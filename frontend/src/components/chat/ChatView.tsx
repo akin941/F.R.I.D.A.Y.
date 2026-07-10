@@ -9,6 +9,7 @@ import { Composer } from "@/components/chat/Composer";
 import { mapErrorType } from "@/components/chat/errors";
 import type { ChatMessageView } from "@/components/chat/types";
 import { TaskDraftCard, type TaskDraft } from "@/components/chat/TaskDraftCard";
+import { ToolRequestCard, type ToolRequestDraft } from "@/components/chat/ToolRequestCard";
 import { localDateString } from "@/components/tasks/TodayView";
 import { apiFetch, apiGetJson, apiPostJson, ApiError } from "@/lib/api-client";
 import { SSEStreamParser } from "@/lib/sse";
@@ -27,7 +28,7 @@ function toView(message: ApiMessage): ChatMessageView {
 }
 
 export function ChatView() {
-  const { activeWorkspace } = useWorkspace();
+  const { activeWorkspace, user } = useWorkspace();
 
   const [conversations, setConversations] = useState<ApiConversation[]>([]);
   const [conversationsLoading, setConversationsLoading] = useState(false);
@@ -42,6 +43,7 @@ export function ChatView() {
   const [optimisticUser, setOptimisticUser] = useState<ChatMessageView | null>(null);
   const [streamingAssistant, setStreamingAssistant] = useState<ChatMessageView | null>(null);
   const [pendingDraft, setPendingDraft] = useState<TaskDraft | null>(null);
+  const [pendingToolRequest, setPendingToolRequest] = useState<ToolRequestDraft | null>(null);
   const [bannerError, setBannerError] = useState<string | null>(null);
   const [disconnected, setDisconnected] = useState(false);
   const [creatingChat, setCreatingChat] = useState(false);
@@ -111,6 +113,7 @@ export function ChatView() {
     setMessages([]);
     setConversationUnavailable(false);
     setPendingDraft(null);
+    setPendingToolRequest(null);
     if (workspaceId) {
       void loadConversations(workspaceId);
     } else {
@@ -148,6 +151,7 @@ export function ChatView() {
   function handleSelect(id: string) {
     if (isStreaming) return;
     setPendingDraft(null);
+    setPendingToolRequest(null);
     selectConversation(id);
   }
 
@@ -172,6 +176,7 @@ export function ChatView() {
     // scope (MVP 6 §1's accepted duplicate-on-reload note), but a stale
     // card just sitting under a newer reply would be confusing regardless.
     setPendingDraft(null);
+    setPendingToolRequest(null);
     setOptimisticUser({ id: `local-user-${Date.now()}`, role: "user", content, status: "complete" });
     setStreamingAssistant({ id: `local-assistant-${Date.now()}`, role: "assistant", content: "", status: "partial" });
     setIsStreaming(true);
@@ -233,13 +238,19 @@ export function ChatView() {
           } else if (event.type === "error") {
             sawTerminal = true;
             setBannerError(mapErrorType(event.error_type));
-          } else if (event.type === "draft") {
+          } else if (event.type === "draft" && event.kind === "task") {
             // Non-terminal -- must NOT set sawTerminal; the stream keeps
             // going until `done` (MVP 6 §5).
             setPendingDraft({
               sourceMessageId: event.source_message_id,
               title: event.title,
               dueDate: event.due_date,
+            });
+          } else if (event.type === "draft" && event.kind === "tool") {
+            setPendingToolRequest({
+              sourceMessageId: event.source_message_id,
+              toolName: event.tool_name,
+              payload: event.payload,
             });
           }
         }
@@ -331,6 +342,14 @@ export function ChatView() {
                 workspaceId={activeWorkspace.id}
                 onConfirmed={() => setPendingDraft(null)}
                 onDiscard={() => setPendingDraft(null)}
+              />
+            ) : null}
+            {pendingToolRequest && activeWorkspace ? (
+              <ToolRequestCard
+                draft={pendingToolRequest}
+                workspaceId={activeWorkspace.id}
+                currentUserId={user?.id ?? null}
+                onDiscard={() => setPendingToolRequest(null)}
               />
             ) : null}
             <Composer

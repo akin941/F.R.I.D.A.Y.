@@ -143,6 +143,15 @@ name = "memory must not import tools (direction: tools -> memory)"
 type = "forbidden"
 source_modules = ["memory"]
 forbidden_modules = ["tools"]
+# memory's own tests import assistant.services for fixtures (already exempt
+# from the "memory must not import assistant" contract below); since MVP 6
+# §4 has assistant.services import tools.registry, that same test import now
+# also forms a transitive memory.tests -> assistant -> tools path. Exempting
+# it here mirrors the existing memory.tests -> assistant.* exemption --
+# production `memory` code still never reaches `tools` by any path.
+ignore_imports = [
+    "memory.tests.* -> assistant.*",
+]
 
 # Dependency direction for memory is one-way: assistant (context injection)
 # imports memory; memory never imports assistant (its Conversation FK uses a
@@ -165,6 +174,15 @@ ignore_imports = [
 name = "knowledge must not import assistant (direction: assistant -> knowledge)"
 type = "forbidden"
 source_modules = ["knowledge"]
+forbidden_modules = ["assistant"]
+
+# Same one-way shape as memory/knowledge: assistant (MVP 6 §4's tool_request
+# resolution, tools.registry.list_tool_names()) imports tools; tools never
+# imports assistant.
+[[tool.importlinter.contracts]]
+name = "tools must not import assistant (direction: assistant -> tools)"
+type = "forbidden"
+source_modules = ["tools"]
 forbidden_modules = ["assistant"]
 
 # Inverted direction from memory/knowledge's shape, and deliberately so: MVP 6

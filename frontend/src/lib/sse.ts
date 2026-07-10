@@ -49,6 +49,22 @@ function parseFrame(frame: string): ChatStreamEvent | { type: "protocol_error" }
           due_date: payload.due_date,
         };
       }
+      if (
+        payload.type === "draft" &&
+        payload.kind === "tool" &&
+        typeof payload.source_message_id === "string" &&
+        typeof payload.tool_name === "string" &&
+        payload.payload !== null &&
+        typeof payload.payload === "object"
+      ) {
+        return {
+          type: "draft",
+          kind: "tool",
+          source_message_id: payload.source_message_id,
+          tool_name: payload.tool_name,
+          payload: payload.payload,
+        };
+      }
       // Unknown event type: ignore without crashing.
       return null;
     }

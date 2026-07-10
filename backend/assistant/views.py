@@ -134,11 +134,14 @@ class ConversationMessageListView(APIView):
             intent_payload=classification["intent_payload"],
         )
 
-        # `draft` SSE event (MVP 6 §3/§5): non-terminal, emitted only for a
-        # task_draft turn with a usable extracted payload -- `done`'s own
-        # contract is completely unchanged. `source_message_id` is this
+        # `draft` SSE event (MVP 6 §3/§4/§5): non-terminal, emitted only for
+        # a task_draft/tool_request turn with a usable payload -- `done`'s
+        # own contract is completely unchanged. `source_message_id` is this
         # already-persisted user message's id, which the frontend must send
-        # back verbatim as `draft_message_id` on confirm.
+        # back verbatim on confirm (as `draft_message_id` for tasks; tool
+        # requests carry no such reference -- confirming one calls
+        # approvals.services.create_request directly, which has no
+        # provenance field to verify against).
         draft_event = None
         if classification["intent"] == Message.Intent.TASK_DRAFT:
             draft_event = {
@@ -147,6 +150,14 @@ class ConversationMessageListView(APIView):
                 "source_message_id": str(user_message.id),
                 "title": classification["intent_payload"]["title"],
                 "due_date": classification["intent_payload"]["due_date"],
+            }
+        elif classification["intent"] == Message.Intent.TOOL_REQUEST:
+            draft_event = {
+                "type": "draft",
+                "kind": "tool",
+                "source_message_id": str(user_message.id),
+                "tool_name": classification["intent_payload"]["tool_name"],
+                "payload": classification["intent_payload"]["payload"],
             }
 
         response = StreamingHttpResponse(

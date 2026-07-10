@@ -672,7 +672,63 @@ def test_tool_request_intent_persists_tool_name_in_payload(
     list(response.streaming_content)
     user_message = Message.objects.get(conversation=conversation, role=Message.Role.USER)
     assert user_message.intent == Message.Intent.TOOL_REQUEST
-    assert user_message.intent_payload == {"tool_name": "vault_export"}
+    assert user_message.intent_payload == {"tool_name": "vault_export", "payload": {}}
+
+
+def test_tool_request_emits_draft_event_before_done_and_creates_no_approval_request(
+    owner, workspace, fake_provider, system_prompt, router_intent_prompt, monkeypatch
+):
+    """MVP 6 §4: classification alone must never call
+    approvals.services.create_request -- this is the regression test for
+    that HIGH finding from plan-review, never to reopen."""
+    import assistant.services as services_module
+    from approvals.models import ApprovalRequest
+
+    def _tool_request(raw_text):
+        return {"intent": Message.Intent.TOOL_REQUEST, "tool_name": "vault_export"}
+
+    monkeypatch.setattr(services_module, "parse_intent", _tool_request)
+    conversation = Conversation.objects.create(workspace=workspace, created_by=owner)
+    response = auth_client(owner).post(
+        f"/api/v1/ai/conversations/{conversation.id}/messages",
+        {"content": "export my vault"},
+        format="json",
+    )
+    assert response.status_code == 200
+    events = _parse_sse(response)
+    types = [e["type"] for e in events]
+    assert types[-2:] == ["draft", "done"]
+
+    draft = events[-2]
+    user_message = Message.objects.get(conversation=conversation, role=Message.Role.USER)
+    assert draft["kind"] == "tool"
+    assert draft["source_message_id"] == str(user_message.id)
+    assert draft["tool_name"] == "vault_export"
+    assert draft["payload"] == {}
+    assert ApprovalRequest.objects.count() == 0
+
+
+def test_unregistered_tool_request_degrades_to_chat_at_view_level(
+    owner, workspace, fake_provider, system_prompt, router_intent_prompt, monkeypatch
+):
+    import assistant.services as services_module
+
+    def _unknown_tool(raw_text):
+        return {"intent": Message.Intent.TOOL_REQUEST, "tool_name": "definitely_not_a_tool"}
+
+    monkeypatch.setattr(services_module, "parse_intent", _unknown_tool)
+    conversation = Conversation.objects.create(workspace=workspace, created_by=owner)
+    response = auth_client(owner).post(
+        f"/api/v1/ai/conversations/{conversation.id}/messages",
+        {"content": "do the thing"},
+        format="json",
+    )
+    assert response.status_code == 200
+    events = _parse_sse(response)
+    assert all(e["type"] != "draft" for e in events)
+    user_message = Message.objects.get(conversation=conversation, role=Message.Role.USER)
+    assert user_message.intent == Message.Intent.CHAT
+    assert user_message.intent_payload == {}
 
 
 def test_router_intent_purpose_records_its_own_model_usage_row(

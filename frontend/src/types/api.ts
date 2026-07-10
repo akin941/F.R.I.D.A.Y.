@@ -64,17 +64,26 @@ export type ChatStreamEvent =
       chunks_used: string[];
     }
   | { type: "error"; error_type: string }
-  // Non-terminal, optional, emitted once (only for a task_draft turn with a
-  // usable extracted draft) after the streamed chunks and BEFORE `done` --
-  // never instead of it (MVP 6 §3/§5). `source_message_id` is the
-  // already-persisted user Message's id; the frontend sends it back
-  // verbatim as `draft_message_id` on confirm.
+  // Non-terminal, optional, emitted once (only for a task_draft/tool_request
+  // turn with a usable extracted draft) after the streamed chunks and
+  // BEFORE `done` -- never instead of it (MVP 6 §3/§4/§5).
+  // `source_message_id` is the already-persisted user Message's id; the
+  // frontend sends it back verbatim as `draft_message_id` on a task confirm
+  // (tool requests carry no such reference -- confirming one calls the
+  // approvals endpoint directly, which has no provenance field).
   | {
       type: "draft";
       kind: "task";
       source_message_id: string;
       title: string;
       due_date: string | null;
+    }
+  | {
+      type: "draft";
+      kind: "tool";
+      source_message_id: string;
+      tool_name: string;
+      payload: Record<string, unknown>;
     };
 
 // --- Memory (MVP 2) ---

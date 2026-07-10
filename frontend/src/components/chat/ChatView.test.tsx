@@ -609,6 +609,113 @@ describe("ChatView", () => {
     expect(screen.queryByText("Looks like a task")).not.toBeInTheDocument();
   });
 
+  it("shows a tool request card on a draft event and confirms it via POST /api/approvals/requests", async () => {
+    let createCalls = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string, init?: RequestInit) => {
+        if (input.startsWith("/api/conversations?")) {
+          return new Response(JSON.stringify([CONVERSATION]), { status: 200 });
+        }
+        if (input === "/api/conversations/c1/messages" && init?.method === "POST") {
+          return sseResponse([
+            `data: ${JSON.stringify({
+              type: "draft",
+              kind: "tool",
+              source_message_id: "u1",
+              tool_name: "vault_export",
+              payload: {},
+            })}\n\n`,
+            `data: ${JSON.stringify({ type: "done", message_id: "a1" })}\n\n`,
+          ]);
+        }
+        if (input === "/api/conversations/c1/messages") {
+          return new Response(JSON.stringify([]), { status: 200 });
+        }
+        if (input === "/api/approvals/requests" && init?.method === "POST") {
+          createCalls += 1;
+          expect(JSON.parse(init.body as string)).toMatchObject({
+            workspace: "w1",
+            tool_name: "vault_export",
+            payload: {},
+          });
+          return new Response(
+            JSON.stringify({
+              id: "ar1",
+              workspace: "w1",
+              tool_name: "vault_export",
+              status: "pending",
+              requested_by: null,
+              decided_by: null,
+              decided_at: null,
+              created_at: "t",
+              updated_at: "t",
+              execution: null,
+            }),
+            { status: 201 },
+          );
+        }
+        throw new Error(`unexpected fetch ${input}`);
+      }),
+    );
+
+    await selectConversation();
+    await userEvent.type(screen.getByPlaceholderText("Message Jarvis…"), "export my vault");
+    await userEvent.click(screen.getByRole("button", { name: "Send" }));
+
+    expect(await screen.findByText("Looks like a tool request")).toBeInTheDocument();
+    expect(screen.getByText("vault_export")).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "Confirm request" }));
+
+    await waitFor(() => expect(createCalls).toBe(1));
+    await waitFor(() =>
+      expect(screen.queryByText("Looks like a tool request")).not.toBeInTheDocument(),
+    );
+    // Confirming renders the shared ApprovalCard (status view), reusing the
+    // exact component /approvals uses for run-status rendering (brief §4).
+    expect(await screen.findByText("Pending")).toBeInTheDocument();
+  });
+
+  it("discards a tool request card without ever calling POST /api/approvals/requests", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string, init?: RequestInit) => {
+        if (input.startsWith("/api/conversations?")) {
+          return new Response(JSON.stringify([CONVERSATION]), { status: 200 });
+        }
+        if (input === "/api/conversations/c1/messages" && init?.method === "POST") {
+          return sseResponse([
+            `data: ${JSON.stringify({
+              type: "draft",
+              kind: "tool",
+              source_message_id: "u1",
+              tool_name: "vault_export",
+              payload: {},
+            })}\n\n`,
+            `data: ${JSON.stringify({ type: "done", message_id: "a1" })}\n\n`,
+          ]);
+        }
+        if (input === "/api/conversations/c1/messages") {
+          return new Response(JSON.stringify([]), { status: 200 });
+        }
+        if (input === "/api/approvals/requests") {
+          throw new Error("must not call /api/approvals/requests on discard");
+        }
+        throw new Error(`unexpected fetch ${input}`);
+      }),
+    );
+
+    await selectConversation();
+    await userEvent.type(screen.getByPlaceholderText("Message Jarvis…"), "export my vault");
+    await userEvent.click(screen.getByRole("button", { name: "Send" }));
+
+    expect(await screen.findByText("Looks like a tool request")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Discard" }));
+
+    expect(screen.queryByText("Looks like a tool request")).not.toBeInTheDocument();
+  });
+
   it("creates exactly one conversation when New chat is clicked twice in the same tick", async () => {
     let createCalls = 0;
     vi.stubGlobal(

@@ -88,3 +88,15 @@ def unregister_tool(name: str) -> None:
 
 def get_tool(name: str) -> ToolSpec | None:
     return _REGISTRY.get(name)
+
+
+def list_tool_names() -> list[str]:
+    """Registered tool names only (MVP 6 §4) -- no metadata. `assistant`
+    (the router) uses this to build its own natural-language tool
+    vocabulary for classification prompts and to verify a classifier's
+    `tool_name` output actually names something registered, without this
+    registry growing a searchable-description field it doesn't otherwise
+    need for a single-tool MVP (see this module's own docstring on why
+    that would be premature). Sorted for a deterministic prompt/test
+    ordering, not registration order."""
+    return sorted(_REGISTRY.keys())

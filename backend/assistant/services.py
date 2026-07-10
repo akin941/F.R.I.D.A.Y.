@@ -22,6 +22,35 @@ from memory.jobs import create_extraction_job
 _ROUTER_INTENT_PROMPT_NAME = "jarvis_router_intent"
 _TASK_DRAFT_PROMPT_NAME = "jarvis_router_task_draft"
 
+# Router-local tool vocabulary (MVP 6 §4) -- NOT on `ToolSpec` itself:
+# `tools/registry.py`'s own module docstring already rules out adding a
+# searchable-description field there for a single-tool MVP (premature
+# abstraction). Names come from `tools.registry.list_tool_names()` (so an
+# unregistered/removed tool is never described to the classifier); this map
+# supplies the natural-language description for whichever names ARE
+# registered. A name with no entry here still resolves (deliberately) --
+# missing prose is a documentation gap, not a reason to make an otherwise
+# valid tool unreachable.
+_TOOL_DESCRIPTIONS = {
+    "vault_export": "export approved memories/notes to the Obsidian vault",
+}
+
+
+def _tool_vocabulary_line():
+    from tools.registry import list_tool_names
+
+    names = list_tool_names()
+    if not names:
+        return ""
+    described = [
+        f"{name} ({_TOOL_DESCRIPTIONS.get(name, 'no description available')})" for name in names
+    ]
+    return (
+        "\n\nRegistered tools you may match a tool_request message against: "
+        + ", ".join(described)
+        + ". Set tool_name to the exact matched name; use null for every other intent."
+    )
+
 
 def _router_intent_prompt_version():
     try:
@@ -141,11 +170,22 @@ def classify_intent(conversation, *, actor, content, client_local_date=None):
     whole turn degrades to plain `chat`, not a `task_draft` intent with no
     usable draft content.
 
+    When classification decides `tool_request`, the named `tool_name` is
+    verified against `tools.registry.list_tool_names()` (MVP 6 §4) — a
+    tool_name that doesn't (or no longer) name a registered tool degrades
+    the whole turn to plain `chat`, exactly like a malformed classification
+    does, rather than surfacing a confirm card for something that can never
+    actually be confirmed. This is resolution against the CURRENT registry
+    only; no dispatch happens here — creating the `ApprovalRequest` only
+    ever happens later, on confirm (see `assistant.views`).
+
     Returns `{"intent": Message.Intent, "intent_payload": dict}`.
     """
+    from tools.registry import list_tool_names
+
     prompt_version = _router_intent_prompt_version()
     messages = [
-        {"role": "system", "content": prompt_version.content},
+        {"role": "system", "content": prompt_version.content + _tool_vocabulary_line()},
         {"role": "user", "content": content},
     ]
     gateway = InferenceGateway()
@@ -167,7 +207,12 @@ def classify_intent(conversation, *, actor, content, client_local_date=None):
         return {"intent": Message.Intent.CHAT, "intent_payload": {}}
 
     if parsed["intent"] == Message.Intent.TOOL_REQUEST:
-        return {"intent": parsed["intent"], "intent_payload": {"tool_name": parsed["tool_name"]}}
+        if parsed["tool_name"] not in list_tool_names():
+            return {"intent": Message.Intent.CHAT, "intent_payload": {}}
+        return {
+            "intent": parsed["intent"],
+            "intent_payload": {"tool_name": parsed["tool_name"], "payload": {}},
+        }
 
     if parsed["intent"] == Message.Intent.TASK_DRAFT:
         draft = _extract_task_draft(

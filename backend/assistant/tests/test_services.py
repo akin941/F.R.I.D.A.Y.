@@ -779,7 +779,7 @@ class TestClassifyIntent:
         result = classify_intent(conversation, actor=alice, content="export my vault")
         assert result == {
             "intent": Message.Intent.TOOL_REQUEST,
-            "intent_payload": {"tool_name": "vault_export"},
+            "intent_payload": {"tool_name": "vault_export", "payload": {}},
         }
 
     def test_non_tool_non_task_draft_intent_gets_empty_payload(
@@ -796,6 +796,48 @@ class TestClassifyIntent:
         monkeypatch.setattr(services_module, "parse_intent", _memory_query)
         result = classify_intent(conversation, actor=alice, content="what do I like")
         assert result == {"intent": Message.Intent.MEMORY_QUERY, "intent_payload": {}}
+
+    def test_unregistered_tool_name_degrades_to_chat(
+        self, conversation, alice, fake_provider, router_intent_prompt, monkeypatch
+    ):
+        """MVP 6 §4: a tool_name that doesn't (or no longer) name a
+        registered tool must never surface a confirm card for something
+        that can't actually be confirmed -- it degrades exactly like a
+        malformed classification, straight to chat."""
+        import assistant.services as services_module
+
+        def _unknown_tool(raw_text):
+            return {"intent": Message.Intent.TOOL_REQUEST, "tool_name": "definitely_not_a_tool"}
+
+        monkeypatch.setattr(services_module, "parse_intent", _unknown_tool)
+        result = classify_intent(conversation, actor=alice, content="do the thing")
+        assert result == {"intent": Message.Intent.CHAT, "intent_payload": {}}
+
+    def test_router_intent_prompt_lists_registered_tool_names(
+        self, conversation, alice, fake_provider, router_intent_prompt, monkeypatch
+    ):
+        """The classification prompt's tool vocabulary is built from
+        `tools.registry.list_tool_names()` at call time, not hardcoded --
+        proves the vocabulary line actually reaches the gateway payload."""
+        import assistant.services as services_module
+        from ai_core.adapters.base import AdapterResult
+        from ai_core.gateway import InferenceGateway
+
+        captured = {}
+
+        def _capture_complete(self, **kwargs):
+            captured.update(kwargs)
+            return AdapterResult(
+                text='{"intent": "chat", "tool_name": null}',
+                input_tokens=1,
+                output_tokens=1,
+                finish_reason="stop",
+            )
+
+        monkeypatch.setattr(InferenceGateway, "complete", _capture_complete)
+        services_module.classify_intent(conversation, actor=alice, content="hi")
+        system_content = captured["messages"][0]["content"]
+        assert "vault_export" in system_content
 
 
 # --- classify_intent's task_draft extraction pipeline (MVP 6 §3) ---
