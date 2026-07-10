@@ -19,7 +19,7 @@ const { workspaceHolder } = vi.hoisted(() => ({
 }));
 
 vi.mock("@/contexts/workspace-context", () => ({
-  useWorkspace: () => ({ activeWorkspace: workspaceHolder.current }),
+  useWorkspace: () => ({ activeWorkspace: workspaceHolder.current, user: { id: "u1" } }),
 }));
 
 const CONVERSATION = {
@@ -645,7 +645,11 @@ describe("ChatView", () => {
               workspace: "w1",
               tool_name: "vault_export",
               status: "pending",
-              requested_by: null,
+              // "u1" matches the mocked useWorkspace() user id above -- the
+              // requester is always the current user in this flow, so this
+              // proves ApprovalCard's OWN isOwnRequest gating (not new logic
+              // here) is what hides Approve/Reject (Codex round-1 review).
+              requested_by: "u1",
               decided_by: null,
               decided_at: null,
               created_at: "t",
@@ -675,6 +679,58 @@ describe("ChatView", () => {
     // Confirming renders the shared ApprovalCard (status view), reusing the
     // exact component /approvals uses for run-status rendering (brief §4).
     expect(await screen.findByText("Pending")).toBeInTheDocument();
+    expect(
+      screen.getByText("Waiting for another workspace admin to decide this request."),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Approve" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Reject" })).not.toBeInTheDocument();
+  });
+
+  it("shows an error and lets the user retry when confirming a tool request fails", async () => {
+    let createCalls = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string, init?: RequestInit) => {
+        if (input.startsWith("/api/conversations?")) {
+          return new Response(JSON.stringify([CONVERSATION]), { status: 200 });
+        }
+        if (input === "/api/conversations/c1/messages" && init?.method === "POST") {
+          return sseResponse([
+            `data: ${JSON.stringify({
+              type: "draft",
+              kind: "tool",
+              source_message_id: "u1",
+              tool_name: "vault_export",
+              payload: {},
+            })}\n\n`,
+            `data: ${JSON.stringify({ type: "done", message_id: "a1" })}\n\n`,
+          ]);
+        }
+        if (input === "/api/conversations/c1/messages") {
+          return new Response(JSON.stringify([]), { status: 200 });
+        }
+        if (input === "/api/approvals/requests" && init?.method === "POST") {
+          createCalls += 1;
+          return new Response(JSON.stringify({ detail: "Role does not allow this action." }), {
+            status: 403,
+          });
+        }
+        throw new Error(`unexpected fetch ${input}`);
+      }),
+    );
+
+    await selectConversation();
+    await userEvent.type(screen.getByPlaceholderText("Message Jarvis…"), "export my vault");
+    await userEvent.click(screen.getByRole("button", { name: "Send" }));
+
+    expect(await screen.findByText("Looks like a tool request")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Confirm request" }));
+
+    expect(await screen.findByText("Role does not allow this action.")).toBeInTheDocument();
+    await waitFor(() => expect(createCalls).toBe(1));
+    // The card must still be here (not silently dismissed) so the user can
+    // discard or retry.
+    expect(screen.getByText("Looks like a tool request")).toBeInTheDocument();
   });
 
   it("discards a tool request card without ever calling POST /api/approvals/requests", async () => {

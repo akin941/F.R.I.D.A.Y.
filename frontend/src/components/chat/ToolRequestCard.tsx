@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -39,8 +39,16 @@ export function ToolRequestCard({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [created, setCreated] = useState<ApiApprovalRequest | null>(null);
+  // Synchronous double-invocation guard (mirrors ChatView's sendingRef/
+  // creatingChatRef): `busy` state alone can't stop two confirm clicks
+  // dispatched in the same tick, since a state update is batched and
+  // doesn't reach the disabled-button render before the second click fires
+  // -- a ref closes that window (Codex round-1 review, MEDIUM).
+  const busyRef = useRef(false);
 
   async function handleConfirm() {
+    if (busyRef.current) return;
+    busyRef.current = true;
     setBusy(true);
     setError(null);
     try {
@@ -57,6 +65,7 @@ export function ToolRequestCard({
           : "Something went wrong. Please try again.",
       );
     } finally {
+      busyRef.current = false;
       setBusy(false);
     }
   }
