@@ -54,11 +54,16 @@ class TestCreateAgentFromGoal:
     def test_missing_prompt_template_raises_improperly_configured(self, workspace, owner):
         with pytest.raises(ImproperlyConfigured):
             create_agent_from_goal(workspace=workspace, actor=owner, goal="Do a thing")
+        # Codex round-2 LOW fix: config is validated before any Agent row
+        # is created, so a misconfigured deployment never leaves a stuck
+        # `planning`-status row behind.
+        assert Agent.objects.count() == 0
 
     def test_missing_active_version_raises_improperly_configured(self, workspace, owner):
         PromptTemplate.objects.create(name="jarvis_agent_plan", purpose="agent.plan")
         with pytest.raises(ImproperlyConfigured):
             create_agent_from_goal(workspace=workspace, actor=owner, goal="Do a thing")
+        assert Agent.objects.count() == 0
 
     def test_fake_provider_creates_single_read_step_agent(
         self, workspace, owner, fake_provider, agent_plan_prompt

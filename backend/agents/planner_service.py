@@ -78,10 +78,18 @@ def create_agent_from_goal(*, workspace, actor, goal):
     the model's output not matching the schema, and a `tool_request` step
     naming a tool that isn't (or is no longer) registered. Never raises
     any of these to the caller.
+
+    The prompt-config lookup runs *before* `start_agent` (Codex round-2 LOW
+    fix -- reversed, this order would durably create a stuck `planning`-
+    status `Agent` row every time a misconfigured deployment's missing/
+    inactive prompt template raised `ImproperlyConfigured`, mirroring
+    `assistant.services.classify_intent`'s identical "validate config
+    first, deploy-time misconfiguration is not a per-request failure"
+    ordering).
     """
+    prompt_version = _agent_plan_prompt_version()
     agent = start_agent(workspace=workspace, actor=actor, goal=goal)
 
-    prompt_version = _agent_plan_prompt_version()
     messages = [
         {"role": "system", "content": prompt_version.content + _tool_vocabulary_line()},
         {"role": "user", "content": goal},
