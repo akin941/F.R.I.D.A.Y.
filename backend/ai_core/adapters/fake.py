@@ -93,6 +93,16 @@ _KNOWLEDGE_QUERY_TRIGGER = "summarize my knowledge base"
 # exercised by feeding `parse_task_draft` its own literal fixtures directly.
 FAKE_TASK_DRAFT_RESPONSE = '{"title": "Fake extracted task", "due_date": null}'
 
+# Purpose-aware fixture for `agent.plan` (MVP 7 §2) -- mirrors
+# agents.planner's schema for the same ai_core-must-not-import-business-
+# apps reason as the fixtures above. A single `read`-kind step; per-case
+# behavior (multi-step plans, tool_request/task_draft steps, malformed
+# output) is exercised by feeding `parse_plan` its own literal fixtures
+# directly.
+FAKE_AGENT_PLAN_RESPONSE = (
+    '{"steps": [{"kind": "read", "description": "Fake plan read step", "payload": {}}]}'
+)
+
 
 def _latest_user_content(messages):
     for message in reversed(messages or []):
@@ -118,6 +128,8 @@ class FakeAdapter(BaseAdapter):
             return FAKE_ROUTER_INTENT_RESPONSE
         if purpose == "router.task_draft":
             return FAKE_TASK_DRAFT_RESPONSE
+        if purpose == "agent.plan":
+            return FAKE_AGENT_PLAN_RESPONSE
         return FAKE_RESPONSE
 
     def _result(self, messages, purpose):
