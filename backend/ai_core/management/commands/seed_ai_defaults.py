@@ -1,5 +1,6 @@
 """Idempotent seed for AI defaults: jarvis_system, jarvis_memory_extraction,
-jarvis_router_intent and jarvis_router_task_draft prompts, and providers.
+jarvis_router_intent, jarvis_router_task_draft and jarvis_agent_plan
+prompts, and providers.
 
 Uses get_or_create so re-running never duplicates records and never clobbers
 pricing/priority edits made in the admin.
@@ -75,6 +76,27 @@ JARVIS_ROUTER_TASK_DRAFT_V1 = (
     "date without it; output nothing outside the JSON object."
 )
 
+# Schema mirrors agents.planner.parse_plan (MVP 7 §2). ai_core must not
+# import the agents app (ADR-003 one-way dependency), so this prompt
+# content intentionally duplicates the shape in prose rather than
+# referencing it -- same discipline as the three prompts above.
+JARVIS_AGENT_PLAN_V1 = (
+    "You plan a sequence of steps to accomplish a user's stated goal. Read "
+    "the goal and output ONLY a single JSON object, no prose, no code "
+    "fences, matching exactly this shape:\n"
+    '{"steps": [{"kind": "read" | "tool_request" | "task_draft", '
+    '"description": "short label", "payload": {...}}]}\n'
+    "Rules: kind=read means gathering information (payload MUST be `{}`, "
+    "empty); kind=tool_request means invoking a registered tool (payload "
+    'MUST be exactly `{"tool_name": "..."}`, naming one of the tools listed '
+    "below); kind=task_draft means proposing a task/reminder to create "
+    '(payload MUST be exactly `{"title": "...", "due_date": "YYYY-MM-DD" | '
+    "null}`); description is a short label for what that step does; if the "
+    "goal cannot be broken into any concrete steps, return an empty steps "
+    "array rather than inventing one; output nothing outside the JSON "
+    "object."
+)
+
 
 class Command(BaseCommand):
     help = "Seed the jarvis_system prompt and LLM providers (idempotent)."
@@ -140,6 +162,22 @@ class Command(BaseCommand):
             task_draft_template.active_version = task_draft_version
             task_draft_template.save(update_fields=["active_version"])
         self._log("jarvis_router_task_draft prompt", created or v_created)
+
+        agent_plan_template, created = PromptTemplate.objects.get_or_create(
+            name="jarvis_agent_plan", defaults={"purpose": "agent.plan"}
+        )
+        agent_plan_version, v_created = PromptVersion.objects.get_or_create(
+            template=agent_plan_template,
+            version=1,
+            defaults={
+                "content": JARVIS_AGENT_PLAN_V1,
+                "changelog": "Initial version (MVP 7).",
+            },
+        )
+        if agent_plan_template.active_version_id is None:
+            agent_plan_template.active_version = agent_plan_version
+            agent_plan_template.save(update_fields=["active_version"])
+        self._log("jarvis_agent_plan prompt", created or v_created)
 
         _, created = ModelProvider.objects.get_or_create(
             name="fake-local",

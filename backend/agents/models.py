@@ -48,6 +48,13 @@ class Agent(WorkspaceScopedModel, TimestampedModel):
 
         PLAN_TOO_LARGE = "plan_too_large"
         PLAN_EMPTY = "plan_empty"
+        # Set by the planner orchestration (branch 2, agents/planner_
+        # service.py) when the `purpose="agent.plan"` gateway call itself
+        # fails, its output doesn't parse, or it names an unregistered
+        # tool -- distinct from PLAN_TOO_LARGE/PLAN_EMPTY, which both mean
+        # "the planner returned a well-shaped step list, but its size was
+        # rejected." This one means "no usable step list was ever produced."
+        PLANNER_ERROR = "planner_error"
 
     goal = models.TextField()
     status = models.CharField(max_length=30, choices=Status.choices, default=Status.PLANNING)
@@ -110,6 +117,12 @@ class AgentStep(TimestampedModel):
     agent = models.ForeignKey(Agent, on_delete=models.CASCADE, related_name="steps")
     order = models.PositiveIntegerField()
     kind = models.CharField(max_length=20, choices=Kind.choices)
+    # The planner's own short natural-language description of what this
+    # step does (MVP 7 §2) -- e.g. what a `read` step's summarization call
+    # is summarizing *against* (agents/planner_service.py::run_read_step,
+    # branch 3). Set once at plan-creation time, same immutability rule as
+    # `kind`/`payload` above.
+    description = models.TextField(blank=True, default="")
     status = models.CharField(max_length=30, choices=Status.choices, default=Status.PENDING)
     # Opaque, kind-specific arguments (mirrors ApprovalRequest.payload) --
     # never used to resolve scope; that always comes from `agent.workspace`.
