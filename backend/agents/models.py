@@ -17,8 +17,11 @@ tool; that's the execution engine (branch 3).
 denormalized `workspace` field) -- unlike `KnowledgeChunk`, it is never
 queried independently of its `Agent`; every access scopes through
 `agent__workspace__members__user=actor`, so there is no divergence risk to
-guard against.
-"""
+guard against. `AgentStepQuerySet.for_actor` (below) is the one sanctioned
+way to do that scoping, mirroring `core.db.WorkspaceScopedQuerySet.for_actor`
+one join deeper -- future direct-step endpoints (branch 3's confirm
+endpoint, branch 5's UI) must go through it rather than hand-rolling the
+join each time (Codex round-1 LOW fix)."""
 
 from django.conf import settings
 from django.db import models
@@ -37,8 +40,20 @@ class Agent(WorkspaceScopedModel, TimestampedModel):
         FAILED = "failed"
         CANCELLED = "cancelled"
 
+    class FailureReason(models.TextChoices):
+        """Closed vocabulary (Codex round-1 MEDIUM fix): a `failed` Agent
+        with no recorded reason is indistinguishable from any other failure
+        later, contrary to brief §1's "failed with a user-visible reason".
+        Set only alongside `status=FAILED`; blank otherwise."""
+
+        PLAN_TOO_LARGE = "plan_too_large"
+        PLAN_EMPTY = "plan_empty"
+
     goal = models.TextField()
     status = models.CharField(max_length=30, choices=Status.choices, default=Status.PLANNING)
+    failure_reason = models.CharField(
+        max_length=30, choices=FailureReason.choices, blank=True, default=""
+    )
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         null=True,
@@ -61,6 +76,20 @@ class Agent(WorkspaceScopedModel, TimestampedModel):
 
     def __str__(self):
         return f"agent {self.id} ({self.status})"
+
+
+class AgentStepQuerySet(models.QuerySet):
+    """Mirrors `core.db.WorkspaceScopedQuerySet.for_actor` one join deeper,
+    since `AgentStep` has no `workspace` field of its own (see the module
+    docstring)."""
+
+    def for_actor(self, actor, workspace=None):
+        if actor is None or not getattr(actor, "is_authenticated", False):
+            return self.none()
+        qs = self.filter(agent__workspace__members__user=actor)
+        if workspace is not None:
+            qs = qs.filter(agent__workspace=workspace)
+        return qs.distinct()
 
 
 class AgentStep(TimestampedModel):
@@ -104,6 +133,8 @@ class AgentStep(TimestampedModel):
     # Small summary, not a full transcript (e.g. a read step's retrieved
     # summary, or a rejection reason) -- written by the execution engine.
     result = models.JSONField(default=dict, blank=True)
+
+    objects = AgentStepQuerySet.as_manager()
 
     class Meta:
         ordering = ["agent", "order"]

@@ -53,3 +53,19 @@ def test_agent_step_unique_order_per_agent(workspace, owner):
     AgentStep.objects.create(agent=agent, order=0, kind=AgentStep.Kind.READ)
     with pytest.raises(IntegrityError):
         AgentStep.objects.create(agent=agent, order=0, kind=AgentStep.Kind.TASK_DRAFT)
+
+
+def test_agent_step_for_actor_scopes_through_agent_workspace(owner, workspace):
+    stranger = register_user(email="stranger@test.dev", password=PASSWORD, name="Stranger")
+    other_workspace = Workspace.objects.get(owner=stranger)
+    mine = Agent.objects.create(workspace=workspace, goal="Mine", created_by=owner)
+    theirs = Agent.objects.create(workspace=other_workspace, goal="Theirs", created_by=stranger)
+    AgentStep.objects.create(agent=mine, order=0, kind=AgentStep.Kind.READ)
+    AgentStep.objects.create(agent=theirs, order=0, kind=AgentStep.Kind.READ)
+
+    visible = AgentStep.objects.for_actor(owner)
+    assert visible.count() == 1
+    assert visible.first().agent_id == mine.id
+
+    scoped_to_other_workspace = AgentStep.objects.for_actor(owner, workspace=other_workspace)
+    assert scoped_to_other_workspace.count() == 0

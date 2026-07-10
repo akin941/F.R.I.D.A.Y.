@@ -25,9 +25,11 @@ def create_plan(*, workspace, actor, goal, steps):
     - zero steps (most likely a planner malfunction, not a legitimately
       "already done" goal -- see the brief's §2 empty-plan note).
 
-    Either way `Agent.status` goes straight to `failed`; a valid, non-empty,
-    within-bound plan creates all its `AgentStep` rows and moves the `Agent`
-    to `running`.
+    Either way `Agent.status` goes straight to `failed`, with
+    `failure_reason` recording which of the two it was (Codex round-1
+    MEDIUM fix -- a bare `failed` status was not the "user-visible reason"
+    brief §1 actually calls for). A valid, non-empty, within-bound plan
+    creates all its `AgentStep` rows and moves the `Agent` to `running`.
     """
     agent = Agent.objects.create(
         workspace=workspace,
@@ -35,9 +37,15 @@ def create_plan(*, workspace, actor, goal, steps):
         created_by=actor,
         status=Agent.Status.PLANNING,
     )
-    if not steps or len(steps) > settings.AGENT_MAX_PLAN_STEPS:
+    if len(steps) > settings.AGENT_MAX_PLAN_STEPS:
         agent.status = Agent.Status.FAILED
-        agent.save(update_fields=["status", "updated_at"])
+        agent.failure_reason = Agent.FailureReason.PLAN_TOO_LARGE
+        agent.save(update_fields=["status", "failure_reason", "updated_at"])
+        return agent
+    if not steps:
+        agent.status = Agent.Status.FAILED
+        agent.failure_reason = Agent.FailureReason.PLAN_EMPTY
+        agent.save(update_fields=["status", "failure_reason", "updated_at"])
         return agent
     AgentStep.objects.bulk_create(
         AgentStep(

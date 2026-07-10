@@ -40,6 +40,7 @@ def test_create_plan_over_bound_rejects_whole_plan_and_fails_agent(workspace, ow
     agent = create_plan(workspace=workspace, actor=owner, goal="Too big", steps=_steps(3))
 
     assert agent.status == Agent.Status.FAILED
+    assert agent.failure_reason == Agent.FailureReason.PLAN_TOO_LARGE
     assert agent.steps.count() == 0
 
 
@@ -47,6 +48,7 @@ def test_create_plan_empty_steps_fails_agent(workspace, owner):
     agent = create_plan(workspace=workspace, actor=owner, goal="Nothing to do", steps=[])
 
     assert agent.status == Agent.Status.FAILED
+    assert agent.failure_reason == Agent.FailureReason.PLAN_EMPTY
     assert agent.steps.count() == 0
 
 
