@@ -26,7 +26,10 @@ test("signup, chat with the fake provider, curated memory, Today, logout, route 
   // growing as sections stack. The approvals + vault export section added
   // last has its own 20s reload-poll budget (even though eager mode should
   // resolve near-instantly) — bumped from 135s to 150s for this section.
-  test.setTimeout(150_000);
+  // MVP 6's router section adds 3 more SSE round trips (knowledge_query
+  // trigger, task_draft, tool_request) plus its own 20s approve+reload-poll
+  // budget for the router-triggered vault export -- bumped to 220s.
+  test.setTimeout(220_000);
 
   const email = `e2e-${Date.now()}@jarvis.test`;
   const password = "Sup3rSecret!2026";
@@ -140,6 +143,89 @@ test("signup, chat with the fake provider, curated memory, Today, logout, route 
 
   await expect(page.getByText(/Knowledge context: 1 chunk/)).toBeVisible({ timeout: 15_000 });
 
+  // MVP 6 router happy path: all 3 live dispatch behaviors, in the same
+  // conversation the knowledge doc above is already seeded in. FakeAdapter's
+  // `router.intent` classification is content-triggered (backend/ai_core/
+  // adapters/fake.py) purely so this real backend process — which this test
+  // cannot monkeypatch — can still exercise every intent; the exact trigger
+  // phrases mirror the ones the backend unit tests already send when they
+  // monkeypatch `parse_intent` directly instead.
+  //
+  // knowledge_query: reuses the seed doc's own vocabulary (so the fake
+  // bag-of-words embedding still ranks it above noise) with the trigger
+  // phrase prepended -- proves a knowledge_query-classified turn still
+  // grounds its reply in retrieval, not just that retrieval runs at all
+  // (already covered above for the default `chat` intent). The widened-
+  // budget mechanism itself is unit-tested (assistant/tests/test_context.py)
+  // with real chunk counts exceeding the default cap; not worth re-proving
+  // here with a dozen extra seeded documents.
+  await composer.fill(`Please summarize my knowledge base — ${KNOWLEDGE_QUERY_TEXT}`);
+  await page.getByRole("button", { name: "Send" }).click();
+  await expect(page.getByText(/Knowledge context: 1 chunk/)).toBeVisible({ timeout: 15_000 });
+
+  // task_draft: confirm creates a REAL Task via the router's draft card, not
+  // the manual /tasks create form (that path is covered by the Tasks/Today
+  // section below).
+  const ROUTER_TASK_TITLE = "Fake extracted task";
+  await expect(composer).toBeEnabled();
+  await composer.fill("remind me to buy oat milk");
+  await page.getByRole("button", { name: "Send" }).click();
+  await expect(page.getByText("Looks like a task")).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByText(ROUTER_TASK_TITLE, { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Confirm task" }).click();
+  await expect(page.getByText("Looks like a task")).not.toBeVisible();
+
+  // tool_request: confirm creates a REAL ApprovalRequest via the router's
+  // draft card. Approved the same way the manual Memory-page export button's
+  // request is approved further below -- an in-page `fetch` against the BFF
+  // transition endpoint, since the UI always hides Approve/Reject for the
+  // requester's own request (brief §4, no bypass by design), and this
+  // account has no second workspace member to be a genuine second decider.
+  // Resolved to `succeeded` here, in this section, before the manual-button
+  // section below creates its OWN separate vault_export request -- so
+  // neither section's "find the pending vault_export request" lookup can
+  // ever see more than the one request it's responsible for.
+  await expect(composer).toBeEnabled();
+  await composer.fill("export my vault please");
+  await page.getByRole("button", { name: "Send" }).click();
+  await expect(page.getByText("Looks like a tool request")).toBeVisible({ timeout: 15_000 });
+  await page.getByRole("button", { name: "Confirm request" }).click();
+  await expect(page.getByText("Looks like a tool request")).not.toBeVisible();
+  await expect(page.getByText("Pending", { exact: true })).toBeVisible();
+
+  const routerVaultExportRequestId = await page.evaluate(async () => {
+    const workspaces = (await (await fetch("/api/workspaces")).json()) as { id: string }[];
+    const workspace = workspaces[0];
+    if (!workspace) throw new Error("No workspace found for the freshly signed-up user.");
+    const requests = (await (
+      await fetch(`/api/approvals/requests?workspace=${workspace.id}&status=pending`)
+    ).json()) as { id: string; tool_name: string }[];
+    const match = requests.find((r) => r.tool_name === "vault_export");
+    if (!match) throw new Error("No pending vault_export approval request found (router path).");
+    return match.id;
+  });
+  const routerApproveStatus = await page.evaluate(async (requestId) => {
+    const response = await fetch(`/api/approvals/requests/${requestId}/approve`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+    });
+    return response.status;
+  }, routerVaultExportRequestId);
+  expect(routerApproveStatus).toBe(200);
+
+  // Verify run status on /approvals, not by reloading /chat: the confirmed
+  // request's ApprovalCard inside the chat composer is a one-time snapshot
+  // (ToolRequestCard has no polling of its own, unlike ApprovalView's
+  // 3-second in-flight poll) -- and reloading /chat itself would lose the
+  // client-side conversation selection anyway, since it isn't part of the
+  // URL. /approvals is the real, intended surface for checking run status.
+  await page.getByRole("link", { name: "Approvals" }).click();
+  await expect(page).toHaveURL(/\/approvals$/);
+  await expect(async () => {
+    await page.reload();
+    await expect(page.getByText(/Run status: Succeeded/)).toBeVisible({ timeout: 5_000 });
+  }).toPass({ timeout: 20_000 });
+
   // Tasks + Today happy path (MVP 4 §3): create a task due today on /tasks,
   // confirm it surfaces on /today (the client-local due_before filter from
   // brief §2 -- the server never computes "today" itself), complete it
@@ -162,10 +248,11 @@ test("signup, chat with the fake provider, curated memory, Today, logout, route 
   // still in flight when the create form is submitted, it can resolve
   // *after* the create POST and overwrite state with the stale empty list
   // (TaskView.loadTasks unconditionally calls setTasks(list) on resolve).
-  // This account is brand new, so the initial list is always empty --
-  // waiting for that empty state confirms the mount-time GET has already
-  // settled before the create begins.
-  await expect(page.getByText("No tasks match these filters.")).toBeVisible();
+  // This account is no longer task-free (the router's task_draft confirm
+  // above already created one) -- waiting for THAT task to render is the
+  // same "mount-time GET has settled" signal the original empty-list wait
+  // proved, just adapted to this test's now-nonzero starting state.
+  await expect(page.getByText(ROUTER_TASK_TITLE, { exact: true })).toBeVisible();
 
   await page.getByRole("button", { name: "New task" }).click();
   await page.getByLabel("Title").fill(TASK_TITLE);
@@ -215,7 +302,11 @@ test("signup, chat with the fake provider, curated memory, Today, logout, route 
 
   await page.getByRole("link", { name: "Approvals" }).click();
   await expect(page).toHaveURL(/\/approvals$/);
-  await expect(page.getByText("vault_export")).toBeVisible();
+  // `.first()`: the router section above already left one DECIDED
+  // vault_export entry on this page (Approved, listed after Pending in the
+  // DOM per ApprovalView's own section order) -- this new request is the
+  // Pending one, rendered first.
+  await expect(page.getByText("vault_export").first()).toBeVisible();
   await expect(
     page.getByText("Waiting for another workspace admin to decide this request."),
   ).toBeVisible();
@@ -242,7 +333,10 @@ test("signup, chat with the fake provider, curated memory, Today, logout, route 
 
   await expect(async () => {
     await page.reload();
-    await expect(page.getByText(/Run status: Succeeded/)).toBeVisible({ timeout: 5_000 });
+    // `.first()`: the router section above already left its own succeeded
+    // vault_export run on this page, ordered by -created_at -- this newer
+    // request's own run is listed first.
+    await expect(page.getByText(/Run status: Succeeded/).first()).toBeVisible({ timeout: 5_000 });
   }).toPass({ timeout: 20_000 });
 
   await page.getByRole("button", { name: "Log out" }).click();

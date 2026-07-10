@@ -7,6 +7,10 @@ from ai_core.adapters.fake import (
     FAKE_MEMORY_EXTRACTION_RESPONSE,
     FAKE_RESPONSE,
     FAKE_ROUTER_INTENT_RESPONSE,
+    FAKE_ROUTER_KNOWLEDGE_QUERY_INTENT_RESPONSE,
+    FAKE_ROUTER_MEMORY_QUERY_INTENT_RESPONSE,
+    FAKE_ROUTER_TASK_DRAFT_INTENT_RESPONSE,
+    FAKE_ROUTER_TOOL_REQUEST_INTENT_RESPONSE,
     FAKE_TASK_DRAFT_RESPONSE,
     FakeAdapter,
     embed_text,
@@ -121,6 +125,56 @@ class TestPurposeAwareFixtures:
         except StopIteration:
             pass
         assert "".join(chunks) == FAKE_ROUTER_INTENT_RESPONSE
+
+    def test_router_intent_content_trigger_task_draft(self):
+        """MVP 6 §6: content-based triggers exist ONLY so the Playwright e2e
+        suite (a real Docker backend process it can't monkeypatch) can still
+        exercise every intent, using the exact phrases the unit tests
+        already send when they monkeypatch `parse_intent` directly."""
+        result = make_adapter().complete(
+            [{"role": "user", "content": "remind me to call mom"}], {}, purpose="router.intent"
+        )
+        assert result.text == FAKE_ROUTER_TASK_DRAFT_INTENT_RESPONSE
+
+    def test_router_intent_content_trigger_tool_request(self):
+        result = make_adapter().complete(
+            [{"role": "user", "content": "export my vault please"}], {}, purpose="router.intent"
+        )
+        assert result.text == FAKE_ROUTER_TOOL_REQUEST_INTENT_RESPONSE
+
+    def test_router_intent_content_trigger_memory_query(self):
+        result = make_adapter().complete(
+            [{"role": "user", "content": "what do I like to eat"}], {}, purpose="router.intent"
+        )
+        assert result.text == FAKE_ROUTER_MEMORY_QUERY_INTENT_RESPONSE
+
+    def test_router_intent_content_trigger_knowledge_query(self):
+        result = make_adapter().complete(
+            [{"role": "user", "content": "please summarize my knowledge base"}],
+            {},
+            purpose="router.intent",
+        )
+        assert result.text == FAKE_ROUTER_KNOWLEDGE_QUERY_INTENT_RESPONSE
+
+    def test_router_intent_no_trigger_still_returns_chat(self):
+        result = make_adapter().complete(
+            [{"role": "user", "content": "hi there, how are you"}], {}, purpose="router.intent"
+        )
+        assert result.text == FAKE_ROUTER_INTENT_RESPONSE
+
+    def test_router_intent_trigger_checks_latest_user_message_only(self):
+        """A trigger phrase in an earlier turn (history) must not leak into
+        classifying an unrelated later message."""
+        result = make_adapter().complete(
+            [
+                {"role": "user", "content": "remind me to call mom"},
+                {"role": "assistant", "content": "Sure, confirm below."},
+                {"role": "user", "content": "actually never mind, just saying hi"},
+            ],
+            {},
+            purpose="router.intent",
+        )
+        assert result.text == FAKE_ROUTER_INTENT_RESPONSE
 
     def test_task_draft_purpose_returns_task_draft_fixture(self):
         result = make_adapter().complete(

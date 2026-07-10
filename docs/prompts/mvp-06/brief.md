@@ -1,10 +1,12 @@
 # MVP 6 — Intent Router: The "Understands Me" Layer
 
-> Status: **approved by the user (2026-07-10) after a 3-round Codex
-> plan-review loop (stopped deliberately at round 3 on clear convergence —
-> see Risks/notes); implementation in progress. Branch 1
-> (`feat/mvp6-router-foundation`) merged to `main` 2026-07-10 after a
-> 2-round Codex code-review loop (0 CRITICAL/HIGH both rounds).** Scope
+> Status: **done (2026-07-10)** — all 5 branches merged to `main`, approved
+> by the user after a 3-round Codex plan-review loop (stopped deliberately
+> at round 3 on clear convergence — see Risks/notes). Every branch's own
+> Codex code-review loop closed with 0 CRITICAL/HIGH findings (branch 1: 2
+> rounds; branch 2: 1 round, clean; branch 3: 2 rounds; branch 4: 2 rounds).
+> `docs/MASTER_PLAN.md` §V records the final summary; §O's "AI-suggested
+> task extraction (MVP 4)" Open Decision is marked resolved/amended. Scope
 > agreed with the user after an explicit disambiguation exchange: "router"
 > in the roadmap (`docs/MASTER_PLAN.md` §L) means **intent routing**
 > (understand a chat message, dispatch it to the right subsystem), not
@@ -506,7 +508,7 @@ the one the server itself handed back in this event.
 | 2 | `feat/mvp6-read-dispatch` — **done (2026-07-10)** | `memory_query`/`knowledge_query` intent-aware framing (widened budget + explicit instruction), `context_report` gains `intent` |
 | 3 | `feat/mvp6-task-draft` — **done (2026-07-10)** | `Task.source` field + migration (default `user_created`, no custom backfill needed) + MASTER_PLAN §O amendment note, `client_local_date` threaded from the chat POST into a `router.task_draft` extraction call, `draft` SSE event (non-terminal, before `done`), `TaskCreateSerializer`'s server-verified optional `draft_message_id` (never a client-asserted `source`), frontend confirm/discard card |
 | 4 | `feat/mvp6-tool-request` — **done (2026-07-10)** | `tools.registry.list_tool_names()`, router-local tool description map, confirm-before-request card (never auto-request), wiring the confirm action into `approvals.services.create_request`, frontend status card reusing `ApprovalCard` |
-| 5 | `feat/mvp6-e2e-docs` | Playwright smoke extension (all 3 live behaviors), MASTER_PLAN + brief closeout |
+| 5 | `feat/mvp6-e2e-docs` — **done (2026-07-10)** | Playwright smoke extension (all 3 live behaviors), MASTER_PLAN + brief closeout |
 
 Branches 3 and 4 both depend on branch 1's classification plumbing but not
 on each other — order between them is not load-bearing.

@@ -82,8 +82,11 @@ See `docs/security/mcp-governance.md`.
 
 MVP 0–20, simplified to **personal kernel + platform capabilities** (ADR-006):
 personal kernel first (shell/chat → memory → knowledge/RAG *(done — §S)* →
-tasks *(done — §T)* → tools/approvals *(done — §U)* → router *(next)* →
-agents → skills → integrations).
+tasks *(done — §T)* → tools/approvals *(done — §U)* → router *(done — §V)* →
+agents *(next)* → skills → integrations). Model-tier/cost routing (a
+DB-backed cheap/mid/strong tier table + `ModelUsage.routing_reason`
+auditability) is a separate, unstarted Gateway sub-task — deliberately not
+folded into the router MVP (§V); see §J.
 
 MVP 10 (company workspaces: multi-user tenancy *inside* Jarvis — invite flows,
 company membership management, company-scoped memory) is **deferred — awaiting
@@ -285,3 +288,71 @@ Obsidian vault" trigger on the Memory page.
 
 Status: **done (2026-07-10)** — all 5 branches merged to main. Plan + branch
 status: `docs/prompts/mvp-05/brief.md`.
+
+## V. MVP 6
+
+MVP 6: the intent router — "understand a chat message, dispatch it to the
+right subsystem" — resolved as the roadmap's actual meaning of "router"
+after an explicit disambiguation with the user (not model-tier/cost
+routing, which is a separate, deferred Gateway sub-task; see §J). No new
+autonomous write path: every write this MVP can trigger already existed
+behind an explicit human click (task creation, gated-tool approval
+requests) — the router only adds a faster way to *reach* that same click,
+never a way to *skip* it.
+
+**Router vs. agents, the autonomy boundary** (grounded in MVP 4's and MVP
+5's own briefs, not invented): router = one user utterance → one classified
+intent → one dispatched action, inside the same turn, writes always
+requiring explicit confirmation. Agents (MVP 7+) = goal → multi-step plan,
+potentially executed without a human typing each step. This is the line
+ADR-004's "agent-requested" vs. "human-requested" language already drew.
+
+Four dispatch behaviors, one per branch:
+
+1. **Classification foundation** (`assistant.intent`, no dispatch side
+   effects): a new `purpose="router.intent"` gateway call classifies every
+   chat message into `chat` / `memory_query` / `knowledge_query` /
+   `task_draft` / `tool_request` before the reply begins. Classification
+   failure always degrades to `chat` — never blocks or corrupts the
+   underlying conversation. `Message.intent`/`intent_payload` (new fields,
+   user-role rows only, immutable once written) persist the result.
+2. **Read-dispatch** (`memory_query`/`knowledge_query`): purely additive
+   framing on top of retrieval that already ran every turn — `knowledge_query`
+   widens the retrieval window for that turn only, both intents add an
+   explicit "the user specifically wants this" system-prompt instruction.
+   No new retrieval mechanism; memory still has no embeddings (MVP 3
+   shipped semantic search for knowledge only, see §Q).
+3. **Confirmable task drafts** (`task_draft`): a second, focused
+   `purpose="router.task_draft"` extraction call (title, optional due date)
+   after classification, a non-terminal `draft` SSE event, and a
+   server-verified `draft_message_id` reference on `TaskCreateSerializer`
+   (never a client-asserted claim) that's the only path producing
+   `Task.source=ai_suggested` — a new provenance field that formally
+   amends MVP 4's Open Decision (§O): the *provenance* half of that
+   decision is met, but its literal "route through the approval-gate
+   machinery" mechanism is deliberately narrowed to not apply, since
+   ADR-004 gates write/delete/deploy/external-send-class actions and
+   creating a `Task` row in one's own workspace isn't in that risk class.
+4. **Confirmable tool requests** (`tool_request`): symmetric with
+   task_draft — classification alone never calls
+   `approvals.services.create_request`, only a confirmed draft does, via
+   the exact function the existing "Export to Obsidian vault" button
+   already calls. `tools.registry.list_tool_names()` (names only) plus a
+   router-local tool-description map build the classification prompt's
+   vocabulary from whatever's actually registered.
+
+Frontend: `TaskDraftCard`/`ToolRequestCard` confirm/discard components
+wired into the chat composer's SSE handling; both reuse existing BFF
+routes unchanged (`POST /api/tasks`, `POST /api/approvals/requests`) with
+only an added optional field, and the tool-request card renders the same
+`ApprovalCard` `/approvals` uses for run-status once confirmed.
+
+Playwright smoke extended to exercise all three live dispatch behaviors
+against the real Docker stack. `FakeAdapter`'s `router.intent` response is
+content-triggered (specific substrings like "remind me"/"export my vault")
+purely so this e2e suite — a real backend process it cannot monkeypatch —
+can still exercise every intent; unit tests monkeypatch `parse_intent`
+directly instead and never depend on this.
+
+Status: **done (2026-07-10)** — all 5 branches merged to main. Plan + branch
+status: `docs/prompts/mvp-06/brief.md`.
