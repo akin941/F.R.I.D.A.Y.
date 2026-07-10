@@ -1,0 +1,118 @@
+"""Deterministic adapter for tests and local development. No network access."""
+
+import hashlib
+import math
+import random
+import re
+
+from ai_core.adapters.base import AdapterResult, BaseAdapter, EmbedAdapterResult
+
+FAKE_RESPONSE = "Merhaba, ben Jarvis. MVP 1 gateway üzerinden çalışıyorum."
+
+# Fixed, small dimension for the fake embedding provider (MVP 3 §1) — chosen
+# purely for fast test fixtures. It does not need to match any real
+# provider's dimension: retrieval always filters chunks to one
+# `embedding_provider` before comparing vectors, so each provider's vectors
+# only ever compare against their own kind.
+FAKE_EMBEDDING_DIMENSION = 32
+
+_TOKEN_RE = re.compile(r"[a-z0-9]+")
+
+
+def _tokenize(text):
+    return _TOKEN_RE.findall(text.lower())
+
+
+def _token_vector(token, dimension):
+    # sha256, not the built-in hash(): Python's hash() is salted per-process
+    # by default and unstable across runs/processes, which would make this
+    # "deterministic" embedding not actually deterministic.
+    seed = int.from_bytes(hashlib.sha256(token.encode()).digest(), "big")
+    rng = random.Random(seed)
+    return [rng.uniform(-1.0, 1.0) for _ in range(dimension)]
+
+
+def embed_text(text, dimension=FAKE_EMBEDDING_DIMENSION):
+    """Deterministic bag-of-words embedding: sum each distinct token's
+    SHA256-seeded unit vector, then L2-normalize. Texts sharing more
+    vocabulary land closer together under cosine similarity by construction —
+    a crude but genuine semantic-similarity signal, not an arbitrary hash."""
+    tokens = _tokenize(text)
+    vector = [0.0] * dimension
+    for token in tokens:
+        token_vector = _token_vector(token, dimension)
+        for i in range(dimension):
+            vector[i] += token_vector[i]
+    norm = math.sqrt(sum(v * v for v in vector))
+    if norm == 0:
+        return vector
+    return [v / norm for v in vector]
+
+
+# Purpose-aware fixture for `memory.extraction` (MVP 2 §3): a hand-written
+# literal, not imported from `memory` — ai_core must never import a business
+# app (ADR-003 / import-linter contract), so this intentionally duplicates
+# the shape of `memory.extraction.SCHEMA_VERSION`/candidate schema rather
+# than referencing it. If that schema changes, this fixture must be updated
+# by hand; a schema-parser test against this exact string guards the drift.
+FAKE_MEMORY_EXTRACTION_RESPONSE = (
+    '{"version": 1, "candidates": [{"type": "preference", '
+    '"title": "Fake extracted preference", '
+    '"content": "Deterministic FakeAdapter candidate for memory.extraction."}]}'
+)
+
+# Purpose-aware fixture for `router.intent` (MVP 6 §1): a hand-written
+# literal mirroring assistant.intent's schema — ai_core must never import a
+# business app (ADR-003 / import-linter contract), so this intentionally
+# duplicates the shape rather than referencing it. Always classifies as
+# `chat` with no tool_name; a schema-parser test against this exact string
+# guards the drift, and per-intent behavior is exercised by feeding
+# `parse_intent` its own literal fixtures directly, not by varying this one.
+FAKE_ROUTER_INTENT_RESPONSE = '{"intent": "chat", "tool_name": null}'
+
+# Purpose-aware fixture for `router.task_draft` (MVP 6 §3) — mirrors
+# assistant.task_draft's schema for the same ai_core-must-not-import-business-
+# apps reason as the fixtures above. Always a fixed title with no due date;
+# per-case behavior (title/due_date variations, malformed output) is
+# exercised by feeding `parse_task_draft` its own literal fixtures directly.
+FAKE_TASK_DRAFT_RESPONSE = '{"title": "Fake extracted task", "due_date": null}'
+
+
+class FakeAdapter(BaseAdapter):
+    def _text_for(self, purpose):
+        if purpose == "memory.extraction":
+            return FAKE_MEMORY_EXTRACTION_RESPONSE
+        if purpose == "router.intent":
+            return FAKE_ROUTER_INTENT_RESPONSE
+        if purpose == "router.task_draft":
+            return FAKE_TASK_DRAFT_RESPONSE
+        return FAKE_RESPONSE
+
+    def _result(self, messages, purpose):
+        text = self._text_for(purpose)
+        input_tokens = sum(self.estimate_tokens(str(m.get("content", ""))) for m in messages)
+        return AdapterResult(
+            text=text,
+            input_tokens=input_tokens,
+            output_tokens=self.estimate_tokens(text),
+            finish_reason="stop",
+            raw_usage={"fake": True},
+        )
+
+    def complete(self, messages, params, *, purpose=""):
+        return self._result(messages, purpose)
+
+    def stream(self, messages, params, *, purpose=""):
+        text = self._text_for(purpose)
+        words = text.split(" ")
+        for word in words[:-1]:
+            yield word + " "
+        yield words[-1]
+        return self._result(messages, purpose)
+
+    def embed(self, texts, *, purpose=""):
+        vectors = [embed_text(t) for t in texts]
+        input_tokens = sum(self.estimate_tokens(t) for t in texts)
+        return EmbedAdapterResult(
+            vectors=vectors, input_tokens=input_tokens, raw_usage={"fake": True}
+        )

@@ -1,0 +1,178 @@
+[project]
+name = "jarvis-backend"
+version = "0.1.0"
+description = "Jarvis OS backend — Django modular monolith"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "django>=5.1,<6.0",
+    "djangorestframework>=3.15",
+    "celery[redis]>=5.4",
+    "redis>=5.0",
+    "psycopg[binary]>=3.2",
+    "django-environ>=0.11",
+    "django-storages>=1.14",
+    "boto3>=1.34",
+    "structlog>=24.1",
+    "sentry-sdk>=2.0",
+    "djangorestframework-simplejwt>=5.5.1",
+    "django-cors-headers>=4.9.0",
+    "anthropic>=0.116.0",
+    "openai>=2.44.0",
+    "pgvector>=0.3.6",
+    "urllib3>=2.7.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "pytest-django>=4.8",
+    "factory-boy>=3.3",
+    "ruff>=0.6",
+    "import-linter>=2.0",
+]
+
+# Not a distributable package: uv installs dependencies only.
+[tool.uv]
+package = false
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+exclude = ["**/migrations/**"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "DJ"]
+
+[tool.pytest.ini_options]
+DJANGO_SETTINGS_MODULE = "config.settings.dev"
+python_files = ["test_*.py"]
+testpaths = [
+    "core",
+    "config",
+    "accounts",
+    "workspaces",
+    "audit",
+    "ai_core",
+    "assistant",
+    "memory",
+    "knowledge",
+    "tasks",
+    "approvals",
+    "tools",
+]
+
+[tool.importlinter]
+root_packages = [
+    "config",
+    "core",
+    "accounts",
+    "workspaces",
+    "audit",
+    "ai_core",
+    "assistant",
+    "memory",
+    "knowledge",
+    "tasks",
+    "approvals",
+    "tools",
+]
+
+# TODO(MVP 1): add the full modular-monolith contracts once kernel apps exist:
+#   - kernel apps must never import apps.modules.*
+#   - apps.modules.* may import kernel apps (one-way dependency)
+#   - ai_core must not import any business module
+[[tool.importlinter.contracts]]
+name = "core (shared infrastructure) must not depend on the Django project config"
+type = "forbidden"
+source_modules = ["core"]
+forbidden_modules = ["config"]
+
+[[tool.importlinter.contracts]]
+name = "core must stay independent of kernel apps"
+type = "forbidden"
+source_modules = ["core"]
+forbidden_modules = ["accounts", "workspaces", "audit", "ai_core", "assistant", "memory", "knowledge", "tasks", "approvals", "tools"]
+
+[[tool.importlinter.contracts]]
+name = "kernel apps must not import the Django project config"
+type = "forbidden"
+source_modules = ["accounts", "workspaces", "audit", "ai_core", "assistant", "memory", "knowledge", "tasks", "approvals", "tools"]
+forbidden_modules = ["config"]
+
+# ai_core is the single door for LLM traffic (ADR-003): it must never depend on
+# business apps (FK references use string labels, not imports).
+[[tool.importlinter.contracts]]
+name = "ai_core must not import business apps"
+type = "forbidden"
+source_modules = ["ai_core"]
+forbidden_modules = ["accounts", "workspaces", "audit", "assistant", "memory", "knowledge", "tasks", "approvals", "tools"]
+ignore_imports = [
+    "ai_core.tests.* -> accounts.*",
+]
+
+[[tool.importlinter.contracts]]
+name = "audit must not depend on business apps (one-way: apps call audit)"
+type = "forbidden"
+source_modules = ["audit"]
+forbidden_modules = ["accounts", "workspaces", "assistant", "memory", "knowledge", "tasks", "approvals", "tools"]
+# Tests exercise the wired flows end-to-end; the contract targets production code.
+ignore_imports = [
+    "audit.tests.* -> accounts.*",
+    "audit.tests.* -> workspaces.*",
+]
+
+# tools is the registry approvals dispatches through (MVP 5 §2); the
+# dependency is one-way (approvals -> tools), mirroring memory/knowledge's
+# own one-way shape against assistant.
+[[tool.importlinter.contracts]]
+name = "tools must not import approvals (direction: approvals -> tools)"
+type = "forbidden"
+source_modules = ["tools"]
+forbidden_modules = ["approvals"]
+# Tests exercise the full request -> approve -> dispatch flow end-to-end;
+# the contract targets production code.
+ignore_imports = [
+    "tools.tests.* -> approvals.*",
+]
+
+# vault_export (MVP 5 §3) reads approved Memory rows directly (system/worker
+# code, not a view -- for_actor() doesn't apply, see tools/export.py); the
+# dependency is one-way (tools -> memory), mirroring assistant -> memory.
+[[tool.importlinter.contracts]]
+name = "memory must not import tools (direction: tools -> memory)"
+type = "forbidden"
+source_modules = ["memory"]
+forbidden_modules = ["tools"]
+
+# Dependency direction for memory is one-way: assistant (context injection)
+# imports memory; memory never imports assistant (its Conversation FK uses a
+# string label). ai_core stays importable (gateway calls in the extraction
+# pipeline, MVP 2 branches 3-4).
+[[tool.importlinter.contracts]]
+name = "memory must not import assistant (direction: assistant -> memory)"
+type = "forbidden"
+source_modules = ["memory"]
+forbidden_modules = ["assistant"]
+# Tests exercise the provenance invariant end-to-end; the contract targets
+# production code.
+ignore_imports = [
+    "memory.tests.* -> assistant.*",
+]
+
+# Same one-way shape as memory: assistant (RAG context injection, MVP 3
+# branch 4) will import knowledge; knowledge never imports assistant.
+[[tool.importlinter.contracts]]
+name = "knowledge must not import assistant (direction: assistant -> knowledge)"
+type = "forbidden"
+source_modules = ["knowledge"]
+forbidden_modules = ["assistant"]
+
+# Inverted direction from memory/knowledge's shape, and deliberately so: MVP 6
+# §3's `draft_message_id` verification needs tasks' own view to resolve an
+# assistant.Message reference (same actor/workspace/intent="task_draft")
+# before deciding Task.source -- assistant never needs to import tasks back.
+[[tool.importlinter.contracts]]
+name = "assistant must not import tasks (direction: tasks -> assistant)"
+type = "forbidden"
+source_modules = ["assistant"]
+forbidden_modules = ["tasks"]

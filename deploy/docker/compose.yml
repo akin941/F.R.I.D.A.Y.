@@ -1,0 +1,132 @@
+# Jarvis OS — development stack. Not production-ready by design (MVP 0).
+# Host ports are shifted (+1) because the other local stack commonly occupies
+# 8000/5432/6379 on this machine. In-network ports are unchanged.
+name: jarvis-os
+
+services:
+  web:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile.dev
+    command: sh -c "uv run python manage.py migrate && uv run python manage.py seed_ai_defaults && uv run python manage.py runserver 0.0.0.0:8000"
+    volumes:
+      - ../../backend:/app
+    ports:
+      - "8001:8000"
+    environment: &backend_env
+      DJANGO_SETTINGS_MODULE: config.settings.dev
+      DJANGO_SECRET_KEY: dev-insecure-key-change-me
+      DJANGO_DEBUG: "true"
+      DJANGO_ALLOWED_HOSTS: localhost,127.0.0.1
+      DATABASE_URL: postgres://jarvis:jarvis@postgres:5432/jarvis
+      REDIS_URL: redis://redis:6379/0
+      MINIO_ENDPOINT: http://minio:9000
+      MINIO_ACCESS_KEY: jarvis
+      MINIO_SECRET_KEY: jarvis-dev-secret
+      MINIO_BUCKET: jarvis
+      # Dev stack uses the deterministic fake LLM provider by default.
+      AI_FAKE_PROVIDER: "true"
+      # Obsidian vault export (MVP 5 §3): the STRING value is shared by both
+      # containers (web validates it, tier 1, with zero filesystem access at
+      # request time) but only `worker` actually has anything bind-mounted
+      # at this path (tier 2 -- see worker.volumes below).
+      OBSIDIAN_VAULT_PATH: /vault
+      # DEV/TEST ONLY (.env.example): this dev stack has exactly one seeded
+      # user in the e2e smoke path (MVP 5 §5), with no second workspace
+      # member to be a real decider -- same reasoning as CI's e2e job env,
+      # and just as safe here since this whole stack is already DEBUG=true,
+      # a fake AI provider, and an insecure dev secret key.
+      DEV_ALLOW_SELF_APPROVAL: "true"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/healthz')"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  worker:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile.dev
+    # `-B` embeds Celery beat in this worker process (MemoryExtractionJob
+    # recovery scan, MVP 2 §4; KnowledgeDocument ingestion recovery scan,
+    # MVP 3 §3). Safe only with exactly ONE worker container (this dev
+    # stack's topology) — running `-B` on more than one worker would
+    # double-schedule the periodic tasks. If this stack ever scales to
+    # multiple worker replicas, split beat into its own service first.
+    command: uv run celery -A config worker -l info -B
+    volumes:
+      - ../../backend:/app
+      # Vault export (MVP 5 §3) is the first worker task to touch the host
+      # filesystem rather than only Postgres/Redis/an outbound HTTP call --
+      # deliberately mounted on `worker` only, never `web` (tier-2 existence
+      # validation can only run where this is actually mounted). Override
+      # the host side via OBSIDIAN_VAULT_HOST_PATH in a `deploy/docker/.env`
+      # file; defaults to a repo-local, gitignored dev data directory.
+      - ${OBSIDIAN_VAULT_HOST_PATH:-../../.devdata/obsidian-vault}:/vault
+    environment: *backend_env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "uv run celery -A config inspect ping | grep -q pong"]
+      interval: 60s
+      timeout: 15s
+      retries: 3
+      start_period: 40s
+
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: jarvis
+      POSTGRES_PASSWORD: jarvis
+      POSTGRES_DB: jarvis
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U jarvis -d jarvis"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7
+    ports:
+      - "6380:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: jarvis
+      MINIO_ROOT_PASSWORD: jarvis-dev-secret
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres-data:
+  minio-data:

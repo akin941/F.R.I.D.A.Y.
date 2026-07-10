@@ -1,0 +1,40 @@
+# Environment / secrets
+.env
+.env.local
+
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+uv.lock.tmp
+
+# Django
+*.sqlite3
+media/
+staticfiles/
+
+# Celery beat local runtime state
+celerybeat-schedule*
+
+# Local service data
+minio-data/
+postgres-data/
+
+# Local Obsidian vault export target (MVP 5 §3, deploy/docker/compose.yml)
+.devdata/
+
+# Dev tools
+graphify-out/
+.claude/
+
+# OS
+.DS_Store
+
+# Frontend (MVP 1+)
+node_modules/
+.next/
+dist/
+coverage/
