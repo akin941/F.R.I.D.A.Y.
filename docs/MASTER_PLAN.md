@@ -234,9 +234,9 @@ serialize instead of racing), a role matrix (owner/admin manage every task,
 members manage their own, viewers read-only), and `record_audit()` mutation
 events that never carry task title/description text. Deliberately manual
 CRUD only in this MVP — no AI-suggested extraction, no context injection into
-chat (see §O's Open Decisions entry: both are deferred to the tools/
-approvals/agents phase, where "the assistant creates a task" can be modeled
-as a real approval-gated tool call instead of a second extraction pipeline).
+chat (true at the time; see §O's Open Decisions entry — MVP 6 §3 later
+resolved/amended this, adding chat-drafted tasks via `Task.source` rather
+than the approval-gated tool call originally envisioned here).
 
 Frontend: a `/tasks` page (list/create/edit/complete/cancel/reopen/delete,
 status filter) following the Next.js BFF pattern established by memory/
