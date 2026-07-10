@@ -461,7 +461,7 @@ same.").
 
 | # | Branch | Contents |
 |---|---|---|
-| 1 | `feat/mvp7-agent-model` | `agents` app scaffold, `Agent`/`AgentStep` models + migration, plan step-count bound enforced at creation time, no dispatch |
+| 1 | `feat/mvp7-agent-model` — **done (2026-07-11)** | `agents` app scaffold, `Agent`/`AgentStep` models + migration, `create_plan()` (step-count bound + empty-plan both fail clean with `Agent.failure_reason`, no dispatch). 2 Codex review rounds (1 MEDIUM + 1 LOW round 1: missing failure reason, missing `AgentStep.for_actor()`; 0 findings round 2). Merged `main` @ `6ddad6b`. |
 | 2 | `feat/mvp7-planner` | `purpose="agent.plan"` gateway call + schema parser, `seed_ai_defaults` entry, tool-name validation against the registry, whole-plan-fails-clean on any parse/schema/gateway error |
 | 3 | `feat/mvp7-execution-engine` | Celery step-advance task, `run_read_step` (`knowledge.context.select_context_chunks` embed + `purpose="agent.read_step"` summarize, both counted), `tool_request` steps pausing at `blocked_on_approval` via `approvals.services.create_request` (`requested_by=Agent.created_by`), `task_draft` steps pausing at `blocked_on_confirmation` with a new agents-local confirm/discard endpoint calling `tasks.services.create_task` server-side, per-step timeout, consecutive-failure halt (zero retries), `Agent.gateway_calls_used` budget brake, `select_for_update`-guarded `cancel_agent` kill switch (covering start, resume, and finalization), real-time status fields (visibility) |
 | 4 | `feat/mvp7-self-mod-guarantee` | ADR-004 self-modification test suite + any narrowing of the engine's write surface needed to make those tests pass cleanly |
