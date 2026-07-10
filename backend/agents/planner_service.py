@@ -21,6 +21,31 @@ from tools.registry import list_tool_names
 
 _AGENT_PLAN_PROMPT_NAME = "jarvis_agent_plan"
 
+# Planner-local tool vocabulary (Codex round-1 LOW fix -- the prompt told
+# the model tool names were "listed below" without ever actually listing
+# them, which would make tool_request planning impossible against a real
+# LLM). Mirrors `assistant.services._TOOL_DESCRIPTIONS`/
+# `_tool_vocabulary_line`'s exact shape; duplicated rather than imported
+# since `agents` and `assistant` have no import relationship in either
+# direction (pyproject.toml import-linter).
+_TOOL_DESCRIPTIONS = {
+    "vault_export": "export approved memories/notes to the Obsidian vault",
+}
+
+
+def _tool_vocabulary_line():
+    names = list_tool_names()
+    if not names:
+        return ""
+    described = [
+        f"{name} ({_TOOL_DESCRIPTIONS.get(name, 'no description available')})" for name in names
+    ]
+    return (
+        "\n\nRegistered tools you may plan a tool_request step against: "
+        + ", ".join(described)
+        + ". Set tool_name to the exact matched name."
+    )
+
 
 def _agent_plan_prompt_version():
     try:
@@ -58,7 +83,7 @@ def create_agent_from_goal(*, workspace, actor, goal):
 
     prompt_version = _agent_plan_prompt_version()
     messages = [
-        {"role": "system", "content": prompt_version.content},
+        {"role": "system", "content": prompt_version.content + _tool_vocabulary_line()},
         {"role": "user", "content": goal},
     ]
     gateway = InferenceGateway()

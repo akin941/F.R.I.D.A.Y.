@@ -35,7 +35,14 @@ status = failed`, `failure_reason = planner_error`) -- callers must catch
 """
 
 import json
+import re
 from datetime import date
+
+# Strict YYYY-MM-DD only (Codex round-1 MEDIUM fix): `date.fromisoformat`
+# alone also accepts other ISO 8601 forms (compact "20260715", week dates
+# "2026-W29-3") on Python 3.11+, which would let a malformed-per-this-
+# schema string through silently.
+_ISO_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 MAX_DESCRIPTION_CHARS = 2000
 MAX_TITLE_CHARS = 255  # matches Task.title's max_length
@@ -92,8 +99,10 @@ def _parse_step(raw_step):
             raise PlanParseError(f"task_draft payload title exceeds {MAX_TITLE_CHARS} chars")
         raw_due_date = payload["due_date"]
         if raw_due_date is not None:
-            if not isinstance(raw_due_date, str):
-                raise PlanParseError("task_draft payload due_date must be a string or null")
+            if not isinstance(raw_due_date, str) or not _ISO_DATE_RE.match(raw_due_date):
+                raise PlanParseError(
+                    "task_draft payload due_date must be a YYYY-MM-DD string or null"
+                )
             try:
                 date.fromisoformat(raw_due_date)
             except ValueError as exc:

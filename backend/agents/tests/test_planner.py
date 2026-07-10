@@ -146,6 +146,17 @@ def test_task_draft_invalid_due_date_raises():
         )
 
 
+def test_task_draft_compact_iso_date_raises():
+    """`date.fromisoformat` alone accepts compact/week-date ISO 8601 forms
+    on Python 3.11+ -- this schema is strictly YYYY-MM-DD only (Codex
+    round-1 MEDIUM fix)."""
+    with pytest.raises(PlanParseError):
+        parse_plan(
+            '{"steps": [{"kind": "task_draft", "description": "x", '
+            '"payload": {"title": "Buy milk", "due_date": "20260715"}}]}'
+        )
+
+
 def test_task_draft_non_string_due_date_raises():
     with pytest.raises(PlanParseError):
         parse_plan(
