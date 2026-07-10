@@ -59,6 +59,7 @@ testpaths = [
     "tasks",
     "approvals",
     "tools",
+    "agents",
 ]
 
 [tool.importlinter]
@@ -75,6 +76,7 @@ root_packages = [
     "tasks",
     "approvals",
     "tools",
+    "agents",
 ]
 
 # TODO(MVP 1): add the full modular-monolith contracts once kernel apps exist:
@@ -91,12 +93,12 @@ forbidden_modules = ["config"]
 name = "core must stay independent of kernel apps"
 type = "forbidden"
 source_modules = ["core"]
-forbidden_modules = ["accounts", "workspaces", "audit", "ai_core", "assistant", "memory", "knowledge", "tasks", "approvals", "tools"]
+forbidden_modules = ["accounts", "workspaces", "audit", "ai_core", "assistant", "memory", "knowledge", "tasks", "approvals", "tools", "agents"]
 
 [[tool.importlinter.contracts]]
 name = "kernel apps must not import the Django project config"
 type = "forbidden"
-source_modules = ["accounts", "workspaces", "audit", "ai_core", "assistant", "memory", "knowledge", "tasks", "approvals", "tools"]
+source_modules = ["accounts", "workspaces", "audit", "ai_core", "assistant", "memory", "knowledge", "tasks", "approvals", "tools", "agents"]
 forbidden_modules = ["config"]
 
 # ai_core is the single door for LLM traffic (ADR-003): it must never depend on
@@ -105,7 +107,7 @@ forbidden_modules = ["config"]
 name = "ai_core must not import business apps"
 type = "forbidden"
 source_modules = ["ai_core"]
-forbidden_modules = ["accounts", "workspaces", "audit", "assistant", "memory", "knowledge", "tasks", "approvals", "tools"]
+forbidden_modules = ["accounts", "workspaces", "audit", "assistant", "memory", "knowledge", "tasks", "approvals", "tools", "agents"]
 ignore_imports = [
     "ai_core.tests.* -> accounts.*",
 ]
@@ -114,7 +116,7 @@ ignore_imports = [
 name = "audit must not depend on business apps (one-way: apps call audit)"
 type = "forbidden"
 source_modules = ["audit"]
-forbidden_modules = ["accounts", "workspaces", "assistant", "memory", "knowledge", "tasks", "approvals", "tools"]
+forbidden_modules = ["accounts", "workspaces", "assistant", "memory", "knowledge", "tasks", "approvals", "tools", "agents"]
 # Tests exercise the wired flows end-to-end; the contract targets production code.
 ignore_imports = [
     "audit.tests.* -> accounts.*",
@@ -194,3 +196,52 @@ name = "assistant must not import tasks (direction: tasks -> assistant)"
 type = "forbidden"
 source_modules = ["assistant"]
 forbidden_modules = ["tasks"]
+
+# agents (MVP 7) is a new one-way dependency root: it may import tools,
+# approvals, tasks, memory, knowledge (its execution engine calls their
+# existing public service functions, branch 3+), but none of those apps may
+# import agents back. agents does not import assistant and is not imported
+# by it either -- the router (MVP 6) and the agent runtime (this MVP) are
+# parallel front doors onto the same gated services, not layered on each
+# other. Six contracts, one per app agents may reach into.
+[[tool.importlinter.contracts]]
+name = "tools must not import agents (direction: agents -> tools)"
+type = "forbidden"
+source_modules = ["tools"]
+forbidden_modules = ["agents"]
+
+[[tool.importlinter.contracts]]
+name = "approvals must not import agents (direction: agents -> approvals)"
+type = "forbidden"
+source_modules = ["approvals"]
+forbidden_modules = ["agents"]
+
+[[tool.importlinter.contracts]]
+name = "tasks must not import agents (direction: agents -> tasks)"
+type = "forbidden"
+source_modules = ["tasks"]
+forbidden_modules = ["agents"]
+
+[[tool.importlinter.contracts]]
+name = "memory must not import agents (direction: agents -> memory)"
+type = "forbidden"
+source_modules = ["memory"]
+forbidden_modules = ["agents"]
+
+[[tool.importlinter.contracts]]
+name = "knowledge must not import agents (direction: agents -> knowledge)"
+type = "forbidden"
+source_modules = ["knowledge"]
+forbidden_modules = ["agents"]
+
+[[tool.importlinter.contracts]]
+name = "assistant must not import agents (no relationship either direction)"
+type = "forbidden"
+source_modules = ["assistant"]
+forbidden_modules = ["agents"]
+
+[[tool.importlinter.contracts]]
+name = "agents must not import assistant (no relationship either direction)"
+type = "forbidden"
+source_modules = ["agents"]
+forbidden_modules = ["assistant"]

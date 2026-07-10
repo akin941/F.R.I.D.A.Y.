@@ -41,6 +41,7 @@ INSTALLED_APPS = [
     "tasks",
     "approvals",
     "tools",
+    "agents",
 ]
 
 AUTH_USER_MODEL = "accounts.User"
@@ -196,6 +197,13 @@ APPROVAL_REQUEST_TTL_HOURS = env.int("APPROVAL_REQUEST_TTL_HOURS", default=24)
 # deployment: `approvals.apps.ApprovalsConfig.ready()` refuses to boot the
 # process at all if this is True while DEBUG is False.
 DEV_ALLOW_SELF_APPROVAL = env.bool("DEV_ALLOW_SELF_APPROVAL", default=False)
+
+# --- Agent runtime (MVP 7) ---
+
+# Plan step-count bound (brief §1, user-mandated brake #1): a planner call
+# returning more steps than this rejects the whole plan (Agent.status =
+# failed) rather than truncating it. Proposed default, adjustable.
+AGENT_MAX_PLAN_STEPS = env.int("AGENT_MAX_PLAN_STEPS", default=10)
 
 # Error tracking — active only when a DSN is configured.
 SENTRY_DSN = env("SENTRY_DSN", default="")
