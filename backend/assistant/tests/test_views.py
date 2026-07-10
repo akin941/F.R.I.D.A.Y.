@@ -572,8 +572,11 @@ def test_chunks_used_defaults_to_empty(
 def test_user_message_classified_as_chat_by_default(
     owner, workspace, fake_provider, system_prompt, router_intent_prompt
 ):
-    """FakeAdapter's router.intent fixture always classifies as chat — the
-    plumbing end-to-end proof that classification runs and is persisted."""
+    """FakeAdapter's router.intent fixture classifies as chat by default for
+    content with no recognized trigger phrase (MVP 6 §6 added content-based
+    triggers for a few exact phrases, purely for the Playwright e2e suite;
+    "hi" matches none of them) — the plumbing end-to-end proof that
+    classification runs and is persisted."""
     conversation = Conversation.objects.create(workspace=workspace, created_by=owner)
     response = auth_client(owner).post(
         f"/api/v1/ai/conversations/{conversation.id}/messages",

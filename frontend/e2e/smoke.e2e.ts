@@ -161,7 +161,15 @@ test("signup, chat with the fake provider, curated memory, Today, logout, route 
   // here with a dozen extra seeded documents.
   await composer.fill(`Please summarize my knowledge base — ${KNOWLEDGE_QUERY_TEXT}`);
   await page.getByRole("button", { name: "Send" }).click();
-  await expect(page.getByText(/Knowledge context: 1 chunk/)).toBeVisible({ timeout: 15_000 });
+  // `.last()`: the plain knowledge_query turn above already left its own
+  // identical "Knowledge context: 1 chunk" badge on this same message list
+  // (MessageList renders one per assistant reply that has chunks_used) --
+  // without scoping to the newest occurrence, this assertion could pass
+  // against that earlier badge without this router-triggered turn having
+  // produced a new grounded reply at all (Codex round-1 review, MEDIUM).
+  await expect(page.getByText(/Knowledge context: 1 chunk/).last()).toBeVisible({
+    timeout: 15_000,
+  });
 
   // task_draft: confirm creates a REAL Task via the router's draft card, not
   // the manual /tasks create form (that path is covered by the Tasks/Today
