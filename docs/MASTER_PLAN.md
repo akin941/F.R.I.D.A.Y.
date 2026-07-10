@@ -140,16 +140,18 @@ Status: **done (2026-07-05)** — all 6 branches merged to main.
   gate) ever become a shared package across Jarvis and external, or the projects
   stay on independent re-implementations permanently. Open; independent
   re-implementation is the working default.
-- AI-suggested task extraction (MVP 4): deliberately deferred, not merely
-  overlooked. Memory's lease-fenced extraction pipeline is a proven, reusable
-  design, but the roadmap places tools/approvals and agents right after tasks
-  specifically so "the assistant creates a task" can be modeled as a real,
-  approval-gated tool call once that infrastructure exists, rather than as a
-  second parallel extraction pipeline. Whichever MVP takes this up must also
-  add a `source`/sensitivity field (or an equivalent cloud-eligibility
-  policy) to `Task`, with a conservative backfill for every task created
-  under MVP 4 — otherwise old manually-created tasks would silently become
-  gateway-eligible by default the moment that machinery exists. See §T.
+- ~~AI-suggested task extraction (MVP 4)~~ — **resolved, amended (MVP 6 §3):**
+  `Task.source` (`user_created`/`ai_suggested`, mirroring `Memory.source`)
+  ships in MVP 6's intent-router work, with every pre-existing row backfilled
+  to `user_created` — the provenance half of this decision is fully met. Its
+  literal mechanism (route through the tools/approval-gate machinery like a
+  gated tool call) is deliberately narrowed, on the record: ADR-004 gates
+  write/delete/deploy/external-send-class actions, and creating a `Task` row
+  in one's own workspace (fully reversible, self-scoped) isn't in that risk
+  class — routing it through the gate would need a second human decider that
+  doesn't exist in a personal workspace, making chat-drafted tasks
+  permanently unusable there. See `docs/prompts/mvp-06/brief.md` §3 for the
+  full reasoning and `tasks/models.py`'s `Task.Source` docstring.
 
 ## P. Fleet / Organization Management (MVP 11 — vision draft)
 

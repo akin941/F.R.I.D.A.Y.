@@ -16,8 +16,10 @@ transitions serialize and a stale instance can never double-transition a row
 or race a delete.
 
 Role policy (identical for personal and company workspaces; "own tasks" is
-the exact predicate `created_by = actor` -- every row here is user-created by
-construction, there is no `source` field to further split on):
+the exact predicate `created_by = actor` regardless of `source` -- MVP 6 §3
+added `Task.source` (user_created/ai_suggested) for provenance, but it plays
+no part in this role matrix; ownership is still decided by `created_by`
+alone):
 
     action                     owner/admin   member       viewer
     read/list                  yes           yes          yes
