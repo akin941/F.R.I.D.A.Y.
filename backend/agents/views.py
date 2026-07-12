@@ -20,12 +20,13 @@ from agents.execution import (
 from agents.models import AgentStep
 from agents.serializers import AgentStepSerializer
 from tasks.serializers import TaskSerializer
+from tasks.services import InvalidTransition, TaskPermissionDenied
 
 
 def _service_error_response(exc):
-    if isinstance(exc, AgentPermissionDenied):
+    if isinstance(exc, (AgentPermissionDenied, TaskPermissionDenied)):
         return Response({"detail": str(exc)}, status=status.HTTP_403_FORBIDDEN)
-    if isinstance(exc, AgentInvalidTransition):
+    if isinstance(exc, (AgentInvalidTransition, InvalidTransition)):
         return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
     raise exc
 
@@ -44,7 +45,17 @@ class AgentStepConfirmView(APIView):
             return Response(status=status.HTTP_404_NOT_FOUND)
         try:
             task = confirm_task_draft_step(step=step, actor=request.user)
-        except (AgentPermissionDenied, AgentInvalidTransition) as exc:
+        except (
+            AgentPermissionDenied,
+            AgentInvalidTransition,
+            TaskPermissionDenied,
+            InvalidTransition,
+        ) as exc:
+            # `confirm_task_draft_step` calls `tasks.services.create_task()`
+            # internally (deliberately unguarded there -- see its own
+            # docstring), which can itself raise if the goal-submitter's
+            # role changed since planning; translate those the same way the
+            # tasks API itself does, rather than letting them 500.
             return _service_error_response(exc)
         return Response(TaskSerializer(task).data, status=status.HTTP_201_CREATED)
 

@@ -130,9 +130,22 @@ class _Claim:
 def _claim_next_step(agent_id):
     """Kill-switch fencing, START boundary: refuses to advance once the
     `Agent` is no longer `running` (covers `cancelled`, but also any other
-    terminal/paused status a stale re-invocation might race against)."""
+    terminal/paused status a stale re-invocation might race against).
+
+    Also refuses to advance while a step is already `running` for this
+    Agent (Codex round-1 P2 fix): Celery's at-least-once delivery means
+    `advance_agent_step` can be redelivered while a prior invocation's read
+    step is still mid-flight (its own gateway calls not yet finalized) --
+    without this check, the redelivered call would skip straight past it
+    to the next `pending` step (or mark the Agent `completed` early),
+    breaking the one-step-at-a-time guarantee this whole engine exists to
+    provide. Safe under the same row lock as the RUNNING status write
+    itself: only one worker can hold this Agent's lock at a time, so a
+    concurrent redelivery always observes the committed RUNNING state."""
     agent = Agent.objects.select_for_update().get(pk=agent_id)
     if agent.status != Agent.Status.RUNNING:
+        return _Claim("halted")
+    if agent.steps.filter(status=AgentStep.Status.RUNNING).exists():
         return _Claim("halted")
 
     step = agent.steps.filter(status=AgentStep.Status.PENDING).order_by("order").first()

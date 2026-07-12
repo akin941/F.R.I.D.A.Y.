@@ -219,6 +219,33 @@ class TestReadStep:
         agent.refresh_from_db()
         assert agent.consecutive_failures == 1
 
+    def test_duplicate_task_delivery_never_claims_past_an_in_flight_step(
+        self, workspace, owner, fake_provider, read_step_prompt
+    ):
+        """Codex round-1 P2 fix: Celery is at-least-once, so
+        `advance_agent_step` can be redelivered while a prior invocation's
+        read step is still `running` (its gateway calls not yet finalized).
+        A second, concurrent `_claim_next_step` call must no-op rather than
+        skipping ahead to the next `pending` step or marking the Agent
+        `completed` early."""
+        from agents.execution import _claim_next_step
+
+        agent = _read_step(2, workspace, owner)
+        # Simulate the first delivery's claim having already marked step 0
+        # `running` (about to call `run_read_step`, gateway call in flight).
+        first_step = agent.steps.order_by("order").first()
+        first_step.status = AgentStep.Status.RUNNING
+        first_step.save(update_fields=["status", "updated_at"])
+
+        claim = _claim_next_step(str(agent.id))
+
+        assert claim.outcome == "halted"
+        agent.refresh_from_db()
+        assert agent.status == Agent.Status.RUNNING
+        steps = list(agent.steps.order_by("order"))
+        assert steps[0].status == AgentStep.Status.RUNNING  # untouched
+        assert steps[1].status == AgentStep.Status.PENDING  # never claimed
+
 
 # --- consecutive-failure brake ---
 
