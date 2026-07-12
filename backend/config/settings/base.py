@@ -223,6 +223,22 @@ AGENT_MAX_CONSECUTIVE_FAILURES = env.int("AGENT_MAX_CONSECUTIVE_FAILURES", defau
 # a hard never-exceed cap.
 AGENT_MAX_GATEWAY_CALLS = env.int("AGENT_MAX_GATEWAY_CALLS", default=20)
 
+# Recovery scan (Codex round-2 fix, branch 3): mirrors memory/knowledge/
+# tools' identical recovery-grace convention. A `read`-kind AgentStep still
+# `running` past this long since its own last update was never finalized by
+# its own worker (crash, OOM-kill, or Celery's hard `time_limit` SIGKILLing
+# the child before the soft-limit handler could run) -- must exceed
+# AGENT_STEP_TIMEOUT_SECONDS + the Celery hard-limit buffer (asserted in
+# agents/tasks.py) or the scan could reclaim a step still legitimately
+# in flight.
+AGENT_STEP_RECOVERY_GRACE_SECONDS = env.int("AGENT_STEP_RECOVERY_GRACE_SECONDS", default=180)
+
+# An Agent stuck `running` this long since its own last update, with no
+# currently-running step, suggests its on_commit dispatch to the next
+# pending step was lost (e.g. broker down at commit time) -- mirrors
+# knowledge's/tools' identical `PENDING_RECOVERY_GRACE_SECONDS`.
+AGENT_DISPATCH_RECOVERY_GRACE_SECONDS = env.int("AGENT_DISPATCH_RECOVERY_GRACE_SECONDS", default=60)
+
 # Error tracking — active only when a DSN is configured.
 SENTRY_DSN = env("SENTRY_DSN", default="")
 if SENTRY_DSN:

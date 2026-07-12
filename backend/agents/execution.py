@@ -24,12 +24,13 @@ after that lock is released.
 """
 
 import logging
-from datetime import date
+from datetime import date, timedelta
 
 from celery.exceptions import SoftTimeLimitExceeded
 from django.conf import settings
 from django.core.exceptions import ImproperlyConfigured
 from django.db import transaction
+from django.utils import timezone
 
 from agents.models import Agent, AgentStep
 from ai_core.exceptions import GatewayError
@@ -258,14 +259,31 @@ def _finalize_read_step(step_id, *, success, result):
     the step's own result/status is always written here -- the gateway
     calls already happened, their cost is real -- but whether this counts
     as license to advance to the next step is decided by
-    `_after_step_resolved`, which independently re-checks `Agent.status`."""
-    step = AgentStep.objects.select_for_update().get(pk=step_id)
+    `_after_step_resolved`, which independently re-checks `Agent.status`.
+
+    Compare-and-swap fenced (Codex round-2 fix): only proceeds if the step
+    is still `running` at lock time. This is what makes
+    `recover_stale_agent_execution`'s reclaim of a worker-lost step safe --
+    whichever of {the original (possibly just-slow, not actually dead)
+    worker, the recovery scan} commits its own finalize call first wins;
+    the other observes the step is no longer `running` and becomes a safe
+    no-op instead of double-writing `gateway_calls_used` or double-calling
+    `_after_step_resolved`. Returns `True` if this call actually finalized
+    the step, `False` if it was already resolved by someone else."""
+    step = (
+        AgentStep.objects.select_for_update()
+        .filter(pk=step_id, status=AgentStep.Status.RUNNING)
+        .first()
+    )
+    if step is None:
+        return False
     agent = Agent.objects.select_for_update().get(pk=step.agent_id)
     step.status = AgentStep.Status.SUCCEEDED if success else AgentStep.Status.FAILED
     step.result = result
     step.save(update_fields=["status", "result", "updated_at"])
     agent.gateway_calls_used += 2
     agent.save(update_fields=["gateway_calls_used", "updated_at"])
+    return True
 
 
 # --- the single place that decides halt-or-continue ---
@@ -322,11 +340,11 @@ def advance_step(agent_id):
     try:
         success, result = run_read_step(claim.step_id)
     except SoftTimeLimitExceeded:
-        _finalize_read_step(claim.step_id, success=False, result={"error": "timeout"})
-        _after_step_resolved(agent_id, step_succeeded=False)
+        if _finalize_read_step(claim.step_id, success=False, result={"error": "timeout"}):
+            _after_step_resolved(agent_id, step_succeeded=False)
         return
-    _finalize_read_step(claim.step_id, success=success, result=result)
-    _after_step_resolved(agent_id, step_succeeded=success)
+    if _finalize_read_step(claim.step_id, success=success, result=result):
+        _after_step_resolved(agent_id, step_succeeded=success)
 
 
 # --- kill switch ---
@@ -457,3 +475,70 @@ def discard_task_draft_step(*, step, actor):
     locked_step.save(update_fields=["status", "updated_at"])
     _after_step_resolved(str(agent.id), step_succeeded=True)
     return locked_step
+
+
+# --- recovery scan (Codex round-2 fix; agents/tasks.py's periodic task) ---
+
+
+def recover_stale_agent_execution():
+    """Periodic scan (Celery beat, `agents/tasks.py`) for two distinct ways
+    an `Agent`'s execution can get permanently stuck with no live worker
+    ever coming back to unstick it -- neither is covered by the per-step
+    Celery timeout alone, which only fires if the SAME worker process
+    survives long enough to catch its own `SoftTimeLimitExceeded`:
+
+    1. A `read`-kind `AgentStep` still `running` past
+       `AGENT_STEP_RECOVERY_GRACE_SECONDS` since its own last update: the
+       worker that claimed it died (OOM-kill, host crash, or a hard
+       `time_limit` SIGKILL before the soft-limit handler ran) before
+       `_finalize_read_step` ever executed. Reclaimed as a failure (mirrors
+       the timeout path's `{"error": "timeout"}` shape) via the SAME
+       compare-and-swap fenced `_finalize_read_step` the real worker itself
+       uses -- so if that worker was actually just slow, not dead, and
+       finalizes for real either just before or just after this scan, only
+       one of the two calls ever takes effect (see `_finalize_read_step`'s
+       own docstring). Counts toward the existing consecutive-failure brake
+       exactly like a genuine per-step timeout does -- no separate retry
+       budget needed.
+    2. An `Agent` still `running`, with no currently-running step, past
+       `AGENT_DISPATCH_RECOVERY_GRACE_SECONDS` since its own last update:
+       its `transaction.on_commit`-scheduled dispatch to the next `pending`
+       step was lost (e.g. the broker was down at commit time -- the exact
+       swallowed-exception path in `dispatch_agent_execution`). Simply
+       re-dispatched; `_claim_next_step`'s own fencing makes this safe even
+       if the original dispatch actually does arrive later (whichever
+       claims first wins, the other observes `running` is no longer
+       matched by its own claim conditions and no-ops).
+
+    Also runnable manually via `manage.py recover_agents` (calls this
+    function directly, not `.delay()` -- no broker/worker required)."""
+    now = timezone.now()
+
+    step_cutoff = now - timedelta(seconds=settings.AGENT_STEP_RECOVERY_GRACE_SECONDS)
+    stale_steps = list(
+        AgentStep.objects.filter(
+            status=AgentStep.Status.RUNNING, updated_at__lt=step_cutoff
+        ).values_list("id", "agent_id")
+    )
+    reclaimed_steps = 0
+    for step_id, agent_id in stale_steps:
+        finalized = _finalize_read_step(
+            str(step_id), success=False, result={"error": "worker_lost"}
+        )
+        if finalized:
+            reclaimed_steps += 1
+            _after_step_resolved(str(agent_id), step_succeeded=False)
+
+    dispatch_cutoff = now - timedelta(seconds=settings.AGENT_DISPATCH_RECOVERY_GRACE_SECONDS)
+    running_step_agent_ids = AgentStep.objects.filter(status=AgentStep.Status.RUNNING).values_list(
+        "agent_id", flat=True
+    )
+    stale_agent_ids = list(
+        Agent.objects.filter(status=Agent.Status.RUNNING, updated_at__lt=dispatch_cutoff)
+        .exclude(id__in=running_step_agent_ids)
+        .values_list("id", flat=True)
+    )
+    for agent_id in stale_agent_ids:
+        dispatch_agent_execution(str(agent_id))
+
+    return {"reclaimed_steps": reclaimed_steps, "redispatched_agents": len(stale_agent_ids)}

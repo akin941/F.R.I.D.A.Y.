@@ -31,4 +31,8 @@ app.conf.beat_schedule = {
         "task": "tools.tasks.recover_stale_vault_export_runs",
         "schedule": 60.0,
     },
+    "agent-execution-recovery-scan": {
+        "task": "agents.tasks.recover_stale_agents",
+        "schedule": 60.0,
+    },
 }

@@ -1,11 +1,13 @@
 import threading
 import time
+from datetime import timedelta
 from unittest import mock
 
 import pytest
 from celery.exceptions import SoftTimeLimitExceeded
 from django.db import connection, transaction
 from django.test import override_settings
+from django.utils import timezone
 
 from accounts.services import register_user
 from agents.execution import (
@@ -556,6 +558,155 @@ class TestCancelAgent:
         step.refresh_from_db()
         assert agent.status == Agent.Status.CANCELLED
         assert step.status == AgentStep.Status.BLOCKED_ON_APPROVAL
+
+
+# --- recovery scan (Codex round-2 fix) ---
+
+
+class TestRecoveryScan:
+    def test_stale_running_step_past_grace_is_reclaimed_as_worker_lost(
+        self, workspace, owner, fake_provider, read_step_prompt
+    ):
+        """Simulates the worker that claimed this read step dying (OOM-kill,
+        hard `time_limit` SIGKILL) before it could ever call
+        `_finalize_read_step` -- the step is stuck `running` forever without
+        the recovery scan."""
+        from agents import execution
+
+        agent = _read_step(1, workspace, owner)
+        claim = execution._claim_next_step(str(agent.id))
+        assert claim.outcome == "read"
+        AgentStep.objects.filter(agent=agent).update(
+            updated_at=timezone.now() - timedelta(seconds=200)
+        )
+
+        result = execution.recover_stale_agent_execution()
+
+        assert result == {"reclaimed_steps": 1, "redispatched_agents": 0}
+        step = agent.steps.get()
+        assert step.status == AgentStep.Status.FAILED
+        assert step.result == {"error": "worker_lost"}
+        agent.refresh_from_db()
+        assert agent.consecutive_failures == 1
+        # Same "no on_commit under this test transaction" gap as everywhere
+        # else in this file -- one more direct call to reach `completed`.
+        _run_to_completion(str(agent.id))
+        agent.refresh_from_db()
+        assert agent.status == Agent.Status.COMPLETED
+
+    def test_fresh_running_step_within_grace_is_left_alone(
+        self, workspace, owner, fake_provider, read_step_prompt
+    ):
+        from agents import execution
+
+        agent = _read_step(1, workspace, owner)
+        claim = execution._claim_next_step(str(agent.id))
+        assert claim.outcome == "read"
+
+        result = execution.recover_stale_agent_execution()
+
+        assert result == {"reclaimed_steps": 0, "redispatched_agents": 0}
+        step = agent.steps.get()
+        assert step.status == AgentStep.Status.RUNNING
+
+    def test_stale_agent_with_no_running_step_is_redispatched(
+        self, workspace, owner, fake_provider, read_step_prompt, monkeypatch
+    ):
+        """The other stranding mode (Codex round-2 finding): the Agent's own
+        on_commit dispatch to its next pending step was lost (e.g. broker
+        down at commit time) -- nothing is `running`, so this must be
+        re-dispatched rather than silently left `running` forever."""
+        from agents import execution
+
+        agent = _read_step(2, workspace, owner)
+        advance_step(str(agent.id))  # completes step 0; step 1 stays pending
+        agent.refresh_from_db()
+        assert agent.status == Agent.Status.RUNNING
+        Agent.objects.filter(pk=agent.id).update(updated_at=timezone.now() - timedelta(seconds=120))
+
+        calls = []
+        monkeypatch.setattr(
+            execution, "dispatch_agent_execution", lambda agent_id: calls.append(agent_id)
+        )
+        result = execution.recover_stale_agent_execution()
+
+        assert result == {"reclaimed_steps": 0, "redispatched_agents": 1}
+        assert calls == [str(agent.id)]
+
+    def test_fresh_agent_with_no_running_step_within_grace_is_left_alone(
+        self, workspace, owner, fake_provider, read_step_prompt, monkeypatch
+    ):
+        from agents import execution
+
+        agent = _read_step(2, workspace, owner)
+        advance_step(str(agent.id))
+        agent.refresh_from_db()
+        assert agent.status == Agent.Status.RUNNING
+
+        calls = []
+        monkeypatch.setattr(
+            execution, "dispatch_agent_execution", lambda agent_id: calls.append(agent_id)
+        )
+        result = execution.recover_stale_agent_execution()
+
+        assert result == {"reclaimed_steps": 0, "redispatched_agents": 0}
+        assert calls == []
+
+    def test_agent_with_a_still_running_step_is_never_redispatched_even_if_agent_row_is_stale(
+        self, workspace, owner, fake_provider, read_step_prompt, monkeypatch
+    ):
+        """The `_claim_next_step` "read" branch only touches the STEP's own
+        `updated_at`, never the Agent's -- so a perfectly healthy in-flight
+        read step can leave the Agent row looking stale by this same grace
+        window. Must never be redispatched while its step is genuinely
+        still running (the exclude in `recover_stale_agent_execution`)."""
+        from agents import execution
+
+        agent = _read_step(1, workspace, owner)
+        claim = execution._claim_next_step(str(agent.id))
+        assert claim.outcome == "read"
+        Agent.objects.filter(pk=agent.id).update(updated_at=timezone.now() - timedelta(seconds=120))
+
+        calls = []
+        monkeypatch.setattr(
+            execution, "dispatch_agent_execution", lambda agent_id: calls.append(agent_id)
+        )
+        result = execution.recover_stale_agent_execution()
+
+        assert result == {"reclaimed_steps": 0, "redispatched_agents": 0}
+        assert calls == []
+        step = agent.steps.get()
+        assert step.status == AgentStep.Status.RUNNING  # untouched
+
+    def test_finalize_after_reclaim_is_a_safe_noop(
+        self, workspace, owner, fake_provider, read_step_prompt
+    ):
+        """Codex round-2 fencing fix: whichever of {the recovery scan, the
+        original (possibly just-slow, not actually dead) worker} finalizes
+        first wins -- the other's own `_finalize_read_step` call must
+        become a safe no-op rather than overwriting the outcome or
+        double-counting `gateway_calls_used`."""
+        from agents import execution
+
+        agent = _read_step(1, workspace, owner)
+        claim = execution._claim_next_step(str(agent.id))
+        step_id = claim.step_id
+
+        finalized_by_recovery = execution._finalize_read_step(
+            step_id, success=False, result={"error": "worker_lost"}
+        )
+        assert finalized_by_recovery is True
+
+        finalized_by_late_worker = execution._finalize_read_step(
+            step_id, success=True, result={"summary": "a late, stale result"}
+        )
+        assert finalized_by_late_worker is False
+
+        step = AgentStep.objects.get(pk=step_id)
+        assert step.status == AgentStep.Status.FAILED
+        assert step.result == {"error": "worker_lost"}
+        agent.refresh_from_db()
+        assert agent.gateway_calls_used == 2  # counted once, not twice
 
 
 # --- real on_commit dispatch chain (the one genuinely durable-transaction test) ---
