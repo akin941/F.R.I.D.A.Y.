@@ -205,6 +205,24 @@ DEV_ALLOW_SELF_APPROVAL = env.bool("DEV_ALLOW_SELF_APPROVAL", default=False)
 # failed) rather than truncating it. Proposed default, adjustable.
 AGENT_MAX_PLAN_STEPS = env.int("AGENT_MAX_PLAN_STEPS", default=10)
 
+# Per-step execution window (brief §3, brake #2a) -- the Celery step-advance
+# task's own soft/hard time limit, covering one step's actual work (a read
+# step's embed+summarize calls; a gate-worthy step's local transition).
+# Not the human approval/confirmation wait, which is unbounded up to
+# ApprovalRequest's own expiry sweep.
+AGENT_STEP_TIMEOUT_SECONDS = env.int("AGENT_STEP_TIMEOUT_SECONDS", default=60)
+
+# Consecutive-failure halt (brief §3, brake #2b): zero internal retries --
+# a step fails once and counts toward this bound, full stop.
+AGENT_MAX_CONSECUTIVE_FAILURES = env.int("AGENT_MAX_CONSECUTIVE_FAILURES", default=2)
+
+# Resource/token budget (brief §3, brake #2c): a per-Agent gateway-call
+# ceiling (Agent.gateway_calls_used), checked before starting a NEW read
+# step -- a step already in flight is allowed to finish, so this is a soft
+# start-condition ceiling with a deliberate bounded one-step overshoot, not
+# a hard never-exceed cap.
+AGENT_MAX_GATEWAY_CALLS = env.int("AGENT_MAX_GATEWAY_CALLS", default=20)
+
 # Error tracking — active only when a DSN is configured.
 SENTRY_DSN = env("SENTRY_DSN", default="")
 if SENTRY_DSN:

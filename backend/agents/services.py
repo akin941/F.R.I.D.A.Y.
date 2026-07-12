@@ -16,6 +16,13 @@ sees a row immediately, not only after the call returns:
 - `create_plan`: a convenience wrapper combining the three in one atomic
   call, for callers (and branch 1's own tests) that already have a full
   steps list in hand and don't need the two-phase shape.
+
+`finalize_plan`'s success path dispatches the first step's execution
+(branch 3) via `transaction.on_commit` -- mirrors `tools.export`'s
+non-propagating broker-publish shape exactly, through `agents.execution.
+dispatch_agent_execution` (imported locally to avoid a module-import
+cycle, same convention `tools.export.dispatch_vault_export_run` already
+uses for its own `from tools.tasks import run_vault_export`).
 """
 
 from django.conf import settings
@@ -78,6 +85,9 @@ def finalize_plan(*, agent, steps):
     )
     agent.status = Agent.Status.RUNNING
     agent.save(update_fields=["status", "updated_at"])
+    from agents.execution import dispatch_agent_execution
+
+    transaction.on_commit(lambda: dispatch_agent_execution(str(agent.id)))
     return agent
 
 

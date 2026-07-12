@@ -55,6 +55,13 @@ class Agent(WorkspaceScopedModel, TimestampedModel):
         # "the planner returned a well-shaped step list, but its size was
         # rejected." This one means "no usable step list was ever produced."
         PLANNER_ERROR = "planner_error"
+        # Consecutive-failure brake (branch 3, brief §3 brake #2b): the
+        # execution engine halted after AGENT_MAX_CONSECUTIVE_FAILURES
+        # steps failed in a row, zero internal retries.
+        CONSECUTIVE_FAILURES = "consecutive_failures"
+        # Resource/token budget brake (branch 3, brief §3 brake #2c): a new
+        # read step would start at/over AGENT_MAX_GATEWAY_CALLS.
+        GATEWAY_BUDGET_EXCEEDED = "gateway_budget_exceeded"
 
     goal = models.TextField()
     status = models.CharField(max_length=30, choices=Status.choices, default=Status.PLANNING)
@@ -71,9 +78,13 @@ class Agent(WorkspaceScopedModel, TimestampedModel):
     # Resource/token budget brake (brief §3): a per-Agent running total of
     # gateway calls the execution engine's read steps have made. Local to
     # this row (not derived from ModelUsage) so concurrent agents' usage can
-    # never cross-contaminate. Untouched by this branch -- the execution
-    # engine (branch 3) is the only writer.
+    # never cross-contaminate.
     gateway_calls_used = models.PositiveIntegerField(default=0)
+    # Consecutive-failure brake (branch 3, brief §3 brake #2b): reset to 0
+    # on any step that resolves cleanly (succeeded or skipped), incremented
+    # on any step that fails (including a timed-out one). Zero internal
+    # retries -- a step fails once and counts toward this, full stop.
+    consecutive_failures = models.PositiveIntegerField(default=0)
 
     class Meta:
         ordering = ["-created_at"]

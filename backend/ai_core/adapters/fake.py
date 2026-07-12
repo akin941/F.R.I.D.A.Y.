@@ -103,6 +103,10 @@ FAKE_AGENT_PLAN_RESPONSE = (
     '{"steps": [{"kind": "read", "description": "Fake plan read step", "payload": {}}]}'
 )
 
+# Purpose-aware fixture for `agent.read_step` (MVP 7 §3) -- free text, not
+# JSON (this purpose has no schema/parser, unlike the others above).
+FAKE_AGENT_READ_STEP_RESPONSE = "Fake read-step summary: nothing notable was retrieved."
+
 
 def _latest_user_content(messages):
     for message in reversed(messages or []):
@@ -130,6 +134,8 @@ class FakeAdapter(BaseAdapter):
             return FAKE_TASK_DRAFT_RESPONSE
         if purpose == "agent.plan":
             return FAKE_AGENT_PLAN_RESPONSE
+        if purpose == "agent.read_step":
+            return FAKE_AGENT_READ_STEP_RESPONSE
         return FAKE_RESPONSE
 
     def _result(self, messages, purpose):
