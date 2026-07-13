@@ -188,3 +188,19 @@ def list_skill_prompt_entries() -> list[tuple[str, str, str]]:
         (spec.name, spec.description, spec.trigger_hint)
         for spec in (_REGISTRY[name] for name in sorted(_REGISTRY.keys()))
     ]
+
+
+def skill_steps_to_plan_dicts(spec: SkillSpec) -> list[dict]:
+    """JSON-safe conversion of a `SkillSpec`'s step template to the same
+    `{"kind", "description", "payload"}` dict shape `agents.planner.
+    parse_plan()` already produces for a freeform LLM plan (MVP 8 §3) --
+    the exact shape `agents.services.finalize_plan` bulk-creates `AgentStep`
+    rows from. Callers must go through this rather than reading
+    `SkillStep.payload` directly: that field is a `MappingProxyType`
+    (immutable, by design -- see `SkillStep.__post_init__`), which is not
+    JSON-serializable and would raise inside `AgentStep.payload`'s
+    `JSONField` otherwise."""
+    return [
+        {"kind": step.kind, "description": step.description, "payload": dict(step.payload)}
+        for step in spec.steps
+    ]

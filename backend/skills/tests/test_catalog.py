@@ -1,3 +1,4 @@
+import json
 from types import MappingProxyType
 
 import pytest
@@ -10,6 +11,7 @@ from skills.catalog import (
     list_skill_names,
     list_skill_prompt_entries,
     register_skill,
+    skill_steps_to_plan_dicts,
     unregister_skill,
 )
 
@@ -183,3 +185,34 @@ class TestStepShapeValidationAtRegistration:
         spec = _spec(steps=(step,))
         with pytest.raises(SkillValidationError):
             register_skill(spec)
+
+
+class TestSkillStepsToPlanDicts:
+    """Codex round-1 P2 fix: `SkillStep.payload` is a `MappingProxyType`
+    (immutable by design, see `SkillStep.__post_init__`), which is not
+    JSON-serializable -- branch 2's `finalize_plan()` call needs a plain,
+    JSON-safe dict shape instead. This is the boundary that conversion must
+    happen at, exercised here rather than left implicit."""
+
+    def test_produces_the_same_shape_parse_plan_expects_and_is_json_safe(self):
+        spec = _spec(
+            steps=(
+                SkillStep(kind="read", description="Read", payload={}),
+                SkillStep(
+                    kind="tool_request",
+                    description="Export",
+                    payload={"tool_name": "vault_export"},
+                ),
+            )
+        )
+        plan_dicts = skill_steps_to_plan_dicts(spec)
+        assert plan_dicts == [
+            {"kind": "read", "description": "Read", "payload": {}},
+            {
+                "kind": "tool_request",
+                "description": "Export",
+                "payload": {"tool_name": "vault_export"},
+            },
+        ]
+        json.dumps(plan_dicts)  # must not raise
+        assert all(type(d["payload"]) is dict for d in plan_dicts)

@@ -95,12 +95,12 @@ forbidden_modules = ["config"]
 name = "core must stay independent of kernel apps"
 type = "forbidden"
 source_modules = ["core"]
-forbidden_modules = ["accounts", "workspaces", "audit", "ai_core", "assistant", "memory", "knowledge", "tasks", "approvals", "tools", "agents"]
+forbidden_modules = ["accounts", "workspaces", "audit", "ai_core", "assistant", "memory", "knowledge", "tasks", "approvals", "tools", "agents", "skills"]
 
 [[tool.importlinter.contracts]]
 name = "kernel apps must not import the Django project config"
 type = "forbidden"
-source_modules = ["accounts", "workspaces", "audit", "ai_core", "assistant", "memory", "knowledge", "tasks", "approvals", "tools", "agents"]
+source_modules = ["accounts", "workspaces", "audit", "ai_core", "assistant", "memory", "knowledge", "tasks", "approvals", "tools", "agents", "skills"]
 forbidden_modules = ["config"]
 
 # ai_core is the single door for LLM traffic (ADR-003): it must never depend on
