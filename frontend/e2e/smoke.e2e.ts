@@ -28,8 +28,12 @@ test("signup, chat with the fake provider, curated memory, Today, logout, route 
   // resolve near-instantly) — bumped from 135s to 150s for this section.
   // MVP 6's router section adds 3 more SSE round trips (knowledge_query
   // trigger, task_draft, tool_request) plus its own 20s approve+reload-poll
-  // budget for the router-triggered vault export -- bumped to 220s.
-  test.setTimeout(220_000);
+  // budget for the router-triggered vault export -- bumped to 220s. MVP 7's
+  // Agents section adds two full agent lifecycles (goal -> plan -> read ->
+  // task_draft confirm -> tool_request approval), each with its own
+  // in-flight poll wait, plus the kill-switch path's own cancel + orphaned-
+  // approval check -- bumped to 260s.
+  test.setTimeout(260_000);
 
   const email = `e2e-${Date.now()}@jarvis.test`;
   const password = "Sup3rSecret!2026";
@@ -349,6 +353,161 @@ test("signup, chat with the fake provider, curated memory, Today, logout, route 
     // request's own run is listed first.
     await expect(page.getByText(/Run status: Succeeded/).first()).toBeVisible({ timeout: 5_000 });
   }).toPass({ timeout: 20_000 });
+
+  // Agents happy path (MVP 7 §5/§6): a goal plans to a `read` step, a
+  // `task_draft` step, and a `tool_request` step in one plan. FakeAdapter's
+  // `agent.plan` purpose is content-triggered on the phrase "full plan"
+  // (backend/ai_core/adapters/fake.py) purely so this real backend process --
+  // which this test cannot monkeypatch -- can still exercise all three step
+  // kinds in one run, mirroring the router section's identical convention
+  // above. Unlike /memory, /knowledge, and /approvals above (real pages),
+  // the agent detail view is pure client-side state on /agents (no
+  // dedicated URL) -- AgentDetail.tsx polls itself every 3s while the Agent
+  // is in flight, so waits below rely on that self-poll and a generous
+  // `expect` timeout instead of the reload-poll convention used elsewhere
+  // (reloading here would lose the selection and land back on the list).
+  const AGENT_GOAL = "Give me the full plan to get my notes organized";
+  const AGENT_READ_STEP = "Summarize relevant notes";
+  const AGENT_TASK_DRAFT_STEP = "Draft a follow-up task";
+  const AGENT_TOOL_REQUEST_STEP = "Export the vault";
+
+  await page.getByRole("link", { name: "Agents" }).click();
+  await expect(page).toHaveURL(/\/agents$/);
+
+  await page.getByRole("button", { name: "New agent" }).click();
+  await page.getByLabel("Goal").fill(AGENT_GOAL);
+  await page.getByRole("button", { name: "Start agent" }).click();
+
+  await expect(page.getByText(AGENT_GOAL, { exact: true })).toBeVisible({ timeout: 10_000 });
+  await page.getByText(AGENT_GOAL, { exact: true }).click();
+  await expect(page.getByRole("button", { name: /Back to agents/ })).toBeVisible({
+    timeout: 10_000,
+  });
+
+  // Read step runs unattended; task_draft blocks for confirmation next.
+  await expect(page.getByRole("button", { name: "Confirm task" })).toBeVisible({
+    timeout: 20_000,
+  });
+  await expect(page.getByText(AGENT_READ_STEP, { exact: true })).toBeVisible();
+  await expect(page.getByText(AGENT_TASK_DRAFT_STEP, { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Confirm task" }).click();
+
+  // Confirming creates a real Task and advances to the tool_request step,
+  // which requires approval (ADR-004) -- the engine can get no further
+  // without a human decision, same "confirm here, decide there" split the
+  // router's tool_request path already established.
+  await expect(page.getByRole("link", { name: "Review on Approvals" })).toBeVisible({
+    timeout: 20_000,
+  });
+  await expect(page.getByText(AGENT_TOOL_REQUEST_STEP, { exact: true })).toBeVisible();
+
+  await page.getByRole("link", { name: "Review on Approvals" }).click();
+  await expect(page).toHaveURL(/\/approvals$/);
+
+  const agentToolRequestId = await page.evaluate(async () => {
+    const workspaces = (await (await fetch("/api/workspaces")).json()) as { id: string }[];
+    const workspace = workspaces[0];
+    if (!workspace) throw new Error("No workspace found for the freshly signed-up user.");
+    const requests = (await (
+      await fetch(`/api/approvals/requests?workspace=${workspace.id}&status=pending`)
+    ).json()) as { id: string; tool_name: string }[];
+    const match = requests.find((r) => r.tool_name === "vault_export");
+    if (!match) throw new Error("No pending vault_export approval request found (agent path).");
+    return match.id;
+  });
+  const agentApproveStatus = await page.evaluate(async (requestId) => {
+    const response = await fetch(`/api/approvals/requests/${requestId}/approve`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+    });
+    return response.status;
+  }, agentToolRequestId);
+  expect(agentApproveStatus).toBe(200);
+
+  await expect(async () => {
+    await page.reload();
+    await expect(page.getByText(/Run status: Succeeded/).first()).toBeVisible({ timeout: 5_000 });
+  }).toPass({ timeout: 20_000 });
+
+  // Approving resumes the engine (agents/signals.py), which runs the tool
+  // step and, since it's the plan's last step, completes the whole agent.
+  await page.getByRole("link", { name: "Agents" }).click();
+  await expect(page).toHaveURL(/\/agents$/);
+  await page.getByText(AGENT_GOAL, { exact: true }).click();
+  await expect(page.getByText("Completed", { exact: true })).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByRole("button", { name: "Cancel agent" })).not.toBeVisible();
+
+  // Agents kill-switch path (MVP 7 §3/§6): cancelling a `blocked_on_approval`
+  // agent must be final -- even if the now-orphaned ApprovalRequest is
+  // decided afterward, the Agent must stay `cancelled` and no further step
+  // may run (the round-5 kill-switch-bypass fix from branch 3's review).
+  const KILL_SWITCH_GOAL = "Give me the full plan to test the kill switch";
+
+  // Back to the list via the in-page button, not the "Agents" nav link --
+  // we're already on /agents (viewing agent1's detail, which is pure
+  // client-side state with no URL of its own), so a Link to the same path
+  // is a no-op in Next.js and would leave the detail view showing forever.
+  await page.getByRole("button", { name: /Back to agents/ }).click();
+  await page.getByRole("button", { name: "New agent" }).click();
+  await page.getByLabel("Goal").fill(KILL_SWITCH_GOAL);
+  await page.getByRole("button", { name: "Start agent" }).click();
+
+  await expect(page.getByText(KILL_SWITCH_GOAL, { exact: true })).toBeVisible({ timeout: 10_000 });
+  await page.getByText(KILL_SWITCH_GOAL, { exact: true }).click();
+  await expect(page.getByRole("button", { name: /Back to agents/ })).toBeVisible({
+    timeout: 10_000,
+  });
+
+  await expect(page.getByRole("button", { name: "Confirm task" })).toBeVisible({
+    timeout: 20_000,
+  });
+  await page.getByRole("button", { name: "Confirm task" }).click();
+
+  await expect(page.getByRole("button", { name: "Cancel agent" })).toBeVisible({
+    timeout: 20_000,
+  });
+  await expect(page.getByRole("link", { name: "Review on Approvals" })).toBeVisible({
+    timeout: 20_000,
+  });
+
+  await page.getByRole("button", { name: "Cancel agent" }).click();
+  await expect(page.getByRole("button", { name: "Cancel agent" })).not.toBeVisible();
+  await expect(page.getByText("Cancelled", { exact: true })).toBeVisible();
+
+  const killSwitchRequestId = await page.evaluate(async () => {
+    const workspaces = (await (await fetch("/api/workspaces")).json()) as { id: string }[];
+    const workspace = workspaces[0];
+    if (!workspace) throw new Error("No workspace found for the freshly signed-up user.");
+    const requests = (await (
+      await fetch(`/api/approvals/requests?workspace=${workspace.id}&status=pending`)
+    ).json()) as { id: string; tool_name: string }[];
+    const match = requests.find((r) => r.tool_name === "vault_export");
+    if (!match) throw new Error("No pending vault_export approval request found (kill-switch).");
+    return match.id;
+  });
+  const killSwitchApproveStatus = await page.evaluate(async (requestId) => {
+    const response = await fetch(`/api/approvals/requests/${requestId}/approve`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+    });
+    return response.status;
+  }, killSwitchRequestId);
+  // Deciding the now-orphaned request is still a valid approvals-side action
+  // (approvals has no idea its requesting agent was cancelled) -- the
+  // guarantee under test is entirely on the Agent's own side, below. A page
+  // reload would lose the client-side detail selection (same reasoning as
+  // above), so re-open the agent via the list instead of reloading in place
+  // -- this also forces a real re-fetch from the backend, not a stale local
+  // state that never learned about the approval decision. Back-to-list is
+  // via the in-page button, not the "Agents" nav link: we're already on
+  // /agents (still viewing agent2's own detail), so a Link to the same path
+  // is a no-op in Next.js.
+  expect(killSwitchApproveStatus).toBe(200);
+
+  await page.getByRole("button", { name: /Back to agents/ }).click();
+  await page.getByText(KILL_SWITCH_GOAL, { exact: true }).click();
+  await expect(page.getByText("Cancelled", { exact: true })).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByRole("button", { name: "Cancel agent" })).not.toBeVisible();
 
   await page.getByRole("button", { name: "Log out" }).click();
   await expect(page).toHaveURL(/\/login$/);

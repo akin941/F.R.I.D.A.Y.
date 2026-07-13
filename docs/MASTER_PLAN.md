@@ -64,6 +64,26 @@ in the roadmap (§L). Knowledge/RAG itself: see §Q.
 
 ## G. Agent Runtime
 
+Shipped in MVP 7 (§W): given a **goal**, Jarvis plans a bounded sequence of
+`AgentStep`s (`read` / `task_draft` / `tool_request`) and executes them
+without requiring a human to type each one — the other half of the
+roadmap's `router → agents` line (§L), drawing the same autonomy boundary
+`docs/prompts/mvp-06/brief.md` and ADR-004 already anticipated ("agent-
+requested" vs. "human-requested"). The approval gate (ADR-004) is not
+rebuilt or given an "agent" exception: every `tool_request` step goes
+through the exact same `ApprovalRequest` machinery a human-typed request
+already used (MVP 5), and `task_draft` steps still pause for an explicit
+human confirm before any `Task` row is created — an agent can plan and
+sequence, but it cannot create a second agent, alter its own steps after
+creation, or touch `tools`/`approvals` permission logic directly (ADR-004's
+self-modification guarantee, proven by branch 4's test suite). Four brakes
+were the user's explicit condition for approving this autonomy increase,
+not nice-to-haves: a plan step-count bound, execution-time brakes (per-step
+timeout, consecutive-failure halt, a `gateway_calls_used` budget ceiling), a
+backend-enforced kill switch (`cancel_agent`, fenced against every
+concurrent path via `select_for_update`), and step-by-step visibility (live
+`Agent`/`AgentStep` status fields, rendered on `/agents`).
+
 ## H. Development Agent Orchestration
 
 ## I. Obsidian Memory Vault
@@ -83,7 +103,7 @@ See `docs/security/mcp-governance.md`.
 MVP 0–20, simplified to **personal kernel + platform capabilities** (ADR-006):
 personal kernel first (shell/chat → memory → knowledge/RAG *(done — §S)* →
 tasks *(done — §T)* → tools/approvals *(done — §U)* → router *(done — §V)* →
-agents *(next)* → skills → integrations). Model-tier/cost routing (a
+agents *(done — §W)* → skills → integrations). Model-tier/cost routing (a
 DB-backed cheap/mid/strong tier table + `ModelUsage.routing_reason`
 auditability) is a separate, unstarted Gateway sub-task — deliberately not
 folded into the router MVP (§V); see §J.
@@ -356,3 +376,61 @@ directly instead and never depend on this.
 
 Status: **done (2026-07-10)** — all 5 branches merged to main. Plan + branch
 status: `docs/prompts/mvp-06/brief.md`.
+
+## W. MVP 7
+
+MVP 7: Agent Runtime — the other half of the `router → agents` roadmap
+line (§L), and, in the user's own words, "Jarvis's riskiest MVP so far."
+Given a **goal**, Jarvis plans a sequence of steps and executes them
+without requiring a human to type each one — a real increase in autonomy,
+scoped narrowly on purpose: ADR-004's approval gate is not rebuilt or
+given an "agent" exception, and the user made four brakes an explicit
+condition of approving this MVP at all (not nice-to-haves): a plan
+step-count bound, execution-time brakes (timeout / consecutive-failure
+halt / `gateway_calls_used` budget), a backend-enforced kill switch, and
+step-by-step visibility.
+
+New `agents` app: `Agent` (`goal`, `status`, `gateway_calls_used`,
+`consecutive_failures`, `failure_reason`) and `AgentStep`
+(`kind` — `read` / `task_draft` / `tool_request` —, `description`,
+`payload`, `status`, `result`), both workspace-scoped and immutable in
+their planned shape once created. A `purpose="agent.plan"` gateway call
+produces the whole plan up front (whole-plan-fails-clean on any
+parse/schema/gateway/tool-name error, never a partial plan); execution
+then advances one step at a time via Celery, pausing at `blocked_on_approval`
+for `tool_request` steps (via the exact `approvals.services.create_request`
+a human-typed request already used) and at `blocked_on_confirmation` for
+`task_draft` steps (a new agents-local confirm/discard endpoint, never the
+engine's own unattended advance path — this is what ADR-004's
+self-modification guarantee and branch 4's test suite specifically prove
+never gets bypassed).
+
+The riskiest branch (3, the execution engine) took **7 rounds** of Codex
+review to close — the most scrutiny any branch in this codebase's history
+has received — surfacing two recurring bug classes worth remembering
+beyond this MVP: a **two-transaction atomicity gap** (a step's own
+resolution and the following halt-or-continue decision as two separate
+transactions let a crash or duplicate delivery in between corrupt state,
+including a genuine kill-switch bypass during planning — round 5, HIGH)
+fixed by merging both into one transaction via a shared decision helper,
+and a **lost `on_commit` callback** (an in-memory Python closure that
+silently loses work if the process dies between commit and callback,
+found in three separate places — dispatch, approval-resume, and
+approval-resume-for-expired) fixed by extending a single periodic recovery
+scan (`agents.tasks.recover_stale_agents`) to cover all three. Branch 4
+audited the merged engine for self-modification violations and needed no
+new code — only a test suite proving the guarantee already held.
+
+Frontend: `/agents` (goal-entry form, list, detail view with per-step
+confirm/discard/approval-link/cancel controls). Playwright smoke covers
+the full lifecycle against the real Docker stack — goal → plan →
+unattended read step → task-draft confirm → tool-request approval →
+completed — plus the kill-switch path (cancel a `blocked_on_approval`
+agent, then approve the now-orphaned `ApprovalRequest` anyway; the Agent
+must stay `cancelled`). `FakeAdapter`'s `agent.plan` purpose is
+content-triggered (`"full plan"`), mirroring MVP 6's `router.intent`
+convention, purely so this real backend process — which the e2e suite
+cannot monkeypatch — can still exercise all three step kinds in one plan.
+
+Status: **done (2026-07-13)** — all 5 branches merged to main. Plan + branch
+status: `docs/prompts/mvp-07/brief.md`.

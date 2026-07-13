@@ -29,11 +29,35 @@ from django.conf import settings
 from django.db import transaction
 
 from agents.models import Agent, AgentStep
+from workspaces.models import WorkspaceMember
+
+# Submitting a goal is a write action, same role class as creating a task
+# or an approval request (tasks.services.create_task's identical
+# _WRITER_ROLES check) -- a viewer may read Agents but never start one.
+# This is where `agents/views.py`'s goal-entry endpoint (branch 5) enforces
+# it; nothing called `start_agent` over HTTP before that endpoint existed,
+# so this check was dormant until branch 5 made it reachable.
+_WRITER_ROLES = {
+    WorkspaceMember.Role.OWNER,
+    WorkspaceMember.Role.ADMIN,
+    WorkspaceMember.Role.MEMBER,
+}
+
+
+def _get_role(actor, workspace):
+    membership = (
+        WorkspaceMember.objects.for_actor(actor, workspace=workspace).filter(user=actor).first()
+    )
+    return membership.role if membership else None
 
 
 def start_agent(*, workspace, actor, goal):
     """Creates the `Agent` row in `planning` status. Call this first, then
     run the planner's gateway call, then `finalize_plan` or `fail_agent`."""
+    from agents.execution import AgentPermissionDenied
+
+    if _get_role(actor, workspace) not in _WRITER_ROLES:
+        raise AgentPermissionDenied("Role does not allow creating an agent.")
     return Agent.objects.create(
         workspace=workspace,
         goal=goal,
