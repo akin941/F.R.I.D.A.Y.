@@ -24,6 +24,7 @@ function agent(overrides: Partial<ApiAgent> = {}): ApiAgent {
     created_by: "u1",
     gateway_calls_used: 2,
     consecutive_failures: 0,
+    skill_name: "",
     created_at: "2026-07-13T00:00:00Z",
     updated_at: "2026-07-13T00:00:00Z",
     ...overrides,

@@ -246,6 +246,7 @@ export interface ApiAgent {
   created_by: string | null;
   gateway_calls_used: number;
   consecutive_failures: number;
+  skill_name: string;
   created_at: string;
   updated_at: string;
 }

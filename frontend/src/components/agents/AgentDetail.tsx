@@ -102,6 +102,9 @@ export function AgentDetail({ agentId, onBack }: { agentId: string; onBack: () =
                 {AGENT_STATUS_LABELS[agent.status]}
                 {agent.failure_reason ? ` — ${agent.failure_reason}` : ""}
               </p>
+              {agent.skill_name ? (
+                <p className="text-sm text-muted-foreground">Ran via skill: {agent.skill_name}</p>
+              ) : null}
             </div>
             {canCancel ? (
               <Button
