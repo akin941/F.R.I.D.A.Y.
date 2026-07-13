@@ -95,12 +95,26 @@ FAKE_TASK_DRAFT_RESPONSE = '{"title": "Fake extracted task", "due_date": null}'
 
 # Purpose-aware fixture for `agent.plan` (MVP 7 §2) -- mirrors
 # agents.planner's schema for the same ai_core-must-not-import-business-
-# apps reason as the fixtures above. A single `read`-kind step; per-case
-# behavior (multi-step plans, tool_request/task_draft steps, malformed
-# output) is exercised by feeding `parse_plan` its own literal fixtures
-# directly.
+# apps reason as the fixtures above. Default is a single `read`-kind step;
+# per-case behavior (multi-step plans, tool_request/task_draft steps,
+# malformed output) is exercised by feeding `parse_plan` its own literal
+# fixtures directly in unit tests. The CONTENT-triggered multi-step variant
+# below exists only so the Playwright e2e suite (branch 5, brief §6 -- a
+# real Docker backend process it cannot monkeypatch) can drive a goal
+# through all three step kinds in one plan, mirroring `router.intent`'s
+# identical trigger-phrase convention above.
 FAKE_AGENT_PLAN_RESPONSE = (
     '{"steps": [{"kind": "read", "description": "Fake plan read step", "payload": {}}]}'
+)
+_AGENT_MULTI_STEP_PLAN_TRIGGER = "full plan"
+FAKE_AGENT_MULTI_STEP_PLAN_RESPONSE = (
+    '{"steps": ['
+    '{"kind": "read", "description": "Summarize relevant notes", "payload": {}}, '
+    '{"kind": "task_draft", "description": "Draft a follow-up task", '
+    '"payload": {"title": "Follow up on the summary", "due_date": null}}, '
+    '{"kind": "tool_request", "description": "Export the vault", '
+    '"payload": {"tool_name": "vault_export"}}'
+    "]}"
 )
 
 # Purpose-aware fixture for `agent.read_step` (MVP 7 §3) -- free text, not
@@ -133,6 +147,9 @@ class FakeAdapter(BaseAdapter):
         if purpose == "router.task_draft":
             return FAKE_TASK_DRAFT_RESPONSE
         if purpose == "agent.plan":
+            latest = _latest_user_content(messages)
+            if _AGENT_MULTI_STEP_PLAN_TRIGGER in latest:
+                return FAKE_AGENT_MULTI_STEP_PLAN_RESPONSE
             return FAKE_AGENT_PLAN_RESPONSE
         if purpose == "agent.read_step":
             return FAKE_AGENT_READ_STEP_RESPONSE

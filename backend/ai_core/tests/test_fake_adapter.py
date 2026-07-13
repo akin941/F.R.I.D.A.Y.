@@ -3,6 +3,8 @@ import math
 import pytest
 
 from ai_core.adapters.fake import (
+    FAKE_AGENT_MULTI_STEP_PLAN_RESPONSE,
+    FAKE_AGENT_PLAN_RESPONSE,
     FAKE_EMBEDDING_DIMENSION,
     FAKE_MEMORY_EXTRACTION_RESPONSE,
     FAKE_RESPONSE,
@@ -193,6 +195,38 @@ class TestPurposeAwareFixtures:
         except StopIteration:
             pass
         assert "".join(chunks) == FAKE_TASK_DRAFT_RESPONSE
+
+    def test_agent_plan_purpose_returns_single_read_step_fixture(self):
+        result = make_adapter().complete(
+            [{"role": "user", "content": "summarize my notes"}], {}, purpose="agent.plan"
+        )
+        assert result.text == FAKE_AGENT_PLAN_RESPONSE
+
+    def test_agent_plan_content_trigger_returns_multi_step_fixture(self):
+        """MVP 7 §6: mirrors router.intent's content-trigger convention so the
+        Playwright e2e suite (a real Docker backend process it can't
+        monkeypatch) can drive a goal through all three step kinds in one
+        plan."""
+        result = make_adapter().complete(
+            [{"role": "user", "content": "give me the full plan for this"}],
+            {},
+            purpose="agent.plan",
+        )
+        assert result.text == FAKE_AGENT_MULTI_STEP_PLAN_RESPONSE
+
+    def test_agent_plan_trigger_checks_latest_user_message_only(self):
+        """A trigger phrase in an earlier turn (history) must not leak into
+        planning for an unrelated later goal."""
+        result = make_adapter().complete(
+            [
+                {"role": "user", "content": "give me the full plan for this"},
+                {"role": "assistant", "content": "Sure, here is the plan."},
+                {"role": "user", "content": "actually just summarize my notes"},
+            ],
+            {},
+            purpose="agent.plan",
+        )
+        assert result.text == FAKE_AGENT_PLAN_RESPONSE
 
     def test_real_adapters_accept_purpose_kwarg_without_using_it(self):
         """The purpose kwarg is an ai_core-internal API addition for every

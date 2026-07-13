@@ -17,6 +17,7 @@ const NAV_ITEMS = [
   { href: "/tasks", label: "Tasks" },
   { href: "/today", label: "Today" },
   { href: "/approvals", label: "Approvals" },
+  { href: "/agents", label: "Agents" },
 ];
 
 export function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {

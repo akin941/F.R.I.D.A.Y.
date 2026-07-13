@@ -193,3 +193,63 @@ export interface ApiApprovalRequest {
   // `payload` is deliberately never included (approvals/serializers.py).
   execution: ApiVaultExportExecution | null;
 }
+
+// --- Agents (MVP 7) ---
+
+export type AgentStatus =
+  | "planning"
+  | "running"
+  | "blocked_on_approval"
+  | "blocked_on_confirmation"
+  | "completed"
+  | "failed"
+  | "cancelled";
+
+export type AgentFailureReason =
+  | ""
+  | "plan_too_large"
+  | "plan_empty"
+  | "planner_error"
+  | "consecutive_failures"
+  | "gateway_budget_exceeded";
+
+export type AgentStepKind = "read" | "tool_request" | "task_draft";
+
+export type AgentStepStatus =
+  | "pending"
+  | "running"
+  | "succeeded"
+  | "failed"
+  | "blocked_on_approval"
+  | "blocked_on_confirmation"
+  | "skipped";
+
+export interface ApiAgentStep {
+  id: string;
+  agent: string;
+  order: number;
+  kind: AgentStepKind;
+  description: string;
+  status: AgentStepStatus;
+  payload: Record<string, unknown>;
+  result: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ApiAgent {
+  id: string;
+  workspace: string;
+  goal: string;
+  status: AgentStatus;
+  failure_reason: AgentFailureReason;
+  created_by: string | null;
+  gateway_calls_used: number;
+  consecutive_failures: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ApiAgentDetail extends ApiAgent {
+  steps: ApiAgentStep[];
+}
