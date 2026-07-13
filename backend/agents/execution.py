@@ -30,6 +30,7 @@ from celery.exceptions import SoftTimeLimitExceeded
 from django.conf import settings
 from django.core.exceptions import ImproperlyConfigured
 from django.db import transaction
+from django.db.models import Q
 from django.utils import timezone
 
 from agents.models import Agent, AgentStep
@@ -551,15 +552,22 @@ def recover_stale_agent_execution():
        matched by its own claim conditions and no-ops).
     3. An `AgentStep` still `blocked_on_approval` past
        `AGENT_APPROVAL_RESUME_RECOVERY_GRACE_SECONDS` since its linked
-       `ApprovalRequest` was actually decided (`decided_at`) -- (Codex
-       round-4 fix): `agents.signals`' own resume is ALSO only an in-memory
+       `ApprovalRequest` was actually decided -- (Codex round-4 fix):
+       `agents.signals`' own resume is ALSO only an in-memory
        `transaction.on_commit` callback; if the process exits after the
        `ApprovalRequest`'s decision commits but before that callback runs,
-       the decision is durable but nothing is ever told about it. Resolved
-       by calling `resume_after_approval_decision` directly -- which is
-       itself fenced/idempotent (re-checks `Agent`/`AgentStep` are still in
-       the expected paused state under lock), so this is a safe no-op if
-       the real signal callback did fire in the meantime.
+       the decision is durable but nothing is ever told about it. Covers
+       BOTH a human decision (`approved`/`rejected`, anchored on
+       `decided_at`) AND the expiry sweep's own decision (`expired`,
+       anchored on `updated_at` instead -- Codex round-5 fix: the expiry
+       paths, `approvals.services._expire_if_stale`/`approvals.tasks.
+       _expire_one`, never set `decided_at` at all, so the round-4 query
+       alone would never match an expired request whose resume callback
+       was lost). Resolved by calling `resume_after_approval_decision`
+       directly -- which is itself fenced/idempotent (re-checks `Agent`/
+       `AgentStep` are still in the expected paused state under lock), so
+       this is a safe no-op if the real signal callback did fire in the
+       meantime.
 
     Also runnable manually via `manage.py recover_agents` (calls this
     function directly, not `.delay()` -- no broker/worker required)."""
@@ -592,14 +600,23 @@ def recover_stale_agent_execution():
 
     approval_cutoff = now - timedelta(seconds=settings.AGENT_APPROVAL_RESUME_RECOVERY_GRACE_SECONDS)
     stale_approval_steps = list(
-        AgentStep.objects.filter(
-            status=AgentStep.Status.BLOCKED_ON_APPROVAL,
-            approval_request__status__in=[
-                ApprovalRequest.Status.APPROVED,
-                ApprovalRequest.Status.REJECTED,
-            ],
-            approval_request__decided_at__lt=approval_cutoff,
-        ).values_list("id", "approval_request__status")
+        AgentStep.objects.filter(status=AgentStep.Status.BLOCKED_ON_APPROVAL)
+        .filter(
+            Q(
+                approval_request__status__in=[
+                    ApprovalRequest.Status.APPROVED,
+                    ApprovalRequest.Status.REJECTED,
+                ],
+                approval_request__decided_at__lt=approval_cutoff,
+            )
+            # Expiry never sets decided_at (Codex round-5 fix) -- anchor on
+            # updated_at instead, which both expiry paths do touch.
+            | Q(
+                approval_request__status=ApprovalRequest.Status.EXPIRED,
+                approval_request__updated_at__lt=approval_cutoff,
+            )
+        )
+        .values_list("id", "approval_request__status")
     )
     for step_id, approval_status in stale_approval_steps:
         resume_after_approval_decision(

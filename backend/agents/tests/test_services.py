@@ -2,8 +2,9 @@ import pytest
 from django.test import override_settings
 
 from accounts.services import register_user
+from agents.execution import cancel_agent
 from agents.models import Agent, AgentStep
-from agents.services import create_plan
+from agents.services import create_plan, fail_agent, finalize_plan, start_agent
 from workspaces.models import Workspace
 
 pytestmark = pytest.mark.django_db
@@ -64,3 +65,46 @@ def test_create_plan_always_creates_agent_row_even_on_rejection(workspace, owner
     before = Agent.objects.count()
     create_plan(workspace=workspace, actor=owner, goal="Will fail", steps=[])
     assert Agent.objects.count() == before + 1
+
+
+class TestCancelDuringPlanning:
+    """Codex round-5 fix: `agents.planner_service.create_agent_from_goal`
+    holds its `Agent` instance across the (possibly slow) planner gateway
+    call with no lock held. If `cancel_agent` lands in that window, the
+    planner's own later `finalize_plan`/`fail_agent` call must never
+    overwrite the cancellation using its now-stale in-memory instance --
+    kill-switch fencing, PLANNING-COMPLETION boundary."""
+
+    def test_finalize_plan_noops_if_agent_was_cancelled_during_planning(self, workspace, owner):
+        agent = start_agent(workspace=workspace, actor=owner, goal="Do things")
+        cancel_agent(agent=agent, actor=owner)  # the race: cancel lands mid-planning
+
+        result = finalize_plan(agent=agent, steps=_steps(2))
+
+        assert result.status == Agent.Status.CANCELLED
+        assert result.steps.count() == 0
+
+    def test_fail_agent_noops_if_agent_was_cancelled_during_planning(self, workspace, owner):
+        agent = start_agent(workspace=workspace, actor=owner, goal="Do things")
+        cancel_agent(agent=agent, actor=owner)
+
+        result = fail_agent(agent=agent, failure_reason=Agent.FailureReason.PLANNER_ERROR)
+
+        assert result.status == Agent.Status.CANCELLED
+        assert result.failure_reason == ""  # never overwritten
+
+    @override_settings(AGENT_MAX_PLAN_STEPS=1)
+    def test_finalize_plan_noops_even_when_the_plan_itself_would_have_been_rejected(
+        self, workspace, owner
+    ):
+        """The cancellation check must run BEFORE the too-many-steps/empty
+        checks -- an already-cancelled Agent must stay `cancelled`, never
+        flip to `failed` just because the stale plan also happened to be
+        invalid."""
+        agent = start_agent(workspace=workspace, actor=owner, goal="Do things")
+        cancel_agent(agent=agent, actor=owner)
+
+        result = finalize_plan(agent=agent, steps=_steps(5))  # over AGENT_MAX_PLAN_STEPS
+
+        assert result.status == Agent.Status.CANCELLED
+        assert result.failure_reason == ""

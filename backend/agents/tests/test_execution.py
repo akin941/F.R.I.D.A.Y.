@@ -836,6 +836,43 @@ class TestRecoveryScan:
         step.refresh_from_db()
         assert step.status == AgentStep.Status.BLOCKED_ON_APPROVAL
 
+    def test_stale_expired_approval_is_also_resumed(self, workspace, owner, tmp_path, settings):
+        """Codex round-5 fix: the expiry sweep (`approvals.tasks._expire_one`
+        / `approvals.services._expire_if_stale`) never sets `decided_at` --
+        an `expired` (not approved/rejected) request whose own resume
+        callback was lost must still be reconciled, anchored on the
+        ApprovalRequest's own `updated_at` instead."""
+        from agents import execution
+        from approvals.tasks import _expire_one
+
+        settings.OBSIDIAN_VAULT_PATH = str(tmp_path)
+        agent = _tool_request_step(workspace, owner)
+        advance_step(str(agent.id))
+        step = agent.steps.get()
+
+        _expire_one(step.approval_request_id)
+        step.approval_request.refresh_from_db()
+        assert step.approval_request.status == ApprovalRequest.Status.EXPIRED
+        assert step.approval_request.decided_at is None
+        ApprovalRequest.objects.filter(pk=step.approval_request_id).update(
+            updated_at=timezone.now() - timedelta(seconds=120)
+        )
+        step.refresh_from_db()
+        assert step.status == AgentStep.Status.BLOCKED_ON_APPROVAL  # not yet resumed
+
+        result = execution.recover_stale_agent_execution()
+
+        assert result == {
+            "reclaimed_steps": 0,
+            "redispatched_agents": 0,
+            "resumed_approvals": 1,
+        }
+        step.refresh_from_db()
+        assert step.status == AgentStep.Status.FAILED  # expired treated as not-approved
+        _run_to_completion(str(agent.id))
+        agent.refresh_from_db()
+        assert agent.status == Agent.Status.COMPLETED
+
 
 # --- real on_commit dispatch chain (the one genuinely durable-transaction test) ---
 

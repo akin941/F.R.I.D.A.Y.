@@ -42,13 +42,30 @@ def start_agent(*, workspace, actor, goal):
     )
 
 
+@transaction.atomic
 def fail_agent(*, agent, failure_reason):
     """Moves `agent` straight to `failed` with a recorded, user-visible
-    reason (Codex round-1 MEDIUM fix, branch 1) -- never a bare status."""
-    agent.status = Agent.Status.FAILED
-    agent.failure_reason = failure_reason
-    agent.save(update_fields=["status", "failure_reason", "updated_at"])
-    return agent
+    reason (Codex round-1 MEDIUM fix, branch 1) -- never a bare status.
+
+    Re-fetches and locks the row fresh rather than trusting the in-memory
+    `agent` instance the caller passed in (Codex round-5 fix, branch 3):
+    `agents.planner_service.create_agent_from_goal` holds `agent` across
+    its own (possibly slow) planner gateway call with no lock held, so a
+    `cancel_agent()` call landing in that window durably sets `cancelled`
+    in the DB while the caller's own Python object still says `planning`.
+    A blind `.save()` here would silently resurrect an already-cancelled
+    Agent to `failed`. No-ops (returns the current, cancelled instance
+    untouched) if that happened -- kill-switch fencing, PLANNING-
+    COMPLETION boundary (a fourth boundary alongside start/resume/
+    finalization: a plan that finishes deciding AFTER a cancel must never
+    overwrite it)."""
+    locked = Agent.objects.select_for_update().get(pk=agent.pk)
+    if locked.status == Agent.Status.CANCELLED:
+        return locked
+    locked.status = Agent.Status.FAILED
+    locked.failure_reason = failure_reason
+    locked.save(update_fields=["status", "failure_reason", "updated_at"])
+    return locked
 
 
 @transaction.atomic
@@ -58,8 +75,15 @@ def finalize_plan(*, agent, steps):
     `agents.planner_service` -- this branch's own tests stand in for it
     with fixture lists).
 
-    Two conditions reject the whole plan before any `AgentStep` row is
-    written -- never a partial/truncated one:
+    Re-fetches and locks `agent` fresh, same reasoning and same fix as
+    `fail_agent` above (Codex round-5 fix): a cancel landing while the
+    planner's gateway call was still in flight must never be overwritten
+    by this call finally completing -- no-ops (returns the current,
+    cancelled instance untouched, no `AgentStep` rows created, no
+    dispatch) if the Agent is already `cancelled`.
+
+    Otherwise, two conditions reject the whole plan before any `AgentStep`
+    row is written -- never a partial/truncated one:
 
     - more steps than `AGENT_MAX_PLAN_STEPS` (the plan step-count bound);
     - zero steps (most likely a planner malfunction, not a legitimately
@@ -69,13 +93,16 @@ def finalize_plan(*, agent, steps):
     non-empty, within-bound plan creates all its `AgentStep` rows and moves
     `agent` to `running`.
     """
+    locked = Agent.objects.select_for_update().get(pk=agent.pk)
+    if locked.status == Agent.Status.CANCELLED:
+        return locked
     if len(steps) > settings.AGENT_MAX_PLAN_STEPS:
-        return fail_agent(agent=agent, failure_reason=Agent.FailureReason.PLAN_TOO_LARGE)
+        return fail_agent(agent=locked, failure_reason=Agent.FailureReason.PLAN_TOO_LARGE)
     if not steps:
-        return fail_agent(agent=agent, failure_reason=Agent.FailureReason.PLAN_EMPTY)
+        return fail_agent(agent=locked, failure_reason=Agent.FailureReason.PLAN_EMPTY)
     AgentStep.objects.bulk_create(
         AgentStep(
-            agent=agent,
+            agent=locked,
             order=index,
             kind=step["kind"],
             description=step.get("description", ""),
@@ -83,12 +110,12 @@ def finalize_plan(*, agent, steps):
         )
         for index, step in enumerate(steps)
     )
-    agent.status = Agent.Status.RUNNING
-    agent.save(update_fields=["status", "updated_at"])
+    locked.status = Agent.Status.RUNNING
+    locked.save(update_fields=["status", "updated_at"])
     from agents.execution import dispatch_agent_execution
 
-    transaction.on_commit(lambda: dispatch_agent_execution(str(agent.id)))
-    return agent
+    transaction.on_commit(lambda: dispatch_agent_execution(str(locked.id)))
+    return locked
 
 
 @transaction.atomic
