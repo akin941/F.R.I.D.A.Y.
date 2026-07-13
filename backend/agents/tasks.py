@@ -40,11 +40,17 @@ def advance_agent_step(agent_id):
     A broad safety net beyond the specific `SoftTimeLimitExceeded` handling
     `execution.advance_agent_step` already does internally -- mirrors
     `tools.tasks.run_vault_export`'s identical outer `except Exception`
-    backstop for anything truly unexpected (a bug, a transient DB error)."""
+    backstop for anything truly unexpected (a bug, a transient DB error).
+
+    Also resolves any step this run may have already claimed to `running`
+    before the exception hit (Codex round-7 fix) -- otherwise it would sit
+    `running` for the full recovery-scan grace window instead of failing
+    immediately."""
     try:
         execution.advance_step(agent_id)
     except Exception:
         logger.exception("Unexpected failure advancing agent %s", agent_id)
+        execution.resolve_running_step_after_unexpected_error(agent_id)
 
 
 @shared_task

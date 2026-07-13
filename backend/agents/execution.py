@@ -388,6 +388,26 @@ def advance_step(agent_id):
     _finalize_read_step(claim.step_id, success=success, result=result)
 
 
+def resolve_running_step_after_unexpected_error(agent_id):
+    """Called by `agents.tasks.advance_agent_step`'s outer safety net when
+    `advance_step` raises something other than `SoftTimeLimitExceeded`
+    (Codex round-7 fix) -- e.g. a missing `jarvis_agent_read_step` prompt
+    raising `ImproperlyConfigured`, or any other unexpected bug. Without
+    this, `_claim_next_step` may have already committed a read step to
+    `running` before the exception hit; the outer handler used to just log
+    and swallow it, leaving the step `running` -- not stuck forever (the
+    recovery scan reclaims it after `AGENT_STEP_RECOVERY_GRACE_SECONDS`),
+    but stalled for that whole window when the failure could be resolved
+    immediately. A safe no-op if no step is currently `running` for this
+    agent (the exception happened before or without claiming one) --
+    `_finalize_read_step`'s own compare-and-swap fencing makes this safe
+    even if the step was somehow already resolved by the time this runs."""
+    step = AgentStep.objects.filter(agent_id=agent_id, status=AgentStep.Status.RUNNING).first()
+    if step is None:
+        return
+    _finalize_read_step(str(step.id), success=False, result={"error": "unexpected_error"})
+
+
 # --- kill switch ---
 
 
