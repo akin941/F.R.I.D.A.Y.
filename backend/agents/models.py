@@ -85,6 +85,19 @@ class Agent(WorkspaceScopedModel, TimestampedModel):
     # on any step that fails (including a timed-out one). Zero internal
     # retries -- a step fails once and counts toward this, full stop.
     consecutive_failures = models.PositiveIntegerField(default=0)
+    # Skill-selection audit trail (MVP 8 §6, brief): set only when this
+    # Agent's plan was produced by a matched skill template rather than a
+    # freeform `agent.plan` gateway call -- both blank for every agent
+    # created before this MVP shipped (no backfill needed) and for any
+    # agent that fell through to freeform planning. `skill_content_hash` is
+    # the `SkillSpec.content_hash` AT THE MOMENT this agent used it, copied
+    # onto the row at plan-creation time rather than looked up from the
+    # live catalog later -- mirrors the panel's `prompt_key`+`prompt_version`
+    # usage-record pattern: "why did this agent behave this way" stays
+    # answerable from the `Agent` row itself even after a later deploy
+    # changes the skill's own template (and therefore its content_hash).
+    skill_name = models.CharField(max_length=100, blank=True, default="")
+    skill_content_hash = models.CharField(max_length=64, blank=True, default="")
 
     class Meta:
         ordering = ["-created_at"]

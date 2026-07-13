@@ -96,7 +96,9 @@ def _read_step(count, workspace, owner, goal="Do things"):
     return create_plan(workspace=workspace, actor=owner, goal=goal, steps=steps)
 
 
-def _tool_request_step(workspace, owner, tool_name="vault_export", goal="Export"):
+def _tool_request_step(
+    workspace, owner, tool_name="vault_export", goal="Export", skill_name="", skill_content_hash=""
+):
     steps = [
         {
             "kind": "tool_request",
@@ -104,7 +106,14 @@ def _tool_request_step(workspace, owner, tool_name="vault_export", goal="Export"
             "payload": {"tool_name": tool_name},
         }
     ]
-    return create_plan(workspace=workspace, actor=owner, goal=goal, steps=steps)
+    return create_plan(
+        workspace=workspace,
+        actor=owner,
+        goal=goal,
+        steps=steps,
+        skill_name=skill_name,
+        skill_content_hash=skill_content_hash,
+    )
 
 
 def _task_draft_step(workspace, owner, title="Buy milk", due_date=None, goal="Draft a task"):
@@ -448,6 +457,34 @@ class TestToolRequestStep:
         agent = _tool_request_step(workspace, owner)
         advance_step(str(agent.id))
         step = agent.steps.get()
+
+        from approvals.services import ApprovalPermissionDenied
+
+        with pytest.raises(ApprovalPermissionDenied):
+            approve_request(approval_request=step.approval_request, actor=owner)
+
+    def test_requester_cannot_approve_their_own_skill_originated_agents_request(
+        self, workspace, owner, tmp_path, settings
+    ):
+        """MVP 8 §4: the exact same invariant re-proven against a
+        skill-originated plan (`skill_name`/`skill_content_hash` set,
+        mirroring what `agents.planner_service.create_agent_from_goal`
+        would set on a real match) instead of an LLM-freeform one -- a
+        skill's step template can propose a `tool_request` step, but it
+        goes through the identical `_dispatch_tool_request_step` ->
+        `approvals.services.create_request` path as any other, with no new
+        mechanism and no bypass of the requester != decider check."""
+        settings.OBSIDIAN_VAULT_PATH = str(tmp_path)
+        agent = _tool_request_step(
+            workspace,
+            owner,
+            skill_name="weekly_export",
+            skill_content_hash="deadbeef" * 8,
+        )
+        assert agent.skill_name == "weekly_export"
+        advance_step(str(agent.id))
+        step = agent.steps.get()
+        assert step.status == AgentStep.Status.BLOCKED_ON_APPROVAL
 
         from approvals.services import ApprovalPermissionDenied
 

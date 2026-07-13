@@ -23,6 +23,7 @@ from agents.execution import (
     resume_after_approval_decision,
 )
 from agents.models import Agent, AgentStep
+from agents.planner_service import create_agent_from_goal
 from agents.services import create_plan
 from ai_core.models import ModelProvider, PromptTemplate, PromptVersion
 from approvals.models import ApprovalRequest
@@ -74,6 +75,26 @@ def read_step_prompt():
         name="jarvis_agent_read_step", purpose="agent.read_step"
     )
     version = PromptVersion.objects.create(template=template, version=1, content="Summarize.")
+    template.active_version = version
+    template.save(update_fields=["active_version"])
+    return version
+
+
+@pytest.fixture
+def agent_plan_prompt():
+    template = PromptTemplate.objects.create(name="jarvis_agent_plan", purpose="agent.plan")
+    version = PromptVersion.objects.create(template=template, version=1, content="Plan the goal.")
+    template.active_version = version
+    template.save(update_fields=["active_version"])
+    return version
+
+
+@pytest.fixture
+def skill_match_prompt():
+    template = PromptTemplate.objects.create(
+        name="jarvis_agent_skill_match", purpose="agent.skill_match"
+    )
+    version = PromptVersion.objects.create(template=template, version=1, content="Match a skill.")
     template.active_version = version
     template.save(update_fields=["active_version"])
     return version
@@ -220,6 +241,50 @@ class TestNoRegistryOrPermissionBypass:
         with mock.patch("tools.tasks.run_vault_export.delay"):
             approve_request(approval_request=tool_step.approval_request, actor=second_admin)
         resume_after_approval_decision(agent_step_id=tool_step.id, approved=True)  # must not raise
+
+    def test_planner_service_never_calls_skills_registry_mutation_functions(
+        self, workspace, owner, fake_provider, agent_plan_prompt, skill_match_prompt, monkeypatch
+    ):
+        """MVP 8 §5 -- the direct twin of the test above: `agents` may only
+        ever READ the skill catalog (`list_skill_prompt_entries`, `get_skill`,
+        `list_skill_names`, all by the planner) -- never register or
+        unregister a skill. Proven by making both mutation functions raise:
+        `create_agent_from_goal` must never trip them, whether or not the
+        goal actually matches a registered skill (both paths exercised, via
+        FakeAdapter's content-trigger convention)."""
+        from skills import catalog
+
+        def _boom(*args, **kwargs):
+            raise AssertionError("agents must never mutate the skills registry")
+
+        monkeypatch.setattr(catalog, "register_skill", _boom)
+        monkeypatch.setattr(catalog, "unregister_skill", _boom)
+
+        matched = create_agent_from_goal(
+            workspace=workspace, actor=owner, goal="please export my weekly notes for me"
+        )
+        assert matched.status == Agent.Status.RUNNING
+        assert matched.skill_name == "weekly_export"
+
+        unmatched = create_agent_from_goal(
+            workspace=workspace, actor=owner, goal="do something entirely unrelated"
+        )
+        assert unmatched.status == Agent.Status.RUNNING
+        assert unmatched.skill_name == ""
+
+    def test_engine_and_planner_service_source_never_calls_skills_mutation_functions(self):
+        """Static cross-check on top of the behavioral test above: neither
+        module's source text ever references `register_skill`/
+        `unregister_skill` at all -- confirms the guarantee holds by
+        construction, not just for the specific lifecycles exercised."""
+        import inspect
+
+        from agents import execution, planner_service
+
+        for module in (execution, planner_service):
+            source = inspect.getsource(module)
+            assert "register_skill(" not in source
+            assert "unregister_skill(" not in source
 
     def test_engine_never_calls_approvals_decision_functions_directly(
         self, workspace, owner, tmp_path, settings, monkeypatch

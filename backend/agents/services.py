@@ -93,11 +93,20 @@ def fail_agent(*, agent, failure_reason):
 
 
 @transaction.atomic
-def finalize_plan(*, agent, steps):
+def finalize_plan(*, agent, steps, skill_name="", skill_content_hash=""):
     """`steps` is an ordered list of `{"kind", "description", "payload"}`
     dicts, already parsed and validated by the caller (the planner,
     `agents.planner_service` -- this branch's own tests stand in for it
     with fixture lists).
+
+    `skill_name`/`skill_content_hash` (MVP 8 §3/§6, brief) are set only
+    when `steps` came from a matched `SkillSpec` rather than a freeform
+    `agent.plan` response -- both default to `""` (freeform plan, the
+    unchanged MVP 7 behavior). Set INSIDE this same locked block, alongside
+    `status=RUNNING`, never before this call or in a separate save: setting
+    them earlier could annotate a cancelled-during-planning `Agent` (which
+    this function correctly no-ops on, below) as having used a skill it
+    never actually ran.
 
     Re-fetches and locks `agent` fresh, same reasoning and same fix as
     `fail_agent` above (Codex round-5 fix): a cancel landing while the
@@ -113,7 +122,10 @@ def finalize_plan(*, agent, steps):
     - zero steps (most likely a planner malfunction, not a legitimately
       "already done" goal -- see the brief's §2 empty-plan note).
 
-    Either way `agent` goes straight to `failed` via `fail_agent`. A valid,
+    Either way `agent` goes straight to `failed` via `fail_agent`. This
+    bound applies identically to a skill's step list as to a freeform LLM
+    plan -- a skill authored with more steps than the bound still fails
+    clean with `plan_too_large`, never silently bypassing it. A valid,
     non-empty, within-bound plan creates all its `AgentStep` rows and moves
     `agent` to `running`.
     """
@@ -135,7 +147,9 @@ def finalize_plan(*, agent, steps):
         for index, step in enumerate(steps)
     )
     locked.status = Agent.Status.RUNNING
-    locked.save(update_fields=["status", "updated_at"])
+    locked.skill_name = skill_name
+    locked.skill_content_hash = skill_content_hash
+    locked.save(update_fields=["status", "skill_name", "skill_content_hash", "updated_at"])
     from agents.execution import dispatch_agent_execution
 
     transaction.on_commit(lambda: dispatch_agent_execution(str(locked.id)))
@@ -143,8 +157,10 @@ def finalize_plan(*, agent, steps):
 
 
 @transaction.atomic
-def create_plan(*, workspace, actor, goal, steps):
+def create_plan(*, workspace, actor, goal, steps, skill_name="", skill_content_hash=""):
     """`start_agent` + `finalize_plan` in one atomic call, for callers that
     already have a full steps list in hand."""
     agent = start_agent(workspace=workspace, actor=actor, goal=goal)
-    return finalize_plan(agent=agent, steps=steps)
+    return finalize_plan(
+        agent=agent, steps=steps, skill_name=skill_name, skill_content_hash=skill_content_hash
+    )

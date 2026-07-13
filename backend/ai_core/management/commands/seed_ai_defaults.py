@@ -97,6 +97,27 @@ JARVIS_AGENT_PLAN_V1 = (
     "object."
 )
 
+# Schema mirrors agents.skill_match.parse_skill_match (MVP 8 §3). ai_core
+# must not import the agents app (ADR-003 one-way dependency), so this
+# prompt content intentionally duplicates the shape in prose rather than
+# referencing it -- same discipline as the prompts above. The caller
+# (agents.planner_service._attempt_skill_match) appends a per-call registered-
+# skill vocabulary line to this content before sending it -- this string is
+# the fixed, versioned part only.
+JARVIS_AGENT_SKILL_MATCH_V1 = (
+    "You decide whether a user's stated goal is an unambiguous match for one "
+    "of a known set of pre-approved skill templates. Read the goal and "
+    "output ONLY a single JSON object, no prose, no code fences, matching "
+    "exactly this shape:\n"
+    '{"skill_name": "<name>" | null}\n'
+    "Rules: only return a skill_name if the goal is an unambiguous, "
+    "essentially-exact match for that skill's stated purpose; if there is "
+    "any doubt, partial fit, or ambiguity, return null -- a wrong guess here "
+    "is worse than falling back to normal planning; skill_name, if not null, "
+    "MUST be exactly one of the registered skill names listed below; output "
+    "nothing outside the JSON object."
+)
+
 # Free-text summarization, not schema-constrained JSON (unlike the prompts
 # above) -- a read step's result is a short prose summary, not a structured
 # object with its own parser.
@@ -190,6 +211,22 @@ class Command(BaseCommand):
             agent_plan_template.active_version = agent_plan_version
             agent_plan_template.save(update_fields=["active_version"])
         self._log("jarvis_agent_plan prompt", created or v_created)
+
+        agent_skill_match_template, created = PromptTemplate.objects.get_or_create(
+            name="jarvis_agent_skill_match", defaults={"purpose": "agent.skill_match"}
+        )
+        agent_skill_match_version, v_created = PromptVersion.objects.get_or_create(
+            template=agent_skill_match_template,
+            version=1,
+            defaults={
+                "content": JARVIS_AGENT_SKILL_MATCH_V1,
+                "changelog": "Initial version (MVP 8).",
+            },
+        )
+        if agent_skill_match_template.active_version_id is None:
+            agent_skill_match_template.active_version = agent_skill_match_version
+            agent_skill_match_template.save(update_fields=["active_version"])
+        self._log("jarvis_agent_skill_match prompt", created or v_created)
 
         agent_read_step_template, created = PromptTemplate.objects.get_or_create(
             name="jarvis_agent_read_step", defaults={"purpose": "agent.read_step"}
