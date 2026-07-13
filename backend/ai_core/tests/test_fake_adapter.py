@@ -5,6 +5,8 @@ import pytest
 from ai_core.adapters.fake import (
     FAKE_AGENT_MULTI_STEP_PLAN_RESPONSE,
     FAKE_AGENT_PLAN_RESPONSE,
+    FAKE_AGENT_SKILL_MATCH_MATCHED_RESPONSE,
+    FAKE_AGENT_SKILL_MATCH_RESPONSE,
     FAKE_EMBEDDING_DIMENSION,
     FAKE_MEMORY_EXTRACTION_RESPONSE,
     FAKE_RESPONSE,
@@ -227,6 +229,38 @@ class TestPurposeAwareFixtures:
             purpose="agent.plan",
         )
         assert result.text == FAKE_AGENT_PLAN_RESPONSE
+
+    def test_agent_skill_match_purpose_returns_null_by_default(self):
+        result = make_adapter().complete(
+            [{"role": "user", "content": "do something unrelated"}],
+            {},
+            purpose="agent.skill_match",
+        )
+        assert result.text == FAKE_AGENT_SKILL_MATCH_RESPONSE
+
+    def test_agent_skill_match_content_trigger_returns_matched_fixture(self):
+        """MVP 8 §6: mirrors router.intent's/agent.plan's content-trigger
+        convention so the Playwright e2e suite (a real Docker backend
+        process it can't monkeypatch) can drive a goal through the skill-
+        selection path."""
+        result = make_adapter().complete(
+            [{"role": "user", "content": "please export my weekly notes for me"}],
+            {},
+            purpose="agent.skill_match",
+        )
+        assert result.text == FAKE_AGENT_SKILL_MATCH_MATCHED_RESPONSE
+
+    def test_agent_skill_match_trigger_checks_latest_user_message_only(self):
+        result = make_adapter().complete(
+            [
+                {"role": "user", "content": "export my weekly notes"},
+                {"role": "assistant", "content": "Sure, exporting now."},
+                {"role": "user", "content": "actually never mind, do something else"},
+            ],
+            {},
+            purpose="agent.skill_match",
+        )
+        assert result.text == FAKE_AGENT_SKILL_MATCH_RESPONSE
 
     def test_real_adapters_accept_purpose_kwarg_without_using_it(self):
         """The purpose kwarg is an ai_core-internal API addition for every

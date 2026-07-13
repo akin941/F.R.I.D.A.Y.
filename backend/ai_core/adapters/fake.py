@@ -121,6 +121,20 @@ FAKE_AGENT_MULTI_STEP_PLAN_RESPONSE = (
 # JSON (this purpose has no schema/parser, unlike the others above).
 FAKE_AGENT_READ_STEP_RESPONSE = "Fake read-step summary: nothing notable was retrieved."
 
+# Purpose-aware fixture for `agent.skill_match` (MVP 8 §3) -- mirrors
+# agents.skill_match's schema for the same ai_core-must-not-import-business-
+# apps reason as the fixtures above. Default is an explicit no-match; the
+# CONTENT-triggered matched variant below exists only so the Playwright e2e
+# suite (a real Docker backend process it cannot monkeypatch) can drive a
+# goal through the skill-selection path, mirroring `router.intent`'s/
+# `agent.plan`'s identical trigger-phrase convention. Per-case unit-test
+# behavior (hallucinated names, parse failures) is exercised by feeding
+# `parse_skill_match` its own literal fixtures directly, or by monkeypatching
+# the gateway call/parser -- never by relying on this string.
+FAKE_AGENT_SKILL_MATCH_RESPONSE = '{"skill_name": null}'
+_AGENT_SKILL_MATCH_TRIGGER = "export my weekly notes"
+FAKE_AGENT_SKILL_MATCH_MATCHED_RESPONSE = '{"skill_name": "weekly_export"}'
+
 
 def _latest_user_content(messages):
     for message in reversed(messages or []):
@@ -153,6 +167,11 @@ class FakeAdapter(BaseAdapter):
             return FAKE_AGENT_PLAN_RESPONSE
         if purpose == "agent.read_step":
             return FAKE_AGENT_READ_STEP_RESPONSE
+        if purpose == "agent.skill_match":
+            latest = _latest_user_content(messages)
+            if _AGENT_SKILL_MATCH_TRIGGER in latest:
+                return FAKE_AGENT_SKILL_MATCH_MATCHED_RESPONSE
+            return FAKE_AGENT_SKILL_MATCH_RESPONSE
         return FAKE_RESPONSE
 
     def _result(self, messages, purpose):
