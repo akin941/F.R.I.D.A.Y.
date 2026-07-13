@@ -36,6 +36,7 @@ from agents.models import Agent, AgentStep
 from ai_core.exceptions import GatewayError
 from ai_core.gateway import InferenceGateway
 from ai_core.models import PromptTemplate
+from approvals.models import ApprovalRequest
 from approvals.services import ApprovalServiceError, create_request
 from knowledge.context import render_knowledge_block, select_context_chunks
 from tasks.models import Task
@@ -520,11 +521,11 @@ def discard_task_draft_step(*, step, actor):
 
 
 def recover_stale_agent_execution():
-    """Periodic scan (Celery beat, `agents/tasks.py`) for two distinct ways
-    an `Agent`'s execution can get permanently stuck with no live worker
-    ever coming back to unstick it -- neither is covered by the per-step
-    Celery timeout alone, which only fires if the SAME worker process
-    survives long enough to catch its own `SoftTimeLimitExceeded`:
+    """Periodic scan (Celery beat, `agents/tasks.py`) for three distinct
+    ways an `Agent`'s execution can get permanently stuck with no live
+    worker ever coming back to unstick it -- none of these are covered by
+    the per-step Celery timeout alone, which only fires if the SAME worker
+    process survives long enough to catch its own `SoftTimeLimitExceeded`:
 
     1. A `read`-kind `AgentStep` still `running` past
        `AGENT_STEP_RECOVERY_GRACE_SECONDS` since its own last update: the
@@ -548,6 +549,17 @@ def recover_stale_agent_execution():
        if the original dispatch actually does arrive later (whichever
        claims first wins, the other observes `running` is no longer
        matched by its own claim conditions and no-ops).
+    3. An `AgentStep` still `blocked_on_approval` past
+       `AGENT_APPROVAL_RESUME_RECOVERY_GRACE_SECONDS` since its linked
+       `ApprovalRequest` was actually decided (`decided_at`) -- (Codex
+       round-4 fix): `agents.signals`' own resume is ALSO only an in-memory
+       `transaction.on_commit` callback; if the process exits after the
+       `ApprovalRequest`'s decision commits but before that callback runs,
+       the decision is durable but nothing is ever told about it. Resolved
+       by calling `resume_after_approval_decision` directly -- which is
+       itself fenced/idempotent (re-checks `Agent`/`AgentStep` are still in
+       the expected paused state under lock), so this is a safe no-op if
+       the real signal callback did fire in the meantime.
 
     Also runnable manually via `manage.py recover_agents` (calls this
     function directly, not `.delay()` -- no broker/worker required)."""
@@ -578,4 +590,24 @@ def recover_stale_agent_execution():
     for agent_id in stale_agent_ids:
         dispatch_agent_execution(str(agent_id))
 
-    return {"reclaimed_steps": reclaimed_steps, "redispatched_agents": len(stale_agent_ids)}
+    approval_cutoff = now - timedelta(seconds=settings.AGENT_APPROVAL_RESUME_RECOVERY_GRACE_SECONDS)
+    stale_approval_steps = list(
+        AgentStep.objects.filter(
+            status=AgentStep.Status.BLOCKED_ON_APPROVAL,
+            approval_request__status__in=[
+                ApprovalRequest.Status.APPROVED,
+                ApprovalRequest.Status.REJECTED,
+            ],
+            approval_request__decided_at__lt=approval_cutoff,
+        ).values_list("id", "approval_request__status")
+    )
+    for step_id, approval_status in stale_approval_steps:
+        resume_after_approval_decision(
+            agent_step_id=step_id, approved=approval_status == ApprovalRequest.Status.APPROVED
+        )
+
+    return {
+        "reclaimed_steps": reclaimed_steps,
+        "redispatched_agents": len(stale_agent_ids),
+        "resumed_approvals": len(stale_approval_steps),
+    }

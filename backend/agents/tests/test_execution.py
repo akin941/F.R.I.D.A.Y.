@@ -628,7 +628,11 @@ class TestRecoveryScan:
 
         result = execution.recover_stale_agent_execution()
 
-        assert result == {"reclaimed_steps": 1, "redispatched_agents": 0}
+        assert result == {
+            "reclaimed_steps": 1,
+            "redispatched_agents": 0,
+            "resumed_approvals": 0,
+        }
         step = agent.steps.get()
         assert step.status == AgentStep.Status.FAILED
         assert step.result == {"error": "worker_lost"}
@@ -651,7 +655,11 @@ class TestRecoveryScan:
 
         result = execution.recover_stale_agent_execution()
 
-        assert result == {"reclaimed_steps": 0, "redispatched_agents": 0}
+        assert result == {
+            "reclaimed_steps": 0,
+            "redispatched_agents": 0,
+            "resumed_approvals": 0,
+        }
         step = agent.steps.get()
         assert step.status == AgentStep.Status.RUNNING
 
@@ -676,7 +684,11 @@ class TestRecoveryScan:
         )
         result = execution.recover_stale_agent_execution()
 
-        assert result == {"reclaimed_steps": 0, "redispatched_agents": 1}
+        assert result == {
+            "reclaimed_steps": 0,
+            "redispatched_agents": 1,
+            "resumed_approvals": 0,
+        }
         assert calls == [str(agent.id)]
 
     def test_fresh_agent_with_no_running_step_within_grace_is_left_alone(
@@ -695,7 +707,11 @@ class TestRecoveryScan:
         )
         result = execution.recover_stale_agent_execution()
 
-        assert result == {"reclaimed_steps": 0, "redispatched_agents": 0}
+        assert result == {
+            "reclaimed_steps": 0,
+            "redispatched_agents": 0,
+            "resumed_approvals": 0,
+        }
         assert calls == []
 
     def test_agent_with_a_still_running_step_is_never_redispatched_even_if_agent_row_is_stale(
@@ -719,7 +735,11 @@ class TestRecoveryScan:
         )
         result = execution.recover_stale_agent_execution()
 
-        assert result == {"reclaimed_steps": 0, "redispatched_agents": 0}
+        assert result == {
+            "reclaimed_steps": 0,
+            "redispatched_agents": 0,
+            "resumed_approvals": 0,
+        }
         assert calls == []
         step = agent.steps.get()
         assert step.status == AgentStep.Status.RUNNING  # untouched
@@ -753,6 +773,68 @@ class TestRecoveryScan:
         assert step.result == {"error": "worker_lost"}
         agent.refresh_from_db()
         assert agent.gateway_calls_used == 2  # counted once, not twice
+
+    def test_stale_decided_approval_past_grace_is_resumed(
+        self, workspace, owner, second_admin, tmp_path, settings
+    ):
+        """Codex round-4 fix: `agents.signals`' own resume is ALSO only an
+        in-memory `transaction.on_commit` callback (never fires under this
+        test's non-durable transaction, exactly like it wouldn't if the
+        process died right after the ApprovalRequest's own commit) -- the
+        recovery scan must reconcile a step still `blocked_on_approval`
+        once its linked ApprovalRequest has actually been decided."""
+        from agents import execution
+
+        settings.OBSIDIAN_VAULT_PATH = str(tmp_path)
+        agent = _tool_request_step(workspace, owner)
+        advance_step(str(agent.id))
+        step = agent.steps.get()
+
+        with mock.patch("tools.tasks.run_vault_export.delay"):
+            approve_request(approval_request=step.approval_request, actor=second_admin)
+        step.approval_request.refresh_from_db()
+        assert step.approval_request.status == ApprovalRequest.Status.APPROVED
+        ApprovalRequest.objects.filter(pk=step.approval_request_id).update(
+            decided_at=timezone.now() - timedelta(seconds=120)
+        )
+        step.refresh_from_db()
+        assert step.status == AgentStep.Status.BLOCKED_ON_APPROVAL  # not yet resumed
+
+        result = execution.recover_stale_agent_execution()
+
+        assert result == {
+            "reclaimed_steps": 0,
+            "redispatched_agents": 0,
+            "resumed_approvals": 1,
+        }
+        step.refresh_from_db()
+        assert step.status == AgentStep.Status.SUCCEEDED
+        _run_to_completion(str(agent.id))
+        agent.refresh_from_db()
+        assert agent.status == Agent.Status.COMPLETED
+
+    def test_freshly_decided_approval_within_grace_is_left_alone(
+        self, workspace, owner, second_admin, tmp_path, settings
+    ):
+        from agents import execution
+
+        settings.OBSIDIAN_VAULT_PATH = str(tmp_path)
+        agent = _tool_request_step(workspace, owner)
+        advance_step(str(agent.id))
+        step = agent.steps.get()
+
+        with mock.patch("tools.tasks.run_vault_export.delay"):
+            approve_request(approval_request=step.approval_request, actor=second_admin)
+
+        result = execution.recover_stale_agent_execution()
+
+        assert result == {
+            "reclaimed_steps": 0,
+            "redispatched_agents": 0,
+            "resumed_approvals": 0,
+        }
+        step.refresh_from_db()
+        assert step.status == AgentStep.Status.BLOCKED_ON_APPROVAL
 
 
 # --- real on_commit dispatch chain (the one genuinely durable-transaction test) ---

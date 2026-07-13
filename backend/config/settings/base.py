@@ -239,6 +239,19 @@ AGENT_STEP_RECOVERY_GRACE_SECONDS = env.int("AGENT_STEP_RECOVERY_GRACE_SECONDS",
 # knowledge's/tools' identical `PENDING_RECOVERY_GRACE_SECONDS`.
 AGENT_DISPATCH_RECOVERY_GRACE_SECONDS = env.int("AGENT_DISPATCH_RECOVERY_GRACE_SECONDS", default=60)
 
+# A third distinct "lost on_commit callback" gap (Codex round-4 fix): the
+# approval-resume signal (agents/signals.py) also registers its resume via
+# an in-memory `transaction.on_commit` callback -- if the process exits
+# after the ApprovalRequest's own decision commits but before that callback
+# runs, the decision is durable but the Agent/AgentStep are never told
+# about it. An AgentStep still `blocked_on_approval` this long after its
+# linked ApprovalRequest was actually decided (`decided_at`) means that
+# callback was lost -- reconciled by calling `resume_after_approval_decision`
+# directly.
+AGENT_APPROVAL_RESUME_RECOVERY_GRACE_SECONDS = env.int(
+    "AGENT_APPROVAL_RESUME_RECOVERY_GRACE_SECONDS", default=60
+)
+
 # Error tracking — active only when a DSN is configured.
 SENTRY_DSN = env("SENTRY_DSN", default="")
 if SENTRY_DSN:
