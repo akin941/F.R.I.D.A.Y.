@@ -41,6 +41,11 @@ INSTALLED_APPS = [
     "tasks",
     "approvals",
     "tools",
+    # "skills" must be listed after "tools": SkillsConfig.ready() validates
+    # every skill's tool_request references against tools.registry at boot
+    # time, which only sees every tool if ToolsConfig.ready() already ran
+    # (Django calls ready() in INSTALLED_APPS order) -- MVP 8 §2, brief.
+    "skills",
     "agents",
 ]
 

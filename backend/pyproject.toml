@@ -60,6 +60,7 @@ testpaths = [
     "approvals",
     "tools",
     "agents",
+    "skills",
 ]
 
 [tool.importlinter]
@@ -77,6 +78,7 @@ root_packages = [
     "approvals",
     "tools",
     "agents",
+    "skills",
 ]
 
 # TODO(MVP 1): add the full modular-monolith contracts once kernel apps exist:
@@ -93,12 +95,12 @@ forbidden_modules = ["config"]
 name = "core must stay independent of kernel apps"
 type = "forbidden"
 source_modules = ["core"]
-forbidden_modules = ["accounts", "workspaces", "audit", "ai_core", "assistant", "memory", "knowledge", "tasks", "approvals", "tools", "agents"]
+forbidden_modules = ["accounts", "workspaces", "audit", "ai_core", "assistant", "memory", "knowledge", "tasks", "approvals", "tools", "agents", "skills"]
 
 [[tool.importlinter.contracts]]
 name = "kernel apps must not import the Django project config"
 type = "forbidden"
-source_modules = ["accounts", "workspaces", "audit", "ai_core", "assistant", "memory", "knowledge", "tasks", "approvals", "tools", "agents"]
+source_modules = ["accounts", "workspaces", "audit", "ai_core", "assistant", "memory", "knowledge", "tasks", "approvals", "tools", "agents", "skills"]
 forbidden_modules = ["config"]
 
 # ai_core is the single door for LLM traffic (ADR-003): it must never depend on
@@ -107,7 +109,7 @@ forbidden_modules = ["config"]
 name = "ai_core must not import business apps"
 type = "forbidden"
 source_modules = ["ai_core"]
-forbidden_modules = ["accounts", "workspaces", "audit", "assistant", "memory", "knowledge", "tasks", "approvals", "tools", "agents"]
+forbidden_modules = ["accounts", "workspaces", "audit", "assistant", "memory", "knowledge", "tasks", "approvals", "tools", "agents", "skills"]
 ignore_imports = [
     "ai_core.tests.* -> accounts.*",
 ]
@@ -245,3 +247,29 @@ name = "agents must not import assistant (no relationship either direction)"
 type = "forbidden"
 source_modules = ["agents"]
 forbidden_modules = ["assistant"]
+
+# skills (MVP 8) is a new one-way dependency root, the same shape as agents:
+# it may import tools (needed for §2's boot-time tool-reference validation),
+# but tools never imports skills back -- mirrors the existing
+# "approvals -> tools" direction. agents may import skills (its planner
+# service reads the skill catalog to look up a matched template); skills
+# must never import agents back, since skills.catalog must stay a plain
+# code-only registry with no execution-engine knowledge at all.
+[[tool.importlinter.contracts]]
+name = "skills must not import agents (direction: agents -> skills)"
+type = "forbidden"
+source_modules = ["skills"]
+forbidden_modules = ["agents"]
+# skills.tests' own parity tests import agents.planner to assert both
+# validators accept/reject the exact same per-kind step shapes (MVP 8 §1);
+# the contract targets production code only, mirroring every other
+# tests.* exemption in this file.
+ignore_imports = [
+    "skills.tests.* -> agents.*",
+]
+
+[[tool.importlinter.contracts]]
+name = "tools must not import skills (direction: skills -> tools)"
+type = "forbidden"
+source_modules = ["tools"]
+forbidden_modules = ["skills"]
