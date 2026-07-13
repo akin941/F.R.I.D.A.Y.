@@ -101,6 +101,16 @@ class SkillStep:
     payload: dict
 
     def __post_init__(self):
+        # Codex round-2 P2 fix: `dict(self.payload)` below coerces ANY
+        # iterable (a list, a list of pairs, ...) into a dict -- silently
+        # accepting a shape `agents.planner._parse_step` would reject
+        # outright (it requires `isinstance(payload, dict)` before doing
+        # anything else). Check the type BEFORE coercion, so a non-dict
+        # payload fails the same way in both validators (parity tests).
+        if not isinstance(self.payload, dict):
+            raise SkillValidationError(
+                f"SkillStep payload must be a dict, got {type(self.payload).__name__}"
+            )
         # Defensive: a plain dict is mutable even on a frozen dataclass
         # (frozen only blocks reassigning the *attribute*, not mutating the
         # dict it points to) -- wrap it read-only so nothing can mutate a

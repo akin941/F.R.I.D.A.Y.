@@ -117,15 +117,25 @@ CASES = [
         False,
         id="invalid-task_draft-title-too-long",
     ),
+    pytest.param(
+        {"kind": "read", "description": "Read", "payload": []},
+        False,
+        id="invalid-non-dict-payload",
+    ),
 ]
 
 
 @pytest.mark.parametrize("raw_step, expected_valid", CASES)
 def test_skills_and_agents_validators_agree(raw_step, expected_valid):
-    skill_step = SkillStep(
-        kind=raw_step["kind"], description=raw_step["description"], payload=raw_step["payload"]
-    )
+    # A non-dict payload (Codex round-2 P2 fix) is now rejected at
+    # SkillStep *construction*, before _validate_step_shape ever runs --
+    # both points count as "the skills side rejected it" for parity.
     try:
+        skill_step = SkillStep(
+            kind=raw_step["kind"],
+            description=raw_step["description"],
+            payload=raw_step["payload"],
+        )
         _validate_step_shape(skill_step)
         skills_valid = True
     except SkillValidationError:

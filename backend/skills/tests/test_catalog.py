@@ -170,9 +170,10 @@ class TestStepShapeValidationAtRegistration:
             unregister_skill("stub_skill")
 
     def test_invalid_payload_shape_fails_at_registration_not_construction(self):
-        # SkillStep construction itself never validates shape (that's the
-        # registry's job, at register_skill time) -- constructing an
-        # invalid step must not raise.
+        # A dict-shaped-but-wrong-keys payload passes SkillStep's own
+        # basic dict-type check at construction (that's the registry's
+        # job, at register_skill time, via _validate_step_shape) --
+        # constructing it must not raise.
         step = SkillStep(kind="read", description="Read", payload={"unexpected": 1})
         spec = _spec(steps=(step,))
         with pytest.raises(SkillValidationError):
@@ -185,6 +186,23 @@ class TestStepShapeValidationAtRegistration:
         spec = _spec(steps=(step,))
         with pytest.raises(SkillValidationError):
             register_skill(spec)
+
+    def test_non_dict_payload_fails_at_construction_not_registration(self):
+        # Codex round-2 P2 fix: a non-dict iterable (e.g. a list, or a list
+        # of pairs) would otherwise be silently coerced into a dict by
+        # `dict(...)` before any shape check ever ran -- accepting shapes
+        # `agents.planner._parse_step` rejects outright. This must fail as
+        # soon as the type is wrong, not later.
+        with pytest.raises(SkillValidationError):
+            SkillStep(kind="read", description="Read", payload=[])
+
+    def test_non_dict_payload_that_would_coerce_to_a_valid_shape_still_rejected(self):
+        with pytest.raises(SkillValidationError):
+            SkillStep(
+                kind="tool_request",
+                description="Export",
+                payload=[("tool_name", "vault_export")],
+            )
 
 
 class TestSkillStepsToPlanDicts:
