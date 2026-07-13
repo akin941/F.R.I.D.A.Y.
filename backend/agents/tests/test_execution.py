@@ -407,6 +407,37 @@ class TestToolRequestStep:
         assert agent.status == Agent.Status.COMPLETED
         assert agent.consecutive_failures == 1
 
+    def test_step_resolution_and_halt_decision_commit_atomically(
+        self, workspace, owner, tmp_path, settings, monkeypatch
+    ):
+        """Codex round-6 fix: `resume_after_approval_decision` used to be
+        two separate transactions (resolve the step, then decide halt-or-
+        continue) -- a process death in between would leave the step
+        resolved but the Agent stuck `blocked_on_approval` forever, past
+        even the recovery scan (which only looks for steps still
+        `blocked_on_approval`). Proven here by forcing the halt-decision
+        to raise: if the two writes are truly one transaction, the whole
+        thing rolls back together, never a split state."""
+        from agents import execution
+
+        settings.OBSIDIAN_VAULT_PATH = str(tmp_path)
+        agent = _tool_request_step(workspace, owner)
+        advance_step(str(agent.id))
+        step = agent.steps.get()
+
+        def _boom(agent, *, step_succeeded):
+            raise RuntimeError("simulated crash")
+
+        monkeypatch.setattr(execution, "_decide_halt_or_continue", _boom)
+
+        with pytest.raises(RuntimeError):
+            execution.resume_after_approval_decision(agent_step_id=step.id, approved=True)
+
+        step.refresh_from_db()
+        agent.refresh_from_db()
+        assert step.status == AgentStep.Status.BLOCKED_ON_APPROVAL  # rolled back together
+        assert agent.status == Agent.Status.BLOCKED_ON_APPROVAL
+
     def test_requester_cannot_approve_their_own_agents_request(
         self, workspace, owner, tmp_path, settings
     ):

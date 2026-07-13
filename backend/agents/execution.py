@@ -429,7 +429,16 @@ def resume_after_approval_decision(*, agent_step_id, approved):
     resolved) -- the signal firing more than once, or after a cancellation,
     must never double-process or resurrect a stopped `Agent` (this is the
     exact "cancel, then approve the orphaned request anyway" scenario the
-    brief's kill-switch test requires)."""
+    brief's kill-switch test requires).
+
+    The step's own resolution and the halt-or-continue decision are
+    applied in the SAME transaction (Codex round-6 fix -- the same
+    atomicity gap round 3 already closed for `_finalize_read_step`/
+    `_dispatch_tool_request_step`): previously this was two separate
+    transactions, so a process death in between left the step resolved
+    but the Agent stuck `blocked_on_approval` forever -- unrecoverable
+    even by the recovery scan, which only looks for steps still
+    `blocked_on_approval`."""
     try:
         step = AgentStep.objects.get(pk=agent_step_id)
     except AgentStep.DoesNotExist:
@@ -443,7 +452,7 @@ def resume_after_approval_decision(*, agent_step_id, approved):
             return
         locked_step.status = AgentStep.Status.SUCCEEDED if approved else AgentStep.Status.FAILED
         locked_step.save(update_fields=["status", "updated_at"])
-    _after_step_resolved(str(step.agent_id), step_succeeded=approved)
+        _decide_halt_or_continue(agent, step_succeeded=approved)
 
 
 # --- task_draft confirm/discard (agents/views.py) ---
