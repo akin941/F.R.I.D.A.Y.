@@ -154,6 +154,39 @@ class TestAgentDetailView:
         body = response.json()
         assert [step["description"] for step in body["steps"]] == ["First", "Second"]
 
+    def test_detail_surfaces_skill_name_when_the_plan_was_skill_originated(
+        self, workspace, owner
+    ):
+        """MVP 8 §7 (branch 3): the audit field is exposed to the frontend
+        so `AgentDetail` can show which skill (if any) produced this plan."""
+        agent = create_plan(
+            workspace=workspace,
+            actor=owner,
+            goal="Export my weekly notes",
+            steps=[{"kind": "read", "description": "Summarize", "payload": {}}],
+            skill_name="weekly_export",
+            skill_content_hash="deadbeef" * 8,
+        )
+
+        response = client_for(owner).get(f"/api/v1/agents/{agent.id}")
+
+        assert response.status_code == 200
+        assert response.json()["skill_name"] == "weekly_export"
+
+    def test_list_and_detail_show_empty_skill_name_for_a_freeform_plan(self, workspace, owner):
+        agent = create_plan(
+            workspace=workspace,
+            actor=owner,
+            goal="Do things",
+            steps=[{"kind": "read", "description": "First", "payload": {}}],
+        )
+
+        list_response = client_for(owner).get(f"/api/v1/agents?workspace={workspace.id}")
+        detail_response = client_for(owner).get(f"/api/v1/agents/{agent.id}")
+
+        assert list_response.json()[0]["skill_name"] == ""
+        assert detail_response.json()["skill_name"] == ""
+
     def test_unknown_agent_is_404(self, owner):
         import uuid
 

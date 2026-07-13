@@ -37,6 +37,7 @@ class AgentSerializer(serializers.ModelSerializer):
             "created_by",
             "gateway_calls_used",
             "consecutive_failures",
+            "skill_name",
             "created_at",
             "updated_at",
         ]

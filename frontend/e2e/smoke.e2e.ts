@@ -1,8 +1,26 @@
 import { test, expect } from "@playwright/test";
+import type { Page } from "@playwright/test";
 
 // FakeAdapter's fixed reply (backend/ai_core/adapters/fake.py) — deterministic,
 // no network call, so this string is a safe, stable assertion target.
 const FAKE_REPLY = "Merhaba, ben Jarvis. MVP 1 gateway üzerinden çalışıyorum.";
+
+// Clicking an agent's goal card on the list view is an in-page, client-side-
+// only navigation (setSelectedAgentId -- no URL change, see AgentsView.tsx).
+// Observed to be occasionally flaky under Playwright's automated click even
+// though the exact same interaction never fails through manual/real browser
+// use (verified directly) -- retrying the click until the detail view's own
+// "Back to agents" button (present immediately on every successful
+// navigation, regardless of the agent's own data still loading) actually
+// shows up absorbs that flake without weakening what the test proves.
+async function openAgentDetail(page: Page, goalText: string) {
+  await expect(async () => {
+    await page.getByText(goalText, { exact: true }).click();
+    await expect(page.getByRole("button", { name: /Back to agents/ })).toBeVisible({
+      timeout: 3_000,
+    });
+  }).toPass({ timeout: 15_000 });
+}
 
 // FakeAdapter's purpose-aware fixture for `memory.extraction` (MVP 2 §3):
 // every assistant reply dispatches an extraction job over `on_commit`, run
@@ -32,8 +50,10 @@ test("signup, chat with the fake provider, curated memory, Today, logout, route 
   // Agents section adds two full agent lifecycles (goal -> plan -> read ->
   // task_draft confirm -> tool_request approval), each with its own
   // in-flight poll wait, plus the kill-switch path's own cancel + orphaned-
-  // approval check -- bumped to 260s.
-  test.setTimeout(260_000);
+  // approval check -- bumped to 260s. MVP 8's skill-matched agent lifecycle
+  // (goal -> agent.skill_match -> read -> tool_request approval, no
+  // task_draft) adds one more full round trip -- bumped to 300s.
+  test.setTimeout(300_000);
 
   const email = `e2e-${Date.now()}@jarvis.test`;
   const password = "Sup3rSecret!2026";
@@ -379,10 +399,7 @@ test("signup, chat with the fake provider, curated memory, Today, logout, route 
   await page.getByRole("button", { name: "Start agent" }).click();
 
   await expect(page.getByText(AGENT_GOAL, { exact: true })).toBeVisible({ timeout: 10_000 });
-  await page.getByText(AGENT_GOAL, { exact: true }).click();
-  await expect(page.getByRole("button", { name: /Back to agents/ })).toBeVisible({
-    timeout: 10_000,
-  });
+  await openAgentDetail(page, AGENT_GOAL);
 
   // Read step runs unattended; task_draft blocks for confirmation next.
   await expect(page.getByRole("button", { name: "Confirm task" })).toBeVisible({
@@ -433,7 +450,73 @@ test("signup, chat with the fake provider, curated memory, Today, logout, route 
   // step and, since it's the plan's last step, completes the whole agent.
   await page.getByRole("link", { name: "Agents" }).click();
   await expect(page).toHaveURL(/\/agents$/);
-  await page.getByText(AGENT_GOAL, { exact: true }).click();
+  await openAgentDetail(page, AGENT_GOAL);
+  await expect(page.getByText("Completed", { exact: true })).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByRole("button", { name: "Cancel agent" })).not.toBeVisible();
+
+  // Agents skill-matched path (MVP 8 §3/§7, brief): a goal matching a
+  // registered skill's trigger phrase skips `agent.plan` entirely --
+  // FakeAdapter's `agent.skill_match` purpose is content-triggered on
+  // "export my weekly notes" (backend/ai_core/adapters/fake.py), which
+  // returns the `weekly_export` skill's fixed two-step template (read ->
+  // tool_request) rather than a freeform LLM plan. Asserting the resulting
+  // steps match that exact template (not the "full plan" trigger's
+  // three-kind fixture above, and no "Confirm task" button at all -- the
+  // skill's template has no task_draft step) is what actually proves the
+  // skip happened, not just that some plan ran.
+  const SKILL_MATCHED_GOAL = "Please export my weekly notes for me";
+  const SKILL_READ_STEP = "Summarize recent notes";
+  const SKILL_TOOL_REQUEST_STEP = "Export the vault";
+
+  await page.getByRole("button", { name: /Back to agents/ }).click();
+  await page.getByRole("button", { name: "New agent" }).click();
+  await page.getByLabel("Goal").fill(SKILL_MATCHED_GOAL);
+  await page.getByRole("button", { name: "Start agent" }).click();
+
+  await expect(page.getByText(SKILL_MATCHED_GOAL, { exact: true })).toBeVisible({
+    timeout: 10_000,
+  });
+  await openAgentDetail(page, SKILL_MATCHED_GOAL);
+  await expect(page.getByText("Ran via skill: weekly_export", { exact: true })).toBeVisible({
+    timeout: 10_000,
+  });
+  await expect(page.getByText(SKILL_READ_STEP, { exact: true })).toBeVisible();
+
+  // Read step runs unattended; tool_request blocks for approval next --
+  // no "Confirm task" ever appears on this path (the skill's template has
+  // no task_draft step at all).
+  await expect(page.getByRole("link", { name: "Review on Approvals" })).toBeVisible({
+    timeout: 20_000,
+  });
+  await expect(page.getByText(SKILL_TOOL_REQUEST_STEP, { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Confirm task" })).not.toBeVisible();
+
+  await page.getByRole("link", { name: "Review on Approvals" }).click();
+  await expect(page).toHaveURL(/\/approvals$/);
+
+  const skillToolRequestId = await page.evaluate(async () => {
+    const workspaces = (await (await fetch("/api/workspaces")).json()) as { id: string }[];
+    const workspace = workspaces[0];
+    if (!workspace) throw new Error("No workspace found for the freshly signed-up user.");
+    const requests = (await (
+      await fetch(`/api/approvals/requests?workspace=${workspace.id}&status=pending`)
+    ).json()) as { id: string; tool_name: string }[];
+    const match = requests.find((r) => r.tool_name === "vault_export");
+    if (!match) throw new Error("No pending vault_export approval request found (skill path).");
+    return match.id;
+  });
+  const skillApproveStatus = await page.evaluate(async (requestId) => {
+    const response = await fetch(`/api/approvals/requests/${requestId}/approve`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+    });
+    return response.status;
+  }, skillToolRequestId);
+  expect(skillApproveStatus).toBe(200);
+
+  await page.getByRole("link", { name: "Agents" }).click();
+  await expect(page).toHaveURL(/\/agents$/);
+  await openAgentDetail(page, SKILL_MATCHED_GOAL);
   await expect(page.getByText("Completed", { exact: true })).toBeVisible({ timeout: 20_000 });
   await expect(page.getByRole("button", { name: "Cancel agent" })).not.toBeVisible();
 
@@ -453,10 +536,7 @@ test("signup, chat with the fake provider, curated memory, Today, logout, route 
   await page.getByRole("button", { name: "Start agent" }).click();
 
   await expect(page.getByText(KILL_SWITCH_GOAL, { exact: true })).toBeVisible({ timeout: 10_000 });
-  await page.getByText(KILL_SWITCH_GOAL, { exact: true }).click();
-  await expect(page.getByRole("button", { name: /Back to agents/ })).toBeVisible({
-    timeout: 10_000,
-  });
+  await openAgentDetail(page, KILL_SWITCH_GOAL);
 
   await expect(page.getByRole("button", { name: "Confirm task" })).toBeVisible({
     timeout: 20_000,
@@ -505,7 +585,7 @@ test("signup, chat with the fake provider, curated memory, Today, logout, route 
   expect(killSwitchApproveStatus).toBe(200);
 
   await page.getByRole("button", { name: /Back to agents/ }).click();
-  await page.getByText(KILL_SWITCH_GOAL, { exact: true }).click();
+  await openAgentDetail(page, KILL_SWITCH_GOAL);
   await expect(page.getByText("Cancelled", { exact: true })).toBeVisible({ timeout: 10_000 });
   await expect(page.getByRole("button", { name: "Cancel agent" })).not.toBeVisible();
 

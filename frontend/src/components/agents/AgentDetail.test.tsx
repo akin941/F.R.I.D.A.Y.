@@ -30,6 +30,7 @@ function detail(overrides: Partial<ApiAgentDetail> = {}): ApiAgentDetail {
     created_by: "u1",
     gateway_calls_used: 2,
     consecutive_failures: 0,
+    skill_name: "",
     created_at: "2026-07-13T00:00:00Z",
     updated_at: "2026-07-13T00:00:00Z",
     steps: [step()],
@@ -56,6 +57,29 @@ describe("AgentDetail", () => {
 
     expect(await screen.findByText("Summarize my notes")).toBeInTheDocument();
     expect(screen.getByText("Read something")).toBeInTheDocument();
+  });
+
+  it("shows which skill produced the plan when skill_name is set", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => jsonResponse(detail({ skill_name: "weekly_export" }))),
+    );
+
+    render(<AgentDetail agentId="a1" onBack={() => undefined} />);
+
+    expect(await screen.findByText("Ran via skill: weekly_export")).toBeInTheDocument();
+  });
+
+  it("shows no skill line for a freeform (non-skill) plan", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => jsonResponse(detail({ skill_name: "" }))),
+    );
+
+    render(<AgentDetail agentId="a1" onBack={() => undefined} />);
+    await screen.findByText("Summarize my notes");
+
+    expect(screen.queryByText(/Ran via skill/)).not.toBeInTheDocument();
   });
 
   it("cancels a running agent", async () => {

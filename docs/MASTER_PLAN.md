@@ -59,8 +59,8 @@ memories never reach a gateway payload (the cloud-eligibility negative
 contract). Every memory access — read, context injection, export — is
 audited, and users can export everything they can read as a portable JSON
 download; a second, filesystem-based Obsidian export shipped in MVP 5's
-approval gate (see §U). Skills: not started — planned after knowledge/RAG
-in the roadmap (§L). Knowledge/RAG itself: see §Q.
+approval gate (see §U). Skills: **done — see §X.** Knowledge/RAG itself:
+see §Q.
 
 ## G. Agent Runtime
 
@@ -103,10 +103,10 @@ See `docs/security/mcp-governance.md`.
 MVP 0–20, simplified to **personal kernel + platform capabilities** (ADR-006):
 personal kernel first (shell/chat → memory → knowledge/RAG *(done — §S)* →
 tasks *(done — §T)* → tools/approvals *(done — §U)* → router *(done — §V)* →
-agents *(done — §W)* → skills → integrations). Model-tier/cost routing (a
-DB-backed cheap/mid/strong tier table + `ModelUsage.routing_reason`
-auditability) is a separate, unstarted Gateway sub-task — deliberately not
-folded into the router MVP (§V); see §J.
+agents *(done — §W)* → skills *(done — §X)* → integrations). Model-tier/cost
+routing (a DB-backed cheap/mid/strong tier table +
+`ModelUsage.routing_reason` auditability) is a separate, unstarted Gateway
+sub-task — deliberately not folded into the router MVP (§V); see §J.
 
 MVP 10 (company workspaces: multi-user tenancy *inside* Jarvis — invite flows,
 company membership management, company-scoped memory) is **deferred — awaiting
@@ -434,3 +434,72 @@ cannot monkeypatch — can still exercise all three step kinds in one plan.
 
 Status: **done (2026-07-13)** — all 5 branches merged to main. Plan + branch
 status: `docs/prompts/mvp-07/brief.md`.
+
+## X. MVP 8
+
+MVP 8: Skills — reusable plan templates, the shortcut half of the
+`agents → skills` roadmap line (§L). MVP 7 gave every agent one
+`purpose="agent.plan"` gateway call per goal, even for goals that recur in
+a predictable shape ("export my weekly notes," "turn this note into a
+task"). A **Skill** is a git-authored, pre-approved plan template — the
+answer to "we already know how to do this; skip re-planning it from
+scratch." This MVP adds a mechanism to register such templates and a
+narrow, safe way for the agent runtime to recognize a match, without
+touching the execution engine, the approval gate, or any of MVP 7's four
+brakes at all: a skill-matched plan's `AgentStep` rows go through the
+exact same `finalize_plan()` → execution engine → approval gate path a
+freeform LLM plan already does.
+
+New `skills` kernel app: a **code-only registry** (`SkillSpec`/`SkillStep`
+frozen dataclasses, no DB table) mirroring `tools/registry.py`'s
+established pattern rather than `ai_core.PromptTemplate`/`PromptVersion`'s
+weaker "immutable-by-discipline, not code-enforced" one — a deliberate
+strengthening the user chose during scoping: changing a skill requires a
+git commit + PR review + deploy, never a database write, and there is no
+runtime data structure for an agent to mutate at all. `skills` is a new
+one-way import-linter root (agents may import skills; skills must never
+import agents), with its own per-kind step-shape validator duplicated from
+— not importing — `agents.planner`'s, proven identical via parity tests.
+Boot-time validation (`SkillsConfig.ready()`) fails the whole process at
+startup if any skill references an unregistered tool, rather than only
+surfacing the dangling reference when an agent happens to run that skill.
+
+A new, narrower `purpose="agent.skill_match"` gateway call precedes
+`agent.plan` in `create_agent_from_goal()`: given the goal and the
+registered skill catalog, it returns `{"skill_name": "<name>" | null}` —
+binary, not a graded confidence score (a considered simplification: the
+prompt itself encodes "only match if unambiguous," and a non-null response
+is independently re-validated against the live registry before being
+trusted, so a hallucinated or weak match degrades to freeform planning
+exactly like an explicit `null` would). A match skips `agent.plan`
+entirely — the actual efficiency gain, not just a faster plan. Two new
+`Agent` audit fields, `skill_name`/`skill_content_hash`, record which
+skill (and which exact version of its template) produced a given plan,
+mirroring the panel's `prompt_key`+`prompt_version` usage-record pattern —
+answerable months later even after the skill's own template has since
+changed in a later deploy.
+
+Two example skills ship: `weekly_export` (read → tool_request, exports the
+vault) and `note_to_task` (read → task_draft). Frontend: `AgentDetail`
+surfaces `Agent.skill_name` when set ("Ran via skill: weekly_export").
+Playwright smoke extends the agents section with a skill-matched goal,
+asserting the resulting steps match the skill's fixed template rather
+than a freeform LLM plan.
+
+The plan itself took **6 rounds of Codex plan-review** before
+implementation began — the round-1 HIGH (a claimed reuse of
+`agents.planner`'s validators that contradicted `skills` never importing
+`agents`) was escalated to the user, who chose duplicating a local
+validator with parity tests over the alternatives; the rest were
+increasingly subtle Python dataclass correctness bugs (`dataclasses.
+replace()` cannot target an `init=False` field; a mutable-collection hash
+invalidation the same shape as an already-fixed bug earlier in the same
+review; `ModelUsage` success/failure semantics for the new gateway
+purpose). Branch 1 (skills-foundation) took 3 rounds of code review — a
+JSON-serialization footgun (`SkillStep.payload`'s `MappingProxyType` isn't
+JSON-serializable) and a validation-parity hole (a non-dict payload
+silently coerced before shape validation ran) — both real, both fixed.
+Branch 2 (skill-selection) came back clean on round 1.
+
+Status: **done (2026-07-13)** — all 3 branches merged to main. Plan + branch
+status: `docs/prompts/mvp-08/brief.md`.
