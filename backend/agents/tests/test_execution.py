@@ -300,6 +300,52 @@ class TestConsecutiveFailureBrake:
         assert agent.status == Agent.Status.COMPLETED
         assert agent.consecutive_failures == 0  # reset by the second step's success
 
+    @override_settings(AGENT_MAX_CONSECUTIVE_FAILURES=1)
+    def test_duplicate_delivery_cannot_bypass_the_halt_right_after_a_read_step_fails(
+        self, workspace, owner, fake_provider, read_step_prompt
+    ):
+        """Codex round-3 fix: `_finalize_read_step` now applies the halt-
+        or-continue decision in the SAME transaction as the step's own
+        failure -- a "duplicate delivery" claim attempt immediately after
+        must see the Agent already `failed`, never a stale `running` with
+        the failure not yet counted (which would let it wrongly claim the
+        next step, bypassing the brake)."""
+        from agents import execution
+
+        agent = _read_step(2, workspace, owner)
+        claim = execution._claim_next_step(str(agent.id))
+        assert claim.outcome == "read"
+        execution._finalize_read_step(claim.step_id, success=False, result={"error": "boom"})
+
+        duplicate_claim = execution._claim_next_step(str(agent.id))
+
+        agent.refresh_from_db()
+        assert agent.status == Agent.Status.FAILED
+        assert agent.failure_reason == Agent.FailureReason.CONSECUTIVE_FAILURES
+        assert duplicate_claim.outcome == "halted"
+        steps = list(agent.steps.order_by("order"))
+        assert steps[1].status == AgentStep.Status.PENDING  # never claimed
+
+    @override_settings(AGENT_MAX_CONSECUTIVE_FAILURES=1)
+    def test_tool_request_creation_failure_also_decides_halt_inline(
+        self, workspace, owner, monkeypatch
+    ):
+        """Same race, the OTHER path: `_dispatch_tool_request_step`'s own
+        `ApprovalServiceError` branch must also decide halt-or-continue
+        within `_claim_next_step`'s own already-open transaction, not a
+        separate later call."""
+        from agents import execution
+
+        monkeypatch.setattr("approvals.services._resolve_tool", lambda name: None)
+        agent = _tool_request_step(workspace, owner, tool_name="not_a_real_tool")
+
+        claim = execution._claim_next_step(str(agent.id))
+
+        assert claim.outcome == "step_failed"
+        agent.refresh_from_db()
+        assert agent.status == Agent.Status.FAILED
+        assert agent.failure_reason == Agent.FailureReason.CONSECUTIVE_FAILURES
+
 
 # --- tool_request dispatch + resume via signal ---
 

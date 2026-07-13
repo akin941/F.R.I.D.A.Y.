@@ -192,6 +192,14 @@ def _dispatch_tool_request_step(agent, step):
         step.status = AgentStep.Status.FAILED
         step.result = {"error": "approval_request_failed"}
         step.save(update_fields=["status", "result", "updated_at"])
+        # Codex round-3 fix: decide halt-or-continue INLINE, in this same
+        # already-open transaction (`agent` is already locked by
+        # `_claim_next_step`) -- never as a separate later call. Closes the
+        # gap where a duplicate Celery delivery could see `agent.status ==
+        # running` with no `running` step in between and claim the next
+        # pending step before this failure was actually counted toward the
+        # consecutive-failure brake.
+        _decide_halt_or_continue(agent, step_succeeded=False)
         return _Claim("step_failed", step_id=str(step.id))
     step.approval_request = approval_request
     step.status = AgentStep.Status.BLOCKED_ON_APPROVAL
@@ -257,9 +265,13 @@ def run_read_step(step_id):
 def _finalize_read_step(step_id, *, success, result):
     """Kill-switch fencing, FINALIZATION boundary (brief §3's round-2 fix):
     the step's own result/status is always written here -- the gateway
-    calls already happened, their cost is real -- but whether this counts
-    as license to advance to the next step is decided by
-    `_after_step_resolved`, which independently re-checks `Agent.status`.
+    calls already happened, their cost is real. The halt-or-continue
+    decision (`_decide_halt_or_continue`) is applied INLINE, in this same
+    transaction, immediately after (Codex round-3 fix) -- never as a
+    separate later call, which left a gap where a duplicate Celery
+    delivery could observe `agent.status == running` with no `running`
+    step in between and claim the next pending step before this one's
+    outcome was actually counted toward the consecutive-failure brake.
 
     Compare-and-swap fenced (Codex round-2 fix): only proceeds if the step
     is still `running` at lock time. This is what makes
@@ -267,9 +279,10 @@ def _finalize_read_step(step_id, *, success, result):
     whichever of {the original (possibly just-slow, not actually dead)
     worker, the recovery scan} commits its own finalize call first wins;
     the other observes the step is no longer `running` and becomes a safe
-    no-op instead of double-writing `gateway_calls_used` or double-calling
-    `_after_step_resolved`. Returns `True` if this call actually finalized
-    the step, `False` if it was already resolved by someone else."""
+    no-op instead of double-writing `gateway_calls_used` or double-applying
+    the halt-or-continue decision. Returns `True` if this call actually
+    finalized the step, `False` if it was already resolved by someone
+    else (in which case nothing else happens)."""
     step = (
         AgentStep.objects.select_for_update()
         .filter(pk=step_id, status=AgentStep.Status.RUNNING)
@@ -283,23 +296,32 @@ def _finalize_read_step(step_id, *, success, result):
     step.save(update_fields=["status", "result", "updated_at"])
     agent.gateway_calls_used += 2
     agent.save(update_fields=["gateway_calls_used", "updated_at"])
+    _decide_halt_or_continue(agent, step_succeeded=success)
     return True
 
 
 # --- the single place that decides halt-or-continue ---
 
 
-@transaction.atomic
-def _after_step_resolved(agent_id, *, step_succeeded):
-    """Kill-switch fencing, RESUME/CONTINUE boundary: a cancelled `Agent`
-    never advances again, regardless of how its most recent step resolved.
+def _decide_halt_or_continue(agent, *, step_succeeded):
+    """The halt-or-continue decision body: a cancelled `Agent` never
+    advances again, regardless of how its most recent step resolved.
     Otherwise this is the consecutive-failure brake (brief §3, brake #2b):
     reset to 0 on any clean outcome (succeeded or skipped -- a discarded
     task draft is not a failure), incremented on any failure, halting the
     whole `Agent` at `AGENT_MAX_CONSECUTIVE_FAILURES` with zero internal
     retries. If still viable, schedules the next step via
-    `transaction.on_commit`."""
-    agent = Agent.objects.select_for_update().get(pk=agent_id)
+    `transaction.on_commit`.
+
+    Factored out of `_after_step_resolved` (Codex round-3 fix) so callers
+    that already hold `agent` `select_for_update`-locked within their OWN
+    open transaction (`_finalize_read_step`, `_dispatch_tool_request_step`)
+    can apply this decision in that SAME transaction, rather than
+    releasing the lock and re-acquiring it in a separate later call --
+    closing the gap where a duplicate delivery could sneak in between the
+    two and claim the next step before this one's outcome was counted.
+    MUST NOT be called with an `agent` that isn't already locked in the
+    caller's own open transaction."""
     if agent.status == Agent.Status.CANCELLED:
         return
     if step_succeeded:
@@ -317,7 +339,25 @@ def _after_step_resolved(agent_id, *, step_succeeded):
             return
         agent.status = Agent.Status.RUNNING
         agent.save(update_fields=["status", "consecutive_failures", "updated_at"])
-    transaction.on_commit(lambda: dispatch_agent_execution(str(agent_id)))
+    transaction.on_commit(lambda: dispatch_agent_execution(str(agent.id)))
+
+
+@transaction.atomic
+def _after_step_resolved(agent_id, *, step_succeeded):
+    """Kill-switch fencing, RESUME/CONTINUE boundary: locks `agent` fresh
+    and applies `_decide_halt_or_continue`. Safe to call as a separate,
+    later transaction ONLY because every current caller's own preceding
+    step-mutation leaves `Agent.status` at a non-`running` paused status
+    the whole time in between (`resume_after_approval_decision`'s
+    `blocked_on_approval` -> resolved-step write; `confirm_task_draft_step`/
+    `discard_task_draft_step`'s nested-atomic call, where Django's
+    savepoint nesting means there IS no separate transaction at all) -- so
+    a duplicate `_claim_next_step` call in that gap always sees
+    `agent.status != running` and no-ops, unlike the read-step/tool_request
+    paths `_finalize_read_step`/`_dispatch_tool_request_step` now decide
+    inline for exactly that reason."""
+    agent = Agent.objects.select_for_update().get(pk=agent_id)
+    _decide_halt_or_continue(agent, step_succeeded=step_succeeded)
 
 
 # --- the Celery task's own entry point (agents/tasks.py) ---
@@ -331,20 +371,19 @@ def advance_step(agent_id):
     is only ever expected around `run_read_step`'s gateway calls -- the
     claim/finalize DB work is fast local work well within the budget."""
     claim = _claim_next_step(agent_id)
-    if claim.outcome in ("halted", "done", "blocked"):
-        return
-    if claim.outcome == "step_failed":
-        _after_step_resolved(agent_id, step_succeeded=False)
+    if claim.outcome in ("halted", "done", "blocked", "step_failed"):
+        # "step_failed" already applied its own halt-or-continue decision
+        # inline, within the same transaction `_claim_next_step` held the
+        # Agent lock in (see `_dispatch_tool_request_step`) -- nothing left
+        # to do here.
         return
     # claim.outcome == "read"
     try:
         success, result = run_read_step(claim.step_id)
     except SoftTimeLimitExceeded:
-        if _finalize_read_step(claim.step_id, success=False, result={"error": "timeout"}):
-            _after_step_resolved(agent_id, step_succeeded=False)
+        _finalize_read_step(claim.step_id, success=False, result={"error": "timeout"})
         return
-    if _finalize_read_step(claim.step_id, success=success, result=result):
-        _after_step_resolved(agent_id, step_succeeded=success)
+    _finalize_read_step(claim.step_id, success=success, result=result)
 
 
 # --- kill switch ---
@@ -521,13 +560,11 @@ def recover_stale_agent_execution():
         ).values_list("id", "agent_id")
     )
     reclaimed_steps = 0
-    for step_id, agent_id in stale_steps:
-        finalized = _finalize_read_step(
-            str(step_id), success=False, result={"error": "worker_lost"}
-        )
-        if finalized:
+    for step_id, _agent_id in stale_steps:
+        # `_finalize_read_step` applies the halt-or-continue decision
+        # inline now (Codex round-3 fix) -- nothing further to do here.
+        if _finalize_read_step(str(step_id), success=False, result={"error": "worker_lost"}):
             reclaimed_steps += 1
-            _after_step_resolved(str(agent_id), step_succeeded=False)
 
     dispatch_cutoff = now - timedelta(seconds=settings.AGENT_DISPATCH_RECOVERY_GRACE_SECONDS)
     running_step_agent_ids = AgentStep.objects.filter(status=AgentStep.Status.RUNNING).values_list(
