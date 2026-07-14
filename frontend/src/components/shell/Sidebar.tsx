@@ -17,12 +17,12 @@ export function Sidebar() {
       <div className="flex items-center border-b border-border p-2 md:hidden">
         <Sheet open={open} onOpenChange={setOpen}>
           <SheetTrigger asChild>
-            <Button variant="ghost" size="icon" aria-label="Open navigation">
+            <Button variant="ghost" size="icon" aria-label="Menüyü aç">
               <Menu className="h-5 w-5" />
             </Button>
           </SheetTrigger>
           <SheetContent side="left" className="w-64 p-0">
-            <SheetTitle className="sr-only">Navigation</SheetTitle>
+            <SheetTitle className="sr-only">Menü</SheetTitle>
             <SidebarContent onNavigate={() => setOpen(false)} />
           </SheetContent>
         </Sheet>

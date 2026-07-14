@@ -43,7 +43,7 @@ export function MemoryView() {
       setMemories(list);
     } catch {
       if (activeWorkspaceIdRef.current === workspaceId) {
-        setLoadError("Failed to load memories.");
+        setLoadError("Notlar yüklenemedi.");
       }
     } finally {
       if (activeWorkspaceIdRef.current === workspaceId) setLoading(false);
@@ -118,7 +118,7 @@ export function MemoryView() {
       // implying the user can just go approve it themselves.
       setVaultExportNotice({
         type: "success",
-        message: "Request created. It needs approval from another workspace admin before it runs.",
+        message: "İstek oluşturuldu. Çalışmadan önce başka bir çalışma alanı yöneticisinin onayı gerekiyor.",
       });
     } catch (err) {
       if (activeWorkspaceIdRef.current !== workspaceId) return;
@@ -126,8 +126,8 @@ export function MemoryView() {
         type: "error",
         message:
           err instanceof ApiError
-            ? (err.body.detail ?? "Could not create the export request.")
-            : "Could not create the export request.",
+            ? (err.body.detail ?? "Dışa aktarma isteği oluşturulamadı.")
+            : "Dışa aktarma isteği oluşturulamadı.",
       });
     } finally {
       if (activeWorkspaceIdRef.current === workspaceId) setVaultExportBusy(false);
@@ -143,7 +143,7 @@ export function MemoryView() {
   if (!activeWorkspace) {
     return (
       <div className="flex flex-1 items-center justify-center p-6 text-sm text-muted-foreground">
-        No workspace available.
+        Kullanılabilir çalışma alanı yok.
       </div>
     );
   }
@@ -152,24 +152,24 @@ export function MemoryView() {
     <div className="flex flex-1 flex-col gap-6 overflow-y-auto p-6">
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Memory</h1>
+          <h1 className="text-2xl font-semibold tracking-tight">Hafıza</h1>
           <p className="text-sm text-muted-foreground">
-            Curated facts, preferences and episodes Jarvis remembers.
+            Jarvis'in hatırladığı, seçilmiş bilgiler, tercihler ve anılar.
           </p>
         </div>
         <div className="flex gap-2">
           <Button variant="outline" onClick={handleExport}>
-            Export
+            Dışa aktar
           </Button>
           <Button
             variant="outline"
             onClick={() => void handleVaultExportRequest()}
             disabled={vaultExportBusy}
           >
-            Export to Obsidian vault
+            Obsidian vault'a aktar
           </Button>
           <Button onClick={() => setCreating((v) => !v)}>
-            {creating ? "Cancel" : "New memory"}
+            {creating ? "İptal" : "Yeni not"}
           </Button>
         </div>
       </div>
@@ -211,10 +211,10 @@ export function MemoryView() {
         <>
           <section className="flex flex-col gap-3">
             <h2 className="text-lg font-medium tracking-tight">
-              Pending approval {pending.length > 0 ? `(${pending.length})` : ""}
+              Onay bekleyenler {pending.length > 0 ? `(${pending.length})` : ""}
             </h2>
             {pending.length === 0 ? (
-              <p className="text-sm text-muted-foreground">Nothing waiting for review.</p>
+              <p className="text-sm text-muted-foreground">İncelemeyi bekleyen bir şey yok.</p>
             ) : (
               <div className="flex flex-col gap-3">
                 {pending.map((memory) => (
@@ -234,17 +234,17 @@ export function MemoryView() {
 
           <section className="flex flex-col gap-3">
             <div className="flex flex-wrap items-center justify-between gap-3">
-              <h2 className="text-lg font-medium tracking-tight">All memories</h2>
+              <h2 className="text-lg font-medium tracking-tight">Tüm notlar</h2>
               <div className="flex gap-2">
                 <Select
                   value={statusFilter}
                   onValueChange={(v) => setStatusFilter(v as MemoryStatus | "all")}
                 >
-                  <SelectTrigger aria-label="Status filter">
+                  <SelectTrigger aria-label="Durum filtresi">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="all">All statuses</SelectItem>
+                    <SelectItem value="all">Tüm durumlar</SelectItem>
                     {LIST_STATUSES.map((status) => (
                       <SelectItem key={status} value={status}>
                         {MEMORY_STATUS_LABELS[status]}
@@ -256,11 +256,11 @@ export function MemoryView() {
                   value={typeFilter}
                   onValueChange={(v) => setTypeFilter(v as MemoryType | "all")}
                 >
-                  <SelectTrigger aria-label="Type filter">
+                  <SelectTrigger aria-label="Tür filtresi">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="all">All types</SelectItem>
+                    <SelectItem value="all">Tüm türler</SelectItem>
                     {MEMORY_TYPES.map((type) => (
                       <SelectItem key={type} value={type}>
                         {MEMORY_TYPE_LABELS[type]}
@@ -271,7 +271,7 @@ export function MemoryView() {
               </div>
             </div>
             {others.length === 0 ? (
-              <p className="text-sm text-muted-foreground">No memories match these filters.</p>
+              <p className="text-sm text-muted-foreground">Bu filtrelere uyan not yok.</p>
             ) : (
               <div className="flex flex-col gap-3">
                 {others.map((memory) => (

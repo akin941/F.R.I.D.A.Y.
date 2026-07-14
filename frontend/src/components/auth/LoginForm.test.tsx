@@ -23,9 +23,9 @@ describe("LoginForm", () => {
     );
 
     render(<LoginForm />);
-    await userEvent.type(screen.getByLabelText("Email"), "alice@test.dev");
-    await userEvent.type(screen.getByLabelText("Password"), "wrong-password");
-    await userEvent.click(screen.getByRole("button", { name: /sign in/i }));
+    await userEvent.type(screen.getByLabelText("E-posta"), "alice@test.dev");
+    await userEvent.type(screen.getByLabelText("Parola"), "wrong-password");
+    await userEvent.click(screen.getByRole("button", { name: /giriş yap/i }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent("Invalid credentials.");
     expect(push).not.toHaveBeenCalled();
@@ -43,9 +43,9 @@ describe("LoginForm", () => {
     );
 
     render(<LoginForm />);
-    await userEvent.type(screen.getByLabelText("Email"), "alice@test.dev");
-    await userEvent.type(screen.getByLabelText("Password"), "correct-password");
-    await userEvent.click(screen.getByRole("button", { name: /sign in/i }));
+    await userEvent.type(screen.getByLabelText("E-posta"), "alice@test.dev");
+    await userEvent.type(screen.getByLabelText("Parola"), "correct-password");
+    await userEvent.click(screen.getByRole("button", { name: /giriş yap/i }));
 
     await vi.waitFor(() => expect(push).toHaveBeenCalledWith("/chat"));
   });

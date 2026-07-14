@@ -12,13 +12,13 @@ export function WorkspaceSwitcher() {
   }
 
   if (workspaces.length === 0) {
-    return <p className="text-sm text-muted-foreground">No workspace available.</p>;
+    return <p className="text-sm text-muted-foreground">Kullanılabilir çalışma alanı yok.</p>;
   }
 
   return (
     <Select value={activeWorkspace?.id} onValueChange={setActiveWorkspaceId}>
-      <SelectTrigger className="w-full" aria-label="Active workspace">
-        <SelectValue placeholder="Select workspace" />
+      <SelectTrigger className="w-full" aria-label="Aktif çalışma alanı">
+        <SelectValue placeholder="Çalışma alanı seç" />
       </SelectTrigger>
       <SelectContent>
         {workspaces.map((workspace) => (

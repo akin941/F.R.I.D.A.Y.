@@ -41,9 +41,9 @@ export function MemoryCreateForm({
       setValue(EMPTY);
     } catch (err) {
       if (err instanceof ApiError) {
-        setError(err.body.detail ?? "That memory could not be created.");
+        setError(err.body.detail ?? "Not oluşturulamadı.");
       } else {
-        setError("Something went wrong. Please try again.");
+        setError("Bir şeyler ters gitti. Lütfen tekrar deneyin.");
       }
     } finally {
       setSubmitting(false);
@@ -53,7 +53,7 @@ export function MemoryCreateForm({
   return (
     <Card>
       <CardHeader>
-        <CardTitle>New memory</CardTitle>
+        <CardTitle>Yeni not</CardTitle>
       </CardHeader>
       <form onSubmit={handleSubmit}>
         <CardContent className="flex flex-col gap-3">
@@ -66,10 +66,10 @@ export function MemoryCreateForm({
         </CardContent>
         <CardFooter className="flex justify-end gap-2">
           <Button type="button" variant="outline" onClick={onCancel} disabled={submitting}>
-            Cancel
+            İptal
           </Button>
           <Button type="submit" disabled={submitting}>
-            {submitting ? "Creating…" : "Create memory"}
+            {submitting ? "Oluşturuluyor…" : "Not oluştur"}
           </Button>
         </CardFooter>
       </form>

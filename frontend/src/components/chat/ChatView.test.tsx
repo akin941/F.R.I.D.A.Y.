@@ -65,7 +65,7 @@ async function selectConversation() {
   render(<ChatView />);
   const button = await screen.findByText("Test conversation");
   await userEvent.click(button);
-  await screen.findByPlaceholderText("Message Jarvis…");
+  await screen.findByPlaceholderText("Jarvis'e yaz…");
 }
 
 describe("ChatView", () => {
@@ -109,8 +109,8 @@ describe("ChatView", () => {
     );
 
     await selectConversation();
-    await userEvent.type(screen.getByPlaceholderText("Message Jarvis…"), "Hi there");
-    await userEvent.click(screen.getByRole("button", { name: "Send" }));
+    await userEvent.type(screen.getByPlaceholderText("Jarvis'e yaz…"), "Hi there");
+    await userEvent.click(screen.getByRole("button", { name: "Gönder" }));
 
     expect(await screen.findByText("Hi there")).toBeInTheDocument();
     await waitFor(() => expect(screen.getByText("Hello!")).toBeInTheDocument());
@@ -159,24 +159,24 @@ describe("ChatView", () => {
     );
 
     await selectConversation();
-    await userEvent.type(screen.getByPlaceholderText("Message Jarvis…"), "Hi there");
-    await userEvent.click(screen.getByRole("button", { name: "Send" }));
+    await userEvent.type(screen.getByPlaceholderText("Jarvis'e yaz…"), "Hi there");
+    await userEvent.click(screen.getByRole("button", { name: "Gönder" }));
 
     pushChunk(`data: ${JSON.stringify({ type: "chunk", text: "Hello!" })}\n\n`);
     await waitFor(() => expect(screen.getByText("Hello!")).toBeInTheDocument());
     // Mid-stream: the terminal event hasn't landed yet, so the reply is still
     // the live optimistic bubble — the indicator must not be present yet.
-    expect(screen.queryByText(/Memory context/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Hafıza bağlamı/)).not.toBeInTheDocument();
 
     pushChunk(
       `data: ${JSON.stringify({ type: "done", message_id: "a1", memories_used: ["mem-1", "mem-2"] })}\n\n`,
     );
     closeStream();
 
-    expect(await screen.findByText("Memory context: 2 memories")).toBeInTheDocument();
+    expect(await screen.findByText("Hafıza bağlamı: 2 not")).toBeInTheDocument();
     // Restricted to assistant messages: the user bubble's fixtured (and
     // unrealistic) memories_used must never render an indicator of its own.
-    expect(screen.getAllByText(/Memory context/)).toHaveLength(1);
+    expect(screen.getAllByText(/Hafıza bağlamı/)).toHaveLength(1);
   });
 
   it("shows the knowledge-context indicator after reconciliation, mirroring memory context", async () => {
@@ -208,12 +208,12 @@ describe("ChatView", () => {
     );
 
     await selectConversation();
-    await userEvent.type(screen.getByPlaceholderText("Message Jarvis…"), "Hi there");
-    await userEvent.click(screen.getByRole("button", { name: "Send" }));
+    await userEvent.type(screen.getByPlaceholderText("Jarvis'e yaz…"), "Hi there");
+    await userEvent.click(screen.getByRole("button", { name: "Gönder" }));
 
-    expect(await screen.findByText("Knowledge context: 1 chunk")).toBeInTheDocument();
+    expect(await screen.findByText("Bilgi bağlamı: 1 parça")).toBeInTheDocument();
     // Restricted to assistant messages, same as memory context.
-    expect(screen.getAllByText(/Knowledge context/)).toHaveLength(1);
+    expect(screen.getAllByText(/Bilgi bağlamı/)).toHaveLength(1);
   });
 
   it("shows a banner and reconciles when the stream sends an error event", async () => {
@@ -236,10 +236,10 @@ describe("ChatView", () => {
     );
 
     await selectConversation();
-    await userEvent.type(screen.getByPlaceholderText("Message Jarvis…"), "Trigger error");
-    await userEvent.click(screen.getByRole("button", { name: "Send" }));
+    await userEvent.type(screen.getByPlaceholderText("Jarvis'e yaz…"), "Trigger error");
+    await userEvent.click(screen.getByRole("button", { name: "Gönder" }));
 
-    expect(await screen.findByRole("alert")).toHaveTextContent(/no ai provider/i);
+    expect(await screen.findByRole("alert")).toHaveTextContent(/yapay zeka sağlayıcısı/i);
     await waitFor(() => expect(messagesCallCount).toBeGreaterThan(0));
   });
 
@@ -261,10 +261,10 @@ describe("ChatView", () => {
     );
 
     await selectConversation();
-    await userEvent.type(screen.getByPlaceholderText("Message Jarvis…"), "Disconnect me");
-    await userEvent.click(screen.getByRole("button", { name: "Send" }));
+    await userEvent.type(screen.getByPlaceholderText("Jarvis'e yaz…"), "Disconnect me");
+    await userEvent.click(screen.getByRole("button", { name: "Gönder" }));
 
-    expect(await screen.findByText(/connection lost/i)).toBeInTheDocument();
+    expect(await screen.findByText(/bağlantı koptu/i)).toBeInTheDocument();
   });
 
   it("blocks a second send while a stream is already in flight", async () => {
@@ -299,12 +299,12 @@ describe("ChatView", () => {
     );
 
     await selectConversation();
-    const textarea = screen.getByPlaceholderText("Message Jarvis…");
+    const textarea = screen.getByPlaceholderText("Jarvis'e yaz…");
     await userEvent.type(textarea, "First message");
-    await userEvent.click(screen.getByRole("button", { name: "Send" }));
+    await userEvent.click(screen.getByRole("button", { name: "Gönder" }));
 
-    await waitFor(() => expect(screen.getByRole("button", { name: "Stop" })).toBeInTheDocument());
-    expect(screen.queryByRole("button", { name: "Send" })).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Durdur" })).toBeInTheDocument());
+    expect(screen.queryByRole("button", { name: "Gönder" })).not.toBeInTheDocument();
     expect(textarea).toBeDisabled();
 
     resolveStream?.();
@@ -453,10 +453,10 @@ describe("ChatView", () => {
     const { rerender } = render(<ChatView />);
     const button = await screen.findByText("Test conversation");
     await userEvent.click(button);
-    const textarea = await screen.findByPlaceholderText("Message Jarvis…");
+    const textarea = await screen.findByPlaceholderText("Jarvis'e yaz…");
     await userEvent.type(textarea, "First message");
-    await userEvent.click(screen.getByRole("button", { name: "Send" }));
-    await waitFor(() => expect(screen.getByRole("button", { name: "Stop" })).toBeInTheDocument());
+    await userEvent.click(screen.getByRole("button", { name: "Gönder" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Durdur" })).toBeInTheDocument());
 
     workspaceHolder.current = WORKSPACE_2;
     rerender(<ChatView />);
@@ -464,7 +464,7 @@ describe("ChatView", () => {
     await waitFor(() => expect(streamAborted).toBe(true));
     // Once aborted, the workspace switch's own placeholder view takes over —
     // no residual "Stop" button stuck from the abandoned stream.
-    expect(screen.queryByRole("button", { name: "Stop" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Durdur" })).not.toBeInTheDocument();
 
     streamController?.close();
   });
@@ -489,8 +489,8 @@ describe("ChatView", () => {
     );
 
     await selectConversation();
-    await userEvent.type(screen.getByPlaceholderText("Message Jarvis…"), "Double click");
-    const sendButton = screen.getByRole("button", { name: "Send" });
+    await userEvent.type(screen.getByPlaceholderText("Jarvis'e yaz…"), "Double click");
+    const sendButton = screen.getByRole("button", { name: "Gönder" });
     // Both clicks inside one `act` callback run before React flushes any
     // resulting state update, so the second click's handler sees exactly the
     // same pre-click state as the first — the genuine same-tick scenario, not
@@ -557,17 +557,17 @@ describe("ChatView", () => {
     );
 
     await selectConversation();
-    await userEvent.type(screen.getByPlaceholderText("Message Jarvis…"), "remind me to call mom");
-    await userEvent.click(screen.getByRole("button", { name: "Send" }));
+    await userEvent.type(screen.getByPlaceholderText("Jarvis'e yaz…"), "remind me to call mom");
+    await userEvent.click(screen.getByRole("button", { name: "Gönder" }));
 
-    expect(await screen.findByText("Looks like a task")).toBeInTheDocument();
+    expect(await screen.findByText("Bu bir görev gibi görünüyor")).toBeInTheDocument();
     expect(screen.getByText("Call mom")).toBeInTheDocument();
-    expect(screen.getByText("Due 2026-07-15")).toBeInTheDocument();
+    expect(screen.getByText("Son tarih 2026-07-15")).toBeInTheDocument();
 
-    await userEvent.click(screen.getByRole("button", { name: "Confirm task" }));
+    await userEvent.click(screen.getByRole("button", { name: "Görevi onayla" }));
 
     await waitFor(() => expect(createCalls).toBe(1));
-    await waitFor(() => expect(screen.queryByText("Looks like a task")).not.toBeInTheDocument());
+    await waitFor(() => expect(screen.queryByText("Bu bir görev gibi görünüyor")).not.toBeInTheDocument());
   });
 
   it("discards a task draft card without ever calling POST /api/tasks", async () => {
@@ -600,13 +600,13 @@ describe("ChatView", () => {
     );
 
     await selectConversation();
-    await userEvent.type(screen.getByPlaceholderText("Message Jarvis…"), "remind me to call mom");
-    await userEvent.click(screen.getByRole("button", { name: "Send" }));
+    await userEvent.type(screen.getByPlaceholderText("Jarvis'e yaz…"), "remind me to call mom");
+    await userEvent.click(screen.getByRole("button", { name: "Gönder" }));
 
-    expect(await screen.findByText("Looks like a task")).toBeInTheDocument();
-    await userEvent.click(screen.getByRole("button", { name: "Discard" }));
+    expect(await screen.findByText("Bu bir görev gibi görünüyor")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Vazgeç" }));
 
-    expect(screen.queryByText("Looks like a task")).not.toBeInTheDocument();
+    expect(screen.queryByText("Bu bir görev gibi görünüyor")).not.toBeInTheDocument();
   });
 
   it("shows a tool request card on a draft event and confirms it via POST /api/approvals/requests", async () => {
@@ -664,17 +664,17 @@ describe("ChatView", () => {
     );
 
     await selectConversation();
-    await userEvent.type(screen.getByPlaceholderText("Message Jarvis…"), "export my vault");
-    await userEvent.click(screen.getByRole("button", { name: "Send" }));
+    await userEvent.type(screen.getByPlaceholderText("Jarvis'e yaz…"), "export my vault");
+    await userEvent.click(screen.getByRole("button", { name: "Gönder" }));
 
-    expect(await screen.findByText("Looks like a tool request")).toBeInTheDocument();
+    expect(await screen.findByText("Bu bir araç isteği gibi görünüyor")).toBeInTheDocument();
     expect(screen.getByText("vault_export")).toBeInTheDocument();
 
-    await userEvent.click(screen.getByRole("button", { name: "Confirm request" }));
+    await userEvent.click(screen.getByRole("button", { name: "İsteği onayla" }));
 
     await waitFor(() => expect(createCalls).toBe(1));
     await waitFor(() =>
-      expect(screen.queryByText("Looks like a tool request")).not.toBeInTheDocument(),
+      expect(screen.queryByText("Bu bir araç isteği gibi görünüyor")).not.toBeInTheDocument(),
     );
     // Confirming renders the shared ApprovalCard (status view), reusing the
     // exact component /approvals uses for run-status rendering (brief §4).
@@ -720,17 +720,17 @@ describe("ChatView", () => {
     );
 
     await selectConversation();
-    await userEvent.type(screen.getByPlaceholderText("Message Jarvis…"), "export my vault");
-    await userEvent.click(screen.getByRole("button", { name: "Send" }));
+    await userEvent.type(screen.getByPlaceholderText("Jarvis'e yaz…"), "export my vault");
+    await userEvent.click(screen.getByRole("button", { name: "Gönder" }));
 
-    expect(await screen.findByText("Looks like a tool request")).toBeInTheDocument();
-    await userEvent.click(screen.getByRole("button", { name: "Confirm request" }));
+    expect(await screen.findByText("Bu bir araç isteği gibi görünüyor")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "İsteği onayla" }));
 
     expect(await screen.findByText("Role does not allow this action.")).toBeInTheDocument();
     await waitFor(() => expect(createCalls).toBe(1));
     // The card must still be here (not silently dismissed) so the user can
     // discard or retry.
-    expect(screen.getByText("Looks like a tool request")).toBeInTheDocument();
+    expect(screen.getByText("Bu bir araç isteği gibi görünüyor")).toBeInTheDocument();
   });
 
   it("discards a tool request card without ever calling POST /api/approvals/requests", async () => {
@@ -763,13 +763,13 @@ describe("ChatView", () => {
     );
 
     await selectConversation();
-    await userEvent.type(screen.getByPlaceholderText("Message Jarvis…"), "export my vault");
-    await userEvent.click(screen.getByRole("button", { name: "Send" }));
+    await userEvent.type(screen.getByPlaceholderText("Jarvis'e yaz…"), "export my vault");
+    await userEvent.click(screen.getByRole("button", { name: "Gönder" }));
 
-    expect(await screen.findByText("Looks like a tool request")).toBeInTheDocument();
-    await userEvent.click(screen.getByRole("button", { name: "Discard" }));
+    expect(await screen.findByText("Bu bir araç isteği gibi görünüyor")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Vazgeç" }));
 
-    expect(screen.queryByText("Looks like a tool request")).not.toBeInTheDocument();
+    expect(screen.queryByText("Bu bir araç isteği gibi görünüyor")).not.toBeInTheDocument();
   });
 
   it("creates exactly one conversation when New chat is clicked twice in the same tick", async () => {
@@ -792,7 +792,7 @@ describe("ChatView", () => {
     );
 
     render(<ChatView />);
-    const newChatButton = await screen.findByText("New chat");
+    const newChatButton = await screen.findByText("Yeni sohbet");
     act(() => {
       fireEvent.click(newChatButton);
       fireEvent.click(newChatButton);

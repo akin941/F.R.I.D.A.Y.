@@ -11,14 +11,14 @@ import { useWorkspace } from "@/contexts/workspace-context";
 import { apiPostJson } from "@/lib/api-client";
 
 const NAV_ITEMS = [
-  { href: "/chat", label: "Chat" },
-  { href: "/memory", label: "Memory" },
-  { href: "/knowledge", label: "Knowledge" },
-  { href: "/tasks", label: "Tasks" },
-  { href: "/today", label: "Today" },
-  { href: "/approvals", label: "Approvals" },
-  { href: "/agents", label: "Agents" },
-  { href: "/integrations", label: "Integrations" },
+  { href: "/chat", label: "Sohbet" },
+  { href: "/memory", label: "Hafıza" },
+  { href: "/knowledge", label: "Bilgi" },
+  { href: "/tasks", label: "Görevler" },
+  { href: "/today", label: "Bugün" },
+  { href: "/approvals", label: "Onaylar" },
+  { href: "/agents", label: "Ajanlar" },
+  { href: "/integrations", label: "Entegrasyonlar" },
 ];
 
 export function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
@@ -62,7 +62,7 @@ export function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
           </p>
         )}
         <Button variant="outline" onClick={handleLogout}>
-          Log out
+          Çıkış yap
         </Button>
       </div>
     </div>

@@ -50,13 +50,13 @@ export function SignupForm() {
           setEmailError(email400);
           setPasswordError(password400);
           if (!email400 && !password400) {
-            setFormError(err.body.detail ?? "Please check your details and try again.");
+            setFormError(err.body.detail ?? "Lütfen bilgilerinizi kontrol edip tekrar deneyin.");
           }
         } else {
-          setFormError(err.body.detail ?? "Something went wrong. Please try again.");
+          setFormError(err.body.detail ?? "Bir şeyler ters gitti. Lütfen tekrar deneyin.");
         }
       } else {
-        setFormError("Something went wrong. Please try again.");
+        setFormError("Bir şeyler ters gitti. Lütfen tekrar deneyin.");
       }
     } finally {
       setSubmitting(false);
@@ -66,15 +66,15 @@ export function SignupForm() {
   return (
     <Card className="w-full max-w-sm">
       <CardHeader>
-        <CardTitle>Create your Jarvis account</CardTitle>
+        <CardTitle>Jarvis hesabını oluştur</CardTitle>
       </CardHeader>
       <CardContent>
         {signupDisabled ? (
           <Alert variant="destructive" role="alert">
             <AlertDescription>
-              Signup is disabled.{" "}
+              Kayıt kapalı.{" "}
               <Link href="/login" className="underline underline-offset-4">
-                Sign in instead
+                Bunun yerine giriş yap
               </Link>
               .
             </AlertDescription>
@@ -87,11 +87,11 @@ export function SignupForm() {
               </Alert>
             ) : null}
             <div className="flex flex-col gap-2">
-              <Label htmlFor="name">Name (optional)</Label>
+              <Label htmlFor="name">İsim (isteğe bağlı)</Label>
               <Input id="name" value={name} onChange={(e) => setName(e.target.value)} />
             </div>
             <div className="flex flex-col gap-2">
-              <Label htmlFor="email">Email</Label>
+              <Label htmlFor="email">E-posta</Label>
               <Input
                 id="email"
                 type="email"
@@ -107,7 +107,7 @@ export function SignupForm() {
               ) : null}
             </div>
             <div className="flex flex-col gap-2">
-              <Label htmlFor="password">Password</Label>
+              <Label htmlFor="password">Parola</Label>
               <Input
                 id="password"
                 type="password"
@@ -123,12 +123,12 @@ export function SignupForm() {
               ) : null}
             </div>
             <Button type="submit" disabled={submitting}>
-              {submitting ? "Creating account…" : "Sign up"}
+              {submitting ? "Hesap oluşturuluyor…" : "Kayıt ol"}
             </Button>
             <p className="text-sm text-muted-foreground">
-              Already have an account?{" "}
+              Zaten hesabın var mı?{" "}
               <Link href="/login" className="underline underline-offset-4">
-                Sign in
+                Giriş yap
               </Link>
             </p>
           </form>

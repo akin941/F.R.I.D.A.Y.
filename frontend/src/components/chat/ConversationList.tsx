@@ -27,7 +27,7 @@ export function ConversationList({
     <div className="flex h-full w-64 shrink-0 flex-col border-r border-border">
       <div className="p-2">
         <Button className="w-full" onClick={onNewChat} disabled={disabled}>
-          New chat
+          Yeni sohbet
         </Button>
       </div>
       <ScrollArea className="flex-1">
@@ -38,7 +38,7 @@ export function ConversationList({
               <Skeleton className="h-9 w-full" />
             </>
           ) : conversations.length === 0 ? (
-            <p className="p-2 text-sm text-muted-foreground">No conversations yet.</p>
+            <p className="p-2 text-sm text-muted-foreground">Henüz sohbet yok.</p>
           ) : (
             conversations.map((conversation) => (
               <button
@@ -51,7 +51,7 @@ export function ConversationList({
                   selectedId === conversation.id && "bg-accent text-accent-foreground",
                 )}
               >
-                {conversation.title || "Untitled conversation"}
+                {conversation.title || "Adsız sohbet"}
               </button>
             ))
           )}

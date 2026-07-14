@@ -28,18 +28,18 @@ export function Composer({ value, onChange, onSend, onStop, isStreaming, disable
         value={value}
         onChange={(e) => onChange(e.target.value)}
         onKeyDown={handleKeyDown}
-        placeholder="Message Jarvis…"
+        placeholder="Jarvis'e yaz…"
         disabled={disabled || isStreaming}
         rows={2}
         className="flex-1 resize-none"
       />
       {isStreaming ? (
         <Button type="button" variant="outline" onClick={onStop}>
-          Stop
+          Durdur
         </Button>
       ) : (
         <Button type="button" onClick={onSend} disabled={disabled || !value.trim()}>
-          Send
+          Gönder
         </Button>
       )}
     </div>

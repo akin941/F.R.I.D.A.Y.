@@ -204,14 +204,14 @@ export function ChatView() {
           const retryAfter = response.headers.get("Retry-After");
           setBannerError(
             retryAfter
-              ? `You're sending messages too fast. Try again in ${retryAfter}s.`
-              : "You're sending messages too fast. Please wait a moment.",
+              ? `Çok hızlı mesaj gönderiyorsun. ${retryAfter}s sonra tekrar dene.`
+              : "Çok hızlı mesaj gönderiyorsun. Lütfen biraz bekle.",
           );
         } else if (response.status === 400) {
           const body = await response.json().catch(() => ({}));
-          setBannerError(body.detail ?? "That message could not be sent.");
+          setBannerError(body.detail ?? "Mesaj gönderilemedi.");
         } else {
-          setBannerError("Something went wrong. Please try again.");
+          setBannerError("Bir şeyler ters gitti. Lütfen tekrar deneyin.");
         }
         return;
       }
@@ -296,7 +296,7 @@ export function ChatView() {
       />
       <div className="flex flex-1 flex-col">
         <div aria-live="polite" className="sr-only">
-          {isStreaming ? "Assistant is responding" : ""}
+          {isStreaming ? "Asistan yanıtlıyor" : ""}
         </div>
         {bannerError ? (
           <Alert variant="destructive" role="alert" className="m-4">
@@ -306,7 +306,7 @@ export function ChatView() {
         {disconnected ? (
           <Alert className="m-4">
             <AlertDescription className="flex items-center justify-between gap-4">
-              <span>Connection lost before the response finished.</span>
+              <span>Yanıt tamamlanmadan bağlantı koptu.</span>
               <Button
                 variant="outline"
                 size="sm"
@@ -315,23 +315,23 @@ export function ChatView() {
                   if (selectedConversationId) void loadMessages(selectedConversationId);
                 }}
               >
-                Refresh history
+                Geçmişi yenile
               </Button>
             </AlertDescription>
           </Alert>
         ) : null}
         {conversationUnavailable ? (
           <Alert variant="destructive" role="alert" className="m-4">
-            <AlertDescription>This conversation is no longer accessible.</AlertDescription>
+            <AlertDescription>Bu sohbete artık erişilemiyor.</AlertDescription>
           </Alert>
         ) : null}
         {!activeWorkspace ? (
           <div className="flex flex-1 items-center justify-center p-6 text-sm text-muted-foreground">
-            No workspace available.
+            Kullanılabilir çalışma alanı yok.
           </div>
         ) : !selectedConversationId ? (
           <div className="flex flex-1 items-center justify-center p-6 text-sm text-muted-foreground">
-            Select a conversation or start a new chat.
+            Bir sohbet seç ya da yeni bir sohbet başlat.
           </div>
         ) : (
           <>

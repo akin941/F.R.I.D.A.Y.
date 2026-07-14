@@ -50,8 +50,8 @@ export function TaskDraftCard({
     } catch (err) {
       setError(
         err instanceof ApiError
-          ? (err.body.detail ?? "That task could not be created.")
-          : "Something went wrong. Please try again.",
+          ? (err.body.detail ?? "Görev oluşturulamadı.")
+          : "Bir şeyler ters gitti. Lütfen tekrar deneyin.",
       );
     } finally {
       setBusy(false);
@@ -61,7 +61,7 @@ export function TaskDraftCard({
   return (
     <Card className="m-4" data-testid="task-draft-card">
       <CardHeader>
-        <CardTitle>Looks like a task</CardTitle>
+        <CardTitle>Bu bir görev gibi görünüyor</CardTitle>
       </CardHeader>
       <CardContent className="flex flex-col gap-1">
         {error ? (
@@ -71,15 +71,15 @@ export function TaskDraftCard({
         ) : null}
         <p className="text-sm font-medium">{draft.title}</p>
         {draft.dueDate ? (
-          <p className="text-sm text-muted-foreground">Due {draft.dueDate}</p>
+          <p className="text-sm text-muted-foreground">Son tarih {draft.dueDate}</p>
         ) : null}
       </CardContent>
       <CardFooter className="flex justify-end gap-2">
         <Button variant="outline" size="sm" onClick={onDiscard} disabled={busy}>
-          Discard
+          Vazgeç
         </Button>
         <Button size="sm" onClick={() => void handleConfirm()} disabled={busy}>
-          {busy ? "Creating…" : "Confirm task"}
+          {busy ? "Oluşturuluyor…" : "Görevi onayla"}
         </Button>
       </CardFooter>
     </Card>

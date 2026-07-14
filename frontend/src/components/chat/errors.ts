@@ -1,8 +1,8 @@
 const ERROR_MESSAGES: Record<string, string> = {
-  no_provider: "No AI provider is configured right now. Please try again later.",
-  client_disconnect: "The connection was interrupted.",
+  no_provider: "Şu anda yapılandırılmış bir yapay zeka sağlayıcısı yok. Lütfen daha sonra tekrar deneyin.",
+  client_disconnect: "Bağlantı kesildi.",
 };
 
 export function mapErrorType(errorType: string): string {
-  return ERROR_MESSAGES[errorType] ?? "The assistant hit an unexpected error. Please try again.";
+  return ERROR_MESSAGES[errorType] ?? "Asistan beklenmedik bir hatayla karşılaştı. Lütfen tekrar deneyin.";
 }

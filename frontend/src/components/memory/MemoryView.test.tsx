@@ -55,7 +55,7 @@ describe("MemoryView", () => {
 
     render(<MemoryView />);
 
-    expect(await screen.findByText("Pending approval (1)")).toBeInTheDocument();
+    expect(await screen.findByText("Onay bekleyenler (1)")).toBeInTheDocument();
     expect(screen.getByText("Coffee")).toBeInTheDocument();
     expect(screen.getByText("Tea")).toBeInTheDocument();
   });
@@ -75,12 +75,12 @@ describe("MemoryView", () => {
     render(<MemoryView />);
     await screen.findByText("Coffee");
 
-    const approveButton = screen.getByRole("button", { name: "Approve" });
+    const approveButton = screen.getByRole("button", { name: "Onayla" });
     await userEvent.click(approveButton);
 
     await waitFor(() => {
-      expect(screen.getByText("Pending approval")).toBeInTheDocument();
-      expect(screen.queryByRole("button", { name: "Approve" })).not.toBeInTheDocument();
+      expect(screen.getByText("Onay bekleyenler")).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Onayla" })).not.toBeInTheDocument();
     });
     const [url, options] = fetchMock.mock.calls.find(([u]) =>
       String(u).includes("/approve"),
@@ -103,10 +103,10 @@ describe("MemoryView", () => {
 
     render(<MemoryView />);
     await screen.findByText("Coffee");
-    await userEvent.click(screen.getByRole("button", { name: "Reject" }));
+    await userEvent.click(screen.getByRole("button", { name: "Reddet" }));
 
     await waitFor(() => {
-      expect(screen.getByText("Nothing waiting for review.")).toBeInTheDocument();
+      expect(screen.getByText("İncelemeyi bekleyen bir şey yok.")).toBeInTheDocument();
     });
   });
 
@@ -123,12 +123,12 @@ describe("MemoryView", () => {
     );
 
     render(<MemoryView />);
-    await screen.findByText("Nothing waiting for review.");
+    await screen.findByText("İncelemeyi bekleyen bir şey yok.");
 
-    await userEvent.click(screen.getByRole("button", { name: "New memory" }));
-    await userEvent.type(screen.getByLabelText("Title"), "New fact");
-    await userEvent.type(screen.getByLabelText("Content"), "A fact.");
-    await userEvent.click(screen.getByRole("button", { name: "Create memory" }));
+    await userEvent.click(screen.getByRole("button", { name: "Yeni not" }));
+    await userEvent.type(screen.getByLabelText("Başlık"), "New fact");
+    await userEvent.type(screen.getByLabelText("İçerik"), "A fact.");
+    await userEvent.click(screen.getByRole("button", { name: "Not oluştur" }));
 
     expect(await screen.findByText("New fact")).toBeInTheDocument();
   });
@@ -147,12 +147,12 @@ describe("MemoryView", () => {
 
     render(<MemoryView />);
     await screen.findByText("Coffee");
-    await userEvent.click(screen.getByRole("button", { name: "Edit" }));
+    await userEvent.click(screen.getByRole("button", { name: "Düzenle" }));
 
-    const titleInput = screen.getByLabelText("Title") as HTMLInputElement;
+    const titleInput = screen.getByLabelText("Başlık") as HTMLInputElement;
     await userEvent.clear(titleInput);
     await userEvent.type(titleInput, "Coffee (edited)");
-    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+    await userEvent.click(screen.getByRole("button", { name: "Kaydet" }));
 
     expect(await screen.findByText("Coffee (edited)")).toBeInTheDocument();
   });
@@ -171,10 +171,10 @@ describe("MemoryView", () => {
 
     render(<MemoryView />);
     await screen.findByText("Coffee");
-    await userEvent.click(screen.getByRole("button", { name: "Forget" }));
+    await userEvent.click(screen.getByRole("button", { name: "Unut" }));
 
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Restore" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Geri yükle" })).toBeInTheDocument();
     });
   });
 
@@ -192,10 +192,10 @@ describe("MemoryView", () => {
 
     render(<MemoryView />);
     await screen.findByText("Coffee");
-    await userEvent.click(screen.getByRole("button", { name: "Restore" }));
+    await userEvent.click(screen.getByRole("button", { name: "Geri yükle" }));
 
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Forget" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Unut" })).toBeInTheDocument();
     });
   });
 
@@ -213,7 +213,7 @@ describe("MemoryView", () => {
 
     render(<MemoryView />);
     await screen.findByText("Coffee");
-    await userEvent.click(screen.getByRole("button", { name: "Delete" }));
+    await userEvent.click(screen.getByRole("button", { name: "Sil" }));
 
     await waitFor(() => {
       expect(screen.queryByText("Coffee")).not.toBeInTheDocument();
@@ -229,8 +229,8 @@ describe("MemoryView", () => {
     vi.stubGlobal("open", openMock);
 
     render(<MemoryView />);
-    await screen.findByText("Nothing waiting for review.");
-    await userEvent.click(screen.getByRole("button", { name: "Export" }));
+    await screen.findByText("İncelemeyi bekleyen bir şey yok.");
+    await userEvent.click(screen.getByRole("button", { name: "Dışa aktar" }));
 
     expect(openMock).toHaveBeenCalledWith("/api/memories/export?workspace=w1", "_blank");
   });
@@ -247,12 +247,12 @@ describe("MemoryView", () => {
     );
 
     render(<MemoryView />);
-    await screen.findByText("Nothing waiting for review.");
-    await userEvent.click(screen.getByRole("button", { name: "Export to Obsidian vault" }));
+    await screen.findByText("İncelemeyi bekleyen bir şey yok.");
+    await userEvent.click(screen.getByRole("button", { name: "Obsidian vault'a aktar" }));
 
     expect(
       await screen.findByText(
-        "Request created. It needs approval from another workspace admin before it runs.",
+        "İstek oluşturuldu. Çalışmadan önce başka bir çalışma alanı yöneticisinin onayı gerekiyor.",
       ),
     ).toBeInTheDocument();
   });
@@ -269,8 +269,8 @@ describe("MemoryView", () => {
     );
 
     render(<MemoryView />);
-    await screen.findByText("Nothing waiting for review.");
-    await userEvent.click(screen.getByRole("button", { name: "Export to Obsidian vault" }));
+    await screen.findByText("İncelemeyi bekleyen bir şey yok.");
+    await userEvent.click(screen.getByRole("button", { name: "Obsidian vault'a aktar" }));
 
     expect(await screen.findByText("OBSIDIAN_VAULT_PATH is not configured.")).toBeInTheDocument();
   });
@@ -289,8 +289,8 @@ describe("MemoryView", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     render(<MemoryView />);
-    await screen.findByText("Nothing waiting for review.");
-    const button = screen.getByRole("button", { name: "Export to Obsidian vault" });
+    await screen.findByText("İncelemeyi bekleyen bir şey yok.");
+    const button = screen.getByRole("button", { name: "Obsidian vault'a aktar" });
     await userEvent.click(button);
     // A second click while the first POST is still in flight (Codex review,
     // branch 4: double-clicking created duplicate approval requests).
@@ -299,7 +299,7 @@ describe("MemoryView", () => {
     expect(button).toBeDisabled();
     resolvePost?.(jsonResponse({ id: "req1", tool_name: "vault_export", status: "pending" }, 201));
     await screen.findByText(
-      "Request created. It needs approval from another workspace admin before it runs.",
+      "İstek oluşturuldu. Çalışmadan önce başka bir çalışma alanı yöneticisinin onayı gerekiyor.",
     );
 
     const postCalls = fetchMock.mock.calls.filter(
@@ -324,8 +324,8 @@ describe("MemoryView", () => {
     );
 
     const { rerender } = render(<MemoryView />);
-    await screen.findByText("Nothing waiting for review.");
-    await userEvent.click(screen.getByRole("button", { name: "Export to Obsidian vault" }));
+    await screen.findByText("İncelemeyi bekleyen bir şey yok.");
+    await userEvent.click(screen.getByRole("button", { name: "Obsidian vault'a aktar" }));
 
     // The user switches away before workspace A's POST resolves.
     workspaceHolder.current = { id: "w2", name: "Acme", type: "company", role: "member" };
@@ -338,10 +338,10 @@ describe("MemoryView", () => {
     // button must not be left disabled by A's now-irrelevant request.
     expect(
       screen.queryByText(
-        "Request created. It needs approval from another workspace admin before it runs.",
+        "İstek oluşturuldu. Çalışmadan önce başka bir çalışma alanı yöneticisinin onayı gerekiyor.",
       ),
     ).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Export to Obsidian vault" })).not.toBeDisabled();
+    expect(screen.getByRole("button", { name: "Obsidian vault'a aktar" })).not.toBeDisabled();
   });
 
   it("closes an in-progress create draft on a workspace switch instead of letting it cross into the new workspace", async () => {
@@ -351,19 +351,19 @@ describe("MemoryView", () => {
     );
 
     const { rerender } = render(<MemoryView />);
-    await screen.findByText("Nothing waiting for review.");
+    await screen.findByText("İncelemeyi bekleyen bir şey yok.");
 
-    await userEvent.click(screen.getByRole("button", { name: "New memory" }));
-    await userEvent.type(screen.getByLabelText("Title"), "Workspace A draft");
-    expect(screen.getByLabelText("Title")).toHaveValue("Workspace A draft");
+    await userEvent.click(screen.getByRole("button", { name: "Yeni not" }));
+    await userEvent.type(screen.getByLabelText("Başlık"), "Workspace A draft");
+    expect(screen.getByLabelText("Başlık")).toHaveValue("Workspace A draft");
 
     workspaceHolder.current = { id: "w2", name: "Acme", type: "company", role: "member" };
     rerender(<MemoryView />);
 
     // The draft form must not survive the switch: neither its fields nor
     // the "creating" state should carry over into workspace w2.
-    expect(screen.queryByLabelText("Title")).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "New memory" })).toBeInTheDocument();
+    expect(screen.queryByLabelText("Başlık")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Yeni not" })).toBeInTheDocument();
   });
 
   it("discards a create response for a workspace the user has already switched away from", async () => {
@@ -382,11 +382,11 @@ describe("MemoryView", () => {
     );
 
     const { rerender } = render(<MemoryView />);
-    await screen.findByText("Nothing waiting for review.");
-    await userEvent.click(screen.getByRole("button", { name: "New memory" }));
-    await userEvent.type(screen.getByLabelText("Title"), "Workspace A draft");
-    await userEvent.type(screen.getByLabelText("Content"), "Some content.");
-    await userEvent.click(screen.getByRole("button", { name: "Create memory" }));
+    await screen.findByText("İncelemeyi bekleyen bir şey yok.");
+    await userEvent.click(screen.getByRole("button", { name: "Yeni not" }));
+    await userEvent.type(screen.getByLabelText("Başlık"), "Workspace A draft");
+    await userEvent.type(screen.getByLabelText("İçerik"), "Some content.");
+    await userEvent.click(screen.getByRole("button", { name: "Not oluştur" }));
 
     // The user switches away before workspace A's create call resolves.
     workspaceHolder.current = { id: "w2", name: "Acme", type: "company", role: "member" };

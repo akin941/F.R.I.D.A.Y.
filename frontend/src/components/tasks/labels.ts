@@ -1,17 +1,17 @@
 import type { TaskPriority, TaskStatus } from "@/types/api";
 
 export const TASK_STATUS_LABELS: Record<TaskStatus, string> = {
-  open: "Open",
-  done: "Done",
-  cancelled: "Cancelled",
+  open: "Açık",
+  done: "Tamamlandı",
+  cancelled: "İptal edildi",
 };
 
 export const TASK_STATUSES: TaskStatus[] = ["open", "done", "cancelled"];
 
 export const TASK_PRIORITY_LABELS: Record<TaskPriority, string> = {
-  low: "Low",
+  low: "Düşük",
   normal: "Normal",
-  high: "High",
+  high: "Yüksek",
 };
 
 export const TASK_PRIORITIES: TaskPriority[] = ["low", "normal", "high"];

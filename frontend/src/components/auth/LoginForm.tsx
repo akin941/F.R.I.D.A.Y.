@@ -27,9 +27,9 @@ export function LoginForm() {
       router.refresh();
     } catch (err) {
       if (err instanceof ApiError) {
-        setFormError(err.body.detail ?? "Invalid email or password.");
+        setFormError(err.body.detail ?? "E-posta veya parola hatalı.");
       } else {
-        setFormError("Something went wrong. Please try again.");
+        setFormError("Bir şeyler ters gitti. Lütfen tekrar deneyin.");
       }
     } finally {
       setSubmitting(false);
@@ -39,7 +39,7 @@ export function LoginForm() {
   return (
     <Card className="w-full max-w-sm">
       <CardHeader>
-        <CardTitle>Sign in to Jarvis</CardTitle>
+        <CardTitle>Jarvis'e giriş yap</CardTitle>
       </CardHeader>
       <CardContent>
         <form className="flex flex-col gap-4" onSubmit={handleSubmit}>
@@ -49,7 +49,7 @@ export function LoginForm() {
             </Alert>
           ) : null}
           <div className="flex flex-col gap-2">
-            <Label htmlFor="email">Email</Label>
+            <Label htmlFor="email">E-posta</Label>
             <Input
               id="email"
               type="email"
@@ -60,7 +60,7 @@ export function LoginForm() {
             />
           </div>
           <div className="flex flex-col gap-2">
-            <Label htmlFor="password">Password</Label>
+            <Label htmlFor="password">Parola</Label>
             <Input
               id="password"
               type="password"
@@ -71,12 +71,12 @@ export function LoginForm() {
             />
           </div>
           <Button type="submit" disabled={submitting}>
-            {submitting ? "Signing in…" : "Sign in"}
+            {submitting ? "Giriş yapılıyor…" : "Giriş yap"}
           </Button>
           <p className="text-sm text-muted-foreground">
-            No account yet?{" "}
+            Henüz hesabın yok mu?{" "}
             <Link href="/signup" className="underline underline-offset-4">
-              Sign up
+              Kayıt ol
             </Link>
           </p>
         </form>

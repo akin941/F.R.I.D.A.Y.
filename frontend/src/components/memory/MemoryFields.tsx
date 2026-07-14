@@ -26,7 +26,7 @@ export function MemoryFields({
   return (
     <div className="flex flex-col gap-3">
       <div className="flex flex-col gap-2">
-        <Label htmlFor={`${idPrefix}-title`}>Title</Label>
+        <Label htmlFor={`${idPrefix}-title`}>Başlık</Label>
         <Input
           id={`${idPrefix}-title`}
           value={value.title}
@@ -35,7 +35,7 @@ export function MemoryFields({
         />
       </div>
       <div className="flex flex-col gap-2">
-        <Label htmlFor={`${idPrefix}-content`}>Content</Label>
+        <Label htmlFor={`${idPrefix}-content`}>İçerik</Label>
         <Textarea
           id={`${idPrefix}-content`}
           value={value.content}
@@ -45,7 +45,7 @@ export function MemoryFields({
       </div>
       <div className="flex gap-3">
         <div className="flex flex-1 flex-col gap-2">
-          <Label htmlFor={`${idPrefix}-type`}>Type</Label>
+          <Label htmlFor={`${idPrefix}-type`}>Tür</Label>
           <Select
             value={value.memory_type}
             onValueChange={(memory_type) =>
@@ -65,7 +65,7 @@ export function MemoryFields({
           </Select>
         </div>
         <div className="flex flex-1 flex-col gap-2">
-          <Label htmlFor={`${idPrefix}-sensitivity`}>Sensitivity</Label>
+          <Label htmlFor={`${idPrefix}-sensitivity`}>Gizlilik</Label>
           <Select
             value={value.sensitivity}
             onValueChange={(sensitivity) =>

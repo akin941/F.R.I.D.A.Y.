@@ -31,19 +31,17 @@ export function MessageList({ messages }: { messages: ChatMessageView[] }) {
             {message.content}
             {message.status === "partial" || message.status === "failed" ? (
               <span className="text-xs opacity-70">
-                {message.status === "failed" ? "Failed" : "Partial response"}
+                {message.status === "failed" ? "Başarısız" : "Yarım yanıt"}
               </span>
             ) : null}
             {message.role === "assistant" && (message.memoriesUsed?.length ?? 0) > 0 ? (
               <span className="text-xs opacity-70">
-                Memory context: {message.memoriesUsed?.length}{" "}
-                {message.memoriesUsed?.length === 1 ? "memory" : "memories"}
+                Hafıza bağlamı: {message.memoriesUsed?.length} not
               </span>
             ) : null}
             {message.role === "assistant" && (message.chunksUsed?.length ?? 0) > 0 ? (
               <span className="text-xs opacity-70">
-                Knowledge context: {message.chunksUsed?.length}{" "}
-                {message.chunksUsed?.length === 1 ? "chunk" : "chunks"}
+                Bilgi bağlamı: {message.chunksUsed?.length} parça
               </span>
             ) : null}
           </div>

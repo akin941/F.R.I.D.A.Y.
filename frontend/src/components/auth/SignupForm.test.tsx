@@ -23,11 +23,11 @@ describe("SignupForm", () => {
     );
 
     render(<SignupForm />);
-    await userEvent.type(screen.getByLabelText("Email"), "bob@test.dev");
-    await userEvent.type(screen.getByLabelText("Password"), "Str0ngDevPass!42");
-    await userEvent.click(screen.getByRole("button", { name: /sign up/i }));
+    await userEvent.type(screen.getByLabelText("E-posta"), "bob@test.dev");
+    await userEvent.type(screen.getByLabelText("Parola"), "Str0ngDevPass!42");
+    await userEvent.click(screen.getByRole("button", { name: /kayıt ol/i }));
 
-    expect(await screen.findByRole("alert")).toHaveTextContent(/signup is disabled/i);
+    expect(await screen.findByRole("alert")).toHaveTextContent(/kayıt kapalı/i);
   });
 
   it("shows a field-level error for a duplicate email", async () => {
@@ -42,9 +42,9 @@ describe("SignupForm", () => {
     );
 
     render(<SignupForm />);
-    await userEvent.type(screen.getByLabelText("Email"), "bob@test.dev");
-    await userEvent.type(screen.getByLabelText("Password"), "Str0ngDevPass!42");
-    await userEvent.click(screen.getByRole("button", { name: /sign up/i }));
+    await userEvent.type(screen.getByLabelText("E-posta"), "bob@test.dev");
+    await userEvent.type(screen.getByLabelText("Parola"), "Str0ngDevPass!42");
+    await userEvent.click(screen.getByRole("button", { name: /kayıt ol/i }));
 
     expect(await screen.findByText("A user with this email already exists.")).toBeInTheDocument();
   });
@@ -61,9 +61,9 @@ describe("SignupForm", () => {
     );
 
     render(<SignupForm />);
-    await userEvent.type(screen.getByLabelText("Email"), "bob@test.dev");
-    await userEvent.type(screen.getByLabelText("Password"), "Str0ngDevPass!42");
-    await userEvent.click(screen.getByRole("button", { name: /sign up/i }));
+    await userEvent.type(screen.getByLabelText("E-posta"), "bob@test.dev");
+    await userEvent.type(screen.getByLabelText("Parola"), "Str0ngDevPass!42");
+    await userEvent.click(screen.getByRole("button", { name: /kayıt ol/i }));
 
     await vi.waitFor(() => expect(push).toHaveBeenCalledWith("/chat"));
   });

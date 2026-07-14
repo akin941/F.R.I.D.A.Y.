@@ -47,8 +47,8 @@ export function MemoryCard({
     } catch (err) {
       setError(
         err instanceof ApiError
-          ? (err.body.detail ?? "That action could not be completed.")
-          : "Something went wrong. Please try again.",
+          ? (err.body.detail ?? "İşlem tamamlanamadı.")
+          : "Bir şeyler ters gitti. Lütfen tekrar deneyin.",
       );
       return undefined;
     } finally {
@@ -98,7 +98,7 @@ export function MemoryCard({
     return (
       <Card>
         <CardHeader>
-          <CardTitle>Edit memory</CardTitle>
+          <CardTitle>Notu düzenle</CardTitle>
         </CardHeader>
         <form onSubmit={handleSaveEdit}>
           <CardContent className="flex flex-col gap-3">
@@ -119,10 +119,10 @@ export function MemoryCard({
               }}
               disabled={busy}
             >
-              Cancel
+              İptal
             </Button>
             <Button type="submit" disabled={busy}>
-              {busy ? "Saving…" : "Save"}
+              {busy ? "Kaydediliyor…" : "Kaydet"}
             </Button>
           </CardFooter>
         </form>
@@ -158,34 +158,34 @@ export function MemoryCard({
         {variant === "pending" ? (
           <>
             <Button variant="outline" size="sm" onClick={() => setEditing(true)} disabled={busy}>
-              Edit
+              Düzenle
             </Button>
             <Button variant="outline" size="sm" onClick={() => void handleReject()} disabled={busy}>
-              Reject
+              Reddet
             </Button>
             <Button size="sm" onClick={() => void handleApprove()} disabled={busy}>
-              Approve
+              Onayla
             </Button>
           </>
         ) : null}
         {variant === "list" && memory.status === "approved" ? (
           <>
             <Button variant="outline" size="sm" onClick={() => setEditing(true)} disabled={busy}>
-              Edit
+              Düzenle
             </Button>
             <Button variant="outline" size="sm" onClick={() => void handleForget()} disabled={busy}>
-              Forget
+              Unut
             </Button>
           </>
         ) : null}
         {variant === "list" && memory.status === "archived" ? (
           <Button variant="outline" size="sm" onClick={() => void handleRestore()} disabled={busy}>
-            Restore
+            Geri yükle
           </Button>
         ) : null}
         {variant === "list" && memory.status === "rejected" ? (
           <Button variant="destructive" size="sm" onClick={() => void handleDelete()} disabled={busy}>
-            Delete
+            Sil
           </Button>
         ) : null}
       </CardFooter>

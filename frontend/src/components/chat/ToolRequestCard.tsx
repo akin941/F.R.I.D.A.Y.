@@ -61,8 +61,8 @@ export function ToolRequestCard({
     } catch (err) {
       setError(
         err instanceof ApiError
-          ? (err.body.detail ?? "That request could not be created.")
-          : "Something went wrong. Please try again.",
+          ? (err.body.detail ?? "İstek oluşturulamadı.")
+          : "Bir şeyler ters gitti. Lütfen tekrar deneyin.",
       );
     } finally {
       busyRef.current = false;
@@ -86,7 +86,7 @@ export function ToolRequestCard({
   return (
     <Card className="m-4" data-testid="tool-request-card">
       <CardHeader>
-        <CardTitle>Looks like a tool request</CardTitle>
+        <CardTitle>Bu bir araç isteği gibi görünüyor</CardTitle>
       </CardHeader>
       <CardContent className="flex flex-col gap-1">
         {error ? (
@@ -96,15 +96,15 @@ export function ToolRequestCard({
         ) : null}
         <p className="text-sm font-medium">{draft.toolName}</p>
         <p className="text-sm text-muted-foreground">
-          This requires another workspace admin&apos;s approval before it runs.
+          Çalışmadan önce başka bir çalışma alanı yöneticisinin onayı gerekiyor.
         </p>
       </CardContent>
       <CardFooter className="flex justify-end gap-2">
         <Button variant="outline" size="sm" onClick={onDiscard} disabled={busy}>
-          Discard
+          Vazgeç
         </Button>
         <Button size="sm" onClick={() => void handleConfirm()} disabled={busy}>
-          {busy ? "Requesting…" : "Confirm request"}
+          {busy ? "İsteniyor…" : "İsteği onayla"}
         </Button>
       </CardFooter>
     </Card>
