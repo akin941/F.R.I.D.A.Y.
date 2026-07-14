@@ -5,6 +5,24 @@ import type { Page } from "@playwright/test";
 // no network call, so this string is a safe, stable assertion target.
 const FAKE_REPLY = "Merhaba, ben Jarvis. MVP 1 gateway üzerinden çalışıyorum.";
 
+// MVP 9 §5/§6: the PAT/Telegram sections below talk to the real backend
+// directly (Playwright's `request` fixture, not `page.evaluate` fetch) --
+// a PAT is meant to be usable by a standalone HTTP client with no browser
+// session at all, and a webhook call is never made by our own frontend in
+// the first place. `page.evaluate` fetches stay same-origin (the BFF, port
+// 3001) throughout this file; only these two new sections cross to the raw
+// backend origin, which is also why they use `request.*` instead --
+// `page.evaluate`'s fetch runs inside the real browser page and would be
+// subject to CORS against a different origin, while `request.*` is a plain
+// Node HTTP client with no such restriction.
+const BACKEND_API_URL = process.env.BACKEND_API_URL ?? "http://127.0.0.1:8001/api/v1";
+// Matches the fixture value this repo's compose.yml/ci.yml set for the e2e
+// environment -- a deliberately fake, non-secret value (MVP9 §4's webhook
+// auth exists to prove authenticity, not to hide anything in a dev/test
+// stack that already runs an insecure Django secret key and a fake LLM
+// provider).
+const TELEGRAM_WEBHOOK_SECRET = process.env.TELEGRAM_WEBHOOK_SECRET ?? "e2e-fixture-webhook-secret";
+
 // Clicking an agent's goal card on the list view is an in-page, client-side-
 // only navigation (setSelectedAgentId -- no URL change, see AgentsView.tsx).
 // Observed to be occasionally flaky under Playwright's automated click even
@@ -31,6 +49,7 @@ const FAKE_MEMORY_TITLE = "Fake extracted preference";
 
 test("signup, chat with the fake provider, curated memory, Today, logout, route guard", async ({
   page,
+  request,
 }) => {
   // Above the config default (45s): this path waits out two SSE replies, an
   // extraction-job round trip (dispatch -> worker pickup -> gateway call ->
@@ -52,8 +71,12 @@ test("signup, chat with the fake provider, curated memory, Today, logout, route 
   // in-flight poll wait, plus the kill-switch path's own cancel + orphaned-
   // approval check -- bumped to 260s. MVP 8's skill-matched agent lifecycle
   // (goal -> agent.skill_match -> read -> tool_request approval, no
-  // task_draft) adds one more full round trip -- bumped to 300s.
-  test.setTimeout(300_000);
+  // task_draft) adds one more full round trip -- bumped to 300s. MVP 9's
+  // PAT/Telegram section adds a raw-backend chat round trip (no reload-poll
+  // needed, `request.post` already waits for the full SSE stream) plus two
+  // Telegram webhook-driven reload-poll waits (link-status, then a relayed
+  // message's persistence) -- bumped to 340s.
+  test.setTimeout(340_000);
 
   const email = `e2e-${Date.now()}@jarvis.test`;
   const password = "Sup3rSecret!2026";
@@ -588,6 +611,174 @@ test("signup, chat with the fake provider, curated memory, Today, logout, route 
   await openAgentDetail(page, KILL_SWITCH_GOAL);
   await expect(page.getByText("Cancelled", { exact: true })).toBeVisible({ timeout: 10_000 });
   await expect(page.getByRole("button", { name: "Cancel agent" })).not.toBeVisible();
+
+  // PAT/CLI channel happy path (MVP 9 §1/§2): a PAT-authenticated request
+  // hits the REAL backend directly, with no browser session at all -- this
+  // is the actual point of the channel, so it's the one thing this section
+  // must prove that no earlier one does. Minting the token is still a web/
+  // JWT-only action (brief §1), so that one call goes through the BFF via
+  // the existing browser session; everything after uses `request.*`
+  // against BACKEND_API_URL with only the raw `jpat_...` bearer token.
+  const e2eWorkspaceId = await page.evaluate(async () => {
+    const workspaces = (await (await fetch("/api/workspaces")).json()) as { id: string }[];
+    const workspace = workspaces[0];
+    if (!workspace) throw new Error("No workspace found for the freshly signed-up user.");
+    return workspace.id;
+  });
+
+  const mintResponse = await page.evaluate(async (workspaceId) => {
+    const response = await fetch("/api/auth/tokens", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ workspace: workspaceId, name: "e2e cli" }),
+    });
+    return { status: response.status, body: (await response.json()) as { token?: string } };
+  }, e2eWorkspaceId);
+  expect(mintResponse.status).toBe(201);
+  const patToken = mintResponse.body.token;
+  if (!patToken) throw new Error("Token mint response had no raw `token` field.");
+  const patAuthHeader = { Authorization: `Bearer ${patToken}` };
+
+  // No `workspace` in the body at all -- implied by the bound credential
+  // (core.channels.scoped_for_actor), proving the round-3 P2 fix actually
+  // works end-to-end, not just against a mocked request in a unit test.
+  const createConvResponse = await request.post(`${BACKEND_API_URL}/ai/conversations`, {
+    headers: patAuthHeader,
+    data: {},
+  });
+  expect(createConvResponse.ok()).toBe(true);
+  const patConversationId = ((await createConvResponse.json()) as { id: string }).id;
+
+  const patMessageResponse = await request.post(
+    `${BACKEND_API_URL}/ai/conversations/${patConversationId}/messages`,
+    { headers: patAuthHeader, data: { content: "Hello from the CLI channel" } },
+  );
+  expect(patMessageResponse.ok()).toBe(true);
+
+  const patMessages = (await (
+    await request.get(`${BACKEND_API_URL}/ai/conversations/${patConversationId}/messages`, {
+      headers: patAuthHeader,
+    })
+  ).json()) as { role: string; content: string }[];
+  expect(patMessages.some((m) => m.role === "assistant" && m.content === FAKE_REPLY)).toBe(true);
+
+  // Channel restriction on decisions (MVP 9 §1, ADR-004) -- this MVP's core
+  // safety property per the brief's own Risks section, so it's the one
+  // assertion in this whole file that's worth proving against the real
+  // backend rather than only in a unit test: a PAT-authenticated actor may
+  // still PROPOSE a tool_request (creation is unchanged, brief's own
+  // "Out of scope" note) but must never be able to DECIDE one.
+  const patApprovalCreateResponse = await request.post(`${BACKEND_API_URL}/approvals/requests`, {
+    headers: patAuthHeader,
+    data: { tool_name: "vault_export", payload: {} },
+  });
+  expect(patApprovalCreateResponse.ok()).toBe(true);
+  const patApprovalRequestId = ((await patApprovalCreateResponse.json()) as { id: string }).id;
+
+  const patApproveResponse = await request.post(
+    `${BACKEND_API_URL}/approvals/requests/${patApprovalRequestId}/approve`,
+    { headers: patAuthHeader },
+  );
+  expect(patApproveResponse.status()).toBe(403);
+
+  // The same request, decided over the web channel instead -- proving the
+  // 403 above is a channel restriction, not a general failure of this
+  // request or account.
+  const webApproveStatus = await page.evaluate(async (requestId) => {
+    const response = await fetch(`/api/approvals/requests/${requestId}/approve`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+    });
+    return response.status;
+  }, patApprovalRequestId);
+  expect(webApproveStatus).toBe(200);
+
+  // Telegram happy path (MVP 9 §4): a webhook POST is the one genuinely
+  // external-facing surface this whole file exercises -- Telegram is not
+  // our own frontend, so this goes through `request.*` against the raw
+  // backend, with the shared-secret header a real Telegram delivery would
+  // carry. `process_telegram_update`'s reply-sending step still makes one
+  // real, bounded (10s timeout, branch-3-round-4 fix), fast-failing outbound
+  // call to api.telegram.org (the fixture bot token isn't real) -- accepted
+  // deliberately (see docs/integrations/README.md) since the state this
+  // section actually asserts on (the link, the persisted messages) is fully
+  // committed before that call ever happens; this webhook response's own
+  // status is intentionally not asserted on for that reason.
+  const telegramLinkCodeResponse = await page.evaluate(async (workspaceId) => {
+    const response = await fetch("/api/integrations/telegram/link-code", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ workspace: workspaceId }),
+    });
+    return (await response.json()) as { code: string };
+  }, e2eWorkspaceId);
+
+  const conversationsBeforeLink = (await (
+    await request.get(`${BACKEND_API_URL}/ai/conversations?workspace=${e2eWorkspaceId}`, {
+      headers: patAuthHeader,
+    })
+  ).json()) as { id: string }[];
+
+  const telegramChatId = Date.now();
+  await request
+    .post(`${BACKEND_API_URL}/integrations/telegram/webhook`, {
+      headers: { "X-Telegram-Bot-Api-Secret-Token": TELEGRAM_WEBHOOK_SECRET },
+      data: {
+        update_id: 1,
+        message: {
+          chat: { id: telegramChatId, type: "private" },
+          text: `/link ${telegramLinkCodeResponse.code}`,
+        },
+      },
+    })
+    .catch(() => undefined);
+
+  await expect(async () => {
+    const status = (await (
+      await page.evaluate(async (workspaceId) => {
+        const response = await fetch(
+          `/api/integrations/telegram/link-status?workspace=${workspaceId}`,
+        );
+        return { status: response.status, body: await response.json() };
+      }, e2eWorkspaceId)
+    )) as { body: { linked: boolean; chat_id: string | null } };
+    expect(status.body.linked).toBe(true);
+    expect(status.body.chat_id).toBe(String(telegramChatId));
+  }).toPass({ timeout: 20_000 });
+
+  const conversationsAfterLink = (await (
+    await request.get(`${BACKEND_API_URL}/ai/conversations?workspace=${e2eWorkspaceId}`, {
+      headers: patAuthHeader,
+    })
+  ).json()) as { id: string }[];
+  const beforeIds = new Set(conversationsBeforeLink.map((c) => c.id));
+  const linkedConversationId = conversationsAfterLink.find((c) => !beforeIds.has(c.id))?.id;
+  if (!linkedConversationId) {
+    throw new Error("Linking Telegram did not create a new Conversation.");
+  }
+
+  await request
+    .post(`${BACKEND_API_URL}/integrations/telegram/webhook`, {
+      headers: { "X-Telegram-Bot-Api-Secret-Token": TELEGRAM_WEBHOOK_SECRET },
+      data: {
+        update_id: 2,
+        message: { chat: { id: telegramChatId, type: "private" }, text: "Hello from Telegram" },
+      },
+    })
+    .catch(() => undefined);
+
+  await expect(async () => {
+    const messages = (await (
+      await request.get(
+        `${BACKEND_API_URL}/ai/conversations/${linkedConversationId}/messages`,
+        { headers: patAuthHeader },
+      )
+    ).json()) as { role: string; content: string }[];
+    expect(messages.some((m) => m.role === "user" && m.content === "Hello from Telegram")).toBe(
+      true,
+    );
+    expect(messages.some((m) => m.role === "assistant" && m.content === FAKE_REPLY)).toBe(true);
+  }).toPass({ timeout: 20_000 });
 
   await page.getByRole("button", { name: "Log out" }).click();
   await expect(page).toHaveURL(/\/login$/);

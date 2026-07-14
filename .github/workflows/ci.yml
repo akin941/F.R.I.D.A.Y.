@@ -118,6 +118,13 @@ jobs:
       # workspace member to be the decider, unlike a real deployment where
       # requester != decider is enforced with no exception.
       DEV_ALLOW_SELF_APPROVAL: "true"
+      # DEV/TEST ONLY fixture values (MVP 9 §4) -- same reasoning as
+      # compose.yml's identical block: not real Telegram credentials, just
+      # non-empty strings the e2e Telegram section (smoke.e2e.ts) needs to
+      # get past TelegramWebhookView's fail-closed auth check. Must match
+      # smoke.e2e.ts's TELEGRAM_WEBHOOK_SECRET default exactly.
+      TELEGRAM_BOT_TOKEN: "e2e-fixture-bot-token"
+      TELEGRAM_WEBHOOK_SECRET: "e2e-fixture-webhook-secret"
       # A fixed path this job's own env shares between the backend process
       # (started below) and the frontend/Playwright process (started later
       # in this same job) -- global-setup.ts creates the directory before
