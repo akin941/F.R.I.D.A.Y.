@@ -254,3 +254,31 @@ export interface ApiAgent {
 export interface ApiAgentDetail extends ApiAgent {
   steps: ApiAgentStep[];
 }
+
+// --- Integrations (MVP 9) ---
+
+export interface ApiPersonalAccessToken {
+  id: string;
+  name: string;
+  workspace: string;
+  last_used_at: string | null;
+  revoked_at: string | null;
+  created_at: string;
+}
+
+// Only present on the create response, alongside every ApiPersonalAccessToken
+// field above -- the raw token appears exactly once, ever (accounts/views.py).
+export interface ApiPersonalAccessTokenCreated extends ApiPersonalAccessToken {
+  token: string;
+}
+
+export interface ApiTelegramLinkCode {
+  code: string;
+  expires_at: string;
+}
+
+export interface ApiTelegramLinkStatus {
+  linked: boolean;
+  chat_id: string | null;
+  linked_at: string | null;
+}
