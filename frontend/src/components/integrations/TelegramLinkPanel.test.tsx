@@ -98,6 +98,41 @@ describe("TelegramLinkPanel", () => {
     expect(await screen.findByText(/Linked to chat 222/)).toBeInTheDocument();
   });
 
+  it("does not get stuck loading if Unlink's reload arrives after the workspace was switched away", async () => {
+    let resolveDelete: (response: Response) => void = () => {};
+    const deletePromise = new Promise<Response>((resolve) => {
+      resolveDelete = resolve;
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string, init?: RequestInit) => {
+        if (init?.method === "DELETE") return deletePromise;
+        if (input.includes("workspace=w2")) {
+          return jsonResponse({ linked: true, chat_id: "333", linked_at: "2026-07-13T00:00:00Z" });
+        }
+        return jsonResponse({ linked: true, chat_id: "999", linked_at: "2026-07-13T00:00:00Z" });
+      }),
+    );
+
+    render(<TelegramLinkPanel />);
+    await screen.findByText(/Linked to chat 999/);
+
+    await userEvent.click(screen.getByRole("button", { name: "Unlink" }));
+
+    // Switch workspace while the DELETE for w1 is still in flight.
+    await userEvent.click(screen.getByRole("combobox", { name: "Telegram workspace" }));
+    await userEvent.click(await screen.findByRole("option", { name: "Acme" }));
+    expect(await screen.findByText(/Linked to chat 333/)).toBeInTheDocument();
+
+    // The stale w1 unlink now resolves -- proves the round-3 P2 fix: its
+    // follow-up reload must not resurrect the loading skeleton for w2,
+    // which already finished loading its own (unrelated) status.
+    resolveDelete(new Response(null, { status: 204 }));
+    await waitFor(() => {
+      expect(screen.getByText(/Linked to chat 333/)).toBeInTheDocument();
+    });
+  });
+
   it("discards a link-code response that arrives after the workspace was switched away", async () => {
     let resolvePost: (response: Response) => void = () => {};
     const postPromise = new Promise<Response>((resolve) => {

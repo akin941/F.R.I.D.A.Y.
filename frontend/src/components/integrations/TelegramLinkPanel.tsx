@@ -118,12 +118,22 @@ export function TelegramLinkPanel() {
   }
 
   async function handleUnlink() {
+    const requestedWorkspaceId = workspaceId;
     setUnlinking(true);
     setUnlinkError(null);
     try {
-      await apiDelete(`/api/integrations/telegram/link?workspace=${encodeURIComponent(workspaceId)}`);
-      await loadStatus(workspaceId);
+      await apiDelete(
+        `/api/integrations/telegram/link?workspace=${encodeURIComponent(requestedWorkspaceId)}`,
+      );
+      // Same staleness guard as handleRequestCode: if the picker moved on
+      // while the DELETE was in flight, loadStatus(requestedWorkspaceId)
+      // would set `loading` true for a workspace that's no longer selected
+      // and then, quite reasonably, refuse to clear it again -- leaving the
+      // panel stuck on its skeleton (Codex review, branch 4 round 3).
+      if (workspaceIdRef.current !== requestedWorkspaceId) return;
+      await loadStatus(requestedWorkspaceId);
     } catch (err) {
+      if (workspaceIdRef.current !== requestedWorkspaceId) return;
       setUnlinkError(
         err instanceof ApiError
           ? (err.body.detail ?? "That chat could not be unlinked.")
