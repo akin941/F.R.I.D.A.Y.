@@ -47,6 +47,7 @@ INSTALLED_APPS = [
     # (Django calls ready() in INSTALLED_APPS order) -- MVP 8 §2, brief.
     "skills",
     "agents",
+    "integrations",
 ]
 
 AUTH_USER_MODEL = "accounts.User"

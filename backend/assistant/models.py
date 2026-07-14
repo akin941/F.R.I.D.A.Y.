@@ -69,6 +69,11 @@ class Message(WorkspaceScopedModel, TimestampedModel):
         TASK_DRAFT = "task_draft"
         TOOL_REQUEST = "tool_request"
 
+    class Channel(models.TextChoices):
+        WEB = "web"
+        CLI = "cli"
+        TELEGRAM = "telegram"
+
     conversation = models.ForeignKey(
         Conversation, on_delete=models.CASCADE, related_name="messages"
     )
@@ -110,6 +115,15 @@ class Message(WorkspaceScopedModel, TimestampedModel):
     # through their own existing surfaces (/tasks, /approvals), not linked
     # back to this row.
     intent_payload = models.JSONField(default=dict, blank=True)
+    # Which channel this turn arrived over (MVP 9 §1) -- stamped on BOTH the
+    # user message and the assistant's reply for the same turn, resolved
+    # once from core.channels.request_channel(request) and threaded through
+    # the one existing call chain (assistant.views -> build_gateway_stream/
+    # stream_assistant_reply -> _persist_assistant_message), never
+    # independently re-derived for the reply. Immutable once written; blank
+    # default for every pre-MVP-9 row reads as "web" via the field default,
+    # not a distinct unknown value.
+    channel = models.CharField(max_length=20, choices=Channel.choices, default=Channel.WEB)
 
     class Meta:
         ordering = ["created_at"]

@@ -1,6 +1,8 @@
+from django.conf import settings
 from django.contrib.auth.models import AbstractBaseUser, BaseUserManager, PermissionsMixin
 from django.db import models
 
+from core.db import WorkspaceScopedModel
 from core.models import TimestampedModel
 
 
@@ -50,3 +52,33 @@ class User(TimestampedModel, AbstractBaseUser, PermissionsMixin):
 
     def __str__(self):
         return self.email
+
+
+class PersonalAccessToken(WorkspaceScopedModel, TimestampedModel):
+    """CLI bearer credential (MVP 9 §1) — the CLI's equivalent of the JWT
+    `AuditedLoginView` already mints. Bound to exactly one workspace
+    (`workspace`, from `WorkspaceScopedModel`) for its lifetime; switching
+    workspaces means revoking and reminting, never an in-place change. Lives
+    here, not in `integrations`, because `assistant`/`agents`/`approvals`
+    need to import `PersonalAccessTokenAuthentication` directly to allowlist
+    it, and routing that through `accounts` (already an open dependency for
+    all of them via `User` FKs) avoids an `integrations <-> approvals`
+    import cycle those apps otherwise have no reason to need.
+    """
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="personal_access_tokens"
+    )
+    name = models.CharField(max_length=255)
+    # sha256 hex digest of the raw token; the raw value is never stored,
+    # returned exactly once in the mint response.
+    token_hash = models.CharField(max_length=64, unique=True)
+    last_used_at = models.DateTimeField(null=True, blank=True)
+    # Soft-revoke, never deleted — audit trail of what credentials existed.
+    revoked_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"{self.name} ({self.user_id})"

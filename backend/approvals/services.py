@@ -43,6 +43,7 @@ from django.utils import timezone
 from approvals.models import ApprovalRequest
 from audit.models import AuditLog
 from audit.services import record_audit
+from core.channels import CHANNEL_WEB
 from tools.registry import ToolValidationError
 from workspaces.models import WorkspaceMember
 
@@ -148,6 +149,18 @@ def _check_requester_not_decider(approval_request, actor):
         raise ApprovalPermissionDenied("The requester cannot decide their own request.")
 
 
+def _check_channel_is_web(channel):
+    """No approvals from low-trust channels (MVP 9 §1,
+    docs/integrations/README.md) -- default-deny by channel identity, not
+    by denylisting known-untrusted channels: only CHANNEL_WEB is ever
+    accepted for a decision, so a future channel this check doesn't yet
+    know about is untrusted by default until someone deliberately extends
+    this one check (the safer failure direction for a hard rule ADR-004
+    says no configuration may relax)."""
+    if channel != CHANNEL_WEB:
+        raise ApprovalPermissionDenied("Decisions are not permitted over this channel.")
+
+
 def _record(approval_request, action, actor, **metadata):
     # Audit metadata carries ids/status/tool_name only -- never `payload`,
     # which is not unconditionally safe to log verbatim (a future tool's
@@ -190,19 +203,24 @@ def create_request(*, workspace, actor, tool_name, payload=None):
     return approval_request
 
 
-def approve_request(*, approval_request, actor):
+def approve_request(*, approval_request, actor, channel=CHANNEL_WEB):
     """Approving also triggers the gated tool: `tool.create_execution()`
     runs and commits INSIDE this same transaction -- before the broker is
     ever contacted -- so a durable execution row exists even if the
     publish that follows never lands (durable-before-dispatch, brief §2).
     `tool.dispatch()` is registered via `transaction.on_commit`, so it only
-    ever runs after this transaction has actually committed."""
+    ever runs after this transaction has actually committed.
+
+    `channel` (MVP 9 §1) defaults to CHANNEL_WEB for backward-compatible
+    direct callers (e.g. tests); `approvals.views` always passes the
+    request's actual channel explicitly."""
     with transaction.atomic():
         approval_request = _locked(approval_request, actor)
         _require(
             get_role(actor, approval_request.workspace) in _CURATOR_ROLES, "approving this request"
         )
         _check_requester_not_decider(approval_request, actor)
+        _check_channel_is_web(channel)
         expired = _expire_if_stale(approval_request)
         if not expired:
             if approval_request.status != ApprovalRequest.Status.PENDING:
@@ -223,13 +241,14 @@ def approve_request(*, approval_request, actor):
     return approval_request
 
 
-def reject_request(*, approval_request, actor):
+def reject_request(*, approval_request, actor, channel=CHANNEL_WEB):
     with transaction.atomic():
         approval_request = _locked(approval_request, actor)
         _require(
             get_role(actor, approval_request.workspace) in _CURATOR_ROLES, "rejecting this request"
         )
         _check_requester_not_decider(approval_request, actor)
+        _check_channel_is_web(channel)
         expired = _expire_if_stale(approval_request)
         if not expired:
             if approval_request.status != ApprovalRequest.Status.PENDING:

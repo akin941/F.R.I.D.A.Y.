@@ -1,7 +1,7 @@
 from django.contrib.auth.password_validation import validate_password
 from rest_framework import serializers
 
-from accounts.models import User
+from accounts.models import PersonalAccessToken, User
 
 
 class SignupSerializer(serializers.Serializer):
@@ -31,3 +31,17 @@ class WorkspaceSummarySerializer(serializers.Serializer):
     name = serializers.CharField()
     type = serializers.CharField()
     role = serializers.CharField()
+
+
+class PersonalAccessTokenCreateSerializer(serializers.Serializer):
+    workspace = serializers.UUIDField()
+    name = serializers.CharField(max_length=255)
+
+
+class PersonalAccessTokenSerializer(serializers.ModelSerializer):
+    # Never includes the raw token or its hash — the raw value is returned
+    # exactly once, in the mint response only (see views.py).
+    class Meta:
+        model = PersonalAccessToken
+        fields = ["id", "name", "workspace", "last_used_at", "revoked_at", "created_at"]
+        read_only_fields = fields

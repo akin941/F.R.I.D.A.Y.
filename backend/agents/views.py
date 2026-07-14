@@ -9,8 +9,10 @@ import uuid
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
+from rest_framework.settings import api_settings
 from rest_framework.views import APIView
 
+from accounts.authentication import PersonalAccessTokenAuthentication
 from agents.execution import (
     AgentInvalidTransition,
     AgentPermissionDenied,
@@ -26,9 +28,20 @@ from agents.serializers import (
     AgentSerializer,
     AgentStepSerializer,
 )
+from core.channels import is_low_trust, scoped_for_actor
 from tasks.serializers import TaskSerializer
 from tasks.services import InvalidTransition, TaskPermissionDenied
 from workspaces.models import Workspace
+
+# Allowlisted for PAT auth (MVP 9 §1/§2) -- AgentStepConfirmView/
+# AgentStepDiscardView are deliberately NOT allowlisted (out of this MVP's
+# scope; only goal-entry/list/detail/cancel are named in the brief).
+# PersonalAccessTokenAuthentication MUST precede JWTAuthentication -- see
+# accounts/authentication.py's docstring for why.
+_PAT_ALLOWLISTED_AUTHENTICATION_CLASSES = [
+    PersonalAccessTokenAuthentication,
+    *api_settings.DEFAULT_AUTHENTICATION_CLASSES,
+]
 
 
 def _service_error_response(exc):
@@ -46,20 +59,26 @@ def _get_step(request, step_id):
 
 def _resolve_workspace(request):
     """Validate the `workspace` query param and return (workspace, error).
-    Mirrors `tasks.views`/`approvals.views`'s identical helper."""
+    Mirrors `tasks.views`/`approvals.views`'s identical helper. A CLI/PAT
+    request has no workspace to supply -- the presence requirement is
+    skipped entirely for a low-trust channel, since scoped_for_actor()
+    forces the bound workspace regardless."""
     workspace_id = request.query_params.get("workspace")
     if not workspace_id:
-        return None, Response(
-            {"detail": "workspace query parameter is required."},
-            status=status.HTTP_400_BAD_REQUEST,
-        )
-    try:
-        workspace_uuid = uuid.UUID(workspace_id)
-    except ValueError:
-        return None, Response(
-            {"detail": "workspace must be a valid UUID."}, status=status.HTTP_400_BAD_REQUEST
-        )
-    workspace = Workspace.objects.for_actor(request.user, workspace=workspace_uuid).first()
+        if not is_low_trust(request):
+            return None, Response(
+                {"detail": "workspace query parameter is required."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        workspace_uuid = None
+    else:
+        try:
+            workspace_uuid = uuid.UUID(workspace_id)
+        except ValueError:
+            return None, Response(
+                {"detail": "workspace must be a valid UUID."}, status=status.HTTP_400_BAD_REQUEST
+            )
+    workspace = scoped_for_actor(request, Workspace.objects, workspace=workspace_uuid).first()
     if workspace is None:
         return None, Response(status=status.HTTP_404_NOT_FOUND)
     return workspace, None
@@ -67,12 +86,13 @@ def _resolve_workspace(request):
 
 class AgentListCreateView(APIView):
     permission_classes = [IsAuthenticated]
+    authentication_classes = _PAT_ALLOWLISTED_AUTHENTICATION_CLASSES
 
     def get(self, request):
         workspace, error = _resolve_workspace(request)
         if error is not None:
             return error
-        agents = Agent.objects.for_actor(request.user, workspace=workspace)
+        agents = scoped_for_actor(request, Agent.objects, workspace=workspace)
         status_filter = request.query_params.get("status")
         if status_filter:
             if status_filter not in Agent.Status.values:
@@ -83,10 +103,20 @@ class AgentListCreateView(APIView):
         return Response(AgentSerializer(agents, many=True).data)
 
     def post(self, request):
-        serializer = AgentCreateSerializer(data=request.data)
+        data = request.data
+        if is_low_trust(request):
+            # `.copy()` first: request.data is an immutable QueryDict for
+            # form-encoded requests (Codex review, branch 1 round 1). Only
+            # inject into an actual mapping -- a non-object body (e.g. a
+            # JSON list) is left untouched for the serializer's own
+            # validation to reject with its normal 400 (round 2).
+            if isinstance(data, dict):
+                data = data.copy()
+                data["workspace"] = request.auth.bound_workspace_id
+        serializer = AgentCreateSerializer(data=data)
         serializer.is_valid(raise_exception=True)
-        workspace = Workspace.objects.for_actor(
-            request.user, workspace=serializer.validated_data["workspace"]
+        workspace = scoped_for_actor(
+            request, Workspace.objects, workspace=serializer.validated_data["workspace"]
         ).first()
         if workspace is None:
             return Response(status=status.HTTP_404_NOT_FOUND)
@@ -105,10 +135,13 @@ class AgentListCreateView(APIView):
 
 class AgentDetailView(APIView):
     permission_classes = [IsAuthenticated]
+    authentication_classes = _PAT_ALLOWLISTED_AUTHENTICATION_CLASSES
 
     def get(self, request, agent_id):
         # Out-of-scope rows -> 404, never 403 (existence must not leak).
-        agent = Agent.objects.for_actor(request.user).filter(id=agent_id).first()
+        # By-id lookup, no workspace parameter -- scoped_for_actor still
+        # forces a channel-bound request to its bound workspace.
+        agent = scoped_for_actor(request, Agent.objects).filter(id=agent_id).first()
         if agent is None:
             return Response(status=status.HTTP_404_NOT_FOUND)
         return Response(AgentDetailSerializer(agent).data)
@@ -116,9 +149,10 @@ class AgentDetailView(APIView):
 
 class AgentCancelView(APIView):
     permission_classes = [IsAuthenticated]
+    authentication_classes = _PAT_ALLOWLISTED_AUTHENTICATION_CLASSES
 
     def post(self, request, agent_id):
-        agent = Agent.objects.for_actor(request.user).filter(id=agent_id).first()
+        agent = scoped_for_actor(request, Agent.objects).filter(id=agent_id).first()
         if agent is None:
             return Response(status=status.HTTP_404_NOT_FOUND)
         try:
