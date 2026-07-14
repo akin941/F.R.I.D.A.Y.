@@ -17,8 +17,13 @@ from django.core.cache import cache
 from django.db import models, transaction
 from django.utils import timezone
 
-from assistant.models import Conversation, Message
-from assistant.services import build_gateway_stream, classify_intent, stream_assistant_reply
+from assistant.models import Message
+from assistant.services import (
+    build_gateway_stream,
+    classify_intent,
+    create_conversation,
+    stream_assistant_reply,
+)
 from integrations import telegram_client
 from integrations.models import LinkedTelegramChat, TelegramLinkCode
 from workspaces.models import Workspace
@@ -110,9 +115,13 @@ def _consume_link_code(code, chat_id):
         models.Q(user=link_code.user, workspace=link_code.workspace) | models.Q(chat_id=chat_id)
     ).delete()
 
-    conversation = Conversation.objects.create(
-        workspace=link_code.workspace, created_by=link_code.user
-    )
+    # create_conversation (assistant.services), not a bare Conversation.
+    # objects.create() -- the existing audited creation path
+    # (assistant.conversation.created) applies to every conversation this
+    # app creates, including one created from the Telegram link flow
+    # rather than the web "new conversation" button (Codex review,
+    # branch 3 round 2).
+    conversation = create_conversation(workspace=link_code.workspace, actor=link_code.user)
     return LinkedTelegramChat.objects.create(
         workspace=link_code.workspace,
         user=link_code.user,

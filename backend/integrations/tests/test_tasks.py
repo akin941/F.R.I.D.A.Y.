@@ -13,6 +13,7 @@ from django.utils import timezone
 from accounts.services import register_user
 from ai_core.models import ModelProvider, ModelUsage, PromptTemplate, PromptVersion
 from assistant.models import Conversation, Message
+from audit.models import AuditLog
 from integrations.models import LinkedTelegramChat, TelegramLinkCode
 from integrations.tasks import (
     _RELAY_RATE_LIMIT,
@@ -122,6 +123,22 @@ def test_valid_code_links_creates_conversation_and_marks_consumed(owner, workspa
     assert Conversation.objects.filter(id=linked.conversation_id).exists()
     send.assert_called_once()
     assert "linked" in send.call_args.args[1].lower()
+
+
+def test_valid_code_links_records_conversation_creation_audit_entry(owner, workspace):
+    """Proves the round-2 P2 fix: the Telegram link flow goes through
+    assistant.services.create_conversation, the same audited path the web
+    'new conversation' button uses -- not a bare Conversation.objects.
+    create() that would silently skip the audit trail."""
+    make_link_code(owner, workspace)
+    with mock.patch("integrations.tasks.telegram_client.send_message"):
+        process_telegram_update(private_update("chat-1", "/link abc123"))
+
+    linked = LinkedTelegramChat.objects.get(chat_id="chat-1")
+    entry = AuditLog.objects.get(action="assistant.conversation.created")
+    assert entry.actor == owner
+    assert entry.workspace == workspace
+    assert entry.resource_id == str(linked.conversation_id)
 
 
 def test_expired_code_is_rejected_and_creates_nothing(owner, workspace):
