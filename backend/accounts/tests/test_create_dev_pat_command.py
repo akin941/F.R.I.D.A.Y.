@@ -13,6 +13,18 @@ pytestmark = pytest.mark.django_db
 PASSWORD = "Str0ngDevPass!42"
 
 
+@pytest.fixture(autouse=True)
+def _debug_settings(settings):
+    # Django's test framework forces settings.DEBUG = False for the whole
+    # session (django.test.utils.setup_test_environment), regardless of
+    # what config.settings.dev sets it to -- this command's own DEBUG gate
+    # (round 3 fix, below) would otherwise make every other test in this
+    # file fail, since command.handle() reads the real, test-forced value.
+    # The one negative test that actually exercises the gate overrides
+    # this back to False itself.
+    settings.DEBUG = True
+
+
 @pytest.fixture
 def owner():
     return register_user(email="owner@test.dev", password=PASSWORD, name="Owner")
@@ -37,6 +49,16 @@ def test_mints_a_token_bound_to_the_named_workspace(owner, workspace):
     assert token.user == owner
     assert token.workspace == workspace
     assert token.revoked_at is None
+
+
+def test_refuses_to_run_outside_debug(owner, workspace, settings):
+    """A dev-only command that never actually checked DEBUG could mint a
+    real bearer credential against a production deploy by accident (Codex
+    review, branch 2 round 3)."""
+    settings.DEBUG = False
+    with pytest.raises(CommandError):
+        run(owner.email, workspace.name)
+    assert not PersonalAccessToken.objects.exists()
 
 
 def test_unknown_email_raises_command_error(workspace):

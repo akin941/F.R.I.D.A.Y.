@@ -6,6 +6,7 @@ convenience command, never run in production deploy automation.
 
 import secrets
 
+from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError
 
 from accounts.authentication import TOKEN_PREFIX, hash_token
@@ -21,6 +22,15 @@ class Command(BaseCommand):
         parser.add_argument("workspace_name")
 
     def handle(self, *args, **options):
+        # The docstring/help text call this dev-only, but nothing enforced
+        # that -- an accidental invocation against a production deploy
+        # would mint a real bearer credential for any email/workspace named
+        # (Codex review, branch 2 round 3). Gate on DEBUG, mirroring
+        # approvals.apps.ApprovalsConfig.ready()'s identical
+        # DEV_ALLOW_SELF_APPROVAL fail-fast convention.
+        if not settings.DEBUG:
+            raise CommandError("create_dev_pat is a dev-only command and requires DEBUG=True.")
+
         email = options["email"]
         workspace_name = options["workspace_name"]
 
