@@ -119,8 +119,18 @@ class TelegramWebhookView(APIView):
         configured = settings.TELEGRAM_WEBHOOK_SECRET
         # An unconfigured secret must never "match" an empty/missing
         # header -- fail closed, not fail open. hmac.compare_digest for a
-        # timing-safe comparison of the two.
-        if not configured or not hmac.compare_digest(configured, provided):
+        # timing-safe comparison of the two. Also require a bot token: the
+        # documented setup registers the webhook only once both are set, so
+        # a missing token means this deployment isn't actually configured
+        # for Telegram yet -- accepting traffic anyway would let a /link
+        # update consume a code and create a link before the reply attempt
+        # fails against an invalid Bot API URL (Codex review, branch 3
+        # round 4).
+        if (
+            not configured
+            or not settings.TELEGRAM_BOT_TOKEN
+            or not hmac.compare_digest(configured, provided)
+        ):
             return Response(status=status.HTTP_403_FORBIDDEN)
 
         process_telegram_update.delay(request.data)

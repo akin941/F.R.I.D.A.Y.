@@ -43,3 +43,20 @@ def test_set_webhook_posts_url_and_secret():
         "setWebhook", {"url": "https://x/webhook", "secret_token": "s3cr3t"}
     )
     assert result == {"ok": True}
+
+
+def test_post_calls_urlopen_with_a_finite_timeout(settings):
+    """Proves the round-4 P2 fix: urlopen's own default timeout is
+    unbounded, which would otherwise let a stalled Telegram API call hang
+    the calling Celery worker indefinitely."""
+    settings.TELEGRAM_BOT_TOKEN = "test-token"
+    fake_response = mock.MagicMock()
+    fake_response.read.return_value = b'{"ok": true}'
+    fake_response.__enter__.return_value = fake_response
+    with mock.patch.object(
+        telegram_client.urllib.request, "urlopen", return_value=fake_response
+    ) as urlopen:
+        result = telegram_client._post("sendMessage", {"chat_id": "1", "text": "hi"})
+
+    assert result == {"ok": True}
+    assert urlopen.call_args.kwargs["timeout"] == telegram_client._REQUEST_TIMEOUT_SECONDS

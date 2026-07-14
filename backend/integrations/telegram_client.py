@@ -13,6 +13,12 @@ from django.conf import settings
 # Telegram's own documented per-message character limit for sendMessage.
 TELEGRAM_MESSAGE_LIMIT = 4096
 
+# urlopen's default timeout is unbounded -- a stalled Telegram API call
+# would otherwise hang the calling Celery worker (or the
+# register_telegram_webhook command) indefinitely (Codex review, branch 3
+# round 4).
+_REQUEST_TIMEOUT_SECONDS = 10
+
 
 def _api_url(method):
     return f"https://api.telegram.org/bot{settings.TELEGRAM_BOT_TOKEN}/{method}"
@@ -22,7 +28,7 @@ def _post(method, payload):
     data = json.dumps(payload).encode()
     req = urllib.request.Request(_api_url(method), data=data, method="POST")
     req.add_header("Content-Type", "application/json")
-    with urllib.request.urlopen(req) as resp:
+    with urllib.request.urlopen(req, timeout=_REQUEST_TIMEOUT_SECONDS) as resp:
         return json.loads(resp.read())
 
 

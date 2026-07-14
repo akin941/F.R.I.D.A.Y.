@@ -185,6 +185,24 @@ def test_webhook_unconfigured_secret_never_matches_empty_header(settings):
     delay.assert_not_called()
 
 
+def test_webhook_correct_secret_but_missing_bot_token_is_403_and_does_nothing(settings):
+    """Proves the round-4 P2 fix: a deployment isn't actually configured
+    for Telegram until BOTH the secret and the bot token are set -- an
+    unset bot token must fail closed the same as an unset/wrong secret,
+    not accept traffic and let /link consume a code before the reply
+    attempt fails against an invalid Bot API URL."""
+    settings.TELEGRAM_BOT_TOKEN = ""
+    with mock.patch("integrations.views.process_telegram_update.delay") as delay:
+        response = APIClient().post(
+            "/api/v1/integrations/telegram/webhook",
+            {"update_id": 1},
+            format="json",
+            HTTP_X_TELEGRAM_BOT_API_SECRET_TOKEN="test-secret",
+        )
+    assert response.status_code == 403
+    delay.assert_not_called()
+
+
 def test_webhook_correct_secret_enqueues_and_returns_200_without_running_relay_inline():
     payload = {"update_id": 1, "message": {"chat": {"id": 1, "type": "private"}, "text": "hi"}}
     with mock.patch("integrations.views.process_telegram_update.delay") as delay:
