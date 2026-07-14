@@ -32,11 +32,23 @@ class Command(BaseCommand):
         # Membership-filtered, not a bare name lookup: a workspace name is
         # not globally unique, and this must never mint a token bound to a
         # workspace the user doesn't actually belong to.
-        workspace = Workspace.objects.filter(name=workspace_name, members__user=user).first()
-        if workspace is None:
+        matches = list(Workspace.objects.filter(name=workspace_name, members__user=user))
+        if not matches:
             raise CommandError(
                 f"{email!r} is not a member of a workspace named {workspace_name!r}."
             )
+        if len(matches) > 1:
+            # Workspace names are not unique -- silently picking one of
+            # several matches would bind the token to whichever row the
+            # database happened to return first (Codex review, branch 2
+            # round 1). Fail loud and let the operator disambiguate by id.
+            ids = ", ".join(str(ws.id) for ws in matches)
+            raise CommandError(
+                f"{email!r} belongs to {len(matches)} workspaces named "
+                f"{workspace_name!r} ({ids}) -- ambiguous, rename one or "
+                f"mint the token another way."
+            )
+        workspace = matches[0]
 
         raw_token = TOKEN_PREFIX + secrets.token_urlsafe(32)
         PersonalAccessToken.objects.create(

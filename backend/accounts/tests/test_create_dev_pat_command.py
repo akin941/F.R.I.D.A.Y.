@@ -67,6 +67,21 @@ def test_picks_the_workspace_the_user_actually_belongs_to_when_names_collide(own
     assert token.workspace == workspace
 
 
+def test_ambiguous_same_named_workspaces_for_the_same_user_raises_command_error(owner, workspace):
+    """The user themself belongs to two DIFFERENT workspaces sharing the
+    same name -- silently picking one via `.first()` would bind the token
+    to whichever row the database happened to return first (Codex review,
+    branch 2 round 1). Must fail loud instead of guessing."""
+    second_workspace = Workspace.objects.create(name=workspace.name, owner=owner)
+    WorkspaceMember.objects.create(
+        workspace=second_workspace, user=owner, role=WorkspaceMember.Role.OWNER
+    )
+
+    with pytest.raises(CommandError):
+        run(owner.email, workspace.name)
+    assert not PersonalAccessToken.objects.exists()
+
+
 def test_member_of_a_shared_workspace_can_mint_their_own_token(owner, workspace):
     member = register_user(email="member@test.dev", password=PASSWORD, name="Member")
     WorkspaceMember.objects.create(
