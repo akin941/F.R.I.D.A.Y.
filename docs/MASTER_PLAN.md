@@ -103,8 +103,8 @@ See `docs/security/mcp-governance.md`.
 MVP 0–20, simplified to **personal kernel + platform capabilities** (ADR-006):
 personal kernel first (shell/chat → memory → knowledge/RAG *(done — §S)* →
 tasks *(done — §T)* → tools/approvals *(done — §U)* → router *(done — §V)* →
-agents *(done — §W)* → skills *(done — §X)* → integrations). Model-tier/cost
-routing (a DB-backed cheap/mid/strong tier table +
+agents *(done — §W)* → skills *(done — §X)* → integrations
+*(done — §Y)*). Model-tier/cost routing (a DB-backed cheap/mid/strong tier table +
 `ModelUsage.routing_reason` auditability) is a separate, unstarted Gateway
 sub-task — deliberately not folded into the router MVP (§V); see §J.
 
@@ -503,3 +503,102 @@ Branch 2 (skill-selection) came back clean on round 1.
 
 Status: **done (2026-07-13)** — all 3 branches merged to main. Plan + branch
 status: `docs/prompts/mvp-08/brief.md`.
+
+## Y. MVP 9
+
+MVP 9: Integrations — a CLI and a Telegram bot, the last stage of the
+`shell/chat → ... → skills → integrations` roadmap line (§L). Every surface
+Jarvis had shipped through MVP 8 was reachable only through the web app,
+authenticated by a password+JWT login. This MVP adds two more ways to
+*reach* Jarvis — a bearer-token CLI and a relayed Telegram bot — without
+adding a single new way to *act*: both are new front doors onto the exact
+same chat pipeline (and, for the CLI, the same agents/approvals endpoints)
+the web app already calls. The one new concept introduced on purpose is
+**channel trust**: a request authenticated by anything other than the
+standard web login is low-trust, and — the MVP's one hard, load-bearing
+rule (ADR-004) — a low-trust channel can never *decide* an
+`ApprovalRequest`, only propose one, exactly as the web app can.
+
+`core/channels.py` (`ChannelPrincipal`, `request_channel`,
+`is_low_trust`, `scoped_for_actor`) is the one primitive both channels sit
+on, deliberately placed in `core` rather than `integrations` so `approvals`
+can ask "did this arrive over a low-trust channel?" without importing
+`integrations` at all. `scoped_for_actor()` is the one function every
+workspace-scoped view on the PAT allowlist calls instead of `for_actor()`
+directly — for a channel-bound request it forces the query to the token's
+bound workspace regardless of what the client supplied (or omitted), the
+same containment guarantee a by-id lookup, a query param, and a body field
+all had to be independently closed against (three separate P1 findings
+during plan-review, below). `PersonalAccessToken` lives in `accounts`, not
+`integrations` — a real architecture correction mid-plan-review: it's
+fundamentally an authentication credential, the CLI's equivalent of the JWT
+`AuditedLoginView` already mints, and `assistant`/`agents`/`approvals`
+already import `accounts` everywhere they reference `User`.
+
+The Telegram bot links one 1:1 chat to one `(user, workspace)` pair and one
+`Conversation` for the link's lifetime via a short-lived `/link <code>`
+flow (atomic, redelivery-safe claim), then relays messages through the
+identical `classify_intent → build_gateway_stream → persist` pipeline the
+web endpoint uses. Group chats are rejected outright — `chat.type ==
+"private"` is checked before anything else runs, non-negotiable, since a
+group has no per-sender identity in this design. A `task_draft`/
+`tool_request` classification degrades to a read-only description in this
+channel; there is no confirm path for a Telegram-surfaced draft in *either*
+channel — the web app's own draft-confirm mechanism turned out to only work
+for the live SSE stream that produced it, not a reopened past turn, so
+building persisted-draft reconstruction stayed explicitly out of scope
+rather than being absorbed as a side effect of adding a chat channel.
+
+Frontend: a new `/integrations` settings page (personal access token
+list/create/revoke with a one-time-reveal banner for the raw token value;
+Telegram link-code request/status/unlink), each section carrying its own
+workspace picker since a PAT or a Telegram link is bound to one workspace
+for its lifetime, not necessarily whichever workspace the sidebar switcher
+currently has active. Playwright smoke extends the existing e2e flow with
+a PAT-authenticated chat round trip against the real backend (no browser
+session at all) plus the channel-restriction invariant itself (a
+PAT-authenticated approve attempt gets a live 403, then the same request
+approved over the web channel gets 200) and a Telegram section that POSTs
+real webhook payloads against the real backend and asserts on the
+resulting DB-observable state (link status, persisted messages) rather
+than the webhook response itself — the reply-sending step's one bounded,
+fast-failing outbound call to Telegram's API against a fixture bot token
+is an accepted, documented trade-off (`docs/integrations/README.md`), not
+something worth adding backend-side test scaffolding to eliminate.
+
+The plan took **8 rounds of Codex plan-review** before implementation
+began. All 4 P1s were escalated to the user and fixed with explicit
+sign-off: a global-PAT-authentication design would have let a PAT
+authenticate against *every* `IsAuthenticated` view in the codebase, not
+just the ones this MVP intended to expose (fixed with an explicit
+per-view allowlist, never `DEFAULT_AUTHENTICATION_CLASSES`); Telegram
+group-chat linking was declared out of scope in prose but never actually
+enforced (fixed with the non-negotiable `chat.type` gate above); the
+original `effective_workspace_id()` design only intercepted query-param
+call sites, not a by-id lookup or a body field (fixed by generalizing to
+`scoped_for_actor()`); and the PAT authenticator didn't check
+`user.is_active`, meaning a deactivated account could keep using an
+unrevoked token indefinitely. Branch code review found and fixed real
+issues at every stage: branch 1 (channel foundation) took 3 rounds;
+branch 2 (CLI channel) took 4 rounds (4 real P2s: an ambiguous
+workspace-name match in `create_dev_pat`, a missing `client_local_date`
+field, a whitespace-mutation bug, a missing `DEBUG` gate); branch 3
+(Telegram bot) took 4 rounds, escalating one more P1 to the user
+(relay-time link revalidation — a deactivated or removed user could keep
+relaying messages indefinitely through a stale link) plus real P2s
+(missing chat-scope throttling on the relay path, the link flow bypassing
+the audited `create_conversation` service, link-code *consumption* not
+revalidating access the same way relay already did, a webhook accepting
+traffic with no bot token configured, an unbounded outbound HTTP call); a
+recurring `update_id`-deduplication finding was correctly recognized each
+time as a re-raise of an already-decided, documented scope exclusion, not
+a new gap. Branch 4 (frontend) took 4 rounds (a raw PAT token surviving in
+list state past the reveal banner's dismissal, two instances of the same
+stale-closure race after a mid-flight workspace switch, and the reveal
+banner's "Copied" state carrying over to a newly created token) — the user
+was consulted directly after the third consecutive round with a new
+finding, per this project's standing escalation protocol for extended
+review loops, and chose to run one more round before merging.
+
+Status: **done (2026-07-14)** — all 5 branches merged to main. Plan +
+branch status: `docs/prompts/mvp-09/brief.md`.

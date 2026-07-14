@@ -37,6 +37,15 @@ services:
       # and just as safe here since this whole stack is already DEBUG=true,
       # a fake AI provider, and an insecure dev secret key.
       DEV_ALLOW_SELF_APPROVAL: "true"
+      # DEV/TEST ONLY fixture values (MVP 9 §4) -- not real Telegram
+      # credentials, just non-empty strings so TelegramWebhookView's
+      # fail-closed auth check has something to compare against for the
+      # e2e Telegram section (frontend/e2e/smoke.e2e.ts). The reply-sending
+      # step still makes one real, bounded, fast-failing outbound call to
+      # api.telegram.org against this fake token -- see that test file's
+      # own comment for why that's an accepted trade-off here.
+      TELEGRAM_BOT_TOKEN: "e2e-fixture-bot-token"
+      TELEGRAM_WEBHOOK_SECRET: "e2e-fixture-webhook-secret"
     depends_on:
       postgres:
         condition: service_healthy
