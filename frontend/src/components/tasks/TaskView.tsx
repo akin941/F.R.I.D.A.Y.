@@ -34,7 +34,7 @@ export function TaskView() {
       setTasks(list);
     } catch {
       if (activeWorkspaceIdRef.current === workspaceId) {
-        setLoadError("Failed to load tasks.");
+        setLoadError("Görevler yüklenemedi.");
       }
     } finally {
       if (activeWorkspaceIdRef.current === workspaceId) setLoading(false);
@@ -79,7 +79,7 @@ export function TaskView() {
   if (!activeWorkspace) {
     return (
       <div className="flex flex-1 items-center justify-center p-6 text-sm text-muted-foreground">
-        No workspace available.
+        Kullanılabilir çalışma alanı yok.
       </div>
     );
   }
@@ -88,10 +88,10 @@ export function TaskView() {
     <div className="flex flex-1 flex-col gap-6 overflow-y-auto p-6">
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Tasks</h1>
-          <p className="text-sm text-muted-foreground">Your to-do list.</p>
+          <h1 className="text-2xl font-semibold tracking-tight">Görevler</h1>
+          <p className="text-sm text-muted-foreground">Yapılacaklar listen.</p>
         </div>
-        <Button onClick={() => setCreating((v) => !v)}>{creating ? "Cancel" : "New task"}</Button>
+        <Button onClick={() => setCreating((v) => !v)}>{creating ? "İptal" : "Yeni görev"}</Button>
       </div>
 
       {loadError ? (
@@ -118,13 +118,13 @@ export function TaskView() {
       ) : (
         <section className="flex flex-col gap-3">
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <h2 className="text-lg font-medium tracking-tight">All tasks</h2>
+            <h2 className="text-lg font-medium tracking-tight">Tüm görevler</h2>
             <Select value={statusFilter} onValueChange={(v) => setStatusFilter(v as TaskStatus | "all")}>
-              <SelectTrigger aria-label="Status filter">
+              <SelectTrigger aria-label="Durum filtresi">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">All statuses</SelectItem>
+                <SelectItem value="all">Tüm durumlar</SelectItem>
                 {TASK_STATUSES.map((status) => (
                   <SelectItem key={status} value={status}>
                     {TASK_STATUS_LABELS[status]}
@@ -134,7 +134,7 @@ export function TaskView() {
             </Select>
           </div>
           {visible.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No tasks match these filters.</p>
+            <p className="text-sm text-muted-foreground">Bu filtrelere uyan görev yok.</p>
           ) : (
             <div className="flex flex-col gap-3">
               {visible.map((task) => (

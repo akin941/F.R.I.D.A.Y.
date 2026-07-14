@@ -40,8 +40,8 @@ export function TaskCard({
     } catch (err) {
       setError(
         err instanceof ApiError
-          ? (err.body.detail ?? "That action could not be completed.")
-          : "Something went wrong. Please try again.",
+          ? (err.body.detail ?? "İşlem tamamlanamadı.")
+          : "Bir şeyler ters gitti. Lütfen tekrar deneyin.",
       );
       return undefined;
     } finally {
@@ -81,7 +81,7 @@ export function TaskCard({
     return (
       <Card>
         <CardHeader>
-          <CardTitle>Edit task</CardTitle>
+          <CardTitle>Görevi düzenle</CardTitle>
         </CardHeader>
         <form onSubmit={handleSaveEdit}>
           <CardContent className="flex flex-col gap-3">
@@ -102,10 +102,10 @@ export function TaskCard({
               }}
               disabled={busy}
             >
-              Cancel
+              İptal
             </Button>
             <Button type="submit" disabled={busy}>
-              {busy ? "Saving…" : "Save"}
+              {busy ? "Kaydediliyor…" : "Kaydet"}
             </Button>
           </CardFooter>
         </form>
@@ -134,14 +134,14 @@ export function TaskCard({
           {task.due_date ? (
             <>
               <span>&middot;</span>
-              <span>Due {task.due_date}</span>
+              <span>Son tarih {task.due_date}</span>
             </>
           ) : null}
         </div>
       </CardContent>
       <CardFooter className="flex flex-wrap justify-end gap-2">
         <Button variant="outline" size="sm" onClick={() => setEditing(true)} disabled={busy}>
-          Edit
+          Düzenle
         </Button>
         {task.status === "open" ? (
           <>
@@ -151,10 +151,10 @@ export function TaskCard({
               onClick={() => void handleTransition("cancel")}
               disabled={busy}
             >
-              Cancel
+              İptal et
             </Button>
             <Button size="sm" onClick={() => void handleTransition("complete")} disabled={busy}>
-              Complete
+              Tamamla
             </Button>
           </>
         ) : (
@@ -164,11 +164,11 @@ export function TaskCard({
             onClick={() => void handleTransition("reopen")}
             disabled={busy}
           >
-            Reopen
+            Yeniden aç
           </Button>
         )}
         <Button variant="destructive" size="sm" onClick={() => void handleDelete()} disabled={busy}>
-          Delete
+          Sil
         </Button>
       </CardFooter>
     </Card>

@@ -69,11 +69,11 @@ describe("TaskView", () => {
     );
 
     render(<TaskView />);
-    await screen.findByText("No tasks match these filters.");
+    await screen.findByText("Bu filtrelere uyan görev yok.");
 
-    await userEvent.click(screen.getByRole("button", { name: "New task" }));
-    await userEvent.type(screen.getByLabelText("Title"), "Water plants");
-    await userEvent.click(screen.getByRole("button", { name: "Create task" }));
+    await userEvent.click(screen.getByRole("button", { name: "Yeni görev" }));
+    await userEvent.type(screen.getByLabelText("Başlık"), "Water plants");
+    await userEvent.click(screen.getByRole("button", { name: "Görev oluştur" }));
 
     expect(await screen.findByText("Water plants")).toBeInTheDocument();
   });
@@ -92,10 +92,10 @@ describe("TaskView", () => {
 
     render(<TaskView />);
     await screen.findByText("Buy milk");
-    await userEvent.click(screen.getByRole("button", { name: "Complete" }));
+    await userEvent.click(screen.getByRole("button", { name: "Tamamla" }));
 
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Reopen" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Yeniden aç" })).toBeInTheDocument();
     });
   });
 
@@ -113,10 +113,10 @@ describe("TaskView", () => {
 
     render(<TaskView />);
     await screen.findByText("Buy milk");
-    await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    await userEvent.click(screen.getByRole("button", { name: "İptal et" }));
 
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Reopen" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Yeniden aç" })).toBeInTheDocument();
     });
   });
 
@@ -134,10 +134,10 @@ describe("TaskView", () => {
 
     render(<TaskView />);
     await screen.findByText("Buy milk");
-    await userEvent.click(screen.getByRole("button", { name: "Reopen" }));
+    await userEvent.click(screen.getByRole("button", { name: "Yeniden aç" }));
 
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Complete" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Tamamla" })).toBeInTheDocument();
     });
   });
 
@@ -155,12 +155,12 @@ describe("TaskView", () => {
 
     render(<TaskView />);
     await screen.findByText("Buy milk");
-    await userEvent.click(screen.getByRole("button", { name: "Edit" }));
+    await userEvent.click(screen.getByRole("button", { name: "Düzenle" }));
 
-    const titleInput = screen.getByLabelText("Title") as HTMLInputElement;
+    const titleInput = screen.getByLabelText("Başlık") as HTMLInputElement;
     await userEvent.clear(titleInput);
     await userEvent.type(titleInput, "Buy oat milk");
-    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+    await userEvent.click(screen.getByRole("button", { name: "Kaydet" }));
 
     expect(await screen.findByText("Buy oat milk")).toBeInTheDocument();
   });
@@ -179,7 +179,7 @@ describe("TaskView", () => {
 
     render(<TaskView />);
     await screen.findByText("Buy milk");
-    await userEvent.click(screen.getByRole("button", { name: "Delete" }));
+    await userEvent.click(screen.getByRole("button", { name: "Sil" }));
 
     await waitFor(() => {
       expect(screen.queryByText("Buy milk")).not.toBeInTheDocument();
@@ -198,8 +198,8 @@ describe("TaskView", () => {
     await screen.findByText("Open one");
     expect(screen.getByText("Done one")).toBeInTheDocument();
 
-    await userEvent.click(screen.getByRole("combobox", { name: "Status filter" }));
-    await userEvent.click(await screen.findByRole("option", { name: "Done" }));
+    await userEvent.click(screen.getByRole("combobox", { name: "Durum filtresi" }));
+    await userEvent.click(await screen.findByRole("option", { name: "Tamamlandı" }));
 
     await waitFor(() => {
       expect(screen.queryByText("Open one")).not.toBeInTheDocument();
@@ -214,17 +214,17 @@ describe("TaskView", () => {
     );
 
     const { rerender } = render(<TaskView />);
-    await screen.findByText("No tasks match these filters.");
+    await screen.findByText("Bu filtrelere uyan görev yok.");
 
-    await userEvent.click(screen.getByRole("button", { name: "New task" }));
-    await userEvent.type(screen.getByLabelText("Title"), "Workspace A draft");
-    expect(screen.getByLabelText("Title")).toHaveValue("Workspace A draft");
+    await userEvent.click(screen.getByRole("button", { name: "Yeni görev" }));
+    await userEvent.type(screen.getByLabelText("Başlık"), "Workspace A draft");
+    expect(screen.getByLabelText("Başlık")).toHaveValue("Workspace A draft");
 
     workspaceHolder.current = { id: "w2", name: "Acme", type: "company", role: "member" };
     rerender(<TaskView />);
 
     expect(screen.queryByLabelText("Title")).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "New task" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Yeni görev" })).toBeInTheDocument();
   });
 
   it("discards a create response for a workspace the user has already switched away from", async () => {
@@ -243,10 +243,10 @@ describe("TaskView", () => {
     );
 
     const { rerender } = render(<TaskView />);
-    await screen.findByText("No tasks match these filters.");
-    await userEvent.click(screen.getByRole("button", { name: "New task" }));
-    await userEvent.type(screen.getByLabelText("Title"), "Workspace A draft");
-    await userEvent.click(screen.getByRole("button", { name: "Create task" }));
+    await screen.findByText("Bu filtrelere uyan görev yok.");
+    await userEvent.click(screen.getByRole("button", { name: "Yeni görev" }));
+    await userEvent.type(screen.getByLabelText("Başlık"), "Workspace A draft");
+    await userEvent.click(screen.getByRole("button", { name: "Görev oluştur" }));
 
     workspaceHolder.current = { id: "w2", name: "Acme", type: "company", role: "member" };
     rerender(<TaskView />);

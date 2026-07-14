@@ -44,9 +44,9 @@ export function TaskCreateForm({
       setValue(EMPTY);
     } catch (err) {
       if (err instanceof ApiError) {
-        setError(err.body.detail ?? "That task could not be created.");
+        setError(err.body.detail ?? "Görev oluşturulamadı.");
       } else {
-        setError("Something went wrong. Please try again.");
+        setError("Bir şeyler ters gitti. Lütfen tekrar deneyin.");
       }
     } finally {
       setSubmitting(false);
@@ -56,7 +56,7 @@ export function TaskCreateForm({
   return (
     <Card>
       <CardHeader>
-        <CardTitle>New task</CardTitle>
+        <CardTitle>Yeni görev</CardTitle>
       </CardHeader>
       <form onSubmit={handleSubmit}>
         <CardContent className="flex flex-col gap-3">
@@ -69,10 +69,10 @@ export function TaskCreateForm({
         </CardContent>
         <CardFooter className="flex justify-end gap-2">
           <Button type="button" variant="outline" onClick={onCancel} disabled={submitting}>
-            Cancel
+            İptal
           </Button>
           <Button type="submit" disabled={submitting}>
-            {submitting ? "Creating…" : "Create task"}
+            {submitting ? "Oluşturuluyor…" : "Görev oluştur"}
           </Button>
         </CardFooter>
       </form>

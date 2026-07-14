@@ -87,7 +87,7 @@ describe("TodayView", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     render(<TodayView />);
-    await screen.findByText("Nothing due today. Enjoy the quiet.");
+    await screen.findByText("Bugün vadesi gelen bir şey yok. Keyfini çıkar.");
 
     const calledUrl = fetchMock.mock.calls[0]?.[0] as string;
     expect(calledUrl).toContain("status=open");
@@ -102,7 +102,7 @@ describe("TodayView", () => {
 
     render(<TodayView />);
 
-    expect(await screen.findByText("Nothing due today. Enjoy the quiet.")).toBeInTheDocument();
+    expect(await screen.findByText("Bugün vadesi gelen bir şey yok. Keyfini çıkar.")).toBeInTheDocument();
   });
 
   it("completing a task removes it from the list without a re-fetch", async () => {
@@ -119,7 +119,7 @@ describe("TodayView", () => {
 
     render(<TodayView />);
     await screen.findByText("Buy milk");
-    await userEvent.click(screen.getByRole("button", { name: "Complete" }));
+    await userEvent.click(screen.getByRole("button", { name: "Tamamla" }));
 
     await waitFor(() => {
       expect(screen.queryByText("Buy milk")).not.toBeInTheDocument();

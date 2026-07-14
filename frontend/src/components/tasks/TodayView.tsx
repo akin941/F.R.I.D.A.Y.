@@ -43,8 +43,8 @@ function TodayTaskItem({
     } catch (err) {
       setError(
         err instanceof ApiError
-          ? (err.body.detail ?? "That task could not be completed.")
-          : "Something went wrong. Please try again.",
+          ? (err.body.detail ?? "Görev tamamlanamadı.")
+          : "Bir şeyler ters gitti. Lütfen tekrar deneyin.",
       );
     } finally {
       setBusy(false);
@@ -67,15 +67,13 @@ function TodayTaskItem({
           {task.due_date ? (
             <>
               <span>&middot;</span>
-              <span>Due {task.due_date}</span>
+              <span>Son tarih {task.due_date}</span>
             </>
           ) : null}
         </div>
       </CardContent>
       <CardFooter className="flex justify-end">
-        <Button size="sm" onClick={() => void handleComplete()} disabled={busy}>
-          Complete
-        </Button>
+        <Button size="sm" onClick={() => void handleComplete()} disabled={busy}>Tamamla</Button>
       </CardFooter>
     </Card>
   );
@@ -102,7 +100,7 @@ export function TodayView() {
       setTasks(list);
     } catch {
       if (activeWorkspaceIdRef.current === workspaceId) {
-        setLoadError("Failed to load today's tasks.");
+        setLoadError("Bugünün görevleri yüklenemedi.");
       }
     } finally {
       if (activeWorkspaceIdRef.current === workspaceId) setLoading(false);
@@ -129,7 +127,7 @@ export function TodayView() {
   if (!activeWorkspace) {
     return (
       <div className="flex flex-1 items-center justify-center p-6 text-sm text-muted-foreground">
-        No workspace available.
+        Kullanılabilir çalışma alanı yok.
       </div>
     );
   }
@@ -137,8 +135,8 @@ export function TodayView() {
   return (
     <div className="flex flex-1 flex-col gap-4 p-6">
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Today</h1>
-        <p className="text-sm text-muted-foreground">Tasks due today or overdue.</p>
+        <h1 className="text-2xl font-semibold tracking-tight">Bugün</h1>
+        <p className="text-sm text-muted-foreground">Bugün vadesi gelen veya geçen görevler.</p>
       </div>
 
       {loadError ? (
@@ -162,7 +160,7 @@ export function TodayView() {
           ))}
         </div>
       ) : tasks.length === 0 ? (
-        <p className="text-sm text-muted-foreground">Nothing due today. Enjoy the quiet.</p>
+        <p className="text-sm text-muted-foreground">Bugün vadesi gelen bir şey yok. Keyfini çıkar.</p>
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {tasks.map((task) => (

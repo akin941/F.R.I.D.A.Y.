@@ -28,7 +28,7 @@ export function TaskFields({
   return (
     <div className="flex flex-col gap-3">
       <div className="flex flex-col gap-2">
-        <Label htmlFor={`${idPrefix}-title`}>Title</Label>
+        <Label htmlFor={`${idPrefix}-title`}>Başlık</Label>
         <Input
           id={`${idPrefix}-title`}
           value={value.title}
@@ -37,7 +37,7 @@ export function TaskFields({
         />
       </div>
       <div className="flex flex-col gap-2">
-        <Label htmlFor={`${idPrefix}-description`}>Description</Label>
+        <Label htmlFor={`${idPrefix}-description`}>Açıklama</Label>
         <Textarea
           id={`${idPrefix}-description`}
           value={value.description}
@@ -46,7 +46,7 @@ export function TaskFields({
       </div>
       <div className="flex gap-3">
         <div className="flex flex-1 flex-col gap-2">
-          <Label htmlFor={`${idPrefix}-due-date`}>Due date</Label>
+          <Label htmlFor={`${idPrefix}-due-date`}>Son tarih</Label>
           <Input
             id={`${idPrefix}-due-date`}
             type="date"
@@ -55,7 +55,7 @@ export function TaskFields({
           />
         </div>
         <div className="flex flex-1 flex-col gap-2">
-          <Label htmlFor={`${idPrefix}-priority`}>Priority</Label>
+          <Label htmlFor={`${idPrefix}-priority`}>Öncelik</Label>
           <Select
             value={value.priority}
             onValueChange={(priority) => onChange({ ...value, priority: priority as TaskPriority })}
