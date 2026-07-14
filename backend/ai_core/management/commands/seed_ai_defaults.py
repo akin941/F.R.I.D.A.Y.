@@ -317,6 +317,32 @@ class Command(BaseCommand):
             )
             self._log("openai-embedding-primary provider", created)
 
+        if os.environ.get("NVIDIA_API_KEY"):
+            _, created = ModelProvider.objects.get_or_create(
+                name="nvidia-nim",
+                defaults={
+                    "provider_type": ModelProvider.ProviderType.OPENAI_COMPATIBLE,
+                    # `or` (not `.get(key, default)`) since a Compose
+                    # `${VAR:-}` substitution materializes an EMPTY string
+                    # env var rather than leaving it unset — `.get()`'s
+                    # default only kicks in when the key is absent, so it
+                    # would silently accept "" and (for base_url) fall
+                    # through to the openai SDK's own default endpoint
+                    # instead of NIM's (caught live: a 401 against
+                    # api.openai.com with no relevant key set).
+                    "model_id": os.environ.get("NVIDIA_MODEL_ID") or "meta/llama-3.3-70b-instruct",
+                    "base_url": os.environ.get("NVIDIA_BASE_URL")
+                    or "https://integrate.api.nvidia.com/v1",
+                    "api_key_env_var": "NVIDIA_API_KEY",
+                    # Personal/dev-only, free-tier provider (~40 RPM) — never
+                    # wired into any shared/production config; priority puts
+                    # it below the paid providers so a key added alongside
+                    # them doesn't silently displace a deliberate choice.
+                    "priority": 25,
+                },
+            )
+            self._log("nvidia-nim provider", created)
+
         if os.environ.get("DEEPSEEK_API_KEY"):
             _, created = ModelProvider.objects.get_or_create(
                 name="deepseek",

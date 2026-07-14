@@ -24,8 +24,15 @@ services:
       MINIO_ACCESS_KEY: jarvis
       MINIO_SECRET_KEY: jarvis-dev-secret
       MINIO_BUCKET: jarvis
-      # Dev stack uses the deterministic fake LLM provider by default.
-      AI_FAKE_PROVIDER: "true"
+      # Dev stack uses the deterministic fake LLM provider by default; override
+      # locally (never committed) via `deploy/docker/.env` — same mechanism
+      # as OBSIDIAN_VAULT_HOST_PATH below — to point this stack at a real
+      # provider (e.g. NVIDIA NIM) for personal dogfooding. Untouched, this
+      # still defaults to "true" so `make test-e2e`/CI stay deterministic.
+      AI_FAKE_PROVIDER: "${AI_FAKE_PROVIDER:-true}"
+      NVIDIA_API_KEY: "${NVIDIA_API_KEY:-}"
+      NVIDIA_MODEL_ID: "${NVIDIA_MODEL_ID:-}"
+      NVIDIA_BASE_URL: "${NVIDIA_BASE_URL:-}"
       # Obsidian vault export (MVP 5 §3): the STRING value is shared by both
       # containers (web validates it, tier 1, with zero filesystem access at
       # request time) but only `worker` actually has anything bind-mounted
