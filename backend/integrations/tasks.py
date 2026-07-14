@@ -12,6 +12,8 @@ import json
 import uuid
 
 from celery import shared_task
+from django.conf import settings
+from django.core.cache import cache
 from django.db import models, transaction
 from django.utils import timezone
 
@@ -19,8 +21,37 @@ from assistant.models import Conversation, Message
 from assistant.services import build_gateway_stream, classify_intent, stream_assistant_reply
 from integrations import telegram_client
 from integrations.models import LinkedTelegramChat, TelegramLinkCode
+from workspaces.models import Workspace
 
 _LINK_COMMAND_PREFIX = "/link "
+
+
+def _parse_rate(rate):
+    """Same format DRF's SimpleRateThrottle.parse_rate accepts
+    ("<count>/<period>", period one of s/m/h/d) -- reimplemented locally
+    (rather than instantiating SimpleRateThrottle, which requires a
+    view-bound `.scope`) since the parsing itself doesn't touch `self` at
+    all in DRF's own implementation either."""
+    num, period = rate.split("/")
+    return int(num), {"s": 1, "m": 60, "h": 3600, "d": 86400}[period[0]]
+
+
+# Mirrors the "chat" scope's budget (ScopedRateThrottle, assistant/views.py)
+# -- the Telegram relay path is a Celery task, never passes through DRF's
+# view-level throttling at all, so without an equivalent check here a
+# linked chat could enqueue unbounded provider calls (Codex review,
+# branch 3 round 1). Fixed-window counter via Django's cache framework;
+# correct only under this repo's existing single-worker-process topology,
+# the same constraint config/celery.py's embedded beat already documents.
+_RELAY_RATE_LIMIT, _RELAY_RATE_WINDOW_SECONDS = _parse_rate(
+    settings.REST_FRAMEWORK["DEFAULT_THROTTLE_RATES"]["chat"]
+)
+
+
+def _relay_rate_limited(user_id):
+    cache_key = f"telegram-relay-throttle:{user_id}"
+    cache.add(cache_key, 0, timeout=_RELAY_RATE_WINDOW_SECONDS)
+    return cache.incr(cache_key) > _RELAY_RATE_LIMIT
 
 
 @shared_task
@@ -100,11 +131,34 @@ def _handle_link(chat_id, code):
 
 def _handle_relay(chat_id, text):
     linked = (
-        LinkedTelegramChat.objects.select_related("conversation").filter(chat_id=chat_id).first()
+        LinkedTelegramChat.objects.select_related("conversation", "user")
+        .filter(chat_id=chat_id)
+        .first()
     )
     if linked is None:
         telegram_client.send_message(
             chat_id, "This chat isn't linked yet -- get a code from the Jarvis settings page."
+        )
+        return
+
+    # Revalidate the link is still good on every message, not only at link
+    # time (Codex review, branch 3 round 1, P1): a user deactivated or
+    # removed from the workspace since linking must not keep relaying
+    # messages and running gateway calls through the stale row. Unlike
+    # JWT/PAT auth, nothing else in this path re-checks either condition.
+    still_valid = (
+        linked.user.is_active
+        and Workspace.objects.filter(pk=linked.workspace_id, members__user=linked.user).exists()
+    )
+    if not still_valid:
+        telegram_client.send_message(
+            chat_id, "This link is no longer valid -- please re-link from the Jarvis settings page."
+        )
+        return
+
+    if _relay_rate_limited(linked.user_id):
+        telegram_client.send_message(
+            chat_id, "You're sending messages too fast -- please wait a moment and try again."
         )
         return
 

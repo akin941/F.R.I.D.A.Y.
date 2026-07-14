@@ -7,15 +7,21 @@ from datetime import timedelta
 from unittest import mock
 
 import pytest
+from django.core.cache import cache
 from django.utils import timezone
 
 from accounts.services import register_user
 from ai_core.models import ModelProvider, ModelUsage, PromptTemplate, PromptVersion
 from assistant.models import Conversation, Message
 from integrations.models import LinkedTelegramChat, TelegramLinkCode
-from integrations.tasks import process_telegram_update, sweep_expired_link_codes
+from integrations.tasks import (
+    _RELAY_RATE_LIMIT,
+    _relay_rate_limited,
+    process_telegram_update,
+    sweep_expired_link_codes,
+)
 from tasks.models import Task
-from workspaces.models import Workspace
+from workspaces.models import Workspace, WorkspaceMember
 
 pytestmark = pytest.mark.django_db
 
@@ -207,6 +213,58 @@ def _link(owner, workspace, chat_id="chat-1"):
     return LinkedTelegramChat.objects.create(
         workspace=workspace, user=owner, chat_id=chat_id, conversation=conversation
     )
+
+
+def test_relay_refuses_when_linked_user_is_deactivated(owner, workspace):
+    """Proves the round-1 P1 fix: a link's user is revalidated on every
+    message, not only checked once at link time."""
+    linked = _link(owner, workspace)
+    owner.is_active = False
+    owner.save(update_fields=["is_active"])
+
+    with mock.patch("integrations.tasks.telegram_client.send_message") as send:
+        process_telegram_update(private_update(linked.chat_id, "hello"))
+
+    assert Message.objects.count() == 0
+    assert "no longer valid" in send.call_args.args[1].lower()
+
+
+def test_relay_refuses_when_linked_user_no_longer_a_workspace_member(owner, workspace):
+    linked = _link(owner, workspace)
+    WorkspaceMember.objects.filter(workspace=workspace, user=owner).delete()
+
+    with mock.patch("integrations.tasks.telegram_client.send_message") as send:
+        process_telegram_update(private_update(linked.chat_id, "hello"))
+
+    assert Message.objects.count() == 0
+    assert "no longer valid" in send.call_args.args[1].lower()
+
+
+def test_relay_rate_limit_helper_allows_up_to_the_budget_then_blocks():
+    """Proves the round-1 P2 fix (chat throttling) at the unit level,
+    without needing _RELAY_RATE_LIMIT real gateway calls."""
+    user_id = "rate-limit-test-user"
+    cache.delete(f"telegram-relay-throttle:{user_id}")
+    try:
+        for _ in range(_RELAY_RATE_LIMIT):
+            assert _relay_rate_limited(user_id) is False
+        assert _relay_rate_limited(user_id) is True
+    finally:
+        cache.delete(f"telegram-relay-throttle:{user_id}")
+
+
+def test_relay_is_blocked_once_the_budget_is_already_exhausted(owner, workspace):
+    linked = _link(owner, workspace)
+    cache_key = f"telegram-relay-throttle:{owner.id}"
+    cache.set(cache_key, _RELAY_RATE_LIMIT, timeout=60)
+    try:
+        with mock.patch("integrations.tasks.telegram_client.send_message") as send:
+            process_telegram_update(private_update(linked.chat_id, "hello"))
+
+        assert Message.objects.count() == 0
+        assert "too fast" in send.call_args.args[1].lower()
+    finally:
+        cache.delete(cache_key)
 
 
 def test_relay_stamps_channel_telegram_on_both_rows_and_records_model_usage(
