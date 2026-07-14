@@ -88,20 +88,31 @@ export function TelegramLinkPanel() {
   /* eslint-enable react-hooks/set-state-in-effect */
 
   async function handleRequestCode() {
+    const requestedWorkspaceId = workspaceId;
     setRequesting(true);
     setRequestError(null);
     try {
       const code = await apiPostJson<ApiTelegramLinkCode>("/api/integrations/telegram/link-code", {
-        workspace: workspaceId,
+        workspace: requestedWorkspaceId,
       });
+      // The response carries no workspace of its own -- if the picker moved
+      // to a different workspace while this POST was in flight, showing this
+      // code here would let the user paste a code for the wrong workspace
+      // into their Telegram bot (Codex review, branch 4 round 2).
+      if (workspaceIdRef.current !== requestedWorkspaceId) return;
       setLinkCode(code);
     } catch (err) {
+      if (workspaceIdRef.current !== requestedWorkspaceId) return;
       setRequestError(
         err instanceof ApiError
           ? (err.body.detail ?? "That code could not be created.")
           : "Something went wrong. Please try again.",
       );
     } finally {
+      // Unconditional, unlike the two branches above -- `requesting` is a
+      // plain in-flight flag for this panel, not workspace-scoped state, so
+      // it must always clear once the request settles, even if the picker
+      // moved on to a different workspace while it was in flight.
       setRequesting(false);
     }
   }

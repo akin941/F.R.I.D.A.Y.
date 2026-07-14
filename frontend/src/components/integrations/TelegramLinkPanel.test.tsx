@@ -98,6 +98,43 @@ describe("TelegramLinkPanel", () => {
     expect(await screen.findByText(/Linked to chat 222/)).toBeInTheDocument();
   });
 
+  it("discards a link-code response that arrives after the workspace was switched away", async () => {
+    let resolvePost: (response: Response) => void = () => {};
+    const postPromise = new Promise<Response>((resolve) => {
+      resolvePost = resolve;
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string, init?: RequestInit) => {
+        if (init?.method === "POST") return postPromise;
+        if (input.includes("workspace=w2")) {
+          return jsonResponse({ linked: true, chat_id: "222", linked_at: "2026-07-13T00:00:00Z" });
+        }
+        return jsonResponse({ linked: false, chat_id: null, linked_at: null });
+      }),
+    );
+
+    render(<TelegramLinkPanel />);
+    await screen.findByText("Not linked to a Telegram chat yet.");
+
+    await userEvent.click(screen.getByRole("button", { name: "Link Telegram" }));
+    expect(screen.getByRole("button", { name: "Requesting…" })).toBeDisabled();
+
+    // Switch workspace while the request for w1 is still in flight.
+    await userEvent.click(screen.getByRole("combobox", { name: "Telegram workspace" }));
+    await userEvent.click(await screen.findByRole("option", { name: "Acme" }));
+    expect(await screen.findByText(/Linked to chat 222/)).toBeInTheDocument();
+
+    // The stale w1 response now resolves -- proves the round-2 P2 fix: it
+    // must not surface w1's code while the panel shows w2, and it must not
+    // leave the (workspace-agnostic) requesting flag stuck.
+    resolvePost(jsonResponse({ code: "abc123", expires_at: "2026-07-13T00:10:00Z" }, 201));
+    await waitFor(() => {
+      expect(screen.queryByText("/link abc123")).not.toBeInTheDocument();
+    });
+    expect(screen.getByText(/Linked to chat 222/)).toBeInTheDocument();
+  });
+
   it("clears an expired code once its countdown reaches zero", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     vi.setSystemTime(new Date("2026-07-13T00:00:00Z"));
