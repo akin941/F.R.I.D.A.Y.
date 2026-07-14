@@ -27,6 +27,11 @@
 > self-contradiction, PAT ownership filtering, Telegram message chunking
 > past the 4096-char limit, atomic link-code consumption, missing `pytest`
 > `testpaths` entry) were closed autonomously per standing protocol.
+>
+> **Status: MVP 9 COMPLETE (2026-07-14)** — all 5 branches merged to main
+> (`12ad4f9`, `6d69147`, `db00dee`, `65ea9fa`, `7780919`). See the Branch
+> plan table below for per-branch Codex code-review round counts and
+> findings.
 
 ## Goal and user value
 
@@ -677,7 +682,9 @@ expired and unconsumed, unlike an `ApprovalRequest` or `PersonalAccessToken`)
 | 2 | `feat/mvp9-cli-channel` | **Done (2026-07-13, merged to main `6d69147`).** CLI client script (`integrations/cli/jarvis_cli.py`); `create_dev_pat` management command; tests exercising a PAT-authenticated request against the existing chat/agents/approvals endpoints (including a request that omits `workspace` entirely, and the negative case: a PAT-authenticated approve/reject attempt is rejected). 4 rounds of Codex code review, 4 real P2 fixes (ambiguous workspace-name match, missing `client_local_date`, a whitespace-mutation bug, a missing `DEBUG` gate). |
 | 3 | `feat/mvp9-telegram-bot` | **Done (2026-07-14, merged to main `db00dee`).** `TelegramLinkCode`/`LinkedTelegramChat` models + migration; link-code mint endpoint; link-status/unlink endpoints; webhook view (secret verification, `chat.type == "private"` check, fast-ack, enqueue); `telegram_client.py` (mockable HTTP wrapper); `process_telegram_update` Celery task (link flow + relay flow); `sweep_expired_link_codes` periodic task + beat wiring; `register_telegram_webhook` management command; `.env.example` additions; tests (webhook secret rejection, group-chat rejection, link-code consume/expire/reuse, link-status/unlink, relay-through-existing-pipeline, `Message.channel="telegram"` stamped correctly, no synchronous gateway call inside the webhook request). 4 rounds of Codex code review: round 1 escalated 1 new P1 to the user (relay-time link revalidation) + 1 real P2 (throttling); round 2, 1 real P2 (link flow bypassed the audited `create_conversation` service); round 3, 1 real P2 (link-code consumption not revalidating access the same way relay already did); round 4, 2 real P2s (webhook accepting traffic with no bot token, unbounded outbound HTTP call) — approved directly by the user without a 5th round. A recurring `update_id`-deduplication finding was correctly recognized each time as a re-raise of an already-decided, documented scope exclusion. |
 | 4 | `feat/mvp9-frontend-settings` | **Done (2026-07-14, merged to main `65ea9fa`).** Integrations settings UI (§3): token list/create/revoke, Telegram link-code request + status + unlink; frontend types/BFF routes/component tests. 4 rounds of Codex code review, all P2s, all fixed: raw PAT token retained in list state after banner dismissal; a link-code response race after a mid-flight workspace switch; the same race pattern in the Unlink flow; the reveal banner's "Copied" state carrying over to a newly created token — the user was consulted directly after the third consecutive round with a new finding and chose to run one more round before merging. |
-| 5 | `feat/mvp9-e2e-docs` | Playwright e2e (PAT-authenticated chat round trip against the real Docker stack; Telegram flow exercised via a recorded/mocked webhook POST, not a real Telegram network call — see Risks); `docs/integrations/README.md` update; `MASTER_PLAN.md` new §Y section + roadmap line; MVP9 closeout. |
+| 5 | `feat/mvp9-e2e-docs` | **Done (2026-07-14, merged to main `7780919`).** Playwright e2e (PAT-authenticated chat round trip against the real Docker stack, including the channel-restriction invariant proven live: a PAT-authenticated approve attempt 403s, the same request approved over the web channel 200s; Telegram flow via real webhook POSTs against the real backend, asserted on DB-observable state — see Risks for the accepted one-real-outbound-call trade-off); `docs/integrations/README.md` fleshed out from a stub into a real guide; `MASTER_PLAN.md` new §Y section + roadmap line. Codex code review: round 1, 0 findings, direct APPROVE. |
+
+**MVP 9 COMPLETE — all 5 branches merged to main, all Codex review loops closed.**
 
 **Config enumerations to touch (branch 1)**: `backend/pyproject.toml` —
 add `"integrations"` to both `testpaths` and import-linter `root_packages`
