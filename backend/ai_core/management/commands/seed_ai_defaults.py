@@ -343,6 +343,39 @@ class Command(BaseCommand):
             )
             self._log("nvidia-nim provider", created)
 
+            _, created = ModelProvider.objects.get_or_create(
+                name="nvidia-nim-embedding",
+                defaults={
+                    "provider_type": ModelProvider.ProviderType.OPENAI_COMPATIBLE,
+                    "capability": ModelProvider.Capability.EMBEDDING,
+                    # Default baai/bge-m3: a SYMMETRIC multilingual embedding
+                    # model (strong on Turkish) that works through the plain
+                    # openai_compat `.embeddings.create(model, input)` call
+                    # with NO `input_type` parameter -- deliberately not an
+                    # asymmetric NIM model (e.g. nvidia/nv-embedqa-*), which
+                    # reject that plain call with "'input_type' parameter is
+                    # required for asymmetric models" and would need adapter
+                    # changes out of scope here. Overriding the model_id to an
+                    # asymmetric one will break embedding until the adapter
+                    # learns to send input_type.
+                    "model_id": os.environ.get("NVIDIA_EMBEDDING_MODEL_ID") or "baai/bge-m3",
+                    "base_url": os.environ.get("NVIDIA_BASE_URL")
+                    or "https://integrate.api.nvidia.com/v1",
+                    "api_key_env_var": "NVIDIA_API_KEY",
+                    # MUST match the model_id's real output width, or the
+                    # retrieval query's dimension guard (knowledge/context.py
+                    # `_VectorDims`) silently filters out every stored chunk.
+                    # baai/bge-m3 = 1024 (verified live).
+                    # `or` guards the same empty-string trap as model_id above
+                    # (a Compose `${VAR:-}` empty value would make int("")
+                    # raise); the `:-1024` default in compose.yml also prevents
+                    # empty, this is belt-and-suspenders for a bare env too.
+                    "dimension": int(os.environ.get("NVIDIA_EMBEDDING_DIMENSION") or "1024"),
+                    "priority": 25,
+                },
+            )
+            self._log("nvidia-nim-embedding provider", created)
+
         if os.environ.get("DEEPSEEK_API_KEY"):
             _, created = ModelProvider.objects.get_or_create(
                 name="deepseek",
