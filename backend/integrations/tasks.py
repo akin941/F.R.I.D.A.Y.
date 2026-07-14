@@ -103,11 +103,29 @@ def _consume_link_code(code, chat_id):
     now = timezone.now()
     link_code = (
         TelegramLinkCode.objects.select_for_update()
+        .select_related("user")
         .filter(code=code, consumed_at__isnull=True, expires_at__gt=now)
         .first()
     )
     if link_code is None:
         return None
+
+    # Same revalidation _handle_relay performs on every relayed message
+    # (round-1 P1 fix) applies here too, at claim time: a code minted
+    # before its user was deactivated or removed from the workspace must
+    # not still be consumable just because it hasn't expired yet (Codex
+    # review, branch 3 round 3) -- otherwise the link flow would mutate
+    # and audit workspace data on behalf of someone who's since lost
+    # access to it.
+    still_eligible = (
+        link_code.user.is_active
+        and Workspace.objects.filter(
+            pk=link_code.workspace_id, members__user=link_code.user
+        ).exists()
+    )
+    if not still_eligible:
+        return None
+
     link_code.consumed_at = now
     link_code.save(update_fields=["consumed_at", "updated_at"])
 

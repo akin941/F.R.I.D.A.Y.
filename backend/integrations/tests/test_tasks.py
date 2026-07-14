@@ -193,6 +193,35 @@ def test_non_private_chat_never_consumes_a_code_or_links(owner, workspace, chat_
     send.assert_not_called()
 
 
+def test_link_code_is_refused_when_user_is_deactivated_since_minting(owner, workspace):
+    """Proves the round-3 P2 fix: revalidated at claim time, not only on
+    later relay -- a code minted before deactivation must not still link."""
+    link_code = make_link_code(owner, workspace)
+    owner.is_active = False
+    owner.save(update_fields=["is_active"])
+
+    with mock.patch("integrations.tasks.telegram_client.send_message") as send:
+        process_telegram_update(private_update("chat-1", "/link abc123"))
+
+    link_code.refresh_from_db()
+    assert link_code.consumed_at is None
+    assert not LinkedTelegramChat.objects.exists()
+    assert "invalid or expired" in send.call_args.args[1].lower()
+
+
+def test_link_code_is_refused_when_user_no_longer_a_workspace_member(owner, workspace):
+    link_code = make_link_code(owner, workspace)
+    WorkspaceMember.objects.filter(workspace=workspace, user=owner).delete()
+
+    with mock.patch("integrations.tasks.telegram_client.send_message") as send:
+        process_telegram_update(private_update("chat-1", "/link abc123"))
+
+    link_code.refresh_from_db()
+    assert link_code.consumed_at is None
+    assert not LinkedTelegramChat.objects.exists()
+    assert "invalid or expired" in send.call_args.args[1].lower()
+
+
 def test_relinking_replaces_the_existing_user_workspace_row(owner, workspace):
     first_code = make_link_code(owner, workspace, code="first")
     with mock.patch("integrations.tasks.telegram_client.send_message"):
