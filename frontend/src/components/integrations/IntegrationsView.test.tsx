@@ -108,6 +108,47 @@ describe("IntegrationsView", () => {
     expect(screen.queryByText("jpat_raw_value")).not.toBeInTheDocument();
   });
 
+  it("resets the reveal banner's copied state for a newly created token", async () => {
+    Object.assign(navigator, { clipboard: { writeText: vi.fn().mockResolvedValue(undefined) } });
+    const createdTokens = [
+      { ...token({ id: "a", name: "token A" }), token: "jpat_a" },
+      { ...token({ id: "b", name: "token B" }), token: "jpat_b" },
+    ];
+    let createCount = 0;
+    vi.stubGlobal(
+      "fetch",
+      fetchRouter({
+        "GET /api/auth/tokens": () => jsonResponse([]),
+        "POST /api/auth/tokens": () => jsonResponse(createdTokens[createCount++], 201),
+      }),
+    );
+
+    render(<IntegrationsView />);
+    await screen.findByText("No personal access tokens yet.");
+
+    await userEvent.click(screen.getByRole("button", { name: "New token" }));
+    await userEvent.type(screen.getByLabelText("Name"), "token A");
+    await userEvent.click(screen.getByRole("combobox", { name: "Token workspace" }));
+    await userEvent.click(await screen.findByRole("option", { name: "Alice" }));
+    await userEvent.click(screen.getByRole("button", { name: "Create token" }));
+    await screen.findByText("jpat_a");
+
+    await userEvent.click(screen.getByRole("button", { name: "Copy" }));
+    expect(await screen.findByRole("button", { name: "Copied" })).toBeInTheDocument();
+
+    // Create a second token without dismissing the first's banner.
+    await userEvent.click(screen.getByRole("button", { name: "New token" }));
+    await userEvent.type(screen.getByLabelText("Name"), "token B");
+    await userEvent.click(screen.getByRole("combobox", { name: "Token workspace" }));
+    await userEvent.click(await screen.findByRole("option", { name: "Alice" }));
+    await userEvent.click(screen.getByRole("button", { name: "Create token" }));
+
+    // Proves the round-4 P2 fix: the banner for token B must not inherit
+    // token A's "Copied" state -- it hasn't actually been copied yet.
+    expect(await screen.findByText("jpat_b")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Copy" })).toBeInTheDocument();
+  });
+
   it("revokes a token", async () => {
     const active = token();
     vi.stubGlobal(

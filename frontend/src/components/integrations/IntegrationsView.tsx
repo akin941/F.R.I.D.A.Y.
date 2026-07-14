@@ -87,7 +87,16 @@ export function IntegrationsView() {
         ) : null}
 
         {revealedToken ? (
-          <RevealedTokenBanner token={revealedToken} onDismiss={() => setRevealedToken(null)} />
+          // Keyed by the token itself: creating a second token without
+          // dismissing the first's banner must not let React reuse the same
+          // instance and carry over its "Copied" state -- that would show
+          // "Copied" for a token that was never actually copied (Codex
+          // review, branch 4 round 4).
+          <RevealedTokenBanner
+            key={revealedToken}
+            token={revealedToken}
+            onDismiss={() => setRevealedToken(null)}
+          />
         ) : null}
 
         {creating ? (
