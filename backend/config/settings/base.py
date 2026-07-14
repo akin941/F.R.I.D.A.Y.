@@ -258,6 +258,21 @@ AGENT_APPROVAL_RESUME_RECOVERY_GRACE_SECONDS = env.int(
     "AGENT_APPROVAL_RESUME_RECOVERY_GRACE_SECONDS", default=60
 )
 
+# --- Telegram bot (MVP 9 §4) ---
+
+# Bot API token from @BotFather -- used only server-side by
+# integrations/telegram_client.py to call the Bot API. Never the same
+# value as TELEGRAM_WEBHOOK_SECRET below.
+TELEGRAM_BOT_TOKEN = env("TELEGRAM_BOT_TOKEN", default="")
+
+# A value WE choose and register with Telegram via `setWebhook`
+# (`manage.py register_telegram_webhook`) -- Telegram echoes it back on
+# every webhook call as the X-Telegram-Bot-Api-Secret-Token header, which
+# the webhook view verifies before touching the database or enqueuing
+# anything. Empty by default: an unconfigured secret must never match an
+# empty/missing header (fail closed, not fail open).
+TELEGRAM_WEBHOOK_SECRET = env("TELEGRAM_WEBHOOK_SECRET", default="")
+
 # Error tracking — active only when a DSN is configured.
 SENTRY_DSN = env("SENTRY_DSN", default="")
 if SENTRY_DSN:
