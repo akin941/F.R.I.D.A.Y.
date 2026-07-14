@@ -19,5 +19,6 @@ urlpatterns = [
     path("api/v1/", include("tasks.urls")),
     path("api/v1/", include("approvals.urls")),
     path("api/v1/", include("agents.urls")),
+    path("api/v1/", include("integrations.urls")),
     # TODO(MVP 1, next branches): audit admin wiring.
 ]

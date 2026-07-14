@@ -35,4 +35,8 @@ app.conf.beat_schedule = {
         "task": "agents.tasks.recover_stale_agents",
         "schedule": 60.0,
     },
+    "telegram-link-code-expiry-sweep": {
+        "task": "integrations.tasks.sweep_expired_link_codes",
+        "schedule": 60.0,
+    },
 }
