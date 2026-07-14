@@ -296,6 +296,7 @@ def stream_assistant_reply(
     memory_ids=None,
     chunk_ids=None,
     draft_event=None,
+    channel=Message.Channel.WEB,
 ):
     """`request_id` is the id `RequestIDMiddleware` assigned to the originating
     request. Django never iterates `StreamingHttpResponse.streaming_content`
@@ -309,6 +310,12 @@ def stream_assistant_reply(
     (the terminal event ends up being `done`, never `error`) — `done`'s own
     contract (message_id, usage, memories_used, chunks_used) is completely
     unchanged; `draft` is additive and always precedes it, never replaces it.
+
+    `channel` (MVP 9 §1) is the same value already stamped on this turn's
+    user Message row (assistant/views.py resolves it once via
+    core.channels.request_channel) -- threaded through to
+    _persist_assistant_message so the reply carries the identical value,
+    never independently re-derived.
     """
     token = request_id_var.set(request_id)
     try:
@@ -319,13 +326,20 @@ def stream_assistant_reply(
             memory_ids or [],
             chunk_ids or [],
             draft_event,
+            channel,
         )
     finally:
         request_id_var.reset(token)
 
 
 def _stream_assistant_reply(
-    conversation, gateway_stream, usage_holder, memory_ids, chunk_ids, draft_event=None
+    conversation,
+    gateway_stream,
+    usage_holder,
+    memory_ids,
+    chunk_ids,
+    draft_event=None,
+    channel=Message.Channel.WEB,
 ):
     message_id = uuid.uuid4()
     accumulated = []
@@ -369,6 +383,7 @@ def _stream_assistant_reply(
             usage=usage_holder.get("usage"),
             memory_ids=memory_ids,
             chunk_ids=chunk_ids,
+            channel=channel,
         )
 
     if draft_event is not None and terminal_event["type"] == "done":
@@ -378,7 +393,15 @@ def _stream_assistant_reply(
 
 @transaction.atomic
 def _persist_assistant_message(
-    conversation, *, message_id, content, status, usage, memory_ids, chunk_ids
+    conversation,
+    *,
+    message_id,
+    content,
+    status,
+    usage,
+    memory_ids,
+    chunk_ids,
+    channel=Message.Channel.WEB,
 ):
     """The single write site for the assistant `Message` row.
 
@@ -403,6 +426,7 @@ def _persist_assistant_message(
         model_usage=usage,
         memories_used=memory_ids,
         chunks_used=chunk_ids,
+        channel=channel,
     )
     if status == Message.Status.COMPLETE:
         create_extraction_job(conversation=locked_conversation, through_message=message)

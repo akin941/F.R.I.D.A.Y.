@@ -5,9 +5,11 @@ from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.renderers import JSONRenderer
 from rest_framework.response import Response
+from rest_framework.settings import api_settings
 from rest_framework.throttling import ScopedRateThrottle
 from rest_framework.views import APIView
 
+from accounts.authentication import PersonalAccessTokenAuthentication
 from assistant.models import Conversation, Message
 from assistant.serializers import (
     ConversationCreateSerializer,
@@ -21,36 +23,60 @@ from assistant.services import (
     create_conversation,
     stream_assistant_reply,
 )
+from core.channels import is_low_trust, request_channel, scoped_for_actor
 from workspaces.models import Workspace
+
+# Allowlisted for PAT auth (MVP 9 §1/§2). PersonalAccessTokenAuthentication
+# MUST precede JWTAuthentication: DRF's authentication loop stops at the
+# first authenticator that raises AuthenticationFailed, and
+# JWTAuthentication raises InvalidToken for any non-JWT-shaped string
+# (including a jpat_... token) -- reordering this would silently reject
+# every PAT request (see accounts/authentication.py's own docstring).
+_PAT_ALLOWLISTED_AUTHENTICATION_CLASSES = [
+    PersonalAccessTokenAuthentication,
+    *api_settings.DEFAULT_AUTHENTICATION_CLASSES,
+]
 
 
 class ConversationListCreateView(APIView):
     permission_classes = [IsAuthenticated]
+    authentication_classes = _PAT_ALLOWLISTED_AUTHENTICATION_CLASSES
 
     def get(self, request):
         workspace_id = request.query_params.get("workspace")
         if not workspace_id:
-            return Response(
-                {"detail": "workspace query parameter is required."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-        try:
-            workspace_uuid = uuid.UUID(workspace_id)
-        except ValueError:
-            return Response(
-                {"detail": "workspace must be a valid UUID."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-        conversations = Conversation.objects.for_actor(
-            request.user, workspace=workspace_uuid
+            # A CLI/PAT request has no workspace to supply -- it's implied
+            # by the bound credential (core.channels.scoped_for_actor,
+            # below). Only a CHANNEL_WEB request must supply one.
+            if not is_low_trust(request):
+                return Response(
+                    {"detail": "workspace query parameter is required."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            workspace_uuid = None
+        else:
+            try:
+                workspace_uuid = uuid.UUID(workspace_id)
+            except ValueError:
+                return Response(
+                    {"detail": "workspace must be a valid UUID."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+        conversations = scoped_for_actor(
+            request, Conversation.objects, workspace=workspace_uuid
         ).order_by("-created_at", "-id")
         return Response(ConversationSerializer(conversations, many=True).data)
 
     def post(self, request):
+        if is_low_trust(request):
+            # Resolve the bound workspace before serializer validation --
+            # ConversationCreateSerializer declares `workspace` as required,
+            # enforced before any view code runs.
+            request.data["workspace"] = request.auth.bound_workspace_id
         serializer = ConversationCreateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        workspace = Workspace.objects.for_actor(
-            request.user, workspace=serializer.validated_data["workspace"]
+        workspace = scoped_for_actor(
+            request, Workspace.objects, workspace=serializer.validated_data["workspace"]
         ).first()
         if workspace is None:
             return Response(status=status.HTTP_404_NOT_FOUND)
@@ -64,6 +90,7 @@ class ConversationListCreateView(APIView):
 
 class ConversationMessageListView(APIView):
     permission_classes = [IsAuthenticated]
+    authentication_classes = _PAT_ALLOWLISTED_AUTHENTICATION_CLASSES
     throttle_classes = [ScopedRateThrottle]
     throttle_scope = "chat"
 
@@ -85,14 +112,18 @@ class ConversationMessageListView(APIView):
         return super().get_throttles()
 
     def _get_conversation(self, request, conversation_id):
-        return Conversation.objects.for_actor(request.user).filter(id=conversation_id).first()
+        # By-id lookup, no workspace parameter at all -- scoped_for_actor
+        # still forces a channel-bound request to its bound workspace, so a
+        # PAT bound to workspace A can never reach a conversation in
+        # workspace B by id (round-2 P1 fix).
+        return scoped_for_actor(request, Conversation.objects).filter(id=conversation_id).first()
 
     def get(self, request, conversation_id):
         conversation = self._get_conversation(request, conversation_id)
         if conversation is None:
             return Response(status=status.HTTP_404_NOT_FOUND)
         messages = (
-            Message.objects.for_actor(request.user, workspace=conversation.workspace)
+            scoped_for_actor(request, Message.objects, workspace=conversation.workspace)
             .filter(conversation=conversation)
             .order_by("created_at", "id")
         )
@@ -106,6 +137,10 @@ class ConversationMessageListView(APIView):
         serializer = MessageCreateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         content = serializer.validated_data["content"]
+        # Resolved once, threaded through to both this turn's user message
+        # and its assistant reply (MVP 9 §1) -- never independently
+        # re-derived for the reply, so the two rows can never drift apart.
+        channel = request_channel(request)
 
         # Classify before building the reply context (MVP 6 §1) — a wholly
         # new step inserted ahead of the existing build_gateway_stream/persist
@@ -132,6 +167,7 @@ class ConversationMessageListView(APIView):
             created_by=request.user,
             intent=classification["intent"],
             intent_payload=classification["intent_payload"],
+            channel=channel,
         )
 
         # `draft` SSE event (MVP 6 §3/§4/§5): non-terminal, emitted only for
@@ -169,6 +205,7 @@ class ConversationMessageListView(APIView):
                 memory_ids=memory_ids,
                 chunk_ids=chunk_ids,
                 draft_event=draft_event,
+                channel=channel,
             ),
             content_type="text/event-stream",
         )

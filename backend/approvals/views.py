@@ -3,8 +3,10 @@ import uuid
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
+from rest_framework.settings import api_settings
 from rest_framework.views import APIView
 
+from accounts.authentication import PersonalAccessTokenAuthentication
 from approvals.models import ApprovalRequest
 from approvals.serializers import ApprovalRequestCreateSerializer, ApprovalRequestSerializer
 from approvals.services import (
@@ -14,12 +16,23 @@ from approvals.services import (
     create_request,
     reject_request,
 )
+from core.channels import is_low_trust, request_channel, scoped_for_actor
 from workspaces.models import Workspace
 
 _TRANSITIONS = {
     "approve": approve_request,
     "reject": reject_request,
 }
+
+# Allowlisted for PAT auth (MVP 9 §1/§2). The transition view is allowlisted
+# too, specifically so a PAT-authenticated decide attempt gets the
+# deliberate channel-restriction 403 (approvals.services) rather than a
+# generic 401. PersonalAccessTokenAuthentication MUST precede
+# JWTAuthentication -- see accounts/authentication.py's docstring for why.
+_PAT_ALLOWLISTED_AUTHENTICATION_CLASSES = [
+    PersonalAccessTokenAuthentication,
+    *api_settings.DEFAULT_AUTHENTICATION_CLASSES,
+]
 
 
 def _service_error_response(exc):
@@ -31,20 +44,25 @@ def _service_error_response(exc):
 
 
 def _resolve_workspace(request):
-    """Validate the `workspace` query param and return (workspace, error)."""
+    """Validate the `workspace` query param and return (workspace, error).
+    A CLI/PAT request has no workspace to supply -- the presence
+    requirement is skipped entirely for a low-trust channel."""
     workspace_id = request.query_params.get("workspace")
     if not workspace_id:
-        return None, Response(
-            {"detail": "workspace query parameter is required."},
-            status=status.HTTP_400_BAD_REQUEST,
-        )
-    try:
-        workspace_uuid = uuid.UUID(workspace_id)
-    except ValueError:
-        return None, Response(
-            {"detail": "workspace must be a valid UUID."}, status=status.HTTP_400_BAD_REQUEST
-        )
-    workspace = Workspace.objects.for_actor(request.user, workspace=workspace_uuid).first()
+        if not is_low_trust(request):
+            return None, Response(
+                {"detail": "workspace query parameter is required."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        workspace_uuid = None
+    else:
+        try:
+            workspace_uuid = uuid.UUID(workspace_id)
+        except ValueError:
+            return None, Response(
+                {"detail": "workspace must be a valid UUID."}, status=status.HTTP_400_BAD_REQUEST
+            )
+    workspace = scoped_for_actor(request, Workspace.objects, workspace=workspace_uuid).first()
     if workspace is None:
         return None, Response(status=status.HTTP_404_NOT_FOUND)
     return workspace, None
@@ -52,12 +70,13 @@ def _resolve_workspace(request):
 
 class ApprovalRequestListCreateView(APIView):
     permission_classes = [IsAuthenticated]
+    authentication_classes = _PAT_ALLOWLISTED_AUTHENTICATION_CLASSES
 
     def get(self, request):
         workspace, error = _resolve_workspace(request)
         if error is not None:
             return error
-        requests = ApprovalRequest.objects.for_actor(request.user, workspace=workspace)
+        requests = scoped_for_actor(request, ApprovalRequest.objects, workspace=workspace)
         status_filter = request.query_params.get("status")
         if status_filter:
             if status_filter not in ApprovalRequest.Status.values:
@@ -77,10 +96,12 @@ class ApprovalRequestListCreateView(APIView):
         return Response(ApprovalRequestSerializer(requests, many=True).data)
 
     def post(self, request):
+        if is_low_trust(request):
+            request.data["workspace"] = request.auth.bound_workspace_id
         serializer = ApprovalRequestCreateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        workspace = Workspace.objects.for_actor(
-            request.user, workspace=serializer.validated_data["workspace"]
+        workspace = scoped_for_actor(
+            request, Workspace.objects, workspace=serializer.validated_data["workspace"]
         ).first()
         if workspace is None:
             return Response(status=status.HTTP_404_NOT_FOUND)
@@ -100,18 +121,25 @@ class ApprovalRequestListCreateView(APIView):
 
 class ApprovalRequestTransitionView(APIView):
     permission_classes = [IsAuthenticated]
+    authentication_classes = _PAT_ALLOWLISTED_AUTHENTICATION_CLASSES
 
     def post(self, request, request_id, action):
         transition = _TRANSITIONS.get(action)
         if transition is None:
             return Response(status=status.HTTP_404_NOT_FOUND)
+        # By-id lookup, no workspace parameter -- scoped_for_actor still
+        # forces a channel-bound request to its bound workspace.
         approval_request = (
-            ApprovalRequest.objects.for_actor(request.user).filter(id=request_id).first()
+            scoped_for_actor(request, ApprovalRequest.objects).filter(id=request_id).first()
         )
         if approval_request is None:
             return Response(status=status.HTTP_404_NOT_FOUND)
         try:
-            approval_request = transition(approval_request=approval_request, actor=request.user)
+            approval_request = transition(
+                approval_request=approval_request,
+                actor=request.user,
+                channel=request_channel(request),
+            )
         except (ApprovalPermissionDenied, InvalidTransition) as exc:
             return _service_error_response(exc)
         return Response(ApprovalRequestSerializer(approval_request).data)

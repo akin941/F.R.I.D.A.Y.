@@ -61,6 +61,7 @@ testpaths = [
     "tools",
     "agents",
     "skills",
+    "integrations",
 ]
 
 [tool.importlinter]
@@ -79,6 +80,7 @@ root_packages = [
     "tools",
     "agents",
     "skills",
+    "integrations",
 ]
 
 # TODO(MVP 1): add the full modular-monolith contracts once kernel apps exist:
@@ -95,12 +97,12 @@ forbidden_modules = ["config"]
 name = "core must stay independent of kernel apps"
 type = "forbidden"
 source_modules = ["core"]
-forbidden_modules = ["accounts", "workspaces", "audit", "ai_core", "assistant", "memory", "knowledge", "tasks", "approvals", "tools", "agents", "skills"]
+forbidden_modules = ["accounts", "workspaces", "audit", "ai_core", "assistant", "memory", "knowledge", "tasks", "approvals", "tools", "agents", "skills", "integrations"]
 
 [[tool.importlinter.contracts]]
 name = "kernel apps must not import the Django project config"
 type = "forbidden"
-source_modules = ["accounts", "workspaces", "audit", "ai_core", "assistant", "memory", "knowledge", "tasks", "approvals", "tools", "agents", "skills"]
+source_modules = ["accounts", "workspaces", "audit", "ai_core", "assistant", "memory", "knowledge", "tasks", "approvals", "tools", "agents", "skills", "integrations"]
 forbidden_modules = ["config"]
 
 # ai_core is the single door for LLM traffic (ADR-003): it must never depend on
@@ -109,7 +111,7 @@ forbidden_modules = ["config"]
 name = "ai_core must not import business apps"
 type = "forbidden"
 source_modules = ["ai_core"]
-forbidden_modules = ["accounts", "workspaces", "audit", "assistant", "memory", "knowledge", "tasks", "approvals", "tools", "agents", "skills"]
+forbidden_modules = ["accounts", "workspaces", "audit", "assistant", "memory", "knowledge", "tasks", "approvals", "tools", "agents", "skills", "integrations"]
 ignore_imports = [
     "ai_core.tests.* -> accounts.*",
 ]
@@ -273,3 +275,36 @@ name = "tools must not import skills (direction: skills -> tools)"
 type = "forbidden"
 source_modules = ["tools"]
 forbidden_modules = ["skills"]
+
+# integrations (MVP 9) is a new dependency root, one-way: it may import
+# assistant (needed for the Telegram relay to call the same
+# classify_intent/build_gateway_stream pipeline the web app uses), accounts
+# and workspaces (workspace-membership validation at link time) -- but none
+# of those may import integrations back. approvals/agents have no
+# relationship with integrations at all: PersonalAccessTokenAuthentication
+# lives in accounts, not integrations (see accounts/authentication.py's own
+# docstring for why), so assistant/agents/approvals never need to import
+# integrations directly.
+[[tool.importlinter.contracts]]
+name = "assistant must not import integrations (direction: integrations -> assistant)"
+type = "forbidden"
+source_modules = ["assistant"]
+forbidden_modules = ["integrations"]
+
+[[tool.importlinter.contracts]]
+name = "approvals must not import integrations (no relationship either direction)"
+type = "forbidden"
+source_modules = ["approvals"]
+forbidden_modules = ["integrations"]
+
+[[tool.importlinter.contracts]]
+name = "agents must not import integrations (no relationship either direction)"
+type = "forbidden"
+source_modules = ["agents"]
+forbidden_modules = ["integrations"]
+
+[[tool.importlinter.contracts]]
+name = "integrations must not import approvals or agents (integrations needs neither)"
+type = "forbidden"
+source_modules = ["integrations"]
+forbidden_modules = ["approvals", "agents"]
