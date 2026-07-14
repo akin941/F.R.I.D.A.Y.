@@ -28,6 +28,7 @@ import sys
 import tomllib
 import urllib.error
 import urllib.request
+from datetime import date
 from pathlib import Path
 
 CONFIG_PATH = Path.home() / ".config" / "jarvis" / "cli.toml"
@@ -101,7 +102,13 @@ def send_message(base_url, token, conversation_id, content, *, out=None):
     time -- a bare `out=sys.stdout` default parameter binds the stream
     object present when this module was first imported, which silently
     breaks under anything that reassigns `sys.stdout` later (pytest's
-    `capsys`, output redirection, etc.)."""
+    `capsys`, output redirection, etc.).
+
+    Sends `client_local_date` (this machine's local calendar date) the
+    same way the web client does -- task-draft extraction only resolves
+    relative due dates ("tomorrow") when it's supplied; omitting it would
+    silently drop due dates from CLI-originated draft tasks (Codex review,
+    branch 2 round 2)."""
     if out is None:
         out = sys.stdout
     with _request(
@@ -109,7 +116,7 @@ def send_message(base_url, token, conversation_id, content, *, out=None):
         token,
         f"/api/v1/ai/conversations/{conversation_id}/messages",
         method="POST",
-        body={"content": content},
+        body={"content": content, "client_local_date": date.today().isoformat()},
     ) as resp:
         for event in _iter_sse_events(resp):
             if event["type"] == "chunk":
@@ -129,8 +136,15 @@ def main(argv=None):
 
     content = args.message
     if content is None:
-        content = sys.stdin.read().strip()
-    if not content:
+        stdin_content = sys.stdin.read()
+        # Trim only the single trailing newline a shell pipe adds (`echo
+        # "..." | jarvis_cli`) -- never the surrounding whitespace itself.
+        # MessageCreateSerializer declares trim_whitespace=False for
+        # exactly this reason: meaningful leading/trailing whitespace (an
+        # indented code snippet) must reach the API unmodified (Codex
+        # review, branch 2 round 2).
+        content = stdin_content[:-1] if stdin_content.endswith("\n") else stdin_content
+    if not content.strip():
         print("No message given.", file=sys.stderr)
         return 1
 

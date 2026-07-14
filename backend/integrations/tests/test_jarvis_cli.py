@@ -147,6 +147,30 @@ def test_send_message_returns_error_event_without_raising():
     assert terminal == {"type": "error", "error_type": "no_provider"}
 
 
+def test_send_message_includes_client_local_date_in_the_request_body():
+    """task_draft extraction only resolves relative due dates ("tomorrow")
+    when client_local_date is supplied on the same endpoint the web client
+    already sends it on (Codex review, branch 2 round 2)."""
+    fake = _FakeResponse(
+        lines=_sse_lines(
+            {
+                "type": "done",
+                "message_id": "m1",
+                "usage": {},
+                "memories_used": [],
+                "chunks_used": [],
+            }
+        )
+    )
+    with mock.patch.object(jarvis_cli.urllib.request, "urlopen", return_value=fake) as urlopen:
+        jarvis_cli.send_message("http://base", "jpat_x", "conv-1", "hi", out=io.StringIO())
+
+    request = urlopen.call_args[0][0]
+    body = json.loads(request.data)
+    assert body["content"] == "hi"
+    assert body["client_local_date"] == jarvis_cli.date.today().isoformat()
+
+
 # --- main() ---
 
 
@@ -243,3 +267,37 @@ def test_main_returns_1_on_http_error(tmp_path, monkeypatch, capsys):
 def test_main_returns_1_with_no_message_and_empty_stdin(monkeypatch):
     monkeypatch.setattr("sys.stdin", io.StringIO(""))
     assert jarvis_cli.main([]) == 1
+
+
+def test_main_preserves_meaningful_stdin_whitespace(tmp_path, monkeypatch):
+    """A piped message with meaningful leading/trailing whitespace (e.g. an
+    indented code snippet) must reach the API unmodified -- only the single
+    trailing newline the pipe itself adds is trimmed (Codex review, branch
+    2 round 2)."""
+    monkeypatch.setattr(jarvis_cli, "CONFIG_PATH", tmp_path / "missing.toml")
+    monkeypatch.setattr(
+        jarvis_cli,
+        "load_config",
+        lambda: {"token": "jpat_x", "base_url": "http://base", "conversation_id": "conv-1"},
+    )
+    monkeypatch.setattr("sys.stdin", io.StringIO("  def f():\n    return 1\n"))
+
+    message_resp = _FakeResponse(
+        lines=_sse_lines(
+            {
+                "type": "done",
+                "message_id": "m1",
+                "usage": {},
+                "memories_used": [],
+                "chunks_used": [],
+            }
+        )
+    )
+    with mock.patch.object(
+        jarvis_cli.urllib.request, "urlopen", return_value=message_resp
+    ) as urlopen:
+        exit_code = jarvis_cli.main([])
+
+    assert exit_code == 0
+    body = json.loads(urlopen.call_args[0][0].data)
+    assert body["content"] == "  def f():\n    return 1"
