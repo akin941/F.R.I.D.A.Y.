@@ -99,6 +99,10 @@ describe("IntegrationsView", () => {
 
     expect(await screen.findByText("jpat_raw_value")).toBeInTheDocument();
     expect(await screen.findByText("phone")).toBeInTheDocument();
+    // Proves the round-1 P2 fix: the raw token is never also stored on the
+    // list-row entry -- appears exactly once (the reveal banner), not a
+    // second time anywhere the row itself might render it.
+    expect(screen.getAllByText("jpat_raw_value")).toHaveLength(1);
 
     await userEvent.click(screen.getByRole("button", { name: "Done" }));
     expect(screen.queryByText("jpat_raw_value")).not.toBeInTheDocument();

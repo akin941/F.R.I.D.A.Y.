@@ -41,9 +41,14 @@ export function IntegrationsView() {
   }, [loadTokens]);
   /* eslint-enable react-hooks/set-state-in-effect */
 
-  function handleCreated(token: ApiPersonalAccessTokenCreated) {
-    setTokens((prev) => [token, ...prev]);
-    setRevealedToken(token.token);
+  function handleCreated(created: ApiPersonalAccessTokenCreated) {
+    // The raw `token` field must never linger in the list's long-lived
+    // state -- it's already fully handed off to `revealedToken` below, the
+    // one place it's rendered, and dismissing that banner must actually end
+    // its reachability, not just its visibility (Codex review, branch 4).
+    const { token: rawToken, ...rest } = created;
+    setTokens((prev) => [rest, ...prev]);
+    setRevealedToken(rawToken);
     setCreating(false);
   }
 
