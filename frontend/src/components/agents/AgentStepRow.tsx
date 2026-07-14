@@ -46,8 +46,8 @@ export function AgentStepRow({
     } catch (err) {
       setError(
         err instanceof ApiError
-          ? (err.body.detail ?? "That task could not be created.")
-          : "Something went wrong. Please try again.",
+          ? (err.body.detail ?? "Görev oluşturulamadı.")
+          : "Bir şeyler ters gitti. Lütfen tekrar deneyin.",
       );
       setBusy(false);
     }
@@ -62,8 +62,8 @@ export function AgentStepRow({
     } catch (err) {
       setError(
         err instanceof ApiError
-          ? (err.body.detail ?? "That step could not be discarded.")
-          : "Something went wrong. Please try again.",
+          ? (err.body.detail ?? "Adım atılamadı.")
+          : "Bir şeyler ters gitti. Lütfen tekrar deneyin.",
       );
       setBusy(false);
     }
@@ -88,17 +88,13 @@ export function AgentStepRow({
       </div>
       {summary ? <p className="text-sm text-muted-foreground">{summary}</p> : null}
       {step.status === "blocked_on_approval" ? (
-        <Link href="/approvals" className="text-sm underline">
-          Review on Approvals
-        </Link>
+        <Link href="/approvals" className="text-sm underline">Onaylar sayfasında incele</Link>
       ) : null}
       {step.status === "blocked_on_confirmation" && step.kind === "task_draft" ? (
         <div className="flex justify-end gap-2">
-          <Button variant="outline" size="sm" onClick={() => void handleDiscard()} disabled={busy}>
-            Discard
-          </Button>
+          <Button variant="outline" size="sm" onClick={() => void handleDiscard()} disabled={busy}>Vazgeç</Button>
           <Button size="sm" onClick={() => void handleConfirm()} disabled={busy}>
-            {busy ? "Working…" : "Confirm task"}
+            {busy ? "İşleniyor…" : "Görevi onayla"}
           </Button>
         </div>
       ) : null}

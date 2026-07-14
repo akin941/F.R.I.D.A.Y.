@@ -1,13 +1,13 @@
 import type { AgentStatus, AgentStepKind, AgentStepStatus } from "@/types/api";
 
 export const AGENT_STATUS_LABELS: Record<AgentStatus, string> = {
-  planning: "Planning",
-  running: "Running",
-  blocked_on_approval: "Waiting for approval",
-  blocked_on_confirmation: "Waiting for confirmation",
-  completed: "Completed",
-  failed: "Failed",
-  cancelled: "Cancelled",
+  planning: "Planlanıyor",
+  running: "Çalışıyor",
+  blocked_on_approval: "Onay bekliyor",
+  blocked_on_confirmation: "Onay bekliyor",
+  completed: "Tamamlandı",
+  failed: "Başarısız",
+  cancelled: "İptal edildi",
 };
 
 export const AGENT_STATUSES: AgentStatus[] = [
@@ -32,17 +32,17 @@ export const AGENT_IN_FLIGHT_STATUSES: AgentStatus[] = [
 ];
 
 export const AGENT_STEP_STATUS_LABELS: Record<AgentStepStatus, string> = {
-  pending: "Pending",
-  running: "Running",
-  succeeded: "Succeeded",
-  failed: "Failed",
-  blocked_on_approval: "Waiting for approval",
-  blocked_on_confirmation: "Waiting for confirmation",
-  skipped: "Skipped",
+  pending: "Beklemede",
+  running: "Çalışıyor",
+  succeeded: "Başarılı",
+  failed: "Başarısız",
+  blocked_on_approval: "Onay bekliyor",
+  blocked_on_confirmation: "Onay bekliyor",
+  skipped: "Atlandı",
 };
 
 export const AGENT_STEP_KIND_LABELS: Record<AgentStepKind, string> = {
-  read: "Read",
-  tool_request: "Tool request",
-  task_draft: "Task draft",
+  read: "Oku",
+  tool_request: "Araç isteği",
+  task_draft: "Görev taslağı",
 };

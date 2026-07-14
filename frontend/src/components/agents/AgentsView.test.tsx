@@ -64,7 +64,7 @@ describe("AgentsView", () => {
 
     render(<AgentsView />);
 
-    expect(await screen.findByText("No agents yet.")).toBeInTheDocument();
+    expect(await screen.findByText("Henüz ajan yok.")).toBeInTheDocument();
   });
 
   it("starts a new agent and shows it in the list", async () => {
@@ -80,11 +80,11 @@ describe("AgentsView", () => {
     );
 
     render(<AgentsView />);
-    await screen.findByText("No agents yet.");
+    await screen.findByText("Henüz ajan yok.");
 
-    await userEvent.click(screen.getByRole("button", { name: "New agent" }));
-    await userEvent.type(screen.getByLabelText("Goal"), "Draft a report");
-    await userEvent.click(screen.getByRole("button", { name: "Start agent" }));
+    await userEvent.click(screen.getByRole("button", { name: "Yeni ajan" }));
+    await userEvent.type(screen.getByLabelText("Hedef"), "Draft a report");
+    await userEvent.click(screen.getByRole("button", { name: "Ajanı başlat" }));
 
     expect(await screen.findByText("Draft a report")).toBeInTheDocument();
   });
@@ -104,6 +104,6 @@ describe("AgentsView", () => {
     render(<AgentsView />);
     await userEvent.click(await screen.findByText("Summarize my notes"));
 
-    expect(await screen.findByRole("button", { name: /Back to agents/ })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: /Ajanlara dön/ })).toBeInTheDocument();
   });
 });

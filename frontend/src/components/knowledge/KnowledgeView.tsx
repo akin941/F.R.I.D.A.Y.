@@ -34,7 +34,7 @@ export function KnowledgeView() {
       setDocuments(list);
     } catch {
       if (activeWorkspaceIdRef.current === workspaceId) {
-        setLoadError("Failed to load knowledge documents.");
+        setLoadError("Bilgi belgeleri yüklenemedi.");
       }
     } finally {
       if (activeWorkspaceIdRef.current === workspaceId) setLoading(false);
@@ -74,7 +74,7 @@ export function KnowledgeView() {
   if (!activeWorkspace) {
     return (
       <div className="flex flex-1 items-center justify-center p-6 text-sm text-muted-foreground">
-        No workspace available.
+        Kullanılabilir çalışma alanı yok.
       </div>
     );
   }
@@ -83,13 +83,13 @@ export function KnowledgeView() {
     <div className="flex flex-1 flex-col gap-6 overflow-y-auto p-6">
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Knowledge</h1>
+          <h1 className="text-2xl font-semibold tracking-tight">Bilgi</h1>
           <p className="text-sm text-muted-foreground">
-            Documents Jarvis can retrieve into chat context.
+            Jarvis'in sohbet bağlamına getirebileceği belgeler.
           </p>
         </div>
         <Button onClick={() => setCreating((v) => !v)}>
-          {creating ? "Cancel" : "New document"}
+          {creating ? "İptal" : "Yeni belge"}
         </Button>
       </div>
 
@@ -117,16 +117,16 @@ export function KnowledgeView() {
       ) : (
         <section className="flex flex-col gap-3">
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <h2 className="text-lg font-medium tracking-tight">Documents</h2>
+            <h2 className="text-lg font-medium tracking-tight">Belgeler</h2>
             <Select
               value={statusFilter}
               onValueChange={(v) => setStatusFilter(v as KnowledgeStatus | "all")}
             >
-              <SelectTrigger aria-label="Status filter">
+              <SelectTrigger aria-label="Durum filtresi">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">All statuses</SelectItem>
+                <SelectItem value="all">Tüm durumlar</SelectItem>
                 {KNOWLEDGE_STATUSES.map((status) => (
                   <SelectItem key={status} value={status}>
                     {KNOWLEDGE_STATUS_LABELS[status]}
@@ -136,7 +136,7 @@ export function KnowledgeView() {
             </Select>
           </div>
           {visible.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No documents match these filters.</p>
+            <p className="text-sm text-muted-foreground">Bu filtrelere uyan belge yok.</p>
           ) : (
             <div className="flex flex-col gap-3">
               {visible.map((document) => (

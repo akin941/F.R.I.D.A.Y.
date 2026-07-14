@@ -58,7 +58,7 @@ describe("ApprovalView", () => {
     render(<ApprovalView />);
 
     expect(await screen.findByText("vault_export")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Approve" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Onayla" })).toBeInTheDocument();
   });
 
   it("hides the decide controls for a request the viewer made themselves", async () => {
@@ -70,10 +70,10 @@ describe("ApprovalView", () => {
     render(<ApprovalView />);
 
     expect(await screen.findByText("vault_export")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Approve" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Reject" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Onayla" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Reddet" })).not.toBeInTheDocument();
     expect(
-      screen.getByText("Waiting for another workspace admin to decide this request."),
+      screen.getByText("Bu isteğe başka bir çalışma alanı yöneticisinin karar vermesi bekleniyor."),
     ).toBeInTheDocument();
   });
 
@@ -90,8 +90,8 @@ describe("ApprovalView", () => {
     // Only owner/admin roles may decide server-side (brief §4) -- a member
     // viewing someone else's request must not see controls that would
     // always fail with a 403 (Codex review, branch 4).
-    expect(screen.queryByRole("button", { name: "Approve" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Reject" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Onayla" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Reddet" })).not.toBeInTheDocument();
   });
 
   it("approves a pending request", async () => {
@@ -108,10 +108,10 @@ describe("ApprovalView", () => {
 
     render(<ApprovalView />);
     await screen.findByText("vault_export");
-    await userEvent.click(screen.getByRole("button", { name: "Approve" }));
+    await userEvent.click(screen.getByRole("button", { name: "Onayla" }));
 
     await waitFor(() => {
-      expect(screen.getByText("Approved")).toBeInTheDocument();
+      expect(screen.getByText("Onaylandı")).toBeInTheDocument();
     });
   });
 
@@ -129,10 +129,10 @@ describe("ApprovalView", () => {
 
     render(<ApprovalView />);
     await screen.findByText("vault_export");
-    await userEvent.click(screen.getByRole("button", { name: "Reject" }));
+    await userEvent.click(screen.getByRole("button", { name: "Reddet" }));
 
     await waitFor(() => {
-      expect(screen.getByText("Rejected")).toBeInTheDocument();
+      expect(screen.getByText("Reddedildi")).toBeInTheDocument();
     });
   });
 
@@ -161,8 +161,8 @@ describe("ApprovalView", () => {
 
     render(<ApprovalView />);
 
-    expect(await screen.findByText(/Run status: Succeeded/)).toBeInTheDocument();
-    expect(screen.getByText(/3 written, 1 updated, 0 removed/)).toBeInTheDocument();
+    expect(await screen.findByText(/Çalışma durumu: Başarılı/)).toBeInTheDocument();
+    expect(screen.getByText(/3 yazıldı, 1 güncellendi, 0 silindi/)).toBeInTheDocument();
   });
 
   it("polls silently until an in-flight execution reaches a terminal status", async () => {
@@ -194,13 +194,13 @@ describe("ApprovalView", () => {
     );
 
     render(<ApprovalView />);
-    expect(await screen.findByText(/Run status: Waiting to run/)).toBeInTheDocument();
+    expect(await screen.findByText(/Çalışma durumu: Çalışması bekleniyor/)).toBeInTheDocument();
 
     await vi.advanceTimersByTimeAsync(3000);
 
-    expect(await screen.findByText(/Run status: Succeeded/)).toBeInTheDocument();
+    expect(await screen.findByText(/Çalışma durumu: Başarılı/)).toBeInTheDocument();
     // Polling is silent -- no skeleton flash while an in-flight execution refreshes.
-    expect(screen.queryByText("Nothing waiting for a decision.")).toBeInTheDocument();
+    expect(screen.queryByText("Karar bekleyen bir şey yok.")).toBeInTheDocument();
   });
 
   it("filters the decided list by status", async () => {
@@ -216,11 +216,11 @@ describe("ApprovalView", () => {
     );
 
     render(<ApprovalView />);
-    await screen.findByText("Decided");
+    await screen.findByText("Karara bağlananlar");
     expect(screen.getAllByText("vault_export")).toHaveLength(2);
 
-    await userEvent.click(screen.getByRole("combobox", { name: "Status filter" }));
-    await userEvent.click(await screen.findByRole("option", { name: "Rejected" }));
+    await userEvent.click(screen.getByRole("combobox", { name: "Durum filtresi" }));
+    await userEvent.click(await screen.findByRole("option", { name: "Reddedildi" }));
 
     await waitFor(() => {
       expect(screen.getAllByText("vault_export")).toHaveLength(1);

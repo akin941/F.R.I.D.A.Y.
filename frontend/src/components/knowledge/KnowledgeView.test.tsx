@@ -74,12 +74,12 @@ describe("KnowledgeView", () => {
     );
 
     render(<KnowledgeView />);
-    await screen.findByText("No documents match these filters.");
+    await screen.findByText("Bu filtrelere uyan belge yok.");
 
-    await userEvent.click(screen.getByRole("button", { name: "New document" }));
-    await userEvent.type(screen.getByLabelText("Title"), "New doc");
-    await userEvent.type(screen.getByLabelText("Content"), "Some content.");
-    await userEvent.click(screen.getByRole("button", { name: "Create document" }));
+    await userEvent.click(screen.getByRole("button", { name: "Yeni belge" }));
+    await userEvent.type(screen.getByLabelText("Başlık"), "New doc");
+    await userEvent.type(screen.getByLabelText("İçerik"), "Some content.");
+    await userEvent.click(screen.getByRole("button", { name: "Belge oluştur" }));
 
     expect(await screen.findByText("New doc")).toBeInTheDocument();
   });
@@ -97,14 +97,14 @@ describe("KnowledgeView", () => {
     );
 
     render(<KnowledgeView />);
-    await screen.findByText("No documents match these filters.");
+    await screen.findByText("Bu filtrelere uyan belge yok.");
 
-    await userEvent.click(screen.getByRole("button", { name: "New document" }));
-    await userEvent.click(screen.getByLabelText("Source"));
-    await userEvent.click(await screen.findByRole("option", { name: "From URL" }));
-    await userEvent.type(screen.getByLabelText("Title"), "Article");
+    await userEvent.click(screen.getByRole("button", { name: "Yeni belge" }));
+    await userEvent.click(screen.getByLabelText("Kaynak"));
+    await userEvent.click(await screen.findByRole("option", { name: "URL'den" }));
+    await userEvent.type(screen.getByLabelText("Başlık"), "Article");
     await userEvent.type(screen.getByLabelText("URL"), "https://example.com/a");
-    await userEvent.click(screen.getByRole("button", { name: "Create document" }));
+    await userEvent.click(screen.getByRole("button", { name: "Belge oluştur" }));
 
     expect(await screen.findByText("Article")).toBeInTheDocument();
   });
@@ -121,12 +121,12 @@ describe("KnowledgeView", () => {
     );
 
     render(<KnowledgeView />);
-    await screen.findByText("No documents match these filters.");
+    await screen.findByText("Bu filtrelere uyan belge yok.");
 
-    await userEvent.click(screen.getByRole("button", { name: "New document" }));
-    await userEvent.type(screen.getByLabelText("Title"), "Empty doc");
-    await userEvent.type(screen.getByLabelText("Content"), "x");
-    await userEvent.click(screen.getByRole("button", { name: "Create document" }));
+    await userEvent.click(screen.getByRole("button", { name: "Yeni belge" }));
+    await userEvent.type(screen.getByLabelText("Başlık"), "Empty doc");
+    await userEvent.type(screen.getByLabelText("İçerik"), "x");
+    await userEvent.click(screen.getByRole("button", { name: "Belge oluştur" }));
 
     expect(await screen.findByText("content must not be empty.")).toBeInTheDocument();
   });
@@ -145,7 +145,7 @@ describe("KnowledgeView", () => {
 
     render(<KnowledgeView />);
     await screen.findByText("Lantern mode");
-    await userEvent.click(screen.getByRole("button", { name: "Delete" }));
+    await userEvent.click(screen.getByRole("button", { name: "Sil" }));
 
     await waitFor(() => {
       expect(screen.queryByText("Lantern mode")).not.toBeInTheDocument();
@@ -163,8 +163,8 @@ describe("KnowledgeView", () => {
     render(<KnowledgeView />);
     await screen.findByText("Ready doc");
 
-    await userEvent.click(screen.getByLabelText("Status filter"));
-    await userEvent.click(await screen.findByRole("option", { name: "Failed" }));
+    await userEvent.click(screen.getByLabelText("Durum filtresi"));
+    await userEvent.click(await screen.findByRole("option", { name: "Başarısız" }));
 
     expect(screen.queryByText("Ready doc")).not.toBeInTheDocument();
     expect(screen.getByText("Failed doc")).toBeInTheDocument();
@@ -177,16 +177,16 @@ describe("KnowledgeView", () => {
     );
 
     const { rerender } = render(<KnowledgeView />);
-    await screen.findByText("No documents match these filters.");
+    await screen.findByText("Bu filtrelere uyan belge yok.");
 
-    await userEvent.click(screen.getByRole("button", { name: "New document" }));
-    await userEvent.type(screen.getByLabelText("Title"), "Workspace A draft");
-    expect(screen.getByLabelText("Title")).toHaveValue("Workspace A draft");
+    await userEvent.click(screen.getByRole("button", { name: "Yeni belge" }));
+    await userEvent.type(screen.getByLabelText("Başlık"), "Workspace A draft");
+    expect(screen.getByLabelText("Başlık")).toHaveValue("Workspace A draft");
 
     workspaceHolder.current = { id: "w2", name: "Acme", type: "company", role: "member" };
     rerender(<KnowledgeView />);
 
-    expect(screen.queryByLabelText("Title")).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "New document" })).toBeInTheDocument();
+    expect(screen.queryByLabelText("Başlık")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Yeni belge" })).toBeInTheDocument();
   });
 });

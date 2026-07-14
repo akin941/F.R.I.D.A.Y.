@@ -42,8 +42,8 @@ export function ApprovalCard({
     } catch (err) {
       setError(
         err instanceof ApiError
-          ? (err.body.detail ?? "That action could not be completed.")
-          : "Something went wrong. Please try again.",
+          ? (err.body.detail ?? "İşlem tamamlanamadı.")
+          : "Bir şeyler ters gitti. Lütfen tekrar deneyin.",
       );
     } finally {
       setBusy(false);
@@ -66,7 +66,7 @@ export function ApprovalCard({
           {request.decided_at ? (
             <>
               <span>&middot;</span>
-              <span>Decided {new Date(request.decided_at).toLocaleString()}</span>
+              <span>Karara bağlandı {new Date(request.decided_at).toLocaleString()}</span>
             </>
           ) : null}
         </div>
@@ -75,19 +75,19 @@ export function ApprovalCard({
             "approved" means "done". */}
         {request.execution ? (
           <p className="text-sm">
-            Run status:{" "}
+            Çalışma durumu:{" "}
             {EXECUTION_STATUS_LABELS[request.execution.status] ?? request.execution.status}
             {request.execution.status === "failed" && request.execution.error_message
               ? ` — ${request.execution.error_message}`
               : null}
             {request.execution.status === "succeeded"
-              ? ` (${request.execution.written_count} written, ${request.execution.updated_count} updated, ${request.execution.removed_count} removed)`
+              ? ` (${request.execution.written_count} yazıldı, ${request.execution.updated_count} güncellendi, ${request.execution.removed_count} silindi)`
               : null}
           </p>
         ) : null}
         {isOwnRequest && request.status === "pending" ? (
           <p className="text-sm text-muted-foreground">
-            Waiting for another workspace admin to decide this request.
+            Bu isteğe başka bir çalışma alanı yöneticisinin karar vermesi bekleniyor.
           </p>
         ) : null}
       </CardContent>
@@ -98,12 +98,8 @@ export function ApprovalCard({
             size="sm"
             onClick={() => void handleDecide("reject")}
             disabled={busy}
-          >
-            Reject
-          </Button>
-          <Button size="sm" onClick={() => void handleDecide("approve")} disabled={busy}>
-            Approve
-          </Button>
+          >Reddet</Button>
+          <Button size="sm" onClick={() => void handleDecide("approve")} disabled={busy}>Onayla</Button>
         </CardFooter>
       ) : null}
     </Card>

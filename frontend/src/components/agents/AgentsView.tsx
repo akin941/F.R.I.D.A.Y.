@@ -34,7 +34,7 @@ export function AgentsView() {
       setAgents(list);
     } catch {
       if (activeWorkspaceIdRef.current === workspaceId && !options?.silent) {
-        setLoadError("Failed to load agents.");
+        setLoadError("Ajanlar yüklenemedi.");
       }
     } finally {
       if (activeWorkspaceIdRef.current === workspaceId && !options?.silent) setLoading(false);
@@ -76,7 +76,7 @@ export function AgentsView() {
   if (!activeWorkspace) {
     return (
       <div className="flex flex-1 items-center justify-center p-6 text-sm text-muted-foreground">
-        No workspace available.
+        Kullanılabilir çalışma alanı yok.
       </div>
     );
   }
@@ -91,13 +91,12 @@ export function AgentsView() {
     <div className="flex flex-1 flex-col gap-6 overflow-y-auto p-6">
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Agents</h1>
+          <h1 className="text-2xl font-semibold tracking-tight">Ajanlar</h1>
           <p className="text-sm text-muted-foreground">
-            Goal in, multi-step plan out — no per-step confirmation, but every
-            write/delete/deploy/external-send action still goes through Approvals.
+            Hedefi ver, çok adımlı planı al — adım adım onay yok, ama her yazma/silme/dağıtım/dışa-gönderme işlemi yine Onaylar üzerinden geçer.
           </p>
         </div>
-        <Button onClick={() => setCreating((v) => !v)}>{creating ? "Cancel" : "New agent"}</Button>
+        <Button onClick={() => setCreating((v) => !v)}>{creating ? "İptal" : "Yeni ajan"}</Button>
       </div>
 
       {loadError ? (
@@ -121,7 +120,7 @@ export function AgentsView() {
           <Skeleton className="h-20 w-full" />
         </div>
       ) : agents.length === 0 ? (
-        <p className="text-sm text-muted-foreground">No agents yet.</p>
+        <p className="text-sm text-muted-foreground">Henüz ajan yok.</p>
       ) : (
         <div className="flex flex-col gap-3">
           {agents.map((agent) => (

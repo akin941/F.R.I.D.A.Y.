@@ -40,7 +40,7 @@ export function ApprovalView() {
       setRequests(list);
     } catch {
       if (activeWorkspaceIdRef.current === workspaceId && !options?.silent) {
-        setLoadError("Failed to load approval requests.");
+        setLoadError("Onay istekleri yüklenemedi.");
       }
     } finally {
       if (activeWorkspaceIdRef.current === workspaceId && !options?.silent) setLoading(false);
@@ -94,7 +94,7 @@ export function ApprovalView() {
   if (!activeWorkspace) {
     return (
       <div className="flex flex-1 items-center justify-center p-6 text-sm text-muted-foreground">
-        No workspace available.
+        Kullanılabilir çalışma alanı yok.
       </div>
     );
   }
@@ -102,9 +102,9 @@ export function ApprovalView() {
   return (
     <div className="flex flex-1 flex-col gap-6 overflow-y-auto p-6">
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Approvals</h1>
+        <h1 className="text-2xl font-semibold tracking-tight">Onaylar</h1>
         <p className="text-sm text-muted-foreground">
-          Requests for write/delete/deploy/external-send actions that need a human decision.
+          İnsan kararı gerektiren yazma/silme/dağıtım/dışa-gönderme istekleri.
         </p>
       </div>
 
@@ -123,10 +123,10 @@ export function ApprovalView() {
         <>
           <section className="flex flex-col gap-3">
             <h2 className="text-lg font-medium tracking-tight">
-              Pending {pending.length > 0 ? `(${pending.length})` : ""}
+              Bekleyenler {pending.length > 0 ? `(${pending.length})` : ""}
             </h2>
             {pending.length === 0 ? (
-              <p className="text-sm text-muted-foreground">Nothing waiting for a decision.</p>
+              <p className="text-sm text-muted-foreground">Karar bekleyen bir şey yok.</p>
             ) : (
               <div className="flex flex-col gap-3">
                 {pending.map((request) => (
@@ -146,16 +146,16 @@ export function ApprovalView() {
 
           <section className="flex flex-col gap-3">
             <div className="flex flex-wrap items-center justify-between gap-3">
-              <h2 className="text-lg font-medium tracking-tight">Decided</h2>
+              <h2 className="text-lg font-medium tracking-tight">Karara bağlananlar</h2>
               <Select
                 value={statusFilter}
                 onValueChange={(v) => setStatusFilter(v as ApprovalStatus | "all")}
               >
-                <SelectTrigger aria-label="Status filter">
+                <SelectTrigger aria-label="Durum filtresi">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">All statuses</SelectItem>
+                  <SelectItem value="all">Tüm durumlar</SelectItem>
                   {DECIDED_STATUSES.map((status) => (
                     <SelectItem key={status} value={status}>
                       {APPROVAL_STATUS_LABELS[status]}
@@ -166,7 +166,7 @@ export function ApprovalView() {
             </div>
             {decided.length === 0 ? (
               <p className="text-sm text-muted-foreground">
-                No decided requests match this filter.
+                Bu filtreye uyan karara bağlanmış istek yok.
               </p>
             ) : (
               <div className="flex flex-col gap-3">

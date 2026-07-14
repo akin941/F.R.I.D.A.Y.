@@ -67,7 +67,7 @@ describe("AgentDetail", () => {
 
     render(<AgentDetail agentId="a1" onBack={() => undefined} />);
 
-    expect(await screen.findByText("Ran via skill: weekly_export")).toBeInTheDocument();
+    expect(await screen.findByText("Şu beceriyle çalıştı: weekly_export")).toBeInTheDocument();
   });
 
   it("shows no skill line for a freeform (non-skill) plan", async () => {
@@ -97,10 +97,10 @@ describe("AgentDetail", () => {
 
     render(<AgentDetail agentId="a1" onBack={() => undefined} />);
     await screen.findByText("Summarize my notes");
-    await userEvent.click(screen.getByRole("button", { name: "Cancel agent" }));
+    await userEvent.click(screen.getByRole("button", { name: "Ajanı iptal et" }));
 
     await waitFor(() => {
-      expect(screen.queryByRole("button", { name: "Cancel agent" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Ajanı iptal et" })).not.toBeInTheDocument();
     });
   });
 
@@ -113,7 +113,7 @@ describe("AgentDetail", () => {
     render(<AgentDetail agentId="a1" onBack={() => undefined} />);
     await screen.findByText("Summarize my notes");
 
-    expect(screen.queryByRole("button", { name: "Cancel agent" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Ajanı iptal et" })).not.toBeInTheDocument();
   });
 
   it("links a blocked_on_approval step to /approvals", async () => {
@@ -137,7 +137,7 @@ describe("AgentDetail", () => {
 
     render(<AgentDetail agentId="a1" onBack={() => undefined} />);
 
-    const link = await screen.findByRole("link", { name: "Review on Approvals" });
+    const link = await screen.findByRole("link", { name: "Onaylar sayfasında incele" });
     expect(link).toHaveAttribute("href", "/approvals");
   });
 
@@ -164,7 +164,7 @@ describe("AgentDetail", () => {
 
     render(<AgentDetail agentId="a1" onBack={() => undefined} />);
     await screen.findByText("Draft a task");
-    await userEvent.click(screen.getByRole("button", { name: "Confirm task" }));
+    await userEvent.click(screen.getByRole("button", { name: "Görevi onayla" }));
 
     await waitFor(() => {
       expect(
@@ -199,7 +199,7 @@ describe("AgentDetail", () => {
 
     render(<AgentDetail agentId="a1" onBack={() => undefined} />);
     await screen.findByText("Draft a task");
-    await userEvent.click(screen.getByRole("button", { name: "Discard" }));
+    await userEvent.click(screen.getByRole("button", { name: "Vazgeç" }));
 
     await waitFor(() => {
       expect(

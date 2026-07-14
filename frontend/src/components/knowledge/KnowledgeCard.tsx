@@ -31,8 +31,8 @@ export function KnowledgeCard({
     } catch (err) {
       setError(
         err instanceof ApiError
-          ? (err.body.detail ?? "That document could not be deleted.")
-          : "Something went wrong. Please try again.",
+          ? (err.body.detail ?? "Belge silinemedi.")
+          : "Bir şeyler ters gitti. Lütfen tekrar deneyin.",
       );
       setBusy(false);
     }
@@ -72,7 +72,7 @@ export function KnowledgeCard({
           onClick={() => void handleDelete()}
           disabled={busy}
         >
-          Delete
+          Sil
         </Button>
       </CardFooter>
     </Card>

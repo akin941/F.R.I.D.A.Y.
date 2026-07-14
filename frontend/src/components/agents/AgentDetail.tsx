@@ -31,7 +31,7 @@ export function AgentDetail({ agentId, onBack }: { agentId: string; onBack: () =
         const data = await apiGetJson<ApiAgentDetail>(`/api/agents/${agentId}`);
         setAgent(data);
       } catch {
-        if (!options?.silent) setLoadError("Failed to load this agent.");
+        if (!options?.silent) setLoadError("Bu ajan yüklenemedi.");
       } finally {
         if (!options?.silent) setLoading(false);
       }
@@ -62,8 +62,8 @@ export function AgentDetail({ agentId, onBack }: { agentId: string; onBack: () =
     } catch (err) {
       setCancelError(
         err instanceof ApiError
-          ? (err.body.detail ?? "That agent could not be cancelled.")
-          : "Something went wrong. Please try again.",
+          ? (err.body.detail ?? "Ajan iptal edilemedi.")
+          : "Bir şeyler ters gitti. Lütfen tekrar deneyin.",
       );
     } finally {
       setCancelling(false);
@@ -79,7 +79,7 @@ export function AgentDetail({ agentId, onBack }: { agentId: string; onBack: () =
   return (
     <div className="flex flex-1 flex-col gap-4 overflow-y-auto p-6">
       <Button variant="outline" size="sm" className="self-start" onClick={onBack}>
-        &larr; Back to agents
+        &larr; Ajanlara dön
       </Button>
 
       {loadError ? (
@@ -103,7 +103,7 @@ export function AgentDetail({ agentId, onBack }: { agentId: string; onBack: () =
                 {agent.failure_reason ? ` — ${agent.failure_reason}` : ""}
               </p>
               {agent.skill_name ? (
-                <p className="text-sm text-muted-foreground">Ran via skill: {agent.skill_name}</p>
+                <p className="text-sm text-muted-foreground">Şu beceriyle çalıştı: {agent.skill_name}</p>
               ) : null}
             </div>
             {canCancel ? (
@@ -112,7 +112,7 @@ export function AgentDetail({ agentId, onBack }: { agentId: string; onBack: () =
                 onClick={() => void handleCancel()}
                 disabled={cancelling}
               >
-                {cancelling ? "Cancelling…" : "Cancel agent"}
+                {cancelling ? "İptal ediliyor…" : "Ajanı iptal et"}
               </Button>
             ) : null}
           </div>

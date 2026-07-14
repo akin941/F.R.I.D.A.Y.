@@ -40,8 +40,8 @@ export function AgentGoalForm({
     } catch (err) {
       setError(
         err instanceof ApiError
-          ? (err.body.detail ?? "That agent could not be started.")
-          : "Something went wrong. Please try again.",
+          ? (err.body.detail ?? "Ajan başlatılamadı.")
+          : "Bir şeyler ters gitti. Lütfen tekrar deneyin.",
       );
     } finally {
       setSubmitting(false);
@@ -51,7 +51,7 @@ export function AgentGoalForm({
   return (
     <Card>
       <CardHeader>
-        <CardTitle>New agent</CardTitle>
+        <CardTitle>Yeni ajan</CardTitle>
       </CardHeader>
       <form onSubmit={handleSubmit}>
         <CardContent className="flex flex-col gap-3">
@@ -61,8 +61,8 @@ export function AgentGoalForm({
             </Alert>
           ) : null}
           <Textarea
-            aria-label="Goal"
-            placeholder="What should the agent do?"
+            aria-label="Hedef"
+            placeholder="Ajan ne yapsın?"
             value={goal}
             onChange={(e) => setGoal(e.target.value)}
             rows={3}
@@ -70,11 +70,9 @@ export function AgentGoalForm({
           />
         </CardContent>
         <CardFooter className="flex justify-end gap-2">
-          <Button type="button" variant="outline" onClick={onCancel} disabled={submitting}>
-            Cancel
-          </Button>
+          <Button type="button" variant="outline" onClick={onCancel} disabled={submitting}>İptal</Button>
           <Button type="submit" disabled={submitting || !goal.trim()}>
-            {submitting ? "Planning…" : "Start agent"}
+            {submitting ? "Planlanıyor…" : "Ajanı başlat"}
           </Button>
         </CardFooter>
       </form>

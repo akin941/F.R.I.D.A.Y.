@@ -30,7 +30,7 @@ function extractErrorMessage(err: unknown, fallback: string): string {
     }
     return fallback;
   }
-  return "Something went wrong. Please try again.";
+  return "Bir şeyler ters gitti. Lütfen tekrar deneyin.";
 }
 
 export function KnowledgeCreateForm({
@@ -56,7 +56,7 @@ export function KnowledgeCreateForm({
     setError(null);
 
     if (sourceType === "file_upload" && !file) {
-      setError("Choose a file to upload.");
+      setError("Yüklenecek bir dosya seç.");
       return;
     }
 
@@ -92,7 +92,7 @@ export function KnowledgeCreateForm({
       setSourceUrl("");
       setFile(null);
     } catch (err) {
-      setError(extractErrorMessage(err, "That document could not be created."));
+      setError(extractErrorMessage(err, "Belge oluşturulamadı."));
     } finally {
       setSubmitting(false);
     }
@@ -101,7 +101,7 @@ export function KnowledgeCreateForm({
   return (
     <Card>
       <CardHeader>
-        <CardTitle>New document</CardTitle>
+        <CardTitle>Yeni belge</CardTitle>
       </CardHeader>
       <form onSubmit={handleSubmit}>
         <CardContent className="flex flex-col gap-3">
@@ -111,7 +111,7 @@ export function KnowledgeCreateForm({
             </Alert>
           ) : null}
           <div className="flex flex-col gap-2">
-            <Label htmlFor="create-knowledge-source-type">Source</Label>
+            <Label htmlFor="create-knowledge-source-type">Kaynak</Label>
             <Select
               value={sourceType}
               onValueChange={(value) => setSourceType(value as KnowledgeSourceType)}
@@ -129,7 +129,7 @@ export function KnowledgeCreateForm({
             </Select>
           </div>
           <div className="flex flex-col gap-2">
-            <Label htmlFor="create-knowledge-title">Title</Label>
+            <Label htmlFor="create-knowledge-title">Başlık</Label>
             <Input
               id="create-knowledge-title"
               value={title}
@@ -139,7 +139,7 @@ export function KnowledgeCreateForm({
           </div>
           {sourceType === "pasted_text" ? (
             <div className="flex flex-col gap-2">
-              <Label htmlFor="create-knowledge-content">Content</Label>
+              <Label htmlFor="create-knowledge-content">İçerik</Label>
               <Textarea
                 id="create-knowledge-content"
                 value={content}
@@ -162,7 +162,7 @@ export function KnowledgeCreateForm({
           ) : null}
           {sourceType === "file_upload" ? (
             <div className="flex flex-col gap-2">
-              <Label htmlFor="create-knowledge-file">File</Label>
+              <Label htmlFor="create-knowledge-file">Dosya</Label>
               <Input
                 id="create-knowledge-file"
                 type="file"
@@ -172,7 +172,7 @@ export function KnowledgeCreateForm({
             </div>
           ) : null}
           <div className="flex flex-col gap-2">
-            <Label htmlFor="create-knowledge-sensitivity">Sensitivity</Label>
+            <Label htmlFor="create-knowledge-sensitivity">Gizlilik</Label>
             <Select
               value={sensitivity}
               onValueChange={(value) => setSensitivity(value as KnowledgeSensitivity)}
@@ -188,11 +188,9 @@ export function KnowledgeCreateForm({
           </div>
         </CardContent>
         <CardFooter className="flex justify-end gap-2">
-          <Button type="button" variant="outline" onClick={onCancel} disabled={submitting}>
-            Cancel
-          </Button>
+          <Button type="button" variant="outline" onClick={onCancel} disabled={submitting}>İptal</Button>
           <Button type="submit" disabled={submitting}>
-            {submitting ? "Creating…" : "Create document"}
+            {submitting ? "Oluşturuluyor…" : "Belge oluştur"}
           </Button>
         </CardFooter>
       </form>
