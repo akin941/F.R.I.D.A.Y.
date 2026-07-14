@@ -68,12 +68,17 @@ class ConversationListCreateView(APIView):
         return Response(ConversationSerializer(conversations, many=True).data)
 
     def post(self, request):
+        data = request.data
         if is_low_trust(request):
             # Resolve the bound workspace before serializer validation --
             # ConversationCreateSerializer declares `workspace` as required,
-            # enforced before any view code runs.
-            request.data["workspace"] = request.auth.bound_workspace_id
-        serializer = ConversationCreateSerializer(data=request.data)
+            # enforced before any view code runs. `.copy()` first: DRF
+            # exposes `request.data` as an immutable QueryDict for
+            # form-encoded requests, so mutating it in place would 500 on
+            # anything but a JSON body (Codex review, branch 1 round 1).
+            data = data.copy()
+            data["workspace"] = request.auth.bound_workspace_id
+        serializer = ConversationCreateSerializer(data=data)
         serializer.is_valid(raise_exception=True)
         workspace = scoped_for_actor(
             request, Workspace.objects, workspace=serializer.validated_data["workspace"]

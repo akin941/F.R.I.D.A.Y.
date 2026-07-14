@@ -96,9 +96,13 @@ class ApprovalRequestListCreateView(APIView):
         return Response(ApprovalRequestSerializer(requests, many=True).data)
 
     def post(self, request):
+        data = request.data
         if is_low_trust(request):
-            request.data["workspace"] = request.auth.bound_workspace_id
-        serializer = ApprovalRequestCreateSerializer(data=request.data)
+            # `.copy()` first: request.data is an immutable QueryDict for
+            # form-encoded requests (Codex review, branch 1 round 1).
+            data = data.copy()
+            data["workspace"] = request.auth.bound_workspace_id
+        serializer = ApprovalRequestCreateSerializer(data=data)
         serializer.is_valid(raise_exception=True)
         workspace = scoped_for_actor(
             request, Workspace.objects, workspace=serializer.validated_data["workspace"]

@@ -113,6 +113,16 @@ def test_pat_create_conversation_without_workspace_body_field_succeeds(pat, work
     assert str(response.data["workspace"]) == str(workspace.id)
 
 
+def test_pat_create_conversation_via_form_encoded_body_does_not_500(pat, workspace):
+    """DRF exposes `request.data` as an immutable QueryDict for
+    form-encoded requests -- proves the view copies before injecting the
+    bound workspace rather than mutating it in place (Codex review, branch
+    1 round 1)."""
+    response = pat_client(pat).post("/api/v1/ai/conversations", {}, format="multipart")
+    assert response.status_code == 201
+    assert str(response.data["workspace"]) == str(workspace.id)
+
+
 def test_pat_create_conversation_with_mismatched_body_workspace_is_forced_to_bound(
     pat, workspace, other_workspace
 ):
