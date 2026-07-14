@@ -123,6 +123,15 @@ def test_pat_create_conversation_via_form_encoded_body_does_not_500(pat, workspa
     assert str(response.data["workspace"]) == str(workspace.id)
 
 
+def test_pat_create_conversation_with_non_object_json_body_is_400_not_500(pat):
+    """A syntactically valid but non-object JSON body (e.g. a bare list)
+    has nothing sensible to inject a workspace into -- must fall through to
+    the serializer's own 400, not raise TypeError trying to subscript a
+    list (Codex review, branch 1 round 2)."""
+    response = pat_client(pat).post("/api/v1/ai/conversations", [], format="json")
+    assert response.status_code == 400
+
+
 def test_pat_create_conversation_with_mismatched_body_workspace_is_forced_to_bound(
     pat, workspace, other_workspace
 ):

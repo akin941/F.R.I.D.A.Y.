@@ -106,9 +106,13 @@ class AgentListCreateView(APIView):
         data = request.data
         if is_low_trust(request):
             # `.copy()` first: request.data is an immutable QueryDict for
-            # form-encoded requests (Codex review, branch 1 round 1).
-            data = data.copy()
-            data["workspace"] = request.auth.bound_workspace_id
+            # form-encoded requests (Codex review, branch 1 round 1). Only
+            # inject into an actual mapping -- a non-object body (e.g. a
+            # JSON list) is left untouched for the serializer's own
+            # validation to reject with its normal 400 (round 2).
+            if isinstance(data, dict):
+                data = data.copy()
+                data["workspace"] = request.auth.bound_workspace_id
         serializer = AgentCreateSerializer(data=data)
         serializer.is_valid(raise_exception=True)
         workspace = scoped_for_actor(

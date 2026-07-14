@@ -76,8 +76,14 @@ class ConversationListCreateView(APIView):
             # exposes `request.data` as an immutable QueryDict for
             # form-encoded requests, so mutating it in place would 500 on
             # anything but a JSON body (Codex review, branch 1 round 1).
-            data = data.copy()
-            data["workspace"] = request.auth.bound_workspace_id
+            # Only inject into an actual mapping -- a syntactically valid
+            # but non-object body (e.g. a JSON list) has no `.copy()`/`[]`
+            # assignment to make sense of; leave it untouched and let the
+            # serializer's own validation reject it with its normal 400
+            # (Codex review, branch 1 round 2).
+            if isinstance(data, dict):
+                data = data.copy()
+                data["workspace"] = request.auth.bound_workspace_id
         serializer = ConversationCreateSerializer(data=data)
         serializer.is_valid(raise_exception=True)
         workspace = scoped_for_actor(
