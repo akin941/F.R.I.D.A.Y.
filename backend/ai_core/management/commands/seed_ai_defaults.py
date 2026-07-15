@@ -330,7 +330,16 @@ class Command(BaseCommand):
                     # through to the openai SDK's own default endpoint
                     # instead of NIM's (caught live: a 401 against
                     # api.openai.com with no relevant key set).
-                    "model_id": os.environ.get("NVIDIA_MODEL_ID") or "meta/llama-3.3-70b-instruct",
+                    # Default meta/llama-3.1-8b-instruct: on the free NIM tier
+                    # the larger meta/llama-3.3-70b-instruct endpoint is
+                    # frequently overloaded and times out or drops the stream
+                    # mid-reply (measured live: 0/6 streaming calls completed,
+                    # all APITimeoutError -> a "partial" reply in chat). The 8b
+                    # endpoint returned 6/6 complete streams at ~0.9s and holds
+                    # strict-JSON output for router.intent/agent.plan. Reliable
+                    # small model beats an unreachable large one for dogfooding;
+                    # override with NVIDIA_MODEL_ID once the 70b tier is healthy.
+                    "model_id": os.environ.get("NVIDIA_MODEL_ID") or "meta/llama-3.1-8b-instruct",
                     "base_url": os.environ.get("NVIDIA_BASE_URL")
                     or "https://integrate.api.nvidia.com/v1",
                     "api_key_env_var": "NVIDIA_API_KEY",
