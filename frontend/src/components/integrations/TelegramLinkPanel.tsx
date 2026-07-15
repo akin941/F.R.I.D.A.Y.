@@ -52,7 +52,7 @@ export function TelegramLinkPanel() {
       if (workspaceIdRef.current !== id) return;
       setStatus(data);
     } catch {
-      if (workspaceIdRef.current === id) setLoadError("Failed to load Telegram link status.");
+      if (workspaceIdRef.current === id) setLoadError("Telegram bağlantı durumu yüklenemedi.");
     } finally {
       if (workspaceIdRef.current === id) setLoading(false);
     }
@@ -105,8 +105,8 @@ export function TelegramLinkPanel() {
       if (workspaceIdRef.current !== requestedWorkspaceId) return;
       setRequestError(
         err instanceof ApiError
-          ? (err.body.detail ?? "That code could not be created.")
-          : "Something went wrong. Please try again.",
+          ? (err.body.detail ?? "Kod oluşturulamadı.")
+          : "Bir şeyler ters gitti. Lütfen tekrar deneyin.",
       );
     } finally {
       // Unconditional, unlike the two branches above -- `requesting` is a
@@ -136,8 +136,8 @@ export function TelegramLinkPanel() {
       if (workspaceIdRef.current !== requestedWorkspaceId) return;
       setUnlinkError(
         err instanceof ApiError
-          ? (err.body.detail ?? "That chat could not be unlinked.")
-          : "Something went wrong. Please try again.",
+          ? (err.body.detail ?? "Sohbet bağlantısı kaldırılamadı.")
+          : "Bir şeyler ters gitti. Lütfen tekrar deneyin.",
       );
     } finally {
       setUnlinking(false);
@@ -149,11 +149,11 @@ export function TelegramLinkPanel() {
       <CardContent className="flex flex-col gap-3">
         <div className="flex flex-col gap-1.5">
           <label className="text-sm font-medium" htmlFor="telegram-workspace">
-            Workspace
+            Çalışma alanı
           </label>
           <Select value={workspaceId} onValueChange={setWorkspaceId}>
-            <SelectTrigger id="telegram-workspace" aria-label="Telegram workspace">
-              <SelectValue placeholder="Select workspace" />
+            <SelectTrigger id="telegram-workspace" aria-label="Telegram çalışma alanı">
+              <SelectValue placeholder="Çalışma alanı seç" />
             </SelectTrigger>
             <SelectContent>
               {workspaces.map((workspace) => (
@@ -176,8 +176,11 @@ export function TelegramLinkPanel() {
         ) : status.linked ? (
           <div className="flex flex-col gap-2">
             <p className="text-sm">
-              Linked to chat {status.chat_id}
-              {status.linked_at ? ` since ${new Date(status.linked_at).toLocaleString()}` : ""}.
+              Şu sohbete bağlı: {status.chat_id}
+              {status.linked_at
+                ? ` (${new Date(status.linked_at).toLocaleString()} tarihinden beri)`
+                : ""}
+              .
             </p>
             {unlinkError ? (
               <Alert variant="destructive" role="alert">
@@ -191,13 +194,13 @@ export function TelegramLinkPanel() {
                 onClick={() => void handleUnlink()}
                 disabled={unlinking}
               >
-                {unlinking ? "Unlinking…" : "Unlink"}
+                {unlinking ? "Kaldırılıyor…" : "Bağlantıyı kaldır"}
               </Button>
             </div>
           </div>
         ) : (
           <div className="flex flex-col gap-2">
-            <p className="text-sm text-muted-foreground">Not linked to a Telegram chat yet.</p>
+            <p className="text-sm text-muted-foreground">Henüz bir Telegram sohbetine bağlı değil.</p>
             {requestError ? (
               <Alert variant="destructive" role="alert">
                 <AlertDescription>{requestError}</AlertDescription>
@@ -205,15 +208,15 @@ export function TelegramLinkPanel() {
             ) : null}
             {linkCode ? (
               <Alert>
-                <AlertTitle>Message your Jarvis Telegram bot</AlertTitle>
+                <AlertTitle>Jarvis Telegram botuna yaz</AlertTitle>
                 <AlertDescription className="flex flex-col gap-1">
                   <span>
-                    Send <code className="rounded-md bg-muted px-1 py-0.5">/link {linkCode.code}</code>
+                    Şunu gönder <code className="rounded-md bg-muted px-1 py-0.5">/link {linkCode.code}</code>
                   </span>
                   <span>
                     {remainingSeconds > 0
-                      ? `Expires in ${remainingSeconds}s`
-                      : "This code has expired — request a new one."}
+                      ? `${remainingSeconds}s içinde sona erecek`
+                      : "Bu kodun süresi doldu — yeni bir tane iste."}
                   </span>
                 </AlertDescription>
               </Alert>
@@ -223,7 +226,7 @@ export function TelegramLinkPanel() {
                   onClick={() => void handleRequestCode()}
                   disabled={requesting || !workspaceId}
                 >
-                  {requesting ? "Requesting…" : "Link Telegram"}
+                  {requesting ? "İsteniyor…" : "Telegram'ı bağla"}
                 </Button>
               </div>
             )}

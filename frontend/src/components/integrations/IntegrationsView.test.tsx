@@ -75,7 +75,7 @@ describe("IntegrationsView", () => {
 
     render(<IntegrationsView />);
 
-    expect(await screen.findByText("No personal access tokens yet.")).toBeInTheDocument();
+    expect(await screen.findByText("Henüz kişisel erişim token'ı yok.")).toBeInTheDocument();
   });
 
   it("creates a token and reveals its raw value exactly once", async () => {
@@ -89,13 +89,13 @@ describe("IntegrationsView", () => {
     );
 
     render(<IntegrationsView />);
-    await screen.findByText("No personal access tokens yet.");
+    await screen.findByText("Henüz kişisel erişim token'ı yok.");
 
-    await userEvent.click(screen.getByRole("button", { name: "New token" }));
-    await userEvent.type(screen.getByLabelText("Name"), "phone");
-    await userEvent.click(screen.getByRole("combobox", { name: "Token workspace" }));
+    await userEvent.click(screen.getByRole("button", { name: "Yeni token" }));
+    await userEvent.type(screen.getByLabelText("İsim"), "phone");
+    await userEvent.click(screen.getByRole("combobox", { name: "Token çalışma alanı" }));
     await userEvent.click(await screen.findByRole("option", { name: "Alice" }));
-    await userEvent.click(screen.getByRole("button", { name: "Create token" }));
+    await userEvent.click(screen.getByRole("button", { name: "Token oluştur" }));
 
     expect(await screen.findByText("jpat_raw_value")).toBeInTheDocument();
     expect(await screen.findByText("phone")).toBeInTheDocument();
@@ -104,7 +104,7 @@ describe("IntegrationsView", () => {
     // second time anywhere the row itself might render it.
     expect(screen.getAllByText("jpat_raw_value")).toHaveLength(1);
 
-    await userEvent.click(screen.getByRole("button", { name: "Done" }));
+    await userEvent.click(screen.getByRole("button", { name: "Tamam" }));
     expect(screen.queryByText("jpat_raw_value")).not.toBeInTheDocument();
   });
 
@@ -124,29 +124,29 @@ describe("IntegrationsView", () => {
     );
 
     render(<IntegrationsView />);
-    await screen.findByText("No personal access tokens yet.");
+    await screen.findByText("Henüz kişisel erişim token'ı yok.");
 
-    await userEvent.click(screen.getByRole("button", { name: "New token" }));
-    await userEvent.type(screen.getByLabelText("Name"), "token A");
-    await userEvent.click(screen.getByRole("combobox", { name: "Token workspace" }));
+    await userEvent.click(screen.getByRole("button", { name: "Yeni token" }));
+    await userEvent.type(screen.getByLabelText("İsim"), "token A");
+    await userEvent.click(screen.getByRole("combobox", { name: "Token çalışma alanı" }));
     await userEvent.click(await screen.findByRole("option", { name: "Alice" }));
-    await userEvent.click(screen.getByRole("button", { name: "Create token" }));
+    await userEvent.click(screen.getByRole("button", { name: "Token oluştur" }));
     await screen.findByText("jpat_a");
 
-    await userEvent.click(screen.getByRole("button", { name: "Copy" }));
-    expect(await screen.findByRole("button", { name: "Copied" })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Kopyala" }));
+    expect(await screen.findByRole("button", { name: "Kopyalandı" })).toBeInTheDocument();
 
     // Create a second token without dismissing the first's banner.
-    await userEvent.click(screen.getByRole("button", { name: "New token" }));
-    await userEvent.type(screen.getByLabelText("Name"), "token B");
-    await userEvent.click(screen.getByRole("combobox", { name: "Token workspace" }));
+    await userEvent.click(screen.getByRole("button", { name: "Yeni token" }));
+    await userEvent.type(screen.getByLabelText("İsim"), "token B");
+    await userEvent.click(screen.getByRole("combobox", { name: "Token çalışma alanı" }));
     await userEvent.click(await screen.findByRole("option", { name: "Alice" }));
-    await userEvent.click(screen.getByRole("button", { name: "Create token" }));
+    await userEvent.click(screen.getByRole("button", { name: "Token oluştur" }));
 
     // Proves the round-4 P2 fix: the banner for token B must not inherit
     // token A's "Copied" state -- it hasn't actually been copied yet.
     expect(await screen.findByText("jpat_b")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Copy" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Kopyala" })).toBeInTheDocument();
   });
 
   it("revokes a token", async () => {
@@ -162,11 +162,11 @@ describe("IntegrationsView", () => {
 
     render(<IntegrationsView />);
     await screen.findByText("laptop cli");
-    await userEvent.click(screen.getByRole("button", { name: "Revoke" }));
+    await userEvent.click(screen.getByRole("button", { name: "İptal et" }));
 
     await waitFor(() => {
-      expect(screen.getByText(/Revoked/)).toBeInTheDocument();
+      expect(screen.getByText(/İptal edildi/)).toBeInTheDocument();
     });
-    expect(screen.queryByRole("button", { name: "Revoke" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "İptal et" })).not.toBeInTheDocument();
   });
 });

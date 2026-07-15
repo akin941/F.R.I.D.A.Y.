@@ -39,7 +39,7 @@ export function LoginForm() {
   return (
     <Card className="w-full max-w-sm">
       <CardHeader>
-        <CardTitle>Jarvis'e giriş yap</CardTitle>
+        <CardTitle>Jarvis&apos;e giriş yap</CardTitle>
       </CardHeader>
       <CardContent>
         <form className="flex flex-col gap-4" onSubmit={handleSubmit}>

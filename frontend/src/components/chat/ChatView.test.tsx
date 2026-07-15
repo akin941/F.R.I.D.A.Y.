@@ -678,9 +678,9 @@ describe("ChatView", () => {
     );
     // Confirming renders the shared ApprovalCard (status view), reusing the
     // exact component /approvals uses for run-status rendering (brief §4).
-    expect(await screen.findByText("Pending")).toBeInTheDocument();
+    expect(await screen.findByText("Beklemede")).toBeInTheDocument();
     expect(
-      screen.getByText("Waiting for another workspace admin to decide this request."),
+      screen.getByText("Bu isteğe başka bir çalışma alanı yöneticisinin karar vermesi bekleniyor."),
     ).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Approve" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Reject" })).not.toBeInTheDocument();

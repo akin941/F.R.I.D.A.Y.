@@ -25,15 +25,15 @@ export function RevealedTokenBanner({ token, onDismiss }: { token: string; onDis
 
   return (
     <Alert>
-      <AlertTitle>Copy this token now — it won&apos;t be shown again</AlertTitle>
+      <AlertTitle>Bu token&apos;ı şimdi kopyala — bir daha gösterilmeyecek</AlertTitle>
       <AlertDescription className="flex flex-col gap-2">
         <code className="break-all rounded-md bg-muted px-2 py-1 text-xs">{token}</code>
         <div className="flex gap-2">
           <Button type="button" size="sm" variant="outline" onClick={() => void handleCopy()}>
-            {copied ? "Copied" : "Copy"}
+            {copied ? "Kopyalandı" : "Kopyala"}
           </Button>
           <Button type="button" size="sm" onClick={onDismiss}>
-            Done
+            Tamam
           </Button>
         </div>
       </AlertDescription>

@@ -41,11 +41,11 @@ describe("TelegramLinkPanel", () => {
 
     render(<TelegramLinkPanel />);
 
-    expect(await screen.findByText("Not linked to a Telegram chat yet.")).toBeInTheDocument();
+    expect(await screen.findByText("Henüz bir Telegram sohbetine bağlı değil.")).toBeInTheDocument();
 
-    await userEvent.click(screen.getByRole("button", { name: "Link Telegram" }));
+    await userEvent.click(screen.getByRole("button", { name: "Telegram'ı bağla" }));
 
-    expect(await screen.findByText("Message your Jarvis Telegram bot")).toBeInTheDocument();
+    expect(await screen.findByText("Jarvis Telegram botuna yaz")).toBeInTheDocument();
     expect(screen.getByText("/link abc123")).toBeInTheDocument();
   });
 
@@ -71,12 +71,12 @@ describe("TelegramLinkPanel", () => {
 
     render(<TelegramLinkPanel />);
 
-    expect(await screen.findByText(/Linked to chat 999/)).toBeInTheDocument();
+    expect(await screen.findByText(/Şu sohbete bağlı: 999/)).toBeInTheDocument();
 
-    await userEvent.click(screen.getByRole("button", { name: "Unlink" }));
+    await userEvent.click(screen.getByRole("button", { name: "Bağlantıyı kaldır" }));
 
     await waitFor(() => {
-      expect(screen.getByText("Not linked to a Telegram chat yet.")).toBeInTheDocument();
+      expect(screen.getByText("Henüz bir Telegram sohbetine bağlı değil.")).toBeInTheDocument();
     });
   });
 
@@ -90,12 +90,12 @@ describe("TelegramLinkPanel", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     render(<TelegramLinkPanel />);
-    await screen.findByText("Not linked to a Telegram chat yet.");
+    await screen.findByText("Henüz bir Telegram sohbetine bağlı değil.");
 
-    await userEvent.click(screen.getByRole("combobox", { name: "Telegram workspace" }));
+    await userEvent.click(screen.getByRole("combobox", { name: "Telegram çalışma alanı" }));
     await userEvent.click(await screen.findByRole("option", { name: "Acme" }));
 
-    expect(await screen.findByText(/Linked to chat 222/)).toBeInTheDocument();
+    expect(await screen.findByText(/Şu sohbete bağlı: 222/)).toBeInTheDocument();
   });
 
   it("does not get stuck loading if Unlink's reload arrives after the workspace was switched away", async () => {
@@ -115,21 +115,21 @@ describe("TelegramLinkPanel", () => {
     );
 
     render(<TelegramLinkPanel />);
-    await screen.findByText(/Linked to chat 999/);
+    await screen.findByText(/Şu sohbete bağlı: 999/);
 
-    await userEvent.click(screen.getByRole("button", { name: "Unlink" }));
+    await userEvent.click(screen.getByRole("button", { name: "Bağlantıyı kaldır" }));
 
     // Switch workspace while the DELETE for w1 is still in flight.
-    await userEvent.click(screen.getByRole("combobox", { name: "Telegram workspace" }));
+    await userEvent.click(screen.getByRole("combobox", { name: "Telegram çalışma alanı" }));
     await userEvent.click(await screen.findByRole("option", { name: "Acme" }));
-    expect(await screen.findByText(/Linked to chat 333/)).toBeInTheDocument();
+    expect(await screen.findByText(/Şu sohbete bağlı: 333/)).toBeInTheDocument();
 
     // The stale w1 unlink now resolves -- proves the round-3 P2 fix: its
     // follow-up reload must not resurrect the loading skeleton for w2,
     // which already finished loading its own (unrelated) status.
     resolveDelete(new Response(null, { status: 204 }));
     await waitFor(() => {
-      expect(screen.getByText(/Linked to chat 333/)).toBeInTheDocument();
+      expect(screen.getByText(/Şu sohbete bağlı: 333/)).toBeInTheDocument();
     });
   });
 
@@ -150,15 +150,15 @@ describe("TelegramLinkPanel", () => {
     );
 
     render(<TelegramLinkPanel />);
-    await screen.findByText("Not linked to a Telegram chat yet.");
+    await screen.findByText("Henüz bir Telegram sohbetine bağlı değil.");
 
-    await userEvent.click(screen.getByRole("button", { name: "Link Telegram" }));
-    expect(screen.getByRole("button", { name: "Requesting…" })).toBeDisabled();
+    await userEvent.click(screen.getByRole("button", { name: "Telegram'ı bağla" }));
+    expect(screen.getByRole("button", { name: "İsteniyor…" })).toBeDisabled();
 
     // Switch workspace while the request for w1 is still in flight.
-    await userEvent.click(screen.getByRole("combobox", { name: "Telegram workspace" }));
+    await userEvent.click(screen.getByRole("combobox", { name: "Telegram çalışma alanı" }));
     await userEvent.click(await screen.findByRole("option", { name: "Acme" }));
-    expect(await screen.findByText(/Linked to chat 222/)).toBeInTheDocument();
+    expect(await screen.findByText(/Şu sohbete bağlı: 222/)).toBeInTheDocument();
 
     // The stale w1 response now resolves -- proves the round-2 P2 fix: it
     // must not surface w1's code while the panel shows w2, and it must not
@@ -167,7 +167,7 @@ describe("TelegramLinkPanel", () => {
     await waitFor(() => {
       expect(screen.queryByText("/link abc123")).not.toBeInTheDocument();
     });
-    expect(screen.getByText(/Linked to chat 222/)).toBeInTheDocument();
+    expect(screen.getByText(/Şu sohbete bağlı: 222/)).toBeInTheDocument();
   });
 
   it("clears an expired code once its countdown reaches zero", async () => {
@@ -187,14 +187,14 @@ describe("TelegramLinkPanel", () => {
     );
 
     render(<TelegramLinkPanel />);
-    await screen.findByText("Not linked to a Telegram chat yet.");
+    await screen.findByText("Henüz bir Telegram sohbetine bağlı değil.");
 
-    await userEvent.click(screen.getByRole("button", { name: "Link Telegram" }));
+    await userEvent.click(screen.getByRole("button", { name: "Telegram'ı bağla" }));
     expect(await screen.findByText("/link abc123")).toBeInTheDocument();
 
     await vi.advanceTimersByTimeAsync(3000);
 
     expect(screen.queryByText("/link abc123")).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Link Telegram" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Telegram'ı bağla" })).toBeInTheDocument();
   });
 });

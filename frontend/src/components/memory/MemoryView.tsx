@@ -154,7 +154,7 @@ export function MemoryView() {
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Hafıza</h1>
           <p className="text-sm text-muted-foreground">
-            Jarvis'in hatırladığı, seçilmiş bilgiler, tercihler ve anılar.
+            Jarvis&apos;in hatırladığı, seçilmiş bilgiler, tercihler ve anılar.
           </p>
         </div>
         <div className="flex gap-2">
@@ -166,7 +166,7 @@ export function MemoryView() {
             onClick={() => void handleVaultExportRequest()}
             disabled={vaultExportBusy}
           >
-            Obsidian vault'a aktar
+            Obsidian vault&apos;a aktar
           </Button>
           <Button onClick={() => setCreating((v) => !v)}>
             {creating ? "İptal" : "Yeni not"}

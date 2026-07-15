@@ -31,8 +31,8 @@ function TokenRow({
     } catch (err) {
       setError(
         err instanceof ApiError
-          ? (err.body.detail ?? "That token could not be revoked.")
-          : "Something went wrong. Please try again.",
+          ? (err.body.detail ?? "Token iptal edilemedi.")
+          : "Bir şeyler ters gitti. Lütfen tekrar deneyin.",
       );
     } finally {
       setRevoking(false);
@@ -53,17 +53,17 @@ function TokenRow({
         <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
           <span>{workspaceName}</span>
           <span>&middot;</span>
-          <span>Created {new Date(token.created_at).toLocaleString()}</span>
+          <span>Oluşturuldu {new Date(token.created_at).toLocaleString()}</span>
           {token.last_used_at ? (
             <>
               <span>&middot;</span>
-              <span>Last used {new Date(token.last_used_at).toLocaleString()}</span>
+              <span>Son kullanım {new Date(token.last_used_at).toLocaleString()}</span>
             </>
           ) : null}
         </div>
         {token.revoked_at ? (
           <p className="text-sm text-muted-foreground">
-            Revoked {new Date(token.revoked_at).toLocaleString()}
+            İptal edildi {new Date(token.revoked_at).toLocaleString()}
           </p>
         ) : (
           <div>
@@ -73,7 +73,7 @@ function TokenRow({
               onClick={() => void handleRevoke()}
               disabled={revoking}
             >
-              {revoking ? "Revoking…" : "Revoke"}
+              {revoking ? "İptal ediliyor…" : "İptal et"}
             </Button>
           </div>
         )}
@@ -92,11 +92,11 @@ export function TokenList({
   const { workspaces } = useWorkspace();
 
   function workspaceName(workspaceId: string) {
-    return workspaces.find((w) => w.id === workspaceId)?.name ?? "Unknown workspace";
+    return workspaces.find((w) => w.id === workspaceId)?.name ?? "Bilinmeyen çalışma alanı";
   }
 
   if (tokens.length === 0) {
-    return <p className="text-sm text-muted-foreground">No personal access tokens yet.</p>;
+    return <p className="text-sm text-muted-foreground">Henüz kişisel erişim token&apos;ı yok.</p>;
   }
 
   return (

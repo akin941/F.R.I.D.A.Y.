@@ -29,7 +29,7 @@ export function IntegrationsView() {
       const list = await apiGetJson<ApiPersonalAccessToken[]>("/api/auth/tokens");
       setTokens(list);
     } catch {
-      setLoadError("Failed to load personal access tokens.");
+      setLoadError("Kişisel erişim tokenları yüklenemedi.");
     } finally {
       setLoading(false);
     }
@@ -59,7 +59,7 @@ export function IntegrationsView() {
   if (workspaces.length === 0) {
     return (
       <div className="flex flex-1 items-center justify-center p-6 text-sm text-muted-foreground">
-        No workspace available.
+        Kullanılabilir çalışma alanı yok.
       </div>
     );
   }
@@ -67,17 +67,17 @@ export function IntegrationsView() {
   return (
     <div className="flex flex-1 flex-col gap-6 overflow-y-auto p-6">
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Integrations</h1>
+        <h1 className="text-2xl font-semibold tracking-tight">Entegrasyonlar</h1>
         <p className="text-sm text-muted-foreground">
-          Reach Jarvis from a CLI or Telegram — new front doors onto the same chat pipeline, never
-          a new way to approve or reject a request (that still requires the web app).
+          Jarvis&apos;e CLI veya Telegram üzerinden ulaş — aynı sohbet hattına açılan yeni kapılar, bir
+          isteği onaylamanın ya da reddetmenin yeni bir yolu değil (o hâlâ web uygulamasını gerektirir).
         </p>
       </div>
 
       <section className="flex flex-col gap-3">
         <div className="flex flex-wrap items-center justify-between gap-4">
-          <h2 className="text-lg font-medium tracking-tight">Personal access tokens</h2>
-          <Button onClick={() => setCreating((v) => !v)}>{creating ? "Cancel" : "New token"}</Button>
+          <h2 className="text-lg font-medium tracking-tight">Kişisel erişim tokenları</h2>
+          <Button onClick={() => setCreating((v) => !v)}>{creating ? "İptal" : "Yeni token"}</Button>
         </div>
 
         {loadError ? (

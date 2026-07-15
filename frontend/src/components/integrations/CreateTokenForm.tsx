@@ -51,8 +51,8 @@ export function CreateTokenForm({
     } catch (err) {
       setError(
         err instanceof ApiError
-          ? (err.body.detail ?? "That token could not be created.")
-          : "Something went wrong. Please try again.",
+          ? (err.body.detail ?? "Token oluşturulamadı.")
+          : "Bir şeyler ters gitti. Lütfen tekrar deneyin.",
       );
     } finally {
       setSubmitting(false);
@@ -62,7 +62,7 @@ export function CreateTokenForm({
   return (
     <Card>
       <CardHeader>
-        <CardTitle>New personal access token</CardTitle>
+        <CardTitle>Yeni kişisel erişim token&apos;ı</CardTitle>
       </CardHeader>
       <form onSubmit={handleSubmit}>
         <CardContent className="flex flex-col gap-3">
@@ -72,20 +72,20 @@ export function CreateTokenForm({
             </Alert>
           ) : null}
           <div className="flex flex-col gap-1.5">
-            <Label htmlFor="token-name">Name</Label>
+            <Label htmlFor="token-name">İsim</Label>
             <Input
               id="token-name"
-              placeholder="e.g. laptop cli"
+              placeholder="örn. dizüstü cli"
               value={name}
               onChange={(e) => setName(e.target.value)}
               required
             />
           </div>
           <div className="flex flex-col gap-1.5">
-            <Label htmlFor="token-workspace">Workspace</Label>
+            <Label htmlFor="token-workspace">Çalışma alanı</Label>
             <Select value={workspaceId} onValueChange={setWorkspaceId}>
-              <SelectTrigger id="token-workspace" aria-label="Token workspace">
-                <SelectValue placeholder="Select workspace" />
+              <SelectTrigger id="token-workspace" aria-label="Token çalışma alanı">
+                <SelectValue placeholder="Çalışma alanı seç" />
               </SelectTrigger>
               <SelectContent>
                 {workspaces.map((workspace) => (
@@ -98,11 +98,9 @@ export function CreateTokenForm({
           </div>
         </CardContent>
         <CardFooter className="flex justify-end gap-2">
-          <Button type="button" variant="outline" onClick={onCancel} disabled={submitting}>
-            Cancel
-          </Button>
+          <Button type="button" variant="outline" onClick={onCancel} disabled={submitting}>İptal</Button>
           <Button type="submit" disabled={submitting || !name.trim() || !workspaceId}>
-            {submitting ? "Creating…" : "Create token"}
+            {submitting ? "Oluşturuluyor…" : "Token oluştur"}
           </Button>
         </CardFooter>
       </form>
