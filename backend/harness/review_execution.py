@@ -28,6 +28,7 @@ job) closed as `review_unavailable`.
 
 import json
 import logging
+import os
 import tempfile
 import time
 from decimal import Decimal
@@ -170,6 +171,21 @@ def _teardown_container(container_id):
 
 
 def _safe_remove_container(container_name):
+    """Codex code-review P2, branch 3 round 4 (deferred): a `docker rm`
+    failure here leaks a stopped container -- still carrying the review
+    CLI's own credentials (e.g. `CODEX_API_KEY`) in its environment --
+    indefinitely, with nothing to retry the removal. `HarnessJob` has an
+    analogous periodic sweep (`recover_stale_harness_jobs`'s leaked-
+    container case); `HarnessReview` doesn't have one yet. Accepted as a
+    bounded, host-trust-boundary-internal residual risk (anyone with
+    access to inspect a leaked container already has runner-host access,
+    which already implies access to the same credential via the worker's
+    own environment) and explicitly deferred to branch 4's own recovery-
+    scan extension, the same call made for the dispatch-failure/
+    unexpected-error gaps this module already closed directly in round 2
+    -- unlike those, this one is periodic-retry-shaped (needs a scan, not
+    a single synchronous check) and belongs with the rest of that
+    machinery."""
     try:
         runner.remove_container(container_name)
         return True
@@ -341,6 +357,46 @@ def _produce_review_summary(job, fenced_transcript):
     return _parse_review_response(result.text)
 
 
+# Codex CLI (and, if `_SELECTABLE_REVIEW_AGENTS` ever grows to include Claude
+# Code as a reviewer, Claude Code too) walks from the checkout root down to
+# its own working directory, honoring `AGENTS.override.md`/`AGENTS.md` (or
+# `CLAUDE.md`) as trusted project-level instructions at EVERY directory level
+# it passes through -- confirmed against Codex CLI's own documented discovery
+# behavior. Since the review container's cwd IS the clean-clone checkout root
+# and the checked-out commit is exactly the diff under review, an
+# implementation commit that adds one of these files gets it read and obeyed
+# by the reviewer BEFORE the actual review goal is ever applied -- letting
+# the code under review instruct its own reviewer to approve regardless of
+# content, or to suppress findings, defeating the entire point of a
+# cross-vendor review gate.
+_AGENT_INSTRUCTION_FILENAMES = frozenset({"AGENTS.md", "AGENTS.override.md", "CLAUDE.md"})
+
+
+def _strip_agent_instruction_files(directory):
+    """Removes every file matching a known agent-instruction-file
+    convention from the clean clone's ENTIRE working tree (not just its
+    root -- Codex CLI's own discovery walks every directory level between
+    the checkout root and its cwd, and the checkout root and the CLI's cwd
+    are the same directory here, but a subdirectory-rooted fallback name
+    could still be planted) before the review container is ever launched,
+    so there is nothing left for it to discover regardless of where in the
+    tree the implementation committed one. Raises `runner.RunnerError` if
+    any matching file can't be removed -- a review that might still be
+    running with attacker-supplied instructions in place must fail closed,
+    not launch anyway on a best-effort basis."""
+    for root, _dirs, files in os.walk(directory):
+        for filename in files:
+            if filename not in _AGENT_INSTRUCTION_FILENAMES:
+                continue
+            path = os.path.join(root, filename)
+            try:
+                os.remove(path)
+            except OSError as exc:
+                raise runner.RunnerError(
+                    f"Failed to remove agent-instruction file {path} from review checkout"
+                ) from exc
+
+
 def run_harness_review_job(review_id):
     review = _claim_review(review_id)
     if review is None:
@@ -383,6 +439,12 @@ def run_harness_review_job(review_id):
             base_sha=job.base_commit_sha,
             produced_sha=job.produced_commit_sha,
         )
+        # Codex code-review P1, branch 3 round 4: strip agent-instruction
+        # files (AGENTS.md/AGENTS.override.md/CLAUDE.md) from the clean
+        # clone before the review container ever sees them -- see
+        # `_strip_agent_instruction_files`'s own docstring for the full
+        # attack this closes.
+        _strip_agent_instruction_files(clean_clone_dir)
         image = runner.image_for_agent(review.agent)
         cli_env = _resolve_cli_env(review.agent)
         runner.launch_container(
