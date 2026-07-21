@@ -146,7 +146,21 @@ def resolve_pending_review_after_dispatch_failure(review_id):
 
 def _claim_review(review_id):
     """Fenced claim: `pending` -> `running`. Mirrors
-    `harness.execution._claim_job`'s exact shape."""
+    `harness.execution._claim_job`'s exact shape, extended with a check
+    on the implementation job's own live status (Codex code-review P2,
+    branch 3 round 5): a curator can cancel the job (`pending_review` ->
+    `cancelled`, worktree cleaned up immediately --
+    `cancel_harness_implementation_job`) after this review row was
+    already created but before this task claims it. Claiming based on
+    the review row alone let a review still launch and spend review-CLI
+    credentials bundling/reviewing a job no longer awaiting review (a
+    wasted-cost/availability issue, not a security bypass --
+    `request_harness_push`/`fail_implementation_job_for_review` both
+    re-check the job's live status before acting on the verdict either
+    way). Locks the job row too and refuses to claim -- failing the
+    review closed instead, since nothing else will ever resolve a
+    `pending` review whose job already moved on -- unless it is still
+    `pending_review`."""
     with transaction.atomic():
         locked = (
             HarnessReview.objects.select_for_update(of=("self",))
@@ -154,6 +168,18 @@ def _claim_review(review_id):
             .first()
         )
         if locked is None:
+            return None
+        job_still_awaits_review = (
+            HarnessImplementationJob.objects.select_for_update(of=("self",))
+            .filter(
+                pk=locked.implementation_job_id,
+                status=HarnessImplementationJob.Status.PENDING_REVIEW,
+            )
+            .exists()
+        )
+        if not job_still_awaits_review:
+            locked.status = HarnessReview.Status.FAILED
+            locked.save(update_fields=["status", "updated_at"])
             return None
         locked.status = HarnessReview.Status.RUNNING
         locked.started_at = timezone.now()
@@ -271,11 +297,23 @@ def _build_review_goal(job):
 
 
 def _fence_and_bound_transcript(raw_output):
-    """Mirrors `harness.execution._fence_and_bound_transcript` exactly --
-    see that function's docstring for the full rationale."""
+    """Bounding/fencing discipline mirrors `harness.execution.
+    _fence_and_bound_transcript`'s (see that function's docstring for the
+    shared rationale), but the truncation SHAPE deliberately diverges
+    (Codex code-review P2, branch 3 round 5): discovery's own transcript
+    front-loads the context that matters, so a head-only cut is fine
+    there, but `_build_review_goal` asks the review CLI to conclude with
+    its verdict at the END of the transcript -- a head-only cut silently
+    drops that verdict for any review whose transcript exceeds the
+    budget, making the gateway see an inconclusive transcript and fail an
+    otherwise-valid review as `review_unavailable`. Keeps a head+tail
+    window instead so the opening context AND the trailing verdict both
+    survive."""
     bounded_raw = raw_output
     if len(bounded_raw) > _RAW_TRANSCRIPT_MAX_CHARS:
-        bounded_raw = bounded_raw[: _RAW_TRANSCRIPT_MAX_CHARS - 1] + "…"
+        head_chars = _RAW_TRANSCRIPT_MAX_CHARS // 2
+        tail_chars = _RAW_TRANSCRIPT_MAX_CHARS - head_chars - 1
+        bounded_raw = bounded_raw[:head_chars] + "…" + bounded_raw[-tail_chars:]
     fenced_for_prompt = neutralize_fence(strip_invisible_formatting(bounded_raw), "repo_transcript")
     return bounded_raw, fenced_for_prompt
 

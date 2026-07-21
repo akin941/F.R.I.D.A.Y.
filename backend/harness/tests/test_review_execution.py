@@ -409,6 +409,32 @@ class TestRunHarnessReviewJobFailurePaths:
         review_execution.run_harness_review_job(review.id)
         launch_mock.assert_not_called()
 
+    def test_job_already_cancelled_is_a_safe_no_op(self, workspace, owner, repo, monkeypatch):
+        """Codex code-review P2, branch 3 round 5: a curator can cancel
+        the implementation job (`pending_review` -> `cancelled`, worktree
+        cleaned up immediately) after the review row was already created
+        but before this task claims it. The claim must re-check the
+        job's own live status, not just the review row, or it would still
+        bundle/launch (spending review credentials) for a job no longer
+        awaiting review."""
+        job = make_job(
+            workspace,
+            repo,
+            created_by=owner,
+            status=HarnessImplementationJob.Status.CANCELLED,
+            failure_reason=HarnessImplementationJob.FailureReason.KILLED,
+        )
+        review = make_review(workspace, job)
+        launch_mock = mock.Mock()
+        monkeypatch.setattr(review_execution.runner, "launch_container", launch_mock)
+        monkeypatch.setattr(review_execution.runner, "create_bundle", mock.Mock())
+        review_execution.run_harness_review_job(review.id)
+        launch_mock.assert_not_called()
+        review.refresh_from_db()
+        job.refresh_from_db()
+        assert review.status == HarnessReview.Status.FAILED
+        assert job.status == HarnessImplementationJob.Status.CANCELLED
+
 
 class TestStripAgentInstructionFiles:
     """Codex code-review P1, branch 3 round 4: Codex CLI (and Claude Code,
@@ -498,6 +524,29 @@ class TestRunHarnessReviewJobStripsAgentInstructionFiles:
         assert review.status == HarnessReview.Status.FAILED
         assert job.status == HarnessImplementationJob.Status.FAILED
         assert job.failure_reason == HarnessImplementationJob.FailureReason.REVIEW_UNAVAILABLE
+
+
+class TestFenceAndBoundTranscript:
+    """Codex code-review P2, branch 3 round 5: `_build_review_goal` asks
+    the review CLI to conclude with its verdict at the END of the
+    transcript -- a head-only truncation (discovery's own shape) would
+    silently drop it for any review whose transcript exceeds the budget,
+    failing an otherwise-valid review as inconclusive."""
+
+    def test_short_transcript_is_untouched(self):
+        raw = "short transcript with a verdict at the end: approved"
+        bounded_raw, _fenced = review_execution._fence_and_bound_transcript(raw)
+        assert bounded_raw == raw
+
+    def test_long_transcript_keeps_head_and_tail(self):
+        head_marker = "OPENING CONTEXT " * 50
+        tail_marker = "FINAL VERDICT: approved"
+        middle_filler = "x" * 20000
+        raw = head_marker + middle_filler + tail_marker
+        bounded_raw, _fenced = review_execution._fence_and_bound_transcript(raw)
+        assert bounded_raw.startswith(head_marker[:20])
+        assert bounded_raw.endswith(tail_marker)
+        assert len(bounded_raw) <= review_execution._RAW_TRANSCRIPT_MAX_CHARS
 
 
 class TestBuildReviewGoal:
