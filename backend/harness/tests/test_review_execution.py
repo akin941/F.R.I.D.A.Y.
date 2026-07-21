@@ -145,6 +145,38 @@ class TestDispatchHarnessReview:
         assert job.status == HarnessImplementationJob.Status.FAILED
         assert job.failure_reason == HarnessImplementationJob.FailureReason.REVIEW_UNAVAILABLE
 
+    def test_dispatch_failure_write_and_job_transition_are_atomic(
+        self, workspace, owner, repo, settings, monkeypatch
+    ):
+        """Codex code-review P2, branch 3 round 9: an earlier version
+        committed the review as `failed` in its own transaction, then
+        failed the job in a SEPARATE, later transaction -- a crash (or
+        any exception) in the gap between the two left a terminal,
+        already-failed review with the job still stuck `pending_review`
+        forever, invisible to every other recovery path. If the job-
+        failure step raises something unexpected, the review's own write
+        must roll back too, leaving it `pending` -- which
+        `resolve_pending_review_after_dispatch_failure` itself (or a
+        future retry of dispatch) can still find and retry."""
+        settings.CELERY_TASK_ALWAYS_EAGER = False
+        job = make_job(workspace, repo, created_by=owner)
+        monkeypatch.setattr(
+            "harness.tasks.run_harness_review_job",
+            mock.Mock(delay=mock.Mock(side_effect=Exception("broker down"))),
+        )
+        with (
+            mock.patch(
+                "harness.services.fail_implementation_job_for_review",
+                side_effect=RuntimeError("db exploded"),
+            ),
+            pytest.raises(RuntimeError),
+        ):
+            review_execution.dispatch_harness_review(job)
+        job.refresh_from_db()
+        review = HarnessReview.objects.get(implementation_job=job)
+        assert review.status == HarnessReview.Status.PENDING
+        assert job.status == HarnessImplementationJob.Status.PENDING_REVIEW
+
 
 class TestResolveRunningReviewAfterUnexpectedError:
     def test_resolves_a_stuck_running_review_closed(self, workspace, owner, repo, monkeypatch):

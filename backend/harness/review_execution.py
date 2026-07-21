@@ -117,7 +117,21 @@ def resolve_pending_review_after_dispatch_failure(review_id):
     """See `_dispatch_review_task`'s call site above for the full
     rationale. Fenced on `status=pending` -- the review was just created
     and never claimed, so there is no container/worktree to tear down,
-    only the row's own status and the implementation job's."""
+    only the row's own status and the implementation job's.
+
+    The review's own terminal write and the implementation job's
+    consequent failure run inside ONE transaction (Codex code-review P2,
+    branch 3 round 9: an earlier version committed the review as
+    `failed` first, then failed the job as a SEPARATE, later
+    transaction -- a crash in the gap between the two left a terminal,
+    already-failed review with the job still stuck `pending_review`
+    forever, invisible to every other recovery path since
+    `resolve_running_review_after_unexpected_error` only ever looks at
+    reviews still `running`. Mirrors round 3's identical combined-
+    transaction fix for `run_harness_review_job`'s own finalize call
+    sites, applied here too)."""
+    from harness.services import fail_implementation_job_for_review
+
     with transaction.atomic():
         locked = (
             HarnessReview.objects.select_for_update(of=("self",))
@@ -128,20 +142,18 @@ def resolve_pending_review_after_dispatch_failure(review_id):
             return
         locked.status = HarnessReview.Status.FAILED
         locked.save(update_fields=["status", "updated_at"])
-    record_audit(
-        action="harness.review_failed",
-        actor=locked.implementation_job.created_by,
-        workspace=locked.workspace,
-        resource=locked,
-        metadata={"reason": "dispatch_failed"},
-    )
-    from harness.services import fail_implementation_job_for_review
-
-    fail_implementation_job_for_review(
-        job=locked.implementation_job,
-        review=locked,
-        failure_reason=HarnessImplementationJob.FailureReason.REVIEW_UNAVAILABLE,
-    )
+        record_audit(
+            action="harness.review_failed",
+            actor=locked.implementation_job.created_by,
+            workspace=locked.workspace,
+            resource=locked,
+            metadata={"reason": "dispatch_failed"},
+        )
+        fail_implementation_job_for_review(
+            job=locked.implementation_job,
+            review=locked,
+            failure_reason=HarnessImplementationJob.FailureReason.REVIEW_UNAVAILABLE,
+        )
 
 
 def _claim_review(review_id):
