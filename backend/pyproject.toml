@@ -1,0 +1,351 @@
+[project]
+name = "jarvis-backend"
+version = "0.1.0"
+description = "Jarvis OS backend — Django modular monolith"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "django>=5.1,<6.0",
+    "djangorestframework>=3.15",
+    "celery[redis]>=5.4",
+    "redis>=5.0",
+    "psycopg[binary]>=3.2",
+    "django-environ>=0.11",
+    "django-storages>=1.14",
+    "boto3>=1.34",
+    "structlog>=24.1",
+    "sentry-sdk>=2.0",
+    "djangorestframework-simplejwt>=5.5.1",
+    "django-cors-headers>=4.9.0",
+    "anthropic>=0.116.0",
+    "openai>=2.44.0",
+    "pgvector>=0.3.6",
+    "urllib3>=2.7.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "pytest-django>=4.8",
+    "factory-boy>=3.3",
+    "ruff>=0.6",
+    "import-linter>=2.0",
+]
+
+# Not a distributable package: uv installs dependencies only.
+[tool.uv]
+package = false
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+exclude = ["**/migrations/**"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "DJ"]
+
+[tool.pytest.ini_options]
+DJANGO_SETTINGS_MODULE = "config.settings.dev"
+python_files = ["test_*.py"]
+testpaths = [
+    "core",
+    "config",
+    "accounts",
+    "workspaces",
+    "audit",
+    "ai_core",
+    "assistant",
+    "memory",
+    "knowledge",
+    "tasks",
+    "approvals",
+    "tools",
+    "agents",
+    "skills",
+    "integrations",
+    "harness",
+]
+
+[tool.importlinter]
+root_packages = [
+    "config",
+    "core",
+    "accounts",
+    "workspaces",
+    "audit",
+    "ai_core",
+    "assistant",
+    "memory",
+    "knowledge",
+    "tasks",
+    "approvals",
+    "tools",
+    "agents",
+    "skills",
+    "integrations",
+    "harness",
+]
+
+# TODO(MVP 1): add the full modular-monolith contracts once kernel apps exist:
+#   - kernel apps must never import apps.modules.*
+#   - apps.modules.* may import kernel apps (one-way dependency)
+#   - ai_core must not import any business module
+[[tool.importlinter.contracts]]
+name = "core (shared infrastructure) must not depend on the Django project config"
+type = "forbidden"
+source_modules = ["core"]
+forbidden_modules = ["config"]
+
+[[tool.importlinter.contracts]]
+name = "core must stay independent of kernel apps"
+type = "forbidden"
+source_modules = ["core"]
+forbidden_modules = ["accounts", "workspaces", "audit", "ai_core", "assistant", "memory", "knowledge", "tasks", "approvals", "tools", "agents", "skills", "integrations", "harness"]
+
+[[tool.importlinter.contracts]]
+name = "kernel apps must not import the Django project config"
+type = "forbidden"
+source_modules = ["accounts", "workspaces", "audit", "ai_core", "assistant", "memory", "knowledge", "tasks", "approvals", "tools", "agents", "skills", "integrations", "harness"]
+forbidden_modules = ["config"]
+
+# ai_core is the single door for LLM traffic (ADR-003): it must never depend on
+# business apps (FK references use string labels, not imports).
+[[tool.importlinter.contracts]]
+name = "ai_core must not import business apps"
+type = "forbidden"
+source_modules = ["ai_core"]
+forbidden_modules = ["accounts", "workspaces", "audit", "assistant", "memory", "knowledge", "tasks", "approvals", "tools", "agents", "skills", "integrations", "harness"]
+ignore_imports = [
+    "ai_core.tests.* -> accounts.*",
+]
+
+[[tool.importlinter.contracts]]
+name = "audit must not depend on business apps (one-way: apps call audit)"
+type = "forbidden"
+source_modules = ["audit"]
+forbidden_modules = ["accounts", "workspaces", "assistant", "memory", "knowledge", "tasks", "approvals", "tools", "agents", "harness"]
+# Tests exercise the wired flows end-to-end; the contract targets production code.
+ignore_imports = [
+    "audit.tests.* -> accounts.*",
+    "audit.tests.* -> workspaces.*",
+]
+
+# tools is the registry approvals dispatches through (MVP 5 §2); the
+# dependency is one-way (approvals -> tools), mirroring memory/knowledge's
+# own one-way shape against assistant.
+[[tool.importlinter.contracts]]
+name = "tools must not import approvals (direction: approvals -> tools)"
+type = "forbidden"
+source_modules = ["tools"]
+forbidden_modules = ["approvals"]
+# Tests exercise the full request -> approve -> dispatch flow end-to-end;
+# the contract targets production code.
+ignore_imports = [
+    "tools.tests.* -> approvals.*",
+]
+
+# vault_export (MVP 5 §3) reads approved Memory rows directly (system/worker
+# code, not a view -- for_actor() doesn't apply, see tools/export.py); the
+# dependency is one-way (tools -> memory), mirroring assistant -> memory.
+[[tool.importlinter.contracts]]
+name = "memory must not import tools (direction: tools -> memory)"
+type = "forbidden"
+source_modules = ["memory"]
+forbidden_modules = ["tools"]
+# memory's own tests import assistant.services for fixtures (already exempt
+# from the "memory must not import assistant" contract below); since MVP 6
+# §4 has assistant.services import tools.registry, that same test import now
+# also forms a transitive memory.tests -> assistant -> tools path. Exempting
+# it here mirrors the existing memory.tests -> assistant.* exemption --
+# production `memory` code still never reaches `tools` by any path.
+ignore_imports = [
+    "memory.tests.* -> assistant.*",
+]
+
+# Dependency direction for memory is one-way: assistant (context injection)
+# imports memory; memory never imports assistant (its Conversation FK uses a
+# string label). ai_core stays importable (gateway calls in the extraction
+# pipeline, MVP 2 branches 3-4).
+[[tool.importlinter.contracts]]
+name = "memory must not import assistant (direction: assistant -> memory)"
+type = "forbidden"
+source_modules = ["memory"]
+forbidden_modules = ["assistant"]
+# Tests exercise the provenance invariant end-to-end; the contract targets
+# production code.
+ignore_imports = [
+    "memory.tests.* -> assistant.*",
+]
+
+# Same one-way shape as memory: assistant (RAG context injection, MVP 3
+# branch 4) will import knowledge; knowledge never imports assistant.
+[[tool.importlinter.contracts]]
+name = "knowledge must not import assistant (direction: assistant -> knowledge)"
+type = "forbidden"
+source_modules = ["knowledge"]
+forbidden_modules = ["assistant"]
+
+# Same one-way shape as memory/knowledge: assistant (MVP 6 §4's tool_request
+# resolution, tools.registry.list_tool_names()) imports tools; tools never
+# imports assistant.
+[[tool.importlinter.contracts]]
+name = "tools must not import assistant (direction: assistant -> tools)"
+type = "forbidden"
+source_modules = ["tools"]
+forbidden_modules = ["assistant"]
+
+# Inverted direction from memory/knowledge's shape, and deliberately so: MVP 6
+# §3's `draft_message_id` verification needs tasks' own view to resolve an
+# assistant.Message reference (same actor/workspace/intent="task_draft")
+# before deciding Task.source -- assistant never needs to import tasks back.
+[[tool.importlinter.contracts]]
+name = "assistant must not import tasks (direction: tasks -> assistant)"
+type = "forbidden"
+source_modules = ["assistant"]
+forbidden_modules = ["tasks"]
+
+# agents (MVP 7) is a new one-way dependency root: it may import tools,
+# approvals, tasks, memory, knowledge (its execution engine calls their
+# existing public service functions, branch 3+), but none of those apps may
+# import agents back. agents does not import assistant and is not imported
+# by it either -- the router (MVP 6) and the agent runtime (this MVP) are
+# parallel front doors onto the same gated services, not layered on each
+# other. Six contracts, one per app agents may reach into.
+[[tool.importlinter.contracts]]
+name = "tools must not import agents (direction: agents -> tools)"
+type = "forbidden"
+source_modules = ["tools"]
+forbidden_modules = ["agents"]
+
+[[tool.importlinter.contracts]]
+name = "approvals must not import agents (direction: agents -> approvals)"
+type = "forbidden"
+source_modules = ["approvals"]
+forbidden_modules = ["agents"]
+
+[[tool.importlinter.contracts]]
+name = "tasks must not import agents (direction: agents -> tasks)"
+type = "forbidden"
+source_modules = ["tasks"]
+forbidden_modules = ["agents"]
+
+[[tool.importlinter.contracts]]
+name = "memory must not import agents (direction: agents -> memory)"
+type = "forbidden"
+source_modules = ["memory"]
+forbidden_modules = ["agents"]
+
+[[tool.importlinter.contracts]]
+name = "knowledge must not import agents (direction: agents -> knowledge)"
+type = "forbidden"
+source_modules = ["knowledge"]
+forbidden_modules = ["agents"]
+
+[[tool.importlinter.contracts]]
+name = "assistant must not import agents (no relationship either direction)"
+type = "forbidden"
+source_modules = ["assistant"]
+forbidden_modules = ["agents"]
+
+[[tool.importlinter.contracts]]
+name = "agents must not import assistant (no relationship either direction)"
+type = "forbidden"
+source_modules = ["agents"]
+forbidden_modules = ["assistant"]
+
+# skills (MVP 8) is a new one-way dependency root, the same shape as agents:
+# it may import tools (needed for §2's boot-time tool-reference validation),
+# but tools never imports skills back -- mirrors the existing
+# "approvals -> tools" direction. agents may import skills (its planner
+# service reads the skill catalog to look up a matched template); skills
+# must never import agents back, since skills.catalog must stay a plain
+# code-only registry with no execution-engine knowledge at all.
+[[tool.importlinter.contracts]]
+name = "skills must not import agents (direction: agents -> skills)"
+type = "forbidden"
+source_modules = ["skills"]
+forbidden_modules = ["agents"]
+# skills.tests' own parity tests import agents.planner to assert both
+# validators accept/reject the exact same per-kind step shapes (MVP 8 §1);
+# the contract targets production code only, mirroring every other
+# tests.* exemption in this file.
+ignore_imports = [
+    "skills.tests.* -> agents.*",
+]
+
+[[tool.importlinter.contracts]]
+name = "tools must not import skills (direction: skills -> tools)"
+type = "forbidden"
+source_modules = ["tools"]
+forbidden_modules = ["skills"]
+
+# integrations (MVP 9) is a new dependency root, one-way: it may import
+# assistant (needed for the Telegram relay to call the same
+# classify_intent/build_gateway_stream pipeline the web app uses), accounts
+# and workspaces (workspace-membership validation at link time) -- but none
+# of those may import integrations back. approvals/agents have no
+# relationship with integrations at all: PersonalAccessTokenAuthentication
+# lives in accounts, not integrations (see accounts/authentication.py's own
+# docstring for why), so assistant/agents/approvals never need to import
+# integrations directly.
+[[tool.importlinter.contracts]]
+name = "assistant must not import integrations (direction: integrations -> assistant)"
+type = "forbidden"
+source_modules = ["assistant"]
+forbidden_modules = ["integrations"]
+
+[[tool.importlinter.contracts]]
+name = "approvals must not import integrations (no relationship either direction)"
+type = "forbidden"
+source_modules = ["approvals"]
+forbidden_modules = ["integrations"]
+
+[[tool.importlinter.contracts]]
+name = "agents must not import integrations (no relationship either direction)"
+type = "forbidden"
+source_modules = ["agents"]
+forbidden_modules = ["integrations"]
+
+[[tool.importlinter.contracts]]
+name = "integrations must not import approvals or agents (integrations needs neither)"
+type = "forbidden"
+source_modules = ["integrations"]
+forbidden_modules = ["approvals", "agents"]
+
+# harness (Phase 2 brief) is a new one-way dependency root: it may import
+# workspaces (HarnessRepo's WorkspaceScopedModel base, curator-role checks),
+# ai_core (record_external_usage(), branch 2+) and memory
+# (record_work_log(), branch 3+), but none of those apps may import harness
+# back -- no app yet depends on harness output beyond the memory row it
+# writes (brief §"Boundary vs. existing systems"). audit is already covered
+# by the blanket "audit must not depend on business apps" contract above.
+# Phase 3 branch 2 (brief §boundary) adds two more: harness may import
+# approvals (Gate A/B request via `approvals.services.create_request`) and
+# tools (registering `harness_implement`/`harness_push` as real `ToolSpec`s,
+# mirroring `tools/export.py`'s exact shape) -- both already forbidden from
+# importing harness back via the blanket "no other app may import harness"
+# contract below, which already lists both in its `source_modules`.
+[[tool.importlinter.contracts]]
+name = "workspaces must not import harness (direction: harness -> workspaces)"
+type = "forbidden"
+source_modules = ["workspaces"]
+forbidden_modules = ["harness"]
+
+[[tool.importlinter.contracts]]
+name = "memory must not import harness (direction: harness -> memory)"
+type = "forbidden"
+source_modules = ["memory"]
+forbidden_modules = ["harness"]
+
+# The remaining apps have no stated relationship with harness at all in
+# this phase (brief §"Boundary vs. existing systems": "nothing may import
+# harness"). One consolidated contract, mirroring how ai_core/audit's own
+# blanket "must not import business apps" contracts already cover harness
+# by including it in their forbidden_modules list above (Codex code-review
+# P3, branch 1 round 4: an earlier draft only added workspaces/memory,
+# leaving every other app free to import harness while lint-imports still
+# passed).
+[[tool.importlinter.contracts]]
+name = "no other app may import harness (harness is a leaf dependency root)"
+type = "forbidden"
+source_modules = ["accounts", "assistant", "knowledge", "tasks", "approvals", "tools", "agents", "skills", "integrations"]
+forbidden_modules = ["harness"]

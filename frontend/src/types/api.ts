@@ -1,0 +1,366 @@
+export interface ApiUser {
+  id: string;
+  email: string;
+  name: string;
+  is_agent: boolean;
+}
+
+export interface ApiWorkspaceSummary {
+  id: string;
+  name: string;
+  type: "personal" | "company";
+  role: string;
+}
+
+export interface ApiWorkspace {
+  id: string;
+  name: string;
+  type: "personal" | "company";
+  enabled_modules: string[];
+  role: string;
+  created_at: string;
+}
+
+// --- Firm dossier (Phase 0 §2, Phase 1 p1-firm-dossier UI) ---
+
+export interface ApiWorkspaceProfileRepo {
+  name: string;
+  url: string;
+  default_branch?: string;
+}
+
+export interface ApiWorkspaceProfileService {
+  name: string;
+  kind?: string;
+  url?: string;
+}
+
+export interface ApiWorkspaceProfileDeployTarget {
+  name: string;
+  host?: string;
+  // Metadata only -- deploy credentials/secrets must NEVER be entered here
+  // (backend workspaces/models.py; secrets stay in env per CLAUDE.md).
+  notes?: string;
+}
+
+export interface ApiWorkspaceProfile {
+  repos?: ApiWorkspaceProfileRepo[];
+  services?: ApiWorkspaceProfileService[];
+  deploy_targets?: ApiWorkspaceProfileDeployTarget[];
+  notes?: string;
+}
+
+// GET/PATCH /api/workspaces/[workspaceId] -- the only surface that exposes
+// `profile`; the workspace list (ApiWorkspace above) deliberately doesn't.
+export interface ApiWorkspaceDetail extends ApiWorkspace {
+  profile: ApiWorkspaceProfile;
+}
+
+export interface SessionResponse {
+  user: ApiUser;
+  workspaces: ApiWorkspaceSummary[];
+}
+
+export interface ApiConversation {
+  id: string;
+  workspace: string;
+  title: string;
+  created_by: string | null;
+  created_at: string;
+}
+
+export type MessageRole = "user" | "assistant" | "system";
+export type MessageStatus = "complete" | "partial" | "failed";
+
+export interface ApiMessage {
+  id: string;
+  conversation: string;
+  role: MessageRole;
+  content: string;
+  status: MessageStatus;
+  model_usage: string | null;
+  created_by: string | null;
+  created_at: string;
+  // Ordered memory ids supplied to the model for this reply — "memory
+  // context", not proof the model used them (MVP 2 §2).
+  memories_used: string[];
+  // Same contract, for RAG knowledge chunks (MVP 3 §4): ordered chunk ids
+  // supplied as context, not proof of use.
+  chunks_used: string[];
+  // {memory_id: source_workspace_id}, populated only for entries in
+  // memories_used that came from the personal-assistant cross-workspace
+  // overlay (Phase 1 p1-personal-overlay); {} otherwise. No UI surface
+  // renders this yet -- it's the data a future "from Workspace X" view
+  // would need, not a redefinition of memories_used's own contract.
+  overlay_source_workspaces: Record<string, string>;
+}
+
+export type ChatStreamEvent =
+  | { type: "chunk"; text: string }
+  | {
+      type: "done";
+      message_id: string;
+      usage?: Record<string, unknown>;
+      memories_used: string[];
+      chunks_used: string[];
+      overlay_source_workspaces: Record<string, string>;
+    }
+  | { type: "error"; error_type: string }
+  // Non-terminal, optional, emitted once (only for a task_draft/tool_request
+  // turn with a usable extracted draft) after the streamed chunks and
+  // BEFORE `done` -- never instead of it (MVP 6 §3/§4/§5).
+  // `source_message_id` is the already-persisted user Message's id; the
+  // frontend sends it back verbatim as `draft_message_id` on a task confirm
+  // (tool requests carry no such reference -- confirming one calls the
+  // approvals endpoint directly, which has no provenance field).
+  | {
+      type: "draft";
+      kind: "task";
+      source_message_id: string;
+      title: string;
+      due_date: string | null;
+    }
+  | {
+      type: "draft";
+      kind: "tool";
+      source_message_id: string;
+      tool_name: string;
+      payload: Record<string, unknown>;
+    };
+
+// --- Memory (MVP 2) ---
+
+export type MemoryType = "semantic" | "episodic" | "preference" | "procedural" | "work_log";
+export type MemorySensitivity = "normal" | "private";
+export type MemoryStatus = "pending_approval" | "approved" | "rejected" | "archived";
+export type MemorySource = "ai_suggested" | "user_created" | "system_generated";
+
+export interface ApiMemory {
+  id: string;
+  workspace: string;
+  memory_type: MemoryType;
+  sensitivity: MemorySensitivity;
+  status: MemoryStatus;
+  source: MemorySource;
+  title: string;
+  content: string;
+  created_by: string | null;
+  source_conversation: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ApiMemoryExport {
+  workspace: string;
+  count: number;
+  memories: ApiMemory[];
+}
+
+export interface ApiErrorBody {
+  detail?: string;
+  [field: string]: unknown;
+}
+
+// --- Knowledge (MVP 3) ---
+
+export type KnowledgeSourceType = "pasted_text" | "file_upload" | "url";
+export type KnowledgeStatus = "pending" | "processing" | "ready" | "failed";
+export type KnowledgeSensitivity = "normal" | "private"; // identical enum to Memory's
+
+export interface ApiKnowledgeDocument {
+  id: string;
+  workspace: string;
+  source_type: KnowledgeSourceType;
+  title: string;
+  status: KnowledgeStatus;
+  sensitivity: KnowledgeSensitivity;
+  mime_type: string;
+  byte_size: number;
+  source_url: string;
+  error_message: string;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+// --- Tasks (MVP 4) ---
+
+export type TaskStatus = "open" | "done" | "cancelled";
+export type TaskPriority = "low" | "normal" | "high";
+// Mirrors MemorySource's exact vocabulary (MVP 6 §3). Server-controlled only
+// -- never accept this as client input; see TaskCreateForm's `draft_message_id`.
+export type TaskSource = "ai_suggested" | "user_created";
+
+export interface ApiTask {
+  id: string;
+  workspace: string;
+  title: string;
+  description: string;
+  status: TaskStatus;
+  priority: TaskPriority;
+  due_date: string | null;
+  source: TaskSource;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+// --- Approvals (MVP 5) ---
+
+export type ApprovalStatus = "pending" | "approved" | "rejected" | "expired";
+
+// vault_export's ToolSpec.describe_execution shape (tools/export.py) --
+// other tools may register a differently-shaped `execution`, or none at
+// all (then this field is `null`).
+export interface ApiVaultExportExecution {
+  status: "pending" | "running" | "succeeded" | "failed";
+  error_type: string;
+  error_message: string;
+  written_count: number;
+  updated_count: number;
+  removed_count: number;
+  retry_count: number;
+}
+
+export interface ApiApprovalRequest {
+  id: string;
+  workspace: string;
+  tool_name: string;
+  status: ApprovalStatus;
+  requested_by: string | null;
+  decided_by: string | null;
+  decided_at: string | null;
+  created_at: string;
+  updated_at: string;
+  // `payload` is deliberately never included (approvals/serializers.py).
+  execution: ApiVaultExportExecution | null;
+}
+
+// --- Agents (MVP 7) ---
+
+export type AgentStatus =
+  | "planning"
+  | "running"
+  | "blocked_on_approval"
+  | "blocked_on_confirmation"
+  | "completed"
+  | "failed"
+  | "cancelled";
+
+export type AgentFailureReason =
+  | ""
+  | "plan_too_large"
+  | "plan_empty"
+  | "planner_error"
+  | "consecutive_failures"
+  | "gateway_budget_exceeded";
+
+export type AgentStepKind = "read" | "tool_request" | "task_draft";
+
+export type AgentStepStatus =
+  | "pending"
+  | "running"
+  | "succeeded"
+  | "failed"
+  | "blocked_on_approval"
+  | "blocked_on_confirmation"
+  | "skipped";
+
+export interface ApiAgentStep {
+  id: string;
+  agent: string;
+  order: number;
+  kind: AgentStepKind;
+  description: string;
+  status: AgentStepStatus;
+  payload: Record<string, unknown>;
+  result: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ApiAgent {
+  id: string;
+  workspace: string;
+  goal: string;
+  status: AgentStatus;
+  failure_reason: AgentFailureReason;
+  created_by: string | null;
+  gateway_calls_used: number;
+  consecutive_failures: number;
+  skill_name: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ApiAgentDetail extends ApiAgent {
+  steps: ApiAgentStep[];
+}
+
+// --- Integrations (MVP 9) ---
+
+export interface ApiPersonalAccessToken {
+  id: string;
+  name: string;
+  workspace: string;
+  last_used_at: string | null;
+  revoked_at: string | null;
+  created_at: string;
+}
+
+// Only present on the create response, alongside every ApiPersonalAccessToken
+// field above -- the raw token appears exactly once, ever (accounts/views.py).
+export interface ApiPersonalAccessTokenCreated extends ApiPersonalAccessToken {
+  token: string;
+}
+
+export interface ApiTelegramLinkCode {
+  code: string;
+  expires_at: string;
+}
+
+export interface ApiTelegramLinkStatus {
+  linked: boolean;
+  chat_id: string | null;
+  linked_at: string | null;
+}
+
+export type HarnessJobStatus = "pending" | "running" | "succeeded" | "failed" | "cancelled";
+
+export type HarnessJobFailureReason = "" | "timeout" | "runner_error" | "budget_exceeded" | "killed";
+
+export type HarnessAgent = "claude_code" | "codex_cli";
+
+export interface ApiHarnessJob {
+  id: string;
+  workspace: string;
+  repo: string;
+  goal: string;
+  agent: HarnessAgent;
+  sensitivity: string;
+  status: HarnessJobStatus;
+  failure_reason: HarnessJobFailureReason;
+  created_by: string | null;
+  started_at: string | null;
+  elapsed_seconds: number;
+  created_at: string;
+  updated_at: string;
+}
+
+// `raw_transcript` is the CLI's own low-trust output (brief §3/§4, R2
+// mitigation) -- the UI must render it visibly distinguished from
+// `summary`/`findings`, never presented as equally trustworthy prose.
+// All fields optional: `HarnessJob.briefing` defaults to `{}` at the model
+// level (backend/harness/models.py) for any job that hasn't reached
+// finalization yet -- a pending/running/errored-before-briefing job's
+// `briefing` genuinely has none of these keys, not empty-string/empty-array
+// versions of them.
+export interface ApiHarnessJobBriefing {
+  summary?: string;
+  findings?: string[];
+  raw_transcript?: string;
+}
+
+export interface ApiHarnessJobDetail extends ApiHarnessJob {
+  briefing: ApiHarnessJobBriefing;
+}

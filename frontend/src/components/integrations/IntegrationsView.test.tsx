@@ -1,0 +1,172 @@
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { IntegrationsView } from "@/components/integrations/IntegrationsView";
+import type { ApiPersonalAccessToken } from "@/types/api";
+
+const WORKSPACES = [
+  { id: "w1", name: "Alice", type: "personal" as const, role: "owner" },
+  { id: "w2", name: "Acme", type: "company" as const, role: "member" },
+];
+
+vi.mock("@/contexts/workspace-context", () => ({
+  useWorkspace: () => ({
+    workspaces: WORKSPACES,
+    activeWorkspace: WORKSPACES[0],
+  }),
+}));
+
+function token(overrides: Partial<ApiPersonalAccessToken> = {}): ApiPersonalAccessToken {
+  return {
+    id: "t1",
+    name: "laptop cli",
+    workspace: "w1",
+    last_used_at: null,
+    revoked_at: null,
+    created_at: "2026-07-13T00:00:00Z",
+    ...overrides,
+  };
+}
+
+function jsonResponse(body: unknown, status = 200) {
+  return new Response(JSON.stringify(body), { status });
+}
+
+function fetchRouter(handlers: Record<string, () => Response | Promise<Response>>) {
+  return vi.fn(async (input: string, init?: RequestInit) => {
+    const method = init?.method ?? "GET";
+    const key = `${method} ${input.split("?")[0]}`;
+    const handler = handlers[key];
+    if (handler) return handler();
+    if (input.includes("/api/integrations/telegram/link-status")) {
+      return jsonResponse({ linked: false, chat_id: null, linked_at: null });
+    }
+    return jsonResponse([]);
+  });
+}
+
+describe("IntegrationsView", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("loads and renders the token list", async () => {
+    vi.stubGlobal(
+      "fetch",
+      fetchRouter({
+        "GET /api/auth/tokens": () => jsonResponse([token()]),
+      }),
+    );
+
+    render(<IntegrationsView />);
+
+    expect(await screen.findByText("laptop cli")).toBeInTheDocument();
+    // "Alice" also appears in TelegramLinkPanel's own workspace picker.
+    expect(screen.getAllByText("Alice").length).toBeGreaterThan(0);
+  });
+
+  it("shows an empty state when there are no tokens", async () => {
+    vi.stubGlobal(
+      "fetch",
+      fetchRouter({
+        "GET /api/auth/tokens": () => jsonResponse([]),
+      }),
+    );
+
+    render(<IntegrationsView />);
+
+    expect(await screen.findByText("Henüz kişisel erişim token'ı yok.")).toBeInTheDocument();
+  });
+
+  it("creates a token and reveals its raw value exactly once", async () => {
+    const created = { ...token({ id: "new1", name: "phone" }), token: "jpat_raw_value" };
+    vi.stubGlobal(
+      "fetch",
+      fetchRouter({
+        "GET /api/auth/tokens": () => jsonResponse([]),
+        "POST /api/auth/tokens": () => jsonResponse(created, 201),
+      }),
+    );
+
+    render(<IntegrationsView />);
+    await screen.findByText("Henüz kişisel erişim token'ı yok.");
+
+    await userEvent.click(screen.getByRole("button", { name: "Yeni token" }));
+    await userEvent.type(screen.getByLabelText("İsim"), "phone");
+    await userEvent.click(screen.getByRole("combobox", { name: "Token çalışma alanı" }));
+    await userEvent.click(await screen.findByRole("option", { name: "Alice" }));
+    await userEvent.click(screen.getByRole("button", { name: "Token oluştur" }));
+
+    expect(await screen.findByText("jpat_raw_value")).toBeInTheDocument();
+    expect(await screen.findByText("phone")).toBeInTheDocument();
+    // Proves the round-1 P2 fix: the raw token is never also stored on the
+    // list-row entry -- appears exactly once (the reveal banner), not a
+    // second time anywhere the row itself might render it.
+    expect(screen.getAllByText("jpat_raw_value")).toHaveLength(1);
+
+    await userEvent.click(screen.getByRole("button", { name: "Tamam" }));
+    expect(screen.queryByText("jpat_raw_value")).not.toBeInTheDocument();
+  });
+
+  it("resets the reveal banner's copied state for a newly created token", async () => {
+    Object.assign(navigator, { clipboard: { writeText: vi.fn().mockResolvedValue(undefined) } });
+    const createdTokens = [
+      { ...token({ id: "a", name: "token A" }), token: "jpat_a" },
+      { ...token({ id: "b", name: "token B" }), token: "jpat_b" },
+    ];
+    let createCount = 0;
+    vi.stubGlobal(
+      "fetch",
+      fetchRouter({
+        "GET /api/auth/tokens": () => jsonResponse([]),
+        "POST /api/auth/tokens": () => jsonResponse(createdTokens[createCount++], 201),
+      }),
+    );
+
+    render(<IntegrationsView />);
+    await screen.findByText("Henüz kişisel erişim token'ı yok.");
+
+    await userEvent.click(screen.getByRole("button", { name: "Yeni token" }));
+    await userEvent.type(screen.getByLabelText("İsim"), "token A");
+    await userEvent.click(screen.getByRole("combobox", { name: "Token çalışma alanı" }));
+    await userEvent.click(await screen.findByRole("option", { name: "Alice" }));
+    await userEvent.click(screen.getByRole("button", { name: "Token oluştur" }));
+    await screen.findByText("jpat_a");
+
+    await userEvent.click(screen.getByRole("button", { name: "Kopyala" }));
+    expect(await screen.findByRole("button", { name: "Kopyalandı" })).toBeInTheDocument();
+
+    // Create a second token without dismissing the first's banner.
+    await userEvent.click(screen.getByRole("button", { name: "Yeni token" }));
+    await userEvent.type(screen.getByLabelText("İsim"), "token B");
+    await userEvent.click(screen.getByRole("combobox", { name: "Token çalışma alanı" }));
+    await userEvent.click(await screen.findByRole("option", { name: "Alice" }));
+    await userEvent.click(screen.getByRole("button", { name: "Token oluştur" }));
+
+    // Proves the round-4 P2 fix: the banner for token B must not inherit
+    // token A's "Copied" state -- it hasn't actually been copied yet.
+    expect(await screen.findByText("jpat_b")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Kopyala" })).toBeInTheDocument();
+  });
+
+  it("revokes a token", async () => {
+    const active = token();
+    vi.stubGlobal(
+      "fetch",
+      fetchRouter({
+        "GET /api/auth/tokens": () => jsonResponse([active]),
+        "POST /api/auth/tokens/t1/revoke": () =>
+          jsonResponse({ ...active, revoked_at: "2026-07-13T01:00:00Z" }),
+      }),
+    );
+
+    render(<IntegrationsView />);
+    await screen.findByText("laptop cli");
+    await userEvent.click(screen.getByRole("button", { name: "İptal et" }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/İptal edildi/)).toBeInTheDocument();
+    });
+    expect(screen.queryByRole("button", { name: "İptal et" })).not.toBeInTheDocument();
+  });
+});

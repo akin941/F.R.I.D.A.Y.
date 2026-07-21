@@ -1,0 +1,189 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: jarvis
+          POSTGRES_PASSWORD: jarvis
+          POSTGRES_DB: jarvis
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U jarvis -d jarvis"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgres://jarvis:jarvis@localhost:5432/jarvis
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      - name: Ruff lint
+        run: uv run ruff check .
+
+      - name: Ruff format check
+        run: uv run ruff format --check .
+
+      - name: Import contracts (modular monolith rules)
+        run: uv run lint-imports
+
+      - name: Missing migrations check
+        run: uv run python manage.py makemigrations --check --dry-run
+
+      - name: Tests
+        run: uv run pytest
+
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    env:
+      BACKEND_API_URL: http://127.0.0.1:8001/api/v1
+      APP_ORIGIN: http://localhost:3001
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Tests
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+  e2e:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: jarvis
+          POSTGRES_PASSWORD: jarvis
+          POSTGRES_DB: jarvis
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U jarvis -d jarvis"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgres://jarvis:jarvis@localhost:5432/jarvis
+      AI_FAKE_PROVIDER: "true"
+      # No Redis service in this job (MVP 2 §4/§6): eager mode runs the
+      # memory-extraction task inline instead of publishing to a broker that
+      # doesn't exist here.
+      CELERY_TASK_ALWAYS_EAGER: "true"
+      CELERY_TASK_EAGER_PROPAGATES: "true"
+      BACKEND_API_URL: http://127.0.0.1:8001/api/v1
+      APP_ORIGIN: http://localhost:3001
+      # Single-owner system (ADR-008): signup is off by default everywhere;
+      # the e2e smoke is the one flow still exercising the signup path
+      # (until Phase 4's device-trust identity replaces auth), so this job
+      # opts in explicitly. Self-approval needs no flag anymore -- ADR-008
+      # decision 3 made the owner's explicit separate decision the rule.
+      SIGNUP_ENABLED: "true"
+      # DEV/TEST ONLY fixture values (MVP 9 §4) -- same reasoning as
+      # compose.yml's identical block: not real Telegram credentials, just
+      # non-empty strings the e2e Telegram section (smoke.e2e.ts) needs to
+      # get past TelegramWebhookView's fail-closed auth check. Must match
+      # smoke.e2e.ts's TELEGRAM_WEBHOOK_SECRET default exactly.
+      TELEGRAM_BOT_TOKEN: "e2e-fixture-bot-token"
+      TELEGRAM_WEBHOOK_SECRET: "e2e-fixture-webhook-secret"
+      # A fixed path this job's own env shares between the backend process
+      # (started below) and the frontend/Playwright process (started later
+      # in this same job) -- global-setup.ts creates the directory before
+      # any test runs, since the backend process starts before that and
+      # can't create it itself at boot (tier-2 vault-root validation only
+      # runs at request time, not at startup).
+      OBSIDIAN_VAULT_PATH: /tmp/jarvis-e2e-vault
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Install backend dependencies
+        working-directory: backend
+        run: uv sync --frozen
+
+      - name: Migrate + seed AI defaults (FakeAdapter)
+        working-directory: backend
+        run: |
+          uv run python manage.py migrate
+          uv run python manage.py seed_ai_defaults
+
+      - name: Start backend (background)
+        working-directory: backend
+        run: |
+          uv run python manage.py runserver 0.0.0.0:8001 &
+          for i in $(seq 1 30); do
+            curl -sf http://127.0.0.1:8001/healthz && exit 0
+            sleep 1
+          done
+          echo "backend did not become healthy in time" >&2
+          exit 1
+
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Install Playwright browsers
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
+
+      - name: Run e2e smoke tests
+        working-directory: frontend
+        run: npm run test:e2e
+
+      - name: Upload Playwright report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: frontend/playwright-report/
+          retention-days: 7

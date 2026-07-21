@@ -1,0 +1,771 @@
+"""`HarnessImplementationJob`/`HarnessReview` execution engine (Phase 3
+branch 2, brief §boundary). Celery-agnostic -- `harness.tasks` is a thin
+wrapper, mirroring `harness.execution`/`harness.tasks`'s existing split.
+
+Deliberately NOT sharing a common engine with `harness.execution.
+run_harness_job` (brief §boundary, round-1 MEDIUM finding, accepted): this
+job type's lifecycle (writable worktree, wrapper-owned test result,
+cross-vendor review, two approval gates, a host-side push) is materially
+different from discovery's single read-only container, and extraction is
+deferred to whichever later phase has three real call sites to generalize
+from correctly.
+
+Two Celery-task-backing entry points:
+
+- `run_harness_implementation_job` -- Gate A already approved (status is
+  `implementing`, set by `harness.tools.create_harness_implement_execution`):
+  writable clone -> launch (read-write, branch 1's runner) -> wait/poll
+  (mirrors `harness.execution._wait_for_container`'s brake shape) -> read
+  the wrapper's own result file -> on a verified pass, produce a gateway
+  `diff_summary` and move to `pending_review` -- the worktree survives
+  this call's own cleanup (it must last through the Gate-B wait, brief
+  §boundary), every OTHER terminal path cleans up immediately.
+- `run_harness_push_job` -- Gate B already approved (status is `pushing`):
+  bundle the agent's own worktree (a local operation) and push from a
+  separate, host-only clean clone (branch 1's `runner.push_bundled_commit`)
+  -- never from the worktree itself. Cleans up the worktree on every exit
+  path, since nothing needs it to persist any further after this point.
+"""
+
+import logging
+import os
+import tempfile
+import time
+from datetime import timedelta
+from decimal import Decimal
+
+from django.conf import settings
+from django.db import transaction
+from django.utils import timezone
+
+from ai_core.gateway import record_external_usage
+from audit.services import record_audit
+from harness import runner
+from harness.execution import _parse_claude_code_output, _resolve_cli_env
+from harness.models import HarnessImplementationJob
+
+logger = logging.getLogger(__name__)
+
+
+def _claim_implementation_job(job_id):
+    """`implementing` is already set by `create_harness_implement_execution`
+    (called synchronously when Gate A is approved) -- this re-fetches
+    under lock and stamps `started_at` for the brake below, mirroring
+    `harness.execution._claim_job`'s fenced-claim shape one status
+    transition later than that function's own `pending` -> `running`.
+
+    `started_at__isnull=True` is the actual claim fence (Codex code-review
+    P1, branch 2 round 3): unlike discovery, `implementing` is BOTH "ready
+    to be claimed" and "actively running" here -- there is no separate
+    status transition a second claim attempt would find already moved
+    past. A Celery redelivery, or `dispatch()` somehow firing twice, would
+    otherwise have both invocations successfully claim the SAME row (the
+    bare `status=implementing` filter never stops matching), launch a
+    second container under the identical deterministic name, and race
+    each other's own terminal-state writes. `started_at` is set
+    unconditionally by this same claim and never reset, so it is only
+    ever null for a row nothing has claimed yet -- a second attempt finds
+    it already populated and safely gets `None` back."""
+    with transaction.atomic():
+        locked = (
+            HarnessImplementationJob.objects.select_for_update(of=("self",))
+            .filter(
+                pk=job_id,
+                status=HarnessImplementationJob.Status.IMPLEMENTING,
+                started_at__isnull=True,
+            )
+            .first()
+        )
+        if locked is None:
+            return None
+        locked.started_at = timezone.now()
+        locked.save(update_fields=["started_at", "updated_at"])
+        return locked
+
+
+def _teardown_container(container_id):
+    """Mirrors `harness.execution._teardown_container` exactly."""
+    try:
+        runner.stop_container(container_id, grace_seconds=settings.HARNESS_KILL_GRACE_SECONDS)
+        if runner.container_is_running(container_id):
+            runner.kill_container(container_id)
+    except Exception:
+        logger.exception("Failed to stop/kill harness implementation container %s", container_id)
+
+
+def _safe_remove_container(container_name):
+    """Mirrors `harness.execution._safe_remove_container` exactly."""
+    try:
+        runner.remove_container(container_name)
+        return True
+    except Exception:
+        logger.exception(
+            "Failed to remove harness implementation container %s (leaked on host)", container_name
+        )
+        return False
+
+
+def _safe_cleanup_directory(path):
+    """Returns `True` if cleanup is confirmed, `False` if it genuinely
+    failed (Codex code-review P2, branch 2 round 4: an earlier version
+    had no return value at all, so `run_harness_push_job` cleared
+    `worktree_path` unconditionally regardless of whether this actually
+    succeeded -- mirrors `_safe_remove_container`'s identical
+    confirmed-before-clearing discipline). Callers must not clear a
+    persisted path/handle on a `False` return.
+
+    Checks `os.path.exists(path)` AFTER calling `runner.cleanup_directory`,
+    rather than trusting that call not raising (Codex code-review P1,
+    branch 2 round 5): `runner.cleanup_directory` is `shutil.rmtree(path,
+    ignore_errors=True)` -- it NEVER raises, by design, so the earlier
+    round-4 fix's own `try/except` was dead code that always returned
+    `True` regardless of whether the directory was actually removed.
+    `ignore_errors=True` is Phase 3 branch 1's own established behavior
+    (not something this branch introduced or should silently change),
+    so confirmation has to come from checking the filesystem afterward,
+    not from the call's own (silent) outcome."""
+    runner.cleanup_directory(path)
+    if os.path.exists(path):
+        logger.error("Failed to fully clean up harness directory %s (still present on disk)", path)
+        return False
+    return True
+
+
+def _wait_for_implementation_container(job_id, container_name, started_monotonic):
+    """Mirrors `harness.execution._wait_for_container`'s brake shape
+    (timeout, cancel-poll, confirmed exit code) exactly -- the result
+    itself is read separately, from the wrapper's own file, by the caller,
+    never from container stdout/stderr (brief §boundary)."""
+    while runner.container_is_running(container_name):
+        elapsed = time.monotonic() - started_monotonic
+        if elapsed >= settings.HARNESS_MAX_JOB_SECONDS:
+            _teardown_container(container_name)
+            return "failed", HarnessImplementationJob.FailureReason.TIMEOUT
+        if HarnessImplementationJob.objects.filter(pk=job_id, cancel_requested=True).exists():
+            _teardown_container(container_name)
+            return "cancelled", HarnessImplementationJob.FailureReason.KILLED
+        time.sleep(settings.HARNESS_CANCEL_POLL_SECONDS)
+    if HarnessImplementationJob.objects.filter(pk=job_id, cancel_requested=True).exists():
+        return "cancelled", HarnessImplementationJob.FailureReason.KILLED
+    exit_code = runner.container_exit_code(container_name)
+    if exit_code != 0:
+        return "failed", HarnessImplementationJob.FailureReason.RUNNER_ERROR
+    return "succeeded", ""
+
+
+def _fail_and_cleanup(
+    job,
+    failure_reason,
+    *,
+    workspace_dir,
+    removal_confirmed,
+    started_monotonic,
+    test_result=None,
+    input_tokens=0,
+    output_tokens=0,
+    estimated_cost=None,
+    context_report=None,
+):
+    """Shared terminal-failure path for every non-success outcome below --
+    cleans up the worktree immediately (brief round-2/3 MEDIUM finding:
+    every terminal path does, not only the "obviously terminal" ones).
+
+    Cost defaults to zero (mirrors `harness.execution._finalize`'s own
+    failure accounting) for the failure modes reached BEFORE
+    `capture_logs` ever ran (launch errors, timeout, mid-run
+    cancellation) -- there is genuinely nothing to bill for those. Codex
+    code-review P2, branch 2 round 2: an earlier version zeroed cost
+    unconditionally, including the THREE call sites below that run AFTER
+    cost has already been parsed (`test_result_unavailable` x2,
+    `tests_failed`) -- the CLI agent already spent real tokens/cost by
+    that point regardless of what the separate test command or wrapper
+    result later did, so those callers now pass the real figures through
+    instead of silently under-recording actual spend."""
+    if workspace_dir:
+        _safe_cleanup_directory(workspace_dir)
+    latency_ms = int((time.monotonic() - started_monotonic) * 1000)
+    with transaction.atomic():
+        locked = HarnessImplementationJob.objects.select_for_update(of=("self",)).get(pk=job.pk)
+        if locked.status != HarnessImplementationJob.Status.IMPLEMENTING:
+            # Idempotency guard against a double-call -- nothing else
+            # transitions this job away from `implementing` except this
+            # function and the success path below.
+            return
+        cancelled = locked.cancel_requested
+        locked.status = (
+            HarnessImplementationJob.Status.CANCELLED
+            if cancelled
+            else HarnessImplementationJob.Status.FAILED
+        )
+        locked.failure_reason = (
+            HarnessImplementationJob.FailureReason.KILLED if cancelled else failure_reason
+        )
+        if test_result is not None:
+            locked.test_result = test_result
+        if removal_confirmed:
+            locked.container_id = ""
+        locked.elapsed_seconds = max(0, int(latency_ms / 1000))
+        update_fields = [
+            "status",
+            "failure_reason",
+            "container_id",
+            "elapsed_seconds",
+            "updated_at",
+        ]
+        if test_result is not None:
+            update_fields.append("test_result")
+        locked.save(update_fields=update_fields)
+        record_external_usage(
+            workspace=locked.workspace,
+            purpose="harness.implementation",
+            backend=f"harness_cli:{locked.agent}",
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            estimated_cost=estimated_cost if estimated_cost is not None else Decimal("0"),
+            latency_ms=latency_ms,
+            success=False,
+            actor=locked.created_by,
+            error_type=locked.failure_reason,
+            context_report=context_report
+            if context_report is not None
+            else {"usage_source": "unavailable"},
+        )
+    record_audit(
+        action=f"harness.implementation_job_{locked.status}",
+        actor=locked.created_by,
+        workspace=locked.workspace,
+        resource=locked,
+        metadata={"failure_reason": locked.failure_reason},
+    )
+
+
+def dispatch_harness_review(job):
+    """The real container-launched cross-vendor review dispatch (Phase 3
+    branch 3) -- creates the `HarnessReview` row and schedules its own
+    Celery task. Thin re-export from `harness.review_execution` (the
+    branch-2 stub that used to live here directly is gone -- this
+    module's own tests still mock `dispatch_harness_review` at THIS
+    import path, which is why it's re-exported rather than having every
+    caller import from `review_execution` directly)."""
+    from harness.review_execution import dispatch_harness_review as _dispatch_harness_review
+
+    return _dispatch_harness_review(job)
+
+
+def run_harness_implementation_job(job_id):
+    job = _claim_implementation_job(job_id)
+    if job is None:
+        return
+
+    container_name = f"harness-impl-{job.pk}"
+    HarnessImplementationJob.objects.filter(pk=job.pk).update(container_id=container_name)
+
+    workspace_dir = None
+    started_monotonic = time.monotonic()
+    removal_confirmed = True
+    raw_output = ""
+    try:
+        # Codex code-review P2, branch 2 round 2: an earlier version
+        # passed an empty `clone_env`, so any repo relying on
+        # `HARNESS_GIT_SSH_KEY_PATH` (the same credential
+        # `push_bundled_commit` already resolves) had no way to actually
+        # clone -- it would either fail outright or silently fall back to
+        # whatever ambient SSH access the runner host happens to have.
+        # The same credential this job will need again at push time is
+        # resolved up front and threaded through here too.
+        #
+        # `job.repo_git_url`/`job.repo_default_branch` (Codex code-review
+        # P1, branch 2 round 4), NOT `job.repo.git_url`/`job.repo.
+        # default_branch` -- those are LIVE reads through an editable FK;
+        # `create_harness_implementation_job`'s self-modification hard
+        # block only ever runs once, at creation, so reading the repo row
+        # live here (potentially hours later, across the whole Gate A
+        # wait) would let an edit to `HarnessRepo.git_url` made after that
+        # one-time check silently redirect an already-approved job. The
+        # snapshotted fields can never change after creation.
+        workspace_dir = runner.clone_repo_writable(
+            git_url=job.repo_git_url,
+            default_branch=job.repo_default_branch,
+            branch_name=job.branch_name,
+            clone_env=runner._resolve_git_push_env(),
+        )
+        repo_dir = f"{workspace_dir}/repo"
+        base_sha = runner.resolve_commit_sha(repo_dir, "HEAD")
+        image = runner.image_for_agent(job.agent)
+        cli_env = _resolve_cli_env(job.agent)
+        runner.launch_implementation_container(
+            image=image,
+            workspace_dir=workspace_dir,
+            goal=job.goal,
+            # `job.repo_test_command` (Codex code-review P2, branch 2
+            # round 6), NOT `job.repo.test_command` -- the live FK read
+            # would let a curator edit the repo's `test_command` to
+            # blank/whitespace after this job was already approved,
+            # reaching the wrapper as a no-op that a shell exits 0 for.
+            # Same snapshot-at-creation rationale as `repo_git_url`/
+            # `repo_default_branch` above.
+            test_command=job.repo_test_command,
+            base_sha=base_sha,
+            cli_env=cli_env,
+            name=container_name,
+        )
+        status, failure_reason = _wait_for_implementation_container(
+            job.pk, container_name, started_monotonic
+        )
+        if status == "succeeded":
+            # Cost accounting (mirrors `harness.execution._finalize`): the
+            # CLI's own `--output-format json` stdout is captured
+            # separately from the wrapper's dedicated result file below --
+            # the wrapper never reports cost/usage, only test outcome.
+            # Captured HERE, before `finally` removes the container below
+            # (Codex code-review P2, branch 2 round 1: an earlier version
+            # captured logs AFTER `_safe_remove_container` ran -- `docker
+            # logs` can't read anything from a container that no longer
+            # exists, so every successful run silently recorded zero
+            # tokens/cost).
+            raw_output = runner.capture_logs(container_name)
+    except runner.RunnerError:
+        logger.exception("Harness implementation job %s failed to launch", job_id)
+        status, failure_reason = "failed", HarnessImplementationJob.FailureReason.RUNNER_ERROR
+    finally:
+        removal_confirmed = _safe_remove_container(container_name)
+
+    if status != "succeeded":
+        _fail_and_cleanup(
+            job,
+            failure_reason,
+            workspace_dir=workspace_dir,
+            removal_confirmed=removal_confirmed,
+            started_monotonic=started_monotonic,
+        )
+        return
+
+    input_tokens, output_tokens, estimated_cost, context_report = (0, 0, Decimal("0"), {})
+    if raw_output:
+        input_tokens, output_tokens, estimated_cost, context_report = _parse_claude_code_output(
+            raw_output
+        )
+
+    # Shared cost kwargs for every failure path below this point (Codex
+    # code-review P2, branch 2 round 2): the CLI already spent these real
+    # tokens/cost by now regardless of what the wrapper result/test
+    # command turn out to say, so every failure from here on records the
+    # real figures instead of `_fail_and_cleanup`'s zeroed default.
+    cost_kwargs = {
+        "input_tokens": input_tokens,
+        "output_tokens": output_tokens,
+        "estimated_cost": estimated_cost,
+        "context_report": context_report,
+    }
+
+    try:
+        result = runner.read_implementation_result(workspace_dir)
+    except runner.RunnerError:
+        logger.exception("Harness implementation job %s result unavailable", job_id)
+        _fail_and_cleanup(
+            job,
+            HarnessImplementationJob.FailureReason.TEST_RESULT_UNAVAILABLE,
+            workspace_dir=workspace_dir,
+            removal_confirmed=removal_confirmed,
+            started_monotonic=started_monotonic,
+            **cost_kwargs,
+        )
+        return
+
+    tests = result.get("tests") if isinstance(result, dict) else None
+    commit_sha = result.get("commit_sha") if isinstance(result, dict) else None
+    changed_files = result.get("changed_files") if isinstance(result, dict) else None
+    if (
+        not isinstance(tests, dict)
+        or not tests.get("ran")
+        or not commit_sha
+        or not isinstance(changed_files, list)
+    ):
+        _fail_and_cleanup(
+            job,
+            HarnessImplementationJob.FailureReason.TEST_RESULT_UNAVAILABLE,
+            workspace_dir=workspace_dir,
+            removal_confirmed=removal_confirmed,
+            started_monotonic=started_monotonic,
+            **cost_kwargs,
+        )
+        return
+
+    # `passed` is derived here, from the wrapper's own reported
+    # `exit_code`, never trusted as a bare assertion (brief §boundary) --
+    # the wrapper's JSON is Jarvis-authored, deterministic code baked into
+    # the image, not the CLI agent's own self-report, but re-deriving the
+    # single boolean this decision hinges on costs nothing and keeps the
+    # trust boundary exactly where the brief states it.
+    exit_code = tests.get("exit_code")
+    passed = isinstance(exit_code, int) and exit_code == 0
+    test_result = {
+        "ran": True,
+        "exit_code": exit_code,
+        "passed": passed,
+        "command": tests.get("command", ""),
+    }
+
+    if not passed:
+        _fail_and_cleanup(
+            job,
+            HarnessImplementationJob.FailureReason.TESTS_FAILED,
+            workspace_dir=workspace_dir,
+            removal_confirmed=removal_confirmed,
+            started_monotonic=started_monotonic,
+            test_result=test_result,
+            **cost_kwargs,
+        )
+        return
+
+    # Cost brake (Codex code-review P2, branch 2 round 2; mirrors
+    # `harness.execution._finalize`'s brake #2): an otherwise-passing run
+    # whose reported cost exceeds the configured ceiling still fails
+    # closed -- it cannot un-spend the cost, so the real tokens/cost are
+    # recorded here too, not zeroed. Checked AFTER the test-outcome check
+    # above (mirrors discovery's own ordering: a job that failed for a
+    # more specific reason is reported as that reason, not budget, even
+    # if it also happened to run over budget).
+    if estimated_cost > Decimal(str(settings.HARNESS_MAX_JOB_COST)):
+        _fail_and_cleanup(
+            job,
+            HarnessImplementationJob.FailureReason.BUDGET_EXCEEDED,
+            workspace_dir=workspace_dir,
+            removal_confirmed=removal_confirmed,
+            started_monotonic=started_monotonic,
+            test_result=test_result,
+            **cost_kwargs,
+        )
+        return
+
+    # Codex code-review P2, branch 2 round 6: a missing/unparseable
+    # `--output-format json` result (empty Docker logs, a shape
+    # `_parse_claude_code_output` doesn't recognize) falls back to
+    # `estimated_cost == 0`, which can never exceed the budget check
+    # above -- silently letting an otherwise-passing run through as a
+    # "successful free run" with no real cost accounting at all. Mirrors
+    # `harness.execution._finalize`'s identical fail-closed check
+    # (`usage_source != "cli_reported"` -> `runner_error`), checked in
+    # the same order discovery uses (budget first, then availability).
+    if context_report.get("usage_source") != "cli_reported":
+        _fail_and_cleanup(
+            job,
+            HarnessImplementationJob.FailureReason.RUNNER_ERROR,
+            workspace_dir=workspace_dir,
+            removal_confirmed=removal_confirmed,
+            started_monotonic=started_monotonic,
+            test_result=test_result,
+            **cost_kwargs,
+        )
+        return
+
+    diff_summary = _produce_diff_summary(job, changed_files)
+    latency_ms = int((time.monotonic() - started_monotonic) * 1000)
+
+    cancelled_before_review = False
+    with transaction.atomic():
+        locked = HarnessImplementationJob.objects.select_for_update(of=("self",)).get(pk=job.pk)
+        if locked.status != HarnessImplementationJob.Status.IMPLEMENTING:
+            # Already cancelled/superseded under lock -- the worktree this
+            # call produced is no longer wanted by anything; clean it up
+            # rather than leaking it (mirrors every other exit path here).
+            _safe_cleanup_directory(workspace_dir)
+            return
+        # Codex code-review P2, branch 2 round 5: a cancel landing in the
+        # gap between `_wait_for_implementation_container`'s own last
+        # `cancel_requested` check and THIS lock would otherwise go
+        # unnoticed -- `implementing`'s status never changes for a
+        # flag-only cancel (this job type's active-loop statuses are
+        # flag-only, see `cancel_harness_implementation_job`), so the
+        # status check above alone can't catch it. Checked under the SAME
+        # lock that would otherwise commit `pending_review`, mirroring
+        # `harness.execution._finalize`'s identical locked cancel
+        # re-check -- closes the race rather than narrowing it.
+        if locked.cancel_requested:
+            cancelled_before_review = True
+        else:
+            locked.status = HarnessImplementationJob.Status.PENDING_REVIEW
+            locked.base_commit_sha = base_sha
+            locked.produced_commit_sha = commit_sha
+            locked.changed_files = changed_files
+            locked.test_result = test_result
+            locked.diff_summary = diff_summary
+            locked.worktree_path = workspace_dir
+            locked.worktree_expires_at = timezone.now() + timedelta(
+                hours=settings.HARNESS_WORKTREE_RETENTION_HOURS
+            )
+            if removal_confirmed:
+                locked.container_id = ""
+            locked.elapsed_seconds = max(0, int(latency_ms / 1000))
+            locked.save(
+                update_fields=[
+                    "status",
+                    "base_commit_sha",
+                    "produced_commit_sha",
+                    "changed_files",
+                    "test_result",
+                    "diff_summary",
+                    "worktree_path",
+                    "worktree_expires_at",
+                    "container_id",
+                    "elapsed_seconds",
+                    "updated_at",
+                ]
+            )
+            record_external_usage(
+                workspace=locked.workspace,
+                purpose="harness.implementation",
+                backend=f"harness_cli:{locked.agent}",
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                estimated_cost=estimated_cost,
+                latency_ms=latency_ms,
+                success=True,
+                actor=locked.created_by,
+                error_type="",
+                context_report=context_report,
+            )
+
+    if cancelled_before_review:
+        _fail_and_cleanup(
+            job,
+            HarnessImplementationJob.FailureReason.KILLED,
+            workspace_dir=workspace_dir,
+            removal_confirmed=removal_confirmed,
+            started_monotonic=started_monotonic,
+            test_result=test_result,
+            **cost_kwargs,
+        )
+        return
+
+    record_audit(
+        action="harness.implementation_job_pending_review",
+        actor=locked.created_by,
+        workspace=locked.workspace,
+        resource=locked,
+        metadata={},
+    )
+    dispatch_harness_review(locked)
+
+
+def _produce_diff_summary(job, changed_files):
+    """A short, non-gateway placeholder for this branch (brief §boundary:
+    the identical gateway-summarization discipline `HarnessJob.briefing`
+    already uses is the intended design -- wiring the actual
+    `InferenceGateway.complete()` call here duplicates
+    `harness.execution._produce_briefing_summary`'s shape closely enough
+    that it belongs alongside branch 3's own review-summary work, which
+    needs the identical fencing discipline for its own `summary` field.
+    Kept as a plain, bounded, non-gateway string in the meantime so
+    `diff_summary` is never empty for a successful run -- never the raw
+    unfenced file list either, which could be arbitrarily large)."""
+    bounded = changed_files[:50]
+    suffix = "" if len(changed_files) <= 50 else f" (+{len(changed_files) - 50} more)"
+    return (
+        f"Changed {len(changed_files)} file(s) for: {job.goal[:200]}\n"
+        + "\n".join(bounded)
+        + suffix
+    )
+
+
+def _claim_push_job(job_id):
+    """Fenced claim for the push phase (Codex code-review P1, branch 2
+    round 3) -- see `_claim_implementation_job`'s docstring for the full
+    rationale, one field over: without this, a Celery redelivery (or
+    `dispatch()` firing twice) while the row is still `pushing` would let
+    two workers both pass an unfenced read and race through the
+    irreversible `git push` together -- the loser could finalize the job
+    `push_failed` moments after the winner actually pushed successfully.
+    `push_started_at` is set unconditionally by this claim and never
+    reset, so a second attempt finds it already populated and safely gets
+    `None` back."""
+    with transaction.atomic():
+        locked = (
+            HarnessImplementationJob.objects.select_for_update(of=("self",))
+            .filter(
+                pk=job_id,
+                status=HarnessImplementationJob.Status.PUSHING,
+                push_started_at__isnull=True,
+            )
+            .first()
+        )
+        if locked is None:
+            return None
+        locked.push_started_at = timezone.now()
+        locked.save(update_fields=["push_started_at", "updated_at"])
+        return locked
+
+
+def run_harness_push_job(job_id):
+    job = _claim_push_job(job_id)
+    if job is None:
+        return
+    if not job.worktree_path:
+        _finalize_push_failure(job, HarnessImplementationJob.FailureReason.PUSH_FAILED)
+        return
+    # Codex code-review P2, branch 2 round 4: without this, Gate B being
+    # approved after `worktree_expires_at` has already passed (the
+    # recovery sweep that's meant to catch this, branch 4, hasn't run yet
+    # or is behind) would still bundle and push a worktree the retention
+    # deadline says should no longer be trusted. Checked before any
+    # cleanup attempt below, so the worktree's own removal still goes
+    # through the same confirmed-cleanup path as every other exit.
+    if job.worktree_expires_at is not None and timezone.now() > job.worktree_expires_at:
+        cleanup_confirmed = _safe_cleanup_directory(job.worktree_path)
+        _finalize_push_failure(
+            job,
+            HarnessImplementationJob.FailureReason.WORKTREE_EXPIRED,
+            worktree_cleanup_confirmed=cleanup_confirmed,
+        )
+        return
+
+    repo_dir = f"{job.worktree_path}/repo"
+    bundle_dir = None
+    cancelled = False
+    push_error = None
+    try:
+        bundle_dir = tempfile.mkdtemp(prefix="harness-bundle-")
+        bundle_path = f"{bundle_dir}/bundle"
+        runner.create_bundle(
+            repo_dir, base_sha=job.base_commit_sha, ref=job.branch_name, bundle_path=bundle_path
+        )
+        # Codex code-review P1, branch 2 round 2: `pushing` has no
+        # polling loop at all (unlike `implementing`'s
+        # `_wait_for_implementation_container`) -- a curator cancelling a
+        # job after Gate B approval only ever set `cancel_requested`
+        # (`cancel_harness_implementation_job` leaves `pushing` jobs in
+        # place for exactly this loop to observe it), and nothing here
+        # ever read that flag before now. This is the one meaningful
+        # checkpoint: right before the actual network push, the single
+        # irreversible remote-mutating step in this whole function.
+        if HarnessImplementationJob.objects.filter(pk=job_id, cancel_requested=True).exists():
+            cancelled = True
+        else:
+            runner.push_bundled_commit(
+                git_url=job.repo_git_url,
+                default_branch=job.repo_default_branch,
+                branch_name=job.branch_name,
+                bundle_path=bundle_path,
+                base_sha=job.base_commit_sha,
+                produced_sha=job.produced_commit_sha,
+            )
+    except runner.RunnerError as exc:
+        logger.exception("Harness push job %s failed", job_id)
+        push_error = str(exc)
+    finally:
+        # Codex code-review P2, branch 2 round 4: an earlier version
+        # finalized (clearing `worktree_path` unconditionally) from
+        # WITHIN the `except`/inline branches, before this `finally` ever
+        # ran -- so a cleanup failure right here could still have already
+        # lost the DB's only pointer to the leaked directory. Finalizing
+        # is now deferred until after this block has actually run,
+        # everywhere, and threads its confirmed/failed outcome through.
+        if bundle_dir:
+            _safe_cleanup_directory(bundle_dir)
+        worktree_cleanup_confirmed = _safe_cleanup_directory(job.worktree_path)
+
+    if push_error is not None:
+        _finalize_push_failure(
+            job,
+            HarnessImplementationJob.FailureReason.PUSH_FAILED,
+            error=push_error,
+            worktree_cleanup_confirmed=worktree_cleanup_confirmed,
+        )
+        return
+    if cancelled:
+        _finalize_push_cancelled(job, worktree_cleanup_confirmed=worktree_cleanup_confirmed)
+        return
+    _finalize_push_success(job, worktree_cleanup_confirmed=worktree_cleanup_confirmed)
+
+
+def _apply_worktree_cleanup(locked, update_fields, *, worktree_cleanup_confirmed):
+    """Shared by all three finalize functions below (Codex code-review
+    P2, branch 2 round 4): only clear `worktree_path` once cleanup is
+    actually confirmed -- mirrors `harness.services.
+    _cleanup_worktree_best_effort`'s identical discipline. Leaving the
+    path populated on a failed cleanup is what lets a future recovery
+    sweep find and retry the genuinely leaked directory."""
+    if worktree_cleanup_confirmed:
+        locked.worktree_path = ""
+        update_fields.append("worktree_path")
+
+
+def _finalize_push_success(job, *, worktree_cleanup_confirmed=True):
+    with transaction.atomic():
+        locked = (
+            HarnessImplementationJob.objects.select_for_update(of=("self",))
+            .filter(pk=job.pk, status=HarnessImplementationJob.Status.PUSHING)
+            .first()
+        )
+        if locked is None:
+            return
+        locked.status = HarnessImplementationJob.Status.SUCCEEDED
+        locked.push_result = {"pushed": True, "branch_name": locked.branch_name}
+        update_fields = ["status", "push_result", "updated_at"]
+        _apply_worktree_cleanup(
+            locked, update_fields, worktree_cleanup_confirmed=worktree_cleanup_confirmed
+        )
+        locked.save(update_fields=update_fields)
+    record_audit(
+        action="harness.implementation_job_succeeded",
+        actor=locked.created_by,
+        workspace=locked.workspace,
+        resource=locked,
+        metadata={},
+    )
+
+
+def _finalize_push_cancelled(job, *, worktree_cleanup_confirmed=True):
+    """Codex code-review P1, branch 2 round 2 -- see `run_harness_push_job`'s
+    own comment: a cancellation observed right before the network push
+    never actually pushed anything, so this is a plain cancellation, not
+    a failure."""
+    with transaction.atomic():
+        locked = (
+            HarnessImplementationJob.objects.select_for_update(of=("self",))
+            .filter(pk=job.pk, status=HarnessImplementationJob.Status.PUSHING)
+            .first()
+        )
+        if locked is None:
+            return
+        locked.status = HarnessImplementationJob.Status.CANCELLED
+        locked.failure_reason = HarnessImplementationJob.FailureReason.KILLED
+        locked.push_result = {"pushed": False}
+        update_fields = ["status", "failure_reason", "push_result", "updated_at"]
+        _apply_worktree_cleanup(
+            locked, update_fields, worktree_cleanup_confirmed=worktree_cleanup_confirmed
+        )
+        locked.save(update_fields=update_fields)
+    record_audit(
+        action="harness.implementation_job_cancelled",
+        actor=locked.created_by,
+        workspace=locked.workspace,
+        resource=locked,
+        metadata={},
+    )
+
+
+def _finalize_push_failure(job, failure_reason, *, error="", worktree_cleanup_confirmed=True):
+    with transaction.atomic():
+        locked = (
+            HarnessImplementationJob.objects.select_for_update(of=("self",))
+            .filter(pk=job.pk, status=HarnessImplementationJob.Status.PUSHING)
+            .first()
+        )
+        if locked is None:
+            return
+        locked.status = HarnessImplementationJob.Status.FAILED
+        locked.failure_reason = failure_reason
+        locked.push_result = {"pushed": False, "error": error}
+        update_fields = ["status", "failure_reason", "push_result", "updated_at"]
+        _apply_worktree_cleanup(
+            locked, update_fields, worktree_cleanup_confirmed=worktree_cleanup_confirmed
+        )
+        locked.save(update_fields=update_fields)
+    record_audit(
+        action="harness.implementation_job_failed",
+        actor=locked.created_by,
+        workspace=locked.workspace,
+        resource=locked,
+        metadata={"failure_reason": failure_reason},
+    )

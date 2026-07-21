@@ -1,0 +1,160 @@
+# Jarvis OS — development stack. Not production-ready by design (MVP 0).
+# Host ports are shifted (+1) because the other local stack commonly occupies
+# 8000/5432/6379 on this machine. In-network ports are unchanged.
+name: jarvis-os
+
+services:
+  web:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile.dev
+    command: sh -c "uv run python manage.py migrate && uv run python manage.py seed_ai_defaults && uv run python manage.py runserver 0.0.0.0:8000"
+    volumes:
+      - ../../backend:/app
+    ports:
+      - "8001:8000"
+    environment: &backend_env
+      DJANGO_SETTINGS_MODULE: config.settings.dev
+      DJANGO_SECRET_KEY: dev-insecure-key-change-me
+      DJANGO_DEBUG: "true"
+      DJANGO_ALLOWED_HOSTS: localhost,127.0.0.1
+      DATABASE_URL: postgres://jarvis:jarvis@postgres:5432/jarvis
+      REDIS_URL: redis://redis:6379/0
+      MINIO_ENDPOINT: http://minio:9000
+      MINIO_ACCESS_KEY: jarvis
+      MINIO_SECRET_KEY: jarvis-dev-secret
+      MINIO_BUCKET: jarvis
+      # Dev stack uses the deterministic fake LLM provider by default; override
+      # locally (never committed) via `deploy/docker/.env` — same mechanism
+      # as OBSIDIAN_VAULT_HOST_PATH below — to point this stack at a real
+      # provider (e.g. NVIDIA NIM) for personal dogfooding. Untouched, this
+      # still defaults to "true" so `make test-e2e`/CI stay deterministic.
+      AI_FAKE_PROVIDER: "${AI_FAKE_PROVIDER:-true}"
+      NVIDIA_API_KEY: "${NVIDIA_API_KEY:-}"
+      NVIDIA_MODEL_ID: "${NVIDIA_MODEL_ID:-}"
+      NVIDIA_BASE_URL: "${NVIDIA_BASE_URL:-}"
+      NVIDIA_EMBEDDING_MODEL_ID: "${NVIDIA_EMBEDDING_MODEL_ID:-}"
+      NVIDIA_EMBEDDING_DIMENSION: "${NVIDIA_EMBEDDING_DIMENSION:-1024}"
+      # Ollama (MVP 12/ADR-007) — same opt-in, gitignored-.env-overridden
+      # mechanism as NVIDIA_* above. OLLAMA_BASE_URL defaults to
+      # host.docker.internal, the Docker Desktop DNS name for a natively-
+      # running Ollama on the host machine (not containerized here).
+      OLLAMA_API_KEY: "${OLLAMA_API_KEY:-}"
+      OLLAMA_MODEL_ID: "${OLLAMA_MODEL_ID:-}"
+      OLLAMA_BASE_URL: "${OLLAMA_BASE_URL:-http://host.docker.internal:11434/v1}"
+      OLLAMA_EMBED_MODEL_ID: "${OLLAMA_EMBED_MODEL_ID:-}"
+      OLLAMA_EMBED_DIMENSION: "${OLLAMA_EMBED_DIMENSION:-}"
+      # Obsidian vault export (MVP 5 §3): the STRING value is shared by both
+      # containers (web validates it, tier 1, with zero filesystem access at
+      # request time) but only `worker` actually has anything bind-mounted
+      # at this path (tier 2 -- see worker.volumes below).
+      OBSIDIAN_VAULT_PATH: /vault
+      # Single-owner system (ADR-008): signup is off by default in the
+      # daily stack; the owner account comes from `manage.py
+      # bootstrap_owner`. The Playwright e2e smoke still signs up a fresh
+      # user each run (until Phase 4's device-trust identity), so `make
+      # test-e2e` requires SIGNUP_ENABLED=true (e.g. in the gitignored
+      # deploy/docker/.env for that run).
+      SIGNUP_ENABLED: "${SIGNUP_ENABLED:-false}"
+      # DEV/TEST ONLY fixture values (MVP 9 §4) -- not real Telegram
+      # credentials, just non-empty strings so TelegramWebhookView's
+      # fail-closed auth check has something to compare against for the
+      # e2e Telegram section (frontend/e2e/smoke.e2e.ts). The reply-sending
+      # step still makes one real, bounded, fast-failing outbound call to
+      # api.telegram.org against this fake token -- see that test file's
+      # own comment for why that's an accepted trade-off here.
+      TELEGRAM_BOT_TOKEN: "e2e-fixture-bot-token"
+      TELEGRAM_WEBHOOK_SECRET: "e2e-fixture-webhook-secret"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/healthz')"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  worker:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile.dev
+    # `-B` embeds Celery beat in this worker process (MemoryExtractionJob
+    # recovery scan, MVP 2 §4; KnowledgeDocument ingestion recovery scan,
+    # MVP 3 §3). Safe only with exactly ONE worker container (this dev
+    # stack's topology) — running `-B` on more than one worker would
+    # double-schedule the periodic tasks. If this stack ever scales to
+    # multiple worker replicas, split beat into its own service first.
+    command: uv run celery -A config worker -l info -B
+    volumes:
+      - ../../backend:/app
+      # Vault export (MVP 5 §3) is the first worker task to touch the host
+      # filesystem rather than only Postgres/Redis/an outbound HTTP call --
+      # deliberately mounted on `worker` only, never `web` (tier-2 existence
+      # validation can only run where this is actually mounted). Override
+      # the host side via OBSIDIAN_VAULT_HOST_PATH in a `deploy/docker/.env`
+      # file; defaults to a repo-local, gitignored dev data directory.
+      - ${OBSIDIAN_VAULT_HOST_PATH:-../../.devdata/obsidian-vault}:/vault
+    environment: *backend_env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "uv run celery -A config inspect ping | grep -q pong"]
+      interval: 60s
+      timeout: 15s
+      retries: 3
+      start_period: 40s
+
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: jarvis
+      POSTGRES_PASSWORD: jarvis
+      POSTGRES_DB: jarvis
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U jarvis -d jarvis"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7
+    ports:
+      - "6380:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: jarvis
+      MINIO_ROOT_PASSWORD: jarvis-dev-secret
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres-data:
+  minio-data:

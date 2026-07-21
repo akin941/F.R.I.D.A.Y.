@@ -1,0 +1,122 @@
+"use client";
+
+import type { ApiErrorBody } from "@/types/api";
+
+export class ApiError extends Error {
+  status: number;
+  body: ApiErrorBody;
+
+  constructor(status: number, body: ApiErrorBody) {
+    super(body.detail ?? `Request failed with status ${status}`);
+    this.status = status;
+    this.body = body;
+  }
+}
+
+let refreshPromise: Promise<boolean> | null = null;
+
+function refreshSession(): Promise<boolean> {
+  // Concurrent 401s must not each trigger their own refresh call — that would
+  // race two rotations against the same refresh token and strand one caller.
+  if (!refreshPromise) {
+    refreshPromise = fetch("/api/auth/refresh", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+    })
+      .then((res) => res.ok)
+      .catch(() => false)
+      .finally(() => {
+        refreshPromise = null;
+      });
+  }
+  return refreshPromise;
+}
+
+/**
+ * Fetch wrapper for same-origin BFF routes. On a single 401 it attempts one
+ * refresh and retries the original request exactly once; a second 401 (or a
+ * failed refresh) is treated as a hard logout, never as a retry loop.
+ */
+export async function apiFetch(input: string, init: RequestInit = {}, isRetry = false): Promise<Response> {
+  const response = await fetch(input, { ...init, credentials: "same-origin" });
+  if (response.status !== 401) {
+    return response;
+  }
+  if (isRetry) {
+    // Refresh succeeded but the retried request is 401 again (e.g. the
+    // session was revoked mid-flight) — this is not a transient failure to
+    // retry further, it's a hard logout.
+    if (typeof window !== "undefined") {
+      window.location.href = "/login";
+    }
+    return response;
+  }
+  const refreshed = await refreshSession();
+  if (!refreshed) {
+    if (typeof window !== "undefined") {
+      window.location.href = "/login";
+    }
+    return response;
+  }
+  return apiFetch(input, init, true);
+}
+
+async function parseJsonOrThrow<T>(response: Response): Promise<T> {
+  if (!response.ok) {
+    const body = (await response.json().catch(() => ({}) as ApiErrorBody)) as ApiErrorBody;
+    throw new ApiError(response.status, body);
+  }
+  if (response.status === 204) {
+    return undefined as T;
+  }
+  return (await response.json()) as T;
+}
+
+export async function apiGetJson<T>(path: string, init?: RequestInit): Promise<T> {
+  const response = await apiFetch(path, { ...init, method: "GET" });
+  return parseJsonOrThrow<T>(response);
+}
+
+export async function apiPostJson<T>(path: string, body?: unknown, init?: RequestInit): Promise<T> {
+  const response = await apiFetch(path, {
+    ...init,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) },
+    body: body !== undefined ? JSON.stringify(body) : undefined,
+  });
+  return parseJsonOrThrow<T>(response);
+}
+
+/**
+ * For multipart uploads (knowledge file-upload) — the browser computes the
+ * `Content-Type: multipart/form-data; boundary=...` header itself from a
+ * `FormData` body, so unlike `apiPostJson` this must NOT set one manually
+ * (a fixed header would carry the wrong boundary).
+ */
+export async function apiPostForm<T>(path: string, formData: FormData, init?: RequestInit): Promise<T> {
+  const response = await apiFetch(path, {
+    ...init,
+    method: "POST",
+    body: formData,
+  });
+  return parseJsonOrThrow<T>(response);
+}
+
+export async function apiPatchJson<T>(path: string, body: unknown, init?: RequestInit): Promise<T> {
+  const response = await apiFetch(path, {
+    ...init,
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) },
+    body: JSON.stringify(body),
+  });
+  return parseJsonOrThrow<T>(response);
+}
+
+export async function apiDelete(path: string, init?: RequestInit): Promise<void> {
+  const response = await apiFetch(path, {
+    ...init,
+    method: "DELETE",
+    headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) },
+  });
+  await parseJsonOrThrow<undefined>(response);
+}

@@ -1,0 +1,654 @@
+# Phase 3 — Harness v2 (implementation)
+
+> Status: **approved for implementation (plan-review round 8: 0
+> CRITICAL/0 HIGH/0 MEDIUM, explicit "move to implementation"
+> recommendation).** Full 8-round arc: round 1: 4H/2M/2L; round 2:
+> 1 CRITICAL/2H/2M; round 3: 1 CRITICAL/1H/2M/1L; round 4: 0
+> CRITICAL/2H/1L; round 5: 0 CRITICAL/2H/1L; round 6: 0 CRITICAL/2H/1L;
+> round 7: 0 CRITICAL/0H/1M/1L; round 8: clean. No CRITICAL after round
+> 3; no HIGH after round 6. The push/result-file design specifically
+> (branch 1's scope) needed 6 consecutive tightening passes (rounds
+> 2–7) as each fix revealed a narrower residual gap — explicit-URL
+> hardening → clean-clone push → bundle-only extraction → named-ref
+> bundling + process quiescence → create-only compare-and-swap push +
+> confirmed quiescence loop — the longest, most heavily scrutinized
+> single design decision in this repo's plan-review history so far, for
+> the first phase that introduces real repo-write authority. Four user
+> checkpoints along the way: self-modification guard (round 1, chose
+> hard-block); push security round 1 (round 2's CRITICAL, initially
+> chose harden-the-push-command); push security round 2 (round 3 found
+> that fix incomplete, switched to push-from-a-separate-clean-clone);
+> round-5 continuation (chose to keep fixing directly and re-review
+> rather than move to implementation with open items — vindicated by
+> round 8 eventually landing clean).**
+> Parent decisions: ADR-004 (approval gate rules, write-class taxonomy),
+> ADR-008 decision 3 (gate-class vs confirm-class; cross-vendor review),
+> `docs/VISION_JARVIS_2.md` §4/§6/§8, MASTER_PLAN §AA row 3.
+> Builds directly on Phase 2 (`docs/prompts/phase-2-harness-v1/brief.md`,
+> shipped 2026-07-20): `harness` kernel app, `HarnessRepo` allowlist,
+> `HarnessJob` (read-only discovery), the Docker-container brake system,
+> `ai_core.gateway.record_external_usage()`.
+
+## Goal / value
+
+Extend the harness from "read-only discovery, briefing only" to real,
+approved, tested, cross-reviewed feature development: a curator requests
+an implementation from a goal (optionally following a Phase 2 discovery
+run's briefing), a CLI agent implements it in an isolated git worktree,
+runs the repo's own tests, a *different-vendor* CLI agent reviews the
+diff, and — only after an explicit human approval — the branch is pushed
+to the remote. No deploy, no merge to `main`, no direct write to any
+branch a human is working on. The usable outcome (MASTER_PLAN §AA):
+"Add this feature to firm X's repo" → an approved, tested, reviewed
+branch, ready for the owner to open a PR from by hand (Phase 5 adds
+deploy automation on top of a merged branch — out of scope here).
+
+## Boundary vs existing systems
+
+- **Two ApprovalRequest gates, both gate-class (ADR-008 decision 3: "every
+  harness write" + "git push/merge" are both named explicitly in the
+  binding write-class taxonomy)** — not one. **Gate A (plan approval)**
+  gates the *decision to let a CLI agent write inside an isolated
+  worktree at all* — nothing has been written yet when this is requested;
+  the payload is a goal + optional repo/discovery-job reference, not a
+  diff. **Gate B (push approval)** gates the *decision to let a
+  passing-tests, cross-reviewed branch leave the ephemeral worktree and
+  reach the remote* — requested only after implementation + tests +
+  review have all completed, with the actual diff summary and review
+  verdict in the payload. These are Jarvis's own two gates for *this
+  phase*, distinct from VISION §4's "gate #2 (deploy approval)", which is
+  Phase 5's separate, later gate over the deploy action once a branch is
+  already merged — not to be conflated. Neither gate is a rubber stamp of
+  the other: an approved Gate A does not imply Gate B, since Gate A
+  approves *intent to attempt*, Gate B approves the *actual resulting
+  diff*. Plan-review round 1 (Codex) confirmed this two-gate split
+  actually satisfies ADR-004/ADR-008 decision 3's taxonomy as designed.
+- **Both gates are real, registered `ToolSpec`s (`tools.registry`) —
+  round-1 correction, O-1 resolved.** An earlier draft of this brief
+  assumed `agents`' own `tool_request` step bypasses `tools.registry`
+  and called `approvals.services.create_request()` directly with no
+  registered tool; that was wrong. `create_request()` rejects any
+  `tool_name` that doesn't resolve to a registered, `gated=True`
+  `ToolSpec` (`approvals/services.py:190-192`) — `_dispatch_tool_request_step`
+  only works *because* its `tool_name` already resolves to something like
+  `vault_export`. Both `harness_implement` (Gate A) and `harness_push`
+  (Gate B) are registered `ToolSpec`s mirroring `tools/export.py`'s exact
+  shape: `create_execution(approval_request)` creates the durable row
+  (for Gate A: transitions `HarnessImplementationJob` into the running
+  worktree phase; for Gate B: records the approval and marks the job
+  ready to push) *inside* the approval's own transaction, `dispatch(id)`
+  schedules the actual Celery task via `transaction.on_commit`, mirroring
+  `create_vault_export_run`/`dispatch_vault_export_run` line for line.
+  A **rejected or expired** decision has no `dispatch` to run — that path
+  stays signal-driven: `harness/signals.py`'s `post_save` receiver on
+  `ApprovalRequest` (mirrors `agents/signals.py`'s receiver exactly) fires
+  on any non-pending status, and only the `approved` branch matters for
+  `ToolSpec.dispatch` — `rejected`/`expired` instead flip
+  `HarnessImplementationJob.status` straight to a terminal failure state
+  from the signal receiver itself, no Celery task involved. **The
+  receiver must actually be connected (round-3 MEDIUM finding):**
+  `harness/apps.py` currently has no `ready()` hook at all — unlike
+  `agents/apps.py:8`, which is exactly where `agents/signals.py`'s
+  receiver gets connected once at process startup. Branch 2 adds
+  `HarnessConfig.ready()` importing and connecting `harness/signals.py`'s
+  receiver the same way; without it, a Gate A/B rejection or expiry
+  would leave the implementation job silently stuck forever; a direct
+  test asserts the receiver actually fires on a real `ApprovalRequest`
+  save, not just that the receiver function exists in isolation.
+- **Self-modification guard (ADR-004: "agents can never modify their own
+  definitions or permissions"), hard-block, not a review-time check
+  (round-1 HIGH finding, user decision 2026-07-20).** A `HarnessRepo`
+  whose resolved git remote matches this codebase's own — a new
+  `HARNESS_SELF_REPO_IDENTIFIERS` setting (list of remote URLs recognized
+  as "this Jarvis installation itself", compared via the dedicated
+  canonical normalizer below — **not** `harness/serializers.py`'s
+  existing credential-rejection parsing, which only rejects embedded
+  credentials and isn't a canonical-form normalizer) — can still be
+  registered and used for Phase 2 read-only discovery (unchanged, no
+  risk there), but
+  `create_harness_implementation_job()` (branch 2) refuses to create the
+  row at all — `HarnessInvalidTransition`, before Gate A is ever
+  requested, not a check the review pass or Gate B could be talked out
+  of. Applies to both `HarnessImplementationJob` and `HarnessReview`
+  (a review pass reading this codebase's own approval/gate code is lower
+  risk than writing to it, but still refused outright — simpler than
+  arguing the line case by case).
+- **New `HarnessImplementationJob` model, not an extension of `HarnessJob`.**
+  Phase 2's `HarnessJob` docstring is explicit: "a single read-only
+  discovery run… no write, no branch push, no deploy." Its state machine,
+  fields, and brake system were designed for exactly that shape.
+  Implementation has a materially different lifecycle (two approval
+  gates, a worktree instead of a throwaway read-only clone, a linked
+  review, and — round-1 HIGH finding, "missing entirely" — real fields
+  for the artifacts a push actually needs). `HarnessImplementationJob`
+  FKs to `HarnessRepo`, optionally FKs to the `HarnessJob` (discovery
+  run) it followed from (**O-2, resolved by plan-review: optional** —
+  Gate A's own approval payload always carries the actual goal/plan
+  regardless of whether discovery ran first, so requiring the link is
+  policy friction, not a security boundary), and to both `ApprovalRequest`s
+  (Gate A, Gate B — nullable until each is actually requested). New
+  fields beyond Phase 2's `HarnessJob` shape (round-1 "missing entirely"):
+  `branch_name` (`harness/p3-<job-id>` — **O-3, resolved by plan-review**:
+  job-id-keyed uniqueness is sufficient for this phase, a configurable
+  per-repo prefix is a later refinement only if a real repo's own
+  conventions need it; if the branch already exists on the remote, the
+  push fails closed — never force-pushed, never silently renamed),
+  `base_commit_sha`, `produced_commit_sha`, `diff_summary` (gateway-
+  produced, same fencing discipline as the review's own summary — see
+  below), `changed_files` (JSONField list), `test_result` (JSONField —
+  schema below), `worktree_path` + `worktree_expires_at` (round-1 HIGH
+  finding: the worktree's lifetime, below), `push_result`.
+- **New `HarnessReview` model** (not a repurposed `HarnessJob`): FK to the
+  `HarnessImplementationJob` it reviews, `agent` (must differ from the
+  implementation job's `agent` — the mechanical cross-vendor-review
+  enforcement ADR-008 decision 3 requires, enforced at the service layer,
+  not left as convention; there is no existing review-verdict model
+  anywhere in the codebase to reuse — confirmed during this brief's
+  research pass), `verdict` (`approved`/`changes_requested`),
+  `summary`/`findings`/`raw_transcript` as this model's own fields (round-1
+  LOW correction: `HarnessJob.briefing` is a single `JSONField`, not
+  separate columns — `HarnessReview` is free to choose either shape;
+  separate typed fields read more naturally for a model whose whole
+  purpose is those three pieces of content, but the *content/fencing
+  discipline* — gateway-produced, low-trust-input-fenced, R2 mitigation —
+  is what's actually reused from branch 3 Phase 2's
+  `_produce_briefing_summary`/`neutralize_fence` functions, not the DB
+  schema). The implementation job's own `diff_summary` field (above) uses
+  the identical gateway-summarization call, since "the CLI's own account
+  of what it changed" is exactly as much low-trust content as "the CLI's
+  own account of what it found."
+- **The shared "launch container → poll → brake → teardown → record
+  usage" engine is NOT extracted in this phase (round-1 MEDIUM finding,
+  accepted — reverses this brief's own earlier draft).** `HarnessJob`'s
+  execution engine (`harness/execution.py`, 7 rounds of hard-won Codex
+  findings baked into its comments) stays as-is; `HarnessImplementationJob`
+  and `HarnessReview` get their own narrowly-scoped execution functions
+  (branch 2 and branch 3 respectively, each built on branch 1's runner
+  primitives but not sharing a common engine with `HarnessJob`'s),
+  accepting some duplication of the brake-system *shape* (timeout,
+  cancel-poll, container teardown) rather than
+  risking a premature abstraction over a system that has only ever had
+  one real call site until now. Extraction is explicitly deferred to
+  whichever later phase has three real call sites to generalize from
+  correctly, once their actual differences (mount mode, artifact
+  retention, what "success" means per job type) are fully known rather
+  than guessed at design time.
+- **Writable worktree + push credentials — new ground, no existing
+  primitive to build on** (confirmed during this brief's research pass):
+  `harness/runner.clone_repo` today does a read-only, shallow,
+  single-branch clone into a throwaway temp dir, and the container
+  mounts it **read-only**. Phase 3 adds, for `HarnessImplementationJob`
+  only (never for `HarnessJob`/`HarnessReview`, which both stay read-only
+  exactly as today — a source-level test asserts this split directly,
+  test strategy below): a full (non-shallow) clone, a new branch checked
+  out inside it, a **read-write** container mount for this job type only,
+  and — after the container exits with a commit made — a **host-side**
+  `git push` using credentials resolved from env (the `clone_env`-from-env
+  convention `runner.py`'s docstring already describes but no caller
+  populates yet — this phase finally has a real credential to resolve:
+  an SSH deploy key or PAT scoped to the registered repo). The push runs
+  on the host, after the container has already exited and been torn
+  down, over the finished worktree directory — never inside the
+  container itself, and never with the CLI agent's own process able to
+  touch remote credentials (mirrors the existing "clone credential stays
+  host-side" rule, extended to push).
+- **Push happens from a separate, host-only clean clone, using
+  bundle-only extraction and a direct SHA push — never `git am`/
+  `format-patch`, never a checkout in the agent's own worktree (round-3
+  CRITICAL finding fixed by switching to a clean clone; round-4 HIGH
+  finding tightens the extraction mechanism itself, user decision
+  2026-07-20 covers the overall direction, the round-4 tightening is a
+  refinement of it, not a new fork).** Round 2's fix (explicit remote
+  URL, `--no-verify`, sanitized env) closed the specific `pre-push`-hook
+  and rewritten-remote-URL cases but left `.git/config` settings like
+  `credential.helper`/`core.sshCommand`/`url.*.insteadOf` still reachable
+  from a push run in the agent's own worktree (round 3). Round 3's own
+  first fix (bundle create **or** `git format-patch`, applied via
+  `git am`) was itself too broad (round 4): `format-patch` is
+  config-sensitive (`format.signatureFile` and other format-affecting
+  config), `git am` runs hooks (`post-applypatch`, not skippable), and
+  `git am` mints **new** commits with different SHAs — directly
+  contradicting this brief's own "pushed SHA must equal
+  `produced_commit_sha`" consistency check. The tightened design is
+  **bundle-only, no patch/am step at all, bundling a named ref, never a
+  bare SHA (round-6 HIGH fix — `git bundle create` rejects a bare
+  revision with no accompanying ref: Git's own docs show it refusing to
+  create an "empty bundle" for exactly that form)**: the host first
+  verifies, via plumbing against the agent's own worktree,
+  that `refs/heads/<branch_name>` (the branch the implementation
+  container committed to) resolves to exactly `produced_commit_sha`;
+  only then `git bundle create <bundle-path> refs/heads/<branch_name>`
+  inside the agent's worktree (bundling the named ref the host just
+  verified, not a bare commit object — a local, non-networked operation
+  regardless of which valid form it's given); `git fetch <bundle-path>
+  refs/heads/<branch_name>` inside the freshly host-only-cloned copy (a
+  bundle is just a packaged set of objects plus refs — fetching one
+  involves no hooks and no working-tree checkout at all); the host then
+  verifies, entirely with plumbing commands against the clean clone's own
+  object database, that `base_commit_sha` is an ancestor of the fetched
+  commit (`git merge-base --is-ancestor`) and that the fetched object's
+  own SHA is exactly `produced_commit_sha` (a direct string comparison,
+  not inferred); only then `git push <explicit-remote-url>
+  produced_commit_sha:refs/heads/<branch_name>
+  --force-with-lease=refs/heads/<branch_name>:` (round-7 MEDIUM fix — a
+  plain push here is not actually create-only: it would succeed, not
+  fail closed, if the branch already exists on the remote as an ancestor
+  of `produced_commit_sha`, contradicting this brief's own "existing
+  remote branch → fail closed, never force-push" policy stated above;
+  `--force-with-lease=<ref>:` with an empty expected value is Git's own
+  documented form for "this push must create the ref, it must not
+  already exist" — a real compare-and-swap, not a convention) — pushing
+  a raw commit SHA straight to a new branch ref, never a checked-out
+  local branch tip in the clean clone, so the clean clone's own working
+  tree is never populated or checked out at all (no `post-checkout`
+  hook, nothing to check out). The clean clone's `.git/config`/`.git/hooks` were written
+  entirely by host code and never touched by anything agent-controlled
+  at any point in this sequence — a structural property, not an
+  enumerated denylist. A direct test plants a malicious `pre-push` hook
+  AND a rewritten `.git/config` (`credential.helper`, `core.sshCommand`,
+  `url.*.insteadOf`, remote URL) in the agent's own worktree fixture and
+  asserts none of it is ever consulted, because the push subprocess never
+  runs with that worktree as its working tree or `--git-dir` at all; a
+  second test asserts the pushed ref's SHA is exactly
+  `produced_commit_sha`, never a newly-minted commit from an apply step.
+- **Worktree lifetime across the Gate-B wait (round-1 HIGH finding).**
+  Unlike Phase 2's throwaway read-only clone (deleted the moment the
+  container exits), the finished worktree must survive from
+  implementation completion through however long the owner takes to
+  decide Gate B — potentially across a worker restart. `worktree_path`
+  is persisted on `HarnessImplementationJob` (not just held in a Celery
+  task's local variables), `worktree_expires_at` bounds how long an
+  unresolved worktree is kept (a new `HARNESS_WORKTREE_RETENTION_HOURS`
+  setting; the recovery scan — branch 4 — sweeps and cleans up any
+  worktree past this deadline whose job never reached a terminal state,
+  failing the job as `worktree_expired` rather than leaving an orphaned
+  directory or attempting a push against a worktree that might have gone
+  stale relative to the remote in the meantime).
+- **The wrapper runs the test command itself and derives the result from
+  its own subprocess exit code — never the CLI agent's self-report
+  (round-2 HIGH finding, correcting round 1's own fix).** Round 1's fix
+  ("a wrapper-owned JSON result on top of whatever the CLI itself
+  prints") still left room to read the "owned" JSON from something the
+  CLI agent could itself influence (its own transcript, a file it wrote).
+  That's the wrong trust boundary: the wrapper — code Jarvis controls,
+  baked into the container image, never the CLI's own output — invokes
+  the test command **as its own subprocess**, after the CLI agent's
+  invocation has already exited, and derives `passed` from that
+  subprocess's real exit code, never from parsing prose or a
+  CLI-authored file. `commit_sha`/`changed_files` are likewise computed
+  by the wrapper running `git` itself against the worktree state left
+  behind, never read from anything the agent wrote about what it did.
+  The test *command* itself is a new, explicit, curator-set
+  `HarnessRepo.test_command` field (nullable — a repo with none
+  configured fails every implementation job closed as
+  `test_command_not_configured`, never silently skips verification and
+  proceeds anyway). This is deliberately not "a general-purpose
+  test-runner abstraction across arbitrary repo tooling" (still out of
+  scope) — it's one opaque, curator-authored shell command string per
+  repo, run exactly once, with its exit code trusted and nothing else
+  about it interpreted. Wrapper-emitted JSON schema: `{"tests": {"ran":
+  bool, "exit_code": int, "command": str}, "commit_sha": str,
+  "changed_files": [str, ...]}` (`passed` is `exit_code == 0`, derived by
+  Jarvis's own parsing code, not a field the wrapper gets to assert
+  directly). Missing/malformed JSON, or `tests.ran=false` (e.g. no
+  `test_command` configured), fails the job closed as
+  `test_result_unavailable`/`tests_failed` — mirrors branch 2 Phase 2's
+  "an agent without usable reported cost is not selectable" fail-closed
+  precedent exactly. No Gate B request, no review dispatch, for a job
+  whose tests didn't verifiably pass by the wrapper's own hand.
+- **The result is read from a dedicated file, written only after the
+  wrapper has forcibly quiesced every other process in the container —
+  strict sequencing alone is not enough (round-3 HIGH finding; round-4's
+  uid-separation fix reverted at round 5 for conflicting with Phase 2's
+  `--user {host_uid}:{host_gid}` convention; round-5's "blocking
+  subprocess returned" reasoning itself found insufficient at round 6:
+  the CLI agent or the test command can fork/daemonize a grandchild that
+  detaches from the wrapper's own direct-child wait — that grandchild is
+  never `waitpid()`-reaped by "the subprocess call returning" and can
+  keep running, same uid, free to race the wrapper's own result-file
+  write).** The runner's existing log-capture path (`runner.capture_logs`,
+  reused from Phase 2) mixes the CLI agent's own output with the test
+  command's own output — either could freely print text that *looks
+  like* the expected result JSON, so the wrapper writes its result to a
+  dedicated path rather than stdout (round 3), sequenced after both the
+  CLI agent and the test command have returned (round 5) — necessary but
+  not sufficient, since "the process the wrapper directly waited on
+  exited" doesn't mean every process *it* may have spawned did too. The
+  wrapper's actual last two steps, in order (round-7 LOW fix — spelled
+  out precisely, not "send one signal and hope"): **(1) forcibly
+  terminate every remaining process in the container and confirm it**:
+  `kill(-1, SIGKILL)` from PID 1 (a same-uid signal, permitted under
+  ordinary Unix signal rules with no elevated privilege needed, and
+  effective against a `setsid`'d/daemonized grandchild exactly because
+  the container's PID namespace, unlike a bare host process tree, has
+  nowhere else for it to hide or survive — `SIGKILL` cannot be caught,
+  blocked, or ignored by anything still alive to receive it), followed
+  by a scan-and-repeat loop against `/proc` — not a single one-shot
+  snapshot, which could race a process that was still forking at the
+  moment of the snapshot — until the wrapper itself observes zero
+  processes other than its own PID still present (round-8 polish: PID 1
+  also reaps with `waitpid(-1, WNOHANG)` between scans, so a killed
+  child that's become a zombie is actually collected and disappears from
+  `/proc` rather than lingering and stalling the "zero remaining"
+  check); **(2) only then** write the result file. **Superseded by branch
+  1's own implementation-time code review (rounds 3, 6, 8, 10) — this
+  paragraph originally specified `O_CREAT|O_EXCL|O_NOFOLLOW` (fail closed
+  if anything is already at that path); that turned out to be the wrong
+  primitive and was reverted during round 3 in favor of what actually
+  shipped, documented here for consistency with the code:** an agent can
+  plant a believable decoy result file *well before* quiescence ever
+  runs, at any point during its own writable run — `O_EXCL` would make
+  the wrapper's own legitimate write *fail* against that decoy, leaving
+  the decoy as the only content the host ever reads, exactly backwards
+  from "fail closed." The actual guarantee comes from ordering, not from
+  refusing to overwrite: once step (1) has confirmed zero other processes
+  remain, the wrapper is the sole surviving actor and can safely `chmod
+  u+rwx` the containing directory (round 8 — needed because the agent
+  could also have stripped write/execute permission from it as a
+  *filesystem-state*, not process, attack, which `set -e` would otherwise
+  let abort the script before ever reaching the write), `rm -f` whatever
+  is there (stale decoy, symlink, or nothing), and write the real result.
+  Last-writer-wins is safe exactly because quiescence has already
+  eliminated every other writer. Round 6 additionally found that the
+  wrapper's own post-quiescence `git status`/`diff` reads can themselves
+  trigger agent-configured repo hooks (`core.fsmonitor`), spawning a
+  process *after* step (1) already ran — closed with `-c core.fsmonitor=`
+  on those reads plus a second quiescence pass immediately before the
+  write. Round 10 found the dirty-worktree check itself could be defeated
+  by `git update-index --skip-worktree` or `status.showUntrackedFiles=no`
+  — closed by clearing skip-worktree bits and forcing
+  `status.showUntrackedFiles=all` before trusting an empty `git status`.
+  Same uid throughout, same container-launch convention Phase 2 already
+  established — no privileged/unprivileged split, no Dockerfile user
+  changes, no conflict with `--user {host_uid}:{host_gid}`. The shipped
+  regression suite (`harness/tests/test_runner.py`) covers: a malicious
+  `pre-push` hook and rewritten `.git/config` in the agent's worktree,
+  asserting the push subprocess never runs there at all; the pushed ref's
+  SHA matching `produced_commit_sha` exactly, never a re-minted commit;
+  a missing/malformed/symlinked/FIFO result path failing closed via
+  `lstat`; a non-SSH remote and an unconfigured push credential both
+  failing closed rather than falling back to ambient host credentials.
+- **`HARNESS_SELF_REPO_IDENTIFIERS` matching uses a dedicated canonical
+  normalizer, not exact string match (round-2 MEDIUM finding, O-5
+  resolved).** `harness/serializers.py`'s existing URL parsing only goes
+  as far as rejecting embedded credentials — it is not a canonical
+  normalizer and this brief no longer claims otherwise. A new,
+  purpose-built normalizer reduces both a `HarnessRepo.git_url` and each
+  configured self-repo identifier to a comparable `host/owner/repo` form
+  (lowercased, `.git` suffix and trailing slashes stripped, scp-like
+  (`git@host:owner/repo`) and `https://host/owner/repo` forms both
+  resolved to the same canonical string) before comparing — so
+  `git@github.com:akin941/jarvis-os.git` and
+  `https://github.com/akin941/jarvis-os` are correctly recognized as the
+  same repo. Local/`file://` paths (if ever a valid `git_url` — Phase 2's
+  serializer doesn't explicitly forbid them) normalize to their resolved
+  absolute path. A direct test table drives this: known-equivalent URL
+  pairs must normalize identically; the hard-block fires on any of them.
+- **Agent capability matrix, not a single flat selectable set (round-1
+  MEDIUM finding).** Phase 2's `_SELECTABLE_AGENTS` controls discovery-job
+  selectability only. Phase 3 needs `_SELECTABLE_DISCOVERY_AGENTS`
+  (unchanged, `{CLAUDE_CODE}`), `_SELECTABLE_IMPLEMENTATION_AGENTS`, and
+  `_SELECTABLE_REVIEW_AGENTS` as separate sets — conflating them would
+  let a UI or service-layer bug offer an agent as a reviewer before its
+  vendor terms are actually verified for that specific capability, not
+  just for discovery. Codex CLI joins `_SELECTABLE_REVIEW_AGENTS` (and,
+  separately, `_SELECTABLE_IMPLEMENTATION_AGENTS`) only once branch 3's
+  own vendor-terms verification clears it for automated use — the two
+  capabilities are verified and granted independently, not as a package,
+  since a vendor's terms could plausibly distinguish "read a diff and
+  comment" from "write and commit code" even if this brief expects them
+  not to in practice.
+- **Worktree cleanup on every terminal state, not only the expiry sweep
+  (round-2 MEDIUM finding, expanded per round-3 MEDIUM finding).** Every
+  path that ends `HarnessImplementationJob` in a terminal state cleans up
+  its own worktree immediately (mirrors Phase 2's
+  `_safe_cleanup_directory` called from `run_harness_job`'s own `finally`
+  block) — not just the "obviously terminal" ones named in an earlier
+  draft (pushed successfully, rejected at Gate B, review returned
+  `changes_requested`, cancelled), but also the terminal paths the
+  test-outcome contract itself introduces: `tests_failed`,
+  `test_result_unavailable`, `test_command_not_configured`, and a bare
+  runner/container error before any commit was ever made. Every one of
+  these is a `finally`-block responsibility on whichever function
+  produces that terminal state, not a single catch-all — mirrored
+  directly in the test suite, one test per terminal path asserting the
+  worktree directory no longer exists afterward. The expiry sweep
+  (branch 4's recovery scan) exists only for the case immediate cleanup
+  can't cover: a job that never reaches any terminal state at all (a
+  crashed worker, an abandoned Gate-B decision) — a backstop, not the
+  primary cleanup path.
+
+## Branch table (proposed — subject to plan-review round 3)
+
+| # | Branch | Scope |
+|---|---|---|
+| 1 | `feat/p3-writable-runner` | **done (2026-07-20)** — 10 rounds Codex code-review, the longest implementation arc in this repo's history (exceeding Phase 2 branch 2's 7): R1 2 findings (quiescence loop scanned via `ls`/`grep`, which are themselves external processes — never terminated; test-command failure aborted the whole script under `set -e` before the result file was ever written); R2 2 findings (repo state read before quiescence, so a daemonized child could still mutate the worktree after commit_sha/changed_files were captured; `@{upstream}` has no meaning for a freshly-checked-out branch, silently making changed_files always empty); R3 2 findings (unconfigured push credential fell back to the runner host's own ambient SSH access instead of failing closed; noclobber on the result-file write failed against an agent-planted decoy instead of replacing it); R4 4 findings (dirty worktree wasn't fail-closed against what was actually tested; a mutable base ref could be rewritten by the agent to fake an empty diff; the CLI's own exit code was discarded, letting a crashed CLI report a pre-existing checkout's pass; JSON escaping broke on embedded newlines); R5 2 findings (`GIT_SSH_COMMAND` has zero effect on HTTPS remotes, silently falling back to ambient credentials — fixed by rejecting non-SSH remotes outright; a FIFO/symlink planted at the result path could hang or spoof the host's read — fixed with `lstat`-based rejection); R6 1 finding (post-quiescence `git status` can itself trigger repo-configured hooks like `core.fsmonitor`, spawning a process *after* quiescence believed it was done — fixed with `-c core.fsmonitor=` plus a second quiescence pass right before the trusted write); R7 2 findings (git read failures were silenced instead of failing the result closed; `GIT_SSH_COMMAND`'s key path was unquoted, breaking on paths with spaces); R8 2 findings (an agent could plant a decoy result.json then strip write/execute permission from `/workspace` itself, aborting the wrapper's own write via `set -e` and leaving the decoy as the only content — fixed via `chmod u+rwx` first, safe because the wrapper always owns the directory; the sed-based `json_escape` produced empty output for any single-line command, the common case — rewritten in awk); R9 2 findings (the runner images never installed `git`, so every write-mode run would fail closed with exit 127 even on success; awk's `json_escape` still didn't escape non-newline JSON control characters like tabs/CRs — rewritten to delegate to Node's own `JSON.stringify`, closing the class instead of chasing individual characters); R10 1 finding (the dirty-worktree check itself could be defeated by `git update-index --skip-worktree` or `status.showUntrackedFiles=no`, both agent-controllable via `.git` — fixed by clearing skip-worktree bits and forcing `-c status.showUntrackedFiles=all`). No CRITICAL after plan-review; user checkpointed twice during implementation (after R8, after R10) given the round count, chose "keep iterating" then "accept and move on." All 1627 backend tests, ruff, and `sh -n` pass on every commit. **Original scope (unchanged by the fixes above):** `harness/runner.py`: writable clone + branch checkout, read-write container mount (new job type only), same `--user {host_uid}:{host_gid}` single-uid convention Phase 2 already uses (round-5 fix: no privileged/unprivileged split — see boundary section). The bundle-only clean-clone push primitive (round-3 CRITICAL fix, rounds 4/5/6 tightening): verify `refs/heads/<branch_name>` resolves to `produced_commit_sha`, `git bundle create` that *named ref* (round-6 fix — a bare SHA is rejected by `git bundle create` itself) against the agent's own worktree (a local, non-networked operation — no hook fires for it, no credential helper or SSH override or URL-rewrite rule applies, since none of those are network/remote concerns); fetched into a fresh host-only clone whose `.git/config`/`.git/hooks` the agent never touched; ancestry + SHA re-verified via plumbing; pushed by explicit SHA:refs/heads/branch *from the clean clone* — never `format-patch`/`git am`, never a checkout in the clean clone, and critically, the actual network operation (`push`, where `credential.helper`/`core.sshCommand`/`url.*.insteadOf`/hooks could matter) never runs against the agent's worktree at all. The process-quiesced wrapper result-file contract (round-3 HIGH fix; round-4's uid-separation attempt and round-5's sequencing-only attempt both reverted/tightened at round 6, which found a forked/daemonized grandchild could survive "the subprocess call returned" and race the write — see boundary section): the wrapper forcibly terminates every other process still alive in the container's PID namespace before writing anything, runs the configured `test_command` itself and derives `passed` from its real exit code, computes `commit_sha`/`changed_files` itself via `git` — never trusting CLI-authored stdout/stderr for any of it. Every function here is a standalone primitive taking plain arguments (git URL, paths, branch name, test command string) — no Django model import, testable exactly like Phase 2's `runner.py` was, with mocked subprocess calls and fixture directories (including: a malicious-`pre-push`-hook/malicious-`.git/config` regression test proving the *push* step never runs against the agent's worktree; a detached-grandchild-process regression test proving the quiescence kill wins the race against a result-file write attempt; a spoofed-stdout-JSON regression test; a pre-planted-result-file regression test proving the wrapper's `O_EXCL` write fails closed rather than overwriting tampered content). |
+| 2 | `feat/p3-implementation-model-and-gates` | **done (2026-07-20)** — 7 rounds Codex code-review: R1 4 findings (create_execution for both gates unconditionally transitioned status forward regardless of the job's actual current state, so a job cancelled while its gate approval was still pending could be revived by a later approval — fixed with a status re-check; cancelling `pending_review`/`pending_gate_b` only flipped `cancel_requested`, but neither idle-wait phase has a loop watching that flag, so cancellation silently did nothing — both now cancel directly and clean up the worktree; `canonicalize_git_url` stripped `.git` before the trailing slash, missing a real URL spelling and bypassing the self-repo hard-block for it; `capture_logs` ran after the container was already removed, so successful runs silently recorded zero cost); R2 3 findings (`pushing` had no polling loop and never re-checked `cancel_requested` before the actual network push, so a cancelled job could still push — added the one meaningful checkpoint right before it; the writable clone passed an empty `clone_env`, ignoring the configured SSH credential entirely; the cost brake was parsed but never enforced, unlike discovery's identical check); R3 3 findings (`implementing` is both "ready to claim" and "actively running" with no status transition a redelivered Celery task would find already moved past — fenced via `started_at__isnull=True`; the push phase had no claim fence at all — added `push_started_at` + migration; worktree cleanup cleared its DB pointer even when the actual directory removal failed); R4 4 findings, including a P1 (the self-modification hard-block only ever ran once, at job creation — execution code then read `job.repo.git_url` LIVE through an editable FK, so editing a `HarnessRepo`'s remote after Gate A request could silently redirect an already-approved job around the guard — fixed by snapshotting `repo_git_url`/`repo_default_branch` onto the job at creation, migration 0006; push never checked `worktree_expires_at`; the three push finalizers cleared `worktree_path` unconditionally even when cleanup failed; a whitespace-only `test_command` passed a bare truthiness check but ran as a shell no-op); R5 3 findings (`_parse_claude_code_output` used `json.loads`, which rejects the trailing test-command output mixed into the same captured log stream as a parse error, silently zeroing cost and bypassing the whole budget brake — switched to `json.JSONDecoder().raw_decode()`; `_safe_cleanup_directory` trusted a try/except around `shutil.rmtree(..., ignore_errors=True)`, which never raises by design, so cleanup was never actually confirmed — fixed via `os.path.exists()` afterward; the `implementing` → `pending_review` transition never re-checked `cancel_requested` under its own lock, so a cancel landing in a narrow window could still advance to review); R6 2 findings (`test_command` had the identical live-FK snapshot gap `repo_git_url` already closed — added `repo_test_command`, migration 0007; a missing/unparseable CLI result let a run through as a "successful free run" with `estimated_cost` silently at 0 — added the same fail-closed check discovery's own `_finalize` already has); R7 2 findings (`create_execution` for both gates checked only job status, never that the approving `ApprovalRequest` was actually the one linked as `gate_a_request`/`gate_b_request` — since both are real registered tools, an unlinked request created directly through the generic approvals API could later be approved and still transition the job; a non-UUID `job_id` in a malformed payload bubbled out as an unhandled 500 instead of a clean 400). No CRITICAL in any round; P1 only at rounds 1 and 4. User checkpointed twice during implementation (after R4, after R7), chose "keep iterating" then "accept and move on." All 1727 backend tests, ruff, import-linter, and migration checks green on every commit. **Original scope (unchanged by the fixes above):** `HarnessImplementationJob` model + migration (full field list above, including `worktree_path`/`worktree_expires_at`) + `HarnessRepo.test_command` field + migration; self-modification hard-block (`HARNESS_SELF_REPO_IDENTIFIERS` + the canonical normalizer, round-2 MEDIUM fix); `harness_implement`/`harness_push` `ToolSpec` registrations; Gate A + Gate B wiring via `approvals.services.create_request`/`harness/signals.py`, mirroring `agents/execution.py`'s `tool_request` step and `agents/signals.py`'s receiver — including `harness/apps.py`'s own `ready()` hook actually connecting the receiver (round-3 MEDIUM fix, previously missing); service layer (create/list/get/cancel, curator-gated like `HarnessJob`'s); the job's own execution function, now that the model exists, calling branch 1's runner primitives. Review dispatch itself is stubbed/mocked in this branch's own tests (branch 3 wires the real thing) so this branch's state machine can be verified independently. Immediate worktree cleanup on every terminal path this branch's own state machine can reach, including the test-outcome-contract's own failure modes, not only the "obviously terminal" ones (round-2 MEDIUM fix, expanded per round-3 MEDIUM fix). |
+| 3 | `feat/p3-cross-vendor-review` | **Codex CLI vendor-terms verification, resolved 2026-07-21: GO, API-key auth only** (see "Open question resolved: Codex CLI vendor terms" below) — same grounded-evidence approach Phase 2 branch 2 used for Claude Code's headless mode. `HarnessReview` model + migration; the review container run (read-only, its own narrowly-scoped execution function per the boundary section — not the discovery job's engine, not a shared one); the gateway-summarization pipeline for `HarnessReview.summary/findings/raw_transcript` (reuses branch 3 Phase 2's fencing functions directly); the mechanical `reviewer.agent != implementer.agent` enforcement; the split `_SELECTABLE_IMPLEMENTATION_AGENTS`/`_SELECTABLE_REVIEW_AGENTS` sets. |
+| 4 | `feat/p3-implementation-pipeline` | Ties branches 1–3 together into the real end-to-end flow: `HarnessImplementationJob` created → Gate A → worktree implementation → wrapper-reported test outcome gates continuation → dispatch real `HarnessReview` → verdict gates Gate B request → Gate B → hardened host-side push. Recovery scan extended for both blocked-on-approval states plus the worktree-retention-deadline backstop sweep (checked against `HarnessJob`'s own current recovery-scan case count at implementation time, not asserted here). Kill switch extended to a job blocked on either gate: cancelling must revoke/expire the pending `ApprovalRequest` too (checked against `agents`' own kill-switch-while-blocked test coverage for an existing precedent before inventing the exact mechanics). |
+| 5 | `feat/p3-harness-ui` | Extend `/harness`: request an implementation (from a discovery job's detail view, or fresh); render the pipeline's current state including both approval requests' own status (via `HarnessImplementationJob`'s own detail endpoint — never by exposing raw `ApprovalRequest.payload`, which `ApprovalRequestSerializer` deliberately doesn't surface today, round-1 finding); link into the existing `/approvals` inbox for the actual decide action, same as `agents`' `blocked_on_approval` steps do; render the review verdict + findings + diff summary with the same R2 labeling discipline as Phase 2 (raw transcript behind disclosure) — now for *two* independently-fenced raw transcripts per pipeline (implementation's own CLI output, review's own CLI output). |
+
+## Out of scope (explicit)
+
+Deploy automation / VPS deploy / merge to `main` (Phase 5) · a
+general-purpose test-runner abstraction across arbitrary repo tooling
+(the CLI agent's own responsibility, per boundary section — Jarvis only
+defines the wrapper-owned JSON *result* schema, never the test command
+itself) · Gemini CLI / Ollama as implementation or review agents
+(follow-up once a real job-distribution policy table exists, same
+deferral as Phase 2) · a third+ review round or iterative
+revise-per-feedback loop (a `changes_requested` verdict fails the
+implementation job outright in this phase; the curator re-requests a
+fresh implementation with updated guidance — a tighter "same job, second
+attempt" loop is a later-phase refinement) · SSE live log streaming
+(still deferred from Phase 2, revisit once these longer 10-60 min
+implementation jobs make polling genuinely painful — R4 below) · any
+change to `Workspace.profile` dossier schema · merging `agents` (MVP 7)
+and `harness` (O-3's harness-side scope — explicitly still deferred to
+*after* this phase per VISION §2's own inventory table, not resolved
+here even though this is "post-Phase-3") · extracting a shared
+execution engine across `HarnessJob`/`HarnessImplementationJob`/
+`HarnessReview` (explicitly deferred, boundary section) · a repo-level
+configurable branch-name prefix (O-3, deferred until a real repo needs
+it).
+
+## Test strategy
+
+Same discipline as Phase 2 (CLAUDE.md rule 7, rule 5): role × endpoint
+permission tests for every new surface; the CLI invocation and Docker
+subprocess layer stay fully mockable, no test depends on a real
+`claude`/`codex` binary or a real `git push`; migration check; `make
+lint` + `make test` green per branch. New scenarios this phase adds:
+- The Gate-A/Gate-B state machine: every legal and illegal transition,
+  including both recovery-scan cases and the worktree-expiry case.
+- The self-modification guard: a `HarnessRepo` matching
+  `HARNESS_SELF_REPO_IDENTIFIERS` is rejected by
+  `create_harness_implementation_job()` before any `ApprovalRequest`
+  exists — direct unit test, not inferred from the setting's presence.
+- The cross-vendor enforcement: a `HarnessReview` whose `agent` equals
+  its `HarnessImplementationJob.agent` must be rejected at the service
+  layer — direct unit test, mirroring the cross-workspace
+  `HarnessJob.save()` invariant test's shape from Phase 2.
+- The read-only vs read-write container-mount split: a source-level or
+  argv-assertion test proving `HarnessJob`/`HarnessReview` never get a
+  writable mount and `HarnessImplementationJob` never gets a read-only
+  one — a real security property, not incidental.
+- The wrapper-owned test-result contract: missing/malformed JSON, and
+  `tests.ran=false`, both fail closed with no Gate B request and no
+  review dispatch — direct tests for each shape, not just the happy path.
+- Kill switch while blocked on either approval gate: cancel must not
+  leave an orphaned `ApprovalRequest` a later approval click could act on
+  for an already-cancelled job.
+- A `changes_requested` review verdict never reaches Gate B — direct
+  test, not just inferred from the state machine's shape.
+- The credential-resolution path for push: never logged, never present
+  in `HarnessImplementationJob`'s own persisted fields, mirrors branch 2
+  Phase 2's `_resolve_cli_env` test discipline exactly.
+- Worktree-retention-deadline sweep: an unresolved job past
+  `HARNESS_WORKTREE_RETENTION_HOURS` is failed and its worktree cleaned
+  up by the recovery scan, not left orphaned on disk indefinitely.
+
+## Risks
+
+- **R1 — Write authority, for real this time.** This is the phase VISION
+  §8's R1 explicitly named as "the riskiest permission": repo write
+  (deploy is still Phase 5, but a pushed branch is a real external-facing
+  change). Mitigations: two independent approval gates (not one),
+  worktree isolation (never `main`, never a branch a human might be
+  using), the self-modification hard-block, cross-vendor review as a
+  mechanical enforcement (not a convention), a bundle-only push (named
+  ref, verified SHA) from a host-only clean clone that never touches
+  agent-controlled `.git` state at all (round-3 CRITICAL fix, rounds 4/6
+  tightening), the same container/network/resource brake system Phase 2
+  already proved, a process-quiesced, wrapper-derived (never
+  agent-reported) fail-closed test-outcome contract.
+- **R2 — Prompt injection, now with two more surfaces.** Branch 3/4 Phase
+  2 solved this for the discovery briefing; Phase 3 has the same problem
+  twice more — the implementing agent's own account of what it changed
+  (`diff_summary`), and the reviewing agent's own account of the diff —
+  both untrusted-content-in scenarios needing the identical fencing
+  discipline, not a new one invented per surface.
+- **R3 — Cross-vendor review is blocked on an external dependency (Codex
+  CLI vendor terms, O-2 continued from Phase 2). RESOLVED, 2026-07-21:
+  GO, API-key auth only** — see "Open question resolved: Codex CLI
+  vendor terms" below for the full grounded-evidence writeup. The
+  API-key path ADR-008 decision 7 anticipated as a fallback turned out
+  to be the only clearly-compliant path outright, not a contingency for
+  if terms blocked automation generally.
+- **R4 — Longer jobs.** Implementation jobs (worktree write + test run)
+  run longer than discovery's single-shot CLI call; still poll-based per
+  this brief's own scope decision, revisited if real usage makes it
+  painful.
+- **R5 — Duplicated brake-system shape across three job types.** Accepted
+  explicitly (boundary section) rather than risking a premature
+  abstraction; revisit once all three job types' real differences are
+  known from having actually shipped, not guessed at design time.
+- **R6 — `agents`/`harness` merge evaluation lands mid-roadmap.** O-3 says
+  "re-evaluated after Phase 3" — this phase does not resolve it, but by
+  the time it ships, `harness` will have its own approval-gate
+  integration that looks structurally very close to `agents`' own
+  `tool_request` step (both now go through `tools.registry` +
+  `approvals.services.create_request`). Worth flagging now so whoever
+  picks up O-3 later isn't surprised by how much closer the two runtimes
+  have become by construction, not by design intent.
+- **R7 (new, round-1 finding) — worktree persistence across process
+  restarts.** A worker crash between implementation completing and Gate
+  B being decided must not lose the finished worktree or leave
+  `HarnessImplementationJob` stuck with no recovery path — the
+  `worktree_path`/`worktree_expires_at` fields and branch-4's recovery
+  scan extension exist specifically to close this gap, not as
+  observability nice-to-haves.
+
+## Open question resolved: Codex CLI vendor terms (R3, O-2 continued from Phase 2)
+
+**GO — API-key authentication only, never "Sign in with ChatGPT."** Resolved
+2026-07-21, branch 3's first concrete task, same grounded-evidence
+discipline Phase 2 branch 2 used for Claude Code's own headless-mode
+verification (that brief's "Open question resolved: O-2").
+
+- **The two OpenAI terms documents are genuinely separate, and each
+  says so explicitly.** The consumer **Terms of Use**
+  (`openai.com/policies/row-terms-of-use/`, effective 2026-01-01) governs
+  "ChatGPT, DALL-E, and OpenAI's other services for individuals" and
+  states directly, in its own text: *"İş Koşullarımız, ChatGPT
+  Enterprise, API'lerimiz ve işletmeler ile geliştiricilere sunduğumuz
+  diğer hizmetlerin kullanımını düzenler"* ("Our Business Terms govern
+  the use of ChatGPT Enterprise, our APIs, and other services we provide
+  to businesses and developers") — the API is explicitly carved out into
+  a different document from the start. The separate **OpenAI Services
+  Agreement** (`openai.com/policies/business-terms/`, effective
+  2026-01-01) states its own scope just as directly: *"yalnızca
+  işletmeler ve geliştiriciler için OpenAI'ın API'leri... kullanımına
+  uygulanır"* ("applies only to the use of OpenAI's APIs... for
+  businesses and developers").
+- **The "no automatic/programmatic use" restriction lives ONLY in the
+  consumer Terms of Use, not the Business/API terms.** The consumer ToU's
+  restriction list includes *"Otomatik veya programlı olarak veri veya
+  Çıktıyı dışa aktarma"* ("automatically or programmatically
+  exporting/extracting data or Output") — this is the clause that
+  initially looked concerning. It does not appear anywhere in the
+  Business/API Services Agreement's own restriction list (§3.3,
+  items a-i): that list instead covers illegal use, IP/reverse
+  engineering, minors, training competing models, extracting data
+  *"hizmetler aracılığıyla izin verilenler dışında"* ("outside of what's
+  permitted THROUGH the services" — i.e. circumventing the API, not
+  using it), API-key resale, and rate-limit evasion. Using the API as
+  designed — including running it unattended/headless — is the
+  sanctioned mechanism under this document, not a restricted one.
+- **Codex CLI's own official docs explicitly design for and document
+  unattended/automated use under an API key.** `learn.chatgpt.com/docs/
+  non-interactive-mode` documents `codex exec` for scripts and CI/CD
+  pipelines by name, a dedicated `CODEX_API_KEY` env var with explicit
+  least-privilege guidance ("set it only for the single `codex exec`
+  invocation"), `--sandbox`/`--ephemeral`/`--json`/`--output-schema`
+  flags built for pipeline use, and an official `openai/codex-action`
+  GitHub Action wrapper. This is not a workaround being stretched to fit
+  an unintended use case — it is the documented, supported path.
+- **"Sign in with ChatGPT" (ChatGPT-subscription OAuth) is a genuinely
+  unresolved gray area, and must NOT be used for this harness.**
+  `github.com/openai/codex/discussions/8338` asked OpenAI directly
+  whether automated/commercial use under ChatGPT-subscription auth (as
+  opposed to an API key) is permitted; the OpenAI maintainer who replied
+  declined to give a definitive answer, said explicitly they are "an
+  engineer, not a lawyer," and pointed back to the general consumer
+  Terms of Use without resolving which document actually governs that
+  auth path. No later comment in the thread resolved it either. This
+  auth method sits in exactly the ambiguity the consumer ToU's
+  restriction was written for (an individual's ChatGPT
+  account/subscription, not a business API relationship) — automating
+  under it would not be "verified, grounded evidence," it would be an
+  unverified bet.
+- **A code-review verdict is not an automated high-stakes decision under
+  either document's Usage Policies.** OpenAI's Usage Policies restrict
+  automated decisions in named sensitive domains (law enforcement,
+  migration, critical infrastructure, safety components, credit,
+  employment, housing, education, insurance, and similar) — a
+  `HarnessReview` verdict is none of these, and by this phase's own
+  design (brief §boundary) it is advisory input to Gate B, never itself
+  the push decision: a human curator still makes that call.
+- **Consequence for this branch's design:** `_SELECTABLE_REVIEW_AGENTS`
+  (brief §boundary) adds `CODEX_CLI` on this branch, but the runner only
+  ever resolves Codex CLI credentials from `CODEX_API_KEY`-shaped env
+  (mirrors `harness.execution._resolve_cli_env`'s existing one-credential-
+  per-capability shape) — never from a stored ChatGPT session/OAuth
+  token, and never by shelling out to whatever interactive auth state
+  happens to be on the runner host (the exact ambient-credential
+  fail-open pattern branch 1's own `_resolve_git_push_env` already
+  guards against for git push, applied here to the review agent's own
+  auth instead). The API-key fallback ADR-008 decision 7 anticipated
+  turns out to be the ONLY clearly-compliant path, not a contingency for
+  if terms block automation — terms don't block API-key automation, they
+  only leave the OAuth path unresolved, so that path is simply never
+  built.
+
+Sources: [OpenAI Terms of Use](https://openai.com/policies/row-terms-of-use/) ·
+[OpenAI Services Agreement](https://openai.com/policies/business-terms/) ·
+[Codex CLI non-interactive mode docs](https://learn.chatgpt.com/docs/non-interactive-mode) ·
+[GitHub discussion openai/codex#8338](https://github.com/openai/codex/discussions/8338)
+
+## Open questions (updated after plan-review round 2)
+
+- ~~O-1~~ **resolved (plan-review round 1):** both gates are real
+  `ToolSpec`s. See boundary section.
+- ~~O-2~~ **resolved (plan-review round 1):** discovery-job FK stays
+  optional. See boundary section.
+- ~~O-3~~ **resolved (plan-review round 1):** `harness/p3-<job-id>` is
+  sufficient; fail closed on a pre-existing remote branch, never force-push.
+- ~~O-4~~ **resolved (plan-review round 2), superseded by the round-2
+  fix itself:** vendor-verifying "can the CLI emit structured test
+  output" was the wrong question — the wrapper runs the configured
+  `test_command` as its own subprocess and derives the result from its
+  own exit code, never from anything the CLI agent reports. No vendor
+  behavior to verify for test truth specifically (Codex CLI vendor-terms
+  verification in branch 3 is still needed, but for automated-use terms
+  generally, not this).
+- ~~O-5~~ **resolved (plan-review round 2):** a dedicated canonical
+  normalizer (lowercased `host/owner/repo`, `.git`/trailing-slash
+  stripped, scp-like and `https://` forms both resolved to the same
+  canonical string), not exact string match and not a reuse of
+  `harness/serializers.py`'s credential-rejection parsing. See boundary
+  section.
+
+No open questions remain from rounds 1–2. Plan-review round 3 is a
+verification pass on this revision, not expected to surface materially
+new design surface unless something in this revision is itself wrong.
