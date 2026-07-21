@@ -875,7 +875,16 @@ def recover_stale_harness_implementation_jobs():
        leaked-terminal-container case, one resource type over -- reusing
        the same grace-period setting despite its container-specific
        name, since the underlying "retry a confirmed-failed cleanup"
-       shape is identical."""
+       shape is identical.
+    7. A terminal job still carrying a non-empty `container_id`, same
+       grace period (Codex code-review P2, branch 4 round 5): case 6's
+       own analogue for `_recover_stale_implementing_job`'s (or any
+       other finalize path's) confirmed-before-clearing container
+       removal -- a genuinely failed `docker rm` otherwise leaves a
+       stopped container, still carrying the CLI's own credentials in
+       its environment, on the runner host indefinitely. Mirrors
+       `harness.execution`'s and `harness.review_execution`'s identical
+       leaked-terminal-container cases, one job type over."""
     dispatch_cutoff = timezone.now() - timedelta(
         seconds=settings.HARNESS_DISPATCH_RECOVERY_GRACE_SECONDS
     )
@@ -954,6 +963,17 @@ def recover_stale_harness_implementation_jobs():
     )
     for job_id in leaked_worktree_ids:
         _sweep_leaked_terminal_worktree(job_id)
+
+    # Case 7: terminal job, leaked container.
+    leaked_container_ids = list(
+        HarnessImplementationJob.objects.filter(
+            status__in=_IMPLEMENTATION_TERMINAL_STATUSES, updated_at__lt=leaked_worktree_cutoff
+        )
+        .exclude(container_id="")
+        .values_list("pk", flat=True)
+    )
+    for job_id in leaked_container_ids:
+        _sweep_leaked_terminal_implementation_container(job_id)
 
 
 def _claim_stale_implementing_job(job_id, threshold):
@@ -1040,8 +1060,19 @@ def _recover_stale_implementing_job(job_id, threshold):
         error_type=job.failure_reason,
         context_report={"usage_source": "unavailable", "recovered": True},
     )
+    # Codex code-review P3, branch 4 round 5: `_claim_stale_implementing_
+    # job` stores `cancelled` (not `failed`) when the job had `cancel_
+    # requested=True` at claim time -- the audit action must agree with
+    # the status it's actually describing, mirroring `_record_
+    # implementation_job`'s own cancelled-vs-failed action split
+    # elsewhere in this module.
+    audit_action = (
+        "harness.implementation_job_cancelled"
+        if job.status == HarnessImplementationJob.Status.CANCELLED
+        else "harness.implementation_job_failed"
+    )
     record_audit(
-        action="harness.implementation_job_failed",
+        action=audit_action,
         actor=job.created_by,
         workspace=job.workspace,
         resource=job,
@@ -1191,6 +1222,31 @@ def _sweep_leaked_terminal_worktree(job_id):
     if _safe_cleanup_directory(worktree_path):
         HarnessImplementationJob.objects.filter(pk=job_id, worktree_path=worktree_path).update(
             worktree_path=""
+        )
+        return True
+    return False
+
+
+def _sweep_leaked_terminal_implementation_container(job_id):
+    """One iteration of case 7 above (Codex code-review P2, branch 4
+    round 5). Re-fetches under lock first, same discipline as
+    `_sweep_leaked_terminal_worktree` above -- so two overlapping scans
+    don't both attempt removal of the same container -- the Docker call
+    itself happens OUTSIDE the lock, same as every other recovery case
+    in this module."""
+    with transaction.atomic():
+        locked = (
+            HarnessImplementationJob.objects.select_for_update(of=("self",))
+            .filter(pk=job_id, status__in=_IMPLEMENTATION_TERMINAL_STATUSES)
+            .exclude(container_id="")
+            .first()
+        )
+        if locked is None:
+            return False
+        container_id = locked.container_id
+    if _safe_remove_container(container_id):
+        HarnessImplementationJob.objects.filter(pk=job_id, container_id=container_id).update(
+            container_id=""
         )
         return True
     return False

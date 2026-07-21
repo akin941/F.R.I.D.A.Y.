@@ -1033,3 +1033,112 @@ class TestRecoveryScan:
 
         job.refresh_from_db()
         assert job.worktree_path == str(worktree)
+
+    @pytest.mark.parametrize(
+        "status",
+        [
+            HarnessImplementationJob.Status.SUCCEEDED,
+            HarnessImplementationJob.Status.FAILED,
+            HarnessImplementationJob.Status.CANCELLED,
+        ],
+    )
+    def test_retries_removal_of_a_leaked_terminal_container(
+        self, workspace, owner, repo, monkeypatch, settings, status
+    ):
+        """Codex code-review P2, branch 4 round 5: case 6 (leaked
+        worktree) has a sibling case for `container_id` -- a genuinely
+        failed `docker rm` at finalize time otherwise leaves a stopped
+        container, still carrying the CLI's own credentials in its
+        environment, on the host indefinitely, mirroring `harness.
+        execution`'s/`harness.review_execution`'s identical cases."""
+        settings.HARNESS_LEAKED_CONTAINER_RECOVERY_GRACE_SECONDS = 1
+        job = make_job(
+            workspace, repo, created_by=owner, status=status, container_id="leaked-impl-1"
+        )
+        stale_updated = timezone.now() - timedelta(seconds=100)
+        HarnessImplementationJob.objects.filter(pk=job.pk).update(updated_at=stale_updated)
+        remove_mock = mock.Mock()
+        monkeypatch.setattr(implementation_execution.runner, "remove_container", remove_mock)
+
+        implementation_execution.recover_stale_harness_implementation_jobs()
+
+        remove_mock.assert_called_once_with("leaked-impl-1")
+        job.refresh_from_db()
+        assert job.container_id == ""
+        assert job.status == status
+
+    def test_does_not_sweep_a_freshly_finalized_terminal_container(
+        self, workspace, owner, repo, monkeypatch, settings
+    ):
+        settings.HARNESS_LEAKED_CONTAINER_RECOVERY_GRACE_SECONDS = 300
+        job = make_job(
+            workspace,
+            repo,
+            created_by=owner,
+            status=HarnessImplementationJob.Status.FAILED,
+            container_id="leaked-impl-1",
+        )
+        remove_mock = mock.Mock()
+        monkeypatch.setattr(implementation_execution.runner, "remove_container", remove_mock)
+
+        implementation_execution.recover_stale_harness_implementation_jobs()
+
+        remove_mock.assert_not_called()
+        job.refresh_from_db()
+        assert job.container_id == "leaked-impl-1"
+
+    def test_leaves_container_id_populated_when_removal_still_fails(
+        self, workspace, owner, repo, monkeypatch, settings
+    ):
+        settings.HARNESS_LEAKED_CONTAINER_RECOVERY_GRACE_SECONDS = 1
+        job = make_job(
+            workspace,
+            repo,
+            created_by=owner,
+            status=HarnessImplementationJob.Status.FAILED,
+            container_id="leaked-impl-1",
+        )
+        stale_updated = timezone.now() - timedelta(seconds=100)
+        HarnessImplementationJob.objects.filter(pk=job.pk).update(updated_at=stale_updated)
+        monkeypatch.setattr(
+            implementation_execution.runner,
+            "remove_container",
+            mock.Mock(side_effect=RuntimeError("still busy")),
+        )
+
+        implementation_execution.recover_stale_harness_implementation_jobs()
+
+        job.refresh_from_db()
+        assert job.container_id == "leaked-impl-1"
+
+    def test_recovered_cancellation_is_audited_as_cancelled_not_failed(
+        self, workspace, owner, repo, monkeypatch, settings, tmp_path
+    ):
+        """Codex code-review P3, branch 4 round 5: the audit action must
+        agree with the status `_claim_stale_implementing_job` actually
+        stored -- a job whose `cancel_requested` flag was set before the
+        recovery scan caught it ends up `cancelled`, not `failed`."""
+        settings.HARNESS_MAX_JOB_SECONDS = 1
+        settings.HARNESS_RECOVERY_GRACE_SECONDS = 1
+        worktree = tmp_path / "worktree"
+        worktree.mkdir()
+        stale_started = timezone.now() - timedelta(seconds=100)
+        job = make_job(
+            workspace,
+            repo,
+            created_by=owner,
+            status=HarnessImplementationJob.Status.IMPLEMENTING,
+            started_at=stale_started,
+            worktree_path=str(worktree),
+            cancel_requested=True,
+        )
+        implementation_execution.recover_stale_harness_implementation_jobs()
+        job.refresh_from_db()
+        assert job.status == HarnessImplementationJob.Status.CANCELLED
+        entry = AuditLog.objects.filter(
+            action="harness.implementation_job_cancelled", resource_id=str(job.pk)
+        ).first()
+        assert entry is not None
+        assert not AuditLog.objects.filter(
+            action="harness.implementation_job_failed", resource_id=str(job.pk)
+        ).exists()
