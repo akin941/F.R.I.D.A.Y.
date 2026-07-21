@@ -718,6 +718,22 @@ class TestParseReviewResponse:
         summary, findings, verdict = review_execution._parse_review_response(raw)
         assert (summary, findings, verdict) == ("", [], "")
 
+    @pytest.mark.parametrize(
+        "findings_value",
+        ["a single string, not a list", {"not": "a list"}, ["ok", 123], None],
+    )
+    def test_malformed_findings_fails_the_whole_response_closed(self, findings_value):
+        """Codex code-review P2, branch 3 round 14: a malformed
+        `findings` value used to be silently replaced with `[]` while a
+        valid `summary`/`verdict` were still trusted, letting an
+        approval proceed despite the response not matching the schema
+        this function exists to enforce."""
+        raw = json.dumps(
+            {"summary": "looks good", "findings": findings_value, "verdict": "approved"}
+        )
+        summary, findings, verdict = review_execution._parse_review_response(raw)
+        assert (summary, findings, verdict) == ("", [], "")
+
     def test_bounds_summary_and_findings(self):
         long_summary = "x" * (review_execution._REVIEW_SUMMARY_MAX_CHARS + 500)
         many_findings = [

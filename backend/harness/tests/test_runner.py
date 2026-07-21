@@ -416,6 +416,21 @@ class TestResolveCommitSha:
         with pytest.raises(runner.RunnerError):
             runner.resolve_commit_sha("/tmp/repo", "refs/heads/missing")
 
+    def test_timeout_raises_runner_error_not_timeout_expired(self, monkeypatch):
+        """Codex code-review P2, branch 3 round 14: both callers
+        (`push_bundled_commit`, `prepare_review_clone`) wrap their own
+        clone-preparation steps in `except RunnerError: cleanup_
+        directory(...); raise` -- a raw `subprocess.TimeoutExpired`
+        bypassed that entirely, leaking the clean-clone checkout with no
+        caller left holding its path."""
+        monkeypatch.setattr(
+            runner.subprocess,
+            "run",
+            mock.Mock(side_effect=subprocess.TimeoutExpired(cmd="git rev-parse", timeout=30)),
+        )
+        with pytest.raises(runner.RunnerError):
+            runner.resolve_commit_sha("/tmp/repo", "FETCH_HEAD")
+
 
 class TestCreateBundle:
     def test_argv_bundles_a_named_ref_range_not_a_bare_sha(self, monkeypatch):

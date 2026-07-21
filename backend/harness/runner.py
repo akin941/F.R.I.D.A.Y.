@@ -220,13 +220,24 @@ def resolve_commit_sha(directory, ref):
     """`git rev-parse --verify` a ref inside `directory` -- returns the
     resolved SHA, or raises `RunnerError` if the ref doesn't resolve
     (never silently returns something a caller might mistake for
-    success)."""
-    result = subprocess.run(
-        ["git", "-C", directory, "rev-parse", "--verify", ref],
-        capture_output=True,
-        text=True,
-        timeout=_GIT_PLUMBING_TIMEOUT_SECONDS,
-    )
+    success).
+
+    A timeout is also converted to `RunnerError` (Codex code-review P2,
+    branch 3 round 14): both of this function's callers (`push_bundled_
+    commit`, `prepare_review_clone`) wrap their own clone-preparation
+    steps in `except RunnerError: cleanup_directory(...); raise` -- a raw
+    `subprocess.TimeoutExpired` bypasses that entirely, leaking the full
+    clean-clone checkout on the runner host with no caller left holding
+    its path."""
+    try:
+        result = subprocess.run(
+            ["git", "-C", directory, "rev-parse", "--verify", ref],
+            capture_output=True,
+            text=True,
+            timeout=_GIT_PLUMBING_TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise RunnerError(f"resolving {ref!r} in {directory} timed out: {exc}") from exc
     if result.returncode != 0:
         raise RunnerError(f"failed to resolve {ref!r} in {directory}: {result.stderr.strip()}")
     return result.stdout.strip()

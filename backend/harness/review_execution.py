@@ -374,8 +374,16 @@ def _parse_review_response(text):
         HarnessReview.Verdict.CHANGES_REQUESTED,
     ):
         return "", [], ""
+    # Codex code-review P2, branch 3 round 14: a malformed `findings`
+    # value (a string/object instead of a list -- model drift or a
+    # prompt injection that talked the model out of the requested shape)
+    # used to be silently replaced with `[]` while the surrounding
+    # `summary`/`verdict` were still trusted, letting an approval proceed
+    # despite the response not actually matching the schema this
+    # function exists to enforce. Now fails the whole response closed
+    # instead, same as an invalid `summary`/`verdict` already does.
     if not isinstance(findings, list) or not all(isinstance(item, str) for item in findings):
-        findings = []
+        return "", [], ""
     if len(summary) > _REVIEW_SUMMARY_MAX_CHARS:
         summary = summary[: _REVIEW_SUMMARY_MAX_CHARS - 1] + "…"
     bounded_findings = []
