@@ -213,6 +213,28 @@ class TestResolveRunningReviewAfterUnexpectedError:
         review.refresh_from_db()
         assert review.status == HarnessReview.Status.SUCCEEDED
 
+    def test_preserves_transcript_already_persisted_before_interruption(
+        self, workspace, owner, repo, monkeypatch
+    ):
+        """Codex code-review P2, branch 3 round 13: `run_harness_review_
+        job` persists `raw_transcript` BEFORE calling the gateway, so a
+        soft-time-limit/crash interruption during that call still leaves
+        it on the row -- this rescue path must preserve that value, not
+        overwrite it with `_finalize_review_unavailable`'s own empty
+        default."""
+        job = make_job(workspace, repo, created_by=owner)
+        review = make_review(
+            workspace,
+            job,
+            status=HarnessReview.Status.RUNNING,
+            raw_transcript="real codex transcript captured before the crash",
+        )
+        monkeypatch.setattr(review_execution.runner, "cleanup_directory", mock.Mock())
+        review_execution.resolve_running_review_after_unexpected_error(review.id)
+        review.refresh_from_db()
+        assert review.status == HarnessReview.Status.FAILED
+        assert review.raw_transcript == "real codex transcript captured before the crash"
+
 
 def _patch_happy_path_runner(monkeypatch, *, raw_output):
     monkeypatch.setattr(review_execution.runner, "create_bundle", mock.Mock())
@@ -250,6 +272,31 @@ class TestRunHarnessReviewJobSuccess:
         assert review.summary == "looks good"
         assert job.status == HarnessImplementationJob.Status.PENDING_GATE_B
         assert job.gate_b_request is not None
+
+    def test_persists_transcript_before_gateway_call(
+        self, workspace, owner, repo, monkeypatch, review_prompt
+    ):
+        """Codex code-review P2, branch 3 round 13: if `_produce_review_
+        summary` is interrupted (a Celery soft time limit, a worker
+        crash), execution never reaches this function's own finalize
+        call sites at all -- `resolve_running_review_after_unexpected_
+        error`'s rescue only has the DB row to work from. The transcript
+        must already be persisted by the time the gateway call starts,
+        not only written afterward on a path that may never run."""
+        job = make_job(workspace, repo, created_by=owner)
+        review = make_review(workspace, job)
+        _patch_happy_path_runner(monkeypatch, raw_output="raw transcript")
+
+        def _boom(*args, **kwargs):
+            review.refresh_from_db()
+            assert review.raw_transcript == "raw transcript"
+            raise RuntimeError("worker crashed mid-summarization")
+
+        with (
+            mock.patch.object(review_execution, "_produce_review_summary", side_effect=_boom),
+            pytest.raises(RuntimeError),
+        ):
+            review_execution.run_harness_review_job(review.id)
 
     def test_review_write_and_job_transition_are_atomic(
         self, workspace, owner, repo, monkeypatch, review_prompt

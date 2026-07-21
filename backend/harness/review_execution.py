@@ -558,6 +558,16 @@ def run_harness_review_job(review_id):
         return
 
     bounded_raw, fenced_transcript = _fence_and_bound_transcript(raw_output)
+    # Persisted BEFORE the gateway call, not after (Codex code-review P2,
+    # branch 3 round 13, mirrors harness.execution.run_harness_job's
+    # identical round-5 fix): if a Celery soft time limit or worker crash
+    # interrupts `_produce_review_summary` below, execution never reaches
+    # any of this function's own finalize call sites, and
+    # `resolve_running_review_after_unexpected_error`'s rescue only has
+    # this DB row to work from -- without this early write, the only
+    # captured reviewer transcript for exactly the slow/timeout cases an
+    # operator most needs to diagnose would be lost.
+    HarnessReview.objects.filter(pk=review.pk).update(raw_transcript=bounded_raw)
     try:
         summary, findings, verdict = _produce_review_summary(job, fenced_transcript)
     except (GatewayError, ImproperlyConfigured):
@@ -761,7 +771,18 @@ def resolve_running_review_after_unexpected_error(review_id):
     # own calls (Codex code-review P1, branch 3 round 3) -- the review's
     # terminal write and the implementation job's consequent failure must
     # land together, or neither does.
+    #
+    # `raw_transcript=review.raw_transcript` (Codex code-review P2,
+    # branch 3 round 13): `_finalize_review_unavailable`'s own default
+    # (`""`) would otherwise CLOBBER the transcript `run_harness_review_
+    # job` may have already persisted before the interruption that
+    # brought execution here -- passing the row's own freshly-read
+    # current value through preserves it, defaulting naturally to `""`
+    # when nothing was ever written.
     with transaction.atomic():
         _finalize_review_unavailable(
-            review, removal_confirmed=removal_confirmed, started_monotonic=time.monotonic()
+            review,
+            removal_confirmed=removal_confirmed,
+            started_monotonic=time.monotonic(),
+            raw_transcript=review.raw_transcript,
         )
