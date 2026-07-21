@@ -761,7 +761,7 @@ class TestRecoveryScan:
         stale = timezone.now() - timedelta(seconds=100)
         HarnessReview.objects.filter(pk=review.pk).update(created_at=stale)
         dispatch_mock = mock.Mock()
-        monkeypatch.setattr(review_execution, "_dispatch_review_task", dispatch_mock)
+        monkeypatch.setattr(review_execution, "_redispatch_review_task", dispatch_mock)
 
         review_execution.recover_stale_harness_reviews()
 
@@ -774,11 +774,39 @@ class TestRecoveryScan:
         job = make_job(workspace, repo, created_by=owner)
         make_review(workspace, job)
         dispatch_mock = mock.Mock()
-        monkeypatch.setattr(review_execution, "_dispatch_review_task", dispatch_mock)
+        monkeypatch.setattr(review_execution, "_redispatch_review_task", dispatch_mock)
 
         review_execution.recover_stale_harness_reviews()
 
         dispatch_mock.assert_not_called()
+
+    def test_broker_failure_during_recovery_redispatch_does_not_fail_the_review_closed(
+        self, workspace, owner, repo, monkeypatch, settings
+    ):
+        """Codex code-review P2, branch 4 round 1: `_dispatch_review_task`
+        (the ORIGINAL dispatch path) fails the review/job closed on a
+        broker-publish failure -- correct there, since that call is the
+        review's only-ever scheduled attempt. Reusing it for the
+        recovery scan's own redispatch would convert a transient broker
+        outage into a permanent `review_unavailable` on the very first
+        scan pass during that outage; the scan must instead just log and
+        leave the review `pending` for the next pass."""
+        settings.HARNESS_DISPATCH_RECOVERY_GRACE_SECONDS = 1
+        job = make_job(workspace, repo, created_by=owner)
+        review = make_review(workspace, job)
+        stale = timezone.now() - timedelta(seconds=100)
+        HarnessReview.objects.filter(pk=review.pk).update(created_at=stale)
+        monkeypatch.setattr(
+            "harness.tasks.run_harness_review_job",
+            mock.Mock(delay=mock.Mock(side_effect=Exception("broker down"))),
+        )
+
+        review_execution.recover_stale_harness_reviews()
+
+        review.refresh_from_db()
+        job.refresh_from_db()
+        assert review.status == HarnessReview.Status.PENDING
+        assert job.status == HarnessImplementationJob.Status.PENDING_REVIEW
 
     def test_recovers_running_review_whose_worker_hard_crashed(
         self, workspace, owner, repo, monkeypatch, settings

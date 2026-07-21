@@ -487,7 +487,6 @@ def create_harness_implementation_job(
     return job
 
 
-@transaction.atomic
 def cancel_harness_implementation_job(*, job, actor):
     """Kill switch mirroring `cancel_harness_job`'s shape, extended to
     every non-terminal status this job type has (five, not two -- brief
@@ -513,35 +512,96 @@ def cancel_harness_implementation_job(*, job, actor):
     and is cleaned up immediately here, same as every other terminal
     path (brief round-2/3 MEDIUM finding).
 
+    This function is deliberately NOT `@transaction.atomic` at the
+    function level (Codex code-review P2, branch 4 round 1) -- the job's
+    own lock/transition runs in its OWN inner `with transaction.atomic():`
+    block below, and `revoke_request` (which locks the `ApprovalRequest`
+    row) is called strictly AFTER that block, at this function's own top
+    level, so it only ever runs once the job's lock has actually been
+    released. A function-level decorator would make the inner block a
+    mere SAVEPOINT, not a real transaction boundary -- the job row would
+    stay locked for the decorator's ENTIRE outer transaction, i.e.
+    through the revoke calls too, reintroducing exactly the ordering
+    conflict this structure exists to avoid. This was confirmed the hard
+    way: an earlier version of this fix added the inner block *without*
+    removing a pre-existing `@transaction.atomic` decorator, and a real
+    two-connection concurrency test still deadlocked identically, with
+    `connection.in_atomic_block` still `True` immediately after the inner
+    block's own `with` exited -- proof the job lock was never actually
+    released until the decorator's outer transaction did.
+
+    Even with the true transaction boundary fixed, one indirect ordering
+    conflict remains: `approve_request` locks the `ApprovalRequest` first,
+    then the job second (inside `create_harness_implement_execution`/
+    `create_harness_push_execution`), all within its OWN single
+    transaction -- the exact reverse order this function's two separate
+    transactions take. `revoke_request` setting the request to `expired`
+    also fires `harness.signals`'s `post_save` receiver, which schedules
+    (via `transaction.on_commit`) ANOTHER attempt to lock the job row --
+    and that third, signal-triggered lock attempt can still land while
+    `approve_request`'s own transaction is mid-flight holding both locks
+    at once, producing a genuine Postgres deadlock (also confirmed with
+    the same concurrency test). Since `approve_request`'s own bundling of
+    both locks into one transaction is pre-existing, security-relevant
+    approvals code well outside this branch's scope to restructure, and
+    the revoke itself is a UX cleanup, not a security boundary
+    (`create_harness_implement_execution`/`create_harness_push_execution`'s
+    own status re-check is what actually prevents a stale approval from
+    reviving a cancelled job), each revoke call below is best-effort: a
+    deadlock or any other failure here is logged and swallowed, never
+    allowed to make an otherwise-successful cancellation itself fail.
+
     `implementing`/`pushing` -> `cancel_requested = True` only; these are
     the two phases with a real container/wait loop
     (`_wait_for_implementation_container`/`run_harness_push_job`'s own
     brake) that actually observes the flag and performs its own teardown
     and worktree cleanup, never this request."""
-    locked = _locked_implementation_job(job, actor)
-    _require_curator(actor, locked.workspace, "cancelling this harness implementation job")
-    if locked.status == HarnessImplementationJob.Status.PENDING_GATE_A:
-        locked.status = HarnessImplementationJob.Status.CANCELLED
-        locked.failure_reason = HarnessImplementationJob.FailureReason.KILLED
-        locked.save(update_fields=["status", "failure_reason", "updated_at"])
-        _record_implementation_job(locked, "harness.implementation_job_cancelled", actor)
-        if locked.gate_a_request_id is not None:
-            revoke_request(approval_request=locked.gate_a_request, actor=actor)
-    elif locked.status in _IMPLEMENTATION_IDLE_WAIT_STATUSES:
-        was_pending_gate_b = locked.status == HarnessImplementationJob.Status.PENDING_GATE_B
-        locked.status = HarnessImplementationJob.Status.CANCELLED
-        locked.failure_reason = HarnessImplementationJob.FailureReason.KILLED
-        locked.save(update_fields=["status", "failure_reason", "updated_at"])
-        _record_implementation_job(locked, "harness.implementation_job_cancelled", actor)
-        _cleanup_worktree_best_effort(locked)
-        if was_pending_gate_b and locked.gate_b_request_id is not None:
-            revoke_request(approval_request=locked.gate_b_request, actor=actor)
-    elif locked.status in _IMPLEMENTATION_ACTIVE_LOOP_STATUSES:
-        locked.cancel_requested = True
-        locked.save(update_fields=["cancel_requested", "updated_at"])
-        _record_implementation_job(locked, "harness.implementation_job_cancel_requested", actor)
-    # Any other status is already terminal -- idempotent no-op.
+    gate_a_request = None
+    gate_b_request = None
+    with transaction.atomic():
+        locked = _locked_implementation_job(job, actor)
+        _require_curator(actor, locked.workspace, "cancelling this harness implementation job")
+        if locked.status == HarnessImplementationJob.Status.PENDING_GATE_A:
+            locked.status = HarnessImplementationJob.Status.CANCELLED
+            locked.failure_reason = HarnessImplementationJob.FailureReason.KILLED
+            locked.save(update_fields=["status", "failure_reason", "updated_at"])
+            _record_implementation_job(locked, "harness.implementation_job_cancelled", actor)
+            gate_a_request = locked.gate_a_request
+        elif locked.status in _IMPLEMENTATION_IDLE_WAIT_STATUSES:
+            was_pending_gate_b = locked.status == HarnessImplementationJob.Status.PENDING_GATE_B
+            locked.status = HarnessImplementationJob.Status.CANCELLED
+            locked.failure_reason = HarnessImplementationJob.FailureReason.KILLED
+            locked.save(update_fields=["status", "failure_reason", "updated_at"])
+            _record_implementation_job(locked, "harness.implementation_job_cancelled", actor)
+            _cleanup_worktree_best_effort(locked)
+            if was_pending_gate_b:
+                gate_b_request = locked.gate_b_request
+        elif locked.status in _IMPLEMENTATION_ACTIVE_LOOP_STATUSES:
+            locked.cancel_requested = True
+            locked.save(update_fields=["cancel_requested", "updated_at"])
+            _record_implementation_job(locked, "harness.implementation_job_cancel_requested", actor)
+        # Any other status is already terminal -- idempotent no-op.
+    if gate_a_request is not None:
+        _revoke_gate_request_best_effort(gate_a_request, actor)
+    if gate_b_request is not None:
+        _revoke_gate_request_best_effort(gate_b_request, actor)
     return locked
+
+
+def _revoke_gate_request_best_effort(approval_request, actor):
+    """See `cancel_harness_implementation_job`'s own docstring for why
+    this must never raise: the cancellation it's called from has
+    already committed by this point, and a stale approval request left
+    behind on a rare deadlock is a UX inconvenience, not a security
+    issue -- `harness.tools`'s own status re-checks are the actual
+    guard against it being decided into reviving a job that's already
+    gone."""
+    try:
+        revoke_request(approval_request=approval_request, actor=actor)
+    except Exception:
+        logger.exception(
+            "Failed to revoke approval request %s after job cancellation", approval_request.pk
+        )
 
 
 def fail_implementation_job_for_review(*, job, review, failure_reason=None):
@@ -671,7 +731,32 @@ def fail_implementation_job_for_gate_a_decision(job_id, *, decision_status):
     expires -- a rejected/expired `ApprovalRequest` has no `dispatch` to
     run (brief §boundary), so without this the job would stay
     `pending_gate_a` forever. No worktree exists yet at this gate, so
-    there is nothing to clean up beyond the status flip."""
+    there is nothing to clean up beyond the status flip.
+
+    A cheap, non-locking pre-check (Codex code-review P2, branch 4
+    round 1) skips the `select_for_update` attempt entirely when the job
+    is already terminal -- a real, empirically-reproduced deadlock risk
+    otherwise: `cancel_harness_implementation_job` (Phase 3 branch 4)
+    now revokes a job's own `gate_a_request` as part of cancelling it,
+    which fires THIS signal via `revoke_request`'s `expired` write --
+    but the job was already transitioned to `cancelled` by that SAME
+    cancellation, moments earlier, making this function's own job-lock
+    attempt here completely redundant in that case. `approve_request`
+    bundles its own approval-row lock and job-row lock into ONE
+    transaction; a concurrent approval landing at the same moment this
+    redundant lock attempt runs is exactly the shape of a genuine
+    Postgres deadlock, confirmed with a real two-connection concurrency
+    test. Once a job reaches a terminal status it never goes back to
+    `pending_gate_a`, so skipping the lock on a plain (non-blocking)
+    read of an already-terminal status is always safe -- this is purely
+    an optimization to avoid a lock that would find nothing to do
+    anyway, never a change to what this function actually decides."""
+    if (
+        HarnessImplementationJob.objects.filter(pk=job_id)
+        .exclude(status=HarnessImplementationJob.Status.PENDING_GATE_A)
+        .exists()
+    ):
+        return
     with transaction.atomic():
         locked = (
             HarnessImplementationJob.objects.select_for_update(of=("self",))
@@ -692,10 +777,18 @@ def fail_implementation_job_for_gate_a_decision(job_id, *, decision_status):
 
 def fail_implementation_job_for_gate_b_decision(job_id, *, decision_status):
     """Same as `fail_implementation_job_for_gate_a_decision` above, one
-    gate over -- but a worktree DOES exist by the time Gate B is even
-    requested (implementation + tests + review already completed), so
-    this path also cleans it up (brief round-2/3 MEDIUM finding: every
-    terminal path cleans up its own worktree immediately)."""
+    gate over -- including the same non-locking pre-check and the same
+    deadlock-avoidance rationale (Codex code-review P2, branch 4 round
+    1). A worktree DOES exist by the time Gate B is even requested
+    (implementation + tests + review already completed), so this path
+    also cleans it up (brief round-2/3 MEDIUM finding: every terminal
+    path cleans up its own worktree immediately)."""
+    if (
+        HarnessImplementationJob.objects.filter(pk=job_id)
+        .exclude(status=HarnessImplementationJob.Status.PENDING_GATE_B)
+        .exists()
+    ):
+        return
     with transaction.atomic():
         locked = (
             HarnessImplementationJob.objects.select_for_update(of=("self",))

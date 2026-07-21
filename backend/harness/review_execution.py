@@ -95,6 +95,19 @@ def dispatch_harness_review(job):
 
 
 def _dispatch_review_task(review_id):
+    """Original dispatch, called once at review creation. A broker
+    failure here fails the review (and its job) closed immediately
+    (Codex code-review P2, branch 3 round 2) -- correct at THIS call
+    site specifically: this is the review's very first, only-ever
+    scheduled attempt, so there is no reason to make a curator wait out
+    a full recovery-scan interval to learn a freshly-created review
+    never even got published. `recover_stale_harness_reviews` (Phase 3
+    branch 4) exists now, but it re-dispatches a genuinely LOST publish
+    via `_redispatch_review_task` below instead of this function --
+    reusing this fail-closed behavior for a recovery-scan RETRY would
+    convert a transient broker outage into a permanent
+    `review_unavailable` on the very first scan pass during that outage
+    (Codex code-review P2, branch 4 round 1)."""
     from harness.tasks import run_harness_review_job
 
     if settings.CELERY_TASK_ALWAYS_EAGER:
@@ -104,14 +117,24 @@ def _dispatch_review_task(review_id):
         run_harness_review_job.delay(str(review_id))
     except Exception:
         logger.exception("Failed to publish harness review %s to the broker", review_id)
-        # Codex code-review P2, branch 3 round 2: unlike `HarnessJob`,
-        # there is no periodic recovery scan for this job type yet
-        # (branch 4's job) -- without resolving this immediately, a lost
-        # dispatch would leave the review `pending` and the implementation
-        # job `pending_review` forever, with nothing left to ever claim
-        # and run it. Fails both closed right here instead of waiting on
-        # a future sweep that doesn't exist yet.
         resolve_pending_review_after_dispatch_failure(review_id)
+
+
+def _redispatch_review_task(review_id):
+    """Recovery-scan-only redispatch (Phase 3 branch 4, Codex
+    code-review P2, round 1): unlike `_dispatch_review_task` above, a
+    publish failure here is simply logged and left for the NEXT scan
+    pass to retry -- mirrors `dispatch_harness_implement_execution`/
+    `dispatch_harness_push_execution`'s identical swallow-and-log shape
+    for their own recovery-scan redispatch cases. See
+    `_dispatch_review_task`'s own docstring for why the two functions
+    deliberately differ here despite calling the same underlying task."""
+    from harness.tasks import run_harness_review_job
+
+    try:
+        run_harness_review_job.delay(str(review_id))
+    except Exception:
+        logger.exception("Failed to re-publish harness review %s to the broker", review_id)
 
 
 def resolve_pending_review_after_dispatch_failure(review_id):
@@ -836,7 +859,7 @@ def recover_stale_harness_reviews():
         ).values_list("pk", flat=True)
     )
     for review_id in stale_pending_ids:
-        _dispatch_review_task(review_id)
+        _redispatch_review_task(review_id)
 
     running_cutoff = timezone.now() - timedelta(
         seconds=settings.HARNESS_MAX_JOB_SECONDS + settings.HARNESS_RECOVERY_GRACE_SECONDS

@@ -1,10 +1,14 @@
+import threading
 from unittest import mock
 
 import pytest
+from django.db import connection
 
 from accounts.services import register_user
 from approvals.models import ApprovalRequest
+from approvals.services import InvalidTransition, approve_request
 from audit.models import AuditLog
+from core.channels import CHANNEL_WEB
 from harness.models import HarnessImplementationJob, HarnessRepo, HarnessReview
 from harness.services import (
     HarnessInvalidTransition,
@@ -513,3 +517,85 @@ class TestGateDecisionFailures:
         )
         job.refresh_from_db()
         assert job.status == HarnessImplementationJob.Status.SUCCEEDED
+
+
+@pytest.mark.django_db(transaction=True)
+def test_concurrent_cancel_and_approve_gate_a_do_not_deadlock(monkeypatch):
+    """Genuine two-connection concurrency test (Codex code-review P2,
+    branch 4 round 1): `approve_request` locks the `ApprovalRequest` row
+    first, then the job row second (inside `create_harness_implement_
+    execution`); `cancel_harness_implementation_job` locks the job row
+    first, then (via `revoke_request`) the `ApprovalRequest` row second --
+    the exact reverse order. Before the fix, both locks could be held
+    simultaneously by the cancel path, making this a textbook deadlock
+    setup; the fix releases the job lock (committing that transaction)
+    before ever attempting the approval lock, so the two threads can only
+    ever serialize, never deadlock. Mirrors `approvals/tests/
+    test_services.py`'s own `test_concurrent_approve_and_reject_serialize`
+    pattern exactly."""
+    owner = register_user(email="racer-owner3@test.dev", password=PASSWORD, name="Owner3")
+    workspace = Workspace.objects.get(owner=owner)
+    admin = register_user(email="racer-admin3@test.dev", password=PASSWORD, name="Admin3")
+    WorkspaceMember.objects.create(workspace=workspace, user=admin, role=WorkspaceMember.Role.ADMIN)
+    repo = HarnessRepo.objects.create(
+        workspace=workspace,
+        name="jarvis-os",
+        git_url="git@example.com:x/y.git",
+        enabled=True,
+        test_command="pytest -q",
+    )
+    job = create_harness_implementation_job(
+        workspace=workspace, actor=owner, repo=repo, goal="fix the bug"
+    )
+    # Isolates this test to the approve-vs-cancel locking race this
+    # finding is actually about -- conftest.py sets CELERY_TASK_ALWAYS_
+    # EAGER=True globally, so without this, approve_request's own
+    # transaction.on_commit would run the REAL (unmocked) implementation
+    # job pipeline synchronously inline, adding an uncontrolled cascade
+    # of its own locking that has nothing to do with this specific race.
+    monkeypatch.setattr("harness.tasks.run_harness_implementation_job.delay", mock.Mock())
+
+    barrier = threading.Barrier(2)
+    results = {}
+    errors = []
+
+    def approve_worker():
+        try:
+            barrier.wait(timeout=5)
+            row = ApprovalRequest.objects.get(pk=job.gate_a_request_id)
+            try:
+                approve_request(approval_request=row, actor=admin, channel=CHANNEL_WEB)
+                results["approve"] = "succeeded"
+            except InvalidTransition:
+                results["approve"] = "invalid_transition"
+        except Exception as exc:  # pragma: no cover - surfaced via `errors`
+            errors.append(exc)
+        finally:
+            connection.close()
+
+    def cancel_worker():
+        try:
+            barrier.wait(timeout=5)
+            row = HarnessImplementationJob.objects.get(pk=job.pk)
+            cancel_harness_implementation_job(job=row, actor=admin)
+            results["cancel"] = "completed"
+        except Exception as exc:  # pragma: no cover - surfaced via `errors`
+            errors.append(exc)
+        finally:
+            connection.close()
+
+    t1 = threading.Thread(target=approve_worker)
+    t2 = threading.Thread(target=cancel_worker)
+    t1.start()
+    t2.start()
+    t1.join(timeout=10)
+    t2.join(timeout=10)
+
+    assert not errors, errors
+    assert results.get("cancel") == "completed"
+    assert results.get("approve") in ("succeeded", "invalid_transition")
+    job.refresh_from_db()
+    assert job.status in (
+        HarnessImplementationJob.Status.CANCELLED,
+        HarnessImplementationJob.Status.IMPLEMENTING,
+    )
