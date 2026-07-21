@@ -12,6 +12,20 @@
 # read-only` is this repo's own already-proven non-interactive invocation
 # (the orchestration protocol this session itself follows).
 #
+# `2>&1` (Codex code-review P1, branch 3 round 11, confirmed by directly
+# running `codex exec` and inspecting its two streams): the CLI writes its
+# actual transcript -- session banner, echoed prompt, reasoning/tool
+# output -- to STDERR, with only the bare final-answer line on STDOUT.
+# `runner.capture_logs()` (`docker logs`) only ever returns the
+# container's stdout, so without this redirect, a review's `raw_output`
+# would be just that one bare line -- not the real transcript the review
+# pipeline's gateway call is supposed to summarize a verdict from, and not
+# obviously empty either (so it wouldn't even fail closed). Combining the
+# streams here, before either ever leaves the container, is the narrowest
+# fix: it doesn't touch `capture_logs()` itself (shared by every job
+# type) or Claude Code's own wrapper (which uses `--output-format json`
+# and isn't affected).
+#
 # Write mode (`--test-command` present, Phase 3): [TODO: verify the
 # correct Codex CLI sandbox mode for unattended write access against
 # current vendor docs before this ships for real -- `--sandbox
@@ -52,8 +66,9 @@ while [ $# -gt 0 ]; do
 done
 
 if [ -z "$test_command" ]; then
-    # Read-only discovery/review path (Phase 2, unchanged).
-    exec codex exec --sandbox read-only "$goal"
+    # Read-only discovery/review path (Phase 2, unchanged except for the
+    # `2>&1` above).
+    exec codex exec --sandbox read-only "$goal" 2>&1
 fi
 
 # --- Write mode (Phase 3 branch 1) ---
