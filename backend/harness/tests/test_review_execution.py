@@ -219,6 +219,39 @@ class TestRunHarnessReviewJobSuccess:
         assert job.status == HarnessImplementationJob.Status.PENDING_GATE_B
         assert job.gate_b_request is not None
 
+    def test_review_write_and_job_transition_are_atomic(
+        self, workspace, owner, repo, monkeypatch, review_prompt
+    ):
+        """Codex code-review P1, branch 3 round 3: an earlier version
+        committed the review as `succeeded` in its own transaction, then
+        advanced the job in a SEPARATE, later transaction -- a crash (or
+        any exception) between the two left a terminal, already-decided
+        review with the job stuck `pending_review` forever, invisible to
+        `resolve_running_review_after_unexpected_error`'s own `running`-
+        only rescue. If the job-transition step raises something OTHER
+        than the expected `HarnessInvalidTransition`, the review's own
+        write must roll back too, leaving it `running` -- exactly what
+        the rescue path DOES know how to find and retry."""
+        job = make_job(workspace, repo, created_by=owner)
+        review = make_review(workspace, job)
+        _patch_happy_path_runner(monkeypatch, raw_output="raw transcript")
+        with (
+            mock.patch.object(
+                review_execution,
+                "_produce_review_summary",
+                return_value=("looks good", [], "approved"),
+            ),
+            mock.patch(
+                "harness.services.request_harness_push", side_effect=RuntimeError("db exploded")
+            ),
+            pytest.raises(RuntimeError),
+        ):
+            review_execution.run_harness_review_job(review.id)
+        review.refresh_from_db()
+        job.refresh_from_db()
+        assert review.status == HarnessReview.Status.RUNNING
+        assert job.status == HarnessImplementationJob.Status.PENDING_REVIEW
+
     def test_changes_requested_verdict_fails_the_job(
         self, workspace, owner, repo, monkeypatch, review_prompt
     ):
@@ -375,6 +408,24 @@ class TestRunHarnessReviewJobFailurePaths:
         monkeypatch.setattr(review_execution.runner, "launch_container", launch_mock)
         review_execution.run_harness_review_job(review.id)
         launch_mock.assert_not_called()
+
+
+class TestBuildReviewGoal:
+    def test_instructs_safe_diff_flags(self):
+        """Codex code-review P1, branch 3 round 3: a bare `git diff` obeys
+        the reviewed commit's own tracked `.gitattributes` -- a committed
+        `*.py -diff` line makes git print `Binary files ... differ`
+        instead of the real changed lines, hiding exactly the content
+        under review. `--text` unconditionally overrides that
+        classification (verified empirically against a real `-diff`-
+        marked file); `--no-ext-diff`/`--no-textconv` are additional
+        defense-in-depth."""
+        job = HarnessImplementationJob(goal="fix the bug", base_commit_sha="base123")
+        goal_text = review_execution._build_review_goal(job)
+        assert "git diff --text --no-ext-diff --no-textconv base123..HEAD" in goal_text
+        assert "git diff base123..HEAD" not in goal_text.replace(
+            "git diff --text --no-ext-diff --no-textconv base123..HEAD", ""
+        )
 
 
 class TestParseReviewResponse:

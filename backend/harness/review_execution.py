@@ -224,14 +224,33 @@ def _build_review_goal(job):
     immutable, host-resolved `base_commit_sha` the implementation phase
     already recorded, never a mutable ref the agent could have
     rewritten. `HEAD` in the clean clone is `produced_commit_sha`, the
-    exact commit `prepare_review_clone` verified and checked out."""
+    exact commit `prepare_review_clone` verified and checked out.
+
+    `--text --no-ext-diff --no-textconv` (Codex code-review P1, branch 3
+    round 3): round 1's clean-clone fix closes CONFIG-driven diff
+    manipulation (`diff.external`/`textconv`, which need a matching
+    `.git/config` entry the clean clone never has), but a bare `git diff`
+    is still governed by the reviewed commit's own TRACKED
+    `.gitattributes` -- a committed `*.py -diff` line makes git treat
+    matching files as binary for diff purposes with zero config needed
+    at all, printing `Binary files ... differ` instead of the real
+    changed lines, letting an implementation hide exactly the content
+    under review while still being eligible for an "approved" verdict.
+    `--text` unconditionally overrides that binary/`-diff` classification
+    (verified empirically: without it, a `-diff`-marked file's real
+    changes never appear in the diff at all; with it, they do,
+    regardless of what the file's own attributes claim) -- `--no-ext-diff`/
+    `--no-textconv` are additional defense-in-depth against the
+    config-driven mechanisms round 1 already neutralizes structurally."""
     return (
         f"Review the code changes committed on this branch. The stated goal of the "
         f"change was: {job.goal}\n\n"
-        f"Run `git diff {job.base_commit_sha}..HEAD` to see exactly what changed, then "
-        f"review it for correctness, safety, and whether it actually accomplishes the "
-        f"stated goal. Conclude with a clear verdict: approve the change, or request "
-        f"changes and explain what's wrong."
+        f"Run `git diff --text --no-ext-diff --no-textconv {job.base_commit_sha}..HEAD` to "
+        f"see exactly what changed (always use these exact flags -- do not run a bare "
+        f"`git diff`, since a committed `.gitattributes` could otherwise hide real changes "
+        f"behind a binary-file placeholder), then review it for correctness, safety, and "
+        f"whether it actually accomplishes the stated goal. Conclude with a clear verdict: "
+        f"approve the change, or request changes and explain what's wrong."
     )
 
 
@@ -383,10 +402,26 @@ def run_harness_review_job(review_id):
         if clean_clone_dir:
             _safe_cleanup_directory(clean_clone_dir)
 
+    # Codex code-review P1, branch 3 round 3: every path below this point
+    # wraps BOTH the review's own terminal-state write AND the
+    # implementation job's consequent transition in ONE outer
+    # `transaction.atomic()` -- an earlier version committed the review
+    # as `succeeded`/`failed` first, then advanced/failed the job as a
+    # SEPARATE, later transaction. A worker crash (or any exception) in
+    # the gap between the two left a terminal, already-decided review
+    # with an implementation job still stuck `pending_review` forever --
+    # `resolve_running_review_after_unexpected_error`'s own rescue only
+    # ever looks at reviews still `running`, so a review that had already
+    # committed as terminal was invisible to it. Nesting these calls
+    # inside one outer atomic block means either BOTH writes land, or
+    # (if anything raises) NEITHER does -- a crash mid-way leaves the
+    # review still `running`, which the unexpected-error resolver DOES
+    # correctly catch and retry.
     if status != "succeeded" or not raw_output:
-        _finalize_review_unavailable(
-            review, removal_confirmed=removal_confirmed, started_monotonic=started_monotonic
-        )
+        with transaction.atomic():
+            _finalize_review_unavailable(
+                review, removal_confirmed=removal_confirmed, started_monotonic=started_monotonic
+            )
         return
 
     bounded_raw, fenced_transcript = _fence_and_bound_transcript(raw_output)
@@ -394,57 +429,59 @@ def run_harness_review_job(review_id):
         summary, findings, verdict = _produce_review_summary(job, fenced_transcript)
     except (GatewayError, ImproperlyConfigured):
         logger.exception("Harness review %s summarization failed", review_id)
-        _finalize_review_unavailable(
-            review,
-            removal_confirmed=removal_confirmed,
-            started_monotonic=started_monotonic,
-            raw_transcript=bounded_raw,
-        )
+        with transaction.atomic():
+            _finalize_review_unavailable(
+                review,
+                removal_confirmed=removal_confirmed,
+                started_monotonic=started_monotonic,
+                raw_transcript=bounded_raw,
+            )
         return
 
     if verdict not in (HarnessReview.Verdict.APPROVED, HarnessReview.Verdict.CHANGES_REQUESTED):
-        _finalize_review_unavailable(
-            review,
-            removal_confirmed=removal_confirmed,
-            started_monotonic=started_monotonic,
-            raw_transcript=bounded_raw,
-        )
+        with transaction.atomic():
+            _finalize_review_unavailable(
+                review,
+                removal_confirmed=removal_confirmed,
+                started_monotonic=started_monotonic,
+                raw_transcript=bounded_raw,
+            )
         return
 
-    _finalize_review_success(
-        review,
-        summary=summary,
-        findings=findings,
-        verdict=verdict,
-        raw_transcript=bounded_raw,
-        removal_confirmed=removal_confirmed,
-        started_monotonic=started_monotonic,
-    )
-
-    # Advance/fail the implementation job based on the now-durable verdict
-    # (Codex-review-hardened service functions -- both already re-check
-    # the job's live status before acting, so a job cancelled while
-    # review was running is a safe no-op here, not a special case this
-    # module needs to detect itself).
     from harness.services import (
         HarnessInvalidTransition,
         fail_implementation_job_for_review,
         request_harness_push,
     )
 
-    review.refresh_from_db()
-    if verdict == HarnessReview.Verdict.APPROVED:
-        try:
-            request_harness_push(job=job, review=review)
-        except HarnessInvalidTransition:
-            logger.info(
-                "Harness implementation job %s no longer awaiting review completion "
-                "(review %s approved, but the job's status has since moved on)",
-                job.pk,
-                review.pk,
-            )
-    else:
-        fail_implementation_job_for_review(job=job, review=review)
+    with transaction.atomic():
+        _finalize_review_success(
+            review,
+            summary=summary,
+            findings=findings,
+            verdict=verdict,
+            raw_transcript=bounded_raw,
+            removal_confirmed=removal_confirmed,
+            started_monotonic=started_monotonic,
+        )
+        review.refresh_from_db()
+        # Advance/fail the implementation job based on the now-durable
+        # verdict (Codex-review-hardened service functions -- both
+        # already re-check the job's live status before acting, so a job
+        # cancelled while review was running is a safe no-op here, not a
+        # special case this module needs to detect itself).
+        if verdict == HarnessReview.Verdict.APPROVED:
+            try:
+                request_harness_push(job=job, review=review)
+            except HarnessInvalidTransition:
+                logger.info(
+                    "Harness implementation job %s no longer awaiting review completion "
+                    "(review %s approved, but the job's status has since moved on)",
+                    job.pk,
+                    review.pk,
+                )
+        else:
+            fail_implementation_job_for_review(job=job, review=review)
 
 
 def _finalize_review_success(
@@ -587,6 +624,11 @@ def resolve_running_review_after_unexpected_error(review_id):
     if review.container_id:
         _teardown_container(review.container_id)
         removal_confirmed = _safe_remove_container(review.container_id)
-    _finalize_review_unavailable(
-        review, removal_confirmed=removal_confirmed, started_monotonic=time.monotonic()
-    )
+    # Same combined-transaction discipline as `run_harness_review_job`'s
+    # own calls (Codex code-review P1, branch 3 round 3) -- the review's
+    # terminal write and the implementation job's consequent failure must
+    # land together, or neither does.
+    with transaction.atomic():
+        _finalize_review_unavailable(
+            review, removal_confirmed=removal_confirmed, started_monotonic=time.monotonic()
+        )
