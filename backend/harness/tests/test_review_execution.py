@@ -363,6 +363,41 @@ class TestRunHarnessReviewJobFailurePaths:
         assert job.status == HarnessImplementationJob.Status.FAILED
         assert job.failure_reason == HarnessImplementationJob.FailureReason.REVIEW_UNAVAILABLE
 
+    def test_failed_container_with_logs_preserves_raw_transcript(
+        self, workspace, owner, repo, monkeypatch
+    ):
+        """Codex code-review P2, branch 3 round 8: a container that timed
+        out or exited non-zero can still have emitted real diagnostic
+        logs before failing -- discarding them here left the operator
+        with an empty `raw_transcript` for common `review_unavailable`
+        causes (missing CODEX_API_KEY, a mid-run CLI crash) even though
+        `_wait_for_review_container` had already captured them."""
+        job = make_job(workspace, repo, created_by=owner)
+        review = make_review(workspace, job)
+        monkeypatch.setattr(review_execution.runner, "create_bundle", mock.Mock())
+        monkeypatch.setattr(
+            review_execution.runner,
+            "prepare_review_clone",
+            mock.Mock(return_value="/tmp/harness-review-clean-clone-x"),
+        )
+        monkeypatch.setattr(
+            review_execution.runner, "image_for_agent", mock.Mock(return_value="img:1")
+        )
+        monkeypatch.setattr(review_execution.runner, "launch_container", mock.Mock())
+        monkeypatch.setattr(review_execution.runner, "remove_container", mock.Mock())
+        monkeypatch.setattr(review_execution.runner, "cleanup_directory", mock.Mock())
+        monkeypatch.setattr(
+            review_execution,
+            "_wait_for_review_container",
+            mock.Mock(return_value=("failed", "error: CODEX_API_KEY is not set\ncrash traceback")),
+        )
+        review_execution.run_harness_review_job(review.id)
+        review.refresh_from_db()
+        job.refresh_from_db()
+        assert review.status == HarnessReview.Status.FAILED
+        assert job.failure_reason == HarnessImplementationJob.FailureReason.REVIEW_UNAVAILABLE
+        assert "CODEX_API_KEY is not set" in review.raw_transcript
+
     def test_empty_transcript_marks_review_unavailable(self, workspace, owner, repo, monkeypatch):
         job = make_job(workspace, repo, created_by=owner)
         review = make_review(workspace, job)

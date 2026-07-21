@@ -528,9 +528,20 @@ def run_harness_review_job(review_id):
     # review still `running`, which the unexpected-error resolver DOES
     # correctly catch and retry.
     if status != "succeeded" or not raw_output:
+        # Codex code-review P2, branch 3 round 8: a container that timed
+        # out or exited non-zero can still have emitted real logs before
+        # failing (`_wait_for_review_container` returns them as
+        # `raw_output` either way) -- an earlier version discarded them
+        # here, leaving `raw_transcript` empty for the operator on common
+        # `review_unavailable` causes like a missing `CODEX_API_KEY` or a
+        # mid-run CLI crash, even though the diagnostic was captured.
+        bounded_raw = _fence_and_bound_transcript(raw_output)[0] if raw_output else ""
         with transaction.atomic():
             _finalize_review_unavailable(
-                review, removal_confirmed=removal_confirmed, started_monotonic=started_monotonic
+                review,
+                removal_confirmed=removal_confirmed,
+                started_monotonic=started_monotonic,
+                raw_transcript=bounded_raw,
             )
         return
 
