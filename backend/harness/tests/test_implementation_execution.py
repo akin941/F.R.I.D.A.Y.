@@ -250,6 +250,36 @@ class TestRunHarnessImplementationJobFailurePaths:
         implementation_execution.runner.cleanup_directory.assert_called_once_with(
             "/tmp/harness-worktree-x"
         )
+        # Codex code-review P2, branch 4 round 3: round 2's own fix
+        # persists `worktree_path` as soon as the clone succeeds, but
+        # `_fail_and_cleanup` (every non-success terminal path) didn't
+        # clear it once the directory was actually removed -- the row
+        # was left FAILED while still pointing at a directory that no
+        # longer existed.
+        assert job.worktree_path == ""
+
+    def test_fail_and_cleanup_preserves_worktree_path_when_cleanup_fails(
+        self, workspace, owner, repo, monkeypatch, tmp_path
+    ):
+        """Codex code-review P2, branch 4 round 3 (companion to the test
+        above): a genuinely failed cleanup must leave `worktree_path`
+        populated, not clear it -- that's what lets
+        `_sweep_leaked_terminal_worktree` (this same round) find and
+        retry it later."""
+        worktree = tmp_path / "worktree"
+        worktree.mkdir()
+        job = make_job(workspace, repo, created_by=owner)
+        _patch_happy_path_runner(monkeypatch, result=_wrapper_result(passed=False, exit_code=1))
+        implementation_execution.runner.clone_repo_writable.return_value = str(worktree)
+        # A no-op stand-in for `runner.cleanup_directory` -- the real
+        # directory is deliberately left behind so `os.path.exists`
+        # finds it still there afterward, mirroring the push-side test
+        # of the identical confirmed-cleanup discipline.
+        monkeypatch.setattr(implementation_execution.runner, "cleanup_directory", mock.Mock())
+        implementation_execution.run_harness_implementation_job(job.id)
+        job.refresh_from_db()
+        assert job.status == HarnessImplementationJob.Status.FAILED
+        assert job.worktree_path == str(worktree)
 
     def test_missing_result_file_fails_closed(self, workspace, owner, repo, monkeypatch):
         job = make_job(workspace, repo, created_by=owner)
@@ -862,3 +892,78 @@ class TestRecoveryScan:
         job.refresh_from_db()
         assert job.status == HarnessImplementationJob.Status.PENDING_REVIEW
         assert worktree.exists()
+
+    @pytest.mark.parametrize(
+        "status",
+        [
+            HarnessImplementationJob.Status.SUCCEEDED,
+            HarnessImplementationJob.Status.FAILED,
+            HarnessImplementationJob.Status.CANCELLED,
+        ],
+    )
+    def test_retries_removal_of_a_leaked_terminal_worktree(
+        self, workspace, owner, repo, settings, tmp_path, status
+    ):
+        """Codex code-review P2, branch 4 round 3: a genuinely failed
+        `_apply_worktree_cleanup` at finalize time leaves a terminal job
+        still pointing at a directory that was never actually removed --
+        this case is the only thing that ever revisits it, mirroring
+        `harness.execution`'s identical leaked-terminal-container case."""
+        settings.HARNESS_LEAKED_CONTAINER_RECOVERY_GRACE_SECONDS = 1
+        worktree = tmp_path / "worktree"
+        worktree.mkdir()
+        job = make_job(
+            workspace, repo, created_by=owner, status=status, worktree_path=str(worktree)
+        )
+        stale_updated = timezone.now() - timedelta(seconds=100)
+        HarnessImplementationJob.objects.filter(pk=job.pk).update(updated_at=stale_updated)
+
+        implementation_execution.recover_stale_harness_implementation_jobs()
+
+        job.refresh_from_db()
+        assert job.worktree_path == ""
+        assert not worktree.exists()
+        assert job.status == status
+
+    def test_does_not_sweep_a_freshly_finalized_terminal_worktree(
+        self, workspace, owner, repo, settings, tmp_path
+    ):
+        settings.HARNESS_LEAKED_CONTAINER_RECOVERY_GRACE_SECONDS = 300
+        worktree = tmp_path / "worktree"
+        worktree.mkdir()
+        job = make_job(
+            workspace,
+            repo,
+            created_by=owner,
+            status=HarnessImplementationJob.Status.FAILED,
+            worktree_path=str(worktree),
+        )
+        implementation_execution.recover_stale_harness_implementation_jobs()
+        job.refresh_from_db()
+        assert job.worktree_path == str(worktree)
+        assert worktree.exists()
+
+    def test_leaves_worktree_path_populated_when_removal_still_fails(
+        self, workspace, owner, repo, monkeypatch, settings, tmp_path
+    ):
+        settings.HARNESS_LEAKED_CONTAINER_RECOVERY_GRACE_SECONDS = 1
+        worktree = tmp_path / "worktree"
+        worktree.mkdir()
+        job = make_job(
+            workspace,
+            repo,
+            created_by=owner,
+            status=HarnessImplementationJob.Status.FAILED,
+            worktree_path=str(worktree),
+        )
+        stale_updated = timezone.now() - timedelta(seconds=100)
+        HarnessImplementationJob.objects.filter(pk=job.pk).update(updated_at=stale_updated)
+        # A no-op stand-in for `runner.cleanup_directory` -- the real
+        # directory is deliberately left behind so `os.path.exists` finds
+        # it still there afterward, confirming removal genuinely failed.
+        monkeypatch.setattr(implementation_execution.runner, "cleanup_directory", mock.Mock())
+
+        implementation_execution.recover_stale_harness_implementation_jobs()
+
+        job.refresh_from_db()
+        assert job.worktree_path == str(worktree)

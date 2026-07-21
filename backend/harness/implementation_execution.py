@@ -46,6 +46,12 @@ from harness.models import HarnessImplementationJob
 
 logger = logging.getLogger(__name__)
 
+_IMPLEMENTATION_TERMINAL_STATUSES = (
+    HarnessImplementationJob.Status.SUCCEEDED,
+    HarnessImplementationJob.Status.FAILED,
+    HarnessImplementationJob.Status.CANCELLED,
+)
+
 
 def _claim_implementation_job(job_id):
     """`implementing` is already set by `create_harness_implement_execution`
@@ -180,9 +186,23 @@ def _fail_and_cleanup(
     `tests_failed`) -- the CLI agent already spent real tokens/cost by
     that point regardless of what the separate test command or wrapper
     result later did, so those callers now pass the real figures through
-    instead of silently under-recording actual spend."""
+    instead of silently under-recording actual spend.
+
+    Clears `worktree_path` once cleanup is confirmed (Codex code-review
+    P2, branch 4 round 3): `run_harness_implementation_job` now persists
+    `worktree_path` to the DB as soon as the clone succeeds (round 2's
+    own fix, for the recovery scan's benefit), but this function was
+    still only cleaning up `workspace_dir` on disk without ever clearing
+    the now-stale DB pointer -- every terminal path reached through here
+    (tests failed, result unavailable, budget exceeded, a launch error
+    after the clone) left the row FAILED/CANCELLED while still pointing
+    at a directory that no longer existed. Uses `_apply_worktree_cleanup`
+    -- the same confirmed-cleanup discipline the push finalizers already
+    use -- so a genuinely failed cleanup still leaves the path populated
+    for `_sweep_leaked_terminal_worktree` to retry."""
+    worktree_cleanup_confirmed = True
     if workspace_dir:
-        _safe_cleanup_directory(workspace_dir)
+        worktree_cleanup_confirmed = _safe_cleanup_directory(workspace_dir)
     latency_ms = int((time.monotonic() - started_monotonic) * 1000)
     with transaction.atomic():
         locked = HarnessImplementationJob.objects.select_for_update(of=("self",)).get(pk=job.pk)
@@ -214,6 +234,9 @@ def _fail_and_cleanup(
         ]
         if test_result is not None:
             update_fields.append("test_result")
+        _apply_worktree_cleanup(
+            locked, update_fields, worktree_cleanup_confirmed=worktree_cleanup_confirmed
+        )
         locked.save(update_fields=update_fields)
         record_external_usage(
             workspace=locked.workspace,
@@ -829,7 +852,21 @@ def recover_stale_harness_implementation_jobs():
        reclaims the abandoned directory, or fails the job, if the
        decision just never comes; see `_sweep_expired_worktree_job`'s
        own docstring for why this is deliberately scoped to
-       `pending_gate_b` only, not `pending_review` too."""
+       `pending_gate_b` only, not `pending_review` too.
+    6. A terminal job (`succeeded`/`failed`/`cancelled`) still carrying a
+       non-empty `worktree_path`, past
+       `HARNESS_LEAKED_CONTAINER_RECOVERY_GRACE_SECONDS` since its last
+       update (Codex code-review P2, branch 4 round 3): every finalize
+       path's own cleanup attempt (`_apply_worktree_cleanup`'s confirmed-
+       before-clearing discipline) genuinely failed, and unlike case 2,
+       a terminal job is never swept by the `status=implementing` scan
+       above -- without this case the directory would persist on the
+       host indefinitely, with nothing ever revisiting it. Mirrors
+       `harness.execution.recover_stale_harness_jobs`'s identical
+       leaked-terminal-container case, one resource type over -- reusing
+       the same grace-period setting despite its container-specific
+       name, since the underlying "retry a confirmed-failed cleanup"
+       shape is identical."""
     dispatch_cutoff = timezone.now() - timedelta(
         seconds=settings.HARNESS_DISPATCH_RECOVERY_GRACE_SECONDS
     )
@@ -894,6 +931,20 @@ def recover_stale_harness_implementation_jobs():
     )
     for job_id in expired_worktree_ids:
         _sweep_expired_worktree_job(job_id)
+
+    # Case 6: terminal job, leaked worktree.
+    leaked_worktree_cutoff = timezone.now() - timedelta(
+        seconds=settings.HARNESS_LEAKED_CONTAINER_RECOVERY_GRACE_SECONDS
+    )
+    leaked_worktree_ids = list(
+        HarnessImplementationJob.objects.filter(
+            status__in=_IMPLEMENTATION_TERMINAL_STATUSES, updated_at__lt=leaked_worktree_cutoff
+        )
+        .exclude(worktree_path="")
+        .values_list("pk", flat=True)
+    )
+    for job_id in leaked_worktree_ids:
+        _sweep_leaked_terminal_worktree(job_id)
 
 
 def _recover_stale_implementing_job(job_id):
@@ -1000,6 +1051,31 @@ def _sweep_expired_worktree_job(job_id):
         },
     )
     if gate_b_request is not None:
-        from approvals.services import revoke_request
+        from harness.services import _revoke_gate_request_best_effort
 
-        revoke_request(approval_request=gate_b_request, actor=locked.created_by)
+        _revoke_gate_request_best_effort(gate_b_request, locked.created_by)
+
+
+def _sweep_leaked_terminal_worktree(job_id):
+    """One iteration of case 6 above. Re-fetches under lock first
+    (mirrors `harness.execution._sweep_leaked_terminal_container`'s
+    identical discipline) so two overlapping scans don't both attempt
+    removal of the same directory -- the filesystem call itself happens
+    OUTSIDE the lock, same as every other recovery case in this
+    module."""
+    with transaction.atomic():
+        locked = (
+            HarnessImplementationJob.objects.select_for_update(of=("self",))
+            .filter(pk=job_id, status__in=_IMPLEMENTATION_TERMINAL_STATUSES)
+            .exclude(worktree_path="")
+            .first()
+        )
+        if locked is None:
+            return False
+        worktree_path = locked.worktree_path
+    if _safe_cleanup_directory(worktree_path):
+        HarnessImplementationJob.objects.filter(pk=job_id, worktree_path=worktree_path).update(
+            worktree_path=""
+        )
+        return True
+    return False
