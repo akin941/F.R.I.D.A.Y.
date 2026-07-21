@@ -762,6 +762,46 @@ class TestRecoveryScan:
         remove_mock.assert_called_once_with("orphan-impl-1")
         assert not worktree.exists()
 
+    def test_claim_does_not_delete_worktree_of_a_job_that_already_succeeded(
+        self, workspace, owner, repo, monkeypatch, tmp_path
+    ):
+        """Codex code-review P2, branch 4 round 4: an earlier version
+        read the stale job unlocked, tore down its container and deleted
+        its worktree, and only THEN did the real, locked status check --
+        so a live worker that had ALREADY finished (moved to
+        `pending_review`) between the scan's own stale-id query and this
+        specific recovery attempt would still have its now-needed
+        worktree destroyed, even though the resulting DB write would
+        have correctly no-op'd. The claim (re-check + transition,
+        atomically, before ANY cleanup) must find nothing to do at all
+        in this case."""
+        worktree = tmp_path / "worktree"
+        worktree.mkdir()
+        stale_started = timezone.now() - timedelta(seconds=100)
+        job = make_job(
+            workspace,
+            repo,
+            created_by=owner,
+            status=HarnessImplementationJob.Status.PENDING_REVIEW,
+            started_at=stale_started,
+            container_id="orphan-impl-1",
+            worktree_path=str(worktree),
+        )
+        remove_mock = mock.Mock()
+        monkeypatch.setattr(implementation_execution.runner, "remove_container", remove_mock)
+        stop_mock = mock.Mock()
+        monkeypatch.setattr(implementation_execution.runner, "stop_container", stop_mock)
+
+        threshold = timezone.now() - timedelta(seconds=1)
+        implementation_execution._recover_stale_implementing_job(job.id, threshold)
+
+        remove_mock.assert_not_called()
+        stop_mock.assert_not_called()
+        job.refresh_from_db()
+        assert job.status == HarnessImplementationJob.Status.PENDING_REVIEW
+        assert job.worktree_path == str(worktree)
+        assert worktree.exists()
+
     def test_does_not_recover_an_implementing_job_still_within_its_window(
         self, workspace, owner, repo, monkeypatch, settings
     ):
@@ -822,6 +862,32 @@ class TestRecoveryScan:
         assert job.failure_reason == HarnessImplementationJob.FailureReason.TIMEOUT
         assert job.worktree_path == ""
         assert not worktree.exists()
+
+    def test_pushing_claim_does_not_delete_worktree_of_a_job_that_already_succeeded(
+        self, workspace, owner, repo, tmp_path
+    ):
+        """Codex code-review P2, branch 4 round 4: same race as the
+        implementing-side test above, one phase later -- a live worker
+        that already succeeded (moved to `succeeded`) between the scan's
+        own stale-id query and this specific recovery attempt must not
+        have its worktree deleted."""
+        worktree = tmp_path / "worktree"
+        worktree.mkdir()
+        stale_started = timezone.now() - timedelta(seconds=100)
+        job = make_job(
+            workspace,
+            repo,
+            created_by=owner,
+            status=HarnessImplementationJob.Status.SUCCEEDED,
+            push_started_at=stale_started,
+            worktree_path=str(worktree),
+        )
+        threshold = timezone.now() - timedelta(seconds=1)
+        implementation_execution._recover_stale_pushing_job(job.id, threshold)
+        job.refresh_from_db()
+        assert job.status == HarnessImplementationJob.Status.SUCCEEDED
+        assert job.worktree_path == str(worktree)
+        assert worktree.exists()
 
     def test_sweeps_expired_worktree_for_pending_gate_b_job(self, workspace, owner, repo, tmp_path):
         worktree = tmp_path / "worktree"

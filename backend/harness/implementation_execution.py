@@ -831,18 +831,27 @@ def recover_stale_harness_implementation_jobs():
        original dispatch actually does arrive later.
     2. `implementing`, `started_at` set, past `HARNESS_MAX_JOB_SECONDS`
        + `HARNESS_RECOVERY_GRACE_SECONDS` since then -- worker crashed
-       mid-run; failed closed via `_fail_and_cleanup`, which re-checks
-       status under its own lock, so an overlapping scan iteration (or
+       mid-run; failed closed via `_claim_stale_implementing_job` (Codex
+       code-review P2, branch 4 round 4), which re-checks status AND
+       transitions atomically under one lock BEFORE any container
+       teardown or worktree cleanup is attempted -- an earlier version
+       cleaned up first and only checked afterward, so a live worker
+       genuinely still finishing at that exact moment could have its
+       still-needed worktree deleted before the check ever ran, even
+       though the resulting DB write itself would have correctly
+       no-op'd. Claiming first means an overlapping scan iteration (or
        a live worker that actually does finish moments later) safely
-       no-ops rather than double-finalizing.
+       finds nothing to do at all, rather than deleting something out
+       from under a race it hasn't actually won.
     3. `pushing`, `push_started_at` unset -- same lost-dispatch shape as
        case 1, one gate later.
     4. `pushing`, `push_started_at` set, same worker-crashed-mid-run
-       shape as case 2 -- failed via `_finalize_push_failure` instead;
-       no container involved in this phase at all (the actual `git
-       push` is a host-side operation, branch 1's own design, never
-       inside a Docker container), so there is nothing to tear down
-       beyond the worktree itself.
+       shape as case 2, and the same claim-before-cleanup fix (round 4)
+       applied one phase later, via `_claim_stale_pushing_job` -- no
+       container involved in this phase at all (the actual `git push`
+       is a host-side operation, branch 1's own design, never inside a
+       Docker container), so only the worktree itself needs protecting
+       from a premature deletion.
     5. The worktree-retention backstop (brief §boundary, this branch):
        a job sitting `pending_gate_b` -- idle, waiting on a human Gate B
        decision, nothing left touching its worktree -- whose
@@ -896,7 +905,7 @@ def recover_stale_harness_implementation_jobs():
         ).values_list("pk", flat=True)
     )
     for job_id in stale_implementing_ids:
-        _recover_stale_implementing_job(job_id)
+        _recover_stale_implementing_job(job_id, running_cutoff)
 
     # Case 3: pushing, dispatch lost.
     stale_pushing_dispatch_ids = list(
@@ -920,7 +929,7 @@ def recover_stale_harness_implementation_jobs():
         ).values_list("pk", flat=True)
     )
     for job_id in stale_pushing_ids:
-        _recover_stale_pushing_job(job_id)
+        _recover_stale_pushing_job(job_id, running_cutoff)
 
     # Case 5: worktree-retention backstop.
     expired_worktree_ids = list(
@@ -947,49 +956,155 @@ def recover_stale_harness_implementation_jobs():
         _sweep_leaked_terminal_worktree(job_id)
 
 
-def _recover_stale_implementing_job(job_id):
-    """One iteration of case 2 above. No separate pre-claim (unlike
-    `harness.execution._claim_stale_job`): `_fail_and_cleanup` itself
-    already re-checks `status == implementing` under its own lock before
-    writing anything, so the worst an overlapping scan iteration can do
-    is redundantly (but harmlessly -- `_teardown_container`/
-    `_safe_remove_container` are themselves safe to call twice) attempt
-    container teardown before losing the actual finalize race."""
-    job = HarnessImplementationJob.objects.filter(
-        pk=job_id, status=HarnessImplementationJob.Status.IMPLEMENTING
-    ).first()
+def _claim_stale_implementing_job(job_id, threshold):
+    """Fenced claim for case 2 above (Codex code-review P2, branch 4
+    round 4), mirroring `harness.execution._claim_stale_job`'s identical
+    discipline: the re-check AND the transition to a terminal status
+    happen atomically, under the SAME lock. An earlier version read the
+    row unlocked first, then tore down its container and cleaned up its
+    worktree, and only THEN called `_fail_and_cleanup` for the real,
+    locked check -- meaning a live worker that was genuinely still
+    finishing (about to succeed, transitioning `implementing` ->
+    `pending_review`, right as this scan caught a stale read) could have
+    its still-needed worktree deleted before that check ever ran, even
+    though the DB write itself would then correctly no-op. Claiming
+    first closes this: either this claim wins the race (the worker's own
+    later write safely no-ops, finding status no longer `implementing`),
+    or the worker already won (this claim finds nothing, returning
+    `None` before ANY cleanup -- container teardown, directory removal
+    -- is ever attempted)."""
+    with transaction.atomic():
+        locked = (
+            HarnessImplementationJob.objects.select_for_update(of=("self",))
+            .filter(
+                pk=job_id,
+                status=HarnessImplementationJob.Status.IMPLEMENTING,
+                started_at__lt=threshold,
+            )
+            .first()
+        )
+        if locked is None:
+            return None
+        cancelled = locked.cancel_requested
+        locked.status = (
+            HarnessImplementationJob.Status.CANCELLED
+            if cancelled
+            else HarnessImplementationJob.Status.FAILED
+        )
+        locked.failure_reason = (
+            HarnessImplementationJob.FailureReason.KILLED
+            if cancelled
+            else HarnessImplementationJob.FailureReason.TIMEOUT
+        )
+        locked.save(update_fields=["status", "failure_reason", "updated_at"])
+        return locked
+
+
+def _recover_stale_implementing_job(job_id, threshold):
+    """One iteration of case 2 above. Claims the row FIRST -- see
+    `_claim_stale_implementing_job`'s own docstring -- then tears down
+    its container and cleans up its worktree, then records the same
+    usage/audit accounting `_fail_and_cleanup` would for a live
+    in-process failure. Duplicated rather than shared with that
+    function: by this point the transition has already happened via the
+    claim, and `_fail_and_cleanup`'s own internal `status == implementing`
+    gate would otherwise just no-op against a row this claim already
+    moved past."""
+    job = _claim_stale_implementing_job(job_id, threshold)
     if job is None:
         return
     removal_confirmed = True
     if job.container_id:
         _teardown_container(job.container_id)
         removal_confirmed = _safe_remove_container(job.container_id)
-    _fail_and_cleanup(
-        job,
-        HarnessImplementationJob.FailureReason.TIMEOUT,
-        workspace_dir=job.worktree_path,
-        removal_confirmed=removal_confirmed,
-        started_monotonic=time.monotonic(),
+    worktree_cleanup_confirmed = (
+        _safe_cleanup_directory(job.worktree_path) if job.worktree_path else True
+    )
+    update_fields = {}
+    if removal_confirmed:
+        update_fields["container_id"] = ""
+    if worktree_cleanup_confirmed:
+        update_fields["worktree_path"] = ""
+    if update_fields:
+        HarnessImplementationJob.objects.filter(pk=job.pk).update(**update_fields)
+    record_external_usage(
+        workspace=job.workspace,
+        purpose="harness.implementation",
+        backend=f"harness_cli:{job.agent}",
+        input_tokens=0,
+        output_tokens=0,
+        estimated_cost=Decimal("0"),
+        latency_ms=0,
+        success=False,
+        actor=job.created_by,
+        error_type=job.failure_reason,
+        context_report={"usage_source": "unavailable", "recovered": True},
+    )
+    record_audit(
+        action="harness.implementation_job_failed",
+        actor=job.created_by,
+        workspace=job.workspace,
+        resource=job,
+        metadata={"failure_reason": job.failure_reason, "recovered": True},
     )
 
 
-def _recover_stale_pushing_job(job_id):
-    """One iteration of case 4 above. `_finalize_push_failure` itself
-    already re-checks `status == pushing` under its own lock, same
-    reasoning as `_recover_stale_implementing_job`'s docstring."""
-    job = HarnessImplementationJob.objects.filter(
-        pk=job_id, status=HarnessImplementationJob.Status.PUSHING
-    ).first()
+def _claim_stale_pushing_job(job_id, threshold):
+    """Fenced claim for case 4 above, mirroring
+    `_claim_stale_implementing_job`'s identical discipline one phase
+    later -- see that function's own docstring for the full race this
+    closes. Never the `cancelled` branch `_claim_stale_implementing_job`
+    has: `_finalize_push_failure` (the live in-process equivalent this
+    mirrors) has no such branch either -- a cancellation mid-push is
+    handled entirely by its own dedicated checkpoint right before the
+    network push, a genuinely different code path from a stuck/crashed
+    push this recovery case exists for."""
+    with transaction.atomic():
+        locked = (
+            HarnessImplementationJob.objects.select_for_update(of=("self",))
+            .filter(
+                pk=job_id,
+                status=HarnessImplementationJob.Status.PUSHING,
+                push_started_at__lt=threshold,
+            )
+            .first()
+        )
+        if locked is None:
+            return None
+        locked.status = HarnessImplementationJob.Status.FAILED
+        locked.failure_reason = HarnessImplementationJob.FailureReason.TIMEOUT
+        locked.push_result = {
+            "pushed": False,
+            "error": "recovered: no live worker finalized this push in time",
+        }
+        locked.save(update_fields=["status", "failure_reason", "push_result", "updated_at"])
+        return locked
+
+
+def _recover_stale_pushing_job(job_id, threshold):
+    """One iteration of case 4 above. Claims the row FIRST -- see
+    `_claim_stale_pushing_job`'s own docstring -- before ever attempting
+    worktree cleanup, for the identical reason
+    `_recover_stale_implementing_job` does: a live worker that's
+    genuinely still finishing (about to succeed, or mid-push) right as
+    this scan catches a stale read must never have its worktree deleted
+    out from under it before it's actually done with it (`run_harness_
+    push_job` bundles from the worktree before the actual network
+    push)."""
+    job = _claim_stale_pushing_job(job_id, threshold)
     if job is None:
         return
     worktree_cleanup_confirmed = (
         _safe_cleanup_directory(job.worktree_path) if job.worktree_path else True
     )
-    _finalize_push_failure(
-        job,
-        HarnessImplementationJob.FailureReason.TIMEOUT,
-        error="recovered: no live worker finalized this push in time",
-        worktree_cleanup_confirmed=worktree_cleanup_confirmed,
+    if worktree_cleanup_confirmed:
+        HarnessImplementationJob.objects.filter(pk=job.pk).update(worktree_path="")
+    record_audit(
+        action="harness.implementation_job_failed",
+        actor=job.created_by,
+        workspace=job.workspace,
+        resource=job,
+        metadata={"failure_reason": job.failure_reason, "recovered": True},
     )
 
 
