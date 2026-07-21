@@ -588,14 +588,22 @@ def cancel_harness_implementation_job(*, job, actor):
     return locked
 
 
-def _revoke_gate_request_best_effort(approval_request, actor):
+def _revoke_gate_request_best_effort(approval_request, actor=None):
     """See `cancel_harness_implementation_job`'s own docstring for why
     this must never raise: the cancellation it's called from has
     already committed by this point, and a stale approval request left
     behind on a rare deadlock is a UX inconvenience, not a security
     issue -- `harness.tools`'s own status re-checks are the actual
     guard against it being decided into reviving a job that's already
-    gone."""
+    gone.
+
+    `actor` is optional (Codex code-review P2, branch 4 round 6): the
+    worktree-retention sweep (`harness.implementation_execution.
+    _sweep_expired_worktree_job`) calls this with no actor at all -- a
+    passive system timeout, not a human choosing to withdraw anything --
+    and `revoke_request`/`record_revoked` record that correctly as a
+    `SYSTEM`-attributed audit entry only when `actor` is genuinely
+    `None`, never a human actor synthesized from the job's own creator."""
     try:
         revoke_request(approval_request=approval_request, actor=actor)
     except Exception:

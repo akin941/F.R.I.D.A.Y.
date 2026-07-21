@@ -918,6 +918,12 @@ class TestRecoveryScan:
         assert job.worktree_path == ""
         assert not worktree.exists()
         assert gate_b_request.status == ApprovalRequest.Status.EXPIRED
+        # Codex code-review P2, branch 4 round 6: this is a passive
+        # system timeout, not a human choosing to withdraw the request
+        # -- the revoke must not be attributed to the job's own creator.
+        entry = AuditLog.objects.get(action="approval.revoked")
+        assert entry.actor_id is None
+        assert entry.actor_type == AuditLog.ActorType.SYSTEM
 
     def test_does_not_sweep_a_pending_gate_b_job_still_within_retention(
         self, workspace, owner, repo, tmp_path

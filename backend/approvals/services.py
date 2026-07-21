@@ -136,23 +136,35 @@ def _expire_if_stale(approval_request):
     return False
 
 
-def revoke_request(*, approval_request, actor):
+def revoke_request(*, approval_request, actor=None):
     """Withdraws a still-`pending` request because the underlying job/
     action it gates no longer needs a decision -- e.g. a `harness`
     implementation job cancelled while its Gate A/B request was still
     pending (Phase 3 branch 4, `harness.services.
-    cancel_harness_implementation_job`). Reuses the existing `expired`
-    terminal state rather than inventing a new one: the state machine
-    this module's own docstring documents (`pending -> approved |
-    rejected | expired`, no restore/reopen) already treats `expired` as
-    "no longer decidable," which is exactly what a revoke means too --
-    and `harness.signals`'s existing `post_save` receiver already reacts
-    to an `expired` decision by failing the linked job closed
-    (`GATE_EXPIRED`), so this needs no separate job-transition logic of
-    its own; the caller that revoked the request has typically already
-    transitioned its own job by the time this commits, and that
-    signal-triggered attempt safely no-ops against a job that's no
-    longer in the gate-pending status it re-checks.
+    cancel_harness_implementation_job`), or one abandoned until its
+    worktree retention deadline passed with no decision ever made
+    (`harness.implementation_execution._sweep_expired_worktree_job`).
+    Reuses the existing `expired` terminal state rather than inventing a
+    new one: the state machine this module's own docstring documents
+    (`pending -> approved | rejected | expired`, no restore/reopen)
+    already treats `expired` as "no longer decidable," which is exactly
+    what a revoke means too -- and `harness.signals`'s existing
+    `post_save` receiver already reacts to an `expired` decision by
+    failing the linked job closed (`GATE_EXPIRED`), so this needs no
+    separate job-transition logic of its own; the caller that revoked
+    the request has typically already transitioned its own job by the
+    time this commits, and that signal-triggered attempt safely no-ops
+    against a job that's no longer in the gate-pending status it
+    re-checks.
+
+    `actor` is optional (Codex code-review P2, branch 4 round 6): a
+    caller with no real human decision-maker behind the revoke --
+    exactly the worktree-retention sweep, a passive system timeout, not
+    a human choosing to withdraw anything -- must be able to say so
+    explicitly, rather than being forced to attribute the action to
+    whichever human happens to own the underlying job. `record_revoked`
+    below records `actor_type=SYSTEM` whenever `actor` is `None`,
+    mirroring `record_expired`'s identical convention for the TTL sweep.
 
     A safe no-op if the request is no longer `pending` (already decided,
     or already expired by the TTL sweep/decision-time backstop) --
@@ -176,12 +188,19 @@ def revoke_request(*, approval_request, actor):
 def record_revoked(approval_request, actor):
     """Distinct audit action from `approval.expired` (`record_expired`,
     the TTL-sweep/decision-time-backstop case) even though the STORED
-    status is identical -- a revoke is always actor-triggered by an
-    explicit cancellation elsewhere, never a passive timeout, and the
-    audit trail should be able to tell the two apart."""
+    status is identical -- a revoke is always triggered by an explicit
+    cancellation elsewhere, never a passive timeout by itself, and the
+    audit trail should be able to tell the two apart. `actor_type` is
+    `SYSTEM` when no real human actor is behind this call (Codex
+    code-review P2, branch 4 round 6), mirroring `record_expired`'s
+    identical convention -- misattributing a passive system timeout
+    (e.g. the worktree-retention sweep) to whichever human happens to
+    own the underlying job would misrepresent it as an explicit human
+    decision in the audit trail."""
     record_audit(
         action="approval.revoked",
         actor=actor,
+        actor_type=AuditLog.ActorType.SYSTEM if actor is None else AuditLog.ActorType.HUMAN,
         workspace=approval_request.workspace,
         resource=approval_request,
         metadata={"status": approval_request.status, "tool_name": approval_request.tool_name},

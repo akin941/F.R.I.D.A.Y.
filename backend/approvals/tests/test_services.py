@@ -292,6 +292,22 @@ class TestRevoke:
         assert "approval.revoked" in audit_actions()
         entry = AuditLog.objects.get(action="approval.revoked")
         assert entry.actor_id == second_admin.id
+        assert entry.actor_type == AuditLog.ActorType.HUMAN
+
+    def test_revoking_with_no_actor_is_audited_as_system(self, workspace, owner):
+        """Codex code-review P2, branch 4 round 6: a caller with no real
+        human decision-maker behind the revoke (e.g. the harness
+        worktree-retention sweep, a passive system timeout) must not be
+        forced to attribute the action to a human -- mirrors
+        `record_expired`'s identical SYSTEM-attribution convention for
+        the TTL sweep."""
+        request = make_request(workspace, requested_by=owner)
+        revoke_request(approval_request=request)
+        request.refresh_from_db()
+        assert request.status == ApprovalRequest.Status.EXPIRED
+        entry = AuditLog.objects.get(action="approval.revoked")
+        assert entry.actor_id is None
+        assert entry.actor_type == AuditLog.ActorType.SYSTEM
 
     def test_revoking_an_already_decided_request_is_a_safe_no_op(
         self, workspace, owner, second_admin

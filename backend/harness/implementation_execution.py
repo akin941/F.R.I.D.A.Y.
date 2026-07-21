@@ -1199,7 +1199,14 @@ def _sweep_expired_worktree_job(job_id):
     if gate_b_request is not None:
         from harness.services import _revoke_gate_request_best_effort
 
-        _revoke_gate_request_best_effort(gate_b_request, locked.created_by)
+        # No actor (Codex code-review P2, branch 4 round 6): this is a
+        # passive worktree-retention timeout, not a human choosing to
+        # withdraw the request -- passing `locked.created_by` would
+        # misattribute it as an explicit decision by the job's owner in
+        # the approvals audit trail. `revoke_request`/`record_revoked`
+        # record a `None` actor as `SYSTEM`, the correct classification
+        # here.
+        _revoke_gate_request_best_effort(gate_b_request)
 
 
 def _sweep_leaked_terminal_worktree(job_id):
