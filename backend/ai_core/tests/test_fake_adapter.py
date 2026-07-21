@@ -9,6 +9,7 @@ from ai_core.adapters.fake import (
     FAKE_AGENT_SKILL_MATCH_RESPONSE,
     FAKE_EMBEDDING_DIMENSION,
     FAKE_HARNESS_BRIEFING_RESPONSE,
+    FAKE_HARNESS_REVIEW_RESPONSE,
     FAKE_MEMORY_EXTRACTION_RESPONSE,
     FAKE_RESPONSE,
     FAKE_ROUTER_INTENT_RESPONSE,
@@ -271,6 +272,20 @@ class TestPurposeAwareFixtures:
             purpose="harness.briefing",
         )
         assert result.text == FAKE_HARNESS_BRIEFING_RESPONSE
+
+    def test_harness_review_purpose_returns_review_fixture(self):
+        """Codex code-review P2, branch 3 round 12: without a purpose-
+        aware fixture for `harness.review`, AI_FAKE_PROVIDER=true routed
+        every review through the generic non-JSON FAKE_RESPONSE, which
+        `_parse_review_response` can't parse -- every otherwise-
+        successful review failed closed as `review_unavailable` in that
+        (dev/example-default) mode."""
+        result = make_adapter().complete(
+            [{"role": "user", "content": "<repo_transcript>...</repo_transcript>"}],
+            {},
+            purpose="harness.review",
+        )
+        assert result.text == FAKE_HARNESS_REVIEW_RESPONSE
 
     def test_real_adapters_accept_purpose_kwarg_without_using_it(self):
         """The purpose kwarg is an ai_core-internal API addition for every

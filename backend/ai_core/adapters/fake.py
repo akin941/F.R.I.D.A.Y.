@@ -160,6 +160,20 @@ FAKE_HARNESS_BRIEFING_RESPONSE = (
     '{"summary": "Fake briefing summary: nothing notable was found.", "findings": []}'
 )
 
+# Purpose-aware fixture for `harness.review` (Phase 3 branch 3, Codex
+# code-review P2, round 12) -- mirrors harness.review_execution.
+# _parse_review_response's expected shape (summary/verdict/findings), the
+# same reason as the fixtures above. Without this, AI_FAKE_PROVIDER=true
+# (the dev/example default) routed every review through the generic
+# non-JSON FAKE_RESPONSE, which _parse_review_response can't parse --
+# every otherwise-successful review would fail closed as
+# review_unavailable in that mode. Defaults to an explicit approval, the
+# same benign-default convention FAKE_HARNESS_BRIEFING_RESPONSE already
+# uses (an empty findings list, not a hallucinated one).
+FAKE_HARNESS_REVIEW_RESPONSE = (
+    '{"summary": "Fake review summary: no issues found.", "verdict": "approved", "findings": []}'
+)
+
 
 def _latest_user_content(messages):
     for message in reversed(messages or []):
@@ -199,6 +213,8 @@ class FakeAdapter(BaseAdapter):
             return FAKE_AGENT_SKILL_MATCH_RESPONSE
         if purpose == "harness.briefing":
             return FAKE_HARNESS_BRIEFING_RESPONSE
+        if purpose == "harness.review":
+            return FAKE_HARNESS_REVIEW_RESPONSE
         return FAKE_RESPONSE
 
     def _result(self, messages, purpose):
