@@ -14,6 +14,7 @@ from approvals.services import (
     approve_request,
     create_request,
     reject_request,
+    revoke_request,
 )
 from audit.models import AuditLog
 from core.channels import CHANNEL_WEB
@@ -275,6 +276,57 @@ class TestExpiry:
         request = make_request(workspace, requested_by=owner)
         decided = approve_request(approval_request=request, actor=second_admin, channel=CHANNEL_WEB)
         assert decided.status == ApprovalRequest.Status.APPROVED
+
+
+class TestRevoke:
+    """Phase 3 branch 4: withdraws a still-pending request because the
+    underlying job/action it gates no longer needs a decision (e.g. a
+    harness implementation job cancelled while its Gate A/B request was
+    still pending)."""
+
+    def test_revokes_a_pending_request(self, workspace, owner, second_admin):
+        request = make_request(workspace, requested_by=owner)
+        revoke_request(approval_request=request, actor=second_admin)
+        request.refresh_from_db()
+        assert request.status == ApprovalRequest.Status.EXPIRED
+        assert "approval.revoked" in audit_actions()
+        entry = AuditLog.objects.get(action="approval.revoked")
+        assert entry.actor_id == second_admin.id
+
+    def test_revoking_an_already_decided_request_is_a_safe_no_op(
+        self, workspace, owner, second_admin
+    ):
+        request = make_request(workspace, requested_by=owner)
+        approve_request(approval_request=request, actor=second_admin, channel=CHANNEL_WEB)
+        request.refresh_from_db()
+        revoke_request(approval_request=request, actor=second_admin)
+        request.refresh_from_db()
+        assert request.status == ApprovalRequest.Status.APPROVED
+        assert "approval.revoked" not in audit_actions()
+
+    def test_revoking_an_already_expired_request_is_a_safe_no_op(
+        self, workspace, owner, second_admin
+    ):
+        request = make_request(workspace, requested_by=owner)
+        ApprovalRequest.objects.filter(pk=request.pk).update(status=ApprovalRequest.Status.EXPIRED)
+        request.refresh_from_db()
+        revoke_request(approval_request=request, actor=second_admin)
+        assert "approval.revoked" not in audit_actions()
+
+    def test_revoked_status_is_indistinguishable_from_ttl_expiry(
+        self, workspace, owner, second_admin
+    ):
+        """Deliberately reuses the existing `expired` terminal state
+        rather than inventing a new one -- `harness.signals`'s own
+        `post_save` receiver already reacts to `expired` regardless of
+        which path produced it, so a revoked request must fail a linked
+        job closed the identical way a TTL-expired one already does."""
+        request = make_request(workspace, requested_by=owner)
+        revoke_request(approval_request=request, actor=second_admin)
+        request.refresh_from_db()
+        assert request.status == ApprovalRequest.Status.EXPIRED
+        with pytest.raises(InvalidTransition):
+            approve_request(approval_request=request, actor=second_admin, channel=CHANNEL_WEB)
 
 
 class TestLockedScoping:

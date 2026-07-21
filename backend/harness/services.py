@@ -23,7 +23,7 @@ from django.db import transaction
 from django.db.models import ProtectedError
 
 from approvals.models import ApprovalRequest
-from approvals.services import create_request
+from approvals.services import create_request, revoke_request
 from audit.services import record_audit
 from harness.models import HarnessImplementationJob, HarnessJob, HarnessRepo, HarnessReview
 from harness.repo_identity import is_self_repo
@@ -500,14 +500,18 @@ def cancel_harness_implementation_job(*, job, actor):
     all for the two idle-wait phases -- review completion or an
     already-approved Gate B would still proceed as if nothing had
     happened). Their own linked `ApprovalRequest` (`gate_a_request`/
-    `gate_b_request`), if one is still pending, is left as-is -- a
-    curator who later approves it anyway can no longer revive the job,
-    since `harness.tools`'s `create_execution` callbacks re-check the
-    job's current status under lock before transitioning it forward, and
-    it is no longer whatever status they expect (Codex code-review P1,
-    branch 2 round 1, companion fix). A worktree already exists by
-    `pending_review`/`pending_gate_b` and is cleaned up immediately here,
-    same as every other terminal path (brief round-2/3 MEDIUM finding).
+    `gate_b_request`), if one is still pending, is now revoked too (Phase
+    3 branch 4, `approvals.services.revoke_request`) -- even though a
+    curator who approves it anyway can no longer revive the job either
+    way (`harness.tools`'s `create_execution` callbacks already
+    re-check the job's current status under lock, Codex code-review P1,
+    branch 2 round 1, companion fix), leaving a stale-but-still-pending
+    request sitting in the approvals inbox forever was its own UX gap:
+    nothing ever closed it out, so a curator would keep seeing (and
+    could still, harmlessly, decide) a request for a job that's already
+    gone. A worktree already exists by `pending_review`/`pending_gate_b`
+    and is cleaned up immediately here, same as every other terminal
+    path (brief round-2/3 MEDIUM finding).
 
     `implementing`/`pushing` -> `cancel_requested = True` only; these are
     the two phases with a real container/wait loop
@@ -521,12 +525,17 @@ def cancel_harness_implementation_job(*, job, actor):
         locked.failure_reason = HarnessImplementationJob.FailureReason.KILLED
         locked.save(update_fields=["status", "failure_reason", "updated_at"])
         _record_implementation_job(locked, "harness.implementation_job_cancelled", actor)
+        if locked.gate_a_request_id is not None:
+            revoke_request(approval_request=locked.gate_a_request, actor=actor)
     elif locked.status in _IMPLEMENTATION_IDLE_WAIT_STATUSES:
+        was_pending_gate_b = locked.status == HarnessImplementationJob.Status.PENDING_GATE_B
         locked.status = HarnessImplementationJob.Status.CANCELLED
         locked.failure_reason = HarnessImplementationJob.FailureReason.KILLED
         locked.save(update_fields=["status", "failure_reason", "updated_at"])
         _record_implementation_job(locked, "harness.implementation_job_cancelled", actor)
         _cleanup_worktree_best_effort(locked)
+        if was_pending_gate_b and locked.gate_b_request_id is not None:
+            revoke_request(approval_request=locked.gate_b_request, actor=actor)
     elif locked.status in _IMPLEMENTATION_ACTIVE_LOOP_STATUSES:
         locked.cancel_requested = True
         locked.save(update_fields=["cancel_requested", "updated_at"])

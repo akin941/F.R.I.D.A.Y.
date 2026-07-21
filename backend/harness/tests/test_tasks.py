@@ -89,3 +89,21 @@ class TestRecoverStaleHarnessJobsTask:
             tasks.execution, "recover_stale_harness_jobs", mock.Mock(return_value=3)
         )
         assert tasks.recover_stale_harness_jobs() == 3
+
+
+class TestRecoverStaleHarnessImplementationJobsTask:
+    def test_delegates_to_implementation_execution(self, monkeypatch):
+        monkeypatch.setattr(
+            tasks.implementation_execution,
+            "recover_stale_harness_implementation_jobs",
+            mock.Mock(return_value=2),
+        )
+        assert tasks.recover_stale_harness_implementation_jobs() == 2
+
+
+class TestRecoverStaleHarnessReviewsTask:
+    def test_delegates_to_review_execution(self, monkeypatch):
+        monkeypatch.setattr(
+            tasks.review_execution, "recover_stale_harness_reviews", mock.Mock(return_value=1)
+        )
+        assert tasks.recover_stale_harness_reviews() == 1

@@ -14,6 +14,7 @@ from django.utils import timezone
 
 from accounts.services import register_user
 from ai_core.models import ModelUsage
+from approvals.models import ApprovalRequest
 from audit.models import AuditLog
 from harness import implementation_execution
 from harness.models import HarnessImplementationJob, HarnessRepo
@@ -605,3 +606,229 @@ class TestRunHarnessPushJob:
         job.refresh_from_db()
         assert job.status == HarnessImplementationJob.Status.SUCCEEDED
         assert job.worktree_path == str(worktree)
+
+
+class TestRecoveryScan:
+    """Phase 3 branch 4. Mirrors `harness/tests/test_execution.py`'s
+    `TestRecoveryScan` class exactly, one job type over (two active
+    phases instead of one, plus the worktree-retention backstop)."""
+
+    def test_redispatches_implementing_job_whose_dispatch_was_lost(
+        self, workspace, owner, repo, monkeypatch, settings
+    ):
+        settings.HARNESS_DISPATCH_RECOVERY_GRACE_SECONDS = 1
+        job = make_job(
+            workspace, repo, created_by=owner, status=HarnessImplementationJob.Status.IMPLEMENTING
+        )
+        stale = timezone.now() - timedelta(seconds=100)
+        HarnessImplementationJob.objects.filter(pk=job.pk).update(updated_at=stale)
+        dispatch_mock = mock.Mock()
+        monkeypatch.setattr("harness.tools.dispatch_harness_implement_execution", dispatch_mock)
+
+        implementation_execution.recover_stale_harness_implementation_jobs()
+
+        dispatch_mock.assert_called_once_with(str(job.id))
+
+    def test_does_not_redispatch_a_freshly_transitioned_implementing_job(
+        self, workspace, owner, repo, monkeypatch, settings
+    ):
+        settings.HARNESS_DISPATCH_RECOVERY_GRACE_SECONDS = 300
+        make_job(
+            workspace, repo, created_by=owner, status=HarnessImplementationJob.Status.IMPLEMENTING
+        )
+        dispatch_mock = mock.Mock()
+        monkeypatch.setattr("harness.tools.dispatch_harness_implement_execution", dispatch_mock)
+
+        implementation_execution.recover_stale_harness_implementation_jobs()
+
+        dispatch_mock.assert_not_called()
+
+    def test_does_not_redispatch_an_implementing_job_already_claimed(
+        self, workspace, owner, repo, monkeypatch, settings
+    ):
+        """`started_at` set means a worker already claimed it -- this is
+        case 2's territory (worker-crashed), not case 1's (lost
+        dispatch); the two cases must not overlap."""
+        settings.HARNESS_DISPATCH_RECOVERY_GRACE_SECONDS = 1
+        job = make_job(
+            workspace,
+            repo,
+            created_by=owner,
+            status=HarnessImplementationJob.Status.IMPLEMENTING,
+            started_at=timezone.now(),
+        )
+        stale = timezone.now() - timedelta(seconds=100)
+        HarnessImplementationJob.objects.filter(pk=job.pk).update(updated_at=stale)
+        dispatch_mock = mock.Mock()
+        monkeypatch.setattr("harness.tools.dispatch_harness_implement_execution", dispatch_mock)
+        monkeypatch.setattr(implementation_execution.runner, "cleanup_directory", mock.Mock())
+
+        implementation_execution.recover_stale_harness_implementation_jobs()
+
+        dispatch_mock.assert_not_called()
+
+    def test_recovers_implementing_job_whose_worker_crashed(
+        self, workspace, owner, repo, monkeypatch, settings, tmp_path
+    ):
+        settings.HARNESS_MAX_JOB_SECONDS = 1
+        settings.HARNESS_RECOVERY_GRACE_SECONDS = 1
+        worktree = tmp_path / "worktree"
+        worktree.mkdir()
+        stale_started = timezone.now() - timedelta(seconds=100)
+        job = make_job(
+            workspace,
+            repo,
+            created_by=owner,
+            status=HarnessImplementationJob.Status.IMPLEMENTING,
+            started_at=stale_started,
+            container_id="orphan-impl-1",
+            worktree_path=str(worktree),
+        )
+        stop_mock = mock.Mock()
+        monkeypatch.setattr(implementation_execution.runner, "stop_container", stop_mock)
+        monkeypatch.setattr(
+            implementation_execution.runner, "container_is_running", mock.Mock(return_value=False)
+        )
+        remove_mock = mock.Mock()
+        monkeypatch.setattr(implementation_execution.runner, "remove_container", remove_mock)
+
+        implementation_execution.recover_stale_harness_implementation_jobs()
+
+        job.refresh_from_db()
+        assert job.status == HarnessImplementationJob.Status.FAILED
+        assert job.failure_reason == HarnessImplementationJob.FailureReason.TIMEOUT
+        assert job.container_id == ""
+        stop_mock.assert_called_once()
+        remove_mock.assert_called_once_with("orphan-impl-1")
+        assert not worktree.exists()
+
+    def test_does_not_recover_an_implementing_job_still_within_its_window(
+        self, workspace, owner, repo, monkeypatch, settings
+    ):
+        settings.HARNESS_MAX_JOB_SECONDS = 1800
+        settings.HARNESS_RECOVERY_GRACE_SECONDS = 300
+        job = make_job(
+            workspace,
+            repo,
+            created_by=owner,
+            status=HarnessImplementationJob.Status.IMPLEMENTING,
+            started_at=timezone.now(),
+        )
+        implementation_execution.recover_stale_harness_implementation_jobs()
+        job.refresh_from_db()
+        assert job.status == HarnessImplementationJob.Status.IMPLEMENTING
+
+    def test_redispatches_pushing_job_whose_dispatch_was_lost(
+        self, workspace, owner, repo, monkeypatch, settings
+    ):
+        settings.HARNESS_DISPATCH_RECOVERY_GRACE_SECONDS = 1
+        job = make_job(
+            workspace, repo, created_by=owner, status=HarnessImplementationJob.Status.PUSHING
+        )
+        stale = timezone.now() - timedelta(seconds=100)
+        HarnessImplementationJob.objects.filter(pk=job.pk).update(updated_at=stale)
+        dispatch_mock = mock.Mock()
+        monkeypatch.setattr("harness.tools.dispatch_harness_push_execution", dispatch_mock)
+
+        implementation_execution.recover_stale_harness_implementation_jobs()
+
+        dispatch_mock.assert_called_once_with(str(job.id))
+
+    def test_recovers_pushing_job_whose_worker_crashed(
+        self, workspace, owner, repo, monkeypatch, settings, tmp_path
+    ):
+        """No container involved in the push phase at all -- the real
+        `git push` is a host-side operation (branch 1's own design), so
+        recovery here only needs to fail the job and clean up the
+        worktree, never a Docker teardown."""
+        settings.HARNESS_MAX_JOB_SECONDS = 1
+        settings.HARNESS_RECOVERY_GRACE_SECONDS = 1
+        worktree = tmp_path / "worktree"
+        worktree.mkdir()
+        stale_started = timezone.now() - timedelta(seconds=100)
+        job = make_job(
+            workspace,
+            repo,
+            created_by=owner,
+            status=HarnessImplementationJob.Status.PUSHING,
+            push_started_at=stale_started,
+            worktree_path=str(worktree),
+        )
+
+        implementation_execution.recover_stale_harness_implementation_jobs()
+
+        job.refresh_from_db()
+        assert job.status == HarnessImplementationJob.Status.FAILED
+        assert job.failure_reason == HarnessImplementationJob.FailureReason.TIMEOUT
+        assert job.worktree_path == ""
+        assert not worktree.exists()
+
+    def test_sweeps_expired_worktree_for_pending_gate_b_job(self, workspace, owner, repo, tmp_path):
+        worktree = tmp_path / "worktree"
+        worktree.mkdir()
+        gate_b_request = ApprovalRequest.objects.create(
+            workspace=workspace,
+            tool_name="harness_push",
+            status=ApprovalRequest.Status.PENDING,
+            requested_by=owner,
+            origin=ApprovalRequest.Origin.HARNESS,
+        )
+        job = make_job(
+            workspace,
+            repo,
+            created_by=owner,
+            status=HarnessImplementationJob.Status.PENDING_GATE_B,
+            worktree_path=str(worktree),
+            worktree_expires_at=timezone.now() - timedelta(hours=1),
+            gate_b_request=gate_b_request,
+        )
+
+        implementation_execution.recover_stale_harness_implementation_jobs()
+
+        job.refresh_from_db()
+        gate_b_request.refresh_from_db()
+        assert job.status == HarnessImplementationJob.Status.FAILED
+        assert job.failure_reason == HarnessImplementationJob.FailureReason.WORKTREE_EXPIRED
+        assert job.worktree_path == ""
+        assert not worktree.exists()
+        assert gate_b_request.status == ApprovalRequest.Status.EXPIRED
+
+    def test_does_not_sweep_a_pending_gate_b_job_still_within_retention(
+        self, workspace, owner, repo, tmp_path
+    ):
+        worktree = tmp_path / "worktree"
+        worktree.mkdir()
+        job = make_job(
+            workspace,
+            repo,
+            created_by=owner,
+            status=HarnessImplementationJob.Status.PENDING_GATE_B,
+            worktree_path=str(worktree),
+            worktree_expires_at=timezone.now() + timedelta(hours=1),
+        )
+        implementation_execution.recover_stale_harness_implementation_jobs()
+        job.refresh_from_db()
+        assert job.status == HarnessImplementationJob.Status.PENDING_GATE_B
+        assert worktree.exists()
+
+    def test_does_not_sweep_a_pending_review_job_regardless_of_worktree_deadline(
+        self, workspace, owner, repo, tmp_path
+    ):
+        """Deliberately out of scope for this sweep -- see
+        `_sweep_expired_worktree_job`'s own docstring: a `pending_review`
+        job may have an actively running review still reading from this
+        exact worktree."""
+        worktree = tmp_path / "worktree"
+        worktree.mkdir()
+        job = make_job(
+            workspace,
+            repo,
+            created_by=owner,
+            status=HarnessImplementationJob.Status.PENDING_REVIEW,
+            worktree_path=str(worktree),
+            worktree_expires_at=timezone.now() - timedelta(hours=1),
+        )
+        implementation_execution.recover_stale_harness_implementation_jobs()
+        job.refresh_from_db()
+        assert job.status == HarnessImplementationJob.Status.PENDING_REVIEW
+        assert worktree.exists()

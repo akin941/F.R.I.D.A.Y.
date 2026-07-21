@@ -769,3 +769,224 @@ def _finalize_push_failure(job, failure_reason, *, error="", worktree_cleanup_co
         resource=locked,
         metadata={"failure_reason": failure_reason},
     )
+
+
+def recover_stale_harness_implementation_jobs():
+    """Periodic scan (Phase 3 branch 4) covering the same class of
+    permanently-stuck cases `harness.execution.recover_stale_harness_jobs`
+    already covers for discovery, mapped onto `HarnessImplementationJob`'s
+    two ACTIVE-LOOP phases (`implementing`, `pushing`) -- each of which
+    has its own "worker crashed mid-run" AND "the gate-approval-triggered
+    dispatch was lost" variant. Unlike discovery, which self-dispatches
+    at creation, each phase here only starts once a human approves a
+    gate, and `harness.tools.dispatch_harness_implement_execution`/
+    `dispatch_harness_push_execution` swallow a broker-publish failure
+    the same way discovery's own dispatch does -- a job whose gate was
+    approved right as the broker was down is durably `implementing`/
+    `pushing` (that transition already committed, inside the approval's
+    own transaction) with no Celery task ever actually launched to claim
+    it.
+
+    1. `implementing`, `started_at` unset, past
+       `HARNESS_DISPATCH_RECOVERY_GRACE_SECONDS` since its own
+       `updated_at` (the status transition itself) -- lost dispatch,
+       simply re-dispatched; `_claim_implementation_job`'s own
+       `started_at__isnull=True` fence makes this safe even if the
+       original dispatch actually does arrive later.
+    2. `implementing`, `started_at` set, past `HARNESS_MAX_JOB_SECONDS`
+       + `HARNESS_RECOVERY_GRACE_SECONDS` since then -- worker crashed
+       mid-run; failed closed via `_fail_and_cleanup`, which re-checks
+       status under its own lock, so an overlapping scan iteration (or
+       a live worker that actually does finish moments later) safely
+       no-ops rather than double-finalizing.
+    3. `pushing`, `push_started_at` unset -- same lost-dispatch shape as
+       case 1, one gate later.
+    4. `pushing`, `push_started_at` set, same worker-crashed-mid-run
+       shape as case 2 -- failed via `_finalize_push_failure` instead;
+       no container involved in this phase at all (the actual `git
+       push` is a host-side operation, branch 1's own design, never
+       inside a Docker container), so there is nothing to tear down
+       beyond the worktree itself.
+    5. The worktree-retention backstop (brief §boundary, this branch):
+       a job sitting `pending_gate_b` -- idle, waiting on a human Gate B
+       decision, nothing left touching its worktree -- whose
+       `worktree_expires_at` has already passed. `run_harness_push_job`
+       already fails this closed reactively if Gate B is ever actually
+       approved past the deadline (branch 2 round 4), but nothing
+       reclaims the abandoned directory, or fails the job, if the
+       decision just never comes; see `_sweep_expired_worktree_job`'s
+       own docstring for why this is deliberately scoped to
+       `pending_gate_b` only, not `pending_review` too."""
+    dispatch_cutoff = timezone.now() - timedelta(
+        seconds=settings.HARNESS_DISPATCH_RECOVERY_GRACE_SECONDS
+    )
+    running_cutoff = timezone.now() - timedelta(
+        seconds=settings.HARNESS_MAX_JOB_SECONDS + settings.HARNESS_RECOVERY_GRACE_SECONDS
+    )
+
+    # Case 1: implementing, dispatch lost.
+    stale_implementing_dispatch_ids = list(
+        HarnessImplementationJob.objects.filter(
+            status=HarnessImplementationJob.Status.IMPLEMENTING,
+            started_at__isnull=True,
+            updated_at__lt=dispatch_cutoff,
+        ).values_list("pk", flat=True)
+    )
+    for job_id in stale_implementing_dispatch_ids:
+        from harness.tools import dispatch_harness_implement_execution
+
+        dispatch_harness_implement_execution(str(job_id))
+
+    # Case 2: implementing, worker crashed mid-run.
+    stale_implementing_ids = list(
+        HarnessImplementationJob.objects.filter(
+            status=HarnessImplementationJob.Status.IMPLEMENTING,
+            started_at__isnull=False,
+            started_at__lt=running_cutoff,
+        ).values_list("pk", flat=True)
+    )
+    for job_id in stale_implementing_ids:
+        _recover_stale_implementing_job(job_id)
+
+    # Case 3: pushing, dispatch lost.
+    stale_pushing_dispatch_ids = list(
+        HarnessImplementationJob.objects.filter(
+            status=HarnessImplementationJob.Status.PUSHING,
+            push_started_at__isnull=True,
+            updated_at__lt=dispatch_cutoff,
+        ).values_list("pk", flat=True)
+    )
+    for job_id in stale_pushing_dispatch_ids:
+        from harness.tools import dispatch_harness_push_execution
+
+        dispatch_harness_push_execution(str(job_id))
+
+    # Case 4: pushing, worker crashed mid-run.
+    stale_pushing_ids = list(
+        HarnessImplementationJob.objects.filter(
+            status=HarnessImplementationJob.Status.PUSHING,
+            push_started_at__isnull=False,
+            push_started_at__lt=running_cutoff,
+        ).values_list("pk", flat=True)
+    )
+    for job_id in stale_pushing_ids:
+        _recover_stale_pushing_job(job_id)
+
+    # Case 5: worktree-retention backstop.
+    expired_worktree_ids = list(
+        HarnessImplementationJob.objects.filter(
+            status=HarnessImplementationJob.Status.PENDING_GATE_B,
+            worktree_expires_at__lt=timezone.now(),
+        ).values_list("pk", flat=True)
+    )
+    for job_id in expired_worktree_ids:
+        _sweep_expired_worktree_job(job_id)
+
+
+def _recover_stale_implementing_job(job_id):
+    """One iteration of case 2 above. No separate pre-claim (unlike
+    `harness.execution._claim_stale_job`): `_fail_and_cleanup` itself
+    already re-checks `status == implementing` under its own lock before
+    writing anything, so the worst an overlapping scan iteration can do
+    is redundantly (but harmlessly -- `_teardown_container`/
+    `_safe_remove_container` are themselves safe to call twice) attempt
+    container teardown before losing the actual finalize race."""
+    job = HarnessImplementationJob.objects.filter(
+        pk=job_id, status=HarnessImplementationJob.Status.IMPLEMENTING
+    ).first()
+    if job is None:
+        return
+    removal_confirmed = True
+    if job.container_id:
+        _teardown_container(job.container_id)
+        removal_confirmed = _safe_remove_container(job.container_id)
+    _fail_and_cleanup(
+        job,
+        HarnessImplementationJob.FailureReason.TIMEOUT,
+        workspace_dir=job.worktree_path,
+        removal_confirmed=removal_confirmed,
+        started_monotonic=time.monotonic(),
+    )
+
+
+def _recover_stale_pushing_job(job_id):
+    """One iteration of case 4 above. `_finalize_push_failure` itself
+    already re-checks `status == pushing` under its own lock, same
+    reasoning as `_recover_stale_implementing_job`'s docstring."""
+    job = HarnessImplementationJob.objects.filter(
+        pk=job_id, status=HarnessImplementationJob.Status.PUSHING
+    ).first()
+    if job is None:
+        return
+    worktree_cleanup_confirmed = (
+        _safe_cleanup_directory(job.worktree_path) if job.worktree_path else True
+    )
+    _finalize_push_failure(
+        job,
+        HarnessImplementationJob.FailureReason.TIMEOUT,
+        error="recovered: no live worker finalized this push in time",
+        worktree_cleanup_confirmed=worktree_cleanup_confirmed,
+    )
+
+
+def _sweep_expired_worktree_job(job_id):
+    """One iteration of case 5 above. Deliberately scoped to
+    `pending_gate_b` only, not `pending_review` too: a job still
+    `pending_review` may have an ACTIVELY RUNNING review reading from
+    that same worktree right now (`runner.create_bundle` bundles
+    directly from `job.worktree_path/repo`) -- deleting the directory
+    out from under an in-flight review would be a genuine race, not
+    just a theoretical one. A review stuck long enough to matter here is
+    caught, and resolved, much sooner by the review recovery scan's own
+    timeout case anyway (`HARNESS_MAX_JOB_SECONDS` +
+    `HARNESS_RECOVERY_GRACE_SECONDS`, on the order of minutes --
+    worktree retention is `HARNESS_WORKTREE_RETENTION_HOURS`, on the
+    order of days), so by the time a worktree could plausibly still be
+    needed by a genuinely-abandoned review this far past its own
+    deadline, the review has already been resolved one way or another
+    and the job has already moved on from `pending_review`.
+
+    Also revokes the now-orphaned `gate_b_request` (Phase 3 branch 4,
+    `approvals.services.revoke_request`) -- otherwise a curator would
+    keep seeing a Gate B request sitting in their inbox for a job the
+    backend has already failed closed."""
+    job = HarnessImplementationJob.objects.filter(
+        pk=job_id,
+        status=HarnessImplementationJob.Status.PENDING_GATE_B,
+        worktree_expires_at__lt=timezone.now(),
+    ).first()
+    if job is None:
+        return
+    worktree_cleanup_confirmed = (
+        _safe_cleanup_directory(job.worktree_path) if job.worktree_path else True
+    )
+    with transaction.atomic():
+        locked = (
+            HarnessImplementationJob.objects.select_for_update(of=("self",))
+            .filter(pk=job_id, status=HarnessImplementationJob.Status.PENDING_GATE_B)
+            .first()
+        )
+        if locked is None:
+            return
+        locked.status = HarnessImplementationJob.Status.FAILED
+        locked.failure_reason = HarnessImplementationJob.FailureReason.WORKTREE_EXPIRED
+        update_fields = ["status", "failure_reason", "updated_at"]
+        _apply_worktree_cleanup(
+            locked, update_fields, worktree_cleanup_confirmed=worktree_cleanup_confirmed
+        )
+        locked.save(update_fields=update_fields)
+        gate_b_request = locked.gate_b_request
+    record_audit(
+        action="harness.implementation_job_failed",
+        actor=locked.created_by,
+        workspace=locked.workspace,
+        resource=locked,
+        metadata={
+            "failure_reason": HarnessImplementationJob.FailureReason.WORKTREE_EXPIRED,
+            "recovered": True,
+        },
+    )
+    if gate_b_request is not None:
+        from approvals.services import revoke_request
+
+        revoke_request(approval_request=gate_b_request, actor=locked.created_by)

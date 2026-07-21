@@ -291,6 +291,70 @@ class TestCancelHarnessImplementationJob:
         assert cancelled.status == HarnessImplementationJob.Status.SUCCEEDED
         assert cancelled.cancel_requested is False
 
+    def test_pending_gate_a_cancel_revokes_the_gate_a_request(self, workspace, owner, repo):
+        """Phase 3 branch 4 (`approvals.services.revoke_request`): a
+        curator who later approves the now-orphaned request anyway can
+        no longer revive the job either way (`harness.tools`'s own
+        status re-check), but leaving it sitting `pending` forever was
+        its own UX gap -- nothing ever closed it out."""
+        job = create_harness_implementation_job(
+            workspace=workspace, actor=owner, repo=repo, goal="fix the bug"
+        )
+        gate_a_request = job.gate_a_request
+        assert gate_a_request.status == ApprovalRequest.Status.PENDING
+        cancel_harness_implementation_job(job=job, actor=owner)
+        gate_a_request.refresh_from_db()
+        assert gate_a_request.status == ApprovalRequest.Status.EXPIRED
+        assert "approval.revoked" in AuditLog.objects.values_list("action", flat=True)
+
+    def test_pending_gate_b_cancel_revokes_the_gate_b_request(
+        self, workspace, owner, repo, tmp_path
+    ):
+        worktree = tmp_path / "worktree"
+        worktree.mkdir()
+        gate_b_request = ApprovalRequest.objects.create(
+            workspace=workspace,
+            tool_name="harness_push",
+            status=ApprovalRequest.Status.PENDING,
+            requested_by=owner,
+            origin=ApprovalRequest.Origin.HARNESS,
+        )
+        job = make_implementation_job(
+            workspace,
+            repo,
+            status=HarnessImplementationJob.Status.PENDING_GATE_B,
+            worktree_path=str(worktree),
+            gate_b_request=gate_b_request,
+        )
+        cancel_harness_implementation_job(job=job, actor=owner)
+        gate_b_request.refresh_from_db()
+        assert gate_b_request.status == ApprovalRequest.Status.EXPIRED
+
+    def test_pending_review_cancel_does_not_touch_any_approval_request(
+        self, workspace, owner, repo, tmp_path
+    ):
+        """`pending_review` has no live gate approval at all -- only
+        `pending_gate_b`, within the same idle-wait branch, does."""
+        worktree = tmp_path / "worktree"
+        worktree.mkdir()
+        gate_b_request = ApprovalRequest.objects.create(
+            workspace=workspace,
+            tool_name="harness_push",
+            status=ApprovalRequest.Status.PENDING,
+            requested_by=owner,
+            origin=ApprovalRequest.Origin.HARNESS,
+        )
+        job = make_implementation_job(
+            workspace,
+            repo,
+            status=HarnessImplementationJob.Status.PENDING_REVIEW,
+            worktree_path=str(worktree),
+            gate_b_request=gate_b_request,
+        )
+        cancel_harness_implementation_job(job=job, actor=owner)
+        gate_b_request.refresh_from_db()
+        assert gate_b_request.status == ApprovalRequest.Status.PENDING
+
 
 class TestRequestHarnessPush:
     def test_approved_review_requests_gate_b(self, workspace, owner, repo):

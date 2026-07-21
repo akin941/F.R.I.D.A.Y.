@@ -47,4 +47,12 @@ app.conf.beat_schedule = {
         "task": "harness.tasks.recover_stale_harness_jobs",
         "schedule": 60.0,
     },
+    "harness-implementation-job-recovery-scan": {
+        "task": "harness.tasks.recover_stale_harness_implementation_jobs",
+        "schedule": 60.0,
+    },
+    "harness-review-recovery-scan": {
+        "task": "harness.tasks.recover_stale_harness_reviews",
+        "schedule": 60.0,
+    },
 }

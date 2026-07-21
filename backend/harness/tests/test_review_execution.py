@@ -4,9 +4,11 @@ functions -- no real `docker`/`git` subprocess, mirroring
 identical discipline (CLAUDE.md rule 5)."""
 
 import json
+from datetime import timedelta
 from unittest import mock
 
 import pytest
+from django.utils import timezone
 
 from accounts.services import register_user
 from ai_core.models import ModelProvider, ModelUsage, PromptTemplate, PromptVersion
@@ -744,3 +746,134 @@ class TestParseReviewResponse:
         )
         assert len(summary) == review_execution._REVIEW_SUMMARY_MAX_CHARS
         assert len(findings) == review_execution._REVIEW_FINDINGS_MAX_COUNT
+
+
+class TestRecoveryScan:
+    """Phase 3 branch 4. Mirrors `harness/tests/test_execution.py`'s
+    `TestRecoveryScan` class exactly, one job type over."""
+
+    def test_redispatches_pending_review_whose_dispatch_was_lost(
+        self, workspace, owner, repo, monkeypatch, settings
+    ):
+        settings.HARNESS_DISPATCH_RECOVERY_GRACE_SECONDS = 1
+        job = make_job(workspace, repo, created_by=owner)
+        review = make_review(workspace, job)
+        stale = timezone.now() - timedelta(seconds=100)
+        HarnessReview.objects.filter(pk=review.pk).update(created_at=stale)
+        dispatch_mock = mock.Mock()
+        monkeypatch.setattr(review_execution, "_dispatch_review_task", dispatch_mock)
+
+        review_execution.recover_stale_harness_reviews()
+
+        dispatch_mock.assert_called_once_with(review.id)
+
+    def test_does_not_redispatch_a_freshly_created_pending_review(
+        self, workspace, owner, repo, monkeypatch, settings
+    ):
+        settings.HARNESS_DISPATCH_RECOVERY_GRACE_SECONDS = 300
+        job = make_job(workspace, repo, created_by=owner)
+        make_review(workspace, job)
+        dispatch_mock = mock.Mock()
+        monkeypatch.setattr(review_execution, "_dispatch_review_task", dispatch_mock)
+
+        review_execution.recover_stale_harness_reviews()
+
+        dispatch_mock.assert_not_called()
+
+    def test_recovers_running_review_whose_worker_hard_crashed(
+        self, workspace, owner, repo, monkeypatch, settings
+    ):
+        """No exception ever ran to trigger the synchronous
+        `resolve_running_review_after_unexpected_error` rescue (a hard
+        kill -- OOM, SIGKILL -- leaves nothing to run it) -- the
+        recovery scan is the only thing left to reclaim this row."""
+        settings.HARNESS_MAX_JOB_SECONDS = 1
+        settings.HARNESS_RECOVERY_GRACE_SECONDS = 1
+        job = make_job(workspace, repo, created_by=owner)
+        stale_started = timezone.now() - timedelta(seconds=100)
+        review = make_review(
+            workspace,
+            job,
+            status=HarnessReview.Status.RUNNING,
+            started_at=stale_started,
+            container_id="orphan-review-1",
+        )
+        monkeypatch.setattr(review_execution.runner, "stop_container", mock.Mock())
+        monkeypatch.setattr(
+            review_execution.runner, "container_is_running", mock.Mock(return_value=False)
+        )
+        monkeypatch.setattr(review_execution.runner, "remove_container", mock.Mock())
+
+        review_execution.recover_stale_harness_reviews()
+
+        review.refresh_from_db()
+        job.refresh_from_db()
+        assert review.status == HarnessReview.Status.FAILED
+        assert job.status == HarnessImplementationJob.Status.FAILED
+        assert job.failure_reason == HarnessImplementationJob.FailureReason.REVIEW_UNAVAILABLE
+
+    def test_does_not_recover_a_running_review_still_within_its_window(
+        self, workspace, owner, repo, settings
+    ):
+        settings.HARNESS_MAX_JOB_SECONDS = 1800
+        settings.HARNESS_RECOVERY_GRACE_SECONDS = 300
+        job = make_job(workspace, repo, created_by=owner)
+        review = make_review(
+            workspace, job, status=HarnessReview.Status.RUNNING, started_at=timezone.now()
+        )
+        review_execution.recover_stale_harness_reviews()
+        review.refresh_from_db()
+        assert review.status == HarnessReview.Status.RUNNING
+
+    @pytest.mark.parametrize(
+        "status", [HarnessReview.Status.SUCCEEDED, HarnessReview.Status.FAILED]
+    )
+    def test_retries_removal_of_a_leaked_terminal_review_container(
+        self, workspace, owner, repo, monkeypatch, settings, status
+    ):
+        settings.HARNESS_LEAKED_CONTAINER_RECOVERY_GRACE_SECONDS = 1
+        job = make_job(workspace, repo, created_by=owner)
+        review = make_review(workspace, job, status=status, container_id="leaked-review-1")
+        stale_updated = timezone.now() - timedelta(seconds=100)
+        HarnessReview.objects.filter(pk=review.pk).update(updated_at=stale_updated)
+        remove_mock = mock.Mock()
+        monkeypatch.setattr(review_execution.runner, "remove_container", remove_mock)
+
+        review_execution.recover_stale_harness_reviews()
+
+        remove_mock.assert_called_once_with("leaked-review-1")
+        review.refresh_from_db()
+        assert review.container_id == ""
+        assert review.status == status
+
+    def test_does_not_sweep_a_freshly_finalized_terminal_review(
+        self, workspace, owner, repo, monkeypatch, settings
+    ):
+        settings.HARNESS_LEAKED_CONTAINER_RECOVERY_GRACE_SECONDS = 300
+        job = make_job(workspace, repo, created_by=owner)
+        review = make_review(
+            workspace, job, status=HarnessReview.Status.FAILED, container_id="leaked-review-1"
+        )
+        remove_mock = mock.Mock()
+        monkeypatch.setattr(review_execution.runner, "remove_container", remove_mock)
+
+        review_execution.recover_stale_harness_reviews()
+
+        remove_mock.assert_not_called()
+        review.refresh_from_db()
+        assert review.container_id == "leaked-review-1"
+
+    def test_does_not_sweep_a_terminal_review_with_no_leftover_container(
+        self, workspace, owner, repo, monkeypatch, settings
+    ):
+        settings.HARNESS_LEAKED_CONTAINER_RECOVERY_GRACE_SECONDS = 1
+        job = make_job(workspace, repo, created_by=owner)
+        review = make_review(workspace, job, status=HarnessReview.Status.SUCCEEDED, container_id="")
+        stale_updated = timezone.now() - timedelta(seconds=100)
+        HarnessReview.objects.filter(pk=review.pk).update(updated_at=stale_updated)
+        remove_mock = mock.Mock()
+        monkeypatch.setattr(review_execution.runner, "remove_container", remove_mock)
+
+        review_execution.recover_stale_harness_reviews()
+
+        remove_mock.assert_not_called()

@@ -101,11 +101,11 @@ def run_harness_implementation_job(job_id):
 
     Unlike `run_harness_job`, an unexpected interruption here does NOT
     call any "resolve after unexpected error" helper -- there is no
-    equivalent yet for this job type (branch 4's own recovery scan,
-    mirroring `harness.execution.recover_stale_harness_jobs`, is where
-    that belongs); a job interrupted here stays `implementing` until that
-    scan reclaims it, the same grace-window behavior `HarnessJob` itself
-    had before its own recovery scan existed."""
+    synchronous one for this job type; a job interrupted here stays
+    `implementing` until `recover_stale_harness_implementation_jobs`
+    (Phase 3 branch 4, registered in `config/celery.py`'s beat schedule)
+    reclaims it, the same grace-window behavior `HarnessJob` itself had
+    before its own recovery scan existed."""
     try:
         implementation_execution.run_harness_implementation_job(job_id)
     except SoftTimeLimitExceeded:
@@ -123,13 +123,29 @@ def run_harness_implementation_job(job_id):
 )
 def run_harness_push_job(job_id):
     """Thin wrapper -- see `harness.implementation_execution.
-    run_harness_push_job` for the actual bundle/clean-clone/push logic."""
+    run_harness_push_job` for the actual bundle/clean-clone/push logic.
+    Same recovery-scan-is-the-backstop shape as `run_harness_
+    implementation_job` above, one phase later --
+    `recover_stale_harness_implementation_jobs` covers `pushing` too."""
     try:
         implementation_execution.run_harness_push_job(job_id)
     except SoftTimeLimitExceeded:
         logger.exception("Harness push job %s hit its soft time limit", job_id)
     except Exception:
         logger.exception("Unexpected failure running harness push job %s", job_id)
+
+
+@shared_task
+def recover_stale_harness_implementation_jobs():
+    """Periodic scan (Celery beat, embedded via the worker's `-B` flag --
+    see deploy/docker/compose.yml), Phase 3 branch 4. Covers
+    `HarnessImplementationJob`'s `implementing`/`pushing` phases (both a
+    lost-gate-approval-dispatch case and a worker-crashed-mid-run case
+    each) plus the worktree-retention backstop sweep -- see
+    `harness.implementation_execution.
+    recover_stale_harness_implementation_jobs`'s own docstring for the
+    full case list."""
+    return implementation_execution.recover_stale_harness_implementation_jobs()
 
 
 @shared_task(
@@ -159,3 +175,16 @@ def run_harness_review_job(review_id):
     except Exception:
         logger.exception("Unexpected failure running harness review %s", review_id)
         review_execution.resolve_running_review_after_unexpected_error(review_id)
+
+
+@shared_task
+def recover_stale_harness_reviews():
+    """Periodic scan (Celery beat, embedded via the worker's `-B` flag --
+    see deploy/docker/compose.yml), Phase 3 branch 4 -- the backstop for
+    the cases branch 3's synchronous rescues can't reach (a message
+    silently dropped after successful publish, a hard kill with nothing
+    left to run an exception handler) plus the leaked-review-container
+    sweep round 4 explicitly deferred here. See `harness.review_
+    execution.recover_stale_harness_reviews`'s own docstring for the
+    full case list."""
+    return review_execution.recover_stale_harness_reviews()

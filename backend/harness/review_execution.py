@@ -31,6 +31,7 @@ import logging
 import os
 import tempfile
 import time
+from datetime import timedelta
 from decimal import Decimal
 
 from django.conf import settings
@@ -209,21 +210,13 @@ def _teardown_container(container_id):
 
 
 def _safe_remove_container(container_name):
-    """Codex code-review P2, branch 3 round 4 (deferred): a `docker rm`
-    failure here leaks a stopped container -- still carrying the review
-    CLI's own credentials (e.g. `CODEX_API_KEY`) in its environment --
-    indefinitely, with nothing to retry the removal. `HarnessJob` has an
-    analogous periodic sweep (`recover_stale_harness_jobs`'s leaked-
-    container case); `HarnessReview` doesn't have one yet. Accepted as a
-    bounded, host-trust-boundary-internal residual risk (anyone with
-    access to inspect a leaked container already has runner-host access,
-    which already implies access to the same credential via the worker's
-    own environment) and explicitly deferred to branch 4's own recovery-
-    scan extension, the same call made for the dispatch-failure/
-    unexpected-error gaps this module already closed directly in round 2
-    -- unlike those, this one is periodic-retry-shaped (needs a scan, not
-    a single synchronous check) and belongs with the rest of that
-    machinery."""
+    """Codex code-review P2, branch 3 round 4: a `docker rm` failure here
+    leaks a stopped container -- still carrying the review CLI's own
+    credentials (e.g. `CODEX_API_KEY`) in its environment -- indefinitely
+    if nothing ever retries the removal. `recover_stale_harness_reviews`
+    (Phase 3 branch 4) is that retry: its own leaked-terminal-container
+    case periodically re-attempts removal via this exact function, the
+    same shape `HarnessJob`'s analogous case already has."""
     try:
         runner.remove_container(container_name)
         return True
@@ -794,3 +787,102 @@ def resolve_running_review_after_unexpected_error(review_id):
             started_monotonic=time.monotonic(),
             raw_transcript=review.raw_transcript,
         )
+
+
+_REVIEW_TERMINAL_STATUSES = (
+    HarnessReview.Status.SUCCEEDED,
+    HarnessReview.Status.FAILED,
+)
+
+
+def recover_stale_harness_reviews():
+    """Periodic scan (Phase 3 branch 4), mirroring `harness.execution.
+    recover_stale_harness_jobs`'s three-case shape for `HarnessReview`.
+    The synchronous rescues branch 3 already added
+    (`resolve_pending_review_after_dispatch_failure` on a `.delay()` call
+    that itself raises; `resolve_running_review_after_unexpected_error`
+    on a Python-level exception/soft-time-limit inside the task) only
+    cover interruptions the WORKER process itself observes and reacts
+    to. Neither helps a review whose task message was silently dropped
+    by the broker after a successful publish, or a HARD kill (OOM,
+    SIGKILL) that leaves nothing to run any exception handler at all --
+    this scan is the backstop for exactly those two cases, plus the
+    leaked-container sweep round 4 explicitly deferred here.
+
+    1. `pending` past `HARNESS_DISPATCH_RECOVERY_GRACE_SECONDS` since
+       creation -- the message was lost after a successful `.delay()`
+       (distinct from `.delay()` itself raising, already handled
+       synchronously) -- simply re-dispatched; `_claim_review`'s own
+       `status=pending` fence makes this safe even if the original
+       dispatch actually does arrive later.
+    2. `running` past `HARNESS_MAX_JOB_SECONDS` +
+       `HARNESS_RECOVERY_GRACE_SECONDS` since `started_at` -- a hard
+       kill left nothing to call `resolve_running_review_after_
+       unexpected_error` itself; called here instead, which already
+       tears down any leftover container and fails the review (and its
+       job) closed.
+    3. Already terminal (`succeeded`/`failed`) but still carrying a
+       non-empty `container_id`, past
+       `HARNESS_LEAKED_CONTAINER_RECOVERY_GRACE_SECONDS` since its last
+       update -- `_safe_remove_container`'s own removal genuinely failed
+       at finalize time; retried here, same as discovery's identical
+       case 3."""
+    dispatch_cutoff = timezone.now() - timedelta(
+        seconds=settings.HARNESS_DISPATCH_RECOVERY_GRACE_SECONDS
+    )
+    stale_pending_ids = list(
+        HarnessReview.objects.filter(
+            status=HarnessReview.Status.PENDING, created_at__lt=dispatch_cutoff
+        ).values_list("pk", flat=True)
+    )
+    for review_id in stale_pending_ids:
+        _dispatch_review_task(review_id)
+
+    running_cutoff = timezone.now() - timedelta(
+        seconds=settings.HARNESS_MAX_JOB_SECONDS + settings.HARNESS_RECOVERY_GRACE_SECONDS
+    )
+    stale_running_ids = list(
+        HarnessReview.objects.filter(
+            status=HarnessReview.Status.RUNNING, started_at__lt=running_cutoff
+        ).values_list("pk", flat=True)
+    )
+    for review_id in stale_running_ids:
+        resolve_running_review_after_unexpected_error(review_id)
+
+    leaked_cutoff = timezone.now() - timedelta(
+        seconds=settings.HARNESS_LEAKED_CONTAINER_RECOVERY_GRACE_SECONDS
+    )
+    leaked_ids = list(
+        HarnessReview.objects.filter(
+            status__in=_REVIEW_TERMINAL_STATUSES, updated_at__lt=leaked_cutoff
+        )
+        .exclude(container_id="")
+        .values_list("pk", flat=True)
+    )
+    for review_id in leaked_ids:
+        _sweep_leaked_terminal_review_container(review_id)
+
+
+def _sweep_leaked_terminal_review_container(review_id):
+    """One iteration of case 3 above. Re-fetches under lock first
+    (mirrors `harness.execution._sweep_leaked_terminal_container`'s
+    identical discipline) so two overlapping scans don't both attempt
+    removal of the same container -- the Docker call itself happens
+    OUTSIDE the lock, same as every other recovery case in this
+    module."""
+    with transaction.atomic():
+        locked = (
+            HarnessReview.objects.select_for_update(of=("self",))
+            .filter(pk=review_id, status__in=_REVIEW_TERMINAL_STATUSES)
+            .exclude(container_id="")
+            .first()
+        )
+        if locked is None:
+            return False
+        container_id = locked.container_id
+    if _safe_remove_container(container_id):
+        HarnessReview.objects.filter(pk=review_id, container_id=container_id).update(
+            container_id=""
+        )
+        return True
+    return False

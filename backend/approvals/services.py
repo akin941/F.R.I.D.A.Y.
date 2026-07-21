@@ -6,11 +6,14 @@ State machine (illegal transitions raise InvalidTransition -> 400):
     pending -> approved | rejected | expired
 
 There is no restore/reopen: a decided (or expired) request is terminal;
-requesting the same action again creates a new row. `expired` is set both by
-a scheduled sweep (`approvals.tasks`) and, as a backstop, by the decision
-services themselves (`_expire_if_stale`) -- so a request the sweep hasn't
-gotten to yet can never be approved by accident, regardless of the sweep's
-timing.
+requesting the same action again creates a new row. `expired` is set by a
+scheduled sweep (`approvals.tasks`), as a backstop by the decision services
+themselves (`_expire_if_stale`) -- so a request the sweep hasn't gotten to
+yet can never be approved by accident, regardless of the sweep's timing --
+and, explicitly, by `revoke_request` (Phase 3 branch 4): a caller elsewhere
+withdrawing a request whose underlying job/action no longer needs a
+decision, distinguished from the passive cases only in its audit action
+(`approval.revoked` vs `approval.expired`), never in the stored status.
 
 Approving also resolves and runs the request's gated tool (`tools.registry`,
 branch 2): `create_execution()` inside the approval's own transaction, then
@@ -131,6 +134,58 @@ def _expire_if_stale(approval_request):
         record_expired(approval_request)
         return True
     return False
+
+
+def revoke_request(*, approval_request, actor):
+    """Withdraws a still-`pending` request because the underlying job/
+    action it gates no longer needs a decision -- e.g. a `harness`
+    implementation job cancelled while its Gate A/B request was still
+    pending (Phase 3 branch 4, `harness.services.
+    cancel_harness_implementation_job`). Reuses the existing `expired`
+    terminal state rather than inventing a new one: the state machine
+    this module's own docstring documents (`pending -> approved |
+    rejected | expired`, no restore/reopen) already treats `expired` as
+    "no longer decidable," which is exactly what a revoke means too --
+    and `harness.signals`'s existing `post_save` receiver already reacts
+    to an `expired` decision by failing the linked job closed
+    (`GATE_EXPIRED`), so this needs no separate job-transition logic of
+    its own; the caller that revoked the request has typically already
+    transitioned its own job by the time this commits, and that
+    signal-triggered attempt safely no-ops against a job that's no
+    longer in the gate-pending status it re-checks.
+
+    A safe no-op if the request is no longer `pending` (already decided,
+    or already expired by the TTL sweep/decision-time backstop) --
+    callers are never expected to treat this as an error; the
+    underlying cancellation flow this exists for has already achieved
+    its own goal regardless of whether this specific request could
+    still be revoked."""
+    with transaction.atomic():
+        locked = (
+            ApprovalRequest.objects.select_for_update(of=("self",))
+            .filter(pk=approval_request.pk, status=ApprovalRequest.Status.PENDING)
+            .first()
+        )
+        if locked is None:
+            return
+        locked.status = ApprovalRequest.Status.EXPIRED
+        locked.save(update_fields=["status", "updated_at"])
+    record_revoked(locked, actor)
+
+
+def record_revoked(approval_request, actor):
+    """Distinct audit action from `approval.expired` (`record_expired`,
+    the TTL-sweep/decision-time-backstop case) even though the STORED
+    status is identical -- a revoke is always actor-triggered by an
+    explicit cancellation elsewhere, never a passive timeout, and the
+    audit trail should be able to tell the two apart."""
+    record_audit(
+        action="approval.revoked",
+        actor=actor,
+        workspace=approval_request.workspace,
+        resource=approval_request,
+        metadata={"status": approval_request.status, "tool_name": approval_request.tool_name},
+    )
 
 
 def record_expired(approval_request):
