@@ -294,6 +294,36 @@ class TestRunHarnessImplementationJobFailurePaths:
         assert job.status == HarnessImplementationJob.Status.FAILED
         assert job.failure_reason == HarnessImplementationJob.FailureReason.RUNNER_ERROR
 
+    def test_persists_worktree_path_immediately_after_clone(
+        self, workspace, owner, repo, monkeypatch
+    ):
+        """Codex code-review P2, branch 4 round 2: `job.worktree_path` was
+        only ever written to the DB on the success path, at the very end
+        of this function. A worker that hard-crashes anywhere after the
+        clone succeeds (no exception this function's own try/except can
+        catch -- a SIGKILL/OOM) would leave the DB field empty while a
+        real directory sits on disk -- the recovery scan's own worker-
+        crashed case reads this exact field to know what to clean up, and
+        has no access to a dead process's local variables. Persisted
+        immediately once the clone returns, not only on success."""
+        job = make_job(workspace, repo, created_by=owner)
+        monkeypatch.setattr(
+            implementation_execution.runner,
+            "clone_repo_writable",
+            mock.Mock(return_value="/tmp/harness-worktree-x"),
+        )
+
+        def _boom(*args, **kwargs):
+            job.refresh_from_db()
+            assert job.worktree_path == "/tmp/harness-worktree-x"
+            raise RuntimeError("worker crashed mid-run")
+
+        monkeypatch.setattr(
+            implementation_execution.runner, "resolve_commit_sha", mock.Mock(side_effect=_boom)
+        )
+        with pytest.raises(RuntimeError):
+            implementation_execution.run_harness_implementation_job(job.id)
+
     def test_missing_ssh_credential_fails_closed_before_cloning(
         self, workspace, owner, repo, monkeypatch, settings
     ):

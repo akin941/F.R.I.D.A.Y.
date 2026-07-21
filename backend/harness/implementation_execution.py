@@ -289,6 +289,19 @@ def run_harness_implementation_job(job_id):
             branch_name=job.branch_name,
             clone_env=runner._resolve_git_push_env(),
         )
+        # Persisted as soon as the clone succeeds, not only later on the
+        # success path (Codex code-review P2, branch 4 round 2): a worker
+        # that hard-crashes anywhere between here and that later write
+        # would otherwise leave `job.worktree_path` empty in the DB while
+        # a real directory sits on disk -- `recover_stale_harness_
+        # implementation_jobs`' own worker-crashed case reads this same
+        # field to know what to clean up, and `_fail_and_cleanup`'s own
+        # `if workspace_dir:` check silently skips cleanup entirely for
+        # an empty string, leaking the directory with nothing left to
+        # ever find its path again. Writing the same value again on the
+        # success path below is harmless -- it's unchanged for the rest
+        # of this function's execution.
+        HarnessImplementationJob.objects.filter(pk=job.pk).update(worktree_path=workspace_dir)
         repo_dir = f"{workspace_dir}/repo"
         base_sha = runner.resolve_commit_sha(repo_dir, "HEAD")
         image = runner.image_for_agent(job.agent)
