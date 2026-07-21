@@ -65,6 +65,19 @@ _BUNDLE_TIMEOUT_SECONDS = 60
 _GIT_FETCH_TIMEOUT_SECONDS = 60
 _GIT_PUSH_TIMEOUT_SECONDS = 60
 
+# Codex code-review P2, branch 3 round 7: git consults the runner HOST's
+# own global (`~/.gitconfig`)/system (`/etc/gitconfig`) config for things
+# like filter-driver commands, in addition to whatever repo-local config
+# a clean clone's own `git clone`/`fetch` wrote -- a host with e.g. Git
+# LFS installed globally has `filter.lfs.*` defined there, and a
+# `.gitattributes` entry naming that driver (entirely attacker-controlled
+# when it's part of a reviewed commit) would have it invoked during
+# checkout. `GIT_CONFIG_NOSYSTEM`/`GIT_CONFIG_GLOBAL=/dev/null` are git's
+# own documented mechanism for excluding both from a given invocation,
+# used by `prepare_review_clone` so only the clean clone's own local
+# config (never written by reviewed content) is ever consulted.
+_ISOLATED_GIT_ENV = {"GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": "/dev/null"}
+
 _AGENT_IMAGES = {
     "claude_code": lambda: settings.HARNESS_IMAGE_CLAUDE_CODE,
     "codex_cli": lambda: settings.HARNESS_IMAGE_CODEX_CLI,
@@ -366,20 +379,32 @@ def prepare_review_clone(
     `base_sha` is a real ancestor of it) -- but checks the result out
     instead of pushing it, since nothing here ever touches the remote.
 
-    A tracked `.gitattributes` naming a filter/diff driver is not itself
-    dangerous here: the driver's actual COMMAND only ever comes from
-    `.git/config` (or global/system config), and this clone's own
-    `.git/config` is written exclusively by this function's own `git
-    clone`/`git fetch` calls -- never by anything from the reviewed
-    commits' own content, so a named-but-unconfigured filter is
-    correctly treated as a no-op by git itself.
+    A tracked `.gitattributes` naming a filter/diff driver only reaches a
+    REPO-local `.git/config` no content from the reviewed commits ever
+    writes to -- but git also consults the runner HOST's own global/system
+    config for the same lookup, and that one this function doesn't
+    control (Codex code-review P2, branch 3 round 7): if the host happens
+    to have a filter driver configured there (Git LFS being the common
+    case -- `git lfs install` writes `filter.lfs.*` into global/system
+    config, not per-repo), a `.gitattributes` entry naming that driver,
+    entirely attacker-controlled since it's part of the reviewed commit,
+    would have the checkout below invoke it -- a host-side command
+    execution/network-fetch the agent effectively triggers. `_ISOLATED_GIT_ENV`
+    (`GIT_CONFIG_NOSYSTEM`/`GIT_CONFIG_GLOBAL=/dev/null`, git's own
+    documented mechanism for this) is threaded through every subprocess
+    call this function makes, so only the clean clone's own local config
+    -- written exclusively by this function's `clone`/`fetch` calls, never
+    by reviewed content -- is ever consulted; a filter named but not
+    configured there is correctly treated as a no-op by git itself.
 
     Caller must call `cleanup_directory()` on the returned directory on
     every exit path, same as every other clone primitive in this
     module."""
     _reject_non_ssh_remote(git_url)
     directory = _clone_full(
-        git_url=git_url, default_branch=default_branch, clone_env=_resolve_git_push_env()
+        git_url=git_url,
+        default_branch=default_branch,
+        clone_env={**_resolve_git_push_env(), **_ISOLATED_GIT_ENV},
     )
     try:
         try:
@@ -387,6 +412,7 @@ def prepare_review_clone(
                 ["git", "-C", directory, "fetch", bundle_path, f"refs/heads/{branch_name}"],
                 check=True,
                 capture_output=True,
+                env={**os.environ, **_ISOLATED_GIT_ENV},
                 timeout=_GIT_FETCH_TIMEOUT_SECONDS,
             )
         except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
@@ -401,6 +427,7 @@ def prepare_review_clone(
         ancestor_check = subprocess.run(
             ["git", "-C", directory, "merge-base", "--is-ancestor", base_sha, "FETCH_HEAD"],
             capture_output=True,
+            env={**os.environ, **_ISOLATED_GIT_ENV},
             timeout=_GIT_PLUMBING_TIMEOUT_SECONDS,
         )
         if ancestor_check.returncode != 0:
@@ -411,6 +438,7 @@ def prepare_review_clone(
                 ["git", "-C", directory, "checkout", "--detach", "FETCH_HEAD"],
                 check=True,
                 capture_output=True,
+                env={**os.environ, **_ISOLATED_GIT_ENV},
                 timeout=_GIT_PLUMBING_TIMEOUT_SECONDS,
             )
         except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:

@@ -407,7 +407,9 @@ def _produce_review_summary(job, fenced_transcript):
 # the code under review instruct its own reviewer to approve regardless of
 # content, or to suppress findings, defeating the entire point of a
 # cross-vendor review gate.
-_AGENT_INSTRUCTION_FILENAMES = frozenset({"AGENTS.md", "AGENTS.override.md", "CLAUDE.md"})
+_AGENT_INSTRUCTION_FILENAMES_LOWER = frozenset(
+    name.lower() for name in ("AGENTS.md", "AGENTS.override.md", "CLAUDE.md")
+)
 
 
 def _strip_agent_instruction_files(directory):
@@ -418,13 +420,21 @@ def _strip_agent_instruction_files(directory):
     are the same directory here, but a subdirectory-rooted fallback name
     could still be planted) before the review container is ever launched,
     so there is nothing left for it to discover regardless of where in the
-    tree the implementation committed one. Raises `runner.RunnerError` if
-    any matching file can't be removed -- a review that might still be
-    running with attacker-supplied instructions in place must fail closed,
-    not launch anyway on a best-effort basis."""
+    tree the implementation committed one.
+
+    Matches filenames case-INSENSITIVELY (Codex code-review P1, branch 3
+    round 7): a runner host with a case-insensitive filesystem (the macOS
+    default) resolves a lookup for `AGENTS.md` to a committed `agents.md`
+    just as readily as an exact-case match -- the review CLI would still
+    discover and honor it even though an earlier exact-case comparison
+    left it in the checkout untouched.
+
+    Raises `runner.RunnerError` if any matching file can't be removed -- a
+    review that might still be running with attacker-supplied instructions
+    in place must fail closed, not launch anyway on a best-effort basis."""
     for root, _dirs, files in os.walk(directory):
         for filename in files:
-            if filename not in _AGENT_INSTRUCTION_FILENAMES:
+            if filename.lower() not in _AGENT_INSTRUCTION_FILENAMES_LOWER:
                 continue
             path = os.path.join(root, filename)
             try:

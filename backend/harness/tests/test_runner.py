@@ -817,6 +817,83 @@ class TestPrepareReviewClone:
         for call in run_mock.call_args_list:
             assert "push" not in call.args[0]
 
+    def test_isolates_host_global_and_system_git_config(self, monkeypatch, tmp_path):
+        """Codex code-review P2, branch 3 round 7: a runner host with a
+        globally/system-configured filter driver (Git LFS being the
+        common case) would have the checkout below invoke it for a
+        `.gitattributes` entry naming that driver -- entirely
+        attacker-controlled since it's part of the reviewed commit.
+        `GIT_CONFIG_NOSYSTEM`/`GIT_CONFIG_GLOBAL=/dev/null` must be set
+        on every git subprocess call this function makes after the
+        initial clone, not just the checkout itself."""
+        clean_clone_dir = str(tmp_path / "clean-clone")
+        self._mock_clean_clone(monkeypatch, clean_clone_dir)
+        run_mock = mock.Mock(
+            side_effect=[
+                mock.Mock(returncode=0),  # git fetch
+                mock.Mock(returncode=0, stdout="produced999\n"),  # rev-parse FETCH_HEAD
+                mock.Mock(returncode=0),  # merge-base --is-ancestor
+                mock.Mock(returncode=0),  # git checkout --detach FETCH_HEAD
+            ]
+        )
+        monkeypatch.setattr(runner.subprocess, "run", run_mock)
+
+        runner.prepare_review_clone(
+            git_url="git@x:y.git",
+            default_branch="main",
+            branch_name="harness/p3-1",
+            bundle_path="/tmp/out.bundle",
+            base_sha="base111",
+            produced_sha="produced999",
+        )
+
+        # `resolve_commit_sha`'s own `rev-parse` call is a read-only ref
+        # lookup -- it never triggers a working-tree filter/smudge driver,
+        # so it's the one call in this sequence that legitimately doesn't
+        # need this isolation.
+        checked_calls = [
+            call for call in run_mock.call_args_list if "rev-parse" not in call.args[0]
+        ]
+        assert len(checked_calls) == 3
+        for call in checked_calls:
+            env = call.kwargs.get("env") or {}
+            assert env.get("GIT_CONFIG_NOSYSTEM") == "1"
+            assert env.get("GIT_CONFIG_GLOBAL") == "/dev/null"
+
+    def test_clone_isolates_host_global_and_system_git_config(self, monkeypatch, settings):
+        """Same isolation, but for the initial `_clone_full` call itself
+        -- verified by checking the `clone_env` this function passes
+        through, since `_clone_full` merges it into the actual clone
+        subprocess's own environment."""
+        settings.HARNESS_GIT_SSH_KEY_PATH = "/tmp/fake-deploy-key"
+        clone_full_mock = mock.Mock(return_value="/tmp/clean-clone")
+        monkeypatch.setattr(runner, "_clone_full", clone_full_mock)
+        monkeypatch.setattr(
+            runner.subprocess,
+            "run",
+            mock.Mock(
+                side_effect=[
+                    mock.Mock(returncode=0),
+                    mock.Mock(returncode=0, stdout="produced999\n"),
+                    mock.Mock(returncode=0),
+                    mock.Mock(returncode=0),
+                ]
+            ),
+        )
+
+        runner.prepare_review_clone(
+            git_url="git@x:y.git",
+            default_branch="main",
+            branch_name="harness/p3-1",
+            bundle_path="/tmp/out.bundle",
+            base_sha="base111",
+            produced_sha="produced999",
+        )
+
+        clone_env = clone_full_mock.call_args.kwargs["clone_env"]
+        assert clone_env["GIT_CONFIG_NOSYSTEM"] == "1"
+        assert clone_env["GIT_CONFIG_GLOBAL"] == "/dev/null"
+
     def test_sha_mismatch_raises_and_never_checks_out(self, monkeypatch, tmp_path):
         clean_clone_dir = str(tmp_path / "clean-clone")
         self._mock_clean_clone(monkeypatch, clean_clone_dir)
