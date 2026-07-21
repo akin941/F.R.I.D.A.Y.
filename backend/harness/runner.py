@@ -424,12 +424,22 @@ def prepare_review_clone(
                 f"fetched commit {fetched_sha} does not match reported "
                 f"produced_commit_sha {produced_sha}"
             )
-        ancestor_check = subprocess.run(
-            ["git", "-C", directory, "merge-base", "--is-ancestor", base_sha, "FETCH_HEAD"],
-            capture_output=True,
-            env={**os.environ, **_ISOLATED_GIT_ENV},
-            timeout=_GIT_PLUMBING_TIMEOUT_SECONDS,
-        )
+        try:
+            ancestor_check = subprocess.run(
+                ["git", "-C", directory, "merge-base", "--is-ancestor", base_sha, "FETCH_HEAD"],
+                capture_output=True,
+                env={**os.environ, **_ISOLATED_GIT_ENV},
+                timeout=_GIT_PLUMBING_TIMEOUT_SECONDS,
+            )
+        except subprocess.TimeoutExpired as exc:
+            # Codex code-review P2, branch 3 round 10: unlike the fetch/
+            # checkout calls above and below, this one had no timeout
+            # handling of its own -- a `TimeoutExpired` propagated
+            # straight past the `except RunnerError:` cleanup at the
+            # bottom of this function, leaking the full clean-clone
+            # checkout (a copy of the reviewed repo) in /tmp with nothing
+            # left to remove it.
+            raise RunnerError(f"checking ancestry of {base_sha} timed out: {exc}") from exc
         if ancestor_check.returncode != 0:
             raise RunnerError(f"{base_sha} is not an ancestor of the produced commit")
 

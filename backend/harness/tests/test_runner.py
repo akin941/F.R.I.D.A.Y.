@@ -941,6 +941,37 @@ class TestPrepareReviewClone:
             )
         assert run_mock.call_count == 3
 
+    def test_ancestor_check_timeout_still_cleans_up(self, monkeypatch, tmp_path):
+        """Codex code-review P2, branch 3 round 10: unlike the fetch/
+        checkout calls, the merge-base ancestor check had no timeout
+        handling of its own -- a raw `subprocess.TimeoutExpired`
+        propagated past the `except RunnerError:` cleanup at the bottom
+        of this function, leaking the clean-clone checkout in /tmp with
+        nothing left to remove it."""
+        clean_clone_dir = str(tmp_path / "clean-clone")
+        self._mock_clean_clone(monkeypatch, clean_clone_dir)
+        run_mock = mock.Mock(
+            side_effect=[
+                mock.Mock(returncode=0),  # git fetch
+                mock.Mock(returncode=0, stdout="produced999\n"),  # rev-parse FETCH_HEAD
+                subprocess.TimeoutExpired(cmd="git merge-base", timeout=30),
+            ]
+        )
+        monkeypatch.setattr(runner.subprocess, "run", run_mock)
+        rmtree = mock.Mock()
+        monkeypatch.setattr(runner.shutil, "rmtree", rmtree)
+
+        with pytest.raises(runner.RunnerError):
+            runner.prepare_review_clone(
+                git_url="git@x:y.git",
+                default_branch="main",
+                branch_name="harness/p3-1",
+                bundle_path="/tmp/out.bundle",
+                base_sha="base111",
+                produced_sha="produced999",
+            )
+        rmtree.assert_called_once()
+
     def test_cleans_up_clean_clone_on_failure(self, monkeypatch, tmp_path):
         clean_clone_dir = str(tmp_path / "clean-clone")
         self._mock_clean_clone(monkeypatch, clean_clone_dir)
