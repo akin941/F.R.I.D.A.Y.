@@ -549,3 +549,18 @@ export interface ApiImplementationJobDetail extends ApiImplementationJob {
   // Newest first.
   reviews: ApiImplementationReview[];
 }
+
+// --- Activity summary (Phase 4 branch 3) ---
+
+// GET /api/activity/summary: one row per workspace membership.
+export interface ApiActivityWorkspace {
+  workspace: string;
+  pending_approvals: number;
+  live_harness_jobs: number;
+  live_agents: number;
+}
+
+export interface ApiActivitySummary {
+  workspaces: ApiActivityWorkspace[];
+  totals: Omit<ApiActivityWorkspace, "workspace">;
+}
