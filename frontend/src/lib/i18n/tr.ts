@@ -120,6 +120,10 @@ export const ERROR_MESSAGES = {
     message: "Bu görev artık bu işleme uygun değil.",
     specific: true,
   },
+  "task.draft_already_confirmed": {
+    message: "Bu taslaktan zaten bir görev oluşturuldu.",
+    specific: true,
+  },
   // Workspaces
   "workspace.permission_denied": {
     message: "Rolün bu çalışma alanını düzenlemeye yetmiyor.",

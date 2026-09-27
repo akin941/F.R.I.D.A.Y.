@@ -29,7 +29,7 @@ alone):
     delete                     yes           own tasks    no
 """
 
-from django.db import transaction
+from django.db import IntegrityError, transaction
 
 from audit.services import record_audit
 from tasks.models import Task
@@ -55,6 +55,17 @@ class TaskPermissionDenied(TaskServiceError):
     """Actor's role does not allow the action -> 403."""
 
     code = "task.permission_denied"
+
+
+class DraftAlreadyConfirmed(TaskServiceError):
+    """The chat draft already produced a task (Phase 4 branch 4) -> 400.
+
+    Raised by `create_task` when `Task.source_message`'s unique constraint
+    rejects a second task for the same draft message -- the constraint, not
+    a read-then-write check, is the guard, so two concurrent confirms of one
+    draft still create exactly one task."""
+
+    code = "task.draft_already_confirmed"
 
 
 def get_role(actor, workspace):
@@ -132,23 +143,42 @@ def create_task(
     due_date=None,
     priority=Task.Priority.NORMAL,
     source=Task.Source.USER_CREATED,
+    source_message=None,
 ):
     """`source` is never derived from a client-asserted value — the view
     resolves it (via `tasks.serializers.TaskCreateSerializer`'s server-side
     `draft_message_id` verification, MVP 6 §3) and passes the already-decided
     value in, exactly like `status`/`created_by` are already server-decided
-    rather than client input."""
+    rather than client input.
+
+    `source_message` (Phase 4 branch 4) is that same already-verified draft
+    message, never a client value; it is only ever passed together with
+    `source=ai_suggested`. A second task for the same message violates
+    `Task.source_message`'s unique constraint and raises
+    `DraftAlreadyConfirmed` -- no second row, no second audit entry."""
     _require(get_role(actor, workspace) in _WRITER_ROLES, "creating tasks")
-    task = Task.objects.create(
-        workspace=workspace,
-        title=title,
-        description=description,
-        due_date=due_date,
-        priority=priority,
-        source=source,
-        status=Task.Status.OPEN,
-        created_by=actor,
-    )
+    try:
+        # A savepoint of its own: the IntegrityError must roll back only the
+        # failed INSERT, leaving the caller's transaction usable.
+        with transaction.atomic():
+            task = Task.objects.create(
+                workspace=workspace,
+                title=title,
+                description=description,
+                due_date=due_date,
+                priority=priority,
+                source=source,
+                source_message=source_message,
+                status=Task.Status.OPEN,
+                created_by=actor,
+            )
+    except IntegrityError as exc:
+        # Only the unique violation on this column means "already confirmed";
+        # anything else is a real error and propagates.
+        message = str(exc).lower()
+        if source_message is not None and "unique" in message and "source_message" in message:
+            raise DraftAlreadyConfirmed("This draft has already been confirmed.") from exc
+        raise
     _record(task, "task.created", actor, source=source)
     return task
 

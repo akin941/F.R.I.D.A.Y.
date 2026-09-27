@@ -5,6 +5,7 @@ from rest_framework.test import APIClient
 
 from accounts.services import register_user
 from assistant.models import Conversation, Message
+from audit.models import AuditLog
 from tasks.models import Task
 from workspaces.models import Workspace, WorkspaceMember
 
@@ -296,6 +297,66 @@ class TestDraftMessageId:
         )
         assert response.status_code == 201
         assert response.json()["source"] == Task.Source.AI_SUGGESTED
+        # Phase 4 branch 4: the verified draft is linked as the task's
+        # source message (what lets a reloaded chat show it as confirmed).
+        assert Task.objects.get().source_message_id == draft_message.id
+
+    def test_manual_create_links_no_source_message(self, workspace, owner):
+        response = client_for(owner).post("/api/v1/tasks", create_payload(workspace), format="json")
+        assert response.status_code == 201
+        assert Task.objects.get().source_message_id is None
+
+    def test_second_confirm_of_the_same_draft_returns_400_and_creates_nothing(
+        self, workspace, owner
+    ):
+        conversation = self._conversation(workspace, owner)
+        draft_message = self._task_draft_message(workspace, conversation, owner)
+        client = client_for(owner)
+        payload = create_payload(workspace, draft_message_id=str(draft_message.id))
+
+        first = client.post("/api/v1/tasks", payload, format="json")
+        second = client.post("/api/v1/tasks", payload, format="json")
+
+        assert first.status_code == 201
+        assert second.status_code == 400
+        assert second.json()["code"] == "task.draft_already_confirmed"
+        assert Task.objects.count() == 1
+        assert AuditLog.objects.filter(action="task.created").count() == 1
+
+    def test_second_confirm_by_another_member_is_still_refused(self, workspace, owner):
+        # Even a draft the second caller could not have confirmed anyway
+        # (wrong actor -> 400 from verification) never yields a second task.
+        conversation = self._conversation(workspace, owner)
+        draft_message = self._task_draft_message(workspace, conversation, owner)
+        member = user_with_role(workspace, WorkspaceMember.Role.MEMBER, "draft-member@test.dev")
+        payload = create_payload(workspace, draft_message_id=str(draft_message.id))
+
+        assert client_for(owner).post("/api/v1/tasks", payload, format="json").status_code == 201
+        assert client_for(member).post("/api/v1/tasks", payload, format="json").status_code == 400
+        assert Task.objects.count() == 1
+
+    def test_draft_can_be_confirmed_again_after_its_task_is_deleted(self, workspace, owner):
+        conversation = self._conversation(workspace, owner)
+        draft_message = self._task_draft_message(workspace, conversation, owner)
+        client = client_for(owner)
+        payload = create_payload(workspace, draft_message_id=str(draft_message.id))
+        task_id = client.post("/api/v1/tasks", payload, format="json").json()["id"]
+
+        assert client.delete(f"/api/v1/tasks/{task_id}").status_code == 204
+        assert client.post("/api/v1/tasks", payload, format="json").status_code == 201
+
+    def test_deleting_the_conversation_keeps_the_confirmed_task(self, workspace, owner):
+        conversation = self._conversation(workspace, owner)
+        draft_message = self._task_draft_message(workspace, conversation, owner)
+        client_for(owner).post(
+            "/api/v1/tasks",
+            create_payload(workspace, draft_message_id=str(draft_message.id)),
+            format="json",
+        )
+        conversation.delete()
+        task = Task.objects.get()
+        assert task.source_message_id is None
+        assert task.source == Task.Source.AI_SUGGESTED
 
     def test_nonexistent_draft_message_id_returns_400_and_creates_no_task(self, workspace, owner):
         response = client_for(owner).post(
