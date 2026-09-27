@@ -300,6 +300,10 @@ def create_request(*, workspace, actor, tool_name, payload=None, origin, channel
     # SimpleNamespace test stubs as below.
     if not getattr(tool, "user_invocable", True) and origin != ApprovalRequest.Origin.HARNESS:
         raise InvalidTransition(f"{tool_name!r} can only be requested by the system.")
+    # Phase 4 branch 2 (ADR-009): human-only tools (`purge_trash`) are never
+    # requested by a machine.
+    if not getattr(tool, "proposable", True) and origin != ApprovalRequest.Origin.HUMAN:
+        raise InvalidTransition(f"{tool_name!r} can only be requested by a person.")
     # getattr, not tool.validate_request: existing tests stub tools with a
     # bare SimpleNamespace(gated=True), predating this field.
     validate_request = getattr(tool, "validate_request", None)

@@ -76,7 +76,7 @@ def claim_document(document_id):
     now = timezone.now()
     with transaction.atomic():
         document = (
-            KnowledgeDocument.objects.select_for_update(skip_locked=True)
+            KnowledgeDocument.all_objects.select_for_update(skip_locked=True)
             .filter(
                 Q(pk=document_id)
                 & (
@@ -104,7 +104,7 @@ def _fenced(document_id, claim_token):
     the cost record of the wasted attempt, the one intentional exception to
     this fencing, same as memory)."""
     return (
-        KnowledgeDocument.objects.select_for_update()
+        KnowledgeDocument.all_objects.select_for_update()
         .filter(
             pk=document_id,
             status=KnowledgeDocument.Status.PROCESSING,

@@ -321,6 +321,12 @@ DEVICE_PAIRING_ALLOW_UNKNOWN_IP = env.bool("DEVICE_PAIRING_ALLOW_UNKNOWN_IP", de
 ENROLL_RATE_PER_SOURCE = env("ENROLL_RATE_PER_SOURCE", default="5/10m")
 ENROLL_RATE_GLOBAL = env("ENROLL_RATE_GLOBAL", default="60/h")
 
+# --- Trash (ADR-009) ---
+# Soft-deleted knowledge documents and tasks are purged permanently this
+# many days after deletion (daily beat task); an explicit earlier purge is
+# the gate-class `purge_trash` tool.
+TRASH_RETENTION_DAYS = env.int("TRASH_RETENTION_DAYS", default=30)
+
 CORS_ALLOWED_ORIGINS = [o for o in env.list("CORS_ALLOWED_ORIGINS", default=[]) if o] or [
     "http://localhost:3001"
 ]

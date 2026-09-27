@@ -6,6 +6,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from core.channels import request_channel
 from core.permissions import IsWebChannel
 from memory.models import Memory
 from memory.serializers import MemoryCreateSerializer, MemoryCurateSerializer, MemorySerializer
@@ -140,7 +141,7 @@ class MemoryDetailView(APIView):
         if memory is None:
             return Response(status=status.HTTP_404_NOT_FOUND)
         try:
-            delete_memory(memory=memory, actor=request.user)
+            delete_memory(memory=memory, actor=request.user, channel=request_channel(request))
         except (MemoryPermissionDenied, InvalidTransition) as exc:
             return _service_error_response(exc)
         return Response(status=status.HTTP_204_NO_CONTENT)

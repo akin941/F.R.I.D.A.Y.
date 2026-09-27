@@ -26,12 +26,25 @@ alone):
     create                     yes           yes          no
     edit fields                yes           own tasks    no
     complete/cancel/reopen     yes           own tasks    no
-    delete                     yes           own tasks    no
+    delete / restore           yes           own tasks    no
+
+Delete is a soft delete (ADR-009): the task moves to the trash
+(`deleted_at`) and is purged permanently TRASH_RETENTION_DAYS later by the
+retention beat task, or earlier only through an approved gate-class
+`purge_trash` request. Delete and restore are confirm-class under ADR-008
+because they are reversible -- and only for a human actor over the web
+channel (`channel` is a required argument, never defaulted).
 """
 
-from django.db import transaction
+from datetime import timedelta
 
+from django.conf import settings
+from django.db import transaction
+from django.utils import timezone
+
+from audit.models import AuditLog
 from audit.services import record_audit
+from core.channels import CHANNEL_WEB
 from tasks.models import Task
 from workspaces.models import WorkspaceMember
 
@@ -58,6 +71,13 @@ def get_role(actor, workspace):
         WorkspaceMember.objects.for_actor(actor, workspace=workspace).filter(user=actor).first()
     )
     return membership.role if membership else None
+
+
+def _require_human_web(actor, channel, action):
+    """ADR-009 condition: owner deletes/restores are confirm-class only for a
+    human actor over the high-trust web channel."""
+    if getattr(actor, "is_agent", False) or channel != CHANNEL_WEB:
+        raise TaskPermissionDenied(f"{action} is only allowed for a person over the web.")
 
 
 def _is_own(task, actor):
@@ -220,12 +240,79 @@ def reopen_task(*, task, actor):
 
 
 @transaction.atomic
-def delete_task(*, task, actor):
+def delete_task(*, task, actor, channel):
+    """Move the task to the trash (ADR-009). Idempotent for an already
+    trashed row is not reachable: `_locked` only sees live rows."""
+    _require_human_web(actor, channel, "Deleting a task")
     task = _locked(task, actor)
     role = get_role(actor, task.workspace)
     _require(
         role in _CURATOR_ROLES or (role in _WRITER_ROLES and _is_own(task, actor)),
         "deleting this task",
     )
-    _record(task, "task.deleted", actor)
+    task.deleted_at = timezone.now()
+    task.save(update_fields=["deleted_at", "updated_at"])
+    _record(task, "task.deleted", actor, retention_days=settings.TRASH_RETENTION_DAYS)
+    return task
+
+
+@transaction.atomic
+def restore_task(*, task, actor, channel):
+    """Bring a trashed task back (ADR-009). Same role rule as delete."""
+    _require_human_web(actor, channel, "Restoring a task")
+    locked = (
+        Task.all_objects.filter(
+            pk=task.pk, workspace__members__user=actor, deleted_at__isnull=False
+        )
+        .select_for_update(of=("self",))
+        .first()
+    )
+    if locked is None:
+        raise InvalidTransition("Task is not in the trash.")
+    role = get_role(actor, locked.workspace)
+    _require(
+        role in _CURATOR_ROLES or (role in _WRITER_ROLES and _is_own(locked, actor)),
+        "restoring this task",
+    )
+    locked.deleted_at = None
+    locked.save(update_fields=["deleted_at", "updated_at"])
+    _record(locked, "task.restored", actor)
+    return locked
+
+
+def purge_trashed_task(task, *, reason, actor=None, approval_request_id=None):
+    """Permanently delete one trashed task (ADR-009): only from the
+    retention sweep (`reason="retention"`) or an approved `purge_trash`
+    request (`reason="approval"`). Caller holds the transaction. A row
+    that is no longer trashed (restored meanwhile) is left alone."""
+    if task.deleted_at is None:
+        return False
+    record_audit(
+        action="task.purged",
+        actor=actor,
+        actor_type=AuditLog.ActorType.HUMAN if actor else AuditLog.ActorType.SYSTEM,
+        workspace=task.workspace,
+        resource=task,
+        metadata={"reason": reason, "approval_request_id": approval_request_id or ""},
+    )
     task.delete()
+    return True
+
+
+def purge_expired_trashed_tasks(now=None):
+    """Retention sweep: purge tasks trashed more than TRASH_RETENTION_DAYS
+    ago. The window is part of the owner's original, confirmed delete."""
+    cutoff = (now or timezone.now()) - timedelta(days=settings.TRASH_RETENTION_DAYS)
+    purged = 0
+    ids = list(Task.all_objects.filter(deleted_at__lt=cutoff).values_list("pk", flat=True))
+    for task_id in ids:
+        with transaction.atomic():
+            task = (
+                Task.all_objects.select_for_update(of=("self",))
+                .filter(pk=task_id, deleted_at__lt=cutoff)
+                .select_related("workspace")
+                .first()
+            )
+            if task is not None and purge_trashed_task(task, reason="retention"):
+                purged += 1
+    return purged

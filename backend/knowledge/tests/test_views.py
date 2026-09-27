@@ -554,7 +554,9 @@ class TestDetailView:
         entry = AuditLog.objects.get(action="knowledge.read")
         assert entry.metadata == {"document_ids": [created["id"]], "count": 1}
 
-    def test_delete_removes_document_and_chunks(self, workspace, owner, web_client):
+    def test_delete_moves_the_document_to_the_trash(self, workspace, owner, web_client):
+        """ADR-009: delete is a soft delete -- hidden everywhere, chunks kept
+        (excluded from retrieval), purged later."""
         created = (
             web_client(owner)
             .post(
@@ -566,9 +568,11 @@ class TestDetailView:
         )
         document_id = created["id"]
         assert KnowledgeChunk.objects.filter(document_id=document_id).exists()
-        web_client(owner).delete(f"/api/v1/knowledge/documents/{document_id}")
+        response = web_client(owner).delete(f"/api/v1/knowledge/documents/{document_id}")
+        assert response.status_code == 204
         assert not KnowledgeDocument.objects.filter(id=document_id).exists()
-        assert not KnowledgeChunk.objects.filter(document_id=document_id).exists()
+        assert KnowledgeDocument.all_objects.get(id=document_id).deleted_at is not None
+        assert KnowledgeChunk.objects.filter(document_id=document_id).exists()
 
     def test_delete_is_audited(self, workspace, owner, web_client):
         created = (

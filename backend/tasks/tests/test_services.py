@@ -1,10 +1,12 @@
 import threading
+from functools import partial
 
 import pytest
 from django.db import connection
 
 from accounts.services import register_user
 from audit.models import AuditLog
+from core.channels import CHANNEL_WEB
 from tasks.models import Task
 from tasks.services import (
     InvalidTransition,
@@ -155,11 +157,11 @@ class TestRolePolicy:
         with pytest.raises(TaskPermissionDenied):
             complete_task(task=owners_task, actor=member)
         with pytest.raises(TaskPermissionDenied):
-            delete_task(task=owners_task, actor=member)
+            delete_task(task=owners_task, actor=member, channel=CHANNEL_WEB)
 
     def test_viewer_can_do_nothing_mutating(self, workspace, owner, viewer):
         task = make_task(workspace, owner)
-        for action in (complete_task, cancel_task, delete_task):
+        for action in (complete_task, cancel_task, partial(delete_task, channel=CHANNEL_WEB)):
             with pytest.raises(TaskPermissionDenied):
                 action(task=task, actor=viewer)
         with pytest.raises(TaskPermissionDenied):
@@ -197,7 +199,7 @@ class TestLockedScoping:
         with pytest.raises(InvalidTransition):
             edit_task(task=forged, actor=owner, title="Hijacked")
         with pytest.raises(InvalidTransition):
-            delete_task(task=forged, actor=owner)
+            delete_task(task=forged, actor=owner, channel=CHANNEL_WEB)
         foreign.refresh_from_db()
         assert foreign.status == Task.Status.OPEN
         assert foreign.title == "Foreign"
@@ -205,7 +207,7 @@ class TestLockedScoping:
     def test_transition_on_concurrently_deleted_row(self, workspace, owner):
         task = make_task(workspace, owner)
         stale = Task.objects.get(pk=task.pk)
-        delete_task(task=task, actor=owner)
+        delete_task(task=task, actor=owner, channel=CHANNEL_WEB)
         with pytest.raises(InvalidTransition):
             complete_task(task=stale, actor=owner)
 

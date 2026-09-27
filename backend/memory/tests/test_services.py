@@ -1,4 +1,5 @@
 import threading
+from functools import partial
 
 import pytest
 from django.db import OperationalError, connection
@@ -7,6 +8,7 @@ from accounts.services import register_user
 from assistant.models import Conversation
 from assistant.services import mark_conversation_private
 from audit.models import AuditLog
+from core.channels import CHANNEL_WEB
 from memory.models import Memory, compute_fingerprint
 from memory.services import (
     DuplicateMemory,
@@ -158,13 +160,13 @@ class TestStateMachine:
 
     def test_hard_delete_only_never_approved(self, workspace, owner):
         pending = suggestion(workspace, content="pending one")
-        delete_memory(memory=pending, actor=owner)
+        delete_memory(memory=pending, actor=owner, channel=CHANNEL_WEB)
         assert not Memory.objects.filter(pk=pending.pk).exists()
         assert "memory.deleted" in audit_actions()
 
         approved = approve_memory(memory=suggestion(workspace, content="kept"), actor=owner)
         with pytest.raises(InvalidTransition):
-            delete_memory(memory=approved, actor=owner)
+            delete_memory(memory=approved, actor=owner, channel=CHANNEL_WEB)
 
 
 class TestEdit:
@@ -244,11 +246,11 @@ class TestRolePolicy:
     def test_member_cannot_hard_delete(self, workspace, member):
         row = suggestion(workspace)
         with pytest.raises(MemoryPermissionDenied):
-            delete_memory(memory=row, actor=member)
+            delete_memory(memory=row, actor=member, channel=CHANNEL_WEB)
 
     def test_viewer_can_do_nothing_mutating(self, workspace, owner, viewer):
         row = suggestion(workspace)
-        for action in (approve_memory, reject_memory, delete_memory):
+        for action in (approve_memory, reject_memory, partial(delete_memory, channel=CHANNEL_WEB)):
             with pytest.raises(MemoryPermissionDenied):
                 action(memory=row, actor=viewer)
         approved = approve_memory(memory=row, actor=owner)
@@ -276,7 +278,7 @@ class TestConcurrencySafety:
         stale = Memory.objects.get(pk=row.pk)
         approve_memory(memory=row, actor=owner)
         with pytest.raises(InvalidTransition):
-            delete_memory(memory=stale, actor=owner)
+            delete_memory(memory=stale, actor=owner, channel=CHANNEL_WEB)
         assert Memory.objects.filter(pk=row.pk).exists()
 
     def test_stale_instance_cannot_double_transition(self, workspace, owner):
@@ -291,7 +293,7 @@ class TestConcurrencySafety:
     def test_transition_on_concurrently_deleted_row(self, workspace, owner):
         row = suggestion(workspace)
         stale = Memory.objects.get(pk=row.pk)
-        delete_memory(memory=row, actor=owner)
+        delete_memory(memory=row, actor=owner, channel=CHANNEL_WEB)
         with pytest.raises(InvalidTransition):
             approve_memory(memory=stale, actor=owner)
 
@@ -358,7 +360,7 @@ class TestLockedScoping:
         with pytest.raises(InvalidTransition):
             edit_memory(memory=forged, actor=owner, title="Hijacked")
         with pytest.raises(InvalidTransition):
-            delete_memory(memory=forged, actor=owner)
+            delete_memory(memory=forged, actor=owner, channel=CHANNEL_WEB)
         foreign.refresh_from_db()
         assert foreign.status == Memory.Status.PENDING_APPROVAL
         assert foreign.title == "Foreign"
