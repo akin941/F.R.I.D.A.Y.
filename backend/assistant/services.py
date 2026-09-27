@@ -363,6 +363,9 @@ def classify_intent(
 CONNECTOR_ERROR_LOCAL_MODEL_REQUIRED = "connector_local_model_required"
 CONNECTOR_ERROR_INVALID_ARGUMENTS = "connector_invalid_arguments"
 CONNECTOR_ERROR_READ_FAILED = "connector_read_failed"
+# A native bridge's credential was rejected (Google `invalid_grant`): the
+# owner reconnects on the host (`manage.py connect_google`, brief D9/R4).
+CONNECTOR_ERROR_RECONNECT_REQUIRED = "connector_reconnect_required"
 _INVALID_ARGUMENT_CODES = frozenset({"invalid_arguments", "out_of_scope"})
 # Bound on the router's argument object (keys), before the serializer runs.
 _MAX_CONNECTOR_ARGS = 20
@@ -521,11 +524,12 @@ def prepare_connector_read(conversation, *, actor, content, channel, tool_name):
             workspace=conversation.workspace, actor=actor, args=arguments, channel=channel
         )
     except ReadToolError as exc:
-        error_type = (
-            CONNECTOR_ERROR_INVALID_ARGUMENTS
-            if exc.code in _INVALID_ARGUMENT_CODES
-            else CONNECTOR_ERROR_READ_FAILED
-        )
+        if exc.code in _INVALID_ARGUMENT_CODES:
+            error_type = CONNECTOR_ERROR_INVALID_ARGUMENTS
+        elif exc.code == "reconnect_required":
+            error_type = CONNECTOR_ERROR_RECONNECT_REQUIRED
+        else:
+            error_type = CONNECTOR_ERROR_READ_FAILED
         return ConnectorTurn(tool_name=tool_name, outcome=exc.code, error_type=error_type)
     block, report = render_connector_block(result, tool=spec.name, source=spec.source)
     report["data_class"] = spec.data_class
