@@ -52,6 +52,10 @@ export const ERROR_MESSAGES = {
     specific: true,
   },
   owner_required: { message: "Bu işlemi yalnızca kurulum sahibi yapabilir.", specific: true },
+  token_kind_forbidden: {
+    message: "Bu erişim token'ının türü bu işlem için kullanılamaz.",
+    specific: true,
+  },
   not_found: { message: "Aranan kayıt bulunamadı.", specific: false },
   method_not_allowed: { message: "Bu işlem desteklenmiyor.", specific: false },
   not_acceptable: { message: "Bu işlem desteklenmiyor.", specific: false },
@@ -243,6 +247,7 @@ export const tr = {
       web: "Web",
       cli: "CLI",
       telegram: "Telegram",
+      openai: "OpenAI uyumlu istemci",
     } satisfies Record<MessageChannel, string> as Record<string, string>,
     viaChannel: (label: string) => `${label} üzerinden`,
     rename: "Yeniden adlandır",

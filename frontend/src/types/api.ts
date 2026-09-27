@@ -105,7 +105,8 @@ export interface ApiRemoteKeyState {
 }
 
 // Which channel a turn arrived over (backend Message.Channel, MVP 9 §1).
-export type MessageChannel = "web" | "cli" | "telegram";
+// `openai`: the OpenAI-compatible facade (Phase 4 branch 6), e.g. Open WebUI.
+export type MessageChannel = "web" | "cli" | "telegram" | "openai";
 
 export type MessageIntent =
   | ""

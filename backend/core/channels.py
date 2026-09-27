@@ -18,7 +18,11 @@ from dataclasses import dataclass
 # the BFF, whose Origin/Content-Type checks are the CSRF boundary (Phase 4
 # branch 2). Nothing else is ever web.
 CHANNEL_WEB = "web"
-CHANNEL_CLI = "cli"  # low-trust: bearer PAT
+CHANNEL_CLI = "cli"  # low-trust: bearer PAT of kind `cli`
+# Low-trust: bearer PAT of kind `openai`, used only by the OpenAI-compatible
+# facade (Phase 4 branch 6, ADR-008 decision 6: chat only, no tools, never
+# decides anything).
+CHANNEL_OPENAI = "openai"
 CHANNEL_TELEGRAM = "telegram"  # low-trust: relayed, no direct request at all
 # Not a request channel: machine-originated actions (agent engine, harness
 # gates, sweeps) that record "which channel" in audit metadata or on
@@ -47,9 +51,11 @@ class WebSessionPrincipal:
 @dataclass(frozen=True)
 class ChannelPrincipal:
     """Set as `request.auth` by a low-trust authenticator (accounts'
-    `PersonalAccessTokenAuthentication`).
+    `PersonalAccessTokenAuthentication` / `FacadeTokenAuthentication`).
 
-    `channel` is CHANNEL_CLI today; CHANNEL_TELEGRAM never appears here --
+    `channel` is CHANNEL_CLI or CHANNEL_OPENAI (the token's `kind`);
+    `token_id` names the PersonalAccessToken, for per-token limits (the
+    facade's throttle and stream cap). CHANNEL_TELEGRAM never appears here --
     Telegram has no direct request/response cycle with our API at all (it's
     relayed via a webhook + Celery task), so there is no request to
     authenticate as Telegram in the first place.
@@ -57,6 +63,7 @@ class ChannelPrincipal:
 
     channel: str
     bound_workspace_id: str
+    token_id: str | None = None
 
 
 def request_channel(request) -> str:

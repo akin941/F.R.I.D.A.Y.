@@ -90,12 +90,24 @@ class PersonalAccessToken(WorkspaceScopedModel, TimestampedModel):
     it, and routing that through `accounts` (already an open dependency for
     all of them via `User` FKs) avoids an `integrations <-> approvals`
     import cycle those apps otherwise have no reason to need.
+
+    `kind` (Phase 4 branch 6) decides the one surface a token can reach and
+    the channel it authenticates as: a `cli` token only the PAT-allowlisted
+    views (assistant/agents/approvals/activity, CHANNEL_CLI), an `openai`
+    token only the OpenAI-compatible facade (CHANNEL_OPENAI). An Open WebUI
+    server's token can never create agents or approval requests. Fixed at
+    mint, like the workspace.
     """
+
+    class Kind(models.TextChoices):
+        CLI = "cli"
+        OPENAI = "openai"
 
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="personal_access_tokens"
     )
     name = models.CharField(max_length=255)
+    kind = models.CharField(max_length=10, choices=Kind.choices, default=Kind.CLI)
     # sha256 hex digest of the raw token; the raw value is never stored,
     # returned exactly once in the mint response.
     token_hash = models.CharField(max_length=64, unique=True)
