@@ -13,25 +13,8 @@ import {
   KNOWLEDGE_SOURCE_TYPE_LABELS,
   KNOWLEDGE_SOURCE_TYPES,
 } from "@/components/knowledge/labels";
-import { apiPostForm, apiPostJson, ApiError } from "@/lib/api-client";
+import { apiPostForm, apiPostJson, errorMessage } from "@/lib/api-client";
 import type { ApiKnowledgeDocument, KnowledgeSensitivity, KnowledgeSourceType } from "@/types/api";
-
-// Knowledge create errors can come back either flat (`{detail}`, matching
-// every other BFF route in this app) or field-keyed (DRF's default
-// `serializer.is_valid(raise_exception=True)` shape, e.g.
-// `{content: ["content must not be empty."]}`) — pasted-text/url validation
-// failures use the latter. Fall back to the first field-level message
-// before giving up, so those don't silently render as a generic error.
-function extractErrorMessage(err: unknown, fallback: string): string {
-  if (err instanceof ApiError) {
-    if (typeof err.body.detail === "string") return err.body.detail;
-    for (const value of Object.values(err.body)) {
-      if (Array.isArray(value) && typeof value[0] === "string") return value[0];
-    }
-    return fallback;
-  }
-  return "Bir şeyler ters gitti. Lütfen tekrar deneyin.";
-}
 
 export function KnowledgeCreateForm({
   workspaceId,
@@ -92,7 +75,7 @@ export function KnowledgeCreateForm({
       setSourceUrl("");
       setFile(null);
     } catch (err) {
-      setError(extractErrorMessage(err, "Belge oluşturulamadı."));
+      setError(errorMessage(err, "Belge oluşturulamadı."));
     } finally {
       setSubmitting(false);
     }

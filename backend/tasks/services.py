@@ -48,9 +48,13 @@ class TaskServiceError(Exception):
 class InvalidTransition(TaskServiceError):
     """Illegal state-machine move -> 400."""
 
+    code = "task.invalid_transition"
+
 
 class TaskPermissionDenied(TaskServiceError):
     """Actor's role does not allow the action -> 403."""
+
+    code = "task.permission_denied"
 
 
 def get_role(actor, workspace):

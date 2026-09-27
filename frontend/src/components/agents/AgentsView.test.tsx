@@ -1,8 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { AgentsView } from "@/components/agents/AgentsView";
 import type { ApiAgent } from "@/types/api";
+import { renderWithClient } from "@/test/render";
 
 const { workspaceHolder } = vi.hoisted(() => ({
   workspaceHolder: { current: { id: "w1", name: "Alice", type: "personal", role: "owner" } } as {
@@ -51,7 +52,7 @@ describe("AgentsView", () => {
       vi.fn(async () => jsonResponse([row])),
     );
 
-    render(<AgentsView />);
+    renderWithClient(<AgentsView />);
 
     expect(await screen.findByText("Summarize my notes")).toBeInTheDocument();
   });
@@ -62,7 +63,7 @@ describe("AgentsView", () => {
       vi.fn(async () => jsonResponse([])),
     );
 
-    render(<AgentsView />);
+    renderWithClient(<AgentsView />);
 
     expect(await screen.findByText("Henüz ajan yok.")).toBeInTheDocument();
   });
@@ -79,7 +80,7 @@ describe("AgentsView", () => {
       }),
     );
 
-    render(<AgentsView />);
+    renderWithClient(<AgentsView />);
     await screen.findByText("Henüz ajan yok.");
 
     await userEvent.click(screen.getByRole("button", { name: "Yeni ajan" }));
@@ -89,40 +90,40 @@ describe("AgentsView", () => {
     expect(await screen.findByText("Draft a report")).toBeInTheDocument();
   });
 
-  it("opens an agent's detail view on click", async () => {
+  it("links each agent to its routed detail page, carrying the workspace", async () => {
     const row = agent({ id: "a1", goal: "Summarize my notes" });
     vi.stubGlobal(
       "fetch",
-      vi.fn(async (input: string) => {
-        if (input === "/api/agents/a1") {
-          return jsonResponse({ ...row, steps: [] });
-        }
-        return jsonResponse([row]);
-      }),
+      vi.fn(async () => jsonResponse([row])),
     );
 
-    render(<AgentsView />);
-    await userEvent.click(await screen.findByText("Summarize my notes"));
+    renderWithClient(<AgentsView />);
 
-    expect(await screen.findByRole("button", { name: /Ajanlara dön/ })).toBeInTheDocument();
+    const link = await screen.findByRole("link", { name: /Summarize my notes/ });
+    expect(link).toHaveAttribute("href", "/agents/a1?workspace=w1");
   });
 
-  it("opens an agent's detail view from the keyboard", async () => {
-    const row = agent({ id: "a1", goal: "Summarize my notes" });
+  it("polls while an agent is in flight and stops once all are terminal", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    let calls = 0;
     vi.stubGlobal(
       "fetch",
-      vi.fn(async (input: string) => {
-        if (input === "/api/agents/a1") return jsonResponse({ ...row, steps: [] });
-        return jsonResponse([row]);
+      vi.fn(async () => {
+        calls += 1;
+        return jsonResponse([agent({ status: calls < 3 ? "running" : "completed" })]);
       }),
     );
 
-    render(<AgentsView />);
-    const card = await screen.findByRole("button", { name: /Summarize my notes/ });
-    card.focus();
-    await userEvent.keyboard("{Enter}");
+    renderWithClient(<AgentsView />);
+    expect(await screen.findByText("Çalışıyor")).toBeInTheDocument();
 
-    expect(await screen.findByRole("button", { name: /Ajanlara dön/ })).toBeInTheDocument();
+    await vi.advanceTimersByTimeAsync(3000);
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(await screen.findByText("Tamamlandı")).toBeInTheDocument();
+    const callsAtTerminal = calls;
+    await vi.advanceTimersByTimeAsync(15_000);
+    expect(calls).toBe(callsAtTerminal);
+    vi.useRealTimers();
   });
 
   it("renders a Turkish label for the failure reason, never the raw value", async () => {
@@ -133,7 +134,7 @@ describe("AgentsView", () => {
       ),
     );
 
-    render(<AgentsView />);
+    renderWithClient(<AgentsView />);
 
     expect(await screen.findByText(/Model çağrı bütçesi aşıldı/)).toBeInTheDocument();
     expect(screen.queryByText(/gateway_budget_exceeded/)).not.toBeInTheDocument();

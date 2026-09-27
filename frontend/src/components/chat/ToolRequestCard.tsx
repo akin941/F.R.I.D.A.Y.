@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { ApprovalCard } from "@/components/approvals/ApprovalCard";
-import { apiPostJson, ApiError } from "@/lib/api-client";
+import { apiPostJson, errorMessage } from "@/lib/api-client";
 import type { ApiApprovalRequest } from "@/types/api";
 
 export interface ToolRequestDraft {
@@ -57,11 +57,7 @@ export function ToolRequestCard({
       });
       setCreated(request);
     } catch (err) {
-      setError(
-        err instanceof ApiError
-          ? (err.body.detail ?? "İstek oluşturulamadı.")
-          : "Bir şeyler ters gitti. Lütfen tekrar deneyin.",
-      );
+      setError(errorMessage(err, "İstek oluşturulamadı."));
     } finally {
       busyRef.current = false;
       setBusy(false);

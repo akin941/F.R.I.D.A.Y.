@@ -55,13 +55,19 @@ class MemoryServiceError(Exception):
 class InvalidTransition(MemoryServiceError):
     """Illegal state-machine move → 400."""
 
+    code = "memory.invalid_transition"
+
 
 class DuplicateMemory(MemoryServiceError):
     """Fingerprint collision inside the workspace → 400."""
 
+    code = "memory.duplicate"
+
 
 class MemoryPermissionDenied(MemoryServiceError):
     """Actor's role does not allow the action → 403."""
+
+    code = "memory.permission_denied"
 
 
 def get_role(actor, workspace):

@@ -1,10 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Alert, AlertDescription } from "@/components/ui/alert";
+import { ErrorState } from "@/components/ui/error-state";
+import { PageHeader } from "@/components/ui/page-header";
 import { Skeleton } from "@/components/ui/skeleton";
+import { StatusPill } from "@/components/ui/status-pill";
 import { HarnessJobGoalForm } from "@/components/harness/HarnessJobGoalForm";
 import { HarnessJobDetail } from "@/components/harness/HarnessJobDetail";
 import { ImplementationJobDetail } from "@/components/harness/ImplementationJobDetail";
@@ -17,7 +20,10 @@ import {
 } from "@/components/harness/labels";
 import { useWorkspace } from "@/contexts/workspace-context";
 import { apiGetJson } from "@/lib/api-client";
+import { tr } from "@/lib/i18n/tr";
 import { clickableProps } from "@/lib/keyboard";
+import { queryKeys } from "@/lib/query/keys";
+import { POLL_FAST_MS, pollWhile } from "@/lib/query/polling";
 import type { ApiHarnessJob } from "@/types/api";
 import { VIEW_SCROLL_ROOT } from "@/components/shell/view-scroll";
 import { cn } from "@/lib/utils";
@@ -32,81 +38,29 @@ const TABS: { id: HarnessTab; label: string }[] = [
 export function HarnessJobsView() {
   const { activeWorkspace } = useWorkspace();
 
-  const [jobs, setJobs] = useState<ApiHarnessJob[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [loadError, setLoadError] = useState<string | null>(null);
-  const [creating, setCreating] = useState(false);
+  if (!activeWorkspace) {
+    return (
+      <div className="flex flex-1 items-center justify-center p-6 text-sm text-muted-foreground">
+        {tr.common.noWorkspace}
+      </div>
+    );
+  }
+  // Keyed by workspace: switching workspace resets the selection, tab and
+  // open forms; the query keys isolate the rows themselves.
+  return <HarnessConsole key={activeWorkspace.id} workspaceId={activeWorkspace.id} />;
+}
+
+function HarnessConsole({ workspaceId }: { workspaceId: string }) {
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
   const [tab, setTab] = useState<HarnessTab>("discovery");
   const [selectedImplJobId, setSelectedImplJobId] = useState<string | null>(null);
   const [implPrefill, setImplPrefill] = useState<ImplementationPrefill | null>(null);
 
-  const activeWorkspaceIdRef = useRef<string | null>(null);
-
-  const loadJobs = useCallback(async (workspaceId: string, options?: { silent?: boolean }) => {
-    if (!options?.silent) setLoading(true);
-    setLoadError(null);
-    try {
-      const list = await apiGetJson<ApiHarnessJob[]>(
-        `/api/harness/jobs?workspace=${encodeURIComponent(workspaceId)}`,
-      );
-      if (activeWorkspaceIdRef.current !== workspaceId) return;
-      setJobs(list);
-    } catch {
-      if (activeWorkspaceIdRef.current === workspaceId && !options?.silent) {
-        setLoadError("Harness işleri yüklenemedi.");
-      }
-    } finally {
-      if (activeWorkspaceIdRef.current === workspaceId && !options?.silent) setLoading(false);
-    }
-  }, []);
-
-  /* eslint-disable react-hooks/set-state-in-effect -- fetch-on-mount/workspace-change, the standard data-fetching effect pattern */
-  useEffect(() => {
-    const workspaceId = activeWorkspace?.id ?? null;
-    activeWorkspaceIdRef.current = workspaceId;
-    setJobs([]);
-    setCreating(false);
-    setSelectedJobId(null);
-    setSelectedImplJobId(null);
-    setImplPrefill(null);
-    if (workspaceId) {
-      void loadJobs(workspaceId);
-    }
-  }, [activeWorkspace, loadJobs]);
-  /* eslint-enable react-hooks/set-state-in-effect */
-
-  // While viewing the list (not a single job's own detail poll), keep
-  // in-flight rows' statuses fresh too -- same reasoning as AgentsView.
-  useEffect(() => {
-    const workspaceId = activeWorkspace?.id ?? null;
-    if (!workspaceId || selectedJobId || tab !== "discovery") return;
-    const hasInFlight = jobs.some((j) => HARNESS_JOB_IN_FLIGHT_STATUSES.includes(j.status));
-    if (!hasInFlight) return;
-    const interval = setInterval(() => {
-      void loadJobs(workspaceId, { silent: true });
-    }, 3000);
-    return () => clearInterval(interval);
-  }, [jobs, selectedJobId, tab, activeWorkspace, loadJobs]);
-
-  function handleCreated(job: ApiHarnessJob) {
-    if (activeWorkspaceIdRef.current !== job.workspace) return;
-    setJobs((prev) => [job, ...prev]);
-    setCreating(false);
-  }
-
-  if (!activeWorkspace) {
-    return (
-      <div className="flex flex-1 items-center justify-center p-6 text-sm text-muted-foreground">
-        Kullanılabilir çalışma alanı yok.
-      </div>
-    );
-  }
-
   if (selectedJobId) {
     return (
       <HarnessJobDetail
         jobId={selectedJobId}
+        workspaceId={workspaceId}
         onBack={() => setSelectedJobId(null)}
         onRequestImplementation={(prefill) => {
           setImplPrefill(prefill);
@@ -121,6 +75,7 @@ export function HarnessJobsView() {
     return (
       <ImplementationJobDetail
         jobId={selectedImplJobId}
+        workspaceId={workspaceId}
         onBack={() => setSelectedImplJobId(null)}
       />
     );
@@ -138,15 +93,10 @@ export function HarnessJobsView() {
 
   return (
     <div className={cn(VIEW_SCROLL_ROOT, "gap-6 p-6")}>
-      <div className="flex flex-wrap items-center justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Harness</h1>
-          <p className="text-sm text-muted-foreground">
-            Keşif: kayıtlı bir depoda salt okunur bir inceleme çalıştır, brifing al. Uygulama:
-            ajandan değişiklik iste — plan ve gönderim ayrı ayrı senin onayından geçer.
-          </p>
-        </div>
-      </div>
+      <PageHeader
+        title="Harness"
+        description="Keşif: kayıtlı bir depoda salt okunur bir inceleme çalıştır, brifing al. Uygulama: ajandan değişiklik iste — plan ve gönderim ayrı ayrı senin onayından geçer."
+      />
 
       <div role="tablist" aria-label="Harness işleri" className="flex gap-1 border-b">
         {TABS.map((t) => (
@@ -182,8 +132,8 @@ export function HarnessJobsView() {
             // discovery detail view, i.e. while this panel is unmounted, so
             // it always mounts fresh with it -- clearing it afterwards must
             // not remount (and so reload over) the just-created job.
-            key={activeWorkspace.id}
-            workspaceId={activeWorkspace.id}
+            key={workspaceId}
+            workspaceId={workspaceId}
             prefill={implPrefill}
             onPrefillConsumed={() => setImplPrefill(null)}
             onSelect={setSelectedImplJobId}
@@ -194,57 +144,99 @@ export function HarnessJobsView() {
           role="tabpanel"
           id="harness-panel-discovery"
           aria-labelledby="harness-tab-discovery"
-          className="flex flex-col gap-6"
         >
-          <div className="flex justify-end">
-            <Button onClick={() => setCreating((v) => !v)}>{creating ? "İptal" : "Yeni iş"}</Button>
-          </div>
-
-          {loadError ? (
-            <Alert variant="destructive" role="alert">
-              <AlertDescription>{loadError}</AlertDescription>
-            </Alert>
-          ) : null}
-
-          {creating ? (
-            <HarnessJobGoalForm
-              key={activeWorkspace.id}
-              workspaceId={activeWorkspace.id}
-              onCreated={handleCreated}
-              onCancel={() => setCreating(false)}
-            />
-          ) : null}
-
-          {loading ? (
-            <div className="flex flex-col gap-3">
-              <Skeleton className="h-20 w-full" />
-              <Skeleton className="h-20 w-full" />
-            </div>
-          ) : jobs.length === 0 ? (
-            <p className="text-sm text-muted-foreground">Henüz harness işi yok.</p>
-          ) : (
-            <div className="flex flex-col gap-3">
-              {jobs.map((job) => (
-                <Card
-                  key={job.id}
-                  className="cursor-pointer transition-colors hover:bg-accent/50 focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none"
-                  {...clickableProps(() => setSelectedJobId(job.id))}
-                >
-                  <CardHeader>
-                    <CardTitle className="text-base">{job.goal}</CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <p className="text-sm text-muted-foreground">
-                      {HARNESS_JOB_STATUS_LABELS[job.status]}
-                      {job.failure_reason ? ` — ${harnessFailureReasonLabel(job.failure_reason)}` : ""}
-                    </p>
-                  </CardContent>
-                </Card>
-              ))}
-            </div>
-          )}
+          <DiscoveryJobsPanel workspaceId={workspaceId} onSelect={setSelectedJobId} />
         </div>
       )}
+    </div>
+  );
+}
+
+/**
+ * "Keşif işleri": the discovery job list + request form. Polls only while
+ * mounted (this tab, list visible) and some job is still in flight.
+ */
+function DiscoveryJobsPanel({
+  workspaceId,
+  onSelect,
+}: {
+  workspaceId: string;
+  onSelect: (jobId: string) => void;
+}) {
+  const queryClient = useQueryClient();
+  const [creating, setCreating] = useState(false);
+  const jobs = useQuery({
+    queryKey: queryKeys.harnessJobs(workspaceId),
+    queryFn: () =>
+      apiGetJson<ApiHarnessJob[]>(`/api/harness/jobs?workspace=${encodeURIComponent(workspaceId)}`),
+    refetchInterval: pollWhile<ApiHarnessJob[]>((list) =>
+      list.some((j) => HARNESS_JOB_IN_FLIGHT_STATUSES.includes(j.status)) ? POLL_FAST_MS : null,
+    ),
+  });
+
+  function handleCreated(job: ApiHarnessJob) {
+    queryClient.setQueryData<ApiHarnessJob[]>(queryKeys.harnessJobs(job.workspace), (prev = []) => [
+      job,
+      ...prev.filter((j) => j.id !== job.id),
+    ]);
+    setCreating(false);
+  }
+
+  return (
+    <div className="flex flex-col gap-6">
+      <div className="flex justify-end">
+        <Button onClick={() => setCreating((v) => !v)}>{creating ? "İptal" : "Yeni iş"}</Button>
+      </div>
+
+      {jobs.isError && !jobs.data ? (
+        <ErrorState
+          error={jobs.error}
+          title="Harness işleri yüklenemedi."
+          onRetry={() => void jobs.refetch()}
+          retrying={jobs.isFetching}
+        />
+      ) : null}
+
+      {creating ? (
+        <HarnessJobGoalForm
+          workspaceId={workspaceId}
+          onCreated={handleCreated}
+          onCancel={() => setCreating(false)}
+        />
+      ) : null}
+
+      {jobs.isPending ? (
+        <div className="flex flex-col gap-3">
+          <Skeleton className="h-20 w-full" />
+          <Skeleton className="h-20 w-full" />
+        </div>
+      ) : jobs.data?.length === 0 ? (
+        <p className="text-sm text-muted-foreground">Henüz harness işi yok.</p>
+      ) : jobs.data ? (
+        <div className="flex flex-col gap-3">
+          {jobs.data.map((job) => (
+            <Card
+              key={job.id}
+              className="cursor-pointer transition-colors hover:bg-accent/50 focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none"
+              {...clickableProps(() => onSelect(job.id))}
+            >
+              <CardHeader>
+                <CardTitle className="text-base">{job.goal}</CardTitle>
+              </CardHeader>
+              <CardContent className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+                <StatusPill
+                  domain="harnessJob"
+                  status={job.status}
+                  label={HARNESS_JOB_STATUS_LABELS[job.status] ?? job.status}
+                />
+                {job.failure_reason ? (
+                  <span>{harnessFailureReasonLabel(job.failure_reason)}</span>
+                ) : null}
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      ) : null}
     </div>
   );
 }

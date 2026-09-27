@@ -10,7 +10,7 @@ import {
   MEMORY_TYPE_LABELS,
 } from "@/components/memory/labels";
 import { MemoryFields, type MemoryFieldsValue } from "@/components/memory/MemoryFields";
-import { apiDelete, apiPatchJson, apiPostJson, ApiError } from "@/lib/api-client";
+import { apiDelete, apiPatchJson, apiPostJson, errorMessage } from "@/lib/api-client";
 import type { ApiMemory } from "@/types/api";
 
 function toFieldsValue(memory: ApiMemory): MemoryFieldsValue {
@@ -45,11 +45,7 @@ export function MemoryCard({
     try {
       return await action();
     } catch (err) {
-      setError(
-        err instanceof ApiError
-          ? (err.body.detail ?? "İşlem tamamlanamadı.")
-          : "Bir şeyler ters gitti. Lütfen tekrar deneyin.",
-      );
+      setError(errorMessage(err, "İşlem tamamlanamadı."));
       return undefined;
     } finally {
       setBusy(false);

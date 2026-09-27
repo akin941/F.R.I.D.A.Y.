@@ -221,6 +221,15 @@ REST_FRAMEWORK = {
         "rest_framework_simplejwt.authentication.JWTAuthentication",
     ),
     "DEFAULT_PERMISSION_CLASSES": ("rest_framework.permissions.IsAuthenticated",),
+    # Phase 4 branch 3: every error body carries a stable `code`
+    # (core/api_errors.py, vocabulary in core/error_codes.py) -- the handler
+    # for raised exceptions, the renderer as the backstop for error
+    # responses views build by hand.
+    "EXCEPTION_HANDLER": "core.api_errors.exception_handler",
+    "DEFAULT_RENDERER_CLASSES": (
+        "core.api_errors.CodedJSONRenderer",
+        "rest_framework.renderers.BrowsableAPIRenderer",
+    ),
     # Scoped rates (ScopedRateThrottle, counted in the default cache):
     # - "chat": provider-cost message send (assistant/views.py).
     # - "login" / "refresh": the anonymous token endpoints (accounts/urls.py).

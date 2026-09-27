@@ -11,7 +11,7 @@ import type { ChatMessageView } from "@/components/chat/types";
 import { TaskDraftCard, type TaskDraft } from "@/components/chat/TaskDraftCard";
 import { ToolRequestCard, type ToolRequestDraft } from "@/components/chat/ToolRequestCard";
 import { localDateString } from "@/components/tasks/TodayView";
-import { apiFetch, apiGetJson, apiPostJson, ApiError } from "@/lib/api-client";
+import { apiFetch, apiGetJson, apiPostJson, ApiError, errorMessage } from "@/lib/api-client";
 import { SSEStreamParser } from "@/lib/sse";
 import { useWorkspace } from "@/contexts/workspace-context";
 import type { ApiConversation, ApiMessage } from "@/types/api";
@@ -234,7 +234,7 @@ export function ChatView() {
           );
         } else if (response.status === 400) {
           const body = await response.json().catch(() => ({}));
-          setBannerError(body.detail ?? "Mesaj gönderilemedi.");
+          setBannerError(errorMessage(new ApiError(response.status, body), "Mesaj gönderilemedi."));
         } else {
           setBannerError("Bir şeyler ters gitti. Lütfen tekrar deneyin.");
         }

@@ -4,7 +4,7 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { apiPostJson, ApiError } from "@/lib/api-client";
+import { apiPostJson, errorMessage } from "@/lib/api-client";
 import { useWorkspace } from "@/contexts/workspace-context";
 import type { ApiPersonalAccessToken } from "@/types/api";
 
@@ -33,11 +33,7 @@ function TokenRow({
       );
       onRevoked(updated);
     } catch (err) {
-      setError(
-        err instanceof ApiError
-          ? (err.body.detail ?? "Token iptal edilemedi.")
-          : "Bir şeyler ters gitti. Lütfen tekrar deneyin.",
-      );
+      setError(errorMessage(err, "Token iptal edilemedi."));
     } finally {
       setRevoking(false);
     }

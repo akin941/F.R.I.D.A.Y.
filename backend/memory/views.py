@@ -6,6 +6,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from core.api_errors import service_error_response
 from memory.models import Memory
 from memory.serializers import MemoryCreateSerializer, MemoryCurateSerializer, MemorySerializer
 from memory.services import (
@@ -34,9 +35,9 @@ _TRANSITIONS = {
 
 def _service_error_response(exc):
     if isinstance(exc, MemoryPermissionDenied):
-        return Response({"detail": str(exc)}, status=status.HTTP_403_FORBIDDEN)
+        return service_error_response(exc, status.HTTP_403_FORBIDDEN)
     if isinstance(exc, (InvalidTransition, DuplicateMemory)):
-        return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        return service_error_response(exc, status.HTTP_400_BAD_REQUEST)
     raise exc
 
 

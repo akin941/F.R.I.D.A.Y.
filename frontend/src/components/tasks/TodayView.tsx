@@ -7,7 +7,7 @@ import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/componen
 import { Skeleton } from "@/components/ui/skeleton";
 import { TASK_PRIORITY_LABELS } from "@/components/tasks/labels";
 import { useWorkspace } from "@/contexts/workspace-context";
-import { apiGetJson, apiPostJson, ApiError } from "@/lib/api-client";
+import { apiGetJson, apiPostJson, errorMessage } from "@/lib/api-client";
 import type { ApiTask } from "@/types/api";
 import { VIEW_SCROLL_ROOT } from "@/components/shell/view-scroll";
 import { cn } from "@/lib/utils";
@@ -43,11 +43,7 @@ function TodayTaskItem({
       await apiPostJson<ApiTask>(`/api/tasks/${task.id}/complete`);
       onCompleted(task.id);
     } catch (err) {
-      setError(
-        err instanceof ApiError
-          ? (err.body.detail ?? "Görev tamamlanamadı.")
-          : "Bir şeyler ters gitti. Lütfen tekrar deneyin.",
-      );
+      setError(errorMessage(err, "Görev tamamlanamadı."));
     } finally {
       setBusy(false);
     }

@@ -1,3 +1,4 @@
+import { tr } from "@/lib/i18n/tr";
 import type {
   AgentFailureReason,
   AgentStatus,
@@ -5,24 +6,13 @@ import type {
   AgentStepStatus,
 } from "@/types/api";
 
-export const AGENT_STATUS_LABELS: Record<AgentStatus, string> = {
-  planning: "Planlanıyor",
-  running: "Çalışıyor",
-  blocked_on_approval: "Onay bekliyor",
-  blocked_on_confirmation: "Onay bekliyor",
-  completed: "Tamamlandı",
-  failed: "Başarısız",
-  cancelled: "İptal edildi",
-};
+// Strings live in the Turkish catalog (lib/i18n/tr.ts); re-exported here
+// under their established names next to the agent status logic.
+export const AGENT_STATUS_LABELS: Record<AgentStatus, string> = tr.status.agent;
 
 // `""` (no failure) is never rendered -- callers only show a reason when set.
-export const AGENT_FAILURE_REASON_LABELS: Record<Exclude<AgentFailureReason, "">, string> = {
-  plan_too_large: "Plan çok büyük",
-  plan_empty: "Plan boş",
-  planner_error: "Planlayıcı hatası",
-  consecutive_failures: "Art arda çok fazla başarısız adım",
-  gateway_budget_exceeded: "Model çağrı bütçesi aşıldı",
-};
+export const AGENT_FAILURE_REASON_LABELS: Record<Exclude<AgentFailureReason, "">, string> =
+  tr.agent.failureReason;
 
 /** Turkish label for a raw failure_reason; unknown values fall back verbatim. */
 export function agentFailureReasonLabel(reason: string): string {
@@ -40,9 +30,8 @@ export const AGENT_STATUSES: AgentStatus[] = [
 ];
 
 // An Agent still in one of these statuses may still change on its own
-// (the execution engine advancing in the background) -- the detail view
-// polls silently while true, same reasoning as ApprovalView's run-status
-// poll.
+// (the execution engine advancing in the background) -- list and detail
+// poll while any row is in flight.
 export const AGENT_IN_FLIGHT_STATUSES: AgentStatus[] = [
   "planning",
   "running",
@@ -50,18 +39,6 @@ export const AGENT_IN_FLIGHT_STATUSES: AgentStatus[] = [
   "blocked_on_confirmation",
 ];
 
-export const AGENT_STEP_STATUS_LABELS: Record<AgentStepStatus, string> = {
-  pending: "Beklemede",
-  running: "Çalışıyor",
-  succeeded: "Başarılı",
-  failed: "Başarısız",
-  blocked_on_approval: "Onay bekliyor",
-  blocked_on_confirmation: "Onay bekliyor",
-  skipped: "Atlandı",
-};
+export const AGENT_STEP_STATUS_LABELS: Record<AgentStepStatus, string> = tr.status.agentStep;
 
-export const AGENT_STEP_KIND_LABELS: Record<AgentStepKind, string> = {
-  read: "Oku",
-  tool_request: "Araç isteği",
-  task_draft: "Görev taslağı",
-};
+export const AGENT_STEP_KIND_LABELS: Record<AgentStepKind, string> = tr.agent.stepKind;

@@ -4,7 +4,7 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { apiPostJson, ApiError } from "@/lib/api-client";
+import { apiPostJson, errorMessage } from "@/lib/api-client";
 import type { ApiTask } from "@/types/api";
 
 export interface TaskDraft {
@@ -48,11 +48,7 @@ export function TaskDraftCard({
       });
       onConfirmed(task);
     } catch (err) {
-      setError(
-        err instanceof ApiError
-          ? (err.body.detail ?? "Görev oluşturulamadı.")
-          : "Bir şeyler ters gitti. Lütfen tekrar deneyin.",
-      );
+      setError(errorMessage(err, "Görev oluşturulamadı."));
     } finally {
       setBusy(false);
     }

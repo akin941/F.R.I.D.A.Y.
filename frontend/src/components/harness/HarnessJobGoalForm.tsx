@@ -7,7 +7,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { HarnessRepoPicker } from "@/components/harness/HarnessRepoPicker";
-import { apiPostJson, ApiError } from "@/lib/api-client";
+import { apiPostJson, errorMessage } from "@/lib/api-client";
 import type { ApiHarnessJob } from "@/types/api";
 
 // Same cap the backend enforces on a harness job's goal.
@@ -48,11 +48,7 @@ export function HarnessJobGoalForm({
       setRepo("");
       setGoal("");
     } catch (err) {
-      setError(
-        err instanceof ApiError
-          ? (err.body.detail ?? "İş başlatılamadı.")
-          : "Bir şeyler ters gitti. Lütfen tekrar deneyin.",
-      );
+      setError(errorMessage(err, "İş başlatılamadı."));
     } finally {
       setSubmitting(false);
     }

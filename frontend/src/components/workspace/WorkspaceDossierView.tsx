@@ -11,7 +11,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Separator } from "@/components/ui/separator";
 import { useWorkspace } from "@/contexts/workspace-context";
-import { apiGetJson, apiPatchJson, ApiError } from "@/lib/api-client";
+import { apiGetJson, apiPatchJson, errorMessage } from "@/lib/api-client";
 import type {
   ApiWorkspaceDetail,
   ApiWorkspaceProfile,
@@ -209,11 +209,7 @@ export function WorkspaceDossierView() {
       setEditing(false);
     } catch (err) {
       if (activeWorkspaceIdRef.current !== workspaceId) return;
-      setSubmitError(
-        err instanceof ApiError
-          ? (err.body.detail ?? "Profil kaydedilemedi.")
-          : "Profil kaydedilemedi.",
-      );
+      setSubmitError(errorMessage(err, "Profil kaydedilemedi."));
     } finally {
       if (activeWorkspaceIdRef.current === workspaceId) setSubmitting(false);
     }
