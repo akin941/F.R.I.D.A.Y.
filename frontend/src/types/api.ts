@@ -516,9 +516,15 @@ export interface ApiHarnessRepo {
   enabled: boolean;
   sensitive: boolean;
   test_command: string;
+  // Phase 4 branch 5, read-only: how the ADR-004 self-modification guard
+  // sees this repo (`self` = Jarvis's own remote, implementation refused;
+  // `unconfigured` = HARNESS_SELF_REPO_IDENTIFIERS empty, all refused).
+  self_repo_status?: ApiRepoSelfStatus;
   created_at: string;
   updated_at: string;
 }
+
+export type ApiRepoSelfStatus = "self" | "other" | "unconfigured";
 
 // --- Harness implementation jobs (Phase 3 branch 6/7) ---
 

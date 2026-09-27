@@ -544,6 +544,73 @@ export const tr = {
       no_changes: "Ajan hiçbir değişiklik üretmedi",
       secret_leak: "Değişikliklerde gizli bilgi sızıntısı tespit edildi",
     } satisfies Record<Exclude<ImplFailureReason, "">, string>,
+    // The routed console (Phase 4 branch 5).
+    console: {
+      backToConsole: "Harness'e dön",
+      backToImplementations: "Uygulama işlerine dön",
+      repos: "Depolar",
+      live: "Canlı işler",
+      noLive: "Şu anda çalışan ya da onay bekleyen iş yok.",
+      discoveryJob: "Keşif işi",
+      implementationJob: "Uygulama işi",
+      detailTabs: "İş ayrıntıları",
+      tabs: {
+        briefing: "Brifing",
+        plan: "Plan",
+        review: "İnceleme",
+        diff: "Diff",
+        transcripts: "Transkriptler",
+      },
+      ownSummaryNote: "Özet ve bulgular Jarvis'in kendi özetidir (model üretimi).",
+      noSummaryButTranscript:
+        "Özet üretilemedi. Ajanın ham çıktısı Transkriptler sekmesinde, güvenilmeyen içerik olarak duruyor.",
+      briefingPending: "Brifing iş bittiğinde burada görünecek.",
+      noTranscript: "Henüz ham çıktı yok.",
+      noReviews: "Henüz inceleme yok.",
+      rawOnTranscriptsTab:
+        "İnceleyicinin ham çıktısı Transkriptler sekmesinde, güvenilmeyen içerik olarak duruyor.",
+      noCommitYet: "Henüz commit üretilmedi.",
+    },
+    repos: {
+      title: "Depolar",
+      description:
+        "Harness'in çalışabileceği kayıtlı depolar. Bir depo etkinleştirilene kadar hiçbir iş onu kullanamaz.",
+      create: "Depo kaydet",
+      createTitle: "Yeni depo kaydet",
+      createSubmit: "Kaydet",
+      createFailed: "Depo kaydedilemedi.",
+      editTitle: (name: string) => `“${name}” deposunu düzenle`,
+      editSubmit: "Değişiklikleri kaydet",
+      editFailed: "Depo güncellenemedi.",
+      edit: "Düzenle",
+      saving: "Kaydediliyor…",
+      loadFailed: "Depolar yüklenemedi.",
+      empty: "Henüz kayıtlı depo yok.",
+      emptyHint: "Bir depo kaydet ve etkinleştir; keşif ve uygulama işleri onu seçebilir.",
+      formDescription:
+        "Kimlik bilgisi saklanmaz: klonlama yetkisi sunucu ortamından gelir. Uygulama işleri için test komutu gerekir.",
+      name: "Ad",
+      gitUrl: "Git adresi",
+      gitUrlHint:
+        "Token, parola, “?” ya da “#” içermeyen düz bir adres (ör. git@github.com:sahip/depo.git).",
+      defaultBranch: "Varsayılan dal",
+      testCommand: "Test komutu",
+      testCommandHint:
+        "Uygulama işlerinde değişiklikten sonra çalıştırılır; boş bırakılırsa uygulama işleri reddedilir.",
+      noTestCommand: "Test komutu tanımlı değil — uygulama işleri bu depoyu kullanamaz.",
+      enabled: "Etkin",
+      disabled: "Devre dışı",
+      enabledLabel: "Etkin",
+      enabledHint: "Devre dışı bir depo hiçbir harness işinde seçilemez.",
+      sensitive: "Hassas",
+      sensitiveLabel: "Hassas müşteri işi",
+      sensitiveHint: "Bu depodaki işler hassas olarak işaretlenir.",
+      selfRepo: "Jarvis'in kendi deposu",
+      selfRepoHint:
+        "Bu depo Jarvis'in kendi kurulumuna çözülüyor: kendini değiştirme koruması (ADR-004) uygulama işlerini reddeder. Salt okunur keşif çalışır.",
+      selfRepoUnconfigured:
+        "HARNESS_SELF_REPO_IDENTIFIERS tanımlı değil: kendini değiştirme koruması hangi deponun Jarvis olduğunu bilemediği için tüm uygulama işlerini reddeder. Keşif işleri çalışır.",
+    },
   },
   approvals: {
     // Human title per tool; a tool without one keeps its raw `tool_name`.

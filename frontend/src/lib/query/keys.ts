@@ -21,6 +21,7 @@ export const queryKeys = {
     [workspaceId, "harness", "implementation-jobs"] as const,
   implementationJob: (workspaceId: string, jobId: string) =>
     [workspaceId, "harness", "implementation-jobs", jobId] as const,
+  harnessRepos: (workspaceId: string) => [workspaceId, "harness", "repos"] as const,
   approvals: (workspaceId: string) => [workspaceId, "approvals"] as const,
   conversations: (workspaceId: string) => [workspaceId, "conversations"] as const,
   messages: (workspaceId: string, conversationId: string) =>

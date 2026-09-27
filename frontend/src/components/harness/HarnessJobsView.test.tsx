@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { screen } from "@testing-library/react";
+import { screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { HarnessJobsView } from "@/components/harness/HarnessJobsView";
 import { REPO_ID, implJob, repo } from "@/components/harness/test-fixtures";
@@ -46,6 +46,7 @@ describe("HarnessJobsView", () => {
 
   afterEach(() => {
     vi.unstubAllGlobals();
+    window.history.replaceState(null, "", "/");
   });
 
   it("loads and renders the job list", async () => {
@@ -93,7 +94,7 @@ describe("HarnessJobsView", () => {
     await userEvent.type(screen.getByLabelText("Hedef"), "Audit the auth module");
     await userEvent.click(screen.getByRole("button", { name: "İşi başlat" }));
 
-    expect(await screen.findByText("Audit the auth module")).toBeInTheDocument();
+    expect((await screen.findAllByText("Audit the auth module")).length).toBeGreaterThan(0);
     const post = fetchMock.mock.calls.find(([, init]) => init?.method === "POST");
     expect(JSON.parse(post?.[1]?.body as string)).toEqual({
       workspace: "w1",
@@ -102,26 +103,12 @@ describe("HarnessJobsView", () => {
     });
   });
 
-  it("switches to the implementation jobs tab and opens a job's detail", async () => {
+  it("switches to the implementation jobs tab; rows link to their routed detail", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async (input: string) => {
         if (input.startsWith("/api/harness/implementation-jobs?")) {
-          return jsonResponse([implJob()]);
-        }
-        if (input === "/api/harness/implementation-jobs/ij1") {
-          return jsonResponse({
-            ...implJob(),
-            base_commit_sha: "",
-            produced_commit_sha: "",
-            changed_files: [],
-            diff_summary: "",
-            test_result: {},
-            push_result: {},
-            worktree_expires_at: null,
-            raw_transcript: "",
-            reviews: [],
-          });
+          return jsonResponse([implJob({ status: "succeeded" })]);
         }
         return jsonResponse([]);
       }),
@@ -138,12 +125,10 @@ describe("HarnessJobsView", () => {
     await userEvent.click(implTab);
     expect(implTab).toHaveAttribute("aria-selected", "true");
 
-    await userEvent.click(await screen.findByRole("button", { name: /Add a health endpoint/ }));
-
-    expect(
-      await screen.findByRole("button", { name: /Uygulama işlerine dön/ }),
-    ).toBeInTheDocument();
-    expect(await screen.findByRole("list", { name: "İş hattı" })).toBeInTheDocument();
+    expect(await screen.findByRole("link", { name: /Add a health endpoint/ })).toHaveAttribute(
+      "href",
+      "/harness/implementations/ij1?workspace=w1",
+    );
   });
 
   it("moves between tabs with the arrow keys", async () => {
@@ -161,7 +146,8 @@ describe("HarnessJobsView", () => {
     expect(await screen.findByText("Henüz uygulama işi yok.")).toBeInTheDocument();
   });
 
-  it("requests an implementation from a finished discovery job, prefilled and linked", async () => {
+  it("opens the implementation form prefilled from a discovery job link, and links the new job", async () => {
+    window.history.replaceState(null, "", "/harness?tab=implementation&discovery=d1&workspace=w1");
     const discovery = job({ id: "d1", repo: REPO_ID, goal: "Find the flaky test" });
     const created = implJob({ id: "ij9", goal: "Find the flaky test", discovery_job: "d1" });
     const fetchMock = vi.fn(async (input: string, init?: RequestInit) => {
@@ -176,22 +162,20 @@ describe("HarnessJobsView", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     renderWithClient(<HarnessJobsView />);
-    await userEvent.click(await screen.findByText("Find the flaky test"));
-    await userEvent.click(await screen.findByRole("button", { name: "Uygulama iste" }));
 
-    // Now on the implementation tab, with the form prefilled from the job.
+    // On the implementation tab, with the form prefilled from the job.
+    expect(await screen.findByLabelText("Uygulama hedefi")).toHaveValue("Find the flaky test");
     expect(screen.getByRole("tab", { name: "Uygulama işleri" })).toHaveAttribute(
       "aria-selected",
       "true",
     );
-    expect(screen.getByLabelText("Uygulama hedefi")).toHaveValue("Find the flaky test");
     expect(await screen.findByRole("combobox", { name: "Depo" })).toHaveTextContent("jarvis");
 
     await userEvent.click(screen.getByRole("button", { name: "Uygulama iste" }));
 
     expect(
-      await screen.findByRole("button", { name: /Find the flaky test/ }),
-    ).toBeInTheDocument();
+      (await screen.findAllByRole("link", { name: /Find the flaky test/ })).length,
+    ).toBeGreaterThan(0);
     const post = fetchMock.mock.calls.find(([, init]) => init?.method === "POST");
     expect(JSON.parse(post?.[1]?.body as string)).toEqual({
       workspace: "w1",
@@ -201,40 +185,56 @@ describe("HarnessJobsView", () => {
     });
   });
 
-  it("opens a job's detail view on click", async () => {
+  it("links each discovery job to its routed detail", async () => {
     const row = job({ id: "j1", goal: "Find the bug" });
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async (input: string) => {
-        if (input === "/api/harness/jobs/j1") {
-          return jsonResponse({ ...row, briefing: {} });
-        }
-        return jsonResponse([row]);
-      }),
-    );
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse([row])));
 
     renderWithClient(<HarnessJobsView />);
-    await userEvent.click(await screen.findByText("Find the bug"));
 
-    expect(await screen.findByRole("button", { name: /Harness işlerine dön/ })).toBeInTheDocument();
+    expect(await screen.findByRole("link", { name: /Find the bug/ })).toHaveAttribute(
+      "href",
+      "/harness/jobs/j1?workspace=w1",
+    );
   });
 
-  it("opens a job's detail view from the keyboard", async () => {
-    const row = job({ id: "j1", goal: "Find the bug" });
+  it("lists every in-flight job of both kinds in the live strip, and none that finished", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async (input: string) => {
-        if (input === "/api/harness/jobs/j1") return jsonResponse({ ...row, briefing: {} });
-        return jsonResponse([row]);
+        if (input.startsWith("/api/harness/implementation-jobs?")) {
+          return jsonResponse([
+            implJob({ id: "ij1", goal: "Gate waits", status: "pending_gate_b" }),
+            implJob({ id: "ij2", goal: "Impl done", status: "succeeded" }),
+          ]);
+        }
+        return jsonResponse([
+          job({ id: "j1", goal: "Discovery runs", status: "running" }),
+          job({ id: "j2", goal: "Discovery done", status: "succeeded" }),
+        ]);
       }),
     );
 
     renderWithClient(<HarnessJobsView />);
-    const card = await screen.findByRole("button", { name: /Find the bug/ });
-    card.focus();
-    await userEvent.keyboard(" ");
 
-    expect(await screen.findByRole("button", { name: /Harness işlerine dön/ })).toBeInTheDocument();
+    const live = (await screen.findByRole("heading", { name: /Canlı işler \(2\)/ })).closest(
+      "section",
+    )!;
+    const links = within(live).getAllByRole("link");
+    expect(links.map((a) => a.getAttribute("href")).sort()).toEqual([
+      "/harness/implementations/ij1?workspace=w1",
+      "/harness/jobs/j1?workspace=w1",
+    ]);
+    expect(within(live).queryByText("Impl done")).not.toBeInTheDocument();
+    expect(within(live).queryByText("Discovery done")).not.toBeInTheDocument();
+  });
+
+  it("links to the repo registry", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse([])));
+    renderWithClient(<HarnessJobsView />);
+    expect(await screen.findByRole("link", { name: "Depolar" })).toHaveAttribute(
+      "href",
+      "/harness/repos",
+    );
   });
 
   it("renders a Turkish label for the failure reason, never the raw value", async () => {
