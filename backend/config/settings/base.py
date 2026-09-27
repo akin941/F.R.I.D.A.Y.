@@ -92,6 +92,10 @@ INSTALLED_APPS = [
     "agents",
     "integrations",
     "harness",
+    # Phase 5 (ADR-010): outside-world bridges and deploys. Kernel apps,
+    # registered empty in branch 1 so their import contracts bite first.
+    "connectors",
+    "deploys",
 ]
 
 AUTH_USER_MODEL = "accounts.User"
@@ -594,7 +598,7 @@ HARNESS_GIT_SSH_KEY_PATH = env("HARNESS_GIT_SSH_KEY_PATH", default="")
 
 # Self-modification hard-block (ADR-004: "agents can never modify their own
 # definitions or permissions"): remote URLs recognized as "this Jarvis
-# installation itself", compared via harness.repo_identity's canonical
+# installation itself", compared via core.repo_identity's canonical
 # normalizer, not exact string match -- so the https/ssh/scp-like forms of
 # the same remote are all correctly recognized. Empty by default -- and since
 # Phase 3 branch 5 an empty list REFUSES every implementation job (fail

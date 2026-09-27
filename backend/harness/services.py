@@ -26,8 +26,8 @@ from approvals.models import ApprovalRequest
 from approvals.services import create_request, revoke_request
 from audit.services import record_audit
 from core.channels import CHANNEL_SYSTEM
+from core.repo_identity import is_self_repo
 from harness.models import HarnessImplementationJob, HarnessJob, HarnessRepo, HarnessReview
-from harness.repo_identity import is_self_repo
 from memory.models import Memory
 from workspaces.models import WorkspaceMember
 
@@ -518,6 +518,8 @@ def create_harness_implementation_job(
         },
         origin=ApprovalRequest.Origin.HARNESS,
         channel=CHANNEL_SYSTEM,
+        # The owning service of this system-only gate (ADR-010).
+        system_created=True,
     )
     job.gate_a_request = approval_request
     job.save(update_fields=["gate_a_request", "updated_at"])
@@ -752,6 +754,8 @@ def request_harness_push(*, job, review):
         },
         origin=ApprovalRequest.Origin.HARNESS,
         channel=CHANNEL_SYSTEM,
+        # The owning service of this system-only gate (ADR-010).
+        system_created=True,
     )
     locked.gate_b_request = approval_request
     locked.status = HarnessImplementationJob.Status.PENDING_GATE_B

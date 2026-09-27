@@ -23,7 +23,7 @@ not a real operating system.
    review-blocking defect.
 4. **No write/delete/deploy/external-send without the approval gate.** Agents can
    never modify their own definitions or permissions. Coder and reviewer agents
-   are never the same. (ADR-004)
+   are never the same. (ADR-004; system-created gates, deploys, connectors: ADR-010)
    Owner deletes are reversible trash moves; permanent purge is gated. (ADR-009)
 5. **LLM-calling code must be mockable.** Tests that hit a real LLM are
    nightly-only.

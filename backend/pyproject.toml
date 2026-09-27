@@ -62,6 +62,8 @@ testpaths = [
     "skills",
     "integrations",
     "harness",
+    "connectors",
+    "deploys",
 ]
 
 [tool.importlinter]
@@ -82,6 +84,8 @@ root_packages = [
     "skills",
     "integrations",
     "harness",
+    "connectors",
+    "deploys",
 ]
 
 # The kernel-level contracts are below. The module-pack contracts (kernel apps
@@ -99,12 +103,12 @@ forbidden_modules = ["config"]
 name = "core must stay independent of kernel apps"
 type = "forbidden"
 source_modules = ["core"]
-forbidden_modules = ["accounts", "workspaces", "audit", "ai_core", "assistant", "memory", "knowledge", "tasks", "approvals", "tools", "agents", "skills", "integrations", "harness"]
+forbidden_modules = ["accounts", "workspaces", "audit", "ai_core", "assistant", "memory", "knowledge", "tasks", "approvals", "tools", "agents", "skills", "integrations", "harness", "connectors", "deploys"]
 
 [[tool.importlinter.contracts]]
 name = "kernel apps must not import the Django project config"
 type = "forbidden"
-source_modules = ["accounts", "workspaces", "audit", "ai_core", "assistant", "memory", "knowledge", "tasks", "approvals", "tools", "agents", "skills", "integrations", "harness"]
+source_modules = ["accounts", "workspaces", "audit", "ai_core", "assistant", "memory", "knowledge", "tasks", "approvals", "tools", "agents", "skills", "integrations", "harness", "connectors", "deploys"]
 forbidden_modules = ["config"]
 
 # ai_core is the single door for LLM traffic (ADR-003): it must never depend on
@@ -113,7 +117,7 @@ forbidden_modules = ["config"]
 name = "ai_core must not import business apps"
 type = "forbidden"
 source_modules = ["ai_core"]
-forbidden_modules = ["accounts", "workspaces", "audit", "assistant", "memory", "knowledge", "tasks", "approvals", "tools", "agents", "skills", "integrations", "harness"]
+forbidden_modules = ["accounts", "workspaces", "audit", "assistant", "memory", "knowledge", "tasks", "approvals", "tools", "agents", "skills", "integrations", "harness", "connectors", "deploys"]
 ignore_imports = [
     "ai_core.tests.* -> accounts.*",
 ]
@@ -122,7 +126,7 @@ ignore_imports = [
 name = "audit must not depend on business apps (one-way: apps call audit)"
 type = "forbidden"
 source_modules = ["audit"]
-forbidden_modules = ["accounts", "workspaces", "assistant", "memory", "knowledge", "tasks", "approvals", "tools", "agents", "harness"]
+forbidden_modules = ["accounts", "workspaces", "assistant", "memory", "knowledge", "tasks", "approvals", "tools", "agents", "harness", "connectors", "deploys"]
 # Tests exercise the wired flows end-to-end; the contract targets production code.
 ignore_imports = [
     "audit.tests.* -> accounts.*",
@@ -347,5 +351,51 @@ forbidden_modules = ["harness"]
 [[tool.importlinter.contracts]]
 name = "no other app may import harness (harness is a leaf dependency root)"
 type = "forbidden"
-source_modules = ["accounts", "assistant", "knowledge", "tasks", "approvals", "tools", "agents", "skills", "integrations"]
+source_modules = ["accounts", "assistant", "knowledge", "tasks", "approvals", "tools", "agents", "skills", "integrations", "connectors", "deploys"]
 forbidden_modules = ["harness"]
+
+# Phase 5 (ADR-010): two new kernel apps, `connectors` (MCP servers and
+# native bridges) and `deploys` (deploy targets, the deploy gate, the SSH
+# runner). Registered empty in branch 1 so these contracts bite before any
+# code lands. Each contract lists everything the app may NOT import, i.e.
+# the complement of ADR-010's allowlist -- a new edge needs an ADR change,
+# not just a contract edit. `harness` staying a leaf is covered by the
+# "no other app may import harness" contract above (both apps are in its
+# source_modules); `core`, `audit` and `ai_core` are covered by their own
+# blanket contracts above.
+#
+# connectors may import core, workspaces, audit, ai_core, tools, memory.
+[[tool.importlinter.contracts]]
+name = "connectors may import only core, workspaces, audit, ai_core, tools, memory (ADR-010)"
+type = "forbidden"
+source_modules = ["connectors"]
+forbidden_modules = ["config", "accounts", "assistant", "knowledge", "tasks", "approvals", "agents", "skills", "integrations", "harness", "deploys"]
+
+# deploys may import the same set plus connectors (GitHub title/CI reads
+# for the deploy snapshot) and approvals (it mints its own system-created
+# `deploy` gate through `approvals.services.create_request`, the same edge
+# harness has for Gates A/B).
+[[tool.importlinter.contracts]]
+name = "deploys may import only core, workspaces, audit, ai_core, tools, memory, connectors, approvals (ADR-010)"
+type = "forbidden"
+source_modules = ["deploys"]
+forbidden_modules = ["config", "accounts", "assistant", "knowledge", "tasks", "agents", "skills", "integrations", "harness"]
+
+# Nothing below them imports either app. `assistant` reaches connector
+# reads only through `tools.registry` (ReadToolSpec), never `connectors`
+# directly; `memory`, `tools`, `approvals`, `workspaces` stay unaware of
+# both (work_log, ToolSpec/ReadToolSpec and create_request are the hooks
+# they expose instead).
+[[tool.importlinter.contracts]]
+name = "kernel apps must not import connectors or deploys (ADR-010)"
+type = "forbidden"
+source_modules = ["accounts", "workspaces", "assistant", "memory", "knowledge", "tasks", "approvals", "tools", "agents", "skills", "integrations"]
+forbidden_modules = ["connectors", "deploys"]
+
+# harness may import connectors (the `github_open_pr` gate, PR/CI reads)
+# but not deploys: the deploy gate is requested by `deploys` itself.
+[[tool.importlinter.contracts]]
+name = "harness may import connectors but not deploys (ADR-010)"
+type = "forbidden"
+source_modules = ["harness"]
+forbidden_modules = ["deploys"]
