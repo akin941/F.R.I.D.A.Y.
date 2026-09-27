@@ -2,7 +2,11 @@ import os
 
 from celery import Celery
 
-os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings.dev")
+# Production by default (Phase 4 branch 1): a server started without an
+# explicit DJANGO_SETTINGS_MODULE fails hard on a missing environment
+# (config/settings/prod.py) instead of booting with DEBUG=True. Every dev
+# path names config.settings.dev explicitly (compose, Makefile).
+os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings.prod")
 
 app = Celery("jarvis")
 app.config_from_object("django.conf:settings", namespace="CELERY")
@@ -54,6 +58,10 @@ _BEAT_SCHEDULE = {
     "harness-review-recovery-scan": {
         "task": "harness.tasks.recover_stale_harness_reviews",
         "schedule": 60.0,
+    },
+    "jwt-flush-expired-tokens": {
+        "task": "accounts.tasks.flush_expired_tokens",
+        "schedule": 24 * 60 * 60.0,
     },
 }
 

@@ -10,8 +10,6 @@ dependencies = [
     "redis>=5.0",
     "psycopg[binary]>=3.2",
     "django-environ>=0.11",
-    "django-storages>=1.14",
-    "boto3>=1.34",
     "structlog>=24.1",
     "sentry-sdk>=2.0",
     "djangorestframework-simplejwt>=5.5.1",
@@ -20,6 +18,7 @@ dependencies = [
     "openai>=2.44.0",
     "pgvector>=0.3.6",
     "urllib3>=2.7.0",
+    "gunicorn>=23.0",
 ]
 
 [dependency-groups]
@@ -44,7 +43,7 @@ exclude = ["**/migrations/**"]
 select = ["E", "F", "I", "B", "UP", "DJ"]
 
 [tool.pytest.ini_options]
-DJANGO_SETTINGS_MODULE = "config.settings.dev"
+DJANGO_SETTINGS_MODULE = "config.settings.test"
 python_files = ["test_*.py"]
 testpaths = [
     "core",
@@ -85,10 +84,11 @@ root_packages = [
     "harness",
 ]
 
-# TODO(MVP 1): add the full modular-monolith contracts once kernel apps exist:
-#   - kernel apps must never import apps.modules.*
-#   - apps.modules.* may import kernel apps (one-way dependency)
-#   - ai_core must not import any business module
+# The kernel-level contracts are below. The module-pack contracts (kernel apps
+# never import apps.modules.*; apps.modules.* may import kernel apps, one-way)
+# land together with the first module pack -- no apps.modules package exists
+# yet, so there is nothing for import-linter to check. ai_core's contract is
+# already here.
 [[tool.importlinter.contracts]]
 name = "core (shared infrastructure) must not depend on the Django project config"
 type = "forbidden"

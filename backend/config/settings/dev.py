@@ -1,5 +1,14 @@
-from .base import *  # noqa: F403
-from .base import env
+import os
+
+# Set BEFORE base is imported: base.py only allows its hard-coded
+# DJANGO_SECRET_KEY fallback when DEBUG is on, and reads DEBUG from the
+# environment. An explicit, non-empty DJANGO_DEBUG in the environment still
+# wins (an empty one -- e.g. from a copied .env.example -- counts as unset).
+if not os.environ.get("DJANGO_DEBUG"):
+    os.environ["DJANGO_DEBUG"] = "true"
+
+from .base import *  # noqa: E402, F403
+from .base import env  # noqa: E402
 
 DEBUG = True
 

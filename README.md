@@ -14,14 +14,14 @@ installations.
 
 ## Stack
 
-Django modular monolith · PostgreSQL + pgvector · Redis + Celery · MinIO (S3) ·
+Django modular monolith · PostgreSQL + pgvector · Redis + Celery ·
 Next.js (MVP 1+) · Docker Compose.
 
 ## Quickstart (development)
 
 ```bash
 cp .env.example .env      # fill in what you need
-make up                   # start postgres/redis/minio/web/worker
+make up                   # start postgres/redis/web/worker (runs `make secrets` first)
 make test                 # backend + frontend tests
 make lint                 # backend (ruff + import-linter) + frontend (eslint + tsc)
 
@@ -30,10 +30,27 @@ cp frontend/.env.example frontend/.env.local
 make frontend-install
 make frontend-dev         # http://localhost:3001
 
+# daily-driver stack: gunicorn + prod settings + `next start` on :3001
+make up-daily
+
 # e2e smoke test (Playwright, real backend + FakeAdapter — requires `make up` first)
 make e2e-install           # one-time: downloads the Chromium browser
 make test-e2e              # boots/reuses the frontend dev server, runs the suite
 ```
+
+## Stack secrets
+
+The compose stack publishes every port on `127.0.0.1` only and commits no
+secret: `make secrets` (run automatically by `make up`) writes a random
+`DJANGO_SECRET_KEY`, `POSTGRES_PASSWORD` and `REDIS_PASSWORD` into the
+gitignored `deploy/docker/.env` — only for keys that are missing, never
+overwriting. Host-side commands (`make test`, `make harness-runner`,
+`uv run python manage.py …` from `backend/`) derive their default
+`DATABASE_URL`/`REDIS_URL` from that file, so nothing needs copying. See
+`deploy/docker/.env.example` for the optional keys (including the e2e-run
+block). A stack created before this change keeps its old Postgres password
+inside the volume — `make secrets` detects that, keeps it working and prints
+how to rotate it.
 
 ## First run
 
