@@ -189,6 +189,19 @@ class TestRunHarnessImplementationJobSuccess:
         usage = ModelUsage.objects.get(purpose="harness.implementation")
         assert usage.success is True
 
+    def test_usage_row_and_review_carry_routing_reasons(self, workspace, owner, repo, monkeypatch):
+        # Phase 5 D11: the implementer's own reason on its external row; the
+        # review it hands off to is recorded as the cross-vendor pairing.
+        job = make_job(workspace, repo, created_by=owner, agent_routing_reason="policy:default")
+        _patch_happy_path_runner(monkeypatch, result=_wrapper_result())
+        with mock.patch.object(implementation_execution, "dispatch_created_review"):
+            implementation_execution.run_harness_implementation_job(job.id)
+        usage = ModelUsage.objects.get(purpose="harness.implementation")
+        assert usage.routing_reason == "policy:default"
+        review = job.reviews.get()
+        assert review.agent == "codex_cli"
+        assert review.agent_routing_reason == "policy:cross_vendor"
+
     def test_captures_logs_before_removing_the_container(self, workspace, owner, repo, monkeypatch):
         """Codex code-review P2, branch 2 round 1: an earlier version
         called `capture_logs` AFTER `_safe_remove_container` in the

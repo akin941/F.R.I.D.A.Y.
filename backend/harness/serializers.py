@@ -204,6 +204,7 @@ class HarnessJobSerializer(serializers.ModelSerializer):
             "repo_name",
             "goal",
             "agent",
+            "agent_routing_reason",
             "sensitivity",
             "status",
             "failure_reason",
@@ -237,9 +238,10 @@ class HarnessJobCreateSerializer(serializers.Serializer):
     workspace = serializers.UUIDField()
     repo = serializers.UUIDField()
     goal = serializers.CharField(max_length=_MAX_GOAL_CHARS)
-    agent = serializers.ChoiceField(
-        choices=HarnessJob.Agent.choices, required=False, default=HarnessJob.Agent.CLAUDE_CODE
-    )
+    # Omitted -> None -> the policy default (`agent_routing_reason`
+    # "policy:default"); named -> must be policy-selectable
+    # ("owner_selected"), checked by the service (Phase 5 D11).
+    agent = serializers.ChoiceField(choices=HarnessJob.Agent.choices, required=False)
 
     def validate_goal(self, value):
         if not value.strip():
@@ -274,6 +276,7 @@ class HarnessReviewSerializer(serializers.ModelSerializer):
         fields = [
             "id",
             "agent",
+            "agent_routing_reason",
             "status",
             "verdict",
             "summary",
@@ -305,6 +308,7 @@ class HarnessImplementationJobSerializer(serializers.ModelSerializer):
             "discovery_job",
             "goal",
             "agent",
+            "agent_routing_reason",
             "reviewer_agent",
             "status",
             "failure_reason",
@@ -358,9 +362,9 @@ class HarnessImplementationJobDetailSerializer(HarnessImplementationJobSerialize
 class HarnessImplementationJobCreateSerializer(serializers.Serializer):
     # Same resolution discipline as `HarnessJobCreateSerializer`: ids are
     # resolved through `for_actor()` before the service runs. The agent is
-    # not client-selectable -- the service's own default (the only
-    # selectable implementation agent) applies, and the reviewer is picked
-    # server-side as a different vendor.
+    # not client-selectable -- the `HARNESS_AGENT_POLICY` implementation
+    # default applies ("policy:default"), and the reviewer is the policy's
+    # cross-vendor pairing, picked server-side.
     workspace = serializers.UUIDField()
     repo = serializers.UUIDField()
     goal = serializers.CharField(max_length=_MAX_GOAL_CHARS)

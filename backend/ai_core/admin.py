@@ -19,11 +19,16 @@ class ModelProviderAdmin(admin.ModelAdmin):
         "model_id",
         "priority",
         "is_active",
+        "personal_data_allowed",
         "input_price_per_mtok",
         "output_price_per_mtok",
     ]
-    list_filter = ["provider_type", "capability", "is_active"]
+    list_filter = ["provider_type", "capability", "is_active", "personal_data_allowed"]
     search_fields = ["name", "model_id"]
+    # D5: changed only by the audited `manage.py set_provider_personal_data`
+    # (or set once by `seed_ai_defaults` for local providers) -- never by an
+    # unaudited admin form save.
+    readonly_fields = ["personal_data_allowed"]
 
 
 class PromptVersionInline(admin.TabularInline):

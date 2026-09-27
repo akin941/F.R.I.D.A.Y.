@@ -42,7 +42,9 @@ def fake_provider():
 
 @pytest.fixture
 def review_prompt():
-    template = PromptTemplate.objects.create(name="jarvis_harness_review", purpose="harness.review")
+    template = PromptTemplate.objects.create(
+        name="jarvis_harness_review_summary", purpose="harness.review_summary"
+    )
     version = PromptVersion.objects.create(
         template=template, version=1, content="Review the diff and respond with JSON."
     )
@@ -107,13 +109,82 @@ class TestSelectReviewAgent:
         agent = review_execution.select_review_agent(HarnessImplementationJob.Agent.CLAUDE_CODE)
         assert agent == HarnessReview.Agent.CODEX_CLI
 
-    def test_raises_when_no_eligible_agent_is_selectable(self, monkeypatch):
-        monkeypatch.setattr(
-            "harness.services._SELECTABLE_REVIEW_AGENTS",
-            {HarnessImplementationJob.Agent.CLAUDE_CODE},
-        )
+    def test_raises_when_the_implementer_has_no_reviewer(self, settings):
+        settings.HARNESS_AGENT_POLICY = {
+            **settings.HARNESS_AGENT_POLICY,
+            "implementation": {
+                "default": "claude_code",
+                "selectable": ["claude_code"],
+                "reviewers": {},
+            },
+        }
         with pytest.raises(HarnessInvalidTransition):
             review_execution.select_review_agent(HarnessImplementationJob.Agent.CLAUDE_CODE)
+
+    def test_never_returns_the_implementer_even_if_misconfigured(self, settings):
+        # The boot check (harness.E001) refuses this config; the run-time
+        # guard holds independently of it (ADR-008 decision 3).
+        settings.HARNESS_AGENT_POLICY = {
+            **settings.HARNESS_AGENT_POLICY,
+            "implementation": {
+                "default": "claude_code",
+                "selectable": ["claude_code"],
+                "reviewers": {"claude_code": "claude_code"},
+            },
+        }
+        with pytest.raises(HarnessInvalidTransition):
+            review_execution.select_review_agent(HarnessImplementationJob.Agent.CLAUDE_CODE)
+
+    def test_follows_the_policy_pairing(self, settings):
+        settings.HARNESS_AGENT_POLICY = {
+            **settings.HARNESS_AGENT_POLICY,
+            "implementation": {
+                "default": "codex_cli",
+                "selectable": ["codex_cli"],
+                "reviewers": {"codex_cli": "claude_code"},
+            },
+        }
+        agent = review_execution.select_review_agent(HarnessImplementationJob.Agent.CODEX_CLI)
+        assert agent == HarnessReview.Agent.CLAUDE_CODE
+
+
+class TestReviewRoutingReasons:
+    """Phase 5 D11: the review row and its external usage row say the
+    reviewer came from the cross-vendor pairing; the gateway summary is
+    accounted under its own purpose, `harness.review_summary`."""
+
+    def test_pending_review_records_cross_vendor_reason(self, workspace, repo):
+        job = make_job(workspace, repo)
+        review = review_execution.create_pending_review(
+            job, review_execution.select_review_agent(job.agent)
+        )
+        assert review.agent_routing_reason == "policy:cross_vendor"
+
+    def test_external_usage_row_carries_the_review_reason(
+        self, workspace, owner, repo, monkeypatch, review_prompt
+    ):
+        job = make_job(workspace, repo, created_by=owner)
+        review = make_review(workspace, job, agent_routing_reason="policy:cross_vendor")
+        _patch_happy_path_runner(monkeypatch, raw_output="raw transcript")
+        with mock.patch.object(
+            review_execution, "_produce_review_summary", return_value=("ok", [], "approved")
+        ):
+            review_execution.run_harness_review_job(review.id)
+        usage = ModelUsage.objects.get(purpose="harness.review")
+        assert usage.provider is None
+        assert usage.routing_reason == "policy:cross_vendor"
+
+    def test_gateway_summary_uses_its_own_purpose(self, workspace, owner, repo, review_prompt):
+        job = make_job(workspace, repo, created_by=owner)
+        summary, _findings, verdict = review_execution._produce_review_summary(
+            job, "fenced transcript"
+        )
+        assert verdict == "approved"
+        usage = ModelUsage.objects.get()
+        assert usage.purpose == "harness.review_summary"
+        assert usage.provider is not None  # in-process gateway row
+        assert usage.prompt_version == review_prompt
+        assert not ModelUsage.objects.filter(purpose="harness.review").exists()
 
 
 class TestDispatchHarnessReview:
@@ -554,7 +625,7 @@ class TestRunHarnessReviewJobFailurePaths:
 
 class TestStripAgentInstructionFiles:
     """Codex code-review P1, branch 3 round 4: Codex CLI (and Claude Code,
-    should it ever join `_SELECTABLE_REVIEW_AGENTS`) automatically
+    should the agent policy ever pair it as a reviewer) automatically
     discovers and honors AGENTS.md/AGENTS.override.md/CLAUDE.md as
     trusted project instructions -- an implementation commit that adds
     one of these to the reviewed repo could instruct its own reviewer to
