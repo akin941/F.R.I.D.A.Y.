@@ -95,6 +95,15 @@ export const ERROR_MESSAGES = {
     specific: true,
   },
   "approval.expired": { message: "Bu onay isteğinin süresi doldu.", specific: true },
+  // Connectors
+  "connector.permission_denied": {
+    message: "Bağlantıları yalnızca kurulum sahibi web uygulamasından yönetebilir.",
+    specific: true,
+  },
+  "connector.invalid_transition": {
+    message: "Bu bağlantı bu çalışma alanında açılamaz (engelli ya da bu alan türüne uygun değil).",
+    specific: true,
+  },
   // Agents
   "agent.permission_denied": { message: "Rolün bu ajan işlemine yetmiyor.", specific: true },
   "agent.invalid_transition": {
@@ -243,6 +252,11 @@ export const tr = {
       no_provider:
         "Şu anda yapılandırılmış bir yapay zeka sağlayıcısı yok. Lütfen daha sonra tekrar deneyin.",
       client_disconnect: "Bağlantı kesildi.",
+      connector_local_model_required:
+        "Bu kaynak kişisel veri içeriyor; okumak için kişisel veriye izinli yerel bir model gerekiyor. Hiçbir şey okunmadı.",
+      connector_invalid_arguments:
+        "İstek bu kaynak için anlaşılamadı ya da bu çalışma alanının dışında kalıyor. Hiçbir şey okunmadı.",
+      connector_read_failed: "Kaynak şu anda okunamadı. Biraz sonra tekrar dene.",
     } as Record<string, string>,
     streamFailed: "Asistan beklenmedik bir hatayla karşılaştı. Lütfen tekrar deneyin.",
     private: "Özel",

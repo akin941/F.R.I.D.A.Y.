@@ -30,6 +30,7 @@ urlpatterns = [
     path("api/v1/", include("agents.urls")),
     path("api/v1/", include("integrations.urls")),
     path("api/v1/", include("harness.urls")),
+    path("api/v1/", include("connectors.urls")),
     # Cross-app read-only aggregate for the shell's badges (Phase 4
     # branch 3); lives in the composition root, see config/activity.py.
     path("api/v1/activity/summary", ActivitySummaryView.as_view(), name="activity-summary"),

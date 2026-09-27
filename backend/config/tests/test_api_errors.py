@@ -28,6 +28,7 @@ from accounts.services import register_user
 from agents.execution import AgentServiceError
 from approvals.models import ApprovalRequest
 from approvals.services import ApprovalServiceError
+from connectors.services import ConnectorServiceError
 from core.api_errors import (
     STATUS_FALLBACK_CODES,
     CodedJSONRenderer,
@@ -48,6 +49,7 @@ PASSWORD = "Str0ngDevPass!42"
 _DOMAIN_BASES = [
     AgentServiceError,
     ApprovalServiceError,
+    ConnectorServiceError,
     HarnessServiceError,
     KnowledgeServiceError,
     MemoryServiceError,
