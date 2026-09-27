@@ -26,8 +26,8 @@ from approvals.models import ApprovalRequest
 from approvals.services import create_request, revoke_request
 from audit.services import record_audit
 from core.channels import CHANNEL_SYSTEM
+from core.repo_identity import is_self_repo
 from harness.models import HarnessImplementationJob, HarnessJob, HarnessRepo, HarnessReview
-from harness.repo_identity import is_self_repo
 from memory.models import Memory
 from workspaces.models import WorkspaceMember
 
