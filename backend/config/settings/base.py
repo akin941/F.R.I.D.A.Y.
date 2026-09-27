@@ -92,6 +92,10 @@ INSTALLED_APPS = [
     "agents",
     "integrations",
     "harness",
+    # Phase 5 (ADR-010): outside-world bridges and deploys. Kernel apps,
+    # registered empty in branch 1 so their import contracts bite first.
+    "connectors",
+    "deploys",
 ]
 
 AUTH_USER_MODEL = "accounts.User"
