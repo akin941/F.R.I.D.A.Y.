@@ -66,11 +66,13 @@ class ToolSpec:
 
     `user_invocable` (Phase 3 branch 6, plan-review round 9 item 3): `False`
     for tools only a system component may request -- the harness gates
-    (`harness_implement`/`harness_push`) are created by the harness itself
-    with `origin=HARNESS`. Such tools are left out of `list_tool_names()`
-    (so the chat router and the agent planner never propose them) AND
-    `approvals.services.create_request` refuses them for human/agent
-    origins, so a direct `POST /approvals` can't mint one either.
+    (`harness_implement`/`harness_push`) are created by the harness itself.
+    Such tools are left out of `list_tool_names()` (so the chat router and
+    the agent planner never propose them) AND
+    `approvals.services.create_request` refuses them unless its owning
+    service passes `system_created=True` (ADR-010; the HTTP view never
+    does), so a direct `POST /approvals` can't mint one either, whatever
+    origin it claims.
 
     `proposable` (Phase 4 branch 2, ADR-009): `False` for a tool only a
     person may request directly (the trash view's "Kalıcı olarak sil" ->

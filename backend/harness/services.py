@@ -518,6 +518,8 @@ def create_harness_implementation_job(
         },
         origin=ApprovalRequest.Origin.HARNESS,
         channel=CHANNEL_SYSTEM,
+        # The owning service of this system-only gate (ADR-010).
+        system_created=True,
     )
     job.gate_a_request = approval_request
     job.save(update_fields=["gate_a_request", "updated_at"])
@@ -752,6 +754,8 @@ def request_harness_push(*, job, review):
         },
         origin=ApprovalRequest.Origin.HARNESS,
         channel=CHANNEL_SYSTEM,
+        # The owning service of this system-only gate (ADR-010).
+        system_created=True,
     )
     locked.gate_b_request = approval_request
     locked.status = HarnessImplementationJob.Status.PENDING_GATE_B
