@@ -75,6 +75,12 @@ ADR-008's "no growth by precedent" holds: this ADR adds no new confirm-class
 - Code that must see trashed rows has to say so (`all_objects`): the
   ingestion worker does, so a document trashed mid-ingestion finishes and a
   restore needs no re-ingestion.
+- One deliberate asymmetry: trashing a task releases its link to the chat
+  draft it was confirmed from (`Task.source_message`, Phase 4 branch 4), so
+  the draft reads as unconfirmed and can be re-confirmed. A restored task
+  keeps its content, status and `source` provenance but not that back-link
+  -- the link is a plain unique column, and releasing it at delete time is
+  what keeps draft confirmation idempotent across delete/restore/re-confirm.
 - The trash UI (list, restore, "Kalıcı olarak sil") lands in Phase 4 branch 5;
   the API (`GET /tasks/trash`, `GET /knowledge/documents/trash`,
   `POST …/restore`, `purge_trash` requests) lands with this ADR.

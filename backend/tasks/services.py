@@ -306,7 +306,12 @@ def delete_task(*, task, actor, channel):
 
 @transaction.atomic
 def restore_task(*, task, actor, channel):
-    """Bring a trashed task back (ADR-009). Same role rule as delete."""
+    """Bring a trashed task back (ADR-009). Same role rule as delete.
+
+    The task returns with its content, status and `source` provenance; its
+    chat-draft back-link (`source_message`) was released at delete time and
+    is not re-taken (ADR-009 Consequences), so a restore never collides
+    with a draft the owner re-confirmed meanwhile."""
     _require_human_web(actor, channel, "Restoring a task")
     locked = (
         Task.all_objects.filter(

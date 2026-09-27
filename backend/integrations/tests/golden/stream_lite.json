@@ -1,0 +1,174 @@
+[
+  {
+    "id": "chatcmpl-<id>",
+    "object": "chat.completion.chunk",
+    "created": 0,
+    "model": "jarvis-lite",
+    "choices": [
+      {
+        "index": 0,
+        "delta": {
+          "role": "assistant",
+          "content": ""
+        },
+        "finish_reason": null
+      }
+    ],
+    "usage": null
+  },
+  {
+    "id": "chatcmpl-<id>",
+    "object": "chat.completion.chunk",
+    "created": 0,
+    "model": "jarvis-lite",
+    "choices": [
+      {
+        "index": 0,
+        "delta": {
+          "content": "Merhaba, "
+        },
+        "finish_reason": null
+      }
+    ],
+    "usage": null
+  },
+  {
+    "id": "chatcmpl-<id>",
+    "object": "chat.completion.chunk",
+    "created": 0,
+    "model": "jarvis-lite",
+    "choices": [
+      {
+        "index": 0,
+        "delta": {
+          "content": "ben "
+        },
+        "finish_reason": null
+      }
+    ],
+    "usage": null
+  },
+  {
+    "id": "chatcmpl-<id>",
+    "object": "chat.completion.chunk",
+    "created": 0,
+    "model": "jarvis-lite",
+    "choices": [
+      {
+        "index": 0,
+        "delta": {
+          "content": "Jarvis. "
+        },
+        "finish_reason": null
+      }
+    ],
+    "usage": null
+  },
+  {
+    "id": "chatcmpl-<id>",
+    "object": "chat.completion.chunk",
+    "created": 0,
+    "model": "jarvis-lite",
+    "choices": [
+      {
+        "index": 0,
+        "delta": {
+          "content": "MVP "
+        },
+        "finish_reason": null
+      }
+    ],
+    "usage": null
+  },
+  {
+    "id": "chatcmpl-<id>",
+    "object": "chat.completion.chunk",
+    "created": 0,
+    "model": "jarvis-lite",
+    "choices": [
+      {
+        "index": 0,
+        "delta": {
+          "content": "1 "
+        },
+        "finish_reason": null
+      }
+    ],
+    "usage": null
+  },
+  {
+    "id": "chatcmpl-<id>",
+    "object": "chat.completion.chunk",
+    "created": 0,
+    "model": "jarvis-lite",
+    "choices": [
+      {
+        "index": 0,
+        "delta": {
+          "content": "gateway "
+        },
+        "finish_reason": null
+      }
+    ],
+    "usage": null
+  },
+  {
+    "id": "chatcmpl-<id>",
+    "object": "chat.completion.chunk",
+    "created": 0,
+    "model": "jarvis-lite",
+    "choices": [
+      {
+        "index": 0,
+        "delta": {
+          "content": "üzerinden "
+        },
+        "finish_reason": null
+      }
+    ],
+    "usage": null
+  },
+  {
+    "id": "chatcmpl-<id>",
+    "object": "chat.completion.chunk",
+    "created": 0,
+    "model": "jarvis-lite",
+    "choices": [
+      {
+        "index": 0,
+        "delta": {
+          "content": "çalışıyorum."
+        },
+        "finish_reason": null
+      }
+    ],
+    "usage": null
+  },
+  {
+    "id": "chatcmpl-<id>",
+    "object": "chat.completion.chunk",
+    "created": 0,
+    "model": "jarvis-lite",
+    "choices": [
+      {
+        "index": 0,
+        "delta": {},
+        "finish_reason": "stop"
+      }
+    ],
+    "usage": null
+  },
+  {
+    "id": "chatcmpl-<id>",
+    "object": "chat.completion.chunk",
+    "created": 0,
+    "model": "jarvis-lite",
+    "choices": [],
+    "usage": {
+      "prompt_tokens": "<int>",
+      "completion_tokens": "<int>",
+      "total_tokens": "<int>"
+    }
+  },
+  "[DONE]"
+]

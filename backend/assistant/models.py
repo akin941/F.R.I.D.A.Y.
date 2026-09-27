@@ -83,6 +83,8 @@ class Message(WorkspaceScopedModel, TimestampedModel):
         WEB = "web"
         CLI = "cli"
         TELEGRAM = "telegram"
+        # The OpenAI-compatible facade (Phase 4 branch 6).
+        OPENAI = "openai"
 
     conversation = models.ForeignKey(
         Conversation, on_delete=models.CASCADE, related_name="messages"

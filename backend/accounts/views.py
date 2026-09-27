@@ -352,6 +352,7 @@ class PersonalAccessTokenListCreateView(APIView):
             workspace=workspace,
             user=request.user,
             name=serializer.validated_data["name"],
+            kind=serializer.validated_data["kind"],
             token_hash=hash_token(raw_token),
             expires_at=timezone.now() + timedelta(days=ttl_days),
         )
@@ -360,7 +361,11 @@ class PersonalAccessTokenListCreateView(APIView):
             actor=request.user,
             workspace=workspace,
             resource=token,
-            metadata={"via": "web", "expires_at": token.expires_at.isoformat()},
+            metadata={
+                "via": "web",
+                "kind": token.kind,
+                "expires_at": token.expires_at.isoformat(),
+            },
         )
         data = PersonalAccessTokenSerializer(token).data
         data["token"] = raw_token  # only ever appears in this one response
@@ -384,5 +389,6 @@ class PersonalAccessTokenRevokeView(APIView):
                 actor=request.user,
                 workspace=token.workspace,
                 resource=token,
+                metadata={"kind": token.kind},
             )
         return Response(PersonalAccessTokenSerializer(token).data)

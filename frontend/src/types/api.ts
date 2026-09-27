@@ -107,7 +107,8 @@ export interface ApiRemoteKeyState {
 }
 
 // Which channel a turn arrived over (backend Message.Channel, MVP 9 §1).
-export type MessageChannel = "web" | "cli" | "telegram";
+// `openai`: the OpenAI-compatible facade (Phase 4 branch 6), e.g. Open WebUI.
+export type MessageChannel = "web" | "cli" | "telegram" | "openai";
 
 export type MessageIntent =
   | ""
@@ -459,9 +460,14 @@ export interface ApiAgentDetail extends ApiAgent {
 
 // --- Integrations (MVP 9) ---
 
+// Which surface a token reaches (Phase 4 branch 6): `cli` the Jarvis CLI
+// endpoints, `openai` only the OpenAI-compatible facade (/v1). Fixed at mint.
+export type PatKind = "cli" | "openai";
+
 export interface ApiPersonalAccessToken {
   id: string;
   name: string;
+  kind: PatKind;
   workspace: string;
   last_used_at: string | null;
   revoked_at: string | null;

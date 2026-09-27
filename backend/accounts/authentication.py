@@ -5,10 +5,16 @@
 the only way to reach `core.channels.CHANNEL_WEB`.
 
 `PersonalAccessTokenAuthentication` (MVP 9 §1) is the CLI channel's
-low-trust bearer credential. Never added to `DEFAULT_AUTHENTICATION_CLASSES`: only the specific view
-classes this MVP allowlists (assistant/agents/approvals) set this explicitly
-in their own `authentication_classes`, with this class ordered BEFORE
-`DeviceJWTAuthentication`. DRF's authentication loop stops at the first
+low-trust bearer credential; it accepts only `cli`-kind tokens.
+`FacadeTokenAuthentication` (Phase 4 branch 6) is the same credential
+check for the OpenAI-compatible facade and accepts only `openai`-kind
+tokens. A valid token of the other kind is refused with a 403
+(`token_kind_forbidden`), never silently authenticated. Neither is ever
+added to `DEFAULT_AUTHENTICATION_CLASSES`: only the specific view classes
+MVP 9 allowlists (assistant/agents/approvals) set the PAT class explicitly
+in their own `authentication_classes`, ordered BEFORE
+`DeviceJWTAuthentication`; the facade views use `FacadeTokenAuthentication`
+alone. DRF's authentication loop stops at the first
 authenticator that raises `AuthenticationFailed` — `JWTAuthentication`
 raises `InvalidToken` (an `AuthenticationFailed` subclass) for any
 non-JWT-shaped string, including a `jpat_...` token, so if it ran first on
@@ -24,13 +30,13 @@ import uuid
 from django.core.cache import cache
 from django.utils import timezone
 from rest_framework.authentication import BaseAuthentication
-from rest_framework.exceptions import AuthenticationFailed
+from rest_framework.exceptions import AuthenticationFailed, PermissionDenied
 from rest_framework_simplejwt.authentication import JWTAuthentication
 
 from accounts.models import PersonalAccessToken, TrustedDevice
 from audit.models import AuditLog
 from audit.services import record_audit
-from core.channels import CHANNEL_CLI, ChannelPrincipal, WebSessionPrincipal
+from core.channels import CHANNEL_CLI, CHANNEL_OPENAI, ChannelPrincipal, WebSessionPrincipal
 from core.client_ip import trusted_client_ip
 
 TOKEN_PREFIX = "jpat_"
@@ -52,7 +58,14 @@ def hash_token(raw_token: str) -> str:
     return hashlib.sha256(raw_token.encode()).hexdigest()
 
 
-def _audit_auth_failure(raw_token, reason):
+# The channel each token kind authenticates as.
+KIND_CHANNELS = {
+    PersonalAccessToken.Kind.CLI: CHANNEL_CLI,
+    PersonalAccessToken.Kind.OPENAI: CHANNEL_OPENAI,
+}
+
+
+def _audit_auth_failure(raw_token, reason, surface):
     cache.add(_AUTH_FAILURE_AUDIT_KEY, 0, timeout=AUTH_FAILURE_AUDIT_WINDOW_SECONDS)
     if cache.incr(_AUTH_FAILURE_AUDIT_KEY) > AUTH_FAILURE_AUDIT_LIMIT:
         return
@@ -60,11 +73,20 @@ def _audit_auth_failure(raw_token, reason):
         action="accounts.pat.auth_failed",
         actor=None,
         actor_type=AuditLog.ActorType.SYSTEM,
-        metadata={"token_prefix": raw_token[:_AUDITED_PREFIX_LENGTH], "reason": reason},
+        metadata={
+            "token_prefix": raw_token[:_AUDITED_PREFIX_LENGTH],
+            "reason": reason,
+            "surface": surface,
+        },
     )
 
 
 class PersonalAccessTokenAuthentication(BaseAuthentication):
+    # The token kind this authenticator accepts, and the surface name the
+    # audit log records for a failure against it.
+    accepted_kind = PersonalAccessToken.Kind.CLI
+    surface = "cli"
+
     def authenticate_header(self, request):
         # DRF's `get_authenticate_header` only ever consults the FIRST
         # configured authenticator (rest_framework.views.APIView) -- since
@@ -104,16 +126,37 @@ class PersonalAccessTokenAuthentication(BaseAuthentication):
         else:
             reason = None
         if reason is not None:
-            _audit_auth_failure(raw_token, reason)
+            _audit_auth_failure(raw_token, reason, self.surface)
             raise AuthenticationFailed("Invalid, expired or revoked token.")
+        if token.kind != self.accepted_kind:
+            # A genuine token presented to the wrong surface: 403, not 401 --
+            # the credential is fine, this surface is not for its kind. Never
+            # touches `last_used_at`.
+            _audit_auth_failure(raw_token, "wrong_kind", self.surface)
+            raise PermissionDenied(
+                "This token's kind cannot be used on this endpoint.", code="token_kind_forbidden"
+            )
 
         token.last_used_at = now
         token.save(update_fields=["last_used_at"])
 
         return (
             token.user,
-            ChannelPrincipal(channel=CHANNEL_CLI, bound_workspace_id=str(token.workspace_id)),
+            ChannelPrincipal(
+                channel=KIND_CHANNELS[token.kind],
+                bound_workspace_id=str(token.workspace_id),
+                token_id=str(token.pk),
+            ),
         )
+
+
+class FacadeTokenAuthentication(PersonalAccessTokenAuthentication):
+    """The OpenAI-compatible facade's only authenticator (Phase 4 branch 6):
+    `openai`-kind tokens -> CHANNEL_OPENAI. Bearer-only; the facade never
+    accepts a web session."""
+
+    accepted_kind = PersonalAccessToken.Kind.OPENAI
+    surface = "openai"
 
 
 class DeviceJWTAuthentication(JWTAuthentication):
