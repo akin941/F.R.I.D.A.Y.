@@ -328,6 +328,20 @@ def build_payload(target, sha, snapshot):
     }
 
 
+def _check_requestable(target, sha):
+    if not target.enabled:
+        raise DeployInvalidTransition("Deploy target is not enabled.")
+    guard = self_repo_error(target.repo_git_url)
+    if guard is not None:
+        raise DeployInvalidTransition(_SELF_REPO_MESSAGES[guard])
+    if not target.current_sha:
+        raise DeployInvalidTransition(
+            "The target's live SHA is unknown; run a status check on it first."
+        )
+    if sha == target.current_sha:
+        raise DeployInvalidTransition("This SHA is already live on the target.")
+
+
 def request_deploy(*, workspace, actor, target, sha, channel):
     """Mints the `deploy` gate for `sha` on `target`. Returns the pending
     `ApprovalRequest`. Refuses (DeployInvalidTransition / DeployCiRequired)
@@ -343,20 +357,20 @@ def request_deploy(*, workspace, actor, target, sha, channel):
         sha = normalize_sha(sha)
     except TargetFieldError as exc:
         raise DeployInvalidTransition(str(exc)) from exc
+    # The commit/CI snapshot may take up to two connector reads (GitHub): it
+    # is resolved BEFORE the row lock, never under it, so a slow sidecar
+    # cannot hold the target locked. The lock then re-checks everything and
+    # refuses if the target's configuration changed in between.
+    unlocked = DeployTarget.objects.get(pk=target.pk)
+    _check_requestable(unlocked, sha)
+    snapshot = resolve_commit_snapshot(unlocked, sha, actor=actor, channel=channel)
     with transaction.atomic():
         locked = DeployTarget.objects.select_for_update().get(pk=target.pk)
-        if not locked.enabled:
-            raise DeployInvalidTransition("Deploy target is not enabled.")
-        guard = self_repo_error(locked.repo_git_url)
-        if guard is not None:
-            raise DeployInvalidTransition(_SELF_REPO_MESSAGES[guard])
-        if not locked.current_sha:
+        _check_requestable(locked, sha)
+        if locked.config_hash != unlocked.config_hash or locked.current_sha != unlocked.current_sha:
             raise DeployInvalidTransition(
-                "The target's live SHA is unknown; run a status check on it first."
+                "The target changed while its commit was being checked; request the deploy again."
             )
-        if sha == locked.current_sha:
-            raise DeployInvalidTransition("This SHA is already live on the target.")
-        snapshot = resolve_commit_snapshot(locked, sha, actor=actor, channel=channel)
         if snapshot.ci_conclusion not in CI_CONCLUSIONS:
             snapshot = CommitSnapshot(snapshot.title, CI_UNKNOWN, snapshot.source)
         if locked.require_ci_success and snapshot.ci_conclusion != CI_SUCCESS:
