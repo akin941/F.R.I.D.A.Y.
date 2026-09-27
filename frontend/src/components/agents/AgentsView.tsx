@@ -1,12 +1,17 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useState } from "react";
+import Link from "next/link";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { Bot } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Alert, AlertDescription } from "@/components/ui/alert";
+import { EmptyState } from "@/components/ui/empty-state";
+import { ErrorState } from "@/components/ui/error-state";
+import { PageHeader } from "@/components/ui/page-header";
 import { Skeleton } from "@/components/ui/skeleton";
+import { StatusPill } from "@/components/ui/status-pill";
 import { AgentGoalForm } from "@/components/agents/AgentGoalForm";
-import { AgentDetail } from "@/components/agents/AgentDetail";
 import {
   AGENT_IN_FLIGHT_STATUSES,
   AGENT_STATUS_LABELS,
@@ -14,141 +19,117 @@ import {
 } from "@/components/agents/labels";
 import { useWorkspace } from "@/contexts/workspace-context";
 import { apiGetJson } from "@/lib/api-client";
-import { clickableProps } from "@/lib/keyboard";
+import { tr } from "@/lib/i18n/tr";
+import { queryKeys } from "@/lib/query/keys";
+import { POLL_FAST_MS, pollWhile } from "@/lib/query/polling";
 import type { ApiAgent } from "@/types/api";
 import { VIEW_SCROLL_ROOT } from "@/components/shell/view-scroll";
 import { cn } from "@/lib/utils";
 
+export function agentDetailHref(agent: Pick<ApiAgent, "id" | "workspace">): string {
+  return `/agents/${agent.id}?workspace=${encodeURIComponent(agent.workspace)}`;
+}
+
 export function AgentsView() {
   const { activeWorkspace } = useWorkspace();
-
-  const [agents, setAgents] = useState<ApiAgent[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [loadError, setLoadError] = useState<string | null>(null);
-  const [creating, setCreating] = useState(false);
-  const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
-
-  const activeWorkspaceIdRef = useRef<string | null>(null);
-
-  const loadAgents = useCallback(async (workspaceId: string, options?: { silent?: boolean }) => {
-    if (!options?.silent) setLoading(true);
-    setLoadError(null);
-    try {
-      const list = await apiGetJson<ApiAgent[]>(
-        `/api/agents?workspace=${encodeURIComponent(workspaceId)}`,
-      );
-      if (activeWorkspaceIdRef.current !== workspaceId) return;
-      setAgents(list);
-    } catch {
-      if (activeWorkspaceIdRef.current === workspaceId && !options?.silent) {
-        setLoadError("Ajanlar yüklenemedi.");
-      }
-    } finally {
-      if (activeWorkspaceIdRef.current === workspaceId && !options?.silent) setLoading(false);
-    }
-  }, []);
-
-  /* eslint-disable react-hooks/set-state-in-effect -- fetch-on-mount/workspace-change, the standard data-fetching effect pattern */
-  useEffect(() => {
-    const workspaceId = activeWorkspace?.id ?? null;
-    activeWorkspaceIdRef.current = workspaceId;
-    setAgents([]);
-    setCreating(false);
-    setSelectedAgentId(null);
-    if (workspaceId) {
-      void loadAgents(workspaceId);
-    }
-  }, [activeWorkspace, loadAgents]);
-  /* eslint-enable react-hooks/set-state-in-effect */
-
-  // While viewing the list (not a single agent's own detail poll), keep
-  // in-flight rows' statuses fresh too -- same reasoning as ApprovalView.
-  useEffect(() => {
-    const workspaceId = activeWorkspace?.id ?? null;
-    if (!workspaceId || selectedAgentId) return;
-    const hasInFlight = agents.some((a) => AGENT_IN_FLIGHT_STATUSES.includes(a.status));
-    if (!hasInFlight) return;
-    const interval = setInterval(() => {
-      void loadAgents(workspaceId, { silent: true });
-    }, 3000);
-    return () => clearInterval(interval);
-  }, [agents, selectedAgentId, activeWorkspace, loadAgents]);
-
-  function handleCreated(agent: ApiAgent) {
-    if (activeWorkspaceIdRef.current !== agent.workspace) return;
-    setAgents((prev) => [agent, ...prev]);
-    setCreating(false);
-  }
 
   if (!activeWorkspace) {
     return (
       <div className="flex flex-1 items-center justify-center p-6 text-sm text-muted-foreground">
-        Kullanılabilir çalışma alanı yok.
+        {tr.common.noWorkspace}
       </div>
     );
   }
+  // Keyed by workspace: switching workspace resets local UI state (the
+  // open create form); the query key isolates the rows themselves.
+  return <AgentList key={activeWorkspace.id} workspaceId={activeWorkspace.id} />;
+}
 
-  if (selectedAgentId) {
-    return (
-      <AgentDetail agentId={selectedAgentId} onBack={() => setSelectedAgentId(null)} />
-    );
+function AgentList({ workspaceId }: { workspaceId: string }) {
+  const queryClient = useQueryClient();
+  const [creating, setCreating] = useState(false);
+
+  // Keep in-flight rows' statuses fresh while the list is open; stops on
+  // its own once every agent is terminal.
+  const agents = useQuery({
+    queryKey: queryKeys.agents(workspaceId),
+    queryFn: () =>
+      apiGetJson<ApiAgent[]>(`/api/agents?workspace=${encodeURIComponent(workspaceId)}`),
+    refetchInterval: pollWhile<ApiAgent[]>((list) =>
+      list.some((a) => AGENT_IN_FLIGHT_STATUSES.includes(a.status)) ? POLL_FAST_MS : null,
+    ),
+  });
+
+  function handleCreated(agent: ApiAgent) {
+    queryClient.setQueryData<ApiAgent[]>(queryKeys.agents(agent.workspace), (prev = []) => [
+      agent,
+      ...prev.filter((a) => a.id !== agent.id),
+    ]);
+    setCreating(false);
   }
 
   return (
     <div className={cn(VIEW_SCROLL_ROOT, "gap-6 p-6")}>
-      <div className="flex flex-wrap items-center justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Ajanlar</h1>
-          <p className="text-sm text-muted-foreground">
-            Hedefi ver, çok adımlı planı al — adım adım onay yok, ama her yazma/silme/dağıtım/dışa-gönderme işlemi yine Onaylar üzerinden geçer.
-          </p>
-        </div>
-        <Button onClick={() => setCreating((v) => !v)}>{creating ? "İptal" : "Yeni ajan"}</Button>
-      </div>
+      <PageHeader
+        title="Ajanlar"
+        description="Hedefi ver, çok adımlı planı al — adım adım onay yok, ama her yazma/silme/dağıtım/dışa-gönderme işlemi yine Onaylar üzerinden geçer."
+        actions={
+          <Button onClick={() => setCreating((v) => !v)}>{creating ? "İptal" : "Yeni ajan"}</Button>
+        }
+      />
 
-      {loadError ? (
-        <Alert variant="destructive" role="alert">
-          <AlertDescription>{loadError}</AlertDescription>
-        </Alert>
+      {agents.isError && !agents.data ? (
+        <ErrorState
+          error={agents.error}
+          title="Ajanlar yüklenemedi."
+          onRetry={() => void agents.refetch()}
+          retrying={agents.isFetching}
+        />
       ) : null}
 
       {creating ? (
         <AgentGoalForm
-          key={activeWorkspace.id}
-          workspaceId={activeWorkspace.id}
+          workspaceId={workspaceId}
           onCreated={handleCreated}
           onCancel={() => setCreating(false)}
         />
       ) : null}
 
-      {loading ? (
+      {agents.isPending ? (
         <div className="flex flex-col gap-3">
           <Skeleton className="h-20 w-full" />
           <Skeleton className="h-20 w-full" />
         </div>
-      ) : agents.length === 0 ? (
-        <p className="text-sm text-muted-foreground">Henüz ajan yok.</p>
-      ) : (
-        <div className="flex flex-col gap-3">
-          {agents.map((agent) => (
-            <Card
-              key={agent.id}
-              className="cursor-pointer transition-colors hover:bg-accent/50 focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none"
-              {...clickableProps(() => setSelectedAgentId(agent.id))}
-            >
-              <CardHeader>
-                <CardTitle className="text-base">{agent.goal}</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <p className="text-sm text-muted-foreground">
-                  {AGENT_STATUS_LABELS[agent.status]}
-                  {agent.failure_reason ? ` — ${agentFailureReasonLabel(agent.failure_reason)}` : ""}
-                </p>
-              </CardContent>
-            </Card>
+      ) : agents.data?.length === 0 ? (
+        <EmptyState icon={Bot} title="Henüz ajan yok." />
+      ) : agents.data ? (
+        <ul className="flex flex-col gap-3">
+          {agents.data.map((agent) => (
+            <li key={agent.id}>
+              <Link
+                href={agentDetailHref(agent)}
+                className="block rounded-xl outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+              >
+                <Card className="transition-colors hover:bg-accent/50">
+                  <CardHeader>
+                    <CardTitle className="text-base">{agent.goal}</CardTitle>
+                  </CardHeader>
+                  <CardContent className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+                    <StatusPill
+                      domain="agent"
+                      status={agent.status}
+                      label={AGENT_STATUS_LABELS[agent.status] ?? agent.status}
+                    />
+                    {agent.failure_reason ? (
+                      <span>{agentFailureReasonLabel(agent.failure_reason)}</span>
+                    ) : null}
+                  </CardContent>
+                </Card>
+              </Link>
+            </li>
           ))}
-        </div>
-      )}
+        </ul>
+      ) : null}
     </div>
   );
 }

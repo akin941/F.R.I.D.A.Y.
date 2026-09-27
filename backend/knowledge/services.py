@@ -60,13 +60,19 @@ class KnowledgeServiceError(Exception):
 class KnowledgePermissionDenied(KnowledgeServiceError):
     """Actor's role does not allow the action → 403."""
 
+    code = "knowledge.permission_denied"
+
 
 class DuplicateDocument(KnowledgeServiceError):
     """content_hash collision inside the workspace → 400."""
 
+    code = "knowledge.duplicate"
+
 
 class InvalidUpload(KnowledgeServiceError):
     """Bad size/MIME/content → 400."""
+
+    code = "knowledge.invalid_upload"
 
 
 def get_role(actor, workspace):

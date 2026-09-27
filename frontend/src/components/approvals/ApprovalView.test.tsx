@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { ApprovalView } from "@/components/approvals/ApprovalView";
 import type {
@@ -7,6 +7,8 @@ import type {
   ApiHarnessImplementDisplaySummary,
   ApiHarnessPushDisplaySummary,
 } from "@/types/api";
+import { renderWithClient } from "@/test/render";
+import { setDocumentHidden } from "@/test/visibility";
 
 const { workspaceHolder } = vi.hoisted(() => ({
   workspaceHolder: {
@@ -68,7 +70,7 @@ describe("ApprovalView", () => {
       vi.fn(async () => jsonResponse([approvalRequest()])),
     );
 
-    render(<ApprovalView />);
+    renderWithClient(<ApprovalView />);
 
     expect(await screen.findByText("vault_export")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Onayla" })).toBeInTheDocument();
@@ -82,7 +84,7 @@ describe("ApprovalView", () => {
       vi.fn(async () => jsonResponse([approvalRequest({ requested_by: "u1" })])),
     );
 
-    render(<ApprovalView />);
+    renderWithClient(<ApprovalView />);
 
     expect(await screen.findByText("vault_export")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Onayla" })).toBeInTheDocument();
@@ -96,7 +98,7 @@ describe("ApprovalView", () => {
       vi.fn(async () => jsonResponse([approvalRequest({ requested_by: "u2" })])),
     );
 
-    render(<ApprovalView />);
+    renderWithClient(<ApprovalView />);
 
     expect(await screen.findByText("vault_export")).toBeInTheDocument();
     // Only owner/admin roles may decide server-side (brief §4) -- a member
@@ -118,7 +120,7 @@ describe("ApprovalView", () => {
       }),
     );
 
-    render(<ApprovalView />);
+    renderWithClient(<ApprovalView />);
     await screen.findByText("vault_export");
     await userEvent.click(screen.getByRole("button", { name: "Onayla" }));
     await userEvent.click(screen.getByRole("button", { name: "Evet, onayla" }));
@@ -140,7 +142,7 @@ describe("ApprovalView", () => {
       }),
     );
 
-    render(<ApprovalView />);
+    renderWithClient(<ApprovalView />);
     await screen.findByText("vault_export");
     await userEvent.click(screen.getByRole("button", { name: "Reddet" }));
     await userEvent.click(screen.getByRole("button", { name: "Evet, reddet" }));
@@ -173,7 +175,7 @@ describe("ApprovalView", () => {
       ),
     );
 
-    render(<ApprovalView />);
+    renderWithClient(<ApprovalView />);
 
     expect(await screen.findByText(/Çalışma durumu: Başarılı/)).toBeInTheDocument();
     expect(screen.getByText(/3 yazıldı, 1 güncellendi, 0 silindi/)).toBeInTheDocument();
@@ -207,7 +209,7 @@ describe("ApprovalView", () => {
       }),
     );
 
-    render(<ApprovalView />);
+    renderWithClient(<ApprovalView />);
     expect(await screen.findByText(/Çalışma durumu: Çalışması bekleniyor/)).toBeInTheDocument();
 
     await vi.advanceTimersByTimeAsync(3000);
@@ -229,7 +231,7 @@ describe("ApprovalView", () => {
       vi.fn(async () => jsonResponse([approved, rejected])),
     );
 
-    render(<ApprovalView />);
+    renderWithClient(<ApprovalView />);
     await screen.findByText("Karara bağlananlar");
     expect(screen.getAllByText("vault_export")).toHaveLength(2);
 
@@ -247,7 +249,7 @@ describe("ApprovalView", () => {
     );
     vi.stubGlobal("fetch", fetchMock);
 
-    render(<ApprovalView />);
+    renderWithClient(<ApprovalView />);
     await screen.findByText("vault_export");
     await userEvent.click(screen.getByRole("button", { name: "Onayla" }));
 
@@ -278,7 +280,7 @@ describe("ApprovalView", () => {
       ),
     );
 
-    render(<ApprovalView />);
+    renderWithClient(<ApprovalView />);
 
     expect(await screen.findByText("Uygulama planı onayı (Kapı A)")).toBeInTheDocument();
     expect(screen.getByText("Add a health endpoint")).toBeInTheDocument();
@@ -314,7 +316,7 @@ describe("ApprovalView", () => {
       ),
     );
 
-    render(<ApprovalView />);
+    renderWithClient(<ApprovalView />);
 
     expect(await screen.findByText("Gönderim onayı (Kapı B)")).toBeInTheDocument();
     expect(screen.getByText("Değişen dosyalar (30)")).toBeInTheDocument();
@@ -360,7 +362,7 @@ describe("ApprovalView", () => {
       ),
     );
 
-    render(<ApprovalView />);
+    renderWithClient(<ApprovalView />);
 
     expect(
       await screen.findByText("İş durumu: Başarısız — Gönderim (push) başarısız"),
@@ -405,7 +407,7 @@ describe("ApprovalView", () => {
       }),
     );
 
-    render(<ApprovalView />);
+    renderWithClient(<ApprovalView />);
     expect(await screen.findByText("İş durumu: Uygulanıyor")).toBeInTheDocument();
 
     await vi.advanceTimersByTimeAsync(3000);
@@ -428,7 +430,7 @@ describe("ApprovalView", () => {
       }),
     );
 
-    render(<ApprovalView />);
+    renderWithClient(<ApprovalView />);
     expect(
       await screen.findByText("İş durumu: Gönderim onayı bekleniyor (Kapı B)"),
     ).toBeInTheDocument();
@@ -452,13 +454,10 @@ describe("ApprovalView", () => {
         return jsonResponse([harnessExecution("implementing")]);
       }),
     );
-    const setHidden = (hidden: boolean) => {
-      Object.defineProperty(document, "hidden", { configurable: true, get: () => hidden });
-      document.dispatchEvent(new Event("visibilitychange"));
-    };
+    const setHidden = setDocumentHidden;
 
     try {
-      render(<ApprovalView />);
+      renderWithClient(<ApprovalView />);
       await screen.findByText("İş durumu: Uygulanıyor");
 
       act(() => setHidden(true));
@@ -488,7 +487,7 @@ describe("ApprovalView", () => {
     );
 
     try {
-      const { container } = render(<ApprovalView />);
+      const { container } = renderWithClient(<ApprovalView />);
       await screen.findAllByText("vault_export");
 
       const highlighted = container.querySelector('[data-highlighted="true"]');
@@ -505,7 +504,7 @@ describe("ApprovalView", () => {
     searchParamsHolder.current = new URLSearchParams("request=missing");
     vi.stubGlobal("fetch", vi.fn(async () => jsonResponse([approvalRequest()])));
 
-    render(<ApprovalView />);
+    renderWithClient(<ApprovalView />);
 
     expect(
       await screen.findByText(/İstenen onay isteği bu çalışma alanında bulunamadı/),
@@ -515,7 +514,7 @@ describe("ApprovalView", () => {
   it("moves focus into the confirmation and back to the trigger on Vazgeç", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => jsonResponse([approvalRequest()])));
 
-    render(<ApprovalView />);
+    renderWithClient(<ApprovalView />);
     await screen.findByText("vault_export");
 
     await userEvent.click(screen.getByRole("button", { name: "Reddet" }));
@@ -541,7 +540,7 @@ describe("ApprovalView", () => {
     );
     workspaceHolder.current = { id: "w1", name: "Alice", type: "personal", role: "member" };
 
-    render(<ApprovalView />);
+    renderWithClient(<ApprovalView />);
 
     expect(await screen.findByText("Gönderim onayı (Kapı B)")).toBeInTheDocument();
     expect(screen.getAllByText("Bu istek için özet bilgisi yok.")).toHaveLength(2);

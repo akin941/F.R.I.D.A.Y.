@@ -28,6 +28,7 @@ from agents.serializers import (
     AgentSerializer,
     AgentStepSerializer,
 )
+from core.api_errors import service_error_response
 from core.channels import is_low_trust, scoped_for_actor
 from core.permissions import IsWebChannel
 from core.throttling import CreateScopedRateThrottle
@@ -48,9 +49,9 @@ _PAT_ALLOWLISTED_AUTHENTICATION_CLASSES = [
 
 def _service_error_response(exc):
     if isinstance(exc, (AgentPermissionDenied, TaskPermissionDenied)):
-        return Response({"detail": str(exc)}, status=status.HTTP_403_FORBIDDEN)
+        return service_error_response(exc, status.HTTP_403_FORBIDDEN)
     if isinstance(exc, (AgentInvalidTransition, InvalidTransition)):
-        return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        return service_error_response(exc, status.HTTP_400_BAD_REQUEST)
     raise exc
 
 

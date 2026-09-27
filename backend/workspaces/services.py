@@ -13,6 +13,8 @@ _CURATOR_ROLES = {WorkspaceMember.Role.OWNER, WorkspaceMember.Role.ADMIN}
 class WorkspacePermissionDenied(Exception):
     """Actor's role does not allow the action -> 403."""
 
+    code = "workspace.permission_denied"
+
 
 def get_role(actor, workspace):
     membership = (

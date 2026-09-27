@@ -14,6 +14,7 @@ class IsWebChannel(BasePermission):
     authenticator stays closed to it."""
 
     message = "This action is only available from a trusted device's web session."
+    code = "channel_forbidden"
 
     def has_permission(self, request, view):
         return request_channel(request) == CHANNEL_WEB
@@ -23,6 +24,7 @@ class IsOwner(BasePermission):
     """The installation owner (`User.is_owner`), human and active."""
 
     message = "Only the installation owner can do this."
+    code = "owner_required"
 
     def has_permission(self, request, view):
         user = request.user

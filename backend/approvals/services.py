@@ -66,10 +66,32 @@ class ApprovalServiceError(Exception):
 class InvalidTransition(ApprovalServiceError):
     """Illegal state-machine move, or an unknown/non-gated tool -> 400."""
 
+    code = "approval.invalid_transition"
+
+
+class ApprovalExpired(InvalidTransition):
+    """The request expired before (or while) it was decided -> 400."""
+
+    code = "approval.expired"
+
 
 class ApprovalPermissionDenied(ApprovalServiceError):
     """Actor's role (or the channel-trust rule) does not allow the
     action -> 403."""
+
+    code = "approval.permission_denied"
+
+
+class ApprovalAgentForbidden(ApprovalPermissionDenied):
+    """A machine (`is_agent`) actor tried to decide -> 403."""
+
+    code = "approval.agent_forbidden"
+
+
+class ApprovalChannelForbidden(ApprovalPermissionDenied):
+    """A decision arrived over a channel other than web -> 403."""
+
+    code = "approval.channel_forbidden"
 
 
 def get_role(actor, workspace):
@@ -248,7 +270,7 @@ def _check_actor_is_human(actor):
     service account exists today, and none may ever decide even if one
     were to reach the web channel)."""
     if getattr(actor, "is_agent", False):
-        raise ApprovalPermissionDenied("Agent accounts cannot decide approval requests.")
+        raise ApprovalAgentForbidden("Agent accounts cannot decide approval requests.")
 
 
 def _check_channel_is_web(channel):
@@ -260,7 +282,7 @@ def _check_channel_is_web(channel):
     this one check (the safer failure direction for a hard rule ADR-004
     says no configuration may relax)."""
     if channel != CHANNEL_WEB:
-        raise ApprovalPermissionDenied("Decisions are not permitted over this channel.")
+        raise ApprovalChannelForbidden("Decisions are not permitted over this channel.")
 
 
 def _record(approval_request, action, actor, channel, **metadata):
@@ -361,7 +383,7 @@ def approve_request(*, approval_request, actor, channel):
                 execution_id = tool.create_execution(approval_request)
                 transaction.on_commit(lambda: tool.dispatch(execution_id))
     if expired:
-        raise InvalidTransition("This request has expired.")
+        raise ApprovalExpired("This request has expired.")
     return approval_request
 
 
@@ -385,5 +407,5 @@ def reject_request(*, approval_request, actor, channel):
             )
             _record(approval_request, "approval.rejected", actor, channel)
     if expired:
-        raise InvalidTransition("This request has expired.")
+        raise ApprovalExpired("This request has expired.")
     return approval_request

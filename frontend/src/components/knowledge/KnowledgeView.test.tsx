@@ -109,12 +109,12 @@ describe("KnowledgeView", () => {
     expect(await screen.findByText("Article")).toBeInTheDocument();
   });
 
-  it("surfaces a field-keyed validation error from the backend", async () => {
+  it("maps a field-keyed validation error to Turkish, never the English field text", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async (input: string, init?: RequestInit) => {
         if (init?.method === "POST") {
-          return jsonResponse({ content: ["content must not be empty."] }, 400);
+          return jsonResponse({ content: ["content must not be empty."], code: "invalid" }, 400);
         }
         return jsonResponse([]);
       }),
@@ -128,7 +128,10 @@ describe("KnowledgeView", () => {
     await userEvent.type(screen.getByLabelText("İçerik"), "x");
     await userEvent.click(screen.getByRole("button", { name: "Belge oluştur" }));
 
-    expect(await screen.findByText("content must not be empty.")).toBeInTheDocument();
+    // A generic validation code keeps the form's own Turkish context; the
+    // English field message never renders.
+    expect(await screen.findByText("Belge oluşturulamadı.")).toBeInTheDocument();
+    expect(screen.queryByText("content must not be empty.")).not.toBeInTheDocument();
   });
 
   it("deletes a document", async () => {

@@ -1,8 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { ImplementationJobsPanel } from "@/components/harness/ImplementationJobsPanel";
 import { implJob, jsonResponse, repo } from "@/components/harness/test-fixtures";
+import { renderWithClient } from "@/test/render";
 
 function renderPanel(overrides: Partial<Parameters<typeof ImplementationJobsPanel>[0]> = {}) {
   const props = {
@@ -12,7 +13,7 @@ function renderPanel(overrides: Partial<Parameters<typeof ImplementationJobsPane
     onSelect: vi.fn(),
     ...overrides,
   };
-  return { ...render(<ImplementationJobsPanel {...props} />), props };
+  return { ...renderWithClient(<ImplementationJobsPanel {...props} />), props };
 }
 
 describe("ImplementationJobsPanel", () => {
@@ -36,8 +37,9 @@ describe("ImplementationJobsPanel", () => {
 
     expect(await screen.findByText("Add a health endpoint")).toBeInTheDocument();
     expect(
-      screen.getByText("Başarısız — Değişikliklerde gizli bilgi sızıntısı tespit edildi"),
+      screen.getByText("Değişikliklerde gizli bilgi sızıntısı tespit edildi"),
     ).toBeInTheDocument();
+    expect(screen.getByText("Başarısız")).toHaveAttribute("data-tone", "danger");
     expect(screen.getByText(/Depo: jarvis · Kapı A: Karar bekliyor/)).toBeInTheDocument();
   });
 

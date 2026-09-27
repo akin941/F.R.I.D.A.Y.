@@ -16,6 +16,7 @@ from approvals.services import (
     create_request,
     reject_request,
 )
+from core.api_errors import service_error_response
 from core.channels import is_low_trust, request_channel, scoped_for_actor
 from core.permissions import IsWebChannel
 from workspaces.models import Workspace
@@ -38,9 +39,9 @@ _PAT_ALLOWLISTED_AUTHENTICATION_CLASSES = [
 
 def _service_error_response(exc):
     if isinstance(exc, ApprovalPermissionDenied):
-        return Response({"detail": str(exc)}, status=status.HTTP_403_FORBIDDEN)
+        return service_error_response(exc, status.HTTP_403_FORBIDDEN)
     if isinstance(exc, InvalidTransition):
-        return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        return service_error_response(exc, status.HTTP_400_BAD_REQUEST)
     raise exc
 
 

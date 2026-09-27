@@ -1,10 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Alert, AlertDescription } from "@/components/ui/alert";
+import { ErrorState } from "@/components/ui/error-state";
 import { Skeleton } from "@/components/ui/skeleton";
+import { StatusPill } from "@/components/ui/status-pill";
 import {
   ImplementationJobForm,
   type ImplementationPrefill,
@@ -19,15 +21,15 @@ import {
 } from "@/components/harness/labels";
 import { apiGetJson } from "@/lib/api-client";
 import { clickableProps } from "@/lib/keyboard";
-import { usePolling } from "@/lib/use-polling";
+import { queryKeys } from "@/lib/query/keys";
+import { pollWhile } from "@/lib/query/polling";
 import type { ApiImplementationJob } from "@/types/api";
 
 /**
- * "Uygulama işleri" list + request form. Same data-loading discipline as
- * HarnessJobsView's discovery list: an `activeWorkspaceIdRef` guard drops a
- * response for a workspace the user already switched away from, and the
- * list polls silently only while some row is non-terminal (fast while a
- * job is working, slow while jobs only await a gate; paused when hidden).
+ * "Uygulama işleri" list + request form. Rows come from the workspace-keyed
+ * query cache (a workspace switch never shows another workspace's rows);
+ * the list polls only while some row is non-terminal (fast while a job is
+ * working, slow while jobs only await a gate; paused when hidden).
  *
  * `prefill` (set when the user asked for an implementation from a
  * discovery job) opens the form pre-populated; `onPrefillConsumed` lets
@@ -44,43 +46,21 @@ export function ImplementationJobsPanel({
   onPrefillConsumed: () => void;
   onSelect: (jobId: string) => void;
 }) {
-  const [jobs, setJobs] = useState<ApiImplementationJob[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [loadError, setLoadError] = useState<string | null>(null);
+  const queryClient = useQueryClient();
   const [creating, setCreating] = useState(prefill != null);
 
-  const activeWorkspaceIdRef = useRef<string | null>(null);
-
-  const loadJobs = useCallback(async (wsId: string, options?: { silent?: boolean }) => {
-    if (!options?.silent) setLoading(true);
-    setLoadError(null);
-    try {
-      const list = await apiGetJson<ApiImplementationJob[]>(
-        `/api/harness/implementation-jobs?workspace=${encodeURIComponent(wsId)}`,
-      );
-      if (activeWorkspaceIdRef.current !== wsId) return;
-      setJobs(list);
-    } catch {
-      if (activeWorkspaceIdRef.current === wsId && !options?.silent) {
-        setLoadError("Uygulama işleri yüklenemedi.");
-      }
-    } finally {
-      if (activeWorkspaceIdRef.current === wsId && !options?.silent) setLoading(false);
-    }
-  }, []);
-
-  /* eslint-disable react-hooks/set-state-in-effect -- fetch-on-mount/workspace-change, the standard data-fetching effect pattern */
-  useEffect(() => {
-    activeWorkspaceIdRef.current = workspaceId;
-    setJobs([]);
-    void loadJobs(workspaceId);
-  }, [workspaceId, loadJobs]);
-  /* eslint-enable react-hooks/set-state-in-effect */
-
-  usePolling(
-    () => void loadJobs(workspaceId, { silent: true }),
-    fastestPollInterval(jobs.map((j) => implPollInterval(j.status))),
-  );
+  // Polls only while some row is non-terminal: fast while a job is
+  // working, slow while jobs only await a gate (never while hidden).
+  const jobs = useQuery({
+    queryKey: queryKeys.implementationJobs(workspaceId),
+    queryFn: () =>
+      apiGetJson<ApiImplementationJob[]>(
+        `/api/harness/implementation-jobs?workspace=${encodeURIComponent(workspaceId)}`,
+      ),
+    refetchInterval: pollWhile<ApiImplementationJob[]>((list) =>
+      fastestPollInterval(list.map((j) => implPollInterval(j.status))),
+    ),
+  });
 
   function closeForm() {
     setCreating(false);
@@ -88,8 +68,10 @@ export function ImplementationJobsPanel({
   }
 
   function handleCreated(job: ApiImplementationJob) {
-    if (activeWorkspaceIdRef.current !== job.workspace) return;
-    setJobs((prev) => [job, ...prev.filter((j) => j.id !== job.id)]);
+    queryClient.setQueryData<ApiImplementationJob[]>(
+      queryKeys.implementationJobs(job.workspace),
+      (prev = []) => [job, ...prev.filter((j) => j.id !== job.id)],
+    );
     closeForm();
   }
 
@@ -105,10 +87,13 @@ export function ImplementationJobsPanel({
         </Button>
       </div>
 
-      {loadError ? (
-        <Alert variant="destructive" role="alert">
-          <AlertDescription>{loadError}</AlertDescription>
-        </Alert>
+      {jobs.isError && !jobs.data ? (
+        <ErrorState
+          error={jobs.error}
+          title="Uygulama işleri yüklenemedi."
+          onRetry={() => void jobs.refetch()}
+          retrying={jobs.isFetching}
+        />
       ) : null}
 
       {creating ? (
@@ -121,16 +106,16 @@ export function ImplementationJobsPanel({
         />
       ) : null}
 
-      {loading ? (
+      {jobs.isPending ? (
         <div className="flex flex-col gap-3">
           <Skeleton className="h-20 w-full" />
           <Skeleton className="h-20 w-full" />
         </div>
-      ) : jobs.length === 0 ? (
-        loadError ? null : <p className="text-sm text-muted-foreground">Henüz uygulama işi yok.</p>
+      ) : !jobs.data ? null : jobs.data.length === 0 ? (
+        <p className="text-sm text-muted-foreground">Henüz uygulama işi yok.</p>
       ) : (
         <div className="flex flex-col gap-3">
-          {jobs.map((job) => (
+          {jobs.data.map((job) => (
             <Card
               key={job.id}
               className="cursor-pointer transition-colors hover:bg-accent/50 focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none"
@@ -140,12 +125,18 @@ export function ImplementationJobsPanel({
                 <CardTitle className="text-base">{job.goal}</CardTitle>
               </CardHeader>
               <CardContent className="flex flex-col gap-1 text-sm text-muted-foreground">
-                <p>
-                  {IMPL_STATUS_LABELS[job.status] ?? job.status}
-                  {job.failure_reason
-                    ? ` — ${harnessFailureReasonLabel(job.failure_reason)}`
-                    : ""}
-                  {job.cancel_requested && !isImplTerminal(job.status) ? " — iptal istendi" : ""}
+                <p className="flex flex-wrap items-center gap-2">
+                  <StatusPill
+                    domain="implementation"
+                    status={job.status}
+                    label={IMPL_STATUS_LABELS[job.status] ?? job.status}
+                  />
+                  {job.failure_reason ? (
+                    <span>{harnessFailureReasonLabel(job.failure_reason)}</span>
+                  ) : null}
+                  {job.cancel_requested && !isImplTerminal(job.status) ? (
+                    <span>iptal istendi</span>
+                  ) : null}
                 </p>
                 <p>
                   Depo: {job.repo_name}

@@ -9,7 +9,6 @@ import { CreateTokenForm } from "@/components/integrations/CreateTokenForm";
 import { RevealedTokenBanner } from "@/components/integrations/RevealedTokenBanner";
 import { TokenList } from "@/components/integrations/TokenList";
 import { TelegramLinkPanel } from "@/components/integrations/TelegramLinkPanel";
-import { DevicesPanel } from "@/components/integrations/DevicesPanel";
 import { useWorkspace } from "@/contexts/workspace-context";
 import { apiGetJson } from "@/lib/api-client";
 import type { ApiPersonalAccessToken, ApiPersonalAccessTokenCreated } from "@/types/api";
@@ -76,17 +75,6 @@ export function IntegrationsView() {
           isteği onaylamanın ya da reddetmenin yeni bir yolu değil (o hâlâ web uygulamasını gerektirir).
         </p>
       </div>
-
-      <section className="flex flex-col gap-3">
-        <h2 className="text-lg font-medium tracking-tight">Cihazlar</h2>
-        <p className="text-sm text-muted-foreground">
-          Jarvis&apos;e yalnızca eşleştirilmiş cihazlar erişir. İptal edilen bir cihaz bir sonraki
-          isteğinde oturumunu kaybeder.
-        </p>
-        <DevicesPanel />
-      </section>
-
-      <Separator />
 
       <section className="flex flex-col gap-3">
         <div className="flex flex-wrap items-center justify-between gap-4">

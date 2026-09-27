@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { MemoryFields, type MemoryFieldsValue } from "@/components/memory/MemoryFields";
-import { apiPostJson, ApiError } from "@/lib/api-client";
+import { apiPostJson, errorMessage } from "@/lib/api-client";
 import type { ApiMemory } from "@/types/api";
 
 const EMPTY: MemoryFieldsValue = {
@@ -40,11 +40,7 @@ export function MemoryCreateForm({
       onCreated(memory);
       setValue(EMPTY);
     } catch (err) {
-      if (err instanceof ApiError) {
-        setError(err.body.detail ?? "Not oluşturulamadı.");
-      } else {
-        setError("Bir şeyler ters gitti. Lütfen tekrar deneyin.");
-      }
+      setError(errorMessage(err, "Not oluşturulamadı."));
     } finally {
       setSubmitting(false);
     }

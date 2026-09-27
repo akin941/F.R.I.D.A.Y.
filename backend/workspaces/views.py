@@ -5,6 +5,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from core.api_errors import service_error_response
 from core.channels import request_channel
 from core.permissions import IsWebChannel
 from workspaces.models import Workspace, WorkspaceMember
@@ -99,7 +100,7 @@ class WorkspaceDetailView(APIView):
                         profile=serializer.validated_data["profile"],
                     )
         except WorkspacePermissionDenied as exc:
-            return Response({"detail": str(exc)}, status=status.HTTP_403_FORBIDDEN)
+            return service_error_response(exc, status.HTTP_403_FORBIDDEN)
         # Re-fetch for output: `update_profile` returns a lock-query instance
         # without the `role` annotation the serializer needs.
         workspace = self._get_workspace(request, workspace_id)

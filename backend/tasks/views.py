@@ -8,6 +8,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from assistant.models import Message
+from core.api_errors import service_error_response
 from core.channels import request_channel
 from core.permissions import IsWebChannel
 from tasks.models import Task
@@ -44,9 +45,9 @@ _PRIORITY_ORDER = Case(
 
 def _service_error_response(exc):
     if isinstance(exc, TaskPermissionDenied):
-        return Response({"detail": str(exc)}, status=status.HTTP_403_FORBIDDEN)
+        return service_error_response(exc, status.HTTP_403_FORBIDDEN)
     if isinstance(exc, InvalidTransition):
-        return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        return service_error_response(exc, status.HTTP_400_BAD_REQUEST)
     raise exc
 
 

@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { TelegramLinkPanel } from "@/components/integrations/TelegramLinkPanel";
+import { renderWithClient } from "@/test/render";
 
 const WORKSPACES = [
   { id: "w1", name: "Alice", type: "personal" as const, role: "owner" },
@@ -14,6 +15,11 @@ vi.mock("@/contexts/workspace-context", () => ({
     activeWorkspace: WORKSPACES[0],
   }),
 }));
+
+// A code is only shown while it is still valid.
+function inTenMinutes() {
+  return new Date(Date.now() + 10 * 60_000).toISOString();
+}
 
 function jsonResponse(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), { status });
@@ -30,7 +36,7 @@ describe("TelegramLinkPanel", () => {
       "fetch",
       vi.fn(async (input: string, init?: RequestInit) => {
         if (init?.method === "POST") {
-          return jsonResponse({ code: "abc123", expires_at: "2026-07-13T00:10:00Z" }, 201);
+          return jsonResponse({ code: "abc123", expires_at: inTenMinutes() }, 201);
         }
         if (input.includes("link-status")) {
           return jsonResponse({ linked: false, chat_id: null, linked_at: null });
@@ -39,7 +45,7 @@ describe("TelegramLinkPanel", () => {
       }),
     );
 
-    render(<TelegramLinkPanel />);
+    renderWithClient(<TelegramLinkPanel />);
 
     expect(await screen.findByText("Henüz bir Telegram sohbetine bağlı değil.")).toBeInTheDocument();
 
@@ -69,7 +75,7 @@ describe("TelegramLinkPanel", () => {
       }),
     );
 
-    render(<TelegramLinkPanel />);
+    renderWithClient(<TelegramLinkPanel />);
 
     expect(await screen.findByText(/Şu sohbete bağlı: 999/)).toBeInTheDocument();
 
@@ -89,7 +95,7 @@ describe("TelegramLinkPanel", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    render(<TelegramLinkPanel />);
+    renderWithClient(<TelegramLinkPanel />);
     await screen.findByText("Henüz bir Telegram sohbetine bağlı değil.");
 
     await userEvent.click(screen.getByRole("combobox", { name: "Telegram çalışma alanı" }));
@@ -114,7 +120,7 @@ describe("TelegramLinkPanel", () => {
       }),
     );
 
-    render(<TelegramLinkPanel />);
+    renderWithClient(<TelegramLinkPanel />);
     await screen.findByText(/Şu sohbete bağlı: 999/);
 
     await userEvent.click(screen.getByRole("button", { name: "Bağlantıyı kaldır" }));
@@ -149,7 +155,7 @@ describe("TelegramLinkPanel", () => {
       }),
     );
 
-    render(<TelegramLinkPanel />);
+    renderWithClient(<TelegramLinkPanel />);
     await screen.findByText("Henüz bir Telegram sohbetine bağlı değil.");
 
     await userEvent.click(screen.getByRole("button", { name: "Telegram'ı bağla" }));
@@ -163,7 +169,7 @@ describe("TelegramLinkPanel", () => {
     // The stale w1 response now resolves -- proves the round-2 P2 fix: it
     // must not surface w1's code while the panel shows w2, and it must not
     // leave the (workspace-agnostic) requesting flag stuck.
-    resolvePost(jsonResponse({ code: "abc123", expires_at: "2026-07-13T00:10:00Z" }, 201));
+    resolvePost(jsonResponse({ code: "abc123", expires_at: inTenMinutes() }, 201));
     await waitFor(() => {
       expect(screen.queryByText("/link abc123")).not.toBeInTheDocument();
     });
@@ -186,7 +192,7 @@ describe("TelegramLinkPanel", () => {
       }),
     );
 
-    render(<TelegramLinkPanel />);
+    renderWithClient(<TelegramLinkPanel />);
     await screen.findByText("Henüz bir Telegram sohbetine bağlı değil.");
 
     await userEvent.click(screen.getByRole("button", { name: "Telegram'ı bağla" }));
