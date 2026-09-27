@@ -585,7 +585,7 @@ class TestPushBundledCommit:
                 or "/tmp/out.bundle" in argv
                 or "git@x:y.git" in argv
             )
-        rmtree.assert_called_once_with(clean_clone_dir, onexc=mock.ANY)
+        rmtree.assert_called_once_with(clean_clone_dir, ignore_errors=True)
 
     def test_push_uses_explicit_url_and_create_only_lease(self, monkeypatch, tmp_path):
         clean_clone_dir = str(tmp_path / "clean-clone")
@@ -688,7 +688,7 @@ class TestPushBundledCommit:
                 base_sha="base111",
                 produced_sha="produced999",
             )
-        rmtree.assert_called_once_with(clean_clone_dir, onexc=mock.ANY)
+        rmtree.assert_called_once_with(clean_clone_dir, ignore_errors=True)
 
     def test_ancestor_check_timeout_raises_runner_error(self, monkeypatch, tmp_path):
         """Codex code-review pattern (mirrors `TestPrepareReviewClone`'s
@@ -720,7 +720,7 @@ class TestPushBundledCommit:
                 base_sha="base111",
                 produced_sha="produced999",
             )
-        rmtree.assert_called_once_with(clean_clone_dir, onexc=mock.ANY)
+        rmtree.assert_called_once_with(clean_clone_dir, ignore_errors=True)
 
     @pytest.mark.parametrize(
         "git_url",
@@ -1041,7 +1041,7 @@ class TestPrepareReviewClone:
                 base_sha="base111",
                 produced_sha="produced999",
             )
-        rmtree.assert_called_once_with(clean_clone_dir, onexc=mock.ANY)
+        rmtree.assert_called_once_with(clean_clone_dir, ignore_errors=True)
 
 
 class TestReadImplementationResult:

@@ -129,35 +129,35 @@ def cleanup_directory(path):
     outcome themselves with `os.path.exists` afterwards.
 
     Phase 3 branch 5 (2026-09-27 audit): the agent owns every path in its
-    worktree and can `chmod 500` a directory so its entries can't be
-    unlinked -- the previous `rmtree(..., ignore_errors=True)` then left
-    the tree behind forever (and the recovery sweep retried it on every
-    pass). The host runs as that same uid, and chmod(2) checks ownership
-    rather than mode bits, so the error handler restores owner rwx on the
-    failing entry's parent and retries once. It never touches anything
-    outside `path` itself."""
-    root = os.path.abspath(path)
-
-    def _restore_owner_access(function, failed_path, exc):
-        if isinstance(exc, FileNotFoundError):
-            return
-        parent = os.path.dirname(os.path.abspath(failed_path))
-        if parent != root and not parent.startswith(root + os.sep):
-            return
-        try:
-            os.chmod(parent, stat.S_IRWXU)
-            if os.path.isdir(failed_path) and not os.path.islink(failed_path):
-                os.chmod(failed_path, stat.S_IRWXU)
-            function(failed_path)
-        except OSError:
-            pass
-
+    worktree and can strip owner permissions from directories (`chmod 500`
+    / `000`) so their entries can't be listed or unlinked -- a plain
+    `rmtree(..., ignore_errors=True)` then left the tree behind forever.
+    The host runs as that same uid, and chmod(2) checks ownership rather
+    than mode bits, so a pre-pass restores owner rwx on every directory
+    inside `path` (never following symlinks, never touching anything
+    outside it) before the delete. Replaces an `onexc` retry handler that
+    could itself raise when rmtree reported an `os.open` failure (Codex
+    code-review P1, branch 5 round 3)."""
     try:
-        if os.path.isdir(root) and not os.path.islink(root):
-            os.chmod(root, stat.S_IRWXU)
-    except OSError:
-        pass
-    shutil.rmtree(path, onexc=_restore_owner_access)
+        if os.path.isdir(path) and not os.path.islink(path):
+            _restore_owner_access(path)
+    except Exception:
+        logger.exception("Restoring owner access under %s failed", path)
+    shutil.rmtree(path, ignore_errors=True)
+
+
+def _restore_owner_access(root):
+    stack = [root]
+    while stack:
+        directory = stack.pop()
+        try:
+            os.chmod(directory, stat.S_IRWXU)
+            with os.scandir(directory) as entries:
+                for entry in entries:
+                    if entry.is_dir(follow_symlinks=False):
+                        stack.append(entry.path)
+        except OSError:
+            continue
 
 
 def _resolve_git_push_env():

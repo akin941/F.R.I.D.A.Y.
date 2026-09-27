@@ -228,13 +228,19 @@ harness_write_mode_main() {
                 tests_exit_code=1
             fi
         fi
+        # Via a temp file, not a pipeline: POSIX sh reports only the last
+        # command's status, which would mask a failing `git diff` as an
+        # empty change list (Codex code-review P2, branch 5 round 3).
+        # Nothing else is alive to touch the file (quiesced above).
         diff_base="${base_commit:-HEAD}"
-        if diff_output_json=$(sgit diff --name-only -z "$diff_base" "$commit_sha" -- 2>/dev/null \
-            | nul_list_to_json); then
+        diff_tmp=$(mktemp)
+        if sgit diff --name-only -z "$diff_base" "$commit_sha" -- >"$diff_tmp" 2>/dev/null \
+            && diff_output_json=$(nul_list_to_json <"$diff_tmp"); then
             changed_files_json="$diff_output_json"
         else
             tests_exit_code=1
         fi
+        rm -f "$diff_tmp"
     fi
 
     [ "$run_ok" = true ] || tests_exit_code=1

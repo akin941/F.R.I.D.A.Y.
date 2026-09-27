@@ -413,3 +413,17 @@ def test_cat_file_parser_ignores_missing_marker_inside_content():
 def test_cat_file_parser_fails_closed_on_missing_or_truncated(stream):
     with pytest.raises(runner.RunnerError):
         list(runner._iter_cat_file_batch(stream))
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root ignores directory permissions")
+def test_cleanup_handles_directories_without_any_owner_permission(tmp_path):
+    """Codex code-review P1, branch 5 round 3: a chmod-000 directory made the
+    old rmtree retry handler raise TypeError (os.open needs flags)."""
+    root = tmp_path / "worktree"
+    locked = root / "a" / "b"
+    locked.mkdir(parents=True)
+    (locked / "f").write_text("x")
+    os.chmod(locked, 0)
+    os.chmod(root / "a", 0)
+    runner.cleanup_directory(str(root))
+    assert not root.exists()

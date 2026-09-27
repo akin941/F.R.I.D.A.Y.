@@ -303,3 +303,19 @@ def test_agent_switching_branches_cannot_redirect_the_commit(tmp_path):
     )
     assert _git(repo, "rev-parse", "main").strip() == result["commit_sha"]
     assert result["tests"]["passed"] is True
+
+
+def test_failing_git_diff_after_tests_fails_closed(tmp_path):
+    """Codex code-review P2, branch 5 round 3: a `git diff` failure must not
+    be masked by the pipeline's last command into an empty change list."""
+    workspace, _repo, base = _make_workspace(tmp_path, {"a.py": "old\n"})
+    base_object = f".git/objects/{base[:2]}/{base[2:]}"
+    _proc, result = _run_wrapper(
+        workspace,
+        base=base,
+        agent_script="printf 'new\\n' > a.py",
+        # The test command itself removes the base commit object after the
+        # wrapper committed on top of it.
+        test_command=f"chmod u+w {base_object}; rm -f {base_object}",
+    )
+    assert result["tests"]["passed"] is False
