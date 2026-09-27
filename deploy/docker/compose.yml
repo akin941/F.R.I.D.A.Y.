@@ -12,6 +12,28 @@
 # missing value; `deploy/docker/.env.example` lists every supported key).
 name: jarvis-os
 
+# Connector sidecars (Phase 5, ADR-010 decision 3, brief D1). Every MCP
+# server Jarvis talks to runs as its own service built on this anchor, in
+# the `connectors` profile (`docker compose --profile connectors up`):
+# digest-pinned image, read-only root filesystem, every capability dropped,
+# no new privileges, NO published ports, reachable only over the internal
+# `connectors` network -- and holding only its own credential, from
+# `deploy/docker/.env` (never Jarvis's env, never the database). A sidecar
+# that needs the internet (e.g. GitHub) also joins `connectors-egress`. A
+# stdio-only server runs behind the stdio<->HTTP bridge
+# (backend/connectors/docker/stdio_bridge.py, image
+# backend/connectors/docker/Dockerfile.bridge) inside its own sidecar --
+# never in web or worker. Jarvis learns a sidecar's URL from the env var
+# its manifest names (e.g. `GITHUB_MCP_URL: http://github-mcp:8080/mcp`).
+x-connector-sidecar: &connector-sidecar
+  profiles: ["connectors"]
+  read_only: true
+  cap_drop: ["ALL"]
+  security_opt: ["no-new-privileges:true"]
+  tmpfs: ["/tmp"]
+  networks: ["connectors"]
+  restart: unless-stopped
+
 services:
   web:
     build:
@@ -70,6 +92,9 @@ services:
       # updates.
       TELEGRAM_BOT_TOKEN: "${TELEGRAM_BOT_TOKEN:-}"
       TELEGRAM_WEBHOOK_SECRET: "${TELEGRAM_WEBHOOK_SECRET:-}"
+    # `connectors`: the internal network the MCP sidecars listen on (web
+    # runs connector reads in the chat request thread).
+    networks: ["default", "connectors"]
     depends_on:
       postgres:
         condition: service_healthy
@@ -106,6 +131,8 @@ services:
       # file; defaults to a repo-local, gitignored dev data directory.
       - ${OBSIDIAN_VAULT_HOST_PATH:-../../.devdata/obsidian-vault}:/vault
     environment: *backend_env
+    # Connector writes, pin checks and health checks run here (Celery).
+    networks: ["default", "connectors"]
     depends_on:
       postgres:
         condition: service_healthy
@@ -153,3 +180,12 @@ services:
 
 volumes:
   postgres-data:
+
+networks:
+  default: {}
+  # No route out: sidecars and the Jarvis services that call them only.
+  connectors:
+    internal: true
+  # For sidecars whose server must reach its vendor API; never joined by
+  # web or worker.
+  connectors-egress: {}

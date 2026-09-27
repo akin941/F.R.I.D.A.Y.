@@ -441,4 +441,8 @@ allow_indirect_imports = true
 ignore_imports = [
     # The fake MCP server the connectors tests talk to.
     "connectors.tests.fakes -> mcp.server",
+    # The stdio<->HTTP bridge IS a server (and spawns the stdio child): it
+    # runs only inside a connector sidecar, never in web/worker/runner (D1).
+    "connectors.docker.stdio_bridge -> mcp.server",
+    "connectors.docker.stdio_bridge -> mcp.client.stdio",
 ]
