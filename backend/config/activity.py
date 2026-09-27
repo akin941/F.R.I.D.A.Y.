@@ -99,7 +99,7 @@ class ActivitySummaryView(APIView):
         fresh_since = timezone.now() - timedelta(hours=settings.APPROVAL_REQUEST_TTL_HOURS)
         pending = _counts_by_workspace(
             ApprovalRequest.objects.for_actor(user, workspace=workspace_filter).filter(
-                status=ApprovalRequest.Status.PENDING, created_at__gt=fresh_since
+                status=ApprovalRequest.Status.PENDING, created_at__gte=fresh_since
             )
         )
         agents = _counts_by_workspace(
