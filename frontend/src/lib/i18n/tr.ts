@@ -101,6 +101,20 @@ export const ERROR_MESSAGES = {
     message: "Ajan ya da adım artık bu işleme uygun değil.",
     specific: true,
   },
+  // Deploys
+  "deploy.permission_denied": {
+    message: "Dağıtım işlemlerini yalnızca kurulum sahibi yapabilir.",
+    specific: true,
+  },
+  "deploy.invalid_transition": {
+    message: "Bu dağıtım hedefi ya da çalıştırması artık bu işleme uygun değil.",
+    specific: true,
+  },
+  "deploy.ci_required": {
+    message:
+      "Bu hedef, commit için başarılı bir CI sonucu istiyor; CI durumu başarılı değil ya da bilinmiyor.",
+    specific: true,
+  },
   // Harness
   "harness.permission_denied": { message: "Rolün bu harness işlemine yetmiyor.", specific: true },
   "harness.invalid_transition": {

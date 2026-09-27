@@ -386,6 +386,12 @@ name = "deploys may import only core, workspaces, audit, ai_core, tools, memory,
 type = "forbidden"
 source_modules = ["deploys"]
 forbidden_modules = ["config", "accounts", "assistant", "knowledge", "tasks", "agents", "skills", "integrations", "harness"]
+# Tests build users and PATs for the role x endpoint matrix (the
+# ai_core.tests/audit.tests exemption). Production code never imports
+# accounts: the PAT authenticator is injected by config/urls.py.
+ignore_imports = [
+    "deploys.tests.* -> accounts.*",
+]
 
 # Nothing below them imports either app. `assistant` reaches connector
 # reads only through `tools.registry` (ReadToolSpec), never `connectors`
