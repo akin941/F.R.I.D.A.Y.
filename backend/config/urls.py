@@ -2,6 +2,8 @@ from django.contrib import admin
 from django.http import JsonResponse
 from django.urls import include, path
 
+from config.activity import ActivitySummaryView
+
 
 def healthz(request):
     """Liveness probe used by Docker healthchecks and (later) monitoring."""
@@ -28,6 +30,9 @@ urlpatterns = [
     path("api/v1/", include("agents.urls")),
     path("api/v1/", include("integrations.urls")),
     path("api/v1/", include("harness.urls")),
+    # Cross-app read-only aggregate for the shell's badges (Phase 4
+    # branch 3); lives in the composition root, see config/activity.py.
+    path("api/v1/activity/summary", ActivitySummaryView.as_view(), name="activity-summary"),
     # No audit-log admin by design: Django admin bypasses `for_actor()`
     # workspace scoping (ADR-001; see approvals/admin.py for the same
     # argument). The audit trail is read through scoped application code.
