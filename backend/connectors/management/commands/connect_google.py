@@ -80,6 +80,10 @@ class _Redirect:
 
 def _handler(redirect):
     class Handler(BaseHTTPRequestHandler):
+        # A browser may pre-connect without sending a request; never block
+        # the single-threaded server on such a socket.
+        timeout = 5
+
         def do_GET(self):  # noqa: N802 -- http.server API
             parts = urlsplit(self.path)
             if parts.path != "/":

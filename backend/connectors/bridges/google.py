@@ -45,6 +45,7 @@ from datetime import time as dt_time
 from email.message import EmailMessage
 from email.policy import SMTP
 from typing import Protocol
+from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo
 
 import httpx
@@ -249,8 +250,9 @@ def _send(client, method, url, **kwargs):
 
 
 def _endpoint(url):
-    # Log the endpoint family only: ids and query strings are the owner's data.
-    return url.split("?", 1)[0].rsplit("/users/me/", 1)[-1].split("/")[0]
+    # Log the host only: paths carry message ids, query strings the owner's
+    # search -- both are the owner's data.
+    return urlsplit(str(url)).hostname or "?"
 
 
 def _json(response):
