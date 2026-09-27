@@ -488,12 +488,16 @@ def _drive(run_id, token):
         return
     rollback_output = _output_block("rollback", result)
     if not result.ok:
+        # A transport failure (ssh timeout / exit 255) leaves the remote's
+        # state unknown, unlike a clean refusal -- a distinct code so the
+        # banner does not overstate certainty. Either way the live SHA is
+        # unknown now: cleared, so the next request needs a status refresh.
         _finish(
             run_id,
             token,
             [S.ROLLING_BACK],
             S.ROLLBACK_FAILED,
-            E.ROLLBACK_COMMAND_FAILED,
+            E.ROLLBACK_OUTCOME_UNKNOWN if result.transport_failed else E.ROLLBACK_COMMAND_FAILED,
             current_sha="",
             output=rollback_output,
         )
@@ -512,6 +516,9 @@ def _drive(run_id, token):
             current_sha=run.rollback_sha,
         )
     else:
+        # The rollback verb succeeded, so the checkout IS `rollback_sha`;
+        # only its health fails. Recording it (rather than clearing to
+        # unknown) keeps the drift check exact for the owner's next move.
         _finish(
             run_id,
             token,

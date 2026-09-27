@@ -168,6 +168,7 @@ class DeployRun(WorkspaceScopedModel, TimestampedModel):
         HEALTH_CHECKS_FAILED = "health_checks_failed"
         HEALTH_WINDOW_ELAPSED = "health_window_elapsed"
         ROLLBACK_COMMAND_FAILED = "rollback_command_failed"
+        ROLLBACK_OUTCOME_UNKNOWN = "rollback_outcome_unknown"
         ROLLBACK_HEALTH_FAILED = "rollback_health_failed"
         RUNNER_LOST = "runner_lost"
         UNEXPECTED_ERROR = "unexpected_error"

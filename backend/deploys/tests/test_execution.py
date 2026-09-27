@@ -174,6 +174,20 @@ def test_failed_rollback_health_is_rollback_failed(owner, workspace, target, rem
     assert run.status == S.ROLLBACK_FAILED
     assert run.error_code == E.ROLLBACK_HEALTH_FAILED
     assert remote.verbs().count("rollback") == 1
+    # The rollback verb succeeded: the live checkout is the rollback SHA.
+    target.refresh_from_db()
+    assert target.current_sha == run.rollback_sha
+
+
+def test_rollback_transport_failure_is_an_unknown_outcome(owner, workspace, target, remote):
+    remote.health_default = False
+    remote.transport_fail.add("rollback")
+    run = run_it(approved_run(owner, workspace, target))
+    assert run.status == S.ROLLBACK_FAILED
+    assert run.error_code == E.ROLLBACK_OUTCOME_UNKNOWN
+    assert remote.verbs().count("rollback") == 1
+    target.refresh_from_db()
+    assert target.current_sha == ""
 
 
 # --- refusals before the deploy verb ---
