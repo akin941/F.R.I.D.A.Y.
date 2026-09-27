@@ -94,7 +94,7 @@ def _parse_client_local_date(raw):
         return None
 
 
-def _extract_task_draft(conversation, *, actor, content, client_local_date):
+def _extract_task_draft(conversation, *, actor, content, client_local_date, context_report=None):
     """Second, focused extraction call for a `task_draft`-classified message
     (MVP 6 §3) — decides *what* the task should contain (title, optional due
     date), mirroring `memory.extraction`'s own "classify, then extract"
@@ -131,6 +131,7 @@ def _extract_task_draft(conversation, *, actor, content, client_local_date):
             workspace=conversation.workspace,
             prompt_version=prompt_version,
             stream=False,
+            context_report=context_report,
         )
     except GatewayError:
         return None
@@ -146,7 +147,23 @@ def _extract_task_draft(conversation, *, actor, content, client_local_date):
     }
 
 
-def classify_intent(conversation, *, actor, content, client_local_date=None):
+def _allowed_intents_line(allowed):
+    names = ", ".join(sorted(allowed))
+    return (
+        f"\n\nOnly these intents are available on this channel: {names}. "
+        "Classify every other message as chat."
+    )
+
+
+def classify_intent(
+    conversation,
+    *,
+    actor,
+    content,
+    client_local_date=None,
+    allowed_intents=None,
+    context_report=None,
+):
     """Classify a user's chat message into a router intent (MVP 6 §1).
 
     Runs its own blocking, non-streaming `purpose="router.intent"` gateway
@@ -180,13 +197,33 @@ def classify_intent(conversation, *, actor, content, client_local_date=None):
     only; no dispatch happens here — creating the `ApprovalRequest` only
     ever happens later, on confirm (see `assistant.views`).
 
+    `allowed_intents` (Phase 4 branch 6) narrows the router for a
+    low-trust, chat-only channel (the OpenAI-compatible facade passes
+    `{chat, memory_query, knowledge_query}`): the tool vocabulary is left
+    out of the prompt unless `tool_request` is allowed, the prompt names the
+    allowed set, and a classification outside it degrades to plain `chat`
+    BEFORE any task-draft extraction -- no draft, no tool proposal, no
+    second gateway call. `chat` is always allowed. Default `None`: every
+    intent (web, CLI, Telegram).
+
+    `context_report` (optional) is recorded on this call's ModelUsage row
+    (and the task-draft call's), e.g. the facade's channel and model alias.
+
     Returns `{"intent": Message.Intent, "intent_payload": dict}`.
     """
     from tools.registry import list_tool_names
 
+    allowed = None
+    if allowed_intents is not None:
+        allowed = frozenset(allowed_intents) | {Message.Intent.CHAT}
     prompt_version = _router_intent_prompt_version()
+    system_prompt = prompt_version.content
+    if allowed is None or Message.Intent.TOOL_REQUEST in allowed:
+        system_prompt += _tool_vocabulary_line()
+    if allowed is not None:
+        system_prompt += _allowed_intents_line(allowed)
     messages = [
-        {"role": "system", "content": prompt_version.content + _tool_vocabulary_line()},
+        {"role": "system", "content": system_prompt},
         {"role": "user", "content": content},
     ]
     gateway = InferenceGateway()
@@ -198,6 +235,7 @@ def classify_intent(conversation, *, actor, content, client_local_date=None):
             workspace=conversation.workspace,
             prompt_version=prompt_version,
             stream=False,
+            context_report=context_report,
         )
     except GatewayError:
         return {"intent": Message.Intent.CHAT, "intent_payload": {}}
@@ -205,6 +243,9 @@ def classify_intent(conversation, *, actor, content, client_local_date=None):
     try:
         parsed = parse_intent(result.text)
     except IntentParseError:
+        return {"intent": Message.Intent.CHAT, "intent_payload": {}}
+
+    if allowed is not None and parsed["intent"] not in allowed:
         return {"intent": Message.Intent.CHAT, "intent_payload": {}}
 
     if parsed["intent"] == Message.Intent.TOOL_REQUEST:
@@ -217,7 +258,11 @@ def classify_intent(conversation, *, actor, content, client_local_date=None):
 
     if parsed["intent"] == Message.Intent.TASK_DRAFT:
         draft = _extract_task_draft(
-            conversation, actor=actor, content=content, client_local_date=client_local_date
+            conversation,
+            actor=actor,
+            content=content,
+            client_local_date=client_local_date,
+            context_report=context_report,
         )
         if draft is None:
             return {"intent": Message.Intent.CHAT, "intent_payload": {}}
@@ -227,7 +272,7 @@ def classify_intent(conversation, *, actor, content, client_local_date=None):
 
 
 @transaction.atomic
-def create_conversation(*, workspace, actor, title="", private=False):
+def create_conversation(*, workspace, actor, title="", private=False, channel=""):
     """`private` at creation needs no cascade (Phase 1 p1-work-log,
     Codex round-2 P1): nothing has been extracted from a brand-new row —
     this is the row's initial value, not a `False -> True` transition, so
@@ -235,6 +280,9 @@ def create_conversation(*, workspace, actor, title="", private=False):
     here. Lets a caller start a conversation private from message one
     instead of create-then-PATCH, which left a race window where the first
     exchange could already be extraction-eligible before the PATCH landed.
+
+    `channel` (optional) names the non-web channel that created it (the
+    OpenAI-compatible facade) in the audit row.
     """
     conversation = Conversation.objects.create(
         workspace=workspace,
@@ -242,14 +290,101 @@ def create_conversation(*, workspace, actor, title="", private=False):
         created_by=actor,
         private=private,
     )
+    metadata = {"private": private}
+    if channel:
+        metadata["channel"] = channel
     record_audit(
         action="assistant.conversation.created",
         actor=actor,
         workspace=workspace,
         resource=conversation,
-        metadata={"private": private},
+        metadata=metadata,
     )
     return conversation
+
+
+# Intents a forked copy keeps. A task-draft / tool-request classification
+# belongs to the turn that produced it (its confirm card was offered there);
+# a copy never re-offers it.
+_FORK_KEPT_INTENTS = {
+    Message.Intent.CHAT,
+    Message.Intent.MEMORY_QUERY,
+    Message.Intent.KNOWLEDGE_QUERY,
+}
+
+
+@transaction.atomic
+def fork_conversation(*, source, actor, cut_before_id=None, channel=""):
+    """A new conversation in `source`'s workspace (same title and private
+    flag) seeded with copies of `source`'s messages created before the
+    message `cut_before_id` (all of them when None, or when it is not a
+    message of `source`) -- Phase 4 branch 6's fork for an OpenAI-compatible
+    client that regenerated or edited a turn: the server history stays
+    authoritative and the original conversation is left untouched.
+
+    Copies are trusted rows of the same workspace (never client-supplied
+    text): role, content, status, author, channel, the injected memory /
+    chunk ids and plain intents; they keep the source's timestamps, so the
+    order is unchanged. No ModelUsage link (the usage belongs to the
+    original reply), no overlay provenance (owner-only, web-only), no
+    task-draft/tool-request payloads. The extraction cursor is placed on the
+    last copy: the source already had its chance to extract them.
+
+    Returns `(conversation, {source_message_id: copy_id})`.
+    """
+    conversation = create_conversation(
+        workspace=source.workspace,
+        actor=actor,
+        title=source.title,
+        private=source.private,
+        channel=channel,
+    )
+    originals = list(
+        Message.objects.filter(conversation=source, workspace=source.workspace).order_by(
+            "created_at", "id"
+        )
+    )
+    cut_ids = [str(m.id) for m in originals]
+    if cut_before_id is not None and str(cut_before_id) in cut_ids:
+        originals = originals[: cut_ids.index(str(cut_before_id))]
+    copies = [
+        Message(
+            id=uuid.uuid4(),
+            workspace=conversation.workspace,
+            conversation=conversation,
+            role=original.role,
+            content=original.content,
+            status=original.status,
+            created_by=original.created_by,
+            channel=original.channel,
+            memories_used=original.memories_used,
+            chunks_used=original.chunks_used,
+            intent=original.intent if original.intent in _FORK_KEPT_INTENTS else "",
+        )
+        for original in originals
+    ]
+    Message.objects.bulk_create(copies)
+    # `created_at` is auto_now_add (set on insert); restore the source's.
+    for copy, original in zip(copies, originals, strict=True):
+        copy.created_at = original.created_at
+    Message.objects.bulk_update(copies, ["created_at"])
+    if copies:
+        conversation.last_extracted_message = copies[-1]
+        conversation.save(update_fields=["last_extracted_message", "updated_at"])
+    record_audit(
+        action="assistant.conversation.forked",
+        actor=actor,
+        workspace=conversation.workspace,
+        resource=conversation,
+        metadata={
+            "source_conversation": str(source.id),
+            "copied_messages": len(copies),
+            **({"channel": channel} if channel else {}),
+        },
+    )
+    return conversation, {
+        str(original.id): str(copy.id) for original, copy in zip(originals, copies, strict=True)
+    }
 
 
 @transaction.atomic
@@ -305,7 +440,15 @@ def mark_conversation_private(*, conversation, actor):
     return locked
 
 
-def build_gateway_stream(conversation, *, actor, content, channel, intent=Message.Intent.CHAT):
+def build_gateway_stream(
+    conversation,
+    *,
+    actor,
+    content,
+    channel,
+    intent=Message.Intent.CHAT,
+    report_extra=None,
+):
     """Start the gateway call and return (generator, usage_holder, memory_ids,
     chunk_ids, overlay_source_workspaces).
 
@@ -331,6 +474,9 @@ def build_gateway_stream(conversation, *, actor, content, channel, intent=Messag
     default — passed straight through to `build_context`, which is the only
     place it changes behavior (gates the cross-workspace overlay to the
     trusted web channel only).
+
+    `report_extra` (optional, Phase 4 branch 6) is merged into the chat
+    call's `context_report` -- e.g. the facade's model alias.
     """
     gateway = InferenceGateway()
     messages, context_report, prompt_version, memory_ids, chunk_ids, overlay_source_workspaces = (
@@ -342,6 +488,8 @@ def build_gateway_stream(conversation, *, actor, content, channel, intent=Messag
             intent=intent,
         )
     )
+    if report_extra:
+        context_report = {**context_report, **report_extra}
     usage_holder = {}
     try:
         gateway_stream = gateway.complete(
@@ -364,24 +512,40 @@ def _eager_error_stream(exc):
     yield  # pragma: no cover — makes this a generator; unreachable
 
 
-def stream_assistant_reply(
+def iter_assistant_reply_events(
     conversation,
     gateway_stream,
     usage_holder,
     *,
     request_id,
+    message_id=None,
     memory_ids=None,
     chunk_ids=None,
     overlay_source_workspaces=None,
     draft_event=None,
     channel=Message.Channel.WEB,
 ):
-    """`request_id` is the id `RequestIDMiddleware` assigned to the originating
+    """The assistant reply as structured events (Phase 4 branch 6): zero or
+    more `{"type": "chunk", "text"}`, then -- only on success -- the
+    optional `draft_event`, then exactly one terminal event, `{"type":
+    "done", "message_id", "usage", "memories_used", "chunks_used",
+    "overlay_source_workspaces"}` or `{"type": "error", "error_type"}`. The
+    assistant Message row is persisted (single write site) before the
+    terminal event is yielded. Every consumer reads these dicts: the web
+    chat through the SSE encoder (`stream_assistant_reply`), the Telegram
+    relay and the OpenAI-compatible facade directly -- none of them decodes
+    SSE bytes back into JSON.
+
+    `request_id` is the id `RequestIDMiddleware` assigned to the originating
     request. Django never iterates `StreamingHttpResponse.streaming_content`
     until after the middleware chain has returned — by then the middleware's
     own `finally` has already reset `core.context.request_id_var` — so this
     generator must re-publish it for the duration of its own (deferred)
     execution, or the gateway's `_record()` call records an empty request_id.
+
+    `message_id` (optional) fixes the assistant Message's id up front, for a
+    consumer that must name the reply before it exists (the facade's
+    `chatcmpl-<id>`); omitted, a fresh one is generated.
 
     `draft_event` (MVP 6 §3/§5) is an optional pre-built `{"type": "draft",
     ...}` payload, yielded once, ONLY when the reply completes successfully
@@ -401,10 +565,11 @@ def stream_assistant_reply(
     """
     token = request_id_var.set(request_id)
     try:
-        yield from _stream_assistant_reply(
+        yield from _assistant_reply_events(
             conversation,
             gateway_stream,
             usage_holder,
+            message_id or uuid.uuid4(),
             memory_ids or [],
             chunk_ids or [],
             overlay_source_workspaces or {},
@@ -415,17 +580,37 @@ def stream_assistant_reply(
         request_id_var.reset(token)
 
 
-def _stream_assistant_reply(
+def stream_assistant_reply(conversation, gateway_stream, usage_holder, **kwargs):
+    """The web chat's SSE body: `iter_assistant_reply_events` (same
+    arguments), each event framed by `sse_event`."""
+    return encode_sse(
+        iter_assistant_reply_events(conversation, gateway_stream, usage_holder, **kwargs)
+    )
+
+
+def encode_sse(events):
+    """Frame each structured event as one SSE `data:` line. Closing this
+    generator (client disconnect) closes `events` right away, so the reply
+    is persisted `partial`/`failed` deterministically, not at garbage
+    collection."""
+    try:
+        for event in events:
+            yield sse_event(event)
+    finally:
+        events.close()
+
+
+def _assistant_reply_events(
     conversation,
     gateway_stream,
     usage_holder,
+    message_id,
     memory_ids,
     chunk_ids,
     overlay_source_workspaces,
     draft_event=None,
     channel=Message.Channel.WEB,
 ):
-    message_id = uuid.uuid4()
     accumulated = []
     status = Message.Status.FAILED  # defined even if no branch below runs
     terminal_event = None  # built pre-persistence, yielded post-persistence
@@ -433,7 +618,7 @@ def _stream_assistant_reply(
     try:
         for chunk in gateway_stream:
             accumulated.append(chunk)
-            yield sse_event({"type": "chunk", "text": chunk})
+            yield {"type": "chunk", "text": chunk}
     except GatewayError as exc:
         status = Message.Status.PARTIAL if accumulated else Message.Status.FAILED
         terminal_event = {"type": "error", "error_type": exc.error_type}
@@ -473,8 +658,8 @@ def _stream_assistant_reply(
         )
 
     if draft_event is not None and terminal_event["type"] == "done":
-        yield sse_event(draft_event)
-    yield sse_event(terminal_event)
+        yield draft_event
+    yield terminal_event
 
 
 @transaction.atomic

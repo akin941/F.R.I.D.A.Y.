@@ -32,6 +32,10 @@ class PersonalAccessTokenCreateSerializer(serializers.Serializer):
     name = serializers.CharField(max_length=255)
     # Optional lifetime chosen at mint; omitted -> PAT_DEFAULT_TTL_DAYS.
     expires_in_days = serializers.IntegerField(required=False, min_value=1)
+    # Phase 4 branch 6: which surface the token reaches (fixed at mint).
+    kind = serializers.ChoiceField(
+        choices=PersonalAccessToken.Kind.choices, default=PersonalAccessToken.Kind.CLI
+    )
 
     def validate_expires_in_days(self, value):
         # Validated here, not via max_value=, so the cap follows the live
@@ -51,6 +55,7 @@ class PersonalAccessTokenSerializer(serializers.ModelSerializer):
         fields = [
             "id",
             "name",
+            "kind",
             "workspace",
             "last_used_at",
             "revoked_at",

@@ -29,6 +29,9 @@ GENERIC_ERROR_CODES = frozenset(
         # `core.permissions.IsWebChannel` / `IsOwner` (Phase 4 branch 2).
         "channel_forbidden",
         "owner_required",
+        # A valid PAT of the wrong `kind` for the endpoint (Phase 4 branch 6:
+        # an `openai` token on a CLI surface, or a `cli` token on the facade).
+        "token_kind_forbidden",
         "not_found",
         "method_not_allowed",
         "not_acceptable",

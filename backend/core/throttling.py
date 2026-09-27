@@ -110,3 +110,19 @@ class EnrollGlobalThrottle(_SettingsRateThrottle):
 
     def get_cache_key(self, request, view):
         return self.cache_format % {"scope": self.scope, "ident": "all"}
+
+
+class FacadeTokenThrottle(_SettingsRateThrottle):
+    """Per-token rate limit of the OpenAI-compatible facade (Phase 4
+    branch 6): FACADE_RATE per PersonalAccessToken, whatever the client's
+    IP. Keyed on the ChannelPrincipal's `token_id`; a request without one
+    never reaches a facade view (bearer-only), so it is not counted here."""
+
+    scope = "openai"
+    rate_setting = "FACADE_RATE"
+
+    def get_cache_key(self, request, view):
+        token_id = getattr(getattr(request, "auth", None), "token_id", None)
+        if token_id is None:
+            return None
+        return self.cache_format % {"scope": self.scope, "ident": token_id}

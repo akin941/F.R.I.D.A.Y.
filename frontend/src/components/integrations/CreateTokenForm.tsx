@@ -15,7 +15,10 @@ import {
 } from "@/components/ui/select";
 import { apiPostJson, errorMessage } from "@/lib/api-client";
 import { useWorkspace } from "@/contexts/workspace-context";
-import type { ApiPersonalAccessTokenCreated } from "@/types/api";
+import { tr } from "@/lib/i18n/tr";
+import type { ApiPersonalAccessTokenCreated, PatKind } from "@/types/api";
+
+const KINDS: PatKind[] = ["cli", "openai"];
 
 // Lifetimes offered at mint (days). The backend default is 90 and its cap
 // 365 (PAT_DEFAULT_TTL_DAYS / PAT_MAX_TTL_DAYS).
@@ -45,6 +48,7 @@ export function CreateTokenForm({
   const [name, setName] = useState("");
   const [workspaceId, setWorkspaceId] = useState(activeWorkspace?.id ?? "");
   const [expiryDays, setExpiryDays] = useState(DEFAULT_EXPIRY_DAYS);
+  const [kind, setKind] = useState<PatKind>("cli");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -56,6 +60,7 @@ export function CreateTokenForm({
       const token = await apiPostJson<ApiPersonalAccessTokenCreated>("/api/auth/tokens", {
         workspace: workspaceId,
         name,
+        kind,
         expires_in_days: Number(expiryDays),
       });
       onCreated(token);
@@ -88,6 +93,22 @@ export function CreateTokenForm({
               onChange={(e) => setName(e.target.value)}
               required
             />
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="token-kind">Tür</Label>
+            <Select value={kind} onValueChange={(value) => setKind(value as PatKind)}>
+              <SelectTrigger id="token-kind" aria-label="Token türü">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {KINDS.map((option) => (
+                  <SelectItem key={option} value={option}>
+                    {tr.token.kind[option]}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <p className="text-xs text-muted-foreground">{tr.token.kindHint[kind]}</p>
           </div>
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="token-workspace">Çalışma alanı</Label>

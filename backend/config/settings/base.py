@@ -334,6 +334,18 @@ DJANGO_ADMIN_ENABLED = env.bool("DJANGO_ADMIN_ENABLED", default=False)
 ENROLL_RATE_PER_SOURCE = env("ENROLL_RATE_PER_SOURCE", default="5/10m")
 ENROLL_RATE_GLOBAL = env("ENROLL_RATE_GLOBAL", default="60/h")
 
+# --- OpenAI-compatible facade (Phase 4 branch 6, ADR-008 decision 6) ---
+# `/v1/chat/completions` + `/v1/models` for Open WebUI-class clients, with a
+# PAT of kind `openai`: chat only, low trust. Per token: FACADE_RATE requests
+# ("<count>/<n><s|m|h|d>"), at most FACADE_MAX_CONCURRENT_STREAMS completions
+# in flight (a slot expires after FACADE_STREAM_SLOT_TTL_SECONDS if a worker
+# dies mid-stream), and a new user turn (or, for `jarvis-lite`, the whole
+# message list) of at most FACADE_MAX_REQUEST_CHARS characters.
+FACADE_RATE = env("FACADE_RATE", default="20/min")
+FACADE_MAX_CONCURRENT_STREAMS = env.int("FACADE_MAX_CONCURRENT_STREAMS", default=2)
+FACADE_STREAM_SLOT_TTL_SECONDS = env.int("FACADE_STREAM_SLOT_TTL_SECONDS", default=300)
+FACADE_MAX_REQUEST_CHARS = env.int("FACADE_MAX_REQUEST_CHARS", default=32000)
+
 # --- Trash (ADR-009) ---
 # Soft-deleted knowledge documents and tasks are purged permanently this
 # many days after deletion (daily beat task); an explicit earlier purge is

@@ -1,0 +1,17 @@
+{
+  "object": "list",
+  "data": [
+    {
+      "id": "jarvis",
+      "object": "model",
+      "created": 1790467200,
+      "owned_by": "jarvis"
+    },
+    {
+      "id": "jarvis-lite",
+      "object": "model",
+      "created": 1790467200,
+      "owned_by": "jarvis"
+    }
+  ]
+}
