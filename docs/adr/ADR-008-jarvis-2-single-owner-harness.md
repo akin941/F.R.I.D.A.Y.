@@ -132,15 +132,9 @@ implementation facts and open items, not new decisions.
   6.** `/v1/chat/completions` + `/v1/models` behind `openai`-kind PATs
   (`CHANNEL_OPENAI`), router restricted to chat/memory/knowledge intents,
   never deciding or reaching tools.
-- **Resolved — decision 3 "delete" vs owner deletes:** ADR-009 (Phase 4)
-  makes owner deletes of self-scoped rows confirm-class with a 30-day
-  trash and a gate-class `purge_trash`. Original open item follows.
-- **Open item for the Phase 4 brief — decision 3 "delete" vs owner
-  deletes.** The gate-class list names "delete", yet the owner hard-deletes
-  memory, knowledge documents and tasks directly over the web channel
-  (`memory/views.py`, `knowledge/views.py`, `tasks/views.py`) without an
-  `ApprovalRequest`. Whether a direct owner action over the high-trust web
-  channel *is* the explicit decision for self-scoped deletes (recoverable
-  only by backup), or whether these must move behind the gate, is not yet
-  decided. Flagged for the Phase 4 brief; per decision 3, any reclassification
-  requires a new ADR.
+- **Resolved — decision 3 "delete" vs owner deletes (flagged here for
+  the Phase 4 brief).** At the time, the owner hard-deleted memory,
+  knowledge documents and tasks directly over the web channel without an
+  `ApprovalRequest`. ADR-009 (Phase 4) settles it: owner deletes of
+  self-scoped rows are confirm-class soft deletes with a 30-day trash
+  (`deleted_at`), and permanent removal is the gate-class `purge_trash`.
