@@ -52,6 +52,7 @@ def record_external_usage(
     actor=None,
     error_type="",
     context_report=None,
+    routing_reason="",
 ):
     """Record one `ModelUsage` row for a call that ran entirely out of
     process (no `ModelProvider`, no adapter, no gateway retry/fallback
@@ -65,8 +66,12 @@ def record_external_usage(
     external CLI's own reported cost), taken as given, not derived from a
     `ModelProvider`'s per-token pricing. `request_id` is read from the
     active request the same way `_finalize` already does, so external and
-    in-process rows correlate the same way; `routing_reason` is always
-    empty (there is no provider to have routed to)."""
+    in-process rows correlate the same way. There is no provider to have
+    routed to, so `routing_reason` (Phase 5 D11) is the caller's own reason
+    for picking the external agent -- e.g. the harness job's
+    `agent_routing_reason` ("policy:default" | "owner_selected" |
+    "policy:cross_vendor") -- so external rows explain themselves the way
+    in-process rows do; empty when the caller has none."""
     user = actor if getattr(actor, "is_authenticated", False) else None
     return ModelUsage.objects.create(
         workspace=workspace,
@@ -81,7 +86,7 @@ def record_external_usage(
         latency_ms=latency_ms,
         success=success,
         error_type=error_type or "",
-        routing_reason="",
+        routing_reason=routing_reason or "",
         estimated_cost=estimated_cost,
         context_report=dict(context_report or {}),
     )

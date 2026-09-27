@@ -499,12 +499,21 @@ export type HarnessJobFailureReason = "" | "timeout" | "runner_error" | "budget_
 
 export type HarnessAgent = "claude_code" | "codex_cli";
 
+// Why a harness job row got its agent (Phase 5 D11, HARNESS_AGENT_POLICY);
+// "" on rows that predate the field.
+export type HarnessAgentRoutingReason =
+  | ""
+  | "policy:default"
+  | "owner_selected"
+  | "policy:cross_vendor";
+
 export interface ApiHarnessJob {
   id: string;
   workspace: string;
   repo: string;
   goal: string;
   agent: HarnessAgent;
+  agent_routing_reason: HarnessAgentRoutingReason;
   sensitivity: string;
   status: HarnessJobStatus;
   failure_reason: HarnessJobFailureReason;
@@ -601,6 +610,7 @@ export interface ApiImplementationJob {
   discovery_job: string | null;
   goal: string;
   agent: "claude_code";
+  agent_routing_reason: HarnessAgentRoutingReason;
   // "" when no cross-vendor reviewer was selectable.
   reviewer_agent: "codex_cli" | "";
   status: ImplStatus;
@@ -619,6 +629,7 @@ export interface ApiImplementationJob {
 export interface ApiImplementationReview {
   id: string;
   agent: "codex_cli";
+  agent_routing_reason: HarnessAgentRoutingReason;
   status: "pending" | "running" | "succeeded" | "failed";
   verdict: "" | "approved" | "changes_requested";
   // Gateway-produced -- Jarvis's own summarization, trusted-ish.

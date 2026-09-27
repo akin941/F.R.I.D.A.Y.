@@ -45,7 +45,7 @@ from ai_core.exceptions import GatewayError
 from ai_core.gateway import InferenceGateway, record_external_usage
 from ai_core.models import PromptTemplate
 from audit.services import record_audit
-from harness import container_lifecycle, runner
+from harness import container_lifecycle, policy, runner
 from harness.execution import _resolve_cli_env, redact_harness_secrets
 from harness.models import HarnessImplementationJob, HarnessReview
 from memory.context import neutralize_fence, strip_invisible_formatting
@@ -65,21 +65,21 @@ _REVIEW_FINDING_MAX_CHARS = 500
 
 
 def select_review_agent(implementation_agent):
-    """Picks a review agent that differs from the implementation job's
-    own agent -- the mechanical cross-vendor-review enforcement ADR-008
-    decision 3 requires (brief §boundary), enforced here explicitly
-    rather than relying on `_SELECTABLE_IMPLEMENTATION_AGENTS`/
-    `_SELECTABLE_REVIEW_AGENTS` happening to stay disjoint. Raises
-    `HarnessInvalidTransition` if no eligible agent is currently
-    selectable."""
-    from harness.services import _SELECTABLE_REVIEW_AGENTS, HarnessInvalidTransition
+    """The cross-vendor reviewer `HARNESS_AGENT_POLICY` pairs with the
+    implementation job's own agent (Phase 5 D11) -- the mechanical
+    cross-vendor-review enforcement ADR-008 decision 3 requires. The
+    pairing is checked at boot (`harness.E001` refuses a self-pairing) AND
+    here, explicitly, at run time: `policy.reviewer_for` never returns the
+    implementer itself. Raises `HarnessInvalidTransition` when the
+    implementer has no eligible reviewer."""
+    from harness.services import HarnessInvalidTransition
 
-    eligible = [agent for agent in _SELECTABLE_REVIEW_AGENTS if agent != implementation_agent]
-    if not eligible:
+    reviewer = policy.reviewer_for(implementation_agent)
+    if reviewer is None or reviewer == str(implementation_agent):
         raise HarnessInvalidTransition(
             "No eligible cross-vendor review agent is currently selectable."
         )
-    return eligible[0]
+    return HarnessReview.Agent(reviewer)
 
 
 def dispatch_harness_review(job):
@@ -103,6 +103,7 @@ def create_pending_review(job, agent):
         workspace=job.workspace,
         implementation_job=job,
         agent=agent,
+        agent_routing_reason=policy.ROUTING_CROSS_VENDOR,
         status=HarnessReview.Status.PENDING,
     )
 
@@ -461,8 +462,8 @@ def _produce_review_summary(job, fenced_transcript):
     return _parse_review_response(result.text)
 
 
-# Codex CLI (and, if `_SELECTABLE_REVIEW_AGENTS` ever grows to include Claude
-# Code as a reviewer, Claude Code too) walks from the checkout root down to
+# Codex CLI (and, if `HARNESS_AGENT_POLICY` ever pairs Claude Code as a
+# reviewer, Claude Code too) walks from the checkout root down to
 # its own working directory, honoring `AGENTS.override.md`/`AGENTS.md` (or
 # `CLAUDE.md`) as trusted project-level instructions at EVERY directory level
 # it passes through -- confirmed against Codex CLI's own documented discovery
@@ -719,6 +720,7 @@ def _finalize_review_success(
             workspace=locked.workspace,
             purpose="harness.review",
             backend=f"harness_cli:{locked.agent}",
+            routing_reason=locked.agent_routing_reason,
             input_tokens=0,
             output_tokens=0,
             estimated_cost=Decimal("0"),
@@ -777,6 +779,7 @@ def _finalize_review_unavailable(
             workspace=locked.workspace,
             purpose="harness.review",
             backend=f"harness_cli:{locked.agent}",
+            routing_reason=locked.agent_routing_reason,
             input_tokens=0,
             output_tokens=0,
             estimated_cost=Decimal("0"),

@@ -149,8 +149,12 @@ class ModelUsage(TimestampedModel):
     success = models.BooleanField(default=False)
     error_type = models.CharField(max_length=50, blank=True, default="")
     # Why THIS provider served the call (phase 0, §J/§L auditability):
-    # "tier:<name>" | "priority" | "fallback:<n>" | "only_provider".
-    # Empty for rows predating the field and for no-provider failures.
+    # "tier:<name>" | "priority" | "fallback:<n>" | "only_provider";
+    # "personal_data_required" on a no-provider failure caused by the D5
+    # personal-data filter (Phase 5). External-CLI rows
+    # (`record_external_usage`) carry the harness agent's routing reason
+    # instead: "policy:default" | "owner_selected" | "policy:cross_vendor".
+    # Empty for rows predating the field and for other no-provider failures.
     routing_reason = models.CharField(max_length=50, blank=True, default="")
     estimated_cost = models.DecimalField(max_digits=12, decimal_places=6, default=0)
     context_report = models.JSONField(default=dict, blank=True)

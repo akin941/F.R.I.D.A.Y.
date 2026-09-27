@@ -192,7 +192,7 @@ class HarnessJobListCreateView(APIView):
                 actor=request.user,
                 repo=repo,
                 goal=serializer.validated_data["goal"],
-                agent=serializer.validated_data["agent"],
+                agent=serializer.validated_data.get("agent"),
             )
         except (HarnessPermissionDenied, HarnessInvalidTransition) as exc:
             return _service_error_response(exc)

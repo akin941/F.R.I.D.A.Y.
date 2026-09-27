@@ -27,6 +27,7 @@ from approvals.services import create_request, revoke_request
 from audit.services import record_audit
 from core.channels import CHANNEL_SYSTEM
 from core.repo_identity import is_self_repo
+from harness import policy
 from harness.models import HarnessImplementationJob, HarnessJob, HarnessRepo, HarnessReview
 from memory.models import Memory
 from workspaces.models import WorkspaceMember
@@ -45,22 +46,13 @@ EDITABLE_FIELDS = (
     "test_command",
 )
 
-# Agent capability matrix (Phase 3 branch 2, brief §boundary, round-1
-# MEDIUM finding): three separate selectable sets, not one flat one --
-# conflating them would let a UI or service-layer bug offer an agent as a
-# reviewer (or implementer) before its vendor terms are actually verified
-# for THAT specific capability, not just for discovery. Renamed from the
-# Phase 2 `_SELECTABLE_AGENTS` (discovery-only) to make the split explicit.
-_SELECTABLE_DISCOVERY_AGENTS = {HarnessJob.Agent.CLAUDE_CODE}
-_SELECTABLE_IMPLEMENTATION_AGENTS = {HarnessImplementationJob.Agent.CLAUDE_CODE}
-# Codex CLI cleared for review use (branch 3, brief "Open question
-# resolved: Codex CLI vendor terms" -- GO, API-key auth only, never
-# "Sign in with ChatGPT"). Disjoint from `_SELECTABLE_IMPLEMENTATION_AGENTS`
-# by construction in this phase (mechanically enforces reviewer !=
-# implementer just by which set each role draws from), but
-# `dispatch_harness_review`'s own explicit check is what actually
-# guards this, not reliance on the sets happening to stay disjoint.
-_SELECTABLE_REVIEW_AGENTS = {HarnessReview.Agent.CODEX_CLI}
+# Agent selection (Phase 5 D11): `settings.HARNESS_AGENT_POLICY`, read
+# through `harness.policy`, replaces the Phase 3 `_SELECTABLE_DISCOVERY_/
+# _IMPLEMENTATION_/_REVIEW_AGENTS` sets. The capability split those sets
+# enforced survives as the per-kind `selectable` lists (an agent cleared
+# for discovery is not thereby cleared to write), and the reviewer is the
+# policy's explicit implementer -> reviewer pairing, never the implementer
+# itself (system check at boot + `policy.reviewer_for` at run time).
 
 
 class HarnessServiceError(Exception):
@@ -248,7 +240,7 @@ def get_job(*, workspace, actor, job_id):
 
 
 @transaction.atomic
-def create_harness_job(*, workspace, actor, repo, goal, agent=HarnessJob.Agent.CLAUDE_CODE):
+def create_harness_job(*, workspace, actor, repo, goal, agent=None):
     """The only sanctioned creation path for `HarnessJob` rows. `repo` is
     re-locked here (not just trusted from the caller) so an `enabled`
     flip can never race a job's creation against it, mirroring
@@ -259,25 +251,41 @@ def create_harness_job(*, workspace, actor, repo, goal, agent=HarnessJob.Agent.C
     existing row here for a forged instance to misrepresent), but the
     *repo*'s current state is re-verified live, under lock, since a
     curator could disable it in the gap between the caller reading it and
-    this call running."""
+    this call running.
+
+    `agent=None` takes the policy default (`agent_routing_reason`
+    "policy:default"); a named agent must be policy-selectable for
+    discovery ("owner_selected")."""
     _require_curator(actor, workspace, "creating a harness job")
     if repo.workspace_id != workspace.id:
         raise HarnessPermissionDenied("Repo does not belong to this workspace.")
     locked_repo = _locked(repo, actor)
     if not locked_repo.enabled:
         raise HarnessInvalidTransition("Repo is not enabled for harness runs.")
-    if agent not in _SELECTABLE_DISCOVERY_AGENTS:
-        raise HarnessInvalidTransition(f"Agent '{agent}' is not selectable in this phase.")
+    try:
+        agent, routing_reason = policy.resolve_agent(policy.DISCOVERY, agent)
+    except policy.AgentNotSelectable:
+        raise HarnessInvalidTransition(
+            f"Agent '{agent}' is not selectable in this phase."
+        ) from None
     sensitivity = Memory.Sensitivity.PRIVATE if locked_repo.sensitive else Memory.Sensitivity.NORMAL
     job = HarnessJob.objects.create(
         workspace=workspace,
         repo=locked_repo,
         goal=goal,
         agent=agent,
+        agent_routing_reason=routing_reason,
         sensitivity=sensitivity,
         created_by=actor,
     )
-    _record_job(job, "harness.job_created", actor, agent=agent, repo_id=str(locked_repo.id))
+    _record_job(
+        job,
+        "harness.job_created",
+        actor,
+        agent=agent,
+        agent_routing_reason=routing_reason,
+        repo_id=str(locked_repo.id),
+    )
     # Codex code-review P1, branch 2 round 1: an earlier draft left the job
     # in `pending` with nothing ever enqueuing `harness.tasks.run_harness_job`
     # -- the recovery scan only reclaims a stale `running` job, so a job
@@ -419,7 +427,7 @@ def create_harness_implementation_job(
     actor,
     repo,
     goal,
-    agent=HarnessImplementationJob.Agent.CLAUDE_CODE,
+    agent=None,
     discovery_job=None,
 ):
     """The only sanctioned creation path for `HarnessImplementationJob`
@@ -438,9 +446,9 @@ def create_harness_implementation_job(
        none configured fails every implementation job closed", and the
        earliest point that's knowable is right here, not after a container
        has already run.
-    3. `agent` must be in `_SELECTABLE_IMPLEMENTATION_AGENTS` (the
-       capability matrix, brief §boundary -- distinct from the discovery
-       set).
+    3. `agent` (None = the policy default) must be policy-selectable for
+       implementation (`HARNESS_AGENT_POLICY`, Phase 5 D11 -- distinct
+       from the discovery list).
 
     Requests Gate A immediately, in the same transaction as job creation
     (durable-before-request) -- `approvals.services.create_request` runs
@@ -484,8 +492,12 @@ def create_harness_implementation_job(
             "Repo has no test_command configured; implementation jobs cannot verify "
             "their own result without one."
         )
-    if agent not in _SELECTABLE_IMPLEMENTATION_AGENTS:
-        raise HarnessInvalidTransition(f"Agent '{agent}' is not selectable for implementation.")
+    try:
+        agent, routing_reason = policy.resolve_agent(policy.IMPLEMENTATION, agent)
+    except policy.AgentNotSelectable:
+        raise HarnessInvalidTransition(
+            f"Agent '{agent}' is not selectable for implementation."
+        ) from None
     if discovery_job is not None and discovery_job.workspace_id != workspace.id:
         raise HarnessPermissionDenied("discovery_job does not belong to this workspace.")
     if discovery_job is not None and discovery_job.repo_id != locked_repo.id:
@@ -497,6 +509,7 @@ def create_harness_implementation_job(
         discovery_job=discovery_job,
         goal=goal,
         agent=agent,
+        agent_routing_reason=routing_reason,
         sensitivity=sensitivity,
         created_by=actor,
     )
@@ -524,7 +537,12 @@ def create_harness_implementation_job(
     job.gate_a_request = approval_request
     job.save(update_fields=["gate_a_request", "updated_at"])
     _record_implementation_job(
-        job, "harness.implementation_job_created", actor, agent=agent, repo_id=str(locked_repo.id)
+        job,
+        "harness.implementation_job_created",
+        actor,
+        agent=agent,
+        agent_routing_reason=routing_reason,
+        repo_id=str(locked_repo.id),
     )
     return job
 

@@ -648,6 +648,31 @@ HARNESS_SELF_REPO_IDENTIFIERS = [
     if value.strip()
 ]
 
+# Harness job-distribution policy (Phase 5 D11; replaces the Phase 3
+# `_SELECTABLE_*_AGENTS` sets in harness/services.py). Per job kind: the
+# `default` agent used when the owner names none (agent_routing_reason
+# "policy:default"), the owner-`selectable` agents ("owner_selected"), and
+# for implementation the cross-vendor `reviewers` pairing implementer ->
+# reviewer (review rows record "policy:cross_vendor"). The `codex_cli`
+# implementation slot exists (its image and write-mode wrapper ship) but
+# stays off until its write-mode vendor terms are verified -- add it to
+# `selectable` AND give it a reviewer to turn it on. ADR-008 decision 3:
+# a Django system check (harness.checks, `harness.E001`...) refuses to boot
+# on any self-pairing, a selectable implementer without a reviewer, or an
+# unknown agent. Not env-configurable: this is policy, changed in code
+# review, not per deployment.
+HARNESS_AGENT_POLICY = {
+    "discovery": {
+        "default": "claude_code",
+        "selectable": ["claude_code"],
+    },
+    "implementation": {
+        "default": "claude_code",
+        "selectable": ["claude_code"],  # "codex_cli" slot: off
+        "reviewers": {"claude_code": "codex_cli"},
+    },
+}
+
 # How long a finished-but-undecided implementation worktree is kept on disk
 # waiting for a Gate B (push approval) decision, across however long the
 # owner takes and across a possible worker restart (brief §boundary,
