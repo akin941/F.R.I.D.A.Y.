@@ -16,7 +16,6 @@ from accounts.services import register_user
 from assistant.models import Conversation, Message
 from audit.models import AuditLog
 from knowledge.models import KnowledgeChunk, KnowledgeDocument
-from tasks.models import Task
 from workspaces.models import Workspace, WorkspaceMember
 
 pytestmark = pytest.mark.django_db
@@ -250,7 +249,9 @@ def test_confirmed_draft_reports_its_task(owner, workspace, conversation):
     assert rows[str(draft.id)]["confirmed_task"] == created.data["id"]
     assert rows[str(other.id)]["confirmed_task"] is None
 
-    Task.objects.all().delete()
+    # Through the API: assistant tests never import tasks (import-linter,
+    # tasks -> assistant is the only allowed direction).
+    assert client.delete(f"/api/v1/tasks/{created.data['id']}").status_code == 204
     rows = {row["id"]: row for row in client.get(messages_url(conversation)).data}
     assert rows[str(draft.id)]["confirmed_task"] is None
 
