@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Separator } from "@/components/ui/separator";
@@ -12,7 +13,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { ApprovalCard } from "@/components/approvals/ApprovalCard";
-import { APPROVAL_STATUS_LABELS } from "@/components/approvals/labels";
+import { APPROVAL_STATUS_LABELS, isExecutionInFlight } from "@/components/approvals/labels";
 import { useWorkspace } from "@/contexts/workspace-context";
 import { apiGetJson } from "@/lib/api-client";
 import type { ApiApprovalRequest, ApprovalStatus } from "@/types/api";
@@ -21,13 +22,18 @@ const DECIDED_STATUSES: ApprovalStatus[] = ["approved", "rejected", "expired"];
 
 export function ApprovalView() {
   const { activeWorkspace } = useWorkspace();
+  // `/approvals?request=<id>` (e.g. from a harness job's gate chip):
+  // scroll to and highlight that one card.
+  const highlightId = useSearchParams().get("request");
 
   const [requests, setRequests] = useState<ApiApprovalRequest[]>([]);
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<ApprovalStatus | "all">("all");
+  const [loadedWorkspaceId, setLoadedWorkspaceId] = useState<string | null>(null);
 
   const activeWorkspaceIdRef = useRef<string | null>(null);
+  const scrolledToRef = useRef<string | null>(null);
 
   const loadRequests = useCallback(async (workspaceId: string, options?: { silent?: boolean }) => {
     if (!options?.silent) setLoading(true);
@@ -38,6 +44,7 @@ export function ApprovalView() {
       );
       if (activeWorkspaceIdRef.current !== workspaceId) return;
       setRequests(list);
+      setLoadedWorkspaceId(workspaceId);
     } catch {
       if (activeWorkspaceIdRef.current === workspaceId && !options?.silent) {
         setLoadError("Onay istekleri yüklenemedi.");
@@ -65,18 +72,32 @@ export function ApprovalView() {
   // indicator stuck at "Waiting to run" until a manual reload (Codex review,
   // branch 4). Poll silently -- no skeleton flash -- only while something is
   // actually in flight; stops on its own once every execution is terminal.
+  // Harness executions track the implementation job's own status, which
+  // stays non-terminal across its whole pipeline (not just pending/running)
+  // -- `isExecutionInFlight` knows each tool's vocabulary.
   useEffect(() => {
     const workspaceId = activeWorkspace?.id ?? null;
     if (!workspaceId) return;
-    const hasInFlightExecution = requests.some(
-      (r) => r.execution?.status === "pending" || r.execution?.status === "running",
-    );
+    const hasInFlightExecution = requests.some(isExecutionInFlight);
     if (!hasInFlightExecution) return;
     const interval = setInterval(() => {
       void loadRequests(workspaceId, { silent: true });
     }, 3000);
     return () => clearInterval(interval);
   }, [requests, activeWorkspace, loadRequests]);
+
+  // Scroll the requested card into view once, the first time it renders.
+  useEffect(() => {
+    if (!highlightId || scrolledToRef.current === highlightId) return;
+    if (!requests.some((r) => r.id === highlightId)) return;
+    const element = document.getElementById(`approval-${highlightId}`);
+    if (!element) return;
+    scrolledToRef.current = highlightId;
+    if (typeof element.scrollIntoView === "function") {
+      element.scrollIntoView({ block: "center", behavior: "smooth" });
+    }
+    element.focus({ preventScroll: true });
+  }, [highlightId, requests, loading]);
 
   function handleChanged(updated: ApiApprovalRequest) {
     setRequests((prev) => prev.map((r) => (r.id === updated.id ? updated : r)));
@@ -85,11 +106,16 @@ export function ApprovalView() {
   const pending = requests.filter((r) => r.status === "pending");
   const decided = requests
     .filter((r) => r.status !== "pending")
-    .filter((r) => statusFilter === "all" || r.status === statusFilter);
+    .filter((r) => statusFilter === "all" || r.status === statusFilter || r.id === highlightId);
   // Only owner/admin roles may decide (brief §4, approvals.services
   // _CURATOR_ROLES) -- members/viewers would otherwise see Approve/Reject
   // buttons that always fail with a 403 (Codex review, branch 4).
   const canDecide = activeWorkspace?.role === "owner" || activeWorkspace?.role === "admin";
+  const highlightMissing =
+    highlightId != null &&
+    !loading &&
+    loadedWorkspaceId === activeWorkspace?.id &&
+    !requests.some((r) => r.id === highlightId);
 
   if (!activeWorkspace) {
     return (
@@ -114,6 +140,15 @@ export function ApprovalView() {
         </Alert>
       ) : null}
 
+      {highlightMissing ? (
+        <Alert>
+          <AlertDescription>
+            İstenen onay isteği bu çalışma alanında bulunamadı — başka bir çalışma alanına ait
+            olabilir.
+          </AlertDescription>
+        </Alert>
+      ) : null}
+
       {loading ? (
         <div className="flex flex-col gap-3">
           <Skeleton className="h-24 w-full" />
@@ -135,6 +170,7 @@ export function ApprovalView() {
                     request={request}
                     canDecide={canDecide}
                     onChanged={handleChanged}
+                    highlighted={request.id === highlightId}
                   />
                 ))}
               </div>
@@ -175,6 +211,7 @@ export function ApprovalView() {
                     request={request}
                     canDecide={canDecide}
                     onChanged={handleChanged}
+                    highlighted={request.id === highlightId}
                   />
                 ))}
               </div>

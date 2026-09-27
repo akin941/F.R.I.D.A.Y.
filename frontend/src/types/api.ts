@@ -222,6 +222,52 @@ export interface ApiVaultExportExecution {
   retry_count: number;
 }
 
+// harness_implement (Gate A) execution shape -- its `status` is the
+// implementation job's own status (ImplStatus), NOT a vault-export status.
+export interface ApiHarnessImplementExecution {
+  status: ImplStatus;
+  failure_reason: ImplFailureReason;
+  branch_name: string;
+}
+
+// harness_push (Gate B) execution shape.
+export interface ApiHarnessPushExecution {
+  status: ImplStatus;
+  failure_reason: ImplFailureReason;
+  produced_commit_sha: string;
+  push_result: ApiImplPushResult;
+}
+
+// Server-built, whitelisted summary of what is being decided
+// (`ToolSpec.describe_request`); `null` for tools without that hook. The raw
+// `payload` stays unexposed either way.
+export interface ApiHarnessImplementDisplaySummary {
+  kind: "harness_implement";
+  job_id: string;
+  goal: string;
+  repo_name: string;
+  branch_name: string;
+  agent: string;
+  reviewer_agent: string;
+}
+
+export interface ApiHarnessPushDisplaySummary {
+  kind: "harness_push";
+  job_id: string;
+  branch_name: string;
+  produced_commit_sha: string;
+  changed_files: string[];
+  changed_files_total: number;
+  diff_summary: string;
+  test_result: { passed: boolean; command: string; exit_code: number | null } | null;
+  review: { verdict: string; summary: string } | null;
+}
+
+export type ApiDisplaySummary =
+  | ApiHarnessImplementDisplaySummary
+  | ApiHarnessPushDisplaySummary
+  | null;
+
 export interface ApiApprovalRequest {
   id: string;
   workspace: string;
@@ -233,7 +279,18 @@ export interface ApiApprovalRequest {
   created_at: string;
   updated_at: string;
   // `payload` is deliberately never included (approvals/serializers.py).
-  execution: ApiVaultExportExecution | null;
+  // Each tool registers its own `execution` shape (or none -- `null`),
+  // keyed on `tool_name`: vault_export -> ApiVaultExportExecution,
+  // harness_implement -> ApiHarnessImplementExecution, harness_push ->
+  // ApiHarnessPushExecution. The UI must branch on `tool_name` before
+  // reading any tool-specific field (never assume vault-export counters).
+  execution:
+    | ApiVaultExportExecution
+    | ApiHarnessImplementExecution
+    | ApiHarnessPushExecution
+    | null;
+  // Optional: absent on responses from a backend predating this field.
+  display_summary?: ApiDisplaySummary;
 }
 
 // --- Agents (MVP 7) ---
