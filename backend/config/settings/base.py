@@ -321,6 +321,10 @@ JARVIS_BFF_SHARED_SECRET = env("JARVIS_BFF_SHARED_SECRET", default="")
 # true (config/settings/dev.py), production default false: pair with a
 # strong code or the remote key instead.
 DEVICE_PAIRING_ALLOW_UNKNOWN_IP = env.bool("DEVICE_PAIRING_ALLOW_UNKNOWN_IP", default=False)
+# Django admin is the owner password's only use (break-glass, Phase 4 Q3):
+# `admin/` is routed only when this is on. Dev default true
+# (config/settings/dev.py), production default false.
+DJANGO_ADMIN_ENABLED = env.bool("DJANGO_ADMIN_ENABLED", default=False)
 # Two-tier enrollment throttle (accounts/throttling.py): a tight limit per
 # validated client IP plus a much looser install-wide ceiling, so a flood
 # from one source cannot exhaust the bucket the owner needs. Without a

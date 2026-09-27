@@ -17,3 +17,6 @@ DEBUG = True
 # spike): PIN pairing stays usable locally with LAN gating off. Production
 # defaults to false (config/settings/base.py).
 DEVICE_PAIRING_ALLOW_UNKNOWN_IP = env.bool("DEVICE_PAIRING_ALLOW_UNKNOWN_IP", default=True)
+# Django admin (break-glass, Phase 4 Q3) is routed in development only by
+# default; production opts in explicitly.
+DJANGO_ADMIN_ENABLED = env.bool("DJANGO_ADMIN_ENABLED", default=True)

@@ -797,7 +797,7 @@ test("enroll, chat with the fake provider, curated memory, Today, logout, route 
 
   // ...until it is forgotten: "Bu cihazı unut" revokes it for good, and the
   // next visit asks for a pairing code again.
-  await page.getByRole("link", { name: "Entegrasyonlar" }).click();
+  await page.getByRole("link", { name: "Cihazlar" }).click();
   await page.getByRole("button", { name: "Bu cihazı unut" }).click();
   await expect(page).toHaveURL(/\/enroll$/);
   await expect(page.getByLabel("Eşleştirme kodu")).toBeVisible();

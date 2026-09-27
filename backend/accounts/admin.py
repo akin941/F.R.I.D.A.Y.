@@ -11,4 +11,7 @@ class UserAdmin(admin.ModelAdmin):
     ordering = ["-created_at"]
     # Password changes go through createsuperuser/CLI in dev; the hash is not editable here.
     exclude = ["password"]
-    readonly_fields = ["last_login", "created_at", "updated_at"]
+    # Ownership moves only through `manage.py set_owner`, which revokes the
+    # outgoing owner's devices and remote key; editing the flag here would
+    # skip that and leave their trusted devices live.
+    readonly_fields = ["is_owner", "last_login", "created_at", "updated_at"]

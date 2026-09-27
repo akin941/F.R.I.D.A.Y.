@@ -22,6 +22,8 @@ def test_creates_owner_with_personal_workspace(monkeypatch):
 
     user = User.objects.get(email="owner@test.dev")
     assert user.check_password("s3cure-enough")
+    # The password's only use is the Django-admin break-glass (Q3).
+    assert user.is_owner and user.is_staff
     # Same register_user() path signup used: personal workspace + audit row.
     membership = WorkspaceMember.objects.get(user=user)
     assert membership.workspace.type == Workspace.Type.PERSONAL

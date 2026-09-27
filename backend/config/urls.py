@@ -1,3 +1,4 @@
+from django.conf import settings
 from django.contrib import admin
 from django.http import JsonResponse
 from django.urls import include, path
@@ -11,7 +12,6 @@ def healthz(request):
 
 
 urlpatterns = [
-    path("admin/", admin.site.urls),
     path("healthz", healthz, name="healthz"),
     path("api/v1/auth/", include("accounts.urls")),
     # Mounted twice: bare (no trailing slash) so the pre-existing list route
@@ -37,3 +37,9 @@ urlpatterns = [
     # workspace scoping (ADR-001; see approvals/admin.py for the same
     # argument). The audit trail is read through scoped application code.
 ]
+
+# Django admin is break-glass only (Phase 4 Q3): routed when
+# DJANGO_ADMIN_ENABLED (dev default true, prod default false). The owner
+# password is accepted nowhere else.
+if settings.DJANGO_ADMIN_ENABLED:
+    urlpatterns.insert(0, path("admin/", admin.site.urls))

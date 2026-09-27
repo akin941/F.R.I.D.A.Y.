@@ -134,12 +134,13 @@ class LogoutView(APIView):
     Called by the BFF's logout route ("Çıkış"). The device stays trusted --
     "Bu cihazı unut" (`devices/current/revoke`) is the one that revokes it.
 
-    Possession of a valid refresh token is the credential here -- an
-    access token may already be expired at logout -- so no authentication
-    is required. The view keeps the default (device-JWT-only)
-    authenticators, so a CLI personal access token is refused outright
-    (401). When a valid access token IS sent, it must belong to the same
-    user as the refresh token.
+    Possession of a valid refresh token is the credential here, so no
+    access token is required (the BFF never sends one on logout). The view
+    keeps the default (device-JWT-only) authenticators, so any bearer that
+    IS sent is authenticated first: a CLI personal access token -- or an
+    expired/invalid access token -- is refused outright (401) before the
+    refresh token is looked at. A valid access token must belong to the
+    same user as the refresh token.
     """
 
     permission_classes = [AllowAny]

@@ -85,7 +85,11 @@ class Command(BaseCommand):
                 )
             user = register_user(email=options["email"], password=password, name=options["name"])
             user.is_owner = True
-            user.save(update_fields=["is_owner", "updated_at"])
+            # Staff so the password works as the Django-admin break-glass
+            # credential (Phase 4 Q3) -- admin is routed only when
+            # DJANGO_ADMIN_ENABLED.
+            user.is_staff = True
+            user.save(update_fields=["is_owner", "is_staff", "updated_at"])
         self.stdout.write(self.style.SUCCESS(f"Owner account created: {user.email}"))
         self.stdout.write(
             "Next: `manage.py issue_pairing_code` and enter the code at /enroll to trust "
