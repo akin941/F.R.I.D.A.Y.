@@ -531,8 +531,20 @@ def prepare_connector_read(conversation, *, actor, content, channel, tool_name):
         else:
             error_type = CONNECTOR_ERROR_READ_FAILED
         return ConnectorTurn(tool_name=tool_name, outcome=exc.code, error_type=error_type)
+    # Phase 5 branch 5: one call can be stricter than its spec (a GitHub
+    # read of a `sensitive` repo is `personal` on a `firm` connector). Such
+    # a result is only kept if a personal-data provider can consume it --
+    # otherwise it is dropped here, unflagged, like the pre-flight refusal.
+    if not personal and getattr(result, "data_class", "") == DATA_CLASS_PERSONAL:
+        personal = True
+        if not gateway.has_eligible_provider(purpose="chat", personal_data=True):
+            return ConnectorTurn(
+                tool_name=tool_name,
+                outcome="local_model_required",
+                error_type=CONNECTOR_ERROR_LOCAL_MODEL_REQUIRED,
+            )
     block, report = render_connector_block(result, tool=spec.name, source=spec.source)
-    report["data_class"] = spec.data_class
+    report["data_class"] = DATA_CLASS_PERSONAL if personal else spec.data_class
     if personal:
         mark_conversation_personal_data(conversation=conversation, actor=actor)
     return ConnectorTurn(tool_name=tool_name, outcome="ok", block=block, reads=[report])

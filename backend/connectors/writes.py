@@ -109,7 +109,7 @@ def prepare_write_payload(connector, tool, workspace, payload):
             policy.scope_check(workspace, clean)
         except ScopeError as exc:
             raise ToolValidationError("The arguments are outside this workspace.") from exc
-    return {
+    stored = {
         "connector": manifest.name,
         "tool": policy.name,
         "server_tool": policy.server_tool,
@@ -125,6 +125,22 @@ def prepare_write_payload(connector, tool, workspace, payload):
             "rows": _display_rows(policy, clean),
         },
     }
+    if policy.context_serializer is not None:
+        # Extra snapshot the task checks but never sends (e.g. a PR's
+        # expected head SHA); shown in the dialog like the arguments.
+        context = policy.context_serializer(data=(payload or {}).get("context") or {})
+        if not context.is_valid():
+            raise ToolValidationError(f"Invalid context: {', '.join(sorted(context.errors))}.")
+        clean_context = json_safe(context.validated_data)
+        stored["context"] = clean_context
+        stored["display"]["context_rows"] = [
+            {
+                "label": name,
+                "value": value if isinstance(value, str) else canonical_json(value),
+            }
+            for name, value in sorted(clean_context.items())
+        ]
+    return stored
 
 
 def describe_write_request(approval_request):
@@ -142,6 +158,7 @@ def describe_write_request(approval_request):
         "data_class": display.get("data_class", ""),
         "manifest_version": payload.get("manifest_version"),
         "rows": display.get("rows", []),
+        "context_rows": display.get("context_rows", []),
         "arguments_json": canonical_json(arguments),
         "arguments_sha256": payload.get("arguments_sha256", ""),
     }
@@ -276,6 +293,18 @@ def execute_claimed_write(execution_id, claim_token):
         return
     payload = approval_request.payload
     manifest, policy = _resolve(execution.connector, execution.tool)
+    if policy.precondition is not None:
+        # Checked after the claim, before the one send: a failed
+        # precondition (or a failed check) sends nothing -> `failed`.
+        refused = policy.precondition(manifest, execution.binding, payload)
+        if refused is not None:
+            _finalize_fenced(
+                execution_id,
+                claim_token,
+                status=Status.FAILED,
+                error_type=refused if refused in ErrorType.values else ErrorType.UNKNOWN,
+            )
+            return
     try:
         result = bridges.call_tool(
             manifest,

@@ -23,10 +23,12 @@ from django.db import transaction
 from approvals.models import ApprovalRequest
 from approvals.services import create_request
 from audit.services import record_audit
+from connectors import github
 from core.channels import CHANNEL_CLI, CHANNEL_WEB
 from core.repo_identity import is_self_repo
 from deploys.models import CONFIG_HASH_FIELDS, DeployRun, DeployTarget
 from deploys.validation import TargetFieldError, normalize_sha
+from tools.registry import ReadToolError
 from workspaces.models import WorkspaceMember
 
 logger = logging.getLogger(__name__)
@@ -40,6 +42,7 @@ CI_SUCCESS = "success"
 CI_UNKNOWN = "unknown"
 CI_CONCLUSIONS = frozenset({CI_SUCCESS, "failure", "pending", CI_UNKNOWN})
 COMMIT_SOURCE_MANUAL = "manual"
+COMMIT_SOURCE_GITHUB = "github"
 COMMIT_TITLE_MAX_CHARS = 200
 
 _REQUEST_CHANNELS = frozenset({CHANNEL_WEB, CHANNEL_CLI})
@@ -230,14 +233,49 @@ class CommitSnapshot:
     source: str
 
 
-def resolve_commit_snapshot(target, sha):
-    """The seam branch 5 (`feat/p5-github`) wires: when the workspace has a
-    GitHub binding, the commit title and CI conclusion come from
-    `connectors` reads (`github_*`) for `target.repo_git_url` at `sha`.
-    Until then -- and for any target without such a binding -- this is the
-    manual-SHA path: no title, CI `unknown`, so a target with
-    `require_ci_success` refuses the request (brief D10)."""
-    return CommitSnapshot(title="", ci_conclusion=CI_UNKNOWN, source=COMMIT_SOURCE_MANUAL)
+def resolve_commit_snapshot(target, sha, *, actor=None, channel=CHANNEL_WEB):
+    """Wired by branch 5 (`feat/p5-github`): when the workspace has an
+    enabled GitHub binding and `target.repo_git_url` is a github.com repo
+    registered as a `HarnessRepo` of the workspace (the connector's scope
+    check), the commit title comes from `github_branch_head` (`get_commit`
+    at `sha`) and the CI conclusion from `github_ci_status` (the workflow
+    runs on `tracked_branch` whose `head_sha` is `sha`) -- both audited `connector.read`s under
+    the requesting actor and channel. Any other case, and any refusal or
+    failure of those reads, is the manual-SHA path: no title, CI
+    `unknown`, so a target with `require_ci_success` refuses the request
+    (brief D10) -- a GitHub outage never passes a CI requirement."""
+    manual = CommitSnapshot(title="", ci_conclusion=CI_UNKNOWN, source=COMMIT_SOURCE_MANUAL)
+    remote = github.split_github_remote(target.repo_git_url)
+    if remote is None or not github.workspace_has_github(target.workspace):
+        return manual
+    owner, repo = remote
+    try:
+        commit = github.read_commit(
+            workspace=target.workspace,
+            actor=actor,
+            owner=owner,
+            repo=repo,
+            ref=sha,
+            channel=channel,
+        )
+        if github.commit_sha(commit) != sha:
+            return manual
+        ci = github.read_ci(
+            workspace=target.workspace,
+            actor=actor,
+            owner=owner,
+            repo=repo,
+            head_sha=sha,
+            branch=target.tracked_branch,
+            channel=channel,
+        )
+    except ReadToolError:
+        return manual
+    return CommitSnapshot(
+        title=github.commit_title(commit),
+        ci_conclusion=ci["state"] if ci["state"] in CI_CONCLUSIONS else CI_UNKNOWN,
+        source=COMMIT_SOURCE_GITHUB,
+    )
 
 
 _TITLE_STRIP_RE = re.compile(r"[\x00-\x1f\x7f]+")
@@ -290,6 +328,20 @@ def build_payload(target, sha, snapshot):
     }
 
 
+def _check_requestable(target, sha):
+    if not target.enabled:
+        raise DeployInvalidTransition("Deploy target is not enabled.")
+    guard = self_repo_error(target.repo_git_url)
+    if guard is not None:
+        raise DeployInvalidTransition(_SELF_REPO_MESSAGES[guard])
+    if not target.current_sha:
+        raise DeployInvalidTransition(
+            "The target's live SHA is unknown; run a status check on it first."
+        )
+    if sha == target.current_sha:
+        raise DeployInvalidTransition("This SHA is already live on the target.")
+
+
 def request_deploy(*, workspace, actor, target, sha, channel):
     """Mints the `deploy` gate for `sha` on `target`. Returns the pending
     `ApprovalRequest`. Refuses (DeployInvalidTransition / DeployCiRequired)
@@ -305,20 +357,20 @@ def request_deploy(*, workspace, actor, target, sha, channel):
         sha = normalize_sha(sha)
     except TargetFieldError as exc:
         raise DeployInvalidTransition(str(exc)) from exc
+    # The commit/CI snapshot may take up to two connector reads (GitHub): it
+    # is resolved BEFORE the row lock, never under it, so a slow sidecar
+    # cannot hold the target locked. The lock then re-checks everything and
+    # refuses if the target's configuration changed in between.
+    unlocked = DeployTarget.objects.get(pk=target.pk)
+    _check_requestable(unlocked, sha)
+    snapshot = resolve_commit_snapshot(unlocked, sha, actor=actor, channel=channel)
     with transaction.atomic():
         locked = DeployTarget.objects.select_for_update().get(pk=target.pk)
-        if not locked.enabled:
-            raise DeployInvalidTransition("Deploy target is not enabled.")
-        guard = self_repo_error(locked.repo_git_url)
-        if guard is not None:
-            raise DeployInvalidTransition(_SELF_REPO_MESSAGES[guard])
-        if not locked.current_sha:
+        _check_requestable(locked, sha)
+        if locked.config_hash != unlocked.config_hash or locked.current_sha != unlocked.current_sha:
             raise DeployInvalidTransition(
-                "The target's live SHA is unknown; run a status check on it first."
+                "The target changed while its commit was being checked; request the deploy again."
             )
-        if sha == locked.current_sha:
-            raise DeployInvalidTransition("This SHA is already live on the target.")
-        snapshot = resolve_commit_snapshot(locked, sha)
         if snapshot.ci_conclusion not in CI_CONCLUSIONS:
             snapshot = CommitSnapshot(snapshot.title, CI_UNKNOWN, snapshot.source)
         if locked.require_ci_success and snapshot.ci_conclusion != CI_SUCCESS:

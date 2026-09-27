@@ -503,3 +503,55 @@ def test_a_provider_failure_during_argument_extraction_is_the_gateway_error(
     events = _post(web_client(owner), conversation)
     assert events == [{"type": "error", "error_type": "timeout"}]
     assert server.calls == []
+
+
+# --- GitHub: a `sensitive` repo makes one call `personal` (Phase 5 branch 5) ---
+
+
+@pytest.fixture
+def sensitive_github(monkeypatch, workspace, enable):
+    from connectors import github
+    from connectors.manifest import get_manifest
+
+    state = fakes.install_github(monkeypatch, fakes.GithubServerState())
+    canonical = github.canonical_remote("acme", "secret")
+    monkeypatch.setattr(
+        github,
+        "_repo_resolver",
+        lambda ws, remote: (
+            github.RepoScope(sensitive=True, default_branch="main")
+            if ws.id == workspace.id and remote == canonical
+            else None
+        ),
+    )
+    enable(get_manifest("github"), workspace)
+    state.calls.clear()
+    return state
+
+
+def test_a_sensitive_github_read_is_personal(
+    sensitive_github, owner, local_provider, calls, route, conversation, web_client
+):
+    route("github_branch_head", {"owner": "acme", "repo": "secret", "sha": "main"})
+    events = _post(web_client(owner), conversation)
+    assert events[-1]["type"] == "done"
+    assert sensitive_github.names() == ["get_commit"]
+    assert calls[-1]["purpose"] == "chat" and calls[-1]["personal_data"] is True
+    conversation.refresh_from_db()
+    assert (conversation.private, conversation.personal_data) == (True, True)
+    reply = Message.objects.get(role="assistant")
+    assert reply.connector_reads[0]["data_class"] == "personal"
+    read = AuditLog.objects.get(action="connector.read")
+    assert read.metadata["data_class"] == "personal"
+
+
+def test_a_sensitive_github_read_without_a_local_model_is_dropped(
+    sensitive_github, owner, cloud_provider, calls, route, conversation, web_client
+):
+    route("github_branch_head", {"owner": "acme", "repo": "secret", "sha": "main"})
+    events = _post(web_client(owner), conversation)
+    assert events == [{"type": "error", "error_type": "connector_local_model_required"}]
+    # The content never reached a provider: no chat call at all.
+    assert "chat" not in [c["purpose"] for c in calls]
+    conversation.refresh_from_db()
+    assert (conversation.private, conversation.personal_data) == (False, False)

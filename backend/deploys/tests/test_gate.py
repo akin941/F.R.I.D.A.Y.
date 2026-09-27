@@ -128,7 +128,9 @@ def test_a_green_ci_snapshot_satisfies_the_requirement(owner, workspace, target,
     target.save()
     monkeypatch.setattr(
         "deploys.services.resolve_commit_snapshot",
-        lambda target, sha: CommitSnapshot("Fix\x07 the header\nfor real", "success", "github"),
+        lambda target, sha, **_: CommitSnapshot(
+            "Fix\x07 the header\nfor real", "success", "github"
+        ),
     )
     request = _request(owner, workspace, target)
     assert request.payload["commit"] == {
@@ -407,3 +409,18 @@ def test_concurrent_approvals_leave_exactly_one_active_run(monkeypatch):
     assert sorted(r.status for r in runs) == [S.PENDING, S.REFUSED]
     assert [r.error_code for r in runs if r.status == S.REFUSED] == [E.TARGET_BUSY]
     connection.close()
+
+
+def test_commit_snapshot_is_resolved_outside_the_row_lock(owner, workspace, target, monkeypatch):
+    """The snapshot's connector reads run before `select_for_update`, never
+    under it; a target changed meanwhile is refused, not requested blind."""
+    from deploys import services
+
+    def snapshot_while_the_target_moves(unlocked, sha, *, actor, channel):
+        DeployTarget.objects.filter(pk=unlocked.pk).update(current_sha=SHA_C)
+        return CommitSnapshot("title", "success", "manual")
+
+    monkeypatch.setattr(services, "resolve_commit_snapshot", snapshot_while_the_target_moves)
+    with pytest.raises(DeployInvalidTransition, match="changed"):
+        _request(owner, workspace, target)
+    assert not ApprovalRequest.objects.filter(tool_name="deploy").exists()

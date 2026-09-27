@@ -92,6 +92,9 @@ services:
       # updates.
       TELEGRAM_BOT_TOKEN: "${TELEGRAM_BOT_TOKEN:-}"
       TELEGRAM_WEBHOOK_SECRET: "${TELEGRAM_WEBHOOK_SECRET:-}"
+      # Connector sidecar URLs (Phase 5, ADR-010): only the URL -- each
+      # credential lives in its sidecar's own environment, never here.
+      GITHUB_MCP_URL: "${GITHUB_MCP_URL:-}"
       # Google mail/calendar bridge (Phase 5 branch 8, brief D9): the
       # Desktop-app OAuth client and the owner's refresh token printed once
       # by the host-side `manage.py connect_google`. Env only -- never the
@@ -151,6 +154,26 @@ services:
       timeout: 15s
       retries: 3
       start_period: 40s
+
+  # GitHub connector (Phase 5 branch 5, brief D7, docs/mcp/github.md): the
+  # official github-mcp-server v1.12.2 (digest-pinned in the Dockerfile)
+  # in STDIO mode behind the stdio<->HTTP bridge, so the PAT stays in this
+  # container: its HTTP mode would take the token from each request's
+  # Authorization header, i.e. Jarvis would hold it. `--tools=` registers
+  # only the four pinned tools; BRIDGE_ALLOWED_TOOLS repeats the ceiling.
+  # Needs the internet (api.github.com) -> also joins `connectors-egress`.
+  github-mcp:
+    <<: *connector-sidecar
+    build:
+      context: ../..
+      dockerfile: backend/connectors/docker/Dockerfile.github
+    environment:
+      BRIDGE_COMMAND: '["/server/github-mcp-server", "stdio", "--tools=pull_request_read,actions_list,get_commit,create_pull_request"]'
+      BRIDGE_ALLOWED_TOOLS: "pull_request_read,actions_list,get_commit,create_pull_request"
+      BRIDGE_ENV_PASSTHROUGH: "GITHUB_PERSONAL_ACCESS_TOKEN"
+      # Env-only, from deploy/docker/.env; this service only.
+      GITHUB_PERSONAL_ACCESS_TOKEN: "${GITHUB_PERSONAL_ACCESS_TOKEN:-}"
+    networks: ["connectors", "connectors-egress"]
 
   postgres:
     image: pgvector/pgvector:pg16

@@ -222,3 +222,123 @@ def make_manifest(
 
 
 IMAGE_BLOCK = ImageContent(data="aGVsbG8=", mime_type="image/png")
+
+
+# --- GitHub (Phase 5 branch 5) ---
+#
+# A fake `github-mcp-server`: the four pinned tools with exactly the pinned
+# schemas, plus `merge_pull_request` and `create_or_update_file`, which the
+# manifest does not list -- they must stay unreachable even though the
+# server offers them. Results mimic the server's JSON-in-text replies.
+
+GITHUB_URL = "http://127.0.0.1:8766/mcp"
+HEAD_SHA = "a" * 40
+MOVED_SHA = "b" * 40
+
+
+@dataclass
+class GithubServerState:
+    schemas: dict = field(default_factory=dict)
+    calls: list = field(default_factory=list)
+    http_requests: list = field(default_factory=list)
+    # branch or sha -> head sha returned by get_commit
+    heads: dict = field(default_factory=dict)
+    commit_message: str = "Fix the header\n\nlong body"
+    workflow_runs: list = field(default_factory=list)
+    pr_number: int = 42
+    create_is_error: bool = False
+    on_call: object = None
+
+    def __post_init__(self):
+        from connectors.manifests.github import SERVER_SCHEMAS
+
+        if not self.schemas:
+            self.schemas = copy.deepcopy(SERVER_SCHEMAS)
+            self.schemas["merge_pull_request"] = {
+                "type": "object",
+                "properties": {"owner": {"type": "string"}, "pullNumber": {"type": "number"}},
+            }
+            self.schemas["create_or_update_file"] = {
+                "type": "object",
+                "properties": {"path": {"type": "string"}},
+            }
+
+    def names(self):
+        return [name for name, _ in self.calls]
+
+
+def build_github_server(state):
+    import json
+
+    async def list_tools(ctx, params):
+        return ListToolsResult(
+            tools=[
+                Tool(name=name, description=SERVER_DESCRIPTION_CANARY, input_schema=schema)
+                for name, schema in state.schemas.items()
+            ]
+        )
+
+    def text(value):
+        return CallToolResult(content=[TextContent(text=json.dumps(value))])
+
+    async def call_tool(ctx, params):
+        args = dict(params.arguments or {})
+        state.calls.append((params.name, args))
+        if state.on_call is not None:
+            await state.on_call(params.name)
+        if params.name == "get_commit":
+            ref = args.get("sha", "")
+            sha = state.heads.get(ref, ref if len(ref) == 40 else HEAD_SHA)
+            return text({"sha": sha, "commit": {"message": state.commit_message}, "html_url": "x"})
+        if params.name == "actions_list":
+            return text(
+                {"total_count": len(state.workflow_runs), "workflow_runs": state.workflow_runs}
+            )
+        if params.name == "pull_request_read":
+            return text({"number": args.get("pullNumber"), "title": "A PR", "state": "open"})
+        if params.name == "create_pull_request":
+            if state.create_is_error:
+                return CallToolResult(content=[TextContent(text="boom")], is_error=True)
+            owner, repo = args["owner"], args["repo"]
+            return text(
+                {
+                    "id": "123",
+                    "url": f"https://github.com/{owner}/{repo}/pull/{state.pr_number}",
+                }
+            )
+        return CallToolResult(content=[TextContent(text="done")])
+
+    return Server(
+        "github-mcp-server",
+        version="1.12.2",
+        instructions=SERVER_INSTRUCTIONS_CANARY,
+        on_list_tools=list_tools,
+        on_call_tool=call_tool,
+    )
+
+
+def github_connector(state):
+    """`mcp_client._connect_http` replacement serving the fake GitHub."""
+    return asgi_connector(
+        state,
+        app_factory=lambda s: build_github_server(s).streamable_http_app(
+            stateless_http=True, json_response=True
+        ),
+    )
+
+
+def workflow_run(sha, *, status="completed", conclusion="success", name="CI"):
+    return {
+        "name": name,
+        "head_sha": sha,
+        "status": status,
+        "conclusion": conclusion,
+        "html_url": "https://github.com/acme/app/actions/runs/1",
+    }
+
+
+def install_github(monkeypatch, state):
+    """Point the production MCP client at the fake GitHub server."""
+    monkeypatch.setenv("GITHUB_MCP_URL", GITHUB_URL)
+    monkeypatch.setattr(mcp_client, "_connect_http", github_connector(state))
+    return state

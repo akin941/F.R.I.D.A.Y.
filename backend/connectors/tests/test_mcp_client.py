@@ -170,7 +170,11 @@ def test_runs_from_a_celery_task_in_eager_mode(fake_manifest, server):
     def probe():
         return sorted(mcp_client.list_tools(fake_manifest, timeout=5).tool_hashes)
 
-    assert probe.delay().get() == ["fake_create_note", "fake_merge", "fake_search"]
+    # Eager mode runs the task inline; `disable_sync_subtasks=False` keeps
+    # Celery's process-global "inside a task" flag, which an earlier eager
+    # task in the same session can leave set, from failing this `.get()`.
+    result = probe.delay().get(disable_sync_subtasks=False)
+    assert result == ["fake_create_note", "fake_merge", "fake_search"]
 
 
 def test_oversized_response_is_cut_off_while_streaming(fake_manifest, monkeypatch, settings):
