@@ -36,6 +36,7 @@ because they are reversible -- and only for a human actor over the web
 channel (`channel` is a required argument, never defaulted).
 """
 
+import logging
 from datetime import timedelta
 
 from django.conf import settings
@@ -45,8 +46,14 @@ from django.utils import timezone
 from audit.models import AuditLog
 from audit.services import record_audit
 from core.channels import CHANNEL_WEB
+from memory.models import Memory
+from memory.services import DuplicateMemory, record_work_log
 from tasks.models import Task
 from workspaces.models import WorkspaceMember
+
+logger = logging.getLogger(__name__)
+
+_WORK_LOG_TITLE_MAX_CHARS = 200
 
 _CURATOR_ROLES = {WorkspaceMember.Role.OWNER, WorkspaceMember.Role.ADMIN}
 _WRITER_ROLES = _CURATOR_ROLES | {WorkspaceMember.Role.MEMBER}
@@ -161,6 +168,43 @@ def _record(task, action, actor, **metadata):
     )
 
 
+def _record_outcome_work_log(task, outcome):
+    """`work_log` for a task outcome (ADR-008 decision 4, Phase 5 brief
+    D13): completed or cancelled. Bookkeeping only -- the outcome, the
+    date, the task id and its owner-authored (or owner-confirmed) title;
+    never the description. Calls `memory.services.record_work_log`
+    directly rather than `tools.work_log.record_tool_outcome`: a task is
+    not a gated tool (no `ApprovalRequest`), and `tools` already imports
+    `tasks` (`tools.purge`), so the reverse edge would be a cycle.
+
+    `private` when the task was confirmed from a chat draft in a
+    conversation that is private now (ADR-005: its title came out of that
+    conversation). The date is in the content, so the same outcome on
+    another day is a new row; a same-day repeat of the same task's outcome
+    (complete, reopen, complete) is the same row and swallowed as a
+    duplicate. Best-effort, in its own savepoint: the transition has
+    already happened and is audited."""
+    conversation = getattr(task.source_message, "conversation", None)
+    sensitivity = (
+        Memory.Sensitivity.PRIVATE
+        if conversation is not None and conversation.private
+        else Memory.Sensitivity.NORMAL
+    )
+    day = timezone.localdate().isoformat()
+    try:
+        with transaction.atomic():
+            record_work_log(
+                workspace=task.workspace,
+                title=f"Task {outcome}: {task.title}"[:_WORK_LOG_TITLE_MAX_CHARS],
+                content=f"Task {outcome} on {day}: {task.title}\nTask id: {task.id}.",
+                sensitivity=sensitivity,
+            )
+    except DuplicateMemory:
+        pass
+    except Exception:
+        logger.exception("Task %s work_log (%s) failed", task.pk, outcome)
+
+
 @transaction.atomic
 def create_task(
     *,
@@ -242,6 +286,7 @@ def complete_task(*, task, actor):
     task.status = Task.Status.DONE
     task.save(update_fields=["status", "updated_at"])
     _record(task, "task.completed", actor)
+    _record_outcome_work_log(task, "completed")
     return task
 
 
@@ -260,6 +305,7 @@ def cancel_task(*, task, actor):
     task.status = Task.Status.CANCELLED
     task.save(update_fields=["status", "updated_at"])
     _record(task, "task.cancelled", actor)
+    _record_outcome_work_log(task, "cancelled")
     return task
 
 

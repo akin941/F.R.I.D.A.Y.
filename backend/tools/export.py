@@ -54,6 +54,7 @@ from tools.vault_paths import (
     validate_vault_root_exists,
     validate_vault_root_string,
 )
+from tools.work_log import record_tool_outcome
 from workspaces.models import Workspace
 
 logger = logging.getLogger(__name__)
@@ -205,6 +206,16 @@ def finalize_vault_export_success(run_id, claim_token, counts):
             "removed": removed,
         },
     )
+    # work_log (ADR-008 decision 4, brief D13): counts only, like the audit
+    # row -- never memory titles or file names.
+    record_tool_outcome(
+        run.approval_request,
+        outcome="succeeded",
+        summary=(
+            f"Vault export run {run.id}: {written} written, {updated} updated, {removed} removed."
+        ),
+        sensitivity=Memory.Sensitivity.NORMAL,
+    )
     return True
 
 
@@ -242,6 +253,16 @@ def finalize_vault_export_failure(run_id, claim_token, *, error_type):
             workspace=run.workspace,
             resource=run,
             metadata={"workspace": str(run.workspace_id), "error_type": error_type},
+        )
+        # Terminal failures only (a retryable one is not an outcome yet);
+        # the closed-vocabulary error type, never the exception text.
+        record_tool_outcome(
+            run.approval_request,
+            outcome="failed",
+            summary=(
+                f"Vault export run {run.id} failed after {run.retry_count} attempts: {error_type}."
+            ),
+            sensitivity=Memory.Sensitivity.NORMAL,
         )
     return True
 
