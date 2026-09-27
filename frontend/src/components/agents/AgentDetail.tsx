@@ -12,6 +12,8 @@ import {
 } from "@/components/agents/labels";
 import { apiGetJson, apiPostJson, ApiError } from "@/lib/api-client";
 import type { ApiAgentDetail } from "@/types/api";
+import { VIEW_SCROLL_ROOT } from "@/components/shell/view-scroll";
+import { cn } from "@/lib/utils";
 
 /**
  * Detail view for one `Agent` (brief §5): its ordered `AgentStep` list,
@@ -81,7 +83,7 @@ export function AgentDetail({ agentId, onBack }: { agentId: string; onBack: () =
     agent.status !== "cancelled";
 
   return (
-    <div className="flex flex-1 flex-col gap-4 overflow-y-auto p-6">
+    <div className={cn(VIEW_SCROLL_ROOT, "gap-4 p-6")}>
       <Button variant="outline" size="sm" className="self-start" onClick={onBack}>
         &larr; Ajanlara dön
       </Button>

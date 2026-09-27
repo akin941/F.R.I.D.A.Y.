@@ -19,6 +19,8 @@ import { useWorkspace } from "@/contexts/workspace-context";
 import { apiGetJson } from "@/lib/api-client";
 import { clickableProps } from "@/lib/keyboard";
 import type { ApiHarnessJob } from "@/types/api";
+import { VIEW_SCROLL_ROOT } from "@/components/shell/view-scroll";
+import { cn } from "@/lib/utils";
 
 type HarnessTab = "discovery" | "implementation";
 
@@ -135,7 +137,7 @@ export function HarnessJobsView() {
   }
 
   return (
-    <div className="flex flex-1 flex-col gap-6 overflow-y-auto p-6">
+    <div className={cn(VIEW_SCROLL_ROOT, "gap-6 p-6")}>
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Harness</h1>

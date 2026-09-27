@@ -14,6 +14,8 @@ import {
 } from "@/components/harness/labels";
 import { apiGetJson, apiPostJson, ApiError } from "@/lib/api-client";
 import type { ApiHarnessJobDetail } from "@/types/api";
+import { VIEW_SCROLL_ROOT } from "@/components/shell/view-scroll";
+import { cn } from "@/lib/utils";
 
 /**
  * Detail view for one `HarnessJob` (brief §4). Polls silently while the
@@ -111,7 +113,7 @@ export function HarnessJobDetail({
     job != null && (Boolean(job.briefing.summary) || findings.length > 0 || Boolean(rawTranscript));
 
   return (
-    <div className="flex flex-1 flex-col gap-4 overflow-y-auto p-6">
+    <div className={cn(VIEW_SCROLL_ROOT, "gap-4 p-6")}>
       <Button variant="outline" size="sm" className="self-start" onClick={onBack}>
         &larr; Harness işlerine dön
       </Button>

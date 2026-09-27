@@ -9,6 +9,8 @@ import { TASK_PRIORITY_LABELS } from "@/components/tasks/labels";
 import { useWorkspace } from "@/contexts/workspace-context";
 import { apiGetJson, apiPostJson, ApiError } from "@/lib/api-client";
 import type { ApiTask } from "@/types/api";
+import { VIEW_SCROLL_ROOT } from "@/components/shell/view-scroll";
+import { cn } from "@/lib/utils";
 
 /**
  * The *client's* local calendar date as YYYY-MM-DD -- deliberately not
@@ -133,7 +135,7 @@ export function TodayView() {
   }
 
   return (
-    <div className="flex flex-1 flex-col gap-4 overflow-y-auto p-6">
+    <div className={cn(VIEW_SCROLL_ROOT, "gap-4 p-6")}>
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">Bugün</h1>
         <p className="text-sm text-muted-foreground">Bugün vadesi gelen veya geçen görevler.</p>

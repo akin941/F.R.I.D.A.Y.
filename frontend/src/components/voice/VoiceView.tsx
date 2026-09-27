@@ -11,6 +11,8 @@ import { apiFetch, apiPostJson } from "@/lib/api-client";
 import { SSEStreamParser } from "@/lib/sse";
 import { useWorkspace } from "@/contexts/workspace-context";
 import type { ApiConversation } from "@/types/api";
+import { VIEW_SCROLL_ROOT } from "@/components/shell/view-scroll";
+import { cn } from "@/lib/utils";
 
 /**
  * MVP 12 §1 (ADR-007): a real integration, not a mockup — sends through the
@@ -121,7 +123,7 @@ export function VoiceView() {
   }
 
   return (
-    <div className="flex flex-1 flex-col items-center justify-center-safe gap-8 overflow-y-auto p-8">
+    <div className={cn(VIEW_SCROLL_ROOT, "items-center justify-center-safe gap-8 p-8")}>
       <JarvisOrb state={orbState} size={220} />
 
       {transcript ? (

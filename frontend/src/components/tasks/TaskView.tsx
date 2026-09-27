@@ -11,6 +11,8 @@ import { TASK_STATUS_LABELS, TASK_STATUSES } from "@/components/tasks/labels";
 import { useWorkspace } from "@/contexts/workspace-context";
 import { apiGetJson } from "@/lib/api-client";
 import type { ApiTask, TaskStatus } from "@/types/api";
+import { VIEW_SCROLL_ROOT } from "@/components/shell/view-scroll";
+import { cn } from "@/lib/utils";
 
 export function TaskView() {
   const { activeWorkspace } = useWorkspace();
@@ -85,7 +87,7 @@ export function TaskView() {
   }
 
   return (
-    <div className="flex flex-1 flex-col gap-6 overflow-y-auto p-6">
+    <div className={cn(VIEW_SCROLL_ROOT, "gap-6 p-6")}>
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Görevler</h1>

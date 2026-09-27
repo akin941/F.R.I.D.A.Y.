@@ -25,6 +25,7 @@ import type {
   ApiImplementationJobDetail,
   ApiImplementationReview,
 } from "@/types/api";
+import { VIEW_SCROLL_ROOT } from "@/components/shell/view-scroll";
 
 const STEP_STATE_CLASSES: Record<PipelineStepState, string> = {
   done: "border-primary bg-primary text-primary-foreground",
@@ -202,7 +203,7 @@ export function ImplementationJobDetail({
   const pushResult = job && "pushed" in job.push_result ? job.push_result : null;
 
   return (
-    <div className="flex flex-1 flex-col gap-4 overflow-y-auto p-6">
+    <div className={cn(VIEW_SCROLL_ROOT, "gap-4 p-6")}>
       <Button variant="outline" size="sm" className="self-start" onClick={onBack}>
         &larr; Uygulama işlerine dön
       </Button>
