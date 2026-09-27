@@ -10,6 +10,7 @@ import secrets
 
 import pytest
 from django.urls import URLPattern, URLResolver, get_resolver
+from rest_framework.exceptions import PermissionDenied
 from rest_framework.settings import api_settings
 from rest_framework.test import APIClient, APIRequestFactory
 from rest_framework.views import APIView
@@ -17,6 +18,7 @@ from rest_framework.views import APIView
 from accounts.authentication import (
     TOKEN_PREFIX,
     DeviceJWTAuthentication,
+    FacadeTokenAuthentication,
     PersonalAccessTokenAuthentication,
     hash_token,
 )
@@ -26,6 +28,7 @@ from accounts.services import register_user
 from approvals.models import ApprovalRequest
 from core.channels import (
     CHANNEL_CLI,
+    CHANNEL_OPENAI,
     CHANNEL_UNKNOWN,
     CHANNEL_WEB,
     ChannelPrincipal,
@@ -42,6 +45,7 @@ PASSWORD = "Str0ngDevPass!42"
 KNOWN_AUTHENTICATORS = {
     DeviceJWTAuthentication: CHANNEL_WEB,
     PersonalAccessTokenAuthentication: CHANNEL_CLI,
+    FacadeTokenAuthentication: CHANNEL_OPENAI,
 }
 
 
@@ -119,6 +123,30 @@ def test_pat_yields_cli(owner, workspace):
     )
     request = _authenticate(PersonalAccessTokenAuthentication, f"Bearer {raw}")
     assert request_channel(request) == CHANNEL_CLI
+
+
+def test_openai_pat_yields_openai_on_the_facade_only(owner, workspace):
+    raw = TOKEN_PREFIX + secrets.token_urlsafe(32)
+    PersonalAccessToken.objects.create(
+        workspace=workspace,
+        user=owner,
+        name="open webui",
+        kind=PersonalAccessToken.Kind.OPENAI,
+        token_hash=hash_token(raw),
+    )
+    request = _authenticate(FacadeTokenAuthentication, f"Bearer {raw}")
+    assert request_channel(request) == CHANNEL_OPENAI
+    with pytest.raises(PermissionDenied):
+        _authenticate(PersonalAccessTokenAuthentication, f"Bearer {raw}")
+
+
+def test_cli_pat_is_refused_by_the_facade_authenticator(owner, workspace):
+    raw = TOKEN_PREFIX + secrets.token_urlsafe(32)
+    PersonalAccessToken.objects.create(
+        workspace=workspace, user=owner, name="cli", token_hash=hash_token(raw)
+    )
+    with pytest.raises(PermissionDenied):
+        _authenticate(FacadeTokenAuthentication, f"Bearer {raw}")
 
 
 @pytest.mark.parametrize(

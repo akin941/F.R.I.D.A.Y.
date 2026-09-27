@@ -272,7 +272,7 @@ def classify_intent(
 
 
 @transaction.atomic
-def create_conversation(*, workspace, actor, title="", private=False):
+def create_conversation(*, workspace, actor, title="", private=False, channel=""):
     """`private` at creation needs no cascade (Phase 1 p1-work-log,
     Codex round-2 P1): nothing has been extracted from a brand-new row —
     this is the row's initial value, not a `False -> True` transition, so
@@ -280,6 +280,9 @@ def create_conversation(*, workspace, actor, title="", private=False):
     here. Lets a caller start a conversation private from message one
     instead of create-then-PATCH, which left a race window where the first
     exchange could already be extraction-eligible before the PATCH landed.
+
+    `channel` (optional) names the non-web channel that created it (the
+    OpenAI-compatible facade) in the audit row.
     """
     conversation = Conversation.objects.create(
         workspace=workspace,
@@ -287,14 +290,101 @@ def create_conversation(*, workspace, actor, title="", private=False):
         created_by=actor,
         private=private,
     )
+    metadata = {"private": private}
+    if channel:
+        metadata["channel"] = channel
     record_audit(
         action="assistant.conversation.created",
         actor=actor,
         workspace=workspace,
         resource=conversation,
-        metadata={"private": private},
+        metadata=metadata,
     )
     return conversation
+
+
+# Intents a forked copy keeps. A task-draft / tool-request classification
+# belongs to the turn that produced it (its confirm card was offered there);
+# a copy never re-offers it.
+_FORK_KEPT_INTENTS = {
+    Message.Intent.CHAT,
+    Message.Intent.MEMORY_QUERY,
+    Message.Intent.KNOWLEDGE_QUERY,
+}
+
+
+@transaction.atomic
+def fork_conversation(*, source, actor, cut_before_id=None, channel=""):
+    """A new conversation in `source`'s workspace (same title and private
+    flag) seeded with copies of `source`'s messages created before the
+    message `cut_before_id` (all of them when None, or when it is not a
+    message of `source`) -- Phase 4 branch 6's fork for an OpenAI-compatible
+    client that regenerated or edited a turn: the server history stays
+    authoritative and the original conversation is left untouched.
+
+    Copies are trusted rows of the same workspace (never client-supplied
+    text): role, content, status, author, channel, the injected memory /
+    chunk ids and plain intents; they keep the source's timestamps, so the
+    order is unchanged. No ModelUsage link (the usage belongs to the
+    original reply), no overlay provenance (owner-only, web-only), no
+    task-draft/tool-request payloads. The extraction cursor is placed on the
+    last copy: the source already had its chance to extract them.
+
+    Returns `(conversation, {source_message_id: copy_id})`.
+    """
+    conversation = create_conversation(
+        workspace=source.workspace,
+        actor=actor,
+        title=source.title,
+        private=source.private,
+        channel=channel,
+    )
+    originals = list(
+        Message.objects.filter(conversation=source, workspace=source.workspace).order_by(
+            "created_at", "id"
+        )
+    )
+    cut_ids = [str(m.id) for m in originals]
+    if cut_before_id is not None and str(cut_before_id) in cut_ids:
+        originals = originals[: cut_ids.index(str(cut_before_id))]
+    copies = [
+        Message(
+            id=uuid.uuid4(),
+            workspace=conversation.workspace,
+            conversation=conversation,
+            role=original.role,
+            content=original.content,
+            status=original.status,
+            created_by=original.created_by,
+            channel=original.channel,
+            memories_used=original.memories_used,
+            chunks_used=original.chunks_used,
+            intent=original.intent if original.intent in _FORK_KEPT_INTENTS else "",
+        )
+        for original in originals
+    ]
+    Message.objects.bulk_create(copies)
+    # `created_at` is auto_now_add (set on insert); restore the source's.
+    for copy, original in zip(copies, originals, strict=True):
+        copy.created_at = original.created_at
+    Message.objects.bulk_update(copies, ["created_at"])
+    if copies:
+        conversation.last_extracted_message = copies[-1]
+        conversation.save(update_fields=["last_extracted_message", "updated_at"])
+    record_audit(
+        action="assistant.conversation.forked",
+        actor=actor,
+        workspace=conversation.workspace,
+        resource=conversation,
+        metadata={
+            "source_conversation": str(source.id),
+            "copied_messages": len(copies),
+            **({"channel": channel} if channel else {}),
+        },
+    )
+    return conversation, {
+        str(original.id): str(copy.id) for original, copy in zip(originals, copies, strict=True)
+    }
 
 
 @transaction.atomic
