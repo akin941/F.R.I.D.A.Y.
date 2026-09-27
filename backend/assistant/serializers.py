@@ -4,10 +4,27 @@ from assistant.models import Conversation, Message
 
 
 class ConversationSerializer(serializers.ModelSerializer):
+    # The channel of the conversation's first message (web/cli/telegram/...)
+    # -- the "channel badge" source (Phase 4 branch 4). Read from the
+    # `origin_channel` annotation (`assistant.views.with_origin_channel`);
+    # null for a conversation with no messages yet or an unannotated row.
+    origin_channel = serializers.SerializerMethodField()
+
     class Meta:
         model = Conversation
-        fields = ["id", "workspace", "title", "created_by", "created_at", "private"]
+        fields = [
+            "id",
+            "workspace",
+            "title",
+            "created_by",
+            "created_at",
+            "private",
+            "origin_channel",
+        ]
         read_only_fields = fields
+
+    def get_origin_channel(self, obj):
+        return getattr(obj, "origin_channel", None)
 
 
 class ConversationCreateSerializer(serializers.Serializer):
@@ -24,21 +41,29 @@ class ConversationCreateSerializer(serializers.Serializer):
 
 
 class ConversationUpdateSerializer(serializers.Serializer):
-    """PATCH body for the private-flag-only update endpoint (Phase 1
-    p1-work-log). `private` is one-way (`False -> True` only, see
-    `Conversation.private`'s field docstring) — the serializer rejects a
-    `false` value outright as a validation error; the service layer
-    (`mark_conversation_private`) enforces the same rule structurally by
-    never accepting a value at all, so this is belt-and-suspenders, not the
-    only guard.
+    """PATCH body for the conversation update endpoint: `title` (rename,
+    Phase 4 branch 4) and/or `private` (Phase 1 p1-work-log); at least one.
+
+    `private` is one-way (`False -> True` only, see `Conversation.private`'s
+    field docstring) — the serializer rejects a `false` value outright as a
+    validation error; the service layer (`mark_conversation_private`)
+    enforces the same rule structurally by never accepting a value at all,
+    so this is belt-and-suspenders, not the only guard. A blank `title` is
+    allowed: it clears the name back to the "untitled" default.
     """
 
-    private = serializers.BooleanField()
+    title = serializers.CharField(max_length=255, required=False, allow_blank=True)
+    private = serializers.BooleanField(required=False)
 
     def validate_private(self, value):
         if not value:
             raise serializers.ValidationError("private can only be set to true (one-way).")
         return value
+
+    def validate(self, attrs):
+        if not attrs:
+            raise serializers.ValidationError("Provide title and/or private.")
+        return attrs
 
 
 class MessageSerializer(serializers.ModelSerializer):
@@ -58,8 +83,21 @@ class MessageSerializer(serializers.ModelSerializer):
             "overlay_source_workspaces",
             "intent",
             "intent_payload",
+            "channel",
+            "confirmed_task",
         ]
         read_only_fields = fields
+
+    # Phase 4 branch 4: the id of the task confirmed from this (task-draft)
+    # message, via `Task.source_message` -- lets a reloaded chat render the
+    # draft as "confirmed" instead of offering a second confirm. Read from
+    # the `confirmed_task_ref` annotation the message list view adds (one
+    # LEFT JOIN, no per-row query); null when unannotated or unconfirmed.
+    confirmed_task = serializers.SerializerMethodField()
+
+    def get_confirmed_task(self, obj):
+        task_id = getattr(obj, "confirmed_task_ref", None)
+        return str(task_id) if task_id else None
 
 
 class MessageCreateSerializer(serializers.Serializer):
