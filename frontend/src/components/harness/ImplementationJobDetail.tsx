@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Skeleton } from "@/components/ui/skeleton";
 import { LowTrustTranscript } from "@/components/harness/LowTrustTranscript";
+import { TechnicalDetail } from "@/components/harness/TechnicalDetail";
 import {
   GATE_STATUS_LABELS,
   HARNESS_AGENT_LABELS,
@@ -99,6 +100,11 @@ function ReviewBlock({ review }: { review: ApiImplementationReview }) {
           </>
         ) : null}
       </p>
+      {review.summary || review.findings.length > 0 ? (
+        <p className="text-xs text-muted-foreground">
+          Özet ve bulgular: Jarvis&apos;in kendi özeti (model üretimi).
+        </p>
+      ) : null}
       {review.summary ? <p className="whitespace-pre-wrap text-sm">{review.summary}</p> : null}
       {review.findings.length > 0 ? (
         <ul className="list-inside list-disc text-sm">
@@ -112,7 +118,7 @@ function ReviewBlock({ review }: { review: ApiImplementationReview }) {
           text={review.raw_transcript}
           showLabel="İnceleyicinin ham çıktısını göster"
           hideLabel="İnceleyicinin ham çıktısını gizle"
-          warning="Bu, inceleyici ajanın (Codex CLI) kendi ham çıktısıdır — güvenilmeyen içerik olarak ele alınmalı, yukarıdaki karar, özet ve bulgular gibi doğrulanmış kabul edilmemelidir."
+          warning="Bu, inceleyici ajanın (Codex CLI) kendi ham çıktısıdır ve güvenilmeyen içerik olarak ele alınmalıdır. Yukarıdaki karar, özet ve bulgular ise Jarvis'in kendi özetidir (model üretimi); ikisini birbirine karıştırma."
         />
       ) : null}
     </li>
@@ -146,6 +152,25 @@ export function ImplementationJobDetail({
   const [cancelError, setCancelError] = useState<string | null>(null);
 
   const activeJobIdRef = useRef(jobId);
+  const cancelTriggerRef = useRef<HTMLButtonElement>(null);
+  const confirmCancelRef = useRef<HTMLButtonElement>(null);
+  const restoreCancelFocusRef = useRef(false);
+
+  // Focus follows the confirmation step: into its confirm button when it
+  // opens, back to the "İşi iptal et" trigger when it is dismissed.
+  useEffect(() => {
+    if (confirmingCancel) {
+      confirmCancelRef.current?.focus();
+    } else if (restoreCancelFocusRef.current) {
+      restoreCancelFocusRef.current = false;
+      cancelTriggerRef.current?.focus();
+    }
+  }, [confirmingCancel]);
+
+  function dismissCancelPrompt() {
+    restoreCancelFocusRef.current = true;
+    setConfirmingCancel(false);
+  }
 
   const loadJob = useCallback(
     async (options?: { silent?: boolean }) => {
@@ -235,7 +260,7 @@ export function ImplementationJobDetail({
               </p>
               <p className="text-sm text-muted-foreground">
                 Depo: {job.repo_name} · Uygulayıcı: {HARNESS_AGENT_LABELS[job.agent]} · İnceleyici:{" "}
-                {HARNESS_AGENT_LABELS[job.reviewer_agent]}
+                {(job.reviewer_agent && HARNESS_AGENT_LABELS[job.reviewer_agent]) || "—"}
               </p>
               {job.cancel_requested && !isImplTerminal(job.status) ? (
                 <p className="text-sm text-muted-foreground">
@@ -244,7 +269,11 @@ export function ImplementationJobDetail({
               ) : null}
             </div>
             {canCancel && !confirmingCancel ? (
-              <Button variant="outline" onClick={() => setConfirmingCancel(true)}>
+              <Button
+                ref={cancelTriggerRef}
+                variant="outline"
+                onClick={() => setConfirmingCancel(true)}
+              >
                 İşi iptal et
               </Button>
             ) : null}
@@ -259,6 +288,7 @@ export function ImplementationJobDetail({
                 </span>
                 <span className="flex gap-2">
                   <Button
+                    ref={confirmCancelRef}
                     variant="destructive"
                     size="sm"
                     onClick={() => void handleCancel()}
@@ -269,7 +299,7 @@ export function ImplementationJobDetail({
                   <Button
                     variant="outline"
                     size="sm"
-                    onClick={() => setConfirmingCancel(false)}
+                    onClick={dismissCancelPrompt}
                     disabled={cancelling}
                   >
                     Vazgeç
@@ -286,7 +316,7 @@ export function ImplementationJobDetail({
           ) : null}
 
           <ol aria-label="İş hattı" className="flex flex-wrap items-center gap-2">
-            {pipelineStepStates(job).map(({ step, state }, index) => (
+            {pipelineStepStates(job, job.reviews.length).map(({ step, state }, index) => (
               <li
                 key={step}
                 aria-current={state === "current" ? "step" : undefined}
@@ -337,9 +367,10 @@ export function ImplementationJobDetail({
               pushResult.pushed ? (
                 <p>Dal uzak depoya gönderildi.</p>
               ) : (
-                <p className="text-destructive">
-                  Gönderim başarısız{pushResult.error ? `: ${pushResult.error}` : "."}
-                </p>
+                <div className="flex flex-col gap-1">
+                  <p className="text-destructive">Gönderim başarısız.</p>
+                  {pushResult.error ? <TechnicalDetail text={pushResult.error} /> : null}
+                </div>
               )
             ) : null}
             {job.worktree_expires_at && job.status === "pending_gate_b" ? (
@@ -421,7 +452,7 @@ export function ImplementationJobDetail({
                 text={job.raw_transcript}
                 showLabel="Uygulayıcının ham çıktısını göster"
                 hideLabel="Uygulayıcının ham çıktısını gizle"
-                warning="Bu, uygulayıcı ajanın (Claude Code) kendi ham çıktısıdır — güvenilmeyen içerik olarak ele alınmalı; test sonucu, değişen dosyalar ve inceleme kararı gibi doğrulanmış kabul edilmemelidir."
+                warning="Bu, uygulayıcı ajanın (Claude Code) kendi ham çıktısıdır ve güvenilmeyen içerik olarak ele alınmalıdır. Test sonucu ve değişen dosyalar Jarvis'in çalıştırıcısından gelir; değişiklik ve inceleme özetleri Jarvis'in kendi özetidir (model üretimi)."
               />
             </section>
           ) : null}

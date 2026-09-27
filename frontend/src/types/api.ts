@@ -245,7 +245,10 @@ export interface ApiHarnessImplementDisplaySummary {
   kind: "harness_implement";
   job_id: string;
   goal: string;
+  // `repo_name` is only a curator-chosen label; `repo_git_url` is what the
+  // agent will actually work against.
   repo_name: string;
+  repo_git_url: string;
   branch_name: string;
   agent: string;
   reviewer_agent: string;
@@ -484,7 +487,8 @@ export interface ApiImplementationJob {
   discovery_job: string | null;
   goal: string;
   agent: "claude_code";
-  reviewer_agent: "codex_cli";
+  // "" when no cross-vendor reviewer was selectable.
+  reviewer_agent: "codex_cli" | "";
   status: ImplStatus;
   failure_reason: ImplFailureReason;
   cancel_requested: boolean;

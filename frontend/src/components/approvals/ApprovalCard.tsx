@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -17,6 +17,7 @@ import {
   REVIEW_VERDICT_LABELS,
   harnessFailureReasonLabel,
 } from "@/components/harness/labels";
+import { TechnicalDetail } from "@/components/harness/TechnicalDetail";
 import { apiPostJson, ApiError } from "@/lib/api-client";
 import { cn } from "@/lib/utils";
 import type {
@@ -30,7 +31,9 @@ import type {
 
 const CHANGED_FILES_PREVIEW = 20;
 
+// "" (e.g. no reviewer was selectable) renders as a dash, never blank.
 function agentLabel(agent: string): string {
+  if (!agent) return "—";
   return HARNESS_AGENT_LABELS[agent as keyof typeof HARNESS_AGENT_LABELS] ?? agent;
 }
 
@@ -49,7 +52,16 @@ function ImplementSummary({ summary }: { summary: ApiHarnessImplementDisplaySumm
       <SummaryRow label="Hedef">
         <span className="whitespace-pre-wrap">{summary.goal}</span>
       </SummaryRow>
-      <SummaryRow label="Depo">{summary.repo_name}</SummaryRow>
+      <SummaryRow label="Depo">
+        {summary.repo_name}
+        {/* The name is only a curator-chosen label -- the URL is what the
+            agent will actually clone and work against. */}
+        {summary.repo_git_url ? (
+          <code className="block font-mono text-xs break-all text-muted-foreground">
+            {summary.repo_git_url}
+          </code>
+        ) : null}
+      </SummaryRow>
       <SummaryRow label="Dal">
         <code className="font-mono">{summary.branch_name}</code>
       </SummaryRow>
@@ -119,7 +131,12 @@ function PushSummary({ summary }: { summary: ApiHarnessPushDisplaySummary }) {
               {REVIEW_VERDICT_LABELS[summary.review.verdict] ?? summary.review.verdict}
             </span>
             {summary.review.summary ? (
-              <span className="block whitespace-pre-wrap">{summary.review.summary}</span>
+              <>
+                <span className="block text-xs text-muted-foreground">
+                  Jarvis&apos;in kendi özeti (model üretimi).
+                </span>
+                <span className="block whitespace-pre-wrap">{summary.review.summary}</span>
+              </>
             ) : null}
           </span>
         ) : (
@@ -167,9 +184,12 @@ function HarnessExecutionLine({
       {pushResult && "pushed" in pushResult ? (
         pushResult.pushed ? (
           <p>Dal uzak depoya gönderildi.</p>
-        ) : pushResult.error ? (
-          <p className="text-destructive">Gönderim hatası: {pushResult.error}</p>
-        ) : null
+        ) : (
+          <div className="flex flex-col gap-1">
+            <p className="text-destructive">Gönderim başarısız.</p>
+            {pushResult.error ? <TechnicalDetail text={pushResult.error} /> : null}
+          </div>
+        )
       ) : null}
     </div>
   );
@@ -204,6 +224,29 @@ export function ApprovalCard({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [confirming, setConfirming] = useState<"approve" | "reject" | null>(null);
+
+  const approveRef = useRef<HTMLButtonElement>(null);
+  const rejectRef = useRef<HTMLButtonElement>(null);
+  const confirmRef = useRef<HTMLButtonElement>(null);
+  const restoreFocusRef = useRef<"approve" | "reject" | null>(null);
+
+  // Focus follows the confirmation step: into "Evet, …" when it opens,
+  // back to the Onayla/Reddet button that opened it on "Vazgeç".
+  useEffect(() => {
+    if (confirming) {
+      confirmRef.current?.focus();
+      return;
+    }
+    const target = restoreFocusRef.current;
+    restoreFocusRef.current = null;
+    if (target === "approve") approveRef.current?.focus();
+    else if (target === "reject") rejectRef.current?.focus();
+  }, [confirming]);
+
+  function dismissConfirm() {
+    restoreFocusRef.current = confirming;
+    setConfirming(null);
+  }
 
   // ADR-008 decision 3 (single-owner): the gate is an explicit, separate,
   // audited decision over the high-trust web channel -- the owner decides
@@ -298,12 +341,13 @@ export function ApprovalCard({
               <Button
                 variant="outline"
                 size="sm"
-                onClick={() => setConfirming(null)}
+                onClick={dismissConfirm}
                 disabled={busy}
               >
                 Vazgeç
               </Button>
               <Button
+                ref={confirmRef}
                 size="sm"
                 variant={confirming === "reject" ? "destructive" : "default"}
                 onClick={() => void handleDecide(confirming)}
@@ -315,10 +359,15 @@ export function ApprovalCard({
           </CardFooter>
         ) : (
           <CardFooter className="flex justify-end gap-2">
-            <Button variant="outline" size="sm" onClick={() => setConfirming("reject")}>
+            <Button
+              ref={rejectRef}
+              variant="outline"
+              size="sm"
+              onClick={() => setConfirming("reject")}
+            >
               Reddet
             </Button>
-            <Button size="sm" onClick={() => setConfirming("approve")}>
+            <Button ref={approveRef} size="sm" onClick={() => setConfirming("approve")}>
               Onayla
             </Button>
           </CardFooter>

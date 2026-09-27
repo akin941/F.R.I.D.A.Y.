@@ -58,5 +58,16 @@ describe("pipelineStepStates", () => {
         }),
       ),
     ).toBe("pending_gate_b");
+    // A review had started (detail view knows): cancelled during review.
+    expect(
+      stoppedAtStep(
+        implJob({
+          status: "cancelled",
+          failure_reason: "killed",
+          gate_a: { id: "ga1", status: "approved", decided_at: "t" },
+        }),
+        1,
+      ),
+    ).toBe("pending_review");
   });
 });

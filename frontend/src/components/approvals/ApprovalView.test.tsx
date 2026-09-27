@@ -264,9 +264,10 @@ describe("ApprovalView", () => {
       job_id: "ij1",
       goal: "Add a health endpoint",
       repo_name: "jarvis",
+      repo_git_url: "git@example.test:me/jarvis.git",
       branch_name: "jarvis/impl-ij1",
       agent: "claude_code",
-      reviewer_agent: "codex_cli",
+      reviewer_agent: "",
     };
     vi.stubGlobal(
       "fetch",
@@ -282,9 +283,12 @@ describe("ApprovalView", () => {
     expect(await screen.findByText("Uygulama planı onayı (Kapı A)")).toBeInTheDocument();
     expect(screen.getByText("Add a health endpoint")).toBeInTheDocument();
     expect(screen.getByText("jarvis")).toBeInTheDocument();
+    // The repo name is only a label -- the real clone URL is shown too.
+    expect(screen.getByText("git@example.test:me/jarvis.git")).toBeInTheDocument();
     expect(screen.getByText("jarvis/impl-ij1")).toBeInTheDocument();
     expect(screen.getByText("Claude Code")).toBeInTheDocument();
-    expect(screen.getByText("Codex CLI")).toBeInTheDocument();
+    // No selectable reviewer ("") renders as a dash, never blank.
+    expect(screen.getByText("—")).toBeInTheDocument();
 
     await userEvent.click(screen.getByRole("button", { name: "Onayla" }));
     expect(screen.getByText(/ayrı bir gönderim onayı \(Kapı B\) olmadan/)).toBeInTheDocument();
@@ -322,6 +326,7 @@ describe("ApprovalView", () => {
     expect(screen.getByText(/Geçti \(çıkış kodu 0\)/)).toBeInTheDocument();
     expect(screen.getByText("Onaylandı", { selector: "span.font-medium" })).toBeInTheDocument();
     expect(screen.getByText("Looks correct.")).toBeInTheDocument();
+    expect(screen.getByText("Jarvis'in kendi özeti (model üretimi).")).toBeInTheDocument();
     expect(screen.getByText("0123456789ab")).toBeInTheDocument();
 
     await userEvent.click(screen.getByRole("button", { name: "Onayla" }));
@@ -360,7 +365,13 @@ describe("ApprovalView", () => {
     expect(
       await screen.findByText("İş durumu: Başarısız — Gönderim (push) başarısız"),
     ).toBeInTheDocument();
-    expect(screen.getByText("Gönderim hatası: remote rejected")).toBeInTheDocument();
+    // The raw git error sits in a collapsed "Teknik ayrıntı" disclosure as
+    // preformatted text, not inline prose.
+    expect(screen.getByText("Gönderim başarısız.")).toBeInTheDocument();
+    const detailText = screen.getByText("remote rejected");
+    expect(detailText.tagName).toBe("PRE");
+    expect(detailText.closest("details")).not.toHaveAttribute("open");
+    expect(screen.queryByText(/Gönderim hatası: remote rejected/)).not.toBeInTheDocument();
     expect(screen.getByText("İş durumu: Tamamlandı")).toBeInTheDocument();
     expect(screen.queryByText(/undefined/)).not.toBeInTheDocument();
     expect(screen.queryByText(/yazıldı/)).not.toBeInTheDocument();
@@ -499,5 +510,40 @@ describe("ApprovalView", () => {
     expect(
       await screen.findByText(/İstenen onay isteği bu çalışma alanında bulunamadı/),
     ).toBeInTheDocument();
+  });
+
+  it("moves focus into the confirmation and back to the trigger on Vazgeç", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse([approvalRequest()])));
+
+    render(<ApprovalView />);
+    await screen.findByText("vault_export");
+
+    await userEvent.click(screen.getByRole("button", { name: "Reddet" }));
+    expect(screen.getByRole("button", { name: "Evet, reddet" })).toHaveFocus();
+    await userEvent.click(screen.getByRole("button", { name: "Vazgeç" }));
+    expect(screen.getByRole("button", { name: "Reddet" })).toHaveFocus();
+
+    await userEvent.click(screen.getByRole("button", { name: "Onayla" }));
+    expect(screen.getByRole("button", { name: "Evet, onayla" })).toHaveFocus();
+    await userEvent.keyboard("{Shift>}{Tab}{/Shift}{Enter}");
+    expect(screen.getByRole("button", { name: "Onayla" })).toHaveFocus();
+  });
+
+  it("does not crash when a harness request's display_summary is null (non-curator)", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        jsonResponse([
+          approvalRequest({ tool_name: "harness_push", display_summary: null, execution: null }),
+          approvalRequest({ id: "r2", tool_name: "harness_implement", display_summary: null }),
+        ]),
+      ),
+    );
+    workspaceHolder.current = { id: "w1", name: "Alice", type: "personal", role: "member" };
+
+    render(<ApprovalView />);
+
+    expect(await screen.findByText("Gönderim onayı (Kapı B)")).toBeInTheDocument();
+    expect(screen.getAllByText("Bu istek için özet bilgisi yok.")).toHaveLength(2);
   });
 });

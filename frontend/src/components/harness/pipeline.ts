@@ -25,14 +25,18 @@ const FAILURE_STAGE: Partial<Record<ImplFailureReason, ImplStatus>> = {
 
 /**
  * The pipeline step a failed/cancelled job stopped at: the failure reason
- * when it pins one down, otherwise inferred from how far the gates got.
+ * when it pins one down, otherwise inferred from how far the job got --
+ * its gates, and (detail view only) whether a review had started, so a
+ * job cancelled during review stops at "İnceleme", not "Uygulama".
  */
 export function stoppedAtStep(
   job: Pick<ApiImplementationJob, "failure_reason" | "gate_a" | "gate_b">,
+  reviewCount = 0,
 ): ImplStatus {
   const fromReason = FAILURE_STAGE[job.failure_reason];
   if (fromReason) return fromReason;
   if (job.gate_b) return job.gate_b.status === "approved" ? "pushing" : "pending_gate_b";
+  if (reviewCount > 0) return "pending_review";
   if (job.gate_a?.status === "approved") return "implementing";
   return "pending_gate_a";
 }
@@ -40,9 +44,10 @@ export function stoppedAtStep(
 /** Per-step state for the stepper over the linear happy path. */
 export function pipelineStepStates(
   job: Pick<ApiImplementationJob, "status" | "failure_reason" | "gate_a" | "gate_b">,
+  reviewCount = 0,
 ): { step: ImplStatus; state: PipelineStepState }[] {
   const terminalStop = job.status === "failed" || job.status === "cancelled";
-  const anchor = terminalStop ? stoppedAtStep(job) : job.status;
+  const anchor = terminalStop ? stoppedAtStep(job, reviewCount) : job.status;
   const anchorIndex = IMPL_PIPELINE_STEPS.indexOf(anchor);
   return IMPL_PIPELINE_STEPS.map((step, index) => {
     let state: PipelineStepState;

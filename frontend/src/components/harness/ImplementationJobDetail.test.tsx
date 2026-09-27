@@ -292,6 +292,73 @@ describe("ImplementationJobDetail", () => {
 
     renderDetail();
 
-    expect(await screen.findByText("Gönderim başarısız: remote rejected")).toBeInTheDocument();
+    expect(await screen.findByText("Gönderim başarısız.")).toBeInTheDocument();
+    const detailText = screen.getByText("remote rejected");
+    expect(detailText.tagName).toBe("PRE");
+    expect(detailText.closest("details")).not.toHaveAttribute("open");
+  });
+
+  it("shows a dash when no reviewer was selectable", async () => {
+    stubDetail(implDetail({ reviewer_agent: "" }));
+
+    renderDetail();
+
+    expect(
+      await screen.findByText("Depo: jarvis · Uygulayıcı: Claude Code · İnceleyici: —"),
+    ).toBeInTheDocument();
+  });
+
+  it("places a job cancelled during review at the review step", async () => {
+    stubDetail(
+      implDetail({
+        status: "cancelled",
+        failure_reason: "killed",
+        gate_a: { id: "ga1", status: "approved", decided_at: "t" },
+        reviews: [review({ status: "running", verdict: "", summary: "", findings: [] })],
+      }),
+    );
+
+    renderDetail();
+    await screen.findByText("İptal edildi — Durduruldu");
+
+    const steps = within(screen.getByRole("list", { name: "İş hattı" })).getAllByRole("listitem");
+    expect(steps.map((s) => s.getAttribute("data-state"))).toEqual([
+      "done",
+      "done",
+      "stopped",
+      "upcoming",
+      "upcoming",
+      "upcoming",
+    ]);
+  });
+
+  it("moves focus into the cancel prompt and back to the trigger on Vazgeç", async () => {
+    stubDetail(implDetail());
+
+    renderDetail();
+    await userEvent.click(await screen.findByRole("button", { name: "İşi iptal et" }));
+
+    expect(screen.getByRole("button", { name: "Evet, iptal et" })).toHaveFocus();
+    await userEvent.click(screen.getByRole("button", { name: "Vazgeç" }));
+    expect(screen.getByRole("button", { name: "İşi iptal et" })).toHaveFocus();
+  });
+
+  it("pairs each transcript disclosure with the region it controls", async () => {
+    stubDetail(FULL);
+
+    renderDetail();
+    const toggle = await screen.findByRole("button", {
+      name: "Uygulayıcının ham çıktısını göster",
+    });
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    const regionId = toggle.getAttribute("aria-controls");
+    expect(regionId).toBeTruthy();
+
+    await userEvent.click(toggle);
+
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    expect(document.getElementById(regionId!)).toContainElement(
+      screen.getByText("implementer raw output"),
+    );
   });
 });

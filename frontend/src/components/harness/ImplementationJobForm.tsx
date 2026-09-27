@@ -83,8 +83,8 @@ export function ImplementationJobForm({
               <span>
                 Uygulama iki ayrı sahip onayı gerektirir: önce <strong>plan onayı (Kapı A)</strong>,
                 ajan çalışmaya başlamadan; sonra değişiklikler test edilip incelendikten sonra{" "}
-                <strong>gönderim onayı (Kapı B)</strong>, dal uzak depoya gönderilmeden. Onaylar
-                Onaylar sayfasından verilir.
+                <strong>gönderim onayı (Kapı B)</strong>, dal uzak depoya gönderilmeden. Her iki
+                karar da Onaylar sayfasından verilir.
               </span>
               <span>
                 Uygulayıcı: Claude Code · İnceleyici: Codex CLI (sabit; seçilemez).

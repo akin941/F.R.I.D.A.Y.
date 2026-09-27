@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useId, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 
@@ -26,6 +26,7 @@ export function LowTrustTranscript({
   warning: string;
 }) {
   const [open, setOpen] = useState(false);
+  const regionId = useId();
 
   return (
     <div className="flex flex-col gap-2">
@@ -35,12 +36,13 @@ export function LowTrustTranscript({
         size="sm"
         className="self-start"
         aria-expanded={open}
+        aria-controls={regionId}
         onClick={() => setOpen((v) => !v)}
       >
         {open ? hideLabel : showLabel}
       </Button>
       {open ? (
-        <div className="flex flex-col gap-1">
+        <div id={regionId} className="flex flex-col gap-1">
           <Alert>
             <AlertDescription>{warning}</AlertDescription>
           </Alert>

@@ -206,7 +206,7 @@ export function HarnessJobDetail({
                   text={rawTranscript}
                   showLabel="Ham çıktıyı göster"
                   hideLabel="Ham çıktıyı gizle"
-                  warning="Bu, ajanın kendi ham çıktısıdır — güvenilmeyen içerik olarak ele alınmalı, yukarıdaki özet ve bulgular gibi doğrulanmış kabul edilmemelidir."
+                  warning="Bu, ajanın kendi ham çıktısıdır ve güvenilmeyen içerik olarak ele alınmalıdır. Yukarıdaki özet ve bulgular ise Jarvis'in kendi özetidir (model üretimi); ikisini birbirine karıştırma."
                 />
               ) : null}
             </section>
