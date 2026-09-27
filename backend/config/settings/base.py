@@ -119,6 +119,17 @@ CELERY_RESULT_BACKEND = REDIS_URL
 CELERY_TASK_ALWAYS_EAGER = env.bool("CELERY_TASK_ALWAYS_EAGER", default=False)
 CELERY_TASK_EAGER_PROPAGATES = env.bool("CELERY_TASK_EAGER_PROPAGATES", default=False)
 
+# Harness runner queue (Phase 3 branch 8, ADR-008 decision 7's runner
+# abstraction): every `harness.tasks.*` task -- job execution AND the
+# recovery scans, which also call `docker` -- is routed to its own queue,
+# consumed only by a worker running on a registered runner host that has
+# Docker and the harness images (first runner: the owner's Mac, `make
+# harness-runner`). The compose worker has no Docker socket and consumes
+# only the default queue, so it can never pick up a harness task and fail
+# it. With no runner running, harness jobs simply wait `pending`.
+HARNESS_CELERY_QUEUE = env("HARNESS_CELERY_QUEUE", default="harness")
+CELERY_TASK_ROUTES = {"harness.tasks.*": {"queue": HARNESS_CELERY_QUEUE}}
+
 # --- API / auth ---
 
 REST_FRAMEWORK = {
