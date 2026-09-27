@@ -39,6 +39,16 @@ def test_self_and_other_repos_are_labeled(owner, workspace, settings, web_client
     assert status_by_name(web_client(owner), workspace) == {"jarvis": "self", "site": "other"}
 
 
+def test_malformed_legacy_url_is_reported_as_other(owner, workspace, settings, web_client):
+    """A legacy row whose URL cannot be canonicalized never names this
+    installation's remote: the serializer reports "other" instead of
+    failing the whole list."""
+    settings.HARNESS_SELF_REPO_IDENTIFIERS = [SELF_URL]
+    HarnessRepo.objects.create(workspace=workspace, name="legacy", git_url="https://[::1/x")
+
+    assert status_by_name(web_client(owner), workspace) == {"legacy": "other"}
+
+
 def test_unconfigured_identifiers_are_reported(owner, workspace, settings, web_client):
     settings.HARNESS_SELF_REPO_IDENTIFIERS = []
     HarnessRepo.objects.create(workspace=workspace, name="site", git_url="git@example.com:x/y.git")

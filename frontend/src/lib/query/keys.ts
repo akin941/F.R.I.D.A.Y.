@@ -23,7 +23,6 @@ export const queryKeys = {
   implementationJob: (workspaceId: string, jobId: string) =>
     [workspaceId, "harness", "implementation-jobs", jobId] as const,
   harnessRepos: (workspaceId: string) => [workspaceId, "harness", "repos"] as const,
-  approvals: (workspaceId: string) => [workspaceId, "approvals"] as const,
   trashTasks: (workspaceId: string) => [workspaceId, "trash", "tasks"] as const,
   trashDocuments: (workspaceId: string) => [workspaceId, "trash", "documents"] as const,
   conversations: (workspaceId: string) => [workspaceId, "conversations"] as const,
