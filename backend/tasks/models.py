@@ -59,6 +59,21 @@ class Task(WorkspaceScopedModel, TimestampedModel):
         on_delete=models.SET_NULL,
         related_name="tasks_created",
     )
+    # The chat draft this task was confirmed from (Phase 4 branch 4). A
+    # nullable UNIQUE link (OneToOneField), set only by the verified
+    # `draft_message_id` create path: the unique constraint is what makes
+    # confirming a draft idempotent -- a second confirm of the same draft,
+    # even a concurrent one, can never create a second task. It also lets a
+    # reloaded chat re-render the draft as "confirmed" (reverse accessor
+    # `confirmed_task` on the message). SET_NULL, not CASCADE: deleting a
+    # conversation must never take the owner's tasks with it.
+    source_message = models.OneToOneField(
+        "assistant.Message",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="confirmed_task",
+    )
     # Soft delete (ADR-009): deleting moves the task to the trash; it is
     # purged permanently TRASH_RETENTION_DAYS later (beat) or by an approved
     # `purge_trash` request. The default manager hides trashed rows.

@@ -104,12 +104,28 @@ export interface ApiRemoteKeyState {
   key?: string;
 }
 
+// Which channel a turn arrived over (backend Message.Channel, MVP 9 §1).
+export type MessageChannel = "web" | "cli" | "telegram";
+
+export type MessageIntent =
+  | ""
+  | "chat"
+  | "memory_query"
+  | "knowledge_query"
+  | "task_draft"
+  | "tool_request";
+
 export interface ApiConversation {
   id: string;
   workspace: string;
   title: string;
   created_by: string | null;
   created_at: string;
+  // One-way (false -> true only): a private conversation feeds no memory.
+  private: boolean;
+  // The first message's channel (Phase 4 branch 4 channel badge); null
+  // until the conversation has a message.
+  origin_channel: MessageChannel | null;
 }
 
 export type MessageRole = "user" | "assistant" | "system";
@@ -136,6 +152,18 @@ export interface ApiMessage {
   // renders this yet -- it's the data a future "from Workspace X" view
   // would need, not a redefinition of memories_used's own contract.
   overlay_source_workspaces: Record<string, string>;
+  // The router's classification of a USER message (MVP 6 §1) and its
+  // frozen payload: `{title, due_date}` for task_draft, `{tool_name,
+  // payload}` for tool_request, `{}` otherwise.
+  intent: MessageIntent;
+  intent_payload: Record<string, unknown>;
+  channel: MessageChannel;
+  // The task confirmed from this task-draft message (Task.source_message),
+  // or null -- how a reloaded chat knows a draft was already confirmed.
+  confirmed_task: string | null;
+  // {chunk_id: document_id} for this reply's chunks_used, resolved in the
+  // conversation's scope; a chunk whose document is gone is absent.
+  chunk_documents: Record<string, string>;
 }
 
 export type ChatStreamEvent =

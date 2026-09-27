@@ -63,6 +63,16 @@ describe("Markdown sanitization", () => {
     expect(container.querySelector('input[type="checkbox"]')).not.toBeNull();
   });
 
+  it("is streaming-safe: an unclosed fence renders as code until it closes", () => {
+    const partial = renderMd("Şöyle:\n\n```ts\nconst a = 1;\nconst b");
+    expect(partial.querySelector("pre code")).toHaveTextContent("const a = 1; const b");
+    expect(partial.querySelector("p")).toHaveTextContent("Şöyle:");
+
+    const closed = renderMd("Şöyle:\n\n```ts\nconst a = 1;\n```\n\nSonra *metin*.");
+    expect(closed.querySelectorAll("pre")).toHaveLength(1);
+    expect(closed.querySelector("em")).toHaveTextContent("metin");
+  });
+
   it("renders fenced code with a working copy button", async () => {
     const writeText = vi.fn(async () => undefined);
     const user = userEvent.setup();

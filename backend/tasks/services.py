@@ -39,7 +39,7 @@ channel (`channel` is a required argument, never defaulted).
 from datetime import timedelta
 
 from django.conf import settings
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.utils import timezone
 
 from audit.models import AuditLog
@@ -52,6 +52,14 @@ _CURATOR_ROLES = {WorkspaceMember.Role.OWNER, WorkspaceMember.Role.ADMIN}
 _WRITER_ROLES = _CURATOR_ROLES | {WorkspaceMember.Role.MEMBER}
 
 EDITABLE_FIELDS = ("title", "description", "due_date", "priority")
+
+
+def _is_source_message_unique_violation(exc: IntegrityError) -> bool:
+    cause = exc.__cause__
+    if getattr(cause, "sqlstate", None) != "23505":  # unique_violation
+        return False
+    constraint = getattr(getattr(cause, "diag", None), "constraint_name", None) or ""
+    return "source_message" in constraint
 
 
 class TaskServiceError(Exception):
@@ -68,6 +76,17 @@ class TaskPermissionDenied(TaskServiceError):
     """Actor's role does not allow the action -> 403."""
 
     code = "task.permission_denied"
+
+
+class DraftAlreadyConfirmed(TaskServiceError):
+    """The chat draft already produced a task (Phase 4 branch 4) -> 400.
+
+    Raised by `create_task` when `Task.source_message`'s unique constraint
+    rejects a second task for the same draft message -- the constraint, not
+    a read-then-write check, is the guard, so two concurrent confirms of one
+    draft still create exactly one task."""
+
+    code = "task.draft_already_confirmed"
 
 
 def get_role(actor, workspace):
@@ -152,23 +171,42 @@ def create_task(
     due_date=None,
     priority=Task.Priority.NORMAL,
     source=Task.Source.USER_CREATED,
+    source_message=None,
 ):
     """`source` is never derived from a client-asserted value — the view
     resolves it (via `tasks.serializers.TaskCreateSerializer`'s server-side
     `draft_message_id` verification, MVP 6 §3) and passes the already-decided
     value in, exactly like `status`/`created_by` are already server-decided
-    rather than client input."""
+    rather than client input.
+
+    `source_message` (Phase 4 branch 4) is that same already-verified draft
+    message, never a client value; it is only ever passed together with
+    `source=ai_suggested`. A second task for the same message violates
+    `Task.source_message`'s unique constraint and raises
+    `DraftAlreadyConfirmed` -- no second row, no second audit entry."""
     _require(get_role(actor, workspace) in _WRITER_ROLES, "creating tasks")
-    task = Task.objects.create(
-        workspace=workspace,
-        title=title,
-        description=description,
-        due_date=due_date,
-        priority=priority,
-        source=source,
-        status=Task.Status.OPEN,
-        created_by=actor,
-    )
+    try:
+        # A savepoint of its own: the IntegrityError must roll back only the
+        # failed INSERT, leaving the caller's transaction usable.
+        with transaction.atomic():
+            task = Task.objects.create(
+                workspace=workspace,
+                title=title,
+                description=description,
+                due_date=due_date,
+                priority=priority,
+                source=source,
+                source_message=source_message,
+                status=Task.Status.OPEN,
+                created_by=actor,
+            )
+    except IntegrityError as exc:
+        # Only the unique violation on this column means "already confirmed";
+        # anything else is a real error and propagates. Keyed off the
+        # driver's SQLSTATE + constraint name, not the message wording.
+        if source_message is not None and _is_source_message_unique_violation(exc):
+            raise DraftAlreadyConfirmed("This draft has already been confirmed.") from exc
+        raise
     _record(task, "task.created", actor, source=source)
     return task
 
@@ -255,7 +293,13 @@ def delete_task(*, task, actor, channel):
         "deleting this task",
     )
     task.deleted_at = timezone.now()
-    task.save(update_fields=["deleted_at", "updated_at"])
+    # Trashing releases the chat draft it was confirmed from (Phase 4
+    # branch 4 x ADR-009): the draft reads as unconfirmed again and can be
+    # re-confirmed; restoring the trashed task brings it back as an
+    # independent task (the unique link is not re-taken, so a restore can
+    # never collide with a re-confirmed task).
+    task.source_message = None
+    task.save(update_fields=["deleted_at", "source_message", "updated_at"])
     _record(task, "task.deleted", actor, retention_days=settings.TRASH_RETENTION_DAYS)
     return task
 

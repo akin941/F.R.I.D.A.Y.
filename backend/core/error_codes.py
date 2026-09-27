@@ -64,6 +64,7 @@ DOMAIN_ERROR_CODES = frozenset(
         "memory.duplicate",
         "task.permission_denied",
         "task.invalid_transition",
+        "task.draft_already_confirmed",
         "workspace.permission_denied",
     }
 )

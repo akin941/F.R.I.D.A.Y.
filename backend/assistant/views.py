@@ -1,5 +1,7 @@
 import uuid
 
+from django.db import transaction
+from django.db.models import F, OuterRef, Subquery
 from django.http import StreamingHttpResponse
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
@@ -22,10 +24,12 @@ from assistant.services import (
     classify_intent,
     create_conversation,
     mark_conversation_private,
+    rename_conversation,
     stream_assistant_reply,
 )
 from core.channels import is_low_trust, request_channel, scoped_for_actor
 from core.throttling import ScopedRateThrottle
+from knowledge.models import KnowledgeChunk
 from workspaces.models import Workspace
 
 # Allowlisted for PAT auth (MVP 9 §1/§2). PersonalAccessTokenAuthentication
@@ -40,6 +44,15 @@ _PAT_ALLOWLISTED_AUTHENTICATION_CLASSES = [
 ]
 
 
+def with_origin_channel(conversations):
+    """Annotate each conversation with `origin_channel`: the channel of its
+    first message (Phase 4 branch 4's channel badge -- a conversation started
+    from the CLI, Telegram or a facade client). One correlated subquery, so
+    the list stays a single query."""
+    first_message = Message.objects.filter(conversation=OuterRef("pk")).order_by("created_at", "id")
+    return conversations.annotate(origin_channel=Subquery(first_message.values("channel")[:1]))
+
+
 def _get_conversation(request, conversation_id):
     # By-id lookup, no workspace parameter at all -- scoped_for_actor still
     # forces a channel-bound request to its bound workspace, so a PAT bound
@@ -47,7 +60,9 @@ def _get_conversation(request, conversation_id):
     # (round-2 P1 fix). Shared by every conversation-detail view (Phase 1
     # p1-work-log's ConversationDetailView reuses this rather than
     # duplicating it a second time).
-    return scoped_for_actor(request, Conversation.objects).filter(id=conversation_id).first()
+    return with_origin_channel(
+        scoped_for_actor(request, Conversation.objects).filter(id=conversation_id)
+    ).first()
 
 
 class ConversationListCreateView(APIView):
@@ -74,8 +89,8 @@ class ConversationListCreateView(APIView):
                     {"detail": "workspace must be a valid UUID."},
                     status=status.HTTP_400_BAD_REQUEST,
                 )
-        conversations = scoped_for_actor(
-            request, Conversation.objects, workspace=workspace_uuid
+        conversations = with_origin_channel(
+            scoped_for_actor(request, Conversation.objects, workspace=workspace_uuid)
         ).order_by("-created_at", "-id")
         return Response(ConversationSerializer(conversations, many=True).data)
 
@@ -113,9 +128,11 @@ class ConversationListCreateView(APIView):
 
 
 class ConversationDetailView(APIView):
-    """Retrieve + private-flag-only update (Phase 1 p1-work-log — closes
-    MASTER_PLAN §O's private-conversation-flag half). No other field is
-    writable here; `title` editing, if ever added, is a separate concern.
+    """Retrieve + update (Phase 1 p1-work-log's one-way private flag —
+    closes MASTER_PLAN §O's private-conversation-flag half — and Phase 4
+    branch 4's rename). `title` and `private` are the only writable fields;
+    both writes happen in one transaction, so a combined PATCH either
+    applies fully or not at all.
     """
 
     permission_classes = [IsAuthenticated]
@@ -133,8 +150,16 @@ class ConversationDetailView(APIView):
             return Response(status=status.HTTP_404_NOT_FOUND)
         serializer = ConversationUpdateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        updated = mark_conversation_private(conversation=conversation, actor=request.user)
-        return Response(ConversationSerializer(updated).data)
+        with transaction.atomic():
+            if "title" in serializer.validated_data:
+                rename_conversation(
+                    conversation=conversation,
+                    actor=request.user,
+                    title=serializer.validated_data["title"],
+                )
+            if serializer.validated_data.get("private"):
+                mark_conversation_private(conversation=conversation, actor=request.user)
+        return Response(ConversationSerializer(_get_conversation(request, conversation.id)).data)
 
 
 class ConversationMessageListView(APIView):
@@ -164,12 +189,24 @@ class ConversationMessageListView(APIView):
         conversation = _get_conversation(request, conversation_id)
         if conversation is None:
             return Response(status=status.HTTP_404_NOT_FOUND)
-        messages = (
+        messages = list(
             scoped_for_actor(request, Message.objects, workspace=conversation.workspace)
             .filter(conversation=conversation)
+            .annotate(confirmed_task_ref=F("confirmed_task__id"))
             .order_by("created_at", "id")
         )
         data = MessageSerializer(messages, many=True).data
+        chunk_documents = self._chunk_documents(request, conversation, messages)
+        for message in data:
+            # {chunk_id: document_id} for this reply's `chunks_used` (Phase 4
+            # branch 4's "Kaynaklar" deep links into /knowledge). Resolved
+            # through the same scope as the conversation; a chunk whose
+            # document is gone is simply absent (rendered without a link).
+            message["chunk_documents"] = {
+                chunk_id: chunk_documents[chunk_id]
+                for chunk_id in message["chunks_used"]
+                if chunk_id in chunk_documents
+            }
         if is_low_trust(request) or request.user.id != conversation.workspace.owner_id:
             # overlay_source_workspaces (p1-personal-overlay) only ever
             # makes sense for the workspace OWNER: the overlay itself only
@@ -193,6 +230,24 @@ class ConversationMessageListView(APIView):
             for message in data:
                 message["overlay_source_workspaces"] = {}
         return Response(data)
+
+    @staticmethod
+    def _chunk_documents(request, conversation, messages):
+        chunk_ids = set()
+        for message in messages:
+            for chunk_id in message.chunks_used or []:
+                try:
+                    chunk_ids.add(uuid.UUID(str(chunk_id)))
+                except ValueError:
+                    continue
+        if not chunk_ids:
+            return {}
+        rows = (
+            scoped_for_actor(request, KnowledgeChunk.objects, workspace=conversation.workspace)
+            .filter(id__in=chunk_ids)
+            .values_list("id", "document_id")
+        )
+        return {str(chunk_id): str(document_id) for chunk_id, document_id in rows}
 
     def post(self, request, conversation_id):
         conversation = _get_conversation(request, conversation_id)

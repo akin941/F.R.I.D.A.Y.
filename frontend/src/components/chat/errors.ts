@@ -1,8 +1,6 @@
-const ERROR_MESSAGES: Record<string, string> = {
-  no_provider: "Şu anda yapılandırılmış bir yapay zeka sağlayıcısı yok. Lütfen daha sonra tekrar deneyin.",
-  client_disconnect: "Bağlantı kesildi.",
-};
+import { tr } from "@/lib/i18n/tr";
 
+/** Turkish text for an SSE `error` event's `error_type`. */
 export function mapErrorType(errorType: string): string {
-  return ERROR_MESSAGES[errorType] ?? "Asistan beklenmedik bir hatayla karşılaştı. Lütfen tekrar deneyin.";
+  return tr.chat.streamErrors[errorType] ?? tr.chat.streamFailed;
 }

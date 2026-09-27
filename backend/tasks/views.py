@@ -14,6 +14,7 @@ from core.permissions import IsWebChannel
 from tasks.models import Task
 from tasks.serializers import TaskCreateSerializer, TaskEditSerializer, TaskSerializer
 from tasks.services import (
+    DraftAlreadyConfirmed,
     InvalidTransition,
     TaskPermissionDenied,
     cancel_task,
@@ -46,7 +47,7 @@ _PRIORITY_ORDER = Case(
 def _service_error_response(exc):
     if isinstance(exc, TaskPermissionDenied):
         return service_error_response(exc, status.HTTP_403_FORBIDDEN)
-    if isinstance(exc, InvalidTransition):
+    if isinstance(exc, InvalidTransition | DraftAlreadyConfirmed):
         return service_error_response(exc, status.HTTP_400_BAD_REQUEST)
     raise exc
 
@@ -89,11 +90,11 @@ def _parse_date_param(request, name):
 
 def _resolve_draft_source(request, workspace, draft_message_id):
     """Resolve `TaskCreateSerializer`'s optional `draft_message_id` reference
-    into a `Task.Source` value (MVP 6 §3). Returns `(source, error_response)`
-    — exactly one is non-`None`.
+    into a `(source, source_message, error_response)` triple (MVP 6 §3,
+    Phase 4 branch 4) — either `error_response` is `None` or both others are.
 
     `draft_message_id` absent (`None`) is the ordinary manual-create path,
-    unchanged: `(Task.Source.USER_CREATED, None)`. Present but failing
+    unchanged: `(Task.Source.USER_CREATED, None, None)`. Present but failing
     verification (message not found, wrong actor, wrong workspace, wrong
     `intent`) is a hard 400 with NO `Task` row created — never a silent
     downgrade to `user_created`, which could let a confirm click that should
@@ -102,9 +103,13 @@ def _resolve_draft_source(request, workspace, draft_message_id):
     exists to prevent). `created_by=request.user` enforces "same actor": the
     referenced message must be this requester's own drafted message, not
     merely any message visible in the workspace.
+
+    The verified message is returned so `create_task` can link it as
+    `Task.source_message`; a draft that already has a task is refused there
+    (`DraftAlreadyConfirmed`, by the unique constraint), not here.
     """
     if draft_message_id is None:
-        return Task.Source.USER_CREATED, None
+        return Task.Source.USER_CREATED, None, None
 
     draft_message = (
         Message.objects.for_actor(request.user, workspace=workspace)
@@ -112,11 +117,15 @@ def _resolve_draft_source(request, workspace, draft_message_id):
         .first()
     )
     if draft_message is None:
-        return None, Response(
-            {"detail": "draft_message_id does not reference a valid task_draft message."},
-            status=status.HTTP_400_BAD_REQUEST,
+        return (
+            None,
+            None,
+            Response(
+                {"detail": "draft_message_id does not reference a valid task_draft message."},
+                status=status.HTTP_400_BAD_REQUEST,
+            ),
         )
-    return Task.Source.AI_SUGGESTED, None
+    return Task.Source.AI_SUGGESTED, draft_message, None
 
 
 class TaskListCreateView(APIView):
@@ -160,7 +169,7 @@ class TaskListCreateView(APIView):
         if workspace is None:
             return Response(status=status.HTTP_404_NOT_FOUND)
 
-        source, error = _resolve_draft_source(
+        source, source_message, error = _resolve_draft_source(
             request, workspace, serializer.validated_data["draft_message_id"]
         )
         if error is not None:
@@ -175,8 +184,9 @@ class TaskListCreateView(APIView):
                 due_date=serializer.validated_data["due_date"],
                 priority=serializer.validated_data["priority"],
                 source=source,
+                source_message=source_message,
             )
-        except (TaskPermissionDenied, InvalidTransition) as exc:
+        except (TaskPermissionDenied, InvalidTransition, DraftAlreadyConfirmed) as exc:
             return _service_error_response(exc)
         return Response(TaskSerializer(task).data, status=status.HTTP_201_CREATED)
 
