@@ -77,6 +77,9 @@ class ConnectorWriteExecution(WorkspaceScopedModel, TimestampedModel):
         PROTOCOL_ERROR = "protocol_error"
         TOOL_ERROR = "tool_error"
         WORKER_LOST = "worker_lost"
+        # A write's precondition (Phase 5 branch 5): the PR's remote head
+        # is no longer the SHA the owner approved -- nothing was sent.
+        HEAD_MOVED = "head_moved"
         UNKNOWN = "unknown"
 
     TERMINAL = frozenset({Status.SUCCEEDED, Status.FAILED, Status.UNKNOWN_OUTCOME})

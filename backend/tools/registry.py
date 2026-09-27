@@ -200,12 +200,19 @@ class ReadResult:
     The connectors framework serializes `structuredContent` into `text`
     itself, so one size bound covers both: `text` is already bounded to
     `CONNECTOR_RESULT_MAX_CHARS`, `size` is its length before bounding and
-    `truncated` says whether anything was cut (Phase 5 branch 4)."""
+    `truncated` says whether anything was cut (Phase 5 branch 4).
+
+    `data_class` (Phase 5 branch 5) is set when this one call's data is of
+    a stricter class than the spec's own -- a GitHub read of a `sensitive`
+    `HarnessRepo` is `personal` although the connector is `firm` (brief
+    D7/D5). Empty means "the spec's `data_class`"; a caller treats the
+    stricter of the two as the call's class."""
 
     text: str
     structured: Any = None
     size: int = 0
     truncated: bool = False
+    data_class: str = ""
 
 
 @dataclass(frozen=True)

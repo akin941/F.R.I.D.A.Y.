@@ -34,6 +34,8 @@ from connectors import mcp_client
 from connectors.manifest import ScopeError
 from connectors.services import enabled_binding, record_listing, tool_available
 from tools.registry import (
+    DATA_CLASS_PERSONAL,
+    READ_CHANNELS,
     ReadResult,
     ReadToolError,
     ReadToolSpec,
@@ -88,7 +90,25 @@ def compose_result_text(texts, structured):
     return text, size, False
 
 
-def perform_read(manifest, policy, *, workspace, actor, args, channel):
+def parse_json_result(result):
+    """A server result as data: its `structuredContent`, else the JSON of
+    its first text block, else `None` -- for Jarvis's own programmatic uses
+    (a PR's number, a head SHA, CI runs), never for a prompt."""
+    if result.structured is not None:
+        return result.structured
+    for text in result.texts:
+        try:
+            return json.loads(text)
+        except (TypeError, ValueError):
+            continue
+    return None
+
+
+def perform_read(manifest, policy, *, workspace, actor, args, channel, as_data=False):
+    """One audited read. `as_data=True` (Jarvis-internal callers: the
+    harness PR panel, the deploy snapshot) returns the parsed JSON in
+    `ReadResult.structured` instead of bounded text; the same refusals,
+    pin check and audit row apply."""
     started = time.monotonic()
     binding = enabled_binding(workspace, manifest.name)
     audit = {
@@ -108,6 +128,13 @@ def perform_read(manifest, policy, *, workspace, actor, args, channel):
             raise ReadToolError("not_available")
         clean = validate_arguments(manifest, policy, workspace, args)
         audit["args_sha256"] = arguments_sha256(clean)
+        data_class = policy.classify(workspace, clean) if policy.classify else ""
+        if data_class:
+            audit["data_class"] = data_class
+        # A call classified personal is held to the personal channel set
+        # (web only), whatever the connector's own channels (D5).
+        if data_class == DATA_CLASS_PERSONAL and channel not in READ_CHANNELS[data_class]:
+            raise ReadToolError("channel_forbidden")
         try:
             result = mcp_client.call_tool(
                 manifest,
@@ -122,9 +149,13 @@ def perform_read(manifest, policy, *, workspace, actor, args, channel):
             raise ReadToolError(exc.code) from None
         if result.is_error:
             raise ReadToolError("tool_error")
+        if as_data:
+            data = parse_json_result(result)
+            audit["size"] = len(canonical_json(data)) if data is not None else 0
+            return ReadResult(text="", structured=data, data_class=data_class)
         text, size, truncated = compose_result_text(result.texts, result.structured)
         audit.update({"size": size, "truncated": truncated})
-        return ReadResult(text=text, size=size, truncated=truncated)
+        return ReadResult(text=text, size=size, truncated=truncated, data_class=data_class)
     except ReadToolError as exc:
         audit["outcome"] = exc.code
         raise

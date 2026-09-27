@@ -86,6 +86,20 @@ class ToolPolicy:
     renderer: Callable[[dict], list] | None = None
     records_work_log: bool = True
     gate_name: str = ""
+    # Phase 5 branch 5 (GitHub): optional per-call hooks, all Jarvis code.
+    # `classify(workspace, args) -> "firm" | "personal"`: a read whose
+    # arguments name personal-class data (a `sensitive` repo) is treated as
+    # `personal` for that call even on a `firm` connector (brief D7/D5).
+    classify: Callable[[Any, dict], str] | None = None
+    # A write's extra snapshot beyond the server arguments (e.g. the
+    # expected head SHA of a PR), validated by this strict serializer at
+    # request time and stored as `payload["context"]`; never sent.
+    context_serializer: Any = None
+    # `precondition(manifest, binding, payload) -> error_type | None`, run
+    # by the write task after the claim and before the one send; a returned
+    # code (a `ConnectorWriteExecution.ErrorType` value) ends the execution
+    # `failed` with nothing sent (e.g. GitHub's `head_moved`).
+    precondition: Callable[[Any, Any, dict], str | None] | None = None
 
 
 @dataclass(frozen=True)
@@ -197,6 +211,13 @@ def _validate_tool(manifest, policy):
         raise ValueError(f"{where}: schema_sha256 must be a 64-hex sha256 pin.")
     if policy.kind == TOOL_WRITE and not _GATE_RE.match(manifest.gate_name(policy)):
         raise ValueError(f"{where}: invalid gate name {manifest.gate_name(policy)!r}.")
+    if policy.context_serializer is not None and not (
+        isinstance(policy.context_serializer, type)
+        and issubclass(policy.context_serializer, serializers.Serializer)
+    ):
+        raise ValueError(f"{where}: context_serializer must be a DRF Serializer class.")
+    if policy.kind == TOOL_READ and (policy.context_serializer or policy.precondition):
+        raise ValueError(f"{where}: context and preconditions apply to writes only.")
 
 
 _MANIFESTS: dict[str, ConnectorManifest] = {}
