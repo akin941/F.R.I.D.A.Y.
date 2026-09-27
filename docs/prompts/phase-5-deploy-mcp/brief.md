@@ -2,7 +2,8 @@
 
 > Status: **Approved (2026-09-27) — Sonnet 5 plan-review round 3
 > APPROVE after two REVISE rounds (see "Plan-review rounds"; Codex CLI
-> is retired)**. Implementation waits for the precondition below.
+> is retired)**. Precondition met 2026-09-27 (Phase 4 merged to `main`,
+> PR #27); step-0 spikes recorded below.
 > Parent decisions: ADR-001, ADR-002 (import contracts), ADR-003
 > (single gateway door, ModelUsage), ADR-004 + ADR-008 decision 3
 > (gate-class vs confirm-class: every deploy, external send and git
@@ -749,7 +750,8 @@ MCP tool callable; a credential in the DB, a payload, audit or logs.
   code manifests, schema pins, Jarvis-authored descriptions, no sampling,
   per-sidecar credentials.
 - **R4 — Google OAuth friction.** A consent screen in "Testing" issues
-  refresh tokens that expire after 7 days; Gmail scopes are restricted
+  refresh tokens that expire after 7 days; `gmail.readonly` is restricted
+  (step-0 spike: the owner's personal use is exempt from verification)
   and an unverified personal app shows a warning; a forced verification
   review would be a multi-week external timeline. Runbook: "In
   production", unverified, single user; the health beat surfaces
@@ -770,6 +772,67 @@ MCP tool callable; a credential in the DB, a payload, audit or logs.
   says so.
 - **R9 — Phase size.** Ten branches; the minimum usable cut protects the
   deploy path.
+
+## Step-0 spikes (recorded 2026-09-27, before code)
+
+Vendor facts checked against official sources on 2026-09-27; detail and
+source URLs in the spike notes kept with the branch-4/branch-8 PRs.
+
+**Branch 4 — transport (D1, D2, D7).**
+- `github-mcp-server` (v1.12.2, `ghcr.io/github/github-mcp-server`,
+  pin by digest) has a Streamable-HTTP mode (`http` subcommand), but in
+  that mode it takes the token **only from each request's
+  `Authorization` header** — Jarvis would hold the PAT, which D1 forbids
+  (a sidecar holds only its own credential; R6: the PAT can merge via
+  REST). **Decision:** run it in **stdio mode inside its sidecar behind
+  our stdio↔HTTP bridge** (D1's stdio path), with
+  `GITHUB_PERSONAL_ACCESS_TOKEN` in the sidecar's env only. GitHub's
+  hosted endpoint is not used (its tool limits are client-sent headers).
+- Tool ceiling server-side: start with `--tools=` listing only the
+  pinned tools (merge, file-write, branch and workflow-trigger tools are
+  then unregistered); not `--read-only`, which would also drop
+  `create_pull_request`.
+- Pinned tools: `pull_request_read` (methods restricted by the manifest
+  to `get`, `get_status`, `get_check_runs`), `actions_list` /
+  `actions_get` (the old workflow-run tools were consolidated into
+  these), `get_commit` (takes a branch name → branch head; there is no
+  `get_branch`), `list_branches`, `list_commits`, `list_pull_requests`,
+  and the one write `create_pull_request`. Its `reviewers[]` and
+  `maintainer_can_modify` arguments are fixed by Jarvis (empty / false)
+  and shown in the dialog. Schemas have changed across minor releases
+  (e.g. `perPage` in v1.12.0) — the schema pins are needed.
+- MCP Python SDK: `mcp` 2.x (2.2.0, 2026-09-07) is the stable line; 1.x
+  is security-fix only. Target 2.x. Stable protocol `2026-07-28` is
+  stateless (`server/discover` replaces the initialize handshake/
+  sessions); the client is `mcp.client.streamable_http.
+  streamable_http_client(url, http_client=...)` with headers/timeouts on
+  its async HTTP client. `anyio.run()` per operation is sound (D2's
+  running-loop guard matches anyio's own requirement). The SDK still
+  pulls server-side packages, so the `mcp.server` import ban stays. It
+  refuses cross-origin redirects but follows same-origin 307/308: D1's
+  "follows no redirects" is enforced by our client configuration
+  (`follow_redirects=False` on the HTTP client), tested.
+
+**Branch 8 — Google (D9, R4).**
+- Verification does **not** block branch 8. Only `gmail.readonly` is a
+  restricted scope; `gmail.send`, `calendar.readonly` and
+  `calendar.events` are sensitive. An unverified External app used by
+  its own developer falls under Google's personal-use exemption: the
+  owner clicks through the "unverified app" screen; no security
+  assessment; cap of 100 new users.
+- In "In production" status the 7-day refresh-token expiry of "Testing"
+  does not apply. Tokens still end after 6 months unused, on a password
+  change (Gmail scopes), on revocation, or past 100 tokens per client per
+  account — the health beat maps `invalid_grant` to "reconnect with
+  `connect_google`".
+- Flow: Desktop-app OAuth client, loopback redirect on `127.0.0.1` with
+  a random port, PKCE S256 (out-of-band is blocked since 2023-01-31).
+  Installed apps get no incremental authorization: adding the send
+  scopes re-consents the full scope set and yields a new refresh token.
+  Users can decline individual scopes — the granted-scope check (D9)
+  covers it. Client secrets are shown once at creation; clients unused
+  for 6 months are deleted (the daily refresh counts as use). The IMAP
+  app-password fallback is not needed.
 
 ## Plan-review rounds (Sonnet 5, 2026-09-27)
 
