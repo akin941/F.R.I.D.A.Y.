@@ -187,7 +187,17 @@ CELERY_TASK_EAGER_PROPAGATES = env.bool("CELERY_TASK_EAGER_PROPAGATES", default=
 # only the default queue, so it can never pick up a harness task and fail
 # it. With no runner running, harness jobs simply wait `pending`.
 HARNESS_CELERY_QUEUE = env("HARNESS_CELERY_QUEUE", default="harness")
-CELERY_TASK_ROUTES = {"harness.tasks.*": {"queue": HARNESS_CELERY_QUEUE}}
+# Deploy runner queue (Phase 5 branch 6, brief D10): every `deploys.tasks.*`
+# task -- the SSH deploy run, the target `status` refresh and the recovery
+# scan -- goes to its own queue, consumed by the same runner process as the
+# harness queue (`make harness-runner`, `-Q harness,deploy`), so the deploy
+# SSH key lives only on the runner host, like HARNESS_GIT_SSH_KEY_PATH.
+# With no runner up, deploys wait `pending`.
+DEPLOY_CELERY_QUEUE = env("DEPLOY_CELERY_QUEUE", default="deploy")
+CELERY_TASK_ROUTES = {
+    "harness.tasks.*": {"queue": HARNESS_CELERY_QUEUE},
+    "deploys.tasks.*": {"queue": DEPLOY_CELERY_QUEUE},
+}
 
 
 def redis_cache_location(redis_url):
@@ -618,6 +628,34 @@ HARNESS_SELF_REPO_IDENTIFIERS = [
 # reached a terminal state -- a backstop, not the primary cleanup path
 # (every terminal transition cleans up its own worktree immediately).
 HARNESS_WORKTREE_RETENTION_HOURS = env.int("HARNESS_WORKTREE_RETENTION_HOURS", default=72)
+
+# --- Deploys (Phase 5 branch 6, ADR-010 decision 7, brief D10) ---
+
+# The private key the runner uses for the forced-command deploy account on
+# every DeployTarget, resolved from env only (never on a row, a payload or a
+# log). Empty by default: with no key configured every deploy run and status
+# refresh fails closed (`ssh_key_missing`) -- there is no ambient fallback
+# (no SSH agent, no ~/.ssh default key; see deploys/ssh.py).
+DEPLOY_SSH_KEY_PATH = env("DEPLOY_SSH_KEY_PATH", default="")
+# Per-invocation timeouts of the system `ssh` client. The deploy/rollback
+# verbs run the target's own build + restart commands, hence the long one.
+DEPLOY_SSH_CONNECT_TIMEOUT_SECONDS = env.int("DEPLOY_SSH_CONNECT_TIMEOUT_SECONDS", default=10)
+DEPLOY_SSH_STATUS_TIMEOUT_SECONDS = env.int("DEPLOY_SSH_STATUS_TIMEOUT_SECONDS", default=60)
+DEPLOY_SSH_HEALTH_TIMEOUT_SECONDS = env.int("DEPLOY_SSH_HEALTH_TIMEOUT_SECONDS", default=30)
+DEPLOY_SSH_DEPLOY_TIMEOUT_SECONDS = env.int("DEPLOY_SSH_DEPLOY_TIMEOUT_SECONDS", default=900)
+# The optional `health_url` GET (no redirects, no proxies from env).
+DEPLOY_HEALTH_URL_TIMEOUT_SECONDS = env.int("DEPLOY_HEALTH_URL_TIMEOUT_SECONDS", default=10)
+# Health checks are spaced evenly across a target's health window: window /
+# this many. At least 3, so three consecutive failures always span most of
+# the window (ADR-010: one blip never rolls back).
+DEPLOY_HEALTH_CHECKS_PER_WINDOW = env.int("DEPLOY_HEALTH_CHECKS_PER_WINDOW", default=4)
+# A claimed run's lease, renewed at every step. Must exceed the longest
+# single step (the deploy verb's timeout) with room to spare, or the
+# recovery scan could declare a live run lost (asserted in deploys.tasks).
+DEPLOY_RUN_LEASE_SECONDS = env.int("DEPLOY_RUN_LEASE_SECONDS", default=1200)
+# A `pending` run still unclaimed this long after its last update is
+# re-dispatched by the recovery scan (its on_commit publish was lost).
+DEPLOY_PENDING_RECOVERY_GRACE_SECONDS = env.int("DEPLOY_PENDING_RECOVERY_GRACE_SECONDS", default=60)
 
 # --- Telegram bot (MVP 9 §4) ---
 
