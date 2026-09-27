@@ -4,6 +4,8 @@ import { useCallback, useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Skeleton } from "@/components/ui/skeleton";
+import { LowTrustTranscript } from "@/components/harness/LowTrustTranscript";
+import type { ImplementationPrefill } from "@/components/harness/ImplementationJobForm";
 import {
   HARNESS_AGENT_LABELS,
   HARNESS_JOB_IN_FLIGHT_STATUSES,
@@ -25,15 +27,25 @@ import type { ApiHarnessJobDetail } from "@/types/api";
  * half of that structural guarantee -- the two are rendered in visibly
  * distinct blocks, never merged into one undifferentiated wall of text,
  * and the raw transcript is collapsed behind an explicit disclosure
- * rather than shown by default.
+ * rather than shown by default (shared `LowTrustTranscript`).
+ *
+ * `onRequestImplementation`: a finished discovery run can seed an
+ * implementation request (same repo + goal, linked via `discovery_job`).
  */
-export function HarnessJobDetail({ jobId, onBack }: { jobId: string; onBack: () => void }) {
+export function HarnessJobDetail({
+  jobId,
+  onBack,
+  onRequestImplementation,
+}: {
+  jobId: string;
+  onBack: () => void;
+  onRequestImplementation?: (prefill: ImplementationPrefill) => void;
+}) {
   const [job, setJob] = useState<ApiHarnessJobDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [cancelling, setCancelling] = useState(false);
   const [cancelError, setCancelError] = useState<string | null>(null);
-  const [showRawTranscript, setShowRawTranscript] = useState(false);
 
   const loadJob = useCallback(
     async (options?: { silent?: boolean }) => {
@@ -137,11 +149,26 @@ export function HarnessJobDetail({ jobId, onBack }: { jobId: string; onBack: () 
                 Ajan: {HARNESS_AGENT_LABELS[job.agent]}
               </p>
             </div>
-            {canCancel ? (
-              <Button variant="outline" onClick={() => void handleCancel()} disabled={cancelling}>
-                {cancelling ? "İptal ediliyor…" : "İşi iptal et"}
-              </Button>
-            ) : null}
+            <div className="flex flex-wrap gap-2">
+              {job.status === "succeeded" && onRequestImplementation ? (
+                <Button
+                  onClick={() =>
+                    onRequestImplementation({
+                      repo: job.repo,
+                      goal: job.goal,
+                      discoveryJobId: job.id,
+                    })
+                  }
+                >
+                  Uygulama iste
+                </Button>
+              ) : null}
+              {canCancel ? (
+                <Button variant="outline" onClick={() => void handleCancel()} disabled={cancelling}>
+                  {cancelling ? "İptal ediliyor…" : "İşi iptal et"}
+                </Button>
+              ) : null}
+            </div>
           </div>
 
           {cancelError ? (
@@ -173,30 +200,12 @@ export function HarnessJobDetail({ jobId, onBack }: { jobId: string; onBack: () 
                 </div>
               ) : null}
               {rawTranscript ? (
-                <div className="flex flex-col gap-2">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    className="self-start"
-                    onClick={() => setShowRawTranscript((v) => !v)}
-                  >
-                    {showRawTranscript ? "Ham çıktıyı gizle" : "Ham çıktıyı göster"}
-                  </Button>
-                  {showRawTranscript ? (
-                    <div className="flex flex-col gap-1">
-                      <Alert>
-                        <AlertDescription>
-                          Bu, ajanın kendi ham çıktısıdır — güvenilmeyen içerik olarak ele alınmalı,
-                          yukarıdaki özet ve bulgular gibi doğrulanmış kabul edilmemelidir.
-                        </AlertDescription>
-                      </Alert>
-                      <pre className="max-h-96 overflow-auto whitespace-pre-wrap rounded-md border bg-muted p-3 text-xs">
-                        {rawTranscript}
-                      </pre>
-                    </div>
-                  ) : null}
-                </div>
+                <LowTrustTranscript
+                  text={rawTranscript}
+                  showLabel="Ham çıktıyı göster"
+                  hideLabel="Ham çıktıyı gizle"
+                  warning="Bu, ajanın kendi ham çıktısıdır — güvenilmeyen içerik olarak ele alınmalı, yukarıdaki özet ve bulgular gibi doğrulanmış kabul edilmemelidir."
+                />
               ) : null}
             </section>
           ) : job.status === "succeeded" || job.status === "failed" ? (

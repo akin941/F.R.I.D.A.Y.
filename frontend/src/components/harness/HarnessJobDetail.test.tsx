@@ -198,4 +198,38 @@ describe("HarnessJobDetail", () => {
     expect(await screen.findByText(/Zaman aşımı/)).toBeInTheDocument();
     expect(screen.queryByText(/— timeout/)).not.toBeInTheDocument();
   });
+
+  it("offers an implementation request only for a succeeded discovery job", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => jsonResponse(detail({ id: "j1", repo: "r1", status: "succeeded" }))),
+    );
+    const onRequestImplementation = vi.fn();
+
+    render(
+      <HarnessJobDetail
+        jobId="j1"
+        onBack={() => undefined}
+        onRequestImplementation={onRequestImplementation}
+      />,
+    );
+    await userEvent.click(await screen.findByRole("button", { name: "Uygulama iste" }));
+
+    expect(onRequestImplementation).toHaveBeenCalledWith({
+      repo: "r1",
+      goal: "Find the bug",
+      discoveryJobId: "j1",
+    });
+  });
+
+  it("does not offer an implementation request for an unfinished job", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse(detail({ status: "running" }))));
+
+    render(
+      <HarnessJobDetail jobId="j1" onBack={() => undefined} onRequestImplementation={vi.fn()} />,
+    );
+    await screen.findByText("Find the bug");
+
+    expect(screen.queryByRole("button", { name: "Uygulama iste" })).not.toBeInTheDocument();
+  });
 });

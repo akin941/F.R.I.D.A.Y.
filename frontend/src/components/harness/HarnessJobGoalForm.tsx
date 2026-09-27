@@ -4,19 +4,21 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { HarnessRepoPicker } from "@/components/harness/HarnessRepoPicker";
 import { apiPostJson, ApiError } from "@/lib/api-client";
 import type { ApiHarnessJob } from "@/types/api";
 
+// Same cap the backend enforces on a harness job's goal.
+export const HARNESS_GOAL_MAX_LENGTH = 2000;
+
 /**
- * `repo` is a registered `HarnessRepo` id, entered directly -- the repo
- * allowlist itself is curator-gated registration (branch 1), managed
- * through its own API, not a picker here (brief §4: minimal API only, no
- * harness console redesign). `agent` is left unset -- Claude Code is the
- * only selectable agent this phase ships (brief), so the backend's own
- * default covers it.
+ * `repo` is picked from the workspace's registered, enabled repos
+ * (`HarnessRepoPicker`) -- registration itself stays a curator-gated API
+ * action, not something this form offers. `agent` is left unset -- Claude
+ * Code is the only selectable agent this phase ships (brief), so the
+ * backend's own default covers it.
  */
 export function HarnessJobGoalForm({
   workspaceId,
@@ -68,16 +70,13 @@ export function HarnessJobGoalForm({
               <AlertDescription>{error}</AlertDescription>
             </Alert>
           ) : null}
-          <div className="flex flex-col gap-2">
-            <Label htmlFor="harness-job-repo">Depo kimliği</Label>
-            <Input
-              id="harness-job-repo"
-              value={repo}
-              onChange={(e) => setRepo(e.target.value)}
-              placeholder="Kayıtlı harness deposunun UUID'si"
-              required
-            />
-          </div>
+          <HarnessRepoPicker
+            id="harness-job-repo"
+            workspaceId={workspaceId}
+            value={repo}
+            onChange={setRepo}
+            disabled={submitting}
+          />
           <div className="flex flex-col gap-2">
             <Label htmlFor="harness-job-goal">Hedef</Label>
             <Textarea
@@ -86,6 +85,7 @@ export function HarnessJobGoalForm({
               onChange={(e) => setGoal(e.target.value)}
               placeholder="Ajan bu depoda ne bulsun?"
               rows={3}
+              maxLength={HARNESS_GOAL_MAX_LENGTH}
               required
             />
           </div>
