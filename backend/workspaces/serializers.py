@@ -105,11 +105,38 @@ def _bounded_list(value, field_name):
 
 
 class WorkspaceProfileUpdateSerializer(serializers.Serializer):
-    """PATCH body for the profile-only update endpoint. `profile` is the
-    sole writable field on `Workspace` -- any other top-level key in the
-    request body is silently ignored (this serializer simply has no field
-    for it), mirroring `tasks.serializers.TaskEditSerializer`. `profile`
-    fully replaces the stored dossier -- it is not deep-merged with the
-    existing value."""
+    """PATCH body for the workspace update endpoint. `profile` and (since
+    Phase 4 branch 2) `name` are the only writable fields on `Workspace`,
+    each optional but at least one required -- any other top-level key
+    (`type`, `enabled_modules`, ...) is silently ignored (this serializer
+    simply has no field for it), mirroring `tasks.serializers.
+    TaskEditSerializer`. `profile` fully replaces the stored dossier -- it
+    is not deep-merged with the existing value."""
 
-    profile = WorkspaceProfileSerializer()
+    profile = WorkspaceProfileSerializer(required=False)
+    name = serializers.CharField(max_length=_MAX_NAME_CHARS, required=False)
+
+    def validate_name(self, value):
+        value = value.strip()
+        if not value:
+            raise serializers.ValidationError("Name cannot be blank.")
+        return value
+
+    def validate(self, attrs):
+        if not attrs:
+            raise serializers.ValidationError("Provide `profile` and/or `name`.")
+        return attrs
+
+
+class FirmWorkspaceCreateSerializer(serializers.Serializer):
+    """POST body for `POST /api/v1/workspaces` (Phase 4 branch 2): a firm
+    (company) workspace. `type` is never client-chosen -- always company."""
+
+    name = serializers.CharField(max_length=_MAX_NAME_CHARS)
+    profile = WorkspaceProfileSerializer(required=False)
+
+    def validate_name(self, value):
+        value = value.strip()
+        if not value:
+            raise serializers.ValidationError("Name cannot be blank.")
+        return value

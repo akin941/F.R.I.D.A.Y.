@@ -120,17 +120,17 @@ class TestPatchPermissionMatrix:
         assert workspace.profile == {}
 
     def test_patch_ignores_other_fields(self, workspace, owner, web_client):
-        """`name`/`type`/`enabled_modules` never become writable through this
-        endpoint -- only `profile` (brief §2)."""
+        """`type`/`enabled_modules` never become writable through this
+        endpoint -- only `profile` and (Phase 4 branch 2) `name`."""
         response = web_client(owner).patch(
             f"/api/v1/workspaces/{workspace.id}",
-            {"profile": VALID_PROFILE, "name": "Renamed", "type": "company"},
+            {"profile": VALID_PROFILE, "type": "company", "enabled_modules": ["x"]},
             format="json",
         )
         assert response.status_code == 200
         workspace.refresh_from_db()
-        assert workspace.name != "Renamed"
         assert workspace.type == Workspace.Type.PERSONAL
+        assert workspace.enabled_modules == []
 
     def test_patch_replaces_profile_wholesale(self, workspace, owner, web_client):
         client = web_client(owner)
