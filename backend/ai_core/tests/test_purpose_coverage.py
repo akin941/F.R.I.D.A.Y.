@@ -54,6 +54,25 @@ def _call_name(func):
     return ""
 
 
+def _purpose_expr(node):
+    """The expression passed as `purpose` in a gateway call: the `purpose=`
+    keyword, else -- for the gateway methods, whose first parameter is
+    `purpose` -- the first positional argument. `_UNSEEN` when the call
+    carries neither but splats `**kwargs` (the purpose could hide in it),
+    `None` when it plainly passes none."""
+    for keyword in node.keywords:
+        if keyword.arg == "purpose":
+            return keyword.value
+    if _call_name(node.func) != "record_external_usage" and node.args:
+        return node.args[0]
+    if any(keyword.arg is None for keyword in node.keywords):
+        return _UNSEEN
+    return None
+
+
+_UNSEEN = object()
+
+
 def collect_purposes():
     """`({purpose: [site, ...]}, [unresolvable site, ...])`."""
     found, unresolved = {}, []
@@ -63,17 +82,16 @@ def collect_purposes():
         for node in ast.walk(tree):
             if not isinstance(node, ast.Call) or _call_name(node.func) not in GATEWAY_CALLS:
                 continue
-            for keyword in node.keywords:
-                if keyword.arg != "purpose":
-                    continue
-                value = keyword.value
-                site = f"{rel}:{node.lineno}"
-                if isinstance(value, ast.Constant) and isinstance(value.value, str):
-                    found.setdefault(value.value, []).append(site)
-                elif isinstance(value, ast.Name) and value.id in constants:
-                    found.setdefault(constants[value.id], []).append(site)
-                elif str(rel) not in _PASS_THROUGH_MODULES:
-                    unresolved.append(site)
+            value = _purpose_expr(node)
+            if value is None:
+                continue
+            site = f"{rel}:{node.lineno}"
+            if isinstance(value, ast.Constant) and isinstance(value.value, str):
+                found.setdefault(value.value, []).append(site)
+            elif isinstance(value, ast.Name) and value.id in constants:
+                found.setdefault(constants[value.id], []).append(site)
+            elif str(rel) not in _PASS_THROUGH_MODULES:
+                unresolved.append(site)
     return found, unresolved
 
 
@@ -128,3 +146,17 @@ def test_review_purpose_split():
     assert settings.AI_PURPOSE_TIERS["harness.review_summary"] == "cheap"
     assert "harness.review" not in settings.AI_PURPOSE_TIERS
     assert "harness.review" in settings.AI_UNTIERED_PURPOSES
+
+
+def _call(source):
+    return ast.parse(source).body[0].value
+
+
+def test_purpose_is_seen_positionally_and_through_splats():
+    # A positional purpose is still found; a `**kwargs` call without an
+    # explicit purpose is reported as unseen, never silently skipped.
+    assert _purpose_expr(_call("gateway.complete('chat', messages)")).value == "chat"
+    assert _purpose_expr(_call("gateway.embed(purpose='x', texts=t)")).value == "x"
+    assert _purpose_expr(_call("gateway.complete(**kwargs)")) is _UNSEEN
+    assert _purpose_expr(_call("record_external_usage(**kwargs)")) is _UNSEEN
+    assert _purpose_expr(_call("task.complete()")) is None
