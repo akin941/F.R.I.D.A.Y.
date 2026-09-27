@@ -128,7 +128,9 @@ def test_a_green_ci_snapshot_satisfies_the_requirement(owner, workspace, target,
     target.save()
     monkeypatch.setattr(
         "deploys.services.resolve_commit_snapshot",
-        lambda target, sha: CommitSnapshot("Fix\x07 the header\nfor real", "success", "github"),
+        lambda target, sha, **_: CommitSnapshot(
+            "Fix\x07 the header\nfor real", "success", "github"
+        ),
     )
     request = _request(owner, workspace, target)
     assert request.payload["commit"] == {
