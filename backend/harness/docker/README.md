@@ -42,8 +42,9 @@ when this branch started, not an oversight:
 - Codex CLI's image exists so the vendor-terms/cost-reporting
   verification this branch's O-2/R6 items require has something real to
   test against — it is **not** wired as a selectable `HarnessJob.agent`
-  until that verification separately clears it
-  (`harness/services.py`'s `_SELECTABLE_AGENTS`).
+  until that verification separately clears it (the per-job-kind
+  `selectable` lists of `HARNESS_AGENT_POLICY`, `config/settings/base.py`;
+  Codex CLI is selectable only as the cross-vendor reviewer).
 - The restricted-egress Docker network (`HARNESS_DOCKER_NETWORK`) referenced
   by `harness.runner.launch_container` is runner setup, not built by this
   branch either — provisioning it (a bridge network with an egress

@@ -13,6 +13,7 @@ function detail(overrides: Partial<ApiHarnessJobDetail> = {}): ApiHarnessJobDeta
     repo: "r1",
     goal: "Find the bug",
     agent: "claude_code",
+    agent_routing_reason: "policy:default",
     sensitivity: "normal",
     status: "pending",
     failure_reason: "",

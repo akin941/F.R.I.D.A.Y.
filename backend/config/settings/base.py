@@ -369,11 +369,49 @@ AI_TIMEOUT_CONNECT = env.int("AI_TIMEOUT_CONNECT", default=10)
 AI_TIMEOUT_READ = env.int("AI_TIMEOUT_READ", default=60)
 AI_MAX_RETRIES = env.int("AI_MAX_RETRIES", default=2)
 AI_RETRY_BACKOFF_SECONDS = env.float("AI_RETRY_BACKOFF_SECONDS", default=0.5)
-# Tier routing skeleton (phase 0, MASTER_PLAN §J): purpose -> tier name
-# ("cheap"/"mid"/"strong", ai_core.ModelTier). Empty = pure priority order,
-# byte-for-byte the pre-phase-0 gateway behavior. Deliberately a settings
-# dict, not env/DB, until it needs runtime editing (phase-0 brief §4).
-AI_PURPOSE_TIERS = {}
+# Tier routing map (phase 0 skeleton, MASTER_PLAN §J; full map Phase 5 D11,
+# docs/cost/token-optimization.md layer 4): purpose -> tier name
+# ("cheap"/"mid"/"strong", ai_core.ModelTier). A purpose's tier only
+# REORDERS eligible providers (tier members first, then priority); with no
+# ModelTier rows for that tier the gateway keeps plain priority order, so
+# the map is inert until `seed_ai_defaults` (or the admin) adds tier rows.
+# Deliberately a settings dict, not env/DB, until it needs runtime editing
+# (phase-0 brief §4). Every `purpose=` literal in production code must be
+# either mapped here or listed in AI_UNTIERED_PURPOSES below -- a CI test
+# (ai_core/tests/test_purpose_coverage.py) fails otherwise.
+AI_PURPOSE_TIERS = {
+    # cheap: classification, argument extraction, short structured summaries
+    "router.intent": "cheap",
+    "router.task_draft": "cheap",
+    "router.connector_args": "cheap",  # Phase 5 branch 4 (D4)
+    "agent.skill_match": "cheap",
+    "harness.briefing": "cheap",
+    "harness.diff_summary": "cheap",
+    "harness.review_summary": "cheap",
+    "facade.ephemeral": "cheap",
+    # mid: conversation, extraction, retrieval-grounded steps
+    "chat": "mid",
+    "memory.extraction": "mid",
+    "agent.read_step": "mid",
+    # strong: planning
+    "agent.plan": "strong",
+}
+# The brief's `UNTIERED_PURPOSES` (D11): purposes that deliberately have no
+# tier. Embeddings are pinned by their stored vector dimension (a tier swap
+# would silently orphan every stored vector), and external-CLI usage rows
+# (`record_external_usage`) have no provider for the gateway to route.
+AI_UNTIERED_PURPOSES = frozenset(
+    {
+        # embeddings
+        "memory.retrieval",
+        "knowledge.embedding",
+        "knowledge.retrieval",
+        # external CLI usage (harness containers, ADR-008 decision 1)
+        "harness.discovery",
+        "harness.implementation",
+        "harness.review",
+    }
+)
 
 # --- Knowledge/RAG (MVP 3) ---
 
@@ -609,6 +647,31 @@ HARNESS_SELF_REPO_IDENTIFIERS = [
     for value in env.list("HARNESS_SELF_REPO_IDENTIFIERS", default=[])
     if value.strip()
 ]
+
+# Harness job-distribution policy (Phase 5 D11; replaces the Phase 3
+# `_SELECTABLE_*_AGENTS` sets in harness/services.py). Per job kind: the
+# `default` agent used when the owner names none (agent_routing_reason
+# "policy:default"), the owner-`selectable` agents ("owner_selected"), and
+# for implementation the cross-vendor `reviewers` pairing implementer ->
+# reviewer (review rows record "policy:cross_vendor"). The `codex_cli`
+# implementation slot exists (its image and write-mode wrapper ship) but
+# stays off until its write-mode vendor terms are verified -- add it to
+# `selectable` AND give it a reviewer to turn it on. ADR-008 decision 3:
+# a Django system check (harness.checks, `harness.E001`...) refuses to boot
+# on any self-pairing, a selectable implementer without a reviewer, or an
+# unknown agent. Not env-configurable: this is policy, changed in code
+# review, not per deployment.
+HARNESS_AGENT_POLICY = {
+    "discovery": {
+        "default": "claude_code",
+        "selectable": ["claude_code"],
+    },
+    "implementation": {
+        "default": "claude_code",
+        "selectable": ["claude_code"],  # "codex_cli" slot: off
+        "reviewers": {"claude_code": "codex_cli"},
+    },
+}
 
 # How long a finished-but-undecided implementation worktree is kept on disk
 # waiting for a Gate B (push approval) decision, across however long the

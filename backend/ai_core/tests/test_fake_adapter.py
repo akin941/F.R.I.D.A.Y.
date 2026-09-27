@@ -275,7 +275,8 @@ class TestPurposeAwareFixtures:
 
     def test_harness_review_purpose_returns_review_fixture(self):
         """Codex code-review P2, branch 3 round 12: without a purpose-
-        aware fixture for `harness.review`, AI_FAKE_PROVIDER=true routed
+        aware fixture for the review summary (`harness.review_summary`
+        since the Phase 5 D11 purpose split), AI_FAKE_PROVIDER=true routed
         every review through the generic non-JSON FAKE_RESPONSE, which
         `_parse_review_response` can't parse -- every otherwise-
         successful review failed closed as `review_unavailable` in that
@@ -283,7 +284,7 @@ class TestPurposeAwareFixtures:
         result = make_adapter().complete(
             [{"role": "user", "content": "<repo_transcript>...</repo_transcript>"}],
             {},
-            purpose="harness.review",
+            purpose="harness.review_summary",
         )
         assert result.text == FAKE_HARNESS_REVIEW_RESPONSE
 
