@@ -17,6 +17,7 @@ export const SHELL_PATHS = [
   "/memory",
   "/tasks",
   "/today",
+  "/trash",
   "/voice",
   "/workspaces",
 ];
@@ -63,6 +64,7 @@ export const config = {
     "/memory/:path*",
     "/tasks/:path*",
     "/today/:path*",
+    "/trash/:path*",
     "/voice/:path*",
     "/workspaces/:path*",
   ],

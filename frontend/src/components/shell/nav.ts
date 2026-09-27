@@ -10,6 +10,7 @@ import {
   Plug,
   ShieldCheck,
   Terminal,
+  Trash2,
   type LucideIcon,
 } from "lucide-react";
 import { tr } from "@/lib/i18n/tr";
@@ -54,6 +55,7 @@ export const NAV_GROUPS: NavGroup[] = [
       { href: "/knowledge", label: items.knowledge, icon: BookOpen },
       { href: "/tasks", label: items.tasks, icon: ListTodo },
       { href: "/today", label: items.today, icon: CalendarCheck },
+      { href: "/trash", label: items.trash, icon: Trash2 },
     ],
   },
   {

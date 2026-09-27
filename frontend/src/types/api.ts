@@ -258,6 +258,8 @@ export interface ApiKnowledgeDocument {
   created_by: string | null;
   created_at: string;
   updated_at: string;
+  // ADR-009: set while the row is in the trash ("Çöp kutusu").
+  deleted_at?: string | null;
 }
 
 // --- Tasks (MVP 4) ---
@@ -280,6 +282,8 @@ export interface ApiTask {
   created_by: string | null;
   created_at: string;
   updated_at: string;
+  // ADR-009: set while the row is in the trash ("Çöp kutusu").
+  deleted_at?: string | null;
 }
 
 // --- Approvals (MVP 5) ---
