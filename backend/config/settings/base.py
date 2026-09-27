@@ -486,6 +486,13 @@ CONNECTOR_HEALTH_TIMEOUT_SECONDS = env.int("CONNECTOR_HEALTH_TIMEOUT_SECONDS", d
 # a live worker never loses its lease mid-call. A lease that expires anyway
 # means the worker was lost -> `unknown_outcome`, never a re-send (D6).
 CONNECTOR_WRITE_LEASE_SECONDS = env.int("CONNECTOR_WRITE_LEASE_SECONDS", default=120)
+# Google bridge (Phase 5 branch 8, brief D9). Credentials are NOT settings:
+# `GOOGLE_OAUTH_CLIENT_ID` / `_CLIENT_SECRET` / `_REFRESH_TOKEN` are read from
+# the environment at call time by `connectors.bridges.google` only (never
+# stored, cached, audited or logged). The one tunable: how much of a mail's
+# text body `mail_read` keeps (the whole read is still bounded by
+# CONNECTOR_RESULT_MAX_CHARS).
+GOOGLE_MAIL_BODY_MAX_CHARS = env.int("GOOGLE_MAIL_BODY_MAX_CHARS", default=6000)
 
 # --- Agent runtime (MVP 7) ---
 
@@ -770,4 +777,11 @@ LOGGING = {
     "disable_existing_loggers": False,
     "handlers": {"console": {"class": "logging.StreamHandler"}},
     "root": {"handlers": ["console"], "level": "INFO"},
+    # httpx logs every request URL at INFO -- for the Google bridge that is
+    # the owner's mail search query, message ids and calendar windows
+    # (Phase 5 branch 8). Warnings and errors only.
+    "loggers": {
+        "httpx": {"level": "WARNING"},
+        "httpcore": {"level": "WARNING"},
+    },
 }

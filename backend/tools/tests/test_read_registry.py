@@ -49,7 +49,12 @@ def _read(name="stub_read", data_class=DATA_CLASS_FIRM, channels=None, bound=(FI
 
 
 @pytest.fixture
-def registered():
+def registered(monkeypatch):
+    # An empty registry: the committed connectors' reads (e.g. Google's,
+    # registered at startup) are not part of these unit tests.
+    from tools import registry
+
+    monkeypatch.setattr(registry, "_READ_REGISTRY", {})
     names = []
 
     def register(spec):

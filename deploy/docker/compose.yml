@@ -92,6 +92,13 @@ services:
       # updates.
       TELEGRAM_BOT_TOKEN: "${TELEGRAM_BOT_TOKEN:-}"
       TELEGRAM_WEBHOOK_SECRET: "${TELEGRAM_WEBHOOK_SECRET:-}"
+      # Google mail/calendar bridge (Phase 5 branch 8, brief D9): the
+      # Desktop-app OAuth client and the owner's refresh token printed once
+      # by the host-side `manage.py connect_google`. Env only -- never the
+      # database. Empty = the `google` connector reports `not_configured`.
+      GOOGLE_OAUTH_CLIENT_ID: "${GOOGLE_OAUTH_CLIENT_ID:-}"
+      GOOGLE_OAUTH_CLIENT_SECRET: "${GOOGLE_OAUTH_CLIENT_SECRET:-}"
+      GOOGLE_OAUTH_REFRESH_TOKEN: "${GOOGLE_OAUTH_REFRESH_TOKEN:-}"
     # `connectors`: the internal network the MCP sidecars listen on (web
     # runs connector reads in the chat request thread).
     networks: ["default", "connectors"]

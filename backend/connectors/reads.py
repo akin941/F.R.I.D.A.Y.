@@ -30,7 +30,7 @@ import time
 from django.conf import settings
 
 from audit.services import record_audit
-from connectors import mcp_client
+from connectors import bridges, mcp_client
 from connectors.manifest import ScopeError
 from connectors.services import enabled_binding, record_listing, tool_available
 from tools.registry import (
@@ -109,7 +109,7 @@ def perform_read(manifest, policy, *, workspace, actor, args, channel):
         clean = validate_arguments(manifest, policy, workspace, args)
         audit["args_sha256"] = arguments_sha256(clean)
         try:
-            result = mcp_client.call_tool(
+            result = bridges.call_tool(
                 manifest,
                 server_tool=policy.server_tool,
                 arguments=clean,

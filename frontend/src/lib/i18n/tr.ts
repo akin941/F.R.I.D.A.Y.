@@ -271,6 +271,8 @@ export const tr = {
       connector_invalid_arguments:
         "İstek bu kaynak için anlaşılamadı ya da bu çalışma alanının dışında kalıyor. Hiçbir şey okunmadı.",
       connector_read_failed: "Kaynak şu anda okunamadı. Biraz sonra tekrar dene.",
+      connector_reconnect_required:
+        "Google bağlantısının yetkisi düşmüş. Sunucuda `manage.py connect_google` ile yeniden bağlan. Hiçbir şey okunmadı.",
     } as Record<string, string>,
     streamFailed: "Asistan beklenmedik bir hatayla karşılaştı. Lütfen tekrar deneyin.",
     private: "Özel",
