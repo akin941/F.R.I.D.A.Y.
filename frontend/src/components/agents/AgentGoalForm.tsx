@@ -38,9 +38,7 @@ export function AgentGoalForm({
       onCreated(agent);
       setGoal("");
     } catch (err) {
-      setError(
-        errorMessage(err, "Ajan başlatılamadı."),
-      );
+      setError(errorMessage(err, "Ajan başlatılamadı."));
     } finally {
       setSubmitting(false);
     }

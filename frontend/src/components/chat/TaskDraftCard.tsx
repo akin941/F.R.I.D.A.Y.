@@ -48,9 +48,7 @@ export function TaskDraftCard({
       });
       onConfirmed(task);
     } catch (err) {
-      setError(
-        errorMessage(err, "Görev oluşturulamadı."),
-      );
+      setError(errorMessage(err, "Görev oluşturulamadı."));
     } finally {
       setBusy(false);
     }

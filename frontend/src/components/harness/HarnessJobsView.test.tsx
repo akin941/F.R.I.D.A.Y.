@@ -1,9 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { HarnessJobsView } from "@/components/harness/HarnessJobsView";
 import { REPO_ID, implJob, repo } from "@/components/harness/test-fixtures";
 import type { ApiHarnessJob } from "@/types/api";
+import { renderWithClient } from "@/test/render";
 
 const { workspaceHolder } = vi.hoisted(() => ({
   workspaceHolder: { current: { id: "w1", name: "Alice", type: "personal", role: "owner" } } as {
@@ -54,7 +55,7 @@ describe("HarnessJobsView", () => {
       vi.fn(async () => jsonResponse([row])),
     );
 
-    render(<HarnessJobsView />);
+    renderWithClient(<HarnessJobsView />);
 
     expect(await screen.findByText("Find the bug")).toBeInTheDocument();
   });
@@ -65,7 +66,7 @@ describe("HarnessJobsView", () => {
       vi.fn(async () => jsonResponse([])),
     );
 
-    render(<HarnessJobsView />);
+    renderWithClient(<HarnessJobsView />);
 
     expect(await screen.findByText("Henüz harness işi yok.")).toBeInTheDocument();
   });
@@ -81,7 +82,7 @@ describe("HarnessJobsView", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    render(<HarnessJobsView />);
+    renderWithClient(<HarnessJobsView />);
     await screen.findByText("Henüz harness işi yok.");
 
     await userEvent.click(screen.getByRole("button", { name: "Yeni iş" }));
@@ -126,7 +127,7 @@ describe("HarnessJobsView", () => {
       }),
     );
 
-    render(<HarnessJobsView />);
+    renderWithClient(<HarnessJobsView />);
     await screen.findByText("Henüz harness işi yok.");
 
     const implTab = screen.getByRole("tab", { name: "Uygulama işleri" });
@@ -148,7 +149,7 @@ describe("HarnessJobsView", () => {
   it("moves between tabs with the arrow keys", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => jsonResponse([])));
 
-    render(<HarnessJobsView />);
+    renderWithClient(<HarnessJobsView />);
     await screen.findByText("Henüz harness işi yok.");
 
     screen.getByRole("tab", { name: "Keşif işleri" }).focus();
@@ -174,7 +175,7 @@ describe("HarnessJobsView", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    render(<HarnessJobsView />);
+    renderWithClient(<HarnessJobsView />);
     await userEvent.click(await screen.findByText("Find the flaky test"));
     await userEvent.click(await screen.findByRole("button", { name: "Uygulama iste" }));
 
@@ -212,7 +213,7 @@ describe("HarnessJobsView", () => {
       }),
     );
 
-    render(<HarnessJobsView />);
+    renderWithClient(<HarnessJobsView />);
     await userEvent.click(await screen.findByText("Find the bug"));
 
     expect(await screen.findByRole("button", { name: /Harness işlerine dön/ })).toBeInTheDocument();
@@ -228,7 +229,7 @@ describe("HarnessJobsView", () => {
       }),
     );
 
-    render(<HarnessJobsView />);
+    renderWithClient(<HarnessJobsView />);
     const card = await screen.findByRole("button", { name: /Find the bug/ });
     card.focus();
     await userEvent.keyboard(" ");
@@ -242,7 +243,7 @@ describe("HarnessJobsView", () => {
       vi.fn(async () => jsonResponse([job({ status: "failed", failure_reason: "runner_error" })])),
     );
 
-    render(<HarnessJobsView />);
+    renderWithClient(<HarnessJobsView />);
 
     expect(await screen.findByText(/Çalıştırıcı hatası/)).toBeInTheDocument();
     expect(screen.queryByText(/runner_error/)).not.toBeInTheDocument();

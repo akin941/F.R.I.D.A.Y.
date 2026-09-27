@@ -1,8 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { HarnessJobDetail } from "@/components/harness/HarnessJobDetail";
 import type { ApiHarnessJobDetail } from "@/types/api";
+import { renderWithClient } from "@/test/render";
 
 function detail(overrides: Partial<ApiHarnessJobDetail> = {}): ApiHarnessJobDetail {
   return {
@@ -39,7 +40,7 @@ describe("HarnessJobDetail", () => {
       vi.fn(async () => jsonResponse(detail())),
     );
 
-    render(<HarnessJobDetail jobId="j1" onBack={() => undefined} />);
+    renderWithClient(<HarnessJobDetail jobId="j1" workspaceId="w1" onBack={() => undefined} />);
 
     expect(await screen.findByText("Find the bug")).toBeInTheDocument();
     expect(screen.getByText("Ajan: Claude Code")).toBeInTheDocument();
@@ -55,7 +56,7 @@ describe("HarnessJobDetail", () => {
       vi.fn(async () => jsonResponse(detail({ status: "pending", briefing: {} }))),
     );
 
-    render(<HarnessJobDetail jobId="j1" onBack={() => undefined} />);
+    renderWithClient(<HarnessJobDetail jobId="j1" workspaceId="w1" onBack={() => undefined} />);
 
     expect(await screen.findByText("Find the bug")).toBeInTheDocument();
     expect(screen.queryByText("Özet")).not.toBeInTheDocument();
@@ -79,7 +80,7 @@ describe("HarnessJobDetail", () => {
       ),
     );
 
-    render(<HarnessJobDetail jobId="j1" onBack={() => undefined} />);
+    renderWithClient(<HarnessJobDetail jobId="j1" workspaceId="w1" onBack={() => undefined} />);
 
     expect(await screen.findByText("All clear.")).toBeInTheDocument();
     expect(screen.getByText("Minor typo in README")).toBeInTheDocument();
@@ -98,7 +99,7 @@ describe("HarnessJobDetail", () => {
       vi.fn(async () => jsonResponse(detail({ status: "failed", briefing: {} }))),
     );
 
-    render(<HarnessJobDetail jobId="j1" onBack={() => undefined} />);
+    renderWithClient(<HarnessJobDetail jobId="j1" workspaceId="w1" onBack={() => undefined} />);
 
     expect(await screen.findByText("Bu iş için brifing yok.")).toBeInTheDocument();
   });
@@ -120,7 +121,7 @@ describe("HarnessJobDetail", () => {
       ),
     );
 
-    render(<HarnessJobDetail jobId="j1" onBack={() => undefined} />);
+    renderWithClient(<HarnessJobDetail jobId="j1" workspaceId="w1" onBack={() => undefined} />);
 
     expect(await screen.findByRole("button", { name: "Ham çıktıyı göster" })).toBeInTheDocument();
     expect(screen.queryByText("Özet")).not.toBeInTheDocument();
@@ -144,7 +145,7 @@ describe("HarnessJobDetail", () => {
       }),
     );
 
-    render(<HarnessJobDetail jobId="j1" onBack={() => undefined} />);
+    renderWithClient(<HarnessJobDetail jobId="j1" workspaceId="w1" onBack={() => undefined} />);
     await screen.findByText("Find the bug");
     await userEvent.click(screen.getByRole("button", { name: "İşi iptal et" }));
 
@@ -159,7 +160,7 @@ describe("HarnessJobDetail", () => {
       vi.fn(async () => jsonResponse(detail({ status: "succeeded" }))),
     );
 
-    render(<HarnessJobDetail jobId="j1" onBack={() => undefined} />);
+    renderWithClient(<HarnessJobDetail jobId="j1" workspaceId="w1" onBack={() => undefined} />);
     await screen.findByText("Find the bug");
 
     expect(screen.queryByRole("button", { name: "İşi iptal et" })).not.toBeInTheDocument();
@@ -176,7 +177,7 @@ describe("HarnessJobDetail", () => {
       }),
     );
 
-    const { container } = render(<HarnessJobDetail jobId="j1" onBack={() => undefined} />);
+    const { container } = renderWithClient(<HarnessJobDetail jobId="j1" workspaceId="w1" onBack={() => undefined} />);
 
     expect(await screen.findByText("Bu iş yüklenemedi.")).toBeInTheDocument();
     expect(container.querySelector('[data-slot="skeleton"]')).toBeNull();
@@ -193,7 +194,7 @@ describe("HarnessJobDetail", () => {
       vi.fn(async () => jsonResponse(detail({ status: "failed", failure_reason: "timeout" }))),
     );
 
-    render(<HarnessJobDetail jobId="j1" onBack={() => undefined} />);
+    renderWithClient(<HarnessJobDetail jobId="j1" workspaceId="w1" onBack={() => undefined} />);
 
     expect(await screen.findByText(/Zaman aşımı/)).toBeInTheDocument();
     expect(screen.queryByText(/— timeout/)).not.toBeInTheDocument();
@@ -206,9 +207,10 @@ describe("HarnessJobDetail", () => {
     );
     const onRequestImplementation = vi.fn();
 
-    render(
+    renderWithClient(
       <HarnessJobDetail
         jobId="j1"
+        workspaceId="w1"
         onBack={() => undefined}
         onRequestImplementation={onRequestImplementation}
       />,
@@ -225,8 +227,8 @@ describe("HarnessJobDetail", () => {
   it("does not offer an implementation request for an unfinished job", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => jsonResponse(detail({ status: "running" }))));
 
-    render(
-      <HarnessJobDetail jobId="j1" onBack={() => undefined} onRequestImplementation={vi.fn()} />,
+    renderWithClient(
+      <HarnessJobDetail jobId="j1" workspaceId="w1" onBack={() => undefined} onRequestImplementation={vi.fn()} />,
     );
     await screen.findByText("Find the bug");
 

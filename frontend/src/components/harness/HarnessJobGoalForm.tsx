@@ -48,9 +48,7 @@ export function HarnessJobGoalForm({
       setRepo("");
       setGoal("");
     } catch (err) {
-      setError(
-        errorMessage(err, "İş başlatılamadı."),
-      );
+      setError(errorMessage(err, "İş başlatılamadı."));
     } finally {
       setSubmitting(false);
     }

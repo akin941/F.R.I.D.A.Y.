@@ -7,26 +7,28 @@ import { tr } from "@/lib/i18n/tr";
 import { cn } from "@/lib/utils";
 
 /**
- * A failed load or action: the Turkish message (catalog message for a
- * specific error code, else `fallback`), an optional retry, and -- for an
- * API error -- a collapsed "Teknik ayrıntılar" disclosure with the status,
- * the stable code and the backend's English `detail`. This disclosure is
- * the ONLY place a backend `detail` is ever rendered.
+ * A failed load or action: the caller's Turkish `title` ("Ajanlar
+ * yüklenemedi."), the catalog message when the error code says something
+ * more specific ("Bu işlem için yetkin yok."), an optional retry, and --
+ * for an API error -- a collapsed "Teknik ayrıntılar" disclosure with the
+ * status, the stable code and the backend's English `detail`. This
+ * disclosure is the ONLY place a backend `detail` is ever rendered.
  */
 export function ErrorState({
   error,
-  fallback,
+  title,
   onRetry,
   retrying = false,
   className,
 }: {
   error: unknown;
-  fallback: string;
+  title: string;
   onRetry?: () => void;
   retrying?: boolean;
   className?: string;
 }) {
   const apiError = error instanceof ApiError ? error : null;
+  const reason = errorMessage(error, title);
   return (
     <div
       role="alert"
@@ -36,10 +38,13 @@ export function ErrorState({
         className,
       )}
     >
-      <p className="flex items-start gap-2 text-danger">
+      <div className="flex items-start gap-2 text-danger">
         <CircleAlert aria-hidden className="mt-0.5 size-4 shrink-0" />
-        <span>{errorMessage(error, fallback)}</span>
-      </p>
+        <div className="flex flex-col gap-0.5">
+          <p className="font-medium">{title}</p>
+          {reason !== title ? <p>{reason}</p> : null}
+        </div>
+      </div>
       {onRetry ? (
         <div>
           <Button variant="outline" size="sm" onClick={onRetry} disabled={retrying}>

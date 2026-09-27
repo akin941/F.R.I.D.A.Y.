@@ -214,7 +214,7 @@ describe("ErrorState", () => {
     const user = userEvent.setup();
     const onRetry = vi.fn();
     const error = new ApiError(400, { detail: "This request has expired.", code: "approval.expired" });
-    render(<ErrorState error={error} fallback="Onay yüklenemedi." onRetry={onRetry} />);
+    render(<ErrorState error={error} title="Onay yüklenemedi." onRetry={onRetry} />);
 
     const alert = screen.getByRole("alert");
     expect(alert).toHaveTextContent("Bu onay isteğinin süresi doldu.");
@@ -233,7 +233,7 @@ describe("ErrorState", () => {
   });
 
   it("uses the caller's context for a generic error and has no disclosure for a network error", () => {
-    render(<ErrorState error={new TypeError("Failed to fetch")} fallback="Ajanlar yüklenemedi." />);
+    render(<ErrorState error={new TypeError("Failed to fetch")} title="Ajanlar yüklenemedi." />);
     expect(screen.getByRole("alert")).toHaveTextContent("Bir şeyler ters gitti");
     expect(screen.queryByText("Teknik ayrıntılar")).not.toBeInTheDocument();
   });

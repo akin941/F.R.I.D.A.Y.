@@ -1,10 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { ErrorState } from "@/components/ui/error-state";
 import { Skeleton } from "@/components/ui/skeleton";
+import { StatusPill } from "@/components/ui/status-pill";
 import { LowTrustTranscript } from "@/components/harness/LowTrustTranscript";
 import { TechnicalDetail } from "@/components/harness/TechnicalDetail";
 import {
@@ -20,7 +23,8 @@ import {
 } from "@/components/harness/labels";
 import { pipelineStepStates, type PipelineStepState } from "@/components/harness/pipeline";
 import { apiGetJson, apiPostJson, errorMessage } from "@/lib/api-client";
-import { usePolling } from "@/lib/use-polling";
+import { queryKeys } from "@/lib/query/keys";
+import { pollWhile } from "@/lib/query/polling";
 import { cn } from "@/lib/utils";
 import type {
   ApiGateSummary,
@@ -54,17 +58,7 @@ function GateChip({ label, gate }: { label: string; gate: ApiGateSummary }) {
       <span className="font-medium">{label}:</span>
       {gate ? (
         <>
-          <span
-            className={cn(
-              "rounded-full px-2 py-0.5 text-xs",
-              gate.status === "approved" && "bg-primary/15 text-foreground",
-              gate.status === "pending" && "bg-accent text-accent-foreground",
-              (gate.status === "rejected" || gate.status === "expired") &&
-                "bg-destructive/15 text-destructive",
-            )}
-          >
-            {GATE_STATUS_LABELS[gate.status]}
-          </span>
+          <StatusPill domain="gate" status={gate.status} label={GATE_STATUS_LABELS[gate.status]} />
           <Link
             href={`/approvals?request=${encodeURIComponent(gate.id)}`}
             className="text-xs underline underline-offset-4"
@@ -129,8 +123,8 @@ function ReviewBlock({ review }: { review: ApiImplementationReview }) {
  * Detail view for one implementation job. Polls silently while the job is
  * non-terminal -- every 3s while a container is working, every 30s while
  * it only waits at a gate, paused while the tab is hidden -- and stops on
- * its own at succeeded/failed/cancelled. A response for a job
- * id this view is no longer showing is discarded (stale-response guard).
+ * its own at succeeded/failed/cancelled (query layer; the job id is part
+ * of the query key, so a response for another job never lands here).
  *
  * Trust layering (R2): `diff_summary`, review `summary`/`findings` are
  * Jarvis's own gateway output; both CLIs' `raw_transcript`s are low-trust
@@ -139,19 +133,18 @@ function ReviewBlock({ review }: { review: ApiImplementationReview }) {
  */
 export function ImplementationJobDetail({
   jobId,
+  workspaceId,
   onBack,
 }: {
   jobId: string;
+  workspaceId: string;
   onBack: () => void;
 }) {
-  const [job, setJob] = useState<ApiImplementationJobDetail | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState<string | null>(null);
+  const queryClient = useQueryClient();
   const [confirmingCancel, setConfirmingCancel] = useState(false);
   const [cancelling, setCancelling] = useState(false);
   const [cancelError, setCancelError] = useState<string | null>(null);
 
-  const activeJobIdRef = useRef(jobId);
   const cancelTriggerRef = useRef<HTMLButtonElement>(null);
   const confirmCancelRef = useRef<HTMLButtonElement>(null);
   const restoreCancelFocusRef = useRef(false);
@@ -172,35 +165,14 @@ export function ImplementationJobDetail({
     setConfirmingCancel(false);
   }
 
-  const loadJob = useCallback(
-    async (options?: { silent?: boolean }) => {
-      activeJobIdRef.current = jobId;
-      if (!options?.silent) setLoading(true);
-      setLoadError(null);
-      try {
-        const data = await apiGetJson<ApiImplementationJobDetail>(
-          `/api/harness/implementation-jobs/${jobId}`,
-        );
-        if (activeJobIdRef.current !== jobId) return;
-        setJob(data);
-      } catch {
-        if (activeJobIdRef.current === jobId && !options?.silent) {
-          setLoadError("Bu uygulama işi yüklenemedi.");
-        }
-      } finally {
-        if (activeJobIdRef.current === jobId && !options?.silent) setLoading(false);
-      }
-    },
-    [jobId],
-  );
-
-  /* eslint-disable react-hooks/set-state-in-effect -- fetch-on-mount, the standard data-fetching effect pattern */
-  useEffect(() => {
-    void loadJob();
-  }, [loadJob]);
-  /* eslint-enable react-hooks/set-state-in-effect */
-
-  usePolling(() => void loadJob({ silent: true }), job ? implPollInterval(job.status) : null);
+  const detailKey = queryKeys.implementationJob(workspaceId, jobId);
+  const query = useQuery({
+    queryKey: detailKey,
+    queryFn: () =>
+      apiGetJson<ApiImplementationJobDetail>(`/api/harness/implementation-jobs/${jobId}`),
+    refetchInterval: pollWhile<ApiImplementationJobDetail>((job) => implPollInterval(job.status)),
+  });
+  const job = query.data ?? null;
 
   async function handleCancel() {
     setCancelling(true);
@@ -208,11 +180,13 @@ export function ImplementationJobDetail({
     try {
       await apiPostJson<ApiImplementationJob>(`/api/harness/implementation-jobs/${jobId}/cancel`);
       setConfirmingCancel(false);
-      await loadJob({ silent: true });
+      await queryClient.invalidateQueries({ queryKey: detailKey });
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.implementationJobs(workspaceId),
+        exact: true,
+      });
     } catch (err) {
-      setCancelError(
-        errorMessage(err, "İş iptal edilemedi."),
-      );
+      setCancelError(errorMessage(err, "İş iptal edilemedi."));
     } finally {
       setCancelling(false);
     }
@@ -228,23 +202,20 @@ export function ImplementationJobDetail({
         &larr; Uygulama işlerine dön
       </Button>
 
-      {loadError ? (
-        <Alert variant="destructive" role="alert">
-          <AlertDescription>{loadError}</AlertDescription>
-        </Alert>
-      ) : null}
-
       {!job ? (
-        loading ? (
+        query.isPending ? (
           <div className="flex flex-col gap-3">
             <Skeleton className="h-8 w-2/3" />
             <Skeleton className="h-24 w-full" />
           </div>
-        ) : loadError ? (
-          <Button variant="outline" size="sm" className="self-start" onClick={() => void loadJob()}>
-            Tekrar dene
-          </Button>
-        ) : null
+        ) : (
+          <ErrorState
+            error={query.error}
+            title="Bu uygulama işi yüklenemedi."
+            onRetry={() => void query.refetch()}
+            retrying={query.isFetching}
+          />
+        )
       ) : (
         <>
           <div className="flex flex-wrap items-start justify-between gap-4">
@@ -252,9 +223,15 @@ export function ImplementationJobDetail({
               <h1 className="text-xl font-semibold tracking-tight whitespace-pre-wrap break-words">
                 {job.goal}
               </h1>
-              <p className="text-sm text-muted-foreground">
-                {IMPL_STATUS_LABELS[job.status] ?? job.status}
-                {job.failure_reason ? ` — ${harnessFailureReasonLabel(job.failure_reason)}` : ""}
+              <p className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+                <StatusPill
+                  domain="implementation"
+                  status={job.status}
+                  label={IMPL_STATUS_LABELS[job.status] ?? job.status}
+                />
+                {job.failure_reason ? (
+                  <span>{harnessFailureReasonLabel(job.failure_reason)}</span>
+                ) : null}
               </p>
               <p className="text-sm text-muted-foreground">
                 Depo: {job.repo_name} · Uygulayıcı: {HARNESS_AGENT_LABELS[job.agent]} · İnceleyici:{" "}

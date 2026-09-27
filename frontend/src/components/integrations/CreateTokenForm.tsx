@@ -61,9 +61,7 @@ export function CreateTokenForm({
       onCreated(token);
       setName("");
     } catch (err) {
-      setError(
-        errorMessage(err, "Token oluşturulamadı."),
-      );
+      setError(errorMessage(err, "Token oluşturulamadı."));
     } finally {
       setSubmitting(false);
     }

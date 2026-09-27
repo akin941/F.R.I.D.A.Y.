@@ -1,9 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { ErrorState } from "@/components/ui/error-state";
 import { Skeleton } from "@/components/ui/skeleton";
+import { StatusPill } from "@/components/ui/status-pill";
 import { LowTrustTranscript } from "@/components/harness/LowTrustTranscript";
 import type { ImplementationPrefill } from "@/components/harness/ImplementationJobForm";
 import {
@@ -13,15 +16,16 @@ import {
   harnessFailureReasonLabel,
 } from "@/components/harness/labels";
 import { apiGetJson, apiPostJson, errorMessage } from "@/lib/api-client";
+import { queryKeys } from "@/lib/query/keys";
+import { POLL_FAST_MS, pollWhile } from "@/lib/query/polling";
 import type { ApiHarnessJobDetail } from "@/types/api";
 import { VIEW_SCROLL_ROOT } from "@/components/shell/view-scroll";
 import { cn } from "@/lib/utils";
 
 /**
- * Detail view for one `HarnessJob` (brief §4). Polls silently while the
- * job is still in flight (pending/running), mirroring `AgentDetail`'s
- * identical run-status poll -- stops on its own once the job reaches a
- * terminal status.
+ * Detail view for one `HarnessJob` (brief §4). Polls while the job is
+ * still in flight (pending/running) via the query layer -- stops on its
+ * own once the job reaches a terminal status.
  *
  * R2 mitigation (prompt injection, brief §3/§4): `summary`/`findings` are
  * Jarvis's own gateway-produced, trustworthy content; `raw_transcript` is
@@ -36,59 +40,41 @@ import { cn } from "@/lib/utils";
  */
 export function HarnessJobDetail({
   jobId,
+  workspaceId,
   onBack,
   onRequestImplementation,
 }: {
   jobId: string;
+  workspaceId: string;
   onBack: () => void;
   onRequestImplementation?: (prefill: ImplementationPrefill) => void;
 }) {
-  const [job, setJob] = useState<ApiHarnessJobDetail | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState<string | null>(null);
+  const queryClient = useQueryClient();
   const [cancelling, setCancelling] = useState(false);
   const [cancelError, setCancelError] = useState<string | null>(null);
 
-  const loadJob = useCallback(
-    async (options?: { silent?: boolean }) => {
-      if (!options?.silent) setLoading(true);
-      setLoadError(null);
-      try {
-        const data = await apiGetJson<ApiHarnessJobDetail>(`/api/harness/jobs/${jobId}`);
-        setJob(data);
-      } catch {
-        if (!options?.silent) setLoadError("Bu iş yüklenemedi.");
-      } finally {
-        if (!options?.silent) setLoading(false);
-      }
-    },
-    [jobId],
-  );
-
-  /* eslint-disable react-hooks/set-state-in-effect -- fetch-on-mount, the standard data-fetching effect pattern */
-  useEffect(() => {
-    void loadJob();
-  }, [loadJob]);
-  /* eslint-enable react-hooks/set-state-in-effect */
-
-  useEffect(() => {
-    if (!job || !HARNESS_JOB_IN_FLIGHT_STATUSES.includes(job.status)) return;
-    const interval = setInterval(() => {
-      void loadJob({ silent: true });
-    }, 3000);
-    return () => clearInterval(interval);
-  }, [job, loadJob]);
+  const detailKey = queryKeys.harnessJob(workspaceId, jobId);
+  const query = useQuery({
+    queryKey: detailKey,
+    queryFn: () => apiGetJson<ApiHarnessJobDetail>(`/api/harness/jobs/${jobId}`),
+    refetchInterval: pollWhile<ApiHarnessJobDetail>((job) =>
+      HARNESS_JOB_IN_FLIGHT_STATUSES.includes(job.status) ? POLL_FAST_MS : null,
+    ),
+  });
+  const job = query.data ?? null;
 
   async function handleCancel() {
     setCancelling(true);
     setCancelError(null);
     try {
       await apiPostJson(`/api/harness/jobs/${jobId}/cancel`);
-      await loadJob({ silent: true });
+      void queryClient.invalidateQueries({ queryKey: detailKey });
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.harnessJobs(workspaceId),
+        exact: true,
+      });
     } catch (err) {
-      setCancelError(
-        errorMessage(err, "İş iptal edilemedi."),
-      );
+      setCancelError(errorMessage(err, "İş iptal edilemedi."));
     } finally {
       setCancelling(false);
     }
@@ -116,34 +102,36 @@ export function HarnessJobDetail({
         &larr; Harness işlerine dön
       </Button>
 
-      {loadError ? (
-        <Alert variant="destructive" role="alert">
-          <AlertDescription>{loadError}</AlertDescription>
-        </Alert>
-      ) : null}
-
-      {/* Skeleton only while a load is actually in flight -- after a failed
-          first load the error above stands alone (with a retry), rather
-          than sitting next to a skeleton that never resolves. */}
+      {/* Skeleton only while the first load is in flight -- a failed first
+          load shows the error with a retry instead. */}
       {!job ? (
-        loading ? (
+        query.isPending ? (
           <div className="flex flex-col gap-3">
             <Skeleton className="h-8 w-2/3" />
             <Skeleton className="h-24 w-full" />
           </div>
-        ) : loadError ? (
-          <Button variant="outline" size="sm" className="self-start" onClick={() => void loadJob()}>
-            Tekrar dene
-          </Button>
-        ) : null
+        ) : (
+          <ErrorState
+            error={query.error}
+            title="Bu iş yüklenemedi."
+            onRetry={() => void query.refetch()}
+            retrying={query.isFetching}
+          />
+        )
       ) : (
         <>
           <div className="flex flex-wrap items-start justify-between gap-4">
             <div>
               <h1 className="text-xl font-semibold tracking-tight">{job.goal}</h1>
-              <p className="text-sm text-muted-foreground">
-                {HARNESS_JOB_STATUS_LABELS[job.status]}
-                {job.failure_reason ? ` — ${harnessFailureReasonLabel(job.failure_reason)}` : ""}
+              <p className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+                <StatusPill
+                  domain="harnessJob"
+                  status={job.status}
+                  label={HARNESS_JOB_STATUS_LABELS[job.status] ?? job.status}
+                />
+                {job.failure_reason ? (
+                  <span>{harnessFailureReasonLabel(job.failure_reason)}</span>
+                ) : null}
               </p>
               <p className="text-sm text-muted-foreground">
                 Ajan: {HARNESS_AGENT_LABELS[job.agent]}

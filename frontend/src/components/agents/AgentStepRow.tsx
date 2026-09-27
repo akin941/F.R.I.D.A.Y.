@@ -44,9 +44,7 @@ export function AgentStepRow({
       await apiPostJson(`/api/agents/steps/${step.id}/confirm`);
       onResolved();
     } catch (err) {
-      setError(
-        errorMessage(err, "Görev oluşturulamadı."),
-      );
+      setError(errorMessage(err, "Görev oluşturulamadı."));
       setBusy(false);
     }
   }
@@ -58,9 +56,7 @@ export function AgentStepRow({
       await apiPostJson(`/api/agents/steps/${step.id}/discard`);
       onResolved();
     } catch (err) {
-      setError(
-        errorMessage(err, "Adım atılamadı."),
-      );
+      setError(errorMessage(err, "Adım atılamadı."));
       setBusy(false);
     }
   }

@@ -33,9 +33,7 @@ function TokenRow({
       );
       onRevoked(updated);
     } catch (err) {
-      setError(
-        errorMessage(err, "Token iptal edilemedi."),
-      );
+      setError(errorMessage(err, "Token iptal edilemedi."));
     } finally {
       setRevoking(false);
     }

@@ -1,8 +1,17 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { AgentDetail } from "@/components/agents/AgentDetail";
 import type { ApiAgentDetail, ApiAgentStep } from "@/types/api";
+
+const { workspace } = vi.hoisted(() => ({
+  workspace: { id: "w1", name: "Alice", type: "personal" as const, role: "owner" },
+}));
+
+vi.mock("@/contexts/workspace-context", () => ({
+  useWorkspace: () => ({ activeWorkspace: workspace }),
+}));
+import { renderWithClient } from "@/test/render";
 
 function step(overrides: Partial<ApiAgentStep> = {}): ApiAgentStep {
   return {
@@ -53,7 +62,7 @@ describe("AgentDetail", () => {
       vi.fn(async () => jsonResponse(detail())),
     );
 
-    render(<AgentDetail agentId="a1" onBack={() => undefined} />);
+    renderWithClient(<AgentDetail agentId="a1" />);
 
     expect(await screen.findByText("Summarize my notes")).toBeInTheDocument();
     expect(screen.getByText("Read something")).toBeInTheDocument();
@@ -65,7 +74,7 @@ describe("AgentDetail", () => {
       vi.fn(async () => jsonResponse(detail({ skill_name: "weekly_export" }))),
     );
 
-    render(<AgentDetail agentId="a1" onBack={() => undefined} />);
+    renderWithClient(<AgentDetail agentId="a1" />);
 
     expect(await screen.findByText("Şu beceriyle çalıştı: weekly_export")).toBeInTheDocument();
   });
@@ -76,7 +85,7 @@ describe("AgentDetail", () => {
       vi.fn(async () => jsonResponse(detail({ skill_name: "" }))),
     );
 
-    render(<AgentDetail agentId="a1" onBack={() => undefined} />);
+    renderWithClient(<AgentDetail agentId="a1" />);
     await screen.findByText("Summarize my notes");
 
     expect(screen.queryByText(/Ran via skill/)).not.toBeInTheDocument();
@@ -95,7 +104,7 @@ describe("AgentDetail", () => {
       }),
     );
 
-    render(<AgentDetail agentId="a1" onBack={() => undefined} />);
+    renderWithClient(<AgentDetail agentId="a1" />);
     await screen.findByText("Summarize my notes");
     await userEvent.click(screen.getByRole("button", { name: "Ajanı iptal et" }));
 
@@ -110,7 +119,7 @@ describe("AgentDetail", () => {
       vi.fn(async () => jsonResponse(detail({ status: "completed" }))),
     );
 
-    render(<AgentDetail agentId="a1" onBack={() => undefined} />);
+    renderWithClient(<AgentDetail agentId="a1" />);
     await screen.findByText("Summarize my notes");
 
     expect(screen.queryByRole("button", { name: "Ajanı iptal et" })).not.toBeInTheDocument();
@@ -135,7 +144,7 @@ describe("AgentDetail", () => {
       ),
     );
 
-    render(<AgentDetail agentId="a1" onBack={() => undefined} />);
+    renderWithClient(<AgentDetail agentId="a1" />);
 
     const link = await screen.findByRole("link", { name: "Onaylar sayfasında incele" });
     expect(link).toHaveAttribute("href", "/approvals");
@@ -162,7 +171,7 @@ describe("AgentDetail", () => {
       }),
     );
 
-    render(<AgentDetail agentId="a1" onBack={() => undefined} />);
+    renderWithClient(<AgentDetail agentId="a1" />);
     await screen.findByText("Draft a task");
     await userEvent.click(screen.getByRole("button", { name: "Görevi onayla" }));
 
@@ -197,7 +206,7 @@ describe("AgentDetail", () => {
       }),
     );
 
-    render(<AgentDetail agentId="a1" onBack={() => undefined} />);
+    renderWithClient(<AgentDetail agentId="a1" />);
     await screen.findByText("Draft a task");
     await userEvent.click(screen.getByRole("button", { name: "Vazgeç" }));
 

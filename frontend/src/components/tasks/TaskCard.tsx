@@ -38,9 +38,7 @@ export function TaskCard({
     try {
       return await action();
     } catch (err) {
-      setError(
-        errorMessage(err, "İşlem tamamlanamadı."),
-      );
+      setError(errorMessage(err, "İşlem tamamlanamadı."));
       return undefined;
     } finally {
       setBusy(false);

@@ -56,9 +56,7 @@ export function ImplementationJobForm({
       });
       onCreated(job);
     } catch (err) {
-      setError(
-        errorMessage(err, "Uygulama işi oluşturulamadı."),
-      );
+      setError(errorMessage(err, "Uygulama işi oluşturulamadı."));
     } finally {
       setSubmitting(false);
     }

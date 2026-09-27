@@ -234,9 +234,7 @@ export function ChatView() {
           );
         } else if (response.status === 400) {
           const body = await response.json().catch(() => ({}));
-          setBannerError(
-            errorMessage(new ApiError(response.status, body), "Mesaj gönderilemedi."),
-          );
+          setBannerError(errorMessage(new ApiError(response.status, body), "Mesaj gönderilemedi."));
         } else {
           setBannerError("Bir şeyler ters gitti. Lütfen tekrar deneyin.");
         }

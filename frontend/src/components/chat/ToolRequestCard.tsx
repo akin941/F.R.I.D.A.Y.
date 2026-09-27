@@ -57,9 +57,7 @@ export function ToolRequestCard({
       });
       setCreated(request);
     } catch (err) {
-      setError(
-        errorMessage(err, "İstek oluşturulamadı."),
-      );
+      setError(errorMessage(err, "İstek oluşturulamadı."));
     } finally {
       busyRef.current = false;
       setBusy(false);

@@ -43,9 +43,7 @@ function TodayTaskItem({
       await apiPostJson<ApiTask>(`/api/tasks/${task.id}/complete`);
       onCompleted(task.id);
     } catch (err) {
-      setError(
-        errorMessage(err, "Görev tamamlanamadı."),
-      );
+      setError(errorMessage(err, "Görev tamamlanamadı."));
     } finally {
       setBusy(false);
     }

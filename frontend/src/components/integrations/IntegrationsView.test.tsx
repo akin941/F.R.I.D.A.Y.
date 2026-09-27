@@ -1,8 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { IntegrationsView } from "@/components/integrations/IntegrationsView";
 import type { ApiPersonalAccessToken } from "@/types/api";
+import { renderWithClient } from "@/test/render";
 
 const WORKSPACES = [
   { id: "w1", name: "Alice", type: "personal" as const, role: "owner" },
@@ -59,7 +60,7 @@ describe("IntegrationsView", () => {
       }),
     );
 
-    render(<IntegrationsView />);
+    renderWithClient(<IntegrationsView />);
 
     expect(await screen.findByText("laptop cli")).toBeInTheDocument();
     // "Alice" also appears in TelegramLinkPanel's own workspace picker.
@@ -74,7 +75,7 @@ describe("IntegrationsView", () => {
       }),
     );
 
-    render(<IntegrationsView />);
+    renderWithClient(<IntegrationsView />);
 
     expect(await screen.findByText("Henüz kişisel erişim token'ı yok.")).toBeInTheDocument();
   });
@@ -89,7 +90,7 @@ describe("IntegrationsView", () => {
       }),
     );
 
-    render(<IntegrationsView />);
+    renderWithClient(<IntegrationsView />);
     await screen.findByText("Henüz kişisel erişim token'ı yok.");
 
     await userEvent.click(screen.getByRole("button", { name: "Yeni token" }));
@@ -124,7 +125,7 @@ describe("IntegrationsView", () => {
       }),
     );
 
-    render(<IntegrationsView />);
+    renderWithClient(<IntegrationsView />);
     await screen.findByText("Henüz kişisel erişim token'ı yok.");
 
     await userEvent.click(screen.getByRole("button", { name: "Yeni token" }));
@@ -158,7 +159,7 @@ describe("IntegrationsView", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    render(<IntegrationsView />);
+    renderWithClient(<IntegrationsView />);
     await screen.findByText("Henüz kişisel erişim token'ı yok.");
 
     await userEvent.click(screen.getByRole("button", { name: "Yeni token" }));
@@ -186,7 +187,7 @@ describe("IntegrationsView", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    render(<IntegrationsView />);
+    renderWithClient(<IntegrationsView />);
     await screen.findByText("Henüz kişisel erişim token'ı yok.");
     await userEvent.click(screen.getByRole("button", { name: "Yeni token" }));
     await userEvent.type(screen.getByLabelText("İsim"), "dflt");
@@ -208,7 +209,7 @@ describe("IntegrationsView", () => {
       }),
     );
 
-    render(<IntegrationsView />);
+    renderWithClient(<IntegrationsView />);
     expect(await screen.findByText(/Süresi doldu/)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "İptal et" })).not.toBeInTheDocument();
   });
@@ -224,7 +225,7 @@ describe("IntegrationsView", () => {
       }),
     );
 
-    render(<IntegrationsView />);
+    renderWithClient(<IntegrationsView />);
     await screen.findByText("laptop cli");
     await userEvent.click(screen.getByRole("button", { name: "İptal et" }));
 

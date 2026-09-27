@@ -29,9 +29,7 @@ export function KnowledgeCard({
       await apiDelete(`/api/knowledge/documents/${document.id}`);
       onDeleted(document.id);
     } catch (err) {
-      setError(
-        errorMessage(err, "Belge silinemedi."),
-      );
+      setError(errorMessage(err, "Belge silinemedi."));
       setBusy(false);
     }
   }

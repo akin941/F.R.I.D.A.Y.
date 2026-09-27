@@ -265,9 +265,7 @@ export function ApprovalCard({
       setConfirming(null);
       onChanged(updated);
     } catch (err) {
-      setError(
-        errorMessage(err, "İşlem tamamlanamadı."),
-      );
+      setError(errorMessage(err, "İşlem tamamlanamadı."));
     } finally {
       setBusy(false);
     }

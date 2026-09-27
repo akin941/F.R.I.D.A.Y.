@@ -1,17 +1,18 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { ImplementationJobDetail } from "@/components/harness/ImplementationJobDetail";
 import { HARNESS_FAILURE_REASON_LABELS } from "@/components/harness/labels";
 import { implDetail, jsonResponse, review } from "@/components/harness/test-fixtures";
 import type { ApiImplementationJobDetail, ImplFailureReason } from "@/types/api";
+import { renderWithClient } from "@/test/render";
 
 function stubDetail(body: ApiImplementationJobDetail) {
   vi.stubGlobal("fetch", vi.fn(async () => jsonResponse(body)));
 }
 
 function renderDetail() {
-  return render(<ImplementationJobDetail jobId="ij1" onBack={() => undefined} />);
+  return renderWithClient(<ImplementationJobDetail jobId="ij1" workspaceId="w1" onBack={() => undefined} />);
 }
 
 const FULL = implDetail({
@@ -100,7 +101,7 @@ describe("ImplementationJobDetail", () => {
     expect(screen.getByText("backend/tests/test_health.py")).toBeInTheDocument();
     expect(screen.getByText(/Model tarafından üretilmiş bir özettir/)).toBeInTheDocument();
     expect(screen.getByText("Adds a /health endpoint and its test.")).toBeInTheDocument();
-    expect(screen.getByText("Onaylandı", { selector: "span.font-medium" })).toBeInTheDocument();
+    expect(screen.getByText("Onaylandı", { selector: "span.font-medium:not([data-slot])" })).toBeInTheDocument();
     expect(screen.getByText("Looks correct.")).toBeInTheDocument();
     expect(screen.getByText("Consider a test for the 404 path")).toBeInTheDocument();
   });
@@ -146,7 +147,8 @@ describe("ImplementationJobDetail", () => {
 
     renderDetail();
 
-    expect(await screen.findByText("Başarısız — Testler başarısız")).toBeInTheDocument();
+    expect(await screen.findByText("Testler başarısız")).toBeInTheDocument();
+    expect(screen.getByText("Başarısız")).toHaveAttribute("data-tone", "danger");
     expect(screen.getByText(/Testler başarısız \(çıkış kodu 2\)/)).toBeInTheDocument();
     const steps = within(screen.getByRole("list", { name: "İş hattı" })).getAllByRole("listitem");
     expect(steps[1]).toHaveAttribute("data-state", "stopped");
@@ -159,9 +161,8 @@ describe("ImplementationJobDetail", () => {
 
       renderDetail();
 
-      expect(
-        await screen.findByText(`Başarısız — ${HARNESS_FAILURE_REASON_LABELS[reason]}`),
-      ).toBeInTheDocument();
+      expect(await screen.findByText(HARNESS_FAILURE_REASON_LABELS[reason])).toBeInTheDocument();
+      expect(screen.getByText("Başarısız")).toHaveAttribute("data-status", "failed");
     },
   );
 
@@ -187,7 +188,7 @@ describe("ImplementationJobDetail", () => {
 
     await vi.advanceTimersByTimeAsync(3000);
     await vi.advanceTimersByTimeAsync(3000);
-    expect(await screen.findByText("Tamamlandı", { selector: "p" })).toBeInTheDocument();
+    expect(await screen.findByText("Tamamlandı", { selector: "[data-slot=badge]" })).toBeInTheDocument();
     const callsAtTerminal = calls;
 
     await vi.advanceTimersByTimeAsync(9000);
@@ -282,7 +283,7 @@ describe("ImplementationJobDetail", () => {
     stubDetail(implDetail({ status: "cancelled", failure_reason: "killed" }));
 
     renderDetail();
-    await screen.findByText("İptal edildi — Durduruldu");
+    await screen.findByText("Durduruldu");
 
     expect(screen.queryByRole("button", { name: "İşi iptal et" })).not.toBeInTheDocument();
   });
@@ -325,7 +326,7 @@ describe("ImplementationJobDetail", () => {
     );
 
     renderDetail();
-    await screen.findByText("İptal edildi — Durduruldu");
+    await screen.findByText("Durduruldu");
 
     const steps = within(screen.getByRole("list", { name: "İş hattı" })).getAllByRole("listitem");
     expect(steps.map((s) => s.getAttribute("data-state"))).toEqual([
