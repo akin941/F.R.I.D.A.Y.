@@ -79,6 +79,8 @@ harness-smoke:
 	$(BACKEND) HARNESS_DOCKER_SMOKE_IMAGE=jarvis-harness-smoke:local uv run pytest harness/tests/test_docker_smoke.py -q
 
 # The runner worker: consumes ONLY the harness queue, on this host (it needs
-# Docker and the images). The compose worker never takes harness tasks.
+# Docker and the images), and runs its own embedded beat that schedules ONLY
+# the harness recovery scans (the compose beat never does). One runner at a
+# time: a second `-B` runner would double-schedule the scans.
 harness-runner:
-	$(BACKEND) uv run celery -A config worker -Q $${HARNESS_CELERY_QUEUE:-harness} -l info -n harness-runner@%h
+	$(BACKEND) HARNESS_RUNNER_BEAT=true uv run celery -A config worker -B -s /tmp/jarvis-harness-beat-schedule -Q $${HARNESS_CELERY_QUEUE:-harness} -l info -n harness-runner@%h

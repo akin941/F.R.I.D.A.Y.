@@ -79,8 +79,12 @@ runner host, in its own terminal:
 make harness-runner
 ```
 
-It consumes only the `harness` queue, including the recovery scans. With
-no runner running, harness jobs wait in `pending`.
+It consumes only the `harness` queue and runs its own beat, which
+schedules only the harness recovery scans (they need this host's Docker
+and worktrees). With no runner running, harness jobs wait in `pending`
+and nothing is recovered — nothing can be stuck mid-run either, since all
+execution happens on the runner; the scans resume when it starts. Run one
+runner at a time.
 
 ## 5. First runs
 
