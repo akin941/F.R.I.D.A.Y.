@@ -399,3 +399,17 @@ def test_review_container_is_torn_down_once_the_job_is_cancelled(
     assert status == "failed"
     assert transcript == "partial"
     teardown.assert_called_once_with("harness-review-x")
+
+
+def test_cat_file_parser_ignores_missing_marker_inside_content():
+    body = b"this line is missing\nand more"
+    stream = b"abc blob %d\n" % len(body) + body + b"\n"
+    assert list(runner._iter_cat_file_batch(stream)) == [body]
+
+
+@pytest.mark.parametrize(
+    "stream", [b"abc missing\n", b"abc blob 10\nshort", b"garbage-without-newline"]
+)
+def test_cat_file_parser_fails_closed_on_missing_or_truncated(stream):
+    with pytest.raises(runner.RunnerError):
+        list(runner._iter_cat_file_batch(stream))

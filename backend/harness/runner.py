@@ -351,12 +351,37 @@ def diff_contains_any(directory, *, base_sha, head_sha, needles):
         )
     except (subprocess.TimeoutExpired, OSError) as exc:
         raise RunnerError(f"reading objects {base_sha}..{head_sha} failed: {exc}") from exc
-    if contents.returncode != 0 or b" missing\n" in contents.stdout:
+    if contents.returncode != 0:
         raise RunnerError(f"reading objects {base_sha}..{head_sha} failed")
-    # Headers ("<sha> <type> <size>") are hex/ASCII and can't contain a
-    # credential, so searching the whole batch stream is equivalent to
-    # searching each object body.
-    return any(needle in contents.stdout for needle in needle_bytes)
+    return any(
+        needle in body for body in _iter_cat_file_batch(contents.stdout) for needle in needle_bytes
+    )
+
+
+def _iter_cat_file_batch(stream):
+    """Yields each object body from `git cat-file --batch` output, parsed
+    by its `<sha> <type> <size>` header (Codex code-review P2, branch 5
+    round 2: a substring check for the `missing` marker over the raw stream
+    false-positived on ordinary file content). A `missing` header or a
+    truncated stream raises `RunnerError`."""
+    position = 0
+    while position < len(stream):
+        header_end = stream.find(b"\n", position)
+        if header_end == -1:
+            raise RunnerError("truncated git cat-file output")
+        header = stream[position:header_end].split(b" ")
+        if len(header) != 3:
+            raise RunnerError(f"unexpected git cat-file header: {header!r}")
+        try:
+            size = int(header[2])
+        except ValueError as exc:
+            raise RunnerError(f"unexpected git cat-file header: {header!r}") from exc
+        body_start = header_end + 1
+        body_end = body_start + size
+        if body_end > len(stream):
+            raise RunnerError("truncated git cat-file output")
+        yield stream[body_start:body_end]
+        position = body_end + 1
 
 
 def _clone_full(*, git_url, default_branch, clone_env):
