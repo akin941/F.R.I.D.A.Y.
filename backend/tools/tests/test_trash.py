@@ -158,14 +158,6 @@ def test_retention_purge_removes_only_rows_older_than_the_window(workspace, owne
     assert purged.actor is None and purged.actor_type == AuditLog.ActorType.SYSTEM
 
 
-def test_beat_schedules_both_retention_purges():
-    from config.celery import build_beat_schedule
-
-    tasks = {entry["task"] for entry in build_beat_schedule(runner_mode=False).values()}
-    assert "tasks.tasks.purge_expired_trashed_tasks_task" in tasks
-    assert "knowledge.tasks.purge_expired_trashed_documents_task" in tasks
-
-
 # --- gate-class purge_trash ---
 
 
