@@ -52,7 +52,10 @@ from memory.context import neutralize_fence, strip_invisible_formatting
 
 logger = logging.getLogger(__name__)
 
-_HARNESS_REVIEW_PROMPT_NAME = "jarvis_harness_review"
+# D11 (Phase 5 branch 2): the gateway summary has its own purpose and
+# prompt row; `harness.review` now names only the external-CLI usage rows.
+_HARNESS_REVIEW_PROMPT_NAME = "jarvis_harness_review_summary"
+_REVIEW_SUMMARY_PURPOSE = "harness.review_summary"
 # Same bounding discipline as `harness.execution`'s identical constants --
 # see that module's docstring for the full rationale.
 _RAW_TRANSCRIPT_MAX_CHARS = 8000
@@ -448,7 +451,7 @@ def _produce_review_summary(job, fenced_transcript):
     ]
     gateway = InferenceGateway()
     result = gateway.complete(
-        purpose="harness.review",
+        purpose=_REVIEW_SUMMARY_PURPOSE,
         messages=messages,
         actor=job.created_by,
         workspace=job.workspace,

@@ -42,7 +42,9 @@ def fake_provider():
 
 @pytest.fixture
 def review_prompt():
-    template = PromptTemplate.objects.create(name="jarvis_harness_review", purpose="harness.review")
+    template = PromptTemplate.objects.create(
+        name="jarvis_harness_review_summary", purpose="harness.review_summary"
+    )
     version = PromptVersion.objects.create(
         template=template, version=1, content="Review the diff and respond with JSON."
     )

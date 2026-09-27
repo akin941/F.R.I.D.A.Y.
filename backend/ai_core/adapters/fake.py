@@ -160,7 +160,8 @@ FAKE_HARNESS_BRIEFING_RESPONSE = (
     '{"summary": "Fake briefing summary: nothing notable was found.", "findings": []}'
 )
 
-# Purpose-aware fixture for `harness.review` (Phase 3 branch 3, Codex
+# Purpose-aware fixture for `harness.review_summary` (Phase 3 branch 3 as
+# `harness.review`; renamed with the Phase 5 D11 purpose split; Codex
 # code-review P2, round 12) -- mirrors harness.review_execution.
 # _parse_review_response's expected shape (summary/verdict/findings), the
 # same reason as the fixtures above. Without this, AI_FAKE_PROVIDER=true
@@ -219,7 +220,7 @@ class FakeAdapter(BaseAdapter):
             return FAKE_AGENT_SKILL_MATCH_RESPONSE
         if purpose == "harness.briefing":
             return FAKE_HARNESS_BRIEFING_RESPONSE
-        if purpose == "harness.review":
+        if purpose == "harness.review_summary":
             return FAKE_HARNESS_REVIEW_RESPONSE
         if purpose == "harness.diff_summary":
             return FAKE_HARNESS_DIFF_SUMMARY_RESPONSE
