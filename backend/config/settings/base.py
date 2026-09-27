@@ -272,6 +272,57 @@ PAT_MAX_TTL_DAYS = env.int("PAT_MAX_TTL_DAYS", default=365)
 # Dev signup switch — prod default is False (see dev.py for the dev default).
 SIGNUP_ENABLED = env.bool("SIGNUP_ENABLED", default=False)
 
+# --- Device trust (Phase 4 branch 2, ADR-008 decision 2) ---
+#
+# There is no signup and no password login: the owner enrolls devices at
+# /enroll with a pairing code (`manage.py issue_pairing_code`, or "Yeni cihaz
+# eşleştir" on a trusted session) or the remote access key, and each trusted
+# device mints its own JWT sessions (accounts/devices.py).
+
+# A device unused for this long can no longer authenticate or mint a
+# session (re-enroll it).
+DEVICE_IDLE_EXPIRY_DAYS = env.int("DEVICE_IDLE_EXPIRY_DAYS", default=90)
+# PIN pairing codes are accepted only from these networks (LAN gating):
+# loopback, RFC 1918, IPv6 ULA and the CGNAT range Tailscale uses. Strong
+# codes and the remote key work from any network. Defense in depth, not the
+# boundary: codes are issuable only by a trusted principal, single-use,
+# short-lived, attempt-burned and hashed.
+DEVICE_PAIRING_NETWORKS = [
+    net.strip()
+    for net in env.list(
+        "DEVICE_PAIRING_NETWORKS",
+        default=[
+            "127.0.0.0/8",
+            "::1/128",
+            "10.0.0.0/8",
+            "172.16.0.0/12",
+            "192.168.0.0/16",
+            "fc00::/7",
+            "100.64.0.0/10",
+        ],
+    )
+    if net.strip()
+]
+# Django only ever sees the BFF's address. The BFF forwards the browser's IP
+# (taken ONLY from its TRUSTED_CLIENT_IP_HEADER, set by the owner's reverse
+# proxy) as X-Jarvis-Client-IP together with X-Jarvis-BFF-Key; Django
+# ignores the IP header unless the key matches this shared secret. Empty =
+# no client IP is ever trusted.
+JARVIS_BFF_SHARED_SECRET = env("JARVIS_BFF_SHARED_SECRET", default="")
+# Without a validated client IP (no trusted proxy, e.g. bare `next start`),
+# a PIN is accepted only when this is on ("LAN gating off"). Dev default
+# true (config/settings/dev.py), production default false: pair with a
+# strong code or the remote key instead.
+DEVICE_PAIRING_ALLOW_UNKNOWN_IP = env.bool("DEVICE_PAIRING_ALLOW_UNKNOWN_IP", default=False)
+# Two-tier enrollment throttle (accounts/throttling.py): a tight limit per
+# validated client IP plus a much looser install-wide ceiling, so a flood
+# from one source cannot exhaust the bucket the owner needs. Without a
+# validated client IP only the global ceiling applies (accepted, documented
+# residual risk; the host-shell `issue_pairing_code` path is never
+# throttled). Format "<count>/<n><s|m|h|d>", e.g. "5/10m".
+ENROLL_RATE_PER_SOURCE = env("ENROLL_RATE_PER_SOURCE", default="5/10m")
+ENROLL_RATE_GLOBAL = env("ENROLL_RATE_GLOBAL", default="60/h")
+
 CORS_ALLOWED_ORIGINS = [o for o in env.list("CORS_ALLOWED_ORIGINS", default=[]) if o] or [
     "http://localhost:3001"
 ]
