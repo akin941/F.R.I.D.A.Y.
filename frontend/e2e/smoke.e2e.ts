@@ -137,7 +137,18 @@ test("signup, chat with the fake provider, curated memory, Today, logout, route 
   await composer.fill("What do you remember about me?");
   await page.getByRole("button", { name: "Gönder" }).click();
 
-  await expect(page.getByText(/Hafıza bağlamı: 1 not/)).toBeVisible({ timeout: 15_000 });
+  // The reply's collapsible "Kaynaklar" list (Phase 4 branch 4) names the
+  // curated memory as context; following its entry lands on /memory with
+  // exactly that memory highlighted -- proving the entry IS the memory
+  // approved above, not just that some memory was used.
+  const memorySources = page.getByTestId("message-sources").last();
+  await expect(memorySources).toContainText(/Kaynaklar · 1 hafıza kaydı/, { timeout: 15_000 });
+  await memorySources.locator("summary").click();
+  await memorySources.getByRole("link", { name: "Hafıza kaydı 1" }).click();
+  await expect(page).toHaveURL(/\/memory\?workspace=[^&]+&memory=[0-9a-f-]+$/);
+  await expect(page.locator("[data-deep-link-active]")).toContainText(FAKE_MEMORY_TITLE, {
+    timeout: 10_000,
+  });
 
   // Knowledge retrieval happy path (MVP 3 §4/§6): upload a short pasted-text
   // document, wait for `ready` (embedding dispatched over `on_commit`, run
@@ -186,7 +197,11 @@ test("signup, chat with the fake provider, curated memory, Today, logout, route 
   await composer.fill(KNOWLEDGE_QUERY_TEXT);
   await page.getByRole("button", { name: "Gönder" }).click();
 
-  await expect(page.getByText(/Bilgi bağlamı: 1 parça/)).toBeVisible({ timeout: 15_000 });
+  // Knowledge context shows in the reply's "Kaynaklar" summary (its entry's
+  // deep link into /knowledge is followed after the router turn below).
+  await expect(page.getByTestId("message-sources").last()).toContainText(/1 bilgi parçası/, {
+    timeout: 15_000,
+  });
 
   // MVP 6 router happy path: all 3 live dispatch behaviors, in the same
   // conversation the knowledge doc above is already seeded in. FakeAdapter's
@@ -204,7 +219,9 @@ test("signup, chat with the fake provider, curated memory, Today, logout, route 
   // budget mechanism itself is unit-tested (assistant/tests/test_context.py)
   // with real chunk counts exceeding the default cap; not worth re-proving
   // here with a dozen extra seeded documents.
-  const knowledgeBadge = page.getByText(/Bilgi bağlamı: 1 parça/);
+  const knowledgeBadge = page.getByTestId("message-sources").filter({
+    hasText: /1 bilgi parçası/,
+  });
   // The plain knowledge_query turn above already left one such badge on
   // this message list (MessageList renders one per assistant reply that
   // has chunks_used) -- a `.last()`/`.toBeVisible()` check alone could
@@ -219,6 +236,21 @@ test("signup, chat with the fake provider, curated memory, Today, logout, route 
   await page.getByRole("button", { name: "Gönder" }).click();
   await expect(knowledgeBadge).toHaveCount(2, { timeout: 15_000 });
 
+  // The router turn's "Kaynaklar" entry deep-links to the seeded document:
+  // /knowledge opens with exactly that document highlighted.
+  const knowledgeSources = knowledgeBadge.last();
+  await knowledgeSources.locator("summary").click();
+  await knowledgeSources.getByRole("link", { name: "Bilgi parçası 1" }).click();
+  await expect(page).toHaveURL(/\/knowledge\?workspace=[^&]+&document=[0-9a-f-]+$/);
+  await expect(page.locator("[data-deep-link-active]")).toContainText(KNOWLEDGE_DOC_TITLE, {
+    timeout: 10_000,
+  });
+
+  // Back to the same conversation for the remaining router intents.
+  await page.getByRole("link", { name: "Sohbet" }).click();
+  await expect(page).toHaveURL(/\/chat$/);
+  await page.getByRole("button", { name: "Adsız sohbet" }).click();
+
   // task_draft: confirm creates a REAL Task via the router's draft card, not
   // the manual /tasks create form (that path is covered by the Tasks/Today
   // section below).
@@ -230,6 +262,14 @@ test("signup, chat with the fake provider, curated memory, Today, logout, route 
   await expect(page.getByText(ROUTER_TASK_TITLE, { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Görevi onayla" }).click();
   await expect(page.getByText("Bu bir görev gibi görünüyor")).not.toBeVisible();
+  // The draft now renders as confirmed (Task.source_message links it), with
+  // a link to the created task -- no second confirm is offered.
+  await expect(page.getByText("Görev oluşturuldu", { exact: true })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Görevi aç" })).toHaveAttribute(
+    "href",
+    /\/tasks\?workspace=[^&]+&task=[0-9a-f-]+$/,
+  );
+  await expect(page.getByRole("button", { name: "Görevi onayla" })).toHaveCount(0);
 
   // tool_request: confirm creates a REAL ApprovalRequest via the router's
   // draft card. Approved the same way the manual Memory-page export button's

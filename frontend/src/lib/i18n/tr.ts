@@ -11,6 +11,7 @@ import type {
   KnowledgeSensitivity,
   KnowledgeSourceType,
   KnowledgeStatus,
+  MessageChannel,
   MemorySensitivity,
   MemoryStatus,
   MemoryType,
@@ -120,6 +121,10 @@ export const ERROR_MESSAGES = {
     message: "Bu görev artık bu işleme uygun değil.",
     specific: true,
   },
+  "task.draft_already_confirmed": {
+    message: "Bu taslaktan zaten bir görev oluşturuldu.",
+    specific: true,
+  },
   // Workspaces
   "workspace.permission_denied": {
     message: "Rolün bu çalışma alanını düzenlemeye yetmiyor.",
@@ -188,6 +193,101 @@ export const tr = {
   },
   time: {
     justNow: "az önce",
+  },
+  chat: {
+    conversations: "Sohbetler",
+    openConversations: "Sohbet listesini aç",
+    newChat: "Yeni sohbet",
+    untitled: "Adsız sohbet",
+    noConversations: "Henüz sohbet yok.",
+    loadConversationsFailed: "Sohbetler yüklenemedi.",
+    loadMessagesFailed: "Mesajlar yüklenemedi.",
+    newChatFailed: "Yeni sohbet başlatılamadı. Lütfen tekrar deneyin.",
+    pickConversation: "Bir sohbet seç ya da yeni bir sohbet başlat.",
+    emptyConversation: "Jarvis'e bir şey sor.",
+    unavailable: "Bu sohbete artık erişilemiyor.",
+    placeholder: "Jarvis'e yaz…",
+    composerLabel: "Mesaj",
+    send: "Gönder",
+    stop: "Durdur",
+    assistantTyping: "Asistan yanıtlıyor",
+    newMessages: "Yeni mesaj ↓",
+    copyMessage: "Mesajı kopyala",
+    interrupted: "Yanıt yarıda kaldı",
+    failed: "Yanıt alınamadı",
+    retry: "Tekrar dene",
+    disconnected: "Yanıt tamamlanmadan bağlantı koptu.",
+    refreshHistory: "Geçmişi yenile",
+    throttled: (retryAfter: string | null) =>
+      retryAfter
+        ? `Çok hızlı mesaj gönderiyorsun. ${retryAfter}s sonra tekrar dene.`
+        : "Çok hızlı mesaj gönderiyorsun. Lütfen biraz bekle.",
+    sendFailed: "Mesaj gönderilemedi.",
+    // SSE `error` event `error_type`s (assistant.services); anything else
+    // falls back to `streamFailed`.
+    streamErrors: {
+      no_provider:
+        "Şu anda yapılandırılmış bir yapay zeka sağlayıcısı yok. Lütfen daha sonra tekrar deneyin.",
+      client_disconnect: "Bağlantı kesildi.",
+    } as Record<string, string>,
+    streamFailed: "Asistan beklenmedik bir hatayla karşılaştı. Lütfen tekrar deneyin.",
+    private: "Özel",
+    privateHint: "Özel sohbet: bu sohbetten hafıza çıkarılmaz.",
+    channel: {
+      web: "Web",
+      cli: "CLI",
+      telegram: "Telegram",
+    } satisfies Record<MessageChannel, string> as Record<string, string>,
+    viaChannel: (label: string) => `${label} üzerinden`,
+    rename: "Yeniden adlandır",
+    renameTitle: "Sohbeti yeniden adlandır",
+    renameLabel: "Sohbet adı",
+    renameHint: "Boş bırakırsan sohbet “Adsız sohbet” olarak görünür.",
+    save: "Kaydet",
+    saving: "Kaydediliyor…",
+    renameFailed: "Sohbet adı değiştirilemedi.",
+    markPrivate: "Özel yap",
+    markPrivateTitle: "Bu sohbet özel yapılsın mı?",
+    markPrivateDescription:
+      "Özel sohbetlerden hafıza çıkarılmaz. Bu sohbetten daha önce çıkarılmış öneriler reddedilir, onaylanmış hafıza kayıtları arşivlenir. Bu işlem geri alınamaz.",
+    markingPrivate: "Özel yapılıyor…",
+    markPrivateFailed: "Sohbet özel yapılamadı.",
+    sources: {
+      title: "Kaynaklar",
+      summary: (memories: number, chunks: number) =>
+        [
+          memories > 0 ? `${memories} hafıza kaydı` : null,
+          chunks > 0 ? `${chunks} bilgi parçası` : null,
+        ]
+          .filter(Boolean)
+          .join(", "),
+      memory: (n: number) => `Hafıza kaydı ${n}`,
+      chunk: (n: number) => `Bilgi parçası ${n}`,
+      fromPersonal: "kişisel alandan",
+      noLink: "belge artık yok",
+    },
+    taskDraft: {
+      title: "Bu bir görev gibi görünüyor",
+      due: (date: string) => `Son tarih ${date}`,
+      confirm: "Görevi onayla",
+      confirming: "Oluşturuluyor…",
+      discard: "Vazgeç",
+      failed: "Görev oluşturulamadı.",
+      created: "Görev oluşturuldu",
+      openTask: "Görevi aç",
+    },
+    toolDraft: {
+      title: "Bu bir araç isteği gibi görünüyor",
+      needsApproval: "Çalışmadan önce Onaylar sayfasından vereceğin açık onay gerekiyor.",
+      confirm: "İsteği onayla",
+      confirming: "İsteniyor…",
+      discard: "Vazgeç",
+      failed: "İstek oluşturulamadı.",
+      readOnlyTitle: (tool: string) => `Araç isteği: ${tool}`,
+      readOnlyHint:
+        "Bu istek sohbette onaylandıysa durumunu ve kararını Onaylar sayfasında görebilirsin.",
+      openApprovals: "Onaylara git",
+    },
   },
   markdown: {
     imageOmitted: (alt: string) => (alt ? `[görsel gösterilmedi: ${alt}]` : "[görsel gösterilmedi]"),

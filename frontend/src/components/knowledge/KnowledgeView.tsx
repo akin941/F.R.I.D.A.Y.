@@ -12,6 +12,7 @@ import { useWorkspace } from "@/contexts/workspace-context";
 import { apiGetJson } from "@/lib/api-client";
 import type { ApiKnowledgeDocument, KnowledgeStatus } from "@/types/api";
 import { VIEW_SCROLL_ROOT } from "@/components/shell/view-scroll";
+import { DeepLinkTarget, useDeepLinkTarget } from "@/components/shell/deep-link-target";
 import { cn } from "@/lib/utils";
 
 export function KnowledgeView() {
@@ -69,6 +70,8 @@ export function KnowledgeView() {
     setCreating(false);
   }
 
+  // `?document=<id>` from a chat "Kaynaklar" link.
+  const linkedDocumentId = useDeepLinkTarget("document", !loading && documents.length > 0);
   const visible = documents.filter(
     (d) => statusFilter === "all" || d.status === statusFilter,
   );
@@ -142,7 +145,14 @@ export function KnowledgeView() {
           ) : (
             <div className="flex flex-col gap-3">
               {visible.map((document) => (
-                <KnowledgeCard key={document.id} document={document} onDeleted={handleDeleted} />
+                <DeepLinkTarget
+                  key={document.id}
+                  kind="document"
+                  id={document.id}
+                  active={linkedDocumentId === document.id}
+                >
+                  <KnowledgeCard document={document} onDeleted={handleDeleted} />
+                </DeepLinkTarget>
               ))}
             </div>
           )}

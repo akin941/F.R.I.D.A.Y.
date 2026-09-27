@@ -31,7 +31,16 @@ function hastText(node: unknown): string {
   return (n.children ?? []).map(hastText).join("");
 }
 
-function CopyButton({ text, label }: { text: string; label: string }) {
+/** Icon button copying `text` to the clipboard, with brief "Kopyalandı" feedback. */
+export function CopyButton({
+  text,
+  label,
+  className,
+}: {
+  text: string;
+  label: string;
+  className?: string;
+}) {
   const [copied, setCopied] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => () => {
@@ -57,7 +66,7 @@ function CopyButton({ text, label }: { text: string; label: string }) {
       aria-label={copied ? tr.common.copied : label}
       title={copied ? tr.common.copied : label}
       onClick={() => void copy()}
-      className="absolute top-1.5 right-1.5 bg-background/80"
+      className={className}
     >
       {copied ? <Check /> : <Copy />}
     </Button>
@@ -85,7 +94,11 @@ const COMPONENTS: Components = {
     ),
   pre: ({ node, children }) => (
     <div className="relative">
-      <CopyButton text={hastText(node).replace(/\n$/, "")} label={tr.common.copyCode} />
+      <CopyButton
+        text={hastText(node).replace(/\n$/, "")}
+        label={tr.common.copyCode}
+        className="absolute top-1.5 right-1.5 bg-background/80"
+      />
       <pre className="overflow-x-auto rounded-md border bg-muted p-3 pr-10 font-mono text-xs">
         {children}
       </pre>

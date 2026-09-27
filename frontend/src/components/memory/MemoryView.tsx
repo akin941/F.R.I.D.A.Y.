@@ -17,6 +17,7 @@ import { useWorkspace } from "@/contexts/workspace-context";
 import { apiGetJson, apiPostJson, errorMessage } from "@/lib/api-client";
 import type { ApiMemory, MemoryStatus, MemoryType } from "@/types/api";
 import { VIEW_SCROLL_ROOT } from "@/components/shell/view-scroll";
+import { DeepLinkTarget, useDeepLinkTarget } from "@/components/shell/deep-link-target";
 import { cn } from "@/lib/utils";
 
 const LIST_STATUSES: MemoryStatus[] = ["approved", "rejected", "archived"];
@@ -137,6 +138,8 @@ export function MemoryView() {
     }
   }
 
+  // `?memory=<id>` from a chat "Kaynaklar" link.
+  const linkedMemoryId = useDeepLinkTarget("memory", !loading && memories.length > 0);
   const pending = memories.filter((m) => m.status === "pending_approval");
   const others = memories
     .filter((m) => m.status !== "pending_approval")
@@ -221,13 +224,19 @@ export function MemoryView() {
             ) : (
               <div className="flex flex-col gap-3">
                 {pending.map((memory) => (
-                  <MemoryCard
+                  <DeepLinkTarget
                     key={memory.id}
-                    memory={memory}
-                    variant="pending"
-                    onChanged={handleChanged}
-                    onDeleted={handleDeleted}
-                  />
+                    kind="memory"
+                    id={memory.id}
+                    active={linkedMemoryId === memory.id}
+                  >
+                    <MemoryCard
+                      memory={memory}
+                      variant="pending"
+                      onChanged={handleChanged}
+                      onDeleted={handleDeleted}
+                    />
+                  </DeepLinkTarget>
                 ))}
               </div>
             )}
@@ -278,13 +287,19 @@ export function MemoryView() {
             ) : (
               <div className="flex flex-col gap-3">
                 {others.map((memory) => (
-                  <MemoryCard
+                  <DeepLinkTarget
                     key={memory.id}
-                    memory={memory}
-                    variant="list"
-                    onChanged={handleChanged}
-                    onDeleted={handleDeleted}
-                  />
+                    kind="memory"
+                    id={memory.id}
+                    active={linkedMemoryId === memory.id}
+                  >
+                    <MemoryCard
+                      memory={memory}
+                      variant="list"
+                      onChanged={handleChanged}
+                      onDeleted={handleDeleted}
+                    />
+                  </DeepLinkTarget>
                 ))}
               </div>
             )}

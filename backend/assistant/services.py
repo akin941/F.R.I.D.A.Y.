@@ -253,6 +253,29 @@ def create_conversation(*, workspace, actor, title="", private=False):
 
 
 @transaction.atomic
+def rename_conversation(*, conversation, actor, title):
+    """Set the conversation's display title (Phase 4 branch 4). Same access
+    rule as `mark_conversation_private` (any member who can see the
+    conversation -- the caller resolves it through `scoped_for_actor`). An
+    unchanged title is a no-op without an audit row. The audit entry carries
+    no title text: titles are free user text, and the audit log is
+    bookkeeping, not a content mirror (mirrors `tasks.services._record`).
+    """
+    locked = Conversation.objects.select_for_update().get(pk=conversation.pk)
+    if locked.title == title:
+        return locked
+    locked.title = title
+    locked.save(update_fields=["title", "updated_at"])
+    record_audit(
+        action="assistant.conversation.renamed",
+        actor=actor,
+        workspace=locked.workspace,
+        resource=locked,
+    )
+    return locked
+
+
+@transaction.atomic
 def mark_conversation_private(*, conversation, actor):
     """One-way: this function only ever sets `private=True` — it takes no
     value parameter, so `False` is structurally unreachable through this
