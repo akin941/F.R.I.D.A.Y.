@@ -264,6 +264,12 @@ def create_request(*, workspace, actor, tool_name, payload=None, origin):
     tool = _resolve_tool(tool_name)
     if tool is None or not tool.gated:
         raise InvalidTransition(f"{tool_name!r} is not a valid gated tool.")
+    # Phase 3 branch 6 (plan-review round 9 item 3): system-only gates
+    # (e.g. the harness's own Gate A/B) can only be minted by their owning
+    # component, never by a human/agent request. getattr for the same
+    # SimpleNamespace test stubs as below.
+    if not getattr(tool, "user_invocable", True) and origin != ApprovalRequest.Origin.HARNESS:
+        raise InvalidTransition(f"{tool_name!r} can only be requested by the system.")
     # getattr, not tool.validate_request: existing tests stub tools with a
     # bare SimpleNamespace(gated=True), predating this field.
     validate_request = getattr(tool, "validate_request", None)

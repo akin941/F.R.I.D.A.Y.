@@ -335,6 +335,11 @@ class HarnessImplementationJob(WorkspaceScopedModel, TimestampedModel):
     worktree_path = models.CharField(max_length=1000, blank=True, default="")
     worktree_expires_at = models.DateTimeField(null=True, blank=True)
     push_result = models.JSONField(default=dict, blank=True)
+    # The implementing CLI's own output (Phase 3 branch 6): read only from
+    # the wrapper's post-quiescence frame, bounded at write time, stored
+    # unmutated for audit/debugging. LOW-TRUST content -- the UI renders it
+    # fenced behind a disclosure, never as Jarvis's own words (R2).
+    raw_transcript = models.TextField(blank=True, default="")
     # The claim fence for `run_harness_push_job` (Codex code-review P1,
     # branch 2 round 3): a Celery redelivery, or `dispatch()` firing
     # twice while the row is still `pushing`, would otherwise let two

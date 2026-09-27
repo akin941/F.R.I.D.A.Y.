@@ -3,7 +3,7 @@ from urllib.parse import urlsplit
 
 from rest_framework import serializers
 
-from harness.models import HarnessJob, HarnessRepo
+from harness.models import HarnessImplementationJob, HarnessJob, HarnessRepo, HarnessReview
 
 _MAX_NAME_CHARS = 255
 _MAX_URL_CHARS = 2000
@@ -210,6 +210,131 @@ class HarnessJobCreateSerializer(serializers.Serializer):
     agent = serializers.ChoiceField(
         choices=HarnessJob.Agent.choices, required=False, default=HarnessJob.Agent.CLAUDE_CODE
     )
+
+    def validate_goal(self, value):
+        if not value.strip():
+            raise serializers.ValidationError("goal must not be empty.")
+        return value
+
+
+# --- Implementation jobs (Phase 3 branch 6) ---------------------------------
+
+
+def _gate_summary(approval_request):
+    """Only `{id, status, decided_at}` of a linked gate -- never its
+    `payload` (plan-review round 1 of Phase 3; the approvals API's own
+    `display_summary` is the one place a decider sees gate content). A
+    gate revoked by cancel/worktree expiry reports `expired`."""
+    if approval_request is None:
+        return None
+    return {
+        "id": str(approval_request.id),
+        "status": approval_request.status,
+        "decided_at": approval_request.decided_at,
+    }
+
+
+class HarnessReviewSerializer(serializers.ModelSerializer):
+    """`summary`/`findings` are gateway-produced; `raw_transcript` is the
+    reviewing CLI's own low-trust output -- the UI renders it fenced behind
+    a disclosure (R2), never as Jarvis's own words."""
+
+    class Meta:
+        model = HarnessReview
+        fields = [
+            "id",
+            "agent",
+            "status",
+            "verdict",
+            "summary",
+            "findings",
+            "raw_transcript",
+            "elapsed_seconds",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = fields
+
+
+class HarnessImplementationJobSerializer(serializers.ModelSerializer):
+    """List/create/cancel shape. Never exposes `worktree_path` or
+    `container_id` (runner-host internals)."""
+
+    repo_name = serializers.CharField(source="repo.name", read_only=True)
+    reviewer_agent = serializers.SerializerMethodField()
+    gate_a = serializers.SerializerMethodField()
+    gate_b = serializers.SerializerMethodField()
+
+    class Meta:
+        model = HarnessImplementationJob
+        fields = [
+            "id",
+            "workspace",
+            "repo",
+            "repo_name",
+            "discovery_job",
+            "goal",
+            "agent",
+            "reviewer_agent",
+            "status",
+            "failure_reason",
+            "cancel_requested",
+            "branch_name",
+            "created_by",
+            "started_at",
+            "elapsed_seconds",
+            "created_at",
+            "updated_at",
+            "gate_a",
+            "gate_b",
+        ]
+        read_only_fields = fields
+
+    def get_reviewer_agent(self, obj):
+        from harness.review_execution import select_review_agent
+        from harness.services import HarnessInvalidTransition
+
+        try:
+            return str(select_review_agent(obj.agent))
+        except HarnessInvalidTransition:
+            return ""
+
+    def get_gate_a(self, obj):
+        return _gate_summary(obj.gate_a_request)
+
+    def get_gate_b(self, obj):
+        return _gate_summary(obj.gate_b_request)
+
+
+class HarnessImplementationJobDetailSerializer(HarnessImplementationJobSerializer):
+    reviews = HarnessReviewSerializer(many=True, read_only=True)
+
+    class Meta(HarnessImplementationJobSerializer.Meta):
+        fields = [
+            *HarnessImplementationJobSerializer.Meta.fields,
+            "base_commit_sha",
+            "produced_commit_sha",
+            "changed_files",
+            "diff_summary",
+            "test_result",
+            "push_result",
+            "worktree_expires_at",
+            "raw_transcript",
+            "reviews",
+        ]
+        read_only_fields = fields
+
+
+class HarnessImplementationJobCreateSerializer(serializers.Serializer):
+    # Same resolution discipline as `HarnessJobCreateSerializer`: ids are
+    # resolved through `for_actor()` before the service runs. The agent is
+    # not client-selectable -- the service's own default (the only
+    # selectable implementation agent) applies, and the reviewer is picked
+    # server-side as a different vendor.
+    workspace = serializers.UUIDField()
+    repo = serializers.UUIDField()
+    goal = serializers.CharField(max_length=_MAX_GOAL_CHARS)
+    discovery_job = serializers.UUIDField(required=False, allow_null=True, default=None)
 
     def validate_goal(self, value):
         if not value.strip():

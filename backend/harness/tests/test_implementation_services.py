@@ -87,7 +87,14 @@ class TestCreateHarnessImplementationJob:
         assert job.status == HarnessImplementationJob.Status.PENDING_GATE_A
         assert job.gate_a_request is not None
         assert job.gate_a_request.tool_name == "harness_implement"
-        assert job.gate_a_request.payload == {"job_id": str(job.id)}
+        assert job.gate_a_request.payload == {
+            "job_id": str(job.id),
+            "goal": "fix the bug",
+            "repo_name": repo.name,
+            "repo_git_url": job.repo_git_url,
+            "branch_name": job.branch_name,
+            "agent": "claude_code",
+        }
         assert job.gate_a_request.origin == ApprovalRequest.Origin.HARNESS
         assert job.branch_name == f"harness/p3-{job.id}"
 

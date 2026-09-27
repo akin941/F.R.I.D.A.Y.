@@ -5,8 +5,11 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from harness.models import HarnessJob, HarnessRepo
+from harness.models import HarnessImplementationJob, HarnessJob, HarnessRepo
 from harness.serializers import (
+    HarnessImplementationJobCreateSerializer,
+    HarnessImplementationJobDetailSerializer,
+    HarnessImplementationJobSerializer,
     HarnessJobCreateSerializer,
     HarnessJobDetailSerializer,
     HarnessJobSerializer,
@@ -17,13 +20,17 @@ from harness.serializers import (
 from harness.services import (
     HarnessInvalidTransition,
     HarnessPermissionDenied,
+    cancel_harness_implementation_job,
     cancel_harness_job,
+    create_harness_implementation_job,
     create_harness_job,
     create_repo,
     delete_repo,
     edit_repo,
+    get_implementation_job,
     get_job,
     get_repo,
+    list_implementation_jobs,
     list_jobs,
     list_repos,
 )
@@ -215,3 +222,102 @@ class HarnessJobCancelView(APIView):
         except HarnessPermissionDenied as exc:
             return _service_error_response(exc)
         return Response(HarnessJobSerializer(job).data)
+
+
+# --- Implementation jobs (Phase 3 branch 6) ---------------------------------
+
+
+def _implementation_queryset(queryset):
+    return queryset.select_related("repo", "gate_a_request", "gate_b_request")
+
+
+class HarnessImplementationJobListCreateView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        workspace, error = _resolve_workspace(request)
+        if error is not None:
+            return error
+        try:
+            jobs = list_implementation_jobs(workspace=workspace, actor=request.user)
+        except HarnessPermissionDenied as exc:
+            return _service_error_response(exc)
+        jobs = _implementation_queryset(jobs).order_by("-created_at")
+        return Response(HarnessImplementationJobSerializer(jobs, many=True).data)
+
+    def post(self, request):
+        serializer = HarnessImplementationJobCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        workspace = Workspace.objects.for_actor(
+            request.user, workspace=serializer.validated_data["workspace"]
+        ).first()
+        if workspace is None:
+            return Response(status=status.HTTP_404_NOT_FOUND)
+        # Out-of-scope/nonexistent repo or discovery job -> 404, never 403
+        # (existence must not leak); the service re-verifies both under lock.
+        repo = (
+            HarnessRepo.objects.for_actor(request.user, workspace=workspace)
+            .filter(id=serializer.validated_data["repo"])
+            .first()
+        )
+        if repo is None:
+            return Response(status=status.HTTP_404_NOT_FOUND)
+        discovery_job = None
+        discovery_job_id = serializer.validated_data.get("discovery_job")
+        if discovery_job_id is not None:
+            discovery_job = (
+                HarnessJob.objects.for_actor(request.user, workspace=workspace)
+                .filter(id=discovery_job_id)
+                .first()
+            )
+            if discovery_job is None:
+                return Response(status=status.HTTP_404_NOT_FOUND)
+        try:
+            job = create_harness_implementation_job(
+                workspace=workspace,
+                actor=request.user,
+                repo=repo,
+                goal=serializer.validated_data["goal"],
+                discovery_job=discovery_job,
+            )
+        except (HarnessPermissionDenied, HarnessInvalidTransition) as exc:
+            return _service_error_response(exc)
+        return Response(
+            HarnessImplementationJobSerializer(job).data, status=status.HTTP_201_CREATED
+        )
+
+
+class HarnessImplementationJobDetailView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, job_id):
+        job = HarnessImplementationJob.objects.for_actor(request.user).filter(id=job_id).first()
+        if job is None:
+            return Response(status=status.HTTP_404_NOT_FOUND)
+        try:
+            job = get_implementation_job(workspace=job.workspace, actor=request.user, job_id=job.id)
+        except HarnessPermissionDenied as exc:
+            return _service_error_response(exc)
+        if job is None:
+            return Response(status=status.HTTP_404_NOT_FOUND)
+        job = (
+            _implementation_queryset(HarnessImplementationJob.objects.filter(pk=job.pk))
+            .prefetch_related("reviews")
+            .get()
+        )
+        return Response(HarnessImplementationJobDetailSerializer(job).data)
+
+
+class HarnessImplementationJobCancelView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, job_id):
+        job = HarnessImplementationJob.objects.for_actor(request.user).filter(id=job_id).first()
+        if job is None:
+            return Response(status=status.HTTP_404_NOT_FOUND)
+        try:
+            job = cancel_harness_implementation_job(job=job, actor=request.user)
+        except (HarnessPermissionDenied, HarnessInvalidTransition) as exc:
+            return _service_error_response(exc)
+        job.refresh_from_db()
+        return Response(HarnessImplementationJobSerializer(job).data)

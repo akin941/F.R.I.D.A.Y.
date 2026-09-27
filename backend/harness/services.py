@@ -488,7 +488,17 @@ def create_harness_implementation_job(
         workspace=workspace,
         actor=actor,
         tool_name="harness_implement",
-        payload={"job_id": str(job.id)},
+        # Snapshot for the decider (Phase 3 branch 6, plan-review round 9
+        # item 5): `ToolSpec.describe_request` renders only these values,
+        # so later edits to the repo row can't change what Gate A showed.
+        payload={
+            "job_id": str(job.id),
+            "goal": job.goal,
+            "repo_name": locked_repo.name,
+            "repo_git_url": job.repo_git_url,
+            "branch_name": job.branch_name,
+            "agent": str(job.agent),
+        },
         origin=ApprovalRequest.Origin.HARNESS,
     )
     job.gate_a_request = approval_request
@@ -663,6 +673,9 @@ def fail_implementation_job_for_review(*, job, review, failure_reason=None):
         review_id=str(review.id) if review is not None else "",
     )
     _cleanup_worktree_best_effort(locked)
+    from harness.implementation_execution import record_implementation_work_log
+
+    record_implementation_work_log(locked)
     return locked
 
 
@@ -701,6 +714,15 @@ def request_harness_push(*, job, review):
             "review_id": str(review.id),
             "diff_summary": locked.diff_summary,
             "changed_files": locked.changed_files,
+            # Snapshotted at request time (Phase 3 branch 6, plan-review
+            # round 9 item 5) so Gate B's display summary can never drift
+            # from what the decider actually saw.
+            "branch_name": locked.branch_name,
+            "produced_commit_sha": locked.produced_commit_sha,
+            "test_result": locked.test_result,
+            "review_agent": str(review.agent),
+            "review_verdict": str(review.verdict),
+            "review_summary": review.summary,
         },
         origin=ApprovalRequest.Origin.HARNESS,
     )

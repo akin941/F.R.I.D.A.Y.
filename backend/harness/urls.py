@@ -1,6 +1,9 @@
 from django.urls import path
 
 from harness.views import (
+    HarnessImplementationJobCancelView,
+    HarnessImplementationJobDetailView,
+    HarnessImplementationJobListCreateView,
     HarnessJobCancelView,
     HarnessJobDetailView,
     HarnessJobListCreateView,
@@ -25,5 +28,20 @@ urlpatterns = [
         "harness/jobs/<uuid:job_id>/cancel",
         HarnessJobCancelView.as_view(),
         name="harness-job-cancel",
+    ),
+    path(
+        "harness/implementation-jobs",
+        HarnessImplementationJobListCreateView.as_view(),
+        name="harness-implementation-job-list",
+    ),
+    path(
+        "harness/implementation-jobs/<uuid:job_id>",
+        HarnessImplementationJobDetailView.as_view(),
+        name="harness-implementation-job-detail",
+    ),
+    path(
+        "harness/implementation-jobs/<uuid:job_id>/cancel",
+        HarnessImplementationJobCancelView.as_view(),
+        name="harness-implementation-job-cancel",
     ),
 ]

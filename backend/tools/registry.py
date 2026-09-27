@@ -63,6 +63,20 @@ class ToolSpec:
     unsanitized error text -- the same discipline `VaultExportRun`'s own
     sanitized `error_type`/`error_message` fields already enforce. Optional
     -- a tool with nothing to report simply omits it.
+
+    `user_invocable` (Phase 3 branch 6, plan-review round 9 item 3): `False`
+    for tools only a system component may request -- the harness gates
+    (`harness_implement`/`harness_push`) are created by the harness itself
+    with `origin=HARNESS`. Such tools are left out of `list_tool_names()`
+    (so the chat router and the agent planner never propose them) AND
+    `approvals.services.create_request` refuses them for human/agent
+    origins, so a direct `POST /approvals` can't mint one either.
+
+    `describe_request(approval_request)` (Phase 3 branch 6) returns the
+    safe, whitelisted `display_summary` the approvals UI shows the decider
+    -- built only from the request's own snapshotted payload and immutable
+    snapshots, never the raw `payload` itself (which the serializer still
+    never exposes). Optional.
     """
 
     name: str
@@ -71,6 +85,8 @@ class ToolSpec:
     dispatch: Callable[[Any], None]
     validate_request: Callable[[Any, dict], None] | None = None
     describe_execution: Callable[[Any], dict | None] | None = None
+    user_invocable: bool = True
+    describe_request: Callable[[Any], dict | None] | None = None
 
 
 _REGISTRY: dict[str, ToolSpec] = {}
@@ -91,7 +107,8 @@ def get_tool(name: str) -> ToolSpec | None:
 
 
 def list_tool_names() -> list[str]:
-    """Registered tool names only (MVP 6 §4) -- no metadata. `assistant`
+    """Registered, user-invocable tool names only (MVP 6 §4; the
+    `user_invocable` filter since Phase 3 branch 6) -- no metadata. `assistant`
     (the router) uses this to build its own natural-language tool
     vocabulary for classification prompts and to verify a classifier's
     `tool_name` output actually names something registered, without this
@@ -99,4 +116,4 @@ def list_tool_names() -> list[str]:
     need for a single-tool MVP (see this module's own docstring on why
     that would be premature). Sorted for a deterministic prompt/test
     ordering, not registration order."""
-    return sorted(_REGISTRY.keys())
+    return sorted(name for name, spec in _REGISTRY.items() if spec.user_invocable)

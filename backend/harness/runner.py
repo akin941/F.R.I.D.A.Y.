@@ -384,6 +384,43 @@ def _iter_cat_file_batch(stream):
         position = body_end + 1
 
 
+def diff_stat(directory, *, base_sha, head_sha):
+    """`git diff --stat` for `base_sha..head_sha` in the agent's worktree,
+    with the same isolation as `diff_contains_any` (Phase 3 branch 6: the
+    input to the gateway-produced `diff_summary`). Raises `RunnerError` on
+    failure -- the caller falls back to a deterministic summary."""
+    try:
+        result = subprocess.run(
+            [
+                "git",
+                "-C",
+                directory,
+                "-c",
+                "core.fsmonitor=",
+                "-c",
+                "core.quotePath=true",
+                "diff",
+                "--no-ext-diff",
+                "--no-textconv",
+                "--stat=200,150",
+                base_sha,
+                head_sha,
+                "--",
+            ],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            env={**os.environ, **_ISOLATED_GIT_ENV, "GIT_NO_REPLACE_OBJECTS": "1"},
+            timeout=_GIT_PLUMBING_TIMEOUT_SECONDS,
+        )
+    except (subprocess.TimeoutExpired, OSError) as exc:
+        raise RunnerError(f"git diff --stat failed: {exc}") from exc
+    if result.returncode != 0:
+        raise RunnerError(f"git diff --stat failed: {result.stderr.strip()}")
+    return result.stdout
+
+
 def _clone_full(*, git_url, default_branch, clone_env):
     """A non-shallow clone -- the clean-clone counterpart to `clone_repo`
     above, used by `push_bundled_commit` and `prepare_review_clone`

@@ -198,6 +198,94 @@ def describe_harness_push_execution(approval_request):
     }
 
 
+_DISPLAY_CHANGED_FILES_MAX = 50
+_DISPLAY_TEXT_MAX_CHARS = 4000
+
+
+def _text(value, limit=_DISPLAY_TEXT_MAX_CHARS):
+    if not isinstance(value, str):
+        return ""
+    return value if len(value) <= limit else value[: limit - 1] + "…"
+
+
+def describe_harness_implement_request(approval_request):
+    """`ToolSpec.describe_request` for Gate A (Phase 3 branch 6): a
+    whitelisted summary built from the request's own snapshotted payload;
+    for requests created before the snapshot existed, the job's immutable
+    creation-time snapshots fill the gap (`goal`, `repo_git_url`,
+    `branch_name`, `agent` never change after creation)."""
+    payload = approval_request.payload or {}
+    job = _get_job_from_payload(payload)
+    if job is None or job.workspace_id != approval_request.workspace_id:
+        return None
+    return {
+        "kind": "harness_implement",
+        "job_id": str(job.id),
+        "goal": _text(payload.get("goal", job.goal)),
+        "repo_name": _text(payload.get("repo_name", ""), 200),
+        "repo_git_url": _text(payload.get("repo_git_url", job.repo_git_url), 500),
+        "branch_name": _text(payload.get("branch_name", job.branch_name), 255),
+        "agent": _text(payload.get("agent", job.agent), 50),
+        "reviewer_agent": _reviewer_for(job.agent),
+    }
+
+
+def _reviewer_for(agent):
+    from harness.review_execution import select_review_agent
+    from harness.services import HarnessInvalidTransition
+
+    try:
+        return str(select_review_agent(agent))
+    except HarnessInvalidTransition:
+        return ""
+
+
+def describe_harness_push_request(approval_request):
+    """`ToolSpec.describe_request` for Gate B (Phase 3 branch 6): only the
+    values snapshotted into the payload when Gate B was requested -- the
+    decider sees exactly what existed at that moment, never live job
+    state. Pre-snapshot requests simply show fewer fields."""
+    payload = approval_request.payload or {}
+    job = _get_job_from_payload(payload)
+    if job is None or job.workspace_id != approval_request.workspace_id:
+        return None
+    changed_files = payload.get("changed_files")
+    if not isinstance(changed_files, list):
+        changed_files = []
+    changed_files = [_text(item, 500) for item in changed_files if isinstance(item, str)]
+    test_result = payload.get("test_result")
+    review_verdict = payload.get("review_verdict")
+    return {
+        "kind": "harness_push",
+        "job_id": str(job.id),
+        "branch_name": _text(payload.get("branch_name", job.branch_name), 255),
+        "produced_commit_sha": _text(payload.get("produced_commit_sha", ""), 64),
+        "changed_files": changed_files[:_DISPLAY_CHANGED_FILES_MAX],
+        "changed_files_total": len(changed_files),
+        "diff_summary": _text(payload.get("diff_summary", "")),
+        "test_result": (
+            {
+                "passed": bool(test_result.get("passed")),
+                "command": _text(test_result.get("command", ""), 500),
+                "exit_code": test_result.get("exit_code")
+                if isinstance(test_result.get("exit_code"), int)
+                else None,
+            }
+            if isinstance(test_result, dict) and test_result
+            else None
+        ),
+        "review": (
+            {
+                "agent": _text(payload.get("review_agent", ""), 50),
+                "verdict": _text(review_verdict, 50),
+                "summary": _text(payload.get("review_summary", "")),
+            }
+            if isinstance(review_verdict, str) and review_verdict
+            else None
+        ),
+    }
+
+
 def _register():
     register_tool(
         ToolSpec(
@@ -207,6 +295,10 @@ def _register():
             dispatch=dispatch_harness_implement_execution,
             validate_request=validate_harness_implement_request,
             describe_execution=describe_harness_implement_execution,
+            describe_request=describe_harness_implement_request,
+            # System-only gate: created by `create_harness_implementation_job`
+            # with origin=HARNESS, never by the router/planner/a direct POST.
+            user_invocable=False,
         )
     )
     register_tool(
@@ -217,5 +309,7 @@ def _register():
             dispatch=dispatch_harness_push_execution,
             validate_request=validate_harness_push_request,
             describe_execution=describe_harness_push_execution,
+            describe_request=describe_harness_push_request,
+            user_invocable=False,
         )
     )

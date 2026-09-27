@@ -174,6 +174,12 @@ FAKE_HARNESS_REVIEW_RESPONSE = (
     '{"summary": "Fake review summary: no issues found.", "verdict": "approved", "findings": []}'
 )
 
+# Purpose-aware fixture for `harness.diff_summary` (Phase 3 branch 6) --
+# mirrors harness.implementation_execution._parse_diff_summary_response.
+FAKE_HARNESS_DIFF_SUMMARY_RESPONSE = (
+    '{"summary": "Fake diff summary: a small change across the listed files."}'
+)
+
 
 def _latest_user_content(messages):
     for message in reversed(messages or []):
@@ -215,6 +221,8 @@ class FakeAdapter(BaseAdapter):
             return FAKE_HARNESS_BRIEFING_RESPONSE
         if purpose == "harness.review":
             return FAKE_HARNESS_REVIEW_RESPONSE
+        if purpose == "harness.diff_summary":
+            return FAKE_HARNESS_DIFF_SUMMARY_RESPONSE
         return FAKE_RESPONSE
 
     def _result(self, messages, purpose):

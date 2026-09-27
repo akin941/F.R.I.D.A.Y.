@@ -37,14 +37,23 @@ from datetime import timedelta
 from decimal import Decimal
 
 from django.conf import settings
+from django.core.exceptions import ImproperlyConfigured
 from django.db import transaction
 from django.utils import timezone
 
-from ai_core.gateway import record_external_usage
+from ai_core.exceptions import GatewayError
+from ai_core.gateway import InferenceGateway, record_external_usage
+from ai_core.models import PromptTemplate
 from audit.services import record_audit
 from harness import runner
-from harness.execution import _parse_claude_code_output, _resolve_cli_env
+from harness.execution import (
+    _fence_and_bound_transcript,
+    _parse_claude_code_output,
+    _resolve_cli_env,
+)
 from harness.models import HarnessImplementationJob, HarnessReview
+from memory.context import neutralize_fence, strip_invisible_formatting
+from memory.services import DuplicateMemory, record_work_log
 
 logger = logging.getLogger(__name__)
 
@@ -294,6 +303,7 @@ def _fail_and_cleanup(
         resource=locked,
         metadata={"failure_reason": locked.failure_reason},
     )
+    record_implementation_work_log(locked)
 
 
 def dispatch_created_review(review):
@@ -420,6 +430,15 @@ def run_harness_implementation_job(job_id):
     if cli_output:
         input_tokens, output_tokens, estimated_cost, context_report = _parse_claude_code_output(
             cli_output
+        )
+    # Stored before any further decision (Phase 3 branch 6), mirroring the
+    # discovery/review "persist the transcript first" discipline: the
+    # wrapper-framed CLI output when present, else the bounded raw logs so
+    # a failed run is still diagnosable. Low-trust either way.
+    transcript_source = cli_output if cli_output is not None else raw_output
+    if transcript_source:
+        HarnessImplementationJob.objects.filter(pk=job.pk).update(
+            raw_transcript=_fence_and_bound_transcript(transcript_source)[0]
         )
 
     # Shared cost kwargs for every failure path below this point (Codex
@@ -597,7 +616,9 @@ def run_harness_implementation_job(job_id):
         )
         return
 
-    diff_summary = _produce_diff_summary(job, changed_files)
+    diff_summary = _produce_diff_summary(
+        job, changed_files, repo_dir=f"{workspace_dir}/repo", base_sha=base_sha, head_sha=commit_sha
+    )
     latency_ms = int((time.monotonic() - started_monotonic) * 1000)
 
     cancelled_before_review = False
@@ -690,17 +711,15 @@ def run_harness_implementation_job(job_id):
     dispatch_created_review(review)
 
 
-def _produce_diff_summary(job, changed_files):
-    """A short, non-gateway placeholder for this branch (brief §boundary:
-    the identical gateway-summarization discipline `HarnessJob.briefing`
-    already uses is the intended design -- wiring the actual
-    `InferenceGateway.complete()` call here duplicates
-    `harness.execution._produce_briefing_summary`'s shape closely enough
-    that it belongs alongside branch 3's own review-summary work, which
-    needs the identical fencing discipline for its own `summary` field.
-    Kept as a plain, bounded, non-gateway string in the meantime so
-    `diff_summary` is never empty for a successful run -- never the raw
-    unfenced file list either, which could be arbitrarily large)."""
+_DIFF_SUMMARY_PROMPT_NAME = "jarvis_harness_diff_summary"
+_DIFF_SUMMARY_MAX_CHARS = 1500
+_DIFF_STAT_MAX_CHARS = 6000
+_WORK_LOG_TITLE_MAX_CHARS = 200
+
+
+def _fallback_diff_summary(job, changed_files):
+    """Deterministic, bounded summary used whenever the gateway summary
+    can't be produced -- never the raw, unbounded file list."""
     bounded = changed_files[:50]
     suffix = "" if len(changed_files) <= 50 else f" (+{len(changed_files) - 50} more)"
     return (
@@ -708,6 +727,107 @@ def _produce_diff_summary(job, changed_files):
         + "\n".join(bounded)
         + suffix
     )
+
+
+def _parse_diff_summary_response(text):
+    """Strict parse, same discipline as `_parse_briefing_response`: a
+    malformed reply is treated as no summary, never trusted raw."""
+    import json
+
+    try:
+        parsed = json.loads(text)
+    except (ValueError, TypeError):
+        return ""
+    summary = parsed.get("summary") if isinstance(parsed, dict) else None
+    if not isinstance(summary, str) or not summary.strip():
+        return ""
+    if len(summary) > _DIFF_SUMMARY_MAX_CHARS:
+        summary = summary[: _DIFF_SUMMARY_MAX_CHARS - 1] + "…"
+    return summary
+
+
+def _produce_diff_summary(job, changed_files, *, repo_dir, base_sha, head_sha):
+    """Gateway-produced `diff_summary` (Phase 3 branch 6 -- the boundary
+    section's intended design, which branch 2's placeholder deferred): one
+    `InferenceGateway.complete()` call over the owner's goal plus the
+    fenced `git diff --stat` (agent-influenced file names are untrusted
+    data), recorded as ModelUsage by the gateway itself. Any failure --
+    stat unreadable, prompt unconfigured, gateway error, malformed reply --
+    falls back to the deterministic summary; the job never fails because
+    of it."""
+    try:
+        stat = runner.diff_stat(repo_dir, base_sha=base_sha, head_sha=head_sha)
+    except runner.RunnerError:
+        logger.exception("Harness implementation job %s diff stat unavailable", job.pk)
+        return _fallback_diff_summary(job, changed_files)
+    if len(stat) > _DIFF_STAT_MAX_CHARS:
+        stat = stat[: _DIFF_STAT_MAX_CHARS - 1] + "…"
+    fenced_stat = neutralize_fence(strip_invisible_formatting(stat), "diff_stat")
+    fenced_goal = neutralize_fence(strip_invisible_formatting(job.goal[:2000]), "goal")
+    try:
+        template = PromptTemplate.objects.get(name=_DIFF_SUMMARY_PROMPT_NAME)
+        prompt_version = template.active_version
+        if prompt_version is None:
+            raise ImproperlyConfigured(f"{_DIFF_SUMMARY_PROMPT_NAME} has no active version")
+        result = InferenceGateway().complete(
+            purpose="harness.diff_summary",
+            messages=[
+                {"role": "system", "content": prompt_version.content},
+                {
+                    "role": "user",
+                    "content": (
+                        f"<goal>\n{fenced_goal}\n</goal>\n<diff_stat>\n{fenced_stat}\n</diff_stat>"
+                    ),
+                },
+            ],
+            actor=job.created_by,
+            workspace=job.workspace,
+            prompt_version=prompt_version,
+            stream=False,
+        )
+    except (PromptTemplate.DoesNotExist, ImproperlyConfigured, GatewayError):
+        logger.exception("Harness implementation job %s diff summary fell back", job.pk)
+        return _fallback_diff_summary(job, changed_files)
+    return _parse_diff_summary_response(result.text) or _fallback_diff_summary(job, changed_files)
+
+
+def record_implementation_work_log(job):
+    """ADR-008 decision 4's remaining harness producer (Phase 3 branch 6):
+    a terminal implementation job that actually ran (Gate A approved)
+    leaves an auto-approved, deletable `work_log` memory in its workspace
+    -- the system-generated activity summary "what did we last do for this
+    firm" relies on. Content is Jarvis-authored bookkeeping (status,
+    branch, owner-written goal, the gateway-produced diff summary), never
+    a CLI transcript. Best-effort: a duplicate or any error never affects
+    the job itself."""
+    status_label = {
+        HarnessImplementationJob.Status.SUCCEEDED: "pushed",
+        HarnessImplementationJob.Status.FAILED: "failed",
+        HarnessImplementationJob.Status.CANCELLED: "cancelled",
+    }.get(job.status)
+    if status_label is None:
+        return
+    lines = [
+        f"Harness implementation {status_label} for repo {job.repo_git_url}.",
+        f"Goal: {job.goal[:500]}",
+    ]
+    if job.status == HarnessImplementationJob.Status.SUCCEEDED:
+        lines.append(f"Branch pushed: {job.branch_name} at {job.produced_commit_sha[:12]}.")
+        if job.diff_summary:
+            lines.append(f"Change summary: {job.diff_summary[:1200]}")
+    elif job.failure_reason:
+        lines.append(f"Stopped: {job.failure_reason}.")
+    try:
+        record_work_log(
+            workspace=job.workspace,
+            title=f"Harness: {job.goal[: _WORK_LOG_TITLE_MAX_CHARS - 9]}",
+            content="\n".join(lines),
+            sensitivity=job.sensitivity,
+        )
+    except DuplicateMemory:
+        pass
+    except Exception:
+        logger.exception("Harness implementation job %s work_log failed", job.pk)
 
 
 def _claim_push_job(job_id):
@@ -855,6 +975,7 @@ def _finalize_push_success(job, *, worktree_cleanup_confirmed=True):
         resource=locked,
         metadata={},
     )
+    record_implementation_work_log(locked)
 
 
 def _finalize_push_cancelled(job, *, worktree_cleanup_confirmed=True):
@@ -911,6 +1032,7 @@ def _finalize_push_failure(job, failure_reason, *, error="", worktree_cleanup_co
         resource=locked,
         metadata={"failure_reason": failure_reason},
     )
+    record_implementation_work_log(locked)
 
 
 def recover_stale_harness_implementation_jobs():

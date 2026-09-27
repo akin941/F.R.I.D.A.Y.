@@ -11,6 +11,10 @@ class ApprovalRequestSerializer(serializers.ModelSerializer):
     # below (a `SerializerMethodField` is already implicitly read-only;
     # DRF rejects it appearing in that option too).
     execution = serializers.SerializerMethodField()
+    # Phase 3 branch 6: the tool's own safe, whitelisted summary of what is
+    # being decided (`ToolSpec.describe_request`), or `None`. The raw
+    # `payload` is still never serialized.
+    display_summary = serializers.SerializerMethodField()
 
     class Meta:
         model = ApprovalRequest
@@ -30,6 +34,7 @@ class ApprovalRequestSerializer(serializers.ModelSerializer):
             "created_at",
             "updated_at",
             "execution",
+            "display_summary",
         ]
         read_only_fields = [
             "id",
@@ -54,6 +59,13 @@ class ApprovalRequestSerializer(serializers.ModelSerializer):
 
         tool = _resolve_tool(obj.tool_name)
         describe = getattr(tool, "describe_execution", None) if tool is not None else None
+        return describe(obj) if describe is not None else None
+
+    def get_display_summary(self, obj):
+        from approvals.services import _resolve_tool
+
+        tool = _resolve_tool(obj.tool_name)
+        describe = getattr(tool, "describe_request", None) if tool is not None else None
         return describe(obj) if describe is not None else None
 
 
