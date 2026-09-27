@@ -208,6 +208,11 @@ class ApprovalRequestListCreateView(APIView):
                 # The real channel (web session or CLI PAT), from the
                 # authenticator -- never from the body.
                 channel=request_channel(request),
+                # Unconditionally False (ADR-010): a system-only gate is
+                # minted by its owning service, never through this
+                # endpoint. A literal, not derived from anything in the
+                # request -- pinned by approvals/tests/test_system_created.py.
+                system_created=False,
             )
         except (ApprovalPermissionDenied, InvalidTransition) as exc:
             return _service_error_response(exc)

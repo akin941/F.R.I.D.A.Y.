@@ -27,6 +27,14 @@ module. Contracts enforced with import-linter (see `backend/pyproject.toml`).
 > `approvals`, `tools`, `skills`, `agents`, `integrations`, `harness`. No
 > `apps.modules.*` pack exists yet.
 
+> Note (2026-09-27, Phase 5): ADR-010 adds two kernel apps, `connectors`
+> (MCP servers and native bridges) and `deploys` (deploy targets, the deploy
+> gate, the SSH runner), with one-way import contracts: `connectors` may
+> import `core`, `workspaces`, `audit`, `ai_core`, `tools`, `memory`;
+> `deploys` the same plus `connectors` and `approvals`; `harness` may import
+> `connectors`; no other kernel app imports either. `core` also gains the
+> shared `repo_identity` helpers.
+
 ## Consequences
 A module can be extracted into a service later because boundaries stay clean.
 The first extraction candidate, if ever needed, is the AI gateway.
