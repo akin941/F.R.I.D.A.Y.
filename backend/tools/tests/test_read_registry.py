@@ -49,7 +49,13 @@ def _read(name="stub_read", data_class=DATA_CLASS_FIRM, channels=None, bound=(FI
 
 
 @pytest.fixture
-def registered():
+def registered(monkeypatch):
+    """Registers stubs into an otherwise empty read registry: committed
+    connectors (e.g. GitHub, Phase 5 branch 5) register real reads at
+    startup, whose availability callbacks query the database."""
+    from tools import registry
+
+    monkeypatch.setattr(registry, "_READ_REGISTRY", {})
     names = []
 
     def register(spec):
