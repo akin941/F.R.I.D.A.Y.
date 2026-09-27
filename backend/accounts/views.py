@@ -7,7 +7,6 @@ from rest_framework import status
 from rest_framework.exceptions import AuthenticationFailed
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
-from rest_framework.throttling import ScopedRateThrottle
 from rest_framework.views import APIView
 from rest_framework_simplejwt.exceptions import InvalidToken, TokenError
 from rest_framework_simplejwt.settings import api_settings as jwt_settings
@@ -26,6 +25,7 @@ from accounts.serializers import (
 )
 from accounts.services import register_user
 from audit.services import record_audit
+from core.throttling import ScopedRateThrottle
 from workspaces.models import Workspace, WorkspaceMember
 
 
