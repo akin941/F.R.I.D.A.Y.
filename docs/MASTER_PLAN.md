@@ -749,6 +749,11 @@ not on `main`, and CI (push-to-main / PR only) had never run on it. Draft
 integration PR akin941/jarvis-os#26 was opened on 2026-09-27 so CI runs; a
 green CI run and the merge of that PR are Phase 3 closeout gates.
 
+**Review process (2026-09-27):** Codex CLI is retired from the development
+workflow. Branch and brief reviews are done by independent Claude Code
+subagents on Sonnet 5 (implementer ≠ reviewer model); earlier "Codex
+code-review round N" notes in briefs are historical.
+
 ### Plan audit 2026-09-27
 
 A full re-read of plans + four independent audits (plans/docs, harness

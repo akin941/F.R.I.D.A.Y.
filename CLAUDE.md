@@ -56,5 +56,11 @@ Backend tooling is `uv` (Python 3.12); run backend commands as `uv run ...` from
 - Secrets only via env; update `.env.example` when adding config, never real values.
 - Prompt packs live in `docs/prompts/` (masters + per-MVP / per-phase briefs); ADRs in
   `docs/adr/`; governance in `docs/security/` and `docs/mcp/`.
+- Reviews: every branch and every brief is reviewed by an independent Claude Code
+  subagent running **Sonnet 5** before merge (the implementing model never reviews
+  its own work); findings are fixed and re-reviewed until the verdict is APPROVE.
+  **Codex CLI is not used in this repo's development workflow** (since
+  2026-09-27). This is about how Jarvis is built — the `harness` product's own
+  cross-vendor reviewer (Codex CLI via `CODEX_API_KEY`) is a separate matter.
 - MCPs/external tools require the allowlist + manifest process
   (`docs/security/mcp-governance.md`) before installation.

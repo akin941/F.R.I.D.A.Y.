@@ -1,5 +1,10 @@
 # CODEX.md — Jarvis OS (short guide)
 
+> **Retired for development (2026-09-27):** Codex CLI no longer reviews or
+> implements work in this repo; reviews are done by an independent Sonnet 5
+> Claude Code subagent (see `CLAUDE.md` → Conventions). This file is kept only
+> as a pointer for any tool that still looks for it.
+
 **Read `CLAUDE.md` first** — it is the authoritative development guide; this file
 is only a pointer.
 
