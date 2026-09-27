@@ -33,6 +33,7 @@ from django.db import IntegrityError, transaction
 
 from audit.models import AuditLog
 from audit.services import record_audit
+from core.channels import CHANNEL_WEB
 from memory.jobs import dispatch_memory_embedding
 from memory.models import Memory, compute_fingerprint
 from workspaces.models import WorkspaceMember
@@ -55,13 +56,19 @@ class MemoryServiceError(Exception):
 class InvalidTransition(MemoryServiceError):
     """Illegal state-machine move → 400."""
 
+    code = "memory.invalid_transition"
+
 
 class DuplicateMemory(MemoryServiceError):
     """Fingerprint collision inside the workspace → 400."""
 
+    code = "memory.duplicate"
+
 
 class MemoryPermissionDenied(MemoryServiceError):
     """Actor's role does not allow the action → 403."""
+
+    code = "memory.permission_denied"
 
 
 def get_role(actor, workspace):
@@ -464,9 +471,13 @@ def forget_memory(*, memory, actor):
 
 
 @transaction.atomic
-def delete_memory(*, memory, actor):
+def delete_memory(*, memory, actor, channel):
     """Hard delete — only for never-approved suggestions; frees the
-    fingerprint slot."""
+    fingerprint slot. Confirm-class under ADR-009 (approved memories are
+    archived by `forget_memory` instead, restorable): a human actor over the
+    web channel only -- `channel` is required, never defaulted."""
+    if getattr(actor, "is_agent", False) or channel != CHANNEL_WEB:
+        raise MemoryPermissionDenied("Deleting a memory is only allowed for a person over the web.")
     memory = _locked(memory, actor)
     _require(get_role(actor, memory.workspace) in _CURATOR_ROLES, "deleting memories")
     if memory.status not in (Memory.Status.PENDING_APPROVAL, Memory.Status.REJECTED):

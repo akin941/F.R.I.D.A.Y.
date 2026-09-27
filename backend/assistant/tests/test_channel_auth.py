@@ -92,12 +92,6 @@ def pat_client(raw_token):
     return client
 
 
-def auth_client(user):
-    client = APIClient()
-    client.force_authenticate(user=user)
-    return client
-
-
 def _parse_sse(response):
     body = b"".join(response.streaming_content)
     events = []
@@ -201,10 +195,10 @@ def test_pat_send_message_stamps_channel_cli_on_both_rows(
 
 
 def test_web_send_message_still_stamps_channel_web(
-    owner, workspace, fake_provider, system_prompt, router_intent_prompt
+    owner, workspace, fake_provider, system_prompt, router_intent_prompt, web_client
 ):
     conversation = Conversation.objects.create(workspace=workspace, created_by=owner)
-    response = auth_client(owner).post(
+    response = web_client(owner).post(
         f"/api/v1/ai/conversations/{conversation.id}/messages",
         {"content": "hi from web"},
         format="json",
@@ -221,7 +215,7 @@ def test_web_send_message_still_stamps_channel_web(
 
 
 def test_pat_message_list_never_reveals_overlay_source_workspaces(
-    pat, owner, workspace, fake_provider, system_prompt, router_intent_prompt
+    pat, owner, workspace, fake_provider, system_prompt, router_intent_prompt, web_client
 ):
     """Codex round-1 P1 (p1-personal-overlay): a web-channel turn in this
     conversation used the cross-workspace overlay and persisted
@@ -243,7 +237,7 @@ def test_pat_message_list_never_reveals_overlay_source_workspaces(
         fingerprint=compute_fingerprint("shipped the migration"),
     )
     conversation = Conversation.objects.create(workspace=workspace, created_by=owner)
-    web_response = auth_client(owner).post(
+    web_response = web_client(owner).post(
         f"/api/v1/ai/conversations/{conversation.id}/messages",
         {"content": "hi from web"},
         format="json",

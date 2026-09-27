@@ -9,20 +9,53 @@ and every kernel app may already depend on `core` (one-way, per the
 
 from dataclasses import dataclass
 
-CHANNEL_WEB = "web"  # default: password-login JWT, trusted
-CHANNEL_CLI = "cli"  # low-trust: bearer PAT
+# The high-trust channel. A request is CHANNEL_WEB iff its authenticator set
+# `request.auth` to a `WebSessionPrincipal` -- which only
+# `accounts.authentication.DeviceJWTAuthentication` does, after checking
+# (1) a valid access JWT carrying the `did` claim, (2) that `did` names a
+# non-revoked, non-idle-expired TrustedDevice of the token's user, (3) the
+# user is active, the owner and not an agent; (4) the request came through
+# the BFF, whose Origin/Content-Type checks are the CSRF boundary (Phase 4
+# branch 2). Nothing else is ever web.
+CHANNEL_WEB = "web"
+CHANNEL_CLI = "cli"  # low-trust: bearer PAT of kind `cli`
+# Low-trust: bearer PAT of kind `openai`, used only by the OpenAI-compatible
+# facade (Phase 4 branch 6, ADR-008 decision 6: chat only, no tools, never
+# decides anything).
+CHANNEL_OPENAI = "openai"
 CHANNEL_TELEGRAM = "telegram"  # low-trust: relayed, no direct request at all
+# Not a request channel: machine-originated actions (agent engine, harness
+# gates, sweeps) that record "which channel" in audit metadata or on
+# `ApprovalRequest.requested_channel` (Phase 4 branch 1). Never trusted for
+# a decision -- only CHANNEL_WEB is.
+CHANNEL_SYSTEM = "system"
+# Default-deny (Phase 4 branch 2): any authenticated request whose auth
+# object is neither a WebSessionPrincipal nor a ChannelPrincipal -- e.g. a
+# future authenticator that forgot to state its channel -- is low-trust.
+CHANNEL_UNKNOWN = "unknown"
+
+
+@dataclass(frozen=True)
+class WebSessionPrincipal:
+    """`request.auth` for a trusted device's web session. Carries the
+    TrustedDevice id so device-scoped actions ("Bu cihazı unut", marking
+    the current device in the list) know which device is asking."""
+
+    device_id: str
+
+    @property
+    def channel(self):
+        return CHANNEL_WEB
 
 
 @dataclass(frozen=True)
 class ChannelPrincipal:
     """Set as `request.auth` by a low-trust authenticator (accounts'
-    `PersonalAccessTokenAuthentication`). Absence of this (e.g. a plain
-    JWTAuthentication auth object) means the request is CHANNEL_WEB --
-    default-trusted, not default-denied, since every pre-MVP-9
-    authenticator keeps working unmodified.
+    `PersonalAccessTokenAuthentication` / `FacadeTokenAuthentication`).
 
-    `channel` is CHANNEL_CLI today; CHANNEL_TELEGRAM never appears here --
+    `channel` is CHANNEL_CLI or CHANNEL_OPENAI (the token's `kind`);
+    `token_id` names the PersonalAccessToken, for per-token limits (the
+    facade's throttle and stream cap). CHANNEL_TELEGRAM never appears here --
     Telegram has no direct request/response cycle with our API at all (it's
     relayed via a webhook + Celery task), so there is no request to
     authenticate as Telegram in the first place.
@@ -30,11 +63,26 @@ class ChannelPrincipal:
 
     channel: str
     bound_workspace_id: str
+    token_id: str | None = None
 
 
 def request_channel(request) -> str:
+    """CHANNEL_WEB only for a WebSessionPrincipal; a ChannelPrincipal's own
+    (low-trust) channel; CHANNEL_UNKNOWN for anything else (default-deny)."""
     auth = getattr(request, "auth", None)
-    return auth.channel if isinstance(auth, ChannelPrincipal) else CHANNEL_WEB
+    if isinstance(auth, WebSessionPrincipal):
+        return CHANNEL_WEB
+    if isinstance(auth, ChannelPrincipal):
+        # A ChannelPrincipal is low-trust by definition; one claiming "web"
+        # is a bug, never trust.
+        return auth.channel if auth.channel != CHANNEL_WEB else CHANNEL_UNKNOWN
+    return CHANNEL_UNKNOWN
+
+
+def request_device_id(request):
+    """The TrustedDevice id of a web session, or None."""
+    auth = getattr(request, "auth", None)
+    return auth.device_id if isinstance(auth, WebSessionPrincipal) else None
 
 
 def is_low_trust(request) -> bool:
@@ -45,7 +93,7 @@ def scoped_for_actor(request, queryset, workspace=None):
     """Drop-in replacement for `<Model>.objects.for_actor(request.user,
     workspace=...)` in every view allowlisted for PAT auth (MVP 9 §2).
 
-    For a CHANNEL_WEB request, behavior is unchanged (whatever `workspace`
+    For a request without a ChannelPrincipal, behavior is unchanged (whatever `workspace`
     the view already computed -- from a query param, a body field, or None
     for a bare by-id lookup -- passes through as-is). For a
     ChannelPrincipal-authenticated request, `workspace` is always forced to

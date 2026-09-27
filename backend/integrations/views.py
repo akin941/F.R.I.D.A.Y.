@@ -18,6 +18,7 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from core.permissions import IsWebChannel
 from integrations.models import LinkedTelegramChat, TelegramLinkCode
 from integrations.serializers import TelegramLinkCodeCreateSerializer
 from integrations.tasks import process_telegram_update
@@ -50,7 +51,7 @@ def _resolve_workspace(request):
 
 
 class TelegramLinkCodeCreateView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, IsWebChannel]
 
     def post(self, request):
         serializer = TelegramLinkCodeCreateSerializer(data=request.data)
@@ -70,7 +71,7 @@ class TelegramLinkCodeCreateView(APIView):
 
 
 class TelegramLinkStatusView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, IsWebChannel]
 
     def get(self, request):
         workspace, error = _resolve_workspace(request)
@@ -85,7 +86,7 @@ class TelegramLinkStatusView(APIView):
 
 
 class TelegramUnlinkView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, IsWebChannel]
 
     def delete(self, request):
         workspace, error = _resolve_workspace(request)

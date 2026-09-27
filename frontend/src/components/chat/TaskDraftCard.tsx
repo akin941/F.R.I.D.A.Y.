@@ -1,42 +1,76 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
+import Link from "next/link";
+import { CircleCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { apiPostJson, ApiError } from "@/lib/api-client";
+import type { TaskDraft } from "@/components/chat/drafts";
+import { ApiError, apiPostJson, errorMessage } from "@/lib/api-client";
+import { tr } from "@/lib/i18n/tr";
 import type { ApiTask } from "@/types/api";
 
-export interface TaskDraft {
-  sourceMessageId: string;
-  title: string;
-  dueDate: string | null;
+export type { TaskDraft };
+
+export function taskHref(workspaceId: string, taskId: string): string {
+  return `/tasks?workspace=${encodeURIComponent(workspaceId)}&task=${encodeURIComponent(taskId)}`;
 }
 
 /**
- * Confirm/discard card for a `task_draft`-classified chat turn (MVP 6 §3).
- * Confirm reuses the existing `POST /api/tasks` route -- the only new
- * thing sent is `draft_message_id`, a REFERENCE the server independently
- * verifies (same actor, same workspace, `intent="task_draft"`) before ever
- * marking the created row `ai_suggested`; this component never asserts
- * that provenance itself. Discard is a pure client-side no-op -- nothing
- * was created, so there is nothing to undo.
+ * Confirm/discard card for a `task_draft`-classified chat turn (MVP 6 §3),
+ * live from the stream or rebuilt from the persisted message (Phase 4
+ * branch 4). Confirm reuses `POST /api/tasks` -- the only new thing sent is
+ * `draft_message_id`, a REFERENCE the server independently verifies (same
+ * actor, same workspace, `intent="task_draft"`) before marking the row
+ * `ai_suggested` and linking it as `Task.source_message`. That link is
+ * unique, so a second confirm (another tab, a reload) is refused with
+ * `task.draft_already_confirmed`; the card then asks for a refresh and
+ * shows the confirmed state. Discard is client-side only -- nothing was
+ * created, so there is nothing to undo.
  */
 export function TaskDraftCard({
   draft,
   workspaceId,
+  confirmedTaskId,
   onConfirmed,
+  onAlreadyConfirmed,
   onDiscard,
 }: {
   draft: TaskDraft;
   workspaceId: string;
+  confirmedTaskId: string | null;
   onConfirmed: (task: ApiTask) => void;
+  onAlreadyConfirmed: () => void;
   onDiscard: () => void;
 }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Same-tick double-click guard (state updates are batched).
+  const busyRef = useRef(false);
+
+  if (confirmedTaskId) {
+    return (
+      <div
+        data-testid="task-draft-confirmed"
+        className="flex flex-wrap items-center gap-x-2 gap-y-1 rounded-lg border border-success/30 bg-success-muted px-3 py-2 text-sm"
+      >
+        <CircleCheck aria-hidden className="size-4 shrink-0 text-success" />
+        <span className="font-medium">{tr.chat.taskDraft.created}</span>
+        <span className="min-w-0 truncate text-muted-foreground">{draft.title}</span>
+        <Link
+          href={taskHref(workspaceId, confirmedTaskId)}
+          className="ml-auto text-primary underline underline-offset-4"
+        >
+          {tr.chat.taskDraft.openTask}
+        </Link>
+      </div>
+    );
+  }
 
   async function handleConfirm() {
+    if (busyRef.current) return;
+    busyRef.current = true;
     setBusy(true);
     setError(null);
     try {
@@ -48,20 +82,23 @@ export function TaskDraftCard({
       });
       onConfirmed(task);
     } catch (err) {
-      setError(
-        err instanceof ApiError
-          ? (err.body.detail ?? "Görev oluşturulamadı.")
-          : "Bir şeyler ters gitti. Lütfen tekrar deneyin.",
-      );
+      if (err instanceof ApiError && err.code === "task.draft_already_confirmed") {
+        // Not an error for the owner: the refetch re-renders this card as
+        // "Görev oluşturuldu".
+        onAlreadyConfirmed();
+      } else {
+        setError(errorMessage(err, tr.chat.taskDraft.failed));
+      }
     } finally {
+      busyRef.current = false;
       setBusy(false);
     }
   }
 
   return (
-    <Card className="m-4" data-testid="task-draft-card">
+    <Card size="sm" data-testid="task-draft-card">
       <CardHeader>
-        <CardTitle>Bu bir görev gibi görünüyor</CardTitle>
+        <CardTitle>{tr.chat.taskDraft.title}</CardTitle>
       </CardHeader>
       <CardContent className="flex flex-col gap-1">
         {error ? (
@@ -71,15 +108,15 @@ export function TaskDraftCard({
         ) : null}
         <p className="text-sm font-medium">{draft.title}</p>
         {draft.dueDate ? (
-          <p className="text-sm text-muted-foreground">Son tarih {draft.dueDate}</p>
+          <p className="text-sm text-muted-foreground">{tr.chat.taskDraft.due(draft.dueDate)}</p>
         ) : null}
       </CardContent>
       <CardFooter className="flex justify-end gap-2">
         <Button variant="outline" size="sm" onClick={onDiscard} disabled={busy}>
-          Vazgeç
+          {tr.chat.taskDraft.discard}
         </Button>
         <Button size="sm" onClick={() => void handleConfirm()} disabled={busy}>
-          {busy ? "Oluşturuluyor…" : "Görevi onayla"}
+          {busy ? tr.chat.taskDraft.confirming : tr.chat.taskDraft.confirm}
         </Button>
       </CardFooter>
     </Card>

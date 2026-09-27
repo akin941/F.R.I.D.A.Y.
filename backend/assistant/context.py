@@ -321,6 +321,9 @@ def build_context(conversation, *, actor, new_user_content, channel, intent=Mess
         "chunk_count": len(chunk_ids),
         "chunk_ids": chunk_ids,
         "intent": intent,
+        # The request channel this turn arrived over (Phase 4 branch 6):
+        # lets usage be split by channel (web / cli / telegram / openai).
+        "channel": channel,
         # No profile content here (brief §3) — bool + bounded char count
         # only, mirroring the ids-only discipline everywhere else in this
         # report, just without ids since there's nothing to identify (one

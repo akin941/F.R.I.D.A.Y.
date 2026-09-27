@@ -24,6 +24,13 @@ data never leaks into personal memory scope, and vice versa.
 > command (`backend/accounts/management/commands/bootstrap_owner.py`), which
 > goes through the same `register_user()` service. The workspace axis itself
 > is unchanged.
+>
+> Note (2026-09-27, Phase 4 branch 2): signup is removed entirely. The owner
+> (`User.is_owner`, `bootstrap_owner` or `set_owner`) reaches the web only
+> through an enrolled trusted device (`manage.py issue_pairing_code` → `/enroll`);
+> firm (`company`) workspaces are created by the owner from the web
+> (`POST /api/v1/workspaces`, owner + web channel only, owner membership only).
+> Scoping through `for_actor()` is unchanged.
 
 ## Consequences
 Multi-tenancy is nearly free later; every feature pays a small scoping tax now.

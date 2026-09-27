@@ -11,6 +11,7 @@ from django.core.management.base import BaseCommand, CommandError
 
 from accounts.authentication import TOKEN_PREFIX, hash_token
 from accounts.models import PersonalAccessToken, User
+from audit.services import record_audit
 from workspaces.models import Workspace
 
 
@@ -20,6 +21,12 @@ class Command(BaseCommand):
     def add_arguments(self, parser):
         parser.add_argument("email")
         parser.add_argument("workspace_name")
+        parser.add_argument(
+            "--kind",
+            choices=PersonalAccessToken.Kind.values,
+            default=PersonalAccessToken.Kind.CLI,
+            help="Token kind: cli (default) or openai (the OpenAI-compatible facade).",
+        )
 
     def handle(self, *args, **options):
         # The docstring/help text call this dev-only, but nothing enforced
@@ -60,12 +67,27 @@ class Command(BaseCommand):
             )
         workspace = matches[0]
 
+        kind = options["kind"]
         raw_token = TOKEN_PREFIX + secrets.token_urlsafe(32)
-        PersonalAccessToken.objects.create(
+        token = PersonalAccessToken.objects.create(
             user=user,
             workspace=workspace,
-            name="dev cli",
+            name=f"dev {kind}",
+            kind=kind,
             token_hash=hash_token(raw_token),
+        )
+        # Same audit row as the mint endpoint, marked as coming from a
+        # management command (no request, so no web channel behind it).
+        record_audit(
+            action="accounts.pat.created",
+            actor=user,
+            workspace=workspace,
+            resource=token,
+            metadata={
+                "via": "management_command",
+                "kind": kind,
+                "expires_at": token.expires_at.isoformat(),
+            },
         )
         # Raw token only ever appears here -- same one-time-display
         # discipline as the mint endpoint (accounts/views.py).

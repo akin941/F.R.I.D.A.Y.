@@ -1,4 +1,5 @@
 import { mkdirSync } from "node:fs";
+import { issuePairingCode } from "./manage";
 
 const backendApiUrl = process.env.BACKEND_API_URL ?? "http://127.0.0.1:8001/api/v1";
 const healthUrl = `${backendApiUrl.replace(/\/api\/v1\/?$/, "")}/healthz`;
@@ -28,20 +29,33 @@ const DELAY_MS = 1000;
  * for the frontend process in that setup. CI sets the same fixed path for
  * both the backend and this process (see ci.yml), so this creates the one
  * directory the backend process needs but can't create at boot itself.
+ *
+ * Device trust (Phase 4 branch 2): there is no signup any more. Once the
+ * backend is up, this issues a one-time pairing PIN for the owner account
+ * (`manage.py issue_pairing_code --plain`, via E2E_MANAGE_CMD -- see
+ * e2e/manage.ts) and hands it to the smoke test as E2E_PAIRING_CODE. The
+ * owner must exist: CI runs `bootstrap_owner --email e2e@example.test
+ * --if-absent`; a local stack already has its owner. Dev settings accept a
+ * PIN without a trusted client IP (DEVICE_PAIRING_ALLOW_UNKNOWN_IP).
  */
 export default async function globalSetup() {
   if (process.env.OBSIDIAN_VAULT_PATH) {
     mkdirSync(process.env.OBSIDIAN_VAULT_PATH, { recursive: true });
   }
 
-  for (let attempt = 1; attempt <= RETRIES; attempt += 1) {
+  let healthy = false;
+  for (let attempt = 1; attempt <= RETRIES && !healthy; attempt += 1) {
     try {
       const response = await fetch(healthUrl);
-      if (response.ok) return;
+      healthy = response.ok;
     } catch {
       // backend not reachable yet
     }
-    await new Promise((resolve) => setTimeout(resolve, DELAY_MS));
+    if (!healthy) await new Promise((resolve) => setTimeout(resolve, DELAY_MS));
+  }
+  if (healthy) {
+    process.env.E2E_PAIRING_CODE = issuePairingCode();
+    return;
   }
   throw new Error(
     `Backend not reachable at ${healthUrl} after ${RETRIES}s. ` +

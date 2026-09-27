@@ -1,6 +1,8 @@
 # Phase 4 — Security baseline, identity, UI renewal, OpenAI facade
 
-> Status: **approved for implementation (2026-09-27)** after plan-review
+> Status: **done (2026-09-27)** — all six branches merged into
+> `integ/phase-4` after independent Sonnet 5 review (see "Closeout").
+> Originally approved for implementation (2026-09-27) after plan-review
 > round 1 (independent Sonnet 5 reviewer — Codex CLI is retired from the
 > development workflow): 1 CRITICAL / 3 HIGH / 5 MEDIUM / 2 LOW, all
 > incorporated below (see "Plan-review round 1"). Branch 1 was implemented
@@ -310,6 +312,23 @@ names it and PIN pairing is LAN-gated; (b) no trustworthy header (bare
 `DEVICE_PAIRING_ALLOW_UNKNOWN_IP=true` (dev default; documented as
 "LAN gating off"), and prod setups without a proxy pair devices with
 strong codes / `issue_pairing_code` only.
+
+> **Step-0 finding (2026-09-27, Next.js 16.3.6 source,
+> `node_modules/next/dist/server/base-server.js` `handleRequestImpl`):**
+> a route handler never sees the socket address directly (`NextRequest`
+> has no `ip` since Next 15). `next dev` and `next start` share this code
+> path and set `x-forwarded-for` from `socket.remoteAddress` **only when
+> the request does not already carry one** (`req.headers['x-forwarded-for']
+> ??= …`); `x-real-ip` is never touched. So under a bare `next dev` /
+> `next start` both headers are client-controlled → outcome (b): the BFF
+> forwards no client IP unless `TRUSTED_CLIENT_IP_HEADER` is set, and PINs
+> work only with `DEVICE_PAIRING_ALLOW_UNKNOWN_IP=true` (dev default).
+> Behind Caddy → outcome (a): `reverse_proxy` with `header_up X-Real-IP
+> {remote_host}` overwrites any client value, so `TRUSTED_CLIENT_IP_HEADER=
+> X-Real-IP` is trustworthy (Caddy's own `X-Forwarded-For` also works when
+> no `trusted_proxies` are configured, since Caddy then replaces a
+> client-sent value; the BFF uses the right-most entry of a list-valued
+> header). Implemented exactly so in `frontend/src/lib/client-ip.ts`.
 
 **Why not the PAT model for the remote key.** A PAT authenticates API
 calls *as a low-trust, workspace-bound channel*; the remote key does the
@@ -779,3 +798,31 @@ image or raw HTML.
   session migration at the flip; facade pre-auth flood limit; delete
   condition asymmetry (resolved by the ADR-009 rewrite).
 - LOW — CI guard for the web-client fixture flip.
+
+## Closeout (2026-09-27)
+
+Every branch was reviewed by an independent Sonnet 5 subagent until
+APPROVE, merged `--no-ff` into `integ/phase-4` with the Playwright smoke
+green locally, and the phase went to `main` through PR #27.
+
+| # | Branch | Review | Notes |
+|---|---|---|---|
+| 1 | `feat/p4-security-baseline` | APPROVE (round 2) | Throttles fail closed (503) on a cache outage; daily gunicorn 3×16 |
+| 2 | `feat/p4-device-trust` | APPROVE (round 3) | Step-0 client-IP spike recorded above; round 1 added Q3 (`DJANGO_ADMIN_ENABLED`, owner `is_staff`) and made `is_owner` read-only in admin; the merge with branch 4 decided that trashing a task releases its chat-draft link (ADR-009 Consequences) |
+| 3 | `feat/p4-design-system` | APPROVE (round 1) | `IsWebChannel`/`IsOwner` got stable codes `channel_forbidden`/`owner_required` when merged with branch 2; "Cihazlar" is its own `/devices` route |
+| 4 | `feat/p4-chat-redesign` | APPROVE (round 1) | Reconciliation is client-only (no SSE `start` event); draft confirmation detects the unique violation by SQLSTATE + constraint name |
+| 5 | `feat/p4-console-and-inbox` | APPROVE (round 1) | Adds read-only `self_repo_status` and `/auth/me` `trash_retention_days`; approvals list unpaginated |
+| 6 | `feat/p4-openai-facade` | APPROVE (round 1) | `openai`-client smoke + R4b load check recorded in the branch report; e2e `facade.e2e.ts` covers models, completion, streaming, 401, `tools` refusal |
+
+**Owner-only follow-up:** the manual Open WebUI smoke required by branch
+6's "done when" (streaming, history continuity, `jarvis-lite` as task
+model) needs Open WebUI installed; record it in
+`docs/integrations/README.md` ("OpenAI-compatible facade").
+
+**Carried forward** (MASTER_PLAN §AA): facade binding retention
+(`FacadeConversation` rows are never pruned); the BFF pre-auth limiter
+is per process; `fork_conversation`'s no-usable-cut fallback copies the
+whole source conversation; approvals list pagination; the e2e smoke
+reuses the owner on a CI retry, so a failed first attempt can leave data
+the retry trips over.
+

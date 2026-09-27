@@ -47,12 +47,6 @@ def outsider():
     return register_user(email="outsider@test.dev", password=PASSWORD, name="Outsider")
 
 
-def client_for(user):
-    client = APIClient()
-    client.force_authenticate(user=user)
-    return client
-
-
 def user_with_role(workspace, role, email):
     user = register_user(email=email, password=PASSWORD, name=role)
     WorkspaceMember.objects.create(workspace=workspace, user=user, role=role)
@@ -77,32 +71,32 @@ class TestListCreate:
         response = APIClient().get("/api/v1/approvals/requests", {"workspace": str(workspace.id)})
         assert response.status_code == 401
 
-    def test_requires_workspace_param(self, owner):
-        assert client_for(owner).get("/api/v1/approvals/requests").status_code == 400
+    def test_requires_workspace_param(self, owner, web_client):
+        assert web_client(owner).get("/api/v1/approvals/requests").status_code == 400
 
-    def test_list_filters_by_status(self, workspace, owner, second_admin):
+    def test_list_filters_by_status(self, workspace, owner, second_admin, web_client):
         pending = make_request(workspace, requested_by=owner)
         make_request(workspace, requested_by=owner, status=ApprovalRequest.Status.APPROVED)
-        response = client_for(owner).get(
+        response = web_client(owner).get(
             "/api/v1/approvals/requests", {"workspace": str(workspace.id), "status": "pending"}
         )
         assert response.status_code == 200
         assert [row["id"] for row in response.json()] == [str(pending.id)]
 
-    def test_invalid_status_filter_is_400(self, workspace, owner):
-        response = client_for(owner).get(
+    def test_invalid_status_filter_is_400(self, workspace, owner, web_client):
+        response = web_client(owner).get(
             "/api/v1/approvals/requests", {"workspace": str(workspace.id), "status": "bogus"}
         )
         assert response.status_code == 400
 
-    def test_out_of_scope_workspace_is_404(self, workspace, outsider):
-        response = client_for(outsider).get(
+    def test_out_of_scope_workspace_is_404(self, workspace, outsider, web_client):
+        response = web_client(outsider).get(
             "/api/v1/approvals/requests", {"workspace": str(workspace.id)}
         )
         assert response.status_code == 404
 
-    def test_create_ignores_client_supplied_server_fields(self, workspace, owner):
-        response = client_for(owner).post(
+    def test_create_ignores_client_supplied_server_fields(self, workspace, owner, web_client):
+        response = web_client(owner).post(
             "/api/v1/approvals/requests",
             {**create_payload(workspace), "status": "approved", "decided_by": None},
             format="json",
@@ -112,8 +106,8 @@ class TestListCreate:
         assert body["status"] == "pending"
         assert body["requested_by"] == str(owner.id)
 
-    def test_response_never_includes_payload(self, workspace, owner):
-        response = client_for(owner).post(
+    def test_response_never_includes_payload(self, workspace, owner, web_client):
+        response = web_client(owner).post(
             "/api/v1/approvals/requests",
             create_payload(workspace, payload={"secret": "value"}),
             format="json",
@@ -121,9 +115,9 @@ class TestListCreate:
         assert response.status_code == 201
         assert "payload" not in response.json()
 
-    def test_unknown_tool_is_400(self, workspace, owner):
+    def test_unknown_tool_is_400(self, workspace, owner, web_client):
         with mock.patch("approvals.services._resolve_tool", lambda name: None):
-            response = client_for(owner).post(
+            response = web_client(owner).post(
                 "/api/v1/approvals/requests", create_payload(workspace), format="json"
             )
         assert response.status_code == 400
@@ -133,29 +127,33 @@ class TestExecutionField:
     """brief §4: a run-status summary from the request's tool, or `None`
     if the tool has no `describe_execution` hook or nothing has run yet."""
 
-    def test_execution_is_none_without_a_describe_execution_hook(self, workspace, owner):
+    def test_execution_is_none_without_a_describe_execution_hook(
+        self, workspace, owner, web_client
+    ):
         make_request(workspace, requested_by=owner)
         with mock.patch("approvals.services._resolve_tool", lambda name: _GATED_TOOL):
-            response = client_for(owner).get(
+            response = web_client(owner).get(
                 "/api/v1/approvals/requests", {"workspace": str(workspace.id)}
             )
         assert response.status_code == 200
         assert response.json()[0]["execution"] is None
 
-    def test_execution_reflects_the_tools_describe_execution_hook(self, workspace, owner):
+    def test_execution_reflects_the_tools_describe_execution_hook(
+        self, workspace, owner, web_client
+    ):
         make_request(workspace, requested_by=owner)
         tool_with_execution = SimpleNamespace(
             gated=True,
             describe_execution=lambda approval_request: {"status": "succeeded"},
         )
         with mock.patch("approvals.services._resolve_tool", lambda name: tool_with_execution):
-            response = client_for(owner).get(
+            response = web_client(owner).get(
                 "/api/v1/approvals/requests", {"workspace": str(workspace.id)}
             )
         assert response.status_code == 200
         assert response.json()[0]["execution"] == {"status": "succeeded"}
 
-    def test_the_execution_field_does_not_cost_a_query_per_row(self, workspace, owner):
+    def test_the_execution_field_does_not_cost_a_query_per_row(self, workspace, owner, web_client):
         """Codex review (branch 4): the list endpoint is unpaginated, and
         `describe_vault_export_execution` used to run its own query per
         row -- turning one list read into N+1. The view now
@@ -173,7 +171,7 @@ class TestExecutionField:
             )
 
         with CaptureQueriesContext(connection) as one_row:
-            response = client_for(owner).get(
+            response = web_client(owner).get(
                 "/api/v1/approvals/requests", {"workspace": str(workspace.id)}
             )
         assert response.status_code == 200
@@ -190,7 +188,7 @@ class TestExecutionField:
             )
 
         with CaptureQueriesContext(connection) as more_rows:
-            response = client_for(owner).get(
+            response = web_client(owner).get(
                 "/api/v1/approvals/requests", {"workspace": str(workspace.id)}
             )
         assert response.status_code == 200
@@ -201,10 +199,10 @@ class TestPermissionMatrix:
     """Role x endpoint matrix (CLAUDE.md rule 7)."""
 
     @pytest.mark.parametrize("role", ROLES)
-    def test_all_roles_can_read(self, workspace, role):
+    def test_all_roles_can_read(self, workspace, role, web_client):
         user = user_with_role(workspace, role, f"role-{role}@test.dev")
         make_request(workspace)
-        response = client_for(user).get(
+        response = web_client(user).get(
             "/api/v1/approvals/requests", {"workspace": str(workspace.id)}
         )
         assert response.status_code == 200
@@ -220,9 +218,9 @@ class TestPermissionMatrix:
         ],
     )
     @mock.patch("approvals.services._resolve_tool", lambda name: _GATED_TOOL)
-    def test_create(self, workspace, role, expected):
+    def test_create(self, workspace, role, expected, web_client):
         user = user_with_role(workspace, role, f"role-{role}@test.dev")
-        response = client_for(user).post(
+        response = web_client(user).post(
             "/api/v1/approvals/requests", create_payload(workspace), format="json"
         )
         assert response.status_code == expected
@@ -237,30 +235,30 @@ class TestPermissionMatrix:
         ],
     )
     @pytest.mark.parametrize("action", ["approve", "reject"])
-    def test_decide(self, workspace, owner, role, expected, action):
+    def test_decide(self, workspace, owner, role, expected, action, web_client):
         user = user_with_role(workspace, role, f"role-{role}-{action}@test.dev")
         request = make_request(workspace, requested_by=owner)
-        response = client_for(user).post(
+        response = web_client(user).post(
             f"/api/v1/approvals/requests/{request.id}/{action}", format="json"
         )
         assert response.status_code == expected
 
 
 class TestOwnerDecision:
-    def test_owner_approves_own_request_via_http(self, workspace, owner):
+    def test_owner_approves_own_request_via_http(self, workspace, owner, web_client):
         # ADR-008 decision 3: the explicit, separate, audited decision over
         # the high-trust web channel IS the gate -- there is no second
         # human in a single-owner system.
         request = make_request(workspace, requested_by=owner)
-        response = client_for(owner).post(
+        response = web_client(owner).post(
             f"/api/v1/approvals/requests/{request.id}/approve", format="json"
         )
         assert response.status_code == 200
         assert response.json()["status"] == "approved"
 
-    def test_different_admin_can_approve_via_http(self, workspace, owner, second_admin):
+    def test_different_admin_can_approve_via_http(self, workspace, owner, second_admin, web_client):
         request = make_request(workspace, requested_by=owner)
-        response = client_for(second_admin).post(
+        response = web_client(second_admin).post(
             f"/api/v1/approvals/requests/{request.id}/approve", format="json"
         )
         assert response.status_code == 200
@@ -268,25 +266,25 @@ class TestOwnerDecision:
 
 
 class TestDetailAndTransitions:
-    def test_out_of_scope_transition_is_404_not_403(self, workspace, owner, outsider):
+    def test_out_of_scope_transition_is_404_not_403(self, workspace, owner, outsider, web_client):
         request = make_request(workspace, requested_by=owner)
-        response = client_for(outsider).post(
+        response = web_client(outsider).post(
             f"/api/v1/approvals/requests/{request.id}/approve", format="json"
         )
         assert response.status_code == 404
 
-    def test_unknown_action_is_404(self, workspace, owner, second_admin):
+    def test_unknown_action_is_404(self, workspace, owner, second_admin, web_client):
         request = make_request(workspace, requested_by=owner)
-        response = client_for(second_admin).post(
+        response = web_client(second_admin).post(
             f"/api/v1/approvals/requests/{request.id}/promote", format="json"
         )
         assert response.status_code == 404
 
-    def test_illegal_transition_is_400(self, workspace, owner, second_admin):
+    def test_illegal_transition_is_400(self, workspace, owner, second_admin, web_client):
         request = make_request(
             workspace, requested_by=owner, status=ApprovalRequest.Status.APPROVED
         )
-        response = client_for(second_admin).post(
+        response = web_client(second_admin).post(
             f"/api/v1/approvals/requests/{request.id}/reject", format="json"
         )
         assert response.status_code == 400

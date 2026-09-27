@@ -39,6 +39,7 @@ from ai_core.gateway import InferenceGateway
 from ai_core.models import PromptTemplate
 from approvals.models import ApprovalRequest
 from approvals.services import ApprovalServiceError, create_request
+from core.channels import CHANNEL_SYSTEM
 from knowledge.context import render_knowledge_block, select_context_chunks
 from tasks.models import Task
 from tasks.services import create_task
@@ -59,10 +60,14 @@ class AgentServiceError(Exception):
 class AgentPermissionDenied(AgentServiceError):
     """Actor's role does not allow the action -> 403."""
 
+    code = "agent.permission_denied"
+
 
 class AgentInvalidTransition(AgentServiceError):
     """Illegal state-machine move (e.g. confirming an already-resolved
     step, or one that no longer exists) -> 400."""
+
+    code = "agent.invalid_transition"
 
 
 def get_role(actor, workspace):
@@ -193,6 +198,7 @@ def _dispatch_tool_request_step(agent, step):
             tool_name=tool_name,
             payload={},
             origin=ApprovalRequest.Origin.AGENT,
+            channel=CHANNEL_SYSTEM,
         )
     except ApprovalServiceError:
         logger.exception(

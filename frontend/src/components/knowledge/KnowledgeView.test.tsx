@@ -3,6 +3,7 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { KnowledgeView } from "@/components/knowledge/KnowledgeView";
 import type { ApiKnowledgeDocument } from "@/types/api";
+import { calledWith, confirmInDialog, findConfirmDialog } from "@/test/confirm";
 
 const { workspaceHolder } = vi.hoisted(() => ({
   workspaceHolder: { current: { id: "w1", name: "Alice", type: "personal", role: "owner" } } as {
@@ -109,12 +110,12 @@ describe("KnowledgeView", () => {
     expect(await screen.findByText("Article")).toBeInTheDocument();
   });
 
-  it("surfaces a field-keyed validation error from the backend", async () => {
+  it("maps a field-keyed validation error to Turkish, never the English field text", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async (input: string, init?: RequestInit) => {
         if (init?.method === "POST") {
-          return jsonResponse({ content: ["content must not be empty."] }, 400);
+          return jsonResponse({ content: ["content must not be empty."], code: "invalid" }, 400);
         }
         return jsonResponse([]);
       }),
@@ -128,24 +129,30 @@ describe("KnowledgeView", () => {
     await userEvent.type(screen.getByLabelText("İçerik"), "x");
     await userEvent.click(screen.getByRole("button", { name: "Belge oluştur" }));
 
-    expect(await screen.findByText("content must not be empty.")).toBeInTheDocument();
+    // A generic validation code keeps the form's own Turkish context; the
+    // English field message never renders.
+    expect(await screen.findByText("Belge oluşturulamadı.")).toBeInTheDocument();
+    expect(screen.queryByText("content must not be empty.")).not.toBeInTheDocument();
   });
 
-  it("deletes a document", async () => {
+  it("moves a document to the trash only after confirmation", async () => {
     const ready = document();
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async (input: string, init?: RequestInit) => {
-        if (init?.method === "DELETE") {
-          return new Response(null, { status: 204 });
-        }
-        return jsonResponse([ready]);
-      }),
-    );
+    const fetchMock = vi.fn(async (input: string, init?: RequestInit) => {
+      if (init?.method === "DELETE") {
+        return new Response(null, { status: 204 });
+      }
+      return jsonResponse([ready]);
+    });
+    vi.stubGlobal("fetch", fetchMock);
 
     render(<KnowledgeView />);
     await screen.findByText("Lantern mode");
     await userEvent.click(screen.getByRole("button", { name: "Sil" }));
+    const dialog = await findConfirmDialog();
+    expect(dialog).toHaveTextContent("“Lantern mode” çöp kutusuna taşınır");
+    expect(dialog).toHaveTextContent("30 gün içinde");
+    expect(calledWith(fetchMock, "DELETE", `/api/knowledge/documents/${ready.id}`)).toBe(false);
+    await confirmInDialog("Çöp kutusuna taşı");
 
     await waitFor(() => {
       expect(screen.queryByText("Lantern mode")).not.toBeInTheDocument();

@@ -5,6 +5,8 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from core.api_errors import service_error_response
+from core.throttling import CreateScopedRateThrottle
 from harness.models import HarnessImplementationJob, HarnessJob, HarnessRepo
 from harness.serializers import (
     HarnessImplementationJobCreateSerializer,
@@ -39,9 +41,9 @@ from workspaces.models import Workspace
 
 def _service_error_response(exc):
     if isinstance(exc, HarnessPermissionDenied):
-        return Response({"detail": str(exc)}, status=status.HTTP_403_FORBIDDEN)
+        return service_error_response(exc, status.HTTP_403_FORBIDDEN)
     if isinstance(exc, HarnessInvalidTransition):
-        return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        return service_error_response(exc, status.HTTP_400_BAD_REQUEST)
     raise exc
 
 
@@ -145,6 +147,9 @@ class HarnessRepoDetailView(APIView):
 
 class HarnessJobListCreateView(APIView):
     permission_classes = [IsAuthenticated]
+    # Each job may spend up to HARNESS_MAX_JOB_COST.
+    throttle_classes = [CreateScopedRateThrottle]
+    throttle_scope = "cost"
 
     def get(self, request):
         workspace, error = _resolve_workspace(request)
@@ -237,6 +242,8 @@ def _implementation_queryset(queryset):
 
 class HarnessImplementationJobListCreateView(APIView):
     permission_classes = [IsAuthenticated]
+    throttle_classes = [CreateScopedRateThrottle]
+    throttle_scope = "cost"
 
     def get(self, request):
         workspace, error = _resolve_workspace(request)

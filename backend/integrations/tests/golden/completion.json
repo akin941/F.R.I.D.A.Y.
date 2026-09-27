@@ -1,0 +1,22 @@
+{
+  "id": "chatcmpl-<id>",
+  "object": "chat.completion",
+  "created": 0,
+  "model": "jarvis",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "Merhaba, ben Jarvis. MVP 1 gateway üzerinden çalışıyorum."
+      },
+      "finish_reason": "stop",
+      "logprobs": null
+    }
+  ],
+  "usage": {
+    "prompt_tokens": "<int>",
+    "completion_tokens": "<int>",
+    "total_tokens": "<int>"
+  }
+}

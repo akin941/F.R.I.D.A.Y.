@@ -1,377 +1,173 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import Link from "next/link";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
-import { Alert, AlertDescription } from "@/components/ui/alert";
-import {
-  APPROVAL_STATUS_LABELS,
-  EXECUTION_STATUS_LABELS,
-  TOOL_TITLES,
-  decisionConsequence,
-  isHarnessTool,
-} from "@/components/approvals/labels";
-import {
-  HARNESS_AGENT_LABELS,
-  IMPL_STATUS_LABELS,
-  REVIEW_VERDICT_LABELS,
-  harnessFailureReasonLabel,
-} from "@/components/harness/labels";
-import { TechnicalDetail } from "@/components/harness/TechnicalDetail";
-import { apiPostJson, ApiError } from "@/lib/api-client";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { StatusPill } from "@/components/ui/status-pill";
+import { APPROVAL_STATUS_LABELS } from "@/components/approvals/labels";
+import { approvalHref } from "@/components/approvals/links";
+import { rendererFor, type Decision } from "@/components/approvals/renderers";
+import { apiPostJson } from "@/lib/api-client";
+import { formatRemaining } from "@/lib/format/duration";
+import { formatDateTime, formatRelativeTime } from "@/lib/format/relative-time";
+import { tr } from "@/lib/i18n/tr";
+import { useCountdown } from "@/lib/use-countdown";
 import { cn } from "@/lib/utils";
-import type {
-  ApiApprovalRequest,
-  ApiHarnessImplementDisplaySummary,
-  ApiHarnessImplementExecution,
-  ApiHarnessPushDisplaySummary,
-  ApiHarnessPushExecution,
-  ApiVaultExportExecution,
-} from "@/types/api";
+import type { ApiApprovalRequest } from "@/types/api";
 
-const CHANGED_FILES_PREVIEW = 20;
+const copy = tr.approvals;
 
-// "" (e.g. no reviewer was selectable) renders as a dash, never blank.
-function agentLabel(agent: string): string {
-  if (!agent) return "—";
-  return HARNESS_AGENT_LABELS[agent as keyof typeof HARNESS_AGENT_LABELS] ?? agent;
-}
+/** The inbox's j/k navigation targets (one per card: its title link). */
+export const INBOX_ITEM_ATTRIBUTE = "data-inbox-item";
 
-function SummaryRow({ label, children }: { label: string; children: React.ReactNode }) {
+function ExpiryCountdown({ expiresAt }: { expiresAt: string }) {
+  const remaining = useCountdown(expiresAt);
   return (
-    <div className="flex flex-col gap-0.5 sm:flex-row sm:gap-2">
-      <dt className="shrink-0 text-muted-foreground sm:w-32">{label}</dt>
-      <dd className="min-w-0 break-words">{children}</dd>
-    </div>
+    <span className={cn(remaining === 0 && "text-destructive")}>
+      {remaining > 0 ? copy.meta.expiresIn(formatRemaining(remaining)) : copy.meta.expiredNow}
+    </span>
   );
 }
 
-function ImplementSummary({ summary }: { summary: ApiHarnessImplementDisplaySummary }) {
-  return (
-    <dl className="flex flex-col gap-1 text-sm">
-      <SummaryRow label="Hedef">
-        <span className="whitespace-pre-wrap">{summary.goal}</span>
-      </SummaryRow>
-      <SummaryRow label="Depo">
-        {summary.repo_name}
-        {/* The name is only a curator-chosen label -- the URL is what the
-            agent will actually clone and work against. */}
-        {summary.repo_git_url ? (
-          <code className="block font-mono text-xs break-all text-muted-foreground">
-            {summary.repo_git_url}
-          </code>
-        ) : null}
-      </SummaryRow>
-      <SummaryRow label="Dal">
-        <code className="font-mono">{summary.branch_name}</code>
-      </SummaryRow>
-      <SummaryRow label="Uygulayıcı">{agentLabel(summary.agent)}</SummaryRow>
-      <SummaryRow label="İnceleyici">{agentLabel(summary.reviewer_agent)}</SummaryRow>
-    </dl>
-  );
-}
-
-function PushSummary({ summary }: { summary: ApiHarnessPushDisplaySummary }) {
-  const shown = summary.changed_files.slice(0, CHANGED_FILES_PREVIEW);
-  const total = Math.max(summary.changed_files_total, summary.changed_files.length);
-  const more = total - shown.length;
-  return (
-    <dl className="flex flex-col gap-1 text-sm">
-      <SummaryRow label="Dal">
-        <code className="font-mono">{summary.branch_name}</code>
-      </SummaryRow>
-      {summary.produced_commit_sha ? (
-        <SummaryRow label="Commit">
-          <code className="font-mono" title={summary.produced_commit_sha}>
-            {summary.produced_commit_sha.slice(0, 12)}
-          </code>
-        </SummaryRow>
-      ) : null}
-      <SummaryRow label={`Değişen dosyalar (${total})`}>
-        <ul className="font-mono text-xs">
-          {shown.map((file) => (
-            <li key={file} className="break-all">
-              {file}
-            </li>
-          ))}
-          {more > 0 ? <li className="font-sans text-muted-foreground">+{more} daha</li> : null}
-        </ul>
-      </SummaryRow>
-      {summary.diff_summary ? (
-        <SummaryRow label="Değişiklik özeti">
-          <span className="block text-xs text-muted-foreground">
-            Model tarafından üretilmiş özet — diff’in kendisi değildir.
-          </span>
-          <span className="whitespace-pre-wrap">{summary.diff_summary}</span>
-        </SummaryRow>
-      ) : null}
-      <SummaryRow label="Testler">
-        {summary.test_result ? (
-          <span className={cn(!summary.test_result.passed && "text-destructive")}>
-            {summary.test_result.passed ? "Geçti" : "Başarısız"}
-            {summary.test_result.exit_code != null
-              ? ` (çıkış kodu ${summary.test_result.exit_code})`
-              : ""}
-            {" — "}
-            <code className="font-mono">{summary.test_result.command}</code>
-          </span>
-        ) : (
-          <span className="text-muted-foreground">Sonuç yok</span>
-        )}
-      </SummaryRow>
-      <SummaryRow label="İnceleme">
-        {summary.review ? (
-          <span>
-            <span
-              className={cn(
-                "font-medium",
-                summary.review.verdict === "changes_requested" && "text-destructive",
-              )}
-            >
-              {REVIEW_VERDICT_LABELS[summary.review.verdict] ?? summary.review.verdict}
-            </span>
-            {summary.review.summary ? (
-              <>
-                <span className="block text-xs text-muted-foreground">
-                  Jarvis&apos;in kendi özeti (model üretimi).
-                </span>
-                <span className="block whitespace-pre-wrap">{summary.review.summary}</span>
-              </>
-            ) : null}
-          </span>
-        ) : (
-          <span className="text-muted-foreground">İnceleme yok</span>
-        )}
-      </SummaryRow>
-    </dl>
-  );
-}
-
-function VaultExportExecutionLine({ execution }: { execution: ApiVaultExportExecution }) {
-  const hasCounters =
-    typeof execution.written_count === "number" &&
-    typeof execution.updated_count === "number" &&
-    typeof execution.removed_count === "number";
-  return (
-    <p className="text-sm">
-      Çalışma durumu: {EXECUTION_STATUS_LABELS[execution.status] ?? execution.status}
-      {execution.status === "failed" && execution.error_message
-        ? ` — ${execution.error_message}`
-        : null}
-      {execution.status === "succeeded" && hasCounters
-        ? ` (${execution.written_count} yazıldı, ${execution.updated_count} güncellendi, ${execution.removed_count} silindi)`
-        : null}
-    </p>
-  );
-}
-
-function HarnessExecutionLine({
-  execution,
+function DecisionButtons({
+  request,
+  subject,
+  onChanged,
 }: {
-  execution: ApiHarnessImplementExecution | ApiHarnessPushExecution;
+  request: ApiApprovalRequest;
+  subject: string;
+  onChanged: (request: ApiApprovalRequest) => void;
 }) {
-  const pushResult = "push_result" in execution ? execution.push_result : null;
-  return (
-    <div className="flex flex-col gap-0.5 text-sm">
-      <p>
-        İş durumu:{" "}
-        {IMPL_STATUS_LABELS[execution.status as keyof typeof IMPL_STATUS_LABELS] ??
-          execution.status}
-        {execution.failure_reason
-          ? ` — ${harnessFailureReasonLabel(execution.failure_reason)}`
-          : null}
-      </p>
-      {pushResult && "pushed" in pushResult ? (
-        pushResult.pushed ? (
-          <p>Dal uzak depoya gönderildi.</p>
-        ) : (
-          <div className="flex flex-col gap-1">
-            <p className="text-destructive">Gönderim başarısız.</p>
-            {pushResult.error ? <TechnicalDetail text={pushResult.error} /> : null}
-          </div>
-        )
-      ) : null}
-    </div>
-  );
-}
+  const renderer = rendererFor(request.tool_name);
 
-function GenericExecutionLine({ status }: { status: unknown }) {
-  if (typeof status !== "string") return null;
-  return <p className="text-sm">Çalışma durumu: {EXECUTION_STATUS_LABELS[status] ?? status}</p>;
+  async function decide(decision: Decision) {
+    onChanged(
+      await apiPostJson<ApiApprovalRequest>(`/api/approvals/requests/${request.id}/${decision}`),
+    );
+  }
+
+  function dialog(decision: Decision) {
+    const approve = decision === "approve";
+    return (
+      <ConfirmDialog
+        trigger={
+          <Button size="sm" variant={approve ? "default" : "outline"}>
+            {approve ? copy.decision.approve : copy.decision.reject}
+          </Button>
+        }
+        title={approve ? copy.decision.approveTitle : copy.decision.rejectTitle}
+        description={renderer.consequence(request, decision)}
+        confirmLabel={approve ? copy.decision.approveConfirm : copy.decision.rejectConfirm}
+        busyLabel={copy.decision.busy}
+        destructive={!approve}
+        errorFallback={copy.decision.failed}
+        onConfirm={() => decide(decision)}
+      >
+        <p className="text-sm font-medium">{subject}</p>
+      </ConfirmDialog>
+    );
+  }
+
+  return (
+    <CardFooter className="flex justify-end gap-2">
+      {dialog("reject")}
+      {dialog("approve")}
+    </CardFooter>
+  );
 }
 
 /**
- * One approval request. Rendering is keyed on `tool_name`: each tool
- * registers its own `execution` shape and (for harness tools) a
- * server-built `display_summary` -- nothing tool-specific is read without
- * first checking which tool this is, so e.g. a harness execution never
- * prints vault-export counters.
+ * One approval request, rendered by its tool's renderer
+ * (`components/approvals/renderers/`, generic fallback for any other tool):
+ * what is being decided (`display_summary`), the run status after approval
+ * (`execution`), and -- while pending, for a curator -- Onayla/Reddet, each
+ * behind a dialog that states the consequence. Decisions only happen here,
+ * in the web UI (ADR-008 decision 3); the server enforces the channel and
+ * the role unconditionally, `canDecide` only hides controls that would 403.
  *
- * Deciding is a two-step action: Onayla/Reddet first shows what the
- * decision will do, and only "Evet, …" sends it.
+ * `workspaceName` labels the row in the cross-workspace inbox.
  */
 export function ApprovalCard({
   request,
   canDecide,
   onChanged,
-  highlighted = false,
+  workspaceName,
+  linkToDetail = true,
+  headingLevel = "h3",
 }: {
   request: ApiApprovalRequest;
   canDecide: boolean;
   onChanged: (request: ApiApprovalRequest) => void;
-  highlighted?: boolean;
+  workspaceName?: string;
+  linkToDetail?: boolean;
+  headingLevel?: "h1" | "h2" | "h3";
 }) {
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [confirming, setConfirming] = useState<"approve" | "reject" | null>(null);
-
-  const approveRef = useRef<HTMLButtonElement>(null);
-  const rejectRef = useRef<HTMLButtonElement>(null);
-  const confirmRef = useRef<HTMLButtonElement>(null);
-  const restoreFocusRef = useRef<"approve" | "reject" | null>(null);
-
-  // Focus follows the confirmation step: into "Evet, …" when it opens,
-  // back to the Onayla/Reddet button that opened it on "Vazgeç".
-  useEffect(() => {
-    if (confirming) {
-      confirmRef.current?.focus();
-      return;
-    }
-    const target = restoreFocusRef.current;
-    restoreFocusRef.current = null;
-    if (target === "approve") approveRef.current?.focus();
-    else if (target === "reject") rejectRef.current?.focus();
-  }, [confirming]);
-
-  function dismissConfirm() {
-    restoreFocusRef.current = confirming;
-    setConfirming(null);
-  }
-
-  // ADR-008 decision 3 (single-owner): the gate is an explicit, separate,
-  // audited decision over the high-trust web channel -- the owner decides
-  // their own and their agents' requests, so no own-request hiding here.
-  // `canDecide` reflects the workspace role check, enforced server-side
-  // unconditionally; hiding for members/viewers is a UI-level reflection
-  // of that rule, not a substitute for it.
-
-  async function handleDecide(action: "approve" | "reject") {
-    setBusy(true);
-    setError(null);
-    try {
-      const updated = await apiPostJson<ApiApprovalRequest>(
-        `/api/approvals/requests/${request.id}/${action}`,
-      );
-      setConfirming(null);
-      onChanged(updated);
-    } catch (err) {
-      setError(
-        err instanceof ApiError
-          ? (err.body.detail ?? "İşlem tamamlanamadı.")
-          : "Bir şeyler ters gitti. Lütfen tekrar deneyin.",
-      );
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  const title = TOOL_TITLES[request.tool_name];
-  const summary = request.display_summary ?? null;
-  const execution = request.execution;
+  const renderer = rendererFor(request.tool_name);
+  const title = renderer.title(request);
+  const hasOwnTitle = title !== request.tool_name;
+  const Heading = headingLevel;
+  const origin = request.origin ? (copy.origin[request.origin] ?? request.origin) : null;
+  const channel = request.requested_channel
+    ? (copy.channel[request.requested_channel] ?? request.requested_channel)
+    : null;
+  const { Summary, Execution } = renderer;
+  const pending = request.status === "pending";
 
   return (
-    <Card
-      id={`approval-${request.id}`}
-      tabIndex={highlighted ? -1 : undefined}
-      data-highlighted={highlighted ? "true" : undefined}
-      className={cn(highlighted && "ring-2 ring-primary outline-none")}
-    >
-      <CardHeader>
-        <CardTitle>{title ?? request.tool_name}</CardTitle>
-        {title ? (
+    <Card id={`approval-${request.id}`} data-testid={`approval-${request.id}`}>
+      <CardHeader className="gap-1">
+        <CardTitle className="flex flex-wrap items-center gap-2">
+          <Heading className="text-base font-medium">
+            {linkToDetail ? (
+              <Link
+                href={approvalHref(request.id)}
+                {...{ [INBOX_ITEM_ATTRIBUTE]: "" }}
+                className="underline-offset-4 hover:underline focus-visible:rounded-sm focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none"
+              >
+                {title}
+              </Link>
+            ) : (
+              title
+            )}
+          </Heading>
+          <StatusPill
+            domain="approval"
+            status={request.status}
+            label={APPROVAL_STATUS_LABELS[request.status] ?? request.status}
+          />
+          {workspaceName ? <Badge variant="outline">{workspaceName}</Badge> : null}
+        </CardTitle>
+        {hasOwnTitle ? (
           <code className="font-mono text-xs text-muted-foreground">{request.tool_name}</code>
         ) : null}
       </CardHeader>
       <CardContent className="flex flex-col gap-2">
-        {error ? (
-          <Alert variant="destructive" role="alert">
-            <AlertDescription>{error}</AlertDescription>
-          </Alert>
-        ) : null}
-        <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
-          <span>{APPROVAL_STATUS_LABELS[request.status]}</span>
+        <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
+          <span title={formatDateTime(request.created_at)}>
+            {copy.meta.requested(formatRelativeTime(request.created_at))}
+          </span>
+          {origin && channel ? <span>{copy.meta.via(origin, channel)}</span> : null}
           {request.decided_at ? (
-            <>
-              <span>&middot;</span>
-              <span>Karara bağlandı {new Date(request.decided_at).toLocaleString()}</span>
-            </>
+            <span title={formatDateTime(request.decided_at)}>
+              {copy.meta.decided(formatRelativeTime(request.decided_at))}
+            </span>
           ) : null}
+          {pending && request.expires_at ? <ExpiryCountdown expiresAt={request.expires_at} /> : null}
         </div>
-
-        {summary?.kind === "harness_implement" && request.tool_name === "harness_implement" ? (
-          <ImplementSummary summary={summary} />
-        ) : summary?.kind === "harness_push" && request.tool_name === "harness_push" ? (
-          <PushSummary summary={summary} />
-        ) : isHarnessTool(request.tool_name) ? (
-          <p className="text-sm text-muted-foreground">Bu istek için özet bilgisi yok.</p>
-        ) : null}
-
+        <Summary request={request} />
         {/* Approval and actual completion are two separate async moments
-            (dispatch is async, brief §2) -- this must never imply
-            "approved" means "done". */}
-        {execution ? (
-          request.tool_name === "vault_export" ? (
-            <VaultExportExecutionLine execution={execution as ApiVaultExportExecution} />
-          ) : isHarnessTool(request.tool_name) ? (
-            <HarnessExecutionLine
-              execution={execution as ApiHarnessImplementExecution | ApiHarnessPushExecution}
-            />
-          ) : (
-            <GenericExecutionLine status={(execution as { status?: unknown }).status} />
-          )
-        ) : null}
+            (dispatch is async) -- this must never imply "approved" means
+            "done". */}
+        <Execution request={request} />
       </CardContent>
-      {request.status === "pending" && canDecide ? (
-        confirming ? (
-          <CardFooter className="flex flex-col items-stretch gap-2">
-            <p className="text-sm" role="status">
-              {decisionConsequence(request.tool_name, confirming)}
-            </p>
-            <div className="flex justify-end gap-2">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={dismissConfirm}
-                disabled={busy}
-              >
-                Vazgeç
-              </Button>
-              <Button
-                ref={confirmRef}
-                size="sm"
-                variant={confirming === "reject" ? "destructive" : "default"}
-                onClick={() => void handleDecide(confirming)}
-                disabled={busy}
-              >
-                {confirming === "approve" ? "Evet, onayla" : "Evet, reddet"}
-              </Button>
-            </div>
-          </CardFooter>
-        ) : (
-          <CardFooter className="flex justify-end gap-2">
-            <Button
-              ref={rejectRef}
-              variant="outline"
-              size="sm"
-              onClick={() => setConfirming("reject")}
-            >
-              Reddet
-            </Button>
-            <Button ref={approveRef} size="sm" onClick={() => setConfirming("approve")}>
-              Onayla
-            </Button>
-          </CardFooter>
-        )
+      {pending && canDecide ? (
+        <DecisionButtons
+          request={request}
+          subject={workspaceName ? copy.decision.subject(title, workspaceName) : title}
+          onChanged={onChanged}
+        />
       ) : null}
     </Card>
   );

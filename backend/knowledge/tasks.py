@@ -22,7 +22,12 @@ from knowledge.jobs import (
     finalize_ingestion_success,
 )
 from knowledge.models import KnowledgeDocument, compute_content_hash
-from knowledge.services import InvalidUpload, content_hash_exists, reject_nul_bytes
+from knowledge.services import (
+    InvalidUpload,
+    content_hash_exists,
+    purge_expired_trashed_documents,
+    reject_nul_bytes,
+)
 from knowledge.url_fetch import UrlFetchError, fetch_url
 
 logger = logging.getLogger(__name__)
@@ -140,7 +145,7 @@ def process_knowledge_document(document_id):
 
 
 def _process_claimed_document(document_id, claim_token):
-    document = KnowledgeDocument.objects.get(pk=document_id)
+    document = KnowledgeDocument.all_objects.get(pk=document_id)
 
     content = None
     if document.source_type == KnowledgeDocument.SourceType.URL:
@@ -231,7 +236,7 @@ def recover_stale_knowledge_documents():
     now = timezone.now()
     pending_grace = now - timedelta(seconds=PENDING_RECOVERY_GRACE_SECONDS)
     stale_ids = list(
-        KnowledgeDocument.objects.filter(
+        KnowledgeDocument.all_objects.filter(
             Q(status=KnowledgeDocument.Status.PENDING, updated_at__lt=pending_grace)
             | Q(status=KnowledgeDocument.Status.PROCESSING, lease_expires_at__lt=now)
         ).values_list("id", flat=True)
@@ -239,3 +244,10 @@ def recover_stale_knowledge_documents():
     for document_id in stale_ids:
         dispatch_knowledge_document(document_id)
     return len(stale_ids)
+
+
+@shared_task
+def purge_expired_trashed_documents_task():
+    """Daily beat job (config/celery.py, ADR-009): permanently delete
+    documents that have sat in the trash longer than TRASH_RETENTION_DAYS."""
+    return purge_expired_trashed_documents()

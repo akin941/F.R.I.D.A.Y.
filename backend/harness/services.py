@@ -25,6 +25,7 @@ from django.db.models import ProtectedError
 from approvals.models import ApprovalRequest
 from approvals.services import create_request, revoke_request
 from audit.services import record_audit
+from core.channels import CHANNEL_SYSTEM
 from harness.models import HarnessImplementationJob, HarnessJob, HarnessRepo, HarnessReview
 from harness.repo_identity import is_self_repo
 from memory.models import Memory
@@ -69,10 +70,14 @@ class HarnessServiceError(Exception):
 class HarnessPermissionDenied(HarnessServiceError):
     """Actor's role does not allow the action -> 403."""
 
+    code = "harness.permission_denied"
+
 
 class HarnessInvalidTransition(HarnessServiceError):
     """Illegal state-machine move, or an unselectable agent/disabled repo
     -> 400."""
+
+    code = "harness.invalid_transition"
 
 
 def get_role(actor, workspace):
@@ -512,6 +517,7 @@ def create_harness_implementation_job(
             "reviewer_agent": _snapshot_reviewer(job.agent),
         },
         origin=ApprovalRequest.Origin.HARNESS,
+        channel=CHANNEL_SYSTEM,
     )
     job.gate_a_request = approval_request
     job.save(update_fields=["gate_a_request", "updated_at"])
@@ -745,6 +751,7 @@ def request_harness_push(*, job, review):
             "review_summary": review.summary,
         },
         origin=ApprovalRequest.Origin.HARNESS,
+        channel=CHANNEL_SYSTEM,
     )
     locked.gate_b_request = approval_request
     locked.status = HarnessImplementationJob.Status.PENDING_GATE_B

@@ -9,9 +9,9 @@ from workspaces.services import ensure_personal_workspace
 def register_user(*, email, password, name=""):
     """Create a user together with their personal workspace.
 
-    The single entry point for user creation in application flows (signup now,
-    invites later). Explicit service call instead of signals, so the flow stays
-    testable and visible.
+    The single entry point for user creation (`manage.py bootstrap_owner`;
+    there is no signup since Phase 4 branch 2). Explicit service call
+    instead of signals, so the flow stays testable and visible.
     """
     user = User.objects.create_user(email=email, password=password, name=name)
     workspace = ensure_personal_workspace(user)

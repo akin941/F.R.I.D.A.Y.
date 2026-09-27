@@ -6,6 +6,9 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from core.api_errors import service_error_response
+from core.channels import request_channel
+from core.permissions import IsWebChannel
 from memory.models import Memory
 from memory.serializers import MemoryCreateSerializer, MemoryCurateSerializer, MemorySerializer
 from memory.services import (
@@ -34,9 +37,9 @@ _TRANSITIONS = {
 
 def _service_error_response(exc):
     if isinstance(exc, MemoryPermissionDenied):
-        return Response({"detail": str(exc)}, status=status.HTTP_403_FORBIDDEN)
+        return service_error_response(exc, status.HTTP_403_FORBIDDEN)
     if isinstance(exc, (InvalidTransition, DuplicateMemory)):
-        return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        return service_error_response(exc, status.HTTP_400_BAD_REQUEST)
     raise exc
 
 
@@ -109,7 +112,7 @@ class MemoryListCreateView(APIView):
 
 
 class MemoryDetailView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, IsWebChannel]
 
     def _get_memory(self, request, memory_id):
         # Out-of-scope rows → 404, never 403 (existence must not leak).
@@ -139,7 +142,7 @@ class MemoryDetailView(APIView):
         if memory is None:
             return Response(status=status.HTTP_404_NOT_FOUND)
         try:
-            delete_memory(memory=memory, actor=request.user)
+            delete_memory(memory=memory, actor=request.user, channel=request_channel(request))
         except (MemoryPermissionDenied, InvalidTransition) as exc:
             return _service_error_response(exc)
         return Response(status=status.HTTP_204_NO_CONTENT)

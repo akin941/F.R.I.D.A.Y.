@@ -4,9 +4,13 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { TASK_PRIORITY_LABELS, TASK_STATUS_LABELS } from "@/components/tasks/labels";
 import { TaskFields, type TaskFieldsValue } from "@/components/tasks/TaskFields";
-import { apiDelete, apiPatchJson, apiPostJson, ApiError } from "@/lib/api-client";
+import { apiDelete, apiPatchJson, apiPostJson, errorMessage } from "@/lib/api-client";
+import { useWorkspace } from "@/contexts/workspace-context";
+import { TRASH_RETENTION_DAYS_DEFAULT } from "@/lib/trash";
+import { tr } from "@/lib/i18n/tr";
 import type { ApiTask } from "@/types/api";
 
 function toFieldsValue(task: ApiTask): TaskFieldsValue {
@@ -27,6 +31,8 @@ export function TaskCard({
   onChanged: (task: ApiTask) => void;
   onDeleted: (id: string) => void;
 }) {
+  const trashRetentionDays =
+    useWorkspace().trashRetentionDays ?? TRASH_RETENTION_DAYS_DEFAULT;
   const [editing, setEditing] = useState(false);
   const [fields, setFields] = useState<TaskFieldsValue>(toFieldsValue(task));
   const [busy, setBusy] = useState(false);
@@ -38,11 +44,7 @@ export function TaskCard({
     try {
       return await action();
     } catch (err) {
-      setError(
-        err instanceof ApiError
-          ? (err.body.detail ?? "İşlem tamamlanamadı.")
-          : "Bir şeyler ters gitti. Lütfen tekrar deneyin.",
-      );
+      setError(errorMessage(err, "İşlem tamamlanamadı."));
       return undefined;
     } finally {
       setBusy(false);
@@ -70,11 +72,10 @@ export function TaskCard({
     if (updated) onChanged(updated);
   }
 
+  // Runs only from the confirmation dialog, which reports a failure.
   async function handleDelete() {
-    await run(async () => {
-      await apiDelete(`/api/tasks/${task.id}`);
-      onDeleted(task.id);
-    });
+    await apiDelete(`/api/tasks/${task.id}`);
+    onDeleted(task.id);
   }
 
   if (editing) {
@@ -167,9 +168,19 @@ export function TaskCard({
             Yeniden aç
           </Button>
         )}
-        <Button variant="destructive" size="sm" onClick={() => void handleDelete()} disabled={busy}>
-          Sil
-        </Button>
+        <ConfirmDialog
+          trigger={
+            <Button variant="destructive" size="sm" disabled={busy}>
+              Sil
+            </Button>
+          }
+          title={tr.confirm.trash.taskTitle}
+          description={tr.confirm.trash.task(task.title, trashRetentionDays)}
+          confirmLabel={tr.confirm.trash.confirm}
+          busyLabel={tr.confirm.trash.deleting}
+          errorFallback={tr.confirm.trash.taskFailed}
+          onConfirm={handleDelete}
+        />
       </CardFooter>
     </Card>
   );

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -11,14 +12,14 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { HARNESS_REPOS_HREF } from "@/components/harness/links";
 import { apiGetJson } from "@/lib/api-client";
 import type { ApiHarnessRepo } from "@/types/api";
 
 /**
- * Picker over the workspace's registered, enabled harness repos. Repo
- * registration itself stays an owner-side action outside this UI (no
- * registry editing here) -- the empty state says so rather than offering a
- * raw id field.
+ * Picker over the workspace's registered, enabled harness repos. Repos are
+ * registered on the registry page (`/harness/repos`) -- the empty state
+ * links there rather than offering a raw id field.
  *
  * `requireTestCommand`: implementation jobs fail closed without a
  * configured `test_command` (backend rejects the create with a 400), so
@@ -88,8 +89,11 @@ export function HarnessRepoPicker({
         <Skeleton className="h-8 w-64" />
       ) : enabledRepos.length === 0 ? (
         <p className="text-sm text-muted-foreground">
-          Bu çalışma alanında kullanılabilir kayıtlı depo yok. Depolar çalışma alanı sahibi
-          tarafından kaydedilir; bu ekrandan eklenemez.
+          Bu çalışma alanında kullanılabilir kayıtlı depo yok.{" "}
+          <Link href={HARNESS_REPOS_HREF} className="underline underline-offset-4">
+            Depolar sayfasından
+          </Link>{" "}
+          bir depo kaydedip etkinleştirebilirsin.
         </p>
       ) : (
         <>

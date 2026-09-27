@@ -3,6 +3,7 @@ export interface ApiUser {
   email: string;
   name: string;
   is_agent: boolean;
+  is_owner: boolean;
 }
 
 export interface ApiWorkspaceSummary {
@@ -56,10 +57,66 @@ export interface ApiWorkspaceDetail extends ApiWorkspace {
   profile: ApiWorkspaceProfile;
 }
 
+// A "new device enrolled remotely" notice (Phase 4 branch 2), shown on every
+// device for a week after a remote-key enrollment.
+export interface ApiSecurityNotice {
+  kind: "remote_enrollment";
+  device_id: string;
+  device_name: string;
+  created_at: string;
+}
+
 export interface SessionResponse {
   user: ApiUser;
   workspaces: ApiWorkspaceSummary[];
+  security_notices?: ApiSecurityNotice[];
+  // ADR-009 retention window (backend TRASH_RETENTION_DAYS).
+  trash_retention_days?: number;
 }
+
+// --- Device trust (Phase 4 branch 2) ---
+
+export type ApiDeviceEnrolledVia = "pin" | "strong_code" | "remote_key";
+
+export interface ApiTrustedDevice {
+  id: string;
+  name: string;
+  enrolled_via: ApiDeviceEnrolledVia;
+  enrolled_ip: string | null;
+  user_agent: string;
+  created_at: string;
+  last_seen_at: string | null;
+  last_seen_ip: string | null;
+  revoked_at: string | null;
+  revoke_reason: string;
+  idle_expires_at: string;
+  is_current: boolean;
+}
+
+export interface ApiPairingCode {
+  code: string;
+  kind: "pin" | "strong";
+  expires_at: string;
+}
+
+export interface ApiRemoteKeyState {
+  active: boolean;
+  created_at: string | null;
+  last_used_at: string | null;
+  key?: string;
+}
+
+// Which channel a turn arrived over (backend Message.Channel, MVP 9 §1).
+// `openai`: the OpenAI-compatible facade (Phase 4 branch 6), e.g. Open WebUI.
+export type MessageChannel = "web" | "cli" | "telegram" | "openai";
+
+export type MessageIntent =
+  | ""
+  | "chat"
+  | "memory_query"
+  | "knowledge_query"
+  | "task_draft"
+  | "tool_request";
 
 export interface ApiConversation {
   id: string;
@@ -67,6 +124,11 @@ export interface ApiConversation {
   title: string;
   created_by: string | null;
   created_at: string;
+  // One-way (false -> true only): a private conversation feeds no memory.
+  private: boolean;
+  // The first message's channel (Phase 4 branch 4 channel badge); null
+  // until the conversation has a message.
+  origin_channel: MessageChannel | null;
 }
 
 export type MessageRole = "user" | "assistant" | "system";
@@ -93,6 +155,18 @@ export interface ApiMessage {
   // renders this yet -- it's the data a future "from Workspace X" view
   // would need, not a redefinition of memories_used's own contract.
   overlay_source_workspaces: Record<string, string>;
+  // The router's classification of a USER message (MVP 6 §1) and its
+  // frozen payload: `{title, due_date}` for task_draft, `{tool_name,
+  // payload}` for tool_request, `{}` otherwise.
+  intent: MessageIntent;
+  intent_payload: Record<string, unknown>;
+  channel: MessageChannel;
+  // The task confirmed from this task-draft message (Task.source_message),
+  // or null -- how a reloaded chat knows a draft was already confirmed.
+  confirmed_task: string | null;
+  // {chunk_id: document_id} for this reply's chunks_used, resolved in the
+  // conversation's scope; a chunk whose document is gone is absent.
+  chunk_documents: Record<string, string>;
 }
 
 export type ChatStreamEvent =
@@ -158,6 +232,10 @@ export interface ApiMemoryExport {
 
 export interface ApiErrorBody {
   detail?: string;
+  // Stable machine-readable error code (backend core/error_codes.py);
+  // resolved to Turkish by lib/i18n/error-codes.ts. A validation error on
+  // a field literally named `code` makes this a list -- treated as absent.
+  code?: unknown;
   [field: string]: unknown;
 }
 
@@ -181,6 +259,8 @@ export interface ApiKnowledgeDocument {
   created_by: string | null;
   created_at: string;
   updated_at: string;
+  // ADR-009: set while the row is in the trash ("Çöp kutusu").
+  deleted_at?: string | null;
 }
 
 // --- Tasks (MVP 4) ---
@@ -203,6 +283,8 @@ export interface ApiTask {
   created_by: string | null;
   created_at: string;
   updated_at: string;
+  // ADR-009: set while the row is in the trash ("Çöp kutusu").
+  deleted_at?: string | null;
 }
 
 // --- Approvals (MVP 5) ---
@@ -266,21 +348,40 @@ export interface ApiHarnessPushDisplaySummary {
   review: { verdict: string; summary: string } | null;
 }
 
+// purge_trash (ADR-009, gate-class permanent delete of trashed rows).
+export interface ApiPurgeTrashDisplaySummary {
+  kind: "purge_trash";
+  task_count: number;
+  document_count: number;
+  // First few titles of the named rows (truncated server-side).
+  titles: string[];
+}
+
 export type ApiDisplaySummary =
   | ApiHarnessImplementDisplaySummary
   | ApiHarnessPushDisplaySummary
+  | ApiPurgeTrashDisplaySummary
   | null;
+
+export type ApprovalOrigin = "human" | "agent" | "harness";
+
+export type ApprovalRequestedChannel = "web" | "cli" | "telegram" | "system" | "unknown";
 
 export interface ApiApprovalRequest {
   id: string;
   workspace: string;
   tool_name: string;
   status: ApprovalStatus;
+  // Optional: absent on responses from a backend predating these fields.
+  origin?: ApprovalOrigin;
+  requested_channel?: ApprovalRequestedChannel;
   requested_by: string | null;
   decided_by: string | null;
   decided_at: string | null;
   created_at: string;
   updated_at: string;
+  // When a pending request stops being decidable (null once decided).
+  expires_at?: string | null;
   // `payload` is deliberately never included (approvals/serializers.py).
   // Each tool registers its own `execution` shape (or none -- `null`),
   // keyed on `tool_name`: vault_export -> ApiVaultExportExecution,
@@ -359,12 +460,19 @@ export interface ApiAgentDetail extends ApiAgent {
 
 // --- Integrations (MVP 9) ---
 
+// Which surface a token reaches (Phase 4 branch 6): `cli` the Jarvis CLI
+// endpoints, `openai` only the OpenAI-compatible facade (/v1). Fixed at mint.
+export type PatKind = "cli" | "openai";
+
 export interface ApiPersonalAccessToken {
   id: string;
   name: string;
+  kind: PatKind;
   workspace: string;
   last_used_at: string | null;
   revoked_at: string | null;
+  // Tokens expire (Phase 4 branch 1); the backend rejects them from here on.
+  expires_at: string;
   created_at: string;
 }
 
@@ -437,9 +545,15 @@ export interface ApiHarnessRepo {
   enabled: boolean;
   sensitive: boolean;
   test_command: string;
+  // Phase 4 branch 5, read-only: how the ADR-004 self-modification guard
+  // sees this repo (`self` = Jarvis's own remote, implementation refused;
+  // `unconfigured` = HARNESS_SELF_REPO_IDENTIFIERS empty, all refused).
+  self_repo_status?: ApiRepoSelfStatus;
   created_at: string;
   updated_at: string;
 }
+
+export type ApiRepoSelfStatus = "self" | "other" | "unconfigured";
 
 // --- Harness implementation jobs (Phase 3 branch 6/7) ---
 
@@ -542,4 +656,19 @@ export interface ApiImplementationJobDetail extends ApiImplementationJob {
   raw_transcript: string;
   // Newest first.
   reviews: ApiImplementationReview[];
+}
+
+// --- Activity summary (Phase 4 branch 3) ---
+
+// GET /api/activity/summary: one row per workspace membership.
+export interface ApiActivityWorkspace {
+  workspace: string;
+  pending_approvals: number;
+  live_harness_jobs: number;
+  live_agents: number;
+}
+
+export interface ApiActivitySummary {
+  workspaces: ApiActivityWorkspace[];
+  totals: Omit<ApiActivityWorkspace, "workspace">;
 }

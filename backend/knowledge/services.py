@@ -7,6 +7,7 @@ Role policy (simpler than Memory's — no AI-suggested/approval axis):
     read/list     yes           yes            yes
     upload        yes           yes            no
     delete        yes           own uploads    no
+    restore       yes           own uploads    no
 
 "Own uploads" is the exact predicate `created_by=actor`, same shape as
 Memory's member-authorization predicate.
@@ -14,14 +15,25 @@ Memory's member-authorization predicate.
 Approval gate: explicitly out of scope, by the same precedent MVP 2 already
 established for user-created memories (CLAUDE.md rule 4 targets *agent*-
 initiated writes; a human directly uploading a document is not that).
+
+Delete is a soft delete (ADR-009): the document moves to the trash
+(`deleted_at`); its chunks stay but are excluded from retrieval
+(`KnowledgeChunkQuerySet.cloud_eligible`). Permanent purge happens only
+TRASH_RETENTION_DAYS later (beat) or through an approved gate-class
+`purge_trash` request. Delete/restore require a human actor over the web
+channel (required `channel` argument).
 """
 
 import pathlib
+from datetime import timedelta
 
 from django.conf import settings
 from django.db import IntegrityError, transaction
+from django.utils import timezone
 
+from audit.models import AuditLog
 from audit.services import record_audit
+from core.channels import CHANNEL_WEB
 from knowledge.chunking import chunk_text, estimate_token_count
 from knowledge.jobs import dispatch_knowledge_document
 from knowledge.models import KnowledgeChunk, KnowledgeDocument, compute_content_hash
@@ -48,13 +60,19 @@ class KnowledgeServiceError(Exception):
 class KnowledgePermissionDenied(KnowledgeServiceError):
     """Actor's role does not allow the action → 403."""
 
+    code = "knowledge.permission_denied"
+
 
 class DuplicateDocument(KnowledgeServiceError):
     """content_hash collision inside the workspace → 400."""
 
+    code = "knowledge.duplicate"
+
 
 class InvalidUpload(KnowledgeServiceError):
     """Bad size/MIME/content → 400."""
+
+    code = "knowledge.invalid_upload"
 
 
 def get_role(actor, workspace):
@@ -228,15 +246,101 @@ def create_url_document(*, workspace, actor, title, source_url, sensitivity):
     return document
 
 
+def _require_human_web(actor, channel, action):
+    """ADR-009 condition: owner deletes/restores are confirm-class only for a
+    human actor over the high-trust web channel."""
+    if getattr(actor, "is_agent", False) or channel != CHANNEL_WEB:
+        raise KnowledgePermissionDenied(f"{action} is only allowed for a person over the web.")
+
+
+def _locked_document(document, actor, *, trashed):
+    return (
+        KnowledgeDocument.all_objects.filter(
+            pk=document.pk, workspace__members__user=actor, deleted_at__isnull=not trashed
+        )
+        .select_for_update(of=("self",))
+        .first()
+    )
+
+
 @transaction.atomic
-def delete_document(*, document, actor):
-    role = get_role(actor, document.workspace)
+def delete_document(*, document, actor, channel):
+    """Move the document to the trash (ADR-009)."""
+    _require_human_web(actor, channel, "Deleting a document")
+    locked = _locked_document(document, actor, trashed=False)
+    if locked is None:
+        raise KnowledgePermissionDenied("Document no longer exists.")
+    role = get_role(actor, locked.workspace)
     _require(
-        role in _CURATOR_ROLES or (role in _WRITER_ROLES and _is_own_upload(document, actor)),
+        role in _CURATOR_ROLES or (role in _WRITER_ROLES and _is_own_upload(locked, actor)),
         "deleting this document",
     )
-    _record(document, "knowledge.deleted", actor)
+    locked.deleted_at = timezone.now()
+    locked.save(update_fields=["deleted_at", "updated_at"])
+    _record(locked, "knowledge.deleted", actor, retention_days=settings.TRASH_RETENTION_DAYS)
+    return locked
+
+
+@transaction.atomic
+def restore_document(*, document, actor, channel):
+    """Bring a trashed document back (ADR-009). Refused (DuplicateDocument)
+    when identical content was uploaded again meanwhile."""
+    _require_human_web(actor, channel, "Restoring a document")
+    locked = _locked_document(document, actor, trashed=True)
+    if locked is None:
+        raise InvalidUpload("Document is not in the trash.")
+    role = get_role(actor, locked.workspace)
+    _require(
+        role in _CURATOR_ROLES or (role in _WRITER_ROLES and _is_own_upload(locked, actor)),
+        "restoring this document",
+    )
+    if locked.content_hash and content_hash_exists(locked.workspace, locked.content_hash):
+        raise DuplicateDocument(
+            "An identical document already exists in this workspace; delete it first."
+        )
+    locked.deleted_at = None
+    locked.save(update_fields=["deleted_at", "updated_at"])
+    _record(locked, "knowledge.restored", actor)
+    return locked
+
+
+def purge_trashed_document(document, *, reason, actor=None, approval_request_id=None):
+    """Permanently delete one trashed document and its chunks (ADR-009):
+    only from the retention sweep or an approved `purge_trash` request.
+    Caller holds the transaction; a restored row is left alone."""
+    if document.deleted_at is None:
+        return False
+    record_audit(
+        action="knowledge.purged",
+        actor=actor,
+        actor_type=AuditLog.ActorType.HUMAN if actor else AuditLog.ActorType.SYSTEM,
+        workspace=document.workspace,
+        resource=document,
+        metadata={"reason": reason, "approval_request_id": approval_request_id or ""},
+    )
     document.delete()
+    return True
+
+
+def purge_expired_trashed_documents(now=None):
+    """Retention sweep: purge documents trashed more than
+    TRASH_RETENTION_DAYS ago (part of the owner's confirmed delete)."""
+    cutoff = (now or timezone.now()) - timedelta(days=settings.TRASH_RETENTION_DAYS)
+    purged = 0
+    ids = list(
+        KnowledgeDocument.all_objects.filter(deleted_at__lt=cutoff).values_list("pk", flat=True)
+    )
+    for document_id in ids:
+        with transaction.atomic():
+            document = (
+                KnowledgeDocument.all_objects.select_for_update(of=("self",))
+                .filter(pk=document_id, deleted_at__lt=cutoff)
+                .select_related("workspace")
+                .first()
+            )
+            if document is not None and purge_trashed_document(document, reason="retention"):
+                purged += 1
+    return purged
 
 
 def record_read(*, actor, workspace, documents):

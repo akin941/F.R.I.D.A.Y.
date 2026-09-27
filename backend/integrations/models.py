@@ -43,3 +43,34 @@ class LinkedTelegramChat(WorkspaceScopedModel, TimestampedModel):
 
     def __str__(self):
         return f"{self.chat_id} -> {self.user_id} ({self.workspace_id})"
+
+
+class FacadeConversation(WorkspaceScopedModel, TimestampedModel):
+    """Binds a stateless OpenAI-compatible client's chat to a server-side
+    Conversation (Phase 4 branch 6, `integrations.facade_mapping`).
+
+    Clients resend the whole history on every request; Jarvis's context
+    comes from its own history, so each request is matched to a binding of
+    the same token whose `anchor_hash` (sha256 over the token id and the
+    first user message) matches and whose recorded user turns are a prefix
+    of the client's prior user turns. `user_turn_hashes` are the sha256s of
+    the client's user turns in order; `user_turn_message_ids` is the
+    parallel list of the server-side user Message each turn became (None
+    for a turn Jarvis never saw -- history the client brought along, or a
+    turn answered by another model). The workspace is always the token's."""
+
+    token = models.ForeignKey(
+        "accounts.PersonalAccessToken", on_delete=models.CASCADE, related_name="+"
+    )
+    conversation = models.ForeignKey(
+        "assistant.Conversation", on_delete=models.CASCADE, related_name="+"
+    )
+    anchor_hash = models.CharField(max_length=64)
+    user_turn_hashes = models.JSONField(default=list)
+    user_turn_message_ids = models.JSONField(default=list)
+
+    class Meta:
+        indexes = [models.Index(fields=["token", "anchor_hash"])]
+
+    def __str__(self):
+        return f"facade binding {self.id} -> {self.conversation_id}"

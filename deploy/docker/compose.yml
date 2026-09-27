@@ -1,6 +1,15 @@
-# Jarvis OS — development stack. Not production-ready by design (MVP 0).
+# Jarvis OS — development stack. Not production-ready by design (MVP 0);
+# `compose.daily.yml` is the daily-driver override (gunicorn, prod settings,
+# `next start`).
 # Host ports are shifted (+1) because the other local stack commonly occupies
-# 8000/5432/6379 on this machine. In-network ports are unchanged.
+# 8000/5432/6379 on this machine. In-network ports are unchanged. Every port
+# is published on 127.0.0.1 only (Phase 4 branch 1): nothing in this stack
+# is reachable from the LAN.
+#
+# Secrets are never committed: DJANGO_SECRET_KEY, POSTGRES_PASSWORD and
+# REDIS_PASSWORD come from the gitignored `deploy/docker/.env` (Compose reads
+# it automatically; `make secrets` -- also run by `make up` -- generates any
+# missing value; `deploy/docker/.env.example` lists every supported key).
 name: jarvis-os
 
 services:
@@ -12,18 +21,14 @@ services:
     volumes:
       - ../../backend:/app
     ports:
-      - "8001:8000"
+      - "127.0.0.1:8001:8000"
     environment: &backend_env
       DJANGO_SETTINGS_MODULE: config.settings.dev
-      DJANGO_SECRET_KEY: dev-insecure-key-change-me
+      DJANGO_SECRET_KEY: "${DJANGO_SECRET_KEY:?run `make secrets` (writes deploy/docker/.env)}"
       DJANGO_DEBUG: "true"
       DJANGO_ALLOWED_HOSTS: localhost,127.0.0.1
-      DATABASE_URL: postgres://jarvis:jarvis@postgres:5432/jarvis
-      REDIS_URL: redis://redis:6379/0
-      MINIO_ENDPOINT: http://minio:9000
-      MINIO_ACCESS_KEY: jarvis
-      MINIO_SECRET_KEY: jarvis-dev-secret
-      MINIO_BUCKET: jarvis
+      DATABASE_URL: "postgres://jarvis:${POSTGRES_PASSWORD:?run `make secrets`}@postgres:5432/jarvis"
+      REDIS_URL: "redis://:${REDIS_PASSWORD:?run `make secrets`}@redis:6379/0"
       # Dev stack uses the deterministic fake LLM provider by default; override
       # locally (never committed) via `deploy/docker/.env` — same mechanism
       # as OBSIDIAN_VAULT_HOST_PATH below — to point this stack at a real
@@ -49,28 +54,26 @@ services:
       # request time) but only `worker` actually has anything bind-mounted
       # at this path (tier 2 -- see worker.volumes below).
       OBSIDIAN_VAULT_PATH: /vault
-      # Single-owner system (ADR-008): signup is off by default in the
-      # daily stack; the owner account comes from `manage.py
-      # bootstrap_owner`. The Playwright e2e smoke still signs up a fresh
-      # user each run (until Phase 4's device-trust identity), so `make
-      # test-e2e` requires SIGNUP_ENABLED=true (e.g. in the gitignored
-      # deploy/docker/.env for that run).
-      SIGNUP_ENABLED: "${SIGNUP_ENABLED:-false}"
-      # DEV/TEST ONLY fixture values (MVP 9 §4) -- not real Telegram
-      # credentials, just non-empty strings so TelegramWebhookView's
-      # fail-closed auth check has something to compare against for the
-      # e2e Telegram section (frontend/e2e/smoke.e2e.ts). The reply-sending
-      # step still makes one real, bounded, fast-failing outbound call to
-      # api.telegram.org against this fake token -- see that test file's
-      # own comment for why that's an accepted trade-off here.
-      TELEGRAM_BOT_TOKEN: "e2e-fixture-bot-token"
-      TELEGRAM_WEBHOOK_SECRET: "e2e-fixture-webhook-secret"
+      # Device trust (Phase 4 branch 2): no signup, no password login. The
+      # owner comes from `manage.py bootstrap_owner`, devices enroll at
+      # /enroll with `manage.py issue_pairing_code`. The dev frontend runs
+      # on the host (`npm run dev`) without a trusted proxy, so PINs are
+      # accepted with LAN gating off (dev settings default). The shared BFF
+      # key is only used by the daily stack's frontend container.
+      JARVIS_BFF_SHARED_SECRET: "${JARVIS_BFF_SHARED_SECRET:-}"
+      # Real values from deploy/docker/.env, empty by default (the webhook
+      # then rejects everything, fail closed). A `make test-e2e` run against
+      # this stack needs the e2e fixture values instead -- they live in the
+      # commented "e2e run" block of deploy/docker/.env.example, never as
+      # committed defaults here: a publicly known webhook secret on the
+      # daily stack would let anyone who can reach it inject Telegram
+      # updates.
+      TELEGRAM_BOT_TOKEN: "${TELEGRAM_BOT_TOKEN:-}"
+      TELEGRAM_WEBHOOK_SECRET: "${TELEGRAM_WEBHOOK_SECRET:-}"
     depends_on:
       postgres:
         condition: service_healthy
       redis:
-        condition: service_healthy
-      minio:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/healthz')"]
@@ -119,10 +122,10 @@ services:
     image: pgvector/pgvector:pg16
     environment:
       POSTGRES_USER: jarvis
-      POSTGRES_PASSWORD: jarvis
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?run `make secrets`}"
       POSTGRES_DB: jarvis
     ports:
-      - "5433:5432"
+      - "127.0.0.1:5433:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:
@@ -133,31 +136,20 @@ services:
 
   redis:
     image: redis:7
-    ports:
-      - "6380:6379"
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
-  minio:
-    image: minio/minio:latest
-    command: server /data --console-address ":9001"
+    # AUTH required (Phase 4 branch 1): the broker carries task payloads
+    # and, since the cache moved here, throttle counters.
+    command: ["redis-server", "--requirepass", "${REDIS_PASSWORD:?run `make secrets`}"]
     environment:
-      MINIO_ROOT_USER: jarvis
-      MINIO_ROOT_PASSWORD: jarvis-dev-secret
+      # redis-cli reads the password from here (healthcheck below), so it
+      # never appears on a command line inside the container.
+      REDISCLI_AUTH: "${REDIS_PASSWORD:?run `make secrets`}"
     ports:
-      - "9000:9000"
-      - "9001:9001"
-    volumes:
-      - minio-data:/data
+      - "127.0.0.1:6380:6379"
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
-      interval: 15s
+      test: ["CMD-SHELL", "redis-cli ping | grep -q PONG"]
+      interval: 10s
       timeout: 5s
       retries: 5
 
 volumes:
   postgres-data:
-  minio-data:

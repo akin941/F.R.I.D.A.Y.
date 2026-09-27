@@ -20,7 +20,6 @@ staticfiles/
 celerybeat-schedule*
 
 # Local service data
-minio-data/
 postgres-data/
 
 # Local Obsidian vault export target (MVP 5 §3, deploy/docker/compose.yml)

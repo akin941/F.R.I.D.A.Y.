@@ -68,12 +68,16 @@ describe("HarnessRepoPicker", () => {
     expect(screen.getByTestId("value")).toHaveTextContent(REPO_ID);
   });
 
-  it("explains that repos are registered by the owner when none are available", async () => {
+  it("points to the repo registry when no repo is available", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => jsonResponse([repo({ enabled: false })])));
 
     render(<Harness />);
 
-    expect(await screen.findByText(/çalışma alanı sahibi tarafından kaydedilir/)).toBeInTheDocument();
+    expect(await screen.findByText(/kullanılabilir kayıtlı depo yok/)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Depolar sayfasından" })).toHaveAttribute(
+      "href",
+      "/harness/repos",
+    );
     expect(screen.queryByRole("combobox")).not.toBeInTheDocument();
   });
 

@@ -8,7 +8,6 @@ runs inside Telegram's own response-wait window (see that view's docstring
 for why that matters under at-least-once redelivery).
 """
 
-import json
 import uuid
 
 from celery import shared_task
@@ -22,7 +21,7 @@ from assistant.services import (
     build_gateway_stream,
     classify_intent,
     create_conversation,
-    stream_assistant_reply,
+    iter_assistant_reply_events,
 )
 from integrations import telegram_client
 from integrations.models import LinkedTelegramChat, TelegramLinkCode
@@ -45,9 +44,9 @@ def _parse_rate(rate):
 # -- the Telegram relay path is a Celery task, never passes through DRF's
 # view-level throttling at all, so without an equivalent check here a
 # linked chat could enqueue unbounded provider calls (Codex review,
-# branch 3 round 1). Fixed-window counter via Django's cache framework;
-# correct only under this repo's existing single-worker-process topology,
-# the same constraint config/celery.py's embedded beat already documents.
+# branch 3 round 1). Fixed-window counter via Django's cache framework --
+# Redis-backed wherever REDIS_URL is set (Phase 4 branch 1), so the count
+# is shared across every worker process.
 _RELAY_RATE_LIMIT, _RELAY_RATE_WINDOW_SECONDS = _parse_rate(
     settings.REST_FRAMEWORK["DEFAULT_THROTTLE_RATES"]["chat"]
 )
@@ -232,15 +231,15 @@ def _handle_relay(chat_id, text):
 
 
 def _consume_stream_to_text(conversation, gateway_stream, usage_holder, memory_ids, chunk_ids):
-    """Consumes the SSE generator fully server-side (Telegram has no
-    practical token-by-token streaming UX) -- reuses
-    assistant.services.stream_assistant_reply as-is, so the assistant
-    Message row (channel="telegram") is persisted through the exact same
-    single-write-site discipline the web endpoint relies on
+    """Consumes the reply's structured events fully server-side (Telegram
+    has no practical token-by-token streaming UX) -- the same
+    assistant.services.iter_assistant_reply_events the web endpoint's SSE
+    encoder wraps, so the assistant Message row (channel="telegram") is
+    persisted through the exact same single-write-site discipline
     (_persist_assistant_message), not a second, parallel persistence path."""
     chunks = []
     error_type = None
-    for raw_event in stream_assistant_reply(
+    for event in iter_assistant_reply_events(
         conversation,
         gateway_stream,
         usage_holder,
@@ -249,7 +248,6 @@ def _consume_stream_to_text(conversation, gateway_stream, usage_holder, memory_i
         chunk_ids=chunk_ids,
         channel=Message.Channel.TELEGRAM,
     ):
-        event = json.loads(raw_event.decode()[len("data: ") : -2])
         if event["type"] == "chunk":
             chunks.append(event["text"])
         elif event["type"] == "error":

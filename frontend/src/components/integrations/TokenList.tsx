@@ -3,9 +3,11 @@
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Alert, AlertDescription } from "@/components/ui/alert";
-import { apiPostJson, ApiError } from "@/lib/api-client";
+import { Badge } from "@/components/ui/badge";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { apiPostJson } from "@/lib/api-client";
 import { useWorkspace } from "@/contexts/workspace-context";
+import { tr } from "@/lib/i18n/tr";
 import type { ApiPersonalAccessToken } from "@/types/api";
 
 function TokenRow({
@@ -17,39 +19,25 @@ function TokenRow({
   workspaceName: string;
   onRevoked: (token: ApiPersonalAccessToken) => void;
 }) {
-  const [revoking, setRevoking] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  // Evaluated once per mount (render must stay pure); a token expiring
+  // while the page is open shows as expired on the next load.
+  const [renderedAt] = useState(() => Date.now());
+  const expired = new Date(token.expires_at).getTime() <= renderedAt;
 
+  // Runs only from the confirmation dialog, which reports a failure.
   async function handleRevoke() {
-    setRevoking(true);
-    setError(null);
-    try {
-      const updated = await apiPostJson<ApiPersonalAccessToken>(
-        `/api/auth/tokens/${token.id}/revoke`,
-      );
-      onRevoked(updated);
-    } catch (err) {
-      setError(
-        err instanceof ApiError
-          ? (err.body.detail ?? "Token iptal edilemedi.")
-          : "Bir şeyler ters gitti. Lütfen tekrar deneyin.",
-      );
-    } finally {
-      setRevoking(false);
-    }
+    onRevoked(await apiPostJson<ApiPersonalAccessToken>(`/api/auth/tokens/${token.id}/revoke`));
   }
 
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="text-base">{token.name}</CardTitle>
+        <CardTitle className="flex flex-wrap items-center gap-2 text-base">
+          {token.name}
+          <Badge variant="outline">{tr.token.kind[token.kind] ?? token.kind}</Badge>
+        </CardTitle>
       </CardHeader>
       <CardContent className="flex flex-col gap-2">
-        {error ? (
-          <Alert variant="destructive" role="alert">
-            <AlertDescription>{error}</AlertDescription>
-          </Alert>
-        ) : null}
         <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
           <span>{workspaceName}</span>
           <span>&middot;</span>
@@ -60,21 +48,36 @@ function TokenRow({
               <span>Son kullanım {new Date(token.last_used_at).toLocaleString()}</span>
             </>
           ) : null}
+          {!token.revoked_at && !expired ? (
+            <>
+              <span>&middot;</span>
+              <span>Son geçerlilik {new Date(token.expires_at).toLocaleString()}</span>
+            </>
+          ) : null}
         </div>
         {token.revoked_at ? (
           <p className="text-sm text-muted-foreground">
             İptal edildi {new Date(token.revoked_at).toLocaleString()}
           </p>
+        ) : expired ? (
+          <p className="text-sm text-muted-foreground">
+            Süresi doldu {new Date(token.expires_at).toLocaleString()}
+          </p>
         ) : (
           <div>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => void handleRevoke()}
-              disabled={revoking}
-            >
-              {revoking ? "İptal ediliyor…" : "İptal et"}
-            </Button>
+            <ConfirmDialog
+              trigger={
+                <Button variant="outline" size="sm">
+                  İptal et
+                </Button>
+              }
+              title={tr.confirm.token.title}
+              description={tr.confirm.token.description(token.name)}
+              confirmLabel={tr.confirm.token.confirm}
+              busyLabel={tr.confirm.token.busy}
+              errorFallback={tr.confirm.token.failed}
+              onConfirm={handleRevoke}
+            />
           </div>
         )}
       </CardContent>

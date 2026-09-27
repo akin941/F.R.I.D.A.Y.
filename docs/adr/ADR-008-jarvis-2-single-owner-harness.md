@@ -122,12 +122,19 @@ implementation facts and open items, not new decisions.
   are scheduled: implementation/push outcomes in the Phase 3 closeout
   (`feat/p3-implementation-api`); gated-tool executions, task outcomes and
   deploy outcomes in Phase 5 (MASTER_PLAN §AA outline).
-- **Open item for the Phase 4 brief — decision 3 "delete" vs owner
-  deletes.** The gate-class list names "delete", yet the owner hard-deletes
-  memory, knowledge documents and tasks directly over the web channel
-  (`memory/views.py`, `knowledge/views.py`, `tasks/views.py`) without an
-  `ApprovalRequest`. Whether a direct owner action over the high-trust web
-  channel *is* the explicit decision for self-scoped deletes (recoverable
-  only by backup), or whether these must move behind the gate, is not yet
-  decided. Flagged for the Phase 4 brief; per decision 3, any reclassification
-  requires a new ADR.
+- **Decision 2 (single owner, device-trust identity) — landed in Phase 4
+  branch 2.** `User.is_owner`, trusted devices with pairing codes (LAN PIN,
+  strong code, remote key), device-bound JWTs, default-deny
+  `request_channel()` with `IsWebChannel`/`IsOwner`; signup and password
+  login are gone (`/enroll`); the owner password survives only as the
+  Django-admin break-glass, routed when `DJANGO_ADMIN_ENABLED`.
+- **Decision 6 (facade: chat only, low trust) — landed in Phase 4 branch
+  6.** `/v1/chat/completions` + `/v1/models` behind `openai`-kind PATs
+  (`CHANNEL_OPENAI`), router restricted to chat/memory/knowledge intents,
+  never deciding or reaching tools.
+- **Resolved — decision 3 "delete" vs owner deletes (flagged here for
+  the Phase 4 brief).** At the time, the owner hard-deleted memory,
+  knowledge documents and tasks directly over the web channel without an
+  `ApprovalRequest`. ADR-009 (Phase 4) settles it: owner deletes of
+  self-scoped rows are confirm-class soft deletes with a 30-day trash
+  (`deleted_at`), and permanent removal is the gate-class `purge_trash`.

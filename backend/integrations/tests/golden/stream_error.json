@@ -1,0 +1,42 @@
+[
+  {
+    "id": "chatcmpl-<id>",
+    "object": "chat.completion.chunk",
+    "created": 0,
+    "model": "jarvis",
+    "choices": [
+      {
+        "index": 0,
+        "delta": {
+          "role": "assistant",
+          "content": ""
+        },
+        "finish_reason": null
+      }
+    ]
+  },
+  {
+    "id": "chatcmpl-<id>",
+    "object": "chat.completion.chunk",
+    "created": 0,
+    "model": "jarvis",
+    "choices": [
+      {
+        "index": 0,
+        "delta": {
+          "content": "Merhaba "
+        },
+        "finish_reason": null
+      }
+    ]
+  },
+  {
+    "error": {
+      "message": "The model provider failed (provider_error).",
+      "type": "server_error",
+      "param": null,
+      "code": "provider_error"
+    }
+  },
+  "[DONE]"
+]

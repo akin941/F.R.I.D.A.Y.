@@ -1,218 +1,213 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import Link from "next/link";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
-import { Alert, AlertDescription } from "@/components/ui/alert";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { ErrorState } from "@/components/ui/error-state";
 import { Skeleton } from "@/components/ui/skeleton";
+import { StatusPill } from "@/components/ui/status-pill";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { LowTrustTranscript } from "@/components/harness/LowTrustTranscript";
-import type { ImplementationPrefill } from "@/components/harness/ImplementationJobForm";
 import {
   HARNESS_AGENT_LABELS,
   HARNESS_JOB_IN_FLIGHT_STATUSES,
   HARNESS_JOB_STATUS_LABELS,
   harnessFailureReasonLabel,
 } from "@/components/harness/labels";
-import { apiGetJson, apiPostJson, ApiError } from "@/lib/api-client";
+import { implementationRequestHref } from "@/components/harness/links";
+import { useWorkspace } from "@/contexts/workspace-context";
+import { apiGetJson, apiPostJson } from "@/lib/api-client";
+import { tr } from "@/lib/i18n/tr";
+import { queryKeys } from "@/lib/query/keys";
+import { POLL_FAST_MS, pollWhile } from "@/lib/query/polling";
 import type { ApiHarnessJobDetail } from "@/types/api";
 import { VIEW_SCROLL_ROOT } from "@/components/shell/view-scroll";
 import { cn } from "@/lib/utils";
 
+const copy = tr.harness.console;
+
+/** Route `/harness/jobs/[jobId]`: the detail under the active workspace. */
+export function HarnessJobDetailPage({ jobId }: { jobId: string }) {
+  const { activeWorkspace } = useWorkspace();
+  if (!activeWorkspace) {
+    return (
+      <div className="flex flex-1 items-center justify-center p-6 text-sm text-muted-foreground">
+        {tr.common.noWorkspace}
+      </div>
+    );
+  }
+  return <HarnessJobDetail key={activeWorkspace.id} jobId={jobId} workspaceId={activeWorkspace.id} />;
+}
+
 /**
- * Detail view for one `HarnessJob` (brief §4). Polls silently while the
- * job is still in flight (pending/running), mirroring `AgentDetail`'s
- * identical run-status poll -- stops on its own once the job reaches a
- * terminal status.
+ * Detail view for one `HarnessJob` (brief §4). Polls while the job is
+ * still in flight (pending/running) via the query layer -- stops on its
+ * own once the job reaches a terminal status.
  *
  * R2 mitigation (prompt injection, brief §3/§4): `summary`/`findings` are
  * Jarvis's own gateway-produced, trustworthy content; `raw_transcript` is
- * the CLI agent's own low-trust output. This is the presentation-layer
- * half of that structural guarantee -- the two are rendered in visibly
- * distinct blocks, never merged into one undifferentiated wall of text,
- * and the raw transcript is collapsed behind an explicit disclosure
- * rather than shown by default (shared `LowTrustTranscript`).
+ * the CLI agent's own low-trust output. The two live on separate tabs
+ * (Brifing / Transkript) and the transcript stays collapsed behind an
+ * explicit, labeled disclosure (shared `LowTrustTranscript`) -- never
+ * merged into one undifferentiated wall of text.
  *
- * `onRequestImplementation`: a finished discovery run can seed an
- * implementation request (same repo + goal, linked via `discovery_job`).
+ * A finished discovery run links to the console's implementation form,
+ * prefilled with the same repo + goal and linked via `discovery_job`.
  */
-export function HarnessJobDetail({
-  jobId,
-  onBack,
-  onRequestImplementation,
-}: {
-  jobId: string;
-  onBack: () => void;
-  onRequestImplementation?: (prefill: ImplementationPrefill) => void;
-}) {
-  const [job, setJob] = useState<ApiHarnessJobDetail | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState<string | null>(null);
-  const [cancelling, setCancelling] = useState(false);
-  const [cancelError, setCancelError] = useState<string | null>(null);
+export function HarnessJobDetail({ jobId, workspaceId }: { jobId: string; workspaceId: string }) {
+  const queryClient = useQueryClient();
 
-  const loadJob = useCallback(
-    async (options?: { silent?: boolean }) => {
-      if (!options?.silent) setLoading(true);
-      setLoadError(null);
-      try {
-        const data = await apiGetJson<ApiHarnessJobDetail>(`/api/harness/jobs/${jobId}`);
-        setJob(data);
-      } catch {
-        if (!options?.silent) setLoadError("Bu iş yüklenemedi.");
-      } finally {
-        if (!options?.silent) setLoading(false);
-      }
-    },
-    [jobId],
-  );
+  const detailKey = queryKeys.harnessJob(workspaceId, jobId);
+  const query = useQuery({
+    queryKey: detailKey,
+    queryFn: () => apiGetJson<ApiHarnessJobDetail>(`/api/harness/jobs/${jobId}`),
+    refetchInterval: pollWhile<ApiHarnessJobDetail>((job) =>
+      HARNESS_JOB_IN_FLIGHT_STATUSES.includes(job.status) ? POLL_FAST_MS : null,
+    ),
+  });
+  const job = query.data ?? null;
 
-  /* eslint-disable react-hooks/set-state-in-effect -- fetch-on-mount, the standard data-fetching effect pattern */
-  useEffect(() => {
-    void loadJob();
-  }, [loadJob]);
-  /* eslint-enable react-hooks/set-state-in-effect */
-
-  useEffect(() => {
-    if (!job || !HARNESS_JOB_IN_FLIGHT_STATUSES.includes(job.status)) return;
-    const interval = setInterval(() => {
-      void loadJob({ silent: true });
-    }, 3000);
-    return () => clearInterval(interval);
-  }, [job, loadJob]);
-
+  // Runs only from the confirmation dialog, which reports a failure.
   async function handleCancel() {
-    setCancelling(true);
-    setCancelError(null);
-    try {
-      await apiPostJson(`/api/harness/jobs/${jobId}/cancel`);
-      await loadJob({ silent: true });
-    } catch (err) {
-      setCancelError(
-        err instanceof ApiError
-          ? (err.body.detail ?? "İş iptal edilemedi.")
-          : "Bir şeyler ters gitti. Lütfen tekrar deneyin.",
-      );
-    } finally {
-      setCancelling(false);
-    }
+    await apiPostJson(`/api/harness/jobs/${jobId}/cancel`);
+    void queryClient.invalidateQueries({ queryKey: detailKey });
+    void queryClient.invalidateQueries({
+      queryKey: queryKeys.harnessJobs(workspaceId),
+      exact: true,
+    });
   }
 
   const canCancel = job != null && HARNESS_JOB_IN_FLIGHT_STATUSES.includes(job.status);
   // `briefing` is `{}` for any job that hasn't reached finalization yet
   // (backend model default) -- normalized here rather than assumed fully
-  // populated (Codex-style finding, caught in manual verification: an
-  // undefined `findings` crashed `.length` for a still-pending job).
+  // populated (an undefined `findings` once crashed `.length` for a
+  // still-pending job).
   const findings = job?.briefing.findings ?? [];
+  const summary = job?.briefing.summary ?? "";
+  // A job whose briefing gateway call failed/was skipped still persists
+  // `raw_transcript` with an empty summary/findings -- the transcript
+  // must stay reachable then too.
   const rawTranscript = job?.briefing.raw_transcript ?? "";
-  // Codex code-review P2, branch 4 round 1: a job whose briefing gateway
-  // call failed/was skipped (harness/execution.py's own `_finalize`)
-  // deliberately still persists `raw_transcript` with an empty
-  // `summary`/`findings` -- the transcript must render in that case too,
-  // not just when a summary was successfully produced, or curators lose
-  // the one thing they need to debug why summarization didn't run.
-  const hasBriefing =
-    job != null && (Boolean(job.briefing.summary) || findings.length > 0 || Boolean(rawTranscript));
+  const terminal = job != null && !HARNESS_JOB_IN_FLIGHT_STATUSES.includes(job.status);
 
   return (
     <div className={cn(VIEW_SCROLL_ROOT, "gap-4 p-6")}>
-      <Button variant="outline" size="sm" className="self-start" onClick={onBack}>
-        &larr; Harness işlerine dön
+      <Button variant="outline" size="sm" className="self-start" asChild>
+        <Link href="/harness">&larr; {copy.backToConsole}</Link>
       </Button>
 
-      {loadError ? (
-        <Alert variant="destructive" role="alert">
-          <AlertDescription>{loadError}</AlertDescription>
-        </Alert>
-      ) : null}
-
-      {/* Skeleton only while a load is actually in flight -- after a failed
-          first load the error above stands alone (with a retry), rather
-          than sitting next to a skeleton that never resolves. */}
+      {/* Skeleton only while the first load is in flight -- a failed first
+          load shows the error with a retry instead. */}
       {!job ? (
-        loading ? (
+        query.isPending ? (
           <div className="flex flex-col gap-3">
             <Skeleton className="h-8 w-2/3" />
             <Skeleton className="h-24 w-full" />
           </div>
-        ) : loadError ? (
-          <Button variant="outline" size="sm" className="self-start" onClick={() => void loadJob()}>
-            Tekrar dene
-          </Button>
-        ) : null
+        ) : (
+          <ErrorState
+            error={query.error}
+            title="Bu iş yüklenemedi."
+            onRetry={() => void query.refetch()}
+            retrying={query.isFetching}
+          />
+        )
       ) : (
         <>
           <div className="flex flex-wrap items-start justify-between gap-4">
-            <div>
-              <h1 className="text-xl font-semibold tracking-tight">{job.goal}</h1>
-              <p className="text-sm text-muted-foreground">
-                {HARNESS_JOB_STATUS_LABELS[job.status]}
-                {job.failure_reason ? ` — ${harnessFailureReasonLabel(job.failure_reason)}` : ""}
+            <div className="flex min-w-0 flex-col gap-1">
+              <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
+                {copy.discoveryJob}
+              </p>
+              <h1 className="text-xl font-semibold tracking-tight break-words whitespace-pre-wrap">
+                {job.goal}
+              </h1>
+              <p className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+                <StatusPill
+                  domain="harnessJob"
+                  status={job.status}
+                  label={HARNESS_JOB_STATUS_LABELS[job.status] ?? job.status}
+                />
+                {job.failure_reason ? (
+                  <span>{harnessFailureReasonLabel(job.failure_reason)}</span>
+                ) : null}
               </p>
               <p className="text-sm text-muted-foreground">
                 Ajan: {HARNESS_AGENT_LABELS[job.agent]}
               </p>
             </div>
             <div className="flex flex-wrap gap-2">
-              {job.status === "succeeded" && onRequestImplementation ? (
-                <Button
-                  onClick={() =>
-                    onRequestImplementation({
-                      repo: job.repo,
-                      goal: job.goal,
-                      discoveryJobId: job.id,
-                    })
-                  }
-                >
-                  Uygulama iste
+              {job.status === "succeeded" ? (
+                <Button asChild>
+                  <Link href={implementationRequestHref(job)}>Uygulama iste</Link>
                 </Button>
               ) : null}
               {canCancel ? (
-                <Button variant="outline" onClick={() => void handleCancel()} disabled={cancelling}>
-                  {cancelling ? "İptal ediliyor…" : "İşi iptal et"}
-                </Button>
+                <ConfirmDialog
+                  trigger={<Button variant="outline">İşi iptal et</Button>}
+                  title={tr.confirm.harnessJob.title}
+                  description={tr.confirm.harnessJob.description(job.goal)}
+                  confirmLabel={tr.confirm.harnessJob.confirm}
+                  busyLabel={tr.confirm.harnessJob.busy}
+                  errorFallback={tr.confirm.harnessJob.failed}
+                  onConfirm={handleCancel}
+                />
               ) : null}
             </div>
           </div>
 
-          {cancelError ? (
-            <Alert variant="destructive" role="alert">
-              <AlertDescription>{cancelError}</AlertDescription>
-            </Alert>
-          ) : null}
-
-          {hasBriefing ? (
-            <section className="flex flex-col gap-4">
-              {job.briefing.summary ? (
-                <div>
-                  <h2 className="text-sm font-medium tracking-tight text-muted-foreground">
-                    Özet
-                  </h2>
-                  <p className="whitespace-pre-wrap text-sm">{job.briefing.summary}</p>
-                </div>
-              ) : null}
-              {findings.length > 0 ? (
-                <div>
-                  <h2 className="text-sm font-medium tracking-tight text-muted-foreground">
-                    Bulgular
-                  </h2>
-                  <ul className="list-inside list-disc text-sm">
-                    {findings.map((finding, index) => (
-                      <li key={index}>{finding}</li>
-                    ))}
-                  </ul>
-                </div>
-              ) : null}
+          <Tabs defaultValue="briefing">
+            <TabsList aria-label={copy.detailTabs}>
+              <TabsTrigger value="briefing">{copy.tabs.briefing}</TabsTrigger>
+              <TabsTrigger value="transcripts">{copy.tabs.transcripts}</TabsTrigger>
+            </TabsList>
+            <TabsContent value="briefing" className="flex flex-col gap-4 pt-2">
+              {summary || findings.length > 0 ? (
+                <>
+                  <p className="text-xs text-muted-foreground">{copy.ownSummaryNote}</p>
+                  {summary ? (
+                    <div>
+                      <h2 className="text-sm font-medium tracking-tight text-muted-foreground">
+                        Özet
+                      </h2>
+                      <p className="text-sm whitespace-pre-wrap">{summary}</p>
+                    </div>
+                  ) : null}
+                  {findings.length > 0 ? (
+                    <div>
+                      <h2 className="text-sm font-medium tracking-tight text-muted-foreground">
+                        Bulgular
+                      </h2>
+                      <ul className="list-inside list-disc text-sm">
+                        {findings.map((finding, index) => (
+                          <li key={index}>{finding}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  ) : null}
+                </>
+              ) : rawTranscript ? (
+                <p className="text-sm text-muted-foreground">{copy.noSummaryButTranscript}</p>
+              ) : terminal ? (
+                <p className="text-sm text-muted-foreground">Bu iş için brifing yok.</p>
+              ) : (
+                <p className="text-sm text-muted-foreground">{copy.briefingPending}</p>
+              )}
+            </TabsContent>
+            <TabsContent value="transcripts" className="flex flex-col gap-2 pt-2">
               {rawTranscript ? (
                 <LowTrustTranscript
                   text={rawTranscript}
                   showLabel="Ham çıktıyı göster"
                   hideLabel="Ham çıktıyı gizle"
-                  warning="Bu, ajanın kendi ham çıktısıdır ve güvenilmeyen içerik olarak ele alınmalıdır. Yukarıdaki özet ve bulgular ise Jarvis'in kendi özetidir (model üretimi); ikisini birbirine karıştırma."
+                  warning="Bu, ajanın kendi ham çıktısıdır ve güvenilmeyen içerik olarak ele alınmalıdır. Brifing sekmesindeki özet ve bulgular ise Jarvis'in kendi özetidir (model üretimi); ikisini birbirine karıştırma."
                 />
-              ) : null}
-            </section>
-          ) : job.status === "succeeded" || job.status === "failed" ? (
-            <p className="text-sm text-muted-foreground">Bu iş için brifing yok.</p>
-          ) : null}
+              ) : (
+                <p className="text-sm text-muted-foreground">{copy.noTranscript}</p>
+              )}
+            </TabsContent>
+          </Tabs>
         </>
       )}
     </div>

@@ -28,7 +28,10 @@ from agents.serializers import (
     AgentSerializer,
     AgentStepSerializer,
 )
+from core.api_errors import service_error_response
 from core.channels import is_low_trust, scoped_for_actor
+from core.permissions import IsWebChannel
+from core.throttling import CreateScopedRateThrottle
 from tasks.serializers import TaskSerializer
 from tasks.services import InvalidTransition, TaskPermissionDenied
 from workspaces.models import Workspace
@@ -46,9 +49,9 @@ _PAT_ALLOWLISTED_AUTHENTICATION_CLASSES = [
 
 def _service_error_response(exc):
     if isinstance(exc, (AgentPermissionDenied, TaskPermissionDenied)):
-        return Response({"detail": str(exc)}, status=status.HTTP_403_FORBIDDEN)
+        return service_error_response(exc, status.HTTP_403_FORBIDDEN)
     if isinstance(exc, (AgentInvalidTransition, InvalidTransition)):
-        return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        return service_error_response(exc, status.HTTP_400_BAD_REQUEST)
     raise exc
 
 
@@ -87,6 +90,9 @@ def _resolve_workspace(request):
 class AgentListCreateView(APIView):
     permission_classes = [IsAuthenticated]
     authentication_classes = _PAT_ALLOWLISTED_AUTHENTICATION_CLASSES
+    # Creation blocks on the planner's LLM call (cost-bearing).
+    throttle_classes = [CreateScopedRateThrottle]
+    throttle_scope = "cost"
 
     def get(self, request):
         workspace, error = _resolve_workspace(request)
@@ -163,7 +169,8 @@ class AgentCancelView(APIView):
 
 
 class AgentStepConfirmView(APIView):
-    permission_classes = [IsAuthenticated]
+    # Draft confirmation is a web-only human confirm (ADR-008 confirm-class).
+    permission_classes = [IsAuthenticated, IsWebChannel]
 
     def post(self, request, step_id):
         step = _get_step(request, step_id)
@@ -187,7 +194,7 @@ class AgentStepConfirmView(APIView):
 
 
 class AgentStepDiscardView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, IsWebChannel]
 
     def post(self, request, step_id):
         step = _get_step(request, step_id)

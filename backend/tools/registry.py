@@ -72,6 +72,13 @@ class ToolSpec:
     `approvals.services.create_request` refuses them for human/agent
     origins, so a direct `POST /approvals` can't mint one either.
 
+    `proposable` (Phase 4 branch 2, ADR-009): `False` for a tool only a
+    person may request directly (the trash view's "Kalıcı olarak sil" ->
+    `purge_trash`). Such tools are left out of `list_tool_names()` (the chat
+    router and agent planner never propose them) and
+    `approvals.services.create_request` refuses them for any non-human
+    origin.
+
     `describe_request(approval_request)` (Phase 3 branch 6) returns the
     safe, whitelisted `display_summary` the approvals UI shows the decider
     -- built only from the request's own snapshotted payload and immutable
@@ -87,6 +94,7 @@ class ToolSpec:
     describe_execution: Callable[[Any], dict | None] | None = None
     user_invocable: bool = True
     describe_request: Callable[[Any], dict | None] | None = None
+    proposable: bool = True
 
 
 _REGISTRY: dict[str, ToolSpec] = {}
@@ -116,4 +124,6 @@ def list_tool_names() -> list[str]:
     need for a single-tool MVP (see this module's own docstring on why
     that would be premature). Sorted for a deterministic prompt/test
     ordering, not registration order."""
-    return sorted(name for name, spec in _REGISTRY.items() if spec.user_invocable)
+    return sorted(
+        name for name, spec in _REGISTRY.items() if spec.user_invocable and spec.proposable
+    )

@@ -29,7 +29,16 @@ class KnowledgeDocumentQuerySet(WorkspaceScopedQuerySet):
 
 
 class KnowledgeDocumentManager(models.Manager.from_queryset(KnowledgeDocumentQuerySet)):
-    pass
+    """Unfiltered: the trash view, restore, purge and the ingestion worker
+    (which keeps processing a trashed document -- ADR-009: its chunks stay,
+    excluded from retrieval, so a restore needs no re-ingestion)."""
+
+
+class LiveKnowledgeDocumentManager(KnowledgeDocumentManager):
+    """Default manager: hides trashed documents (ADR-009)."""
+
+    def get_queryset(self):
+        return super().get_queryset().filter(deleted_at__isnull=True)
 
 
 class KnowledgeDocument(WorkspaceScopedModel, TimestampedModel):
@@ -89,8 +98,11 @@ class KnowledgeDocument(WorkspaceScopedModel, TimestampedModel):
     # `MemoryExtractionJob.retry_count` so a document can never stay
     # indefinitely recoverable.
     retry_count = models.PositiveIntegerField(default=0)
+    # Soft delete (ADR-009): see tasks.Task.deleted_at.
+    deleted_at = models.DateTimeField(null=True, blank=True, db_index=True)
 
-    objects = KnowledgeDocumentManager()
+    objects = LiveKnowledgeDocumentManager()
+    all_objects = KnowledgeDocumentManager()
 
     class Meta:
         ordering = ["-updated_at"]
@@ -98,10 +110,13 @@ class KnowledgeDocument(WorkspaceScopedModel, TimestampedModel):
             # Partial index: Postgres unique indexes ignore NULL, so any
             # number of pending `url` documents (still content_hash=null) can
             # coexist in one workspace without colliding; the uniqueness
-            # guarantee only kicks in once a hash actually exists.
+            # guarantee only kicks in once a hash actually exists. Trashed
+            # documents (ADR-009) are outside it too: re-uploading content
+            # whose earlier copy sits in the trash is allowed; restoring
+            # that copy then refuses the duplicate instead.
             models.UniqueConstraint(
                 fields=["workspace", "content_hash"],
-                condition=models.Q(content_hash__isnull=False),
+                condition=models.Q(content_hash__isnull=False, deleted_at__isnull=True),
                 name="unique_knowledge_content_hash",
             )
         ]
@@ -125,6 +140,9 @@ class KnowledgeChunkQuerySet(WorkspaceScopedQuerySet):
         return self.filter(
             document__sensitivity=KnowledgeDocument.Sensitivity.NORMAL,
             document__status=KnowledgeDocument.Status.READY,
+            # ADR-009: a trashed document's chunks stay but never reach
+            # retrieval.
+            document__deleted_at__isnull=True,
             embedding__isnull=False,
         )
 

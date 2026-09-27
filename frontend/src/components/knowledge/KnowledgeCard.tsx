@@ -1,6 +1,5 @@
 "use client";
 
-import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -9,7 +8,11 @@ import {
   KNOWLEDGE_SOURCE_TYPE_LABELS,
   KNOWLEDGE_STATUS_LABELS,
 } from "@/components/knowledge/labels";
-import { apiDelete, ApiError } from "@/lib/api-client";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { useWorkspace } from "@/contexts/workspace-context";
+import { TRASH_RETENTION_DAYS_DEFAULT } from "@/lib/trash";
+import { apiDelete } from "@/lib/api-client";
+import { tr } from "@/lib/i18n/tr";
 import type { ApiKnowledgeDocument } from "@/types/api";
 
 export function KnowledgeCard({
@@ -19,23 +22,13 @@ export function KnowledgeCard({
   document: ApiKnowledgeDocument;
   onDeleted: (id: string) => void;
 }) {
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const trashRetentionDays =
+    useWorkspace().trashRetentionDays ?? TRASH_RETENTION_DAYS_DEFAULT;
 
+  // Runs only from the confirmation dialog, which reports a failure.
   async function handleDelete() {
-    setBusy(true);
-    setError(null);
-    try {
-      await apiDelete(`/api/knowledge/documents/${document.id}`);
-      onDeleted(document.id);
-    } catch (err) {
-      setError(
-        err instanceof ApiError
-          ? (err.body.detail ?? "Belge silinemedi.")
-          : "Bir şeyler ters gitti. Lütfen tekrar deneyin.",
-      );
-      setBusy(false);
-    }
+    await apiDelete(`/api/knowledge/documents/${document.id}`);
+    onDeleted(document.id);
   }
 
   return (
@@ -44,11 +37,6 @@ export function KnowledgeCard({
         <CardTitle>{document.title}</CardTitle>
       </CardHeader>
       <CardContent className="flex flex-col gap-2">
-        {error ? (
-          <Alert variant="destructive" role="alert">
-            <AlertDescription>{error}</AlertDescription>
-          </Alert>
-        ) : null}
         {document.status === "failed" && document.error_message ? (
           <Alert variant="destructive" role="alert">
             <AlertDescription>{document.error_message}</AlertDescription>
@@ -66,14 +54,19 @@ export function KnowledgeCard({
         </div>
       </CardContent>
       <CardFooter className="flex justify-end gap-2">
-        <Button
-          variant="destructive"
-          size="sm"
-          onClick={() => void handleDelete()}
-          disabled={busy}
-        >
-          Sil
-        </Button>
+        <ConfirmDialog
+          trigger={
+            <Button variant="destructive" size="sm">
+              Sil
+            </Button>
+          }
+          title={tr.confirm.trash.documentTitle}
+          description={tr.confirm.trash.document(document.title, trashRetentionDays)}
+          confirmLabel={tr.confirm.trash.confirm}
+          busyLabel={tr.confirm.trash.deleting}
+          errorFallback={tr.confirm.trash.documentFailed}
+          onConfirm={handleDelete}
+        />
       </CardFooter>
     </Card>
   );

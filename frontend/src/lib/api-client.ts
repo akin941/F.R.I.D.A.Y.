@@ -1,16 +1,46 @@
 "use client";
 
+import { isSpecificError, messageForError, resolveErrorCode } from "@/lib/i18n/error-codes";
+import { tr } from "@/lib/i18n/tr";
 import type { ApiErrorBody } from "@/types/api";
 
+/**
+ * A non-2xx API response. `message` is the Turkish catalog message for the
+ * body's stable `code` (backend core/error_codes.py), resolved by status
+ * when the body has none. The backend's English `detail` is kept only as
+ * `detail`, for ErrorState's technical-details disclosure -- never render
+ * it anywhere else.
+ */
 export class ApiError extends Error {
   status: number;
   body: ApiErrorBody;
+  code: string;
+  detail: string | null;
 
   constructor(status: number, body: ApiErrorBody) {
-    super(body.detail ?? `Request failed with status ${status}`);
+    super(messageForError(body.code, status));
+    this.name = "ApiError";
     this.status = status;
     this.body = body;
+    this.code = resolveErrorCode(body.code, status);
+    this.detail = typeof body.detail === "string" ? body.detail : null;
   }
+
+  /** True when `message` says more than a caller's own contextual text. */
+  get specific(): boolean {
+    return isSpecificError(this.body.code, this.status);
+  }
+}
+
+/**
+ * The Turkish text to show for a failed call: the catalog message for a
+ * specific error code (permission, expiry, throttling, a domain rule),
+ * otherwise the caller's `fallback` ("Görev oluşturulamadı."), and the
+ * generic message for a non-HTTP failure (network, parse).
+ */
+export function errorMessage(err: unknown, fallback: string): string {
+  if (err instanceof ApiError) return err.specific ? err.message : fallback;
+  return tr.errors.generic;
 }
 
 let refreshPromise: Promise<boolean> | null = null;
@@ -50,7 +80,7 @@ export async function apiFetch(input: string, init: RequestInit = {}, isRetry = 
       // A full-page navigation is deliberate: it drops every in-memory
       // view state along with the dead session (not a client-side push).
       // eslint-disable-next-line @next/next/no-location-assign-relative-destination
-      window.location.href = "/login";
+      window.location.href = "/enroll";
     }
     return response;
   }
@@ -60,7 +90,7 @@ export async function apiFetch(input: string, init: RequestInit = {}, isRetry = 
       // A full-page navigation is deliberate: it drops every in-memory
       // view state along with the dead session (not a client-side push).
       // eslint-disable-next-line @next/next/no-location-assign-relative-destination
-      window.location.href = "/login";
+      window.location.href = "/enroll";
     }
     return response;
   }

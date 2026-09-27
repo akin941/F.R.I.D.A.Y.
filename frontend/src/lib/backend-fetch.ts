@@ -7,6 +7,8 @@ interface BackendFetchOptions {
   accessToken?: string;
   signal?: AbortSignal;
   accept?: string;
+  // Extra request headers (e.g. `clientIpHeaders()` on the auth routes).
+  headers?: Record<string, string>;
 }
 
 /**
@@ -21,6 +23,7 @@ interface BackendFetchOptions {
 export async function backendFetch(path: string, options: BackendFetchOptions = {}) {
   const isFormData = options.body instanceof FormData;
   const headers: Record<string, string> = {
+    ...(options.headers ?? {}),
     Accept: options.accept ?? "application/json",
   };
   if (options.body !== undefined && !isFormData) {

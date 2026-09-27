@@ -11,7 +11,7 @@ import { TokenList } from "@/components/integrations/TokenList";
 import { TelegramLinkPanel } from "@/components/integrations/TelegramLinkPanel";
 import { useWorkspace } from "@/contexts/workspace-context";
 import { apiGetJson } from "@/lib/api-client";
-import type { ApiPersonalAccessToken, ApiPersonalAccessTokenCreated } from "@/types/api";
+import type { ApiPersonalAccessToken, ApiPersonalAccessTokenCreated, PatKind } from "@/types/api";
 import { VIEW_SCROLL_ROOT } from "@/components/shell/view-scroll";
 import { cn } from "@/lib/utils";
 
@@ -22,7 +22,9 @@ export function IntegrationsView() {
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
-  const [revealedToken, setRevealedToken] = useState<string | null>(null);
+  const [revealedToken, setRevealedToken] = useState<{ token: string; kind: PatKind } | null>(
+    null,
+  );
 
   const loadTokens = useCallback(async () => {
     setLoading(true);
@@ -50,7 +52,7 @@ export function IntegrationsView() {
     // its reachability, not just its visibility (Codex review, branch 4).
     const { token: rawToken, ...rest } = created;
     setTokens((prev) => [rest, ...prev]);
-    setRevealedToken(rawToken);
+    setRevealedToken({ token: rawToken, kind: rest.kind });
     setCreating(false);
   }
 
@@ -71,8 +73,9 @@ export function IntegrationsView() {
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">Entegrasyonlar</h1>
         <p className="text-sm text-muted-foreground">
-          Jarvis&apos;e CLI veya Telegram üzerinden ulaş — aynı sohbet hattına açılan yeni kapılar, bir
-          isteği onaylamanın ya da reddetmenin yeni bir yolu değil (o hâlâ web uygulamasını gerektirir).
+          Jarvis&apos;e CLI, Telegram veya Open WebUI gibi OpenAI uyumlu bir istemci üzerinden ulaş —
+          aynı sohbet hattına açılan yeni kapılar, bir isteği onaylamanın ya da reddetmenin yeni bir
+          yolu değil (o hâlâ web uygulamasını gerektirir).
         </p>
       </div>
 
@@ -95,8 +98,9 @@ export function IntegrationsView() {
           // "Copied" for a token that was never actually copied (Codex
           // review, branch 4 round 4).
           <RevealedTokenBanner
-            key={revealedToken}
-            token={revealedToken}
+            key={revealedToken.token}
+            token={revealedToken.token}
+            kind={revealedToken.kind}
             onDismiss={() => setRevealedToken(null)}
           />
         ) : null}

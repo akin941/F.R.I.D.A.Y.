@@ -8,6 +8,10 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from core.api_errors import service_error_response
+from core.channels import request_channel
+from core.permissions import IsWebChannel
+from core.throttling import CreateScopedRateThrottle
 from knowledge.models import KnowledgeDocument
 from knowledge.serializers import (
     FileUploadCreateSerializer,
@@ -24,15 +28,16 @@ from knowledge.services import (
     create_url_document,
     delete_document,
     record_read,
+    restore_document,
 )
 from workspaces.models import Workspace
 
 
 def _service_error_response(exc):
     if isinstance(exc, KnowledgePermissionDenied):
-        return Response({"detail": str(exc)}, status=status.HTTP_403_FORBIDDEN)
+        return service_error_response(exc, status.HTTP_403_FORBIDDEN)
     if isinstance(exc, (DuplicateDocument, InvalidUpload)):
-        return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        return service_error_response(exc, status.HTTP_400_BAD_REQUEST)
     raise exc
 
 
@@ -97,6 +102,9 @@ class KnowledgePastedTextCreateView(APIView):
     """
 
     permission_classes = [IsAuthenticated]
+    # Ingestion embeds every chunk (cost-bearing).
+    throttle_classes = [CreateScopedRateThrottle]
+    throttle_scope = "cost"
 
     def post(self, request):
         serializer = PastedTextCreateSerializer(data=request.data)
@@ -127,6 +135,9 @@ class KnowledgeUrlCreateView(APIView):
     re-validates everything from scratch in the worker."""
 
     permission_classes = [IsAuthenticated]
+    # Ingestion embeds every chunk (cost-bearing).
+    throttle_classes = [CreateScopedRateThrottle]
+    throttle_scope = "cost"
 
     def post(self, request):
         serializer = UrlCreateSerializer(data=request.data)
@@ -182,6 +193,9 @@ class _MaxSizeUploadHandler(FileUploadHandler):
 
 class KnowledgeFileUploadCreateView(APIView):
     permission_classes = [IsAuthenticated]
+    # Ingestion embeds every chunk (cost-bearing).
+    throttle_classes = [CreateScopedRateThrottle]
+    throttle_scope = "cost"
     parser_classes = [MultiPartParser]
 
     def post(self, request):
@@ -214,7 +228,7 @@ class KnowledgeFileUploadCreateView(APIView):
 
 
 class KnowledgeDocumentDetailView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, IsWebChannel]
 
     def _get_document(self, request, document_id):
         # Out-of-scope rows → 404, never 403 (existence must not leak).
@@ -232,7 +246,48 @@ class KnowledgeDocumentDetailView(APIView):
         if document is None:
             return Response(status=status.HTTP_404_NOT_FOUND)
         try:
-            delete_document(document=document, actor=request.user)
+            delete_document(document=document, actor=request.user, channel=request_channel(request))
         except KnowledgePermissionDenied as exc:
             return _service_error_response(exc)
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class KnowledgeDocumentTrashListView(APIView):
+    """`GET /api/v1/knowledge/documents/trash?workspace=` -- trashed
+    documents ("Çöp kutusu", ADR-009), newest deletion first."""
+
+    permission_classes = [IsAuthenticated, IsWebChannel]
+
+    def get(self, request):
+        workspace, error = _resolve_workspace(request)
+        if error is not None:
+            return error
+        documents = list(
+            KnowledgeDocument.all_objects.for_actor(request.user, workspace=workspace)
+            .filter(deleted_at__isnull=False)
+            .order_by("-deleted_at", "-id")
+        )
+        record_read(actor=request.user, workspace=workspace, documents=documents)
+        return Response(KnowledgeDocumentSerializer(documents, many=True).data)
+
+
+class KnowledgeDocumentRestoreView(APIView):
+    """`POST /api/v1/knowledge/documents/<id>/restore`."""
+
+    permission_classes = [IsAuthenticated, IsWebChannel]
+
+    def post(self, request, document_id):
+        document = (
+            KnowledgeDocument.all_objects.for_actor(request.user)
+            .filter(id=document_id, deleted_at__isnull=False)
+            .first()
+        )
+        if document is None:
+            return Response(status=status.HTTP_404_NOT_FOUND)
+        try:
+            document = restore_document(
+                document=document, actor=request.user, channel=request_channel(request)
+            )
+        except (KnowledgePermissionDenied, DuplicateDocument, InvalidUpload) as exc:
+            return _service_error_response(exc)
+        return Response(KnowledgeDocumentSerializer(document).data)

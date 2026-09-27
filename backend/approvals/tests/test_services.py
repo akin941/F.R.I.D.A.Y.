@@ -82,6 +82,7 @@ class TestCreate:
                 actor=owner,
                 tool_name="anything",
                 origin=ApprovalRequest.Origin.HUMAN,
+                channel=CHANNEL_WEB,
             )
 
     def test_known_gated_tool_creates_a_pending_request(self, workspace, owner, monkeypatch):
@@ -91,6 +92,7 @@ class TestCreate:
             actor=owner,
             tool_name="some_gated_tool",
             origin=ApprovalRequest.Origin.HUMAN,
+            channel=CHANNEL_WEB,
         )
         assert request.status == ApprovalRequest.Status.PENDING
         assert request.requested_by == owner
@@ -104,6 +106,7 @@ class TestCreate:
                 actor=viewer,
                 tool_name="some_gated_tool",
                 origin=ApprovalRequest.Origin.HUMAN,
+                channel=CHANNEL_WEB,
             )
 
     def test_member_can_create(self, workspace, member, monkeypatch):
@@ -113,6 +116,7 @@ class TestCreate:
             actor=member,
             tool_name="some_gated_tool",
             origin=ApprovalRequest.Origin.HUMAN,
+            channel=CHANNEL_WEB,
         )
         assert request.requested_by == member
 
@@ -126,6 +130,7 @@ class TestCreate:
                 actor=owner,
                 tool_name="not_gated",
                 origin=ApprovalRequest.Origin.HUMAN,
+                channel=CHANNEL_WEB,
             )
 
     def test_origin_human_is_persisted_and_audited(self, workspace, owner, monkeypatch):
@@ -137,6 +142,7 @@ class TestCreate:
             actor=owner,
             tool_name="some_gated_tool",
             origin=ApprovalRequest.Origin.HUMAN,
+            channel=CHANNEL_WEB,
         )
         assert request.origin == ApprovalRequest.Origin.HUMAN
         entry = AuditLog.objects.filter(action="approval.requested").latest("created_at")
@@ -151,6 +157,7 @@ class TestCreate:
             actor=owner,
             tool_name="some_gated_tool",
             origin=ApprovalRequest.Origin.AGENT,
+            channel=CHANNEL_WEB,
         )
         assert request.origin == ApprovalRequest.Origin.AGENT
 

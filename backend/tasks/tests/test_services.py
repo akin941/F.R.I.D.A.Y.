@@ -1,12 +1,16 @@
 import threading
+from functools import partial
 
 import pytest
 from django.db import connection
 
 from accounts.services import register_user
+from assistant.models import Conversation, Message
 from audit.models import AuditLog
+from core.channels import CHANNEL_WEB
 from tasks.models import Task
 from tasks.services import (
+    DraftAlreadyConfirmed,
     InvalidTransition,
     TaskPermissionDenied,
     cancel_task,
@@ -69,6 +73,56 @@ class TestCreate:
     def test_member_can_create(self, workspace, member):
         task = create_task(workspace=workspace, actor=member, title="Member task")
         assert task.created_by == member
+
+
+def make_draft_message(workspace, actor):
+    conversation = Conversation.objects.create(workspace=workspace, created_by=actor)
+    return Message.objects.create(
+        workspace=workspace,
+        conversation=conversation,
+        role=Message.Role.USER,
+        content="remind me to call mom",
+        created_by=actor,
+        intent=Message.Intent.TASK_DRAFT,
+        intent_payload={"title": "Call mom", "due_date": None},
+    )
+
+
+class TestDraftConfirmation:
+    """Phase 4 branch 4: `Task.source_message` is unique, so one draft
+    message yields at most one task."""
+
+    def test_links_the_source_message(self, workspace, owner):
+        draft = make_draft_message(workspace, owner)
+        task = create_task(
+            workspace=workspace,
+            actor=owner,
+            title="Call mom",
+            source=Task.Source.AI_SUGGESTED,
+            source_message=draft,
+        )
+        assert task.source_message == draft
+        assert draft.confirmed_task == task
+
+    def test_second_task_for_the_same_draft_is_refused_without_audit(self, workspace, owner):
+        draft = make_draft_message(workspace, owner)
+        kwargs = {
+            "workspace": workspace,
+            "actor": owner,
+            "title": "Call mom",
+            "source": Task.Source.AI_SUGGESTED,
+            "source_message": draft,
+        }
+        create_task(**kwargs)
+        with pytest.raises(DraftAlreadyConfirmed):
+            create_task(**kwargs)
+        assert Task.objects.count() == 1
+        assert audit_actions().count("task.created") == 1
+
+    def test_tasks_without_a_source_message_never_collide(self, workspace, owner):
+        make_task(workspace, owner, title="One")
+        make_task(workspace, owner, title="Two")
+        assert Task.objects.filter(source_message__isnull=True).count() == 2
 
 
 class TestStateMachine:
@@ -155,11 +209,11 @@ class TestRolePolicy:
         with pytest.raises(TaskPermissionDenied):
             complete_task(task=owners_task, actor=member)
         with pytest.raises(TaskPermissionDenied):
-            delete_task(task=owners_task, actor=member)
+            delete_task(task=owners_task, actor=member, channel=CHANNEL_WEB)
 
     def test_viewer_can_do_nothing_mutating(self, workspace, owner, viewer):
         task = make_task(workspace, owner)
-        for action in (complete_task, cancel_task, delete_task):
+        for action in (complete_task, cancel_task, partial(delete_task, channel=CHANNEL_WEB)):
             with pytest.raises(TaskPermissionDenied):
                 action(task=task, actor=viewer)
         with pytest.raises(TaskPermissionDenied):
@@ -197,7 +251,7 @@ class TestLockedScoping:
         with pytest.raises(InvalidTransition):
             edit_task(task=forged, actor=owner, title="Hijacked")
         with pytest.raises(InvalidTransition):
-            delete_task(task=forged, actor=owner)
+            delete_task(task=forged, actor=owner, channel=CHANNEL_WEB)
         foreign.refresh_from_db()
         assert foreign.status == Task.Status.OPEN
         assert foreign.title == "Foreign"
@@ -205,7 +259,7 @@ class TestLockedScoping:
     def test_transition_on_concurrently_deleted_row(self, workspace, owner):
         task = make_task(workspace, owner)
         stale = Task.objects.get(pk=task.pk)
-        delete_task(task=task, actor=owner)
+        delete_task(task=task, actor=owner, channel=CHANNEL_WEB)
         with pytest.raises(InvalidTransition):
             complete_task(task=stale, actor=owner)
 
@@ -252,3 +306,46 @@ def test_concurrent_complete_and_cancel_serialize():
     assert set(results.values()) == {"succeeded", "invalid_transition"}
     task.refresh_from_db()
     assert task.status in (Task.Status.DONE, Task.Status.CANCELLED)
+
+
+@pytest.mark.django_db(transaction=True)
+def test_concurrent_confirms_of_one_draft_create_exactly_one_task():
+    """Two connections confirm the same draft at once: the unique
+    constraint on `Task.source_message` lets exactly one INSERT commit; the
+    other surfaces as DraftAlreadyConfirmed, never as a second task."""
+    owner = register_user(email="draft-racer@test.dev", password=PASSWORD, name="Racer")
+    workspace = Workspace.objects.get(owner=owner)
+    draft = make_draft_message(workspace, owner)
+
+    barrier = threading.Barrier(2)
+    results = []
+    errors = []
+
+    def worker():
+        try:
+            barrier.wait(timeout=5)
+            try:
+                create_task(
+                    workspace=workspace,
+                    actor=owner,
+                    title="Call mom",
+                    source=Task.Source.AI_SUGGESTED,
+                    source_message=draft,
+                )
+                results.append("created")
+            except DraftAlreadyConfirmed:
+                results.append("already_confirmed")
+        except Exception as exc:  # pragma: no cover - surfaced via `errors`
+            errors.append(exc)
+        finally:
+            connection.close()
+
+    threads = [threading.Thread(target=worker) for _ in range(2)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=10)
+
+    assert not errors, errors
+    assert sorted(results) == ["already_confirmed", "created"]
+    assert Task.objects.filter(source_message=draft).count() == 1

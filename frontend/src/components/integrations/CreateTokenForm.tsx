@@ -13,9 +13,22 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { apiPostJson, ApiError } from "@/lib/api-client";
+import { apiPostJson, errorMessage } from "@/lib/api-client";
 import { useWorkspace } from "@/contexts/workspace-context";
-import type { ApiPersonalAccessTokenCreated } from "@/types/api";
+import { tr } from "@/lib/i18n/tr";
+import type { ApiPersonalAccessTokenCreated, PatKind } from "@/types/api";
+
+const KINDS: PatKind[] = ["cli", "openai"];
+
+// Lifetimes offered at mint (days). The backend default is 90 and its cap
+// 365 (PAT_DEFAULT_TTL_DAYS / PAT_MAX_TTL_DAYS).
+const EXPIRY_OPTIONS = [
+  { days: "30", label: "30 gün" },
+  { days: "90", label: "90 gün" },
+  { days: "180", label: "180 gün" },
+  { days: "365", label: "1 yıl" },
+];
+const DEFAULT_EXPIRY_DAYS = "90";
 
 /**
  * A token is bound to one workspace for its lifetime (brief §2/§3), which
@@ -34,6 +47,8 @@ export function CreateTokenForm({
 
   const [name, setName] = useState("");
   const [workspaceId, setWorkspaceId] = useState(activeWorkspace?.id ?? "");
+  const [expiryDays, setExpiryDays] = useState(DEFAULT_EXPIRY_DAYS);
+  const [kind, setKind] = useState<PatKind>("cli");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -45,15 +60,13 @@ export function CreateTokenForm({
       const token = await apiPostJson<ApiPersonalAccessTokenCreated>("/api/auth/tokens", {
         workspace: workspaceId,
         name,
+        kind,
+        expires_in_days: Number(expiryDays),
       });
       onCreated(token);
       setName("");
     } catch (err) {
-      setError(
-        err instanceof ApiError
-          ? (err.body.detail ?? "Token oluşturulamadı.")
-          : "Bir şeyler ters gitti. Lütfen tekrar deneyin.",
-      );
+      setError(errorMessage(err, "Token oluşturulamadı."));
     } finally {
       setSubmitting(false);
     }
@@ -82,6 +95,22 @@ export function CreateTokenForm({
             />
           </div>
           <div className="flex flex-col gap-1.5">
+            <Label htmlFor="token-kind">Tür</Label>
+            <Select value={kind} onValueChange={(value) => setKind(value as PatKind)}>
+              <SelectTrigger id="token-kind" aria-label="Token türü">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {KINDS.map((option) => (
+                  <SelectItem key={option} value={option}>
+                    {tr.token.kind[option]}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <p className="text-xs text-muted-foreground">{tr.token.kindHint[kind]}</p>
+          </div>
+          <div className="flex flex-col gap-1.5">
             <Label htmlFor="token-workspace">Çalışma alanı</Label>
             <Select value={workspaceId} onValueChange={setWorkspaceId}>
               <SelectTrigger id="token-workspace" aria-label="Token çalışma alanı">
@@ -91,6 +120,21 @@ export function CreateTokenForm({
                 {workspaces.map((workspace) => (
                   <SelectItem key={workspace.id} value={workspace.id}>
                     {workspace.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="token-expiry">Geçerlilik süresi</Label>
+            <Select value={expiryDays} onValueChange={setExpiryDays}>
+              <SelectTrigger id="token-expiry" aria-label="Token geçerlilik süresi">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {EXPIRY_OPTIONS.map((option) => (
+                  <SelectItem key={option.days} value={option.days}>
+                    {option.label}
                   </SelectItem>
                 ))}
               </SelectContent>

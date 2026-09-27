@@ -40,12 +40,6 @@ def outsider():
     return register_user(email="outsider@test.dev", password=PASSWORD, name="Outsider")
 
 
-def client_for(user):
-    client = APIClient()
-    client.force_authenticate(user=user)
-    return client
-
-
 def user_with_role(workspace, role, email):
     user = register_user(email=email, password=PASSWORD, name=role)
     WorkspaceMember.objects.create(workspace=workspace, user=user, role=role)
@@ -58,20 +52,20 @@ class TestRetrieve:
         assert response.status_code == 401
 
     @pytest.mark.parametrize("role", ROLES)
-    def test_all_roles_can_retrieve(self, workspace, role):
+    def test_all_roles_can_retrieve(self, workspace, role, web_client):
         user = user_with_role(workspace, role, f"role-{role}@test.dev")
-        response = client_for(user).get(f"/api/v1/workspaces/{workspace.id}")
+        response = web_client(user).get(f"/api/v1/workspaces/{workspace.id}")
         assert response.status_code == 200
         assert response.json()["id"] == str(workspace.id)
         assert response.json()["profile"] == {}
         assert response.json()["role"] == role
 
-    def test_outsider_gets_404_not_403(self, workspace, outsider):
-        response = client_for(outsider).get(f"/api/v1/workspaces/{workspace.id}")
+    def test_outsider_gets_404_not_403(self, workspace, outsider, web_client):
+        response = web_client(outsider).get(f"/api/v1/workspaces/{workspace.id}")
         assert response.status_code == 404
 
-    def test_unknown_workspace_id_is_404(self, owner):
-        response = client_for(owner).get("/api/v1/workspaces/00000000-0000-0000-0000-000000000000")
+    def test_unknown_workspace_id_is_404(self, owner, web_client):
+        response = web_client(owner).get("/api/v1/workspaces/00000000-0000-0000-0000-000000000000")
         assert response.status_code == 404
 
 
@@ -88,9 +82,9 @@ class TestPatchPermissionMatrix:
             (WorkspaceMember.Role.VIEWER, 403),
         ],
     )
-    def test_patch_profile_by_role(self, workspace, role, expected):
+    def test_patch_profile_by_role(self, workspace, role, expected, web_client):
         user = user_with_role(workspace, role, f"role-{role}@test.dev")
-        response = client_for(user).patch(
+        response = web_client(user).patch(
             f"/api/v1/workspaces/{workspace.id}",
             {"profile": VALID_PROFILE},
             format="json",
@@ -109,14 +103,14 @@ class TestPatchPermissionMatrix:
         )
         assert response.status_code == 401
 
-    def test_outsider_patch_is_404_not_403(self, workspace, outsider):
-        response = client_for(outsider).patch(
+    def test_outsider_patch_is_404_not_403(self, workspace, outsider, web_client):
+        response = web_client(outsider).patch(
             f"/api/v1/workspaces/{workspace.id}", {"profile": {}}, format="json"
         )
         assert response.status_code == 404
 
-    def test_patch_invalid_profile_is_400(self, workspace, owner):
-        response = client_for(owner).patch(
+    def test_patch_invalid_profile_is_400(self, workspace, owner, web_client):
+        response = web_client(owner).patch(
             f"/api/v1/workspaces/{workspace.id}",
             {"profile": {"unknown_key": "x"}},
             format="json",
@@ -125,21 +119,21 @@ class TestPatchPermissionMatrix:
         workspace.refresh_from_db()
         assert workspace.profile == {}
 
-    def test_patch_ignores_other_fields(self, workspace, owner):
-        """`name`/`type`/`enabled_modules` never become writable through this
-        endpoint -- only `profile` (brief §2)."""
-        response = client_for(owner).patch(
+    def test_patch_ignores_other_fields(self, workspace, owner, web_client):
+        """`type`/`enabled_modules` never become writable through this
+        endpoint -- only `profile` and (Phase 4 branch 2) `name`."""
+        response = web_client(owner).patch(
             f"/api/v1/workspaces/{workspace.id}",
-            {"profile": VALID_PROFILE, "name": "Renamed", "type": "company"},
+            {"profile": VALID_PROFILE, "type": "company", "enabled_modules": ["x"]},
             format="json",
         )
         assert response.status_code == 200
         workspace.refresh_from_db()
-        assert workspace.name != "Renamed"
         assert workspace.type == Workspace.Type.PERSONAL
+        assert workspace.enabled_modules == []
 
-    def test_patch_replaces_profile_wholesale(self, workspace, owner):
-        client = client_for(owner)
+    def test_patch_replaces_profile_wholesale(self, workspace, owner, web_client):
+        client = web_client(owner)
         client.patch(
             f"/api/v1/workspaces/{workspace.id}",
             {"profile": VALID_PROFILE},
@@ -156,9 +150,11 @@ class TestPatchPermissionMatrix:
 
 
 class TestAudit:
-    def test_successful_patch_records_audit_without_profile_content(self, workspace, owner):
+    def test_successful_patch_records_audit_without_profile_content(
+        self, workspace, owner, web_client
+    ):
         before = AuditLog.objects.count()
-        response = client_for(owner).patch(
+        response = web_client(owner).patch(
             f"/api/v1/workspaces/{workspace.id}",
             {"profile": {"notes": "Super secret client roster."}},
             format="json",
@@ -174,10 +170,10 @@ class TestAudit:
         assert "secret" not in blob
         assert "roster" not in blob
 
-    def test_denied_patch_records_no_audit(self, workspace):
+    def test_denied_patch_records_no_audit(self, workspace, web_client):
         member = user_with_role(workspace, WorkspaceMember.Role.MEMBER, "m@test.dev")
         before = AuditLog.objects.count()
-        response = client_for(member).patch(
+        response = web_client(member).patch(
             f"/api/v1/workspaces/{workspace.id}",
             {"profile": VALID_PROFILE},
             format="json",
@@ -185,9 +181,9 @@ class TestAudit:
         assert response.status_code == 403
         assert AuditLog.objects.count() == before
 
-    def test_invalid_profile_records_no_audit(self, workspace, owner):
+    def test_invalid_profile_records_no_audit(self, workspace, owner, web_client):
         before = AuditLog.objects.count()
-        response = client_for(owner).patch(
+        response = web_client(owner).patch(
             f"/api/v1/workspaces/{workspace.id}",
             {"profile": {"bogus": "x"}},
             format="json",
@@ -200,14 +196,14 @@ class TestCrossWorkspaceIsolation:
     """A user cannot retrieve/patch a workspace they are not a member of --
     404 via scoping, mirroring `test_scoping.py`."""
 
-    def test_cannot_retrieve_other_users_workspace(self, owner, outsider):
+    def test_cannot_retrieve_other_users_workspace(self, owner, outsider, web_client):
         outsider_ws = Workspace.objects.get(owner=outsider)
-        response = client_for(owner).get(f"/api/v1/workspaces/{outsider_ws.id}")
+        response = web_client(owner).get(f"/api/v1/workspaces/{outsider_ws.id}")
         assert response.status_code == 404
 
-    def test_cannot_patch_other_users_workspace(self, owner, outsider):
+    def test_cannot_patch_other_users_workspace(self, owner, outsider, web_client):
         outsider_ws = Workspace.objects.get(owner=outsider)
-        response = client_for(owner).patch(
+        response = web_client(owner).patch(
             f"/api/v1/workspaces/{outsider_ws.id}",
             {"profile": VALID_PROFILE},
             format="json",

@@ -189,6 +189,71 @@ class TestReconciliation:
         assert all_md_files == [memory_path(tmp_path, workspace, memory)]
 
 
+def private_memory_path(vault_root, workspace, memory):
+    return vault_root / "_private" / str(workspace.id) / "Memory" / f"{memory.id}.md"
+
+
+class TestPrivateMemories:
+    """Phase 4 branch 1: `private` memories go to the sync-ignored
+    `_private/` tree (docs/memory/obsidian-vault-strategy.md), never the
+    synced `03_Workspaces/` tree."""
+
+    def test_private_memory_lands_only_under_private(self, workspace, tmp_path):
+        private = make_memory(workspace, sensitivity=Memory.Sensitivity.PRIVATE, fingerprint="p")
+        normal = make_memory(workspace, fingerprint="n")
+        vault_root_real = export.validate_vault_root_exists(str(tmp_path))
+        written, updated, removed = export.export_workspace_memories(vault_root_real, workspace)
+
+        assert (written, updated, removed) == (2, 0, 0)
+        assert private_memory_path(tmp_path, workspace, private).exists()
+        assert not memory_path(tmp_path, workspace, private).exists()
+        assert memory_path(tmp_path, workspace, normal).exists()
+        assert not private_memory_path(tmp_path, workspace, normal).exists()
+        # Nothing private anywhere in the synced tree.
+        synced = tmp_path / "03_Workspaces"
+        assert all(str(private.id) not in p.read_text() for p in synced.rglob("*.md"))
+
+    def test_old_main_tree_copy_of_a_private_memory_is_pruned(self, workspace, tmp_path):
+        """A private memory exported before this change left a copy in the
+        main tree; the next run moves it."""
+        memory = make_memory(workspace, sensitivity=Memory.Sensitivity.PRIVATE)
+        vault_root_real = export.validate_vault_root_exists(str(tmp_path))
+        export.export_workspace_memories(vault_root_real, workspace)
+        # Recreate the pre-change layout: the file in the main tree.
+        legacy = memory_path(tmp_path, workspace, memory)
+        legacy.write_text(private_memory_path(tmp_path, workspace, memory).read_text())
+
+        written, updated, removed = export.export_workspace_memories(vault_root_real, workspace)
+        assert (written, updated, removed) == (0, 1, 1)
+        assert not legacy.exists()
+        assert private_memory_path(tmp_path, workspace, memory).exists()
+
+    def test_memory_moving_between_trees_follows_its_sensitivity(self, workspace, tmp_path):
+        memory = make_memory(workspace)
+        vault_root_real = export.validate_vault_root_exists(str(tmp_path))
+        export.export_workspace_memories(vault_root_real, workspace)
+        memory.sensitivity = Memory.Sensitivity.PRIVATE
+        memory.save(update_fields=["sensitivity"])
+        export.export_workspace_memories(vault_root_real, workspace)
+        assert private_memory_path(tmp_path, workspace, memory).exists()
+        assert not memory_path(tmp_path, workspace, memory).exists()
+
+        memory.sensitivity = Memory.Sensitivity.NORMAL
+        memory.save(update_fields=["sensitivity"])
+        export.export_workspace_memories(vault_root_real, workspace)
+        assert memory_path(tmp_path, workspace, memory).exists()
+        assert not private_memory_path(tmp_path, workspace, memory).exists()
+
+    def test_human_note_in_the_private_tree_is_never_pruned(self, workspace, tmp_path):
+        vault_root_real = export.validate_vault_root_exists(str(tmp_path))
+        export.export_workspace_memories(vault_root_real, workspace)
+        note = tmp_path / "_private" / str(workspace.id) / "Memory" / "diary.md"
+        note.write_text("my own words")
+        written, updated, removed = export.export_workspace_memories(vault_root_real, workspace)
+        assert removed == 0
+        assert note.read_text() == "my own words"
+
+
 class TestConservativePrune:
     def _memory_dir(self, workspace, tmp_path):
         return tmp_path / "03_Workspaces" / str(workspace.id) / "Memory"
@@ -407,6 +472,7 @@ class TestValidateRequestWiring:
                 actor=owner,
                 tool_name="vault_export",
                 origin=ApprovalRequest.Origin.HUMAN,
+                channel=CHANNEL_WEB,
             )
 
     def test_create_request_succeeds_when_vault_root_is_safe(
@@ -418,6 +484,7 @@ class TestValidateRequestWiring:
             actor=owner,
             tool_name="vault_export",
             origin=ApprovalRequest.Origin.HUMAN,
+            channel=CHANNEL_WEB,
         )
         assert request.status == ApprovalRequest.Status.PENDING
 
@@ -442,6 +509,7 @@ def test_durable_before_dispatch_survives_a_broker_publish_failure(settings, tmp
         actor=owner,
         tool_name="vault_export",
         origin=ApprovalRequest.Origin.HUMAN,
+        channel=CHANNEL_WEB,
     )
 
     with mock.patch(

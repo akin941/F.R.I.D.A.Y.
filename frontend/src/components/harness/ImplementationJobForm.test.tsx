@@ -96,8 +96,13 @@ describe("ImplementationJobForm", () => {
     });
   });
 
-  it("shows the backend's error detail when creation is refused", async () => {
-    stubFetch(() => jsonResponse({ detail: "Repo has no test_command configured." }, 400));
+  it("shows the Turkish message for the backend's error code when creation is refused", async () => {
+    stubFetch(() =>
+      jsonResponse(
+        { detail: "Repo has no test_command configured.", code: "harness.invalid_transition" },
+        400,
+      ),
+    );
     const onCreated = vi.fn();
 
     render(
@@ -111,7 +116,10 @@ describe("ImplementationJobForm", () => {
     await screen.findByRole("combobox", { name: "Depo" });
     await userEvent.click(screen.getByRole("button", { name: "Uygulama iste" }));
 
-    expect(await screen.findByText("Repo has no test_command configured.")).toBeInTheDocument();
+    expect(
+      await screen.findByText("Bu harness işi, deposu ya da ajanı artık bu işleme uygun değil."),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("Repo has no test_command configured.")).not.toBeInTheDocument();
     expect(onCreated).not.toHaveBeenCalled();
   });
 

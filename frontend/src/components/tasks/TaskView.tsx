@@ -12,6 +12,7 @@ import { useWorkspace } from "@/contexts/workspace-context";
 import { apiGetJson } from "@/lib/api-client";
 import type { ApiTask, TaskStatus } from "@/types/api";
 import { VIEW_SCROLL_ROOT } from "@/components/shell/view-scroll";
+import { DeepLinkTarget, useDeepLinkTarget } from "@/components/shell/deep-link-target";
 import { cn } from "@/lib/utils";
 
 export function TaskView() {
@@ -76,6 +77,8 @@ export function TaskView() {
     setCreating(false);
   }
 
+  // `?task=<id>` from a chat "Görev oluşturuldu" link.
+  const linkedTaskId = useDeepLinkTarget("task", !loading && tasks.length > 0);
   const visible = tasks.filter((t) => statusFilter === "all" || t.status === statusFilter);
 
   if (!activeWorkspace) {
@@ -140,7 +143,9 @@ export function TaskView() {
           ) : (
             <div className="flex flex-col gap-3">
               {visible.map((task) => (
-                <TaskCard key={task.id} task={task} onChanged={handleChanged} onDeleted={handleDeleted} />
+                <DeepLinkTarget key={task.id} kind="task" id={task.id} active={linkedTaskId === task.id}>
+                  <TaskCard task={task} onChanged={handleChanged} onDeleted={handleDeleted} />
+                </DeepLinkTarget>
               ))}
             </div>
           )}

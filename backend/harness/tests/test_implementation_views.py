@@ -52,12 +52,6 @@ def repo(workspace):
     )
 
 
-def client_for(user):
-    client = APIClient()
-    client.force_authenticate(user=user)
-    return client
-
-
 def member(workspace, role, email):
     user = register_user(email=email, password=PASSWORD, name=role)
     WorkspaceMember.objects.update_or_create(
@@ -83,22 +77,22 @@ class TestPermissions:
         assert APIClient().get(BASE, {"workspace": str(workspace.id)}).status_code == 401
 
     @pytest.mark.parametrize("role", ROLES)
-    def test_list(self, workspace, owner, repo, role):
+    def test_list(self, workspace, owner, repo, role, web_client):
         make_job(workspace, repo, owner)
-        response = client_for(actor_for(workspace, owner, role)).get(
+        response = web_client(actor_for(workspace, owner, role)).get(
             BASE, {"workspace": str(workspace.id)}
         )
         assert response.status_code == (200 if role in CURATOR else 403)
 
     @pytest.mark.parametrize("role", ROLES)
-    def test_detail(self, workspace, owner, repo, role):
+    def test_detail(self, workspace, owner, repo, role, web_client):
         job = make_job(workspace, repo, owner)
-        response = client_for(actor_for(workspace, owner, role)).get(f"{BASE}/{job.id}")
+        response = web_client(actor_for(workspace, owner, role)).get(f"{BASE}/{job.id}")
         assert response.status_code == (200 if role in CURATOR else 403)
 
     @pytest.mark.parametrize("role", ROLES)
-    def test_create(self, workspace, owner, repo, role):
-        response = client_for(actor_for(workspace, owner, role)).post(
+    def test_create(self, workspace, owner, repo, role, web_client):
+        response = web_client(actor_for(workspace, owner, role)).post(
             BASE,
             {"workspace": str(workspace.id), "repo": str(repo.id), "goal": "do it"},
             format="json",
@@ -106,14 +100,14 @@ class TestPermissions:
         assert response.status_code == (201 if role in CURATOR else 403)
 
     @pytest.mark.parametrize("role", ROLES)
-    def test_cancel(self, workspace, owner, repo, role):
+    def test_cancel(self, workspace, owner, repo, role, web_client):
         job = make_job(workspace, repo, owner)
-        response = client_for(actor_for(workspace, owner, role)).post(f"{BASE}/{job.id}/cancel")
+        response = web_client(actor_for(workspace, owner, role)).post(f"{BASE}/{job.id}/cancel")
         assert response.status_code == (200 if role in CURATOR else 403)
 
-    def test_outsider_gets_404_everywhere(self, workspace, owner, repo, outsider):
+    def test_outsider_gets_404_everywhere(self, workspace, owner, repo, outsider, web_client):
         job = make_job(workspace, repo, owner)
-        client = client_for(outsider)
+        client = web_client(outsider)
         assert client.get(BASE, {"workspace": str(workspace.id)}).status_code == 404
         assert client.get(f"{BASE}/{job.id}").status_code == 404
         assert client.post(f"{BASE}/{job.id}/cancel").status_code == 404
@@ -126,19 +120,21 @@ class TestPermissions:
 
 
 class TestIsolation:
-    def test_repo_from_another_workspace_is_404(self, workspace, owner, outsider):
+    def test_repo_from_another_workspace_is_404(self, workspace, owner, outsider, web_client):
         other_ws = Workspace.objects.get(owner=outsider)
         other_repo = HarnessRepo.objects.create(
             workspace=other_ws, name="other", git_url="git@example.com:o/p.git", enabled=True
         )
-        response = client_for(owner).post(
+        response = web_client(owner).post(
             BASE,
             {"workspace": str(workspace.id), "repo": str(other_repo.id), "goal": "x"},
             format="json",
         )
         assert response.status_code == 404
 
-    def test_discovery_job_from_another_workspace_is_404(self, workspace, owner, repo, outsider):
+    def test_discovery_job_from_another_workspace_is_404(
+        self, workspace, owner, repo, outsider, web_client
+    ):
         other_ws = Workspace.objects.get(owner=outsider)
         other_repo = HarnessRepo.objects.create(
             workspace=other_ws, name="other", git_url="git@example.com:o/p.git", enabled=True
@@ -146,7 +142,7 @@ class TestIsolation:
         foreign = HarnessJob.objects.create(
             workspace=other_ws, repo=other_repo, goal="g", created_by=outsider
         )
-        response = client_for(owner).post(
+        response = web_client(owner).post(
             BASE,
             {
                 "workspace": str(workspace.id),
@@ -158,7 +154,7 @@ class TestIsolation:
         )
         assert response.status_code == 404
 
-    def test_list_only_returns_this_workspace(self, workspace, owner, repo, outsider):
+    def test_list_only_returns_this_workspace(self, workspace, owner, repo, outsider, web_client):
         make_job(workspace, repo, owner)
         other_ws = Workspace.objects.get(owner=outsider)
         WorkspaceMember.objects.create(
@@ -174,16 +170,18 @@ class TestIsolation:
         create_harness_implementation_job(
             workspace=other_ws, actor=owner, repo=other_repo, goal="other ws"
         )
-        response = client_for(owner).get(BASE, {"workspace": str(workspace.id)})
+        response = web_client(owner).get(BASE, {"workspace": str(workspace.id)})
         assert [row["goal"] for row in response.json()] == ["add a health endpoint"]
 
 
 class TestShapes:
-    def test_create_links_discovery_job_and_requests_gate_a(self, workspace, owner, repo):
+    def test_create_links_discovery_job_and_requests_gate_a(
+        self, workspace, owner, repo, web_client
+    ):
         discovery = HarnessJob.objects.create(
             workspace=workspace, repo=repo, goal="analyze", created_by=owner
         )
-        response = client_for(owner).post(
+        response = web_client(owner).post(
             BASE,
             {
                 "workspace": str(workspace.id),
@@ -204,10 +202,10 @@ class TestShapes:
         assert set(body["gate_a"]) == {"id", "status", "decided_at"}
         assert body["gate_b"] is None
 
-    def test_invalid_transition_is_400_with_detail(self, workspace, owner, repo):
+    def test_invalid_transition_is_400_with_detail(self, workspace, owner, repo, web_client):
         repo.enabled = False
         repo.save(update_fields=["enabled"])
-        response = client_for(owner).post(
+        response = web_client(owner).post(
             BASE,
             {"workspace": str(workspace.id), "repo": str(repo.id), "goal": "x"},
             format="json",
@@ -215,8 +213,8 @@ class TestShapes:
         assert response.status_code == 400
         assert "detail" in response.json()
 
-    def test_blank_goal_is_400(self, workspace, owner, repo):
-        response = client_for(owner).post(
+    def test_blank_goal_is_400(self, workspace, owner, repo, web_client):
+        response = web_client(owner).post(
             BASE,
             {"workspace": str(workspace.id), "repo": str(repo.id), "goal": "   "},
             format="json",
@@ -224,7 +222,7 @@ class TestShapes:
         assert response.status_code == 400
 
     def test_detail_exposes_reviews_and_transcripts_but_no_host_internals(
-        self, workspace, owner, repo
+        self, workspace, owner, repo, web_client
     ):
         job = make_job(workspace, repo, owner)
         HarnessImplementationJob.objects.filter(pk=job.pk).update(
@@ -244,7 +242,7 @@ class TestShapes:
             findings=["f1"],
             raw_transcript="review output",
         )
-        body = client_for(owner).get(f"{BASE}/{job.id}").json()
+        body = web_client(owner).get(f"{BASE}/{job.id}").json()
         assert body["raw_transcript"] == "cli output"
         assert body["reviews"][0]["raw_transcript"] == "review output"
         assert body["reviews"][0]["verdict"] == "approved"
@@ -253,19 +251,21 @@ class TestShapes:
         assert "container_id" not in body["reviews"][0]
         assert "payload" not in body["gate_a"]
 
-    def test_cancel_pending_gate_a_returns_cancelled(self, workspace, owner, repo):
+    def test_cancel_pending_gate_a_returns_cancelled(self, workspace, owner, repo, web_client):
         job = make_job(workspace, repo, owner)
-        body = client_for(owner).post(f"{BASE}/{job.id}/cancel").json()
+        body = web_client(owner).post(f"{BASE}/{job.id}/cancel").json()
         assert body["status"] == "cancelled"
         assert body["gate_a"]["status"] == "expired"
 
 
 class TestApprovalsDisplaySummary:
-    def test_gate_a_summary_is_snapshotted_and_payload_stays_hidden(self, workspace, owner, repo):
+    def test_gate_a_summary_is_snapshotted_and_payload_stays_hidden(
+        self, workspace, owner, repo, web_client
+    ):
         job = make_job(workspace, repo, owner)
         repo.name = "renamed-later"
         repo.save(update_fields=["name"])
-        response = client_for(owner).get(
+        response = web_client(owner).get(
             "/api/v1/approvals/requests", {"workspace": str(workspace.id)}
         )
         row = next(r for r in response.json() if r["id"] == str(job.gate_a_request_id))
@@ -277,7 +277,9 @@ class TestApprovalsDisplaySummary:
         assert summary["branch_name"] == job.branch_name
         assert summary["reviewer_agent"] == "codex_cli"
 
-    def test_gate_b_summary_comes_from_the_request_time_snapshot(self, workspace, owner, repo):
+    def test_gate_b_summary_comes_from_the_request_time_snapshot(
+        self, workspace, owner, repo, web_client
+    ):
         job = make_job(workspace, repo, owner)
         HarnessImplementationJob.objects.filter(pk=job.pk).update(
             status=HarnessImplementationJob.Status.PENDING_REVIEW,
@@ -299,7 +301,7 @@ class TestApprovalsDisplaySummary:
         # Later edits must not change what Gate B showed.
         HarnessImplementationJob.objects.filter(pk=job.pk).update(diff_summary="edited later")
         HarnessReview.objects.filter(pk=review.pk).update(summary="edited later")
-        response = client_for(owner).get(
+        response = web_client(owner).get(
             "/api/v1/approvals/requests", {"workspace": str(workspace.id)}
         )
         row = next(r for r in response.json() if r["id"] == str(job.gate_b_request_id))
@@ -320,9 +322,11 @@ class TestApprovalsDisplaySummary:
 
 class TestSystemOnlyGates:
     @pytest.mark.parametrize("tool_name", ["harness_implement", "harness_push"])
-    def test_direct_post_of_a_system_only_gate_is_refused(self, workspace, owner, repo, tool_name):
+    def test_direct_post_of_a_system_only_gate_is_refused(
+        self, workspace, owner, repo, tool_name, web_client
+    ):
         job = make_job(workspace, repo, owner)
-        response = client_for(owner).post(
+        response = web_client(owner).post(
             "/api/v1/approvals/requests",
             {
                 "workspace": str(workspace.id),
@@ -355,9 +359,9 @@ class TestDisplaySummaryAudience:
         return next(r for r in response.json() if r["id"] == str(request_id))
 
     @pytest.mark.parametrize("role", [WorkspaceMember.Role.MEMBER, WorkspaceMember.Role.VIEWER])
-    def test_non_curators_get_no_summary(self, workspace, owner, repo, role):
+    def test_non_curators_get_no_summary(self, workspace, owner, repo, role, web_client):
         job = make_job(workspace, repo, owner)
-        client = client_for(member(workspace, role, f"{role}-aud@test.dev"))
+        client = web_client(member(workspace, role, f"{role}-aud@test.dev"))
         assert self._row(client, workspace, job.gate_a_request_id)["display_summary"] is None
 
     def test_low_trust_channel_gets_no_summary(self, workspace, owner, repo):
@@ -373,14 +377,14 @@ class TestDisplaySummaryAudience:
         client.credentials(HTTP_AUTHORIZATION=f"Bearer {raw}")
         assert self._row(client, workspace, job.gate_a_request_id)["display_summary"] is None
 
-    def test_admin_on_web_gets_the_summary(self, workspace, owner, repo):
+    def test_admin_on_web_gets_the_summary(self, workspace, owner, repo, web_client):
         job = make_job(workspace, repo, owner)
         admin = member(workspace, WorkspaceMember.Role.ADMIN, "admin-aud@test.dev")
-        row = self._row(client_for(admin), workspace, job.gate_a_request_id)
+        row = self._row(web_client(admin), workspace, job.gate_a_request_id)
         assert row["display_summary"]["kind"] == "harness_implement"
         assert row["display_summary"]["reviewer_agent"] == "codex_cli"
 
-    def test_unlinked_legacy_gate_row_gets_no_summary(self, workspace, owner, repo):
+    def test_unlinked_legacy_gate_row_gets_no_summary(self, workspace, owner, repo, web_client):
         job = make_job(workspace, repo, owner)
         forged = ApprovalRequest.objects.create(
             workspace=workspace,
@@ -389,10 +393,10 @@ class TestDisplaySummaryAudience:
             requested_by=owner,
             origin=ApprovalRequest.Origin.HUMAN,
         )
-        assert self._row(client_for(owner), workspace, forged.id)["display_summary"] is None
+        assert self._row(web_client(owner), workspace, forged.id)["display_summary"] is None
 
 
-def test_discovery_job_from_another_repo_is_refused(workspace, owner, repo):
+def test_discovery_job_from_another_repo_is_refused(workspace, owner, repo, web_client):
     other_repo = HarnessRepo.objects.create(
         workspace=workspace,
         name="other",
@@ -403,7 +407,7 @@ def test_discovery_job_from_another_repo_is_refused(workspace, owner, repo):
     discovery = HarnessJob.objects.create(
         workspace=workspace, repo=other_repo, goal="analyze", created_by=owner
     )
-    response = client_for(owner).post(
+    response = web_client(owner).post(
         BASE,
         {
             "workspace": str(workspace.id),

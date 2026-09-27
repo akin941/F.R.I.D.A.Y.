@@ -151,4 +151,20 @@ describe("POST /api/tasks/[taskId]/[action]", () => {
 
     expect(response.status).toBe(400);
   });
+
+  it("forwards restore (ADR-009 trash) to the backend's restore view", async () => {
+    cookiesMock.mockResolvedValue(cookieStore("token"));
+    const fetchMock = vi.fn<(input: string, init?: RequestInit) => Promise<Response>>(
+      async () => new Response(JSON.stringify({ id: VALID_ID, deleted_at: null }), { status: 200 }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { POST } = await import("@/app/api/tasks/[taskId]/[action]/route");
+    const response = await POST(postRequest(VALID_ID, "restore"), {
+      params: params(VALID_ID, "restore"),
+    });
+
+    expect(fetchMock.mock.calls[0]?.[0]).toMatch(new RegExp(`/tasks/${VALID_ID}/restore$`));
+    expect(response.status).toBe(200);
+  });
 });

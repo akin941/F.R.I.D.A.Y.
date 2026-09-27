@@ -43,21 +43,73 @@ describe("POST /api/auth/logout", () => {
     vi.resetAllMocks();
   });
 
-  it("clears all auth cookies", async () => {
+  it("blacklists the refresh token at the backend and clears all auth cookies", async () => {
     const cookieStore = createCookieStore({
       jarvis_access: "a",
       jarvis_refresh: "r",
       jarvis_session: "1",
     });
     cookiesMock.mockResolvedValue(cookieStore);
+    const fetchMock = vi.fn(async () => new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", fetchMock);
 
     const { POST } = await import("@/app/api/auth/logout/route");
     const response = await POST(makeRequest());
 
     expect(response.status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toMatch(/\/auth\/logout$/);
+    expect(init.method).toBe("POST");
+    expect(JSON.parse(init.body as string)).toEqual({ refresh: "r" });
+    // The refresh token is the credential; a possibly-expired access token
+    // must not be sent (it would make the backend reject the call).
+    expect((init.headers as Record<string, string>).Authorization).toBeUndefined();
     expect(cookieStore.deleted).toEqual(
       expect.arrayContaining(["jarvis_access", "jarvis_refresh", "jarvis_session"]),
     );
+  });
+
+  it("still clears the cookies when the backend rejects the token", async () => {
+    const cookieStore = createCookieStore({ jarvis_refresh: "already-blacklisted" });
+    cookiesMock.mockResolvedValue(cookieStore);
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("{}", { status: 401 })));
+
+    const { POST } = await import("@/app/api/auth/logout/route");
+    const response = await POST(makeRequest());
+
+    expect(response.status).toBe(200);
+    expect(cookieStore.deleted).toEqual(expect.arrayContaining(["jarvis_refresh"]));
+  });
+
+  it("still clears the cookies when the backend is unreachable", async () => {
+    const cookieStore = createCookieStore({ jarvis_refresh: "r" });
+    cookiesMock.mockResolvedValue(cookieStore);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        throw new TypeError("fetch failed");
+      }),
+    );
+
+    const { POST } = await import("@/app/api/auth/logout/route");
+    const response = await POST(makeRequest());
+
+    expect(response.status).toBe(200);
+    expect(cookieStore.deleted).toEqual(expect.arrayContaining(["jarvis_refresh"]));
+  });
+
+  it("skips the backend call when there is no refresh cookie", async () => {
+    const cookieStore = createCookieStore({ jarvis_session: "1" });
+    cookiesMock.mockResolvedValue(cookieStore);
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { POST } = await import("@/app/api/auth/logout/route");
+    const response = await POST(makeRequest());
+
+    expect(response.status).toBe(200);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("rejects a mismatched Origin", async () => {

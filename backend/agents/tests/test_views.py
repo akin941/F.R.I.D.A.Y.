@@ -1,5 +1,4 @@
 import pytest
-from rest_framework.test import APIClient
 
 from accounts.services import register_user
 from agents.execution import advance_step, cancel_agent
@@ -63,12 +62,6 @@ def agent_plan_prompt():
     return version
 
 
-def client_for(user):
-    client = APIClient()
-    client.force_authenticate(user=user)
-    return client
-
-
 def _task_draft_agent(workspace, owner, title="Buy milk"):
     steps = [
         {
@@ -84,9 +77,9 @@ def _task_draft_agent(workspace, owner, title="Buy milk"):
 
 class TestAgentListCreateView:
     def test_create_runs_the_planner_and_returns_the_agent(
-        self, workspace, owner, fake_provider, agent_plan_prompt
+        self, workspace, owner, fake_provider, agent_plan_prompt, web_client
     ):
-        response = client_for(owner).post(
+        response = web_client(owner).post(
             "/api/v1/agents", {"workspace": str(workspace.id), "goal": "Do something useful"}
         )
 
@@ -96,25 +89,25 @@ class TestAgentListCreateView:
         assert body["status"] == Agent.Status.RUNNING
         assert Agent.objects.get(pk=body["id"]).steps.count() == 1
 
-    def test_create_requires_a_non_blank_goal(self, workspace, owner):
-        response = client_for(owner).post(
+    def test_create_requires_a_non_blank_goal(self, workspace, owner, web_client):
+        response = web_client(owner).post(
             "/api/v1/agents", {"workspace": str(workspace.id), "goal": "   "}
         )
         assert response.status_code == 400
 
     def test_viewer_cannot_create_an_agent(
-        self, workspace, viewer, fake_provider, agent_plan_prompt
+        self, workspace, viewer, fake_provider, agent_plan_prompt, web_client
     ):
-        response = client_for(viewer).post(
+        response = web_client(viewer).post(
             "/api/v1/agents", {"workspace": str(workspace.id), "goal": "Do something"}
         )
         assert response.status_code == 403
         assert Agent.objects.count() == 0
 
-    def test_list_requires_workspace_param(self, owner):
-        assert client_for(owner).get("/api/v1/agents").status_code == 400
+    def test_list_requires_workspace_param(self, owner, web_client):
+        assert web_client(owner).get("/api/v1/agents").status_code == 400
 
-    def test_list_filters_by_status(self, workspace, owner):
+    def test_list_filters_by_status(self, workspace, owner, web_client):
         running = create_plan(
             workspace=workspace,
             actor=owner,
@@ -123,21 +116,21 @@ class TestAgentListCreateView:
         )
         create_plan(workspace=workspace, actor=owner, goal="Failed", steps=[])  # empty plan fails
 
-        response = client_for(owner).get(
+        response = web_client(owner).get(
             "/api/v1/agents", {"workspace": str(workspace.id), "status": "running"}
         )
 
         assert response.status_code == 200
         assert [row["id"] for row in response.json()] == [str(running.id)]
 
-    def test_list_scoped_to_workspace_membership(self, owner):
+    def test_list_scoped_to_workspace_membership(self, owner, web_client):
         outsider = register_user(email="outsider@test.dev", password=PASSWORD, name="Outsider")
-        response = client_for(outsider).get("/api/v1/agents", {"workspace": "not-a-real-uuid"})
+        response = web_client(outsider).get("/api/v1/agents", {"workspace": "not-a-real-uuid"})
         assert response.status_code == 400
 
 
 class TestAgentDetailView:
-    def test_detail_includes_ordered_steps(self, workspace, owner):
+    def test_detail_includes_ordered_steps(self, workspace, owner, web_client):
         agent = create_plan(
             workspace=workspace,
             actor=owner,
@@ -148,13 +141,15 @@ class TestAgentDetailView:
             ],
         )
 
-        response = client_for(owner).get(f"/api/v1/agents/{agent.id}")
+        response = web_client(owner).get(f"/api/v1/agents/{agent.id}")
 
         assert response.status_code == 200
         body = response.json()
         assert [step["description"] for step in body["steps"]] == ["First", "Second"]
 
-    def test_detail_surfaces_skill_name_when_the_plan_was_skill_originated(self, workspace, owner):
+    def test_detail_surfaces_skill_name_when_the_plan_was_skill_originated(
+        self, workspace, owner, web_client
+    ):
         """MVP 8 §7 (branch 3): the audit field is exposed to the frontend
         so `AgentDetail` can show which skill (if any) produced this plan."""
         agent = create_plan(
@@ -166,12 +161,14 @@ class TestAgentDetailView:
             skill_content_hash="deadbeef" * 8,
         )
 
-        response = client_for(owner).get(f"/api/v1/agents/{agent.id}")
+        response = web_client(owner).get(f"/api/v1/agents/{agent.id}")
 
         assert response.status_code == 200
         assert response.json()["skill_name"] == "weekly_export"
 
-    def test_list_and_detail_show_empty_skill_name_for_a_freeform_plan(self, workspace, owner):
+    def test_list_and_detail_show_empty_skill_name_for_a_freeform_plan(
+        self, workspace, owner, web_client
+    ):
         agent = create_plan(
             workspace=workspace,
             actor=owner,
@@ -179,18 +176,18 @@ class TestAgentDetailView:
             steps=[{"kind": "read", "description": "First", "payload": {}}],
         )
 
-        list_response = client_for(owner).get(f"/api/v1/agents?workspace={workspace.id}")
-        detail_response = client_for(owner).get(f"/api/v1/agents/{agent.id}")
+        list_response = web_client(owner).get(f"/api/v1/agents?workspace={workspace.id}")
+        detail_response = web_client(owner).get(f"/api/v1/agents/{agent.id}")
 
         assert list_response.json()[0]["skill_name"] == ""
         assert detail_response.json()["skill_name"] == ""
 
-    def test_unknown_agent_is_404(self, owner):
+    def test_unknown_agent_is_404(self, owner, web_client):
         import uuid
 
-        assert client_for(owner).get(f"/api/v1/agents/{uuid.uuid4()}").status_code == 404
+        assert web_client(owner).get(f"/api/v1/agents/{uuid.uuid4()}").status_code == 404
 
-    def test_out_of_scope_agent_is_404_not_403(self, workspace, owner):
+    def test_out_of_scope_agent_is_404_not_403(self, workspace, owner, web_client):
         outsider = register_user(email="detail-outsider@test.dev", password=PASSWORD, name="O")
         agent = create_plan(
             workspace=workspace,
@@ -198,11 +195,11 @@ class TestAgentDetailView:
             goal="Private",
             steps=[{"kind": "read", "description": "Step", "payload": {}}],
         )
-        assert client_for(outsider).get(f"/api/v1/agents/{agent.id}").status_code == 404
+        assert web_client(outsider).get(f"/api/v1/agents/{agent.id}").status_code == 404
 
 
 class TestAgentCancelView:
-    def test_cancel_a_running_agent(self, workspace, owner):
+    def test_cancel_a_running_agent(self, workspace, owner, web_client):
         agent = create_plan(
             workspace=workspace,
             actor=owner,
@@ -210,12 +207,12 @@ class TestAgentCancelView:
             steps=[{"kind": "read", "description": "Step", "payload": {}}],
         )
 
-        response = client_for(owner).post(f"/api/v1/agents/{agent.id}/cancel")
+        response = web_client(owner).post(f"/api/v1/agents/{agent.id}/cancel")
 
         assert response.status_code == 200
         assert response.json()["status"] == Agent.Status.CANCELLED
 
-    def test_viewer_cannot_cancel(self, workspace, owner, viewer):
+    def test_viewer_cannot_cancel(self, workspace, owner, viewer, web_client):
         agent = create_plan(
             workspace=workspace,
             actor=owner,
@@ -223,13 +220,13 @@ class TestAgentCancelView:
             steps=[{"kind": "read", "description": "Step", "payload": {}}],
         )
 
-        response = client_for(viewer).post(f"/api/v1/agents/{agent.id}/cancel")
+        response = web_client(viewer).post(f"/api/v1/agents/{agent.id}/cancel")
 
         assert response.status_code == 403
         agent.refresh_from_db()
         assert agent.status == Agent.Status.RUNNING
 
-    def test_cancel_is_idempotent(self, workspace, owner):
+    def test_cancel_is_idempotent(self, workspace, owner, web_client):
         agent = create_plan(
             workspace=workspace,
             actor=owner,
@@ -238,35 +235,35 @@ class TestAgentCancelView:
         )
         cancel_agent(agent=agent, actor=owner)
 
-        response = client_for(owner).post(f"/api/v1/agents/{agent.id}/cancel")
+        response = web_client(owner).post(f"/api/v1/agents/{agent.id}/cancel")
 
         assert response.status_code == 200
         assert response.json()["status"] == Agent.Status.CANCELLED
 
-    def test_unknown_agent_is_404(self, owner):
+    def test_unknown_agent_is_404(self, owner, web_client):
         import uuid
 
-        assert client_for(owner).post(f"/api/v1/agents/{uuid.uuid4()}/cancel").status_code == 404
+        assert web_client(owner).post(f"/api/v1/agents/{uuid.uuid4()}/cancel").status_code == 404
 
 
 class TestAgentStepConfirmView:
-    def test_confirm_creates_and_returns_the_task(self, workspace, owner):
+    def test_confirm_creates_and_returns_the_task(self, workspace, owner, web_client):
         agent = _task_draft_agent(workspace, owner)
         step = agent.steps.get()
 
-        response = client_for(owner).post(f"/api/v1/agents/steps/{step.id}/confirm")
+        response = web_client(owner).post(f"/api/v1/agents/steps/{step.id}/confirm")
 
         assert response.status_code == 201
         assert response.json()["title"] == "Buy milk"
 
-    def test_unknown_step_is_404(self, owner):
+    def test_unknown_step_is_404(self, owner, web_client):
         import uuid
 
-        response = client_for(owner).post(f"/api/v1/agents/steps/{uuid.uuid4()}/confirm")
+        response = web_client(owner).post(f"/api/v1/agents/steps/{uuid.uuid4()}/confirm")
         assert response.status_code == 404
 
     def test_task_permission_denied_from_the_task_service_is_translated_to_403(
-        self, workspace, owner, second_admin
+        self, workspace, owner, second_admin, web_client
     ):
         """Codex round-1 P2 fix: `confirm_task_draft_step()` calls
         `tasks.services.create_task(actor=agent.created_by, ...)`
@@ -282,23 +279,23 @@ class TestAgentStepConfirmView:
         # second_admin (a curator) may confirm someone else's agent -- the
         # denial comes from `create_task`'s own actor check on
         # `agent.created_by` (owner), not from `_require_can_confirm`.
-        response = client_for(second_admin).post(f"/api/v1/agents/steps/{step.id}/confirm")
+        response = web_client(second_admin).post(f"/api/v1/agents/steps/{step.id}/confirm")
 
         assert response.status_code == 403
 
 
 class TestAgentStepDiscardView:
-    def test_discard_marks_the_step_skipped(self, workspace, owner):
+    def test_discard_marks_the_step_skipped(self, workspace, owner, web_client):
         agent = _task_draft_agent(workspace, owner)
         step = agent.steps.get()
 
-        response = client_for(owner).post(f"/api/v1/agents/steps/{step.id}/discard")
+        response = web_client(owner).post(f"/api/v1/agents/steps/{step.id}/discard")
 
         assert response.status_code == 200
         assert response.json()["status"] == "skipped"
 
-    def test_unknown_step_is_404(self, owner):
+    def test_unknown_step_is_404(self, owner, web_client):
         import uuid
 
-        response = client_for(owner).post(f"/api/v1/agents/steps/{uuid.uuid4()}/discard")
+        response = web_client(owner).post(f"/api/v1/agents/steps/{uuid.uuid4()}/discard")
         assert response.status_code == 404

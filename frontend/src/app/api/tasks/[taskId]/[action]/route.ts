@@ -11,7 +11,9 @@ interface RouteParams {
   params: Promise<{ taskId: string; action: string }>;
 }
 
-const ALLOWED_ACTIONS = new Set(["complete", "cancel", "reopen"]);
+// `restore` brings a trashed task back (ADR-009); the backend routes it to
+// its own view, not the state machine.
+const ALLOWED_ACTIONS = new Set(["complete", "cancel", "reopen", "restore"]);
 
 export async function POST(request: NextRequest, { params }: RouteParams) {
   const originError = rejectCrossOrigin(request);

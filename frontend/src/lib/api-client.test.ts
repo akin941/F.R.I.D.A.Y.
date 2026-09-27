@@ -62,7 +62,7 @@ describe("apiFetch", () => {
     expect(refreshCalls).toBe(1);
   });
 
-  it("does not enter a retry loop when refresh fails, and redirects to login", async () => {
+  it("does not enter a retry loop when refresh fails, and redirects to /enroll", async () => {
     // Assigning window.location directly makes jsdom attempt a real
     // navigation; stubbing the global `location` binding instead avoids that
     // while still being the same object apiFetch reads via `window.location`.
@@ -86,10 +86,10 @@ describe("apiFetch", () => {
 
     expect(response.status).toBe(401);
     expect(dataCalls).toBe(1);
-    expect(locationStub.href).toBe("/login");
+    expect(locationStub.href).toBe("/enroll");
   });
 
-  it("redirects to login if the retried request is still 401 after a successful refresh", async () => {
+  it("redirects to /enroll if the retried request is still 401 after a successful refresh", async () => {
     // Refresh succeeding but the retried request still 401ing (e.g. the
     // session was revoked between the two calls) is not a transient failure
     // to retry again — it must be treated the same as a failed refresh.
@@ -116,6 +116,6 @@ describe("apiFetch", () => {
     expect(response.status).toBe(401);
     expect(dataCalls).toBe(2);
     expect(refreshCalls).toBe(1);
-    expect(locationStub.href).toBe("/login");
+    expect(locationStub.href).toBe("/enroll");
   });
 });

@@ -10,7 +10,11 @@ once; after that the harness is a normal daily tool.
 ## 0. Prerequisites
 
 - Docker Desktop running on the runner host (first runner: this Mac).
-- The dev stack up: `make up` (Postgres :5433, Redis :6380, web :8001).
+- The dev stack up: `make up` (Postgres :5433, Redis :6380, web :8001 — all
+  on 127.0.0.1). Redis requires AUTH: the runner reads the generated
+  `REDIS_PASSWORD` from the gitignored `deploy/docker/.env`, so leave
+  `REDIS_URL` unset in the repo-root `.env` (or include the password:
+  `redis://:<REDIS_PASSWORD>@localhost:6380/0`).
 - API keys **for the harness only** — API-key auth is the only supported
   mode (Phase 3 brief, "Codex CLI vendor terms"): `ANTHROPIC_API_KEY`
   (Claude Code implements), `CODEX_API_KEY` (Codex CLI reviews).

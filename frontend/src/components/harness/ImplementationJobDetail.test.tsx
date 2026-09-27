@@ -1,17 +1,19 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { ImplementationJobDetail } from "@/components/harness/ImplementationJobDetail";
 import { HARNESS_FAILURE_REASON_LABELS } from "@/components/harness/labels";
 import { implDetail, jsonResponse, review } from "@/components/harness/test-fixtures";
 import type { ApiImplementationJobDetail, ImplFailureReason } from "@/types/api";
+import { cancelDialog, findConfirmDialog } from "@/test/confirm";
+import { renderWithClient } from "@/test/render";
 
 function stubDetail(body: ApiImplementationJobDetail) {
   vi.stubGlobal("fetch", vi.fn(async () => jsonResponse(body)));
 }
 
 function renderDetail() {
-  return render(<ImplementationJobDetail jobId="ij1" onBack={() => undefined} />);
+  return renderWithClient(<ImplementationJobDetail jobId="ij1" workspaceId="w1" />);
 }
 
 const FULL = implDetail({
@@ -81,16 +83,18 @@ describe("ImplementationJobDetail", () => {
     ]);
     expect(steps[3]).toHaveAttribute("aria-current", "step");
 
+    // Plan tab (default): gates deep-link into the routed approval detail.
     expect(screen.getByRole("link", { name: "Onay isteğini gör" })).toHaveAttribute(
       "href",
-      "/approvals?request=ga1",
+      "/approvals/ga1",
     );
     expect(screen.getByRole("link", { name: "Onaylar sayfasında karar ver" })).toHaveAttribute(
       "href",
-      "/approvals?request=gb1",
+      "/approvals/gb1",
     );
-
     expect(screen.getByText("jarvis/impl-ij1")).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("tab", { name: "Diff" }));
     expect(screen.getByText("0123456789ab")).toHaveAttribute(
       "title",
       "0123456789abcdef0123456789abcdef01234567",
@@ -100,7 +104,9 @@ describe("ImplementationJobDetail", () => {
     expect(screen.getByText("backend/tests/test_health.py")).toBeInTheDocument();
     expect(screen.getByText(/Model tarafından üretilmiş bir özettir/)).toBeInTheDocument();
     expect(screen.getByText("Adds a /health endpoint and its test.")).toBeInTheDocument();
-    expect(screen.getByText("Onaylandı", { selector: "span.font-medium" })).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("tab", { name: /İnceleme/ }));
+    expect(screen.getByText("Onaylandı", { selector: "span.font-medium:not([data-slot])" })).toBeInTheDocument();
     expect(screen.getByText("Looks correct.")).toBeInTheDocument();
     expect(screen.getByText("Consider a test for the 404 path")).toBeInTheDocument();
   });
@@ -113,6 +119,11 @@ describe("ImplementationJobDetail", () => {
 
     expect(screen.queryByText("implementer raw output")).not.toBeInTheDocument();
     expect(screen.queryByText("reviewer raw output")).not.toBeInTheDocument();
+    // Raw transcripts live only on their own tab.
+    expect(
+      screen.queryByRole("button", { name: "Uygulayıcının ham çıktısını göster" }),
+    ).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("tab", { name: "Transkriptler" }));
 
     await userEvent.click(screen.getByRole("button", { name: "Uygulayıcının ham çıktısını göster" }));
     const implementerPre = await screen.findByText("implementer raw output");
@@ -131,6 +142,7 @@ describe("ImplementationJobDetail", () => {
 
     await screen.findByText("Add a health endpoint");
     expect(screen.getAllByText("Henüz oluşturulmadı")).toHaveLength(2);
+    await userEvent.click(screen.getByRole("tab", { name: "Diff" }));
     expect(screen.getByText("Henüz test sonucu yok.")).toBeInTheDocument();
   });
 
@@ -146,7 +158,9 @@ describe("ImplementationJobDetail", () => {
 
     renderDetail();
 
-    expect(await screen.findByText("Başarısız — Testler başarısız")).toBeInTheDocument();
+    expect(await screen.findByText("Testler başarısız")).toBeInTheDocument();
+    expect(screen.getByText("Başarısız")).toHaveAttribute("data-tone", "danger");
+    await userEvent.click(screen.getByRole("tab", { name: "Diff" }));
     expect(screen.getByText(/Testler başarısız \(çıkış kodu 2\)/)).toBeInTheDocument();
     const steps = within(screen.getByRole("list", { name: "İş hattı" })).getAllByRole("listitem");
     expect(steps[1]).toHaveAttribute("data-state", "stopped");
@@ -159,9 +173,8 @@ describe("ImplementationJobDetail", () => {
 
       renderDetail();
 
-      expect(
-        await screen.findByText(`Başarısız — ${HARNESS_FAILURE_REASON_LABELS[reason]}`),
-      ).toBeInTheDocument();
+      expect(await screen.findByText(HARNESS_FAILURE_REASON_LABELS[reason])).toBeInTheDocument();
+      expect(screen.getByText("Başarısız")).toHaveAttribute("data-status", "failed");
     },
   );
 
@@ -187,7 +200,7 @@ describe("ImplementationJobDetail", () => {
 
     await vi.advanceTimersByTimeAsync(3000);
     await vi.advanceTimersByTimeAsync(3000);
-    expect(await screen.findByText("Tamamlandı", { selector: "p" })).toBeInTheDocument();
+    expect(await screen.findByText("Tamamlandı", { selector: "[data-slot=badge]" })).toBeInTheDocument();
     const callsAtTerminal = calls;
 
     await vi.advanceTimersByTimeAsync(9000);
@@ -223,8 +236,8 @@ describe("ImplementationJobDetail", () => {
     renderDetail();
     await userEvent.click(await screen.findByRole("button", { name: "İşi iptal et" }));
 
-    expect(screen.getByText(/Bu uygulama işi iptal edilsin mi\?/)).toBeInTheDocument();
-    await userEvent.click(screen.getByRole("button", { name: "Vazgeç" }));
+    expect(await findConfirmDialog()).toHaveTextContent(/Bu uygulama işi iptal edilsin mi\?/);
+    await cancelDialog();
 
     expect(screen.queryByText(/Bu uygulama işi iptal edilsin mi\?/)).not.toBeInTheDocument();
     expect(fetchMock.mock.calls.some(([, init]) => init?.method === "POST")).toBe(false);
@@ -260,7 +273,10 @@ describe("ImplementationJobDetail", () => {
       "fetch",
       vi.fn(async (_input: string, init?: RequestInit) =>
         init?.method === "POST"
-          ? jsonResponse({ detail: "Job already finished." }, 400)
+          ? jsonResponse(
+              { detail: "Job already finished.", code: "harness.invalid_transition" },
+              400,
+            )
           : jsonResponse(implDetail()),
       ),
     );
@@ -269,14 +285,17 @@ describe("ImplementationJobDetail", () => {
     await userEvent.click(await screen.findByRole("button", { name: "İşi iptal et" }));
     await userEvent.click(screen.getByRole("button", { name: "Evet, iptal et" }));
 
-    expect(await screen.findByText("Job already finished.")).toBeInTheDocument();
+    expect(
+      await screen.findByText("Bu harness işi, deposu ya da ajanı artık bu işleme uygun değil."),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("Job already finished.")).not.toBeInTheDocument();
   });
 
   it("never offers cancel for a terminal job", async () => {
     stubDetail(implDetail({ status: "cancelled", failure_reason: "killed" }));
 
     renderDetail();
-    await screen.findByText("İptal edildi — Durduruldu");
+    await screen.findByText("Durduruldu");
 
     expect(screen.queryByRole("button", { name: "İşi iptal et" })).not.toBeInTheDocument();
   });
@@ -292,6 +311,7 @@ describe("ImplementationJobDetail", () => {
 
     renderDetail();
 
+    await userEvent.click(await screen.findByRole("tab", { name: "Diff" }));
     expect(await screen.findByText("Gönderim başarısız.")).toBeInTheDocument();
     const detailText = screen.getByText("remote rejected");
     expect(detailText.tagName).toBe("PRE");
@@ -319,7 +339,7 @@ describe("ImplementationJobDetail", () => {
     );
 
     renderDetail();
-    await screen.findByText("İptal edildi — Durduruldu");
+    await screen.findByText("Durduruldu");
 
     const steps = within(screen.getByRole("list", { name: "İş hattı" })).getAllByRole("listitem");
     expect(steps.map((s) => s.getAttribute("data-state"))).toEqual([
@@ -332,14 +352,15 @@ describe("ImplementationJobDetail", () => {
     ]);
   });
 
-  it("moves focus into the cancel prompt and back to the trigger on Vazgeç", async () => {
+  it("moves focus into the cancel dialog (its safe choice) and back to the trigger on Vazgeç", async () => {
     stubDetail(implDetail());
 
     renderDetail();
     await userEvent.click(await screen.findByRole("button", { name: "İşi iptal et" }));
 
-    expect(screen.getByRole("button", { name: "Evet, iptal et" })).toHaveFocus();
-    await userEvent.click(screen.getByRole("button", { name: "Vazgeç" }));
+    const dialog = await findConfirmDialog();
+    expect(within(dialog).getByRole("button", { name: "Vazgeç" })).toHaveFocus();
+    await cancelDialog();
     expect(screen.getByRole("button", { name: "İşi iptal et" })).toHaveFocus();
   });
 
@@ -347,6 +368,7 @@ describe("ImplementationJobDetail", () => {
     stubDetail(FULL);
 
     renderDetail();
+    await userEvent.click(await screen.findByRole("tab", { name: "Transkriptler" }));
     const toggle = await screen.findByRole("button", {
       name: "Uygulayıcının ham çıktısını göster",
     });

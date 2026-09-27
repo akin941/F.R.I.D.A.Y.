@@ -1,18 +1,18 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { ImplementationJobsPanel } from "@/components/harness/ImplementationJobsPanel";
 import { implJob, jsonResponse, repo } from "@/components/harness/test-fixtures";
+import { renderWithClient } from "@/test/render";
 
 function renderPanel(overrides: Partial<Parameters<typeof ImplementationJobsPanel>[0]> = {}) {
   const props = {
     workspaceId: "w1",
     prefill: null,
     onPrefillConsumed: vi.fn(),
-    onSelect: vi.fn(),
     ...overrides,
   };
-  return { ...render(<ImplementationJobsPanel {...props} />), props };
+  return { ...renderWithClient(<ImplementationJobsPanel {...props} />), props };
 }
 
 describe("ImplementationJobsPanel", () => {
@@ -36,8 +36,9 @@ describe("ImplementationJobsPanel", () => {
 
     expect(await screen.findByText("Add a health endpoint")).toBeInTheDocument();
     expect(
-      screen.getByText("Başarısız — Değişikliklerde gizli bilgi sızıntısı tespit edildi"),
+      screen.getByText("Değişikliklerde gizli bilgi sızıntısı tespit edildi"),
     ).toBeInTheDocument();
+    expect(screen.getByText("Başarısız")).toHaveAttribute("data-tone", "danger");
     expect(screen.getByText(/Depo: jarvis · Kapı A: Karar bekliyor/)).toBeInTheDocument();
   });
 
@@ -58,17 +59,13 @@ describe("ImplementationJobsPanel", () => {
     expect(screen.queryByText("Henüz uygulama işi yok.")).not.toBeInTheDocument();
   });
 
-  it("selects a row by click or keyboard", async () => {
+  it("links each row to its routed detail, carrying the workspace", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => jsonResponse([implJob({ status: "succeeded" })])));
 
-    const { props } = renderPanel();
-    const row = await screen.findByRole("button", { name: /Add a health endpoint/ });
-    await userEvent.click(row);
-    row.focus();
-    await userEvent.keyboard("{Enter}");
+    renderPanel();
+    const row = await screen.findByRole("link", { name: /Add a health endpoint/ });
 
-    expect(props.onSelect).toHaveBeenCalledTimes(2);
-    expect(props.onSelect).toHaveBeenCalledWith("ij1");
+    expect(row).toHaveAttribute("href", "/harness/implementations/ij1?workspace=w1");
   });
 
   it("polls silently while a job is non-terminal and stops once it is terminal", async () => {
@@ -116,7 +113,7 @@ describe("ImplementationJobsPanel", () => {
     // "Uygulama iste" button is the form's submit.
     await userEvent.click(screen.getByRole("button", { name: "Uygulama iste" }));
 
-    expect(await screen.findByRole("button", { name: /Fix the flaky test/ })).toBeInTheDocument();
+    expect(await screen.findByRole("link", { name: /Fix the flaky test/ })).toBeInTheDocument();
     expect(screen.queryByLabelText("Uygulama hedefi")).not.toBeInTheDocument();
     expect(props.onPrefillConsumed).toHaveBeenCalled();
   });

@@ -2,8 +2,10 @@
 
 from datetime import timedelta
 from pathlib import Path
+from urllib.parse import urlsplit, urlunsplit
 
 import environ
+from django.core.exceptions import ImproperlyConfigured
 
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
 
@@ -11,9 +13,46 @@ env = environ.Env(DJANGO_DEBUG=(bool, False))
 # Read .env from the repo root if present (local development convenience).
 environ.Env.read_env(BASE_DIR.parent / ".env")
 
-# `or` fallbacks: a copied .env.example leaves vars set-but-empty; treat empty as unset.
-SECRET_KEY = env("DJANGO_SECRET_KEY", default="") or "dev-insecure-key-change-me-0123456789abcdef"
+
+def _compose_secret(name):
+    """One value from the Docker Compose stack's gitignored
+    `deploy/docker/.env` (written by `make secrets`), or "" when absent.
+
+    Only used to build the HOST-side development defaults for DATABASE_URL
+    and REDIS_URL below, so `make test`, `make harness-runner` and host-side
+    `manage.py` commands reach the compose Postgres/Redis (published on
+    127.0.0.1) with the generated passwords without copying them anywhere.
+    Deliberately reads single keys rather than loading the whole file into
+    the process environment (it also holds provider keys and stack-only
+    toggles). Inside a container the file does not exist -- compose passes
+    the real URLs as env vars -- and production settings require them
+    explicitly (config/settings/prod.py).
+    """
+    path = BASE_DIR.parent / "deploy" / "docker" / ".env"
+    try:
+        lines = path.read_text().splitlines()
+    except OSError:
+        return ""
+    value = ""
+    for line in lines:
+        key, sep, raw = line.strip().partition("=")
+        if sep and key == name:
+            value = raw.strip().strip("'\"")
+    return value
+
+
 DEBUG = env("DJANGO_DEBUG")
+
+# `or` fallbacks: a copied .env.example leaves vars set-but-empty; treat empty as unset.
+# The hard-coded fallback is a development convenience only: without DEBUG
+# (config/settings/dev.py turns it on) a missing key fails hard instead of
+# silently signing sessions/tokens with a publicly known value.
+DEV_FALLBACK_SECRET_KEY = "dev-insecure-key-change-me-0123456789abcdef"
+SECRET_KEY = env("DJANGO_SECRET_KEY", default="")
+if not SECRET_KEY:
+    if not DEBUG:
+        raise ImproperlyConfigured("DJANGO_SECRET_KEY is required when DEBUG is off.")
+    SECRET_KEY = DEV_FALLBACK_SECRET_KEY
 ALLOWED_HOSTS = [h for h in env.list("DJANGO_ALLOWED_HOSTS", default=[]) if h] or [
     "localhost",
     "127.0.0.1",
@@ -28,6 +67,10 @@ INSTALLED_APPS = [
     "django.contrib.staticfiles",
     # Third party
     "rest_framework",
+    # Refresh-token blacklist (Phase 4 branch 1): rotation blacklists the
+    # previous refresh token and POST /api/v1/auth/logout blacklists the
+    # current one; `flushexpiredtokens` runs from beat (config/celery.py).
+    "rest_framework_simplejwt.token_blacklist",
     "corsheaders",
     # Jarvis kernel
     "core",
@@ -86,9 +129,20 @@ WSGI_APPLICATION = "config.wsgi.application"
 ASGI_APPLICATION = "config.asgi.application"
 
 # Postgres is the source of truth (ADR-001); sqlite fallback was removed in MVP 1.
-# Default points at the Compose postgres (host port 5433).
-_DEFAULT_DATABASE_URL = "postgres://jarvis:jarvis@localhost:5433/jarvis"
+# Default points at the Compose postgres (host port 5433) with the password
+# `make secrets` generated into deploy/docker/.env -- never a committed one.
+_compose_pg_password = _compose_secret("POSTGRES_PASSWORD")
+_DEFAULT_DATABASE_URL = (
+    f"postgres://jarvis:{_compose_pg_password}@localhost:5433/jarvis"
+    if _compose_pg_password
+    else "postgres://jarvis@localhost:5433/jarvis"
+)
 DATABASES = {"default": env.db_url_config(env("DATABASE_URL", default="") or _DEFAULT_DATABASE_URL)}
+# Parallel test runs (one per git worktree) against the same Postgres would
+# otherwise all create/destroy the same `test_<name>` database.
+_TEST_DATABASE_NAME = env("DJANGO_TEST_DATABASE_NAME", default="")
+if _TEST_DATABASE_NAME:
+    DATABASES["default"]["TEST"] = {"NAME": _TEST_DATABASE_NAME}
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
@@ -100,14 +154,15 @@ USE_TZ = True
 STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
 
-# TODO(MVP 3): MinIO/S3 storage backend via django-storages (files app).
-MINIO_ENDPOINT = env("MINIO_ENDPOINT", default="")
-MINIO_ACCESS_KEY = env("MINIO_ACCESS_KEY", default="")
-MINIO_SECRET_KEY = env("MINIO_SECRET_KEY", default="")
-MINIO_BUCKET = env("MINIO_BUCKET", default="jarvis")
-
-# Celery
-REDIS_URL = env("REDIS_URL", default="") or "redis://localhost:6380/0"
+# Celery. Host-side default: the compose Redis (host port 6380) with the
+# `make secrets` password from deploy/docker/.env (Redis requires AUTH).
+_compose_redis_password = _compose_secret("REDIS_PASSWORD")
+_DEFAULT_REDIS_URL = (
+    f"redis://:{_compose_redis_password}@localhost:6380/0"
+    if _compose_redis_password
+    else "redis://localhost:6380/0"
+)
+REDIS_URL = env("REDIS_URL", default="") or _DEFAULT_REDIS_URL
 CELERY_BROKER_URL = REDIS_URL
 CELERY_RESULT_BACKEND = REDIS_URL
 # Environment-backed (MVP 2 §4): default off, so `make up`'s worker container
@@ -130,27 +185,172 @@ CELERY_TASK_EAGER_PROPAGATES = env.bool("CELERY_TASK_EAGER_PROPAGATES", default=
 HARNESS_CELERY_QUEUE = env("HARNESS_CELERY_QUEUE", default="harness")
 CELERY_TASK_ROUTES = {"harness.tasks.*": {"queue": HARNESS_CELERY_QUEUE}}
 
+
+def redis_cache_location(redis_url):
+    """REDIS_CACHE_URL's default: the broker's Redis, database 1, so cache
+    keys never mix with Celery's queues in database 0."""
+    parts = urlsplit(redis_url)
+    return urlunsplit((parts.scheme, parts.netloc, "/1", parts.query, parts.fragment))
+
+
+# Cache (Phase 4 branch 1). DRF throttles and the Telegram relay limiter
+# (integrations/tasks.py) count in the default cache; with per-process
+# LocMem, web and worker (and every gunicorn worker) each counted
+# separately. Django's built-in RedisCache (no extra dependency) makes the
+# counters shared. Used only when REDIS_CACHE_URL or REDIS_URL is actually
+# set in the environment (compose web/worker, production); a bare host
+# process without them -- CI's e2e runserver, an ad-hoc shell -- keeps
+# LocMem. The test settings (config/settings/test.py) always use LocMem.
+_REDIS_CACHE_URL = env("REDIS_CACHE_URL", default="") or (
+    redis_cache_location(REDIS_URL) if env("REDIS_URL", default="") else ""
+)
+if _REDIS_CACHE_URL:
+    CACHES = {
+        "default": {
+            "BACKEND": "django.core.cache.backends.redis.RedisCache",
+            "LOCATION": _REDIS_CACHE_URL,
+        }
+    }
+else:
+    CACHES = {"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"}}
+
 # --- API / auth ---
 
 REST_FRAMEWORK = {
-    "DEFAULT_AUTHENTICATION_CLASSES": (
-        "rest_framework_simplejwt.authentication.JWTAuthentication",
-    ),
+    # The web session of a trusted device -- the only authenticator that
+    # yields CHANNEL_WEB (Phase 4 branch 2). PAT auth is allowlisted per view.
+    "DEFAULT_AUTHENTICATION_CLASSES": ("accounts.authentication.DeviceJWTAuthentication",),
     "DEFAULT_PERMISSION_CLASSES": ("rest_framework.permissions.IsAuthenticated",),
-    # "chat" scope caps provider-cost endpoints (assistant message send); see
-    # assistant/views.py. TODO(MVP 1): anon/user throttles for auth endpoints.
-    "DEFAULT_THROTTLE_RATES": {"chat": "30/min"},
+    # Phase 4 branch 3: every error body carries a stable `code`
+    # (core/api_errors.py, vocabulary in core/error_codes.py) -- the handler
+    # for raised exceptions, the renderer as the backstop for error
+    # responses views build by hand.
+    "EXCEPTION_HANDLER": "core.api_errors.exception_handler",
+    "DEFAULT_RENDERER_CLASSES": (
+        "core.api_errors.CodedJSONRenderer",
+        "rest_framework.renderers.BrowsableAPIRenderer",
+    ),
+    # Scoped rates (ScopedRateThrottle, counted in the default cache):
+    # - "chat": provider-cost message send (assistant/views.py).
+    # - "refresh": the anonymous session endpoints (refresh, logout, device
+    #   session mint; accounts/urls.py). Django only ever sees the BFF's
+    #   address as REMOTE_ADDR, so these are effectively GLOBAL rates, not
+    #   per client -- correct for a single-owner system (ADR-008): they bound
+    #   refresh-token replay for the whole install. `/auth/enroll` has its
+    #   own two-tier throttle (ENROLL_RATE_* below).
+    # - "cost": the remaining cost-bearing creates -- agent creation
+    #   (synchronous planner LLM call), harness discovery/implementation
+    #   jobs (each up to HARNESS_MAX_JOB_COST) and knowledge documents
+    #   (embeddings). One shared per-user budget across all of them.
+    "DEFAULT_THROTTLE_RATES": {
+        "chat": "30/min",
+        "refresh": "30/min",
+        "cost": "60/hour",
+    },
 }
 
 SIMPLE_JWT = {
     "ACCESS_TOKEN_LIFETIME": timedelta(minutes=30),
     "REFRESH_TOKEN_LIFETIME": timedelta(days=7),
     "ROTATE_REFRESH_TOKENS": True,
+    # A rotated-out refresh token is blacklisted, so a stolen-and-replayed
+    # older token stops working after the legitimate client's next refresh.
+    "BLACKLIST_AFTER_ROTATION": True,
     "UPDATE_LAST_LOGIN": True,
 }
 
-# Dev signup switch — prod default is False (see dev.py for the dev default).
-SIGNUP_ENABLED = env.bool("SIGNUP_ENABLED", default=False)
+# Django's four stock validators; 12 characters minimum. Enforced wherever
+# a password is set through a human-facing path (`bootstrap_owner`). The
+# owner's password is only a Django-admin break-glass credential: no API
+# endpoint accepts it (Phase 4 branch 2).
+AUTH_PASSWORD_VALIDATORS = [
+    {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},
+    {
+        "NAME": "django.contrib.auth.password_validation.MinimumLengthValidator",
+        "OPTIONS": {"min_length": 12},
+    },
+    {"NAME": "django.contrib.auth.password_validation.CommonPasswordValidator"},
+    {"NAME": "django.contrib.auth.password_validation.NumericPasswordValidator"},
+]
+
+# CLI personal access tokens (MVP 9 §1) expire (Phase 4 branch 1): the mint
+# request may choose a lifetime in days, capped at PAT_MAX_TTL_DAYS;
+# omitted, it gets PAT_DEFAULT_TTL_DAYS.
+PAT_DEFAULT_TTL_DAYS = env.int("PAT_DEFAULT_TTL_DAYS", default=90)
+PAT_MAX_TTL_DAYS = env.int("PAT_MAX_TTL_DAYS", default=365)
+
+# --- Device trust (Phase 4 branch 2, ADR-008 decision 2) ---
+#
+# There is no signup and no password login: the owner enrolls devices at
+# /enroll with a pairing code (`manage.py issue_pairing_code`, or "Yeni cihaz
+# eşleştir" on a trusted session) or the remote access key, and each trusted
+# device mints its own JWT sessions (accounts/devices.py).
+
+# A device unused for this long can no longer authenticate or mint a
+# session (re-enroll it).
+DEVICE_IDLE_EXPIRY_DAYS = env.int("DEVICE_IDLE_EXPIRY_DAYS", default=90)
+# PIN pairing codes are accepted only from these networks (LAN gating):
+# loopback, RFC 1918, IPv6 ULA and the CGNAT range Tailscale uses. Strong
+# codes and the remote key work from any network. Defense in depth, not the
+# boundary: codes are issuable only by a trusted principal, single-use,
+# short-lived, attempt-burned and hashed.
+DEVICE_PAIRING_NETWORKS = [
+    net.strip()
+    for net in env.list(
+        "DEVICE_PAIRING_NETWORKS",
+        default=[
+            "127.0.0.0/8",
+            "::1/128",
+            "10.0.0.0/8",
+            "172.16.0.0/12",
+            "192.168.0.0/16",
+            "fc00::/7",
+            "100.64.0.0/10",
+        ],
+    )
+    if net.strip()
+]
+# Django only ever sees the BFF's address. The BFF forwards the browser's IP
+# (taken ONLY from its TRUSTED_CLIENT_IP_HEADER, set by the owner's reverse
+# proxy) as X-Jarvis-Client-IP together with X-Jarvis-BFF-Key; Django
+# ignores the IP header unless the key matches this shared secret. Empty =
+# no client IP is ever trusted.
+JARVIS_BFF_SHARED_SECRET = env("JARVIS_BFF_SHARED_SECRET", default="")
+# Without a validated client IP (no trusted proxy, e.g. bare `next start`),
+# a PIN is accepted only when this is on ("LAN gating off"). Dev default
+# true (config/settings/dev.py), production default false: pair with a
+# strong code or the remote key instead.
+DEVICE_PAIRING_ALLOW_UNKNOWN_IP = env.bool("DEVICE_PAIRING_ALLOW_UNKNOWN_IP", default=False)
+# Django admin is the owner password's only use (break-glass, Phase 4 Q3):
+# `admin/` is routed only when this is on. Dev default true
+# (config/settings/dev.py), production default false.
+DJANGO_ADMIN_ENABLED = env.bool("DJANGO_ADMIN_ENABLED", default=False)
+# Two-tier enrollment throttle (accounts/throttling.py): a tight limit per
+# validated client IP plus a much looser install-wide ceiling, so a flood
+# from one source cannot exhaust the bucket the owner needs. Without a
+# validated client IP only the global ceiling applies (accepted, documented
+# residual risk; the host-shell `issue_pairing_code` path is never
+# throttled). Format "<count>/<n><s|m|h|d>", e.g. "5/10m".
+ENROLL_RATE_PER_SOURCE = env("ENROLL_RATE_PER_SOURCE", default="5/10m")
+ENROLL_RATE_GLOBAL = env("ENROLL_RATE_GLOBAL", default="60/h")
+
+# --- OpenAI-compatible facade (Phase 4 branch 6, ADR-008 decision 6) ---
+# `/v1/chat/completions` + `/v1/models` for Open WebUI-class clients, with a
+# PAT of kind `openai`: chat only, low trust. Per token: FACADE_RATE requests
+# ("<count>/<n><s|m|h|d>"), at most FACADE_MAX_CONCURRENT_STREAMS completions
+# in flight (a slot expires after FACADE_STREAM_SLOT_TTL_SECONDS if a worker
+# dies mid-stream), and a new user turn (or, for `jarvis-lite`, the whole
+# message list) of at most FACADE_MAX_REQUEST_CHARS characters.
+FACADE_RATE = env("FACADE_RATE", default="20/min")
+FACADE_MAX_CONCURRENT_STREAMS = env.int("FACADE_MAX_CONCURRENT_STREAMS", default=2)
+FACADE_STREAM_SLOT_TTL_SECONDS = env.int("FACADE_STREAM_SLOT_TTL_SECONDS", default=300)
+FACADE_MAX_REQUEST_CHARS = env.int("FACADE_MAX_REQUEST_CHARS", default=32000)
+
+# --- Trash (ADR-009) ---
+# Soft-deleted knowledge documents and tasks are purged permanently this
+# many days after deletion (daily beat task); an explicit earlier purge is
+# the gate-class `purge_trash` tool.
+TRASH_RETENTION_DAYS = env.int("TRASH_RETENTION_DAYS", default=30)
 
 CORS_ALLOWED_ORIGINS = [o for o in env.list("CORS_ALLOWED_ORIGINS", default=[]) if o] or [
     "http://localhost:3001"
@@ -213,7 +413,6 @@ OBSIDIAN_VAULT_PATH = env("OBSIDIAN_VAULT_PATH", default="")
 # timing.
 APPROVAL_REQUEST_TTL_HOURS = env.int("APPROVAL_REQUEST_TTL_HOURS", default=24)
 
-# Dev-only escape hatch for the requester != decider rule ADR-004 requires
 # --- Agent runtime (MVP 7) ---
 
 # Plan step-count bound (brief §1, user-mandated brake #1): a planner call
