@@ -93,6 +93,14 @@ sent.
 - Read from the process environment at call time — never settings, Postgres,
   a payload, an audit row or a log line (test:
   `test_the_token_is_nowhere_but_the_authorization_header`).
+- **Scenes are owner-configured intents (residual risk).** `scene.turn_on`
+  is in scope (brief D8), but Home Assistant resolves a scene's effects at
+  activation time and the bridge cannot preview them: a scene the owner
+  configured in HA may set entities in domains that are otherwise never
+  callable here (`lock`, `alarm_control_panel`, ...). `NEVER_DOMAINS` is
+  therefore not a guarantee once scenes exist. Mitigation: keep security
+  devices out of scenes the Jarvis HA user can activate (HA-side), or drop
+  `scene` from `HA_ALLOWED_DOMAINS`.
 - **R5 — the token is admin-equivalent** (HA has no scoped tokens): create it
   for a dedicated **non-admin** HA user, keep HA on the LAN/Tailscale only,
   rotate it when a device is lost. The code allowlist is the real bound.

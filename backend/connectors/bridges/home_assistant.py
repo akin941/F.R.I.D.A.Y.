@@ -196,6 +196,10 @@ SERVICES = {
     },
     "climate": {"set_temperature": ClimateTemperatureData, "set_hvac_mode": ClimateHvacModeData},
     "media_player": {"media_play": NoData, "media_pause": NoData, "volume_set": VolumeSetData},
+    # A scene is an owner-configured intent HA resolves at activation time;
+    # its effects cannot be previewed and may touch NEVER_DOMAINS entities
+    # (residual risk, docs/mcp/home-assistant.md). Narrow it away with
+    # HA_ALLOWED_DOMAINS if scenes include security devices.
     "scene": {"turn_on": NoData},
     WAKE_ON_LAN: {"send_magic_packet": WakeOnLanData},
 }
