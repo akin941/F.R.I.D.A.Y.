@@ -1,9 +1,11 @@
 import re
 from urllib.parse import urlsplit
 
+from django.conf import settings
 from rest_framework import serializers
 
 from harness.models import HarnessImplementationJob, HarnessJob, HarnessRepo, HarnessReview
+from harness.repo_identity import is_self_repo
 
 _MAX_NAME_CHARS = 255
 _MAX_URL_CHARS = 2000
@@ -78,7 +80,20 @@ def _reject_embedded_credentials(value):
     return value
 
 
+SELF_REPO_STATUS_SELF = "self"
+SELF_REPO_STATUS_OTHER = "other"
+SELF_REPO_STATUS_UNCONFIGURED = "unconfigured"
+
+
 class HarnessRepoSerializer(serializers.ModelSerializer):
+    # Phase 4 branch 5 (repo registry UI, read-only): how the ADR-004
+    # self-modification guard sees this repo -- `self` (resolves to Jarvis's
+    # own remote: implementation runs refused), `other`, or `unconfigured`
+    # (HARNESS_SELF_REPO_IDENTIFIERS empty: every implementation run is
+    # refused). Display only; the guard itself stays in
+    # `create_harness_implementation_job`, evaluated there, never from this.
+    self_repo_status = serializers.SerializerMethodField()
+
     class Meta:
         model = HarnessRepo
         fields = [
@@ -91,10 +106,22 @@ class HarnessRepoSerializer(serializers.ModelSerializer):
             "enabled",
             "sensitive",
             "test_command",
+            "self_repo_status",
             "created_at",
             "updated_at",
         ]
-        read_only_fields = fields
+        read_only_fields = [f for f in fields if f != "self_repo_status"]
+
+    def get_self_repo_status(self, obj):
+        identifiers = settings.HARNESS_SELF_REPO_IDENTIFIERS
+        if not identifiers:
+            return SELF_REPO_STATUS_UNCONFIGURED
+        try:
+            matches = is_self_repo(obj.git_url, self_repo_identifiers=identifiers)
+        except ValueError:
+            # A malformed legacy URL cannot name this installation's remote.
+            matches = False
+        return SELF_REPO_STATUS_SELF if matches else SELF_REPO_STATUS_OTHER
 
 
 class HarnessRepoCreateSerializer(serializers.Serializer):
