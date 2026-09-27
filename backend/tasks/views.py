@@ -9,6 +9,8 @@ from rest_framework.views import APIView
 
 from assistant.models import Message
 from core.api_errors import service_error_response
+from core.channels import request_channel
+from core.permissions import IsWebChannel
 from tasks.models import Task
 from tasks.serializers import TaskCreateSerializer, TaskEditSerializer, TaskSerializer
 from tasks.services import (
@@ -21,6 +23,7 @@ from tasks.services import (
     delete_task,
     edit_task,
     reopen_task,
+    restore_task,
 )
 from workspaces.models import Workspace
 
@@ -126,7 +129,9 @@ def _resolve_draft_source(request, workspace, draft_message_id):
 
 
 class TaskListCreateView(APIView):
-    permission_classes = [IsAuthenticated]
+    # Web only: creating from a chat task draft (`draft_message_id`) is the
+    # confirm step of an AI draft (ADR-008 confirm-class).
+    permission_classes = [IsAuthenticated, IsWebChannel]
 
     def get(self, request):
         workspace, error = _resolve_workspace(request)
@@ -187,7 +192,7 @@ class TaskListCreateView(APIView):
 
 
 class TaskDetailView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, IsWebChannel]
 
     def _get_task(self, request, task_id):
         # Out-of-scope rows -> 404, never 403 (existence must not leak).
@@ -216,7 +221,7 @@ class TaskDetailView(APIView):
         if task is None:
             return Response(status=status.HTTP_404_NOT_FOUND)
         try:
-            delete_task(task=task, actor=request.user)
+            delete_task(task=task, actor=request.user, channel=request_channel(request))
         except (TaskPermissionDenied, InvalidTransition) as exc:
             return _service_error_response(exc)
         return Response(status=status.HTTP_204_NO_CONTENT)
@@ -234,6 +239,44 @@ class TaskTransitionView(APIView):
             return Response(status=status.HTTP_404_NOT_FOUND)
         try:
             task = transition(task=task, actor=request.user)
+        except (TaskPermissionDenied, InvalidTransition) as exc:
+            return _service_error_response(exc)
+        return Response(TaskSerializer(task).data)
+
+
+class TaskTrashListView(APIView):
+    """`GET /api/v1/tasks/trash?workspace=` -- the workspace's trashed tasks
+    ("Çöp kutusu", ADR-009), newest deletion first."""
+
+    permission_classes = [IsAuthenticated, IsWebChannel]
+
+    def get(self, request):
+        workspace, error = _resolve_workspace(request)
+        if error is not None:
+            return error
+        tasks = (
+            Task.all_objects.for_actor(request.user, workspace=workspace)
+            .filter(deleted_at__isnull=False)
+            .order_by("-deleted_at", "-id")
+        )
+        return Response(TaskSerializer(tasks, many=True).data)
+
+
+class TaskRestoreView(APIView):
+    """`POST /api/v1/tasks/<id>/restore` -- bring a trashed task back."""
+
+    permission_classes = [IsAuthenticated, IsWebChannel]
+
+    def post(self, request, task_id):
+        task = (
+            Task.all_objects.for_actor(request.user)
+            .filter(id=task_id, deleted_at__isnull=False)
+            .first()
+        )
+        if task is None:
+            return Response(status=status.HTTP_404_NOT_FOUND)
+        try:
+            task = restore_task(task=task, actor=request.user, channel=request_channel(request))
         except (TaskPermissionDenied, InvalidTransition) as exc:
             return _service_error_response(exc)
         return Response(TaskSerializer(task).data)

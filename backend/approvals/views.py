@@ -18,6 +18,7 @@ from approvals.services import (
 )
 from core.api_errors import service_error_response
 from core.channels import is_low_trust, request_channel, scoped_for_actor
+from core.permissions import IsWebChannel
 from workspaces.models import Workspace
 
 _TRANSITIONS = {
@@ -139,7 +140,10 @@ class ApprovalRequestListCreateView(APIView):
 
 
 class ApprovalRequestTransitionView(APIView):
-    permission_classes = [IsAuthenticated]
+    # Decisions are web-only (ADR-008 decision 3). The view stays PAT-
+    # allowlisted so a CLI decide attempt is a deliberate 403, not a 401;
+    # the service's own channel check stays as the second line.
+    permission_classes = [IsAuthenticated, IsWebChannel]
     authentication_classes = _PAT_ALLOWLISTED_AUTHENTICATION_CLASSES
 
     def post(self, request, request_id, action):

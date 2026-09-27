@@ -3,6 +3,8 @@ from django.urls import path
 from knowledge.views import (
     KnowledgeDocumentDetailView,
     KnowledgeDocumentListView,
+    KnowledgeDocumentRestoreView,
+    KnowledgeDocumentTrashListView,
     KnowledgeFileUploadCreateView,
     KnowledgePastedTextCreateView,
     KnowledgeUrlCreateView,
@@ -28,6 +30,16 @@ urlpatterns = [
         "knowledge/documents/url",
         KnowledgeUrlCreateView.as_view(),
         name="knowledge-document-create-url",
+    ),
+    path(
+        "knowledge/documents/trash",
+        KnowledgeDocumentTrashListView.as_view(),
+        name="knowledge-document-trash",
+    ),
+    path(
+        "knowledge/documents/<uuid:document_id>/restore",
+        KnowledgeDocumentRestoreView.as_view(),
+        name="knowledge-document-restore",
     ),
     path(
         "knowledge/documents/<uuid:document_id>",

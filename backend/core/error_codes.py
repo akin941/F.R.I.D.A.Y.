@@ -26,6 +26,9 @@ GENERIC_ERROR_CODES = frozenset(
         "authentication_failed",
         "not_authenticated",
         "permission_denied",
+        # `core.permissions.IsWebChannel` / `IsOwner` (Phase 4 branch 2).
+        "channel_forbidden",
+        "owner_required",
         "not_found",
         "method_not_allowed",
         "not_acceptable",

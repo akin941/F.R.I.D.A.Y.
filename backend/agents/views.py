@@ -30,6 +30,7 @@ from agents.serializers import (
 )
 from core.api_errors import service_error_response
 from core.channels import is_low_trust, scoped_for_actor
+from core.permissions import IsWebChannel
 from core.throttling import CreateScopedRateThrottle
 from tasks.serializers import TaskSerializer
 from tasks.services import InvalidTransition, TaskPermissionDenied
@@ -168,7 +169,8 @@ class AgentCancelView(APIView):
 
 
 class AgentStepConfirmView(APIView):
-    permission_classes = [IsAuthenticated]
+    # Draft confirmation is a web-only human confirm (ADR-008 confirm-class).
+    permission_classes = [IsAuthenticated, IsWebChannel]
 
     def post(self, request, step_id):
         step = _get_step(request, step_id)
@@ -192,7 +194,7 @@ class AgentStepConfirmView(APIView):
 
 
 class AgentStepDiscardView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, IsWebChannel]
 
     def post(self, request, step_id):
         step = _get_step(request, step_id)

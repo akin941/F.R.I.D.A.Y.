@@ -12,8 +12,11 @@ from .base import env  # noqa: E402
 
 DEBUG = True
 
-# Single-owner system (ADR-008): signup is off in dev too — the owner
-# account comes from `manage.py bootstrap_owner`. The Playwright e2e smoke
-# is the one flow still exercising signup (until Phase 4's device-trust
-# identity); it must opt in explicitly with SIGNUP_ENABLED=true.
-SIGNUP_ENABLED = env.bool("SIGNUP_ENABLED", default=False)
+# Development has no trusted reverse proxy in front of `next dev`, so the
+# BFF cannot forward a trustworthy client IP (Phase 4 branch 2 step-0
+# spike): PIN pairing stays usable locally with LAN gating off. Production
+# defaults to false (config/settings/base.py).
+DEVICE_PAIRING_ALLOW_UNKNOWN_IP = env.bool("DEVICE_PAIRING_ALLOW_UNKNOWN_IP", default=True)
+# Django admin (break-glass, Phase 4 Q3) is routed in development only by
+# default; production opts in explicitly.
+DJANGO_ADMIN_ENABLED = env.bool("DJANGO_ADMIN_ENABLED", default=True)

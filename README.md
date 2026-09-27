@@ -54,17 +54,38 @@ how to rotate it.
 
 ## First run
 
-Jarvis is a single-owner system (ADR-008): signup is off (`SIGNUP_ENABLED=false`
-everywhere). Create the one owner account once, after `make migrate`:
+Jarvis is a single-owner system (ADR-008) with device-trust identity (Phase 4
+branch 2): there is no signup and no password login. Create the one owner
+account once, after `make migrate`, then trust your first browser with a
+one-time pairing code from the host shell:
 
 ```bash
 cd backend
 JARVIS_OWNER_PASSWORD=... uv run python manage.py bootstrap_owner --email you@example.com [--name "..."]
+uv run python manage.py issue_pairing_code            # 8-digit PIN, 5 min, LAN only
+# or: issue_pairing_code --strong                     # strong code, 30 min, any network
 ```
 
+Open the web app (`/enroll`), enter the code and a device name. Further
+devices are paired from a trusted session (Entegrasyonlar → Cihazlar → "Yeni
+cihaz eşleştir"); from outside the LAN use a strong code or the remote access
+key (`manage.py rotate_remote_key`). Lost every device? Host shell +
+`issue_pairing_code` always recovers; `manage.py revoke_all_devices` cuts off a
+stolen one.
+
 The password comes from `JARVIS_OWNER_PASSWORD` or an interactive prompt — never a
-CLI argument. The command refuses to run if any user already exists. It also
-creates the owner's personal workspace.
+CLI argument — and is only a Django-admin break-glass credential. The command
+refuses to run if any user already exists (`--if-absent` makes a re-run a no-op);
+an existing database with several users needs `manage.py set_owner --email ...`.
+It also creates the owner's personal workspace.
+
+**Upgrading an existing installation:** every browser session from before
+device trust (a JWT without a device) stops working on deploy, including your
+own — re-enter through `/enroll` with a code from `manage.py issue_pairing_code`.
+Behind a reverse proxy, set `TRUSTED_CLIENT_IP_HEADER` (e.g. `X-Real-IP` with
+Caddy's `header_up X-Real-IP {remote_host}`) and `JARVIS_BFF_SHARED_SECRET` for
+the frontend so PINs are LAN-gated; without one, production refuses PINs — pair
+with `issue_pairing_code --strong`.
 
 The agent harness launches its CLI workers (Claude Code, Codex CLI) from locally
 built Docker images; see `backend/harness/docker/README.md` for how to build them

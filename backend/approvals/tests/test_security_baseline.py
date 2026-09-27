@@ -62,12 +62,6 @@ def agent_user(workspace):
     return user
 
 
-def web_client(user):
-    client = APIClient()
-    client.force_authenticate(user=user)
-    return client
-
-
 def pat_client(user, workspace):
     raw = TOKEN_PREFIX + secrets.token_urlsafe(32)
     PersonalAccessToken.objects.create(
@@ -96,7 +90,7 @@ def audit(action, request):
 
 
 @pytest.mark.parametrize("action", ["approve", "reject"])
-def test_agent_actor_on_the_web_channel_gets_403(workspace, owner, agent_user, action):
+def test_agent_actor_on_the_web_channel_gets_403(workspace, owner, agent_user, action, web_client):
     request = pending(workspace, owner)
     response = web_client(agent_user).post(f"/api/v1/approvals/requests/{request.id}/{action}")
     assert response.status_code == 403
@@ -119,7 +113,7 @@ def test_agent_actor_is_refused_by_the_service_before_the_channel_check(
 
 
 @pytest.mark.parametrize("action", ["approve", "reject"])
-def test_human_owner_on_the_web_channel_still_decides(workspace, owner, action):
+def test_human_owner_on_the_web_channel_still_decides(workspace, owner, action, web_client):
     request = pending(workspace, owner)
     response = web_client(owner).post(f"/api/v1/approvals/requests/{request.id}/{action}")
     assert response.status_code == 200
@@ -128,7 +122,7 @@ def test_human_owner_on_the_web_channel_still_decides(workspace, owner, action):
 # --- requested channel ---
 
 
-def test_web_request_records_the_web_channel(workspace, owner):
+def test_web_request_records_the_web_channel(workspace, owner, web_client):
     response = web_client(owner).post(
         "/api/v1/approvals/requests",
         {"workspace": str(workspace.id), "tool_name": "some_gated_tool"},

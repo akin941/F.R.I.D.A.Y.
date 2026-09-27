@@ -24,6 +24,7 @@ not a real operating system.
 4. **No write/delete/deploy/external-send without the approval gate.** Agents can
    never modify their own definitions or permissions. Coder and reviewer agents
    are never the same. (ADR-004)
+   Owner deletes are reversible trash moves; permanent purge is gated. (ADR-009)
 5. **LLM-calling code must be mockable.** Tests that hit a real LLM are
    nightly-only.
 6. **Modular monolith dependencies are one-way:** kernel apps never import

@@ -217,9 +217,9 @@ else:
 # --- API / auth ---
 
 REST_FRAMEWORK = {
-    "DEFAULT_AUTHENTICATION_CLASSES": (
-        "rest_framework_simplejwt.authentication.JWTAuthentication",
-    ),
+    # The web session of a trusted device -- the only authenticator that
+    # yields CHANNEL_WEB (Phase 4 branch 2). PAT auth is allowlisted per view.
+    "DEFAULT_AUTHENTICATION_CLASSES": ("accounts.authentication.DeviceJWTAuthentication",),
     "DEFAULT_PERMISSION_CLASSES": ("rest_framework.permissions.IsAuthenticated",),
     # Phase 4 branch 3: every error body carries a stable `code`
     # (core/api_errors.py, vocabulary in core/error_codes.py) -- the handler
@@ -232,18 +232,18 @@ REST_FRAMEWORK = {
     ),
     # Scoped rates (ScopedRateThrottle, counted in the default cache):
     # - "chat": provider-cost message send (assistant/views.py).
-    # - "login" / "refresh": the anonymous token endpoints (accounts/urls.py).
-    #   Django only ever sees the BFF's address as REMOTE_ADDR, so for
-    #   anonymous requests these are effectively GLOBAL rates, not per
-    #   client -- correct for a single-account system (ADR-008): they bound
-    #   password guessing and refresh-token replay for the whole install.
+    # - "refresh": the anonymous session endpoints (refresh, logout, device
+    #   session mint; accounts/urls.py). Django only ever sees the BFF's
+    #   address as REMOTE_ADDR, so these are effectively GLOBAL rates, not
+    #   per client -- correct for a single-owner system (ADR-008): they bound
+    #   refresh-token replay for the whole install. `/auth/enroll` has its
+    #   own two-tier throttle (ENROLL_RATE_* below).
     # - "cost": the remaining cost-bearing creates -- agent creation
     #   (synchronous planner LLM call), harness discovery/implementation
     #   jobs (each up to HARNESS_MAX_JOB_COST) and knowledge documents
     #   (embeddings). One shared per-user budget across all of them.
     "DEFAULT_THROTTLE_RATES": {
         "chat": "30/min",
-        "login": "10/min",
         "refresh": "30/min",
         "cost": "60/hour",
     },
@@ -260,8 +260,9 @@ SIMPLE_JWT = {
 }
 
 # Django's four stock validators; 12 characters minimum. Enforced wherever
-# a password is set through a human-facing path (signup serializer,
-# `bootstrap_owner`).
+# a password is set through a human-facing path (`bootstrap_owner`). The
+# owner's password is only a Django-admin break-glass credential: no API
+# endpoint accepts it (Phase 4 branch 2).
 AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},
     {
@@ -278,8 +279,66 @@ AUTH_PASSWORD_VALIDATORS = [
 PAT_DEFAULT_TTL_DAYS = env.int("PAT_DEFAULT_TTL_DAYS", default=90)
 PAT_MAX_TTL_DAYS = env.int("PAT_MAX_TTL_DAYS", default=365)
 
-# Dev signup switch — prod default is False (see dev.py for the dev default).
-SIGNUP_ENABLED = env.bool("SIGNUP_ENABLED", default=False)
+# --- Device trust (Phase 4 branch 2, ADR-008 decision 2) ---
+#
+# There is no signup and no password login: the owner enrolls devices at
+# /enroll with a pairing code (`manage.py issue_pairing_code`, or "Yeni cihaz
+# eşleştir" on a trusted session) or the remote access key, and each trusted
+# device mints its own JWT sessions (accounts/devices.py).
+
+# A device unused for this long can no longer authenticate or mint a
+# session (re-enroll it).
+DEVICE_IDLE_EXPIRY_DAYS = env.int("DEVICE_IDLE_EXPIRY_DAYS", default=90)
+# PIN pairing codes are accepted only from these networks (LAN gating):
+# loopback, RFC 1918, IPv6 ULA and the CGNAT range Tailscale uses. Strong
+# codes and the remote key work from any network. Defense in depth, not the
+# boundary: codes are issuable only by a trusted principal, single-use,
+# short-lived, attempt-burned and hashed.
+DEVICE_PAIRING_NETWORKS = [
+    net.strip()
+    for net in env.list(
+        "DEVICE_PAIRING_NETWORKS",
+        default=[
+            "127.0.0.0/8",
+            "::1/128",
+            "10.0.0.0/8",
+            "172.16.0.0/12",
+            "192.168.0.0/16",
+            "fc00::/7",
+            "100.64.0.0/10",
+        ],
+    )
+    if net.strip()
+]
+# Django only ever sees the BFF's address. The BFF forwards the browser's IP
+# (taken ONLY from its TRUSTED_CLIENT_IP_HEADER, set by the owner's reverse
+# proxy) as X-Jarvis-Client-IP together with X-Jarvis-BFF-Key; Django
+# ignores the IP header unless the key matches this shared secret. Empty =
+# no client IP is ever trusted.
+JARVIS_BFF_SHARED_SECRET = env("JARVIS_BFF_SHARED_SECRET", default="")
+# Without a validated client IP (no trusted proxy, e.g. bare `next start`),
+# a PIN is accepted only when this is on ("LAN gating off"). Dev default
+# true (config/settings/dev.py), production default false: pair with a
+# strong code or the remote key instead.
+DEVICE_PAIRING_ALLOW_UNKNOWN_IP = env.bool("DEVICE_PAIRING_ALLOW_UNKNOWN_IP", default=False)
+# Django admin is the owner password's only use (break-glass, Phase 4 Q3):
+# `admin/` is routed only when this is on. Dev default true
+# (config/settings/dev.py), production default false.
+DJANGO_ADMIN_ENABLED = env.bool("DJANGO_ADMIN_ENABLED", default=False)
+# Two-tier enrollment throttle (accounts/throttling.py): a tight limit per
+# validated client IP plus a much looser install-wide ceiling, so a flood
+# from one source cannot exhaust the bucket the owner needs. Without a
+# validated client IP only the global ceiling applies (accepted, documented
+# residual risk; the host-shell `issue_pairing_code` path is never
+# throttled). Format "<count>/<n><s|m|h|d>", e.g. "5/10m".
+ENROLL_RATE_PER_SOURCE = env("ENROLL_RATE_PER_SOURCE", default="5/10m")
+ENROLL_RATE_GLOBAL = env("ENROLL_RATE_GLOBAL", default="60/h")
+
+# --- Trash (ADR-009) ---
+# Soft-deleted knowledge documents and tasks are purged permanently this
+# many days after deletion (daily beat task); an explicit earlier purge is
+# the gate-class `purge_trash` tool.
+TRASH_RETENTION_DAYS = env.int("TRASH_RETENTION_DAYS", default=30)
 
 CORS_ALLOWED_ORIGINS = [o for o in env.list("CORS_ALLOWED_ORIGINS", default=[]) if o] or [
     "http://localhost:3001"

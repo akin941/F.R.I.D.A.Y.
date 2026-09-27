@@ -4,11 +4,17 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState } 
 import { toast } from "sonner";
 import { apiGetJson } from "@/lib/api-client";
 import { tr } from "@/lib/i18n/tr";
-import type { ApiUser, ApiWorkspaceSummary, SessionResponse } from "@/types/api";
+import type {
+  ApiSecurityNotice,
+  ApiUser,
+  ApiWorkspaceSummary,
+  SessionResponse,
+} from "@/types/api";
 
 interface WorkspaceContextValue {
   user: ApiUser | null;
   workspaces: ApiWorkspaceSummary[];
+  securityNotices: ApiSecurityNotice[];
   activeWorkspace: ApiWorkspaceSummary | null;
   setActiveWorkspaceId: (workspaceId: string) => void;
   /**
@@ -60,6 +66,7 @@ function pickDefaultWorkspace(
 export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<ApiUser | null>(null);
   const [workspaces, setWorkspaces] = useState<ApiWorkspaceSummary[]>([]);
+  const [securityNotices, setSecurityNotices] = useState<ApiSecurityNotice[]>([]);
   const [activeWorkspaceId, setActiveWorkspaceIdState] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -71,6 +78,7 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
       const session = await apiGetJson<SessionResponse>("/api/auth/session");
       setUser(session.user);
       setWorkspaces(session.workspaces);
+      setSecurityNotices(session.security_notices ?? []);
       const savedId =
         typeof window !== "undefined"
           ? window.localStorage.getItem(storageKey(session.user.id))
@@ -131,6 +139,7 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
     () => ({
       user,
       workspaces,
+      securityNotices,
       activeWorkspace,
       setActiveWorkspaceId,
       followWorkspaceLink,
@@ -141,6 +150,7 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
     [
       user,
       workspaces,
+      securityNotices,
       activeWorkspace,
       setActiveWorkspaceId,
       followWorkspaceLink,

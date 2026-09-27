@@ -29,7 +29,7 @@ vi.mock("next/navigation", () => ({
 vi.mock("@/contexts/workspace-context", () => ({
   useWorkspace: () => ({
     activeWorkspace: workspaceHolder.current,
-    user: { id: "u1", email: "alice@test.dev", name: "Alice", is_agent: false },
+    user: { id: "u1", email: "alice@test.dev", name: "Alice", is_agent: false, is_owner: true },
   }),
 }));
 

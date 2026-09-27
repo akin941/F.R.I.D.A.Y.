@@ -33,12 +33,6 @@ def outsider():
     return register_user(email="outsider@test.dev", password=PASSWORD, name="Outsider")
 
 
-def client_for(user):
-    client = APIClient()
-    client.force_authenticate(user=user)
-    return client
-
-
 def user_with_role(workspace, role, email):
     user = register_user(email=email, password=PASSWORD, name=role)
     WorkspaceMember.objects.create(workspace=workspace, user=user, role=role)
@@ -76,13 +70,13 @@ class TestListCreate:
         response = APIClient().get("/api/v1/memories", {"workspace": str(workspace.id)})
         assert response.status_code == 401
 
-    def test_requires_workspace_param(self, owner):
-        assert client_for(owner).get("/api/v1/memories").status_code == 400
+    def test_requires_workspace_param(self, owner, web_client):
+        assert web_client(owner).get("/api/v1/memories").status_code == 400
 
-    def test_list_filters_and_audits(self, workspace, owner):
+    def test_list_filters_and_audits(self, workspace, owner, web_client):
         approved = make_memory(workspace)
         make_memory(workspace, content="pending", status=Memory.Status.PENDING_APPROVAL)
-        response = client_for(owner).get(
+        response = web_client(owner).get(
             "/api/v1/memories", {"workspace": str(workspace.id), "status": "approved"}
         )
         assert response.status_code == 200
@@ -91,18 +85,18 @@ class TestListCreate:
         assert entry.metadata["count"] == 1
         assert entry.metadata["memory_ids"] == [str(approved.id)]
 
-    def test_invalid_filters_are_400(self, workspace, owner):
-        client = client_for(owner)
+    def test_invalid_filters_are_400(self, workspace, owner, web_client):
+        client = web_client(owner)
         base = {"workspace": str(workspace.id)}
         assert client.get("/api/v1/memories", {**base, "status": "bogus"}).status_code == 400
         assert client.get("/api/v1/memories", {**base, "type": "bogus"}).status_code == 400
 
-    def test_out_of_scope_workspace_is_404(self, workspace, outsider):
-        response = client_for(outsider).get("/api/v1/memories", {"workspace": str(workspace.id)})
+    def test_out_of_scope_workspace_is_404(self, workspace, outsider, web_client):
+        response = web_client(outsider).get("/api/v1/memories", {"workspace": str(workspace.id)})
         assert response.status_code == 404
 
-    def test_create_ignores_client_supplied_server_fields(self, workspace, owner):
-        response = client_for(owner).post(
+    def test_create_ignores_client_supplied_server_fields(self, workspace, owner, web_client):
+        response = web_client(owner).post(
             "/api/v1/memories",
             {
                 **create_payload(workspace),
@@ -118,8 +112,8 @@ class TestListCreate:
         assert body["source"] == "user_created"
         assert body["created_by"] == str(owner.id)
 
-    def test_create_duplicate_is_400(self, workspace, owner):
-        client = client_for(owner)
+    def test_create_duplicate_is_400(self, workspace, owner, web_client):
+        client = web_client(owner)
         assert (
             client.post("/api/v1/memories", create_payload(workspace), format="json").status_code
             == 201
@@ -136,10 +130,10 @@ class TestPermissionMatrix:
     """Role × endpoint matrix (CLAUDE.md rule 7)."""
 
     @pytest.mark.parametrize("role", ROLES)
-    def test_all_roles_can_read(self, workspace, role):
+    def test_all_roles_can_read(self, workspace, role, web_client):
         user = user_with_role(workspace, role, f"role-{role}@test.dev")
         make_memory(workspace)
-        response = client_for(user).get("/api/v1/memories", {"workspace": str(workspace.id)})
+        response = web_client(user).get("/api/v1/memories", {"workspace": str(workspace.id)})
         assert response.status_code == 200
         assert len(response.json()) == 1
 
@@ -152,9 +146,9 @@ class TestPermissionMatrix:
             (WorkspaceMember.Role.VIEWER, 403),
         ],
     )
-    def test_create(self, workspace, role, expected):
+    def test_create(self, workspace, role, expected, web_client):
         user = user_with_role(workspace, role, f"role-{role}@test.dev")
-        response = client_for(user).post(
+        response = web_client(user).post(
             "/api/v1/memories", create_payload(workspace), format="json"
         )
         assert response.status_code == expected
@@ -169,14 +163,14 @@ class TestPermissionMatrix:
         ],
     )
     @pytest.mark.parametrize("action", ["approve", "reject"])
-    def test_curation(self, workspace, role, expected, action):
+    def test_curation(self, workspace, role, expected, action, web_client):
         user = user_with_role(workspace, role, f"role-{role}@test.dev")
         row = make_memory(
             workspace,
             status=Memory.Status.PENDING_APPROVAL,
             source=Memory.Source.AI_SUGGESTED,
         )
-        response = client_for(user).post(f"/api/v1/memories/{row.id}/{action}", format="json")
+        response = web_client(user).post(f"/api/v1/memories/{row.id}/{action}", format="json")
         assert response.status_code == expected
 
     @pytest.mark.parametrize(
@@ -188,18 +182,18 @@ class TestPermissionMatrix:
             (WorkspaceMember.Role.VIEWER, 403),
         ],
     )
-    def test_edit_foreign_row(self, workspace, role, expected):
+    def test_edit_foreign_row(self, workspace, role, expected, web_client):
         user = user_with_role(workspace, role, f"role-{role}@test.dev")
         row = make_memory(workspace)  # created_by is None → not the actor's own
-        response = client_for(user).patch(
+        response = web_client(user).patch(
             f"/api/v1/memories/{row.id}", {"title": "New"}, format="json"
         )
         assert response.status_code == expected
 
-    def test_member_edits_own_row(self, workspace):
+    def test_member_edits_own_row(self, workspace, web_client):
         user = user_with_role(workspace, WorkspaceMember.Role.MEMBER, "m@test.dev")
         row = make_memory(workspace, created_by=user)
-        response = client_for(user).patch(
+        response = web_client(user).patch(
             f"/api/v1/memories/{row.id}", {"title": "Mine"}, format="json"
         )
         assert response.status_code == 200
@@ -213,28 +207,28 @@ class TestPermissionMatrix:
             (WorkspaceMember.Role.VIEWER, 403),
         ],
     )
-    def test_hard_delete(self, workspace, role, expected):
+    def test_hard_delete(self, workspace, role, expected, web_client):
         user = user_with_role(workspace, role, f"role-{role}@test.dev")
         row = make_memory(
             workspace,
             status=Memory.Status.PENDING_APPROVAL,
             source=Memory.Source.AI_SUGGESTED,
         )
-        response = client_for(user).delete(f"/api/v1/memories/{row.id}")
+        response = web_client(user).delete(f"/api/v1/memories/{row.id}")
         assert response.status_code == expected
 
     @pytest.mark.parametrize("role", ROLES)
-    def test_all_roles_can_export(self, workspace, role):
+    def test_all_roles_can_export(self, workspace, role, web_client):
         user = user_with_role(workspace, role, f"role-{role}@test.dev")
         make_memory(workspace)
-        response = client_for(user).get("/api/v1/memories/export", {"workspace": str(workspace.id)})
+        response = web_client(user).get("/api/v1/memories/export", {"workspace": str(workspace.id)})
         assert response.status_code == 200
 
 
 class TestDetailAndTransitions:
-    def test_out_of_scope_detail_is_404_not_403(self, workspace, outsider):
+    def test_out_of_scope_detail_is_404_not_403(self, workspace, outsider, web_client):
         row = make_memory(workspace)
-        client = client_for(outsider)
+        client = web_client(outsider)
         assert client.get(f"/api/v1/memories/{row.id}").status_code == 404
         assert (
             client.patch(f"/api/v1/memories/{row.id}", {"title": "X"}, format="json").status_code
@@ -242,23 +236,23 @@ class TestDetailAndTransitions:
         )
         assert client.post(f"/api/v1/memories/{row.id}/approve", format="json").status_code == 404
 
-    def test_unknown_transition_is_404(self, workspace, owner):
+    def test_unknown_transition_is_404(self, workspace, owner, web_client):
         row = make_memory(workspace)
-        response = client_for(owner).post(f"/api/v1/memories/{row.id}/promote", format="json")
+        response = web_client(owner).post(f"/api/v1/memories/{row.id}/promote", format="json")
         assert response.status_code == 404
 
-    def test_illegal_transition_is_400(self, workspace, owner):
+    def test_illegal_transition_is_400(self, workspace, owner, web_client):
         row = make_memory(workspace)  # approved
-        response = client_for(owner).post(f"/api/v1/memories/{row.id}/reject", format="json")
+        response = web_client(owner).post(f"/api/v1/memories/{row.id}/reject", format="json")
         assert response.status_code == 400
 
-    def test_approve_with_curated_sensitivity(self, workspace, owner):
+    def test_approve_with_curated_sensitivity(self, workspace, owner, web_client):
         row = make_memory(
             workspace,
             status=Memory.Status.PENDING_APPROVAL,
             source=Memory.Source.AI_SUGGESTED,
         )
-        response = client_for(owner).post(
+        response = web_client(owner).post(
             f"/api/v1/memories/{row.id}/approve",
             {"sensitivity": "private", "title": "Curated"},
             format="json",
@@ -269,15 +263,15 @@ class TestDetailAndTransitions:
         assert body["sensitivity"] == "private"
         assert body["title"] == "Curated"
 
-    def test_detail_read_is_audited(self, workspace, owner):
+    def test_detail_read_is_audited(self, workspace, owner, web_client):
         row = make_memory(workspace)
-        client_for(owner).get(f"/api/v1/memories/{row.id}")
+        web_client(owner).get(f"/api/v1/memories/{row.id}")
         entry = AuditLog.objects.get(action="memory.read")
         assert entry.metadata == {"memory_ids": [str(row.id)], "count": 1}
 
 
 class TestExport:
-    def test_export_contains_every_status_and_private(self, workspace, owner):
+    def test_export_contains_every_status_and_private(self, workspace, owner, web_client):
         make_memory(workspace, content="approved one")
         make_memory(
             workspace,
@@ -287,7 +281,7 @@ class TestExport:
         make_memory(workspace, content="pending one", status=Memory.Status.PENDING_APPROVAL)
         make_memory(workspace, content="rejected one", status=Memory.Status.REJECTED)
         make_memory(workspace, content="archived one", status=Memory.Status.ARCHIVED)
-        response = client_for(owner).get(
+        response = web_client(owner).get(
             "/api/v1/memories/export", {"workspace": str(workspace.id)}
         )
         assert response.status_code == 200
@@ -298,9 +292,9 @@ class TestExport:
         sensitivities = {row["sensitivity"] for row in body["memories"]}
         assert "private" in sensitivities
 
-    def test_export_headers_and_audit(self, workspace, owner):
+    def test_export_headers_and_audit(self, workspace, owner, web_client):
         make_memory(workspace)
-        response = client_for(owner).get(
+        response = web_client(owner).get(
             "/api/v1/memories/export", {"workspace": str(workspace.id)}
         )
         assert response["Cache-Control"] == "no-store"
@@ -310,9 +304,9 @@ class TestExport:
         assert entry.metadata["statuses"] == {"approved": 1}
         assert set(entry.metadata.keys()) == {"count", "statuses"}  # no content, ever
 
-    def test_export_scope_equals_read_scope(self, workspace, owner, outsider):
+    def test_export_scope_equals_read_scope(self, workspace, owner, outsider, web_client):
         make_memory(workspace)
-        response = client_for(outsider).get(
+        response = web_client(outsider).get(
             "/api/v1/memories/export", {"workspace": str(workspace.id)}
         )
         assert response.status_code == 404
@@ -323,10 +317,10 @@ class TestPermissionMatrixTransitions:
     role × endpoint coverage flagged in Codex round 1)."""
 
     @pytest.mark.parametrize("role", ROLES)
-    def test_all_roles_can_read_detail(self, workspace, role):
+    def test_all_roles_can_read_detail(self, workspace, role, web_client):
         user = user_with_role(workspace, role, f"role-{role}@test.dev")
         row = make_memory(workspace)
-        response = client_for(user).get(f"/api/v1/memories/{row.id}")
+        response = web_client(user).get(f"/api/v1/memories/{row.id}")
         assert response.status_code == 200
         assert response.json()["id"] == str(row.id)
 
@@ -339,10 +333,10 @@ class TestPermissionMatrixTransitions:
             (WorkspaceMember.Role.VIEWER, 403),
         ],
     )
-    def test_forget_foreign_row(self, workspace, role, expected):
+    def test_forget_foreign_row(self, workspace, role, expected, web_client):
         user = user_with_role(workspace, role, f"role-{role}@test.dev")
         row = make_memory(workspace)  # approved, created_by None → foreign
-        response = client_for(user).post(f"/api/v1/memories/{row.id}/forget", format="json")
+        response = web_client(user).post(f"/api/v1/memories/{row.id}/forget", format="json")
         assert response.status_code == expected
 
     @pytest.mark.parametrize(
@@ -354,25 +348,25 @@ class TestPermissionMatrixTransitions:
             (WorkspaceMember.Role.VIEWER, 403),
         ],
     )
-    def test_restore(self, workspace, role, expected):
+    def test_restore(self, workspace, role, expected, web_client):
         user = user_with_role(workspace, role, f"role-{role}@test.dev")
         row = make_memory(workspace, status=Memory.Status.ARCHIVED)
-        response = client_for(user).post(f"/api/v1/memories/{row.id}/restore", format="json")
+        response = web_client(user).post(f"/api/v1/memories/{row.id}/restore", format="json")
         assert response.status_code == expected
 
-    def test_member_forgets_own_row_via_http(self, workspace):
+    def test_member_forgets_own_row_via_http(self, workspace, web_client):
         user = user_with_role(workspace, WorkspaceMember.Role.MEMBER, "own-forget@test.dev")
         row = make_memory(workspace, created_by=user)
-        response = client_for(user).post(f"/api/v1/memories/{row.id}/forget", format="json")
+        response = web_client(user).post(f"/api/v1/memories/{row.id}/forget", format="json")
         assert response.status_code == 200
         assert response.json()["status"] == "archived"
 
-    def test_member_cannot_forget_ai_suggested_via_http(self, workspace, owner):
+    def test_member_cannot_forget_ai_suggested_via_http(self, workspace, owner, web_client):
         user = user_with_role(workspace, WorkspaceMember.Role.MEMBER, "ai-forget@test.dev")
         row = make_memory(
             workspace,
             source=Memory.Source.AI_SUGGESTED,
             created_by=user,  # even as nominal creator: predicate needs user_created
         )
-        response = client_for(user).post(f"/api/v1/memories/{row.id}/forget", format="json")
+        response = web_client(user).post(f"/api/v1/memories/{row.id}/forget", format="json")
         assert response.status_code == 403

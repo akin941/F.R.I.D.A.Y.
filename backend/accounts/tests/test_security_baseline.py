@@ -1,6 +1,7 @@
 """Phase 4 branch 1 -- owner account and token hardening: refresh-token
 blacklist + logout, PAT expiry and failure audit, `create_dev_pat` audit,
-the password validators, and the token-flush beat task."""
+the password validators, and the token-flush beat task. Sessions come from
+a trusted device (Phase 4 branch 2)."""
 
 import io
 import uuid
@@ -15,7 +16,8 @@ from rest_framework_simplejwt.tokens import RefreshToken
 
 from accounts import authentication
 from accounts.authentication import TOKEN_PREFIX, hash_token
-from accounts.models import PersonalAccessToken, User
+from accounts.devices import enroll_device, issue_pairing_code, issue_session_tokens
+from accounts.models import DevicePairingCode, PersonalAccessToken, User
 from accounts.services import register_user
 from accounts.tasks import flush_expired_tokens
 from audit.models import AuditLog
@@ -28,18 +30,15 @@ PASSWORD = "Str0ngDevPass!42"
 
 @pytest.fixture
 def owner():
-    return register_user(email="owner@test.dev", password=PASSWORD, name="Owner")
+    user = register_user(email="owner@test.dev", password=PASSWORD, name="Owner")
+    user.is_owner = True
+    user.save()
+    return user
 
 
 @pytest.fixture
 def workspace(owner):
     return Workspace.objects.get(owner=owner)
-
-
-def auth_client(user):
-    client = APIClient()
-    client.force_authenticate(user=user)
-    return client
 
 
 def bearer_client(raw):
@@ -49,15 +48,19 @@ def bearer_client(raw):
 
 
 def login(user):
-    response = APIClient().post(
-        "/api/v1/auth/login", {"email": user.email, "password": PASSWORD}, format="json"
+    """A trusted device's session for the owner (there is no password login
+    since Phase 4 branch 2)."""
+    raw, _ = issue_pairing_code(
+        owner=user,
+        kind=DevicePairingCode.Kind.PIN,
+        issued_via=DevicePairingCode.IssuedVia.MANAGEMENT_COMMAND,
     )
-    assert response.status_code == 200, response.data
-    return response.data
+    device, _ = enroll_device(raw_code=raw, device_name="Mac", client_ip="10.0.0.2")
+    return issue_session_tokens(device)
 
 
-def mint(user, workspace, **extra):
-    response = auth_client(user).post(
+def mint(web_client, user, workspace, **extra):
+    response = web_client(user).post(
         "/api/v1/auth/tokens",
         {"workspace": str(workspace.id), "name": "cli", **extra},
         format="json",
@@ -128,8 +131,8 @@ def test_logout_twice_is_refused_the_second_time(owner):
     assert client.post("/api/v1/auth/logout", tokens, format="json").status_code == 401
 
 
-def test_logout_is_a_web_channel_endpoint_pat_is_refused(owner, workspace):
-    raw = mint(owner, workspace).data["token"]
+def test_logout_is_a_web_channel_endpoint_pat_is_refused(owner, workspace, web_client):
+    raw = mint(web_client, owner, workspace).data["token"]
     tokens = login(owner)
     response = bearer_client(raw).post(
         "/api/v1/auth/logout", {"refresh": tokens["refresh"]}, format="json"
@@ -161,32 +164,21 @@ def test_bootstrap_owner_rejects_a_weak_password(monkeypatch, password):
     assert not User.objects.exists()
 
 
-def test_signup_serializer_rejects_a_short_password(settings):
-    settings.SIGNUP_ENABLED = True
-    response = APIClient().post(
-        "/api/v1/auth/signup",
-        {"email": "new@test.dev", "password": "short1!", "name": "N"},
-        format="json",
-    )
-    assert response.status_code == 400
-    assert "password" in response.data
-
-
 # --- PAT expiry ---
 
 
-def test_mint_defaults_to_the_configured_ttl(owner, workspace, settings):
+def test_mint_defaults_to_the_configured_ttl(owner, workspace, settings, web_client):
     settings.PAT_DEFAULT_TTL_DAYS = 90
     before = timezone.now()
-    response = mint(owner, workspace)
+    response = mint(web_client, owner, workspace)
     assert response.status_code == 201
     token = PersonalAccessToken.objects.get(id=response.data["id"])
     assert before + timedelta(days=90) <= token.expires_at <= timezone.now() + timedelta(days=90)
     assert response.data["expires_at"]
 
 
-def test_mint_accepts_a_chosen_ttl(owner, workspace):
-    response = mint(owner, workspace, expires_in_days=7)
+def test_mint_accepts_a_chosen_ttl(owner, workspace, web_client):
+    response = mint(web_client, owner, workspace, expires_in_days=7)
     assert response.status_code == 201
     token = PersonalAccessToken.objects.get(id=response.data["id"])
     assert token.expires_at - timezone.now() < timedelta(days=7, minutes=1)
@@ -194,23 +186,23 @@ def test_mint_accepts_a_chosen_ttl(owner, workspace):
 
 
 @pytest.mark.parametrize("days", [0, 366])
-def test_mint_rejects_a_ttl_outside_the_allowed_range(owner, workspace, settings, days):
+def test_mint_rejects_a_ttl_outside_the_allowed_range(owner, workspace, settings, days, web_client):
     settings.PAT_MAX_TTL_DAYS = 365
-    response = mint(owner, workspace, expires_in_days=days)
+    response = mint(web_client, owner, workspace, expires_in_days=days)
     assert response.status_code == 400
     assert "expires_in_days" in response.data
     assert not PersonalAccessToken.objects.exists()
 
 
-def test_mint_audit_row_records_the_web_path(owner, workspace):
-    mint(owner, workspace)
+def test_mint_audit_row_records_the_web_path(owner, workspace, web_client):
+    mint(web_client, owner, workspace)
     log = AuditLog.objects.get(action="accounts.pat.created")
     assert log.metadata["via"] == "web"
     assert "expires_at" in log.metadata
 
 
-def _expired_token(owner, workspace):
-    raw = mint(owner, workspace).data["token"]
+def _expired_token(owner, workspace, web_client):
+    raw = mint(web_client, owner, workspace).data["token"]
     PersonalAccessToken.objects.filter(token_hash=hash_token(raw)).update(
         expires_at=timezone.now() - timedelta(seconds=1)
     )
@@ -235,22 +227,24 @@ _ALLOWLISTED = [
 
 
 @pytest.mark.parametrize(("method", "path"), _ALLOWLISTED)
-def test_expired_pat_is_rejected_on_every_allowlisted_view(owner, workspace, method, path):
-    raw = _expired_token(owner, workspace)
+def test_expired_pat_is_rejected_on_every_allowlisted_view(
+    owner, workspace, method, path, web_client
+):
+    raw = _expired_token(owner, workspace, web_client)
     url = path.format(ws=workspace.id, id=uuid.uuid4())
     response = getattr(bearer_client(raw), method)(url, {}, format="json")
     assert response.status_code == 401
 
 
-def test_unexpired_pat_still_authenticates(owner, workspace):
-    raw = mint(owner, workspace).data["token"]
+def test_unexpired_pat_still_authenticates(owner, workspace, web_client):
+    raw = mint(web_client, owner, workspace).data["token"]
     response = bearer_client(raw).get(f"/api/v1/ai/conversations?workspace={workspace.id}")
     assert response.status_code == 200
 
 
 @pytest.mark.parametrize("reason", ["unknown", "revoked", "expired", "inactive_user"])
-def test_pat_auth_failures_are_audited_with_prefix_only(owner, workspace, reason):
-    raw = mint(owner, workspace).data["token"]
+def test_pat_auth_failures_are_audited_with_prefix_only(owner, workspace, reason, web_client):
+    raw = mint(web_client, owner, workspace).data["token"]
     token = PersonalAccessToken.objects.get(token_hash=hash_token(raw))
     if reason == "unknown":
         raw = TOKEN_PREFIX + "Z" * 43

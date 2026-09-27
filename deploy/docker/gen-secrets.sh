@@ -32,6 +32,9 @@ fi
 
 has_key DJANGO_SECRET_KEY || append DJANGO_SECRET_KEY "$(random_hex 32)"
 has_key REDIS_PASSWORD || append REDIS_PASSWORD "$(random_hex 24)"
+# BFF <-> Django shared secret (Phase 4 branch 2): lets the daily stack's
+# frontend container state the browser's IP (LAN gating for PIN pairing).
+has_key JARVIS_BFF_SHARED_SECRET || append JARVIS_BFF_SHARED_SECRET "$(random_hex 32)"
 
 if ! has_key POSTGRES_PASSWORD; then
     # POSTGRES_PASSWORD only takes effect when the data volume is first

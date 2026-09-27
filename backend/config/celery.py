@@ -63,6 +63,15 @@ _BEAT_SCHEDULE = {
         "task": "accounts.tasks.flush_expired_tokens",
         "schedule": 24 * 60 * 60.0,
     },
+    # ADR-009: trashed rows are purged TRASH_RETENTION_DAYS after deletion.
+    "trash-retention-purge-tasks": {
+        "task": "tasks.tasks.purge_expired_trashed_tasks_task",
+        "schedule": 24 * 60 * 60.0,
+    },
+    "trash-retention-purge-documents": {
+        "task": "knowledge.tasks.purge_expired_trashed_documents_task",
+        "schedule": 24 * 60 * 60.0,
+    },
 }
 
 # Harness recovery scans (Phase 3 branch 8, review P1): the scans tear down

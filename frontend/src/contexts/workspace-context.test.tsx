@@ -22,7 +22,7 @@ function Consumer() {
 }
 
 const SESSION_BODY = {
-  user: { id: "u1", email: "alice@test.dev", name: "Alice", is_agent: false },
+  user: { id: "u1", email: "alice@test.dev", name: "Alice", is_agent: false, is_owner: true },
   workspaces: [
     { id: "personal-1", name: "Alice", type: "personal", role: "owner" },
     { id: "company-1", name: "Acme", type: "company", role: "member" },

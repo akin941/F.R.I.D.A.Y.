@@ -2,8 +2,12 @@
 
 import logging
 
+from django.conf import settings
 from rest_framework.exceptions import APIException
 from rest_framework.throttling import ScopedRateThrottle as DRFScopedRateThrottle
+from rest_framework.throttling import SimpleRateThrottle
+
+from core.client_ip import trusted_client_ip
 
 logger = logging.getLogger(__name__)
 
@@ -39,3 +43,70 @@ class CreateScopedRateThrottle(ScopedRateThrottle):
         if request.method != "POST":
             return True
         return super().allow_request(request, view)
+
+
+_PERIOD_SECONDS = {"s": 1, "m": 60, "h": 3600, "d": 86400}
+
+
+def parse_rate(rate):
+    """`"<count>/<n><unit>"` -> `(count, seconds)`, where the multiplier is
+    optional ("5/10m", "60/h", "3/30s"). DRF's own parser only accepts a bare
+    unit (and silently treats "10min" as garbage)."""
+    if rate is None:
+        return None, None
+    count, _, period = rate.partition("/")
+    period = period.strip()
+    digits = ""
+    while period and period[0].isdigit():
+        digits, period = digits + period[0], period[1:]
+    if not period or period[0] not in _PERIOD_SECONDS:
+        raise ValueError(f"Invalid throttle rate {rate!r}.")
+    return int(count), int(digits or 1) * _PERIOD_SECONDS[period[0]]
+
+
+class _SettingsRateThrottle(SimpleRateThrottle):
+    """A fail-closed SimpleRateThrottle whose rate is read from a Django
+    setting at request time (so it can use `parse_rate`'s multi-unit
+    periods and be overridden per test)."""
+
+    rate_setting = ""
+
+    def get_rate(self):
+        return getattr(settings, self.rate_setting)
+
+    def parse_rate(self, rate):
+        return parse_rate(rate)
+
+    def allow_request(self, request, view):
+        try:
+            return super().allow_request(request, view)
+        except Exception as exc:
+            logger.exception("Throttle backend unavailable for scope %s", self.scope)
+            raise ThrottleBackendUnavailable() from exc
+
+
+class EnrollPerSourceThrottle(_SettingsRateThrottle):
+    """Tier 1 of the enrollment throttle (Phase 4 branch 2, plan-review
+    round 1 HIGH): a tight limit per BFF-key-validated client IP
+    (`core.client_ip`). No validated IP -> this tier does not apply (only
+    the global ceiling does -- the accepted, documented residual risk)."""
+
+    scope = "enroll_source"
+    rate_setting = "ENROLL_RATE_PER_SOURCE"
+
+    def get_cache_key(self, request, view):
+        client_ip = trusted_client_ip(request)
+        if client_ip is None:
+            return None
+        return self.cache_format % {"scope": self.scope, "ident": client_ip}
+
+
+class EnrollGlobalThrottle(_SettingsRateThrottle):
+    """Tier 2: a much looser install-wide ceiling, so one source hitting its
+    own limit never exhausts the bucket the owner needs."""
+
+    scope = "enroll_global"
+    rate_setting = "ENROLL_RATE_GLOBAL"
+
+    def get_cache_key(self, request, view):
+        return self.cache_format % {"scope": self.scope, "ident": "all"}

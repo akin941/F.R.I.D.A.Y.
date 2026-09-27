@@ -1,6 +1,7 @@
 import { Suspense } from "react";
 import { WorkspaceProvider } from "@/contexts/workspace-context";
 import { Sidebar } from "@/components/shell/Sidebar";
+import { SecurityNoticeBanner } from "@/components/shell/SecurityNoticeBanner";
 import { WorkspaceDeepLink } from "@/components/shell/WorkspaceDeepLink";
 
 export default function ShellLayout({ children }: { children: React.ReactNode }) {
@@ -16,7 +17,10 @@ export default function ShellLayout({ children }: { children: React.ReactNode })
           view's content scrolls. */}
       <div className="flex h-dvh min-h-0 flex-col overflow-hidden md:flex-row">
         <Sidebar />
-        <main className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">{children}</main>
+        <main className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+          <SecurityNoticeBanner />
+          {children}
+        </main>
       </div>
     </WorkspaceProvider>
   );

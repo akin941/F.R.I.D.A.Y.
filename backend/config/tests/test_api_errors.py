@@ -173,20 +173,14 @@ def workspace(owner):
     return Workspace.objects.get(owner=owner)
 
 
-def client_for(user):
-    client = APIClient()
-    client.force_authenticate(user=user)
-    return client
-
-
 def _pending_request(workspace, requested_by):
     return ApprovalRequest.objects.create(
         workspace=workspace, tool_name="some_gated_tool", requested_by=requested_by
     )
 
 
-def test_400_validation_body_has_code_and_field_errors(owner, workspace):
-    response = client_for(owner).post(
+def test_400_validation_body_has_code_and_field_errors(owner, workspace, web_client):
+    response = web_client(owner).post(
         "/api/v1/tasks", {"workspace": str(workspace.id)}, format="json"
     )
     assert response.status_code == 400
@@ -195,8 +189,8 @@ def test_400_validation_body_has_code_and_field_errors(owner, workspace):
     assert "title" in body
 
 
-def test_400_hand_built_body_has_code(owner):
-    response = client_for(owner).get("/api/v1/tasks")
+def test_400_hand_built_body_has_code(owner, web_client):
+    response = web_client(owner).get("/api/v1/tasks")
     assert response.status_code == 400
     assert response.json() == {
         "detail": "workspace query parameter is required.",
@@ -219,19 +213,19 @@ def test_401_bad_bearer_has_code(db):
     assert response.json()["code"] == "token_not_valid"
 
 
-def test_404_bodiless_has_code(owner):
-    response = client_for(owner).get(
+def test_404_bodiless_has_code(owner, web_client):
+    response = web_client(owner).get(
         "/api/v1/tasks", {"workspace": "00000000-0000-0000-0000-000000000000"}
     )
     assert response.status_code == 404
     assert response.json() == {"code": "not_found"}
 
 
-def test_429_has_code(owner, workspace, monkeypatch):
+def test_429_has_code(owner, workspace, monkeypatch, web_client):
     monkeypatch.setattr(
         ScopedRateThrottle, "THROTTLE_RATES", {**ScopedRateThrottle.THROTTLE_RATES, "cost": "0/min"}
     )
-    response = client_for(owner).post(
+    response = web_client(owner).post(
         "/api/v1/agents", {"workspace": str(workspace.id)}, format="json"
     )
     assert response.status_code == 429
@@ -239,11 +233,11 @@ def test_429_has_code(owner, workspace, monkeypatch):
 
 
 @mock.patch("approvals.services._resolve_tool", lambda name: SimpleNamespace(gated=True))
-def test_403_role_denied_has_domain_code(owner, workspace):
+def test_403_role_denied_has_domain_code(owner, workspace, web_client):
     viewer = register_user(email="viewer@test.dev", password=PASSWORD, name="Viewer")
     WorkspaceMember.objects.create(workspace=workspace, user=viewer, role="viewer")
     request = _pending_request(workspace, owner)
-    response = client_for(viewer).post(f"/api/v1/approvals/requests/{request.id}/approve")
+    response = web_client(viewer).post(f"/api/v1/approvals/requests/{request.id}/approve")
     assert response.status_code == 403
     assert response.json()["code"] == "approval.permission_denied"
     assert response.json()["detail"]
@@ -261,37 +255,39 @@ def test_403_channel_forbidden_has_domain_code(owner, workspace):
     client.credentials(HTTP_AUTHORIZATION=f"Bearer {raw}")
     response = client.post(f"/api/v1/approvals/requests/{request.id}/approve")
     assert response.status_code == 403
-    assert response.json()["code"] == "approval.channel_forbidden"
+    # The view-level `IsWebChannel` guard refuses before the service's own
+    # `ApprovalChannelForbidden` check is reached (Phase 4 branch 2).
+    assert response.json()["code"] == "channel_forbidden"
 
 
-def test_403_agent_forbidden_has_domain_code(owner, workspace):
+def test_403_agent_forbidden_has_domain_code(owner, workspace, web_client):
     agent = register_user(email="agent@test.dev", password=PASSWORD, name="Agent")
     agent.is_agent = True
     agent.save(update_fields=["is_agent"])
     WorkspaceMember.objects.create(workspace=workspace, user=agent, role="admin")
     request = _pending_request(workspace, owner)
-    response = client_for(agent).post(f"/api/v1/approvals/requests/{request.id}/reject")
+    response = web_client(agent).post(f"/api/v1/approvals/requests/{request.id}/reject")
     assert response.status_code == 403
     assert response.json()["code"] == "approval.agent_forbidden"
 
 
-def test_400_expired_has_domain_code(owner, workspace, settings):
+def test_400_expired_has_domain_code(owner, workspace, settings, web_client):
     admin = register_user(email="admin3@test.dev", password=PASSWORD, name="Admin3")
     WorkspaceMember.objects.create(workspace=workspace, user=admin, role="admin")
     request = _pending_request(workspace, owner)
     ApprovalRequest.objects.filter(id=request.id).update(
         created_at=request.created_at - timedelta(hours=settings.APPROVAL_REQUEST_TTL_HOURS + 1)
     )
-    response = client_for(admin).post(f"/api/v1/approvals/requests/{request.id}/approve")
+    response = web_client(admin).post(f"/api/v1/approvals/requests/{request.id}/approve")
     assert response.status_code == 400
     assert response.json()["code"] == "approval.expired"
 
 
-def test_400_invalid_transition_has_domain_code(owner, workspace):
+def test_400_invalid_transition_has_domain_code(owner, workspace, web_client):
     admin = register_user(email="admin4@test.dev", password=PASSWORD, name="Admin4")
     WorkspaceMember.objects.create(workspace=workspace, user=admin, role="admin")
     request = _pending_request(workspace, owner)
     ApprovalRequest.objects.filter(id=request.id).update(status="rejected")
-    response = client_for(admin).post(f"/api/v1/approvals/requests/{request.id}/approve")
+    response = web_client(admin).post(f"/api/v1/approvals/requests/{request.id}/approve")
     assert response.status_code == 400
     assert response.json()["code"] == "approval.invalid_transition"

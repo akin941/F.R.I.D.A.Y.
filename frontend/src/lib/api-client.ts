@@ -80,7 +80,7 @@ export async function apiFetch(input: string, init: RequestInit = {}, isRetry = 
       // A full-page navigation is deliberate: it drops every in-memory
       // view state along with the dead session (not a client-side push).
       // eslint-disable-next-line @next/next/no-location-assign-relative-destination
-      window.location.href = "/login";
+      window.location.href = "/enroll";
     }
     return response;
   }
@@ -90,7 +90,7 @@ export async function apiFetch(input: string, init: RequestInit = {}, isRetry = 
       // A full-page navigation is deliberate: it drops every in-memory
       // view state along with the dead session (not a client-side push).
       // eslint-disable-next-line @next/next/no-location-assign-relative-destination
-      window.location.href = "/login";
+      window.location.href = "/enroll";
     }
     return response;
   }

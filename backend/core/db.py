@@ -32,6 +32,17 @@ class WorkspaceScopedManager(models.Manager.from_queryset(WorkspaceScopedQuerySe
     """Default manager for workspace-scoped models."""
 
 
+class LiveWorkspaceScopedManager(WorkspaceScopedManager):
+    """Default manager for soft-deletable (trash-able) business models
+    (ADR-009: knowledge documents, tasks): hides rows with `deleted_at` set,
+    so every `Model.objects...for_actor()` consumer excludes trashed rows
+    without having to remember to. The trash view, restore and purge go
+    through the model's unfiltered `all_objects` manager explicitly."""
+
+    def get_queryset(self):
+        return super().get_queryset().filter(deleted_at__isnull=True)
+
+
 class WorkspaceScopedModel(models.Model):
     """Abstract base for business models: workspace FK + scoped manager.
 

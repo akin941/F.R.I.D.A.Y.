@@ -26,14 +26,8 @@ def bob():
     return register_user(email="bob@test.dev", password=PASSWORD, name="Bob")
 
 
-def auth_client(user):
-    client = APIClient()
-    client.force_authenticate(user=user)
-    return client
-
-
-def test_workspace_list_returns_only_memberships(alice, bob):
-    response = auth_client(alice).get("/api/v1/workspaces")
+def test_workspace_list_returns_only_memberships(alice, bob, web_client):
+    response = web_client(alice).get("/api/v1/workspaces")
     assert response.status_code == 200
     names = [w["name"] for w in response.data]
     assert len(names) == 1
@@ -41,9 +35,9 @@ def test_workspace_list_returns_only_memberships(alice, bob):
     assert all(w["role"] == "owner" for w in response.data)
 
 
-def test_user_cannot_see_other_users_workspace(alice, bob):
+def test_user_cannot_see_other_users_workspace(alice, bob, web_client):
     bob_ws = Workspace.objects.get(owner=bob)
-    ids = [w["id"] for w in auth_client(alice).get("/api/v1/workspaces").data]
+    ids = [w["id"] for w in web_client(alice).get("/api/v1/workspaces").data]
     assert str(bob_ws.id) not in ids
 
 
@@ -74,9 +68,9 @@ def test_workspace_list_requires_auth():
     assert APIClient().get("/api/v1/workspaces").status_code == 401
 
 
-def test_shared_workspace_visible_to_both(alice, bob):
+def test_shared_workspace_visible_to_both(alice, bob, web_client):
     """Forward-looking: membership (not ownership) drives visibility."""
     alice_ws = Workspace.objects.get(owner=alice)
     WorkspaceMember.objects.create(workspace=alice_ws, user=bob, role=WorkspaceMember.Role.MEMBER)
-    ids = [w["id"] for w in auth_client(bob).get("/api/v1/workspaces").data]
+    ids = [w["id"] for w in web_client(bob).get("/api/v1/workspaces").data]
     assert str(alice_ws.id) in ids

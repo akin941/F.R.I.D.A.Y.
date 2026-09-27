@@ -55,12 +55,6 @@ def member_user(request, workspace, owner):
     return user
 
 
-def auth_client(user):
-    client = APIClient()
-    client.force_authenticate(user=user)
-    return client
-
-
 def pat_client(owner, workspace):
     raw = "jpat_test-raw-token-rename-000000000000"
     PersonalAccessToken.objects.create(
@@ -92,8 +86,8 @@ def add_message(conversation, role=Message.Role.USER, **fields):
 # --- rename: role x endpoint ---
 
 
-def test_every_role_can_rename(member_user, conversation):
-    response = auth_client(member_user).patch(
+def test_every_role_can_rename(member_user, conversation, web_client):
+    response = web_client(member_user).patch(
         detail_url(conversation), {"title": "Yeni ad"}, format="json"
     )
     assert response.status_code == 200
@@ -105,21 +99,21 @@ def test_every_role_can_rename(member_user, conversation):
     assert "Yeni ad" not in str(entry.metadata)
 
 
-def test_rename_to_the_same_title_writes_no_audit(owner, conversation):
-    response = auth_client(owner).patch(detail_url(conversation), {"title": "Eski"}, format="json")
+def test_rename_to_the_same_title_writes_no_audit(owner, conversation, web_client):
+    response = web_client(owner).patch(detail_url(conversation), {"title": "Eski"}, format="json")
     assert response.status_code == 200
     assert not AuditLog.objects.filter(action="assistant.conversation.renamed").exists()
 
 
-def test_blank_title_clears_the_name(owner, conversation):
-    response = auth_client(owner).patch(detail_url(conversation), {"title": ""}, format="json")
+def test_blank_title_clears_the_name(owner, conversation, web_client):
+    response = web_client(owner).patch(detail_url(conversation), {"title": ""}, format="json")
     assert response.status_code == 200
     conversation.refresh_from_db()
     assert conversation.title == ""
 
 
-def test_too_long_title_is_400(owner, conversation):
-    response = auth_client(owner).patch(
+def test_too_long_title_is_400(owner, conversation, web_client):
+    response = web_client(owner).patch(
         detail_url(conversation), {"title": "x" * 256}, format="json"
     )
     assert response.status_code == 400
@@ -127,14 +121,14 @@ def test_too_long_title_is_400(owner, conversation):
     assert conversation.title == "Eski"
 
 
-def test_empty_patch_body_is_400(owner, conversation):
-    response = auth_client(owner).patch(detail_url(conversation), {}, format="json")
+def test_empty_patch_body_is_400(owner, conversation, web_client):
+    response = web_client(owner).patch(detail_url(conversation), {}, format="json")
     assert response.status_code == 400
     assert response.data["code"] == "invalid"
 
 
-def test_rename_and_mark_private_in_one_patch(owner, conversation):
-    response = auth_client(owner).patch(
+def test_rename_and_mark_private_in_one_patch(owner, conversation, web_client):
+    response = web_client(owner).patch(
         detail_url(conversation), {"title": "Gizli", "private": True}, format="json"
     )
     assert response.status_code == 200
@@ -142,8 +136,8 @@ def test_rename_and_mark_private_in_one_patch(owner, conversation):
     assert response.data["private"] is True
 
 
-def test_rename_with_private_false_is_rejected_atomically(owner, conversation):
-    response = auth_client(owner).patch(
+def test_rename_with_private_false_is_rejected_atomically(owner, conversation, web_client):
+    response = web_client(owner).patch(
         detail_url(conversation), {"title": "Yeni", "private": False}, format="json"
     )
     assert response.status_code == 400
@@ -152,12 +146,12 @@ def test_rename_with_private_false_is_rejected_atomically(owner, conversation):
     assert conversation.private is False
 
 
-def test_rename_of_another_users_conversation_is_404(owner):
+def test_rename_of_another_users_conversation_is_404(owner, web_client):
     stranger = register_user(email="stranger@test.dev", password=PASSWORD, name="Stranger")
     foreign = Conversation.objects.create(
         workspace=Workspace.objects.get(owner=stranger), created_by=stranger, title="Onların"
     )
-    response = auth_client(owner).patch(detail_url(foreign), {"title": "Benim"}, format="json")
+    response = web_client(owner).patch(detail_url(foreign), {"title": "Benim"}, format="json")
     assert response.status_code == 404
     foreign.refresh_from_db()
     assert foreign.title == "Onların"
@@ -191,22 +185,22 @@ def test_pat_cannot_rename_outside_its_bound_workspace(owner, workspace):
 # --- origin_channel (channel badge source) ---
 
 
-def test_list_carries_the_first_messages_channel(owner, workspace):
+def test_list_carries_the_first_messages_channel(owner, workspace, web_client):
     telegram = Conversation.objects.create(workspace=workspace, created_by=owner, title="tg")
     add_message(telegram, channel=Message.Channel.TELEGRAM)
     add_message(telegram, role=Message.Role.ASSISTANT, channel=Message.Channel.WEB)
     empty = Conversation.objects.create(workspace=workspace, created_by=owner, title="empty")
 
-    response = auth_client(owner).get(f"/api/v1/ai/conversations?workspace={workspace.id}")
+    response = web_client(owner).get(f"/api/v1/ai/conversations?workspace={workspace.id}")
 
     by_id = {row["id"]: row for row in response.data}
     assert by_id[str(telegram.id)]["origin_channel"] == "telegram"
     assert by_id[str(empty.id)]["origin_channel"] is None
 
 
-def test_detail_and_patch_carry_origin_channel(owner, conversation):
+def test_detail_and_patch_carry_origin_channel(owner, conversation, web_client):
     add_message(conversation, channel=Message.Channel.CLI)
-    client = auth_client(owner)
+    client = web_client(owner)
     assert client.get(detail_url(conversation)).data["origin_channel"] == "cli"
     patched = client.patch(detail_url(conversation), {"title": "y"}, format="json")
     assert patched.data["origin_channel"] == "cli"
@@ -215,21 +209,21 @@ def test_detail_and_patch_carry_origin_channel(owner, conversation):
 # --- message list: channel, confirmed_task, chunk_documents ---
 
 
-def test_message_list_exposes_channel_and_intent(owner, conversation):
+def test_message_list_exposes_channel_and_intent(owner, conversation, web_client):
     add_message(
         conversation,
         channel=Message.Channel.TELEGRAM,
         intent=Message.Intent.TASK_DRAFT,
         intent_payload={"title": "Annemi ara", "due_date": None},
     )
-    row = auth_client(owner).get(messages_url(conversation)).data[0]
+    row = web_client(owner).get(messages_url(conversation)).data[0]
     assert row["channel"] == "telegram"
     assert row["intent"] == "task_draft"
     assert row["intent_payload"] == {"title": "Annemi ara", "due_date": None}
     assert row["confirmed_task"] is None
 
 
-def test_confirmed_draft_reports_its_task(owner, workspace, conversation):
+def test_confirmed_draft_reports_its_task(owner, workspace, conversation, web_client):
     draft = add_message(
         conversation,
         created_by=owner,
@@ -237,7 +231,7 @@ def test_confirmed_draft_reports_its_task(owner, workspace, conversation):
         intent_payload={"title": "Annemi ara", "due_date": None},
     )
     other = add_message(conversation, role=Message.Role.ASSISTANT, content="Tamam")
-    client = auth_client(owner)
+    client = web_client(owner)
     created = client.post(
         "/api/v1/tasks",
         {"workspace": str(workspace.id), "title": "Annemi ara", "draft_message_id": str(draft.id)},
@@ -271,7 +265,7 @@ def _chunk(workspace, title):
     return document, chunk
 
 
-def test_chunk_documents_resolve_only_in_scope_chunks(owner, workspace, conversation):
+def test_chunk_documents_resolve_only_in_scope_chunks(owner, workspace, conversation, web_client):
     document, chunk = _chunk(workspace, "Plan")
     stranger = register_user(email="stranger3@test.dev", password=PASSWORD, name="Stranger")
     _, foreign_chunk = _chunk(Workspace.objects.get(owner=stranger), "Onların")
@@ -282,16 +276,16 @@ def test_chunk_documents_resolve_only_in_scope_chunks(owner, workspace, conversa
     )
     plain = add_message(conversation, role=Message.Role.ASSISTANT)
 
-    rows = {row["id"]: row for row in auth_client(owner).get(messages_url(conversation)).data}
+    rows = {row["id"]: row for row in web_client(owner).get(messages_url(conversation)).data}
 
     assert rows[str(reply.id)]["chunk_documents"] == {str(chunk.id): str(document.id)}
     assert rows[str(plain.id)]["chunk_documents"] == {}
 
 
-def test_chunk_of_a_deleted_document_has_no_link(owner, workspace, conversation):
+def test_chunk_of_a_deleted_document_has_no_link(owner, workspace, conversation, web_client):
     document, chunk = _chunk(workspace, "Silinecek")
     reply = add_message(conversation, role=Message.Role.ASSISTANT, chunks_used=[str(chunk.id)])
     document.delete()
-    rows = {row["id"]: row for row in auth_client(owner).get(messages_url(conversation)).data}
+    rows = {row["id"]: row for row in web_client(owner).get(messages_url(conversation)).data}
     assert rows[str(reply.id)]["chunks_used"] == [str(chunk.id)]
     assert rows[str(reply.id)]["chunk_documents"] == {}

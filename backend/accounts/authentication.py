@@ -1,9 +1,14 @@
-"""PAT bearer authentication (MVP 9 §1) — CLI channel credential.
+"""Authenticators.
 
-Never added to `DEFAULT_AUTHENTICATION_CLASSES`: only the specific view
+`DeviceJWTAuthentication` (Phase 4 branch 2) is the sole
+`DEFAULT_AUTHENTICATION_CLASSES` entry: the web session of a trusted device,
+the only way to reach `core.channels.CHANNEL_WEB`.
+
+`PersonalAccessTokenAuthentication` (MVP 9 §1) is the CLI channel's
+low-trust bearer credential. Never added to `DEFAULT_AUTHENTICATION_CLASSES`: only the specific view
 classes this MVP allowlists (assistant/agents/approvals) set this explicitly
 in their own `authentication_classes`, with this class ordered BEFORE
-`JWTAuthentication`. DRF's authentication loop stops at the first
+`DeviceJWTAuthentication`. DRF's authentication loop stops at the first
 authenticator that raises `AuthenticationFailed` — `JWTAuthentication`
 raises `InvalidToken` (an `AuthenticationFailed` subclass) for any
 non-JWT-shaped string, including a `jpat_...` token, so if it ran first on
@@ -14,16 +19,19 @@ exercises JWT.
 """
 
 import hashlib
+import uuid
 
 from django.core.cache import cache
 from django.utils import timezone
 from rest_framework.authentication import BaseAuthentication
 from rest_framework.exceptions import AuthenticationFailed
+from rest_framework_simplejwt.authentication import JWTAuthentication
 
-from accounts.models import PersonalAccessToken
+from accounts.models import PersonalAccessToken, TrustedDevice
 from audit.models import AuditLog
 from audit.services import record_audit
-from core.channels import CHANNEL_CLI, ChannelPrincipal
+from core.channels import CHANNEL_CLI, ChannelPrincipal, WebSessionPrincipal
+from core.client_ip import trusted_client_ip
 
 TOKEN_PREFIX = "jpat_"
 
@@ -106,3 +114,47 @@ class PersonalAccessTokenAuthentication(BaseAuthentication):
             token.user,
             ChannelPrincipal(channel=CHANNEL_CLI, bound_workspace_id=str(token.workspace_id)),
         )
+
+
+class DeviceJWTAuthentication(JWTAuthentication):
+    """The high-trust web channel (Phase 4 branch 2). On top of simplejwt's
+    access-token validation and active-user lookup, every request checks:
+
+    - the token carries the `did` claim (a JWT without it -- e.g. one
+      minted before device trust existed -- is rejected outright);
+    - `did` names a TrustedDevice of the token's user that is neither
+      revoked nor idle-expired (one indexed primary-key lookup per request,
+      so revoking a device kills its outstanding access tokens with the
+      next request);
+    - the user is the installation owner and not an agent.
+
+    Success sets `request.auth` to a `WebSessionPrincipal` -- the only way
+    `core.channels.request_channel()` ever returns CHANNEL_WEB.
+
+    "Next request" is the guarantee: an already-open chat SSE stream is not
+    re-checked mid-stream; it ends with its reply (bounded by the gateway
+    timeout).
+    """
+
+    def authenticate(self, request):
+        result = super().authenticate(request)
+        if result is None:
+            return None
+        user, validated_token = result
+
+        from accounts.devices import DEVICE_CLAIM, device_session_is_valid, touch_device
+
+        raw_device_id = validated_token.get(DEVICE_CLAIM)
+        if not raw_device_id:
+            raise AuthenticationFailed(
+                "Session is not bound to a trusted device.", code="device_missing"
+            )
+        try:
+            device_id = uuid.UUID(str(raw_device_id))
+        except ValueError as exc:
+            raise AuthenticationFailed("Invalid device.", code="device_invalid") from exc
+        device = TrustedDevice.objects.filter(pk=device_id).first()
+        if not device_session_is_valid(device, user):
+            raise AuthenticationFailed("This device is no longer trusted.", code="device_untrusted")
+        touch_device(device, client_ip=trusted_client_ip(request))
+        return user, WebSessionPrincipal(device_id=str(device.pk))

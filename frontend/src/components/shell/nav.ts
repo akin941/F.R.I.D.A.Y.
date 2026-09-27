@@ -5,6 +5,7 @@ import {
   Brain,
   BookOpen,
   ListTodo,
+  MonitorSmartphone,
   MessageSquare,
   Plug,
   ShieldCheck,
@@ -32,8 +33,8 @@ const { items, groups } = tr.nav;
 
 /**
  * The grouped shell navigation (Phase 4 branch 3). Voice ("Sesli") is off
- * the nav until Phase 6 -- its route stays. "Cihazlar" (Ayarlar) arrives
- * with the device-trust branch, which owns the /devices route.
+ * the nav until Phase 6 -- its route stays. "Cihazlar" (Ayarlar) is the
+ * device-trust branch's /devices route.
  */
 export const NAV_GROUPS: NavGroup[] = [
   {
@@ -68,7 +69,10 @@ export const NAV_GROUPS: NavGroup[] = [
   {
     id: "settings",
     label: groups.settings,
-    items: [{ href: "/integrations", label: items.integrations, icon: Plug }],
+    items: [
+      { href: "/devices", label: items.devices, icon: MonitorSmartphone },
+      { href: "/integrations", label: items.integrations, icon: Plug },
+    ],
   },
 ];
 
