@@ -1161,7 +1161,7 @@ describe("ChatView", () => {
 
     await renderAndOpen();
     const notice = await screen.findByTestId("tool-request-notice");
-    expect(notice).toHaveTextContent("Araç isteği: vault_export");
+    expect(notice).toHaveTextContent("Araç isteği: Obsidian vault dışa aktarımı");
     expect(within(notice).getByRole("link", { name: "Onaylara git" })).toHaveAttribute(
       "href",
       "/approvals?workspace=w1",

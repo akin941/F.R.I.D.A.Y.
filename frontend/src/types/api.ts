@@ -343,21 +343,40 @@ export interface ApiHarnessPushDisplaySummary {
   review: { verdict: string; summary: string } | null;
 }
 
+// purge_trash (ADR-009, gate-class permanent delete of trashed rows).
+export interface ApiPurgeTrashDisplaySummary {
+  kind: "purge_trash";
+  task_count: number;
+  document_count: number;
+  // First few titles of the named rows (truncated server-side).
+  titles: string[];
+}
+
 export type ApiDisplaySummary =
   | ApiHarnessImplementDisplaySummary
   | ApiHarnessPushDisplaySummary
+  | ApiPurgeTrashDisplaySummary
   | null;
+
+export type ApprovalOrigin = "human" | "agent" | "harness";
+
+export type ApprovalRequestedChannel = "web" | "cli" | "telegram" | "system" | "unknown";
 
 export interface ApiApprovalRequest {
   id: string;
   workspace: string;
   tool_name: string;
   status: ApprovalStatus;
+  // Optional: absent on responses from a backend predating these fields.
+  origin?: ApprovalOrigin;
+  requested_channel?: ApprovalRequestedChannel;
   requested_by: string | null;
   decided_by: string | null;
   decided_at: string | null;
   created_at: string;
   updated_at: string;
+  // When a pending request stops being decidable (null once decided).
+  expires_at?: string | null;
   // `payload` is deliberately never included (approvals/serializers.py).
   // Each tool registers its own `execution` shape (or none -- `null`),
   // keyed on `tool_name`: vault_export -> ApiVaultExportExecution,

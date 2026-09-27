@@ -3,6 +3,8 @@ import type {
   AgentStatus,
   AgentStepKind,
   AgentStepStatus,
+  ApprovalOrigin,
+  ApprovalRequestedChannel,
   ApprovalStatus,
   HarnessAgent,
   HarnessJobStatus,
@@ -617,22 +619,107 @@ export const tr = {
     toolTitles: {
       harness_implement: "Uygulama planı onayı (Kapı A)",
       harness_push: "Gönderim onayı (Kapı B)",
+      vault_export: "Obsidian vault dışa aktarımı",
+      purge_trash: "Çöp kutusundan kalıcı silme",
     } as Record<string, string>,
+    // What deciding means, stated in the decision dialog (per-tool
+    // renderers, components/approvals/renderers/).
     consequence: {
       harness_implement: {
         approve:
           "Onaylarsan ajan bu plana göre ayrı bir çalışma ağacında değişiklik yapmaya başlar. Dal, ayrı bir gönderim onayı (Kapı B) olmadan uzak depoya gönderilmez.",
+        approveWith: (branch: string, repo: string) =>
+          `Onaylarsan ajan “${repo}” deposunda, ayrı bir çalışma ağacında “${branch}” dalı üzerinde değişiklik yapmaya başlar. Dal, ayrı bir gönderim onayı (Kapı B) olmadan uzak depoya gönderilmez.`,
         reject:
           "Reddedersen uygulama işi başarısız olarak kapanır; depoda hiçbir değişiklik yapılmaz.",
       },
       harness_push: {
         approve: "Onaylarsan bu dal uzak depoya gönderilir (push). Gönderim geri alınamaz.",
+        approveWith: (branch: string) =>
+          `Onaylarsan “${branch}” dalı kayıtlı uzak depoya gönderilir (push). Gönderim geri alınamaz.`,
         reject: "Reddedersen değişiklikler gönderilmez ve uygulama işi başarısız olarak kapanır.",
+      },
+      vault_export: {
+        approve:
+          "Onaylarsan bu çalışma alanının onaylı hafıza kayıtları Obsidian vault'a (dosya sistemine) yazılır; özel kayıtlar yalnızca _private altına gider.",
+        reject: "Reddedersen dışa aktarma çalışmaz; vault'a hiçbir şey yazılmaz.",
+      },
+      purge_trash: {
+        approve: "Onaylarsan çöp kutusundaki bu öğeler kalıcı olarak silinir. Bu işlem geri alınamaz.",
+        approveWith: (tasks: number, documents: number) =>
+          `Onaylarsan çöp kutusundaki ${tasks} görev ve ${documents} belge kalıcı olarak silinir. Bu işlem geri alınamaz; bu arada geri yüklenen öğeler silinmez.`,
+        reject:
+          "Reddedersen öğeler çöp kutusunda kalır; saklama süresi dolunca yine otomatik olarak silinir.",
       },
       generic: {
         approve: "Onaylarsan bu istek çalıştırılır.",
         reject: "Reddedersen bu istek çalıştırılmaz.",
       },
+    },
+    noSummary: "Bu istek için özet bilgisi yok.",
+    purgeSummary: (tasks: number, documents: number) =>
+      `Kalıcı olarak silinecek: ${tasks} görev, ${documents} belge`,
+    more: (count: number) => `+${count} daha`,
+    openJob: "Uygulama işini aç",
+    origin: {
+      human: "İnsan",
+      agent: "Ajan",
+      harness: "Harness",
+    } satisfies Record<ApprovalOrigin, string> as Record<string, string>,
+    channel: {
+      web: "Web",
+      cli: "CLI",
+      telegram: "Telegram",
+      system: "Sistem",
+      unknown: "Bilinmiyor",
+    } satisfies Record<ApprovalRequestedChannel, string> as Record<string, string>,
+    inbox: {
+      title: "Onaylar",
+      description:
+        "Tüm firmalarındaki, insan kararı gerektiren yazma/silme/dağıtım/dışa-gönderme istekleri. Karar yalnızca bu web oturumundan verilir.",
+      pending: "Bekleyenler",
+      noPending: "Karar bekleyen bir şey yok.",
+      history: "Karara bağlananlar",
+      noHistory: "Bu filtrelere uyan karara bağlanmış istek yok.",
+      loadFailed: "Onay istekleri yüklenemedi.",
+      filters: "Filtreler",
+      statusFilter: "Durum filtresi",
+      toolFilter: "Araç filtresi",
+      workspaceFilter: "Çalışma alanı filtresi",
+      originFilter: "Kaynak filtresi",
+      channelFilter: "Kanal filtresi",
+      allStatuses: "Tüm durumlar",
+      allTools: "Tüm araçlar",
+      allWorkspaces: "Tüm çalışma alanları",
+      allOrigins: "Tüm kaynaklar",
+      allChannels: "Tüm kanallar",
+      clearFilters: "Filtreleri temizle",
+      unknownWorkspace: "Bilinmeyen çalışma alanı",
+      shortcuts:
+        "Klavye: j / k istekler arasında gezinir, Enter ayrıntıyı açar. Onay ya da ret için tek tuş kısayolu yoktur.",
+      details: "Ayrıntılar",
+    },
+    meta: {
+      requested: (when: string) => `İstendi ${when}`,
+      decided: (when: string) => `Karara bağlandı ${when}`,
+      via: (origin: string, channel: string) => `Kaynak: ${origin} · Kanal: ${channel}`,
+      expiresIn: (remaining: string) => `Karar için kalan süre: ${remaining}`,
+      expiredNow: "Süresi doldu — artık karar verilemez.",
+    },
+    detail: {
+      back: "Onaylara dön",
+      loadFailed: "Bu onay isteği yüklenemedi.",
+    },
+    decision: {
+      approve: "Onayla",
+      reject: "Reddet",
+      approveTitle: "Bu istek onaylansın mı?",
+      rejectTitle: "Bu istek reddedilsin mi?",
+      approveConfirm: "Evet, onayla",
+      rejectConfirm: "Evet, reddet",
+      busy: "Gönderiliyor…",
+      failed: "İşlem tamamlanamadı.",
+      subject: (title: string, workspace: string) => `${title} — ${workspace}`,
     },
   },
   memory: {
