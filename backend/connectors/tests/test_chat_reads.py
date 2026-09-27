@@ -477,3 +477,29 @@ def test_no_credential_value_anywhere(
     assert CREDENTIAL_CANARY not in dumped
     assert CREDENTIAL_CANARY not in caplog.text
     assert all(CREDENTIAL_CANARY not in json.dumps(r) for r in server.http_requests)
+
+
+def test_a_provider_failure_during_argument_extraction_is_the_gateway_error(
+    fake_manifest,
+    workspace,
+    owner,
+    enable,
+    server,
+    local_provider,
+    route,
+    conversation,
+    web_client,
+    monkeypatch,
+):
+    from ai_core.exceptions import GatewayError
+
+    enable(fake_manifest, workspace)
+    route("fake_search", {"query": "q"})
+
+    def timeout(*args, **kwargs):
+        raise GatewayError("timeout")
+
+    monkeypatch.setattr(assistant_services, "_extract_connector_args", timeout)
+    events = _post(web_client(owner), conversation)
+    assert events == [{"type": "error", "error_type": "timeout"}]
+    assert server.calls == []

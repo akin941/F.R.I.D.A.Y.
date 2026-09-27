@@ -506,7 +506,11 @@ def prepare_connector_read(conversation, *, actor, content, channel, tool_name):
                 error_type=CONNECTOR_ERROR_LOCAL_MODEL_REQUIRED,
             )
         return ConnectorTurn(tool_name=tool_name, outcome=exc.error_type, error_type=exc.error_type)
-    except (GatewayError, ConnectorArgsParseError):
+    except GatewayError as exc:
+        # A provider failure (timeout, rate limit, ...) is not the owner's
+        # wording: surface the gateway's own error type, like a chat turn.
+        return ConnectorTurn(tool_name=tool_name, outcome=exc.error_type, error_type=exc.error_type)
+    except ConnectorArgsParseError:
         return ConnectorTurn(
             tool_name=tool_name,
             outcome="invalid_arguments",
