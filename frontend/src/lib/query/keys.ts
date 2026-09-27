@@ -22,6 +22,9 @@ export const queryKeys = {
   implementationJob: (workspaceId: string, jobId: string) =>
     [workspaceId, "harness", "implementation-jobs", jobId] as const,
   approvals: (workspaceId: string) => [workspaceId, "approvals"] as const,
+  conversations: (workspaceId: string) => [workspaceId, "conversations"] as const,
+  messages: (workspaceId: string, conversationId: string) =>
+    [workspaceId, "conversations", conversationId, "messages"] as const,
   telegramLinkStatus: (workspaceId: string) =>
     [workspaceId, "integrations", "telegram", "link-status"] as const,
   activitySummary: () => [ALL_WORKSPACES, "activity", "summary"] as const,
