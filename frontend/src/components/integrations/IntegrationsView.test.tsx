@@ -21,6 +21,7 @@ function token(overrides: Partial<ApiPersonalAccessToken> = {}): ApiPersonalAcce
   return {
     id: "t1",
     name: "laptop cli",
+    kind: "cli",
     workspace: "w1",
     last_used_at: null,
     revoked_at: null,
@@ -175,6 +176,7 @@ describe("IntegrationsView", () => {
     expect(JSON.parse(postCall![1]!.body as string)).toEqual({
       workspace: "w1",
       name: "short",
+      kind: "cli",
       expires_in_days: 30,
     });
   });
@@ -233,5 +235,67 @@ describe("IntegrationsView", () => {
       expect(screen.getByText(/İptal edildi/)).toBeInTheDocument();
     });
     expect(screen.queryByRole("button", { name: "İptal et" })).not.toBeInTheDocument();
+  });
+
+  it("mints an OpenAI-compatible token and shows its Open WebUI setup", async () => {
+    Object.assign(navigator, { clipboard: { writeText: vi.fn().mockResolvedValue(undefined) } });
+    const created = {
+      ...token({ id: "o1", name: "open webui", kind: "openai" }),
+      token: "jpat_openai_raw",
+    };
+    const fetchMock = fetchRouter({
+      "GET /api/auth/tokens": () => jsonResponse([]),
+      "POST /api/auth/tokens": () => jsonResponse(created, 201),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderWithClient(<IntegrationsView />);
+    await screen.findByText("Henüz kişisel erişim token'ı yok.");
+    await userEvent.click(screen.getByRole("button", { name: "Yeni token" }));
+    await userEvent.type(screen.getByLabelText("İsim"), "open webui");
+    await userEvent.click(screen.getByRole("combobox", { name: "Token türü" }));
+    await userEvent.click(await screen.findByRole("option", { name: "OpenAI uyumlu istemci" }));
+    expect(screen.getByText(/yalnızca sohbet, araç ve onay yok/)).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("combobox", { name: "Token çalışma alanı" }));
+    await userEvent.click(await screen.findByRole("option", { name: "Alice" }));
+    await userEvent.click(screen.getByRole("button", { name: "Token oluştur" }));
+
+    const setup = await screen.findByLabelText("Open WebUI kurulum bilgisi");
+    expect(setup.textContent).toContain(`API Base URL: ${window.location.origin}/v1`);
+    expect(setup.textContent).toContain("API Key: jpat_openai_raw");
+    expect(setup.textContent).toContain("jarvis-lite");
+    await userEvent.click(screen.getByRole("button", { name: "Kurulum bilgisini kopyala" }));
+    expect(navigator.clipboard.writeText).toHaveBeenCalledWith(setup.textContent);
+
+    const postCall = fetchMock.mock.calls.find(([, init]) => init?.method === "POST");
+    expect(JSON.parse(postCall![1]!.body as string).kind).toBe("openai");
+    // The list row shows the kind; the raw token still appears only in the banner.
+    expect(await screen.findByText("open webui")).toBeInTheDocument();
+    expect(screen.getAllByText("OpenAI uyumlu istemci").length).toBeGreaterThan(0);
+
+    await userEvent.click(screen.getByRole("button", { name: "Tamam" }));
+    expect(screen.queryByLabelText("Open WebUI kurulum bilgisi")).not.toBeInTheDocument();
+  });
+
+  it("shows no setup snippet for a CLI token", async () => {
+    const created = { ...token({ id: "c1", name: "cli" }), token: "jpat_cli_raw" };
+    vi.stubGlobal(
+      "fetch",
+      fetchRouter({
+        "GET /api/auth/tokens": () => jsonResponse([]),
+        "POST /api/auth/tokens": () => jsonResponse(created, 201),
+      }),
+    );
+
+    renderWithClient(<IntegrationsView />);
+    await screen.findByText("Henüz kişisel erişim token'ı yok.");
+    await userEvent.click(screen.getByRole("button", { name: "Yeni token" }));
+    await userEvent.type(screen.getByLabelText("İsim"), "cli");
+    await userEvent.click(screen.getByRole("combobox", { name: "Token çalışma alanı" }));
+    await userEvent.click(await screen.findByRole("option", { name: "Alice" }));
+    await userEvent.click(screen.getByRole("button", { name: "Token oluştur" }));
+
+    await screen.findByText("jpat_cli_raw");
+    expect(screen.queryByLabelText("Open WebUI kurulum bilgisi")).not.toBeInTheDocument();
   });
 });

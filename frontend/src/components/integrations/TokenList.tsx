@@ -4,8 +4,10 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
 import { apiPostJson, errorMessage } from "@/lib/api-client";
 import { useWorkspace } from "@/contexts/workspace-context";
+import { tr } from "@/lib/i18n/tr";
 import type { ApiPersonalAccessToken } from "@/types/api";
 
 function TokenRow({
@@ -42,7 +44,10 @@ function TokenRow({
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="text-base">{token.name}</CardTitle>
+        <CardTitle className="flex flex-wrap items-center gap-2 text-base">
+          {token.name}
+          <Badge variant="outline">{tr.token.kind[token.kind] ?? token.kind}</Badge>
+        </CardTitle>
       </CardHeader>
       <CardContent className="flex flex-col gap-2">
         {error ? (

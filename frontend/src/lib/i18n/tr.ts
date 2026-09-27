@@ -13,6 +13,7 @@ import type {
   KnowledgeStatus,
   MessageChannel,
   MemorySensitivity,
+  PatKind,
   MemoryStatus,
   MemoryType,
   TaskPriority,
@@ -493,5 +494,16 @@ export const tr = {
       normal: "Normal",
       high: "Yüksek",
     } satisfies Record<TaskPriority, string>,
+  },
+  token: {
+    kind: {
+      cli: "CLI",
+      openai: "OpenAI uyumlu istemci",
+    } satisfies Record<PatKind, string>,
+    kindHint: {
+      cli: "Jarvis komut satırı (jarvis CLI) için.",
+      openai:
+        "Open WebUI gibi OpenAI uyumlu istemciler için: yalnızca sohbet, araç ve onay yok. CLI uç noktalarında çalışmaz.",
+    } satisfies Record<PatKind, string>,
   },
 } as const;
