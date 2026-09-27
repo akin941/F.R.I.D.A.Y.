@@ -48,14 +48,13 @@ def test_record_audit_rejects_secret_metadata(user):
 # --- request id correlation ---
 
 
-def test_request_id_recorded_during_request(settings):
-    settings.SIGNUP_ENABLED = True
+def test_request_id_recorded_during_request():
     APIClient().post(
-        "/api/v1/auth/signup",
-        {"email": "rid@test.dev", "password": PASSWORD, "name": "R"},
+        "/api/v1/auth/enroll",
+        {"code": "not-a-code", "device_name": "R"},
         headers={"X-Request-ID": "rid-fixed-123"},
     )
-    entry = AuditLog.objects.get(action="user.signup")
+    entry = AuditLog.objects.get(action="accounts.device.enroll_failed")
     assert entry.request_id == "rid-fixed-123"
 
 
@@ -87,12 +86,8 @@ def test_auditlog_delete_is_rejected(user):
 # --- wired events ---
 
 
-def test_signup_records_audit_events(settings):
-    settings.SIGNUP_ENABLED = True
-    APIClient().post(
-        "/api/v1/auth/signup",
-        {"email": "new@test.dev", "password": PASSWORD, "name": "New"},
-    )
+def test_register_user_records_audit_events():
+    register_user(email="new@test.dev", password=PASSWORD, name="New")
     signup_entry = AuditLog.objects.get(action="user.signup")
     ws_entry = AuditLog.objects.get(action="workspace.created")
     assert signup_entry.actor.email == "new@test.dev"
@@ -106,30 +101,17 @@ def test_ensure_personal_workspace_idempotent_audit(user):
     assert AuditLog.objects.filter(action="workspace.created").count() == 1
 
 
-def test_login_failed_records_audit(user):
+def test_failed_enrollment_records_audit_without_the_code(user):
+    user.is_owner = True
+    user.save()
     response = APIClient().post(
-        "/api/v1/auth/login", {"email": "alice@test.dev", "password": "wrong"}
+        "/api/v1/auth/enroll", {"code": "87654321", "device_name": "x"}, format="json"
     )
-    assert response.status_code == 401
-    entry = AuditLog.objects.get(action="auth.login_failed")
+    assert response.status_code == 400
+    entry = AuditLog.objects.get(action="accounts.device.enroll_failed")
     assert entry.actor is None
-    assert entry.metadata["email"] == "alice@test.dev"
-
-
-def test_login_failed_metadata_has_no_password(user):
-    APIClient().post("/api/v1/auth/login", {"email": "alice@test.dev", "password": "wrong"})
-    entry = AuditLog.objects.get(action="auth.login_failed")
-    flat = str(entry.metadata).lower()
-    assert "wrong" not in flat
-    assert "password" not in entry.metadata
-
-
-def test_successful_login_not_broken(user):
-    response = APIClient().post(
-        "/api/v1/auth/login", {"email": "alice@test.dev", "password": PASSWORD}
-    )
-    assert response.status_code == 200
-    assert "access" in response.data
+    assert entry.metadata["kind"] == "pin"
+    assert "87654321" not in str(entry.metadata)
 
 
 # --- admin is read-only ---

@@ -54,20 +54,20 @@ services:
       # request time) but only `worker` actually has anything bind-mounted
       # at this path (tier 2 -- see worker.volumes below).
       OBSIDIAN_VAULT_PATH: /vault
-      # Single-owner system (ADR-008): signup is off by default in the
-      # daily stack; the owner account comes from `manage.py
-      # bootstrap_owner`. The Playwright e2e smoke still signs up a fresh
-      # user each run (until Phase 4's device-trust identity), so `make
-      # test-e2e` requires SIGNUP_ENABLED=true (e.g. in the gitignored
-      # deploy/docker/.env for that run).
-      SIGNUP_ENABLED: "${SIGNUP_ENABLED:-false}"
+      # Device trust (Phase 4 branch 2): no signup, no password login. The
+      # owner comes from `manage.py bootstrap_owner`, devices enroll at
+      # /enroll with `manage.py issue_pairing_code`. The dev frontend runs
+      # on the host (`npm run dev`) without a trusted proxy, so PINs are
+      # accepted with LAN gating off (dev settings default). The shared BFF
+      # key is only used by the daily stack's frontend container.
+      JARVIS_BFF_SHARED_SECRET: "${JARVIS_BFF_SHARED_SECRET:-}"
       # Real values from deploy/docker/.env, empty by default (the webhook
       # then rejects everything, fail closed). A `make test-e2e` run against
-      # this stack needs the e2e fixture values instead -- they live, with
-      # SIGNUP_ENABLED=true, in the commented "e2e run" block of
-      # deploy/docker/.env.example, never as committed defaults here: a
-      # publicly known webhook secret on the daily stack would let anyone
-      # who can reach it inject Telegram updates.
+      # this stack needs the e2e fixture values instead -- they live in the
+      # commented "e2e run" block of deploy/docker/.env.example, never as
+      # committed defaults here: a publicly known webhook secret on the
+      # daily stack would let anyone who can reach it inject Telegram
+      # updates.
       TELEGRAM_BOT_TOKEN: "${TELEGRAM_BOT_TOKEN:-}"
       TELEGRAM_WEBHOOK_SECRET: "${TELEGRAM_WEBHOOK_SECRET:-}"
     depends_on:

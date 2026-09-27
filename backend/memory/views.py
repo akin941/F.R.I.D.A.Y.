@@ -6,6 +6,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from core.permissions import IsWebChannel
 from memory.models import Memory
 from memory.serializers import MemoryCreateSerializer, MemoryCurateSerializer, MemorySerializer
 from memory.services import (
@@ -109,7 +110,7 @@ class MemoryListCreateView(APIView):
 
 
 class MemoryDetailView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, IsWebChannel]
 
     def _get_memory(self, request, memory_id):
         # Out-of-scope rows → 404, never 403 (existence must not leak).

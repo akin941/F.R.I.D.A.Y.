@@ -8,6 +8,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from assistant.models import Message
+from core.permissions import IsWebChannel
 from tasks.models import Task
 from tasks.serializers import TaskCreateSerializer, TaskEditSerializer, TaskSerializer
 from tasks.services import (
@@ -176,7 +177,7 @@ class TaskListCreateView(APIView):
 
 
 class TaskDetailView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, IsWebChannel]
 
     def _get_task(self, request, task_id):
         # Out-of-scope rows -> 404, never 403 (existence must not leak).

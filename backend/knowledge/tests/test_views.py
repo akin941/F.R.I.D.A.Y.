@@ -38,12 +38,6 @@ def outsider():
     return register_user(email="outsider@test.dev", password=PASSWORD, name="Outsider")
 
 
-def client_for(user):
-    client = APIClient()
-    client.force_authenticate(user=user)
-    return client
-
-
 def user_with_role(workspace, role, email):
     user = register_user(email=email, password=PASSWORD, name=role)
     WorkspaceMember.objects.create(workspace=workspace, user=user, role=role)
@@ -66,17 +60,17 @@ class TestListView:
         response = APIClient().get("/api/v1/knowledge/documents", {"workspace": str(workspace.id)})
         assert response.status_code == 401
 
-    def test_requires_workspace_param(self, owner):
-        assert client_for(owner).get("/api/v1/knowledge/documents").status_code == 400
+    def test_requires_workspace_param(self, owner, web_client):
+        assert web_client(owner).get("/api/v1/knowledge/documents").status_code == 400
 
-    def test_out_of_scope_workspace_is_404(self, workspace, outsider):
-        response = client_for(outsider).get(
+    def test_out_of_scope_workspace_is_404(self, workspace, outsider, web_client):
+        response = web_client(outsider).get(
             "/api/v1/knowledge/documents", {"workspace": str(workspace.id)}
         )
         assert response.status_code == 404
 
-    def test_list_filters_by_status_and_audits(self, workspace, owner):
-        client = client_for(owner)
+    def test_list_filters_by_status_and_audits(self, workspace, owner, web_client):
+        client = web_client(owner)
         created = client.post(
             "/api/v1/knowledge/documents/pasted-text",
             pasted_text_payload(workspace),
@@ -91,16 +85,16 @@ class TestListView:
         assert entry.metadata["count"] == 1
         assert entry.metadata["document_ids"] == [created["id"]]
 
-    def test_invalid_status_filter_is_400(self, workspace, owner):
-        response = client_for(owner).get(
+    def test_invalid_status_filter_is_400(self, workspace, owner, web_client):
+        response = web_client(owner).get(
             "/api/v1/knowledge/documents", {"workspace": str(workspace.id), "status": "bogus"}
         )
         assert response.status_code == 400
 
 
 class TestPastedTextCreate:
-    def test_create_populates_chunks_unembedded_and_pending(self, workspace, owner):
-        response = client_for(owner).post(
+    def test_create_populates_chunks_unembedded_and_pending(self, workspace, owner, web_client):
+        response = web_client(owner).post(
             "/api/v1/knowledge/documents/pasted-text",
             pasted_text_payload(workspace, content="Sentence one. Sentence two."),
             format="json",
@@ -114,8 +108,8 @@ class TestPastedTextCreate:
         assert len(chunks) >= 1
         assert all(c.embedding is None for c in chunks)
 
-    def test_ignores_client_supplied_server_fields(self, workspace, owner):
-        response = client_for(owner).post(
+    def test_ignores_client_supplied_server_fields(self, workspace, owner, web_client):
+        response = web_client(owner).post(
             "/api/v1/knowledge/documents/pasted-text",
             {
                 **pasted_text_payload(workspace),
@@ -129,8 +123,8 @@ class TestPastedTextCreate:
         assert body["status"] == "pending"
         assert body["created_by"] == str(owner.id)
 
-    def test_duplicate_content_hash_is_400(self, workspace, owner):
-        client = client_for(owner)
+    def test_duplicate_content_hash_is_400(self, workspace, owner, web_client):
+        client = web_client(owner)
         payload = pasted_text_payload(workspace, content="Exact duplicate text.")
         assert (
             client.post(
@@ -145,17 +139,17 @@ class TestPastedTextCreate:
         )
         assert response.status_code == 400
 
-    def test_empty_content_is_400(self, workspace, owner):
-        response = client_for(owner).post(
+    def test_empty_content_is_400(self, workspace, owner, web_client):
+        response = web_client(owner).post(
             "/api/v1/knowledge/documents/pasted-text",
             pasted_text_payload(workspace, content="   "),
             format="json",
         )
         assert response.status_code == 400
 
-    def test_oversized_content_is_400(self, workspace, owner, settings):
+    def test_oversized_content_is_400(self, workspace, owner, settings, web_client):
         settings.KNOWLEDGE_MAX_UPLOAD_BYTES = 10
-        response = client_for(owner).post(
+        response = web_client(owner).post(
             "/api/v1/knowledge/documents/pasted-text",
             pasted_text_payload(workspace, content="x" * 100),
             format="json",
@@ -163,7 +157,9 @@ class TestPastedTextCreate:
         assert response.status_code == 400
         assert not KnowledgeDocument.objects.exists()
 
-    def test_escaped_non_ascii_content_within_limit_is_not_falsely_rejected(self, workspace, owner):
+    def test_escaped_non_ascii_content_within_limit_is_not_falsely_rejected(
+        self, workspace, owner, web_client
+    ):
         """Round-5 Codex review finding: an earlier Content-Length pre-check
         used a fixed JSON-escaping-overhead allowance, but \\uXXXX-escaped
         emoji/Unicode content can expand 3-6x on the wire relative to its
@@ -172,7 +168,7 @@ class TestPastedTextCreate:
         pre-parse guard on this endpoint anymore (see the view's docstring);
         only the decoded-content check in the service applies."""
         content = "Emoji stress test: " + "😀🎉🚀✨💡" * 200  # well under 1MB decoded
-        response = client_for(owner).post(
+        response = web_client(owner).post(
             "/api/v1/knowledge/documents/pasted-text",
             pasted_text_payload(workspace, content=content),
             format="json",
@@ -180,7 +176,7 @@ class TestPastedTextCreate:
         assert response.status_code == 201
 
     def test_near_cap_non_ascii_content_is_not_rejected_by_djangos_body_limit(
-        self, workspace, owner
+        self, workspace, owner, web_client
     ):
         """Round-6 Codex review finding: ~450k 'é' characters decode to ~900KB
         (under KNOWLEDGE_MAX_UPLOAD_BYTES) but ~2.7MB once JSON-escaped on the
@@ -189,20 +185,20 @@ class TestPastedTextCreate:
         DATA_UPLOAD_MAX_MEMORY_SIZE is now scaled off KNOWLEDGE_MAX_UPLOAD_BYTES
         in settings to give this legitimate, under-cap document headroom."""
         content = "é" * 440_000  # ~880KB decoded UTF-8, ~2.7MB JSON-escaped
-        response = client_for(owner).post(
+        response = web_client(owner).post(
             "/api/v1/knowledge/documents/pasted-text",
             pasted_text_payload(workspace, content=content),
             format="json",
         )
         assert response.status_code == 201
 
-    def test_content_containing_nul_byte_is_400_not_500(self, workspace, owner):
+    def test_content_containing_nul_byte_is_400_not_500(self, workspace, owner, web_client):
         """Round-7 Codex review finding: a JSON string can carry a \\u0000
         escape through to a Python str with no decode error, but PostgreSQL
         text columns cannot store a NUL byte — without an explicit check,
         this reaches the INSERT and fails as a 500 instead of a clean,
         intended 400."""
-        response = client_for(owner).post(
+        response = web_client(owner).post(
             "/api/v1/knowledge/documents/pasted-text",
             pasted_text_payload(workspace, content="before\x00after"),
             format="json",
@@ -210,8 +206,8 @@ class TestPastedTextCreate:
         assert response.status_code == 400
         assert not KnowledgeDocument.objects.exists()
 
-    def test_create_is_audited(self, workspace, owner):
-        client_for(owner).post(
+    def test_create_is_audited(self, workspace, owner, web_client):
+        web_client(owner).post(
             "/api/v1/knowledge/documents/pasted-text",
             pasted_text_payload(workspace),
             format="json",
@@ -233,30 +229,30 @@ class TestFileUploadCreate:
         payload.update(extra)
         return client.post("/api/v1/knowledge/documents/file-upload", payload, format="multipart")
 
-    def test_valid_text_file_creates_document(self, workspace, owner):
-        response = self._upload(client_for(owner), workspace)
+    def test_valid_text_file_creates_document(self, workspace, owner, web_client):
+        response = self._upload(web_client(owner), workspace)
         assert response.status_code == 201
         body = response.json()
         assert body["source_type"] == "file_upload"
         assert body["mime_type"] == "text/plain"
 
-    def test_oversized_file_is_400(self, workspace, owner, settings):
+    def test_oversized_file_is_400(self, workspace, owner, settings, web_client):
         settings.KNOWLEDGE_MAX_UPLOAD_BYTES = 10
-        response = self._upload(client_for(owner), workspace, content=b"x" * 100)
+        response = self._upload(web_client(owner), workspace, content=b"x" * 100)
         assert response.status_code == 400
 
-    def test_disallowed_mime_type_is_400(self, workspace, owner):
+    def test_disallowed_mime_type_is_400(self, workspace, owner, web_client):
         response = self._upload(
-            client_for(owner), workspace, filename="doc.png", content=b"\x89PNG\r\n"
+            web_client(owner), workspace, filename="doc.png", content=b"\x89PNG\r\n"
         )
         assert response.status_code == 400
 
-    def test_file_containing_nul_byte_is_400_not_500(self, workspace, owner):
+    def test_file_containing_nul_byte_is_400_not_500(self, workspace, owner, web_client):
         """Round-7 Codex review finding: a NUL byte survives UTF-8 decoding
         but PostgreSQL text columns cannot store one — without an explicit
         check, this reaches the INSERT and fails as a 500 instead of a
         clean, intended 400."""
-        response = self._upload(client_for(owner), workspace, content=b"before\x00after")
+        response = self._upload(web_client(owner), workspace, content=b"before\x00after")
         assert response.status_code == 400
         assert not KnowledgeDocument.objects.exists()
 
@@ -269,8 +265,8 @@ class TestUrlCreate:
     (see knowledge/tests/test_jobs.py's identical note) — no network-call
     risk from this file."""
 
-    def test_creates_pending_document(self, workspace, owner):
-        response = client_for(owner).post(
+    def test_creates_pending_document(self, workspace, owner, web_client):
+        response = web_client(owner).post(
             "/api/v1/knowledge/documents/url",
             {
                 "workspace": str(workspace.id),
@@ -286,8 +282,8 @@ class TestUrlCreate:
         assert body["status"] == "pending"
         assert body["source_url"] == "https://example.com/article"
 
-    def test_disallowed_scheme_is_400(self, workspace, owner):
-        response = client_for(owner).post(
+    def test_disallowed_scheme_is_400(self, workspace, owner, web_client):
+        response = web_client(owner).post(
             "/api/v1/knowledge/documents/url",
             {
                 "workspace": str(workspace.id),
@@ -300,12 +296,12 @@ class TestUrlCreate:
         assert response.status_code == 400
         assert not KnowledgeDocument.objects.exists()
 
-    def test_embedded_credentials_are_rejected(self, workspace, owner):
+    def test_embedded_credentials_are_rejected(self, workspace, owner, web_client):
         """Round-6 Codex review finding: a pasted `user:token@host` URL
         would otherwise be stored verbatim in `source_url` and exposed to
         every workspace reader via the document serializer — the fetcher
         itself never reads userinfo, so persisting it buys nothing."""
-        response = client_for(owner).post(
+        response = web_client(owner).post(
             "/api/v1/knowledge/documents/url",
             {
                 "workspace": str(workspace.id),
@@ -318,13 +314,13 @@ class TestUrlCreate:
         assert response.status_code == 400
         assert not KnowledgeDocument.objects.exists()
 
-    def test_url_fragment_is_rejected(self, workspace, owner):
+    def test_url_fragment_is_rejected(self, workspace, owner, web_client):
         """Round-9 Codex review finding: same credential-leak shape as
         userinfo above, different carrier — a fragment (e.g. an OAuth
         implicit-flow `#access_token=...`) is never sent to the server by
         any HTTP client, so persisting it in `source_url` only exposes it
         verbatim to every workspace reader."""
-        response = client_for(owner).post(
+        response = web_client(owner).post(
             "/api/v1/knowledge/documents/url",
             {
                 "workspace": str(workspace.id),
@@ -337,8 +333,8 @@ class TestUrlCreate:
         assert response.status_code == 400
         assert not KnowledgeDocument.objects.exists()
 
-    def test_create_is_audited(self, workspace, owner):
-        client_for(owner).post(
+    def test_create_is_audited(self, workspace, owner, web_client):
+        web_client(owner).post(
             "/api/v1/knowledge/documents/url",
             {
                 "workspace": str(workspace.id),
@@ -408,14 +404,14 @@ class TestPermissionMatrix:
     """Role × endpoint matrix (CLAUDE.md rule 7)."""
 
     @pytest.mark.parametrize("role", ROLES)
-    def test_all_roles_can_read(self, workspace, owner, role):
-        client_for(owner).post(
+    def test_all_roles_can_read(self, workspace, owner, role, web_client):
+        web_client(owner).post(
             "/api/v1/knowledge/documents/pasted-text",
             pasted_text_payload(workspace),
             format="json",
         )
         user = user_with_role(workspace, role, f"role-{role}@test.dev")
-        response = client_for(user).get(
+        response = web_client(user).get(
             "/api/v1/knowledge/documents", {"workspace": str(workspace.id)}
         )
         assert response.status_code == 200
@@ -430,9 +426,9 @@ class TestPermissionMatrix:
             (WorkspaceMember.Role.VIEWER, 403),
         ],
     )
-    def test_upload(self, workspace, role, expected):
+    def test_upload(self, workspace, role, expected, web_client):
         user = user_with_role(workspace, role, f"role-{role}@test.dev")
-        response = client_for(user).post(
+        response = web_client(user).post(
             "/api/v1/knowledge/documents/pasted-text",
             pasted_text_payload(workspace),
             format="json",
@@ -448,7 +444,7 @@ class TestPermissionMatrix:
             (WorkspaceMember.Role.VIEWER, 403),
         ],
     )
-    def test_file_upload(self, workspace, role, expected):
+    def test_file_upload(self, workspace, role, expected, web_client):
         """The file-upload endpoint is its own API surface (own URL, own
         view class) and needs its own role x endpoint coverage — it isn't
         exercised by test_upload above, which only hits pasted-text (review
@@ -461,7 +457,7 @@ class TestPermissionMatrix:
             "sensitivity": "normal",
         }
         payload["file"].name = "doc.txt"
-        response = client_for(user).post(
+        response = web_client(user).post(
             "/api/v1/knowledge/documents/file-upload", payload, format="multipart"
         )
         assert response.status_code == expected
@@ -475,11 +471,11 @@ class TestPermissionMatrix:
             (WorkspaceMember.Role.VIEWER, 403),
         ],
     )
-    def test_url(self, workspace, role, expected):
+    def test_url(self, workspace, role, expected, web_client):
         """The url endpoint is its own API surface too — needs its own
         role x endpoint coverage, same rationale as test_file_upload above."""
         user = user_with_role(workspace, role, f"role-{role}@test.dev")
-        response = client_for(user).post(
+        response = web_client(user).post(
             "/api/v1/knowledge/documents/url",
             {
                 "workspace": str(workspace.id),
@@ -500,9 +496,9 @@ class TestPermissionMatrix:
             (WorkspaceMember.Role.VIEWER, 403),
         ],
     )
-    def test_delete_foreign_upload(self, workspace, owner, role, expected):
+    def test_delete_foreign_upload(self, workspace, owner, role, expected, web_client):
         created = (
-            client_for(owner)
+            web_client(owner)
             .post(
                 "/api/v1/knowledge/documents/pasted-text",
                 pasted_text_payload(workspace),
@@ -511,13 +507,13 @@ class TestPermissionMatrix:
             .json()
         )
         user = user_with_role(workspace, role, f"role-{role}@test.dev")
-        response = client_for(user).delete(f"/api/v1/knowledge/documents/{created['id']}")
+        response = web_client(user).delete(f"/api/v1/knowledge/documents/{created['id']}")
         assert response.status_code == expected
 
-    def test_member_deletes_own_upload(self, workspace):
+    def test_member_deletes_own_upload(self, workspace, web_client):
         member = user_with_role(workspace, WorkspaceMember.Role.MEMBER, "m@test.dev")
         created = (
-            client_for(member)
+            web_client(member)
             .post(
                 "/api/v1/knowledge/documents/pasted-text",
                 pasted_text_payload(workspace),
@@ -525,14 +521,14 @@ class TestPermissionMatrix:
             )
             .json()
         )
-        response = client_for(member).delete(f"/api/v1/knowledge/documents/{created['id']}")
+        response = web_client(member).delete(f"/api/v1/knowledge/documents/{created['id']}")
         assert response.status_code == 204
 
 
 class TestDetailView:
-    def test_out_of_scope_detail_is_404_not_403(self, workspace, owner, outsider):
+    def test_out_of_scope_detail_is_404_not_403(self, workspace, owner, outsider, web_client):
         created = (
-            client_for(owner)
+            web_client(owner)
             .post(
                 "/api/v1/knowledge/documents/pasted-text",
                 pasted_text_payload(workspace),
@@ -540,13 +536,13 @@ class TestDetailView:
             )
             .json()
         )
-        client = client_for(outsider)
+        client = web_client(outsider)
         assert client.get(f"/api/v1/knowledge/documents/{created['id']}").status_code == 404
         assert client.delete(f"/api/v1/knowledge/documents/{created['id']}").status_code == 404
 
-    def test_detail_read_is_audited(self, workspace, owner):
+    def test_detail_read_is_audited(self, workspace, owner, web_client):
         created = (
-            client_for(owner)
+            web_client(owner)
             .post(
                 "/api/v1/knowledge/documents/pasted-text",
                 pasted_text_payload(workspace),
@@ -554,13 +550,13 @@ class TestDetailView:
             )
             .json()
         )
-        client_for(owner).get(f"/api/v1/knowledge/documents/{created['id']}")
+        web_client(owner).get(f"/api/v1/knowledge/documents/{created['id']}")
         entry = AuditLog.objects.get(action="knowledge.read")
         assert entry.metadata == {"document_ids": [created["id"]], "count": 1}
 
-    def test_delete_removes_document_and_chunks(self, workspace, owner):
+    def test_delete_removes_document_and_chunks(self, workspace, owner, web_client):
         created = (
-            client_for(owner)
+            web_client(owner)
             .post(
                 "/api/v1/knowledge/documents/pasted-text",
                 pasted_text_payload(workspace),
@@ -570,13 +566,13 @@ class TestDetailView:
         )
         document_id = created["id"]
         assert KnowledgeChunk.objects.filter(document_id=document_id).exists()
-        client_for(owner).delete(f"/api/v1/knowledge/documents/{document_id}")
+        web_client(owner).delete(f"/api/v1/knowledge/documents/{document_id}")
         assert not KnowledgeDocument.objects.filter(id=document_id).exists()
         assert not KnowledgeChunk.objects.filter(document_id=document_id).exists()
 
-    def test_delete_is_audited(self, workspace, owner):
+    def test_delete_is_audited(self, workspace, owner, web_client):
         created = (
-            client_for(owner)
+            web_client(owner)
             .post(
                 "/api/v1/knowledge/documents/pasted-text",
                 pasted_text_payload(workspace),
@@ -584,7 +580,7 @@ class TestDetailView:
             )
             .json()
         )
-        client_for(owner).delete(f"/api/v1/knowledge/documents/{created['id']}")
+        web_client(owner).delete(f"/api/v1/knowledge/documents/{created['id']}")
         entry = AuditLog.objects.get(action="knowledge.deleted")
         assert entry.resource_id == created["id"]
         assert "content" not in entry.metadata

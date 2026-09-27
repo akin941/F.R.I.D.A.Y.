@@ -54,12 +54,6 @@ def pat_client(raw_token):
     return client
 
 
-def auth_client(user):
-    client = APIClient()
-    client.force_authenticate(user=user)
-    return client
-
-
 def make_request(workspace, requested_by=None, **overrides):
     fields = {"workspace": workspace, "tool_name": "some_gated_tool", "requested_by": requested_by}
     fields.update(overrides)
@@ -94,12 +88,17 @@ def test_pat_list_without_workspace_param_succeeds_scoped_to_bound_workspace(
     assert str(response.data[0]["workspace"]) == str(workspace.id)
 
 
-def test_pat_transition_for_request_in_a_different_workspace_returns_404(
-    pat, owner, other_workspace
+def test_pat_transition_for_request_in_a_different_workspace_is_refused_uniformly(
+    pat, owner, workspace, other_workspace
 ):
-    request = make_request(other_workspace, requested_by=owner)
-    response = pat_client(pat).post(f"/api/v1/approvals/requests/{request.id}/approve")
-    assert response.status_code == 404
+    """Since Phase 4 branch 2 IsWebChannel refuses every PAT decision up
+    front -- the same 403 for a foreign request as for one in the bound
+    workspace, so existence still never leaks."""
+    foreign = make_request(other_workspace, requested_by=owner)
+    local = make_request(workspace, requested_by=owner)
+    foreign_response = pat_client(pat).post(f"/api/v1/approvals/requests/{foreign.id}/approve")
+    local_response = pat_client(pat).post(f"/api/v1/approvals/requests/{local.id}/approve")
+    assert foreign_response.status_code == local_response.status_code == 403
 
 
 # --- channel restriction on decisions (the core safety property) ---
@@ -143,7 +142,7 @@ def test_pat_authenticated_curator_cannot_reject(owner, workspace, pat):
     assert request.status == ApprovalRequest.Status.PENDING
 
 
-def test_web_authenticated_curator_decision_is_unaffected(owner, workspace):
+def test_web_authenticated_curator_decision_is_unaffected(owner, workspace, web_client):
     """Regression guard: this MVP must not break the one channel that
     already worked (MVP 5's existing approval flow)."""
     other_admin = register_user(email="admin4@test.dev", password=PASSWORD, name="Admin4")
@@ -152,6 +151,6 @@ def test_web_authenticated_curator_decision_is_unaffected(owner, workspace):
     )
     request = make_request(workspace, requested_by=owner)
 
-    response = auth_client(other_admin).post(f"/api/v1/approvals/requests/{request.id}/approve")
+    response = web_client(other_admin).post(f"/api/v1/approvals/requests/{request.id}/approve")
     assert response.status_code == 200
     assert response.data["status"] == "approved"

@@ -35,12 +35,6 @@ def outsider():
     return register_user(email="outsider@test.dev", password=PASSWORD, name="Outsider")
 
 
-def client_for(user):
-    client = APIClient()
-    client.force_authenticate(user=user)
-    return client
-
-
 def user_with_role(workspace, role, email):
     user = register_user(email=email, password=PASSWORD, name=role)
     WorkspaceMember.objects.create(workspace=workspace, user=user, role=role)
@@ -64,41 +58,41 @@ class TestListCreate:
         response = APIClient().get("/api/v1/tasks", {"workspace": str(workspace.id)})
         assert response.status_code == 401
 
-    def test_requires_workspace_param(self, owner):
-        assert client_for(owner).get("/api/v1/tasks").status_code == 400
+    def test_requires_workspace_param(self, owner, web_client):
+        assert web_client(owner).get("/api/v1/tasks").status_code == 400
 
-    def test_list_filters_by_status(self, workspace, owner):
+    def test_list_filters_by_status(self, workspace, owner, web_client):
         open_task = make_task(workspace)
         make_task(workspace, title="done one", status=Task.Status.DONE)
-        response = client_for(owner).get(
+        response = web_client(owner).get(
             "/api/v1/tasks", {"workspace": str(workspace.id), "status": "open"}
         )
         assert response.status_code == 200
         assert [row["id"] for row in response.json()] == [str(open_task.id)]
 
-    def test_invalid_status_filter_is_400(self, workspace, owner):
-        response = client_for(owner).get(
+    def test_invalid_status_filter_is_400(self, workspace, owner, web_client):
+        response = web_client(owner).get(
             "/api/v1/tasks", {"workspace": str(workspace.id), "status": "bogus"}
         )
         assert response.status_code == 400
 
-    def test_due_date_filters(self, workspace, owner):
+    def test_due_date_filters(self, workspace, owner, web_client):
         today_task = make_task(workspace, title="today", due_date="2026-07-08")
         make_task(workspace, title="future", due_date="2026-08-01")
         make_task(workspace, title="undated")
-        response = client_for(owner).get(
+        response = web_client(owner).get(
             "/api/v1/tasks", {"workspace": str(workspace.id), "due_before": "2026-07-08"}
         )
         assert response.status_code == 200
         assert [row["id"] for row in response.json()] == [str(today_task.id)]
 
-    def test_invalid_date_filter_is_400(self, workspace, owner):
-        response = client_for(owner).get(
+    def test_invalid_date_filter_is_400(self, workspace, owner, web_client):
+        response = web_client(owner).get(
             "/api/v1/tasks", {"workspace": str(workspace.id), "due_before": "not-a-date"}
         )
         assert response.status_code == 400
 
-    def test_ordering_by_due_date_then_priority(self, workspace, owner):
+    def test_ordering_by_due_date_then_priority(self, workspace, owner, web_client):
         low_today = make_task(
             workspace, title="low today", due_date="2026-07-08", priority=Task.Priority.LOW
         )
@@ -108,16 +102,16 @@ class TestListCreate:
         later = make_task(
             workspace, title="later", due_date="2026-07-09", priority=Task.Priority.HIGH
         )
-        response = client_for(owner).get("/api/v1/tasks", {"workspace": str(workspace.id)})
+        response = web_client(owner).get("/api/v1/tasks", {"workspace": str(workspace.id)})
         ids = [row["id"] for row in response.json()]
         assert ids == [str(high_today.id), str(low_today.id), str(later.id)]
 
-    def test_out_of_scope_workspace_is_404(self, workspace, outsider):
-        response = client_for(outsider).get("/api/v1/tasks", {"workspace": str(workspace.id)})
+    def test_out_of_scope_workspace_is_404(self, workspace, outsider, web_client):
+        response = web_client(outsider).get("/api/v1/tasks", {"workspace": str(workspace.id)})
         assert response.status_code == 404
 
-    def test_create_ignores_client_supplied_server_fields(self, workspace, owner):
-        response = client_for(owner).post(
+    def test_create_ignores_client_supplied_server_fields(self, workspace, owner, web_client):
+        response = web_client(owner).post(
             "/api/v1/tasks",
             {
                 **create_payload(workspace),
@@ -136,8 +130,8 @@ class TestListCreate:
         # the default `user_created` (see TestDraftMessageId below).
         assert body["source"] == Task.Source.USER_CREATED
 
-    def test_create_empty_title_is_400(self, workspace, owner):
-        response = client_for(owner).post(
+    def test_create_empty_title_is_400(self, workspace, owner, web_client):
+        response = web_client(owner).post(
             "/api/v1/tasks", create_payload(workspace, title="   "), format="json"
         )
         assert response.status_code == 400
@@ -147,10 +141,10 @@ class TestPermissionMatrix:
     """Role x endpoint matrix (CLAUDE.md rule 7)."""
 
     @pytest.mark.parametrize("role", ROLES)
-    def test_all_roles_can_read(self, workspace, role):
+    def test_all_roles_can_read(self, workspace, role, web_client):
         user = user_with_role(workspace, role, f"role-{role}@test.dev")
         make_task(workspace)
-        response = client_for(user).get("/api/v1/tasks", {"workspace": str(workspace.id)})
+        response = web_client(user).get("/api/v1/tasks", {"workspace": str(workspace.id)})
         assert response.status_code == 200
         assert len(response.json()) == 1
 
@@ -163,9 +157,9 @@ class TestPermissionMatrix:
             (WorkspaceMember.Role.VIEWER, 403),
         ],
     )
-    def test_create(self, workspace, role, expected):
+    def test_create(self, workspace, role, expected, web_client):
         user = user_with_role(workspace, role, f"role-{role}@test.dev")
-        response = client_for(user).post("/api/v1/tasks", create_payload(workspace), format="json")
+        response = web_client(user).post("/api/v1/tasks", create_payload(workspace), format="json")
         assert response.status_code == expected
 
     @pytest.mark.parametrize(
@@ -177,18 +171,18 @@ class TestPermissionMatrix:
             (WorkspaceMember.Role.VIEWER, 403),
         ],
     )
-    def test_edit_foreign_row(self, workspace, role, expected):
+    def test_edit_foreign_row(self, workspace, role, expected, web_client):
         user = user_with_role(workspace, role, f"role-{role}@test.dev")
         row = make_task(workspace)  # created_by is None -> not the actor's own
-        response = client_for(user).patch(
+        response = web_client(user).patch(
             f"/api/v1/tasks/{row.id}", {"title": "New"}, format="json"
         )
         assert response.status_code == expected
 
-    def test_member_edits_own_row(self, workspace):
+    def test_member_edits_own_row(self, workspace, web_client):
         user = user_with_role(workspace, WorkspaceMember.Role.MEMBER, "m@test.dev")
         row = make_task(workspace, created_by=user)
-        response = client_for(user).patch(
+        response = web_client(user).patch(
             f"/api/v1/tasks/{row.id}", {"title": "Mine"}, format="json"
         )
         assert response.status_code == 200
@@ -203,16 +197,16 @@ class TestPermissionMatrix:
         ],
     )
     @pytest.mark.parametrize("action", ["complete", "cancel"])
-    def test_transition_foreign_row(self, workspace, role, expected, action):
+    def test_transition_foreign_row(self, workspace, role, expected, action, web_client):
         user = user_with_role(workspace, role, f"role-{role}@test.dev")
         row = make_task(workspace)  # created_by is None -> not the actor's own
-        response = client_for(user).post(f"/api/v1/tasks/{row.id}/{action}", format="json")
+        response = web_client(user).post(f"/api/v1/tasks/{row.id}/{action}", format="json")
         assert response.status_code == expected
 
-    def test_member_transitions_own_row(self, workspace):
+    def test_member_transitions_own_row(self, workspace, web_client):
         user = user_with_role(workspace, WorkspaceMember.Role.MEMBER, "own@test.dev")
         row = make_task(workspace, created_by=user)
-        response = client_for(user).post(f"/api/v1/tasks/{row.id}/complete", format="json")
+        response = web_client(user).post(f"/api/v1/tasks/{row.id}/complete", format="json")
         assert response.status_code == 200
         assert response.json()["status"] == "done"
 
@@ -225,17 +219,17 @@ class TestPermissionMatrix:
             (WorkspaceMember.Role.VIEWER, 403),
         ],
     )
-    def test_delete_foreign_row(self, workspace, role, expected):
+    def test_delete_foreign_row(self, workspace, role, expected, web_client):
         user = user_with_role(workspace, role, f"role-{role}@test.dev")
         row = make_task(workspace)
-        response = client_for(user).delete(f"/api/v1/tasks/{row.id}")
+        response = web_client(user).delete(f"/api/v1/tasks/{row.id}")
         assert response.status_code == expected
 
 
 class TestDetailAndTransitions:
-    def test_out_of_scope_detail_is_404_not_403(self, workspace, outsider):
+    def test_out_of_scope_detail_is_404_not_403(self, workspace, outsider, web_client):
         row = make_task(workspace)
-        client = client_for(outsider)
+        client = web_client(outsider)
         assert client.get(f"/api/v1/tasks/{row.id}").status_code == 404
         assert (
             client.patch(f"/api/v1/tasks/{row.id}", {"title": "X"}, format="json").status_code
@@ -243,19 +237,19 @@ class TestDetailAndTransitions:
         )
         assert client.post(f"/api/v1/tasks/{row.id}/complete", format="json").status_code == 404
 
-    def test_unknown_transition_is_404(self, workspace, owner):
+    def test_unknown_transition_is_404(self, workspace, owner, web_client):
         row = make_task(workspace)
-        response = client_for(owner).post(f"/api/v1/tasks/{row.id}/promote", format="json")
+        response = web_client(owner).post(f"/api/v1/tasks/{row.id}/promote", format="json")
         assert response.status_code == 404
 
-    def test_illegal_transition_is_400(self, workspace, owner):
+    def test_illegal_transition_is_400(self, workspace, owner, web_client):
         row = make_task(workspace, status=Task.Status.DONE)
-        response = client_for(owner).post(f"/api/v1/tasks/{row.id}/cancel", format="json")
+        response = web_client(owner).post(f"/api/v1/tasks/{row.id}/cancel", format="json")
         assert response.status_code == 400
 
-    def test_reopen_from_cancelled_via_http(self, workspace, owner):
+    def test_reopen_from_cancelled_via_http(self, workspace, owner, web_client):
         row = make_task(workspace, status=Task.Status.CANCELLED)
-        response = client_for(owner).post(f"/api/v1/tasks/{row.id}/reopen", format="json")
+        response = web_client(owner).post(f"/api/v1/tasks/{row.id}/reopen", format="json")
         assert response.status_code == 200
         assert response.json()["status"] == "open"
 
@@ -281,15 +275,15 @@ class TestDraftMessageId:
             intent_payload={"title": "Call mom", "due_date": None},
         )
 
-    def test_absent_draft_message_id_creates_user_created_task(self, workspace, owner):
-        response = client_for(owner).post("/api/v1/tasks", create_payload(workspace), format="json")
+    def test_absent_draft_message_id_creates_user_created_task(self, workspace, owner, web_client):
+        response = web_client(owner).post("/api/v1/tasks", create_payload(workspace), format="json")
         assert response.status_code == 201
         assert response.json()["source"] == Task.Source.USER_CREATED
 
-    def test_valid_draft_message_id_creates_ai_suggested_task(self, workspace, owner):
+    def test_valid_draft_message_id_creates_ai_suggested_task(self, workspace, owner, web_client):
         conversation = self._conversation(workspace, owner)
         draft_message = self._task_draft_message(workspace, conversation, owner)
-        response = client_for(owner).post(
+        response = web_client(owner).post(
             "/api/v1/tasks",
             create_payload(workspace, draft_message_id=str(draft_message.id)),
             format="json",
@@ -297,8 +291,10 @@ class TestDraftMessageId:
         assert response.status_code == 201
         assert response.json()["source"] == Task.Source.AI_SUGGESTED
 
-    def test_nonexistent_draft_message_id_returns_400_and_creates_no_task(self, workspace, owner):
-        response = client_for(owner).post(
+    def test_nonexistent_draft_message_id_returns_400_and_creates_no_task(
+        self, workspace, owner, web_client
+    ):
+        response = web_client(owner).post(
             "/api/v1/tasks",
             create_payload(workspace, draft_message_id=str(uuid.uuid4())),
             format="json",
@@ -306,7 +302,9 @@ class TestDraftMessageId:
         assert response.status_code == 400
         assert Task.objects.count() == 0
 
-    def test_wrong_actor_draft_message_id_returns_400_and_creates_no_task(self, workspace, owner):
+    def test_wrong_actor_draft_message_id_returns_400_and_creates_no_task(
+        self, workspace, owner, web_client
+    ):
         stranger = register_user(
             email="stranger-draft@test.dev", password=PASSWORD, name="Stranger"
         )
@@ -315,7 +313,7 @@ class TestDraftMessageId:
         )
         conversation = self._conversation(workspace, owner)
         draft_message = self._task_draft_message(workspace, conversation, stranger)
-        response = client_for(owner).post(
+        response = web_client(owner).post(
             "/api/v1/tasks",
             create_payload(workspace, draft_message_id=str(draft_message.id)),
             format="json",
@@ -324,7 +322,7 @@ class TestDraftMessageId:
         assert Task.objects.count() == 0
 
     def test_wrong_workspace_draft_message_id_returns_400_and_creates_no_task(
-        self, workspace, owner
+        self, workspace, owner, web_client
     ):
         other_workspace = Workspace.objects.create(
             name="Other", owner=owner, type=Workspace.Type.COMPANY
@@ -334,7 +332,7 @@ class TestDraftMessageId:
         )
         other_conversation = self._conversation(other_workspace, owner)
         draft_message = self._task_draft_message(other_workspace, other_conversation, owner)
-        response = client_for(owner).post(
+        response = web_client(owner).post(
             "/api/v1/tasks",
             create_payload(workspace, draft_message_id=str(draft_message.id)),
             format="json",
@@ -342,12 +340,14 @@ class TestDraftMessageId:
         assert response.status_code == 400
         assert Task.objects.count() == 0
 
-    def test_wrong_intent_draft_message_id_returns_400_and_creates_no_task(self, workspace, owner):
+    def test_wrong_intent_draft_message_id_returns_400_and_creates_no_task(
+        self, workspace, owner, web_client
+    ):
         conversation = self._conversation(workspace, owner)
         draft_message = self._task_draft_message(
             workspace, conversation, owner, intent=Message.Intent.CHAT
         )
-        response = client_for(owner).post(
+        response = web_client(owner).post(
             "/api/v1/tasks",
             create_payload(workspace, draft_message_id=str(draft_message.id)),
             format="json",
@@ -355,8 +355,8 @@ class TestDraftMessageId:
         assert response.status_code == 400
         assert Task.objects.count() == 0
 
-    def test_malformed_draft_message_id_returns_400(self, workspace, owner):
-        response = client_for(owner).post(
+    def test_malformed_draft_message_id_returns_400(self, workspace, owner, web_client):
+        response = web_client(owner).post(
             "/api/v1/tasks",
             create_payload(workspace, draft_message_id="not-a-uuid"),
             format="json",

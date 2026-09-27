@@ -34,6 +34,8 @@ from django.core.cache import cache
 from django.db import transaction
 from django.db.models import F
 from django.utils import timezone
+from rest_framework_simplejwt.settings import api_settings as jwt_settings
+from rest_framework_simplejwt.token_blacklist.models import OutstandingToken
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from accounts.authentication import hash_token
@@ -398,6 +400,9 @@ def issue_session_tokens(device):
     the access token and survives refresh rotation)."""
     refresh = RefreshToken.for_user(device.user)
     refresh[DEVICE_CLAIM] = str(device.pk)
+    # `for_user` recorded the OutstandingToken before the claim existed;
+    # keep the stored copy identical to the token actually handed out.
+    OutstandingToken.objects.filter(jti=refresh[jwt_settings.JTI_CLAIM]).update(token=str(refresh))
     update_last_login(None, device.user)
     return {"access": str(refresh.access_token), "refresh": str(refresh)}
 

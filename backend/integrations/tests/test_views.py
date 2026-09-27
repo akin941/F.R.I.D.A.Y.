@@ -35,12 +35,6 @@ def outsider():
     return register_user(email="outsider@test.dev", password=PASSWORD, name="Outsider")
 
 
-def auth_client(user):
-    client = APIClient()
-    client.force_authenticate(user=user)
-    return client
-
-
 def pat_client(raw_token):
     client = APIClient()
     client.credentials(HTTP_AUTHORIZATION=f"Bearer {raw_token}")
@@ -50,8 +44,8 @@ def pat_client(raw_token):
 # --- link-code mint ---
 
 
-def test_mint_link_code_returns_code_and_expiry(owner, workspace):
-    response = auth_client(owner).post(
+def test_mint_link_code_returns_code_and_expiry(owner, workspace, web_client):
+    response = web_client(owner).post(
         "/api/v1/integrations/telegram/link-code", {"workspace": str(workspace.id)}, format="json"
     )
     assert response.status_code == 201
@@ -60,8 +54,8 @@ def test_mint_link_code_returns_code_and_expiry(owner, workspace):
     assert TelegramLinkCode.objects.filter(user=owner, workspace=workspace).exists()
 
 
-def test_mint_link_code_in_inaccessible_workspace_is_404(outsider, workspace):
-    response = auth_client(outsider).post(
+def test_mint_link_code_in_inaccessible_workspace_is_404(outsider, workspace, web_client):
+    response = web_client(outsider).post(
         "/api/v1/integrations/telegram/link-code", {"workspace": str(workspace.id)}, format="json"
     )
     assert response.status_code == 404
@@ -87,8 +81,8 @@ def test_mint_link_code_requires_web_auth_not_pat(owner, workspace):
 # --- link-status / unlink ---
 
 
-def test_link_status_reflects_unlinked_then_linked(owner, workspace):
-    response = auth_client(owner).get(
+def test_link_status_reflects_unlinked_then_linked(owner, workspace, web_client):
+    response = web_client(owner).get(
         f"/api/v1/integrations/telegram/link-status?workspace={workspace.id}"
     )
     assert response.status_code == 200
@@ -98,7 +92,7 @@ def test_link_status_reflects_unlinked_then_linked(owner, workspace):
     LinkedTelegramChat.objects.create(
         workspace=workspace, user=owner, chat_id="12345", conversation=conversation
     )
-    response = auth_client(owner).get(
+    response = web_client(owner).get(
         f"/api/v1/integrations/telegram/link-status?workspace={workspace.id}"
     )
     assert response.status_code == 200
@@ -107,13 +101,13 @@ def test_link_status_reflects_unlinked_then_linked(owner, workspace):
     assert response.data["linked_at"] is not None
 
 
-def test_unlink_removes_the_row_but_keeps_conversation_and_messages(owner, workspace):
+def test_unlink_removes_the_row_but_keeps_conversation_and_messages(owner, workspace, web_client):
     conversation = Conversation.objects.create(workspace=workspace, created_by=owner)
     LinkedTelegramChat.objects.create(
         workspace=workspace, user=owner, chat_id="12345", conversation=conversation
     )
 
-    response = auth_client(owner).delete(
+    response = web_client(owner).delete(
         f"/api/v1/integrations/telegram/link?workspace={workspace.id}"
     )
     assert response.status_code == 204
@@ -121,12 +115,12 @@ def test_unlink_removes_the_row_but_keeps_conversation_and_messages(owner, works
     assert Conversation.objects.filter(id=conversation.id).exists()
 
 
-def test_relinking_after_unlink_creates_a_fresh_row(owner, workspace):
+def test_relinking_after_unlink_creates_a_fresh_row(owner, workspace, web_client):
     conversation = Conversation.objects.create(workspace=workspace, created_by=owner)
     LinkedTelegramChat.objects.create(
         workspace=workspace, user=owner, chat_id="12345", conversation=conversation
     )
-    auth_client(owner).delete(f"/api/v1/integrations/telegram/link?workspace={workspace.id}")
+    web_client(owner).delete(f"/api/v1/integrations/telegram/link?workspace={workspace.id}")
 
     new_conversation = Conversation.objects.create(workspace=workspace, created_by=owner)
     LinkedTelegramChat.objects.create(
@@ -136,13 +130,13 @@ def test_relinking_after_unlink_creates_a_fresh_row(owner, workspace):
     assert link.chat_id == "67890"
 
 
-def test_link_status_requires_workspace_param(owner):
-    response = auth_client(owner).get("/api/v1/integrations/telegram/link-status")
+def test_link_status_requires_workspace_param(owner, web_client):
+    response = web_client(owner).get("/api/v1/integrations/telegram/link-status")
     assert response.status_code == 400
 
 
-def test_unlink_out_of_scope_workspace_is_404(outsider, workspace):
-    response = auth_client(outsider).delete(
+def test_unlink_out_of_scope_workspace_is_404(outsider, workspace, web_client):
+    response = web_client(outsider).delete(
         f"/api/v1/integrations/telegram/link?workspace={workspace.id}"
     )
     assert response.status_code == 404

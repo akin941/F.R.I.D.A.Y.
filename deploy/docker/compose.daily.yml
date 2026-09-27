@@ -36,6 +36,11 @@ services:
       # stack defaults to real providers (configure them in
       # deploy/docker/.env).
       AI_FAKE_PROVIDER: "${AI_FAKE_PROVIDER:-false}"
+      # Device trust (Phase 4 branch 2): the frontend container forwards the
+      # browser's IP with this key; PINs from an unknown IP are refused
+      # unless the owner explicitly turns LAN gating off.
+      JARVIS_BFF_SHARED_SECRET: "${JARVIS_BFF_SHARED_SECRET:?run `make secrets`}"
+      DEVICE_PAIRING_ALLOW_UNKNOWN_IP: "${DEVICE_PAIRING_ALLOW_UNKNOWN_IP:-false}"
 
   worker:
     environment:
@@ -61,6 +66,12 @@ services:
       # The browser-facing origin (CSRF Origin check in the BFF). Change it
       # to the reverse-proxy/overlay URL when you expose the frontend.
       APP_ORIGIN: "${APP_ORIGIN:-http://localhost:3001}"
+      # The header the owner's reverse proxy sets to the browser's IP (e.g.
+      # X-Real-IP with Caddy's `header_up X-Real-IP {remote_host}`). Empty
+      # (bare `next start`): no client IP is forwarded -- PINs are refused,
+      # pair with a strong code / `manage.py issue_pairing_code --strong`.
+      TRUSTED_CLIENT_IP_HEADER: "${TRUSTED_CLIENT_IP_HEADER:-}"
+      JARVIS_BFF_SHARED_SECRET: "${JARVIS_BFF_SHARED_SECRET:?run `make secrets`}"
     ports:
       - "127.0.0.1:3001:3001"
     depends_on:

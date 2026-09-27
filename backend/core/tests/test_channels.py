@@ -6,10 +6,13 @@ from types import SimpleNamespace
 
 from core.channels import (
     CHANNEL_CLI,
+    CHANNEL_UNKNOWN,
     CHANNEL_WEB,
     ChannelPrincipal,
+    WebSessionPrincipal,
     is_low_trust,
     request_channel,
+    request_device_id,
     scoped_for_actor,
 )
 
@@ -26,7 +29,7 @@ class _FakeQuerySet:
 
 
 def _web_request(user):
-    return SimpleNamespace(user=user, auth=SimpleNamespace())  # not a ChannelPrincipal
+    return SimpleNamespace(user=user, auth=WebSessionPrincipal(device_id="d1"))
 
 
 def _channel_request(user, *, bound_workspace_id):
@@ -36,10 +39,27 @@ def _channel_request(user, *, bound_workspace_id):
     )
 
 
-def test_request_channel_defaults_to_web_when_auth_is_not_a_channel_principal():
+def test_web_session_principal_is_web():
     request = _web_request(user="u1")
     assert request_channel(request) == CHANNEL_WEB
     assert is_low_trust(request) is False
+    assert request_device_id(request) == "d1"
+
+
+def test_request_channel_is_default_deny_for_any_other_auth_object():
+    # Phase 4 branch 2: an authenticator that forgets to state its channel
+    # is low-trust, never web.
+    request = SimpleNamespace(user="u1", auth=SimpleNamespace())
+    assert request_channel(request) == CHANNEL_UNKNOWN
+    assert is_low_trust(request) is True
+    assert request_device_id(request) is None
+
+
+def test_a_channel_principal_can_never_claim_web():
+    request = SimpleNamespace(
+        user="u1", auth=ChannelPrincipal(channel=CHANNEL_WEB, bound_workspace_id="w1")
+    )
+    assert request_channel(request) == CHANNEL_UNKNOWN
 
 
 def test_request_channel_reports_channel_principal():
@@ -48,10 +68,10 @@ def test_request_channel_reports_channel_principal():
     assert is_low_trust(request) is True
 
 
-def test_request_with_no_auth_attribute_at_all_is_web():
+def test_request_with_no_auth_attribute_at_all_is_unknown():
     request = SimpleNamespace(user="u1")
-    assert request_channel(request) == CHANNEL_WEB
-    assert is_low_trust(request) is False
+    assert request_channel(request) == CHANNEL_UNKNOWN
+    assert is_low_trust(request) is True
 
 
 def test_scoped_for_actor_web_request_passes_workspace_through_unchanged():

@@ -95,12 +95,6 @@ def make_member(workspace, email, role):
     return user
 
 
-def auth_client(user):
-    client = APIClient()
-    client.force_authenticate(user=user)
-    return client
-
-
 def _parse_sse(response):
     body = b"".join(response.streaming_content)
     events = []
@@ -121,15 +115,15 @@ def member_user(request, workspace, owner):
 # --- role x endpoint matrix: every role currently allows every operation ---
 
 
-def test_role_can_list_conversations(member_user, workspace, owner):
+def test_role_can_list_conversations(member_user, workspace, owner, web_client):
     Conversation.objects.create(workspace=workspace, created_by=owner)
-    response = auth_client(member_user).get(f"/api/v1/ai/conversations?workspace={workspace.id}")
+    response = web_client(member_user).get(f"/api/v1/ai/conversations?workspace={workspace.id}")
     assert response.status_code == 200
     assert len(response.data) == 1
 
 
-def test_role_can_create_conversation(member_user, workspace):
-    response = auth_client(member_user).post(
+def test_role_can_create_conversation(member_user, workspace, web_client):
+    response = web_client(member_user).post(
         "/api/v1/ai/conversations",
         {"workspace": str(workspace.id), "title": "Hi"},
         format="json",
@@ -145,12 +139,12 @@ def test_role_can_create_conversation(member_user, workspace):
     assert entry.metadata == {"private": False}
 
 
-def test_conversation_can_be_created_private_from_message_one(member_user, workspace):
+def test_conversation_can_be_created_private_from_message_one(member_user, workspace, web_client):
     """Codex round-2 P1 on feat/p1-work-log: without this, a client wanting
     a conversation private from the start had to create-then-PATCH, leaving
     a race window where the first exchange could already be
     extraction-eligible before the follow-up PATCH landed."""
-    response = auth_client(member_user).post(
+    response = web_client(member_user).post(
         "/api/v1/ai/conversations",
         {"workspace": str(workspace.id), "private": True},
         format="json",
@@ -163,7 +157,7 @@ def test_conversation_can_be_created_private_from_message_one(member_user, works
     assert entry.metadata == {"private": True}
 
 
-def test_role_can_list_messages(member_user, workspace, owner):
+def test_role_can_list_messages(member_user, workspace, owner, web_client):
     conversation = Conversation.objects.create(workspace=workspace, created_by=owner)
     Message.objects.create(
         workspace=workspace,
@@ -172,16 +166,16 @@ def test_role_can_list_messages(member_user, workspace, owner):
         content="hi",
         created_by=owner,
     )
-    response = auth_client(member_user).get(f"/api/v1/ai/conversations/{conversation.id}/messages")
+    response = web_client(member_user).get(f"/api/v1/ai/conversations/{conversation.id}/messages")
     assert response.status_code == 200
     assert len(response.data) == 1
 
 
 def test_role_can_send_message(
-    member_user, workspace, owner, fake_provider, system_prompt, router_intent_prompt
+    member_user, workspace, owner, fake_provider, system_prompt, router_intent_prompt, web_client
 ):
     conversation = Conversation.objects.create(workspace=workspace, created_by=owner)
-    response = auth_client(member_user).post(
+    response = web_client(member_user).post(
         f"/api/v1/ai/conversations/{conversation.id}/messages",
         {"content": "hi"},
         format="json",
@@ -218,45 +212,45 @@ def test_unauthenticated_requests_return_401(workspace):
 # --- workspace scoping and validation ---
 
 
-def test_create_conversation_in_inaccessible_workspace_returns_404(owner):
+def test_create_conversation_in_inaccessible_workspace_returns_404(owner, web_client):
     stranger = register_user(email="stranger@test.dev", password=PASSWORD, name="Stranger")
     other_workspace = Workspace.objects.get(owner=stranger)
-    response = auth_client(owner).post(
+    response = web_client(owner).post(
         "/api/v1/ai/conversations", {"workspace": str(other_workspace.id)}, format="json"
     )
     assert response.status_code == 404
 
 
-def test_list_conversations_requires_workspace_param(owner):
-    assert auth_client(owner).get("/api/v1/ai/conversations").status_code == 400
+def test_list_conversations_requires_workspace_param(owner, web_client):
+    assert web_client(owner).get("/api/v1/ai/conversations").status_code == 400
 
 
-def test_list_conversations_malformed_workspace_uuid_returns_400(owner):
-    response = auth_client(owner).get("/api/v1/ai/conversations?workspace=not-a-uuid")
+def test_list_conversations_malformed_workspace_uuid_returns_400(owner, web_client):
+    response = web_client(owner).get("/api/v1/ai/conversations?workspace=not-a-uuid")
     assert response.status_code == 400
 
 
-def test_list_conversations_inaccessible_valid_workspace_returns_empty(owner):
+def test_list_conversations_inaccessible_valid_workspace_returns_empty(owner, web_client):
     stranger = register_user(email="stranger2@test.dev", password=PASSWORD, name="Stranger2")
     other_workspace = Workspace.objects.get(owner=stranger)
-    response = auth_client(owner).get(f"/api/v1/ai/conversations?workspace={other_workspace.id}")
+    response = web_client(owner).get(f"/api/v1/ai/conversations?workspace={other_workspace.id}")
     assert response.status_code == 200
     assert response.data == []
 
 
-def test_cross_workspace_message_list_returns_404(owner):
+def test_cross_workspace_message_list_returns_404(owner, web_client):
     stranger = register_user(email="stranger3@test.dev", password=PASSWORD, name="Stranger3")
     other_workspace = Workspace.objects.get(owner=stranger)
     conversation = Conversation.objects.create(workspace=other_workspace, created_by=stranger)
-    response = auth_client(owner).get(f"/api/v1/ai/conversations/{conversation.id}/messages")
+    response = web_client(owner).get(f"/api/v1/ai/conversations/{conversation.id}/messages")
     assert response.status_code == 404
 
 
-def test_cross_workspace_message_post_returns_404(owner):
+def test_cross_workspace_message_post_returns_404(owner, web_client):
     stranger = register_user(email="stranger4@test.dev", password=PASSWORD, name="Stranger4")
     other_workspace = Workspace.objects.get(owner=stranger)
     conversation = Conversation.objects.create(workspace=other_workspace, created_by=stranger)
-    response = auth_client(owner).post(
+    response = web_client(owner).post(
         f"/api/v1/ai/conversations/{conversation.id}/messages",
         {"content": "hi"},
         format="json",
@@ -268,17 +262,17 @@ def test_cross_workspace_message_post_returns_404(owner):
 # --- conversation detail/private flag (Phase 1 p1-work-log) ---
 
 
-def test_role_can_retrieve_conversation(member_user, workspace, owner):
+def test_role_can_retrieve_conversation(member_user, workspace, owner, web_client):
     conversation = Conversation.objects.create(workspace=workspace, created_by=owner)
-    response = auth_client(member_user).get(f"/api/v1/ai/conversations/{conversation.id}")
+    response = web_client(member_user).get(f"/api/v1/ai/conversations/{conversation.id}")
     assert response.status_code == 200
     assert response.data["id"] == str(conversation.id)
     assert response.data["private"] is False
 
 
-def test_role_can_mark_conversation_private(member_user, workspace, owner):
+def test_role_can_mark_conversation_private(member_user, workspace, owner, web_client):
     conversation = Conversation.objects.create(workspace=workspace, created_by=owner)
-    response = auth_client(member_user).patch(
+    response = web_client(member_user).patch(
         f"/api/v1/ai/conversations/{conversation.id}", {"private": True}, format="json"
     )
     assert response.status_code == 200
@@ -287,9 +281,9 @@ def test_role_can_mark_conversation_private(member_user, workspace, owner):
     assert conversation.private is True
 
 
-def test_setting_private_to_false_is_rejected(owner, workspace):
+def test_setting_private_to_false_is_rejected(owner, workspace, web_client):
     conversation = Conversation.objects.create(workspace=workspace, created_by=owner)
-    response = auth_client(owner).patch(
+    response = web_client(owner).patch(
         f"/api/v1/ai/conversations/{conversation.id}", {"private": False}, format="json"
     )
     assert response.status_code == 400
@@ -297,9 +291,9 @@ def test_setting_private_to_false_is_rejected(owner, workspace):
     assert conversation.private is False
 
 
-def test_unsetting_an_already_private_conversation_is_rejected(owner, workspace):
+def test_unsetting_an_already_private_conversation_is_rejected(owner, workspace, web_client):
     conversation = Conversation.objects.create(workspace=workspace, created_by=owner, private=True)
-    response = auth_client(owner).patch(
+    response = web_client(owner).patch(
         f"/api/v1/ai/conversations/{conversation.id}", {"private": False}, format="json"
     )
     assert response.status_code == 400
@@ -307,9 +301,9 @@ def test_unsetting_an_already_private_conversation_is_rejected(owner, workspace)
     assert conversation.private is True
 
 
-def test_repeating_private_true_is_idempotent(owner, workspace):
+def test_repeating_private_true_is_idempotent(owner, workspace, web_client):
     conversation = Conversation.objects.create(workspace=workspace, created_by=owner)
-    client = auth_client(owner)
+    client = web_client(owner)
     first = client.patch(
         f"/api/v1/ai/conversations/{conversation.id}", {"private": True}, format="json"
     )
@@ -320,19 +314,19 @@ def test_repeating_private_true_is_idempotent(owner, workspace):
     assert AuditLog.objects.filter(action="assistant.conversation.marked_private").count() == 1
 
 
-def test_cross_workspace_conversation_retrieve_returns_404(owner):
+def test_cross_workspace_conversation_retrieve_returns_404(owner, web_client):
     stranger = register_user(email="stranger5@test.dev", password=PASSWORD, name="Stranger5")
     other_workspace = Workspace.objects.get(owner=stranger)
     conversation = Conversation.objects.create(workspace=other_workspace, created_by=stranger)
-    response = auth_client(owner).get(f"/api/v1/ai/conversations/{conversation.id}")
+    response = web_client(owner).get(f"/api/v1/ai/conversations/{conversation.id}")
     assert response.status_code == 404
 
 
-def test_cross_workspace_conversation_patch_returns_404(owner):
+def test_cross_workspace_conversation_patch_returns_404(owner, web_client):
     stranger = register_user(email="stranger6@test.dev", password=PASSWORD, name="Stranger6")
     other_workspace = Workspace.objects.get(owner=stranger)
     conversation = Conversation.objects.create(workspace=other_workspace, created_by=stranger)
-    response = auth_client(owner).patch(
+    response = web_client(owner).patch(
         f"/api/v1/ai/conversations/{conversation.id}", {"private": True}, format="json"
     )
     assert response.status_code == 404
@@ -340,10 +334,10 @@ def test_cross_workspace_conversation_patch_returns_404(owner):
     assert conversation.private is False
 
 
-def test_empty_and_whitespace_content_returns_400_and_creates_nothing(owner, workspace):
+def test_empty_and_whitespace_content_returns_400_and_creates_nothing(owner, workspace, web_client):
     conversation = Conversation.objects.create(workspace=workspace, created_by=owner)
     for content in ["", "   "]:
-        response = auth_client(owner).post(
+        response = web_client(owner).post(
             f"/api/v1/ai/conversations/{conversation.id}/messages",
             {"content": content},
             format="json",
@@ -354,11 +348,11 @@ def test_empty_and_whitespace_content_returns_400_and_creates_nothing(owner, wor
 
 
 def test_meaningful_whitespace_in_content_is_preserved(
-    owner, workspace, fake_provider, system_prompt, router_intent_prompt
+    owner, workspace, fake_provider, system_prompt, router_intent_prompt, web_client
 ):
     conversation = Conversation.objects.create(workspace=workspace, created_by=owner)
     content = "  def f():\n    return 1\n"
-    response = auth_client(owner).post(
+    response = web_client(owner).post(
         f"/api/v1/ai/conversations/{conversation.id}/messages",
         {"content": content},
         format="json",
@@ -372,15 +366,15 @@ def test_meaningful_whitespace_in_content_is_preserved(
 # --- ordering ---
 
 
-def test_conversation_ordering_is_descending(owner, workspace):
+def test_conversation_ordering_is_descending(owner, workspace, web_client):
     first = Conversation.objects.create(workspace=workspace, created_by=owner, title="first")
     second = Conversation.objects.create(workspace=workspace, created_by=owner, title="second")
-    response = auth_client(owner).get(f"/api/v1/ai/conversations?workspace={workspace.id}")
+    response = web_client(owner).get(f"/api/v1/ai/conversations?workspace={workspace.id}")
     ids = [c["id"] for c in response.data]
     assert ids == [str(second.id), str(first.id)]
 
 
-def test_message_ordering_is_ascending(owner, workspace):
+def test_message_ordering_is_ascending(owner, workspace, web_client):
     conversation = Conversation.objects.create(workspace=workspace, created_by=owner)
     first = Message.objects.create(
         workspace=workspace,
@@ -392,7 +386,7 @@ def test_message_ordering_is_ascending(owner, workspace):
     second = Message.objects.create(
         workspace=workspace, conversation=conversation, role=Message.Role.ASSISTANT, content="b"
     )
-    response = auth_client(owner).get(f"/api/v1/ai/conversations/{conversation.id}/messages")
+    response = web_client(owner).get(f"/api/v1/ai/conversations/{conversation.id}/messages")
     ids = [m["id"] for m in response.data]
     assert ids == [str(first.id), str(second.id)]
 
@@ -401,10 +395,10 @@ def test_message_ordering_is_ascending(owner, workspace):
 
 
 def test_user_message_persisted_before_sse_consumption(
-    owner, workspace, fake_provider, system_prompt, router_intent_prompt
+    owner, workspace, fake_provider, system_prompt, router_intent_prompt, web_client
 ):
     conversation = Conversation.objects.create(workspace=workspace, created_by=owner)
-    response = auth_client(owner).post(
+    response = web_client(owner).post(
         f"/api/v1/ai/conversations/{conversation.id}/messages",
         {"content": "hello"},
         format="json",
@@ -420,10 +414,10 @@ def test_user_message_persisted_before_sse_consumption(
 
 
 def test_response_headers_and_content_type_exact(
-    owner, workspace, fake_provider, system_prompt, router_intent_prompt
+    owner, workspace, fake_provider, system_prompt, router_intent_prompt, web_client
 ):
     conversation = Conversation.objects.create(workspace=workspace, created_by=owner)
-    response = auth_client(owner).post(
+    response = web_client(owner).post(
         f"/api/v1/ai/conversations/{conversation.id}/messages",
         {"content": "hi"},
         format="json",
@@ -436,13 +430,13 @@ def test_response_headers_and_content_type_exact(
 
 
 def test_accept_event_stream_header_is_not_rejected(
-    owner, workspace, fake_provider, system_prompt, router_intent_prompt
+    owner, workspace, fake_provider, system_prompt, router_intent_prompt, web_client
 ):
     """Regression: a standards-compliant SSE client sends
     `Accept: text/event-stream`. DRF's content negotiation must not 406 that
     before the view ever runs."""
     conversation = Conversation.objects.create(workspace=workspace, created_by=owner)
-    response = auth_client(owner).post(
+    response = web_client(owner).post(
         f"/api/v1/ai/conversations/{conversation.id}/messages",
         {"content": "hi"},
         format="json",
@@ -453,11 +447,11 @@ def test_accept_event_stream_header_is_not_rejected(
     list(response.streaming_content)
 
 
-def test_accept_event_stream_header_still_returns_json_errors(owner, workspace):
+def test_accept_event_stream_header_still_returns_json_errors(owner, workspace, web_client):
     """Same Accept header, but a request that ends in a plain DRF Response
     (400) — must still come back as JSON, not raw dict-as-bytes."""
     conversation = Conversation.objects.create(workspace=workspace, created_by=owner)
-    response = auth_client(owner).post(
+    response = web_client(owner).post(
         f"/api/v1/ai/conversations/{conversation.id}/messages",
         {"content": "   "},
         format="json",
@@ -468,10 +462,10 @@ def test_accept_event_stream_header_still_returns_json_errors(owner, workspace):
 
 
 def test_user_message_not_echoed_via_sse(
-    owner, workspace, fake_provider, system_prompt, router_intent_prompt
+    owner, workspace, fake_provider, system_prompt, router_intent_prompt, web_client
 ):
     conversation = Conversation.objects.create(workspace=workspace, created_by=owner)
-    response = auth_client(owner).post(
+    response = web_client(owner).post(
         f"/api/v1/ai/conversations/{conversation.id}/messages",
         {"content": "hello-unique-marker"},
         format="json",
@@ -482,10 +476,10 @@ def test_user_message_not_echoed_via_sse(
 
 
 def test_full_fake_gateway_flow_creates_one_usage_linked(
-    owner, workspace, fake_provider, system_prompt, router_intent_prompt
+    owner, workspace, fake_provider, system_prompt, router_intent_prompt, web_client
 ):
     conversation = Conversation.objects.create(workspace=workspace, created_by=owner)
-    response = auth_client(owner).post(
+    response = web_client(owner).post(
         f"/api/v1/ai/conversations/{conversation.id}/messages",
         {"content": "hi"},
         format="json",
@@ -503,7 +497,7 @@ def test_full_fake_gateway_flow_creates_one_usage_linked(
 
 
 def test_chat_post_is_throttled_after_configured_limit(
-    owner, workspace, fake_provider, system_prompt, router_intent_prompt, monkeypatch
+    owner, workspace, fake_provider, system_prompt, router_intent_prompt, monkeypatch, web_client
 ):
     # ScopedRateThrottle.THROTTLE_RATES is a plain class attribute snapshotted
     # from api_settings at import time, so overriding settings.REST_FRAMEWORK
@@ -511,7 +505,7 @@ def test_chat_post_is_throttled_after_configured_limit(
     monkeypatch.setattr(ScopedRateThrottle, "THROTTLE_RATES", {"chat": "2/min"})
     cache.clear()
     conversation = Conversation.objects.create(workspace=workspace, created_by=owner)
-    client = auth_client(owner)
+    client = web_client(owner)
     for _ in range(2):
         response = client.post(
             f"/api/v1/ai/conversations/{conversation.id}/messages",
@@ -528,11 +522,11 @@ def test_chat_post_is_throttled_after_configured_limit(
     assert third.status_code == 429
 
 
-def test_chat_get_is_not_throttled(owner, workspace, monkeypatch):
+def test_chat_get_is_not_throttled(owner, workspace, monkeypatch, web_client):
     monkeypatch.setattr(ScopedRateThrottle, "THROTTLE_RATES", {"chat": "1/min"})
     cache.clear()
     conversation = Conversation.objects.create(workspace=workspace, created_by=owner)
-    client = auth_client(owner)
+    client = web_client(owner)
     for _ in range(5):
         response = client.get(f"/api/v1/ai/conversations/{conversation.id}/messages")
         assert response.status_code == 200
@@ -542,7 +536,7 @@ def test_chat_get_is_not_throttled(owner, workspace, monkeypatch):
 
 
 def test_memories_used_in_done_event_and_persisted(
-    member_user, workspace, fake_provider, system_prompt, router_intent_prompt
+    member_user, workspace, fake_provider, system_prompt, router_intent_prompt, web_client
 ):
     from memory.models import Memory, compute_fingerprint
 
@@ -556,7 +550,7 @@ def test_memories_used_in_done_event_and_persisted(
         fingerprint=compute_fingerprint("Drinks coffee black."),
     )
     conversation = Conversation.objects.create(workspace=workspace, created_by=member_user)
-    response = auth_client(member_user).post(
+    response = web_client(member_user).post(
         f"/api/v1/ai/conversations/{conversation.id}/messages",
         {"content": "hi"},
         format="json",
@@ -570,16 +564,16 @@ def test_memories_used_in_done_event_and_persisted(
     assistant_message = Message.objects.get(conversation=conversation, role=Message.Role.ASSISTANT)
     assert assistant_message.memories_used == [str(memory_row.id)]
 
-    listing = auth_client(member_user).get(f"/api/v1/ai/conversations/{conversation.id}/messages")
+    listing = web_client(member_user).get(f"/api/v1/ai/conversations/{conversation.id}/messages")
     serialized = [m for m in listing.data if m["role"] == "assistant"][0]
     assert serialized["memories_used"] == [str(memory_row.id)]
 
 
 def test_memories_used_defaults_to_empty(
-    member_user, workspace, fake_provider, system_prompt, router_intent_prompt
+    member_user, workspace, fake_provider, system_prompt, router_intent_prompt, web_client
 ):
     conversation = Conversation.objects.create(workspace=workspace, created_by=member_user)
-    response = auth_client(member_user).post(
+    response = web_client(member_user).post(
         f"/api/v1/ai/conversations/{conversation.id}/messages",
         {"content": "hi"},
         format="json",
@@ -594,7 +588,7 @@ def test_memories_used_defaults_to_empty(
 
 
 def test_chunks_used_in_done_event_and_persisted(
-    member_user, workspace, fake_provider, system_prompt, router_intent_prompt
+    member_user, workspace, fake_provider, system_prompt, router_intent_prompt, web_client
 ):
     from ai_core.adapters.fake import embed_text
     from ai_core.tests.test_fake_adapter import QUERY_TEXT, SEED_DOCUMENT_TEXT
@@ -625,7 +619,7 @@ def test_chunks_used_in_done_event_and_persisted(
     )
 
     conversation = Conversation.objects.create(workspace=workspace, created_by=member_user)
-    response = auth_client(member_user).post(
+    response = web_client(member_user).post(
         f"/api/v1/ai/conversations/{conversation.id}/messages",
         {"content": QUERY_TEXT},
         format="json",
@@ -639,16 +633,16 @@ def test_chunks_used_in_done_event_and_persisted(
     assistant_message = Message.objects.get(conversation=conversation, role=Message.Role.ASSISTANT)
     assert assistant_message.chunks_used == [str(chunk.id)]
 
-    listing = auth_client(member_user).get(f"/api/v1/ai/conversations/{conversation.id}/messages")
+    listing = web_client(member_user).get(f"/api/v1/ai/conversations/{conversation.id}/messages")
     serialized = [m for m in listing.data if m["role"] == "assistant"][0]
     assert serialized["chunks_used"] == [str(chunk.id)]
 
 
 def test_chunks_used_defaults_to_empty(
-    member_user, workspace, fake_provider, system_prompt, router_intent_prompt
+    member_user, workspace, fake_provider, system_prompt, router_intent_prompt, web_client
 ):
     conversation = Conversation.objects.create(workspace=workspace, created_by=member_user)
-    response = auth_client(member_user).post(
+    response = web_client(member_user).post(
         f"/api/v1/ai/conversations/{conversation.id}/messages",
         {"content": "hi"},
         format="json",
@@ -663,7 +657,7 @@ def test_chunks_used_defaults_to_empty(
 
 
 def test_user_message_classified_as_chat_by_default(
-    owner, workspace, fake_provider, system_prompt, router_intent_prompt
+    owner, workspace, fake_provider, system_prompt, router_intent_prompt, web_client
 ):
     """FakeAdapter's router.intent fixture classifies as chat by default for
     content with no recognized trigger phrase (MVP 6 §6 added content-based
@@ -671,7 +665,7 @@ def test_user_message_classified_as_chat_by_default(
     "hi" matches none of them) — the plumbing end-to-end proof that
     classification runs and is persisted."""
     conversation = Conversation.objects.create(workspace=workspace, created_by=owner)
-    response = auth_client(owner).post(
+    response = web_client(owner).post(
         f"/api/v1/ai/conversations/{conversation.id}/messages",
         {"content": "hi"},
         format="json",
@@ -682,19 +676,19 @@ def test_user_message_classified_as_chat_by_default(
     assert user_message.intent == Message.Intent.CHAT
     assert user_message.intent_payload == {}
 
-    listing = auth_client(owner).get(f"/api/v1/ai/conversations/{conversation.id}/messages")
+    listing = web_client(owner).get(f"/api/v1/ai/conversations/{conversation.id}/messages")
     serialized = [m for m in listing.data if m["role"] == "user"][0]
     assert serialized["intent"] == Message.Intent.CHAT
     assert serialized["intent_payload"] == {}
 
 
 def test_assistant_message_never_gets_a_classified_intent(
-    owner, workspace, fake_provider, system_prompt, router_intent_prompt
+    owner, workspace, fake_provider, system_prompt, router_intent_prompt, web_client
 ):
     """Classification interprets the user's own message — it must never be
     attached to the assistant's reply row."""
     conversation = Conversation.objects.create(workspace=workspace, created_by=owner)
-    response = auth_client(owner).post(
+    response = web_client(owner).post(
         f"/api/v1/ai/conversations/{conversation.id}/messages",
         {"content": "hi"},
         format="json",
@@ -706,7 +700,7 @@ def test_assistant_message_never_gets_a_classified_intent(
 
 
 def test_classifier_gateway_error_degrades_to_chat_without_blocking_reply(
-    owner, workspace, system_prompt, router_intent_prompt
+    owner, workspace, system_prompt, router_intent_prompt, web_client
 ):
     """No ModelProvider registered at all -> GatewayError('no_provider') for
     the classify call. The user message must still be created (classified as
@@ -714,7 +708,7 @@ def test_classifier_gateway_error_degrades_to_chat_without_blocking_reply(
     reply path (which also has no provider) still degrades independently via
     its own existing error-event contract."""
     conversation = Conversation.objects.create(workspace=workspace, created_by=owner)
-    response = auth_client(owner).post(
+    response = web_client(owner).post(
         f"/api/v1/ai/conversations/{conversation.id}/messages",
         {"content": "hi"},
         format="json",
@@ -728,7 +722,7 @@ def test_classifier_gateway_error_degrades_to_chat_without_blocking_reply(
 
 
 def test_malformed_classifier_output_degrades_to_chat_at_view_level(
-    owner, workspace, fake_provider, system_prompt, router_intent_prompt, monkeypatch
+    owner, workspace, fake_provider, system_prompt, router_intent_prompt, monkeypatch, web_client
 ):
     import assistant.services as services_module
 
@@ -737,7 +731,7 @@ def test_malformed_classifier_output_degrades_to_chat_at_view_level(
 
     monkeypatch.setattr(services_module, "parse_intent", _boom)
     conversation = Conversation.objects.create(workspace=workspace, created_by=owner)
-    response = auth_client(owner).post(
+    response = web_client(owner).post(
         f"/api/v1/ai/conversations/{conversation.id}/messages",
         {"content": "hi"},
         format="json",
@@ -750,7 +744,7 @@ def test_malformed_classifier_output_degrades_to_chat_at_view_level(
 
 
 def test_tool_request_intent_persists_tool_name_in_payload(
-    owner, workspace, fake_provider, system_prompt, router_intent_prompt, monkeypatch
+    owner, workspace, fake_provider, system_prompt, router_intent_prompt, monkeypatch, web_client
 ):
     import assistant.services as services_module
 
@@ -759,7 +753,7 @@ def test_tool_request_intent_persists_tool_name_in_payload(
 
     monkeypatch.setattr(services_module, "parse_intent", _tool_request)
     conversation = Conversation.objects.create(workspace=workspace, created_by=owner)
-    response = auth_client(owner).post(
+    response = web_client(owner).post(
         f"/api/v1/ai/conversations/{conversation.id}/messages",
         {"content": "export my vault"},
         format="json",
@@ -772,7 +766,7 @@ def test_tool_request_intent_persists_tool_name_in_payload(
 
 
 def test_tool_request_emits_draft_event_before_done_and_creates_no_approval_request(
-    owner, workspace, fake_provider, system_prompt, router_intent_prompt, monkeypatch
+    owner, workspace, fake_provider, system_prompt, router_intent_prompt, monkeypatch, web_client
 ):
     """MVP 6 §4: classification alone must never call
     approvals.services.create_request -- this is the regression test for
@@ -785,7 +779,7 @@ def test_tool_request_emits_draft_event_before_done_and_creates_no_approval_requ
 
     monkeypatch.setattr(services_module, "parse_intent", _tool_request)
     conversation = Conversation.objects.create(workspace=workspace, created_by=owner)
-    response = auth_client(owner).post(
+    response = web_client(owner).post(
         f"/api/v1/ai/conversations/{conversation.id}/messages",
         {"content": "export my vault"},
         format="json",
@@ -805,7 +799,7 @@ def test_tool_request_emits_draft_event_before_done_and_creates_no_approval_requ
 
 
 def test_unregistered_tool_request_degrades_to_chat_at_view_level(
-    owner, workspace, fake_provider, system_prompt, router_intent_prompt, monkeypatch
+    owner, workspace, fake_provider, system_prompt, router_intent_prompt, monkeypatch, web_client
 ):
     import assistant.services as services_module
 
@@ -814,7 +808,7 @@ def test_unregistered_tool_request_degrades_to_chat_at_view_level(
 
     monkeypatch.setattr(services_module, "parse_intent", _unknown_tool)
     conversation = Conversation.objects.create(workspace=workspace, created_by=owner)
-    response = auth_client(owner).post(
+    response = web_client(owner).post(
         f"/api/v1/ai/conversations/{conversation.id}/messages",
         {"content": "do the thing"},
         format="json",
@@ -828,12 +822,12 @@ def test_unregistered_tool_request_degrades_to_chat_at_view_level(
 
 
 def test_router_intent_purpose_records_its_own_model_usage_row(
-    owner, workspace, fake_provider, system_prompt, router_intent_prompt
+    owner, workspace, fake_provider, system_prompt, router_intent_prompt, web_client
 ):
     """ADR-003: no gateway call skips ModelUsage — router.intent joins chat
     as a second, independently-recorded purpose for the same turn."""
     conversation = Conversation.objects.create(workspace=workspace, created_by=owner)
-    response = auth_client(owner).post(
+    response = web_client(owner).post(
         f"/api/v1/ai/conversations/{conversation.id}/messages",
         {"content": "hi"},
         format="json",
@@ -863,10 +857,11 @@ def test_task_draft_emits_draft_event_before_done_with_source_message_id(
     router_intent_prompt,
     task_draft_prompt,
     monkeypatch,
+    web_client,
 ):
     _classified_as_task_draft(monkeypatch)
     conversation = Conversation.objects.create(workspace=workspace, created_by=owner)
-    response = auth_client(owner).post(
+    response = web_client(owner).post(
         f"/api/v1/ai/conversations/{conversation.id}/messages",
         {"content": "remind me to call mom", "client_local_date": "2026-07-10"},
         format="json",
@@ -885,10 +880,10 @@ def test_task_draft_emits_draft_event_before_done_with_source_message_id(
 
 
 def test_chat_intent_never_emits_a_draft_event(
-    owner, workspace, fake_provider, system_prompt, router_intent_prompt
+    owner, workspace, fake_provider, system_prompt, router_intent_prompt, web_client
 ):
     conversation = Conversation.objects.create(workspace=workspace, created_by=owner)
-    response = auth_client(owner).post(
+    response = web_client(owner).post(
         f"/api/v1/ai/conversations/{conversation.id}/messages",
         {"content": "hi"},
         format="json",
@@ -899,10 +894,10 @@ def test_chat_intent_never_emits_a_draft_event(
 
 
 def test_client_local_date_is_optional(
-    owner, workspace, fake_provider, system_prompt, router_intent_prompt
+    owner, workspace, fake_provider, system_prompt, router_intent_prompt, web_client
 ):
     conversation = Conversation.objects.create(workspace=workspace, created_by=owner)
-    response = auth_client(owner).post(
+    response = web_client(owner).post(
         f"/api/v1/ai/conversations/{conversation.id}/messages",
         {"content": "hi"},
         format="json",
@@ -919,12 +914,13 @@ def test_malformed_client_local_date_does_not_400(
     router_intent_prompt,
     task_draft_prompt,
     monkeypatch,
+    web_client,
 ):
     """A malformed client_local_date must degrade gracefully (extraction
     falls back to absolute-only resolution), never reject the whole POST."""
     _classified_as_task_draft(monkeypatch)
     conversation = Conversation.objects.create(workspace=workspace, created_by=owner)
-    response = auth_client(owner).post(
+    response = web_client(owner).post(
         f"/api/v1/ai/conversations/{conversation.id}/messages",
         {"content": "remind me tomorrow", "client_local_date": "not-a-date"},
         format="json",
@@ -937,7 +933,7 @@ def test_malformed_client_local_date_does_not_400(
 
 
 def test_overlay_source_workspaces_in_done_event_and_persisted(
-    owner, workspace, fake_provider, system_prompt, router_intent_prompt
+    owner, workspace, fake_provider, system_prompt, router_intent_prompt, web_client
 ):
     """End-to-end through the real view/gateway/persistence chain (channel
     resolved from the request, not passed by a test double) -- the unit
@@ -956,7 +952,7 @@ def test_overlay_source_workspaces_in_done_event_and_persisted(
         fingerprint=compute_fingerprint("shipped the migration"),
     )
     conversation = Conversation.objects.create(workspace=workspace, created_by=owner)
-    response = auth_client(owner).post(
+    response = web_client(owner).post(
         f"/api/v1/ai/conversations/{conversation.id}/messages",
         {"content": "hi"},
         format="json",
@@ -971,16 +967,16 @@ def test_overlay_source_workspaces_in_done_event_and_persisted(
     assistant_message = Message.objects.get(conversation=conversation, role=Message.Role.ASSISTANT)
     assert assistant_message.overlay_source_workspaces == {str(overlay_memory.id): str(company.id)}
 
-    listing = auth_client(owner).get(f"/api/v1/ai/conversations/{conversation.id}/messages")
+    listing = web_client(owner).get(f"/api/v1/ai/conversations/{conversation.id}/messages")
     serialized = [m for m in listing.data if m["role"] == "assistant"][0]
     assert serialized["overlay_source_workspaces"] == {str(overlay_memory.id): str(company.id)}
 
 
 def test_overlay_source_workspaces_defaults_to_empty(
-    owner, workspace, fake_provider, system_prompt, router_intent_prompt
+    owner, workspace, fake_provider, system_prompt, router_intent_prompt, web_client
 ):
     conversation = Conversation.objects.create(workspace=workspace, created_by=owner)
-    response = auth_client(owner).post(
+    response = web_client(owner).post(
         f"/api/v1/ai/conversations/{conversation.id}/messages",
         {"content": "hi"},
         format="json",
@@ -992,7 +988,7 @@ def test_overlay_source_workspaces_defaults_to_empty(
 
 
 def test_overlay_absent_for_non_owner_member_of_the_personal_workspace(
-    workspace, owner, fake_provider, system_prompt, router_intent_prompt
+    workspace, owner, fake_provider, system_prompt, router_intent_prompt, web_client
 ):
     """workspace.owner_id == actor.id is condition (b) -- a fellow member of
     the owner's personal workspace (hypothetical multi-membership scenario)
@@ -1011,7 +1007,7 @@ def test_overlay_absent_for_non_owner_member_of_the_personal_workspace(
         fingerprint=compute_fingerprint("shipped the migration"),
     )
     conversation = Conversation.objects.create(workspace=workspace, created_by=owner)
-    response = auth_client(fellow_member).post(
+    response = web_client(fellow_member).post(
         f"/api/v1/ai/conversations/{conversation.id}/messages",
         {"content": "hi"},
         format="json",
@@ -1022,7 +1018,7 @@ def test_overlay_absent_for_non_owner_member_of_the_personal_workspace(
 
 
 def test_overlay_provenance_hidden_from_a_later_web_member_reading_history(
-    workspace, owner, fake_provider, system_prompt, router_intent_prompt
+    workspace, owner, fake_provider, system_prompt, router_intent_prompt, web_client
 ):
     """Codex round-3 P2: the round-2 gate only stops a NEW overlay from
     firing once a personal workspace gains a second member -- it does
@@ -1044,7 +1040,7 @@ def test_overlay_provenance_hidden_from_a_later_web_member_reading_history(
         fingerprint=compute_fingerprint("shipped the migration"),
     )
     conversation = Conversation.objects.create(workspace=workspace, created_by=owner)
-    web_response = auth_client(owner).post(
+    web_response = web_client(owner).post(
         f"/api/v1/ai/conversations/{conversation.id}/messages",
         {"content": "hi"},
         format="json",
@@ -1059,13 +1055,13 @@ def test_overlay_provenance_hidden_from_a_later_web_member_reading_history(
     # Only now does the workspace become shared.
     fellow_member = make_member(workspace, "fellow@test.dev", WorkspaceMember.Role.MEMBER)
 
-    listing = auth_client(fellow_member).get(f"/api/v1/ai/conversations/{conversation.id}/messages")
+    listing = web_client(fellow_member).get(f"/api/v1/ai/conversations/{conversation.id}/messages")
     assert listing.status_code == 200
     serialized = [m for m in listing.data if m["role"] == "assistant"][0]
     assert serialized["overlay_source_workspaces"] == {}
     # The owner themselves, reading the same history over the same trusted
     # web channel, still sees it in full.
-    owner_listing = auth_client(owner).get(f"/api/v1/ai/conversations/{conversation.id}/messages")
+    owner_listing = web_client(owner).get(f"/api/v1/ai/conversations/{conversation.id}/messages")
     owner_serialized = [m for m in owner_listing.data if m["role"] == "assistant"][0]
     assert owner_serialized["overlay_source_workspaces"] == {
         str(overlay_memory.id): str(company.id)

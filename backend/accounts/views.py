@@ -4,68 +4,126 @@ from datetime import timedelta
 from django.conf import settings
 from django.utils import timezone
 from rest_framework import status
-from rest_framework.exceptions import AuthenticationFailed
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
-from rest_framework_simplejwt.exceptions import InvalidToken, TokenError
+from rest_framework_simplejwt.exceptions import TokenError
 from rest_framework_simplejwt.settings import api_settings as jwt_settings
 from rest_framework_simplejwt.tokens import RefreshToken
-from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
+from rest_framework_simplejwt.views import TokenRefreshView
 
+from accounts import devices
 from accounts.authentication import TOKEN_PREFIX, hash_token
-from accounts.models import PersonalAccessToken, User
+from accounts.models import DevicePairingCode, PersonalAccessToken, TrustedDevice, User
 from accounts.serializers import (
+    DeviceRefreshSerializer,
+    DeviceSessionStartSerializer,
+    EnrollSerializer,
     LogoutSerializer,
+    PairingCodeCreateSerializer,
     PersonalAccessTokenCreateSerializer,
     PersonalAccessTokenSerializer,
-    SignupSerializer,
+    TrustedDeviceSerializer,
     UserSerializer,
     WorkspaceSummarySerializer,
 )
-from accounts.services import register_user
 from audit.services import record_audit
-from core.throttling import ScopedRateThrottle
+from core.channels import request_device_id
+from core.client_ip import trusted_client_ip
+from core.permissions import IsOwner, IsWebChannel
+from core.throttling import EnrollGlobalThrottle, EnrollPerSourceThrottle, ScopedRateThrottle
 from workspaces.models import Workspace, WorkspaceMember
 
+# Web-only, owner-only surfaces (device trust management).
+_OWNER_WEB_PERMISSIONS = [IsAuthenticated, IsWebChannel, IsOwner]
 
-def _token_pair(user):
-    refresh = RefreshToken.for_user(user)
-    return {"access": str(refresh.access_token), "refresh": str(refresh)}
+# How long a remote-key enrollment is surfaced as a "new device enrolled
+# remotely" banner on every device (MeView.security_notices).
+_REMOTE_ENROLLMENT_NOTICE_DAYS = 7
 
 
-class AuditedLoginView(TokenObtainPairView):
-    """TokenObtainPairView + an audit record on failed credentials.
+def _session_payload(device, tokens):
+    return {**tokens, "device": TrustedDeviceSerializer(device).data}
 
-    Behaviour is unchanged (401 on bad credentials); we only observe. The email
-    is recorded to support abuse investigation; the password never is.
 
-    Throttled by the "login" scope -- effectively a global rate, since
-    Django only ever sees the BFF's address (config/settings/base.py).
-    """
+class EnrollView(APIView):
+    """`POST /api/v1/auth/enroll` -- anonymous device enrollment with a
+    pairing code or the remote access key (Phase 4 branch 2). Returns the
+    device secret (once) plus a first JWT pair; the BFF stores all three in
+    HttpOnly cookies and never hands them to the browser's JavaScript.
 
-    throttle_classes = [ScopedRateThrottle]
-    throttle_scope = "login"
+    Two-tier throttle: per BFF-validated client IP, plus an install-wide
+    ceiling (core/throttling.py)."""
 
-    def post(self, request, *args, **kwargs):
+    authentication_classes = []
+    permission_classes = [AllowAny]
+    throttle_classes = [EnrollPerSourceThrottle, EnrollGlobalThrottle]
+
+    def post(self, request):
+        serializer = EnrollSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        client_ip = trusted_client_ip(request)
         try:
-            return super().post(request, *args, **kwargs)
-        except (AuthenticationFailed, InvalidToken):
-            record_audit(
-                action="auth.login_failed",
-                actor=None,
-                metadata={
-                    "email": str(request.data.get("email", ""))[:254],
-                    "reason": "invalid_credentials",
-                },
+            device, raw_secret = devices.enroll_device(
+                raw_code=serializer.validated_data["code"],
+                device_name=serializer.validated_data["device_name"],
+                client_ip=client_ip,
+                user_agent=serializer.validated_data.get("user_agent", ""),
             )
-            raise
+        except devices.PinNetworkRefused:
+            return Response(
+                {
+                    "detail": "PIN codes are accepted only from the local network; "
+                    "use a strong code or the remote access key.",
+                    "code": "pin_network_refused",
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        except (devices.InvalidPairingCode, devices.OwnerNotConfigured):
+            # One answer for every reason (unknown, expired, used, burned,
+            # no owner yet) -- the reason is in the audit log only.
+            return Response(
+                {"detail": "Invalid or expired code.", "code": "invalid_code"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        payload = _session_payload(device, devices.issue_session_tokens(device))
+        payload["device_secret"] = raw_secret  # only ever appears in this response
+        return Response(payload, status=status.HTTP_201_CREATED)
 
 
-class ThrottledTokenRefreshView(TokenRefreshView):
+class DeviceSessionView(APIView):
+    """`POST /api/v1/auth/devices/session` -- mint a fresh JWT pair from a
+    device secret: the BFF's silent re-mint when a refresh fails, and the
+    session start on a fresh page load. A rejected secret is 401 (the
+    browser goes to /enroll)."""
+
+    authentication_classes = []
+    permission_classes = [AllowAny]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "refresh"
+
+    def post(self, request):
+        serializer = DeviceSessionStartSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            device, tokens = devices.start_device_session(
+                raw_secret=serializer.validated_data["device_secret"],
+                client_ip=trusted_client_ip(request),
+            )
+        except devices.DeviceRejected:
+            return Response(
+                {"detail": "This device is not trusted.", "code": "device_rejected"},
+                status=status.HTTP_401_UNAUTHORIZED,
+            )
+        return Response(_session_payload(device, tokens))
+
+
+class DeviceTokenRefreshView(TokenRefreshView):
     """simplejwt's refresh (rotation + blacklist-after-rotation) under the
-    "refresh" throttle scope."""
+    "refresh" throttle scope, refusing a token whose device is revoked or
+    idle-expired, or that has no device at all (401)."""
 
+    serializer_class = DeviceRefreshSerializer
     throttle_classes = [ScopedRateThrottle]
     throttle_scope = "refresh"
 
@@ -73,15 +131,15 @@ class ThrottledTokenRefreshView(TokenRefreshView):
 class LogoutView(APIView):
     """Ends a web session server-side (Phase 4 branch 1): blacklists the
     refresh token in the body, so it can never mint another access token.
-    Called by the BFF's logout route. The outstanding access token simply
-    runs out (ACCESS_TOKEN_LIFETIME).
+    Called by the BFF's logout route ("Çıkış"). The device stays trusted --
+    "Bu cihazı unut" (`devices/current/revoke`) is the one that revokes it.
 
     Possession of a valid refresh token is the credential here -- an
     access token may already be expired at logout -- so no authentication
-    is required. The view keeps the default (JWT-only) authenticators, so
-    a CLI personal access token is refused outright (401): this is a web
-    channel endpoint. When a valid access token IS sent, it must belong to
-    the same user as the refresh token.
+    is required. The view keeps the default (device-JWT-only)
+    authenticators, so a CLI personal access token is refused outright
+    (401). When a valid access token IS sent, it must belong to the same
+    user as the refresh token.
     """
 
     permission_classes = [AllowAny]
@@ -114,25 +172,127 @@ class LogoutView(APIView):
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
-class SignupView(APIView):
-    permission_classes = [AllowAny]
-    # Same anonymous, password-setting shape as login (and off by default).
-    throttle_classes = [ScopedRateThrottle]
-    throttle_scope = "login"
+class DeviceListView(APIView):
+    """`GET /api/v1/auth/devices` -- the owner's devices, current one
+    marked."""
+
+    permission_classes = _OWNER_WEB_PERMISSIONS
+
+    def get(self, request):
+        items = TrustedDevice.objects.filter(user=request.user)
+        context = {"current_device_id": request_device_id(request)}
+        return Response(TrustedDeviceSerializer(items, many=True, context=context).data)
+
+
+class DeviceRevokeView(APIView):
+    """`POST /api/v1/auth/devices/<id>/revoke` -- immediate: the device's
+    outstanding access tokens fail on their next request."""
+
+    permission_classes = _OWNER_WEB_PERMISSIONS
+
+    def post(self, request, device_id):
+        device = TrustedDevice.objects.filter(pk=device_id, user=request.user).first()
+        if device is None:
+            return Response(status=status.HTTP_404_NOT_FOUND)
+        device = devices.revoke_device(device=device, actor=request.user)
+        context = {"current_device_id": request_device_id(request)}
+        return Response(TrustedDeviceSerializer(device, context=context).data)
+
+
+class CurrentDeviceRevokeView(APIView):
+    """`POST /api/v1/auth/devices/current/revoke` -- "Bu cihazı unut": the
+    requesting device revokes itself."""
+
+    permission_classes = _OWNER_WEB_PERMISSIONS
 
     def post(self, request):
-        if not settings.SIGNUP_ENABLED:
-            return Response(
-                {"detail": "Signup is disabled."},
-                status=status.HTTP_403_FORBIDDEN,
-            )
-        serializer = SignupSerializer(data=request.data)
+        device = TrustedDevice.objects.filter(
+            pk=request_device_id(request), user=request.user
+        ).first()
+        if device is None:
+            return Response(status=status.HTTP_404_NOT_FOUND)
+        devices.revoke_device(
+            device=device, actor=request.user, reason=TrustedDevice.RevokeReason.FORGOTTEN
+        )
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class PairingCodeCreateView(APIView):
+    """`POST /api/v1/auth/pairing-codes` -- "Yeni cihaz eşleştir": a trusted
+    session issues a PIN (default) or a strong code, shown once."""
+
+    permission_classes = _OWNER_WEB_PERMISSIONS
+
+    def post(self, request):
+        serializer = PairingCodeCreateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        user = register_user(**serializer.validated_data)
+        issuing_device = TrustedDevice.objects.filter(
+            pk=request_device_id(request), user=request.user
+        ).first()
+        raw, code = devices.issue_pairing_code(
+            owner=request.user,
+            kind=serializer.validated_data["kind"],
+            issued_via=DevicePairingCode.IssuedVia.WEB,
+            issued_by_device=issuing_device,
+        )
         return Response(
-            {"user": UserSerializer(user).data, "tokens": _token_pair(user)},
+            {"code": raw, "kind": code.kind, "expires_at": code.expires_at},
             status=status.HTTP_201_CREATED,
         )
+
+
+def _remote_key_state(owner):
+    key = devices.active_remote_key(owner)
+    if key is None:
+        return {"active": False, "created_at": None, "last_used_at": None}
+    return {"active": True, "created_at": key.created_at, "last_used_at": key.last_used_at}
+
+
+class RemoteAccessKeyView(APIView):
+    """`GET /api/v1/auth/remote-key` -- whether remote enrollment is on;
+    `POST` creates or rotates the key (returned once)."""
+
+    permission_classes = _OWNER_WEB_PERMISSIONS
+
+    def get(self, request):
+        return Response(_remote_key_state(request.user))
+
+    def post(self, request):
+        device = TrustedDevice.objects.filter(
+            pk=request_device_id(request), user=request.user
+        ).first()
+        raw, _ = devices.rotate_remote_key(owner=request.user, via="web", device=device)
+        return Response(
+            {**_remote_key_state(request.user), "key": raw}, status=status.HTTP_201_CREATED
+        )
+
+
+class RemoteAccessKeyRevokeView(APIView):
+    """`POST /api/v1/auth/remote-key/revoke` -- turn remote enrollment off."""
+
+    permission_classes = _OWNER_WEB_PERMISSIONS
+
+    def post(self, request):
+        devices.revoke_remote_key(owner=request.user, via="web")
+        return Response(_remote_key_state(request.user))
+
+
+def _security_notices(user):
+    """Recent remote-key enrollments, surfaced as a "new device enrolled
+    remotely" banner on every device (Phase 4 branch 2)."""
+    since = timezone.now() - timedelta(days=_REMOTE_ENROLLMENT_NOTICE_DAYS)
+    recent = TrustedDevice.objects.filter(
+        user=user, enrolled_via=TrustedDevice.EnrolledVia.REMOTE_KEY, created_at__gte=since
+    )
+    return [
+        {
+            "kind": "remote_enrollment",
+            "device_id": str(device.pk),
+            "device_name": device.name,
+            "created_at": device.created_at.isoformat(),
+        }
+        for device in recent
+    ]
 
 
 class MeView(APIView):
@@ -151,17 +311,18 @@ class MeView(APIView):
             {
                 "user": UserSerializer(request.user).data,
                 "workspaces": WorkspaceSummarySerializer(workspaces, many=True).data,
+                "security_notices": _security_notices(request.user),
             }
         )
 
 
 class PersonalAccessTokenListCreateView(APIView):
-    """Mint/list a CLI bearer credential (MVP 9 §1). Web/JWT-authenticated
-    only — minting a token is itself a sensitive, human-decided action,
-    never done by a channel that's already low-trust (no PAT auth
-    allowlisted here)."""
+    """Mint/list a CLI bearer credential (MVP 9 §1). Web channel only —
+    minting a token is itself a sensitive, human-decided action, never done
+    by a channel that's already low-trust (no PAT auth allowlisted here,
+    and IsWebChannel on top)."""
 
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, IsWebChannel]
 
     def get(self, request):
         # A PAT is a per-user credential, not a shared workspace resource
@@ -203,7 +364,7 @@ class PersonalAccessTokenListCreateView(APIView):
 
 
 class PersonalAccessTokenRevokeView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, IsWebChannel]
 
     def post(self, request, token_id):
         # user=request.user: only the requester's own tokens are ever

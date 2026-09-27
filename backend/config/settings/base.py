@@ -217,24 +217,24 @@ else:
 # --- API / auth ---
 
 REST_FRAMEWORK = {
-    "DEFAULT_AUTHENTICATION_CLASSES": (
-        "rest_framework_simplejwt.authentication.JWTAuthentication",
-    ),
+    # The web session of a trusted device -- the only authenticator that
+    # yields CHANNEL_WEB (Phase 4 branch 2). PAT auth is allowlisted per view.
+    "DEFAULT_AUTHENTICATION_CLASSES": ("accounts.authentication.DeviceJWTAuthentication",),
     "DEFAULT_PERMISSION_CLASSES": ("rest_framework.permissions.IsAuthenticated",),
     # Scoped rates (ScopedRateThrottle, counted in the default cache):
     # - "chat": provider-cost message send (assistant/views.py).
-    # - "login" / "refresh": the anonymous token endpoints (accounts/urls.py).
-    #   Django only ever sees the BFF's address as REMOTE_ADDR, so for
-    #   anonymous requests these are effectively GLOBAL rates, not per
-    #   client -- correct for a single-account system (ADR-008): they bound
-    #   password guessing and refresh-token replay for the whole install.
+    # - "refresh": the anonymous session endpoints (refresh, logout, device
+    #   session mint; accounts/urls.py). Django only ever sees the BFF's
+    #   address as REMOTE_ADDR, so these are effectively GLOBAL rates, not
+    #   per client -- correct for a single-owner system (ADR-008): they bound
+    #   refresh-token replay for the whole install. `/auth/enroll` has its
+    #   own two-tier throttle (ENROLL_RATE_* below).
     # - "cost": the remaining cost-bearing creates -- agent creation
     #   (synchronous planner LLM call), harness discovery/implementation
     #   jobs (each up to HARNESS_MAX_JOB_COST) and knowledge documents
     #   (embeddings). One shared per-user budget across all of them.
     "DEFAULT_THROTTLE_RATES": {
         "chat": "30/min",
-        "login": "10/min",
         "refresh": "30/min",
         "cost": "60/hour",
     },
@@ -251,8 +251,9 @@ SIMPLE_JWT = {
 }
 
 # Django's four stock validators; 12 characters minimum. Enforced wherever
-# a password is set through a human-facing path (signup serializer,
-# `bootstrap_owner`).
+# a password is set through a human-facing path (`bootstrap_owner`). The
+# owner's password is only a Django-admin break-glass credential: no API
+# endpoint accepts it (Phase 4 branch 2).
 AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},
     {
@@ -268,9 +269,6 @@ AUTH_PASSWORD_VALIDATORS = [
 # omitted, it gets PAT_DEFAULT_TTL_DAYS.
 PAT_DEFAULT_TTL_DAYS = env.int("PAT_DEFAULT_TTL_DAYS", default=90)
 PAT_MAX_TTL_DAYS = env.int("PAT_MAX_TTL_DAYS", default=365)
-
-# Dev signup switch — prod default is False (see dev.py for the dev default).
-SIGNUP_ENABLED = env.bool("SIGNUP_ENABLED", default=False)
 
 # --- Device trust (Phase 4 branch 2, ADR-008 decision 2) ---
 #

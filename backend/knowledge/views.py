@@ -8,6 +8,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from core.permissions import IsWebChannel
 from core.throttling import CreateScopedRateThrottle
 from knowledge.models import KnowledgeDocument
 from knowledge.serializers import (
@@ -224,7 +225,7 @@ class KnowledgeFileUploadCreateView(APIView):
 
 
 class KnowledgeDocumentDetailView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, IsWebChannel]
 
     def _get_document(self, request, document_id):
         # Out-of-scope rows → 404, never 403 (existence must not leak).
