@@ -653,3 +653,30 @@ def test_the_governance_twin_records_the_current_pins():
     text = twin.read_text()
     for policy in MANIFEST.tools:
         assert policy.schema_sha256 in text, policy.name
+
+
+def test_a_connect_failure_on_the_send_is_failed_not_unknown(
+    bound,
+    ha,  # noqa: F811
+    web_client,
+    owner,
+    workspace,
+    approve,
+):
+    request_id = _request(web_client, owner, workspace, SALON_40).json()["id"]
+    ha.post_error = httpx.ConnectError("refused")
+    approve(request_id)
+    execution = ConnectorWriteExecution.objects.get()
+    assert (execution.status, execution.error_type) == ("failed", "transport_error")
+
+
+@pytest.mark.parametrize(
+    "base_url",
+    ["http://user:pw@ha.test:8123", "ftp://ha.test", "http://ha.test:8123/?x=1", ""],
+)
+def test_a_malformed_base_url_is_not_configured(base_url, ha, monkeypatch):  # noqa: F811
+    monkeypatch.setenv(bridge.BASE_URL_ENV, base_url)
+    with pytest.raises(Exception) as exc:
+        bridge.list_tools(MANIFEST, timeout=5)
+    assert getattr(exc.value, "code", None) == "not_configured"
+    assert ha.requests == []

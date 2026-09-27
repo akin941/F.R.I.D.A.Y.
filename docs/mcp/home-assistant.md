@@ -83,8 +83,9 @@ sent.
 3. **Execution** (Celery, once): re-validate against the allowlist as it is
    now; read the entity (gone → `failed`/`target_missing`, nothing sent);
    one `POST`; read the state back into the execution result. A timeout,
-   transport error or 5xx after the POST → `unknown_outcome`, never re-sent;
-   an HA 4xx → `failed`/`tool_error`.
+   transport error or 5xx once the POST was handed to the transport →
+   `unknown_outcome`, never re-sent; a connect failure (nothing reached HA)
+   or 401/403 → `failed`; an HA 4xx → `failed`/`tool_error`.
 
 ## Credentials
 - Env var names only: `HA_BASE_URL` (e.g. `http://homeassistant.local:8123`,

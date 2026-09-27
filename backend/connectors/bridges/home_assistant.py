@@ -395,6 +395,14 @@ def _request(client, method, path, *, body=None, operation):
     except ConnectorError:
         logger.warning("home_assistant %s: response over the size cap", operation)
         raise
+    except (httpx.ConnectError, httpx.ConnectTimeout) as exc:
+        # No connection was made: nothing reached Home Assistant.
+        logger.warning("home_assistant %s failed: connect (%s)", operation, type(exc).__name__)
+        error = ConnectorError(
+            "timeout" if isinstance(exc, httpx.TimeoutException) else "transport_error"
+        )
+        error.unsent = True
+        raise error from None
     except httpx.TimeoutException as exc:
         logger.warning("home_assistant %s failed: timeout (%s)", operation, type(exc).__name__)
         raise ConnectorError("timeout") from None
@@ -534,8 +542,10 @@ def _call_service(arguments, timeout):
             )
         except ConnectorError as exc:
             # The request was handed to the transport: HA may have acted --
-            # unless HA answered 401/403, which is a refusal.
-            exc.sent = exc.code != "not_configured"
+            # unless no connection was ever made, or HA answered 401/403
+            # (a refusal). Only then is the write `failed` rather than
+            # `unknown_outcome`.
+            exc.sent = not getattr(exc, "unsent", False) and exc.code != "not_configured"
             raise
         if status >= 500:
             error = ConnectorError("protocol_error")
