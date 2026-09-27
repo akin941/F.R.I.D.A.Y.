@@ -393,18 +393,19 @@ def run_harness_implementation_job(job_id):
         status, failure_reason = _wait_for_implementation_container(
             job.pk, container_name, started_monotonic
         )
-        if status == "succeeded":
-            # Cost accounting (mirrors `harness.execution._finalize`): the
-            # CLI's own `--output-format json` stdout is captured
-            # separately from the wrapper's dedicated result file below --
-            # the wrapper never reports cost/usage, only test outcome.
-            # Captured HERE, before `finally` removes the container below
-            # (Codex code-review P2, branch 2 round 1: an earlier version
-            # captured logs AFTER `_safe_remove_container` ran -- `docker
-            # logs` can't read anything from a container that no longer
-            # exists, so every successful run silently recorded zero
-            # tokens/cost).
+        # Captured on EVERY post-launch outcome (Codex code-review P2,
+        # branch 6 round 2): a crashed/timed-out/cancelled CLI's output is
+        # exactly the diagnostic the stored transcript exists for. Always
+        # before the `finally` removal below.
+        try:
             raw_output = runner.capture_logs(container_name)
+        except runner.RunnerError:
+            logger.exception("Harness implementation job %s logs unavailable", job_id)
+        # Cost accounting reads the same capture (mirrors
+        # `harness.execution._finalize`): the CLI's own stdout is framed by
+        # the wrapper, separate from its result file; it must be read before
+        # `finally` removes the container (Codex code-review P2, branch 2
+        # round 1).
     except runner.RunnerError:
         logger.exception("Harness implementation job %s failed to launch", job_id)
         status, failure_reason = "failed", HarnessImplementationJob.FailureReason.RUNNER_ERROR
@@ -412,6 +413,14 @@ def run_harness_implementation_job(job_id):
         removal_confirmed = _safe_remove_container(container_name)
 
     if status != "succeeded":
+        if raw_output:
+            # Bounded and scrubbed of CLI keys like every stored transcript;
+            # unframed here (the wrapper may never have reached its frame).
+            HarnessImplementationJob.objects.filter(pk=job.pk).update(
+                raw_transcript=_fence_and_bound_transcript(
+                    extract_framed_cli_output(raw_output) or raw_output
+                )[0]
+            )
         _fail_and_cleanup(
             job,
             failure_reason,

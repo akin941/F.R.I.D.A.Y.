@@ -298,3 +298,15 @@ def test_cancel_before_running_writes_no_work_log(workspace, repo, owner):
     job = _job(workspace, repo, owner, status=HarnessImplementationJob.Status.PENDING_GATE_A)
     cancel_harness_implementation_job(job=job, actor=owner)
     assert not Memory.objects.filter(workspace=workspace, memory_type=Memory.Type.WORK_LOG).exists()
+
+
+def test_failed_container_keeps_its_transcript(workspace, repo, owner, monkeypatch):
+    """Codex code-review P2, branch 6 round 2: a crashed CLI's output is the
+    diagnostic the stored transcript exists for."""
+    patches = _patch_runner(monkeypatch)
+    patches["container_exit_code"].return_value = 1
+    patches["capture_logs"].return_value = "Error: invalid x-api-key\n"
+    job = _run(_job(workspace, repo, owner))
+    assert job.status == HarnessImplementationJob.Status.FAILED
+    assert job.failure_reason == HarnessImplementationJob.FailureReason.RUNNER_ERROR
+    assert "invalid x-api-key" in job.raw_transcript
