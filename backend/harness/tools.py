@@ -23,6 +23,34 @@ from tools.registry import ToolSpec, ToolValidationError, register_tool
 logger = logging.getLogger(__name__)
 
 
+_JOB_CACHE_ATTR = "_harness_job_cache"
+
+
+def _job_for_request(approval_request):
+    """`_get_job_from_payload` memoized on the request instance: the
+    approvals list serializes `describe_execution` AND `describe_request`
+    per row, and without this each harness row cost two job queries on an
+    unpaginated list (Phase 3 branch 6 review P3)."""
+    cached = getattr(approval_request, _JOB_CACHE_ATTR, _JOB_CACHE_ATTR)
+    if cached is _JOB_CACHE_ATTR:
+        cached = _get_job_from_payload(approval_request.payload)
+        setattr(approval_request, _JOB_CACHE_ATTR, cached)
+    return cached
+
+
+def _is_linked_gate(approval_request, job, gate_field):
+    """Only the gate the harness itself created and linked to this job gets
+    a display summary (Phase 3 branch 6 review P3): a legacy unlinked
+    `harness_*` row (mintable by a writer before `user_invocable` existed)
+    would otherwise render attacker-chosen payload values as if real."""
+    from approvals.models import ApprovalRequest
+
+    return (
+        approval_request.origin == ApprovalRequest.Origin.HARNESS
+        and getattr(job, gate_field) == approval_request.id
+    )
+
+
 def _get_job_from_payload(payload):
     job_id = payload.get("job_id") if payload else None
     if not job_id:
@@ -119,7 +147,7 @@ def describe_harness_implement_execution(approval_request):
     """`ToolSpec.describe_execution` for Gate A -- a JSON-safe status
     summary for the UI (brief §boundary), mirroring
     `tools.export.describe_vault_export_execution`'s shape."""
-    job = _get_job_from_payload(approval_request.payload)
+    job = _job_for_request(approval_request)
     if job is None:
         return None
     return {
@@ -187,7 +215,7 @@ def dispatch_harness_push_execution(job_id):
 
 
 def describe_harness_push_execution(approval_request):
-    job = _get_job_from_payload(approval_request.payload)
+    job = _job_for_request(approval_request)
     if job is None:
         return None
     return {
@@ -215,8 +243,10 @@ def describe_harness_implement_request(approval_request):
     creation-time snapshots fill the gap (`goal`, `repo_git_url`,
     `branch_name`, `agent` never change after creation)."""
     payload = approval_request.payload or {}
-    job = _get_job_from_payload(payload)
+    job = _job_for_request(approval_request)
     if job is None or job.workspace_id != approval_request.workspace_id:
+        return None
+    if not _is_linked_gate(approval_request, job, "gate_a_request_id"):
         return None
     return {
         "kind": "harness_implement",
@@ -226,7 +256,7 @@ def describe_harness_implement_request(approval_request):
         "repo_git_url": _text(payload.get("repo_git_url", job.repo_git_url), 500),
         "branch_name": _text(payload.get("branch_name", job.branch_name), 255),
         "agent": _text(payload.get("agent", job.agent), 50),
-        "reviewer_agent": _reviewer_for(job.agent),
+        "reviewer_agent": _text(payload.get("reviewer_agent") or _reviewer_for(job.agent), 50),
     }
 
 
@@ -246,8 +276,10 @@ def describe_harness_push_request(approval_request):
     decider sees exactly what existed at that moment, never live job
     state. Pre-snapshot requests simply show fewer fields."""
     payload = approval_request.payload or {}
-    job = _get_job_from_payload(payload)
+    job = _job_for_request(approval_request)
     if job is None or job.workspace_id != approval_request.workspace_id:
+        return None
+    if not _is_linked_gate(approval_request, job, "gate_b_request_id"):
         return None
     changed_files = payload.get("changed_files")
     if not isinstance(changed_files, list):

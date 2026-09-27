@@ -44,7 +44,7 @@ from ai_core.gateway import InferenceGateway, record_external_usage
 from ai_core.models import PromptTemplate
 from audit.services import record_audit
 from harness import runner
-from harness.execution import _resolve_cli_env
+from harness.execution import _resolve_cli_env, redact_harness_secrets
 from harness.models import HarnessImplementationJob, HarnessReview
 from memory.context import neutralize_fence, strip_invisible_formatting
 
@@ -371,7 +371,7 @@ def _fence_and_bound_transcript(raw_output):
     otherwise-valid review as `review_unavailable`. Keeps a head+tail
     window instead so the opening context AND the trailing verdict both
     survive."""
-    bounded_raw = raw_output
+    bounded_raw = redact_harness_secrets(raw_output)
     if len(bounded_raw) > _RAW_TRANSCRIPT_MAX_CHARS:
         head_chars = _RAW_TRANSCRIPT_MAX_CHARS // 2
         tail_chars = _RAW_TRANSCRIPT_MAX_CHARS - head_chars - 1

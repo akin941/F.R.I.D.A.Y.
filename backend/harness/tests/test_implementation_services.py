@@ -94,6 +94,7 @@ class TestCreateHarnessImplementationJob:
             "repo_git_url": job.repo_git_url,
             "branch_name": job.branch_name,
             "agent": "claude_code",
+            "reviewer_agent": "codex_cli",
         }
         assert job.gate_a_request.origin == ApprovalRequest.Origin.HARNESS
         assert job.branch_name == f"harness/p3-{job.id}"

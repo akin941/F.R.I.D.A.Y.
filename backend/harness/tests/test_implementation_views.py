@@ -343,3 +343,74 @@ class TestSystemOnlyGates:
         assert "harness_implement" not in names
         assert "harness_push" not in names
         assert "vault_export" in names
+
+
+class TestDisplaySummaryAudience:
+    """Phase 3 branch 6 review P2: the summary goes only to curators over
+    the web channel -- the same audience that can decide the gate."""
+
+    def _row(self, client, workspace, request_id):
+        response = client.get("/api/v1/approvals/requests", {"workspace": str(workspace.id)})
+        assert response.status_code == 200
+        return next(r for r in response.json() if r["id"] == str(request_id))
+
+    @pytest.mark.parametrize("role", [WorkspaceMember.Role.MEMBER, WorkspaceMember.Role.VIEWER])
+    def test_non_curators_get_no_summary(self, workspace, owner, repo, role):
+        job = make_job(workspace, repo, owner)
+        client = client_for(member(workspace, role, f"{role}-aud@test.dev"))
+        assert self._row(client, workspace, job.gate_a_request_id)["display_summary"] is None
+
+    def test_low_trust_channel_gets_no_summary(self, workspace, owner, repo):
+        from accounts.authentication import hash_token
+        from accounts.models import PersonalAccessToken
+
+        job = make_job(workspace, repo, owner)
+        raw = "jpat_test-raw-token-0000000000000000"
+        PersonalAccessToken.objects.create(
+            user=owner, workspace=workspace, name="cli", token_hash=hash_token(raw)
+        )
+        client = APIClient()
+        client.credentials(HTTP_AUTHORIZATION=f"Bearer {raw}")
+        assert self._row(client, workspace, job.gate_a_request_id)["display_summary"] is None
+
+    def test_admin_on_web_gets_the_summary(self, workspace, owner, repo):
+        job = make_job(workspace, repo, owner)
+        admin = member(workspace, WorkspaceMember.Role.ADMIN, "admin-aud@test.dev")
+        row = self._row(client_for(admin), workspace, job.gate_a_request_id)
+        assert row["display_summary"]["kind"] == "harness_implement"
+        assert row["display_summary"]["reviewer_agent"] == "codex_cli"
+
+    def test_unlinked_legacy_gate_row_gets_no_summary(self, workspace, owner, repo):
+        job = make_job(workspace, repo, owner)
+        forged = ApprovalRequest.objects.create(
+            workspace=workspace,
+            tool_name="harness_push",
+            payload={"job_id": str(job.id), "review_verdict": "approved", "review_summary": "x"},
+            requested_by=owner,
+            origin=ApprovalRequest.Origin.HUMAN,
+        )
+        assert self._row(client_for(owner), workspace, forged.id)["display_summary"] is None
+
+
+def test_discovery_job_from_another_repo_is_refused(workspace, owner, repo):
+    other_repo = HarnessRepo.objects.create(
+        workspace=workspace,
+        name="other",
+        git_url="git@example.com:o/p.git",
+        enabled=True,
+        test_command="pytest -q",
+    )
+    discovery = HarnessJob.objects.create(
+        workspace=workspace, repo=other_repo, goal="analyze", created_by=owner
+    )
+    response = client_for(owner).post(
+        BASE,
+        {
+            "workspace": str(workspace.id),
+            "repo": str(repo.id),
+            "goal": "x",
+            "discovery_job": str(discovery.id),
+        },
+        format="json",
+    )
+    assert response.status_code == 400

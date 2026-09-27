@@ -238,3 +238,63 @@ def test_successful_push_writes_a_work_log_with_the_branch(workspace, repo, owne
     assert job.branch_name in log.content
     assert "adds /health" in log.content
     assert log.sensitivity == job.sensitivity
+
+
+def test_transcripts_are_scrubbed_of_cli_keys(workspace, repo, owner, monkeypatch):
+    """Phase 3 branch 6 review P2: a goal or repo content can make the agent
+    print its own key; stored transcripts never carry it."""
+    key = "sk-ant-test-abcdef0123456789"
+    monkeypatch.setenv("ANTHROPIC_API_KEY", key)
+    patches = _patch_runner(monkeypatch)
+    cli = json.dumps(
+        {"result": f"the key is {key}", "total_cost_usd": "0.01", "usage": {"input_tokens": 1}}
+    )
+    patches["capture_logs"].return_value = _frame(cli) + "\n"
+    job = _run(_job(workspace, repo, owner))
+    assert key not in job.raw_transcript
+    assert "[REDACTED]" in job.raw_transcript
+
+
+def test_push_error_is_scrubbed_and_bounded(workspace, repo, owner, monkeypatch):
+    key = "sk-ant-test-abcdef0123456789"
+    monkeypatch.setenv("ANTHROPIC_API_KEY", key)
+    job = _job(workspace, repo, owner, status=HarnessImplementationJob.Status.PUSHING)
+    implementation_execution._finalize_push_failure(
+        job, HarnessImplementationJob.FailureReason.PUSH_FAILED, error=f"remote: {key} " + "x" * 900
+    )
+    job.refresh_from_db()
+    assert key not in job.push_result["error"]
+    assert len(job.push_result["error"]) <= 500
+
+
+@pytest.mark.parametrize("path", ["gate_b_rejected", "cancel_pending_gate_b", "push_cancelled"])
+def test_post_implementation_terminal_paths_write_a_work_log(
+    workspace, repo, owner, monkeypatch, path
+):
+    from approvals.models import ApprovalRequest
+    from harness.services import (
+        cancel_harness_implementation_job,
+        fail_implementation_job_for_gate_b_decision,
+    )
+
+    monkeypatch.setattr(implementation_execution.runner, "cleanup_directory", mock.Mock())
+    if path == "push_cancelled":
+        job = _job(workspace, repo, owner, status=HarnessImplementationJob.Status.PUSHING)
+        implementation_execution._finalize_push_cancelled(job)
+    else:
+        job = _job(workspace, repo, owner, status=HarnessImplementationJob.Status.PENDING_GATE_B)
+        if path == "gate_b_rejected":
+            fail_implementation_job_for_gate_b_decision(
+                job.id, decision_status=ApprovalRequest.Status.REJECTED
+            )
+        else:
+            cancel_harness_implementation_job(job=job, actor=owner)
+    assert Memory.objects.filter(workspace=workspace, memory_type=Memory.Type.WORK_LOG).count() == 1
+
+
+def test_cancel_before_running_writes_no_work_log(workspace, repo, owner):
+    from harness.services import cancel_harness_implementation_job
+
+    job = _job(workspace, repo, owner, status=HarnessImplementationJob.Status.PENDING_GATE_A)
+    cancel_harness_implementation_job(job=job, actor=owner)
+    assert not Memory.objects.filter(workspace=workspace, memory_type=Memory.Type.WORK_LOG).exists()

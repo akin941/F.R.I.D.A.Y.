@@ -50,6 +50,7 @@ from harness.execution import (
     _fence_and_bound_transcript,
     _parse_claude_code_output,
     _resolve_cli_env,
+    redact_harness_secrets,
 )
 from harness.models import HarnessImplementationJob, HarnessReview
 from memory.context import neutralize_fence, strip_invisible_formatting
@@ -1006,6 +1007,7 @@ def _finalize_push_cancelled(job, *, worktree_cleanup_confirmed=True):
         resource=locked,
         metadata={},
     )
+    record_implementation_work_log(locked)
 
 
 def _finalize_push_failure(job, failure_reason, *, error="", worktree_cleanup_confirmed=True):
@@ -1019,7 +1021,9 @@ def _finalize_push_failure(job, failure_reason, *, error="", worktree_cleanup_co
             return
         locked.status = HarnessImplementationJob.Status.FAILED
         locked.failure_reason = failure_reason
-        locked.push_result = {"pushed": False, "error": error}
+        # Git's own stderr, scrubbed of credentials and bounded before it is
+        # stored and shown to the owner (Phase 3 branch 6 review).
+        locked.push_result = {"pushed": False, "error": redact_harness_secrets(error)[:500]}
         update_fields = ["status", "failure_reason", "push_result", "updated_at"]
         _apply_worktree_cleanup(
             locked, update_fields, worktree_cleanup_confirmed=worktree_cleanup_confirmed
@@ -1344,6 +1348,7 @@ def _recover_stale_implementing_job(job_id, threshold):
         resource=job,
         metadata={"failure_reason": job.failure_reason, "recovered": True},
     )
+    record_implementation_work_log(job)
 
 
 def _claim_stale_pushing_job(job_id, threshold):
@@ -1403,6 +1408,7 @@ def _recover_stale_pushing_job(job_id, threshold):
         resource=job,
         metadata={"failure_reason": job.failure_reason, "recovered": True},
     )
+    record_implementation_work_log(job)
 
 
 def _sweep_expired_worktree_job(job_id):
@@ -1462,6 +1468,7 @@ def _sweep_expired_worktree_job(job_id):
             "recovered": True,
         },
     )
+    record_implementation_work_log(locked)
     if gate_b_request is not None:
         from harness.services import _revoke_gate_request_best_effort
 

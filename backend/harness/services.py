@@ -384,6 +384,15 @@ def _record_implementation_job(job, action, actor, **metadata):
     )
 
 
+def _snapshot_reviewer(agent):
+    from harness.review_execution import select_review_agent
+
+    try:
+        return str(select_review_agent(agent))
+    except HarnessInvalidTransition:
+        return ""
+
+
 def list_implementation_jobs(*, workspace, actor):
     _require_curator(actor, workspace, "listing harness implementation jobs")
     return HarnessImplementationJob.objects.for_actor(actor, workspace=workspace)
@@ -474,6 +483,8 @@ def create_harness_implementation_job(
         raise HarnessInvalidTransition(f"Agent '{agent}' is not selectable for implementation.")
     if discovery_job is not None and discovery_job.workspace_id != workspace.id:
         raise HarnessPermissionDenied("discovery_job does not belong to this workspace.")
+    if discovery_job is not None and discovery_job.repo_id != locked_repo.id:
+        raise HarnessInvalidTransition("discovery_job was run against a different repo.")
     sensitivity = Memory.Sensitivity.PRIVATE if locked_repo.sensitive else Memory.Sensitivity.NORMAL
     job = HarnessImplementationJob.objects.create(
         workspace=workspace,
@@ -498,6 +509,7 @@ def create_harness_implementation_job(
             "repo_git_url": job.repo_git_url,
             "branch_name": job.branch_name,
             "agent": str(job.agent),
+            "reviewer_agent": _snapshot_reviewer(job.agent),
         },
         origin=ApprovalRequest.Origin.HARNESS,
     )
@@ -580,6 +592,7 @@ def cancel_harness_implementation_job(*, job, actor):
     and worktree cleanup, never this request."""
     gate_a_request = None
     gate_b_request = None
+    ran_job = None
     with transaction.atomic():
         locked = _locked_implementation_job(job, actor)
         _require_curator(actor, locked.workspace, "cancelling this harness implementation job")
@@ -596,6 +609,9 @@ def cancel_harness_implementation_job(*, job, actor):
             locked.save(update_fields=["status", "failure_reason", "updated_at"])
             _record_implementation_job(locked, "harness.implementation_job_cancelled", actor)
             _cleanup_worktree_best_effort(locked)
+            # The job actually ran (Gate A was approved): it leaves a
+            # work_log like every other post-implementation terminal path.
+            ran_job = locked
             if was_pending_gate_b:
                 gate_b_request = locked.gate_b_request
         elif locked.status in _IMPLEMENTATION_ACTIVE_LOOP_STATUSES:
@@ -603,6 +619,10 @@ def cancel_harness_implementation_job(*, job, actor):
             locked.save(update_fields=["cancel_requested", "updated_at"])
             _record_implementation_job(locked, "harness.implementation_job_cancel_requested", actor)
         # Any other status is already terminal -- idempotent no-op.
+    if ran_job is not None:
+        from harness.implementation_execution import record_implementation_work_log
+
+        record_implementation_work_log(ran_job)
     if gate_a_request is not None:
         _revoke_gate_request_best_effort(gate_a_request, actor)
     if gate_b_request is not None:
@@ -851,3 +871,6 @@ def fail_implementation_job_for_gate_b_decision(job_id, *, decision_status):
         locked.save(update_fields=["status", "failure_reason", "updated_at"])
     _record_implementation_job(locked, "harness.implementation_job_failed", locked.created_by)
     _cleanup_worktree_best_effort(locked)
+    from harness.implementation_execution import record_implementation_work_log
+
+    record_implementation_work_log(locked)

@@ -97,6 +97,35 @@ def _resolve_cli_env(agent):
     return {}
 
 
+# Every credential a harness container can hold in its environment (the
+# CLI keys resolved by `_resolve_cli_env`). Phase 3 branch 6 (review P2):
+# CLI output is agent-influenced -- a goal or repo content can make the
+# agent print its own key -- so every stored/gateway-bound transcript is
+# scrubbed of these literal values first.
+_HARNESS_SECRET_ENV_NAMES = ("ANTHROPIC_API_KEY", "CODEX_API_KEY", "OPENAI_API_KEY")
+_MIN_REDACTABLE_SECRET_LENGTH = 12
+REDACTED_SECRET = "[REDACTED]"
+
+
+def harness_secret_values():
+    return [
+        value
+        for name in _HARNESS_SECRET_ENV_NAMES
+        if len(value := os.environ.get(name, "")) >= _MIN_REDACTABLE_SECRET_LENGTH
+    ]
+
+
+def redact_harness_secrets(text):
+    """Replaces every known harness credential value in `text`. Literal
+    matching only (an encoded key isn't caught) -- the scrub is defense in
+    depth on top of never logging credentials anywhere else."""
+    if not text:
+        return text
+    for value in harness_secret_values():
+        text = text.replace(value, REDACTED_SECRET)
+    return text
+
+
 def _parse_claude_code_output(raw_output):
     """Best-effort parse of Claude Code's `--output-format json` result
     (brief: "reports a total_cost_usd/usage block in its result object").
@@ -177,7 +206,7 @@ def _fence_and_bound_transcript(raw_output):
     (`memory/context.py:341,359`) so it can never close/open a tag and
     smuggle text into the privileged part of the gateway prompt -- it is
     used ONLY to build the prompt, never persisted."""
-    bounded_raw = raw_output
+    bounded_raw = redact_harness_secrets(raw_output)
     if len(bounded_raw) > _RAW_TRANSCRIPT_MAX_CHARS:
         bounded_raw = bounded_raw[: _RAW_TRANSCRIPT_MAX_CHARS - 1] + "…"
     fenced_for_prompt = neutralize_fence(strip_invisible_formatting(bounded_raw), "repo_transcript")
