@@ -808,6 +808,7 @@ detail in `docs/prompts/phase-3-harness-v2/brief.md` branch table.
 
 | # | Branch | Scope |
 |---|---|---|
+| 5a | `chore/p3-deps-security` | Close the 68 open Dependabot alerts (3 critical) with patch-level upgrades (django, drf, sqlparse, anyio, next, vitest, transitive npm) |
 | 5 | `feat/p3-harness-hardening` | The pending branch-3 follow-ups (fixed `.env.example`: commented defaults) + every harness audit finding above + O-3 decision recorded |
 | 6 | `feat/p3-implementation-api` | Implementation-job + review API (create/list/detail/cancel), stored implementation transcript, gateway-produced `diff_summary`, a safe approval display summary for Gate A/B, `work_log` for implementation/push outcomes, `ToolSpec.user_invocable` filter for router/planner |
 | 7 | `feat/p3-harness-ui` | Frontend: repo picker, request implementation (fresh or from a discovery job), pipeline view, gate status + `/approvals` deep links, review verdict/findings/diff summary with fenced transcripts, harness-aware approval cards; plus the frontend "fix now" list (font, e2e, shell height, chat error/flicker, keyboard cards) |
