@@ -59,6 +59,11 @@ _BEAT_SCHEDULE = {
         "task": "harness.tasks.recover_stale_harness_reviews",
         "schedule": 60.0,
     },
+    # Phase 5 branch 6 (brief D10): lost deploy runs; runner beat only.
+    "deploy-run-recovery-scan": {
+        "task": "deploys.tasks.recover_stale_deploy_runs",
+        "schedule": 60.0,
+    },
     "jwt-flush-expired-tokens": {
         "task": "accounts.tasks.flush_expired_tokens",
         "schedule": 24 * 60 * 60.0,
@@ -81,15 +86,17 @@ _BEAT_SCHEDULE = {
 # runner up, nothing is published -- no scan messages pile up in Redis for a
 # queue nobody consumes -- and nothing needs recovering, because no harness
 # job can make progress without a runner anyway; the scans resume when the
-# runner starts.
-_HARNESS_SCAN_PREFIX = "harness.tasks."
+# runner starts. The deploy recovery scan (Phase 5 branch 6) follows the same
+# rule: deploy runs execute only on the runner (`-Q harness,deploy`), the one
+# host holding the deploy SSH key.
+_RUNNER_SCAN_PREFIXES = ("harness.tasks.", "deploys.tasks.")
 
 
 def build_beat_schedule(*, runner_mode):
     return {
         name: entry
         for name, entry in _BEAT_SCHEDULE.items()
-        if entry["task"].startswith(_HARNESS_SCAN_PREFIX) == runner_mode
+        if entry["task"].startswith(_RUNNER_SCAN_PREFIXES) == runner_mode
     }
 
 
