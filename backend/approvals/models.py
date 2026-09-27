@@ -35,6 +35,17 @@ class ApprovalRequest(WorkspaceScopedModel, TimestampedModel):
         AGENT = "agent"
         HARNESS = "harness"
 
+    class RequestedChannel(models.TextChoices):
+        # The channel the request arrived over (Phase 4 branch 1) -- the
+        # companion of `origin`: a CLI-typed request is origin=human but
+        # channel=cli. `system` = machine callers (agent engine, harness
+        # gates); `unknown` = rows created before this was recorded.
+        WEB = "web"
+        CLI = "cli"
+        TELEGRAM = "telegram"
+        SYSTEM = "system"
+        UNKNOWN = "unknown"
+
     # Which registered tool (tools.registry, MVP 5 branch 2) this gates.
     tool_name = models.CharField(max_length=100)
     # Opaque, tool-specific arguments. Never used to resolve scope -- a
@@ -43,6 +54,11 @@ class ApprovalRequest(WorkspaceScopedModel, TimestampedModel):
     payload = models.JSONField(default=dict, blank=True)
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDING)
     origin = models.CharField(max_length=20, choices=Origin.choices, default=Origin.HUMAN)
+    # The model default only covers rows written outside `create_request`
+    # (legacy rows, test fixtures); the service always sets it explicitly.
+    requested_channel = models.CharField(
+        max_length=20, choices=RequestedChannel.choices, default=RequestedChannel.UNKNOWN
+    )
     requested_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         null=True,

@@ -1,7 +1,11 @@
 """Obsidian vault export -- the first real gated tool (MVP 5 branch 3,
 brief §3). Scope: every `Memory` row `status=approved` in the run's
 workspace, mirrored under `03_Workspaces/<workspace.id>/Memory/
-<memory.id>.md`.
+<memory.id>.md` -- except `sensitivity=private` memories, which go to the
+sync-ignored `_private/<workspace.id>/Memory/<memory.id>.md` tree instead
+(Phase 4 branch 1; docs/memory/obsidian-vault-strategy.md). Each tree is
+reconciled on its own, so a private memory's copy left in the main tree by
+an earlier export is pruned by the next run.
 
 Reconciliation is full-resync + conservative-prune, not an incremental
 diff: every run rewrites every currently-approved memory's file (an edit
@@ -242,12 +246,23 @@ def finalize_vault_export_failure(run_id, claim_token, *, error_type):
     return True
 
 
+# Top-level vault folders (docs/memory/obsidian-vault-strategy.md): the
+# synced workspace tree, and the sync-ignored tree for private memories.
+MAIN_TREE = "03_Workspaces"
+PRIVATE_TREE = "_private"
+
+
 def export_workspace_memories(vault_root_real, workspace):
-    """Tier 2 has already passed by the time this is called. Opens the
-    `03_Workspaces/<workspace.id>/Memory/` chain as validated directory
+    """Tier 2 has already passed by the time this is called. For each tree
+    (`_private/` first, then `03_Workspaces/`), opens the
+    `<tree>/<workspace.id>/Memory/` chain as validated directory
     descriptors (each `mkdir`-if-missing then re-opened with `O_NOFOLLOW`),
-    then runs the write + conservative-prune pass inside it. Returns
-    `(written, updated, removed)`.
+    then runs the write + conservative-prune pass inside it against that
+    tree's own memory set: private memories in `_private/`, all others in
+    `03_Workspaces/`. The private tree is written before the main tree is
+    pruned, so a memory moving between trees is never missing from the
+    vault in between. Returns `(written, updated, removed)` summed over
+    both trees.
 
     Serializes concurrent exports for the same workspace (Codex review
     finding) via a `select_for_update` lock on the workspace row, held for
@@ -258,28 +273,40 @@ def export_workspace_memories(vault_root_real, workspace):
     """
     with transaction.atomic():
         Workspace.objects.select_for_update().get(pk=workspace.pk)
+        approved = list(Memory.objects.filter(workspace=workspace, status=Memory.Status.APPROVED))
+        private = [m for m in approved if m.sensitivity == Memory.Sensitivity.PRIVATE]
+        shared = [m for m in approved if m.sensitivity != Memory.Sensitivity.PRIVATE]
+        totals = (0, 0, 0)
         with dir_fd_scope(open_validated_dir(vault_root_real, vault_root_real)) as root_fd:
-            workspaces_dir_path = f"{vault_root_real}/03_Workspaces"
+            for tree, memories in ((PRIVATE_TREE, private), (MAIN_TREE, shared)):
+                counts = _export_tree(vault_root_real, root_fd, tree, workspace, memories)
+                totals = tuple(total + count for total, count in zip(totals, counts, strict=True))
+        return totals
+
+
+def _export_tree(vault_root_real, root_fd, tree, workspace, memories):
+    tree_path = f"{vault_root_real}/{tree}"
+    with dir_fd_scope(
+        ensure_validated_subdir(vault_root_real, root_fd, vault_root_real, tree)
+    ) as tree_fd:
+        ws_dir_path = f"{tree_path}/{workspace.id}"
+        with dir_fd_scope(
+            ensure_validated_subdir(vault_root_real, tree_fd, tree_path, str(workspace.id))
+        ) as ws_fd:
+            memory_dir_path = f"{ws_dir_path}/Memory"
             with dir_fd_scope(
-                ensure_validated_subdir(vault_root_real, root_fd, vault_root_real, "03_Workspaces")
-            ) as workspaces_fd:
-                ws_dir_path = f"{workspaces_dir_path}/{workspace.id}"
-                with dir_fd_scope(
-                    ensure_validated_subdir(
-                        vault_root_real, workspaces_fd, workspaces_dir_path, str(workspace.id)
-                    )
-                ) as ws_fd:
-                    memory_dir_path = f"{ws_dir_path}/Memory"
-                    with dir_fd_scope(
-                        ensure_validated_subdir(vault_root_real, ws_fd, ws_dir_path, "Memory")
-                    ) as memory_fd:
-                        return _export_memory_dir(
-                            vault_root_real, memory_fd, memory_dir_path, workspace
-                        )
+                ensure_validated_subdir(vault_root_real, ws_fd, ws_dir_path, "Memory")
+            ) as memory_fd:
+                return _export_memory_dir(
+                    vault_root_real, memory_fd, memory_dir_path, workspace, memories
+                )
 
 
-def _export_memory_dir(vault_root_real, memory_fd, memory_path, workspace):
-    approved = list(Memory.objects.filter(workspace=workspace, status=Memory.Status.APPROVED))
+def _export_memory_dir(vault_root_real, memory_fd, memory_path, workspace, approved):
+    """Write + conservative prune for one tree's Memory folder. `approved`
+    is exactly the set this folder should mirror; a recognized export file
+    for any other memory (deleted, archived, or belonging in the other
+    tree) is prunable."""
     approved_ids = {memory.id for memory in approved}
     approved_filenames = {f"{memory.id}.md" for memory in approved}
     existing_files = set(list_validated(vault_root_real, memory_fd, memory_path))

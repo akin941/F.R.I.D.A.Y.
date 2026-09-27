@@ -12,6 +12,11 @@ from dataclasses import dataclass
 CHANNEL_WEB = "web"  # default: password-login JWT, trusted
 CHANNEL_CLI = "cli"  # low-trust: bearer PAT
 CHANNEL_TELEGRAM = "telegram"  # low-trust: relayed, no direct request at all
+# Not a request channel: machine-originated actions (agent engine, harness
+# gates, sweeps) that record "which channel" in audit metadata or on
+# `ApprovalRequest.requested_channel` (Phase 4 branch 1). Never trusted for
+# a decision -- only CHANNEL_WEB is.
+CHANNEL_SYSTEM = "system"
 
 
 @dataclass(frozen=True)

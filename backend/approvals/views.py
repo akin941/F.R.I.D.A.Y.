@@ -125,6 +125,9 @@ class ApprovalRequestListCreateView(APIView):
                 # endpoint is the human path; the serializer accepts no
                 # `origin` from the body, so it cannot be spoofed here.
                 origin=ApprovalRequest.Origin.HUMAN,
+                # The real channel (web session or CLI PAT), from the
+                # authenticator -- never from the body.
+                channel=request_channel(request),
             )
         except (ApprovalPermissionDenied, InvalidTransition) as exc:
             return _service_error_response(exc)

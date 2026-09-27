@@ -51,7 +51,7 @@ from django.utils import timezone
 from approvals.models import ApprovalRequest
 from audit.models import AuditLog
 from audit.services import record_audit
-from core.channels import CHANNEL_WEB
+from core.channels import CHANNEL_SYSTEM, CHANNEL_WEB
 from tools.registry import ToolValidationError
 from workspaces.models import WorkspaceMember
 
@@ -203,7 +203,9 @@ def record_revoked(approval_request, actor):
         actor_type=AuditLog.ActorType.SYSTEM if actor is None else AuditLog.ActorType.HUMAN,
         workspace=approval_request.workspace,
         resource=approval_request,
-        metadata={"status": approval_request.status, "tool_name": approval_request.tool_name},
+        # A revoke is always a side effect of another flow (a cancellation
+        # or a sweep), never a decision taken over a channel of its own.
+        metadata=_channel_metadata(approval_request, CHANNEL_SYSTEM),
     )
 
 
@@ -219,8 +221,34 @@ def record_expired(approval_request):
         actor_type=AuditLog.ActorType.SYSTEM,
         workspace=approval_request.workspace,
         resource=approval_request,
-        metadata={"status": approval_request.status, "tool_name": approval_request.tool_name},
+        metadata=_channel_metadata(approval_request, CHANNEL_SYSTEM),
     )
+
+
+def _channel_metadata(approval_request, channel, **extra):
+    """Every `approval.*` audit row (Phase 4 branch 1) carries both the
+    channel the recorded action happened over (`channel`: the request's
+    own channel for `approval.requested`, the decision channel for
+    approved/rejected, `system` for expiry/revoke) and the channel the
+    request originally arrived over (`requested_channel`). Ids/status/
+    tool_name only otherwise -- never `payload`, which is not
+    unconditionally safe to log verbatim."""
+    return {
+        "status": approval_request.status,
+        "tool_name": approval_request.tool_name,
+        "channel": channel,
+        "requested_channel": approval_request.requested_channel,
+        **extra,
+    }
+
+
+def _check_actor_is_human(actor):
+    """ADR-008 decision 3: a machine actor can request but never decide.
+    Checked first, before role and channel (defense in depth -- no agent
+    service account exists today, and none may ever decide even if one
+    were to reach the web channel)."""
+    if getattr(actor, "is_agent", False):
+        raise ApprovalPermissionDenied("Agent accounts cannot decide approval requests.")
 
 
 def _check_channel_is_web(channel):
@@ -235,31 +263,33 @@ def _check_channel_is_web(channel):
         raise ApprovalPermissionDenied("Decisions are not permitted over this channel.")
 
 
-def _record(approval_request, action, actor, **metadata):
-    # Audit metadata carries ids/status/tool_name only -- never `payload`,
-    # which is not unconditionally safe to log verbatim (a future tool's
-    # payload could carry something sensitive).
+def _record(approval_request, action, actor, channel, **metadata):
     record_audit(
         action=action,
         actor=actor,
         workspace=approval_request.workspace,
         resource=approval_request,
-        metadata={
-            "status": approval_request.status,
-            "tool_name": approval_request.tool_name,
-            **metadata,
-        },
+        metadata=_channel_metadata(approval_request, channel, **metadata),
     )
 
 
 @transaction.atomic
-def create_request(*, workspace, actor, tool_name, payload=None, origin):
+def create_request(*, workspace, actor, tool_name, payload=None, origin, channel):
     """`origin` is required, never defaulted (Codex phase-0 code-review
     P2, mirroring `channel` on the decision services): the human/machine
     provenance split is a security invariant, and a future machine caller
     (the phase-2 harness calls exactly this service) that forgot to state
     its origin would otherwise be silently stamped human. Callers declare
-    it explicitly -- the web view passes HUMAN, the agent engine AGENT."""
+    it explicitly -- the web view passes HUMAN, the agent engine AGENT.
+
+    `channel` (Phase 4 branch 1) is required for the same reason: the
+    channel the request arrived over, persisted as `requested_channel` and
+    recorded in the audit trail. The HTTP view passes the request's real
+    channel (`web` or `cli` -- a CLI request stays origin=human, a person
+    typed it); machine callers (agent engine, harness gates) pass
+    `CHANNEL_SYSTEM`."""
+    if channel not in ApprovalRequest.RequestedChannel.values:
+        raise InvalidTransition(f"Unknown request channel {channel!r}.")
     _require(get_role(actor, workspace) in _WRITER_ROLES, "requesting a gated action")
     tool = _resolve_tool(tool_name)
     if tool is None or not tool.gated:
@@ -285,8 +315,9 @@ def create_request(*, workspace, actor, tool_name, payload=None, origin):
         status=ApprovalRequest.Status.PENDING,
         requested_by=actor,
         origin=origin,
+        requested_channel=channel,
     )
-    _record(approval_request, "approval.requested", actor, origin=str(origin))
+    _record(approval_request, "approval.requested", actor, channel, origin=str(origin))
     return approval_request
 
 
@@ -303,6 +334,7 @@ def approve_request(*, approval_request, actor, channel):
     (`approvals.views` passes the request's actual channel) -- a default
     would let a future internal caller decide "as web" by accident
     (ADR-008 decision 3; Codex phase-0 plan-review P1)."""
+    _check_actor_is_human(actor)
     with transaction.atomic():
         approval_request = _locked(approval_request, actor)
         _require(
@@ -319,7 +351,7 @@ def approve_request(*, approval_request, actor, channel):
             approval_request.save(
                 update_fields=["status", "decided_by", "decided_at", "updated_at"]
             )
-            _record(approval_request, "approval.approved", actor)
+            _record(approval_request, "approval.approved", actor, channel)
             tool = _resolve_tool(approval_request.tool_name)
             if tool is not None:
                 execution_id = tool.create_execution(approval_request)
@@ -330,6 +362,7 @@ def approve_request(*, approval_request, actor, channel):
 
 
 def reject_request(*, approval_request, actor, channel):
+    _check_actor_is_human(actor)
     with transaction.atomic():
         approval_request = _locked(approval_request, actor)
         _require(
@@ -346,7 +379,7 @@ def reject_request(*, approval_request, actor, channel):
             approval_request.save(
                 update_fields=["status", "decided_by", "decided_at", "updated_at"]
             )
-            _record(approval_request, "approval.rejected", actor)
+            _record(approval_request, "approval.rejected", actor, channel)
     if expired:
         raise InvalidTransition("This request has expired.")
     return approval_request
