@@ -36,7 +36,10 @@ from core.channels import CHANNEL_WEB
 _ADDRESS_RE = re.compile(
     r"^[A-Za-z0-9._%+'-]{1,64}@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}\Z"
 )
-_ONE_LINE_RE = re.compile(r"^[^\r\n\x00]*$")
+# Every character the email layer treats as a line break (CR, LF, VT, FF,
+# NEL, U+2028/U+2029) or NUL is refused here, at request time, with a clear
+# 400 -- not later as an opaque protocol_error inside build_mime.
+_ONE_LINE_RE = re.compile(r"^[^\r\n\x00\x0b\x0c\x85\u2028\u2029]*\Z")
 
 MAIL_RECIPIENTS_MAX = 10
 EVENT_ATTENDEES_MAX = 20

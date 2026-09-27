@@ -361,6 +361,8 @@ def test_mail_send_shows_raw_addresses_and_sends_the_mime_built_from_the_payload
         {"cc": [f"c{i}@example.com" for i in range(9)]},  # 2 + 9 > 10
         {"subject": "Konu\r\nBcc: attacker@example.com"},
         {"in_reply_to": "<a@b>\r\nBcc: x@y.z"},
+        {"subject": "Konu\u2028Bcc: x@y.z"},  # unicode line separator
+        {"subject": "Konu\x0bBcc: x@y.z"},  # vertical tab
         {"thread_id": "t1/../x"},
         {"bcc": ["x@example.com"]},  # unknown field
         {"to": []},
