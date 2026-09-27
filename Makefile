@@ -11,7 +11,7 @@ DEV_SETTINGS := DJANGO_SETTINGS_MODULE=$${DJANGO_SETTINGS_MODULE:-config.setting
 FRONTEND := cd frontend &&
 
 .PHONY: up up-daily down logs secrets test lint fmt shell migrate makemigrations \
-	harness-images harness-smoke harness-runner \
+	harness-images harness-smoke harness-runner deploy-smoke \
 	test-backend test-frontend test-e2e lint-backend lint-frontend \
 	frontend-install frontend-dev frontend-build e2e-install
 
@@ -105,3 +105,9 @@ harness-smoke:
 harness-runner:
 	$(BACKEND) $(DEV_SETTINGS) HARNESS_RUNNER_BEAT=true uv run celery -A config worker -B -s /tmp/jarvis-harness-beat-schedule -Q $${HARNESS_CELERY_QUEUE:-harness},$${DEPLOY_CELERY_QUEUE:-deploy} -l info -n harness-runner@%h
 
+# Real-SSH deploy smoke (Phase 5 branch 6; manual/nightly): an sshd container
+# running the real deploy/remote/jarvis-deploy.sh as a forced command against
+# a dummy compose app -- status, deploy, forced health failure, rollback,
+# refused non-merged SHA. Needs Docker and a test database (DATABASE_URL).
+deploy-smoke:
+	./deploy/remote/smoke/run-smoke.sh
