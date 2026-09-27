@@ -23,18 +23,16 @@ const BACKEND_API_URL = process.env.BACKEND_API_URL ?? "http://127.0.0.1:8001/ap
 // provider).
 const TELEGRAM_WEBHOOK_SECRET = process.env.TELEGRAM_WEBHOOK_SECRET ?? "e2e-fixture-webhook-secret";
 
-// Clicking an agent's goal card on the list view is an in-page, client-side-
-// only navigation (setSelectedAgentId -- no URL change, see AgentsView.tsx).
-// Observed to be occasionally flaky under Playwright's automated click even
-// though the exact same interaction never fails through manual/real browser
-// use (verified directly) -- retrying the click until the detail view's own
-// "Ajanlara dön" button (present immediately on every successful
-// navigation, regardless of the agent's own data still loading) actually
-// shows up absorbs that flake without weakening what the test proves.
+// Clicking an agent's goal card opens its routed detail page
+// (`/agents/[agentId]?workspace=`, Phase 4 branch 3). Retrying the click
+// until the detail page's own "Ajanlara dön" link (rendered immediately,
+// regardless of the agent's own data still loading) shows up absorbs a
+// click that lands before hydration without weakening what the test
+// proves.
 async function openAgentDetail(page: Page, goalText: string) {
   await expect(async () => {
     await page.getByText(goalText, { exact: true }).click();
-    await expect(page.getByRole("button", { name: /Ajanlara dön/ })).toBeVisible({
+    await expect(page.getByRole("link", { name: /Ajanlara dön/ })).toBeVisible({
       timeout: 3_000,
     });
   }).toPass({ timeout: 15_000 });
@@ -489,7 +487,7 @@ test("signup, chat with the fake provider, curated memory, Today, logout, route 
   const SKILL_READ_STEP = "Summarize recent notes";
   const SKILL_TOOL_REQUEST_STEP = "Export the vault";
 
-  await page.getByRole("button", { name: /Ajanlara dön/ }).click();
+  await page.getByRole("link", { name: /Ajanlara dön/ }).click();
   await page.getByRole("button", { name: "Yeni ajan" }).click();
   await page.getByLabel("Hedef").fill(SKILL_MATCHED_GOAL);
   await page.getByRole("button", { name: "Ajanı başlat" }).click();
@@ -551,7 +549,7 @@ test("signup, chat with the fake provider, curated memory, Today, logout, route 
   // we're already on /agents (viewing agent1's detail, which is pure
   // client-side state with no URL of its own), so a Link to the same path
   // is a no-op in Next.js and would leave the detail view showing forever.
-  await page.getByRole("button", { name: /Ajanlara dön/ }).click();
+  await page.getByRole("link", { name: /Ajanlara dön/ }).click();
   await page.getByRole("button", { name: "Yeni ajan" }).click();
   await page.getByLabel("Hedef").fill(KILL_SWITCH_GOAL);
   await page.getByRole("button", { name: "Ajanı başlat" }).click();
@@ -605,7 +603,7 @@ test("signup, chat with the fake provider, curated memory, Today, logout, route 
   // is a no-op in Next.js.
   expect(killSwitchApproveStatus).toBe(200);
 
-  await page.getByRole("button", { name: /Ajanlara dön/ }).click();
+  await page.getByRole("link", { name: /Ajanlara dön/ }).click();
   await openAgentDetail(page, KILL_SWITCH_GOAL);
   await expect(page.getByText("İptal edildi", { exact: true })).toBeVisible({ timeout: 10_000 });
   await expect(page.getByRole("button", { name: "Ajanı iptal et" })).not.toBeVisible();
