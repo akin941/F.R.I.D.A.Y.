@@ -74,7 +74,7 @@ class _VectorDims(Func):
     output_field = IntegerField()
 
 
-def select_context_memories(*, actor, workspace, query_text):
+def select_context_memories(*, actor, workspace, query_text, personal_data=False):
     """Return the ordered, budgeted list of memories for a gateway call and
     record the access (ADR-005: every memory access is auditable —
     `memory.context_accessed`, ids only).
@@ -85,6 +85,11 @@ def select_context_memories(*, actor, workspace, query_text):
     than failing the turn (the embed call itself is therefore never inside
     a try/except that could mask a real selection bug — only the gateway
     call is guarded).
+
+    `personal_data` (Phase 5 D5): the query is the owner's message in a
+    conversation that already holds personal-class data, so the embedding
+    provider must be one with `personal_data_allowed` too; with none, the
+    embed fails closed and ranking degrades to the deterministic order.
     """
     priority = Case(
         *(When(memory_type=t, then=Value(p)) for t, p in _TYPE_PRIORITY.items()),
@@ -101,7 +106,11 @@ def select_context_memories(*, actor, workspace, query_text):
     if query_text:
         try:
             result = InferenceGateway().embed(
-                purpose="memory.retrieval", texts=[query_text], actor=actor, workspace=workspace
+                purpose="memory.retrieval",
+                texts=[query_text],
+                actor=actor,
+                workspace=workspace,
+                personal_data=personal_data,
             )
         except GatewayError:
             query_vector = None

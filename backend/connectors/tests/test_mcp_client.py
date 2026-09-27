@@ -171,3 +171,45 @@ def test_runs_from_a_celery_task_in_eager_mode(fake_manifest, server):
         return sorted(mcp_client.list_tools(fake_manifest, timeout=5).tool_hashes)
 
     assert probe.delay().get() == ["fake_create_note", "fake_merge", "fake_search"]
+
+
+def test_oversized_response_is_cut_off_while_streaming(fake_manifest, monkeypatch, settings):
+    """D4: a response body past CONNECTOR_RESPONSE_MAX_BYTES aborts as it
+    streams in -- nothing oversized is buffered or parsed -- and maps to
+    the closed `protocol_error`."""
+    from contextlib import asynccontextmanager
+
+    settings.CONNECTOR_RESPONSE_MAX_BYTES = 1024
+    body = b'{"jsonrpc": "2.0", "id": 1, "result": {"pad": "' + b"x" * 10_000 + b'"}}'
+
+    def handler(request):
+        return httpx2.Response(200, headers={"content-type": "application/json"}, content=body)
+
+    @asynccontextmanager
+    async def connect(url, *, timeout):
+        transport = httpx2.MockTransport(handler)
+        async with mcp_client.build_http_client(timeout=timeout, transport=transport) as client:
+            yield client
+
+    monkeypatch.setenv(fakes.URL_ENV, fakes.SERVER_URL)
+    monkeypatch.setattr(mcp_client, "_connect_http", connect)
+    with pytest.raises(ConnectorError) as excinfo:
+        mcp_client.list_tools(fake_manifest, timeout=5)
+    assert excinfo.value.code == "protocol_error"
+
+
+def test_capped_stream_passes_bodies_within_the_cap():
+    import anyio
+
+    async def collect():
+        stream = mcp_client._CappedStream(httpx2.ByteStream(b"a" * 100), 100)
+        return b"".join([chunk async for chunk in stream])
+
+    assert anyio.run(collect) == b"a" * 100
+
+    async def over():
+        stream = mcp_client._CappedStream(httpx2.ByteStream(b"a" * 101), 100)
+        return b"".join([chunk async for chunk in stream])
+
+    with pytest.raises(mcp_client.ResponseTooLarge):
+        anyio.run(over)

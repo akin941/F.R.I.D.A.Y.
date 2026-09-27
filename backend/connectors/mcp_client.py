@@ -41,6 +41,7 @@ from urllib.parse import urlsplit
 
 import anyio
 import httpx2
+from django.conf import settings
 from mcp.client.client import Client
 from mcp.client.streamable_http import streamable_http_client
 from mcp.types import Implementation, TextContent
@@ -135,15 +136,62 @@ def server_url(manifest):
     return url
 
 
+class ResponseTooLarge(Exception):
+    """An MCP response body exceeded `CONNECTOR_RESPONSE_MAX_BYTES`
+    (classified as `protocol_error`)."""
+
+
+class _CappedStream(httpx2.AsyncByteStream):
+    def __init__(self, inner, max_bytes):
+        self._inner = inner
+        self._max_bytes = max_bytes
+
+    async def __aiter__(self):
+        received = 0
+        async for chunk in self._inner:
+            received += len(chunk)
+            if received > self._max_bytes:
+                raise ResponseTooLarge
+            yield chunk
+
+    async def aclose(self):
+        await self._inner.aclose()
+
+
+class _CappedTransport(httpx2.AsyncBaseTransport):
+    """Counts response bytes as they stream in and aborts past the cap, so
+    nothing oversized is ever buffered or parsed (the SDK has no size
+    limit of its own; `CONNECTOR_RESULT_MAX_CHARS` only applies after)."""
+
+    def __init__(self, inner, max_bytes):
+        self._inner = inner
+        self._max_bytes = max_bytes
+
+    async def handle_async_request(self, request):
+        response = await self._inner.handle_async_request(request)
+        return httpx2.Response(
+            status_code=response.status_code,
+            headers=response.headers,
+            stream=_CappedStream(response.stream, self._max_bytes),
+            extensions=response.extensions,
+            request=request,
+        )
+
+    async def aclose(self):
+        await self._inner.aclose()
+
+
 def build_http_client(*, timeout, transport=None):
     """The hardened HTTP client every MCP connection uses (see module
-    docstring). `transport` is for tests only."""
+    docstring), with a streaming byte cap on every response body.
+    `transport` is for tests only (it is wrapped by the cap too)."""
+    inner = transport if transport is not None else httpx2.AsyncHTTPTransport(trust_env=False)
     return httpx2.AsyncClient(
         timeout=httpx2.Timeout(timeout),
         follow_redirects=False,
         max_redirects=0,
         trust_env=False,
-        transport=transport,
+        transport=_CappedTransport(inner, settings.CONNECTOR_RESPONSE_MAX_BYTES),
     )
 
 

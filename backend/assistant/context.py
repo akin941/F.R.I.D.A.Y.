@@ -51,7 +51,7 @@ from django.conf import settings
 from django.core.exceptions import ImproperlyConfigured
 
 from ai_core.models import PromptTemplate
-from assistant.models import Message
+from assistant.models import Conversation, Message
 from core.channels import CHANNEL_WEB
 from knowledge.context import render_knowledge_block, select_context_chunks
 from memory.context import (
@@ -306,8 +306,19 @@ def build_context(
         raise ImproperlyConfigured("jarvis_system prompt template has no active version")
     prompt_version = template.active_version
 
+    # D5: the owner's message is embedded for retrieval too, so in a
+    # conversation holding personal-class data that embedding must also stay
+    # on an allowed provider. Read fresh: a read earlier this turn sets it.
+    personal_data = bool(
+        Conversation.objects.filter(pk=conversation.pk)
+        .values_list("personal_data", flat=True)
+        .first()
+    )
     memories = select_context_memories(
-        actor=actor, workspace=conversation.workspace, query_text=new_user_content
+        actor=actor,
+        workspace=conversation.workspace,
+        query_text=new_user_content,
+        personal_data=personal_data,
     )
 
     overlay_entries = []
@@ -332,10 +343,14 @@ def build_context(
             query_text=new_user_content,
             max_chunks=KNOWLEDGE_QUERY_MAX_CHUNKS,
             char_budget=KNOWLEDGE_QUERY_CHAR_BUDGET,
+            personal_data=personal_data,
         )
     else:
         chunks = select_context_chunks(
-            actor=actor, workspace=conversation.workspace, query_text=new_user_content
+            actor=actor,
+            workspace=conversation.workspace,
+            query_text=new_user_content,
+            personal_data=personal_data,
         )
     knowledge_block = render_knowledge_block(chunks)
     chunk_ids = [str(c.id) for c in chunks]

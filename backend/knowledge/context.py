@@ -54,7 +54,9 @@ _FENCE_WORDS = ("knowledge", "chunk")
 _WHITESPACE_RUN = re.compile(r"\s+")
 
 
-def select_context_chunks(*, actor, workspace, query_text, max_chunks=None, char_budget=None):
+def select_context_chunks(
+    *, actor, workspace, query_text, max_chunks=None, char_budget=None, personal_data=False
+):
     """Return the ordered, budgeted list of KnowledgeChunk rows for a gateway
     call and record the access (`knowledge.context_accessed`, ids only —
     recorded even when empty, same discipline as
@@ -68,6 +70,10 @@ def select_context_chunks(*, actor, workspace, query_text, max_chunks=None, char
     turn (MVP 6 §2) to widen the retrieval window for that turn only — this
     is the same selection/ranking logic with a bigger budget, not a new
     algorithm.
+
+    `personal_data` (Phase 5 D5): as in `memory.context.
+    select_context_memories` -- the query embedding goes only to a provider
+    with `personal_data_allowed`; with none, zero chunks.
     """
     if max_chunks is None:
         max_chunks = MAX_CONTEXT_CHUNKS
@@ -80,6 +86,7 @@ def select_context_chunks(*, actor, workspace, query_text, max_chunks=None, char
             texts=[query_text],
             actor=actor,
             workspace=workspace,
+            personal_data=personal_data,
         )
     except GatewayError:
         # A knowledge-retrieval failure must never fail the whole chat turn

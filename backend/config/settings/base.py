@@ -475,6 +475,10 @@ CONNECTOR_READ_TIMEOUT_SECONDS = env.int("CONNECTOR_READ_TIMEOUT_SECONDS", defau
 # What survives of a read (text + structuredContent), in characters -- the
 # harness transcript cap. Anything longer is truncated and flagged (D4).
 CONNECTOR_RESULT_MAX_CHARS = env.int("CONNECTOR_RESULT_MAX_CHARS", default=8000)
+# Hard cap on the bytes of any single MCP HTTP response body, enforced while
+# it streams in -- before parsing -- so a runaway server cannot exhaust the
+# web or worker process within the timeout (D4). Over it: protocol_error.
+CONNECTOR_RESPONSE_MAX_BYTES = env.int("CONNECTOR_RESPONSE_MAX_BYTES", default=1_048_576)
 # A gated write's single send (D6), and the pin/health check before it.
 CONNECTOR_WRITE_TIMEOUT_SECONDS = env.int("CONNECTOR_WRITE_TIMEOUT_SECONDS", default=30)
 CONNECTOR_HEALTH_TIMEOUT_SECONDS = env.int("CONNECTOR_HEALTH_TIMEOUT_SECONDS", default=10)
