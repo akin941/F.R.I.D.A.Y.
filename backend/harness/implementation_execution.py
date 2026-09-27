@@ -414,12 +414,13 @@ def run_harness_implementation_job(job_id):
 
     if status != "succeeded":
         if raw_output:
-            # Bounded and scrubbed of CLI keys like every stored transcript;
-            # unframed here (the wrapper may never have reached its frame).
+            # The raw logs themselves, bounded and scrubbed of CLI keys: on a
+            # failed/killed container no frame can be trusted (the wrapper may
+            # never have reached its post-quiescence frame, and anything
+            # before it is agent-writable), so none is decoded here (Codex
+            # code-review P2, branch 6 round 3).
             HarnessImplementationJob.objects.filter(pk=job.pk).update(
-                raw_transcript=_fence_and_bound_transcript(
-                    extract_framed_cli_output(raw_output) or raw_output
-                )[0]
+                raw_transcript=_fence_and_bound_transcript(raw_output)[0]
             )
         _fail_and_cleanup(
             job,

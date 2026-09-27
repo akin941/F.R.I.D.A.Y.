@@ -310,3 +310,11 @@ def test_failed_container_keeps_its_transcript(workspace, repo, owner, monkeypat
     assert job.status == HarnessImplementationJob.Status.FAILED
     assert job.failure_reason == HarnessImplementationJob.FailureReason.RUNNER_ERROR
     assert "invalid x-api-key" in job.raw_transcript
+
+
+def test_failed_container_transcript_ignores_spoofed_frames(workspace, repo, owner, monkeypatch):
+    patches = _patch_runner(monkeypatch)
+    patches["container_exit_code"].return_value = 1
+    patches["capture_logs"].return_value = _frame("all good") + "\nreal crash output\n"
+    job = _run(_job(workspace, repo, owner))
+    assert "real crash output" in job.raw_transcript
