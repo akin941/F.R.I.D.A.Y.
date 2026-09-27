@@ -5,6 +5,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { ErrorState } from "@/components/ui/error-state";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
@@ -17,6 +18,7 @@ import {
 import { apiGetJson, apiPostJson, apiDelete, errorMessage } from "@/lib/api-client";
 import { useWorkspace } from "@/contexts/workspace-context";
 import { formatDateTime } from "@/lib/format/relative-time";
+import { tr } from "@/lib/i18n/tr";
 import { queryKeys } from "@/lib/query/keys";
 import { useCountdown } from "@/lib/use-countdown";
 import type { ApiTelegramLinkCode, ApiTelegramLinkStatus } from "@/types/api";
@@ -66,8 +68,6 @@ function TelegramLinkStatus({ workspaceId }: { workspaceId: string }) {
   const [linkCode, setLinkCode] = useState<ApiTelegramLinkCode | null>(null);
   const [requesting, setRequesting] = useState(false);
   const [requestError, setRequestError] = useState<string | null>(null);
-  const [unlinking, setUnlinking] = useState(false);
-  const [unlinkError, setUnlinkError] = useState<string | null>(null);
 
   const statusKey = queryKeys.telegramLinkStatus(workspaceId);
   const statusQuery = useQuery({
@@ -100,19 +100,10 @@ function TelegramLinkStatus({ workspaceId }: { workspaceId: string }) {
     }
   }
 
+  // Runs only from the confirmation dialog, which reports a failure.
   async function handleUnlink() {
-    setUnlinking(true);
-    setUnlinkError(null);
-    try {
-      await apiDelete(
-        `/api/integrations/telegram/link?workspace=${encodeURIComponent(workspaceId)}`,
-      );
-      await queryClient.invalidateQueries({ queryKey: statusKey });
-    } catch (err) {
-      setUnlinkError(errorMessage(err, "Sohbet bağlantısı kaldırılamadı."));
-    } finally {
-      setUnlinking(false);
-    }
+    await apiDelete(`/api/integrations/telegram/link?workspace=${encodeURIComponent(workspaceId)}`);
+    await queryClient.invalidateQueries({ queryKey: statusKey });
   }
 
   return (
@@ -135,20 +126,20 @@ function TelegramLinkStatus({ workspaceId }: { workspaceId: string }) {
               : ""}
             .
           </p>
-          {unlinkError ? (
-            <Alert variant="destructive" role="alert">
-              <AlertDescription>{unlinkError}</AlertDescription>
-            </Alert>
-          ) : null}
           <div>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => void handleUnlink()}
-              disabled={unlinking}
-            >
-              {unlinking ? "Kaldırılıyor…" : "Bağlantıyı kaldır"}
-            </Button>
+            <ConfirmDialog
+              trigger={
+                <Button variant="outline" size="sm">
+                  Bağlantıyı kaldır
+                </Button>
+              }
+              title={tr.confirm.telegram.title}
+              description={tr.confirm.telegram.description}
+              confirmLabel={tr.confirm.telegram.confirm}
+              busyLabel={tr.confirm.telegram.busy}
+              errorFallback={tr.confirm.telegram.failed}
+              onConfirm={handleUnlink}
+            />
           </div>
         </div>
       ) : (

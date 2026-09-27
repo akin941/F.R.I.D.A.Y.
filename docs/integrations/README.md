@@ -67,10 +67,13 @@ narrower-scoped API key.
   `accounts.pat.created` with `via=management_command`).
 - **Use it**: `Authorization: Bearer jpat_...` against any of the
   PAT-allowlisted endpoints — chat (`/api/v1/ai/conversations*`), agents
-  (`/api/v1/agents*`), and approvals *creation* (`/api/v1/approvals/requests`,
-  but not the `<id>/approve`/`<id>/reject` transition). `workspace` is
+  (`/api/v1/agents*`), and approvals *creation* and reading
+  (`/api/v1/approvals/requests`, `GET …/requests/<id>`, but not the
+  `<id>/approve`/`<id>/reject` transition). `workspace` is
   never supplied by the client on these endpoints — it's implied by the
-  bound token (`core.channels.scoped_for_actor`). A minimal reference client
+  bound token (`core.channels.scoped_for_actor`); the web inbox's
+  `scope=all` (every membership, Phase 4 branch 5) is ignored for a PAT,
+  which stays on its bound workspace. A minimal reference client
   ships at `backend/integrations/cli/jarvis_cli.py`
   (`uv run python -m integrations.cli.jarvis_cli`), configured via
   `~/.config/jarvis/cli.toml` or `JARVIS_CLI_TOKEN`/`JARVIS_CLI_URL` env vars.

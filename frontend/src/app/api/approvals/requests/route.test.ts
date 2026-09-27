@@ -74,6 +74,46 @@ describe("GET /api/approvals/requests", () => {
     expect(calledUrl).toContain("workspace=w1");
     expect(calledUrl).toContain("status=pending");
   });
+
+  it("forwards scope=all without a workspace, plus every inbox filter", async () => {
+    cookiesMock.mockResolvedValue(cookieStore("token"));
+    const fetchMock = vi.fn<(input: string, init?: RequestInit) => Promise<Response>>(
+      async () => new Response(JSON.stringify([]), { status: 200 }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { GET } = await import("@/app/api/approvals/requests/route");
+    const response = await GET(
+      getRequest(
+        "http://localhost:3001/api/approvals/requests?scope=all&status=pending&tool=harness_push&origin=harness&requested_channel=system&payload=x",
+      ),
+    );
+
+    expect(response.status).toBe(200);
+    const calledUrl = new URL(fetchMock.mock.calls[0]?.[0] as string);
+    expect(Object.fromEntries(calledUrl.searchParams)).toEqual({
+      scope: "all",
+      status: "pending",
+      tool: "harness_push",
+      origin: "harness",
+      requested_channel: "system",
+    });
+  });
+
+  it("forwards an optional workspace narrowing with scope=all", async () => {
+    cookiesMock.mockResolvedValue(cookieStore("token"));
+    const fetchMock = vi.fn<(input: string, init?: RequestInit) => Promise<Response>>(
+      async () => new Response(JSON.stringify([]), { status: 200 }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { GET } = await import("@/app/api/approvals/requests/route");
+    await GET(getRequest("http://localhost:3001/api/approvals/requests?scope=all&workspace=w2"));
+
+    const calledUrl = new URL(fetchMock.mock.calls[0]?.[0] as string);
+    expect(calledUrl.searchParams.get("scope")).toBe("all");
+    expect(calledUrl.searchParams.get("workspace")).toBe("w2");
+  });
 });
 
 describe("POST /api/approvals/requests", () => {

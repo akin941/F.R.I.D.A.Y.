@@ -376,6 +376,25 @@ test("enroll, chat with the fake provider, curated memory, Today, logout, route 
 
   await expect(page.getByText("Bugün vadesi gelen bir şey yok. Keyfini çıkar.")).toBeVisible();
 
+  // Trash (ADR-009, Phase 4 branch 5): deleting asks for confirmation
+  // (naming the task and the retention window), moves the task to the
+  // trash, and the trash restores it.
+  await page.getByRole("link", { name: "Görevler" }).click();
+  await expect(page).toHaveURL(/\/tasks$/);
+  const doneTaskCard = page.getByText(TASK_TITLE, { exact: true }).locator("../..");
+  await doneTaskCard.getByRole("button", { name: "Sil" }).click();
+  const trashDialog = page.getByRole("alertdialog");
+  await expect(trashDialog).toContainText(`“${TASK_TITLE}” çöp kutusuna taşınır`);
+  await trashDialog.getByRole("button", { name: "Çöp kutusuna taşı" }).click();
+  await expect(page.getByText(TASK_TITLE, { exact: true })).toHaveCount(0);
+
+  await page.getByRole("link", { name: "Çöp kutusu" }).click();
+  await expect(page).toHaveURL(/\/trash$/);
+  const trashedRow = page.locator("li", { hasText: TASK_TITLE });
+  await expect(trashedRow).toBeVisible();
+  await trashedRow.getByRole("button", { name: "Geri yükle" }).click();
+  await expect(page.getByText("Çöp kutusu boş.")).toBeVisible();
+
   // Approvals + vault export happy path (MVP 5 §5): request the export from
   // Memory, approve it, confirm the run reaches succeeded. The approve step
   // below calls the BFF transition endpoint directly via an in-page `fetch`
@@ -437,6 +456,15 @@ test("enroll, chat with the fake provider, curated memory, Today, logout, route 
     // request's own run is listed first.
     await expect(page.getByText(/Çalışma durumu: Başarılı/).first()).toBeVisible({ timeout: 5_000 });
   }).toPass({ timeout: 20_000 });
+
+  // Routed approval detail (Phase 4 branch 5): deep-linkable, and the old
+  // `?request=<id>` link redirects to it.
+  await page.goto(`/approvals?request=${vaultExportRequestId}`);
+  await expect(page).toHaveURL(new RegExp(`/approvals/${vaultExportRequestId}$`));
+  await expect(
+    page.getByRole("heading", { level: 1, name: "Obsidian vault dışa aktarımı" }),
+  ).toBeVisible();
+  await expect(page.getByText(/Çalışma durumu: Başarılı/)).toBeVisible();
 
   // Agents happy path (MVP 7 §5/§6): a goal plans to a `read` step, a
   // `task_draft` step, and a `tool_request` step in one plan. FakeAdapter's
@@ -614,7 +642,10 @@ test("enroll, chat with the fake provider, curated memory, Today, logout, route 
     timeout: 20_000,
   });
 
+  // Every destructive action sits behind a confirmation dialog (Phase 4
+  // branch 5): the cancel only happens once "Evet, iptal et" is clicked.
   await page.getByRole("button", { name: "Ajanı iptal et" }).click();
+  await page.getByRole("alertdialog").getByRole("button", { name: "Evet, iptal et" }).click();
   await expect(page.getByRole("button", { name: "Ajanı iptal et" })).not.toBeVisible();
   await expect(page.getByText("İptal edildi", { exact: true })).toBeVisible();
 
@@ -839,6 +870,7 @@ test("enroll, chat with the fake provider, curated memory, Today, logout, route 
   // next visit asks for a pairing code again.
   await page.getByRole("link", { name: "Cihazlar" }).click();
   await page.getByRole("button", { name: "Bu cihazı unut" }).click();
+  await page.getByRole("alertdialog").getByRole("button", { name: "Evet, unut" }).click();
   await expect(page).toHaveURL(/\/enroll$/);
   await expect(page.getByLabel("Eşleştirme kodu")).toBeVisible();
 });

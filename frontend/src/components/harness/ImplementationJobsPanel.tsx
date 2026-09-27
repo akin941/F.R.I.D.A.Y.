@@ -1,7 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import Link from "next/link";
+import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ErrorState } from "@/components/ui/error-state";
@@ -14,22 +15,20 @@ import {
 import {
   GATE_STATUS_LABELS,
   IMPL_STATUS_LABELS,
-  fastestPollInterval,
   harnessFailureReasonLabel,
-  implPollInterval,
   isImplTerminal,
 } from "@/components/harness/labels";
-import { apiGetJson } from "@/lib/api-client";
-import { clickableProps } from "@/lib/keyboard";
+import { CARD_LINK_CLASSES, implementationJobHref } from "@/components/harness/links";
+import { useImplementationJobs } from "@/components/harness/queries";
 import { queryKeys } from "@/lib/query/keys";
-import { pollWhile } from "@/lib/query/polling";
 import type { ApiImplementationJob } from "@/types/api";
 
 /**
  * "Uygulama işleri" list + request form. Rows come from the workspace-keyed
  * query cache (a workspace switch never shows another workspace's rows);
  * the list polls only while some row is non-terminal (fast while a job is
- * working, slow while jobs only await a gate; paused when hidden).
+ * working, slow while jobs only await a gate; paused when hidden). Each
+ * row links to its routed detail (`/harness/implementations/[jobId]`).
  *
  * `prefill` (set when the user asked for an implementation from a
  * discovery job) opens the form pre-populated; `onPrefillConsumed` lets
@@ -39,28 +38,16 @@ export function ImplementationJobsPanel({
   workspaceId,
   prefill,
   onPrefillConsumed,
-  onSelect,
 }: {
   workspaceId: string;
   prefill: ImplementationPrefill | null;
   onPrefillConsumed: () => void;
-  onSelect: (jobId: string) => void;
 }) {
   const queryClient = useQueryClient();
   const [creating, setCreating] = useState(prefill != null);
 
-  // Polls only while some row is non-terminal: fast while a job is
-  // working, slow while jobs only await a gate (never while hidden).
-  const jobs = useQuery({
-    queryKey: queryKeys.implementationJobs(workspaceId),
-    queryFn: () =>
-      apiGetJson<ApiImplementationJob[]>(
-        `/api/harness/implementation-jobs?workspace=${encodeURIComponent(workspaceId)}`,
-      ),
-    refetchInterval: pollWhile<ApiImplementationJob[]>((list) =>
-      fastestPollInterval(list.map((j) => implPollInterval(j.status))),
-    ),
-  });
+  // Shared with the console's live strip (one request, one poller).
+  const jobs = useImplementationJobs(workspaceId);
 
   function closeForm() {
     setCreating(false);
@@ -114,39 +101,39 @@ export function ImplementationJobsPanel({
       ) : !jobs.data ? null : jobs.data.length === 0 ? (
         <p className="text-sm text-muted-foreground">Henüz uygulama işi yok.</p>
       ) : (
-        <div className="flex flex-col gap-3">
+        <ul className="flex flex-col gap-3">
           {jobs.data.map((job) => (
-            <Card
-              key={job.id}
-              className="cursor-pointer transition-colors hover:bg-accent/50 focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none"
-              {...clickableProps(() => onSelect(job.id))}
-            >
-              <CardHeader>
-                <CardTitle className="text-base">{job.goal}</CardTitle>
-              </CardHeader>
-              <CardContent className="flex flex-col gap-1 text-sm text-muted-foreground">
-                <p className="flex flex-wrap items-center gap-2">
-                  <StatusPill
-                    domain="implementation"
-                    status={job.status}
-                    label={IMPL_STATUS_LABELS[job.status] ?? job.status}
-                  />
-                  {job.failure_reason ? (
-                    <span>{harnessFailureReasonLabel(job.failure_reason)}</span>
-                  ) : null}
-                  {job.cancel_requested && !isImplTerminal(job.status) ? (
-                    <span>iptal istendi</span>
-                  ) : null}
-                </p>
-                <p>
-                  Depo: {job.repo_name}
-                  {job.gate_a ? ` · Kapı A: ${GATE_STATUS_LABELS[job.gate_a.status]}` : ""}
-                  {job.gate_b ? ` · Kapı B: ${GATE_STATUS_LABELS[job.gate_b.status]}` : ""}
-                </p>
-              </CardContent>
-            </Card>
+            <li key={job.id}>
+              <Link href={implementationJobHref(job)} className={CARD_LINK_CLASSES}>
+                <Card className="bg-transparent">
+                  <CardHeader>
+                    <CardTitle className="text-base">{job.goal}</CardTitle>
+                  </CardHeader>
+                  <CardContent className="flex flex-col gap-1 text-sm text-muted-foreground">
+                    <p className="flex flex-wrap items-center gap-2">
+                      <StatusPill
+                        domain="implementation"
+                        status={job.status}
+                        label={IMPL_STATUS_LABELS[job.status] ?? job.status}
+                      />
+                      {job.failure_reason ? (
+                        <span>{harnessFailureReasonLabel(job.failure_reason)}</span>
+                      ) : null}
+                      {job.cancel_requested && !isImplTerminal(job.status) ? (
+                        <span>iptal istendi</span>
+                      ) : null}
+                    </p>
+                    <p>
+                      Depo: {job.repo_name}
+                      {job.gate_a ? ` · Kapı A: ${GATE_STATUS_LABELS[job.gate_a.status]}` : ""}
+                      {job.gate_b ? ` · Kapı B: ${GATE_STATUS_LABELS[job.gate_b.status]}` : ""}
+                    </p>
+                  </CardContent>
+                </Card>
+              </Link>
+            </li>
           ))}
-        </div>
+        </ul>
       )}
     </div>
   );

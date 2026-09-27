@@ -4,6 +4,7 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import {
   MEMORY_SENSITIVITY_LABELS,
   MEMORY_STATUS_LABELS,
@@ -11,7 +12,10 @@ import {
 } from "@/components/memory/labels";
 import { MemoryFields, type MemoryFieldsValue } from "@/components/memory/MemoryFields";
 import { apiDelete, apiPatchJson, apiPostJson, errorMessage } from "@/lib/api-client";
+import { tr } from "@/lib/i18n/tr";
 import type { ApiMemory } from "@/types/api";
+
+const copy = tr.confirm.memory;
 
 function toFieldsValue(memory: ApiMemory): MemoryFieldsValue {
   return {
@@ -68,14 +72,14 @@ export function MemoryCard({
     if (updated) onChanged(updated);
   }
 
+  // Reject, forget and delete run only from their confirmation dialog,
+  // which reports its own failure (so these throw instead of `run`).
   async function handleReject() {
-    const updated = await run(() => apiPostJson<ApiMemory>(`/api/memories/${memory.id}/reject`));
-    if (updated) onChanged(updated);
+    onChanged(await apiPostJson<ApiMemory>(`/api/memories/${memory.id}/reject`));
   }
 
   async function handleForget() {
-    const updated = await run(() => apiPostJson<ApiMemory>(`/api/memories/${memory.id}/forget`));
-    if (updated) onChanged(updated);
+    onChanged(await apiPostJson<ApiMemory>(`/api/memories/${memory.id}/forget`));
   }
 
   async function handleRestore() {
@@ -84,10 +88,8 @@ export function MemoryCard({
   }
 
   async function handleDelete() {
-    await run(async () => {
-      await apiDelete(`/api/memories/${memory.id}`);
-      onDeleted(memory.id);
-    });
+    await apiDelete(`/api/memories/${memory.id}`);
+    onDeleted(memory.id);
   }
 
   if (editing) {
@@ -156,9 +158,19 @@ export function MemoryCard({
             <Button variant="outline" size="sm" onClick={() => setEditing(true)} disabled={busy}>
               Düzenle
             </Button>
-            <Button variant="outline" size="sm" onClick={() => void handleReject()} disabled={busy}>
-              Reddet
-            </Button>
+            <ConfirmDialog
+              trigger={
+                <Button variant="outline" size="sm" disabled={busy}>
+                  Reddet
+                </Button>
+              }
+              title={copy.rejectTitle}
+              description={copy.reject(memory.title)}
+              confirmLabel={copy.rejectConfirm}
+              busyLabel={copy.rejecting}
+              errorFallback={copy.failed}
+              onConfirm={handleReject}
+            />
             <Button size="sm" onClick={() => void handleApprove()} disabled={busy}>
               Onayla
             </Button>
@@ -169,9 +181,19 @@ export function MemoryCard({
             <Button variant="outline" size="sm" onClick={() => setEditing(true)} disabled={busy}>
               Düzenle
             </Button>
-            <Button variant="outline" size="sm" onClick={() => void handleForget()} disabled={busy}>
-              Unut
-            </Button>
+            <ConfirmDialog
+              trigger={
+                <Button variant="outline" size="sm" disabled={busy}>
+                  Unut
+                </Button>
+              }
+              title={copy.forgetTitle}
+              description={copy.forget(memory.title)}
+              confirmLabel={copy.forgetConfirm}
+              busyLabel={copy.forgetting}
+              errorFallback={copy.failed}
+              onConfirm={handleForget}
+            />
           </>
         ) : null}
         {variant === "list" && memory.status === "archived" ? (
@@ -180,9 +202,18 @@ export function MemoryCard({
           </Button>
         ) : null}
         {variant === "list" && memory.status === "rejected" ? (
-          <Button variant="destructive" size="sm" onClick={() => void handleDelete()} disabled={busy}>
-            Sil
-          </Button>
+          <ConfirmDialog
+            trigger={
+              <Button variant="destructive" size="sm" disabled={busy}>
+                Sil
+              </Button>
+            }
+            title={copy.deleteTitle}
+            description={copy.delete(memory.title)}
+            confirmLabel={copy.deleteConfirm}
+            errorFallback={copy.failed}
+            onConfirm={handleDelete}
+          />
         ) : null}
       </CardFooter>
     </Card>

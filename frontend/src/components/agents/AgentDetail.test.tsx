@@ -12,6 +12,7 @@ vi.mock("@/contexts/workspace-context", () => ({
   useWorkspace: () => ({ activeWorkspace: workspace }),
 }));
 import { renderWithClient } from "@/test/render";
+import { calledWith, cancelDialog, confirmInDialog, findConfirmDialog } from "@/test/confirm";
 
 function step(overrides: Partial<ApiAgentStep> = {}): ApiAgentStep {
   return {
@@ -93,20 +94,25 @@ describe("AgentDetail", () => {
 
   it("cancels a running agent", async () => {
     let current = detail({ status: "running" });
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async (input: string, init?: RequestInit) => {
-        if (init?.method === "POST" && input === "/api/agents/a1/cancel") {
-          current = { ...current, status: "cancelled" };
-          return jsonResponse(current);
-        }
+    const fetchMock = vi.fn(async (input: string, init?: RequestInit) => {
+      if (init?.method === "POST" && input === "/api/agents/a1/cancel") {
+        current = { ...current, status: "cancelled" };
         return jsonResponse(current);
-      }),
-    );
+      }
+      return jsonResponse(current);
+    });
+    vi.stubGlobal("fetch", fetchMock);
 
     renderWithClient(<AgentDetail agentId="a1" />);
     await screen.findByText("Summarize my notes");
     await userEvent.click(screen.getByRole("button", { name: "Ajanı iptal et" }));
+    expect(await findConfirmDialog()).toHaveTextContent("“Summarize my notes” durdurulur");
+    await cancelDialog();
+    expect(calledWith(fetchMock, "POST", "/api/agents/a1/cancel")).toBe(false);
+
+    await userEvent.click(screen.getByRole("button", { name: "Ajanı iptal et" }));
+    await confirmInDialog("Evet, iptal et");
+    expect(calledWith(fetchMock, "POST", "/api/agents/a1/cancel")).toBe(true);
 
     await waitFor(() => {
       expect(screen.queryByRole("button", { name: "Ajanı iptal et" })).not.toBeInTheDocument();

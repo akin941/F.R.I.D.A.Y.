@@ -4,8 +4,10 @@ import { useCallback, useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { apiGetJson, apiPostJson, ApiError } from "@/lib/api-client";
+import { tr } from "@/lib/i18n/tr";
 import type {
   ApiDeviceEnrolledVia,
   ApiPairingCode,
@@ -18,6 +20,8 @@ const VIA_LABELS: Record<ApiDeviceEnrolledVia, string> = {
   strong_code: "Güçlü kod ile",
   remote_key: "Uzaktan erişim anahtarı ile",
 };
+
+const keyCopy = tr.confirm.remoteKey;
 
 function formatDate(value: string | null) {
   return value ? new Date(value).toLocaleString() : "—";
@@ -80,31 +84,16 @@ function DeviceRow({
   onChanged: (device: ApiTrustedDevice) => void;
   onForgotten: () => void;
 }) {
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const copy = tr.confirm.device;
 
+  // Both run only from their confirmation dialog, which reports a failure.
   async function handleRevoke() {
-    setBusy(true);
-    setError(null);
-    try {
-      onChanged(await apiPostJson<ApiTrustedDevice>(`/api/auth/devices/${device.id}/revoke`));
-    } catch (err) {
-      setError(errorText(err, "Cihaz iptal edilemedi."));
-    } finally {
-      setBusy(false);
-    }
+    onChanged(await apiPostJson<ApiTrustedDevice>(`/api/auth/devices/${device.id}/revoke`));
   }
 
   async function handleForget() {
-    setBusy(true);
-    setError(null);
-    try {
-      await apiPostJson("/api/auth/forget");
-      onForgotten();
-    } catch (err) {
-      setError(errorText(err, "Bu cihaz unutulamadı."));
-      setBusy(false);
-    }
+    await apiPostJson("/api/auth/forget");
+    onForgotten();
   }
 
   return (
@@ -118,11 +107,6 @@ function DeviceRow({
         </CardTitle>
       </CardHeader>
       <CardContent className="flex flex-col gap-2">
-        {error ? (
-          <Alert variant="destructive" role="alert">
-            <AlertDescription>{error}</AlertDescription>
-          </Alert>
-        ) : null}
         <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
           <span>{VIA_LABELS[device.enrolled_via]}</span>
           <span>&middot;</span>
@@ -142,25 +126,35 @@ function DeviceRow({
           </p>
         ) : device.is_current ? (
           <div>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => void handleForget()}
-              disabled={busy}
-            >
-              {busy ? "Unutuluyor…" : "Bu cihazı unut"}
-            </Button>
+            <ConfirmDialog
+              trigger={
+                <Button variant="outline" size="sm">
+                  Bu cihazı unut
+                </Button>
+              }
+              title={copy.forgetTitle}
+              description={copy.forget}
+              confirmLabel={copy.forgetConfirm}
+              busyLabel={copy.forgetting}
+              errorFallback={copy.forgetFailed}
+              onConfirm={handleForget}
+            />
           </div>
         ) : (
           <div>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => void handleRevoke()}
-              disabled={busy}
-            >
-              {busy ? "İptal ediliyor…" : "İptal et"}
-            </Button>
+            <ConfirmDialog
+              trigger={
+                <Button variant="outline" size="sm">
+                  İptal et
+                </Button>
+              }
+              title={copy.revokeTitle}
+              description={copy.revoke(device.name)}
+              confirmLabel={copy.revokeConfirm}
+              busyLabel={copy.revoking}
+              errorFallback={copy.revokeFailed}
+              onConfirm={handleRevoke}
+            />
           </div>
         )}
       </CardContent>
@@ -217,31 +211,16 @@ export function DevicesPanel() {
     }
   }
 
+  // Both run only from their confirmation dialog, which reports a failure.
   async function rotateKey() {
-    setBusy(true);
-    setError(null);
-    try {
-      const { key, ...state } = await apiPostJson<ApiRemoteKeyState>("/api/auth/remote-key");
-      setRemoteKey(state);
-      setRevealedKey(key ?? null);
-    } catch (err) {
-      setError(errorText(err, "Uzaktan erişim anahtarı oluşturulamadı."));
-    } finally {
-      setBusy(false);
-    }
+    const { key, ...state } = await apiPostJson<ApiRemoteKeyState>("/api/auth/remote-key");
+    setRemoteKey(state);
+    setRevealedKey(key ?? null);
   }
 
   async function revokeKey() {
-    setBusy(true);
-    setError(null);
-    try {
-      setRemoteKey(await apiPostJson<ApiRemoteKeyState>("/api/auth/remote-key/revoke"));
-      setRevealedKey(null);
-    } catch (err) {
-      setError(errorText(err, "Uzaktan erişim anahtarı kapatılamadı."));
-    } finally {
-      setBusy(false);
-    }
+    setRemoteKey(await apiPostJson<ApiRemoteKeyState>("/api/auth/remote-key/revoke"));
+    setRevealedKey(null);
   }
 
   function handleForgotten() {
@@ -318,13 +297,34 @@ export function DevicesPanel() {
           />
         ) : null}
         <div className="flex flex-wrap gap-2">
-          <Button variant="outline" size="sm" onClick={() => void rotateKey()} disabled={busy}>
-            {remoteKey?.active ? "Anahtarı yenile" : "Anahtar oluştur"}
-          </Button>
+          <ConfirmDialog
+            trigger={
+              <Button variant="outline" size="sm" disabled={busy}>
+                {remoteKey?.active ? "Anahtarı yenile" : "Anahtar oluştur"}
+              </Button>
+            }
+            title={remoteKey?.active ? keyCopy.rotateTitle : keyCopy.createTitle}
+            description={remoteKey?.active ? keyCopy.rotate : keyCopy.create}
+            confirmLabel={remoteKey?.active ? keyCopy.rotateConfirm : keyCopy.createConfirm}
+            busyLabel={keyCopy.busy}
+            destructive={Boolean(remoteKey?.active)}
+            errorFallback={keyCopy.createFailed}
+            onConfirm={rotateKey}
+          />
           {remoteKey?.active ? (
-            <Button variant="outline" size="sm" onClick={() => void revokeKey()} disabled={busy}>
-              Kapat
-            </Button>
+            <ConfirmDialog
+              trigger={
+                <Button variant="outline" size="sm" disabled={busy}>
+                  Kapat
+                </Button>
+              }
+              title={keyCopy.revokeTitle}
+              description={keyCopy.revoke}
+              confirmLabel={keyCopy.revokeConfirm}
+              busyLabel={keyCopy.busy}
+              errorFallback={keyCopy.revokeFailed}
+              onConfirm={revokeKey}
+            />
           ) : null}
         </div>
       </div>

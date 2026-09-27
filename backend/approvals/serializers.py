@@ -1,3 +1,6 @@
+from datetime import timedelta
+
+from django.conf import settings
 from rest_framework import serializers
 
 from approvals.models import ApprovalRequest
@@ -15,6 +18,11 @@ class ApprovalRequestSerializer(serializers.ModelSerializer):
     # being decided (`ToolSpec.describe_request`), or `None`. The raw
     # `payload` is still never serialized.
     display_summary = serializers.SerializerMethodField()
+    # Phase 4 branch 5: when a still-pending request stops being decidable
+    # (`created_at + APPROVAL_REQUEST_TTL_HOURS`, the same TTL the sweep and
+    # `_expire_if_stale` enforce) -- the inbox's expiry countdown. `None`
+    # once decided/expired.
+    expires_at = serializers.SerializerMethodField()
 
     class Meta:
         model = ApprovalRequest
@@ -28,12 +36,14 @@ class ApprovalRequestSerializer(serializers.ModelSerializer):
             "workspace",
             "tool_name",
             "status",
+            "origin",
             "requested_by",
             "requested_channel",
             "decided_by",
             "decided_at",
             "created_at",
             "updated_at",
+            "expires_at",
             "execution",
             "display_summary",
         ]
@@ -42,6 +52,7 @@ class ApprovalRequestSerializer(serializers.ModelSerializer):
             "workspace",
             "tool_name",
             "status",
+            "origin",
             "requested_by",
             "requested_channel",
             "decided_by",
@@ -49,6 +60,12 @@ class ApprovalRequestSerializer(serializers.ModelSerializer):
             "created_at",
             "updated_at",
         ]
+
+    def get_expires_at(self, obj):
+        if obj.status != ApprovalRequest.Status.PENDING:
+            return None
+        ttl = timedelta(hours=settings.APPROVAL_REQUEST_TTL_HOURS)
+        return serializers.DateTimeField().to_representation(obj.created_at + ttl)
 
     def get_execution(self, obj):
         # Local import, not module-level: mirrors `approvals.services.

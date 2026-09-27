@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { screen, waitFor } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { TelegramLinkPanel } from "@/components/integrations/TelegramLinkPanel";
+import { cancelDialog, confirmInDialog, findConfirmDialog } from "@/test/confirm";
 import { renderWithClient } from "@/test/render";
 
 const WORKSPACES = [
@@ -55,11 +56,9 @@ describe("TelegramLinkPanel", () => {
     expect(screen.getByText("/link abc123")).toBeInTheDocument();
   });
 
-  it("shows the linked state and unlinks", async () => {
+  it("shows the linked state and unlinks only after confirmation", async () => {
     let linked = true;
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async (input: string, init?: RequestInit) => {
+    const fetchMock = vi.fn(async (input: string, init?: RequestInit) => {
         if (init?.method === "DELETE") {
           linked = false;
           return new Response(null, { status: 204 });
@@ -72,14 +71,22 @@ describe("TelegramLinkPanel", () => {
           );
         }
         return jsonResponse({});
-      }),
-    );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const isDelete = () => fetchMock.mock.calls.some(([, init]) => init?.method === "DELETE");
 
     renderWithClient(<TelegramLinkPanel />);
 
     expect(await screen.findByText(/Şu sohbete bağlı: 999/)).toBeInTheDocument();
 
     await userEvent.click(screen.getByRole("button", { name: "Bağlantıyı kaldır" }));
+    expect(await findConfirmDialog()).toHaveTextContent("Telegram bağlantısı kaldırılsın mı?");
+    await cancelDialog();
+    expect(isDelete()).toBe(false);
+
+    await userEvent.click(screen.getByRole("button", { name: "Bağlantıyı kaldır" }));
+    expect(isDelete()).toBe(false);
+    await confirmInDialog("Evet, kaldır");
 
     await waitFor(() => {
       expect(screen.getByText("Henüz bir Telegram sohbetine bağlı değil.")).toBeInTheDocument();
@@ -104,19 +111,25 @@ describe("TelegramLinkPanel", () => {
     expect(await screen.findByText(/Şu sohbete bağlı: 222/)).toBeInTheDocument();
   });
 
-  it("does not get stuck loading if Unlink's reload arrives after the workspace was switched away", async () => {
+  it("keeps the unlink dialog open (and the picker unreachable) while the unlink is in flight", async () => {
     let resolveDelete: (response: Response) => void = () => {};
     const deletePromise = new Promise<Response>((resolve) => {
       resolveDelete = resolve;
     });
+    let linked = true;
     vi.stubGlobal(
       "fetch",
-      vi.fn(async (input: string, init?: RequestInit) => {
-        if (init?.method === "DELETE") return deletePromise;
-        if (input.includes("workspace=w2")) {
-          return jsonResponse({ linked: true, chat_id: "333", linked_at: "2026-07-13T00:00:00Z" });
+      vi.fn(async (_input: string, init?: RequestInit) => {
+        if (init?.method === "DELETE") {
+          const response = await deletePromise;
+          linked = false;
+          return response;
         }
-        return jsonResponse({ linked: true, chat_id: "999", linked_at: "2026-07-13T00:00:00Z" });
+        return jsonResponse(
+          linked
+            ? { linked: true, chat_id: "999", linked_at: "2026-07-13T00:00:00Z" }
+            : { linked: false, chat_id: null, linked_at: null },
+        );
       }),
     );
 
@@ -124,19 +137,22 @@ describe("TelegramLinkPanel", () => {
     await screen.findByText(/Şu sohbete bağlı: 999/);
 
     await userEvent.click(screen.getByRole("button", { name: "Bağlantıyı kaldır" }));
+    await confirmInDialog("Evet, kaldır");
 
-    // Switch workspace while the DELETE for w1 is still in flight.
-    await userEvent.click(screen.getByRole("combobox", { name: "Telegram çalışma alanı" }));
-    await userEvent.click(await screen.findByRole("option", { name: "Acme" }));
-    expect(await screen.findByText(/Şu sohbete bağlı: 333/)).toBeInTheDocument();
+    // A modal, busy dialog: no dismissal, and the workspace picker behind
+    // it is out of reach -- a stale unlink can never land on another
+    // workspace's panel (the old in-flight-switch race).
+    const dialog = await findConfirmDialog();
+    expect(within(dialog).getByRole("button", { name: "Kaldırılıyor…" })).toBeDisabled();
+    expect(
+      screen.queryByRole("combobox", { name: "Telegram çalışma alanı" }),
+    ).not.toBeInTheDocument();
 
-    // The stale w1 unlink now resolves -- proves the round-3 P2 fix: its
-    // follow-up reload must not resurrect the loading skeleton for w2,
-    // which already finished loading its own (unrelated) status.
     resolveDelete(new Response(null, { status: 204 }));
-    await waitFor(() => {
-      expect(screen.getByText(/Şu sohbete bağlı: 333/)).toBeInTheDocument();
-    });
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument());
+    expect(
+      await screen.findByText("Henüz bir Telegram sohbetine bağlı değil."),
+    ).toBeInTheDocument();
   });
 
   it("discards a link-code response that arrives after the workspace was switched away", async () => {

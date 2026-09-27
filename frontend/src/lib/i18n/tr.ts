@@ -3,6 +3,8 @@ import type {
   AgentStatus,
   AgentStepKind,
   AgentStepStatus,
+  ApprovalOrigin,
+  ApprovalRequestedChannel,
   ApprovalStatus,
   HarnessAgent,
   HarnessJobStatus,
@@ -189,6 +191,7 @@ export const tr = {
       knowledge: "Bilgi",
       tasks: "Görevler",
       today: "Bugün",
+      trash: "Çöp kutusu",
       workspaces: "Firma dosyası",
       agents: "Ajanlar",
       devices: "Cihazlar",
@@ -299,6 +302,150 @@ export const tr = {
       readOnlyHint:
         "Bu istek sohbette onaylandıysa durumunu ve kararını Onaylar sayfasında görebilirsin.",
       openApprovals: "Onaylara git",
+    },
+  },
+  // The ADR-009 trash (Phase 4 branch 5).
+  trash: {
+    title: "Çöp kutusu",
+    description: (days: number) =>
+      `Silinen görevler ve belgeler ${days} gün burada kalır, sonra kalıcı olarak silinir. Geri yükleyebilir ya da hemen kalıcı olarak silinmeleri için ayrı bir onay isteyebilirsin.`,
+    tasks: "Görevler",
+    documents: "Belgeler",
+    empty: "Çöp kutusu boş.",
+    emptyHint: "Sildiğin görevler ve belgeler geri yüklenebilmeleri için burada bekler.",
+    noTasks: "Çöp kutusunda görev yok.",
+    noDocuments: "Çöp kutusunda belge yok.",
+    loadFailed: "Çöp kutusu yüklenemedi.",
+    deleted: (when: string) => `Silindi ${when}`,
+    purgesAt: (date: string) => `Kalıcı silinme: ${date}`,
+    restore: "Geri yükle",
+    restoring: "Geri yükleniyor…",
+    restoreFailed: "Geri yüklenemedi.",
+    select: (title: string) => `Seç: ${title}`,
+    selectAll: "Tümünü seç",
+    clearSelection: "Seçimi temizle",
+    selected: (count: number) => `${count} öğe seçildi`,
+    purge: "Seçilenleri kalıcı olarak sil",
+    purgeLimit: (max: number) => `Tek istekte en fazla ${max} öğe kalıcı olarak silinebilir.`,
+    purgeTitle: "Kalıcı silme için onay istensin mi?",
+    purgeDescription: (count: number) =>
+      `Seçilen ${count} öğe için bir onay isteği oluşturulur. Kalıcı silme geri alınamaz; yalnızca bu isteği Onaylar sayfasında ayrıca onayladığında gerçekleşir. O zamana kadar öğeler çöp kutusunda kalır ve geri yüklenebilir.`,
+    purgeConfirm: "Onay isteği oluştur",
+    purging: "İsteniyor…",
+    purgeFailed: "Kalıcı silme isteği oluşturulamadı.",
+    purgeRequested: "Kalıcı silme onay isteği oluşturuldu. Karar Onaylar sayfasında verilir.",
+    openRequest: "Onay isteğini aç",
+  },
+  // Confirmation dialogs in front of every destructive action (Phase 4
+  // branch 5). Each names the object and states the consequence.
+  confirm: {
+    memory: {
+      rejectTitle: "Bu hafıza önerisi reddedilsin mi?",
+      reject: (title: string) =>
+        `“${title}” hafızaya eklenmez. Reddedilen öneri listede kalır; istersen sonra kalıcı olarak silebilirsin.`,
+      rejectConfirm: "Evet, reddet",
+      rejecting: "Reddediliyor…",
+      forgetTitle: "Bu hafıza kaydı unutulsun mu?",
+      forget: (title: string) =>
+        `“${title}” arşivlenir ve Jarvis onu artık kullanmaz. Arşivden istediğin zaman geri yükleyebilirsin.`,
+      forgetConfirm: "Evet, unut",
+      forgetting: "Unutuluyor…",
+      deleteTitle: "Reddedilen öneri kalıcı olarak silinsin mi?",
+      delete: (title: string) =>
+        `“${title}” kalıcı olarak silinir. Hiç onaylanmamış bir öneri olduğu için çöp kutusuna gitmez; bu işlem geri alınamaz.`,
+      deleteConfirm: "Evet, kalıcı olarak sil",
+      failed: "İşlem tamamlanamadı.",
+    },
+    trash: {
+      deleting: "Taşınıyor…",
+      confirm: "Çöp kutusuna taşı",
+      taskTitle: "Bu görev çöp kutusuna taşınsın mı?",
+      documentTitle: "Bu belge çöp kutusuna taşınsın mı?",
+      task: (title: string, days: number) =>
+        `“${title}” çöp kutusuna taşınır. ${days} gün içinde Çöp kutusu sayfasından geri yükleyebilirsin; bu sürenin sonunda kalıcı olarak silinir.`,
+      document: (title: string, days: number) =>
+        `“${title}” çöp kutusuna taşınır ve aramalarda artık kullanılmaz. ${days} gün içinde Çöp kutusu sayfasından geri yükleyebilirsin; bu sürenin sonunda kalıcı olarak silinir.`,
+      taskFailed: "Görev silinemedi.",
+      documentFailed: "Belge silinemedi.",
+    },
+    token: {
+      title: "Bu token iptal edilsin mi?",
+      description: (name: string) =>
+        `“${name}” ile yapılan istekler hemen reddedilir. İptal geri alınamaz; gerekirse yeni bir token oluşturursun.`,
+      confirm: "Evet, iptal et",
+      busy: "İptal ediliyor…",
+      failed: "Token iptal edilemedi.",
+    },
+    telegram: {
+      title: "Telegram bağlantısı kaldırılsın mı?",
+      description:
+        "Bu çalışma alanına bağlı Telegram sohbeti artık Jarvis'e mesaj iletemez. Yeniden bağlamak için yeni bir bağlantı kodu gerekir.",
+      confirm: "Evet, kaldır",
+      busy: "Kaldırılıyor…",
+      failed: "Sohbet bağlantısı kaldırılamadı.",
+    },
+    device: {
+      revokeTitle: "Bu cihaz iptal edilsin mi?",
+      revoke: (name: string) =>
+        `“${name}” oturumunu hemen kaybeder. Yeniden kullanmak için yeniden eşleştirilmesi gerekir; bu işlem geri alınamaz.`,
+      revokeConfirm: "Evet, iptal et",
+      revoking: "İptal ediliyor…",
+      revokeFailed: "Cihaz iptal edilemedi.",
+      forgetTitle: "Bu cihaz unutulsun mu?",
+      forget:
+        "Bu tarayıcı artık güvenilen bir cihaz olmaz ve oturumun kapanır. Tekrar kullanmak için yeni bir eşleştirme kodu gerekir.",
+      forgetConfirm: "Evet, unut",
+      forgetting: "Unutuluyor…",
+      forgetFailed: "Bu cihaz unutulamadı.",
+    },
+    remoteKey: {
+      createTitle: "Uzaktan erişim anahtarı oluşturulsun mu?",
+      create:
+        "Anahtarı bilen biri herhangi bir ağdan yeni cihaz eşleştirebilir. Anahtar bir kez gösterilir; her kullanımı tüm cihazlarda bildirilir.",
+      createConfirm: "Evet, oluştur",
+      rotateTitle: "Uzaktan erişim anahtarı yenilensin mi?",
+      rotate:
+        "Mevcut anahtar hemen geçersiz olur ve yerine yenisi oluşturulur. Eski anahtarla artık cihaz eşleştirilemez.",
+      rotateConfirm: "Evet, yenile",
+      revokeTitle: "Uzaktan erişim anahtarı kapatılsın mı?",
+      revoke:
+        "Anahtar hemen geçersiz olur; yerel ağ dışından yalnızca güçlü kodla cihaz eşleştirilebilir.",
+      revokeConfirm: "Evet, kapat",
+      busy: "İşleniyor…",
+      createFailed: "Uzaktan erişim anahtarı oluşturulamadı.",
+      revokeFailed: "Uzaktan erişim anahtarı kapatılamadı.",
+    },
+    agent: {
+      title: "Bu ajan iptal edilsin mi?",
+      description: (goal: string) =>
+        `“${goal}” durdurulur ve kalan adımları çalıştırılmaz. İptal edilen ajan devam ettirilemez.`,
+      confirm: "Evet, iptal et",
+      busy: "İptal ediliyor…",
+      failed: "Ajan iptal edilemedi.",
+    },
+    harnessJob: {
+      title: "Bu keşif işi iptal edilsin mi?",
+      description: (goal: string) =>
+        `“${goal}” için çalışan inceleme durdurulur ve brifing üretilmez. İptal edilen iş devam ettirilemez.`,
+      confirm: "Evet, iptal et",
+      busy: "İptal ediliyor…",
+      failed: "İş iptal edilemedi.",
+    },
+    implementationJob: {
+      title: "Bu uygulama işi iptal edilsin mi?",
+      description:
+        "Bu uygulama işi iptal edilsin mi? Bekleyen onay istekleri geri alınır ve iş kaldığı yerden devam ettirilemez.",
+      confirm: "Evet, iptal et",
+      busy: "İptal ediliyor…",
+      failed: "İş iptal edilemedi.",
+    },
+    repo: {
+      deleteTitle: "Bu depo kaydı silinsin mi?",
+      delete: (name: string) =>
+        `“${name}” harness kayıtlarından kaldırılır; uzak depoya dokunulmaz. İş geçmişi olan bir depo silinemez — onun yerine devre dışı bırak.`,
+      deleteConfirm: "Evet, sil",
+      deleting: "Siliniyor…",
+      deleteFailed: "Depo silinemedi.",
     },
   },
   markdown: {
@@ -438,28 +585,180 @@ export const tr = {
       no_changes: "Ajan hiçbir değişiklik üretmedi",
       secret_leak: "Değişikliklerde gizli bilgi sızıntısı tespit edildi",
     } satisfies Record<Exclude<ImplFailureReason, "">, string>,
+    // The routed console (Phase 4 branch 5).
+    console: {
+      backToConsole: "Harness'e dön",
+      backToImplementations: "Uygulama işlerine dön",
+      repos: "Depolar",
+      live: "Canlı işler",
+      noLive: "Şu anda çalışan ya da onay bekleyen iş yok.",
+      discoveryJob: "Keşif işi",
+      implementationJob: "Uygulama işi",
+      detailTabs: "İş ayrıntıları",
+      tabs: {
+        briefing: "Brifing",
+        plan: "Plan",
+        review: "İnceleme",
+        diff: "Diff",
+        transcripts: "Transkriptler",
+      },
+      ownSummaryNote: "Özet ve bulgular Jarvis'in kendi özetidir (model üretimi).",
+      noSummaryButTranscript:
+        "Özet üretilemedi. Ajanın ham çıktısı Transkriptler sekmesinde, güvenilmeyen içerik olarak duruyor.",
+      briefingPending: "Brifing iş bittiğinde burada görünecek.",
+      noTranscript: "Henüz ham çıktı yok.",
+      noReviews: "Henüz inceleme yok.",
+      rawOnTranscriptsTab:
+        "İnceleyicinin ham çıktısı Transkriptler sekmesinde, güvenilmeyen içerik olarak duruyor.",
+      noCommitYet: "Henüz commit üretilmedi.",
+    },
+    repos: {
+      title: "Depolar",
+      description:
+        "Harness'in çalışabileceği kayıtlı depolar. Bir depo etkinleştirilene kadar hiçbir iş onu kullanamaz.",
+      create: "Depo kaydet",
+      createTitle: "Yeni depo kaydet",
+      createSubmit: "Kaydet",
+      createFailed: "Depo kaydedilemedi.",
+      editTitle: (name: string) => `“${name}” deposunu düzenle`,
+      editSubmit: "Değişiklikleri kaydet",
+      editFailed: "Depo güncellenemedi.",
+      edit: "Düzenle",
+      saving: "Kaydediliyor…",
+      loadFailed: "Depolar yüklenemedi.",
+      empty: "Henüz kayıtlı depo yok.",
+      emptyHint: "Bir depo kaydet ve etkinleştir; keşif ve uygulama işleri onu seçebilir.",
+      formDescription:
+        "Kimlik bilgisi saklanmaz: klonlama yetkisi sunucu ortamından gelir. Uygulama işleri için test komutu gerekir.",
+      name: "Ad",
+      gitUrl: "Git adresi",
+      gitUrlHint:
+        "Token, parola, “?” ya da “#” içermeyen düz bir adres (ör. git@github.com:sahip/depo.git).",
+      defaultBranch: "Varsayılan dal",
+      testCommand: "Test komutu",
+      testCommandHint:
+        "Uygulama işlerinde değişiklikten sonra çalıştırılır; boş bırakılırsa uygulama işleri reddedilir.",
+      noTestCommand: "Test komutu tanımlı değil — uygulama işleri bu depoyu kullanamaz.",
+      enabled: "Etkin",
+      disabled: "Devre dışı",
+      enabledLabel: "Etkin",
+      enabledHint: "Devre dışı bir depo hiçbir harness işinde seçilemez.",
+      sensitive: "Hassas",
+      sensitiveLabel: "Hassas müşteri işi",
+      sensitiveHint: "Bu depodaki işler hassas olarak işaretlenir.",
+      selfRepo: "Jarvis'in kendi deposu",
+      selfRepoHint:
+        "Bu depo Jarvis'in kendi kurulumuna çözülüyor: kendini değiştirme koruması (ADR-004) uygulama işlerini reddeder. Salt okunur keşif çalışır.",
+      selfRepoUnconfigured:
+        "HARNESS_SELF_REPO_IDENTIFIERS tanımlı değil: kendini değiştirme koruması hangi deponun Jarvis olduğunu bilemediği için tüm uygulama işlerini reddeder. Keşif işleri çalışır.",
+    },
   },
   approvals: {
     // Human title per tool; a tool without one keeps its raw `tool_name`.
     toolTitles: {
       harness_implement: "Uygulama planı onayı (Kapı A)",
       harness_push: "Gönderim onayı (Kapı B)",
+      vault_export: "Obsidian vault dışa aktarımı",
+      purge_trash: "Çöp kutusundan kalıcı silme",
     } as Record<string, string>,
+    // What deciding means, stated in the decision dialog (per-tool
+    // renderers, components/approvals/renderers/).
     consequence: {
       harness_implement: {
         approve:
           "Onaylarsan ajan bu plana göre ayrı bir çalışma ağacında değişiklik yapmaya başlar. Dal, ayrı bir gönderim onayı (Kapı B) olmadan uzak depoya gönderilmez.",
+        approveWith: (branch: string, repo: string) =>
+          `Onaylarsan ajan “${repo}” deposunda, ayrı bir çalışma ağacında “${branch}” dalı üzerinde değişiklik yapmaya başlar. Dal, ayrı bir gönderim onayı (Kapı B) olmadan uzak depoya gönderilmez.`,
         reject:
           "Reddedersen uygulama işi başarısız olarak kapanır; depoda hiçbir değişiklik yapılmaz.",
       },
       harness_push: {
         approve: "Onaylarsan bu dal uzak depoya gönderilir (push). Gönderim geri alınamaz.",
+        approveWith: (branch: string) =>
+          `Onaylarsan “${branch}” dalı kayıtlı uzak depoya gönderilir (push). Gönderim geri alınamaz.`,
         reject: "Reddedersen değişiklikler gönderilmez ve uygulama işi başarısız olarak kapanır.",
+      },
+      vault_export: {
+        approve:
+          "Onaylarsan bu çalışma alanının onaylı hafıza kayıtları Obsidian vault'a (dosya sistemine) yazılır; özel kayıtlar yalnızca _private altına gider.",
+        reject: "Reddedersen dışa aktarma çalışmaz; vault'a hiçbir şey yazılmaz.",
+      },
+      purge_trash: {
+        approve: "Onaylarsan çöp kutusundaki bu öğeler kalıcı olarak silinir. Bu işlem geri alınamaz.",
+        approveWith: (tasks: number, documents: number) =>
+          `Onaylarsan çöp kutusundaki ${tasks} görev ve ${documents} belge kalıcı olarak silinir. Bu işlem geri alınamaz; bu arada geri yüklenen öğeler silinmez.`,
+        reject:
+          "Reddedersen öğeler çöp kutusunda kalır; saklama süresi dolunca yine otomatik olarak silinir.",
       },
       generic: {
         approve: "Onaylarsan bu istek çalıştırılır.",
         reject: "Reddedersen bu istek çalıştırılmaz.",
       },
+    },
+    noSummary: "Bu istek için özet bilgisi yok.",
+    purgeSummary: (tasks: number, documents: number) =>
+      `Kalıcı olarak silinecek: ${tasks} görev, ${documents} belge`,
+    more: (count: number) => `+${count} daha`,
+    openJob: "Uygulama işini aç",
+    origin: {
+      human: "İnsan",
+      agent: "Ajan",
+      harness: "Harness",
+    } satisfies Record<ApprovalOrigin, string> as Record<string, string>,
+    channel: {
+      web: "Web",
+      cli: "CLI",
+      telegram: "Telegram",
+      system: "Sistem",
+      unknown: "Bilinmiyor",
+    } satisfies Record<ApprovalRequestedChannel, string> as Record<string, string>,
+    inbox: {
+      title: "Onaylar",
+      description:
+        "Tüm firmalarındaki, insan kararı gerektiren yazma/silme/dağıtım/dışa-gönderme istekleri. Karar yalnızca bu web oturumundan verilir.",
+      pending: "Bekleyenler",
+      noPending: "Karar bekleyen bir şey yok.",
+      history: "Karara bağlananlar",
+      noHistory: "Bu filtrelere uyan karara bağlanmış istek yok.",
+      loadFailed: "Onay istekleri yüklenemedi.",
+      filters: "Filtreler",
+      statusFilter: "Durum filtresi",
+      toolFilter: "Araç filtresi",
+      workspaceFilter: "Çalışma alanı filtresi",
+      originFilter: "Kaynak filtresi",
+      channelFilter: "Kanal filtresi",
+      allStatuses: "Tüm durumlar",
+      allTools: "Tüm araçlar",
+      allWorkspaces: "Tüm çalışma alanları",
+      allOrigins: "Tüm kaynaklar",
+      allChannels: "Tüm kanallar",
+      clearFilters: "Filtreleri temizle",
+      unknownWorkspace: "Bilinmeyen çalışma alanı",
+      shortcuts:
+        "Klavye: j / k istekler arasında gezinir, Enter ayrıntıyı açar. Onay ya da ret için tek tuş kısayolu yoktur.",
+      details: "Ayrıntılar",
+    },
+    meta: {
+      requested: (when: string) => `İstendi ${when}`,
+      decided: (when: string) => `Karara bağlandı ${when}`,
+      via: (origin: string, channel: string) => `Kaynak: ${origin} · Kanal: ${channel}`,
+      expiresIn: (remaining: string) => `Karar için kalan süre: ${remaining}`,
+      expiredNow: "Süresi doldu — artık karar verilemez.",
+    },
+    detail: {
+      back: "Onaylara dön",
+      loadFailed: "Bu onay isteği yüklenemedi.",
+    },
+    decision: {
+      approve: "Onayla",
+      reject: "Reddet",
+      approveTitle: "Bu istek onaylansın mı?",
+      rejectTitle: "Bu istek reddedilsin mi?",
+      approveConfirm: "Evet, onayla",
+      rejectConfirm: "Evet, reddet",
+      busy: "Gönderiliyor…",
+      failed: "İşlem tamamlanamadı.",
+      subject: (title: string, workspace: string) => `${title} — ${workspace}`,
     },
   },
   memory: {

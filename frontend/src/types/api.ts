@@ -70,6 +70,8 @@ export interface SessionResponse {
   user: ApiUser;
   workspaces: ApiWorkspaceSummary[];
   security_notices?: ApiSecurityNotice[];
+  // ADR-009 retention window (backend TRASH_RETENTION_DAYS).
+  trash_retention_days?: number;
 }
 
 // --- Device trust (Phase 4 branch 2) ---
@@ -257,6 +259,8 @@ export interface ApiKnowledgeDocument {
   created_by: string | null;
   created_at: string;
   updated_at: string;
+  // ADR-009: set while the row is in the trash ("Çöp kutusu").
+  deleted_at?: string | null;
 }
 
 // --- Tasks (MVP 4) ---
@@ -279,6 +283,8 @@ export interface ApiTask {
   created_by: string | null;
   created_at: string;
   updated_at: string;
+  // ADR-009: set while the row is in the trash ("Çöp kutusu").
+  deleted_at?: string | null;
 }
 
 // --- Approvals (MVP 5) ---
@@ -342,21 +348,40 @@ export interface ApiHarnessPushDisplaySummary {
   review: { verdict: string; summary: string } | null;
 }
 
+// purge_trash (ADR-009, gate-class permanent delete of trashed rows).
+export interface ApiPurgeTrashDisplaySummary {
+  kind: "purge_trash";
+  task_count: number;
+  document_count: number;
+  // First few titles of the named rows (truncated server-side).
+  titles: string[];
+}
+
 export type ApiDisplaySummary =
   | ApiHarnessImplementDisplaySummary
   | ApiHarnessPushDisplaySummary
+  | ApiPurgeTrashDisplaySummary
   | null;
+
+export type ApprovalOrigin = "human" | "agent" | "harness";
+
+export type ApprovalRequestedChannel = "web" | "cli" | "telegram" | "system" | "unknown";
 
 export interface ApiApprovalRequest {
   id: string;
   workspace: string;
   tool_name: string;
   status: ApprovalStatus;
+  // Optional: absent on responses from a backend predating these fields.
+  origin?: ApprovalOrigin;
+  requested_channel?: ApprovalRequestedChannel;
   requested_by: string | null;
   decided_by: string | null;
   decided_at: string | null;
   created_at: string;
   updated_at: string;
+  // When a pending request stops being decidable (null once decided).
+  expires_at?: string | null;
   // `payload` is deliberately never included (approvals/serializers.py).
   // Each tool registers its own `execution` shape (or none -- `null`),
   // keyed on `tool_name`: vault_export -> ApiVaultExportExecution,
@@ -520,9 +545,15 @@ export interface ApiHarnessRepo {
   enabled: boolean;
   sensitive: boolean;
   test_command: string;
+  // Phase 4 branch 5, read-only: how the ADR-004 self-modification guard
+  // sees this repo (`self` = Jarvis's own remote, implementation refused;
+  // `unconfigured` = HARNESS_SELF_REPO_IDENTIFIERS empty, all refused).
+  self_repo_status?: ApiRepoSelfStatus;
   created_at: string;
   updated_at: string;
 }
+
+export type ApiRepoSelfStatus = "self" | "other" | "unconfigured";
 
 // --- Harness implementation jobs (Phase 3 branch 6/7) ---
 

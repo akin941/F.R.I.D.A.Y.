@@ -3,9 +3,9 @@
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
-import { apiPostJson, errorMessage } from "@/lib/api-client";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { apiPostJson } from "@/lib/api-client";
 import { useWorkspace } from "@/contexts/workspace-context";
 import { tr } from "@/lib/i18n/tr";
 import type { ApiPersonalAccessToken } from "@/types/api";
@@ -19,26 +19,14 @@ function TokenRow({
   workspaceName: string;
   onRevoked: (token: ApiPersonalAccessToken) => void;
 }) {
-  const [revoking, setRevoking] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   // Evaluated once per mount (render must stay pure); a token expiring
   // while the page is open shows as expired on the next load.
   const [renderedAt] = useState(() => Date.now());
   const expired = new Date(token.expires_at).getTime() <= renderedAt;
 
+  // Runs only from the confirmation dialog, which reports a failure.
   async function handleRevoke() {
-    setRevoking(true);
-    setError(null);
-    try {
-      const updated = await apiPostJson<ApiPersonalAccessToken>(
-        `/api/auth/tokens/${token.id}/revoke`,
-      );
-      onRevoked(updated);
-    } catch (err) {
-      setError(errorMessage(err, "Token iptal edilemedi."));
-    } finally {
-      setRevoking(false);
-    }
+    onRevoked(await apiPostJson<ApiPersonalAccessToken>(`/api/auth/tokens/${token.id}/revoke`));
   }
 
   return (
@@ -50,11 +38,6 @@ function TokenRow({
         </CardTitle>
       </CardHeader>
       <CardContent className="flex flex-col gap-2">
-        {error ? (
-          <Alert variant="destructive" role="alert">
-            <AlertDescription>{error}</AlertDescription>
-          </Alert>
-        ) : null}
         <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
           <span>{workspaceName}</span>
           <span>&middot;</span>
@@ -82,14 +65,19 @@ function TokenRow({
           </p>
         ) : (
           <div>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => void handleRevoke()}
-              disabled={revoking}
-            >
-              {revoking ? "İptal ediliyor…" : "İptal et"}
-            </Button>
+            <ConfirmDialog
+              trigger={
+                <Button variant="outline" size="sm">
+                  İptal et
+                </Button>
+              }
+              title={tr.confirm.token.title}
+              description={tr.confirm.token.description(token.name)}
+              confirmLabel={tr.confirm.token.confirm}
+              busyLabel={tr.confirm.token.busy}
+              errorFallback={tr.confirm.token.failed}
+              onConfirm={handleRevoke}
+            />
           </div>
         )}
       </CardContent>

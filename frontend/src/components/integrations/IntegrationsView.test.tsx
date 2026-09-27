@@ -3,6 +3,7 @@ import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { IntegrationsView } from "@/components/integrations/IntegrationsView";
 import type { ApiPersonalAccessToken } from "@/types/api";
+import { confirmInDialog, findConfirmDialog } from "@/test/confirm";
 import { renderWithClient } from "@/test/render";
 
 const WORKSPACES = [
@@ -216,7 +217,7 @@ describe("IntegrationsView", () => {
     expect(screen.queryByRole("button", { name: "İptal et" })).not.toBeInTheDocument();
   });
 
-  it("revokes a token", async () => {
+  it("revokes a token only after confirmation", async () => {
     const active = token();
     vi.stubGlobal(
       "fetch",
@@ -230,6 +231,9 @@ describe("IntegrationsView", () => {
     renderWithClient(<IntegrationsView />);
     await screen.findByText("laptop cli");
     await userEvent.click(screen.getByRole("button", { name: "İptal et" }));
+    expect(await findConfirmDialog()).toHaveTextContent("“laptop cli”");
+    expect(screen.queryByText(/İptal edildi/)).not.toBeInTheDocument();
+    await confirmInDialog("Evet, iptal et");
 
     await waitFor(() => {
       expect(screen.getByText(/İptal edildi/)).toBeInTheDocument();

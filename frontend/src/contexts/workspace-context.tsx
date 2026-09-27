@@ -4,6 +4,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState } 
 import { toast } from "sonner";
 import { apiGetJson } from "@/lib/api-client";
 import { tr } from "@/lib/i18n/tr";
+import { TRASH_RETENTION_DAYS_DEFAULT } from "@/lib/trash";
 import type {
   ApiSecurityNotice,
   ApiUser,
@@ -15,6 +16,12 @@ interface WorkspaceContextValue {
   user: ApiUser | null;
   workspaces: ApiWorkspaceSummary[];
   securityNotices: ApiSecurityNotice[];
+  /**
+   * ADR-009: how many days a trashed task/document stays restorable before
+   * the retention purge -- stated in every delete confirmation. The
+   * backend's TRASH_RETENTION_DAYS (`/auth/me`), the default until loaded.
+   */
+  trashRetentionDays: number;
   activeWorkspace: ApiWorkspaceSummary | null;
   setActiveWorkspaceId: (workspaceId: string) => void;
   /**
@@ -67,6 +74,7 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<ApiUser | null>(null);
   const [workspaces, setWorkspaces] = useState<ApiWorkspaceSummary[]>([]);
   const [securityNotices, setSecurityNotices] = useState<ApiSecurityNotice[]>([]);
+  const [trashRetentionDays, setTrashRetentionDays] = useState(TRASH_RETENTION_DAYS_DEFAULT);
   const [activeWorkspaceId, setActiveWorkspaceIdState] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -79,6 +87,7 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
       setUser(session.user);
       setWorkspaces(session.workspaces);
       setSecurityNotices(session.security_notices ?? []);
+      setTrashRetentionDays(session.trash_retention_days ?? TRASH_RETENTION_DAYS_DEFAULT);
       const savedId =
         typeof window !== "undefined"
           ? window.localStorage.getItem(storageKey(session.user.id))
@@ -140,6 +149,7 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
       user,
       workspaces,
       securityNotices,
+      trashRetentionDays,
       activeWorkspace,
       setActiveWorkspaceId,
       followWorkspaceLink,
@@ -151,6 +161,7 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
       user,
       workspaces,
       securityNotices,
+      trashRetentionDays,
       activeWorkspace,
       setActiveWorkspaceId,
       followWorkspaceLink,
