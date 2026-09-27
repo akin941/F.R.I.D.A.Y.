@@ -115,7 +115,11 @@ the manifest (tested).
   size, outcome, `data_class` when the call is classified).
 - `connector.write.{succeeded,failed,unknown_outcome}` for `github_open_pr`
   (`error_type` `head_moved` when the head moved), `connector.pin_mismatch`,
-  `harness.pull_request.requested`, and the approval's own audit trail.
+  `harness.pull_request.requested`, and the approval's own audit trail. The
+  `get_commit` head check `github_open_pr` makes before its send is a write
+  precondition, not a read: it has no `connector.read` row of its own and
+  is recorded only through the write's terminal `connector.write.*` row
+  (its `error_type`).
 
 ## Review
 - Branch 5 implementation, 2026-09-28; independent Sonnet 5 review pending
