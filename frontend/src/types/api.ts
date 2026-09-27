@@ -3,6 +3,7 @@ export interface ApiUser {
   email: string;
   name: string;
   is_agent: boolean;
+  is_owner: boolean;
 }
 
 export interface ApiWorkspaceSummary {
@@ -56,9 +57,51 @@ export interface ApiWorkspaceDetail extends ApiWorkspace {
   profile: ApiWorkspaceProfile;
 }
 
+// A "new device enrolled remotely" notice (Phase 4 branch 2), shown on every
+// device for a week after a remote-key enrollment.
+export interface ApiSecurityNotice {
+  kind: "remote_enrollment";
+  device_id: string;
+  device_name: string;
+  created_at: string;
+}
+
 export interface SessionResponse {
   user: ApiUser;
   workspaces: ApiWorkspaceSummary[];
+  security_notices?: ApiSecurityNotice[];
+}
+
+// --- Device trust (Phase 4 branch 2) ---
+
+export type ApiDeviceEnrolledVia = "pin" | "strong_code" | "remote_key";
+
+export interface ApiTrustedDevice {
+  id: string;
+  name: string;
+  enrolled_via: ApiDeviceEnrolledVia;
+  enrolled_ip: string | null;
+  user_agent: string;
+  created_at: string;
+  last_seen_at: string | null;
+  last_seen_ip: string | null;
+  revoked_at: string | null;
+  revoke_reason: string;
+  idle_expires_at: string;
+  is_current: boolean;
+}
+
+export interface ApiPairingCode {
+  code: string;
+  kind: "pin" | "strong";
+  expires_at: string;
+}
+
+export interface ApiRemoteKeyState {
+  active: boolean;
+  created_at: string | null;
+  last_used_at: string | null;
+  key?: string;
 }
 
 export interface ApiConversation {

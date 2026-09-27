@@ -56,4 +56,22 @@ describe("setAuthCookies", () => {
     expect(cookieStore.store.get("jarvis_refresh")?.secure).toBe(true);
     expect(cookieStore.store.get("jarvis_session")?.secure).toBe(true);
   });
+
+  it("scopes the device cookie to the auth routes, strict same-site, 400 days", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    const cookieStore = createCookieStore();
+    cookiesMock.mockResolvedValue(cookieStore);
+
+    const { setDeviceCookie } = await import("@/lib/auth-cookies");
+    await setDeviceCookie("jdv_x");
+
+    expect(cookieStore.store.get("jarvis_device")).toEqual({
+      value: "jdv_x",
+      httpOnly: true,
+      sameSite: "strict",
+      secure: true,
+      path: "/api/auth",
+      maxAge: 400 * 24 * 60 * 60,
+    });
+  });
 });

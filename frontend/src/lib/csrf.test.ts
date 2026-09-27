@@ -3,7 +3,7 @@ import { NextRequest } from "next/server";
 import { rejectCrossOrigin, rejectNonJson } from "@/lib/csrf";
 
 function makeRequest(headers: Record<string, string>) {
-  return new NextRequest("http://localhost:3001/api/auth/login", {
+  return new NextRequest("http://localhost:3001/api/auth/enroll", {
     method: "POST",
     headers,
   });

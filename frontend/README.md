@@ -1,7 +1,7 @@
 # Jarvis OS — Frontend
 
-Next.js (App Router) web shell for Jarvis OS: auth, workspace switcher, streaming
-Chat, and a Today placeholder. Talks only to the Django backend's `/api/v1/*`
+Next.js (App Router) web shell for Jarvis OS: device enrollment (`/enroll`),
+workspace switcher, streaming Chat and the other shell views. Talks only to the Django backend's `/api/v1/*`
 endpoints through this app's own Route Handlers (a BFF layer) — the browser never
 sees a JWT or calls Django directly.
 
@@ -32,7 +32,9 @@ npm run test:e2e           # Playwright smoke suite (real backend required, see 
 ## e2e smoke test
 
 `e2e/smoke.e2e.ts` drives a real browser against a real backend — no mocks —
-covering dev signup, the auto-created personal workspace, a full chat send/
+covering device enrollment (`/enroll` with a code from `manage.py
+issue_pairing_code`, run by `e2e/global-setup.ts` through `E2E_MANAGE_CMD`),
+the owner's personal workspace, a full chat send/
 stream against the deterministic FakeAdapter, the Today placeholder, logout,
 and the route guard. It needs the backend actually running and migrated/seeded
 (`make up` from the repo root does all of that); `e2e/global-setup.ts` polls
@@ -48,6 +50,14 @@ mocks the network so it can exercise them cheaply and deterministically.
 - **BFF, not a direct client**: `src/app/api/**/route.ts` proxy to Django,
   translating JWTs into `HttpOnly` cookies (`jarvis_access`, `jarvis_refresh`,
   `jarvis_session`) the browser can never read.
+- **Device trust** (Phase 4 branch 2): there is no signup or password login.
+  `/enroll` exchanges a pairing code (or the remote access key) for a trusted
+  device; its secret lives in the `jarvis_device` cookie (HttpOnly,
+  `SameSite=Strict`, `path=/api/auth`, 400 days). When a refresh fails the
+  refresh route silently re-mints a session from it; only a rejected device
+  sends the browser back to `/enroll`. `TRUSTED_CLIENT_IP_HEADER` +
+  `JARVIS_BFF_SHARED_SECRET` forward the browser's IP for PIN LAN gating
+  (`src/lib/client-ip.ts`; only behind a reverse proxy that sets that header).
 - **`src/proxy.ts`** (Next 16 renamed `middleware.ts`) is an optimistic route guard
   only — every Route Handler re-checks the access-token cookie independently.
 - **`src/lib/sse.ts`** parses the chat SSE stream (`chunk`/`done`/`error` events)

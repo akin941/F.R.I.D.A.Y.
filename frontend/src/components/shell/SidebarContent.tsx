@@ -31,7 +31,7 @@ export function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
 
   async function handleLogout() {
     await apiPostJson("/api/auth/logout").catch(() => undefined);
-    router.push("/login");
+    router.push("/enroll?signed_out=1");
     router.refresh();
   }
 

@@ -124,4 +124,48 @@ describe("POST /api/auth/refresh", () => {
     expect(response.status).toBe(403);
     expect(fetchMock).not.toHaveBeenCalled();
   });
+
+  it("silently re-mints from the device cookie when the refresh token is rejected", async () => {
+    const cookieStore = createCookieStore({
+      jarvis_refresh: "stale-refresh",
+      jarvis_device: "jdv_secret",
+    });
+    cookiesMock.mockResolvedValue(cookieStore);
+    const fetchMock = vi.fn(async (url: string) =>
+      url.endsWith("/auth/refresh")
+        ? new Response(JSON.stringify({ detail: "blacklisted" }), { status: 401 })
+        : new Response(JSON.stringify({ access: "minted-access", refresh: "minted-refresh" }), {
+            status: 200,
+          }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { POST } = await import("@/app/api/auth/refresh/route");
+    const response = await POST(makeRequest());
+
+    expect(response.status).toBe(200);
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
+      expect.stringMatching(/\/auth\/refresh$/),
+      expect.stringMatching(/\/auth\/devices\/session$/),
+    ]);
+    expect(cookieStore.store.get("jarvis_access")?.value).toBe("minted-access");
+    expect(cookieStore.deleted).not.toContain("jarvis_device");
+  });
+
+  it("drops the device cookie only when the device itself is rejected", async () => {
+    const cookieStore = createCookieStore({ jarvis_device: "jdv_revoked" });
+    cookiesMock.mockResolvedValue(cookieStore);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(JSON.stringify({ code: "device_rejected" }), { status: 401 })),
+    );
+
+    const { POST } = await import("@/app/api/auth/refresh/route");
+    const response = await POST(makeRequest());
+
+    expect(response.status).toBe(401);
+    expect(cookieStore.deleted).toEqual(
+      expect.arrayContaining(["jarvis_access", "jarvis_session", "jarvis_device"]),
+    );
+  });
 });
