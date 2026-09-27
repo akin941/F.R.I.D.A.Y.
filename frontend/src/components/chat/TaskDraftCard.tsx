@@ -82,9 +82,12 @@ export function TaskDraftCard({
       });
       onConfirmed(task);
     } catch (err) {
-      setError(errorMessage(err, tr.chat.taskDraft.failed));
       if (err instanceof ApiError && err.code === "task.draft_already_confirmed") {
+        // Not an error for the owner: the refetch re-renders this card as
+        // "Görev oluşturuldu".
         onAlreadyConfirmed();
+      } else {
+        setError(errorMessage(err, tr.chat.taskDraft.failed));
       }
     } finally {
       busyRef.current = false;

@@ -41,6 +41,14 @@ _WRITER_ROLES = _CURATOR_ROLES | {WorkspaceMember.Role.MEMBER}
 EDITABLE_FIELDS = ("title", "description", "due_date", "priority")
 
 
+def _is_source_message_unique_violation(exc: IntegrityError) -> bool:
+    cause = exc.__cause__
+    if getattr(cause, "sqlstate", None) != "23505":  # unique_violation
+        return False
+    constraint = getattr(getattr(cause, "diag", None), "constraint_name", None) or ""
+    return "source_message" in constraint
+
+
 class TaskServiceError(Exception):
     """Base class; views translate subclasses to HTTP statuses."""
 
@@ -174,9 +182,9 @@ def create_task(
             )
     except IntegrityError as exc:
         # Only the unique violation on this column means "already confirmed";
-        # anything else is a real error and propagates.
-        message = str(exc).lower()
-        if source_message is not None and "unique" in message and "source_message" in message:
+        # anything else is a real error and propagates. Keyed off the
+        # driver's SQLSTATE + constraint name, not the message wording.
+        if source_message is not None and _is_source_message_unique_violation(exc):
             raise DraftAlreadyConfirmed("This draft has already been confirmed.") from exc
         raise
     _record(task, "task.created", actor, source=source)
