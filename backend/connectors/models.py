@@ -76,6 +76,9 @@ class ConnectorWriteExecution(WorkspaceScopedModel, TimestampedModel):
         TRANSPORT_ERROR = "transport_error"
         PROTOCOL_ERROR = "protocol_error"
         TOOL_ERROR = "tool_error"
+        # A native bridge found the target gone before sending (D8: a Home
+        # Assistant entity removed after the decision) -- failed closed.
+        TARGET_MISSING = "target_missing"
         WORKER_LOST = "worker_lost"
         UNKNOWN = "unknown"
 

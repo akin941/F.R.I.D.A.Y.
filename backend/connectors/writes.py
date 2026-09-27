@@ -41,7 +41,7 @@ from django.utils import timezone
 
 from audit.models import AuditLog
 from audit.services import record_audit
-from connectors import mcp_client
+from connectors import mcp_client, transport
 from connectors.manifest import ScopeError, get_manifest
 from connectors.models import ConnectorBinding, ConnectorWriteExecution
 from connectors.reads import arguments_sha256, canonical_json, compose_result_text, json_safe
@@ -109,6 +109,15 @@ def prepare_write_payload(connector, tool, workspace, payload):
             policy.scope_check(workspace, clean)
         except ScopeError as exc:
             raise ToolValidationError("The arguments are outside this workspace.") from exc
+    rows = _display_rows(policy, clean)
+    if policy.request_rows is not None:
+        # A native bridge's request-time read of the target (e.g. a Home
+        # Assistant entity's name and current state, D8); raises
+        # `ToolValidationError` to refuse (target missing, unreachable).
+        rows += [
+            {"label": str(row["label"]), "value": str(row["value"])}
+            for row in policy.request_rows(workspace, clean)
+        ]
     return {
         "connector": manifest.name,
         "tool": policy.name,
@@ -122,7 +131,7 @@ def prepare_write_payload(connector, tool, workspace, payload):
             "connector_name": manifest.display_name,
             "tool_description": policy.description,
             "data_class": manifest.data_class,
-            "rows": _display_rows(policy, clean),
+            "rows": rows,
         },
     }
 
@@ -277,7 +286,7 @@ def execute_claimed_write(execution_id, claim_token):
     payload = approval_request.payload
     manifest, policy = _resolve(execution.connector, execution.tool)
     try:
-        result = mcp_client.call_tool(
+        result = transport.call_tool(
             manifest,
             server_tool=payload["server_tool"],
             arguments=payload["arguments"],
@@ -294,6 +303,10 @@ def execute_claimed_write(execution_id, claim_token):
             "timeout": ErrorType.TIMEOUT,
             "transport_error": ErrorType.TRANSPORT_ERROR,
             "protocol_error": ErrorType.PROTOCOL_ERROR,
+            "target_missing": ErrorType.TARGET_MISSING,
+            # The allowlist narrowed between request and execution (e.g.
+            # `HA_ALLOWED_DOMAINS`): the connector changed under the decision.
+            "not_allowed": ErrorType.CONNECTOR_CHANGED,
         }.get(exc.code, ErrorType.UNKNOWN)
         _finalize_fenced(
             execution_id,

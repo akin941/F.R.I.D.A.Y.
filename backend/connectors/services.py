@@ -8,7 +8,7 @@ Pins against tool poisoning: `check_binding_pins` compares the server's
 `tools/list` with the manifest -- on enable (dispatched after commit), on the
 pin beat (`connectors.tasks.check_connector_pins`, every 15 minutes) and,
 in the same MCP session, before every read and write
-(`connectors.mcp_client.call_tool`). Unlisted server tools are ignored; a
+(`connectors.transport.call_tool`, MCP or native bridge). Unlisted server tools are ignored; a
 listed tool whose `inputSchema` hash differs from the manifest pin, or that
 the server stopped offering, is disabled (`mismatch` / `missing`,
 `connector.pin_mismatch` audit) until a commit updates the manifest: the
@@ -27,8 +27,8 @@ from django.utils import timezone
 
 from audit.models import AuditLog
 from audit.services import record_audit
-from connectors import mcp_client
-from connectors.manifest import KIND_MCP, get_manifest, list_manifests
+from connectors import mcp_client, transport
+from connectors.manifest import get_manifest, list_manifests
 from connectors.models import ConnectorBinding
 from core.channels import CHANNEL_WEB
 from workspaces.models import WorkspaceMember
@@ -206,11 +206,11 @@ def check_binding_pins(binding_id):
     if binding is None or not binding.enabled:
         return None
     manifest = get_manifest(binding.connector)
-    if manifest is None or manifest.blocked or manifest.kind != KIND_MCP:
+    if manifest is None or manifest.blocked:
         return binding
     now = timezone.now().isoformat()
     try:
-        listing = mcp_client.list_tools(manifest, timeout=settings.CONNECTOR_HEALTH_TIMEOUT_SECONDS)
+        listing = transport.list_tools(manifest, timeout=settings.CONNECTOR_HEALTH_TIMEOUT_SECONDS)
     except mcp_client.ConnectorError as exc:
         with transaction.atomic():
             locked = ConnectorBinding.objects.select_for_update().get(pk=binding.pk)

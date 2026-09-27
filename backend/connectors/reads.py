@@ -9,8 +9,8 @@ discovers it through `list_read_tools()` without importing this app.
    workspace has an enabled binding and the tool's last pin check said `ok`;
 2. validate the arguments with the tool's strict serializer, then its scope
    check -- a refusal never touches the network;
-3. call the tool through `mcp_client.call_tool` (pin re-checked in the same
-   session, `CONNECTOR_READ_TIMEOUT_SECONDS`);
+3. call the tool through `transport.call_tool` -- the MCP client or a native
+   bridge (pin re-checked in the same session, `CONNECTOR_READ_TIMEOUT_SECONDS`);
 4. keep only text and `structuredContent` (images, audio, resources and
    links are dropped by the client), serialize them into one text and bound
    it to `CONNECTOR_RESULT_MAX_CHARS`.
@@ -30,7 +30,7 @@ import time
 from django.conf import settings
 
 from audit.services import record_audit
-from connectors import mcp_client
+from connectors import mcp_client, transport
 from connectors.manifest import ScopeError
 from connectors.services import enabled_binding, record_listing, tool_available
 from tools.registry import (
@@ -109,7 +109,7 @@ def perform_read(manifest, policy, *, workspace, actor, args, channel):
         clean = validate_arguments(manifest, policy, workspace, args)
         audit["args_sha256"] = arguments_sha256(clean)
         try:
-            result = mcp_client.call_tool(
+            result = transport.call_tool(
                 manifest,
                 server_tool=policy.server_tool,
                 arguments=clean,

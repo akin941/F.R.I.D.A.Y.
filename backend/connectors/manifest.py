@@ -23,6 +23,14 @@ never offered to the router, never callable. Each listed tool carries:
   the tool until a commit updates the pin (fail closed, tool poisoning);
 - for writes: the gate name, `user_invocable`, a renderer for the decision
   dialog and `records_work_log` (brief D6, D13).
+
+A `native` manifest (brief D8, Home Assistant) has no MCP server: its
+bridge (`connectors/bridges/<name>.py`, routed by `connectors.transport`)
+serves the same `list_tools`/`call_tool` contract, and its "schema pin" is
+the sha256 of the bridge's own code-defined request contract (for Home
+Assistant, the service/data allowlist) -- so widening that contract without
+bumping the manifest's pin and version in the same reviewed commit disables
+the tool, exactly like a drifted MCP schema.
 """
 
 import hashlib
@@ -86,6 +94,11 @@ class ToolPolicy:
     renderer: Callable[[dict], list] | None = None
     records_work_log: bool = True
     gate_name: str = ""
+    # Writes of native bridges only: `(workspace, arguments) -> rows`, a
+    # request-time read of the target appended to the decision dialog (D8:
+    # a Home Assistant entity's HA-supplied name and current state). Raises
+    # `tools.registry.ToolValidationError` to refuse the request.
+    request_rows: Callable[[Any, dict], list] | None = None
 
 
 @dataclass(frozen=True)
