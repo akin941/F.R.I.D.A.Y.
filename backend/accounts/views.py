@@ -313,6 +313,9 @@ class MeView(APIView):
                 "user": UserSerializer(request.user).data,
                 "workspaces": WorkspaceSummarySerializer(workspaces, many=True).data,
                 "security_notices": _security_notices(request.user),
+                # ADR-009: a delete's confirmation dialog states how long the
+                # row stays restorable in the trash before the retention purge.
+                "trash_retention_days": settings.TRASH_RETENTION_DAYS,
             }
         )
 
