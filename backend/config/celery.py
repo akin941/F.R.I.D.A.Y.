@@ -59,6 +59,16 @@ _BEAT_SCHEDULE = {
         "task": "harness.tasks.recover_stale_harness_reviews",
         "schedule": 60.0,
     },
+    # Connectors (Phase 5 branch 4, brief D3/D6): lost-dispatch / lost-worker
+    # recovery for gated writes (never a re-send), and the 15-minute pin beat.
+    "connector-write-recovery-scan": {
+        "task": "connectors.tasks.recover_stale_connector_writes",
+        "schedule": 60.0,
+    },
+    "connector-pin-check": {
+        "task": "connectors.tasks.check_connector_pins",
+        "schedule": 15 * 60.0,
+    },
     "jwt-flush-expired-tokens": {
         "task": "accounts.tasks.flush_expired_tokens",
         "schedule": 24 * 60 * 60.0,

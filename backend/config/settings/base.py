@@ -455,6 +455,24 @@ OBSIDIAN_VAULT_PATH = env("OBSIDIAN_VAULT_PATH", default="")
 # timing.
 APPROVAL_REQUEST_TTL_HOURS = env.int("APPROVAL_REQUEST_TTL_HOURS", default=24)
 
+# --- Connectors (Phase 5 branch 4, ADR-010, brief D1-D6) ---
+
+# Manifests are code (`connectors/manifests/`); these are only the runtime
+# bounds. Server URLs and credentials are never settings: each manifest names
+# its own env vars (URL on the Jarvis side, credential in the sidecar only).
+# A read runs in the chat request thread, bounded by this timeout (D4).
+CONNECTOR_READ_TIMEOUT_SECONDS = env.int("CONNECTOR_READ_TIMEOUT_SECONDS", default=10)
+# What survives of a read (text + structuredContent), in characters -- the
+# harness transcript cap. Anything longer is truncated and flagged (D4).
+CONNECTOR_RESULT_MAX_CHARS = env.int("CONNECTOR_RESULT_MAX_CHARS", default=8000)
+# A gated write's single send (D6), and the pin/health check before it.
+CONNECTOR_WRITE_TIMEOUT_SECONDS = env.int("CONNECTOR_WRITE_TIMEOUT_SECONDS", default=30)
+CONNECTOR_HEALTH_TIMEOUT_SECONDS = env.int("CONNECTOR_HEALTH_TIMEOUT_SECONDS", default=10)
+# A write's claim lease: longer than the send timeout plus the pin check, so
+# a live worker never loses its lease mid-call. A lease that expires anyway
+# means the worker was lost -> `unknown_outcome`, never a re-send (D6).
+CONNECTOR_WRITE_LEASE_SECONDS = env.int("CONNECTOR_WRITE_LEASE_SECONDS", default=120)
+
 # --- Agent runtime (MVP 7) ---
 
 # Plan step-count bound (brief §1, user-mandated brake #1): a planner call
