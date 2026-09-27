@@ -35,7 +35,8 @@ governed by code, not by configuration:
 
 1. **Three artifacts, one reviewed commit.** A connector exists only as
    `backend/connectors/manifests/<name>.py` (a `ConnectorManifest`, listed in
-   `BUILTIN`), its governance twin `docs/mcp/<name>.md` (from
+   `BUILTIN`), its governance twin `docs/mcp/<name>.md` (underscores may be
+   spelled as hyphens, e.g. `home-assistant.md`; from
    `docs/mcp/_template.md`) and a `` `<name>` connector `` row in
    `docs/mcp/allowlist.md`. `connectors/tests/test_manifests.py` fails if any
    of them is missing. Widening a connector -- a new tool, channel, scope or
@@ -99,7 +100,17 @@ Every terminal write also leaves a Jarvis-authored `work_log` memory
 connector, operation, closed error code and exception class -- never
 exception text, arguments, results, URLs with credentials or tokens.
 Credentials are env-only: MCP credentials live only in the sidecar; a native
-bridge reads its own from the environment at call time. A test
+bridge reads its own from the environment at call time (Home Assistant:
+`HA_BASE_URL`/`HA_TOKEN`, `connectors/tests/test_home_assistant.py::
+test_the_token_is_nowhere_but_the_authorization_header`).
+
+Native bridges (`kind: native`, `connectors/bridges/<name>.py`, routed by
+`connectors/transport.py`) serve the same `list_tools`/`call_tool` contract
+as the MCP client, so gate, pins, audit and at-most-once execution are the
+framework's. With no remote `inputSchema`, a native tool's pin is the sha256
+of the bridge's own code-defined request contract (for Home Assistant the
+service/data allowlist): widening it without updating the manifest's pin and
+version disables the tool on the next pin check. A test
 (`connectors/tests/test_chat_reads.py::test_no_credential_value_anywhere`)
 asserts a credential value appears in no DB row, audit row or log line.
 

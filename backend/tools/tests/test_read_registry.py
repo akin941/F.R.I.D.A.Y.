@@ -49,7 +49,13 @@ def _read(name="stub_read", data_class=DATA_CLASS_FIRM, channels=None, bound=(FI
 
 
 @pytest.fixture
-def registered():
+def registered(monkeypatch):
+    """Registers into an empty read registry: the committed manifests' own
+    reads (e.g. `ha_states`) query real bindings and are not what these
+    unit tests (with stand-in workspaces) are about."""
+    from tools import registry
+
+    monkeypatch.setattr(registry, "_READ_REGISTRY", {})
     names = []
 
     def register(spec):
