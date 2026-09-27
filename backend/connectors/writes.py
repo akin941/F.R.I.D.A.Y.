@@ -41,7 +41,7 @@ from django.utils import timezone
 
 from audit.models import AuditLog
 from audit.services import record_audit
-from connectors import mcp_client
+from connectors import bridges, mcp_client
 from connectors.manifest import ScopeError, get_manifest
 from connectors.models import ConnectorBinding, ConnectorWriteExecution
 from connectors.reads import arguments_sha256, canonical_json, compose_result_text, json_safe
@@ -306,7 +306,7 @@ def execute_claimed_write(execution_id, claim_token):
             )
             return
     try:
-        result = mcp_client.call_tool(
+        result = bridges.call_tool(
             manifest,
             server_tool=payload["server_tool"],
             arguments=payload["arguments"],
@@ -323,6 +323,9 @@ def execute_claimed_write(execution_id, claim_token):
             "timeout": ErrorType.TIMEOUT,
             "transport_error": ErrorType.TRANSPORT_ERROR,
             "protocol_error": ErrorType.PROTOCOL_ERROR,
+            # Native bridges (D9): the grant changed since the request.
+            "scope_mismatch": ErrorType.CONNECTOR_CHANGED,
+            "reconnect_required": ErrorType.NOT_CONFIGURED,
         }.get(exc.code, ErrorType.UNKNOWN)
         _finalize_fenced(
             execution_id,

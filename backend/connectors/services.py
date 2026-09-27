@@ -27,8 +27,8 @@ from django.utils import timezone
 
 from audit.models import AuditLog
 from audit.services import record_audit
-from connectors import mcp_client
-from connectors.manifest import KIND_MCP, get_manifest, list_manifests
+from connectors import bridges, mcp_client
+from connectors.manifest import KIND_MCP, KIND_NATIVE, get_manifest, list_manifests
 from connectors.models import ConnectorBinding
 from core.channels import CHANNEL_WEB
 from workspaces.models import WorkspaceMember
@@ -206,9 +206,17 @@ def check_binding_pins(binding_id):
     if binding is None or not binding.enabled:
         return None
     manifest = get_manifest(binding.connector)
-    if manifest is None or manifest.blocked or manifest.kind != KIND_MCP:
+    if manifest is None or manifest.blocked:
         return binding
     now = timezone.now().isoformat()
+    if manifest.kind == KIND_NATIVE:
+        bridge = bridges.get_bridge(manifest)
+        if bridge is None:
+            return binding
+        health = bridge.check_health(manifest, timeout=settings.CONNECTOR_HEALTH_TIMEOUT_SECONDS)
+        return record_native_health(binding, manifest, health, checked_at=now)
+    if manifest.kind != KIND_MCP:
+        return binding
     try:
         listing = mcp_client.list_tools(manifest, timeout=settings.CONNECTOR_HEALTH_TIMEOUT_SECONDS)
     except mcp_client.ConnectorError as exc:
@@ -275,4 +283,81 @@ def record_listing(binding, manifest, listing, *, checked_at=None, only_tool=Non
                         "manifest_version": manifest.version,
                     },
                 )
+    return locked
+
+
+# Native bridges (brief D8/D9): no server schema to pin -- the bridge's own
+# health check decides each tool's availability (e.g. Google's granted OAuth
+# scopes). These statuses are NOT sticky: they follow the credential, so a
+# re-consent that grants `gmail.send` makes `mail_send` available at the
+# next check without a manifest change.
+TOOL_SCOPE_MISSING = "scope_missing"
+TOOL_SCOPE_EXTRA = "scope_extra"
+TOOL_RECONNECT_REQUIRED = "reconnect_required"
+# A health error after which nothing stays callable (the credential itself
+# is gone); any other error (timeout, transport) keeps the last statuses.
+_CREDENTIAL_ERRORS = {TOOL_RECONNECT_REQUIRED, "not_configured"}
+
+
+def record_native_health(binding, manifest, health, *, checked_at=None):
+    """Store a native bridge's health report on the binding; audit every
+    tool that newly lost availability to a scope wider than the manifest
+    allows (`connector.scope_mismatch`) and a newly rejected credential
+    (`connector.reconnect_required`). Never records a credential."""
+    with transaction.atomic():
+        locked = ConnectorBinding.objects.select_for_update().get(pk=binding.pk)
+        last = dict(locked.last_health or {})
+        same_version = last.get("manifest_version") == manifest.version
+        previous = dict(last.get("tools", {})) if same_version else {}
+        if health.error in _CREDENTIAL_ERRORS:
+            tools = {policy.name: health.error for policy in manifest.tools}
+        elif health.error:
+            tools = {
+                policy.name: previous.get(policy.name, TOOL_UNCHECKED) for policy in manifest.tools
+            }
+        else:
+            tools = {
+                policy.name: health.tools.get(policy.name, TOOL_SCOPE_MISSING)
+                for policy in manifest.tools
+            }
+        locked.last_health = {
+            "manifest_version": manifest.version,
+            "checked_at": checked_at or timezone.now().isoformat(),
+            "error": health.error,
+            "server_name": health.server_name,
+            "server_version": health.server_version,
+            "protocol_version": "",
+            "details": dict(health.details),
+            "tools": tools,
+        }
+        locked.save(update_fields=["last_health", "updated_at"])
+        newly_extra = sorted(
+            name
+            for name, status in tools.items()
+            if status == TOOL_SCOPE_EXTRA and previous.get(name) != TOOL_SCOPE_EXTRA
+        )
+        if newly_extra:
+            logger.warning("connector %s disabled: grant wider than the manifest", manifest.name)
+            record_audit(
+                action="connector.scope_mismatch",
+                actor=None,
+                actor_type=AuditLog.ActorType.SYSTEM,
+                workspace=locked.workspace,
+                resource=locked,
+                metadata={
+                    "connector": manifest.name,
+                    "tools": newly_extra,
+                    "extra_scopes": list(health.details.get("extra_scopes", [])),
+                    "manifest_version": manifest.version,
+                },
+            )
+        if health.error in _CREDENTIAL_ERRORS and last.get("error") != health.error:
+            record_audit(
+                action="connector.reconnect_required",
+                actor=None,
+                actor_type=AuditLog.ActorType.SYSTEM,
+                workspace=locked.workspace,
+                resource=locked,
+                metadata={"connector": manifest.name, "error": health.error},
+            )
     return locked
