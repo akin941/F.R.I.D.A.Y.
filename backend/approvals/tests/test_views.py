@@ -246,13 +246,17 @@ class TestPermissionMatrix:
         assert response.status_code == expected
 
 
-class TestRequesterDeciderSeparation:
-    def test_requester_cannot_approve_own_request_via_http(self, workspace, owner):
+class TestOwnerDecision:
+    def test_owner_approves_own_request_via_http(self, workspace, owner):
+        # ADR-008 decision 3: the explicit, separate, audited decision over
+        # the high-trust web channel IS the gate -- there is no second
+        # human in a single-owner system.
         request = make_request(workspace, requested_by=owner)
         response = client_for(owner).post(
             f"/api/v1/approvals/requests/{request.id}/approve", format="json"
         )
-        assert response.status_code == 403
+        assert response.status_code == 200
+        assert response.json()["status"] == "approved"
 
     def test_different_admin_can_approve_via_http(self, workspace, owner, second_admin):
         request = make_request(workspace, requested_by=owner)

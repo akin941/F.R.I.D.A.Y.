@@ -8,6 +8,8 @@ from ai_core.adapters.fake import (
     FAKE_AGENT_SKILL_MATCH_MATCHED_RESPONSE,
     FAKE_AGENT_SKILL_MATCH_RESPONSE,
     FAKE_EMBEDDING_DIMENSION,
+    FAKE_HARNESS_BRIEFING_RESPONSE,
+    FAKE_HARNESS_REVIEW_RESPONSE,
     FAKE_MEMORY_EXTRACTION_RESPONSE,
     FAKE_RESPONSE,
     FAKE_ROUTER_INTENT_RESPONSE,
@@ -16,6 +18,7 @@ from ai_core.adapters.fake import (
     FAKE_ROUTER_TASK_DRAFT_INTENT_RESPONSE,
     FAKE_ROUTER_TOOL_REQUEST_INTENT_RESPONSE,
     FAKE_TASK_DRAFT_RESPONSE,
+    FAKE_TRANSCRIPT,
     FakeAdapter,
     embed_text,
 )
@@ -262,6 +265,28 @@ class TestPurposeAwareFixtures:
         )
         assert result.text == FAKE_AGENT_SKILL_MATCH_RESPONSE
 
+    def test_harness_briefing_purpose_returns_briefing_fixture(self):
+        result = make_adapter().complete(
+            [{"role": "user", "content": "<repo_transcript>...</repo_transcript>"}],
+            {},
+            purpose="harness.briefing",
+        )
+        assert result.text == FAKE_HARNESS_BRIEFING_RESPONSE
+
+    def test_harness_review_purpose_returns_review_fixture(self):
+        """Codex code-review P2, branch 3 round 12: without a purpose-
+        aware fixture for `harness.review`, AI_FAKE_PROVIDER=true routed
+        every review through the generic non-JSON FAKE_RESPONSE, which
+        `_parse_review_response` can't parse -- every otherwise-
+        successful review failed closed as `review_unavailable` in that
+        (dev/example-default) mode."""
+        result = make_adapter().complete(
+            [{"role": "user", "content": "<repo_transcript>...</repo_transcript>"}],
+            {},
+            purpose="harness.review",
+        )
+        assert result.text == FAKE_HARNESS_REVIEW_RESPONSE
+
     def test_real_adapters_accept_purpose_kwarg_without_using_it(self):
         """The purpose kwarg is an ai_core-internal API addition for every
         adapter, not a fake-only parameter — real adapters must accept it
@@ -276,3 +301,35 @@ class TestPurposeAwareFixtures:
             stream_params = inspect.signature(adapter_cls.stream).parameters
             assert "purpose" in complete_params
             assert "purpose" in stream_params
+
+
+class TestFakeAudioAdapters:
+    def test_transcribe_returns_fixed_transcript_and_duration(self):
+        adapter = FakeAdapter(provider=None)
+        result = adapter.transcribe(b"any-bytes", content_type="audio/wav", purpose="voice.stt")
+        assert result.text == FAKE_TRANSCRIPT
+        assert result.audio_seconds > 0
+        assert result.input_tokens == 0  # audio in, not text
+        assert result.output_tokens > 0  # transcript estimate
+
+    def test_synthesize_returns_bytes_and_content_type(self):
+        adapter = FakeAdapter(provider=None)
+        result = adapter.synthesize("Merhaba", purpose="voice.tts")
+        assert isinstance(result.audio, bytes) and result.audio
+        assert result.content_type == "audio/wav"
+        assert result.audio_seconds > 0
+        assert result.input_tokens > 0  # source-text estimate
+        assert result.output_tokens == 0  # audio out, not text
+
+    def test_real_adapters_accept_audio_kwargs_without_supporting_them(self):
+        """Every adapter inherits BaseAdapter's transcribe/synthesize, which
+        raise `not_supported` — the base contract exists so the gateway can
+        call them uniformly; real STT/TTS wiring is MVP 12 §2-§3."""
+        from ai_core.adapters.base import AdapterError
+        from ai_core.adapters.openai_compat import OpenAICompatibleAdapter
+
+        adapter = OpenAICompatibleAdapter(provider=None)
+        with pytest.raises(AdapterError):
+            adapter.transcribe(b"x", purpose="voice.stt")
+        with pytest.raises(AdapterError):
+            adapter.synthesize("x", purpose="voice.tts")

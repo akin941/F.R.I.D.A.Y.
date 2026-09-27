@@ -12,11 +12,13 @@ from assistant.services import (
     build_gateway_stream,
     classify_intent,
     create_conversation,
+    mark_conversation_private,
     sse_event,
     stream_assistant_reply,
 )
 from assistant.task_draft import TaskDraftParseError
 from audit.models import AuditLog
+from core.channels import CHANNEL_WEB
 from core.context import get_request_id, request_id_var
 from workspaces.models import Workspace
 
@@ -109,7 +111,7 @@ def test_create_conversation_creates_audit_row(alice, workspace):
     assert entry.workspace == workspace
     assert entry.resource_type == "assistant.conversation"
     assert entry.resource_id == str(conversation.id)
-    assert entry.metadata == {}
+    assert entry.metadata == {"private": False}
 
 
 def test_create_conversation_is_atomic_with_its_audit_row(alice, workspace, monkeypatch):
@@ -390,8 +392,8 @@ def test_inner_gateway_generator_is_closed_on_disconnect(conversation):
 def test_no_provider_normalized_into_sse_error_without_second_usage_row(
     conversation, alice, system_prompt
 ):
-    gateway_stream, usage_holder, _, _ = build_gateway_stream(
-        conversation, actor=alice, content="hi"
+    gateway_stream, usage_holder, _, _, _ = build_gateway_stream(
+        conversation, actor=alice, content="hi", channel=CHANNEL_WEB
     )
     events = list(
         stream_assistant_reply(
@@ -399,12 +401,12 @@ def test_no_provider_normalized_into_sse_error_without_second_usage_row(
         )
     )
     assert [_decode(e) for e in events] == [{"type": "error", "error_type": "no_provider"}]
-    # Two rows total (no double-write for the chat call itself): one from
-    # build_context's knowledge-retrieval embed() call (also no_provider,
-    # since no embedding provider exists here either), one from this
-    # complete() call.
+    # Three rows total (no double-write for the chat call itself): one from
+    # build_context's memory-retrieval embed() call and one from its
+    # knowledge-retrieval embed() call (both no_provider, since no embedding
+    # provider exists here either), one from this complete() call.
     assert ModelUsage.objects.filter(purpose="chat").count() == 1
-    assert ModelUsage.objects.count() == 2
+    assert ModelUsage.objects.count() == 3
     message = Message.objects.get(role=Message.Role.ASSISTANT)
     assert message.status == Message.Status.FAILED
 
@@ -412,8 +414,8 @@ def test_no_provider_normalized_into_sse_error_without_second_usage_row(
 def test_full_fake_gateway_integration_creates_one_usage_linked(
     conversation, alice, system_prompt, fake_provider
 ):
-    gateway_stream, usage_holder, _, _ = build_gateway_stream(
-        conversation, actor=alice, content="Merhaba"
+    gateway_stream, usage_holder, _, _, _ = build_gateway_stream(
+        conversation, actor=alice, content="Merhaba", channel=CHANNEL_WEB
     )
     events = list(
         stream_assistant_reply(
@@ -421,8 +423,8 @@ def test_full_fake_gateway_integration_creates_one_usage_linked(
         )
     )
     assert _decode(events[-1])["type"] == "done"
-    # fake_provider is chat-only; the knowledge-retrieval embed() call still
-    # writes its own (no_provider) ModelUsage row, so two rows exist total.
+    # fake_provider is chat-only; the memory- and knowledge-retrieval
+    # embed() calls still each write their own (no_provider) ModelUsage row.
     assert ModelUsage.objects.filter(purpose="chat").count() == 1
     message = Message.objects.get(role=Message.Role.ASSISTANT)
     assert message.status == Message.Status.COMPLETE
@@ -436,8 +438,8 @@ def test_gateway_call_keeps_the_version_resolved_at_context_build_time(
     build_context resolved, not re-query `active_version` — otherwise a
     repoint between the two calls would desync the recorded prompt lineage
     from the prompt content actually sent."""
-    gateway_stream, usage_holder, _, _ = build_gateway_stream(
-        conversation, actor=alice, content="hi"
+    gateway_stream, usage_holder, _, _, _ = build_gateway_stream(
+        conversation, actor=alice, content="hi", channel=CHANNEL_WEB
     )
     new_version = PromptVersion.objects.create(
         template=system_prompt.template, version=2, content="A different prompt."
@@ -493,8 +495,8 @@ def test_memory_ids_persist_on_no_provider_failure(conversation, alice, system_p
         content="Drinks coffee black.",
         fingerprint=compute_fingerprint("Drinks coffee black."),
     )
-    gateway_stream, usage_holder, memory_ids, _ = build_gateway_stream(
-        conversation, actor=alice, content="hi"
+    gateway_stream, usage_holder, memory_ids, _, _ = build_gateway_stream(
+        conversation, actor=alice, content="hi", channel=CHANNEL_WEB
     )
     events = list(
         stream_assistant_reply(
@@ -556,8 +558,8 @@ def test_chunks_used_defaults_to_empty_list(conversation):
 
 
 def test_chunk_ids_persist_on_no_provider_failure(conversation, alice, system_prompt):
-    gateway_stream, usage_holder, _, chunk_ids = build_gateway_stream(
-        conversation, actor=alice, content="hi"
+    gateway_stream, usage_holder, _, chunk_ids, _ = build_gateway_stream(
+        conversation, actor=alice, content="hi", channel=CHANNEL_WEB
     )
     events = list(
         stream_assistant_reply(
@@ -579,7 +581,7 @@ def test_chunk_ids_persist_with_real_chunk_on_chat_no_provider_failure(
 ):
     """Sibling of test_memory_ids_persist_on_no_provider_failure (fourth
     independent-review pass, branch 4): proves a real, non-empty chunk_ids
-    computed by build_context() for THIS call survives an unrelated
+    computed by build_context(, channel=CHANNEL_WEB) for THIS call survives an unrelated
     chat-gateway failure — not just the trivially-empty case above, where no
     embedding provider exists at all. Only an EMBEDDING-capability provider
     is created here (no CHAT one), so the knowledge-retrieval step succeeds
@@ -611,8 +613,8 @@ def test_chunk_ids_persist_with_real_chunk_on_chat_no_provider_failure(
         embedding=embed_text("hi there"),
         embedding_provider=embedding_provider,
     )
-    gateway_stream, usage_holder, _, chunk_ids = build_gateway_stream(
-        conversation, actor=alice, content="hi"
+    gateway_stream, usage_holder, _, chunk_ids, _ = build_gateway_stream(
+        conversation, actor=alice, content="hi", channel=CHANNEL_WEB
     )
     assert chunk_ids == [str(chunk.id)]  # sanity: build_context really found it
 
@@ -687,8 +689,8 @@ def test_failed_reply_does_not_create_an_extraction_job(conversation):
 
 
 def test_no_provider_failure_does_not_create_an_extraction_job(conversation, alice, system_prompt):
-    gateway_stream, usage_holder, memory_ids, _ = build_gateway_stream(
-        conversation, actor=alice, content="hi"
+    gateway_stream, usage_holder, memory_ids, _, _ = build_gateway_stream(
+        conversation, actor=alice, content="hi", channel=CHANNEL_WEB
     )
     list(
         stream_assistant_reply(
@@ -715,6 +717,53 @@ def test_two_complete_replies_allocate_adjacent_non_overlapping_jobs(conversatio
     assert jobs[1].after_message_id == jobs[0].through_message_id
     conversation.refresh_from_db()
     assert conversation.last_extracted_message_id == jobs[1].through_message_id
+
+
+def test_private_conversation_creates_no_extraction_job(conversation, alice):
+    """Enforcement point (a) of the private-flag gate (Phase 1
+    p1-work-log) — allocation-time, the common case."""
+    mark_conversation_private(conversation=conversation, actor=alice)
+    list(stream_assistant_reply(conversation, _two_chunks(), {}, request_id="req-1"))
+    message = Message.objects.get(role=Message.Role.ASSISTANT)
+    assert message.status == Message.Status.COMPLETE
+    assert not MemoryExtractionJob.objects.filter(conversation=conversation).exists()
+
+
+# --- mark_conversation_private: the one-way private flag (Phase 1 p1-work-log) ---
+
+
+class TestMarkConversationPrivate:
+    def test_sets_private_and_audits(self, conversation, alice):
+        updated = mark_conversation_private(conversation=conversation, actor=alice)
+        assert updated.private is True
+        entry = AuditLog.objects.get(action="assistant.conversation.marked_private")
+        assert entry.actor == alice
+        assert entry.resource_id == str(conversation.id)
+
+    def test_idempotent_repeat_is_a_noop_without_a_second_audit_row(self, conversation, alice):
+        mark_conversation_private(conversation=conversation, actor=alice)
+        before = AuditLog.objects.filter(action="assistant.conversation.marked_private").count()
+        mark_conversation_private(conversation=conversation, actor=alice)
+        after = AuditLog.objects.filter(action="assistant.conversation.marked_private").count()
+        assert after == before == 1
+
+    def test_cascades_to_already_extracted_memories(self, conversation, alice):
+        from memory.models import Memory, compute_fingerprint
+
+        content = "Prefers dark mode."
+        pending = Memory.objects.create(
+            workspace=conversation.workspace,
+            memory_type=Memory.Type.PREFERENCE,
+            status=Memory.Status.PENDING_APPROVAL,
+            source=Memory.Source.AI_SUGGESTED,
+            title="Dark mode",
+            content=content,
+            fingerprint=compute_fingerprint(content),
+            source_conversation=conversation,
+        )
+        mark_conversation_private(conversation=conversation, actor=alice)
+        pending.refresh_from_db()
+        assert pending.status == Memory.Status.REJECTED
 
 
 # --- classify_intent: router classification (MVP 6 §1) ---

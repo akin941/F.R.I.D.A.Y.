@@ -25,8 +25,9 @@ class SkillsConfig(AppConfig):
         without this check, that skill breaks silently and only surfaces
         when an agent actually tries to run it, buried inside a running
         agent's step instead of at deploy time. Fail loud at startup
-        instead, mirroring ApprovalsConfig.ready()'s DEV_ALLOW_SELF_APPROVAL
-        fail-fast convention (approvals/apps.py).
+        instead -- the same fail-fast-at-boot convention ApprovalsConfig.
+        ready() established with its (since-removed, ADR-008) DEV_ALLOW_
+        SELF_APPROVAL guard.
 
         ORDERING CONSTRAINT: this only sees every registered tool if
         ToolsConfig.ready() has already run (Django calls ready() in

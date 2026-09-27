@@ -1,6 +1,12 @@
 from django.contrib import admin
 
-from ai_core.models import ModelProvider, ModelUsage, PromptTemplate, PromptVersion
+from ai_core.models import ModelProvider, ModelTier, ModelUsage, PromptTemplate, PromptVersion
+
+
+@admin.register(ModelTier)
+class ModelTierAdmin(admin.ModelAdmin):
+    list_display = ["tier", "provider"]
+    list_filter = ["tier"]
 
 
 @admin.register(ModelProvider)

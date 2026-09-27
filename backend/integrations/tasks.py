@@ -200,8 +200,14 @@ def _handle_relay(chat_id, text):
     classification = classify_intent(
         conversation, actor=linked.user, content=text, client_local_date=None
     )
-    gateway_stream, usage_holder, memory_ids, chunk_ids = build_gateway_stream(
-        conversation, actor=linked.user, content=text, intent=classification["intent"]
+    gateway_stream, usage_holder, memory_ids, chunk_ids, _overlay_source_workspaces = (
+        build_gateway_stream(
+            conversation,
+            actor=linked.user,
+            content=text,
+            channel=Message.Channel.TELEGRAM,
+            intent=classification["intent"],
+        )
     )
     Message.objects.create(
         workspace=conversation.workspace,

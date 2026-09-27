@@ -23,12 +23,18 @@ function parseFrame(frame: string): ChatStreamEvent | { type: "protocol_error" }
         const chunksUsed = Array.isArray(payload.chunks_used)
           ? payload.chunks_used.filter((id: unknown): id is string => typeof id === "string")
           : [];
+        const overlaySourceWorkspaces =
+          payload.overlay_source_workspaces !== null &&
+          typeof payload.overlay_source_workspaces === "object"
+            ? payload.overlay_source_workspaces
+            : {};
         return {
           type: "done",
           message_id: payload.message_id,
           usage: payload.usage,
           memories_used: memoriesUsed,
           chunks_used: chunksUsed,
+          overlay_source_workspaces: overlaySourceWorkspaces,
         };
       }
       if (payload.type === "error" && typeof payload.error_type === "string") {

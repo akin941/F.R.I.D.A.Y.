@@ -14,8 +14,10 @@ from approvals.services import (
     approve_request,
     create_request,
     reject_request,
+    revoke_request,
 )
 from audit.models import AuditLog
+from core.channels import CHANNEL_WEB
 from workspaces.models import Workspace, WorkspaceMember
 
 pytestmark = pytest.mark.django_db
@@ -75,11 +77,21 @@ class TestCreate:
         # whatever concrete tools tools/ actually registers, e.g. the real
         # vault_export tool, tested in tools/tests/test_export.py).
         with pytest.raises(InvalidTransition):
-            create_request(workspace=workspace, actor=owner, tool_name="anything")
+            create_request(
+                workspace=workspace,
+                actor=owner,
+                tool_name="anything",
+                origin=ApprovalRequest.Origin.HUMAN,
+            )
 
     def test_known_gated_tool_creates_a_pending_request(self, workspace, owner, monkeypatch):
         monkeypatch.setattr("approvals.services._resolve_tool", lambda name: _GATED_TOOL)
-        request = create_request(workspace=workspace, actor=owner, tool_name="some_gated_tool")
+        request = create_request(
+            workspace=workspace,
+            actor=owner,
+            tool_name="some_gated_tool",
+            origin=ApprovalRequest.Origin.HUMAN,
+        )
         assert request.status == ApprovalRequest.Status.PENDING
         assert request.requested_by == owner
         assert "approval.requested" in audit_actions()
@@ -87,11 +99,21 @@ class TestCreate:
     def test_viewer_cannot_create(self, workspace, viewer, monkeypatch):
         monkeypatch.setattr("approvals.services._resolve_tool", lambda name: _GATED_TOOL)
         with pytest.raises(ApprovalPermissionDenied):
-            create_request(workspace=workspace, actor=viewer, tool_name="some_gated_tool")
+            create_request(
+                workspace=workspace,
+                actor=viewer,
+                tool_name="some_gated_tool",
+                origin=ApprovalRequest.Origin.HUMAN,
+            )
 
     def test_member_can_create(self, workspace, member, monkeypatch):
         monkeypatch.setattr("approvals.services._resolve_tool", lambda name: _GATED_TOOL)
-        request = create_request(workspace=workspace, actor=member, tool_name="some_gated_tool")
+        request = create_request(
+            workspace=workspace,
+            actor=member,
+            tool_name="some_gated_tool",
+            origin=ApprovalRequest.Origin.HUMAN,
+        )
         assert request.requested_by == member
 
     def test_non_gated_tool_is_rejected(self, workspace, owner, monkeypatch):
@@ -99,13 +121,54 @@ class TestCreate:
             "approvals.services._resolve_tool", lambda name: SimpleNamespace(gated=False)
         )
         with pytest.raises(InvalidTransition):
-            create_request(workspace=workspace, actor=owner, tool_name="not_gated")
+            create_request(
+                workspace=workspace,
+                actor=owner,
+                tool_name="not_gated",
+                origin=ApprovalRequest.Origin.HUMAN,
+            )
+
+    def test_origin_human_is_persisted_and_audited(self, workspace, owner, monkeypatch):
+        monkeypatch.setattr(
+            "approvals.services._resolve_tool", lambda name: SimpleNamespace(gated=True)
+        )
+        request = create_request(
+            workspace=workspace,
+            actor=owner,
+            tool_name="some_gated_tool",
+            origin=ApprovalRequest.Origin.HUMAN,
+        )
+        assert request.origin == ApprovalRequest.Origin.HUMAN
+        entry = AuditLog.objects.filter(action="approval.requested").latest("created_at")
+        assert entry.metadata["origin"] == "human"
+
+    def test_origin_agent_is_persisted(self, workspace, owner, monkeypatch):
+        monkeypatch.setattr(
+            "approvals.services._resolve_tool", lambda name: SimpleNamespace(gated=True)
+        )
+        request = create_request(
+            workspace=workspace,
+            actor=owner,
+            tool_name="some_gated_tool",
+            origin=ApprovalRequest.Origin.AGENT,
+        )
+        assert request.origin == ApprovalRequest.Origin.AGENT
+
+    def test_origin_is_required_not_defaulted(self, workspace, owner, monkeypatch):
+        # Codex phase-0 code-review P2 (mirrors the decision services'
+        # required channel): a machine caller that forgets to state its
+        # origin must fail loudly, never be silently stamped human.
+        monkeypatch.setattr(
+            "approvals.services._resolve_tool", lambda name: SimpleNamespace(gated=True)
+        )
+        with pytest.raises(TypeError):
+            create_request(workspace=workspace, actor=owner, tool_name="some_gated_tool")
 
 
 class TestDecisions:
     def test_second_admin_approves(self, workspace, owner, second_admin):
         request = make_request(workspace, requested_by=owner)
-        decided = approve_request(approval_request=request, actor=second_admin)
+        decided = approve_request(approval_request=request, actor=second_admin, channel=CHANNEL_WEB)
         assert decided.status == ApprovalRequest.Status.APPROVED
         assert decided.decided_by == second_admin
         assert decided.decided_at is not None
@@ -113,59 +176,80 @@ class TestDecisions:
 
     def test_second_admin_rejects(self, workspace, owner, second_admin):
         request = make_request(workspace, requested_by=owner)
-        decided = reject_request(approval_request=request, actor=second_admin)
+        decided = reject_request(approval_request=request, actor=second_admin, channel=CHANNEL_WEB)
         assert decided.status == ApprovalRequest.Status.REJECTED
         assert "approval.rejected" in audit_actions()
 
-    def test_requester_cannot_approve_own_request(self, workspace, owner):
+    def test_owner_approves_their_own_request(self, workspace, owner):
+        # ADR-008 decision 3: the gate is an explicit, separate, audited
+        # owner decision -- not a two-human rule. The single owner may
+        # decide requests they produced.
         request = make_request(workspace, requested_by=owner)
-        with pytest.raises(ApprovalPermissionDenied):
-            approve_request(approval_request=request, actor=owner)
-
-    def test_requester_cannot_reject_own_request(self, workspace, owner):
-        request = make_request(workspace, requested_by=owner)
-        with pytest.raises(ApprovalPermissionDenied):
-            reject_request(approval_request=request, actor=owner)
-
-    def test_dev_allow_self_approval_flag_relaxes_the_check(self, workspace, owner, settings):
-        settings.DEV_ALLOW_SELF_APPROVAL = True
-        request = make_request(workspace, requested_by=owner)
-        decided = approve_request(approval_request=request, actor=owner)
+        decided = approve_request(approval_request=request, actor=owner, channel=CHANNEL_WEB)
         assert decided.status == ApprovalRequest.Status.APPROVED
+        assert decided.decided_by == owner
+        assert "approval.approved" in audit_actions()
+
+    def test_owner_rejects_their_own_request(self, workspace, owner):
+        request = make_request(workspace, requested_by=owner)
+        decided = reject_request(approval_request=request, actor=owner, channel=CHANNEL_WEB)
+        assert decided.status == ApprovalRequest.Status.REJECTED
+
+    def test_owner_decides_an_agent_origin_request(self, workspace, owner):
+        # The production defect ADR-008/phase 0 fixes: agent-created
+        # requests carry requested_by=owner and must be decidable by the
+        # owner (there is no second human in a single-owner system).
+        request = make_request(workspace, requested_by=owner, origin=ApprovalRequest.Origin.AGENT)
+        decided = approve_request(approval_request=request, actor=owner, channel=CHANNEL_WEB)
+        assert decided.status == ApprovalRequest.Status.APPROVED
+
+    def test_channel_is_required_not_defaulted(self, workspace, owner, second_admin):
+        # Codex phase-0 plan-review P1: a CHANNEL_WEB default would let a
+        # future internal caller decide "as web" by accident. The service
+        # must refuse any call without an explicit decision context.
+        request = make_request(workspace, requested_by=owner)
+        with pytest.raises(TypeError):
+            approve_request(approval_request=request, actor=second_admin)
+        with pytest.raises(TypeError):
+            reject_request(approval_request=request, actor=second_admin)
 
     def test_second_decide_on_approved_request_is_400(self, workspace, owner, second_admin):
         request = approve_request(
-            approval_request=make_request(workspace, requested_by=owner), actor=second_admin
+            approval_request=make_request(workspace, requested_by=owner),
+            actor=second_admin,
+            channel=CHANNEL_WEB,
         )
         with pytest.raises(InvalidTransition):
-            reject_request(approval_request=request, actor=second_admin)
+            reject_request(approval_request=request, actor=second_admin, channel=CHANNEL_WEB)
 
     def test_second_decide_on_rejected_request_is_400(self, workspace, owner, second_admin):
         request = reject_request(
-            approval_request=make_request(workspace, requested_by=owner), actor=second_admin
+            approval_request=make_request(workspace, requested_by=owner),
+            actor=second_admin,
+            channel=CHANNEL_WEB,
         )
         with pytest.raises(InvalidTransition):
-            approve_request(approval_request=request, actor=second_admin)
+            approve_request(approval_request=request, actor=second_admin, channel=CHANNEL_WEB)
 
 
 class TestRolePolicy:
     def test_member_cannot_decide(self, workspace, owner, member):
         request = make_request(workspace, requested_by=owner)
         with pytest.raises(ApprovalPermissionDenied):
-            approve_request(approval_request=request, actor=member)
+            approve_request(approval_request=request, actor=member, channel=CHANNEL_WEB)
         with pytest.raises(ApprovalPermissionDenied):
-            reject_request(approval_request=request, actor=member)
+            reject_request(approval_request=request, actor=member, channel=CHANNEL_WEB)
 
     def test_viewer_cannot_decide(self, workspace, owner, viewer):
         request = make_request(workspace, requested_by=owner)
         with pytest.raises(ApprovalPermissionDenied):
-            approve_request(approval_request=request, actor=viewer)
+            approve_request(approval_request=request, actor=viewer, channel=CHANNEL_WEB)
 
     def test_audit_metadata_never_contains_payload(self, workspace, owner, second_admin):
         request = make_request(
             workspace, requested_by=owner, payload={"secret_detail": "classified"}
         )
-        approve_request(approval_request=request, actor=second_admin)
+        approve_request(approval_request=request, actor=second_admin, channel=CHANNEL_WEB)
         for entry in AuditLog.objects.all():
             blob = str(entry.metadata).lower()
             assert "classified" not in blob
@@ -183,15 +267,82 @@ class TestExpiry:
         )
         request.refresh_from_db()
         with pytest.raises(InvalidTransition):
-            approve_request(approval_request=request, actor=second_admin)
+            approve_request(approval_request=request, actor=second_admin, channel=CHANNEL_WEB)
         request.refresh_from_db()
         assert request.status == ApprovalRequest.Status.EXPIRED
         assert "approval.expired" in audit_actions()
 
     def test_fresh_pending_request_is_not_expired(self, workspace, owner, second_admin):
         request = make_request(workspace, requested_by=owner)
-        decided = approve_request(approval_request=request, actor=second_admin)
+        decided = approve_request(approval_request=request, actor=second_admin, channel=CHANNEL_WEB)
         assert decided.status == ApprovalRequest.Status.APPROVED
+
+
+class TestRevoke:
+    """Phase 3 branch 4: withdraws a still-pending request because the
+    underlying job/action it gates no longer needs a decision (e.g. a
+    harness implementation job cancelled while its Gate A/B request was
+    still pending)."""
+
+    def test_revokes_a_pending_request(self, workspace, owner, second_admin):
+        request = make_request(workspace, requested_by=owner)
+        revoke_request(approval_request=request, actor=second_admin)
+        request.refresh_from_db()
+        assert request.status == ApprovalRequest.Status.EXPIRED
+        assert "approval.revoked" in audit_actions()
+        entry = AuditLog.objects.get(action="approval.revoked")
+        assert entry.actor_id == second_admin.id
+        assert entry.actor_type == AuditLog.ActorType.HUMAN
+
+    def test_revoking_with_no_actor_is_audited_as_system(self, workspace, owner):
+        """Codex code-review P2, branch 4 round 6: a caller with no real
+        human decision-maker behind the revoke (e.g. the harness
+        worktree-retention sweep, a passive system timeout) must not be
+        forced to attribute the action to a human -- mirrors
+        `record_expired`'s identical SYSTEM-attribution convention for
+        the TTL sweep."""
+        request = make_request(workspace, requested_by=owner)
+        revoke_request(approval_request=request)
+        request.refresh_from_db()
+        assert request.status == ApprovalRequest.Status.EXPIRED
+        entry = AuditLog.objects.get(action="approval.revoked")
+        assert entry.actor_id is None
+        assert entry.actor_type == AuditLog.ActorType.SYSTEM
+
+    def test_revoking_an_already_decided_request_is_a_safe_no_op(
+        self, workspace, owner, second_admin
+    ):
+        request = make_request(workspace, requested_by=owner)
+        approve_request(approval_request=request, actor=second_admin, channel=CHANNEL_WEB)
+        request.refresh_from_db()
+        revoke_request(approval_request=request, actor=second_admin)
+        request.refresh_from_db()
+        assert request.status == ApprovalRequest.Status.APPROVED
+        assert "approval.revoked" not in audit_actions()
+
+    def test_revoking_an_already_expired_request_is_a_safe_no_op(
+        self, workspace, owner, second_admin
+    ):
+        request = make_request(workspace, requested_by=owner)
+        ApprovalRequest.objects.filter(pk=request.pk).update(status=ApprovalRequest.Status.EXPIRED)
+        request.refresh_from_db()
+        revoke_request(approval_request=request, actor=second_admin)
+        assert "approval.revoked" not in audit_actions()
+
+    def test_revoked_status_is_indistinguishable_from_ttl_expiry(
+        self, workspace, owner, second_admin
+    ):
+        """Deliberately reuses the existing `expired` terminal state
+        rather than inventing a new one -- `harness.signals`'s own
+        `post_save` receiver already reacts to `expired` regardless of
+        which path produced it, so a revoked request must fail a linked
+        job closed the identical way a TTL-expired one already does."""
+        request = make_request(workspace, requested_by=owner)
+        revoke_request(approval_request=request, actor=second_admin)
+        request.refresh_from_db()
+        assert request.status == ApprovalRequest.Status.EXPIRED
+        with pytest.raises(InvalidTransition):
+            approve_request(approval_request=request, actor=second_admin, channel=CHANNEL_WEB)
 
 
 class TestLockedScoping:
@@ -202,7 +353,7 @@ class TestLockedScoping:
         forged = ApprovalRequest.objects.get(pk=foreign.pk)
         forged.workspace = workspace
         with pytest.raises(InvalidTransition):
-            approve_request(approval_request=forged, actor=second_admin)
+            approve_request(approval_request=forged, actor=second_admin, channel=CHANNEL_WEB)
         foreign.refresh_from_db()
         assert foreign.status == ApprovalRequest.Status.PENDING
 
@@ -236,7 +387,7 @@ def test_concurrent_approve_and_reject_serialize():
             barrier.wait(timeout=5)
             row = ApprovalRequest.objects.get(pk=request.pk)
             try:
-                action(approval_request=row, actor=actor)
+                action(approval_request=row, actor=actor, channel=CHANNEL_WEB)
                 results[key] = "succeeded"
             except InvalidTransition:
                 results[key] = "invalid_transition"
@@ -285,7 +436,7 @@ def test_concurrent_approve_and_sweep_expiry_serialize():
             barrier.wait(timeout=5)
             row = ApprovalRequest.objects.get(pk=request.pk)
             try:
-                approve_request(approval_request=row, actor=admin)
+                approve_request(approval_request=row, actor=admin, channel=CHANNEL_WEB)
                 results["approve"] = "succeeded"
             except InvalidTransition:
                 results["approve"] = "invalid_transition"

@@ -14,9 +14,13 @@ app.autodiscover_tasks()
 # container (the current and foreseeable dev/CI topology): embedded beat
 # would double-schedule if more than one worker process ran `-B`. Scaling to
 # multiple workers requires splitting beat into its own service first.
-app.conf.beat_schedule = {
+_BEAT_SCHEDULE = {
     "memory-extraction-recovery-scan": {
         "task": "memory.tasks.recover_stale_extraction_jobs",
+        "schedule": 60.0,
+    },
+    "memory-embedding-recovery-scan": {
+        "task": "memory.tasks.recover_stale_memory_embeddings",
         "schedule": 60.0,
     },
     "knowledge-ingestion-recovery-scan": {
@@ -39,4 +43,39 @@ app.conf.beat_schedule = {
         "task": "integrations.tasks.sweep_expired_link_codes",
         "schedule": 60.0,
     },
+    "harness-job-recovery-scan": {
+        "task": "harness.tasks.recover_stale_harness_jobs",
+        "schedule": 60.0,
+    },
+    "harness-implementation-job-recovery-scan": {
+        "task": "harness.tasks.recover_stale_harness_implementation_jobs",
+        "schedule": 60.0,
+    },
+    "harness-review-recovery-scan": {
+        "task": "harness.tasks.recover_stale_harness_reviews",
+        "schedule": 60.0,
+    },
 }
+
+# Harness recovery scans (Phase 3 branch 8, review P1): the scans tear down
+# containers and clean up worktrees that exist only on the runner host, so
+# they run on the runner's own embedded beat (`make harness-runner` sets
+# HARNESS_RUNNER_BEAT=true), never on the compose worker's beat. With no
+# runner up, nothing is published -- no scan messages pile up in Redis for a
+# queue nobody consumes -- and nothing needs recovering, because no harness
+# job can make progress without a runner anyway; the scans resume when the
+# runner starts.
+_HARNESS_SCAN_PREFIX = "harness.tasks."
+
+
+def build_beat_schedule(*, runner_mode):
+    return {
+        name: entry
+        for name, entry in _BEAT_SCHEDULE.items()
+        if entry["task"].startswith(_HARNESS_SCAN_PREFIX) == runner_mode
+    }
+
+
+app.conf.beat_schedule = build_beat_schedule(
+    runner_mode=os.environ.get("HARNESS_RUNNER_BEAT", "").lower() == "true"
+)

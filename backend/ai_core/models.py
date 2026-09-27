@@ -19,6 +19,8 @@ class ModelProvider(TimestampedModel):
     class Capability(models.TextChoices):
         CHAT = "chat"
         EMBEDDING = "embedding"
+        STT = "stt"  # speech-to-text (MVP 12)
+        TTS = "tts"  # text-to-speech (MVP 12)
 
     name = models.CharField(max_length=100, unique=True)
     provider_type = models.CharField(max_length=30, choices=ProviderType.choices)
@@ -42,6 +44,35 @@ class ModelProvider(TimestampedModel):
 
     def __str__(self):
         return f"{self.name} ({self.model_id})"
+
+
+class ModelTier(TimestampedModel):
+    """Model-tier routing skeleton (phase 0, MASTER_PLAN §J).
+
+    Maps a provider into a named cost/capability tier (cheap/mid/strong).
+    Which purpose uses which tier lives in `settings.AI_PURPOSE_TIERS`
+    (purpose -> tier name) — deliberately a settings dict, not a table,
+    until it needs runtime editing (phase-0 brief §4). With no tier rows
+    and an empty map, the gateway behaves exactly as before: priority
+    order, `routing_reason` recorded as priority/fallback/only_provider.
+    """
+
+    class Tier(models.TextChoices):
+        CHEAP = "cheap"
+        MID = "mid"
+        STRONG = "strong"
+
+    tier = models.CharField(max_length=10, choices=Tier.choices)
+    provider = models.ForeignKey(ModelProvider, on_delete=models.CASCADE, related_name="tiers")
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["tier", "provider"], name="unique_tier_provider")
+        ]
+        ordering = ["tier", "provider__priority", "provider__name"]
+
+    def __str__(self):
+        return f"{self.tier}: {self.provider.name}"
 
 
 class PromptTemplate(TimestampedModel):
@@ -108,6 +139,10 @@ class ModelUsage(TimestampedModel):
     latency_ms = models.PositiveIntegerField(default=0)
     success = models.BooleanField(default=False)
     error_type = models.CharField(max_length=50, blank=True, default="")
+    # Why THIS provider served the call (phase 0, §J/§L auditability):
+    # "tier:<name>" | "priority" | "fallback:<n>" | "only_provider".
+    # Empty for rows predating the field and for no-provider failures.
+    routing_reason = models.CharField(max_length=50, blank=True, default="")
     estimated_cost = models.DecimalField(max_digits=12, decimal_places=6, default=0)
     context_report = models.JSONField(default=dict, blank=True)
 

@@ -1,5 +1,9 @@
 # Jarvis OS — Mimari Durum Raporu (AI Agent Katmanı Fizibilitesi İçin)
 
+> Note (2026-09-27): historical snapshot from the MVP 3 era (2026-07-07),
+> kept for reference only. The current architecture and roadmap are in
+> `docs/VISION_JARVIS_2.md` §2 and `docs/MASTER_PLAN.md` §AA (ADR-008).
+
 > Not (2026-07-07): Bu rapor tarihli bir durum tespitidir; son bölümdeki
 > "domain-uzmanı agent'lar external modül paketine girer" varsayımı ADR-006 ile
 > geçersizleşmiştir.

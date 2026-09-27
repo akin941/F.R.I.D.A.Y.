@@ -24,6 +24,7 @@ from agents.services import create_plan
 from ai_core.models import ModelProvider, PromptTemplate, PromptVersion
 from approvals.models import ApprovalRequest
 from approvals.services import approve_request, reject_request
+from core.channels import CHANNEL_WEB
 from tasks.models import Task
 from workspaces.models import Workspace, WorkspaceMember
 
@@ -384,7 +385,9 @@ class TestToolRequestStep:
         step = agent.steps.get()
 
         with mock.patch("tools.tasks.run_vault_export.delay"):
-            approve_request(approval_request=step.approval_request, actor=second_admin)
+            approve_request(
+                approval_request=step.approval_request, actor=second_admin, channel=CHANNEL_WEB
+            )
         # `agents/signals.py`'s own receiver defers the actual resume via
         # `transaction.on_commit`, which never fires under this test's
         # non-durable transaction -- call it directly, standing in for what
@@ -405,7 +408,9 @@ class TestToolRequestStep:
         advance_step(str(agent.id))
         step = agent.steps.get()
 
-        reject_request(approval_request=step.approval_request, actor=second_admin)
+        reject_request(
+            approval_request=step.approval_request, actor=second_admin, channel=CHANNEL_WEB
+        )
         # Same on_commit-deferred signal issue as the approve path above.
         resume_after_approval_decision(agent_step_id=step.id, approved=False)
         _run_to_completion(str(agent.id))
@@ -447,23 +452,26 @@ class TestToolRequestStep:
         assert step.status == AgentStep.Status.BLOCKED_ON_APPROVAL  # rolled back together
         assert agent.status == Agent.Status.BLOCKED_ON_APPROVAL
 
-    def test_requester_cannot_approve_their_own_agents_request(
-        self, workspace, owner, tmp_path, settings
-    ):
-        """`requested_by=Agent.created_by` (round-1 provenance fix) means
-        the goal-submitter is blocked from deciding their own agent's
-        request exactly as a human-typed request already blocks them."""
+    def test_owner_approves_their_own_agents_request(self, workspace, owner, tmp_path, settings):
+        """ADR-008 decision 3 (phase 0): `requested_by=Agent.created_by`
+        plus `origin=agent` -- and the owner CAN decide it. This is the
+        production defect the phase-0 brief names: under the old two-human
+        rule an agent's gated step was undecidable in a single-owner
+        deployment. The gate is now the owner's explicit, separate,
+        audited decision over the web channel."""
         settings.OBSIDIAN_VAULT_PATH = str(tmp_path)
         agent = _tool_request_step(workspace, owner)
         advance_step(str(agent.id))
         step = agent.steps.get()
 
-        from approvals.services import ApprovalPermissionDenied
+        assert step.approval_request.origin == ApprovalRequest.Origin.AGENT
+        decided = approve_request(
+            approval_request=step.approval_request, actor=owner, channel=CHANNEL_WEB
+        )
+        assert decided.status == ApprovalRequest.Status.APPROVED
+        assert decided.decided_by == owner
 
-        with pytest.raises(ApprovalPermissionDenied):
-            approve_request(approval_request=step.approval_request, actor=owner)
-
-    def test_requester_cannot_approve_their_own_skill_originated_agents_request(
+    def test_owner_approves_their_own_skill_originated_agents_request(
         self, workspace, owner, tmp_path, settings
     ):
         """MVP 8 §4: the exact same invariant re-proven against a
@@ -473,7 +481,8 @@ class TestToolRequestStep:
         skill's step template can propose a `tool_request` step, but it
         goes through the identical `_dispatch_tool_request_step` ->
         `approvals.services.create_request` path as any other, with no new
-        mechanism and no bypass of the requester != decider check."""
+        mechanism: same `origin=agent` provenance, same explicit-owner-
+        decision gate (ADR-008), no bypass."""
         settings.OBSIDIAN_VAULT_PATH = str(tmp_path)
         agent = _tool_request_step(
             workspace,
@@ -486,10 +495,11 @@ class TestToolRequestStep:
         step = agent.steps.get()
         assert step.status == AgentStep.Status.BLOCKED_ON_APPROVAL
 
-        from approvals.services import ApprovalPermissionDenied
-
-        with pytest.raises(ApprovalPermissionDenied):
-            approve_request(approval_request=step.approval_request, actor=owner)
+        assert step.approval_request.origin == ApprovalRequest.Origin.AGENT
+        decided = approve_request(
+            approval_request=step.approval_request, actor=owner, channel=CHANNEL_WEB
+        )
+        assert decided.status == ApprovalRequest.Status.APPROVED
 
     def test_unregistered_tool_name_fails_the_step_not_the_whole_task(
         self, workspace, owner, monkeypatch
@@ -646,7 +656,9 @@ class TestCancelAgent:
 
         cancel_agent(agent=agent, actor=owner)
         with mock.patch("tools.tasks.run_vault_export.delay"):
-            approve_request(approval_request=step.approval_request, actor=second_admin)
+            approve_request(
+                approval_request=step.approval_request, actor=second_admin, channel=CHANNEL_WEB
+            )
 
         agent.refresh_from_db()
         step.refresh_from_db()
@@ -859,7 +871,9 @@ class TestRecoveryScan:
         step = agent.steps.get()
 
         with mock.patch("tools.tasks.run_vault_export.delay"):
-            approve_request(approval_request=step.approval_request, actor=second_admin)
+            approve_request(
+                approval_request=step.approval_request, actor=second_admin, channel=CHANNEL_WEB
+            )
         step.approval_request.refresh_from_db()
         assert step.approval_request.status == ApprovalRequest.Status.APPROVED
         ApprovalRequest.objects.filter(pk=step.approval_request_id).update(
@@ -892,7 +906,9 @@ class TestRecoveryScan:
         step = agent.steps.get()
 
         with mock.patch("tools.tasks.run_vault_export.delay"):
-            approve_request(approval_request=step.approval_request, actor=second_admin)
+            approve_request(
+                approval_request=step.approval_request, actor=second_admin, channel=CHANNEL_WEB
+            )
 
         result = execution.recover_stale_agent_execution()
 

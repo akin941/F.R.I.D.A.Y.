@@ -93,7 +93,9 @@ class ApprovalRequestListCreateView(APIView):
         # relation name until a second describe_execution-backed tool
         # actually needs a generic batch-prefetch hook.
         requests = requests.select_related("vault_export_run").order_by("-created_at", "-id")
-        return Response(ApprovalRequestSerializer(requests, many=True).data)
+        return Response(
+            ApprovalRequestSerializer(requests, many=True, context={"request": request}).data
+        )
 
     def post(self, request):
         data = request.data
@@ -119,11 +121,16 @@ class ApprovalRequestListCreateView(APIView):
                 actor=request.user,
                 tool_name=serializer.validated_data["tool_name"],
                 payload=serializer.validated_data["payload"],
+                # Explicit, never defaulted (ADR-008/phase-0 P2): this HTTP
+                # endpoint is the human path; the serializer accepts no
+                # `origin` from the body, so it cannot be spoofed here.
+                origin=ApprovalRequest.Origin.HUMAN,
             )
         except (ApprovalPermissionDenied, InvalidTransition) as exc:
             return _service_error_response(exc)
         return Response(
-            ApprovalRequestSerializer(approval_request).data, status=status.HTTP_201_CREATED
+            ApprovalRequestSerializer(approval_request, context={"request": request}).data,
+            status=status.HTTP_201_CREATED,
         )
 
 
@@ -150,4 +157,6 @@ class ApprovalRequestTransitionView(APIView):
             )
         except (ApprovalPermissionDenied, InvalidTransition) as exc:
             return _service_error_response(exc)
-        return Response(ApprovalRequestSerializer(approval_request).data)
+        return Response(
+            ApprovalRequestSerializer(approval_request, context={"request": request}).data
+        )

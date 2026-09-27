@@ -20,20 +20,18 @@ export interface ToolRequestDraft {
  * the manual "Export to Obsidian vault" button already calls -- never a
  * bypass of the approval gate. Discard is a pure client-side no-op; nothing
  * was created yet (classification alone never auto-requests). Once created,
- * this renders the same `ApprovalCard` the `/approvals` page uses for
- * run-status, since the requester (this user) can never decide their own
- * request anyway -- `ApprovalCard`'s own `isOwnRequest` gating already
- * hides Approve/Reject regardless of `canDecide`.
+ * this renders the same `ApprovalCard` the `/approvals` page uses, with
+ * `canDecide=false` on purpose: the decision itself (ADR-008 -- the owner's
+ * explicit, separate decision) belongs on the approvals page, not inline in
+ * the chat turn that produced the request.
  */
 export function ToolRequestCard({
   draft,
   workspaceId,
-  currentUserId,
   onDiscard,
 }: {
   draft: ToolRequestDraft;
   workspaceId: string;
-  currentUserId: string | null;
   onDiscard: () => void;
 }) {
   const [busy, setBusy] = useState(false);
@@ -73,12 +71,7 @@ export function ToolRequestCard({
   if (created) {
     return (
       <div className="m-4">
-        <ApprovalCard
-          request={created}
-          currentUserId={currentUserId}
-          canDecide={false}
-          onChanged={setCreated}
-        />
+        <ApprovalCard request={created} canDecide={false} onChanged={setCreated} />
       </div>
     );
   }
@@ -96,7 +89,7 @@ export function ToolRequestCard({
         ) : null}
         <p className="text-sm font-medium">{draft.toolName}</p>
         <p className="text-sm text-muted-foreground">
-          Çalışmadan önce başka bir çalışma alanı yöneticisinin onayı gerekiyor.
+          Çalışmadan önce Onaylar sayfasından vereceğin açık onay gerekiyor.
         </p>
       </CardContent>
       <CardFooter className="flex justify-end gap-2">

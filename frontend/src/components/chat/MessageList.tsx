@@ -16,7 +16,7 @@ export function MessageList({ messages }: { messages: ChatMessageView[] }) {
   }, [messages]);
 
   return (
-    <ScrollArea className="flex-1 p-4">
+    <ScrollArea className="min-h-0 flex-1 p-4">
       <div className="mx-auto flex max-w-2xl flex-col gap-4">
         {messages.map((message) => (
           <div

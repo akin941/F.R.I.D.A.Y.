@@ -30,6 +30,12 @@ class Workspace(TimestampedModel):
     enabled_modules = models.JSONField(default=list, blank=True)
     model_policy = models.JSONField(default=dict, blank=True)
     settings = models.JSONField(default=dict, blank=True)
+    # Firm dossier (Phase 0 §2): repos/services/deploy_targets/notes.
+    # Schema-validated at the serializer level (workspaces.serializers).
+    # `deploy_targets` is metadata only (name/host/notes) -- deploy
+    # credentials/secrets must NEVER be stored here; secrets stay in env
+    # per CLAUDE.md ("Secrets only via env").
+    profile = models.JSONField(default=dict, blank=True)
 
     objects = WorkspaceQuerySet.as_manager()
 

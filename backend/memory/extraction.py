@@ -26,7 +26,13 @@ MAX_CANDIDATES_PER_JOB = 10
 MAX_TITLE_CHARS = 255  # matches Memory.title's max_length
 MAX_CONTENT_CHARS = 4000
 
-_ALLOWED_TYPES = frozenset(Memory.Type.values)
+# WORK_LOG excluded (Codex round-6 P2 on feat/p1-work-log): it is reserved
+# for `record_work_log()`'s `system_generated` pairing (ADR-008 k.4) —
+# conversation extraction must never let the model tag a candidate as
+# work_log, or finalize_extraction_success() would create an ai_suggested
+# work-log row, bypassing the single-choke-point guarantee the moment a
+# curator approves it without touching memory_type.
+_ALLOWED_TYPES = frozenset(Memory.Type.values) - {Memory.Type.WORK_LOG}
 _TOP_LEVEL_KEYS = {"version", "candidates"}
 _CANDIDATE_KEYS = {"type", "title", "content"}
 

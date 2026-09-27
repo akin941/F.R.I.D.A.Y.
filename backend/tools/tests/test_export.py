@@ -10,6 +10,7 @@ from accounts.services import register_user
 from approvals.models import ApprovalRequest
 from approvals.services import InvalidTransition, approve_request, create_request
 from audit.models import AuditLog
+from core.channels import CHANNEL_WEB
 from memory.models import Memory
 from tools import export
 from tools.models import VaultExportRun
@@ -401,13 +402,23 @@ class TestValidateRequestWiring:
     def test_create_request_400s_on_an_unsafe_vault_root(self, workspace, owner, settings):
         settings.OBSIDIAN_VAULT_PATH = "relative/not/absolute"
         with pytest.raises(InvalidTransition):
-            create_request(workspace=workspace, actor=owner, tool_name="vault_export")
+            create_request(
+                workspace=workspace,
+                actor=owner,
+                tool_name="vault_export",
+                origin=ApprovalRequest.Origin.HUMAN,
+            )
 
     def test_create_request_succeeds_when_vault_root_is_safe(
         self, workspace, owner, settings, tmp_path
     ):
         settings.OBSIDIAN_VAULT_PATH = str(tmp_path)
-        request = create_request(workspace=workspace, actor=owner, tool_name="vault_export")
+        request = create_request(
+            workspace=workspace,
+            actor=owner,
+            tool_name="vault_export",
+            origin=ApprovalRequest.Origin.HUMAN,
+        )
         assert request.status == ApprovalRequest.Status.PENDING
 
 
@@ -426,13 +437,18 @@ def test_durable_before_dispatch_survives_a_broker_publish_failure(settings, tmp
 
     WorkspaceMember.objects.create(workspace=workspace, user=admin, role=WorkspaceMember.Role.ADMIN)
 
-    request = create_request(workspace=workspace, actor=owner, tool_name="vault_export")
+    request = create_request(
+        workspace=workspace,
+        actor=owner,
+        tool_name="vault_export",
+        origin=ApprovalRequest.Origin.HUMAN,
+    )
 
     with mock.patch(
         "tools.tasks.run_vault_export.delay",
         side_effect=ConnectionRefusedError("no redis"),
     ):
-        approve_request(approval_request=request, actor=admin)
+        approve_request(approval_request=request, actor=admin, channel=CHANNEL_WEB)
 
     run = VaultExportRun.objects.get(approval_request=request)
     assert run.status == VaultExportRun.Status.PENDING

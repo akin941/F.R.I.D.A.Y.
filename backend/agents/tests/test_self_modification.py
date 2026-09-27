@@ -28,6 +28,7 @@ from agents.services import create_plan
 from ai_core.models import ModelProvider, PromptTemplate, PromptVersion
 from approvals.models import ApprovalRequest
 from approvals.services import approve_request
+from core.channels import CHANNEL_WEB
 from workspaces.models import Workspace, WorkspaceMember
 
 pytestmark = pytest.mark.django_db
@@ -133,7 +134,9 @@ class TestAgentStepImmutability:
         advance_step(str(agent.id))  # tool_request claimed -> blocked_on_approval
         tool_step = agent.steps.get(order=1)
         with mock.patch("tools.tasks.run_vault_export.delay"):
-            approve_request(approval_request=tool_step.approval_request, actor=second_admin)
+            approve_request(
+                approval_request=tool_step.approval_request, actor=second_admin, channel=CHANNEL_WEB
+            )
         resume_after_approval_decision(agent_step_id=tool_step.id, approved=True)
         advance_step(str(agent.id))  # task_draft claimed -> blocked_on_confirmation
         draft_step = agent.steps.get(order=2)
@@ -187,7 +190,9 @@ class TestNoSelfSpawning:
         advance_step(str(agent.id))
         tool_step = agent.steps.get(order=1)
         with mock.patch("tools.tasks.run_vault_export.delay"):
-            approve_request(approval_request=tool_step.approval_request, actor=second_admin)
+            approve_request(
+                approval_request=tool_step.approval_request, actor=second_admin, channel=CHANNEL_WEB
+            )
         resume_after_approval_decision(agent_step_id=tool_step.id, approved=True)
         advance_step(str(agent.id))
         draft_step = agent.steps.get(order=2)
@@ -239,7 +244,9 @@ class TestNoRegistryOrPermissionBypass:
         advance_step(str(agent.id))  # must not raise
         tool_step = agent.steps.get(order=1)
         with mock.patch("tools.tasks.run_vault_export.delay"):
-            approve_request(approval_request=tool_step.approval_request, actor=second_admin)
+            approve_request(
+                approval_request=tool_step.approval_request, actor=second_admin, channel=CHANNEL_WEB
+            )
         resume_after_approval_decision(agent_step_id=tool_step.id, approved=True)  # must not raise
 
     def test_planner_service_never_calls_skills_registry_mutation_functions(

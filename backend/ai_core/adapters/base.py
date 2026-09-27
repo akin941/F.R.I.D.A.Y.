@@ -31,6 +31,46 @@ class EmbedAdapterResult:
     usage_estimated: bool = False
 
 
+@dataclass
+class TranscribeAdapterResult:
+    """Speech-to-text result (MVP 12). `text` is the transcript.
+
+    STT is priced by audio duration, not tokens, so `audio_seconds` is the
+    real cost signal — the gateway records it in `context_report`. The
+    token fields exist only so the gateway's shared `_record()` accounting
+    reads uniformly across every result type; for STT `input_tokens` stays 0
+    (audio in, not text) and `output_tokens` is a best-effort estimate of
+    the transcript, never a billed quantity.
+    """
+
+    text: str
+    audio_seconds: float = 0.0
+    input_tokens: int = 0
+    output_tokens: int = 0
+    raw_usage: dict = field(default_factory=dict)
+    usage_estimated: bool = False
+
+
+@dataclass
+class SynthesizeAdapterResult:
+    """Text-to-speech result (MVP 12). `audio` is the synthesized bytes and
+    `content_type` its MIME type (e.g. "audio/wav").
+
+    TTS is priced by input characters/duration, not output tokens. As with
+    STT, the token fields are only for `_record()` uniformity: `input_tokens`
+    is a best-effort estimate of the source text, `output_tokens` stays 0
+    (audio out, not text).
+    """
+
+    audio: bytes
+    content_type: str = "audio/wav"
+    audio_seconds: float = 0.0
+    input_tokens: int = 0
+    output_tokens: int = 0
+    raw_usage: dict = field(default_factory=dict)
+    usage_estimated: bool = False
+
+
 class AdapterError(Exception):
     """Provider failure with a secret-safe classification.
 
@@ -79,6 +119,20 @@ class BaseAdapter:
         endpoint (e.g. Anthropic) inherit this default."""
         raise AdapterError(
             "not_supported", retryable=False, safe_message="provider does not support embeddings"
+        )
+
+    def transcribe(self, audio, *, content_type="", purpose=""):
+        """Return a TranscribeAdapterResult (speech-to-text). `audio` is raw
+        bytes. Providers with no STT endpoint inherit this default (MVP 12)."""
+        raise AdapterError(
+            "not_supported", retryable=False, safe_message="provider does not support transcription"
+        )
+
+    def synthesize(self, text, *, params=None, purpose=""):
+        """Return a SynthesizeAdapterResult (text-to-speech). Providers with
+        no TTS endpoint inherit this default (MVP 12)."""
+        raise AdapterError(
+            "not_supported", retryable=False, safe_message="provider does not support synthesis"
         )
 
     @staticmethod

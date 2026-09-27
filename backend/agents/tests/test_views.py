@@ -154,9 +154,7 @@ class TestAgentDetailView:
         body = response.json()
         assert [step["description"] for step in body["steps"]] == ["First", "Second"]
 
-    def test_detail_surfaces_skill_name_when_the_plan_was_skill_originated(
-        self, workspace, owner
-    ):
+    def test_detail_surfaces_skill_name_when_the_plan_was_skill_originated(self, workspace, owner):
         """MVP 8 §7 (branch 3): the audit field is exposed to the frontend
         so `AgentDetail` can show which skill (if any) produced this plan."""
         agent = create_plan(

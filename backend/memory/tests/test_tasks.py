@@ -118,6 +118,29 @@ class TestRunExtractionJobHappyPath:
         assert job.error_type == "unexpected"
 
 
+class TestPrivateConversationGate:
+    """Enforcement point (b) of the private-flag gate (Phase 1 p1-work-log)
+    — the worker-time fast path in memory.tasks._process_claimed_job.
+    Point (c), the finalization-time race-closing guard, is covered
+    directly against finalize_extraction_success in
+    memory/tests/test_jobs.py (it needs the flag to flip AFTER the gateway
+    call, which a single synchronous run_extraction_job() call can't
+    naturally interleave)."""
+
+    def test_private_conversation_finalizes_with_zero_candidates_no_gateway_call(
+        self, conversation, fake_provider, extraction_prompt
+    ):
+        from assistant.services import mark_conversation_private
+
+        job = make_job(conversation)
+        mark_conversation_private(conversation=conversation, actor=conversation.created_by)
+        run_extraction_job(job.id)
+        job.refresh_from_db()
+        assert job.status == MemoryExtractionJob.Status.SUCCEEDED
+        assert not Memory.objects.filter(workspace=conversation.workspace).exists()
+        assert not ModelUsage.objects.filter(purpose="memory.extraction").exists()
+
+
 class TestRunExtractionJobGatewayFailures:
     def test_retryable_gateway_error_returns_job_to_pending(
         self, conversation, fake_provider, extraction_prompt

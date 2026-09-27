@@ -52,7 +52,14 @@ describe("SSEStreamParser", () => {
     );
     expect(events).toEqual([
       { type: "chunk", text: "hi" },
-      { type: "done", message_id: "m1", usage: { tokens: 3 }, memories_used: [], chunks_used: [] },
+      {
+        type: "done",
+        message_id: "m1",
+        usage: { tokens: 3 },
+        memories_used: [],
+        chunks_used: [],
+        overlay_source_workspaces: {},
+      },
     ]);
   });
 
@@ -68,6 +75,7 @@ describe("SSEStreamParser", () => {
         usage: undefined,
         memories_used: ["mem-1", "mem-2"],
         chunks_used: [],
+        overlay_source_workspaces: {},
       },
     ]);
   });
@@ -76,7 +84,14 @@ describe("SSEStreamParser", () => {
     const parser = new SSEStreamParser();
     const events = parser.push(frame({ type: "done", message_id: "m1", memories_used: "not-an-array" }));
     expect(events).toEqual([
-      { type: "done", message_id: "m1", usage: undefined, memories_used: [], chunks_used: [] },
+      {
+        type: "done",
+        message_id: "m1",
+        usage: undefined,
+        memories_used: [],
+        chunks_used: [],
+        overlay_source_workspaces: {},
+      },
     ]);
   });
 
@@ -92,6 +107,7 @@ describe("SSEStreamParser", () => {
         usage: undefined,
         memories_used: [],
         chunks_used: ["chunk-1", "chunk-2"],
+        overlay_source_workspaces: {},
       },
     ]);
   });
@@ -100,7 +116,53 @@ describe("SSEStreamParser", () => {
     const parser = new SSEStreamParser();
     const events = parser.push(frame({ type: "done", message_id: "m1", chunks_used: "not-an-array" }));
     expect(events).toEqual([
-      { type: "done", message_id: "m1", usage: undefined, memories_used: [], chunks_used: [] },
+      {
+        type: "done",
+        message_id: "m1",
+        usage: undefined,
+        memories_used: [],
+        chunks_used: [],
+        overlay_source_workspaces: {},
+      },
+    ]);
+  });
+
+  it("parses overlay_source_workspaces on a done event", () => {
+    const parser = new SSEStreamParser();
+    const events = parser.push(
+      frame({
+        type: "done",
+        message_id: "m1",
+        memories_used: ["mem-1"],
+        overlay_source_workspaces: { "mem-1": "ws-1" },
+      }),
+    );
+    expect(events).toEqual([
+      {
+        type: "done",
+        message_id: "m1",
+        usage: undefined,
+        memories_used: ["mem-1"],
+        chunks_used: [],
+        overlay_source_workspaces: { "mem-1": "ws-1" },
+      },
+    ]);
+  });
+
+  it("defaults overlay_source_workspaces to an empty object when the field is missing or malformed", () => {
+    const parser = new SSEStreamParser();
+    const events = parser.push(
+      frame({ type: "done", message_id: "m1", overlay_source_workspaces: "not-an-object" }),
+    );
+    expect(events).toEqual([
+      {
+        type: "done",
+        message_id: "m1",
+        usage: undefined,
+        memories_used: [],
+        chunks_used: [],
+        overlay_source_workspaces: {},
+      },
     ]);
   });
 
@@ -156,7 +218,14 @@ describe("SSEStreamParser", () => {
         title: "Call mom",
         due_date: "2026-07-15",
       },
-      { type: "done", message_id: "m1", usage: undefined, memories_used: [], chunks_used: [] },
+      {
+        type: "done",
+        message_id: "m1",
+        usage: undefined,
+        memories_used: [],
+        chunks_used: [],
+        overlay_source_workspaces: {},
+      },
     ]);
   });
 

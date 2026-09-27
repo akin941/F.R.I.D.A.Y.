@@ -4,11 +4,16 @@ from unittest import mock
 import pytest
 
 from accounts.services import register_user
-from ai_core.adapters.base import AdapterError, AdapterResult, EmbedAdapterResult
+from ai_core.adapters.base import (
+    AdapterError,
+    AdapterResult,
+    EmbedAdapterResult,
+    TranscribeAdapterResult,
+)
 from ai_core.adapters.fake import FAKE_RESPONSE
 from ai_core.exceptions import GatewayError, NoProviderAvailable
 from ai_core.gateway import InferenceGateway
-from ai_core.models import ModelProvider, ModelUsage
+from ai_core.models import ModelProvider, ModelTier, ModelUsage
 
 pytestmark = pytest.mark.django_db
 
@@ -599,3 +604,333 @@ def test_legacy_provider_defaults_to_chat_capability_and_is_still_selected(user,
     assert result.text == FAKE_RESPONSE
     usage = ModelUsage.objects.get()
     assert usage.provider == provider
+
+
+# --- transcribe()/synthesize() (MVP 12: STT/TTS are gateway calls too) ---
+
+
+@pytest.fixture
+def fake_stt_provider():
+    return ModelProvider.objects.create(
+        name="fake-stt-local",
+        provider_type=ModelProvider.ProviderType.FAKE,
+        capability=ModelProvider.Capability.STT,
+        model_id="fake-stt-1",
+        priority=0,
+    )
+
+
+@pytest.fixture
+def fake_tts_provider():
+    return ModelProvider.objects.create(
+        name="fake-tts-local",
+        provider_type=ModelProvider.ProviderType.FAKE,
+        capability=ModelProvider.Capability.TTS,
+        model_id="fake-tts-1",
+        priority=0,
+    )
+
+
+def test_fake_transcribe_records_usage(user, workspace, fake_stt_provider):
+    result = InferenceGateway().transcribe(
+        purpose="voice.stt",
+        audio=b"raw-audio-bytes",
+        content_type="audio/wav",
+        actor=user,
+        workspace=workspace,
+    )
+    assert result.text
+    assert result.audio_seconds > 0
+    usage = ModelUsage.objects.get()
+    assert usage.success is True
+    assert usage.provider == fake_stt_provider
+    assert usage.purpose == "voice.stt"
+    assert usage.context_report["audio_seconds"] == result.audio_seconds
+
+
+def test_fake_synthesize_records_usage(user, workspace, fake_tts_provider):
+    result = InferenceGateway().synthesize(
+        purpose="voice.tts",
+        text="Merhaba dünya",
+        actor=user,
+        workspace=workspace,
+    )
+    assert isinstance(result.audio, bytes) and result.audio
+    assert result.content_type == "audio/wav"
+    usage = ModelUsage.objects.get()
+    assert usage.success is True
+    assert usage.provider == fake_tts_provider
+    assert usage.purpose == "voice.tts"
+    assert usage.input_tokens > 0  # source text estimate
+    assert usage.context_report["audio_seconds"] == result.audio_seconds
+
+
+def test_transcribe_capability_filtering_never_selects_chat_provider(
+    user, workspace, fake_provider
+):
+    """A chat provider must never be selected for a transcribe() call."""
+    with pytest.raises(NoProviderAvailable):
+        InferenceGateway().transcribe(
+            purpose="voice.stt", audio=b"x", actor=user, workspace=workspace
+        )
+
+
+def test_synthesize_capability_filtering_never_selects_stt_provider(
+    user, workspace, fake_stt_provider
+):
+    """An STT provider must never be selected for a synthesize() call."""
+    with pytest.raises(NoProviderAvailable):
+        InferenceGateway().synthesize(
+            purpose="voice.tts", text="hi", actor=user, workspace=workspace
+        )
+
+
+def test_transcribe_no_provider_records_usage_and_raises(user, workspace):
+    with pytest.raises(NoProviderAvailable) as excinfo:
+        InferenceGateway().transcribe(
+            purpose="voice.stt", audio=b"x", actor=user, workspace=workspace
+        )
+    usage = ModelUsage.objects.get()
+    assert usage.success is False
+    assert usage.provider is None
+    assert usage.error_type == "no_provider"
+    assert excinfo.value.retryable is True
+
+
+def test_transcribe_retryable_error_then_success_single_usage(user, workspace):
+    ModelProvider.objects.create(
+        name="real-stt",
+        provider_type=ModelProvider.ProviderType.OPENAI_COMPATIBLE,
+        capability=ModelProvider.Capability.STT,
+        model_id="whisper-x",
+        api_key_env_var="PATH",  # always present; no network happens (mocked)
+        priority=10,
+    )
+    adapter = mock.Mock()
+    adapter.transcribe.side_effect = [
+        AdapterError("timeout", retryable=True),
+        TranscribeAdapterResult(text="ok", audio_seconds=2.0, output_tokens=1),
+    ]
+    with mock.patch("ai_core.gateway.get_adapter", return_value=adapter):
+        result = InferenceGateway().transcribe(
+            purpose="voice.stt", audio=b"x", actor=user, workspace=workspace
+        )
+    assert result.text == "ok"
+    usage = ModelUsage.objects.get()  # exactly one row
+    assert usage.success is True
+    assert [a["error_type"] for a in usage.context_report["attempts"]] == ["timeout", None]
+
+
+def test_synthesize_permanent_failure_single_usage(user, workspace):
+    ModelProvider.objects.create(
+        name="real-tts",
+        provider_type=ModelProvider.ProviderType.OPENAI_COMPATIBLE,
+        capability=ModelProvider.Capability.TTS,
+        model_id="piper-x",
+        api_key_env_var="PATH",
+        priority=10,
+    )
+    adapter = mock.Mock()
+    adapter.synthesize.side_effect = AdapterError("auth_error", retryable=False)
+    with mock.patch("ai_core.gateway.get_adapter", return_value=adapter):
+        with pytest.raises(GatewayError) as excinfo:
+            InferenceGateway().synthesize(
+                purpose="voice.tts", text="hi", actor=user, workspace=workspace
+            )
+    usage = ModelUsage.objects.get()  # exactly one row, even on failure
+    assert usage.success is False
+    assert usage.error_type == "auth_error"
+    assert excinfo.value.retryable is False
+
+
+# --- tier routing skeleton (phase 0, MASTER_PLAN §J) ---
+
+
+class TestTierRouting:
+    def test_single_provider_records_only_provider(self, user, workspace, fake_provider):
+        result = call(InferenceGateway(), actor=user, workspace=workspace)
+        assert result.usage.routing_reason == "only_provider"
+
+    def test_priority_order_and_reason_without_tier_config(self, user, workspace, fake_provider):
+        # A second eligible (fake) provider at a worse priority: selection
+        # must be byte-for-byte the old priority order, reason "priority".
+        ModelProvider.objects.create(
+            name="fake-slow",
+            provider_type=ModelProvider.ProviderType.FAKE,
+            model_id="fake-2",
+            priority=50,
+        )
+        result = call(InferenceGateway(), actor=user, workspace=workspace)
+        assert result.usage.provider == fake_provider
+        assert result.usage.routing_reason == "priority"
+
+    def test_tier_map_reorders_selection_and_records_tier_reason(
+        self, user, workspace, fake_provider, settings
+    ):
+        # The tier-mapped provider loses on priority (50 vs 0) but the
+        # purpose's tier puts it first -- the actual point of §J routing.
+        cheap = ModelProvider.objects.create(
+            name="fake-cheap",
+            provider_type=ModelProvider.ProviderType.FAKE,
+            model_id="fake-cheap-1",
+            priority=50,
+        )
+        ModelTier.objects.create(tier=ModelTier.Tier.CHEAP, provider=cheap)
+        settings.AI_PURPOSE_TIERS = {"chat": "cheap"}
+        result = call(InferenceGateway(), actor=user, workspace=workspace)
+        assert result.usage.provider == cheap
+        assert result.usage.routing_reason == "tier:cheap"
+
+    def test_unmapped_purpose_ignores_tier_rows(self, user, workspace, fake_provider, settings):
+        cheap = ModelProvider.objects.create(
+            name="fake-cheap",
+            provider_type=ModelProvider.ProviderType.FAKE,
+            model_id="fake-cheap-1",
+            priority=50,
+        )
+        ModelTier.objects.create(tier=ModelTier.Tier.CHEAP, provider=cheap)
+        settings.AI_PURPOSE_TIERS = {"some.other.purpose": "cheap"}
+        result = call(InferenceGateway(), actor=user, workspace=workspace)
+        assert result.usage.provider == fake_provider
+        assert result.usage.routing_reason == "priority"
+
+    def test_fallback_position_is_recorded(self, user, workspace, monkeypatch):
+        # First provider hard-fails, second serves: the surviving usage row
+        # must say the serving provider was the fallback, not the primary.
+        primary = make_real_provider(name="real-a", priority=10)
+        make_real_provider(name="real-b", priority=20)
+        real_calls = {"n": 0}
+
+        class FlakyAdapter:
+            def __init__(self, provider):
+                self.provider = provider
+
+            def complete(self, messages, params, purpose=""):
+                real_calls["n"] += 1
+                if self.provider == primary:
+                    raise AdapterError("auth_error", retryable=False)
+                return AdapterResult(text="ok", input_tokens=1, output_tokens=1)
+
+        monkeypatch.setattr("ai_core.gateway.get_adapter", lambda p, **kw: FlakyAdapter(p))
+        result = call(InferenceGateway(), actor=user, workspace=workspace)
+        assert result.usage.provider.name == "real-b"
+        assert result.usage.routing_reason == "fallback:1"
+        assert real_calls["n"] == 2
+
+
+class TestRecordExternalUsage:
+    """`record_external_usage()` (Phase 2 branch 2, brief §"ModelUsage
+    stays ai_core-owned"): the one sanctioned way to write a ModelUsage
+    row for a call that ran out of process, entirely outside
+    complete()/embed()'s own provider-adapter path."""
+
+    def test_creates_provider_null_row(self, user, workspace):
+        from ai_core.gateway import record_external_usage
+
+        usage = record_external_usage(
+            workspace=workspace,
+            purpose="harness.discovery",
+            backend="harness_cli:claude_code",
+            input_tokens=100,
+            output_tokens=50,
+            estimated_cost=Decimal("0.0123"),
+            latency_ms=4200,
+            success=True,
+            actor=user,
+        )
+        usage.refresh_from_db()
+        assert usage.provider is None
+        assert usage.prompt_version is None
+        assert usage.backend == "harness_cli:claude_code"
+        assert usage.purpose == "harness.discovery"
+        assert usage.input_tokens == 100
+        assert usage.output_tokens == 50
+        assert usage.estimated_cost == Decimal("0.012300")
+        assert usage.latency_ms == 4200
+        assert usage.success is True
+        assert usage.error_type == ""
+        assert usage.routing_reason == ""
+        assert usage.user == user
+        assert usage.workspace == workspace
+
+    def test_estimated_cost_is_stored_as_given_not_recomputed(self, workspace):
+        from ai_core.gateway import record_external_usage
+
+        usage = record_external_usage(
+            workspace=workspace,
+            purpose="harness.discovery",
+            backend="harness_cli:claude_code",
+            input_tokens=0,
+            output_tokens=0,
+            estimated_cost=Decimal("1.500000"),
+            latency_ms=1,
+            success=True,
+        )
+        assert usage.estimated_cost == Decimal("1.500000")
+
+    def test_failure_path_records_error_type(self, workspace):
+        from ai_core.gateway import record_external_usage
+
+        usage = record_external_usage(
+            workspace=workspace,
+            purpose="harness.discovery",
+            backend="harness_cli:claude_code",
+            input_tokens=0,
+            output_tokens=0,
+            estimated_cost=Decimal("0"),
+            latency_ms=500,
+            success=False,
+            error_type="cancelled",
+        )
+        assert usage.success is False
+        assert usage.error_type == "cancelled"
+
+    def test_context_report_round_trips(self, workspace):
+        from ai_core.gateway import record_external_usage
+
+        usage = record_external_usage(
+            workspace=workspace,
+            purpose="harness.discovery",
+            backend="harness_cli:claude_code",
+            input_tokens=0,
+            output_tokens=0,
+            estimated_cost=Decimal("0"),
+            latency_ms=1,
+            success=True,
+            context_report={"usage_source": "cli_reported"},
+        )
+        assert usage.context_report == {"usage_source": "cli_reported"}
+
+    def test_request_id_comes_from_active_request_context(self, workspace, monkeypatch):
+        from ai_core import gateway as gateway_module
+
+        monkeypatch.setattr(gateway_module, "get_request_id", lambda: "req-123")
+        usage = gateway_module.record_external_usage(
+            workspace=workspace,
+            purpose="harness.discovery",
+            backend="harness_cli:claude_code",
+            input_tokens=0,
+            output_tokens=0,
+            estimated_cost=Decimal("0"),
+            latency_ms=1,
+            success=True,
+        )
+        assert usage.request_id == "req-123"
+
+    def test_unauthenticated_actor_stores_no_user(self, workspace):
+        from django.contrib.auth.models import AnonymousUser
+
+        from ai_core.gateway import record_external_usage
+
+        usage = record_external_usage(
+            workspace=workspace,
+            purpose="harness.discovery",
+            backend="harness_cli:claude_code",
+            input_tokens=0,
+            output_tokens=0,
+            estimated_cost=Decimal("0"),
+            latency_ms=1,
+            success=True,
+            actor=AnonymousUser(),
+        )
+        assert usage.user is None

@@ -40,6 +40,16 @@ class Conversation(WorkspaceScopedModel, TimestampedModel):
         on_delete=models.RESTRICT,
         related_name="+",
     )
+    # Closes MASTER_PLAN §O's private-conversation-flag half (Phase 1
+    # p1-work-log). One-way: False -> True only, enforced structurally by
+    # `assistant.services.mark_conversation_private()` (the only writer of
+    # this field — it never accepts a value, only ever sets True), not just
+    # a serializer-level convention. Reversibility would reopen a skipped
+    # extraction window: `last_extracted_message` advances independently of
+    # this flag (memory/jobs.py's create_extraction_job), so un-privating
+    # would let the next job's range re-cross the interval that was skipped
+    # while private.
+    private = models.BooleanField(default=False)
 
     class Meta:
         ordering = ["-created_at"]
@@ -103,6 +113,16 @@ class Message(WorkspaceScopedModel, TimestampedModel):
     # ordered UUID list of KnowledgeChunk rows supplied as context, not proof
     # of use.
     chunks_used = models.JSONField(default=list, blank=True)
+    # Provenance for the narrow cross-workspace overlay (Phase 1
+    # p1-personal-overlay, MASTER_PLAN §O): {memory_id: source_workspace_id}
+    # string-to-string mapping, populated ONLY for overlay-sourced entries
+    # of THIS reply's memories_used -- default {} means "no overlay
+    # contribution", not "unknown". Deliberately a separate field rather
+    # than redefining memories_used's own contract (an unchanged ordered
+    # UUID list elsewhere in the codebase) -- a future UI surface can render
+    # "from Workspace X" without any other consumer of memories_used
+    # needing to change.
+    overlay_source_workspaces = models.JSONField(default=dict, blank=True)
     # Classification result for this message (MVP 6 §1) — set only on
     # USER-role rows, since classification interprets the user's own
     # message, never the assistant's reply. Blank for every pre-MVP-6 row

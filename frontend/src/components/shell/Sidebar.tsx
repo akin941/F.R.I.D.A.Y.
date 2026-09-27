@@ -11,7 +11,7 @@ export function Sidebar() {
 
   return (
     <>
-      <aside className="hidden w-64 shrink-0 border-r border-border md:flex">
+      <aside className="hidden w-64 shrink-0 overflow-y-auto border-r border-border md:flex">
         <SidebarContent />
       </aside>
       <div className="flex items-center border-b border-border p-2 md:hidden">

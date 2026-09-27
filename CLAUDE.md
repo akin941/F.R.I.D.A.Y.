@@ -39,7 +39,7 @@ not a real operating system.
 
 ```bash
 make up / down / logs      # Docker Compose dev stack (web on :8001)
-make test                  # pytest (backend/)
+make test                  # pytest (backend/) + vitest (frontend/)
 make lint                  # ruff check + format check + import-linter
 make fmt                   # autoformat
 make migrate / makemigrations / shell
@@ -51,9 +51,16 @@ Backend tooling is `uv` (Python 3.12); run backend commands as `uv run ...` from
 ## Conventions
 
 - Conventional Commits (`feat:`, `fix:`, `chore:`, `docs:`, `test:`).
-- Branches: `feat/mvpX-<topic>`; `main` is protected — never commit to it directly.
+- Branches: `feat/mvpX-<topic>` (legacy MVP track) / `feat/pN-<topic>` (Jarvis 2.0
+  phases); `main` is protected — never commit to it directly.
 - Secrets only via env; update `.env.example` when adding config, never real values.
-- Prompt packs live in `docs/prompts/` (masters + per-MVP briefs); ADRs in
+- Prompt packs live in `docs/prompts/` (masters + per-MVP / per-phase briefs); ADRs in
   `docs/adr/`; governance in `docs/security/` and `docs/mcp/`.
+- Reviews: every branch and every brief is reviewed by an independent Claude Code
+  subagent running **Sonnet 5** before merge (the implementing model never reviews
+  its own work); findings are fixed and re-reviewed until the verdict is APPROVE.
+  **Codex CLI is not used in this repo's development workflow** (since
+  2026-09-27). This is about how Jarvis is built — the `harness` product's own
+  cross-vendor reviewer (Codex CLI via `CODEX_API_KEY`) is a separate matter.
 - MCPs/external tools require the allowlist + manifest process
   (`docs/security/mcp-governance.md`) before installation.

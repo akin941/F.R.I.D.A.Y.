@@ -1,7 +1,9 @@
 # Reviewer Master Prompt
 
 > Usage: [context header from planning-master.md] + the MVP `brief.md` + the
-> diff/branch → give to a **different** model/tool than the one that wrote the code.
+> diff/branch → give to a **different** model than the one that wrote the code
+> (since 2026-09-27: an independent Claude Code subagent on Sonnet 5; Codex CLI is
+> no longer used).
 
 ## Task
 

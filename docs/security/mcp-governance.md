@@ -25,5 +25,11 @@ GitHub powers; treat every installation as a security decision.
    documents only, on a separate Google account.
 3. MCP write actions cannot bypass the Jarvis approval gate — MCPs are wrapped by
    the tool registry, never wired raw into production agents.
-4. Every MCP call is logged as a ToolCall; unmaintained tools get removed at the
-   periodic re-review (first pass scheduled with MVP 18 hardening).
+4. Every MCP call is logged; unmaintained tools get removed at the periodic
+   re-review (first pass scheduled with the Phase 4 security baseline).
+
+> Note (2026-09-27): there is no `ToolCall` model in the codebase. MCP calls
+> will be logged through the `audit` app, plus `ModelUsage` where an LLM call
+> is involved; the concrete logging design belongs to the Phase 5 brief (MCP
+> client work, MASTER_PLAN §AA). The earlier MVP numbering in this document
+> was replaced by Jarvis 2.0 phase references (ADR-008).

@@ -2,7 +2,12 @@
 
 Postgres is the source of truth; memories are workspace-scoped, auditable,
 editable, forgettable and exportable. AI-suggested memories are born
-`pending_approval` and only reach model context after human approval.
+`pending_approval` and only reach model context after human approval. The
+one deliberately narrow exception (ADR-008 k.4, Phase 1 p1-work-log):
+`source=system_generated` rows are born `approved` — machine-authored
+activity summaries, not conversation-derived content a human hasn't
+reviewed. See `Source.SYSTEM_GENERATED` and
+`memory.services.record_work_log()`, its only creation path.
 Scope (personal vs company) is carried by the workspace row itself — a
 personal workspace's memories are personal memories; there is no separate
 scope field.
@@ -13,6 +18,7 @@ import re
 
 from django.conf import settings
 from django.db import models
+from pgvector.django import VectorField
 
 from core.db import WorkspaceScopedModel, WorkspaceScopedQuerySet
 from core.models import TimestampedModel
@@ -53,6 +59,14 @@ class Memory(WorkspaceScopedModel, TimestampedModel):
         EPISODIC = "episodic"
         PREFERENCE = "preference"
         PROCEDURAL = "procedural"
+        # System-generated activity summaries (ADR-008 k.4, Phase 1
+        # p1-work-log) — auto-approved ONLY when paired with
+        # `source=system_generated` (see `Source` below and
+        # `memory.services.record_work_log()`, the sole creation path for
+        # that pairing). A conversation-derived work_log candidate carries
+        # this same type but `source=ai_suggested`, and stays
+        # `pending_approval` like any other extraction candidate.
+        WORK_LOG = "work_log"
 
     class Sensitivity(models.TextChoices):
         NORMAL = "normal"
@@ -67,6 +81,12 @@ class Memory(WorkspaceScopedModel, TimestampedModel):
     class Source(models.TextChoices):
         AI_SUGGESTED = "ai_suggested"
         USER_CREATED = "user_created"
+        # Machine-provenance rows (Phase 1 p1-work-log, ADR-008 k.4) — only
+        # `memory.services.record_work_log()` ever writes this value, and it
+        # always pairs it with `type=work_log` and `status=approved`. This
+        # is the ONLY auto-approved provenance; no other Source value may
+        # ever be born approved.
+        SYSTEM_GENERATED = "system_generated"
 
     memory_type = models.CharField(max_length=20, choices=Type.choices)
     sensitivity = models.CharField(
@@ -96,6 +116,43 @@ class Memory(WorkspaceScopedModel, TimestampedModel):
         on_delete=models.SET_NULL,
         related_name="memories_extracted",
     )
+    # Durable marker (Phase 1 p1-work-log, Codex round-3 P2): set once,
+    # permanently, by memory.services.privatize_conversation_memories()
+    # when it archives an approved memory as part of the private-
+    # conversation cascade. `restore_memory()` checks THIS, not
+    # `source_conversation.private` — the FK above is nullable
+    # (on_delete=SET_NULL), so deleting the source conversation would
+    # silently defeat an FK-based check and let the row be restored back
+    # into cloud_eligible(), undoing the privacy decision. Never cleared
+    # once set; there is no path back from it.
+    privacy_locked = models.BooleanField(default=False)
+    # Semantic retrieval (Phase 1 branch p1-memory-embeddings). No fixed
+    # `dimensions` kwarg (MVP 3 §1 vector dimension policy, mirrored from
+    # `knowledge.KnowledgeChunk.embedding`) — comparison operators only
+    # require the two operand vectors to match each other's dimension at
+    # query time, not the column's declared dimension. Eligibility is
+    # `cloud_eligible()` only (status=approved, sensitivity=normal); a
+    # private or unapproved row's embedding is always `None` — see
+    # `memory.services`'s embedding-lifecycle reconciliation, the only
+    # sanctioned writer of these five fields.
+    embedding = VectorField(null=True, blank=True)
+    embedding_provider = models.ForeignKey(
+        "ai_core.ModelProvider", null=True, blank=True, on_delete=models.PROTECT, related_name="+"
+    )
+    # Lease-fencing: one embedding attempt in flight at a time per row (not
+    # embed-exactly-once — a row can be legitimately re-embedded many times
+    # over its life, see memory.services). Same field shape as
+    # `knowledge.KnowledgeDocument`'s (document-level attempt, not a
+    # separate per-range job model like `MemoryExtractionJob` — a memory
+    # row's embedding target is always "this row's current title+content").
+    claim_token = models.UUIDField(null=True, blank=True)
+    lease_expires_at = models.DateTimeField(null=True, blank=True)
+    # Retryable embedding failures increment this; once it reaches
+    # memory.jobs.MAX_EMBEDDING_RETRIES the row simply stays unembedded
+    # (retrieval already falls back to deterministic ordering for a row
+    # with no embedding — there is no separate terminal "failed" state to
+    # reach, unlike KnowledgeDocument.status).
+    retry_count = models.PositiveIntegerField(default=0)
 
     objects = MemoryManager()
 

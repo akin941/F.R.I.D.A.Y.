@@ -142,7 +142,25 @@ def test_role_can_create_conversation(member_user, workspace):
     assert entry.workspace == workspace
     assert entry.resource_type == "assistant.conversation"
     assert entry.resource_id == response.data["id"]
-    assert entry.metadata == {}
+    assert entry.metadata == {"private": False}
+
+
+def test_conversation_can_be_created_private_from_message_one(member_user, workspace):
+    """Codex round-2 P1 on feat/p1-work-log: without this, a client wanting
+    a conversation private from the start had to create-then-PATCH, leaving
+    a race window where the first exchange could already be
+    extraction-eligible before the follow-up PATCH landed."""
+    response = auth_client(member_user).post(
+        "/api/v1/ai/conversations",
+        {"workspace": str(workspace.id), "private": True},
+        format="json",
+    )
+    assert response.status_code == 201
+    assert response.data["private"] is True
+    conversation = Conversation.objects.get(pk=response.data["id"])
+    assert conversation.private is True
+    entry = AuditLog.objects.get(action="assistant.conversation.created")
+    assert entry.metadata == {"private": True}
 
 
 def test_role_can_list_messages(member_user, workspace, owner):
@@ -245,6 +263,81 @@ def test_cross_workspace_message_post_returns_404(owner):
     )
     assert response.status_code == 404
     assert Message.objects.filter(conversation=conversation).count() == 0
+
+
+# --- conversation detail/private flag (Phase 1 p1-work-log) ---
+
+
+def test_role_can_retrieve_conversation(member_user, workspace, owner):
+    conversation = Conversation.objects.create(workspace=workspace, created_by=owner)
+    response = auth_client(member_user).get(f"/api/v1/ai/conversations/{conversation.id}")
+    assert response.status_code == 200
+    assert response.data["id"] == str(conversation.id)
+    assert response.data["private"] is False
+
+
+def test_role_can_mark_conversation_private(member_user, workspace, owner):
+    conversation = Conversation.objects.create(workspace=workspace, created_by=owner)
+    response = auth_client(member_user).patch(
+        f"/api/v1/ai/conversations/{conversation.id}", {"private": True}, format="json"
+    )
+    assert response.status_code == 200
+    assert response.data["private"] is True
+    conversation.refresh_from_db()
+    assert conversation.private is True
+
+
+def test_setting_private_to_false_is_rejected(owner, workspace):
+    conversation = Conversation.objects.create(workspace=workspace, created_by=owner)
+    response = auth_client(owner).patch(
+        f"/api/v1/ai/conversations/{conversation.id}", {"private": False}, format="json"
+    )
+    assert response.status_code == 400
+    conversation.refresh_from_db()
+    assert conversation.private is False
+
+
+def test_unsetting_an_already_private_conversation_is_rejected(owner, workspace):
+    conversation = Conversation.objects.create(workspace=workspace, created_by=owner, private=True)
+    response = auth_client(owner).patch(
+        f"/api/v1/ai/conversations/{conversation.id}", {"private": False}, format="json"
+    )
+    assert response.status_code == 400
+    conversation.refresh_from_db()
+    assert conversation.private is True
+
+
+def test_repeating_private_true_is_idempotent(owner, workspace):
+    conversation = Conversation.objects.create(workspace=workspace, created_by=owner)
+    client = auth_client(owner)
+    first = client.patch(
+        f"/api/v1/ai/conversations/{conversation.id}", {"private": True}, format="json"
+    )
+    second = client.patch(
+        f"/api/v1/ai/conversations/{conversation.id}", {"private": True}, format="json"
+    )
+    assert first.status_code == second.status_code == 200
+    assert AuditLog.objects.filter(action="assistant.conversation.marked_private").count() == 1
+
+
+def test_cross_workspace_conversation_retrieve_returns_404(owner):
+    stranger = register_user(email="stranger5@test.dev", password=PASSWORD, name="Stranger5")
+    other_workspace = Workspace.objects.get(owner=stranger)
+    conversation = Conversation.objects.create(workspace=other_workspace, created_by=stranger)
+    response = auth_client(owner).get(f"/api/v1/ai/conversations/{conversation.id}")
+    assert response.status_code == 404
+
+
+def test_cross_workspace_conversation_patch_returns_404(owner):
+    stranger = register_user(email="stranger6@test.dev", password=PASSWORD, name="Stranger6")
+    other_workspace = Workspace.objects.get(owner=stranger)
+    conversation = Conversation.objects.create(workspace=other_workspace, created_by=stranger)
+    response = auth_client(owner).patch(
+        f"/api/v1/ai/conversations/{conversation.id}", {"private": True}, format="json"
+    )
+    assert response.status_code == 404
+    conversation.refresh_from_db()
+    assert conversation.private is False
 
 
 def test_empty_and_whitespace_content_returns_400_and_creates_nothing(owner, workspace):
@@ -838,3 +931,142 @@ def test_malformed_client_local_date_does_not_400(
     )
     assert response.status_code == 200
     list(response.streaming_content)
+
+
+# --- overlay_source_workspaces contract (Phase 1 p1-personal-overlay) ---
+
+
+def test_overlay_source_workspaces_in_done_event_and_persisted(
+    owner, workspace, fake_provider, system_prompt, router_intent_prompt
+):
+    """End-to-end through the real view/gateway/persistence chain (channel
+    resolved from the request, not passed by a test double) -- the unit
+    coverage in memory/tests/test_overlay.py and the build_context-level
+    coverage in assistant/tests/test_context.py both stop short of this."""
+    from memory.models import Memory, compute_fingerprint
+
+    company = Workspace.objects.create(name="Acme", owner=owner, type=Workspace.Type.COMPANY)
+    overlay_memory = Memory.objects.create(
+        workspace=company,
+        memory_type=Memory.Type.WORK_LOG,
+        status=Memory.Status.APPROVED,
+        source=Memory.Source.SYSTEM_GENERATED,
+        title="Log",
+        content="shipped the migration",
+        fingerprint=compute_fingerprint("shipped the migration"),
+    )
+    conversation = Conversation.objects.create(workspace=workspace, created_by=owner)
+    response = auth_client(owner).post(
+        f"/api/v1/ai/conversations/{conversation.id}/messages",
+        {"content": "hi"},
+        format="json",
+    )
+    assert response.status_code == 200
+    events = _parse_sse(response)
+    done = events[-1]
+    assert done["type"] == "done"
+    assert str(overlay_memory.id) in done["memories_used"]
+    assert done["overlay_source_workspaces"] == {str(overlay_memory.id): str(company.id)}
+
+    assistant_message = Message.objects.get(conversation=conversation, role=Message.Role.ASSISTANT)
+    assert assistant_message.overlay_source_workspaces == {str(overlay_memory.id): str(company.id)}
+
+    listing = auth_client(owner).get(f"/api/v1/ai/conversations/{conversation.id}/messages")
+    serialized = [m for m in listing.data if m["role"] == "assistant"][0]
+    assert serialized["overlay_source_workspaces"] == {str(overlay_memory.id): str(company.id)}
+
+
+def test_overlay_source_workspaces_defaults_to_empty(
+    owner, workspace, fake_provider, system_prompt, router_intent_prompt
+):
+    conversation = Conversation.objects.create(workspace=workspace, created_by=owner)
+    response = auth_client(owner).post(
+        f"/api/v1/ai/conversations/{conversation.id}/messages",
+        {"content": "hi"},
+        format="json",
+    )
+    events = _parse_sse(response)
+    assert events[-1]["overlay_source_workspaces"] == {}
+    assistant_message = Message.objects.get(conversation=conversation, role=Message.Role.ASSISTANT)
+    assert assistant_message.overlay_source_workspaces == {}
+
+
+def test_overlay_absent_for_non_owner_member_of_the_personal_workspace(
+    workspace, owner, fake_provider, system_prompt, router_intent_prompt
+):
+    """workspace.owner_id == actor.id is condition (b) -- a fellow member of
+    the owner's personal workspace (hypothetical multi-membership scenario)
+    must never trigger the overlay just by being able to post into it."""
+    from memory.models import Memory, compute_fingerprint
+
+    fellow_member = make_member(workspace, "fellow@test.dev", WorkspaceMember.Role.MEMBER)
+    company = Workspace.objects.create(name="Acme", owner=owner, type=Workspace.Type.COMPANY)
+    Memory.objects.create(
+        workspace=company,
+        memory_type=Memory.Type.WORK_LOG,
+        status=Memory.Status.APPROVED,
+        source=Memory.Source.SYSTEM_GENERATED,
+        title="Log",
+        content="shipped the migration",
+        fingerprint=compute_fingerprint("shipped the migration"),
+    )
+    conversation = Conversation.objects.create(workspace=workspace, created_by=owner)
+    response = auth_client(fellow_member).post(
+        f"/api/v1/ai/conversations/{conversation.id}/messages",
+        {"content": "hi"},
+        format="json",
+    )
+    assert response.status_code == 200
+    events = _parse_sse(response)
+    assert events[-1]["overlay_source_workspaces"] == {}
+
+
+def test_overlay_provenance_hidden_from_a_later_web_member_reading_history(
+    workspace, owner, fake_provider, system_prompt, router_intent_prompt
+):
+    """Codex round-3 P2: the round-2 gate only stops a NEW overlay from
+    firing once a personal workspace gains a second member -- it does
+    nothing for provenance ALREADY persisted from an earlier, genuinely
+    single-member turn. A fellow member added afterward must still never
+    see that historical overlay_source_workspaces mapping, even reading it
+    over a normal, fully-trusted web/JWT request (not a low-trust channel
+    at all)."""
+    from memory.models import Memory, compute_fingerprint
+
+    company = Workspace.objects.create(name="Acme", owner=owner, type=Workspace.Type.COMPANY)
+    overlay_memory = Memory.objects.create(
+        workspace=company,
+        memory_type=Memory.Type.WORK_LOG,
+        status=Memory.Status.APPROVED,
+        source=Memory.Source.SYSTEM_GENERATED,
+        title="Log",
+        content="shipped the migration",
+        fingerprint=compute_fingerprint("shipped the migration"),
+    )
+    conversation = Conversation.objects.create(workspace=workspace, created_by=owner)
+    web_response = auth_client(owner).post(
+        f"/api/v1/ai/conversations/{conversation.id}/messages",
+        {"content": "hi"},
+        format="json",
+    )
+    assert web_response.status_code == 200
+    _parse_sse(web_response)
+
+    assistant_message = Message.objects.get(conversation=conversation, role=Message.Role.ASSISTANT)
+    # Sanity check: the row really does carry the provenance this test guards.
+    assert assistant_message.overlay_source_workspaces == {str(overlay_memory.id): str(company.id)}
+
+    # Only now does the workspace become shared.
+    fellow_member = make_member(workspace, "fellow@test.dev", WorkspaceMember.Role.MEMBER)
+
+    listing = auth_client(fellow_member).get(f"/api/v1/ai/conversations/{conversation.id}/messages")
+    assert listing.status_code == 200
+    serialized = [m for m in listing.data if m["role"] == "assistant"][0]
+    assert serialized["overlay_source_workspaces"] == {}
+    # The owner themselves, reading the same history over the same trusted
+    # web channel, still sees it in full.
+    owner_listing = auth_client(owner).get(f"/api/v1/ai/conversations/{conversation.id}/messages")
+    owner_serialized = [m for m in owner_listing.data if m["role"] == "assistant"][0]
+    assert owner_serialized["overlay_source_workspaces"] == {
+        str(overlay_memory.id): str(company.id)
+    }

@@ -9,6 +9,7 @@ import pytest
 from accounts.services import register_user
 from approvals.models import ApprovalRequest
 from approvals.services import approve_request
+from core.channels import CHANNEL_WEB
 from tools.registry import ToolSpec, register_tool, unregister_tool
 from workspaces.models import Workspace, WorkspaceMember
 
@@ -62,7 +63,7 @@ def test_create_execution_then_dispatch_fire_in_order(stub_tool, recorded_calls)
     )
     request = _make_request(workspace, requested_by=owner)
 
-    approve_request(approval_request=request, actor=admin)
+    approve_request(approval_request=request, actor=admin, channel=CHANNEL_WEB)
 
     assert recorded_calls == [
         ("create_execution", request.pk),
@@ -83,7 +84,7 @@ def test_dispatch_is_deferred_to_a_real_commit(stub_tool, recorded_calls, db):
     )
     request = _make_request(workspace, requested_by=owner)
 
-    approve_request(approval_request=request, actor=admin)
+    approve_request(approval_request=request, actor=admin, channel=CHANNEL_WEB)
 
     assert recorded_calls == [("create_execution", request.pk)]
 
@@ -97,7 +98,7 @@ def test_unregistered_tool_name_skips_dispatch_without_error(recorded_calls):
     )
     request = _make_request(workspace, requested_by=owner, tool_name="nothing_registered")
 
-    decided = approve_request(approval_request=request, actor=admin)
+    decided = approve_request(approval_request=request, actor=admin, channel=CHANNEL_WEB)
 
     assert decided.status == ApprovalRequest.Status.APPROVED
     assert recorded_calls == []

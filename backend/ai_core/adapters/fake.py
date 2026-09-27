@@ -5,9 +5,27 @@ import math
 import random
 import re
 
-from ai_core.adapters.base import AdapterResult, BaseAdapter, EmbedAdapterResult
+from ai_core.adapters.base import (
+    AdapterResult,
+    BaseAdapter,
+    EmbedAdapterResult,
+    SynthesizeAdapterResult,
+    TranscribeAdapterResult,
+)
 
 FAKE_RESPONSE = "Merhaba, ben Jarvis. MVP 1 gateway üzerinden çalışıyorum."
+
+# Deterministic STT/TTS fixtures (MVP 12). No audio decoding/encoding —
+# `transcribe` returns a fixed transcript regardless of the input bytes, and
+# `synthesize` returns fixed placeholder bytes. Real audio round-trips are
+# exercised on the user's own machine against a local Whisper/Piper backend,
+# never in tests (rule 5: LLM/model-calling code is mockable; tests never
+# hit a real model). `audio_seconds` is a fixed fake duration so the
+# gateway's cost/observability recording has a non-zero value to store.
+FAKE_TRANSCRIPT = "Bu, sahte adaptörün ürettiği örnek bir çevrim yazısıdır."
+FAKE_AUDIO_BYTES = b"FAKE-AUDIO"
+FAKE_AUDIO_CONTENT_TYPE = "audio/wav"
+FAKE_AUDIO_SECONDS = 1.5
 
 # Fixed, small dimension for the fake embedding provider (MVP 3 §1) — chosen
 # purely for fast test fixtures. It does not need to match any real
@@ -135,6 +153,33 @@ FAKE_AGENT_SKILL_MATCH_RESPONSE = '{"skill_name": null}'
 _AGENT_SKILL_MATCH_TRIGGER = "export my weekly notes"
 FAKE_AGENT_SKILL_MATCH_MATCHED_RESPONSE = '{"skill_name": "weekly_export"}'
 
+# Purpose-aware fixture for `harness.briefing` (Phase 2 branch 3) --
+# mirrors harness.execution._parse_briefing_response's expected shape, the
+# same ai_core-must-not-import-business-apps reason as the fixtures above.
+FAKE_HARNESS_BRIEFING_RESPONSE = (
+    '{"summary": "Fake briefing summary: nothing notable was found.", "findings": []}'
+)
+
+# Purpose-aware fixture for `harness.review` (Phase 3 branch 3, Codex
+# code-review P2, round 12) -- mirrors harness.review_execution.
+# _parse_review_response's expected shape (summary/verdict/findings), the
+# same reason as the fixtures above. Without this, AI_FAKE_PROVIDER=true
+# (the dev/example default) routed every review through the generic
+# non-JSON FAKE_RESPONSE, which _parse_review_response can't parse --
+# every otherwise-successful review would fail closed as
+# review_unavailable in that mode. Defaults to an explicit approval, the
+# same benign-default convention FAKE_HARNESS_BRIEFING_RESPONSE already
+# uses (an empty findings list, not a hallucinated one).
+FAKE_HARNESS_REVIEW_RESPONSE = (
+    '{"summary": "Fake review summary: no issues found.", "verdict": "approved", "findings": []}'
+)
+
+# Purpose-aware fixture for `harness.diff_summary` (Phase 3 branch 6) --
+# mirrors harness.implementation_execution._parse_diff_summary_response.
+FAKE_HARNESS_DIFF_SUMMARY_RESPONSE = (
+    '{"summary": "Fake diff summary: a small change across the listed files."}'
+)
+
 
 def _latest_user_content(messages):
     for message in reversed(messages or []):
@@ -172,6 +217,12 @@ class FakeAdapter(BaseAdapter):
             if _AGENT_SKILL_MATCH_TRIGGER in latest:
                 return FAKE_AGENT_SKILL_MATCH_MATCHED_RESPONSE
             return FAKE_AGENT_SKILL_MATCH_RESPONSE
+        if purpose == "harness.briefing":
+            return FAKE_HARNESS_BRIEFING_RESPONSE
+        if purpose == "harness.review":
+            return FAKE_HARNESS_REVIEW_RESPONSE
+        if purpose == "harness.diff_summary":
+            return FAKE_HARNESS_DIFF_SUMMARY_RESPONSE
         return FAKE_RESPONSE
 
     def _result(self, messages, purpose):
@@ -201,4 +252,21 @@ class FakeAdapter(BaseAdapter):
         input_tokens = sum(self.estimate_tokens(t) for t in texts)
         return EmbedAdapterResult(
             vectors=vectors, input_tokens=input_tokens, raw_usage={"fake": True}
+        )
+
+    def transcribe(self, audio, *, content_type="", purpose=""):
+        return TranscribeAdapterResult(
+            text=FAKE_TRANSCRIPT,
+            audio_seconds=FAKE_AUDIO_SECONDS,
+            output_tokens=self.estimate_tokens(FAKE_TRANSCRIPT),
+            raw_usage={"fake": True},
+        )
+
+    def synthesize(self, text, *, params=None, purpose=""):
+        return SynthesizeAdapterResult(
+            audio=FAKE_AUDIO_BYTES,
+            content_type=FAKE_AUDIO_CONTENT_TYPE,
+            audio_seconds=FAKE_AUDIO_SECONDS,
+            input_tokens=self.estimate_tokens(text),
+            raw_usage={"fake": True},
         )

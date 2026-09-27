@@ -1,7 +1,8 @@
 # Implementation Master Prompt
 
 > Usage: [context header from planning-master.md] + the MVP `brief.md` + the
-> approved plan → give to Claude Code / Codex CLI on a feature branch.
+> approved plan → give to Claude Code on a feature branch (Codex CLI retired from the
+> development workflow, 2026-09-27).
 
 ## Task
 

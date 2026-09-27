@@ -12,12 +12,15 @@ import { apiPostJson } from "@/lib/api-client";
 
 const NAV_ITEMS = [
   { href: "/chat", label: "Sohbet" },
+  { href: "/voice", label: "Sesli" },
   { href: "/memory", label: "Hafıza" },
   { href: "/knowledge", label: "Bilgi" },
   { href: "/tasks", label: "Görevler" },
   { href: "/today", label: "Bugün" },
+  { href: "/workspaces", label: "Firma dosyası" },
   { href: "/approvals", label: "Onaylar" },
   { href: "/agents", label: "Ajanlar" },
+  { href: "/harness", label: "Harness" },
   { href: "/integrations", label: "Entegrasyonlar" },
 ];
 

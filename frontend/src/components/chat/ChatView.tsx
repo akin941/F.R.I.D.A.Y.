@@ -28,10 +28,11 @@ function toView(message: ApiMessage): ChatMessageView {
 }
 
 export function ChatView() {
-  const { activeWorkspace, user } = useWorkspace();
+  const { activeWorkspace } = useWorkspace();
 
   const [conversations, setConversations] = useState<ApiConversation[]>([]);
   const [conversationsLoading, setConversationsLoading] = useState(false);
+  const [conversationsError, setConversationsError] = useState<string | null>(null);
   const [selectedConversationId, setSelectedConversationId] = useState<string | null>(null);
 
   const [messages, setMessages] = useState<ChatMessageView[]>([]);
@@ -71,6 +72,7 @@ export function ChatView() {
 
   const loadConversations = useCallback(async (workspaceId: string) => {
     setConversationsLoading(true);
+    setConversationsError(null);
     try {
       const list = await apiGetJson<ApiConversation[]>(
         `/api/conversations?workspace=${encodeURIComponent(workspaceId)}`,
@@ -78,29 +80,46 @@ export function ChatView() {
       if (activeWorkspaceIdRef.current !== workspaceId) return;
       setConversations(list);
     } catch {
-      if (activeWorkspaceIdRef.current === workspaceId) setConversations([]);
+      // A failed load must not masquerade as "no chats yet" -- the list
+      // renders an explicit error state with a retry instead.
+      if (activeWorkspaceIdRef.current === workspaceId) {
+        setConversations([]);
+        setConversationsError("Sohbetler yüklenemedi.");
+      }
     } finally {
       if (activeWorkspaceIdRef.current === workspaceId) setConversationsLoading(false);
     }
   }, []);
 
-  const loadMessages = useCallback(async (conversationId: string) => {
-    setMessagesLoading(true);
-    try {
-      const list = await apiGetJson<ApiMessage[]>(`/api/conversations/${conversationId}/messages`);
-      if (selectedConversationIdRef.current !== conversationId) return;
-      setMessages(list.map(toView));
-      setConversationUnavailable(false);
-    } catch (err) {
-      if (selectedConversationIdRef.current !== conversationId) return;
-      if (err instanceof ApiError && err.status === 404) {
-        setConversationUnavailable(true);
-        setMessages([]);
+  // `background`: a reload of the conversation already on screen (after a
+  // reply, or "Geçmişi yenile") keeps the current list mounted instead of
+  // flipping the loading flag -- otherwise every reply unmounts the list
+  // (blank flash + scroll reset). `onSettled` runs synchronously in the same
+  // tick as the list update, so callers can drop their optimistic bubbles
+  // in the same render the reconciled messages land in.
+  const loadMessages = useCallback(
+    async (conversationId: string, options?: { background?: boolean; onSettled?: () => void }) => {
+      if (!options?.background) setMessagesLoading(true);
+      try {
+        const list = await apiGetJson<ApiMessage[]>(`/api/conversations/${conversationId}/messages`);
+        if (selectedConversationIdRef.current !== conversationId) return;
+        setMessages(list.map(toView));
+        setConversationUnavailable(false);
+      } catch (err) {
+        if (selectedConversationIdRef.current !== conversationId) return;
+        if (err instanceof ApiError && err.status === 404) {
+          setConversationUnavailable(true);
+          setMessages([]);
+        }
+      } finally {
+        if (selectedConversationIdRef.current === conversationId && !options?.background) {
+          setMessagesLoading(false);
+        }
+        options?.onSettled?.();
       }
-    } finally {
-      if (selectedConversationIdRef.current === conversationId) setMessagesLoading(false);
-    }
-  }, []);
+    },
+    [],
+  );
 
   // Workspace switches must not leak the previous workspace's conversations,
   // and must not leave a stream running against the workspace being left.
@@ -142,6 +161,10 @@ export function ChatView() {
       if (activeWorkspaceIdRef.current !== activeWorkspace.id) return;
       setConversations((prev) => [conversation, ...prev]);
       selectConversation(conversation.id);
+    } catch {
+      if (activeWorkspaceIdRef.current === activeWorkspace.id) {
+        setBannerError("Yeni sohbet başlatılamadı. Lütfen tekrar deneyin.");
+      }
     } finally {
       creatingChatRef.current = false;
       setCreatingChat(false);
@@ -177,8 +200,10 @@ export function ChatView() {
     // card just sitting under a newer reply would be confusing regardless.
     setPendingDraft(null);
     setPendingToolRequest(null);
-    setOptimisticUser({ id: `local-user-${Date.now()}`, role: "user", content, status: "complete" });
-    setStreamingAssistant({ id: `local-assistant-${Date.now()}`, role: "assistant", content: "", status: "partial" });
+    const localUserId = `local-user-${Date.now()}`;
+    const localAssistantId = `local-assistant-${Date.now()}`;
+    setOptimisticUser({ id: localUserId, role: "user", content, status: "complete" });
+    setStreamingAssistant({ id: localAssistantId, role: "assistant", content: "", status: "partial" });
     setIsStreaming(true);
 
     const controller = new AbortController();
@@ -265,11 +290,19 @@ export function ChatView() {
     } finally {
       sendingRef.current = false;
       setIsStreaming(false);
-      setOptimisticUser(null);
-      setStreamingAssistant(null);
       abortControllerRef.current = null;
+      // Keep this turn's optimistic bubbles on screen until the reconciled
+      // history lands (same render), rather than clearing them first and
+      // leaving a gap. Guarded by id so a newer turn's bubbles are never
+      // cleared by this older turn's reload.
+      const clearLocalBubbles = () => {
+        setOptimisticUser((prev) => (prev?.id === localUserId ? null : prev));
+        setStreamingAssistant((prev) => (prev?.id === localAssistantId ? null : prev));
+      };
       if (conversationId) {
-        void loadMessages(conversationId);
+        void loadMessages(conversationId, { background: true, onSettled: clearLocalBubbles });
+      } else {
+        clearLocalBubbles();
       }
     }
   }
@@ -285,16 +318,20 @@ export function ChatView() {
   ];
 
   return (
-    <div className="flex flex-1 overflow-hidden">
+    <div className="flex min-h-0 flex-1 overflow-hidden">
       <ConversationList
         conversations={conversations}
         selectedId={selectedConversationId}
         onSelect={handleSelect}
         onNewChat={() => void handleNewChat()}
         loading={conversationsLoading}
+        error={conversationsError}
+        onRetry={() => {
+          if (activeWorkspace) void loadConversations(activeWorkspace.id);
+        }}
         disabled={isStreaming || creatingChat || !activeWorkspace}
       />
-      <div className="flex flex-1 flex-col">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         <div aria-live="polite" className="sr-only">
           {isStreaming ? "Asistan yanıtlıyor" : ""}
         </div>
@@ -312,7 +349,9 @@ export function ChatView() {
                 size="sm"
                 onClick={() => {
                   setDisconnected(false);
-                  if (selectedConversationId) void loadMessages(selectedConversationId);
+                  if (selectedConversationId) {
+                    void loadMessages(selectedConversationId, { background: true });
+                  }
                 }}
               >
                 Geçmişi yenile
@@ -348,7 +387,6 @@ export function ChatView() {
               <ToolRequestCard
                 draft={pendingToolRequest}
                 workspaceId={activeWorkspace.id}
-                currentUserId={user?.id ?? null}
                 onDiscard={() => setPendingToolRequest(null)}
               />
             ) : null}

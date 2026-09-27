@@ -1,8 +1,7 @@
-"""Boot-time tool-reference validation (MVP 8 §2, brief) -- mirrors how
-`ApprovalsConfig.ready()`'s `DEV_ALLOW_SELF_APPROVAL` fail-fast test is
-structured (`approvals/tests/test_apps.py`): call the already-loaded app
-config's validation method directly rather than re-running all of Django
-app loading.
+"""Boot-time tool-reference validation (MVP 8 §2, brief) -- structured the
+way `ApprovalsConfig.ready()`'s (since-removed, ADR-008) fail-fast test
+was: call the already-loaded app config's validation method directly
+rather than re-running all of Django app loading.
 """
 
 import pytest

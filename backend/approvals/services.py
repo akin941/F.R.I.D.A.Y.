@@ -6,11 +6,14 @@ State machine (illegal transitions raise InvalidTransition -> 400):
     pending -> approved | rejected | expired
 
 There is no restore/reopen: a decided (or expired) request is terminal;
-requesting the same action again creates a new row. `expired` is set both by
-a scheduled sweep (`approvals.tasks`) and, as a backstop, by the decision
-services themselves (`_expire_if_stale`) -- so a request the sweep hasn't
-gotten to yet can never be approved by accident, regardless of the sweep's
-timing.
+requesting the same action again creates a new row. `expired` is set by a
+scheduled sweep (`approvals.tasks`), as a backstop by the decision services
+themselves (`_expire_if_stale`) -- so a request the sweep hasn't gotten to
+yet can never be approved by accident, regardless of the sweep's timing --
+and, explicitly, by `revoke_request` (Phase 3 branch 4): a caller elsewhere
+withdrawing a request whose underlying job/action no longer needs a
+decision, distinguished from the passive cases only in its audit action
+(`approval.revoked` vs `approval.expired`), never in the stored status.
 
 Approving also resolves and runs the request's gated tool (`tools.registry`,
 branch 2): `create_execution()` inside the approval's own transaction, then
@@ -23,11 +26,16 @@ Role policy (identical for personal and company workspaces):
     request              yes            yes
     approve/reject        no             yes
 
-Requester != decider is enforced unconditionally (ADR-004's core premise --
-the entity that produces an action is not the entity that approves it),
-except when `settings.DEV_ALLOW_SELF_APPROVAL` is True -- a narrowly-scoped,
-dev-only escape hatch that `approvals.apps.ApprovalsConfig.ready()` asserts
-can never be True outside DEBUG mode.
+The decision model (ADR-008 decision 3, replacing MVP 5's two-human
+requester != decider rule): a gated action requires an explicit, separate,
+audited decision by a curator-role human over the high-trust web channel.
+With a single owner there is no second human by definition, so the owner
+may decide requests they (or their agents -- `ApprovalRequest.origin`)
+produced; what is enforced instead is that the decision is never implicit
+(its own endpoint, its own audit row), never available to a machine actor,
+and never accepted from a low-trust channel -- `channel` is therefore a
+required argument: every caller must state the real channel explicitly,
+there is no safe default (Codex phase-0 plan-review P1).
 
 Every mutating service re-fetches its row under `select_for_update` inside
 its transaction (mirrors `memory.services._locked()`), so concurrent
@@ -60,8 +68,8 @@ class InvalidTransition(ApprovalServiceError):
 
 
 class ApprovalPermissionDenied(ApprovalServiceError):
-    """Actor's role (or the requester/decider separation rule) does not
-    allow the action -> 403."""
+    """Actor's role (or the channel-trust rule) does not allow the
+    action -> 403."""
 
 
 def get_role(actor, workspace):
@@ -128,6 +136,77 @@ def _expire_if_stale(approval_request):
     return False
 
 
+def revoke_request(*, approval_request, actor=None):
+    """Withdraws a still-`pending` request because the underlying job/
+    action it gates no longer needs a decision -- e.g. a `harness`
+    implementation job cancelled while its Gate A/B request was still
+    pending (Phase 3 branch 4, `harness.services.
+    cancel_harness_implementation_job`), or one abandoned until its
+    worktree retention deadline passed with no decision ever made
+    (`harness.implementation_execution._sweep_expired_worktree_job`).
+    Reuses the existing `expired` terminal state rather than inventing a
+    new one: the state machine this module's own docstring documents
+    (`pending -> approved | rejected | expired`, no restore/reopen)
+    already treats `expired` as "no longer decidable," which is exactly
+    what a revoke means too -- and `harness.signals`'s existing
+    `post_save` receiver already reacts to an `expired` decision by
+    failing the linked job closed (`GATE_EXPIRED`), so this needs no
+    separate job-transition logic of its own; the caller that revoked
+    the request has typically already transitioned its own job by the
+    time this commits, and that signal-triggered attempt safely no-ops
+    against a job that's no longer in the gate-pending status it
+    re-checks.
+
+    `actor` is optional (Codex code-review P2, branch 4 round 6): a
+    caller with no real human decision-maker behind the revoke --
+    exactly the worktree-retention sweep, a passive system timeout, not
+    a human choosing to withdraw anything -- must be able to say so
+    explicitly, rather than being forced to attribute the action to
+    whichever human happens to own the underlying job. `record_revoked`
+    below records `actor_type=SYSTEM` whenever `actor` is `None`,
+    mirroring `record_expired`'s identical convention for the TTL sweep.
+
+    A safe no-op if the request is no longer `pending` (already decided,
+    or already expired by the TTL sweep/decision-time backstop) --
+    callers are never expected to treat this as an error; the
+    underlying cancellation flow this exists for has already achieved
+    its own goal regardless of whether this specific request could
+    still be revoked."""
+    with transaction.atomic():
+        locked = (
+            ApprovalRequest.objects.select_for_update(of=("self",))
+            .filter(pk=approval_request.pk, status=ApprovalRequest.Status.PENDING)
+            .first()
+        )
+        if locked is None:
+            return
+        locked.status = ApprovalRequest.Status.EXPIRED
+        locked.save(update_fields=["status", "updated_at"])
+    record_revoked(locked, actor)
+
+
+def record_revoked(approval_request, actor):
+    """Distinct audit action from `approval.expired` (`record_expired`,
+    the TTL-sweep/decision-time-backstop case) even though the STORED
+    status is identical -- a revoke is always triggered by an explicit
+    cancellation elsewhere, never a passive timeout by itself, and the
+    audit trail should be able to tell the two apart. `actor_type` is
+    `SYSTEM` when no real human actor is behind this call (Codex
+    code-review P2, branch 4 round 6), mirroring `record_expired`'s
+    identical convention -- misattributing a passive system timeout
+    (e.g. the worktree-retention sweep) to whichever human happens to
+    own the underlying job would misrepresent it as an explicit human
+    decision in the audit trail."""
+    record_audit(
+        action="approval.revoked",
+        actor=actor,
+        actor_type=AuditLog.ActorType.SYSTEM if actor is None else AuditLog.ActorType.HUMAN,
+        workspace=approval_request.workspace,
+        resource=approval_request,
+        metadata={"status": approval_request.status, "tool_name": approval_request.tool_name},
+    )
+
+
 def record_expired(approval_request):
     """`approval.expired` is a system-classified transition even when a
     human's decide attempt is what triggered the decision-time backstop
@@ -142,11 +221,6 @@ def record_expired(approval_request):
         resource=approval_request,
         metadata={"status": approval_request.status, "tool_name": approval_request.tool_name},
     )
-
-
-def _check_requester_not_decider(approval_request, actor):
-    if approval_request.requested_by_id == actor.id and not settings.DEV_ALLOW_SELF_APPROVAL:
-        raise ApprovalPermissionDenied("The requester cannot decide their own request.")
 
 
 def _check_channel_is_web(channel):
@@ -179,11 +253,23 @@ def _record(approval_request, action, actor, **metadata):
 
 
 @transaction.atomic
-def create_request(*, workspace, actor, tool_name, payload=None):
+def create_request(*, workspace, actor, tool_name, payload=None, origin):
+    """`origin` is required, never defaulted (Codex phase-0 code-review
+    P2, mirroring `channel` on the decision services): the human/machine
+    provenance split is a security invariant, and a future machine caller
+    (the phase-2 harness calls exactly this service) that forgot to state
+    its origin would otherwise be silently stamped human. Callers declare
+    it explicitly -- the web view passes HUMAN, the agent engine AGENT."""
     _require(get_role(actor, workspace) in _WRITER_ROLES, "requesting a gated action")
     tool = _resolve_tool(tool_name)
     if tool is None or not tool.gated:
         raise InvalidTransition(f"{tool_name!r} is not a valid gated tool.")
+    # Phase 3 branch 6 (plan-review round 9 item 3): system-only gates
+    # (e.g. the harness's own Gate A/B) can only be minted by their owning
+    # component, never by a human/agent request. getattr for the same
+    # SimpleNamespace test stubs as below.
+    if not getattr(tool, "user_invocable", True) and origin != ApprovalRequest.Origin.HARNESS:
+        raise InvalidTransition(f"{tool_name!r} can only be requested by the system.")
     # getattr, not tool.validate_request: existing tests stub tools with a
     # bare SimpleNamespace(gated=True), predating this field.
     validate_request = getattr(tool, "validate_request", None)
@@ -198,12 +284,13 @@ def create_request(*, workspace, actor, tool_name, payload=None):
         payload=payload or {},
         status=ApprovalRequest.Status.PENDING,
         requested_by=actor,
+        origin=origin,
     )
-    _record(approval_request, "approval.requested", actor)
+    _record(approval_request, "approval.requested", actor, origin=str(origin))
     return approval_request
 
 
-def approve_request(*, approval_request, actor, channel=CHANNEL_WEB):
+def approve_request(*, approval_request, actor, channel):
     """Approving also triggers the gated tool: `tool.create_execution()`
     runs and commits INSIDE this same transaction -- before the broker is
     ever contacted -- so a durable execution row exists even if the
@@ -211,15 +298,16 @@ def approve_request(*, approval_request, actor, channel=CHANNEL_WEB):
     `tool.dispatch()` is registered via `transaction.on_commit`, so it only
     ever runs after this transaction has actually committed.
 
-    `channel` (MVP 9 §1) defaults to CHANNEL_WEB for backward-compatible
-    direct callers (e.g. tests); `approvals.views` always passes the
-    request's actual channel explicitly."""
+    `channel` (MVP 9 §1) is required, never defaulted: a decision must
+    carry an explicit high-trust decision context from its caller
+    (`approvals.views` passes the request's actual channel) -- a default
+    would let a future internal caller decide "as web" by accident
+    (ADR-008 decision 3; Codex phase-0 plan-review P1)."""
     with transaction.atomic():
         approval_request = _locked(approval_request, actor)
         _require(
             get_role(actor, approval_request.workspace) in _CURATOR_ROLES, "approving this request"
         )
-        _check_requester_not_decider(approval_request, actor)
         _check_channel_is_web(channel)
         expired = _expire_if_stale(approval_request)
         if not expired:
@@ -241,13 +329,12 @@ def approve_request(*, approval_request, actor, channel=CHANNEL_WEB):
     return approval_request
 
 
-def reject_request(*, approval_request, actor, channel=CHANNEL_WEB):
+def reject_request(*, approval_request, actor, channel):
     with transaction.atomic():
         approval_request = _locked(approval_request, actor)
         _require(
             get_role(actor, approval_request.workspace) in _CURATOR_ROLES, "rejecting this request"
         )
-        _check_requester_not_decider(approval_request, actor)
         _check_channel_is_web(channel)
         expired = _expire_if_stale(approval_request)
         if not expired:

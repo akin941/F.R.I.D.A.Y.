@@ -19,6 +19,17 @@ Every business table carries a `workspace_id`. A workspace is `personal` or
 view or agent tool must pass through `for_actor()` (see `core/db.py`). Company
 data never leaks into personal memory scope, and vice versa.
 
+> Note (2026-09-27): since ADR-008 (single-owner system) signup is off; the
+> owner's personal workspace is created by the `bootstrap_owner` management
+> command (`backend/accounts/management/commands/bootstrap_owner.py`), which
+> goes through the same `register_user()` service. The workspace axis itself
+> is unchanged.
+
 ## Consequences
 Multi-tenancy is nearly free later; every feature pays a small scoping tax now.
 Cross-workspace isolation gets its own test package (MVP 10) and is a release gate.
+
+> Note (2026-09-27): MVP 10 (multi-user tenancy) was cancelled by ADR-008
+> decision 2. No separate isolation package exists; cross-workspace isolation
+> tests live per app (each app's `tests/` covers its own `for_actor()`
+> scoping) and remain part of the CI gate.

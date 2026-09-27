@@ -27,3 +27,17 @@ Either way, capture just enough to be useful later — not a bug report:
 ```
 
 No entries yet.
+
+> Closed (2026-09-27): the MVP 9 dogfooding week ended with no entries
+> recorded. The roadmap it was meant to inform was reorganized by ADR-008
+> (MVP 10 cancelled; Jarvis 2.0 phases in MASTER_PLAN §AA), so no MVP 10+
+> scoping depends on it. The entry format and the two capture paths above
+> stay valid for the next round.
+
+## Phase 4 (UI renewal) dogfooding
+
+Placeholder — opens when the Phase 4 UI renewal (MASTER_PLAN §AA) is usable
+day to day. Same entry format and capture paths as above; findings feed the
+Phase 4 closeout and Phase 5 scoping.
+
+No entries yet.

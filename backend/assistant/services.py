@@ -18,6 +18,7 @@ from assistant.task_draft import TaskDraftParseError, parse_task_draft
 from audit.services import record_audit
 from core.context import request_id_var
 from memory.jobs import create_extraction_job
+from memory.services import privatize_conversation_memories
 
 _ROUTER_INTENT_PROMPT_NAME = "jarvis_router_intent"
 _TASK_DRAFT_PROMPT_NAME = "jarvis_router_task_draft"
@@ -226,24 +227,64 @@ def classify_intent(conversation, *, actor, content, client_local_date=None):
 
 
 @transaction.atomic
-def create_conversation(*, workspace, actor, title=""):
+def create_conversation(*, workspace, actor, title="", private=False):
+    """`private` at creation needs no cascade (Phase 1 p1-work-log,
+    Codex round-2 P1): nothing has been extracted from a brand-new row —
+    this is the row's initial value, not a `False -> True` transition, so
+    `mark_conversation_private()`'s one-way/cascade machinery doesn't apply
+    here. Lets a caller start a conversation private from message one
+    instead of create-then-PATCH, which left a race window where the first
+    exchange could already be extraction-eligible before the PATCH landed.
+    """
     conversation = Conversation.objects.create(
         workspace=workspace,
         title=title,
         created_by=actor,
+        private=private,
     )
     record_audit(
         action="assistant.conversation.created",
         actor=actor,
         workspace=workspace,
         resource=conversation,
+        metadata={"private": private},
     )
     return conversation
 
 
-def build_gateway_stream(conversation, *, actor, content, intent=Message.Intent.CHAT):
+@transaction.atomic
+def mark_conversation_private(*, conversation, actor):
+    """One-way: this function only ever sets `private=True` — it takes no
+    value parameter, so `False` is structurally unreachable through this
+    path, not just rejected by a serializer convention (Phase 1
+    p1-work-log; see `Conversation.private`'s field docstring for why
+    reversibility would reopen a skipped extraction window). Idempotent
+    repeat on an already-private conversation: a no-op, no second audit
+    row, mirroring `memory.services`'s transition functions.
+
+    Cascades in the same transaction: every Memory row already extracted
+    from this conversation is rejected (if still pending) or archived (if
+    approved) via `memory.services.privatize_conversation_memories`, so
+    nothing born from it stays retrievable after the flag lands.
+    """
+    locked = Conversation.objects.select_for_update().get(pk=conversation.pk)
+    if locked.private:
+        return locked
+    locked.private = True
+    locked.save(update_fields=["private"])
+    record_audit(
+        action="assistant.conversation.marked_private",
+        actor=actor,
+        workspace=locked.workspace,
+        resource=locked,
+    )
+    privatize_conversation_memories(conversation=locked, actor=actor)
+    return locked
+
+
+def build_gateway_stream(conversation, *, actor, content, channel, intent=Message.Intent.CHAT):
     """Start the gateway call and return (generator, usage_holder, memory_ids,
-    chunk_ids).
+    chunk_ids, overlay_source_workspaces).
 
     `InferenceGateway.complete(stream=True)` raises `GatewayError` eagerly for
     `no_provider` (before any generator exists). That eager error is normalized
@@ -254,16 +295,29 @@ def build_gateway_stream(conversation, *, actor, content, intent=Message.Intent.
     `memory_ids`/`chunk_ids` are the ordered lists of injected memory/
     knowledge-chunk UUIDs; the caller threads them into `stream_assistant_reply`
     so they are persisted on the assistant Message row (`memories_used`/
-    `chunks_used`) and surfaced in the SSE `done` event.
+    `chunks_used`) and surfaced in the SSE `done` event. `overlay_source_workspaces`
+    (Phase 1 p1-personal-overlay) is threaded the same way onto
+    `Message.overlay_source_workspaces`.
 
     `intent` is the router's classification of this turn (MVP 6 §2,
     default `chat`) — passed straight through to `build_context`, which is
     the only place it actually changes behavior (knowledge-retrieval budget
     and system-prompt framing).
+
+    `channel` (Phase 1 p1-personal-overlay) is required, keyword-only, no
+    default — passed straight through to `build_context`, which is the only
+    place it changes behavior (gates the cross-workspace overlay to the
+    trusted web channel only).
     """
     gateway = InferenceGateway()
-    messages, context_report, prompt_version, memory_ids, chunk_ids = build_context(
-        conversation, actor=actor, new_user_content=content, intent=intent
+    messages, context_report, prompt_version, memory_ids, chunk_ids, overlay_source_workspaces = (
+        build_context(
+            conversation,
+            actor=actor,
+            new_user_content=content,
+            channel=channel,
+            intent=intent,
+        )
     )
     usage_holder = {}
     try:
@@ -279,7 +333,7 @@ def build_gateway_stream(conversation, *, actor, content, intent=Message.Intent.
         )
     except GatewayError as exc:
         gateway_stream = _eager_error_stream(exc)
-    return gateway_stream, usage_holder, memory_ids, chunk_ids
+    return gateway_stream, usage_holder, memory_ids, chunk_ids, overlay_source_workspaces
 
 
 def _eager_error_stream(exc):
@@ -295,6 +349,7 @@ def stream_assistant_reply(
     request_id,
     memory_ids=None,
     chunk_ids=None,
+    overlay_source_workspaces=None,
     draft_event=None,
     channel=Message.Channel.WEB,
 ):
@@ -310,6 +365,10 @@ def stream_assistant_reply(
     (the terminal event ends up being `done`, never `error`) — `done`'s own
     contract (message_id, usage, memories_used, chunks_used) is completely
     unchanged; `draft` is additive and always precedes it, never replaces it.
+    `overlay_source_workspaces` (Phase 1 p1-personal-overlay) is the same
+    kind of additive value — a `{memory_id: source_workspace_id}` mapping
+    (default `{}`), persisted onto `Message.overlay_source_workspaces` and
+    included in the `done` event alongside `memories_used`/`chunks_used`.
 
     `channel` (MVP 9 §1) is the same value already stamped on this turn's
     user Message row (assistant/views.py resolves it once via
@@ -325,6 +384,7 @@ def stream_assistant_reply(
             usage_holder,
             memory_ids or [],
             chunk_ids or [],
+            overlay_source_workspaces or {},
             draft_event,
             channel,
         )
@@ -338,6 +398,7 @@ def _stream_assistant_reply(
     usage_holder,
     memory_ids,
     chunk_ids,
+    overlay_source_workspaces,
     draft_event=None,
     channel=Message.Channel.WEB,
 ):
@@ -370,6 +431,7 @@ def _stream_assistant_reply(
             },
             "memories_used": memory_ids,
             "chunks_used": chunk_ids,
+            "overlay_source_workspaces": overlay_source_workspaces,
         }
     finally:
         # Single Message write — id is fixed up front, and (per review) the
@@ -383,6 +445,7 @@ def _stream_assistant_reply(
             usage=usage_holder.get("usage"),
             memory_ids=memory_ids,
             chunk_ids=chunk_ids,
+            overlay_source_workspaces=overlay_source_workspaces,
             channel=channel,
         )
 
@@ -401,6 +464,7 @@ def _persist_assistant_message(
     usage,
     memory_ids,
     chunk_ids,
+    overlay_source_workspaces=None,
     channel=Message.Channel.WEB,
 ):
     """The single write site for the assistant `Message` row.
@@ -413,7 +477,10 @@ def _persist_assistant_message(
     (`Conversation.last_extracted_message`) can never be read stale and two
     jobs can never claim overlapping ranges. Only `COMPLETE` replies get a
     job — a partial/failed reply's content is not something worth
-    distilling.
+    distilling. A `private` conversation (Phase 1 p1-work-log) gets no job
+    at all, allocation-time enforcement point (a) of the private-flag gate
+    — points (b)/(c) in memory/tasks.py and memory/jobs.py cover the
+    already-allocated-job and finalization-time races this one can't.
     """
     locked_conversation = Conversation.objects.select_for_update().get(pk=conversation.pk)
     message = Message.objects.create(
@@ -426,9 +493,10 @@ def _persist_assistant_message(
         model_usage=usage,
         memories_used=memory_ids,
         chunks_used=chunk_ids,
+        overlay_source_workspaces=overlay_source_workspaces or {},
         channel=channel,
     )
-    if status == Message.Status.COMPLETE:
+    if status == Message.Status.COMPLETE and not locked_conversation.private:
         create_extraction_job(conversation=locked_conversation, through_message=message)
     return message
 

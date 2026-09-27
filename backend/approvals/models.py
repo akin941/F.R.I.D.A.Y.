@@ -1,10 +1,12 @@
-"""Generic approval gate (ADR-004).
+"""Generic approval gate (ADR-004, amended by ADR-008 decision 3).
 
 Write/delete/deploy/external-send actions go through an `ApprovalRequest`
 before a tool ever runs. Postgres is the source of truth; every decision is
-auditable. The requester and the decider must be different actors (ADR-004's
-core premise) — enforced in `approvals.services`, not here; this model only
-carries the data.
+auditable. In a single-owner system (ADR-008) the gate is not a two-person
+rule — it is an explicit, separate, audited owner decision: machine actors
+(`origin` agent/harness) can request but never decide, and decisions are
+only accepted from the high-trust web channel — enforced in
+`approvals.services`, not here; this model only carries the data.
 """
 
 from django.conf import settings
@@ -21,6 +23,18 @@ class ApprovalRequest(WorkspaceScopedModel, TimestampedModel):
         REJECTED = "rejected"
         EXPIRED = "expired"
 
+    class Origin(models.TextChoices):
+        # Who *produced* the request (ADR-008 decision 3). `requested_by`
+        # stays the accountable human either way -- an agent acts on behalf
+        # of the user who created it -- but origin records whether a machine
+        # actor generated the request, which the audit trail preserves and
+        # future policy (e.g. harness runs) can key on. Machine origins can
+        # never decide: deciding requires the high-trust web channel, which
+        # no machine caller has.
+        HUMAN = "human"
+        AGENT = "agent"
+        HARNESS = "harness"
+
     # Which registered tool (tools.registry, MVP 5 branch 2) this gates.
     tool_name = models.CharField(max_length=100)
     # Opaque, tool-specific arguments. Never used to resolve scope -- a
@@ -28,6 +42,7 @@ class ApprovalRequest(WorkspaceScopedModel, TimestampedModel):
     # `workspace` field, never from a key inside `payload` (services.py).
     payload = models.JSONField(default=dict, blank=True)
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDING)
+    origin = models.CharField(max_length=20, choices=Origin.choices, default=Origin.HUMAN)
     requested_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         null=True,

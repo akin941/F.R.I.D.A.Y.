@@ -206,6 +206,25 @@ class TestFinalizeSuccess:
         assert job.status == MemoryExtractionJob.Status.RUNNING  # untouched
         assert not Memory.objects.filter(workspace=job.workspace).exists()
 
+    def test_conversation_turned_private_after_claim_discards_candidates(self, conversation):
+        """Enforcement point (c) — the actual race-closing guarantee (Phase
+        1 p1-work-log, Codex round-3 HIGH on the brief): the conversation
+        can turn private AFTER the worker-time check
+        (memory.tasks._process_claimed_job) but WHILE the extraction
+        prompt is in flight. finalize_extraction_success must re-check
+        under lock and discard the candidates regardless of what the
+        caller passed, still marking the job succeeded (not failed)."""
+        from assistant.services import mark_conversation_private
+
+        job = make_job(conversation)
+        claimed = claim_extraction_job(job.id)
+        mark_conversation_private(conversation=conversation, actor=conversation.created_by)
+        candidates = [{"type": "semantic", "title": "T", "content": "Should never be created."}]
+        assert finalize_extraction_success(*claimed, candidates) is True
+        job.refresh_from_db()
+        assert job.status == MemoryExtractionJob.Status.SUCCEEDED
+        assert not Memory.objects.filter(workspace=job.workspace).exists()
+
 
 class TestFinalizeFailure:
     def test_retryable_returns_to_pending_and_increments_retry_count(self, conversation):

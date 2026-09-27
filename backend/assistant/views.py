@@ -14,6 +14,7 @@ from assistant.models import Conversation, Message
 from assistant.serializers import (
     ConversationCreateSerializer,
     ConversationSerializer,
+    ConversationUpdateSerializer,
     MessageCreateSerializer,
     MessageSerializer,
 )
@@ -21,6 +22,7 @@ from assistant.services import (
     build_gateway_stream,
     classify_intent,
     create_conversation,
+    mark_conversation_private,
     stream_assistant_reply,
 )
 from core.channels import is_low_trust, request_channel, scoped_for_actor
@@ -36,6 +38,16 @@ _PAT_ALLOWLISTED_AUTHENTICATION_CLASSES = [
     PersonalAccessTokenAuthentication,
     *api_settings.DEFAULT_AUTHENTICATION_CLASSES,
 ]
+
+
+def _get_conversation(request, conversation_id):
+    # By-id lookup, no workspace parameter at all -- scoped_for_actor still
+    # forces a channel-bound request to its bound workspace, so a PAT bound
+    # to workspace A can never reach a conversation in workspace B by id
+    # (round-2 P1 fix). Shared by every conversation-detail view (Phase 1
+    # p1-work-log's ConversationDetailView reuses this rather than
+    # duplicating it a second time).
+    return scoped_for_actor(request, Conversation.objects).filter(id=conversation_id).first()
 
 
 class ConversationListCreateView(APIView):
@@ -95,8 +107,34 @@ class ConversationListCreateView(APIView):
             workspace=workspace,
             actor=request.user,
             title=serializer.validated_data.get("title", ""),
+            private=serializer.validated_data.get("private", False),
         )
         return Response(ConversationSerializer(conversation).data, status=status.HTTP_201_CREATED)
+
+
+class ConversationDetailView(APIView):
+    """Retrieve + private-flag-only update (Phase 1 p1-work-log — closes
+    MASTER_PLAN §O's private-conversation-flag half). No other field is
+    writable here; `title` editing, if ever added, is a separate concern.
+    """
+
+    permission_classes = [IsAuthenticated]
+    authentication_classes = _PAT_ALLOWLISTED_AUTHENTICATION_CLASSES
+
+    def get(self, request, conversation_id):
+        conversation = _get_conversation(request, conversation_id)
+        if conversation is None:
+            return Response(status=status.HTTP_404_NOT_FOUND)
+        return Response(ConversationSerializer(conversation).data)
+
+    def patch(self, request, conversation_id):
+        conversation = _get_conversation(request, conversation_id)
+        if conversation is None:
+            return Response(status=status.HTTP_404_NOT_FOUND)
+        serializer = ConversationUpdateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        updated = mark_conversation_private(conversation=conversation, actor=request.user)
+        return Response(ConversationSerializer(updated).data)
 
 
 class ConversationMessageListView(APIView):
@@ -122,15 +160,8 @@ class ConversationMessageListView(APIView):
             return []
         return super().get_throttles()
 
-    def _get_conversation(self, request, conversation_id):
-        # By-id lookup, no workspace parameter at all -- scoped_for_actor
-        # still forces a channel-bound request to its bound workspace, so a
-        # PAT bound to workspace A can never reach a conversation in
-        # workspace B by id (round-2 P1 fix).
-        return scoped_for_actor(request, Conversation.objects).filter(id=conversation_id).first()
-
     def get(self, request, conversation_id):
-        conversation = self._get_conversation(request, conversation_id)
+        conversation = _get_conversation(request, conversation_id)
         if conversation is None:
             return Response(status=status.HTTP_404_NOT_FOUND)
         messages = (
@@ -138,10 +169,33 @@ class ConversationMessageListView(APIView):
             .filter(conversation=conversation)
             .order_by("created_at", "id")
         )
-        return Response(MessageSerializer(messages, many=True).data)
+        data = MessageSerializer(messages, many=True).data
+        if is_low_trust(request) or request.user.id != conversation.workspace.owner_id:
+            # overlay_source_workspaces (p1-personal-overlay) only ever
+            # makes sense for the workspace OWNER: the overlay itself only
+            # ever fires for actor == workspace.owner, so this field is
+            # inherently owner-only content -- anyone else reading it is a
+            # leak, not a display gap. Redacted for:
+            #  - a low-trust PAT/CLI/Telegram request (round-1 P1): a
+            #    message row can carry provenance from an EARLIER
+            #    web-channel turn that named a workspace outside this
+            #    channel's own binding, even for its own in-scope
+            #    conversation -- true even when the PAT's underlying user
+            #    IS the owner, since a low-trust credential is deliberately
+            #    narrower-trust than the owner's own web session.
+            #  - any web/JWT reader who is not the workspace owner
+            #    (round-3 P2): the round-2 gate only stops a NEW overlay
+            #    from firing once a personal workspace gains a second
+            #    member -- it does nothing for provenance ALREADY
+            #    persisted on earlier rows, which a fellow member could
+            #    otherwise read straight off this same conversation over a
+            #    normal, fully-trusted web request.
+            for message in data:
+                message["overlay_source_workspaces"] = {}
+        return Response(data)
 
     def post(self, request, conversation_id):
-        conversation = self._get_conversation(request, conversation_id)
+        conversation = _get_conversation(request, conversation_id)
         if conversation is None:
             return Response(status=status.HTTP_404_NOT_FOUND)
 
@@ -166,8 +220,14 @@ class ConversationMessageListView(APIView):
             client_local_date=serializer.validated_data["client_local_date"],
         )
 
-        gateway_stream, usage_holder, memory_ids, chunk_ids = build_gateway_stream(
-            conversation, actor=request.user, content=content, intent=classification["intent"]
+        gateway_stream, usage_holder, memory_ids, chunk_ids, overlay_source_workspaces = (
+            build_gateway_stream(
+                conversation,
+                actor=request.user,
+                content=content,
+                channel=channel,
+                intent=classification["intent"],
+            )
         )
         user_message = Message.objects.create(
             workspace=conversation.workspace,
@@ -215,6 +275,7 @@ class ConversationMessageListView(APIView):
                 request_id=request.request_id,
                 memory_ids=memory_ids,
                 chunk_ids=chunk_ids,
+                overlay_source_workspaces=overlay_source_workspaces,
                 draft_event=draft_event,
                 channel=channel,
             ),

@@ -218,3 +218,47 @@ def test_web_send_message_still_stamps_channel_web(
     assistant_message = Message.objects.get(conversation=conversation, role=Message.Role.ASSISTANT)
     assert user_message.channel == Message.Channel.WEB
     assert assistant_message.channel == Message.Channel.WEB
+
+
+def test_pat_message_list_never_reveals_overlay_source_workspaces(
+    pat, owner, workspace, fake_provider, system_prompt, router_intent_prompt
+):
+    """Codex round-1 P1 (p1-personal-overlay): a web-channel turn in this
+    conversation used the cross-workspace overlay and persisted
+    Message.overlay_source_workspaces naming a workspace the PAT was never
+    bound to. The PAT IS legitimately allowed to read this conversation
+    (it's the PAT's own bound workspace, scoped_for_actor lets it through)
+    -- but that provenance field must still never reach a low-trust read,
+    even for a message the channel can otherwise fully see."""
+    from memory.models import Memory, compute_fingerprint
+
+    company = Workspace.objects.create(name="Acme", owner=owner, type=Workspace.Type.COMPANY)
+    overlay_memory = Memory.objects.create(
+        workspace=company,
+        memory_type=Memory.Type.WORK_LOG,
+        status=Memory.Status.APPROVED,
+        source=Memory.Source.SYSTEM_GENERATED,
+        title="Log",
+        content="shipped the migration",
+        fingerprint=compute_fingerprint("shipped the migration"),
+    )
+    conversation = Conversation.objects.create(workspace=workspace, created_by=owner)
+    web_response = auth_client(owner).post(
+        f"/api/v1/ai/conversations/{conversation.id}/messages",
+        {"content": "hi from web"},
+        format="json",
+    )
+    assert web_response.status_code == 200
+    _parse_sse(web_response)
+
+    assistant_message = Message.objects.get(conversation=conversation, role=Message.Role.ASSISTANT)
+    # Sanity check: the row really does carry the provenance this test guards.
+    assert assistant_message.overlay_source_workspaces == {str(overlay_memory.id): str(company.id)}
+
+    listing = pat_client(pat).get(f"/api/v1/ai/conversations/{conversation.id}/messages")
+    assert listing.status_code == 200
+    serialized = [m for m in listing.data if m["role"] == "assistant"][0]
+    assert serialized["overlay_source_workspaces"] == {}
+    # The memory id itself (and the reply content) are unaffected -- only
+    # the cross-workspace provenance mapping is redacted.
+    assert str(overlay_memory.id) in serialized["memories_used"]

@@ -180,12 +180,19 @@ def _dispatch_tool_request_step(agent, step):
     advance IS the ADR-004-gated trigger here (brief §3), since this kind
     of step is genuinely in ADR-004's risk class, unlike `task_draft`.
     `requested_by` is `agent.created_by` (never a synthetic "agent"
-    identity), so `requester != decider` still binds the real human who
-    submitted the goal, exactly as it would for a human-typed request."""
+    identity) so the accountable human stays on the row, and
+    `origin=agent` records the machine provenance. Under ADR-008's
+    single-owner decision model the owner CAN decide this request -- the
+    gate is their explicit, separate, audited decision over the web
+    channel, not a second human."""
     tool_name = step.payload["tool_name"]
     try:
         approval_request = create_request(
-            workspace=agent.workspace, actor=agent.created_by, tool_name=tool_name, payload={}
+            workspace=agent.workspace,
+            actor=agent.created_by,
+            tool_name=tool_name,
+            payload={},
+            origin=ApprovalRequest.Origin.AGENT,
         )
     except ApprovalServiceError:
         logger.exception(

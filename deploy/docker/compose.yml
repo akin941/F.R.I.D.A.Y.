@@ -35,17 +35,27 @@ services:
       NVIDIA_BASE_URL: "${NVIDIA_BASE_URL:-}"
       NVIDIA_EMBEDDING_MODEL_ID: "${NVIDIA_EMBEDDING_MODEL_ID:-}"
       NVIDIA_EMBEDDING_DIMENSION: "${NVIDIA_EMBEDDING_DIMENSION:-1024}"
+      # Ollama (MVP 12/ADR-007) — same opt-in, gitignored-.env-overridden
+      # mechanism as NVIDIA_* above. OLLAMA_BASE_URL defaults to
+      # host.docker.internal, the Docker Desktop DNS name for a natively-
+      # running Ollama on the host machine (not containerized here).
+      OLLAMA_API_KEY: "${OLLAMA_API_KEY:-}"
+      OLLAMA_MODEL_ID: "${OLLAMA_MODEL_ID:-}"
+      OLLAMA_BASE_URL: "${OLLAMA_BASE_URL:-http://host.docker.internal:11434/v1}"
+      OLLAMA_EMBED_MODEL_ID: "${OLLAMA_EMBED_MODEL_ID:-}"
+      OLLAMA_EMBED_DIMENSION: "${OLLAMA_EMBED_DIMENSION:-}"
       # Obsidian vault export (MVP 5 §3): the STRING value is shared by both
       # containers (web validates it, tier 1, with zero filesystem access at
       # request time) but only `worker` actually has anything bind-mounted
       # at this path (tier 2 -- see worker.volumes below).
       OBSIDIAN_VAULT_PATH: /vault
-      # DEV/TEST ONLY (.env.example): this dev stack has exactly one seeded
-      # user in the e2e smoke path (MVP 5 §5), with no second workspace
-      # member to be a real decider -- same reasoning as CI's e2e job env,
-      # and just as safe here since this whole stack is already DEBUG=true,
-      # a fake AI provider, and an insecure dev secret key.
-      DEV_ALLOW_SELF_APPROVAL: "true"
+      # Single-owner system (ADR-008): signup is off by default in the
+      # daily stack; the owner account comes from `manage.py
+      # bootstrap_owner`. The Playwright e2e smoke still signs up a fresh
+      # user each run (until Phase 4's device-trust identity), so `make
+      # test-e2e` requires SIGNUP_ENABLED=true (e.g. in the gitignored
+      # deploy/docker/.env for that run).
+      SIGNUP_ENABLED: "${SIGNUP_ENABLED:-false}"
       # DEV/TEST ONLY fixture values (MVP 9 §4) -- not real Telegram
       # credentials, just non-empty strings so TelegramWebhookView's
       # fail-closed auth check has something to compare against for the
@@ -79,7 +89,10 @@ services:
     # stack's topology) — running `-B` on more than one worker would
     # double-schedule the periodic tasks. If this stack ever scales to
     # multiple worker replicas, split beat into its own service first.
-    command: uv run celery -A config worker -l info -B
+    # `-Q celery`: the default queue only. Harness tasks are routed to the
+    # `harness` queue (CELERY_TASK_ROUTES) and run on a host runner
+    # (`make harness-runner`) -- this container has no Docker access.
+    command: uv run celery -A config worker -l info -B -Q celery
     volumes:
       - ../../backend:/app
       # Vault export (MVP 5 §3) is the first worker task to touch the host

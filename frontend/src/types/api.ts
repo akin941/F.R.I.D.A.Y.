@@ -21,6 +21,41 @@ export interface ApiWorkspace {
   created_at: string;
 }
 
+// --- Firm dossier (Phase 0 §2, Phase 1 p1-firm-dossier UI) ---
+
+export interface ApiWorkspaceProfileRepo {
+  name: string;
+  url: string;
+  default_branch?: string;
+}
+
+export interface ApiWorkspaceProfileService {
+  name: string;
+  kind?: string;
+  url?: string;
+}
+
+export interface ApiWorkspaceProfileDeployTarget {
+  name: string;
+  host?: string;
+  // Metadata only -- deploy credentials/secrets must NEVER be entered here
+  // (backend workspaces/models.py; secrets stay in env per CLAUDE.md).
+  notes?: string;
+}
+
+export interface ApiWorkspaceProfile {
+  repos?: ApiWorkspaceProfileRepo[];
+  services?: ApiWorkspaceProfileService[];
+  deploy_targets?: ApiWorkspaceProfileDeployTarget[];
+  notes?: string;
+}
+
+// GET/PATCH /api/workspaces/[workspaceId] -- the only surface that exposes
+// `profile`; the workspace list (ApiWorkspace above) deliberately doesn't.
+export interface ApiWorkspaceDetail extends ApiWorkspace {
+  profile: ApiWorkspaceProfile;
+}
+
 export interface SessionResponse {
   user: ApiUser;
   workspaces: ApiWorkspaceSummary[];
@@ -52,6 +87,12 @@ export interface ApiMessage {
   // Same contract, for RAG knowledge chunks (MVP 3 §4): ordered chunk ids
   // supplied as context, not proof of use.
   chunks_used: string[];
+  // {memory_id: source_workspace_id}, populated only for entries in
+  // memories_used that came from the personal-assistant cross-workspace
+  // overlay (Phase 1 p1-personal-overlay); {} otherwise. No UI surface
+  // renders this yet -- it's the data a future "from Workspace X" view
+  // would need, not a redefinition of memories_used's own contract.
+  overlay_source_workspaces: Record<string, string>;
 }
 
 export type ChatStreamEvent =
@@ -62,6 +103,7 @@ export type ChatStreamEvent =
       usage?: Record<string, unknown>;
       memories_used: string[];
       chunks_used: string[];
+      overlay_source_workspaces: Record<string, string>;
     }
   | { type: "error"; error_type: string }
   // Non-terminal, optional, emitted once (only for a task_draft/tool_request
@@ -88,10 +130,10 @@ export type ChatStreamEvent =
 
 // --- Memory (MVP 2) ---
 
-export type MemoryType = "semantic" | "episodic" | "preference" | "procedural";
+export type MemoryType = "semantic" | "episodic" | "preference" | "procedural" | "work_log";
 export type MemorySensitivity = "normal" | "private";
 export type MemoryStatus = "pending_approval" | "approved" | "rejected" | "archived";
-export type MemorySource = "ai_suggested" | "user_created";
+export type MemorySource = "ai_suggested" | "user_created" | "system_generated";
 
 export interface ApiMemory {
   id: string;
@@ -180,6 +222,55 @@ export interface ApiVaultExportExecution {
   retry_count: number;
 }
 
+// harness_implement (Gate A) execution shape -- its `status` is the
+// implementation job's own status (ImplStatus), NOT a vault-export status.
+export interface ApiHarnessImplementExecution {
+  status: ImplStatus;
+  failure_reason: ImplFailureReason;
+  branch_name: string;
+}
+
+// harness_push (Gate B) execution shape.
+export interface ApiHarnessPushExecution {
+  status: ImplStatus;
+  failure_reason: ImplFailureReason;
+  produced_commit_sha: string;
+  push_result: ApiImplPushResult;
+}
+
+// Server-built, whitelisted summary of what is being decided
+// (`ToolSpec.describe_request`); `null` for tools without that hook. The raw
+// `payload` stays unexposed either way.
+export interface ApiHarnessImplementDisplaySummary {
+  kind: "harness_implement";
+  job_id: string;
+  goal: string;
+  // `repo_name` is only a curator-chosen label; `repo_git_url` is what the
+  // agent will actually work against.
+  repo_name: string;
+  repo_git_url: string;
+  branch_name: string;
+  agent: string;
+  reviewer_agent: string;
+}
+
+export interface ApiHarnessPushDisplaySummary {
+  kind: "harness_push";
+  job_id: string;
+  branch_name: string;
+  produced_commit_sha: string;
+  changed_files: string[];
+  changed_files_total: number;
+  diff_summary: string;
+  test_result: { passed: boolean; command: string; exit_code: number | null } | null;
+  review: { verdict: string; summary: string } | null;
+}
+
+export type ApiDisplaySummary =
+  | ApiHarnessImplementDisplaySummary
+  | ApiHarnessPushDisplaySummary
+  | null;
+
 export interface ApiApprovalRequest {
   id: string;
   workspace: string;
@@ -191,7 +282,18 @@ export interface ApiApprovalRequest {
   created_at: string;
   updated_at: string;
   // `payload` is deliberately never included (approvals/serializers.py).
-  execution: ApiVaultExportExecution | null;
+  // Each tool registers its own `execution` shape (or none -- `null`),
+  // keyed on `tool_name`: vault_export -> ApiVaultExportExecution,
+  // harness_implement -> ApiHarnessImplementExecution, harness_push ->
+  // ApiHarnessPushExecution. The UI must branch on `tool_name` before
+  // reading any tool-specific field (never assume vault-export counters).
+  execution:
+    | ApiVaultExportExecution
+    | ApiHarnessImplementExecution
+    | ApiHarnessPushExecution
+    | null;
+  // Optional: absent on responses from a backend predating this field.
+  display_summary?: ApiDisplaySummary;
 }
 
 // --- Agents (MVP 7) ---
@@ -281,4 +383,163 @@ export interface ApiTelegramLinkStatus {
   linked: boolean;
   chat_id: string | null;
   linked_at: string | null;
+}
+
+export type HarnessJobStatus = "pending" | "running" | "succeeded" | "failed" | "cancelled";
+
+export type HarnessJobFailureReason = "" | "timeout" | "runner_error" | "budget_exceeded" | "killed";
+
+export type HarnessAgent = "claude_code" | "codex_cli";
+
+export interface ApiHarnessJob {
+  id: string;
+  workspace: string;
+  repo: string;
+  goal: string;
+  agent: HarnessAgent;
+  sensitivity: string;
+  status: HarnessJobStatus;
+  failure_reason: HarnessJobFailureReason;
+  created_by: string | null;
+  started_at: string | null;
+  elapsed_seconds: number;
+  created_at: string;
+  updated_at: string;
+}
+
+// `raw_transcript` is the CLI's own low-trust output (brief §3/§4, R2
+// mitigation) -- the UI must render it visibly distinguished from
+// `summary`/`findings`, never presented as equally trustworthy prose.
+// All fields optional: `HarnessJob.briefing` defaults to `{}` at the model
+// level (backend/harness/models.py) for any job that hasn't reached
+// finalization yet -- a pending/running/errored-before-briefing job's
+// `briefing` genuinely has none of these keys, not empty-string/empty-array
+// versions of them.
+export interface ApiHarnessJobBriefing {
+  summary?: string;
+  findings?: string[];
+  raw_transcript?: string;
+}
+
+export interface ApiHarnessJobDetail extends ApiHarnessJob {
+  briefing: ApiHarnessJobBriefing;
+}
+
+// --- Harness repos (Phase 3) ---
+
+export interface ApiHarnessRepo {
+  id: string;
+  workspace: string;
+  name: string;
+  git_url: string;
+  default_branch: string;
+  runner: string;
+  enabled: boolean;
+  sensitive: boolean;
+  test_command: string;
+  created_at: string;
+  updated_at: string;
+}
+
+// --- Harness implementation jobs (Phase 3 branch 6/7) ---
+
+export type ImplStatus =
+  | "pending_gate_a"
+  | "implementing"
+  | "pending_review"
+  | "pending_gate_b"
+  | "pushing"
+  | "succeeded"
+  | "failed"
+  | "cancelled";
+
+export type ImplFailureReason =
+  | ""
+  | "timeout"
+  | "runner_error"
+  | "budget_exceeded"
+  | "killed"
+  | "gate_a_rejected"
+  | "gate_b_rejected"
+  | "gate_expired"
+  | "test_command_not_configured"
+  | "test_result_unavailable"
+  | "tests_failed"
+  | "review_changes_requested"
+  | "review_unavailable"
+  | "worktree_expired"
+  | "push_failed"
+  | "no_changes"
+  | "secret_leak";
+
+// A gate revoked by cancel/worktree expiry shows status "expired".
+export type ApiGateSummary = {
+  id: string;
+  status: ApprovalStatus;
+  decided_at: string | null;
+} | null;
+
+export interface ApiImplementationJob {
+  id: string;
+  workspace: string;
+  repo: string;
+  repo_name: string;
+  discovery_job: string | null;
+  goal: string;
+  agent: "claude_code";
+  // "" when no cross-vendor reviewer was selectable.
+  reviewer_agent: "codex_cli" | "";
+  status: ImplStatus;
+  failure_reason: ImplFailureReason;
+  cancel_requested: boolean;
+  branch_name: string;
+  created_by: string | null;
+  started_at: string | null;
+  elapsed_seconds: number | null;
+  created_at: string;
+  updated_at: string;
+  gate_a: ApiGateSummary;
+  gate_b: ApiGateSummary;
+}
+
+export interface ApiImplementationReview {
+  id: string;
+  agent: "codex_cli";
+  status: "pending" | "running" | "succeeded" | "failed";
+  verdict: "" | "approved" | "changes_requested";
+  // Gateway-produced -- Jarvis's own summarization, trusted-ish.
+  summary: string;
+  findings: string[];
+  // The reviewer CLI's own output -- LOW TRUST (R2), rendered only behind
+  // an explicit disclosure, never merged with `summary`/`findings`.
+  raw_transcript: string;
+  elapsed_seconds: number | null;
+  created_at: string;
+  updated_at: string;
+}
+
+// `{}` until the job has run tests / attempted a push.
+export type ApiImplTestResult =
+  | { ran: boolean; exit_code: number | null; passed: boolean; command: string }
+  | Record<string, never>;
+
+export type ApiImplPushResult =
+  | { pushed: boolean; branch_name?: string; error?: string }
+  | Record<string, never>;
+
+export interface ApiImplementationJobDetail extends ApiImplementationJob {
+  base_commit_sha: string;
+  produced_commit_sha: string;
+  changed_files: string[];
+  // Gateway-produced summary of the diff stat (deterministic fallback if
+  // the gateway fails) -- a model summary, not the diff itself.
+  diff_summary: string;
+  test_result: ApiImplTestResult;
+  push_result: ApiImplPushResult;
+  worktree_expires_at: string | null;
+  // The implementing CLI's own output -- LOW TRUST (R2), same rendering
+  // discipline as `ApiHarnessJobBriefing.raw_transcript`.
+  raw_transcript: string;
+  // Newest first.
+  reviews: ApiImplementationReview[];
 }

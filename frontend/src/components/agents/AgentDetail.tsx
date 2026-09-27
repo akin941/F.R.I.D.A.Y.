@@ -5,9 +5,15 @@ import { Button } from "@/components/ui/button";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Skeleton } from "@/components/ui/skeleton";
 import { AgentStepRow } from "@/components/agents/AgentStepRow";
-import { AGENT_IN_FLIGHT_STATUSES, AGENT_STATUS_LABELS } from "@/components/agents/labels";
+import {
+  AGENT_IN_FLIGHT_STATUSES,
+  AGENT_STATUS_LABELS,
+  agentFailureReasonLabel,
+} from "@/components/agents/labels";
 import { apiGetJson, apiPostJson, ApiError } from "@/lib/api-client";
 import type { ApiAgentDetail } from "@/types/api";
+import { VIEW_SCROLL_ROOT } from "@/components/shell/view-scroll";
+import { cn } from "@/lib/utils";
 
 /**
  * Detail view for one `Agent` (brief §5): its ordered `AgentStep` list,
@@ -18,7 +24,7 @@ import type { ApiAgentDetail } from "@/types/api";
  */
 export function AgentDetail({ agentId, onBack }: { agentId: string; onBack: () => void }) {
   const [agent, setAgent] = useState<ApiAgentDetail | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [cancelling, setCancelling] = useState(false);
   const [cancelError, setCancelError] = useState<string | null>(null);
@@ -77,7 +83,7 @@ export function AgentDetail({ agentId, onBack }: { agentId: string; onBack: () =
     agent.status !== "cancelled";
 
   return (
-    <div className="flex flex-1 flex-col gap-4 overflow-y-auto p-6">
+    <div className={cn(VIEW_SCROLL_ROOT, "gap-4 p-6")}>
       <Button variant="outline" size="sm" className="self-start" onClick={onBack}>
         &larr; Ajanlara dön
       </Button>
@@ -88,11 +94,18 @@ export function AgentDetail({ agentId, onBack }: { agentId: string; onBack: () =
         </Alert>
       ) : null}
 
-      {loading || !agent ? (
-        <div className="flex flex-col gap-3">
-          <Skeleton className="h-8 w-2/3" />
-          <Skeleton className="h-24 w-full" />
-        </div>
+      {/* Same failed-first-load handling as HarnessJobDetail. */}
+      {!agent ? (
+        loading ? (
+          <div className="flex flex-col gap-3">
+            <Skeleton className="h-8 w-2/3" />
+            <Skeleton className="h-24 w-full" />
+          </div>
+        ) : loadError ? (
+          <Button variant="outline" size="sm" className="self-start" onClick={() => void loadAgent()}>
+            Tekrar dene
+          </Button>
+        ) : null
       ) : (
         <>
           <div className="flex flex-wrap items-start justify-between gap-4">
@@ -100,7 +113,7 @@ export function AgentDetail({ agentId, onBack }: { agentId: string; onBack: () =
               <h1 className="text-xl font-semibold tracking-tight">{agent.goal}</h1>
               <p className="text-sm text-muted-foreground">
                 {AGENT_STATUS_LABELS[agent.status]}
-                {agent.failure_reason ? ` — ${agent.failure_reason}` : ""}
+                {agent.failure_reason ? ` — ${agentFailureReasonLabel(agent.failure_reason)}` : ""}
               </p>
               {agent.skill_name ? (
                 <p className="text-sm text-muted-foreground">Şu beceriyle çalıştı: {agent.skill_name}</p>

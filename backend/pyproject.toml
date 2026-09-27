@@ -62,6 +62,7 @@ testpaths = [
     "agents",
     "skills",
     "integrations",
+    "harness",
 ]
 
 [tool.importlinter]
@@ -81,6 +82,7 @@ root_packages = [
     "agents",
     "skills",
     "integrations",
+    "harness",
 ]
 
 # TODO(MVP 1): add the full modular-monolith contracts once kernel apps exist:
@@ -97,12 +99,12 @@ forbidden_modules = ["config"]
 name = "core must stay independent of kernel apps"
 type = "forbidden"
 source_modules = ["core"]
-forbidden_modules = ["accounts", "workspaces", "audit", "ai_core", "assistant", "memory", "knowledge", "tasks", "approvals", "tools", "agents", "skills", "integrations"]
+forbidden_modules = ["accounts", "workspaces", "audit", "ai_core", "assistant", "memory", "knowledge", "tasks", "approvals", "tools", "agents", "skills", "integrations", "harness"]
 
 [[tool.importlinter.contracts]]
 name = "kernel apps must not import the Django project config"
 type = "forbidden"
-source_modules = ["accounts", "workspaces", "audit", "ai_core", "assistant", "memory", "knowledge", "tasks", "approvals", "tools", "agents", "skills", "integrations"]
+source_modules = ["accounts", "workspaces", "audit", "ai_core", "assistant", "memory", "knowledge", "tasks", "approvals", "tools", "agents", "skills", "integrations", "harness"]
 forbidden_modules = ["config"]
 
 # ai_core is the single door for LLM traffic (ADR-003): it must never depend on
@@ -111,7 +113,7 @@ forbidden_modules = ["config"]
 name = "ai_core must not import business apps"
 type = "forbidden"
 source_modules = ["ai_core"]
-forbidden_modules = ["accounts", "workspaces", "audit", "assistant", "memory", "knowledge", "tasks", "approvals", "tools", "agents", "skills", "integrations"]
+forbidden_modules = ["accounts", "workspaces", "audit", "assistant", "memory", "knowledge", "tasks", "approvals", "tools", "agents", "skills", "integrations", "harness"]
 ignore_imports = [
     "ai_core.tests.* -> accounts.*",
 ]
@@ -120,7 +122,7 @@ ignore_imports = [
 name = "audit must not depend on business apps (one-way: apps call audit)"
 type = "forbidden"
 source_modules = ["audit"]
-forbidden_modules = ["accounts", "workspaces", "assistant", "memory", "knowledge", "tasks", "approvals", "tools", "agents"]
+forbidden_modules = ["accounts", "workspaces", "assistant", "memory", "knowledge", "tasks", "approvals", "tools", "agents", "harness"]
 # Tests exercise the wired flows end-to-end; the contract targets production code.
 ignore_imports = [
     "audit.tests.* -> accounts.*",
@@ -308,3 +310,42 @@ name = "integrations must not import approvals or agents (integrations needs nei
 type = "forbidden"
 source_modules = ["integrations"]
 forbidden_modules = ["approvals", "agents"]
+
+# harness (Phase 2 brief) is a new one-way dependency root: it may import
+# workspaces (HarnessRepo's WorkspaceScopedModel base, curator-role checks),
+# ai_core (record_external_usage(), branch 2+) and memory
+# (record_work_log(), branch 3+), but none of those apps may import harness
+# back -- no app yet depends on harness output beyond the memory row it
+# writes (brief §"Boundary vs. existing systems"). audit is already covered
+# by the blanket "audit must not depend on business apps" contract above.
+# Phase 3 branch 2 (brief §boundary) adds two more: harness may import
+# approvals (Gate A/B request via `approvals.services.create_request`) and
+# tools (registering `harness_implement`/`harness_push` as real `ToolSpec`s,
+# mirroring `tools/export.py`'s exact shape) -- both already forbidden from
+# importing harness back via the blanket "no other app may import harness"
+# contract below, which already lists both in its `source_modules`.
+[[tool.importlinter.contracts]]
+name = "workspaces must not import harness (direction: harness -> workspaces)"
+type = "forbidden"
+source_modules = ["workspaces"]
+forbidden_modules = ["harness"]
+
+[[tool.importlinter.contracts]]
+name = "memory must not import harness (direction: harness -> memory)"
+type = "forbidden"
+source_modules = ["memory"]
+forbidden_modules = ["harness"]
+
+# The remaining apps have no stated relationship with harness at all in
+# this phase (brief §"Boundary vs. existing systems": "nothing may import
+# harness"). One consolidated contract, mirroring how ai_core/audit's own
+# blanket "must not import business apps" contracts already cover harness
+# by including it in their forbidden_modules list above (Codex code-review
+# P3, branch 1 round 4: an earlier draft only added workspaces/memory,
+# leaving every other app free to import harness while lint-imports still
+# passed).
+[[tool.importlinter.contracts]]
+name = "no other app may import harness (harness is a leaf dependency root)"
+type = "forbidden"
+source_modules = ["accounts", "assistant", "knowledge", "tasks", "approvals", "tools", "agents", "skills", "integrations"]
+forbidden_modules = ["harness"]

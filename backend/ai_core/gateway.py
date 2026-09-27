@@ -10,6 +10,17 @@ Guarantees:
 `complete(..., on_usage=callback)` invokes `callback(usage)` exactly once, right
 after the (single) ModelUsage row is persisted, on every accounted path. Callers
 must not raise from the callback and must never create a second ModelUsage row.
+
+`record_external_usage()` (module-level, not a method) is the single
+exception to "every ModelUsage row comes from complete()/embed()": an
+external CLI coding agent (`harness`, Phase 2, ADR-008 decision 1) runs
+out of process, so there is no provider adapter for the gateway's own
+retry/fallback machinery to drive. ADR-008 is explicit that this usage
+"is reported through the InferenceGateway as ModelUsage," not written
+around it — this function is that reporting path, and it is the *only*
+place outside `complete()`/`embed()`'s own internal `_finalize` that may
+construct a `ModelUsage` row. `harness` must never import `ModelUsage`
+directly.
 """
 
 import os
@@ -28,6 +39,54 @@ _MTOK = Decimal(1_000_000)
 _COST_PRECISION = Decimal("0.000001")
 
 
+def record_external_usage(
+    *,
+    workspace,
+    purpose,
+    backend,
+    input_tokens,
+    output_tokens,
+    estimated_cost,
+    latency_ms,
+    success,
+    actor=None,
+    error_type="",
+    context_report=None,
+):
+    """Record one `ModelUsage` row for a call that ran entirely out of
+    process (no `ModelProvider`, no adapter, no gateway retry/fallback
+    logic — the caller already made and finished the call itself).
+
+    Unlike `complete()`/`embed()`'s own `_finalize`, there is no
+    `ModelProvider` fronting this call (`provider=None`, matching
+    `ModelUsage.provider`'s nullable "no provider available" contract,
+    `ai_core/models.py:130`) and no adapter-estimated cost to compute —
+    `estimated_cost` is the caller's own already-known figure (e.g. an
+    external CLI's own reported cost), taken as given, not derived from a
+    `ModelProvider`'s per-token pricing. `request_id` is read from the
+    active request the same way `_finalize` already does, so external and
+    in-process rows correlate the same way; `routing_reason` is always
+    empty (there is no provider to have routed to)."""
+    user = actor if getattr(actor, "is_authenticated", False) else None
+    return ModelUsage.objects.create(
+        workspace=workspace,
+        user=user,
+        provider=None,
+        prompt_version=None,
+        purpose=purpose,
+        request_id=get_request_id() or "",
+        backend=backend,
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+        latency_ms=latency_ms,
+        success=success,
+        error_type=error_type or "",
+        routing_reason="",
+        estimated_cost=estimated_cost,
+        context_report=dict(context_report or {}),
+    )
+
+
 @dataclass
 class GatewayResult:
     text: str
@@ -39,6 +98,21 @@ class GatewayResult:
 class EmbeddingGatewayResult:
     vectors: list
     usage: ModelUsage
+
+
+@dataclass
+class TranscribeGatewayResult:
+    text: str
+    usage: ModelUsage
+    audio_seconds: float = 0.0
+
+
+@dataclass
+class SynthesizeGatewayResult:
+    audio: bytes
+    usage: ModelUsage
+    content_type: str = "audio/wav"
+    audio_seconds: float = 0.0
 
 
 class InferenceGateway:
@@ -70,7 +144,9 @@ class InferenceGateway:
         merged_params.update(params or {})
         base_report = dict(context_report or {})
 
-        providers = self._select_providers(capability=ModelProvider.Capability.CHAT)
+        providers = self._select_providers(
+            capability=ModelProvider.Capability.CHAT, purpose=purpose
+        )
         if not providers:
             self._record(
                 purpose=purpose,
@@ -132,7 +208,9 @@ class InferenceGateway:
         base_report = dict(context_report or {})
         base_report["item_count"] = len(texts)
 
-        providers = self._select_providers(capability=ModelProvider.Capability.EMBEDDING)
+        providers = self._select_providers(
+            capability=ModelProvider.Capability.EMBEDDING, purpose=purpose
+        )
         if not providers:
             self._record(
                 purpose=purpose,
@@ -206,22 +284,218 @@ class InferenceGateway:
             retryable=last_error.retryable if last_error else False,
         )
 
+    def transcribe(
+        self,
+        purpose,
+        audio,
+        *,
+        content_type="",
+        actor=None,
+        workspace=None,
+        prompt_version=None,
+        context_report=None,
+        on_usage=None,
+    ):
+        """Speech-to-text (MVP 12). Same single-door/one-ModelUsage-row/
+        retry/fallback contract as `embed()` (ADR-003) — STT is a gateway
+        call like any other. `audio` is raw bytes; returns the transcript.
+        No streaming variant."""
+        started = time.monotonic()
+        base_report = dict(context_report or {})
+
+        result, usage = self._run_audio(
+            purpose=purpose,
+            capability=ModelProvider.Capability.STT,
+            adapter_call=lambda adapter: adapter.transcribe(
+                audio, content_type=content_type, purpose=purpose
+            ),
+            actor=actor,
+            workspace=workspace,
+            prompt_version=prompt_version,
+            base_report=base_report,
+            started=started,
+            on_usage=on_usage,
+        )
+        return TranscribeGatewayResult(
+            text=result.text, usage=usage, audio_seconds=result.audio_seconds
+        )
+
+    def synthesize(
+        self,
+        purpose,
+        text,
+        *,
+        params=None,
+        actor=None,
+        workspace=None,
+        prompt_version=None,
+        context_report=None,
+        on_usage=None,
+    ):
+        """Text-to-speech (MVP 12). Same contract as `transcribe()`. `text`
+        in, synthesized audio bytes out. No streaming variant."""
+        started = time.monotonic()
+        base_report = dict(context_report or {})
+
+        result, usage = self._run_audio(
+            purpose=purpose,
+            capability=ModelProvider.Capability.TTS,
+            adapter_call=lambda adapter: adapter.synthesize(text, params=params, purpose=purpose),
+            actor=actor,
+            workspace=workspace,
+            prompt_version=prompt_version,
+            base_report=base_report,
+            started=started,
+            on_usage=on_usage,
+        )
+        return SynthesizeGatewayResult(
+            audio=result.audio,
+            usage=usage,
+            content_type=result.content_type,
+            audio_seconds=result.audio_seconds,
+        )
+
+    def _run_audio(
+        self,
+        *,
+        purpose,
+        capability,
+        adapter_call,
+        actor,
+        workspace,
+        prompt_version,
+        base_report,
+        started,
+        on_usage,
+    ):
+        """Shared STT/TTS execution: provider selection + retry/fallback +
+        exactly one ModelUsage row, mirroring `embed()`'s non-streaming
+        shape. `adapter_call(adapter)` performs the one provider call and
+        returns a Transcribe/Synthesize AdapterResult carrying `audio_seconds`
+        (recorded in context_report — the real STT/TTS cost signal, since
+        this class of provider is priced by duration, not tokens)."""
+        providers = self._select_providers(capability=capability, purpose=purpose)
+        if not providers:
+            self._record(
+                purpose=purpose,
+                actor=actor,
+                workspace=workspace,
+                prompt_version=prompt_version,
+                provider=None,
+                result=None,
+                success=False,
+                error_type="no_provider",
+                started=started,
+                report=base_report,
+                attempts=[],
+                on_usage=on_usage,
+            )
+            raise NoProviderAvailable()
+
+        attempts = []
+        last_error = None
+        last_provider = None
+        for provider in providers:
+            last_provider = provider
+            adapter = self._adapter(provider)
+            for attempt in range(1, self.max_retries + 2):
+                try:
+                    result = adapter_call(adapter)
+                except AdapterError as exc:
+                    attempts.append(self._attempt_entry(provider, attempt, exc))
+                    last_error = exc
+                    if not exc.retryable:
+                        break
+                    time.sleep(self.backoff_seconds * attempt)
+                    continue
+                except Exception:
+                    exc = AdapterError("unknown", retryable=False)
+                    attempts.append(self._attempt_entry(provider, attempt, exc))
+                    last_error = exc
+                    break
+                attempts.append(self._attempt_entry(provider, attempt, None))
+                report = dict(base_report)
+                report["audio_seconds"] = getattr(result, "audio_seconds", 0.0)
+                usage = self._record(
+                    purpose=purpose,
+                    actor=actor,
+                    workspace=workspace,
+                    prompt_version=prompt_version,
+                    provider=provider,
+                    result=result,
+                    success=True,
+                    error_type="",
+                    started=started,
+                    report=report,
+                    attempts=attempts,
+                    on_usage=on_usage,
+                )
+                return result, usage
+        self._record(
+            purpose=purpose,
+            actor=actor,
+            workspace=workspace,
+            prompt_version=prompt_version,
+            provider=last_provider,
+            result=None,
+            success=False,
+            error_type=last_error.error_type if last_error else "unknown",
+            started=started,
+            report=base_report,
+            attempts=attempts,
+            on_usage=on_usage,
+        )
+        raise GatewayError(
+            last_error.error_type if last_error else "unknown",
+            retryable=last_error.retryable if last_error else False,
+        )
+
     # --- provider selection ---
 
-    def _select_providers(self, *, capability=ModelProvider.Capability.CHAT):
+    def _select_providers(self, *, capability=ModelProvider.Capability.CHAT, purpose=""):
         """Active providers of the given capability, by priority; fake only
         behind the flag, real ones only when their key env var is actually
-        set. Primary + one fallback."""
-        selected = []
+        set. Primary + one fallback.
+
+        Tier routing skeleton (phase 0, §J): if `purpose` maps to a tier in
+        `settings.AI_PURPOSE_TIERS` and that tier has eligible providers
+        (`ModelTier` rows), those are ordered first; everything else keeps
+        priority order behind them. With no tier configuration the result
+        is byte-for-byte the old priority order. Each selected provider is
+        annotated with an in-memory `_routing_reason`, persisted onto its
+        `ModelUsage` row by `_record` — the single usage writer."""
+        eligible = []
         for provider in ModelProvider.objects.filter(
             is_active=True, capability=capability
         ).order_by("priority", "name"):
             if provider.provider_type == ModelProvider.ProviderType.FAKE:
                 if getattr(settings, "AI_FAKE_PROVIDER", False):
-                    selected.append(provider)
+                    eligible.append(provider)
             elif os.environ.get(provider.api_key_env_var or "", ""):
-                selected.append(provider)
-        return selected[:2]
+                eligible.append(provider)
+
+        tier_name = (getattr(settings, "AI_PURPOSE_TIERS", None) or {}).get(purpose, "")
+        primary_reason = "priority"
+        if tier_name:
+            from ai_core.models import ModelTier
+
+            tier_provider_ids = set(
+                ModelTier.objects.filter(tier=tier_name).values_list("provider_id", flat=True)
+            )
+            in_tier = [p for p in eligible if p.id in tier_provider_ids]
+            if in_tier:
+                eligible = in_tier + [p for p in eligible if p.id not in tier_provider_ids]
+                primary_reason = f"tier:{tier_name}"
+
+        selected = eligible[:2]
+        for position, provider in enumerate(selected):
+            if len(selected) == 1:
+                provider._routing_reason = "only_provider"
+            elif position == 0:
+                provider._routing_reason = primary_reason
+            else:
+                provider._routing_reason = f"fallback:{position}"
+        return selected
 
     # --- non-streaming path ---
 
@@ -492,6 +766,7 @@ class InferenceGateway:
             latency_ms=latency_ms,
             success=success,
             error_type=error_type or "",
+            routing_reason=getattr(provider, "_routing_reason", "") if provider else "",
             estimated_cost=self._estimate_cost(provider, input_tokens, output_tokens),
             context_report=context_report,
         )

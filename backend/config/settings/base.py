@@ -48,6 +48,7 @@ INSTALLED_APPS = [
     "skills",
     "agents",
     "integrations",
+    "harness",
 ]
 
 AUTH_USER_MODEL = "accounts.User"
@@ -118,6 +119,17 @@ CELERY_RESULT_BACKEND = REDIS_URL
 CELERY_TASK_ALWAYS_EAGER = env.bool("CELERY_TASK_ALWAYS_EAGER", default=False)
 CELERY_TASK_EAGER_PROPAGATES = env.bool("CELERY_TASK_EAGER_PROPAGATES", default=False)
 
+# Harness runner queue (Phase 3 branch 8, ADR-008 decision 7's runner
+# abstraction): every `harness.tasks.*` task -- job execution AND the
+# recovery scans, which also call `docker` -- is routed to its own queue,
+# consumed only by a worker running on a registered runner host that has
+# Docker and the harness images (first runner: the owner's Mac, `make
+# harness-runner`). The compose worker has no Docker socket and consumes
+# only the default queue, so it can never pick up a harness task and fail
+# it. With no runner running, harness jobs simply wait `pending`.
+HARNESS_CELERY_QUEUE = env("HARNESS_CELERY_QUEUE", default="harness")
+CELERY_TASK_ROUTES = {"harness.tasks.*": {"queue": HARNESS_CELERY_QUEUE}}
+
 # --- API / auth ---
 
 REST_FRAMEWORK = {
@@ -153,6 +165,11 @@ AI_TIMEOUT_CONNECT = env.int("AI_TIMEOUT_CONNECT", default=10)
 AI_TIMEOUT_READ = env.int("AI_TIMEOUT_READ", default=60)
 AI_MAX_RETRIES = env.int("AI_MAX_RETRIES", default=2)
 AI_RETRY_BACKOFF_SECONDS = env.float("AI_RETRY_BACKOFF_SECONDS", default=0.5)
+# Tier routing skeleton (phase 0, MASTER_PLAN §J): purpose -> tier name
+# ("cheap"/"mid"/"strong", ai_core.ModelTier). Empty = pure priority order,
+# byte-for-byte the pre-phase-0 gateway behavior. Deliberately a settings
+# dict, not env/DB, until it needs runtime editing (phase-0 brief §4).
+AI_PURPOSE_TIERS = {}
 
 # --- Knowledge/RAG (MVP 3) ---
 
@@ -197,13 +214,6 @@ OBSIDIAN_VAULT_PATH = env("OBSIDIAN_VAULT_PATH", default="")
 APPROVAL_REQUEST_TTL_HOURS = env.int("APPROVAL_REQUEST_TTL_HOURS", default=24)
 
 # Dev-only escape hatch for the requester != decider rule ADR-004 requires
-# (MVP 5 §1) — lets a single-user personal workspace's own owner approve
-# their own request, since there is no agent runtime yet and (today) no
-# second workspace member to be the decider. NEVER set this in a real
-# deployment: `approvals.apps.ApprovalsConfig.ready()` refuses to boot the
-# process at all if this is True while DEBUG is False.
-DEV_ALLOW_SELF_APPROVAL = env.bool("DEV_ALLOW_SELF_APPROVAL", default=False)
-
 # --- Agent runtime (MVP 7) ---
 
 # Plan step-count bound (brief §1, user-mandated brake #1): a planner call
@@ -257,6 +267,154 @@ AGENT_DISPATCH_RECOVERY_GRACE_SECONDS = env.int("AGENT_DISPATCH_RECOVERY_GRACE_S
 AGENT_APPROVAL_RESUME_RECOVERY_GRACE_SECONDS = env.int(
     "AGENT_APPROVAL_RESUME_RECOVERY_GRACE_SECONDS", default=60
 )
+
+# --- Harness runner (Phase 2 branch 2, brief §2) ---
+
+# Runtime brake (brief §2, brake #1) -- the Celery job task's own soft time
+# limit, covering the container's whole run (clone + CLI invocation).
+HARNESS_MAX_JOB_SECONDS = env.int("HARNESS_MAX_JOB_SECONDS", default=1800)
+
+# Cost/budget ceiling (brief §2, brake #2), checked against the CLI's own
+# reported cost after the run completes -- an agent without a reliable
+# reported cost figure is simply not offered as a choice at all (brief,
+# Codex round-1 MEDIUM), so this ceiling is never silently unenforced.
+# A plain string, not a float -- consumers wrap it in `Decimal(str(...))`
+# so cost comparisons never pick up binary-float rounding error.
+HARNESS_MAX_JOB_COST = env("HARNESS_MAX_JOB_COST", default="1.00")
+
+# Kill switch (brief §2, brake #3): grace period between `docker stop`
+# (SIGTERM, lets the CLI exit cleanly) and `docker kill` (SIGKILL) when
+# tearing a container down, whether via cancellation or brake enforcement.
+HARNESS_KILL_GRACE_SECONDS = env.int("HARNESS_KILL_GRACE_SECONDS", default=10)
+
+# How often the owning Celery task polls `HarnessJob.cancel_requested`
+# while its container is running (brief, Codex round-4 MEDIUM fix: a
+# non-blocking wait loop around the whole container lifetime, not just a
+# check "between phases" -- a cancel during the one long-running phase,
+# the CLI invocation itself, must be observed before it exits on its own).
+HARNESS_CANCEL_POLL_SECONDS = env.int("HARNESS_CANCEL_POLL_SECONDS", default=2)
+
+# The Celery task's own soft_time_limit must exceed HARNESS_MAX_JOB_SECONDS
+# by this much (Codex code-review P2, branch 2 round 5: an earlier draft
+# set soft_time_limit == HARNESS_MAX_JOB_SECONDS exactly, racing the wait
+# loop's own internal timeout check -- if Celery's limit fired while the
+# loop was still mid-teardown/capture/finalize, the interrupted work was
+# abandoned and the outer safety net could duplicate or lose the outcome).
+# Covers capturing logs, tearing the container down, and writing the
+# terminal ModelUsage/HarnessJob state -- all Docker-control calls the
+# wait loop's own timeout branch already runs before returning. Must cover
+# the worst-case sum of every Docker-control call this path can make
+# (Codex code-review P2, branch 2 round 7: the old default of 30s covered
+# barely one of these calls, let alone all of them; round 8: the round-7
+# fix's own math missed `_teardown_container()`'s `container_is_running()`
+# inspect call between `stop_container` and `kill_container`, one more
+# full `_DOCKER_CONTROL_TIMEOUT_SECONDS` the 150s draft didn't cover):
+#   capture_logs      _DOCKER_CONTROL_TIMEOUT_SECONDS                 = 30
+#   stop_container    HARNESS_KILL_GRACE_SECONDS + _DOCKER_CONTROL_...= 10 + 30 = 40
+#   container_is_running (inspect, before kill)  _DOCKER_CONTROL_...  = 30
+#   kill_container     _DOCKER_CONTROL_TIMEOUT_SECONDS (if running)   = 30
+#   remove_container   _DOCKER_CONTROL_TIMEOUT_SECONDS                = 30
+#                                                              total   = 160
+# 180s leaves headroom above that worst case without drifting out of sync
+# every time one of those timeouts changes.
+HARNESS_CELERY_FINALIZATION_BUFFER_SECONDS = env.int(
+    "HARNESS_CELERY_FINALIZATION_BUFFER_SECONDS", default=180
+)
+
+# Recovery scan (brief §2, brake #4): mirrors agents'/memory's/knowledge's/
+# tools' identical recovery-grace convention. A job still `running` past
+# HARNESS_MAX_JOB_SECONDS plus this buffer, never finalized by its own
+# worker (crash/OOM/hard-kill), is swept -- the sweep uses the job's own
+# `container_id` to run the same stop/kill/rm sequence, rather than
+# assuming a dead worker means a dead container.
+HARNESS_RECOVERY_GRACE_SECONDS = env.int("HARNESS_RECOVERY_GRACE_SECONDS", default=300)
+
+# A second, distinct recovery case (Codex code-review P2, branch 2 round
+# 2; mirrors agents' identical AGENT_DISPATCH_RECOVERY_GRACE_SECONDS): a
+# HarnessJob still `pending` this long since creation had its
+# transaction.on_commit-scheduled dispatch lost (e.g. the broker was down
+# at commit time -- the exact swallowed-exception path in
+# harness.services.dispatch_harness_job). Simply re-dispatched; the
+# execution engine's own `_claim_job` fencing makes this safe even if the
+# original dispatch actually does arrive later.
+HARNESS_DISPATCH_RECOVERY_GRACE_SECONDS = env.int(
+    "HARNESS_DISPATCH_RECOVERY_GRACE_SECONDS", default=60
+)
+
+# A third, distinct recovery case (Codex code-review P2, branch 2 round 7):
+# a job that already finalized as `failed`/`cancelled`/`succeeded` can still
+# carry a non-empty `container_id` if its own `_safe_remove_container` call
+# genuinely failed (as opposed to "already gone") -- that container is then
+# leaked on the host with nothing left to ever revisit it, since the first
+# recovery case above only ever sweeps `status=running` jobs. Swept once a
+# terminal job has sat this long since its last update, to avoid racing an
+# in-flight finalize that is still legitimately retrying removal itself.
+HARNESS_LEAKED_CONTAINER_RECOVERY_GRACE_SECONDS = env.int(
+    "HARNESS_LEAKED_CONTAINER_RECOVERY_GRACE_SECONDS", default=300
+)
+
+# Per-agent container image (brief: "a single Jarvis-owned Dockerfile per
+# supported agent, pinned to a specific, recorded base-image digest --
+# never `latest`" -- see harness/docker/*.Dockerfile). Image *tags* are
+# configured here rather than hardcoded so a reviewed digest bump
+# (the brief's own "reviewed bump/rebuild cadence") is an env change, not
+# a code change.
+HARNESS_IMAGE_CLAUDE_CODE = env(
+    "HARNESS_IMAGE_CLAUDE_CODE", default="jarvis-harness-claude-code:unbuilt"
+)
+HARNESS_IMAGE_CODEX_CLI = env("HARNESS_IMAGE_CODEX_CLI", default="jarvis-harness-codex-cli:unbuilt")
+
+# Docker network implementing the container policy's egress allowlist
+# (brief: "no general internet access... enforced via Docker network
+# policy"). Provisioning the actual restricted-egress network is runner
+# setup, not application code -- this only names which network a launched
+# container joins.
+HARNESS_DOCKER_NETWORK = env("HARNESS_DOCKER_NETWORK", default="jarvis-harness-egress")
+
+# Resource limits applied to every launched container (brief: "a runaway or
+# hostile process inside the container cannot exhaust the runner").
+HARNESS_CONTAINER_MEMORY = env("HARNESS_CONTAINER_MEMORY", default="2g")
+HARNESS_CONTAINER_CPUS = env("HARNESS_CONTAINER_CPUS", default="1.0")
+HARNESS_CONTAINER_PIDS_LIMIT = env.int("HARNESS_CONTAINER_PIDS_LIMIT", default=256)
+
+# --- Harness writable runner (Phase 3 branch 1, brief §boundary) ---
+
+# The push/clean-clone credential for HarnessImplementationJob, resolved
+# from env only -- never stored on HarnessRepo (Phase 2 branch 1's "no
+# credentials field" rule stands; CLAUDE.md "secrets only via env"). A
+# single SSH deploy key shared across every registered repo, mirroring
+# harness.execution._resolve_cli_env's identical one-credential-per-
+# capability simplicity -- a per-repo credential matrix is a real feature
+# this phase doesn't need yet. Empty by default: a repo needing
+# implementation/push (not just discovery) genuinely can't be used for
+# that until this is configured -- fails closed, not a silent no-auth
+# attempt.
+HARNESS_GIT_SSH_KEY_PATH = env("HARNESS_GIT_SSH_KEY_PATH", default="")
+
+# --- Harness implementation jobs (Phase 3 branch 2, brief §boundary) ---
+
+# Self-modification hard-block (ADR-004: "agents can never modify their own
+# definitions or permissions"): remote URLs recognized as "this Jarvis
+# installation itself", compared via harness.repo_identity's canonical
+# normalizer, not exact string match -- so the https/ssh/scp-like forms of
+# the same remote are all correctly recognized. Empty by default -- and since
+# Phase 3 branch 5 an empty list REFUSES every implementation job (fail
+# closed): the guard cannot tell whether a repo is Jarvis itself until the
+# owner configures this installation's own remote(s) here.
+HARNESS_SELF_REPO_IDENTIFIERS = [
+    value.strip()
+    for value in env.list("HARNESS_SELF_REPO_IDENTIFIERS", default=[])
+    if value.strip()
+]
+
+# How long a finished-but-undecided implementation worktree is kept on disk
+# waiting for a Gate B (push approval) decision, across however long the
+# owner takes and across a possible worker restart (brief §boundary,
+# "worktree lifetime across the Gate-B wait"). The recovery scan (branch 4)
+# sweeps and fails closed any worktree past this deadline whose job never
+# reached a terminal state -- a backstop, not the primary cleanup path
+# (every terminal transition cleans up its own worktree immediately).
+HARNESS_WORKTREE_RETENTION_HOURS = env.int("HARNESS_WORKTREE_RETENTION_HOURS", default=72)
 
 # --- Telegram bot (MVP 9 §4) ---
 

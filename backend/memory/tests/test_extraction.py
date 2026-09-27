@@ -33,14 +33,31 @@ class TestHappyPath:
     def test_empty_candidates_list_is_valid(self):
         assert parse_candidates(valid_payload(candidates=[])) == []
 
-    def test_all_memory_types_accepted(self):
+    def test_all_conversation_derivable_memory_types_accepted(self):
+        """WORK_LOG is deliberately excluded (Phase 1 p1-work-log, Codex
+        round-6 P2): it's reserved for record_work_log()'s system_generated
+        pairing (ADR-008 k.4) and must never be extractable from a
+        conversation — see TestWorkLogTypeRejected below."""
         from memory.models import Memory
 
         for memory_type in Memory.Type.values:
+            if memory_type == Memory.Type.WORK_LOG:
+                continue
             payload = valid_payload(
                 candidates=[{"type": memory_type, "title": "T", "content": "C"}]
             )
             assert parse_candidates(payload)[0]["type"] == memory_type
+
+
+class TestWorkLogTypeRejected:
+    def test_work_log_candidate_is_rejected(self):
+        from memory.models import Memory
+
+        payload = valid_payload(
+            candidates=[{"type": Memory.Type.WORK_LOG, "title": "T", "content": "C"}]
+        )
+        with pytest.raises(ExtractionParseError):
+            parse_candidates(payload)
 
 
 class TestFakeFixtureLineage:

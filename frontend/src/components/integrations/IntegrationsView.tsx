@@ -12,6 +12,8 @@ import { TelegramLinkPanel } from "@/components/integrations/TelegramLinkPanel";
 import { useWorkspace } from "@/contexts/workspace-context";
 import { apiGetJson } from "@/lib/api-client";
 import type { ApiPersonalAccessToken, ApiPersonalAccessTokenCreated } from "@/types/api";
+import { VIEW_SCROLL_ROOT } from "@/components/shell/view-scroll";
+import { cn } from "@/lib/utils";
 
 export function IntegrationsView() {
   const { workspaces } = useWorkspace();
@@ -65,7 +67,7 @@ export function IntegrationsView() {
   }
 
   return (
-    <div className="flex flex-1 flex-col gap-6 overflow-y-auto p-6">
+    <div className={cn(VIEW_SCROLL_ROOT, "gap-6 p-6")}>
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">Entegrasyonlar</h1>
         <p className="text-sm text-muted-foreground">

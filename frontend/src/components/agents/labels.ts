@@ -1,4 +1,9 @@
-import type { AgentStatus, AgentStepKind, AgentStepStatus } from "@/types/api";
+import type {
+  AgentFailureReason,
+  AgentStatus,
+  AgentStepKind,
+  AgentStepStatus,
+} from "@/types/api";
 
 export const AGENT_STATUS_LABELS: Record<AgentStatus, string> = {
   planning: "Planlanıyor",
@@ -9,6 +14,20 @@ export const AGENT_STATUS_LABELS: Record<AgentStatus, string> = {
   failed: "Başarısız",
   cancelled: "İptal edildi",
 };
+
+// `""` (no failure) is never rendered -- callers only show a reason when set.
+export const AGENT_FAILURE_REASON_LABELS: Record<Exclude<AgentFailureReason, "">, string> = {
+  plan_too_large: "Plan çok büyük",
+  plan_empty: "Plan boş",
+  planner_error: "Planlayıcı hatası",
+  consecutive_failures: "Art arda çok fazla başarısız adım",
+  gateway_budget_exceeded: "Model çağrı bütçesi aşıldı",
+};
+
+/** Turkish label for a raw failure_reason; unknown values fall back verbatim. */
+export function agentFailureReasonLabel(reason: string): string {
+  return AGENT_FAILURE_REASON_LABELS[reason as Exclude<AgentFailureReason, "">] ?? reason;
+}
 
 export const AGENT_STATUSES: AgentStatus[] = [
   "planning",
