@@ -163,6 +163,47 @@ def test_diff_contains_any_finds_a_committed_secret(tmp_path):
     assert not runner.diff_contains_any(str(tmp_path), base_sha=base, head_sha=head, needles=[])
 
 
+@pytest.mark.skipif(shutil.which("git") is None, reason="needs git")
+@pytest.mark.parametrize("where", ["binary_blob", "commit_message", "file_name"])
+def test_diff_contains_any_scans_raw_objects_not_diff_text(tmp_path, where):
+    """Codex code-review P1, branch 5 round 1: a binary blob, a commit
+    message or a file name never shows the literal value in `git diff`
+    text -- the scan reads raw object content instead."""
+    secret = "sk-ant-live-0123456789abcdef"
+    env = {
+        **os.environ,
+        "GIT_CONFIG_NOSYSTEM": "1",
+        "GIT_CONFIG_GLOBAL": "/dev/null",
+        "GIT_AUTHOR_NAME": "t",
+        "GIT_AUTHOR_EMAIL": "t@x.invalid",
+        "GIT_COMMITTER_NAME": "t",
+        "GIT_COMMITTER_EMAIL": "t@x.invalid",
+    }
+
+    def git(*args):
+        return subprocess.run(
+            ["git", "-C", str(tmp_path), *args], check=True, capture_output=True, text=True, env=env
+        ).stdout.strip()
+
+    git("init", "-q")
+    (tmp_path / "a.txt").write_text("base\n")
+    git("add", "-A")
+    git("commit", "-q", "-m", "base")
+    base = git("rev-parse", "HEAD")
+    message = "change"
+    if where == "binary_blob":
+        (tmp_path / "blob.bin").write_bytes(b"\x00\x01" + secret.encode() + b"\xff" * 50)
+    elif where == "commit_message":
+        (tmp_path / "a.txt").write_text("changed\n")
+        message = f"leak {secret}"
+    else:
+        (tmp_path / f"{secret}.txt").write_text("x\n")
+    git("add", "-A")
+    git("commit", "-q", "-m", message)
+    head = git("rev-parse", "HEAD")
+    assert runner.diff_contains_any(str(tmp_path), base_sha=base, head_sha=head, needles=[secret])
+
+
 # --- implementation job paths ------------------------------------------
 
 

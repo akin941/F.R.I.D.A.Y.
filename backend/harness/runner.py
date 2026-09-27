@@ -312,45 +312,51 @@ def create_bundle(directory, *, base_sha, ref, bundle_path):
 
 
 def diff_contains_any(directory, *, base_sha, head_sha, needles):
-    """`True` if the full `base_sha..head_sha` diff (binary included)
-    contains any of `needles` as a literal substring (Phase 3 branch 5,
-    2026-09-27 audit: the implementing agent's shell holds the CLI API
-    key, and anything it commits is bundled for review and later pushed).
-    Runs with external diff drivers, textconv and repo-configured
-    fsmonitor disabled and host global/system config isolated, so the
-    agent's repo config can neither hide content from the scan nor run a
-    command on the host. Raises `RunnerError` if the diff can't be read --
-    callers fail closed."""
+    """`True` if any object reachable from `head_sha` but not from
+    `base_sha` -- commits (messages, authors), trees (file names) and
+    blobs (raw file bytes, binary included) -- contains any of `needles`
+    as a literal substring (Phase 3 branch 5, 2026-09-27 audit: the
+    implementing agent's shell holds the CLI API key, and everything in
+    that range is bundled for review and later pushed). Scans raw object
+    content via `git cat-file --batch`, not diff text: a binary patch or a
+    commit message would never show the literal value in a diff (Codex
+    code-review P1, branch 5 round 1). A literal scan is best-effort -- an
+    encoded key is not caught -- which is why the key is also kept out of
+    the test command's environment. Host global/system config is isolated
+    and repo-configured fsmonitor disabled. Raises `RunnerError` if the
+    objects can't be read -- callers fail closed."""
     needle_bytes = [n.encode("utf-8") for n in needles if n]
     if not needle_bytes:
         return False
+    git_env = {**os.environ, **_ISOLATED_GIT_ENV, "GIT_NO_REPLACE_OBJECTS": "1"}
+    base_git = ["git", "-C", directory, "-c", "core.fsmonitor="]
     try:
-        result = subprocess.run(
-            [
-                "git",
-                "-C",
-                directory,
-                "-c",
-                "core.fsmonitor=",
-                "-c",
-                "diff.external=",
-                "diff",
-                "--no-ext-diff",
-                "--no-textconv",
-                "--binary",
-                base_sha,
-                head_sha,
-                "--",
-            ],
+        listing = subprocess.run(
+            [*base_git, "rev-list", "--objects", head_sha, f"^{base_sha}", "--"],
             capture_output=True,
-            env={**os.environ, **_ISOLATED_GIT_ENV, "GIT_NO_REPLACE_OBJECTS": "1"},
+            env=git_env,
             timeout=_GIT_PLUMBING_TIMEOUT_SECONDS,
         )
+        if listing.returncode != 0:
+            raise RunnerError(f"listing objects {base_sha}..{head_sha} failed")
+        object_ids = [line.split(b" ", 1)[0] for line in listing.stdout.splitlines() if line]
+        if not object_ids:
+            return False
+        contents = subprocess.run(
+            [*base_git, "cat-file", "--batch"],
+            input=b"\n".join(object_ids) + b"\n",
+            capture_output=True,
+            env=git_env,
+            timeout=_BUNDLE_TIMEOUT_SECONDS,
+        )
     except (subprocess.TimeoutExpired, OSError) as exc:
-        raise RunnerError(f"reading diff {base_sha}..{head_sha} failed: {exc}") from exc
-    if result.returncode != 0:
-        raise RunnerError(f"reading diff {base_sha}..{head_sha} failed: {result.stderr!r}")
-    return any(needle in result.stdout for needle in needle_bytes)
+        raise RunnerError(f"reading objects {base_sha}..{head_sha} failed: {exc}") from exc
+    if contents.returncode != 0 or b" missing\n" in contents.stdout:
+        raise RunnerError(f"reading objects {base_sha}..{head_sha} failed")
+    # Headers ("<sha> <type> <size>") are hex/ASCII and can't contain a
+    # credential, so searching the whole batch stream is equivalent to
+    # searching each object body.
+    return any(needle in contents.stdout for needle in needle_bytes)
 
 
 def _clone_full(*, git_url, default_branch, clone_env):

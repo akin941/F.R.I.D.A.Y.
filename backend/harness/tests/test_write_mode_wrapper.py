@@ -263,3 +263,43 @@ def test_newline_in_path_is_reported_as_one_changed_file(tmp_path):
     )
     assert result["changed_files"] == ["we\nird.py"]
     assert result["tests"]["passed"] is True
+
+
+def test_agent_commits_are_squashed_into_one_wrapper_commit(tmp_path):
+    """Codex code-review P1, branch 5 round 1: commits the agent made itself
+    (whose messages or intermediate trees could carry data the final diff
+    doesn't show) must never be bundled -- the produced history is exactly
+    one wrapper commit whose parent is the base."""
+    workspace, repo, base = _make_workspace(tmp_path, {"a.py": "old\n"})
+    _proc, result = _run_wrapper(
+        workspace,
+        base=base,
+        agent_script=(
+            "printf 'secret\\n' > tmp.txt && git add -A && "
+            "git -c user.name=a -c user.email=a@x.invalid commit -qm 'sk-hidden-in-message' && "
+            "git rm -q tmp.txt && printf 'new\\n' > a.py && git add -A && "
+            "git -c user.name=a -c user.email=a@x.invalid commit -qm second"
+        ),
+        test_command="grep -q new a.py",
+    )
+    head = result["commit_sha"]
+    assert _git(repo, "rev-parse", f"{head}^").strip() == base
+    assert _git(repo, "rev-list", "--count", f"{base}..{head}").strip() == "1"
+    message = _git(repo, "log", "-1", "--format=%B", head)
+    assert "sk-hidden-in-message" not in message
+    assert message.startswith("harness: implementation")
+    assert _git(repo, "log", "-1", "--format=%an", head).strip() == "Jarvis Harness"
+    assert result["changed_files"] == ["a.py"]
+    assert result["tests"]["passed"] is True
+
+
+def test_agent_switching_branches_cannot_redirect_the_commit(tmp_path):
+    workspace, repo, base = _make_workspace(tmp_path, {"a.py": "old\n"})
+    _proc, result = _run_wrapper(
+        workspace,
+        base=base,
+        agent_script="git checkout -q -b elsewhere && printf 'new\\n' > a.py",
+        test_command="grep -q new a.py",
+    )
+    assert _git(repo, "rev-parse", "main").strip() == result["commit_sha"]
+    assert result["tests"]["passed"] is True

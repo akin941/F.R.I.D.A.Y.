@@ -25,7 +25,12 @@
 #    once, for every path spelling, instead of parsing `ls-files -v`.
 # 4. The WRAPPER commits (`add -A`, hooks disabled, fixed identity,
 #    wrapper-authored message): everything the agent left in the tree is
-#    in the commit, except paths the committed .gitignore excludes.
+#    in the commit, except paths the committed .gitignore excludes. HEAD is
+#    first re-pointed at the branch the host checked out and soft-reset to
+#    the base commit, so the produced history is exactly ONE wrapper
+#    commit on top of base -- any commits the agent made itself (whose
+#    messages, authors or intermediate trees could carry data the final
+#    diff doesn't show) are never bundled, reviewed or pushed.
 # 5. A run whose produced tree equals the base tree fails closed as
 #    `no_changes` -- tests are not run.
 # 6. `git clean -ffdx` + `git reset --hard HEAD`: the test command runs
@@ -132,8 +137,9 @@ harness_write_mode_main() {
     result_path="$HARNESS_WORKSPACE_DIR/result.json"
 
     # Snapshotted BEFORE the agent runs: the host-created clone's own
-    # config is the only config trusted afterwards.
+    # config and checked-out branch are the only ones trusted afterwards.
     pristine_git_config=$(cat "$repo_dir/.git/config")
+    branch_ref=$(git -C "$repo_dir" symbolic-ref -q HEAD)
 
     cli_exit_code=0
     cli_output=$(run_cli) || cli_exit_code=$?
@@ -153,14 +159,22 @@ harness_write_mode_main() {
         run_ok=false
     elif ! restore_git_state; then
         run_ok=false
+    elif [ -z "$base_commit" ] || [ -z "$branch_ref" ]; then
+        run_ok=false
+    elif ! sgit symbolic-ref HEAD "$branch_ref" >/dev/null 2>&1 \
+        || ! sgit reset -q --soft "$base_commit" >/dev/null 2>&1; then
+        # Agent history is discarded here: HEAD is back on the host's
+        # branch, at base, with the index still holding the agent's tree.
+        run_ok=false
     else
         if ! sgit add -A >/dev/null 2>&1; then
             run_ok=false
         elif ! sgit diff --cached --quiet >/dev/null 2>&1; then
             goal_line=$(printf '%s\n' "$goal" | head -n 1 | cut -c1-200)
             if ! printf 'harness: implementation\n\nGoal: %s\n' "$goal_line" \
-                | sgit -c user.name="Jarvis Harness" -c user.email="harness@jarvis.invalid" \
-                    commit -q --no-verify -F - >/dev/null 2>&1; then
+                | GIT_AUTHOR_NAME="Jarvis Harness" GIT_AUTHOR_EMAIL="harness@jarvis.invalid" \
+                    GIT_COMMITTER_NAME="Jarvis Harness" GIT_COMMITTER_EMAIL="harness@jarvis.invalid" \
+                    sgit commit -q --no-verify -F - >/dev/null 2>&1; then
                 run_ok=false
             fi
         fi
