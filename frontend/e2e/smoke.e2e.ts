@@ -28,13 +28,13 @@ const TELEGRAM_WEBHOOK_SECRET = process.env.TELEGRAM_WEBHOOK_SECRET ?? "e2e-fixt
 // Observed to be occasionally flaky under Playwright's automated click even
 // though the exact same interaction never fails through manual/real browser
 // use (verified directly) -- retrying the click until the detail view's own
-// "Back to agents" button (present immediately on every successful
+// "Ajanlara dön" button (present immediately on every successful
 // navigation, regardless of the agent's own data still loading) actually
 // shows up absorbs that flake without weakening what the test proves.
 async function openAgentDetail(page: Page, goalText: string) {
   await expect(async () => {
     await page.getByText(goalText, { exact: true }).click();
-    await expect(page.getByRole("button", { name: /Back to agents/ })).toBeVisible({
+    await expect(page.getByRole("button", { name: /Ajanlara dön/ })).toBeVisible({
       timeout: 3_000,
     });
   }).toPass({ timeout: 15_000 });
@@ -82,38 +82,38 @@ test("signup, chat with the fake provider, curated memory, Today, logout, route 
   const password = "Sup3rSecret!2026";
 
   await page.goto("/signup");
-  await page.getByLabel("Email").fill(email);
-  await page.getByLabel("Password").fill(password);
-  await page.getByRole("button", { name: "Sign up" }).click();
+  await page.getByLabel("E-posta").fill(email);
+  await page.getByLabel("Parola").fill(password);
+  await page.getByRole("button", { name: "Kayıt ol" }).click();
 
   await expect(page).toHaveURL(/\/chat$/);
 
   // Personal workspace auto-created on signup (workspaces/services.py).
-  await expect(page.getByRole("combobox", { name: "Active workspace" })).toContainText(
+  await expect(page.getByRole("combobox", { name: "Aktif çalışma alanı" })).toContainText(
     "Personal",
   );
 
-  const newChatButton = page.getByRole("button", { name: "New chat" });
+  const newChatButton = page.getByRole("button", { name: "Yeni sohbet" });
   await expect(newChatButton).toBeEnabled();
   await newChatButton.click();
 
-  const composer = page.getByPlaceholder("Message Jarvis…");
+  const composer = page.getByPlaceholder("Jarvis'e yaz…");
   await expect(composer).toBeEnabled();
   await composer.fill("Hello, Jarvis");
-  await page.getByRole("button", { name: "Send" }).click();
+  await page.getByRole("button", { name: "Gönder" }).click();
 
   await expect(page.getByText(FAKE_REPLY)).toBeVisible({ timeout: 15_000 });
   // The reply text can render from a streamed chunk slightly before the SSE
   // `done` event is processed; navigating away before then aborts the
   // stream, persists the message as `partial`, and skips extraction entirely
   // (assistant/services.py only dispatches on a `complete` persist). Wait for
-  // the composer to leave streaming state ("Stop" -> "Send") first.
-  await expect(page.getByRole("button", { name: "Send" })).toBeVisible();
+  // the composer to leave streaming state ("Durdur" -> "Gönder") first.
+  await expect(page.getByRole("button", { name: "Gönder" })).toBeVisible();
 
   // Curated memory happy path (MVP 2 §6): the extraction fixture above
   // seeded a pending suggestion — curate it, then confirm the next chat
   // turn's `memories_used` picks it up as context.
-  await page.getByRole("link", { name: "Memory" }).click();
+  await page.getByRole("link", { name: "Hafıza" }).click();
   await expect(page).toHaveURL(/\/memory$/);
 
   // CardTitle (frontend/src/components/ui/card.tsx) is a plain <div>, not a
@@ -127,19 +127,19 @@ test("signup, chat with the fake provider, curated memory, Today, logout, route 
     await page.reload();
     await expect(memoryTitle).toBeVisible({ timeout: 5_000 });
   }).toPass({ timeout: 20_000 });
-  await memoryCard.getByRole("button", { name: "Approve" }).click();
+  await memoryCard.getByRole("button", { name: "Onayla" }).click();
 
-  await expect(page.getByText("Nothing waiting for review.")).toBeVisible();
-  await expect(memoryCard.getByText("Approved", { exact: true })).toBeVisible();
+  await expect(page.getByText("İncelemeyi bekleyen bir şey yok.")).toBeVisible();
+  await expect(memoryCard.getByText("Onaylandı", { exact: true })).toBeVisible();
 
-  await page.getByRole("link", { name: "Chat" }).click();
+  await page.getByRole("link", { name: "Sohbet" }).click();
   await expect(page).toHaveURL(/\/chat$/);
-  await page.getByRole("button", { name: "Untitled conversation" }).click();
+  await page.getByRole("button", { name: "Adsız sohbet" }).click();
   await expect(composer).toBeEnabled();
   await composer.fill("What do you remember about me?");
-  await page.getByRole("button", { name: "Send" }).click();
+  await page.getByRole("button", { name: "Gönder" }).click();
 
-  await expect(page.getByText(/Memory context: 1 memory/)).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByText(/Hafıza bağlamı: 1 not/)).toBeVisible({ timeout: 15_000 });
 
   // Knowledge retrieval happy path (MVP 3 §4/§6): upload a short pasted-text
   // document, wait for `ready` (embedding dispatched over `on_commit`, run
@@ -154,13 +154,13 @@ test("signup, chat with the fake provider, curated memory, Today, logout, route 
   const KNOWLEDGE_QUERY_TEXT = "What lantern mode does Jarvis OS support when camping offline?";
   const KNOWLEDGE_DOC_TITLE = "Lantern mode notes";
 
-  await page.getByRole("link", { name: "Knowledge" }).click();
+  await page.getByRole("link", { name: "Bilgi" }).click();
   await expect(page).toHaveURL(/\/knowledge$/);
 
-  await page.getByRole("button", { name: "New document" }).click();
-  await page.getByLabel("Title").fill(KNOWLEDGE_DOC_TITLE);
-  await page.getByLabel("Content").fill(KNOWLEDGE_SEED_TEXT);
-  await page.getByRole("button", { name: "Create document" }).click();
+  await page.getByRole("button", { name: "Yeni belge" }).click();
+  await page.getByLabel("Başlık").fill(KNOWLEDGE_DOC_TITLE);
+  await page.getByLabel("İçerik").fill(KNOWLEDGE_SEED_TEXT);
+  await page.getByRole("button", { name: "Belge oluştur" }).click();
 
   // Same reasoning as the memory-title lookup above: CardTitle is a plain
   // <div>, located by text; "../.." reaches the enclosing Card so the status
@@ -176,19 +176,19 @@ test("signup, chat with the fake provider, curated memory, Today, logout, route 
   const knowledgeCard = knowledgeTitle.locator("../..");
   await expect(async () => {
     await page.reload();
-    await expect(knowledgeCard.getByText("Ready", { exact: true })).toBeVisible({
+    await expect(knowledgeCard.getByText("Hazır", { exact: true })).toBeVisible({
       timeout: 5_000,
     });
   }).toPass({ timeout: 20_000 });
 
-  await page.getByRole("link", { name: "Chat" }).click();
+  await page.getByRole("link", { name: "Sohbet" }).click();
   await expect(page).toHaveURL(/\/chat$/);
-  await page.getByRole("button", { name: "Untitled conversation" }).click();
+  await page.getByRole("button", { name: "Adsız sohbet" }).click();
   await expect(composer).toBeEnabled();
   await composer.fill(KNOWLEDGE_QUERY_TEXT);
-  await page.getByRole("button", { name: "Send" }).click();
+  await page.getByRole("button", { name: "Gönder" }).click();
 
-  await expect(page.getByText(/Knowledge context: 1 chunk/)).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByText(/Bilgi bağlamı: 1 parça/)).toBeVisible({ timeout: 15_000 });
 
   // MVP 6 router happy path: all 3 live dispatch behaviors, in the same
   // conversation the knowledge doc above is already seeded in. FakeAdapter's
@@ -206,7 +206,7 @@ test("signup, chat with the fake provider, curated memory, Today, logout, route 
   // budget mechanism itself is unit-tested (assistant/tests/test_context.py)
   // with real chunk counts exceeding the default cap; not worth re-proving
   // here with a dozen extra seeded documents.
-  const knowledgeBadge = page.getByText(/Knowledge context: 1 chunk/);
+  const knowledgeBadge = page.getByText(/Bilgi bağlamı: 1 parça/);
   // The plain knowledge_query turn above already left one such badge on
   // this message list (MessageList renders one per assistant reply that
   // has chunks_used) -- a `.last()`/`.toBeVisible()` check alone could
@@ -218,7 +218,7 @@ test("signup, chat with the fake provider, curated memory, Today, logout, route 
   // new badge was added by this turn.
   await expect(knowledgeBadge).toHaveCount(1);
   await composer.fill(`Please summarize my knowledge base — ${KNOWLEDGE_QUERY_TEXT}`);
-  await page.getByRole("button", { name: "Send" }).click();
+  await page.getByRole("button", { name: "Gönder" }).click();
   await expect(knowledgeBadge).toHaveCount(2, { timeout: 15_000 });
 
   // task_draft: confirm creates a REAL Task via the router's draft card, not
@@ -227,29 +227,30 @@ test("signup, chat with the fake provider, curated memory, Today, logout, route 
   const ROUTER_TASK_TITLE = "Fake extracted task";
   await expect(composer).toBeEnabled();
   await composer.fill("remind me to buy oat milk");
-  await page.getByRole("button", { name: "Send" }).click();
-  await expect(page.getByText("Looks like a task")).toBeVisible({ timeout: 15_000 });
+  await page.getByRole("button", { name: "Gönder" }).click();
+  await expect(page.getByText("Bu bir görev gibi görünüyor")).toBeVisible({ timeout: 15_000 });
   await expect(page.getByText(ROUTER_TASK_TITLE, { exact: true })).toBeVisible();
-  await page.getByRole("button", { name: "Confirm task" }).click();
-  await expect(page.getByText("Looks like a task")).not.toBeVisible();
+  await page.getByRole("button", { name: "Görevi onayla" }).click();
+  await expect(page.getByText("Bu bir görev gibi görünüyor")).not.toBeVisible();
 
   // tool_request: confirm creates a REAL ApprovalRequest via the router's
   // draft card. Approved the same way the manual Memory-page export button's
   // request is approved further below -- an in-page `fetch` against the BFF
-  // transition endpoint, since the UI always hides Approve/Reject for the
-  // requester's own request (brief §4, no bypass by design), and this
-  // account has no second workspace member to be a genuine second decider.
+  // transition endpoint. (Under ADR-008's single-owner model the owner may
+  // decide their own requests in the UI too, but that path now has a
+  // confirmation step; the direct call keeps this section focused on the
+  // router, not the approvals card.)
   // Resolved to `succeeded` here, in this section, before the manual-button
   // section below creates its OWN separate vault_export request -- so
   // neither section's "find the pending vault_export request" lookup can
   // ever see more than the one request it's responsible for.
   await expect(composer).toBeEnabled();
   await composer.fill("export my vault please");
-  await page.getByRole("button", { name: "Send" }).click();
-  await expect(page.getByText("Looks like a tool request")).toBeVisible({ timeout: 15_000 });
-  await page.getByRole("button", { name: "Confirm request" }).click();
-  await expect(page.getByText("Looks like a tool request")).not.toBeVisible();
-  await expect(page.getByText("Pending", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Gönder" }).click();
+  await expect(page.getByText("Bu bir araç isteği gibi görünüyor")).toBeVisible({ timeout: 15_000 });
+  await page.getByRole("button", { name: "İsteği onayla" }).click();
+  await expect(page.getByText("Bu bir araç isteği gibi görünüyor")).not.toBeVisible();
+  await expect(page.getByText("Beklemede", { exact: true })).toBeVisible();
 
   const routerVaultExportRequestId = await page.evaluate(async () => {
     const workspaces = (await (await fetch("/api/workspaces")).json()) as { id: string }[];
@@ -277,11 +278,11 @@ test("signup, chat with the fake provider, curated memory, Today, logout, route 
   // 3-second in-flight poll) -- and reloading /chat itself would lose the
   // client-side conversation selection anyway, since it isn't part of the
   // URL. /approvals is the real, intended surface for checking run status.
-  await page.getByRole("link", { name: "Approvals" }).click();
+  await page.getByRole("link", { name: "Onaylar", exact: true }).click();
   await expect(page).toHaveURL(/\/approvals$/);
   await expect(async () => {
     await page.reload();
-    await expect(page.getByText(/Run status: Succeeded/)).toBeVisible({ timeout: 5_000 });
+    await expect(page.getByText(/Çalışma durumu: Başarılı/)).toBeVisible({ timeout: 5_000 });
   }).toPass({ timeout: 20_000 });
 
   // Tasks + Today happy path (MVP 4 §3): create a task due today on /tasks,
@@ -300,7 +301,7 @@ test("signup, chat with the fake provider, curated memory, Today, logout, route 
     return `${year}-${month}-${day}`;
   }
 
-  await page.getByRole("link", { name: "Tasks" }).click();
+  await page.getByRole("link", { name: "Görevler" }).click();
   await expect(page).toHaveURL(/\/tasks$/);
   // Codex finding: if the initial `GET /api/tasks` (issued on mount) is
   // still in flight when the create form is submitted, it can resolve
@@ -312,62 +313,59 @@ test("signup, chat with the fake provider, curated memory, Today, logout, route 
   // proved, just adapted to this test's now-nonzero starting state.
   await expect(page.getByText(ROUTER_TASK_TITLE, { exact: true })).toBeVisible();
 
-  await page.getByRole("button", { name: "New task" }).click();
-  await page.getByLabel("Title").fill(TASK_TITLE);
-  await page.getByLabel("Due date").fill(todayLocalDate());
-  await page.getByRole("button", { name: "Create task" }).click();
+  await page.getByRole("button", { name: "Yeni görev" }).click();
+  await page.getByLabel("Başlık").fill(TASK_TITLE);
+  await page.getByLabel("Son tarih").fill(todayLocalDate());
+  await page.getByRole("button", { name: "Görev oluştur" }).click();
 
   // Same reasoning as the memory/knowledge title lookups above: CardTitle is
   // a plain <div>, located by text, not an ARIA heading role.
   await expect(page.getByText(TASK_TITLE, { exact: true })).toBeVisible({ timeout: 10_000 });
 
-  await page.getByRole("link", { name: "Today" }).click();
+  await page.getByRole("link", { name: "Bugün" }).click();
   await expect(page).toHaveURL(/\/today$/);
-  await expect(page.getByRole("heading", { name: "Today" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Bugün" })).toBeVisible();
 
   const todayTaskTitle = page.getByText(TASK_TITLE, { exact: true });
   await expect(todayTaskTitle).toBeVisible({ timeout: 10_000 });
   const todayTaskCard = todayTaskTitle.locator("../..");
-  await todayTaskCard.getByRole("button", { name: "Complete" }).click();
+  await todayTaskCard.getByRole("button", { name: "Tamamla" }).click();
 
-  await expect(page.getByText("Nothing due today. Enjoy the quiet.")).toBeVisible();
+  await expect(page.getByText("Bugün vadesi gelen bir şey yok. Keyfini çıkar.")).toBeVisible();
 
   // Approvals + vault export happy path (MVP 5 §5): request the export from
-  // Memory, approve it, confirm the run reaches succeeded. DEV_ALLOW_SELF_
-  // APPROVAL is set for this e2e run only (no second workspace member exists
-  // to be the decider, unlike a real deployment where requester != decider
-  // is enforced with no exception) -- but the UI itself always hides
-  // Approve/Reject for the requester's own request, everywhere, regardless
-  // of that backend flag (brief §4's own-request gating has no bypass by
-  // design). So the approve step below calls the BFF transition endpoint
-  // directly via an in-page `fetch` (same authenticated browser context,
-  // same CSRF-safe same-origin call a second admin's own browser would
-  // make) rather than clicking a UI button that deliberately doesn't exist
-  // for this actor. `OBSIDIAN_VAULT_PATH` points at a directory this run's
+  // Memory, approve it, confirm the run reaches succeeded. The approve step
+  // below calls the BFF transition endpoint directly via an in-page `fetch`
+  // (same authenticated browser context, same CSRF-safe same-origin call
+  // the approvals card itself makes) -- the card's own Onayla button now
+  // sits behind a confirmation step, which the unit tests cover.
+  // `OBSIDIAN_VAULT_PATH` points at a directory this run's
   // global-setup.ts already created; `CELERY_TASK_ALWAYS_EAGER=true` runs
   // the export inline, so the run should already be `succeeded` by the time
   // the approve call resolves -- the reload-poll loop below is just the
   // same defensive convention the memory/knowledge sections above use for
   // anything backed by a Celery-dispatched job.
-  await page.getByRole("link", { name: "Memory" }).click();
+  await page.getByRole("link", { name: "Hafıza" }).click();
   await expect(page).toHaveURL(/\/memory$/);
-  await page.getByRole("button", { name: "Export to Obsidian vault" }).click();
+  await page.getByRole("button", { name: "Obsidian vault'a aktar" }).click();
   await expect(
     page.getByText(
-      "Request created. It needs approval from another workspace admin before it runs.",
+      "İstek oluşturuldu. Çalışmadan önce başka bir çalışma alanı yöneticisinin onayı gerekiyor.",
     ),
   ).toBeVisible();
 
-  await page.getByRole("link", { name: "Approvals" }).click();
+  await page.getByRole("link", { name: "Onaylar", exact: true }).click();
   await expect(page).toHaveURL(/\/approvals$/);
   // `.first()`: the router section above already left one DECIDED
-  // vault_export entry on this page (Approved, listed after Pending in the
-  // DOM per ApprovalView's own section order) -- this new request is the
-  // Pending one, rendered first.
+  // vault_export entry on this page ("Onaylandı", listed after "Beklemede"
+  // in the DOM per ApprovalView's own section order) -- this new request is
+  // the pending ("Beklemede") one, rendered first.
   await expect(page.getByText("vault_export").first()).toBeVisible();
-  await expect(
-    page.getByText("Waiting for another workspace admin to decide this request."),
-  ).toBeVisible();
+  // The old "waiting for another workspace admin to decide" notice no longer
+  // exists (ADR-008 single-owner: the owner decides their own requests).
+  // Nearest current equivalent: the pending section's heading shows exactly
+  // this one undecided request.
+  await expect(page.getByRole("heading", { name: /Bekleyenler \(1\)/ })).toBeVisible();
 
   const vaultExportRequestId = await page.evaluate(async () => {
     const workspaces = (await (await fetch("/api/workspaces")).json()) as { id: string }[];
@@ -394,7 +392,7 @@ test("signup, chat with the fake provider, curated memory, Today, logout, route 
     // `.first()`: the router section above already left its own succeeded
     // vault_export run on this page, ordered by -created_at -- this newer
     // request's own run is listed first.
-    await expect(page.getByText(/Run status: Succeeded/).first()).toBeVisible({ timeout: 5_000 });
+    await expect(page.getByText(/Çalışma durumu: Başarılı/).first()).toBeVisible({ timeout: 5_000 });
   }).toPass({ timeout: 20_000 });
 
   // Agents happy path (MVP 7 §5/§6): a goal plans to a `read` step, a
@@ -414,34 +412,34 @@ test("signup, chat with the fake provider, curated memory, Today, logout, route 
   const AGENT_TASK_DRAFT_STEP = "Draft a follow-up task";
   const AGENT_TOOL_REQUEST_STEP = "Export the vault";
 
-  await page.getByRole("link", { name: "Agents" }).click();
+  await page.getByRole("link", { name: "Ajanlar" }).click();
   await expect(page).toHaveURL(/\/agents$/);
 
-  await page.getByRole("button", { name: "New agent" }).click();
-  await page.getByLabel("Goal").fill(AGENT_GOAL);
-  await page.getByRole("button", { name: "Start agent" }).click();
+  await page.getByRole("button", { name: "Yeni ajan" }).click();
+  await page.getByLabel("Hedef").fill(AGENT_GOAL);
+  await page.getByRole("button", { name: "Ajanı başlat" }).click();
 
   await expect(page.getByText(AGENT_GOAL, { exact: true })).toBeVisible({ timeout: 10_000 });
   await openAgentDetail(page, AGENT_GOAL);
 
   // Read step runs unattended; task_draft blocks for confirmation next.
-  await expect(page.getByRole("button", { name: "Confirm task" })).toBeVisible({
+  await expect(page.getByRole("button", { name: "Görevi onayla" })).toBeVisible({
     timeout: 20_000,
   });
   await expect(page.getByText(AGENT_READ_STEP, { exact: true })).toBeVisible();
   await expect(page.getByText(AGENT_TASK_DRAFT_STEP, { exact: true })).toBeVisible();
-  await page.getByRole("button", { name: "Confirm task" }).click();
+  await page.getByRole("button", { name: "Görevi onayla" }).click();
 
   // Confirming creates a real Task and advances to the tool_request step,
   // which requires approval (ADR-004) -- the engine can get no further
   // without a human decision, same "confirm here, decide there" split the
   // router's tool_request path already established.
-  await expect(page.getByRole("link", { name: "Review on Approvals" })).toBeVisible({
+  await expect(page.getByRole("link", { name: "Onaylar sayfasında incele" })).toBeVisible({
     timeout: 20_000,
   });
   await expect(page.getByText(AGENT_TOOL_REQUEST_STEP, { exact: true })).toBeVisible();
 
-  await page.getByRole("link", { name: "Review on Approvals" }).click();
+  await page.getByRole("link", { name: "Onaylar sayfasında incele" }).click();
   await expect(page).toHaveURL(/\/approvals$/);
 
   const agentToolRequestId = await page.evaluate(async () => {
@@ -466,16 +464,16 @@ test("signup, chat with the fake provider, curated memory, Today, logout, route 
 
   await expect(async () => {
     await page.reload();
-    await expect(page.getByText(/Run status: Succeeded/).first()).toBeVisible({ timeout: 5_000 });
+    await expect(page.getByText(/Çalışma durumu: Başarılı/).first()).toBeVisible({ timeout: 5_000 });
   }).toPass({ timeout: 20_000 });
 
   // Approving resumes the engine (agents/signals.py), which runs the tool
   // step and, since it's the plan's last step, completes the whole agent.
-  await page.getByRole("link", { name: "Agents" }).click();
+  await page.getByRole("link", { name: "Ajanlar" }).click();
   await expect(page).toHaveURL(/\/agents$/);
   await openAgentDetail(page, AGENT_GOAL);
-  await expect(page.getByText("Completed", { exact: true })).toBeVisible({ timeout: 20_000 });
-  await expect(page.getByRole("button", { name: "Cancel agent" })).not.toBeVisible();
+  await expect(page.getByText("Tamamlandı", { exact: true })).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByRole("button", { name: "Ajanı iptal et" })).not.toBeVisible();
 
   // Agents skill-matched path (MVP 8 §3/§7, brief): a goal matching a
   // registered skill's trigger phrase skips `agent.plan` entirely --
@@ -484,37 +482,37 @@ test("signup, chat with the fake provider, curated memory, Today, logout, route 
   // returns the `weekly_export` skill's fixed two-step template (read ->
   // tool_request) rather than a freeform LLM plan. Asserting the resulting
   // steps match that exact template (not the "full plan" trigger's
-  // three-kind fixture above, and no "Confirm task" button at all -- the
+  // three-kind fixture above, and no "Görevi onayla" button at all -- the
   // skill's template has no task_draft step) is what actually proves the
   // skip happened, not just that some plan ran.
   const SKILL_MATCHED_GOAL = "Please export my weekly notes for me";
   const SKILL_READ_STEP = "Summarize recent notes";
   const SKILL_TOOL_REQUEST_STEP = "Export the vault";
 
-  await page.getByRole("button", { name: /Back to agents/ }).click();
-  await page.getByRole("button", { name: "New agent" }).click();
-  await page.getByLabel("Goal").fill(SKILL_MATCHED_GOAL);
-  await page.getByRole("button", { name: "Start agent" }).click();
+  await page.getByRole("button", { name: /Ajanlara dön/ }).click();
+  await page.getByRole("button", { name: "Yeni ajan" }).click();
+  await page.getByLabel("Hedef").fill(SKILL_MATCHED_GOAL);
+  await page.getByRole("button", { name: "Ajanı başlat" }).click();
 
   await expect(page.getByText(SKILL_MATCHED_GOAL, { exact: true })).toBeVisible({
     timeout: 10_000,
   });
   await openAgentDetail(page, SKILL_MATCHED_GOAL);
-  await expect(page.getByText("Ran via skill: weekly_export", { exact: true })).toBeVisible({
+  await expect(page.getByText("Şu beceriyle çalıştı: weekly_export", { exact: true })).toBeVisible({
     timeout: 10_000,
   });
   await expect(page.getByText(SKILL_READ_STEP, { exact: true })).toBeVisible();
 
   // Read step runs unattended; tool_request blocks for approval next --
-  // no "Confirm task" ever appears on this path (the skill's template has
+  // no "Görevi onayla" ever appears on this path (the skill's template has
   // no task_draft step at all).
-  await expect(page.getByRole("link", { name: "Review on Approvals" })).toBeVisible({
+  await expect(page.getByRole("link", { name: "Onaylar sayfasında incele" })).toBeVisible({
     timeout: 20_000,
   });
   await expect(page.getByText(SKILL_TOOL_REQUEST_STEP, { exact: true })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Confirm task" })).not.toBeVisible();
+  await expect(page.getByRole("button", { name: "Görevi onayla" })).not.toBeVisible();
 
-  await page.getByRole("link", { name: "Review on Approvals" }).click();
+  await page.getByRole("link", { name: "Onaylar sayfasında incele" }).click();
   await expect(page).toHaveURL(/\/approvals$/);
 
   const skillToolRequestId = await page.evaluate(async () => {
@@ -537,11 +535,11 @@ test("signup, chat with the fake provider, curated memory, Today, logout, route 
   }, skillToolRequestId);
   expect(skillApproveStatus).toBe(200);
 
-  await page.getByRole("link", { name: "Agents" }).click();
+  await page.getByRole("link", { name: "Ajanlar" }).click();
   await expect(page).toHaveURL(/\/agents$/);
   await openAgentDetail(page, SKILL_MATCHED_GOAL);
-  await expect(page.getByText("Completed", { exact: true })).toBeVisible({ timeout: 20_000 });
-  await expect(page.getByRole("button", { name: "Cancel agent" })).not.toBeVisible();
+  await expect(page.getByText("Tamamlandı", { exact: true })).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByRole("button", { name: "Ajanı iptal et" })).not.toBeVisible();
 
   // Agents kill-switch path (MVP 7 §3/§6): cancelling a `blocked_on_approval`
   // agent must be final -- even if the now-orphaned ApprovalRequest is
@@ -549,33 +547,33 @@ test("signup, chat with the fake provider, curated memory, Today, logout, route 
   // may run (the round-5 kill-switch-bypass fix from branch 3's review).
   const KILL_SWITCH_GOAL = "Give me the full plan to test the kill switch";
 
-  // Back to the list via the in-page button, not the "Agents" nav link --
+  // Back to the list via the in-page button, not the "Ajanlar" nav link --
   // we're already on /agents (viewing agent1's detail, which is pure
   // client-side state with no URL of its own), so a Link to the same path
   // is a no-op in Next.js and would leave the detail view showing forever.
-  await page.getByRole("button", { name: /Back to agents/ }).click();
-  await page.getByRole("button", { name: "New agent" }).click();
-  await page.getByLabel("Goal").fill(KILL_SWITCH_GOAL);
-  await page.getByRole("button", { name: "Start agent" }).click();
+  await page.getByRole("button", { name: /Ajanlara dön/ }).click();
+  await page.getByRole("button", { name: "Yeni ajan" }).click();
+  await page.getByLabel("Hedef").fill(KILL_SWITCH_GOAL);
+  await page.getByRole("button", { name: "Ajanı başlat" }).click();
 
   await expect(page.getByText(KILL_SWITCH_GOAL, { exact: true })).toBeVisible({ timeout: 10_000 });
   await openAgentDetail(page, KILL_SWITCH_GOAL);
 
-  await expect(page.getByRole("button", { name: "Confirm task" })).toBeVisible({
+  await expect(page.getByRole("button", { name: "Görevi onayla" })).toBeVisible({
     timeout: 20_000,
   });
-  await page.getByRole("button", { name: "Confirm task" }).click();
+  await page.getByRole("button", { name: "Görevi onayla" }).click();
 
-  await expect(page.getByRole("button", { name: "Cancel agent" })).toBeVisible({
+  await expect(page.getByRole("button", { name: "Ajanı iptal et" })).toBeVisible({
     timeout: 20_000,
   });
-  await expect(page.getByRole("link", { name: "Review on Approvals" })).toBeVisible({
+  await expect(page.getByRole("link", { name: "Onaylar sayfasında incele" })).toBeVisible({
     timeout: 20_000,
   });
 
-  await page.getByRole("button", { name: "Cancel agent" }).click();
-  await expect(page.getByRole("button", { name: "Cancel agent" })).not.toBeVisible();
-  await expect(page.getByText("Cancelled", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Ajanı iptal et" }).click();
+  await expect(page.getByRole("button", { name: "Ajanı iptal et" })).not.toBeVisible();
+  await expect(page.getByText("İptal edildi", { exact: true })).toBeVisible();
 
   const killSwitchRequestId = await page.evaluate(async () => {
     const workspaces = (await (await fetch("/api/workspaces")).json()) as { id: string }[];
@@ -602,15 +600,15 @@ test("signup, chat with the fake provider, curated memory, Today, logout, route 
   // above), so re-open the agent via the list instead of reloading in place
   // -- this also forces a real re-fetch from the backend, not a stale local
   // state that never learned about the approval decision. Back-to-list is
-  // via the in-page button, not the "Agents" nav link: we're already on
+  // via the in-page button, not the "Ajanlar" nav link: we're already on
   // /agents (still viewing agent2's own detail), so a Link to the same path
   // is a no-op in Next.js.
   expect(killSwitchApproveStatus).toBe(200);
 
-  await page.getByRole("button", { name: /Back to agents/ }).click();
+  await page.getByRole("button", { name: /Ajanlara dön/ }).click();
   await openAgentDetail(page, KILL_SWITCH_GOAL);
-  await expect(page.getByText("Cancelled", { exact: true })).toBeVisible({ timeout: 10_000 });
-  await expect(page.getByRole("button", { name: "Cancel agent" })).not.toBeVisible();
+  await expect(page.getByText("İptal edildi", { exact: true })).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByRole("button", { name: "Ajanı iptal et" })).not.toBeVisible();
 
   // PAT/CLI channel happy path (MVP 9 §1/§2): a PAT-authenticated request
   // hits the REAL backend directly, with no browser session at all -- this
@@ -780,7 +778,7 @@ test("signup, chat with the fake provider, curated memory, Today, logout, route 
     expect(messages.some((m) => m.role === "assistant" && m.content === FAKE_REPLY)).toBe(true);
   }).toPass({ timeout: 20_000 });
 
-  await page.getByRole("button", { name: "Log out" }).click();
+  await page.getByRole("button", { name: "Çıkış yap" }).click();
   await expect(page).toHaveURL(/\/login$/);
 
   // Optimistic route guard: an unauthenticated request for a protected path
