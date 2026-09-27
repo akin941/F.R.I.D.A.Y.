@@ -28,5 +28,7 @@ urlpatterns = [
     path("api/v1/", include("agents.urls")),
     path("api/v1/", include("integrations.urls")),
     path("api/v1/", include("harness.urls")),
-    # TODO(MVP 1, next branches): audit admin wiring.
+    # No audit-log admin by design: Django admin bypasses `for_actor()`
+    # workspace scoping (ADR-001; see approvals/admin.py for the same
+    # argument). The audit trail is read through scoped application code.
 ]

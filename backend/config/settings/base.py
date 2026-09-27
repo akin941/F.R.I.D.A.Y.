@@ -2,8 +2,10 @@
 
 from datetime import timedelta
 from pathlib import Path
+from urllib.parse import urlsplit, urlunsplit
 
 import environ
+from django.core.exceptions import ImproperlyConfigured
 
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
 
@@ -11,9 +13,46 @@ env = environ.Env(DJANGO_DEBUG=(bool, False))
 # Read .env from the repo root if present (local development convenience).
 environ.Env.read_env(BASE_DIR.parent / ".env")
 
-# `or` fallbacks: a copied .env.example leaves vars set-but-empty; treat empty as unset.
-SECRET_KEY = env("DJANGO_SECRET_KEY", default="") or "dev-insecure-key-change-me-0123456789abcdef"
+
+def _compose_secret(name):
+    """One value from the Docker Compose stack's gitignored
+    `deploy/docker/.env` (written by `make secrets`), or "" when absent.
+
+    Only used to build the HOST-side development defaults for DATABASE_URL
+    and REDIS_URL below, so `make test`, `make harness-runner` and host-side
+    `manage.py` commands reach the compose Postgres/Redis (published on
+    127.0.0.1) with the generated passwords without copying them anywhere.
+    Deliberately reads single keys rather than loading the whole file into
+    the process environment (it also holds provider keys and stack-only
+    toggles). Inside a container the file does not exist -- compose passes
+    the real URLs as env vars -- and production settings require them
+    explicitly (config/settings/prod.py).
+    """
+    path = BASE_DIR.parent / "deploy" / "docker" / ".env"
+    try:
+        lines = path.read_text().splitlines()
+    except OSError:
+        return ""
+    value = ""
+    for line in lines:
+        key, sep, raw = line.strip().partition("=")
+        if sep and key == name:
+            value = raw.strip().strip("'\"")
+    return value
+
+
 DEBUG = env("DJANGO_DEBUG")
+
+# `or` fallbacks: a copied .env.example leaves vars set-but-empty; treat empty as unset.
+# The hard-coded fallback is a development convenience only: without DEBUG
+# (config/settings/dev.py turns it on) a missing key fails hard instead of
+# silently signing sessions/tokens with a publicly known value.
+DEV_FALLBACK_SECRET_KEY = "dev-insecure-key-change-me-0123456789abcdef"
+SECRET_KEY = env("DJANGO_SECRET_KEY", default="")
+if not SECRET_KEY:
+    if not DEBUG:
+        raise ImproperlyConfigured("DJANGO_SECRET_KEY is required when DEBUG is off.")
+    SECRET_KEY = DEV_FALLBACK_SECRET_KEY
 ALLOWED_HOSTS = [h for h in env.list("DJANGO_ALLOWED_HOSTS", default=[]) if h] or [
     "localhost",
     "127.0.0.1",
@@ -28,6 +67,10 @@ INSTALLED_APPS = [
     "django.contrib.staticfiles",
     # Third party
     "rest_framework",
+    # Refresh-token blacklist (Phase 4 branch 1): rotation blacklists the
+    # previous refresh token and POST /api/v1/auth/logout blacklists the
+    # current one; `flushexpiredtokens` runs from beat (config/celery.py).
+    "rest_framework_simplejwt.token_blacklist",
     "corsheaders",
     # Jarvis kernel
     "core",
@@ -86,9 +129,20 @@ WSGI_APPLICATION = "config.wsgi.application"
 ASGI_APPLICATION = "config.asgi.application"
 
 # Postgres is the source of truth (ADR-001); sqlite fallback was removed in MVP 1.
-# Default points at the Compose postgres (host port 5433).
-_DEFAULT_DATABASE_URL = "postgres://jarvis:jarvis@localhost:5433/jarvis"
+# Default points at the Compose postgres (host port 5433) with the password
+# `make secrets` generated into deploy/docker/.env -- never a committed one.
+_compose_pg_password = _compose_secret("POSTGRES_PASSWORD")
+_DEFAULT_DATABASE_URL = (
+    f"postgres://jarvis:{_compose_pg_password}@localhost:5433/jarvis"
+    if _compose_pg_password
+    else "postgres://jarvis@localhost:5433/jarvis"
+)
 DATABASES = {"default": env.db_url_config(env("DATABASE_URL", default="") or _DEFAULT_DATABASE_URL)}
+# Parallel test runs (one per git worktree) against the same Postgres would
+# otherwise all create/destroy the same `test_<name>` database.
+_TEST_DATABASE_NAME = env("DJANGO_TEST_DATABASE_NAME", default="")
+if _TEST_DATABASE_NAME:
+    DATABASES["default"]["TEST"] = {"NAME": _TEST_DATABASE_NAME}
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
@@ -100,14 +154,15 @@ USE_TZ = True
 STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
 
-# TODO(MVP 3): MinIO/S3 storage backend via django-storages (files app).
-MINIO_ENDPOINT = env("MINIO_ENDPOINT", default="")
-MINIO_ACCESS_KEY = env("MINIO_ACCESS_KEY", default="")
-MINIO_SECRET_KEY = env("MINIO_SECRET_KEY", default="")
-MINIO_BUCKET = env("MINIO_BUCKET", default="jarvis")
-
-# Celery
-REDIS_URL = env("REDIS_URL", default="") or "redis://localhost:6380/0"
+# Celery. Host-side default: the compose Redis (host port 6380) with the
+# `make secrets` password from deploy/docker/.env (Redis requires AUTH).
+_compose_redis_password = _compose_secret("REDIS_PASSWORD")
+_DEFAULT_REDIS_URL = (
+    f"redis://:{_compose_redis_password}@localhost:6380/0"
+    if _compose_redis_password
+    else "redis://localhost:6380/0"
+)
+REDIS_URL = env("REDIS_URL", default="") or _DEFAULT_REDIS_URL
 CELERY_BROKER_URL = REDIS_URL
 CELERY_RESULT_BACKEND = REDIS_URL
 # Environment-backed (MVP 2 §4): default off, so `make up`'s worker container
@@ -130,6 +185,35 @@ CELERY_TASK_EAGER_PROPAGATES = env.bool("CELERY_TASK_EAGER_PROPAGATES", default=
 HARNESS_CELERY_QUEUE = env("HARNESS_CELERY_QUEUE", default="harness")
 CELERY_TASK_ROUTES = {"harness.tasks.*": {"queue": HARNESS_CELERY_QUEUE}}
 
+
+def redis_cache_location(redis_url):
+    """REDIS_CACHE_URL's default: the broker's Redis, database 1, so cache
+    keys never mix with Celery's queues in database 0."""
+    parts = urlsplit(redis_url)
+    return urlunsplit((parts.scheme, parts.netloc, "/1", parts.query, parts.fragment))
+
+
+# Cache (Phase 4 branch 1). DRF throttles and the Telegram relay limiter
+# (integrations/tasks.py) count in the default cache; with per-process
+# LocMem, web and worker (and every gunicorn worker) each counted
+# separately. Django's built-in RedisCache (no extra dependency) makes the
+# counters shared. Used only when REDIS_CACHE_URL or REDIS_URL is actually
+# set in the environment (compose web/worker, production); a bare host
+# process without them -- CI's e2e runserver, an ad-hoc shell -- keeps
+# LocMem. The test settings (config/settings/test.py) always use LocMem.
+_REDIS_CACHE_URL = env("REDIS_CACHE_URL", default="") or (
+    redis_cache_location(REDIS_URL) if env("REDIS_URL", default="") else ""
+)
+if _REDIS_CACHE_URL:
+    CACHES = {
+        "default": {
+            "BACKEND": "django.core.cache.backends.redis.RedisCache",
+            "LOCATION": _REDIS_CACHE_URL,
+        }
+    }
+else:
+    CACHES = {"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"}}
+
 # --- API / auth ---
 
 REST_FRAMEWORK = {
@@ -137,17 +221,53 @@ REST_FRAMEWORK = {
         "rest_framework_simplejwt.authentication.JWTAuthentication",
     ),
     "DEFAULT_PERMISSION_CLASSES": ("rest_framework.permissions.IsAuthenticated",),
-    # "chat" scope caps provider-cost endpoints (assistant message send); see
-    # assistant/views.py. TODO(MVP 1): anon/user throttles for auth endpoints.
-    "DEFAULT_THROTTLE_RATES": {"chat": "30/min"},
+    # Scoped rates (ScopedRateThrottle, counted in the default cache):
+    # - "chat": provider-cost message send (assistant/views.py).
+    # - "login" / "refresh": the anonymous token endpoints (accounts/urls.py).
+    #   Django only ever sees the BFF's address as REMOTE_ADDR, so for
+    #   anonymous requests these are effectively GLOBAL rates, not per
+    #   client -- correct for a single-account system (ADR-008): they bound
+    #   password guessing and refresh-token replay for the whole install.
+    # - "cost": the remaining cost-bearing creates -- agent creation
+    #   (synchronous planner LLM call), harness discovery/implementation
+    #   jobs (each up to HARNESS_MAX_JOB_COST) and knowledge documents
+    #   (embeddings). One shared per-user budget across all of them.
+    "DEFAULT_THROTTLE_RATES": {
+        "chat": "30/min",
+        "login": "10/min",
+        "refresh": "30/min",
+        "cost": "60/hour",
+    },
 }
 
 SIMPLE_JWT = {
     "ACCESS_TOKEN_LIFETIME": timedelta(minutes=30),
     "REFRESH_TOKEN_LIFETIME": timedelta(days=7),
     "ROTATE_REFRESH_TOKENS": True,
+    # A rotated-out refresh token is blacklisted, so a stolen-and-replayed
+    # older token stops working after the legitimate client's next refresh.
+    "BLACKLIST_AFTER_ROTATION": True,
     "UPDATE_LAST_LOGIN": True,
 }
+
+# Django's four stock validators; 12 characters minimum. Enforced wherever
+# a password is set through a human-facing path (signup serializer,
+# `bootstrap_owner`).
+AUTH_PASSWORD_VALIDATORS = [
+    {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},
+    {
+        "NAME": "django.contrib.auth.password_validation.MinimumLengthValidator",
+        "OPTIONS": {"min_length": 12},
+    },
+    {"NAME": "django.contrib.auth.password_validation.CommonPasswordValidator"},
+    {"NAME": "django.contrib.auth.password_validation.NumericPasswordValidator"},
+]
+
+# CLI personal access tokens (MVP 9 §1) expire (Phase 4 branch 1): the mint
+# request may choose a lifetime in days, capped at PAT_MAX_TTL_DAYS;
+# omitted, it gets PAT_DEFAULT_TTL_DAYS.
+PAT_DEFAULT_TTL_DAYS = env.int("PAT_DEFAULT_TTL_DAYS", default=90)
+PAT_MAX_TTL_DAYS = env.int("PAT_MAX_TTL_DAYS", default=365)
 
 # Dev signup switch — prod default is False (see dev.py for the dev default).
 SIGNUP_ENABLED = env.bool("SIGNUP_ENABLED", default=False)
@@ -213,7 +333,6 @@ OBSIDIAN_VAULT_PATH = env("OBSIDIAN_VAULT_PATH", default="")
 # timing.
 APPROVAL_REQUEST_TTL_HOURS = env.int("APPROVAL_REQUEST_TTL_HOURS", default=24)
 
-# Dev-only escape hatch for the requester != decider rule ADR-004 requires
 # --- Agent runtime (MVP 7) ---
 
 # Plan step-count bound (brief §1, user-mandated brake #1): a planner call

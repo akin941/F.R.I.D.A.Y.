@@ -365,6 +365,8 @@ export interface ApiPersonalAccessToken {
   workspace: string;
   last_used_at: string | null;
   revoked_at: string | null;
+  // Tokens expire (Phase 4 branch 1); the backend rejects them from here on.
+  expires_at: string;
   created_at: string;
 }
 

@@ -19,6 +19,10 @@ function TokenRow({
 }) {
   const [revoking, setRevoking] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Evaluated once per mount (render must stay pure); a token expiring
+  // while the page is open shows as expired on the next load.
+  const [renderedAt] = useState(() => Date.now());
+  const expired = new Date(token.expires_at).getTime() <= renderedAt;
 
   async function handleRevoke() {
     setRevoking(true);
@@ -60,10 +64,20 @@ function TokenRow({
               <span>Son kullanım {new Date(token.last_used_at).toLocaleString()}</span>
             </>
           ) : null}
+          {!token.revoked_at && !expired ? (
+            <>
+              <span>&middot;</span>
+              <span>Son geçerlilik {new Date(token.expires_at).toLocaleString()}</span>
+            </>
+          ) : null}
         </div>
         {token.revoked_at ? (
           <p className="text-sm text-muted-foreground">
             İptal edildi {new Date(token.revoked_at).toLocaleString()}
+          </p>
+        ) : expired ? (
+          <p className="text-sm text-muted-foreground">
+            Süresi doldu {new Date(token.expires_at).toLocaleString()}
           </p>
         ) : (
           <div>

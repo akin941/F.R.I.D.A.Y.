@@ -25,6 +25,12 @@ workspace notes live under their workspace folder and never enter personal scope
 06_Decisions · 07_Roadmap · 08_Prompts · 09_Learning · 10_Research ·
 12_System_Logs · 99_Archive · _private (sync-ignored) · _templates`
 
+The memory export (`vault_export`, `backend/tools/export.py`) writes approved
+memories to `03_Workspaces/<workspace>/Memory/`, except `sensitivity: private`
+ones, which go to `_private/<workspace>/Memory/` (Phase 4 branch 1). Each
+tree is reconciled separately, so a private memory's older copy in the main
+tree is pruned on the next export.
+
 ## Security
 
 Agents may only touch the vault path (filesystem adapter path-jail). Deletions and

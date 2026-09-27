@@ -83,7 +83,7 @@ describe("POST /api/auth/signup", () => {
     expect(access?.value).toBe("access-token-value");
     expect(access?.httpOnly).toBe(true);
     expect(access?.path).toBe("/api");
-    expect(refresh?.path).toBe("/api/auth/refresh");
+    expect(refresh?.path).toBe("/api/auth");
   });
 
   it("rejects a mismatched Origin before touching the backend", async () => {

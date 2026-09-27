@@ -50,6 +50,18 @@ jobs:
       - name: Missing migrations check
         run: uv run python manage.py makemigrations --check --dry-run
 
+      # Production settings must import from a complete environment and
+      # pass Django's deployment checklist (Phase 4 branch 1). Dummy values
+      # only -- the secret key is generated per run, never committed.
+      - name: Deploy checks (prod settings, dummy env)
+        env:
+          DJANGO_SETTINGS_MODULE: config.settings.prod
+          DJANGO_ALLOWED_HOSTS: jarvis.example
+          REDIS_URL: redis://localhost:6379/0
+        run: |
+          DJANGO_SECRET_KEY="$(python3 -c 'import secrets; print(secrets.token_urlsafe(50))')" \
+            uv run python manage.py check --deploy --fail-level WARNING
+
       - name: Tests
         run: uv run pytest
 

@@ -6,7 +6,6 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.renderers import JSONRenderer
 from rest_framework.response import Response
 from rest_framework.settings import api_settings
-from rest_framework.throttling import ScopedRateThrottle
 from rest_framework.views import APIView
 
 from accounts.authentication import PersonalAccessTokenAuthentication
@@ -26,6 +25,7 @@ from assistant.services import (
     stream_assistant_reply,
 )
 from core.channels import is_low_trust, request_channel, scoped_for_actor
+from core.throttling import ScopedRateThrottle
 from workspaces.models import Workspace
 
 # Allowlisted for PAT auth (MVP 9 §1/§2). PersonalAccessTokenAuthentication

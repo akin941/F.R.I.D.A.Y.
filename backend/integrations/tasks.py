@@ -45,9 +45,9 @@ def _parse_rate(rate):
 # -- the Telegram relay path is a Celery task, never passes through DRF's
 # view-level throttling at all, so without an equivalent check here a
 # linked chat could enqueue unbounded provider calls (Codex review,
-# branch 3 round 1). Fixed-window counter via Django's cache framework;
-# correct only under this repo's existing single-worker-process topology,
-# the same constraint config/celery.py's embedded beat already documents.
+# branch 3 round 1). Fixed-window counter via Django's cache framework --
+# Redis-backed wherever REDIS_URL is set (Phase 4 branch 1), so the count
+# is shared across every worker process.
 _RELAY_RATE_LIMIT, _RELAY_RATE_WINDOW_SECONDS = _parse_rate(
     settings.REST_FRAMEWORK["DEFAULT_THROTTLE_RATES"]["chat"]
 )

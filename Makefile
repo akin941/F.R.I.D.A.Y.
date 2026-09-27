@@ -1,15 +1,33 @@
 # Jarvis OS — development commands
 COMPOSE := docker compose -f deploy/docker/compose.yml
+COMPOSE_DAILY := $(COMPOSE) -f deploy/docker/compose.daily.yml
 BACKEND := cd backend &&
+# The WSGI/ASGI/Celery entry points default to config.settings.prod (fail
+# hard on a missing env) since Phase 4 branch 1, so host-side Celery runs
+# name the dev settings explicitly. manage.py keeps its dev default (every
+# documented `uv run python manage.py ...` still works) and pytest takes its
+# settings from backend/pyproject.toml.
+DEV_SETTINGS := DJANGO_SETTINGS_MODULE=$${DJANGO_SETTINGS_MODULE:-config.settings.dev}
 FRONTEND := cd frontend &&
 
-.PHONY: up down logs test lint fmt shell migrate makemigrations \
+.PHONY: up up-daily down logs secrets test lint fmt shell migrate makemigrations \
 	harness-images harness-smoke harness-runner \
 	test-backend test-frontend test-e2e lint-backend lint-frontend \
 	frontend-install frontend-dev frontend-build e2e-install
 
-up:
+# Generates any missing secret into the gitignored deploy/docker/.env
+# (never overwrites an existing key). `make up` runs it first, so a fresh
+# clone needs no manual step.
+secrets:
+	@sh deploy/docker/gen-secrets.sh deploy/docker/.env
+
+up: secrets
 	$(COMPOSE) up -d --build
+
+# Daily-driver stack: gunicorn + prod settings + `next start` (see
+# deploy/docker/compose.daily.yml).
+up-daily: secrets
+	$(COMPOSE_DAILY) up -d --build
 
 down:
 	$(COMPOSE) down
@@ -83,4 +101,4 @@ harness-smoke:
 # the harness recovery scans (the compose beat never does). One runner at a
 # time: a second `-B` runner would double-schedule the scans.
 harness-runner:
-	$(BACKEND) HARNESS_RUNNER_BEAT=true uv run celery -A config worker -B -s /tmp/jarvis-harness-beat-schedule -Q $${HARNESS_CELERY_QUEUE:-harness} -l info -n harness-runner@%h
+	$(BACKEND) $(DEV_SETTINGS) HARNESS_RUNNER_BEAT=true uv run celery -A config worker -B -s /tmp/jarvis-harness-beat-schedule -Q $${HARNESS_CELERY_QUEUE:-harness} -l info -n harness-runner@%h

@@ -15,18 +15,45 @@ exercises JWT.
 
 import hashlib
 
+from django.core.cache import cache
 from django.utils import timezone
 from rest_framework.authentication import BaseAuthentication
 from rest_framework.exceptions import AuthenticationFailed
 
 from accounts.models import PersonalAccessToken
+from audit.models import AuditLog
+from audit.services import record_audit
 from core.channels import CHANNEL_CLI, ChannelPrincipal
 
 TOKEN_PREFIX = "jpat_"
 
+# Failed PAT authentications are audited (Phase 4 branch 1), but a client
+# hammering the endpoint with garbage must not be able to flood the audit
+# log: at most this many `accounts.pat.auth_failed` rows per window,
+# install-wide (fixed-window counter in the default cache).
+AUTH_FAILURE_AUDIT_LIMIT = 10
+AUTH_FAILURE_AUDIT_WINDOW_SECONDS = 60
+_AUTH_FAILURE_AUDIT_KEY = "accounts:pat-auth-failure-audits"
+# The audited identifier: the fixed prefix plus 4 characters of the random
+# part -- enough to tell tokens apart in an investigation, never enough to
+# help reconstruct one.
+_AUDITED_PREFIX_LENGTH = len(TOKEN_PREFIX) + 4
+
 
 def hash_token(raw_token: str) -> str:
     return hashlib.sha256(raw_token.encode()).hexdigest()
+
+
+def _audit_auth_failure(raw_token, reason):
+    cache.add(_AUTH_FAILURE_AUDIT_KEY, 0, timeout=AUTH_FAILURE_AUDIT_WINDOW_SECONDS)
+    if cache.incr(_AUTH_FAILURE_AUDIT_KEY) > AUTH_FAILURE_AUDIT_LIMIT:
+        return
+    record_audit(
+        action="accounts.pat.auth_failed",
+        actor=None,
+        actor_type=AuditLog.ActorType.SYSTEM,
+        metadata={"token_prefix": raw_token[:_AUDITED_PREFIX_LENGTH], "reason": reason},
+    )
 
 
 class PersonalAccessTokenAuthentication(BaseAuthentication):
@@ -48,20 +75,31 @@ class PersonalAccessTokenAuthentication(BaseAuthentication):
             return None  # not a PAT-shaped credential — fall through
 
         token = (
-            PersonalAccessToken.objects.filter(
-                token_hash=hash_token(raw_token), revoked_at__isnull=True
-            )
+            PersonalAccessToken.objects.filter(token_hash=hash_token(raw_token))
             .select_related("user")
             .first()
         )
+        now = timezone.now()
         # A deactivated user's still-unrevoked PAT is rejected exactly like
         # a revoked or unknown one — JWTAuthentication's own user lookup
         # enforces this already; a bespoke authenticator gets nothing for
-        # free and must check explicitly.
-        if token is None or not token.user.is_active:
-            raise AuthenticationFailed("Invalid or revoked token.")
+        # free and must check explicitly. One generic message for every
+        # reason (no oracle); the reason goes to the audit log only.
+        if token is None:
+            reason = "unknown"
+        elif token.revoked_at is not None:
+            reason = "revoked"
+        elif token.expires_at <= now:
+            reason = "expired"
+        elif not token.user.is_active:
+            reason = "inactive_user"
+        else:
+            reason = None
+        if reason is not None:
+            _audit_auth_failure(raw_token, reason)
+            raise AuthenticationFailed("Invalid, expired or revoked token.")
 
-        token.last_used_at = timezone.now()
+        token.last_used_at = now
         token.save(update_fields=["last_used_at"])
 
         return (

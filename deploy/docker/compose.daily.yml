@@ -1,0 +1,68 @@
+# Jarvis OS — daily-driver override (Phase 4 branch 1). Layered on top of
+# the dev stack:
+#
+#   make up-daily
+#   # = docker compose -f deploy/docker/compose.yml \
+#   #     -f deploy/docker/compose.daily.yml up -d --build
+#
+# What changes versus the dev stack:
+# - web runs gunicorn (gthread workers) instead of `runserver`, which is a
+#   development server and never meant for exposure;
+# - web and worker run `config.settings.prod` (fail-hard: DJANGO_SECRET_KEY,
+#   DATABASE_URL, DJANGO_ALLOWED_HOSTS and REDIS_URL are required; secure
+#   cookies, nosniff, X-Frame-Options DENY, referrer policy);
+# - a `frontend` service builds and serves the Next.js app with
+#   `next build && next start` (production mode: Secure cookies and the
+#   browser-facing security headers from frontend/next.config.ts).
+#
+# Everything is still published on 127.0.0.1 only. Exposing Jarvis beyond
+# this machine goes through a private overlay (Tailscale/WireGuard) or a TLS
+# reverse proxy in front of the frontend -- never by publishing these ports
+# on 0.0.0.0. Django's only client is the BFF (the frontend container, over
+# the compose network), so Django-level HSTS/SSL redirect stay off here.
+services:
+  web:
+    command: >-
+      sh -c "uv run python manage.py migrate
+      && uv run python manage.py seed_ai_defaults
+      && uv run gunicorn config.wsgi -k gthread --workers ${GUNICORN_WORKERS:-3} --threads ${GUNICORN_THREADS:-16}
+      --bind 0.0.0.0:8000 --timeout 120 --access-logfile -"
+    environment:
+      DJANGO_SETTINGS_MODULE: config.settings.prod
+      DJANGO_DEBUG: "false"
+      # "web" is the Host header the BFF uses over the compose network.
+      DJANGO_ALLOWED_HOSTS: web,localhost,127.0.0.1
+      # The deterministic fake provider is a dev/test convenience; the daily
+      # stack defaults to real providers (configure them in
+      # deploy/docker/.env).
+      AI_FAKE_PROVIDER: "${AI_FAKE_PROVIDER:-false}"
+
+  worker:
+    environment:
+      DJANGO_SETTINGS_MODULE: config.settings.prod
+      DJANGO_DEBUG: "false"
+      DJANGO_ALLOWED_HOSTS: web,localhost,127.0.0.1
+      AI_FAKE_PROVIDER: "${AI_FAKE_PROVIDER:-false}"
+
+  frontend:
+    image: node:24-slim
+    working_dir: /app
+    command: sh -c "npm ci && npm run build && npm run start -- --hostname 0.0.0.0"
+    volumes:
+      - ../../frontend:/app
+      # Container-local node_modules/.next: never share the host's
+      # (platform-specific) install with this Linux container.
+      - /app/node_modules
+      - /app/.next
+    environment:
+      NODE_ENV: production
+      NEXT_TELEMETRY_DISABLED: "1"
+      BACKEND_API_URL: http://web:8000/api/v1
+      # The browser-facing origin (CSRF Origin check in the BFF). Change it
+      # to the reverse-proxy/overlay URL when you expose the frontend.
+      APP_ORIGIN: "${APP_ORIGIN:-http://localhost:3001}"
+    ports:
+      - "127.0.0.1:3001:3001"
+    depends_on:
+      web:
+        condition: service_healthy

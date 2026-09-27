@@ -15,3 +15,17 @@ def _celery_eager_for_tests(settings):
     """
     settings.CELERY_TASK_ALWAYS_EAGER = True
     settings.CELERY_TASK_EAGER_PROPAGATES = True
+
+
+@pytest.fixture(autouse=True)
+def _clear_cache():
+    """Throttle counters (DRF scoped throttles, the Telegram relay limiter)
+    live in the default cache (LocMem under config/settings/test.py). The
+    anonymous login/refresh scopes key on REMOTE_ADDR, identical for every
+    test client, so without a per-test reset their counts would leak across
+    unrelated tests."""
+    from django.core.cache import cache
+
+    cache.clear()
+    yield
+    cache.clear()

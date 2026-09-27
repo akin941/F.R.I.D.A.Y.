@@ -17,6 +17,16 @@ import { apiPostJson, ApiError } from "@/lib/api-client";
 import { useWorkspace } from "@/contexts/workspace-context";
 import type { ApiPersonalAccessTokenCreated } from "@/types/api";
 
+// Lifetimes offered at mint (days). The backend default is 90 and its cap
+// 365 (PAT_DEFAULT_TTL_DAYS / PAT_MAX_TTL_DAYS).
+const EXPIRY_OPTIONS = [
+  { days: "30", label: "30 gün" },
+  { days: "90", label: "90 gün" },
+  { days: "180", label: "180 gün" },
+  { days: "365", label: "1 yıl" },
+];
+const DEFAULT_EXPIRY_DAYS = "90";
+
 /**
  * A token is bound to one workspace for its lifetime (brief §2/§3), which
  * may not be whichever workspace the sidebar switcher currently has active
@@ -34,6 +44,7 @@ export function CreateTokenForm({
 
   const [name, setName] = useState("");
   const [workspaceId, setWorkspaceId] = useState(activeWorkspace?.id ?? "");
+  const [expiryDays, setExpiryDays] = useState(DEFAULT_EXPIRY_DAYS);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -45,6 +56,7 @@ export function CreateTokenForm({
       const token = await apiPostJson<ApiPersonalAccessTokenCreated>("/api/auth/tokens", {
         workspace: workspaceId,
         name,
+        expires_in_days: Number(expiryDays),
       });
       onCreated(token);
       setName("");
@@ -91,6 +103,21 @@ export function CreateTokenForm({
                 {workspaces.map((workspace) => (
                   <SelectItem key={workspace.id} value={workspace.id}>
                     {workspace.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="token-expiry">Geçerlilik süresi</Label>
+            <Select value={expiryDays} onValueChange={setExpiryDays}>
+              <SelectTrigger id="token-expiry" aria-label="Token geçerlilik süresi">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {EXPIRY_OPTIONS.map((option) => (
+                  <SelectItem key={option.days} value={option.days}>
+                    {option.label}
                   </SelectItem>
                 ))}
               </SelectContent>
