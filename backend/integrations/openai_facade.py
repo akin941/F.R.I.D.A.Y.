@@ -635,6 +635,10 @@ def _start_jarvis(request, plan, workspace, token):
         content=content,
         allowed_intents=FACADE_INTENTS,
         context_report={"channel": CHANNEL_OPENAI, "model": MODEL_JARVIS},
+        # Connector reads never run over the facade (ADR-010 decision 4):
+        # FACADE_INTENTS excludes connector_read, and no read tool is ever
+        # registered for this channel either.
+        channel=CHANNEL_OPENAI,
     )
     gateway_stream, usage_holder, memory_ids, chunk_ids, _overlay = build_gateway_stream(
         conversation,

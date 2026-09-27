@@ -55,6 +55,8 @@ DOMAIN_ERROR_CODES = frozenset(
         "approval.channel_forbidden",
         "approval.invalid_transition",
         "approval.expired",
+        "connector.permission_denied",
+        "connector.invalid_transition",
         "agent.permission_denied",
         "agent.invalid_transition",
         "deploy.permission_denied",

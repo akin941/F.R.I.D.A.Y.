@@ -19,6 +19,9 @@ dependencies = [
     "pgvector>=0.3.6",
     "urllib3>=2.7.0",
     "gunicorn>=23.0",
+    "mcp>=2.2,<2.3",
+    "httpx>=0.28,<0.29",
+    "httpx2>=2.13,<2.14",
 ]
 
 [dependency-groups]
@@ -86,6 +89,11 @@ root_packages = [
     "harness",
     "connectors",
     "deploys",
+    # The MCP SDK (Phase 5 branch 4, ADR-010 decision 3) is analysed as a
+    # root package only so the contract below can name its `mcp.server`
+    # subpackage -- import-linter cannot forbid a subpackage of an external
+    # package. No contract constrains the SDK's own internal imports.
+    "mcp",
 ]
 
 # The kernel-level contracts are below. The module-pack contracts (kernel apps
@@ -376,6 +384,14 @@ name = "connectors may import only core, workspaces, audit, ai_core, tools, memo
 type = "forbidden"
 source_modules = ["connectors"]
 forbidden_modules = ["config", "accounts", "assistant", "knowledge", "tasks", "approvals", "agents", "skills", "integrations", "harness", "deploys"]
+# Tests drive the wired flows end to end (a user, a chat turn, an approval
+# decision); the contract targets production code.
+ignore_imports = [
+    "connectors.tests.** -> accounts.**",
+    "connectors.tests.** -> approvals.**",
+    "connectors.tests.** -> assistant.**",
+    "connectors.tests.** -> integrations.**",
+]
 
 # deploys may import the same set plus connectors (GitHub title/CI reads
 # for the deploy snapshot) and approvals (it mints its own system-created
@@ -411,3 +427,29 @@ name = "harness may import connectors but not deploys (ADR-010)"
 type = "forbidden"
 source_modules = ["harness"]
 forbidden_modules = ["deploys"]
+
+# The MCP SDK (ADR-010 decision 3, brief D2) ships server-side code
+# (starlette, uvicorn, the stdio server/client) next to the client. Jarvis is
+# only ever an MCP *client* speaking Streamable HTTP to its sidecars:
+# production code may import `mcp.client.*` (never the stdio/SSE
+# transports) and `mcp.types`/`mcp_types`, never `mcp.server`. Direct imports
+# only (`allow_indirect_imports`): the SDK's own client modules import its
+# server package internally (the in-process test transport), which is the
+# SDK's business, not an edge of ours. `connectors.tests.*` use the SDK's
+# server as the fake; the stdio<->HTTP bridge is the one production module
+# that IS a server -- it runs only inside a connector sidecar, never in web,
+# worker or the harness runner (D1).
+[[tool.importlinter.contracts]]
+name = "production code imports only the MCP client side (ADR-010, D2)"
+type = "forbidden"
+source_modules = ["core", "accounts", "workspaces", "audit", "ai_core", "assistant", "memory", "knowledge", "tasks", "approvals", "tools", "agents", "skills", "integrations", "harness", "connectors", "deploys"]
+forbidden_modules = ["mcp.server", "mcp.client.stdio", "mcp.client.sse", "mcp.cli", "mcp.os"]
+allow_indirect_imports = true
+ignore_imports = [
+    # The fake MCP server the connectors tests talk to.
+    "connectors.tests.fakes -> mcp.server",
+    # The stdio<->HTTP bridge IS a server (and spawns the stdio child): it
+    # runs only inside a connector sidecar, never in web/worker/runner (D1).
+    "connectors.docker.stdio_bridge -> mcp.server",
+    "connectors.docker.stdio_bridge -> mcp.client.stdio",
+]

@@ -97,6 +97,15 @@ class ToolSpec:
     snapshots, never the raw `payload` itself (which the serializer still
     never exposes). Optional.
 
+    `prepare_payload(workspace, payload) -> dict` (Phase 5 branch 4, brief
+    D6): tier-1, no-network validation that also RETURNS the payload to
+    store -- the request's snapshot. Called by `approvals.services.
+    create_request` after `validate_request`; its return value replaces the
+    caller-supplied payload wholesale, so a client can never smuggle a field
+    the tool did not put there itself (a connector write snapshots its
+    normalized arguments, binding, manifest version and schema pin here).
+    Raise `ToolValidationError` to refuse. Optional.
+
     `records_work_log` (Phase 5 branch 1, brief D13): whether a terminal
     execution of this tool leaves a Jarvis-authored `work_log` memory
     (`tools.work_log.record_tool_outcome`, ADR-008 decision 4). Default
@@ -115,6 +124,7 @@ class ToolSpec:
     describe_request: Callable[[Any], dict | None] | None = None
     proposable: bool = True
     records_work_log: bool = True
+    prepare_payload: Callable[[Any, dict], dict] | None = None
 
 
 _REGISTRY: dict[str, ToolSpec] = {}
@@ -167,16 +177,35 @@ READ_CHANNELS = {
 }
 
 
+class ReadToolError(Exception):
+    """Raised by `ReadToolSpec.execute` when a read is refused or fails.
+    `code` is a closed-vocabulary token (e.g. `invalid_arguments`,
+    `out_of_scope`, `not_available`, `timeout`, `tool_error`) -- never
+    server or exception text. A tools-local type, like `ToolValidationError`,
+    so `assistant` can handle it without importing `connectors`."""
+
+    def __init__(self, code):
+        self.code = code
+        super().__init__(code)
+
+
 @dataclass(frozen=True)
 class ReadResult:
     """What a read hands back to the caller: text and, optionally, the
     server's `structuredContent`. Everything else an MCP result may carry
     (images, resources, links) is dropped before this object exists. Still
-    low-trust data: the caller bounds, strips and fences it (brief D4)
-    before it gets anywhere near a prompt."""
+    low-trust data: the caller strips and fences it (brief D4) before it
+    gets anywhere near a prompt.
+
+    The connectors framework serializes `structuredContent` into `text`
+    itself, so one size bound covers both: `text` is already bounded to
+    `CONNECTOR_RESULT_MAX_CHARS`, `size` is its length before bounding and
+    `truncated` says whether anything was cut (Phase 5 branch 4)."""
 
     text: str
     structured: Any = None
+    size: int = 0
+    truncated: bool = False
 
 
 @dataclass(frozen=True)
@@ -192,12 +221,17 @@ class ReadToolSpec:
       (brief D5).
     - `channels`: the request channels the read may run over, a subset of
       `READ_CHANNELS[data_class]`.
-    - `execute(*, workspace, actor, args, channel) -> ReadResult`: performs
-      the read; the caller audits it.
+    - `execute(*, workspace, actor, args, channel) -> ReadResult`: validates
+      the arguments (serializer, scope check), performs the read and audits
+      it (`connector.read`, every outcome); raises `ReadToolError` on any
+      refusal or failure.
     - `is_available(workspace) -> bool`: whether the workspace has an
       enabled binding for the read's connector. A callback rather than a
       query here because `tools` must never import `connectors`
       (ADR-010). Required: no read is available by default.
+    - `source`: a short, code-defined label of the system read (e.g.
+      `github`), shown in the fence (`<connector_result source=...>`) and
+      the chat's source badge. Never server-supplied text.
     """
 
     name: str
@@ -207,6 +241,7 @@ class ReadToolSpec:
     channels: frozenset
     execute: Callable[..., ReadResult]
     is_available: Callable[[Any], bool]
+    source: str = ""
 
 
 _READ_REGISTRY: dict[str, ReadToolSpec] = {}

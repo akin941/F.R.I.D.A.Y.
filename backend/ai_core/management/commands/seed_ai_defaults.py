@@ -1,5 +1,6 @@
 """Idempotent seed for AI defaults: jarvis_system, jarvis_memory_extraction,
-jarvis_router_intent, jarvis_router_task_draft, jarvis_agent_plan and the
+jarvis_router_intent, jarvis_router_task_draft, jarvis_router_connector_args,
+jarvis_agent_plan and the
 other purpose prompts, providers, and (D11) default ModelTier rows.
 
 Uses get_or_create so re-running never duplicates records and never clobbers
@@ -74,6 +75,23 @@ JARVIS_ROUTER_TASK_DRAFT_V1 = (
     'resolve relative dates ("tomorrow", "Friday") ONLY against the '
     "reference date given below the schema, if one is given — never guess a "
     "date without it; output nothing outside the JSON object."
+)
+
+# Schema mirrors assistant.services.parse_connector_args (Phase 5 branch 4,
+# brief D4). ai_core must not import the assistant app, so the shape is
+# duplicated in prose -- same discipline as the prompts above. The caller
+# (assistant.services._extract_connector_args) appends the named read tool
+# and its Jarvis-side argument schema; this string is the fixed part.
+JARVIS_ROUTER_CONNECTOR_ARGS_V1 = (
+    "You extract the arguments for one read-only tool from a user chat "
+    "message already routed to that tool. Read ONLY the latest user message "
+    "and output ONLY a single JSON object, no prose, no code fences, whose "
+    "keys are argument names from the schema below and whose values are "
+    "taken from the message. Rules: omit an optional argument the message "
+    "does not state; never invent a value (a required argument the message "
+    "does not state makes the object incomplete -- return it anyway, "
+    "without that key); use only the argument names listed; output nothing "
+    "outside the JSON object."
 )
 
 # Schema mirrors agents.planner.parse_plan (MVP 7 §2). ai_core must not
@@ -283,6 +301,22 @@ class Command(BaseCommand):
             task_draft_template.active_version = task_draft_version
             task_draft_template.save(update_fields=["active_version"])
         self._log("jarvis_router_task_draft prompt", created or v_created)
+
+        connector_args_template, created = PromptTemplate.objects.get_or_create(
+            name="jarvis_router_connector_args", defaults={"purpose": "router.connector_args"}
+        )
+        connector_args_version, v_created = PromptVersion.objects.get_or_create(
+            template=connector_args_template,
+            version=1,
+            defaults={
+                "content": JARVIS_ROUTER_CONNECTOR_ARGS_V1,
+                "changelog": "Initial version (Phase 5 branch 4).",
+            },
+        )
+        if connector_args_template.active_version_id is None:
+            connector_args_template.active_version = connector_args_version
+            connector_args_template.save(update_fields=["active_version"])
+        self._log("jarvis_router_connector_args prompt", created or v_created)
 
         agent_plan_template, created = PromptTemplate.objects.get_or_create(
             name="jarvis_agent_plan", defaults={"purpose": "agent.plan"}

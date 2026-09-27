@@ -466,6 +466,21 @@ class InferenceGateway:
             retryable=last_error.retryable if last_error else False,
         )
 
+    def has_eligible_provider(
+        self, *, purpose, personal_data=False, capability=ModelProvider.Capability.CHAT
+    ):
+        """Pre-flight (D5, Phase 5 branch 4): would a call with these
+        arguments find a provider? The same selection `complete()` runs --
+        including the `personal_data` filter -- but no LLM call is made and
+        no `ModelUsage` row is written (nothing was attempted). A connector
+        read that must not happen without an allowed provider asks this
+        first."""
+        return bool(
+            self._select_providers(
+                capability=capability, purpose=purpose, personal_data=personal_data
+            )
+        )
+
     # --- provider selection ---
 
     def _select_providers(

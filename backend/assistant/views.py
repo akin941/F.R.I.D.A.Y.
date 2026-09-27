@@ -24,6 +24,7 @@ from assistant.services import (
     classify_intent,
     create_conversation,
     mark_conversation_private,
+    prepare_connector_read,
     rename_conversation,
     stream_assistant_reply,
 )
@@ -273,7 +274,26 @@ class ConversationMessageListView(APIView):
             actor=request.user,
             content=content,
             client_local_date=serializer.validated_data["client_local_date"],
+            channel=channel,
         )
+
+        # Phase 5 branch 4 (brief D4/D5): at most one connector read per
+        # turn, run and fenced here -- and, for a personal read, the
+        # conversation's `personal_data` flag committed -- before the chat
+        # completion below is started.
+        connector_turn = None
+        if classification["intent"] == Message.Intent.CONNECTOR_READ:
+            connector_turn = prepare_connector_read(
+                conversation,
+                actor=request.user,
+                content=content,
+                channel=channel,
+                tool_name=classification["intent_payload"]["tool_name"],
+            )
+            classification["intent_payload"] = {
+                "tool_name": connector_turn.tool_name,
+                "outcome": connector_turn.outcome,
+            }
 
         gateway_stream, usage_holder, memory_ids, chunk_ids, overlay_source_workspaces = (
             build_gateway_stream(
@@ -282,6 +302,7 @@ class ConversationMessageListView(APIView):
                 content=content,
                 channel=channel,
                 intent=classification["intent"],
+                connector_turn=connector_turn,
             )
         )
         user_message = Message.objects.create(
@@ -333,6 +354,7 @@ class ConversationMessageListView(APIView):
                 overlay_source_workspaces=overlay_source_workspaces,
                 draft_event=draft_event,
                 channel=channel,
+                connector_reads=connector_turn.reads if connector_turn else None,
             ),
             content_type="text/event-stream",
         )

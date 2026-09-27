@@ -352,6 +352,14 @@ def create_request(
             validate_request(workspace, payload or {})
         except ToolValidationError as exc:
             raise InvalidTransition(str(exc)) from exc
+    # Phase 5 branch 4 (brief D6): a tool that snapshots its request builds
+    # the stored payload itself; the caller's payload is only its input.
+    prepare_payload = getattr(tool, "prepare_payload", None)
+    if prepare_payload is not None:
+        try:
+            payload = prepare_payload(workspace, payload or {})
+        except ToolValidationError as exc:
+            raise InvalidTransition(str(exc)) from exc
     approval_request = ApprovalRequest.objects.create(
         workspace=workspace,
         tool_name=tool_name,
