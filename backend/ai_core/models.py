@@ -38,6 +38,15 @@ class ModelProvider(TimestampedModel):
     # Lower priority = tried first. The fake provider is seeded with priority 0
     # but is only selectable when settings.AI_FAKE_PROVIDER is on.
     priority = models.PositiveIntegerField(default=100)
+    # D5 (Phase 5, ADR-010 decision 5): may this provider receive
+    # personal-class data (mail, calendar, Home Assistant, sensitive-repo
+    # reads)? Default False -- a cloud provider never qualifies by
+    # accident. `seed_ai_defaults` creates only the local, no-network
+    # providers with True; every other change goes through the audited
+    # `manage.py set_provider_personal_data` (read-only in the admin).
+    # `InferenceGateway.complete(..., personal_data=True)` selects ONLY
+    # providers with this flag and fails closed when there are none.
+    personal_data_allowed = models.BooleanField(default=False)
 
     class Meta:
         ordering = ["priority", "name"]

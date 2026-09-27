@@ -374,6 +374,7 @@ class Command(BaseCommand):
                 "model_id": "fake-1",
                 "priority": 0,  # first when AI_FAKE_PROVIDER=true; filtered out otherwise
                 "is_active": True,
+                "personal_data_allowed": True,  # in-process, same as fake-local
             },
         )
         self._log("fake-local provider", created)
@@ -387,6 +388,10 @@ class Command(BaseCommand):
                 "dimension": 32,
                 "priority": 0,  # first when AI_FAKE_PROVIDER=true; filtered out otherwise
                 "is_active": True,
+                # In-process and deterministic: nothing leaves the host, so
+                # personal-class data may reach it (D5). Selectable only
+                # behind AI_FAKE_PROVIDER, i.e. dev/tests/e2e.
+                "personal_data_allowed": True,
             },
         )
         self._log("fake-embedding-local provider", created)
@@ -544,6 +549,7 @@ class Command(BaseCommand):
                     # (priority 10+) when configured — ahead of even
                     # anthropic-primary, since local-first is the point.
                     "priority": 5,
+                    "personal_data_allowed": True,
                 },
             )
             self._log("ollama-local provider", created)
@@ -572,6 +578,11 @@ class Command(BaseCommand):
                     # Local, free, private: same rationale as ollama-local
                     # above.
                     "priority": 5,
+                    # The one real provider seeded for personal-class data
+                    # (D5): it runs on the owner's own machine. Set on
+                    # creation only -- an existing row keeps its flag;
+                    # change it with `manage.py set_provider_personal_data`.
+                    "personal_data_allowed": True,
                 },
             )
             self._log("ollama-embedding provider", created)

@@ -120,6 +120,12 @@ source_modules = ["ai_core"]
 forbidden_modules = ["accounts", "workspaces", "audit", "assistant", "memory", "knowledge", "tasks", "approvals", "tools", "agents", "skills", "integrations", "harness", "connectors", "deploys"]
 ignore_imports = [
     "ai_core.tests.* -> accounts.*",
+    # D5 (Phase 5 branch 2): flipping `personal_data_allowed` must be
+    # audited, and `record_audit` is the only sanctioned audit writer. The
+    # exception is this one operator command -- no gateway/runtime module.
+    "ai_core.management.commands.set_provider_personal_data -> audit.services",
+    # ...and its tests read back the audit rows it writes.
+    "ai_core.tests.test_personal_data -> audit.models",
 ]
 
 [[tool.importlinter.contracts]]
