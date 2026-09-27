@@ -119,7 +119,9 @@ def _resolve_draft_source(request, workspace, draft_message_id):
 
 
 class TaskListCreateView(APIView):
-    permission_classes = [IsAuthenticated]
+    # Web only: creating from a chat task draft (`draft_message_id`) is the
+    # confirm step of an AI draft (ADR-008 confirm-class).
+    permission_classes = [IsAuthenticated, IsWebChannel]
 
     def get(self, request):
         workspace, error = _resolve_workspace(request)

@@ -4,6 +4,7 @@ from django.conf import settings
 from rest_framework import serializers
 from rest_framework.exceptions import AuthenticationFailed
 from rest_framework_simplejwt.serializers import TokenRefreshSerializer
+from rest_framework_simplejwt.settings import api_settings as jwt_settings
 
 from accounts.models import DevicePairingCode, PersonalAccessToken, TrustedDevice, User
 
@@ -120,7 +121,7 @@ class DeviceRefreshSerializer(TokenRefreshSerializer):
 
         refresh = self.token_class(attrs["refresh"])
         raw_device_id = refresh.payload.get(DEVICE_CLAIM)
-        user = User.objects.filter(pk=refresh.payload.get("user_id")).first()
+        user = User.objects.filter(pk=refresh.payload.get(jwt_settings.USER_ID_CLAIM)).first()
         try:
             device_id = uuid.UUID(str(raw_device_id)) if raw_device_id else None
         except ValueError:
