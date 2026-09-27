@@ -76,3 +76,6 @@ See [CLAUDE.md](CLAUDE.md) and `docs/adr/`. Highlights: Workspace is the data ax
 Postgres is the source of truth; all LLM calls go through the `ai_core` gateway and
 are logged as ModelUsage; no write/delete/deploy/external-send without the approval
 gate; agents can never change their own permissions.
+
+Harness (coding-agent runner): images, runner worker and the first paid run are covered in
+[`docs/runbooks/harness-first-run.md`](docs/runbooks/harness-first-run.md).

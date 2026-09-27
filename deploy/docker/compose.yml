@@ -89,7 +89,10 @@ services:
     # stack's topology) — running `-B` on more than one worker would
     # double-schedule the periodic tasks. If this stack ever scales to
     # multiple worker replicas, split beat into its own service first.
-    command: uv run celery -A config worker -l info -B
+    # `-Q celery`: the default queue only. Harness tasks are routed to the
+    # `harness` queue (CELERY_TASK_ROUTES) and run on a host runner
+    # (`make harness-runner`) -- this container has no Docker access.
+    command: uv run celery -A config worker -l info -B -Q celery
     volumes:
       - ../../backend:/app
       # Vault export (MVP 5 §3) is the first worker task to touch the host

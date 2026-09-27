@@ -4,6 +4,7 @@ BACKEND := cd backend &&
 FRONTEND := cd frontend &&
 
 .PHONY: up down logs test lint fmt shell migrate makemigrations \
+	harness-images harness-smoke harness-runner \
 	test-backend test-frontend test-e2e lint-backend lint-frontend \
 	frontend-install frontend-dev frontend-build e2e-install
 
@@ -60,3 +61,24 @@ frontend-dev:
 
 frontend-build:
 	$(FRONTEND) npm run build
+
+# --- Harness runner (Phase 3 branch 8; docs/runbooks/harness-first-run.md) ---
+# Builds both CLI images. Pin the real base-image digest and CLI versions in
+# the Dockerfiles first (they ship with placeholders on purpose).
+HARNESS_IMAGE_CLAUDE_CODE ?= jarvis-harness-claude-code:local
+HARNESS_IMAGE_CODEX_CLI ?= jarvis-harness-codex-cli:local
+
+harness-images:
+	cd backend/harness/docker && docker build -f claude_code.Dockerfile -t $(HARNESS_IMAGE_CLAUDE_CODE) .
+	cd backend/harness/docker && docker build -f codex_cli.Dockerfile -t $(HARNESS_IMAGE_CODEX_CLI) .
+
+# Real-container smoke: the real Claude Code image with its CLI stubbed out
+# (no paid call), then the write-mode round trip through actual Docker.
+harness-smoke:
+	cd backend/harness/docker/smoke && docker build --build-arg BASE_IMAGE=$(HARNESS_IMAGE_CLAUDE_CODE) -f smoke.Dockerfile -t jarvis-harness-smoke:local .
+	$(BACKEND) HARNESS_DOCKER_SMOKE_IMAGE=jarvis-harness-smoke:local uv run pytest harness/tests/test_docker_smoke.py -q
+
+# The runner worker: consumes ONLY the harness queue, on this host (it needs
+# Docker and the images). The compose worker never takes harness tasks.
+harness-runner:
+	$(BACKEND) uv run celery -A config worker -Q $${HARNESS_CELERY_QUEUE:-harness} -l info -n harness-runner@%h
