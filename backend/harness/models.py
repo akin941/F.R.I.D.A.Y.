@@ -295,6 +295,17 @@ class HarnessImplementationJob(WorkspaceScopedModel, TimestampedModel):
         on_delete=models.SET_NULL,
         related_name="harness_implementation_job_gate_b",
     )
+    # Phase 5 branch 5 (brief D7): the latest `github_open_pr` request for
+    # this job's pushed branch -- system-created by `harness.pull_requests`
+    # only from a `succeeded` job. The connectors execution links back only
+    # through the payload's opaque `origin_ref` (ADR-010).
+    pull_request_request = models.OneToOneField(
+        "approvals.ApprovalRequest",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="harness_implementation_job_pull_request",
+    )
     # Snapshotted from `repo.git_url`/`repo.default_branch` at creation
     # time, in `save()` -- NEVER re-read live from `self.repo.git_url`
     # anywhere execution code needs the remote (Codex code-review P1,

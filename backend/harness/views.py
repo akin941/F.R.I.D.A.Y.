@@ -1,13 +1,22 @@
 import uuid
 
-from rest_framework import status
+from rest_framework import serializers, status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from core.api_errors import service_error_response
+from core.channels import request_channel
+from core.permissions import IsOwner, IsWebChannel
 from core.throttling import CreateScopedRateThrottle
 from harness.models import HarnessImplementationJob, HarnessJob, HarnessRepo
+from harness.pull_requests import (
+    HarnessGithubUnavailable,
+    HarnessPullRequestExists,
+    HarnessPullRequestNotReady,
+    pull_request_state,
+    request_pull_request,
+)
 from harness.serializers import (
     HarnessImplementationJobCreateSerializer,
     HarnessImplementationJobDetailSerializer,
@@ -22,6 +31,7 @@ from harness.serializers import (
 from harness.services import (
     HarnessInvalidTransition,
     HarnessPermissionDenied,
+    HarnessServiceError,
     cancel_harness_implementation_job,
     cancel_harness_job,
     create_harness_implementation_job,
@@ -332,3 +342,65 @@ class HarnessImplementationJobCancelView(APIView):
             return _service_error_response(exc)
         job.refresh_from_db()
         return Response(HarnessImplementationJobSerializer(job).data)
+
+
+class PullRequestCreateSerializer(serializers.Serializer):
+    # Owner-editable; omitted -> the goal's first line.
+    title = serializers.CharField(max_length=256, required=False, trim_whitespace=True)
+
+
+def _pull_request_error_response(exc):
+    if isinstance(exc, HarnessPullRequestExists):
+        return service_error_response(exc, status.HTTP_409_CONFLICT)
+    if isinstance(exc, (HarnessPullRequestNotReady, HarnessGithubUnavailable)):
+        return service_error_response(exc, status.HTTP_400_BAD_REQUEST)
+    return _service_error_response(exc)
+
+
+class HarnessImplementationJobPullRequestView(APIView):
+    """`github_open_pr` for a pushed job (Phase 5 branch 5, brief D7): the
+    installation owner over a trusted web session only -- default
+    authentication (no PAT allowlist), `IsWebChannel`, `IsOwner`. POST
+    mints the system-created gate; GET is the job's PR/CI panel."""
+
+    permission_classes = [IsAuthenticated, IsWebChannel, IsOwner]
+
+    def _job(self, request, job_id):
+        return (
+            HarnessImplementationJob.objects.for_actor(request.user)
+            .filter(id=job_id)
+            .select_related("workspace", "pull_request_request")
+            .first()
+        )
+
+    def get(self, request, job_id):
+        job = self._job(request, job_id)
+        if job is None:
+            return Response(status=status.HTTP_404_NOT_FOUND)
+        try:
+            state = pull_request_state(
+                job=job, actor=request.user, channel=request_channel(request)
+            )
+        except HarnessServiceError as exc:
+            return _pull_request_error_response(exc)
+        return Response(state)
+
+    def post(self, request, job_id):
+        job = self._job(request, job_id)
+        if job is None:
+            return Response(status=status.HTTP_404_NOT_FOUND)
+        body = PullRequestCreateSerializer(data=request.data)
+        body.is_valid(raise_exception=True)
+        try:
+            approval_request = request_pull_request(
+                job=job,
+                actor=request.user,
+                channel=request_channel(request),
+                title=body.validated_data.get("title"),
+            )
+        except HarnessServiceError as exc:
+            return _pull_request_error_response(exc)
+        job.refresh_from_db()
+        state = pull_request_state(job=job, actor=request.user, channel=request_channel(request))
+        state["request"]["id"] = str(approval_request.id)
+        return Response(state, status=status.HTTP_201_CREATED)

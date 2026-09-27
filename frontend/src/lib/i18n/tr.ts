@@ -130,6 +130,19 @@ export const ERROR_MESSAGES = {
     message: "Bu harness işi, deposu ya da ajanı artık bu işleme uygun değil.",
     specific: true,
   },
+  "harness.pull_request_not_ready": {
+    message: "Bu iş için PR açılamaz: yalnızca başarıyla tamamlanıp dalı gönderilmiş işler PR alabilir.",
+    specific: true,
+  },
+  "harness.pull_request_exists": {
+    message: "Bu iş için zaten bekleyen ya da açılmış bir PR isteği var.",
+    specific: true,
+  },
+  "harness.github_unavailable": {
+    message:
+      "GitHub bu çalışma alanında kullanılamıyor: bağlantı kapalı, araç doğrulanmamış ya da depo GitHub'da kayıtlı değil.",
+    specific: true,
+  },
   // Knowledge
   "knowledge.permission_denied": { message: "Rolün bu belge işlemine yetmiyor.", specific: true },
   "knowledge.duplicate": {
