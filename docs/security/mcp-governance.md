@@ -75,6 +75,20 @@ governed by code, not by configuration:
    `<connector_result>` data and never become memories. Writes: one gated
    `ToolSpec` per tool, decided over the web only, snapshot-backed, sent at
    most once, never retried (`unknown_outcome` instead).
+7. **Native bridges (D8, D9).** A `native` manifest has no MCP server: its
+   module exports a `BRIDGE` (`backend/connectors/bridges/`) that calls the
+   vendor's REST API itself; the read/write paths, snapshot, gate and audit
+   are the same (`connectors.bridges.call_tool` dispatches by kind). The
+   bridge's pins hash its own request shapes (a bridge change that alters
+   one ships with a pin update). Availability comes from the bridge's health
+   check on enable and on the pin beat -- e.g. Google's granted OAuth scopes:
+   a tool whose scope is not granted is `scope_missing`, a grant wider than
+   the manifest maximum makes every tool `scope_extra`, a rejected refresh
+   token makes every tool `reconnect_required`. These statuses follow the
+   credential and are not sticky (a re-consent re-enables at the next
+   check); scopes are re-checked inside every call before any API request.
+   Credentials are env-only, read at call time; access tokens live in
+   process memory only.
 
 ### Logging and audit design (replaces the 2026-09-27 note)
 
@@ -89,6 +103,8 @@ calls around a read), and none of them carries content or credentials.
 | Every read attempt (ok, refused, failed) | `connector.read` | binding, connector, tool, sha256 of canonical arguments, size, truncated, duration_ms, outcome, channel |
 | Write requested / decided | `approval.requested` / `.approved` / `.rejected` | the approvals app's usual rows |
 | Write terminal state | `connector.write.succeeded` / `.failed` / `.unknown_outcome` (system) | connector, tool, binding, approval request, arguments sha256, closed-vocabulary error type |
+| Native grant wider than the manifest | `connector.scope_mismatch` (system) | connector, tools disabled, extra scope names, manifest version |
+| Native credential rejected / missing | `connector.reconnect_required` (system) | connector, closed error code (`reconnect_required` / `not_configured`) |
 | Personal data entered a conversation | `assistant.conversation.marked_personal_data` | -- |
 
 The chat completion that consumed a read records the read's bookkeeping in
