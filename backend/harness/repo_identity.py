@@ -53,16 +53,34 @@ def canonicalize_git_url(git_url: str) -> str:
 
     scp_match = _SCP_LIKE_RE.match(value)
     if scp_match:
-        host, path = scp_match.group(1), scp_match.group(2)
-        return f"{host}/{path.rstrip('/')}"
+        return _join(scp_match.group(1), scp_match.group(2))
 
     if "://" in value:
         parsed = urlsplit(value)
         host = parsed.hostname or ""
-        path = parsed.path.lstrip("/")
-        return f"{host}/{path}" if host else path
+        return _join(host, parsed.path) if host else _collapse_path(parsed.path)
 
     return value
+
+
+# Phase 3 branch 5 (2026-09-27 audit): alternate spellings of the same
+# remote that GitHub accepts must not bypass the hard block --
+# `git@github.com:/owner/repo`, repeated slashes, a trailing-dot FQDN
+# (`github.com.`) and GitHub's documented SSH-over-443 endpoint
+# (`ssh.github.com`) all name the same repo.
+_HOST_ALIASES = {"ssh.github.com": "github.com", "altssh.gitlab.com": "gitlab.com"}
+
+
+def _collapse_path(path):
+    parts = [part for part in path.split("/") if part]
+    joined = "/".join(parts)
+    return joined[: -len(".git")] if joined.endswith(".git") else joined
+
+
+def _join(host, path):
+    host = host.rstrip(".")
+    host = _HOST_ALIASES.get(host, host)
+    return f"{host}/{_collapse_path(path)}"
 
 
 def is_self_repo(git_url: str, *, self_repo_identifiers) -> bool:

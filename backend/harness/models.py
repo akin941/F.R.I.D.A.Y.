@@ -215,6 +215,13 @@ class HarnessImplementationJob(WorkspaceScopedModel, TimestampedModel):
         REVIEW_UNAVAILABLE = "review_unavailable"
         WORKTREE_EXPIRED = "worktree_expired"
         PUSH_FAILED = "push_failed"
+        # Phase 3 branch 5 (2026-09-27 audit): the produced tree equals
+        # the base tree -- nothing to review or push, tests never run.
+        NO_CHANGES = "no_changes"
+        # Phase 3 branch 5: the produced diff contains the literal value of
+        # a CLI API key the container had in its environment -- the job
+        # fails before review, so the key is never bundled or pushed.
+        SECRET_LEAK = "secret_leak"
 
     repo = models.ForeignKey(
         HarnessRepo, on_delete=models.PROTECT, related_name="implementation_jobs"

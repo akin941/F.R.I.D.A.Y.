@@ -42,3 +42,20 @@ class TestIsSelfRepo:
 
     def test_empty_identifier_list_never_matches(self):
         assert not is_self_repo("git@github.com:akin941/jarvis-os.git", self_repo_identifiers=[])
+
+
+@pytest.mark.parametrize(
+    "spelling",
+    [
+        "git@github.com:/akin941/jarvis-os.git",
+        "ssh://git@ssh.github.com:443/akin941/jarvis-os.git",
+        "git@github.com.:akin941/jarvis-os.git",
+        "ssh://git@github.com/akin941//jarvis-os.git",
+        "https://github.com//akin941/jarvis-os.git/",
+    ],
+)
+def test_alternate_spellings_of_the_same_remote_still_match(spelling):
+    """Phase 3 branch 5 (2026-09-27 audit): leading/repeated path slashes, a
+    trailing-dot host and GitHub's SSH-over-443 endpoint all name the same
+    repo and must not bypass the self-modification hard block."""
+    assert is_self_repo(spelling, self_repo_identifiers=["git@github.com:akin941/jarvis-os.git"])

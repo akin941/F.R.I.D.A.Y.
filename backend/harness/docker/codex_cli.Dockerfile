@@ -47,6 +47,9 @@ ENV HOME=/home/harness
 WORKDIR /repo
 
 COPY codex_cli_run.sh /home/harness/run.sh
+# Shared write-mode logic (Phase 3 branch 5), sourced by run.sh from its
+# own directory.
+COPY harness_write_mode.sh /home/harness/harness_write_mode.sh
 RUN chmod +x /home/harness/run.sh
 
 ENTRYPOINT ["/home/harness/run.sh"]

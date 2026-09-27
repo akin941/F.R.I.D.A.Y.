@@ -28,8 +28,9 @@ when this branch started, not an oversight:
   2. `docker build -f claude_code.Dockerfile -t <image:tag> .`, run from
      **inside this directory** (`backend/harness/docker/`) -- the build
      context must be this directory, not the repo/backend root: the
-     Dockerfile's `COPY claude_code_run.sh ...` expects the entrypoint
-     script at the context root (Codex code-review, branch 2 round 1: an
+     Dockerfile's `COPY claude_code_run.sh ...` (and, since Phase 3
+     branch 5, `COPY harness_write_mode.sh ...`) expects both scripts at
+     the context root (Codex code-review, branch 2 round 1: an
      earlier version of this README documented a repo-root build context,
      which would have made the `COPY` fail before the image could ever be
      used). Same command for `codex_cli.Dockerfile`.
@@ -71,3 +72,38 @@ CLI's `--sandbox workspace-write` are this branch's best-grounded guesses
 for "unattended, non-interactive write access", not yet confirmed against
 either vendor's current documentation. Confirm both (or correct them)
 before building either image for real write-mode use.
+
+## Write mode since Phase 3 branch 5 (2026-09-27)
+
+The write-mode sequence now lives in one shared, tested library,
+`harness_write_mode.sh` (sourced by both wrappers; real-git tests in
+`backend/harness/tests/test_write_mode_wrapper.py`). Its header comment is
+the authoritative description; the operator-facing consequences are:
+
+- **The wrapper owns the commit.** The agent does not need (and is not
+  trusted) to `git commit`; after the CLI exits and the container is
+  quiesced, the wrapper restores the clone's pristine `.git/config`,
+  drops `.git/info`/hooks, rebuilds the index and commits everything the
+  agent left in the tree (committed `.gitignore` rules still apply).
+- **A run that changes nothing fails as `no_changes`.** Tests don't run.
+- **`test_command` runs against a pristine checkout of the produced
+  commit** (`git clean -ffdx` + `git reset --hard HEAD` first). A fresh
+  clone has no ignored files, so **the test command must provision its
+  own dependencies** — e.g. `npm ci && npm test` or
+  `uv sync --frozen && uv run pytest`, not a bare `pytest` that relies on
+  something the agent installed during its session. The container's
+  egress network must allow the package registries the test command
+  needs.
+- **The test command never sees the CLI API keys** (`ANTHROPIC_API_KEY`,
+  `CODEX_API_KEY`, `OPENAI_API_KEY` are unset for it), and the host scans
+  the produced diff for the literal key values before review — a match
+  fails the job as `secret_leak`.
+- **Cost/usage come from one wrapper-framed line only**
+  (`JARVIS_HARNESS_CLI_OUTPUT_V1 <base64>`, emitted after the final
+  quiescence); a missing/malformed frame fails the job as `runner_error`.
+- **`HARNESS_SELF_REPO_IDENTIFIERS` is required.** While it is empty every
+  implementation job is refused (ADR-004 self-modification guard fails
+  closed); set it to this installation's own remote(s).
+- Containers run with `--cap-drop ALL` and
+  `--security-opt no-new-privileges` in addition to the existing
+  network/resource limits.

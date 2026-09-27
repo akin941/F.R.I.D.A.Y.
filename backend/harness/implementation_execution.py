@@ -27,6 +27,8 @@ Two Celery-task-backing entry points:
   path, since nothing needs it to persist any further after this point.
 """
 
+import base64
+import binascii
 import logging
 import os
 import tempfile
@@ -42,9 +44,41 @@ from ai_core.gateway import record_external_usage
 from audit.services import record_audit
 from harness import runner
 from harness.execution import _parse_claude_code_output, _resolve_cli_env
-from harness.models import HarnessImplementationJob
+from harness.models import HarnessImplementationJob, HarnessReview
 
 logger = logging.getLogger(__name__)
+
+# The one line the write-mode wrapper emits last, after its final
+# quiescence (`docker/harness_write_mode.sh`): `<prefix> <base64 of the
+# CLI's own captured stdout>`. Phase 3 branch 5 / plan-review round 9 item
+# 2: container stdout is agent-writable while the agent is alive, so cost,
+# usage and the implementation transcript are read only from the LAST such
+# line -- anything printed before it is ignored, and a missing or malformed
+# last frame fails closed (usage unavailable -> `runner_error`).
+CLI_OUTPUT_PREFIX = "JARVIS_HARNESS_CLI_OUTPUT_V1"
+
+# Literal-substring secret scan over the produced diff (Phase 3 branch 5):
+# values shorter than this can't be matched without false positives.
+_MIN_SECRET_SCAN_LENGTH = 12
+
+
+def extract_framed_cli_output(raw_logs):
+    """Returns the decoded CLI stdout from the last wrapper frame, or
+    `None` if the last frame is absent or malformed. Never falls back to
+    an earlier frame: only the wrapper can write after the agent is dead,
+    so only the final frame is the wrapper's."""
+    last = None
+    for line in (raw_logs or "").splitlines():
+        if line.startswith(CLI_OUTPUT_PREFIX + " ") or line == CLI_OUTPUT_PREFIX:
+            last = line
+    if last is None:
+        return None
+    payload = last[len(CLI_OUTPUT_PREFIX) :].strip()
+    try:
+        return base64.b64decode(payload, validate=True).decode("utf-8", errors="replace")
+    except (binascii.Error, ValueError):
+        return None
+
 
 _IMPLEMENTATION_TERMINAL_STATUSES = (
     HarnessImplementationJob.Status.SUCCEEDED,
@@ -262,17 +296,16 @@ def _fail_and_cleanup(
     )
 
 
-def dispatch_harness_review(job):
-    """The real container-launched cross-vendor review dispatch (Phase 3
-    branch 3) -- creates the `HarnessReview` row and schedules its own
-    Celery task. Thin re-export from `harness.review_execution` (the
-    branch-2 stub that used to live here directly is gone -- this
-    module's own tests still mock `dispatch_harness_review` at THIS
-    import path, which is why it's re-exported rather than having every
-    caller import from `review_execution` directly)."""
-    from harness.review_execution import dispatch_harness_review as _dispatch_harness_review
+def dispatch_created_review(review):
+    """Schedules the review task for a `HarnessReview` row created in the
+    same transaction as the job's `pending_review` transition (Phase 3
+    branch 5, plan-review round 9 item 4). Thin re-export from
+    `harness.review_execution` so this module's tests can mock it at THIS
+    import path. A crash between the commit and this call leaves a
+    `pending` review, which `recover_stale_harness_reviews` re-dispatches."""
+    from harness.review_execution import dispatch_created_review as _dispatch_created_review
 
-    return _dispatch_harness_review(job)
+    return _dispatch_created_review(review)
 
 
 def run_harness_implementation_job(job_id):
@@ -287,6 +320,7 @@ def run_harness_implementation_job(job_id):
     started_monotonic = time.monotonic()
     removal_confirmed = True
     raw_output = ""
+    cli_env = {}
     try:
         # Codex code-review P2, branch 2 round 2: an earlier version
         # passed an empty `clone_env`, so any repo relying on
@@ -376,10 +410,16 @@ def run_harness_implementation_job(job_id):
         )
         return
 
-    input_tokens, output_tokens, estimated_cost, context_report = (0, 0, Decimal("0"), {})
-    if raw_output:
+    input_tokens, output_tokens, estimated_cost, context_report = (
+        0,
+        0,
+        Decimal("0"),
+        {"usage_source": "unavailable"},
+    )
+    cli_output = extract_framed_cli_output(raw_output)
+    if cli_output:
         input_tokens, output_tokens, estimated_cost, context_report = _parse_claude_code_output(
-            raw_output
+            cli_output
         )
 
     # Shared cost kwargs for every failure path below this point (Codex
@@ -401,6 +441,20 @@ def run_harness_implementation_job(job_id):
         _fail_and_cleanup(
             job,
             HarnessImplementationJob.FailureReason.TEST_RESULT_UNAVAILABLE,
+            workspace_dir=workspace_dir,
+            removal_confirmed=removal_confirmed,
+            started_monotonic=started_monotonic,
+            **cost_kwargs,
+        )
+        return
+
+    if isinstance(result, dict) and result.get("no_changes") is True:
+        # The wrapper found the produced tree identical to the base tree
+        # and never ran the tests (Phase 3 branch 5) -- nothing to review
+        # or push.
+        _fail_and_cleanup(
+            job,
+            HarnessImplementationJob.FailureReason.NO_CHANGES,
             workspace_dir=workspace_dir,
             removal_confirmed=removal_confirmed,
             started_monotonic=started_monotonic,
@@ -495,10 +549,59 @@ def run_harness_implementation_job(job_id):
         )
         return
 
+    # Secret scan (Phase 3 branch 5, 2026-09-27 audit): the agent's own
+    # shell had the CLI API key in its environment, and anything it
+    # committed will be bundled for review and later pushed. A literal
+    # match of any credential value in the produced diff fails the job
+    # here, before the diff ever leaves the runner.
+    secret_values = [
+        value for value in cli_env.values() if value and len(value) >= _MIN_SECRET_SCAN_LENGTH
+    ]
+    try:
+        leaked = runner.diff_contains_any(
+            f"{workspace_dir}/repo", base_sha=base_sha, head_sha=commit_sha, needles=secret_values
+        )
+    except runner.RunnerError:
+        logger.exception("Harness implementation job %s secret scan failed", job_id)
+        leaked = True
+    if leaked:
+        _fail_and_cleanup(
+            job,
+            HarnessImplementationJob.FailureReason.SECRET_LEAK,
+            workspace_dir=workspace_dir,
+            removal_confirmed=removal_confirmed,
+            started_monotonic=started_monotonic,
+            test_result=test_result,
+            **cost_kwargs,
+        )
+        return
+
+    # Picked BEFORE the transition (plan-review round 9 item 4): if no
+    # cross-vendor reviewer is selectable, the job fails as
+    # `review_unavailable` instead of committing a `pending_review` that
+    # nothing will ever review.
+    from harness.review_execution import create_pending_review, select_review_agent
+    from harness.services import HarnessInvalidTransition
+
+    try:
+        review_agent = select_review_agent(job.agent)
+    except HarnessInvalidTransition:
+        _fail_and_cleanup(
+            job,
+            HarnessImplementationJob.FailureReason.REVIEW_UNAVAILABLE,
+            workspace_dir=workspace_dir,
+            removal_confirmed=removal_confirmed,
+            started_monotonic=started_monotonic,
+            test_result=test_result,
+            **cost_kwargs,
+        )
+        return
+
     diff_summary = _produce_diff_summary(job, changed_files)
     latency_ms = int((time.monotonic() - started_monotonic) * 1000)
 
     cancelled_before_review = False
+    review = None
     with transaction.atomic():
         locked = HarnessImplementationJob.objects.select_for_update(of=("self",)).get(pk=job.pk)
         if locked.status != HarnessImplementationJob.Status.IMPLEMENTING:
@@ -548,6 +651,9 @@ def run_harness_implementation_job(job_id):
                     "updated_at",
                 ]
             )
+            # Same transaction as the transition: `pending_review` never
+            # commits without the review that will resolve it.
+            review = create_pending_review(locked, review_agent)
             record_external_usage(
                 workspace=locked.workspace,
                 purpose="harness.implementation",
@@ -579,9 +685,9 @@ def run_harness_implementation_job(job_id):
         actor=locked.created_by,
         workspace=locked.workspace,
         resource=locked,
-        metadata={},
+        metadata={"review_id": str(review.id)},
     )
-    dispatch_harness_review(locked)
+    dispatch_created_review(review)
 
 
 def _produce_diff_summary(job, changed_files):
@@ -884,7 +990,17 @@ def recover_stale_harness_implementation_jobs():
        stopped container, still carrying the CLI's own credentials in
        its environment, on the runner host indefinitely. Mirrors
        `harness.execution`'s and `harness.review_execution`'s identical
-       leaked-terminal-container cases, one job type over."""
+       leaked-terminal-container cases, one job type over.
+    8. `pending_review` with no `pending`/`running` review, past
+       `HARNESS_DISPATCH_RECOVERY_GRACE_SECONDS` since its last update
+       (Phase 3 branch 5, 2026-09-27 audit): before this branch the review
+       row was created after `pending_review` committed, so a crash in
+       between (or a reviewer that stopped being selectable) left the job
+       waiting forever on a review nothing would ever run. New jobs create
+       the row atomically; this backstop fails any such job closed as
+       `review_unavailable` (worktree cleaned up) -- a succeeded/failed
+       review always moves the job on in its own transaction, so no
+       active review means nothing will."""
     dispatch_cutoff = timezone.now() - timedelta(
         seconds=settings.HARNESS_DISPATCH_RECOVERY_GRACE_SECONDS
     )
@@ -949,6 +1065,34 @@ def recover_stale_harness_implementation_jobs():
     )
     for job_id in expired_worktree_ids:
         _sweep_expired_worktree_job(job_id)
+
+    # Case 8: pending_review with no active review to resolve it.
+    orphaned_review_ids = list(
+        HarnessImplementationJob.objects.filter(
+            status=HarnessImplementationJob.Status.PENDING_REVIEW,
+            updated_at__lt=dispatch_cutoff,
+        )
+        .exclude(reviews__status__in=(HarnessReview.Status.PENDING, HarnessReview.Status.RUNNING))
+        .values_list("pk", flat=True)
+    )
+    for job_id in orphaned_review_ids:
+        from harness.services import fail_implementation_job_for_review
+
+        job = HarnessImplementationJob.objects.filter(pk=job_id).first()
+        if job is None:
+            continue
+        # Re-checked under the job lock by the service itself; a review
+        # created in the meantime still wins because the service only
+        # acts on `pending_review`, and the next scan would see it active.
+        if job.reviews.filter(
+            status__in=(HarnessReview.Status.PENDING, HarnessReview.Status.RUNNING)
+        ).exists():
+            continue
+        fail_implementation_job_for_review(
+            job=job,
+            review=None,
+            failure_reason=HarnessImplementationJob.FailureReason.REVIEW_UNAVAILABLE,
+        )
 
     # Case 6: terminal job, leaked worktree.
     leaked_worktree_cutoff = timezone.now() - timedelta(

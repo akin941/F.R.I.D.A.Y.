@@ -83,15 +83,30 @@ def dispatch_harness_review(job):
     `harness.implementation_execution.run_harness_implementation_job`
     invokes once tests pass (branch 2 shipped this as a stub; this
     branch wires the real dispatch, per brief §boundary)."""
-    agent = select_review_agent(job.agent)
-    review = HarnessReview.objects.create(
+    review = create_pending_review(job, select_review_agent(job.agent))
+    _dispatch_review_task(review.id)
+    return review
+
+
+def create_pending_review(job, agent):
+    """Creates the `pending` review row only. Phase 3 branch 5 (plan-review
+    round 9 item 4): `run_harness_implementation_job` calls this inside the
+    same transaction as the job's `pending_review` transition, then
+    `dispatch_created_review` after commit -- a job can no longer sit in
+    `pending_review` with no review row that could ever resolve it."""
+    return HarnessReview.objects.create(
         workspace=job.workspace,
         implementation_job=job,
         agent=agent,
         status=HarnessReview.Status.PENDING,
     )
+
+
+def dispatch_created_review(review):
+    """Publishes the task for a review created by `create_pending_review`
+    -- same fail-closed first-dispatch semantics as
+    `dispatch_harness_review`."""
     _dispatch_review_task(review.id)
-    return review
 
 
 def _dispatch_review_task(review_id):
@@ -264,7 +279,18 @@ def _safe_cleanup_directory(path):
         logger.exception("Failed to clean up harness review directory %s", path)
 
 
-def _wait_for_review_container(container_id, started_monotonic):
+def _review_no_longer_wanted(job_id):
+    """The implementation job left `pending_review` (cancelled, or failed
+    by a recovery sweep) or has a cancel requested -- the review's verdict
+    can no longer matter."""
+    return not HarnessImplementationJob.objects.filter(
+        pk=job_id,
+        status=HarnessImplementationJob.Status.PENDING_REVIEW,
+        cancel_requested=False,
+    ).exists()
+
+
+def _wait_for_review_container(container_id, started_monotonic, job_id=None):
     """Timeout-only brake -- no `cancel_requested` equivalent exists on
     `HarnessReview` itself (brief §boundary: cancelling the underlying
     `HarnessImplementationJob` while it's `pending_review` already
@@ -276,6 +302,14 @@ def _wait_for_review_container(container_id, started_monotonic):
     while runner.container_is_running(container_id):
         elapsed = time.monotonic() - started_monotonic
         if elapsed >= settings.HARNESS_MAX_JOB_SECONDS:
+            transcript = runner.capture_logs(container_id)
+            _teardown_container(container_id)
+            return "failed", transcript
+        # Phase 3 branch 5 (2026-09-27 audit): cancelling the job used to
+        # leave an already-launched review running -- reading agent-authored
+        # code with the review CLI's credentials -- until it finished or hit
+        # the time brake. It is torn down as soon as the job stops waiting.
+        if job_id is not None and _review_no_longer_wanted(job_id):
             transcript = runner.capture_logs(container_id)
             _teardown_container(container_id)
             return "failed", transcript
@@ -538,7 +572,9 @@ def run_harness_review_job(review_id):
             cli_env=cli_env,
             name=container_name,
         )
-        status, raw_output = _wait_for_review_container(container_name, started_monotonic)
+        status, raw_output = _wait_for_review_container(
+            container_name, started_monotonic, job_id=job.pk
+        )
     except runner.RunnerError:
         logger.exception("Harness review %s failed to launch", review_id)
     finally:

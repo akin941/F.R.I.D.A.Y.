@@ -125,7 +125,39 @@ def clone_repo(*, git_url, default_branch, clone_env):
 
 
 def cleanup_directory(path):
-    shutil.rmtree(path, ignore_errors=True)
+    """Best-effort recursive delete that never raises; callers confirm the
+    outcome themselves with `os.path.exists` afterwards.
+
+    Phase 3 branch 5 (2026-09-27 audit): the agent owns every path in its
+    worktree and can `chmod 500` a directory so its entries can't be
+    unlinked -- the previous `rmtree(..., ignore_errors=True)` then left
+    the tree behind forever (and the recovery sweep retried it on every
+    pass). The host runs as that same uid, and chmod(2) checks ownership
+    rather than mode bits, so the error handler restores owner rwx on the
+    failing entry's parent and retries once. It never touches anything
+    outside `path` itself."""
+    root = os.path.abspath(path)
+
+    def _restore_owner_access(function, failed_path, exc):
+        if isinstance(exc, FileNotFoundError):
+            return
+        parent = os.path.dirname(os.path.abspath(failed_path))
+        if parent != root and not parent.startswith(root + os.sep):
+            return
+        try:
+            os.chmod(parent, stat.S_IRWXU)
+            if os.path.isdir(failed_path) and not os.path.islink(failed_path):
+                os.chmod(failed_path, stat.S_IRWXU)
+            function(failed_path)
+        except OSError:
+            pass
+
+    try:
+        if os.path.isdir(root) and not os.path.islink(root):
+            os.chmod(root, stat.S_IRWXU)
+    except OSError:
+        pass
+    shutil.rmtree(path, onexc=_restore_owner_access)
 
 
 def _resolve_git_push_env():
@@ -256,13 +288,69 @@ def create_bundle(directory, *, base_sha, ref, bundle_path):
     `push_bundled_commit` below."""
     try:
         subprocess.run(
-            ["git", "-C", directory, "bundle", "create", bundle_path, f"{base_sha}..{ref}"],
+            [
+                "git",
+                "-C",
+                directory,
+                "-c",
+                "core.fsmonitor=",
+                "bundle",
+                "create",
+                bundle_path,
+                f"{base_sha}..{ref}",
+            ],
             check=True,
             capture_output=True,
+            # Host global/system config never applies to a read of the
+            # agent's worktree (Phase 3 branch 5), same isolation as the
+            # clean-clone operations below.
+            env={**os.environ, **_ISOLATED_GIT_ENV, "GIT_NO_REPLACE_OBJECTS": "1"},
             timeout=_BUNDLE_TIMEOUT_SECONDS,
         )
-    except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError) as exc:
         raise RunnerError(f"git bundle create failed: {exc}") from exc
+
+
+def diff_contains_any(directory, *, base_sha, head_sha, needles):
+    """`True` if the full `base_sha..head_sha` diff (binary included)
+    contains any of `needles` as a literal substring (Phase 3 branch 5,
+    2026-09-27 audit: the implementing agent's shell holds the CLI API
+    key, and anything it commits is bundled for review and later pushed).
+    Runs with external diff drivers, textconv and repo-configured
+    fsmonitor disabled and host global/system config isolated, so the
+    agent's repo config can neither hide content from the scan nor run a
+    command on the host. Raises `RunnerError` if the diff can't be read --
+    callers fail closed."""
+    needle_bytes = [n.encode("utf-8") for n in needles if n]
+    if not needle_bytes:
+        return False
+    try:
+        result = subprocess.run(
+            [
+                "git",
+                "-C",
+                directory,
+                "-c",
+                "core.fsmonitor=",
+                "-c",
+                "diff.external=",
+                "diff",
+                "--no-ext-diff",
+                "--no-textconv",
+                "--binary",
+                base_sha,
+                head_sha,
+                "--",
+            ],
+            capture_output=True,
+            env={**os.environ, **_ISOLATED_GIT_ENV, "GIT_NO_REPLACE_OBJECTS": "1"},
+            timeout=_GIT_PLUMBING_TIMEOUT_SECONDS,
+        )
+    except (subprocess.TimeoutExpired, OSError) as exc:
+        raise RunnerError(f"reading diff {base_sha}..{head_sha} failed: {exc}") from exc
+    if result.returncode != 0:
+        raise RunnerError(f"reading diff {base_sha}..{head_sha} failed: {result.stderr!r}")
+    return any(needle in result.stdout for needle in needle_bytes)
 
 
 def _clone_full(*, git_url, default_branch, clone_env):
@@ -341,11 +429,22 @@ def push_bundled_commit(
                 f"fetched commit {fetched_sha} does not match reported "
                 f"produced_commit_sha {produced_sha}"
             )
-        ancestor_check = subprocess.run(
-            ["git", "-C", clean_clone_dir, "merge-base", "--is-ancestor", base_sha, "FETCH_HEAD"],
-            capture_output=True,
-            timeout=_GIT_PLUMBING_TIMEOUT_SECONDS,
-        )
+        try:
+            ancestor_check = subprocess.run(
+                [
+                    "git",
+                    "-C",
+                    clean_clone_dir,
+                    "merge-base",
+                    "--is-ancestor",
+                    base_sha,
+                    "FETCH_HEAD",
+                ],
+                capture_output=True,
+                timeout=_GIT_PLUMBING_TIMEOUT_SECONDS,
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise RunnerError(f"checking ancestry of {base_sha} timed out: {exc}") from exc
         if ancestor_check.returncode != 0:
             raise RunnerError(f"{base_sha} is not an ancestor of the produced commit")
 
@@ -496,12 +595,17 @@ def read_implementation_result(workspace_dir):
     if not stat.S_ISREG(file_stat.st_mode):
         raise RunnerError("implementation result path is not a regular file, refusing to read")
     try:
-        with open(result_path) as f:
-            raw = f.read()
+        with open(result_path, "rb") as f:
+            raw_bytes = f.read()
     except OSError as exc:
         raise RunnerError(f"implementation result file unavailable: {exc}") from exc
+    # Decoded inside the same fail-closed boundary as the JSON parse
+    # (Phase 3 branch 5, 2026-09-27 audit): invalid UTF-8 -- reachable by
+    # an agent committing a non-UTF-8 file name -- used to escape as a
+    # raw `UnicodeDecodeError`, past every caller's `except RunnerError`,
+    # leaving the job to the 35-minute recovery path with 0 recorded cost.
     try:
-        return json.loads(raw)
+        return json.loads(raw_bytes.decode("utf-8"))
     except (ValueError, TypeError) as exc:
         raise RunnerError(f"implementation result file is not valid JSON: {exc}") from exc
 
@@ -565,6 +669,14 @@ def launch_container(*, image, clone_dir, goal, cli_env, name):
         # Only a prebuilt, already-reviewed local image may ever run here.
         "--pull",
         "never",
+        # No capabilities and no privilege gain through setuid binaries
+        # the base image ships (Phase 3 branch 5, 2026-09-27 audit): a
+        # root-in-container escalation could otherwise leave root-owned
+        # files in a bind mount or processes quiescence can't kill.
+        "--cap-drop",
+        "ALL",
+        "--security-opt",
+        "no-new-privileges",
         "--user",
         f"{os.getuid()}:{os.getgid()}",
         "--name",
@@ -645,6 +757,14 @@ def launch_implementation_container(
         "--detach",
         "--pull",
         "never",
+        # No capabilities and no privilege gain through setuid binaries
+        # the base image ships (Phase 3 branch 5, 2026-09-27 audit): a
+        # root-in-container escalation could otherwise leave root-owned
+        # files in a bind mount or processes quiescence can't kill.
+        "--cap-drop",
+        "ALL",
+        "--security-opt",
+        "no-new-privileges",
         "--user",
         f"{os.getuid()}:{os.getgid()}",
         "--name",
@@ -690,22 +810,37 @@ def launch_implementation_container(
 def capture_logs(container_id):
     """Whatever the container has emitted so far -- always safe to call,
     running or already exited."""
-    result = subprocess.run(
-        ["docker", "logs", container_id],
-        capture_output=True,
-        text=True,
-        timeout=_DOCKER_CONTROL_TIMEOUT_SECONDS,
-    )
+    # `errors="replace"`: container stdout is agent-writable, and invalid
+    # UTF-8 must never surface as a `UnicodeDecodeError` past callers'
+    # `except RunnerError` (Phase 3 branch 5, 2026-09-27 audit). Timeouts
+    # and a missing docker binary are converted for the same reason.
+    try:
+        result = subprocess.run(
+            ["docker", "logs", container_id],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=_DOCKER_CONTROL_TIMEOUT_SECONDS,
+        )
+    except (subprocess.TimeoutExpired, OSError) as exc:
+        raise RunnerError(f"docker logs {container_id} failed: {exc}") from exc
     return result.stdout
 
 
 def container_is_running(container_id):
-    result = subprocess.run(
-        ["docker", "inspect", "-f", "{{.State.Running}}", container_id],
-        capture_output=True,
-        text=True,
-        timeout=_DOCKER_CONTROL_TIMEOUT_SECONDS,
-    )
+    """Raises `RunnerError` when the daemon can't be asked at all (timeout,
+    no docker binary) -- never guesses "stopped", which would let a wait
+    loop treat a still-running container as finished."""
+    try:
+        result = subprocess.run(
+            ["docker", "inspect", "-f", "{{.State.Running}}", container_id],
+            capture_output=True,
+            text=True,
+            timeout=_DOCKER_CONTROL_TIMEOUT_SECONDS,
+        )
+    except (subprocess.TimeoutExpired, OSError) as exc:
+        raise RunnerError(f"docker inspect {container_id} failed: {exc}") from exc
     return result.returncode == 0 and result.stdout.strip() == "true"
 
 
@@ -715,12 +850,15 @@ def container_exit_code(container_id):
     which `container_is_running` alone can't (both are simply "not
     running"). Returns `None` if the container's exit state can't be
     determined at all (already removed, or the inspect call itself fails)."""
-    result = subprocess.run(
-        ["docker", "inspect", "-f", "{{.State.ExitCode}}", container_id],
-        capture_output=True,
-        text=True,
-        timeout=_DOCKER_CONTROL_TIMEOUT_SECONDS,
-    )
+    try:
+        result = subprocess.run(
+            ["docker", "inspect", "-f", "{{.State.ExitCode}}", container_id],
+            capture_output=True,
+            text=True,
+            timeout=_DOCKER_CONTROL_TIMEOUT_SECONDS,
+        )
+    except (subprocess.TimeoutExpired, OSError):
+        return None
     if result.returncode != 0:
         return None
     try:

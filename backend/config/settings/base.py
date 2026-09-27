@@ -386,8 +386,10 @@ HARNESS_GIT_SSH_KEY_PATH = env("HARNESS_GIT_SSH_KEY_PATH", default="")
 # definitions or permissions"): remote URLs recognized as "this Jarvis
 # installation itself", compared via harness.repo_identity's canonical
 # normalizer, not exact string match -- so the https/ssh/scp-like forms of
-# the same remote are all correctly recognized. Empty by default: nothing is
-# refused until an owner actually configures this repo's own remote(s) here.
+# the same remote are all correctly recognized. Empty by default -- and since
+# Phase 3 branch 5 an empty list REFUSES every implementation job (fail
+# closed): the guard cannot tell whether a repo is Jarvis itself until the
+# owner configures this installation's own remote(s) here.
 HARNESS_SELF_REPO_IDENTIFIERS = [
     value.strip()
     for value in env.list("HARNESS_SELF_REPO_IDENTIFIERS", default=[])

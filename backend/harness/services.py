@@ -439,6 +439,18 @@ def create_harness_implementation_job(
     locked_repo = _locked(repo, actor)
     if not locked_repo.enabled:
         raise HarnessInvalidTransition("Repo is not enabled for harness runs.")
+    # Phase 3 branch 5 (2026-09-27 audit): an ADR-004 hard rule must not
+    # relax because a setting was never filled in. With no self-repo
+    # identifiers configured the guard cannot tell whether this repo IS
+    # Jarvis, so implementation (write) jobs are refused outright until
+    # the owner sets HARNESS_SELF_REPO_IDENTIFIERS. Read-only discovery is
+    # unaffected.
+    if not settings.HARNESS_SELF_REPO_IDENTIFIERS:
+        raise HarnessInvalidTransition(
+            "HARNESS_SELF_REPO_IDENTIFIERS is not configured; implementation runs are "
+            "refused until this installation's own remote(s) are set (ADR-004 "
+            "self-modification guard)."
+        )
     if is_self_repo(
         locked_repo.git_url, self_repo_identifiers=settings.HARNESS_SELF_REPO_IDENTIFIERS
     ):
@@ -645,7 +657,10 @@ def fail_implementation_job_for_review(*, job, review, failure_reason=None):
         )
         locked.save(update_fields=["status", "failure_reason", "updated_at"])
     _record_implementation_job(
-        locked, "harness.implementation_job_failed", locked.created_by, review_id=str(review.id)
+        locked,
+        "harness.implementation_job_failed",
+        locked.created_by,
+        review_id=str(review.id) if review is not None else "",
     )
     _cleanup_worktree_best_effort(locked)
     return locked

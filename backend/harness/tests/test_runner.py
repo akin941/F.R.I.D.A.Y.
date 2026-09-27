@@ -452,6 +452,8 @@ class TestCreateBundle:
             "git",
             "-C",
             "/tmp/agent-worktree",
+            "-c",
+            "core.fsmonitor=",
             "bundle",
             "create",
             "/tmp/out.bundle",
@@ -583,7 +585,7 @@ class TestPushBundledCommit:
                 or "/tmp/out.bundle" in argv
                 or "git@x:y.git" in argv
             )
-        rmtree.assert_called_once_with(clean_clone_dir, ignore_errors=True)
+        rmtree.assert_called_once_with(clean_clone_dir, onexc=mock.ANY)
 
     def test_push_uses_explicit_url_and_create_only_lease(self, monkeypatch, tmp_path):
         clean_clone_dir = str(tmp_path / "clean-clone")
@@ -686,7 +688,39 @@ class TestPushBundledCommit:
                 base_sha="base111",
                 produced_sha="produced999",
             )
-        rmtree.assert_called_once_with(clean_clone_dir, ignore_errors=True)
+        rmtree.assert_called_once_with(clean_clone_dir, onexc=mock.ANY)
+
+    def test_ancestor_check_timeout_raises_runner_error(self, monkeypatch, tmp_path):
+        """Codex code-review pattern (mirrors `TestPrepareReviewClone`'s
+        `test_ancestor_check_timeout_still_cleans_up`, branch 3 round 10):
+        unlike the fetch/push calls, the merge-base ancestor check had no
+        timeout handling of its own -- a raw `subprocess.TimeoutExpired`
+        would propagate past the caller's `except runner.RunnerError:`
+        (`implementation_execution.py`'s `run_harness_push_job`), leaving
+        the job stuck instead of being finalized as a push failure."""
+        clean_clone_dir = str(tmp_path / "clean-clone")
+        self._mock_clean_clone(monkeypatch, clean_clone_dir)
+        run_mock = mock.Mock(
+            side_effect=[
+                mock.Mock(returncode=0),  # git fetch
+                mock.Mock(returncode=0, stdout="produced999\n"),  # rev-parse FETCH_HEAD
+                subprocess.TimeoutExpired(cmd="git merge-base", timeout=30),
+            ]
+        )
+        monkeypatch.setattr(runner.subprocess, "run", run_mock)
+        rmtree = mock.Mock()
+        monkeypatch.setattr(runner.shutil, "rmtree", rmtree)
+
+        with pytest.raises(runner.RunnerError):
+            runner.push_bundled_commit(
+                git_url="git@x:y.git",
+                default_branch="main",
+                branch_name="harness/p3-1",
+                bundle_path="/tmp/out.bundle",
+                base_sha="base111",
+                produced_sha="produced999",
+            )
+        rmtree.assert_called_once_with(clean_clone_dir, onexc=mock.ANY)
 
     @pytest.mark.parametrize(
         "git_url",
@@ -1007,7 +1041,7 @@ class TestPrepareReviewClone:
                 base_sha="base111",
                 produced_sha="produced999",
             )
-        rmtree.assert_called_once_with(clean_clone_dir, ignore_errors=True)
+        rmtree.assert_called_once_with(clean_clone_dir, onexc=mock.ANY)
 
 
 class TestReadImplementationResult:

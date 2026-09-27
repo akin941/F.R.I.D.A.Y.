@@ -4,6 +4,7 @@ functions -- no real `docker`/`git` subprocess (mirrors
 5's "LLM-calling code must be mockable", extended to this out-of-process
 call)."""
 
+import base64
 import json
 from datetime import timedelta
 from decimal import Decimal
@@ -76,12 +77,21 @@ def _wrapper_result(*, passed=True, exit_code=0, commit_sha="abc123", changed_fi
     }
 
 
+def _frame(cli_stdout):
+    """The write-mode wrapper's own final frame (Phase 3 branch 5): the
+    host reads cost/usage only from the last base64-framed line."""
+    encoded = base64.b64encode(cli_stdout.encode()).decode()
+    return f"test output\n{implementation_execution.CLI_OUTPUT_PREFIX} {encoded}\n"
+
+
 def _claude_json(cost="0.01", input_tokens=10, output_tokens=5):
-    return json.dumps(
-        {
-            "total_cost_usd": cost,
-            "usage": {"input_tokens": input_tokens, "output_tokens": output_tokens},
-        }
+    return _frame(
+        json.dumps(
+            {
+                "total_cost_usd": cost,
+                "usage": {"input_tokens": input_tokens, "output_tokens": output_tokens},
+            }
+        )
     )
 
 
@@ -121,13 +131,16 @@ def _patch_happy_path_runner(monkeypatch, *, result, exit_code=0):
     )
     monkeypatch.setattr(implementation_execution.runner, "remove_container", mock.Mock())
     monkeypatch.setattr(implementation_execution.runner, "cleanup_directory", mock.Mock())
+    monkeypatch.setattr(
+        implementation_execution.runner, "diff_contains_any", mock.Mock(return_value=False)
+    )
 
 
 class TestRunHarnessImplementationJobSuccess:
     def test_passing_tests_move_job_to_pending_review(self, workspace, owner, repo, monkeypatch):
         job = make_job(workspace, repo, created_by=owner)
         _patch_happy_path_runner(monkeypatch, result=_wrapper_result())
-        with mock.patch.object(implementation_execution, "dispatch_harness_review") as dispatch:
+        with mock.patch.object(implementation_execution, "dispatch_created_review") as dispatch:
             implementation_execution.run_harness_implementation_job(job.id)
             dispatch.assert_called_once()
         job.refresh_from_db()
@@ -156,7 +169,7 @@ class TestRunHarnessImplementationJobSuccess:
         repo.git_url = "git@github.com:akin941/jarvis-os.git"
         repo.save(update_fields=["git_url"])
         _patch_happy_path_runner(monkeypatch, result=_wrapper_result())
-        with mock.patch.object(implementation_execution, "dispatch_harness_review"):
+        with mock.patch.object(implementation_execution, "dispatch_created_review"):
             implementation_execution.run_harness_implementation_job(job.id)
         clone_call = implementation_execution.runner.clone_repo_writable.call_args
         assert clone_call.kwargs["git_url"] == "git@example.com:x/y.git"
@@ -164,14 +177,14 @@ class TestRunHarnessImplementationJobSuccess:
     def test_worktree_is_not_cleaned_up_on_success(self, workspace, owner, repo, monkeypatch):
         job = make_job(workspace, repo, created_by=owner)
         _patch_happy_path_runner(monkeypatch, result=_wrapper_result())
-        with mock.patch.object(implementation_execution, "dispatch_harness_review"):
+        with mock.patch.object(implementation_execution, "dispatch_created_review"):
             implementation_execution.run_harness_implementation_job(job.id)
         implementation_execution.runner.cleanup_directory.assert_not_called()
 
     def test_records_model_usage_on_success(self, workspace, owner, repo, monkeypatch):
         job = make_job(workspace, repo, created_by=owner)
         _patch_happy_path_runner(monkeypatch, result=_wrapper_result())
-        with mock.patch.object(implementation_execution, "dispatch_harness_review"):
+        with mock.patch.object(implementation_execution, "dispatch_created_review"):
             implementation_execution.run_harness_implementation_job(job.id)
         usage = ModelUsage.objects.get(purpose="harness.implementation")
         assert usage.success is True
@@ -189,8 +202,10 @@ class TestRunHarnessImplementationJobSuccess:
         job = make_job(workspace, repo, created_by=owner)
         manager = mock.Mock()
         capture_mock = mock.Mock(
-            return_value=json.dumps(
-                {"total_cost_usd": "0.02", "usage": {"input_tokens": 10, "output_tokens": 5}}
+            return_value=_frame(
+                json.dumps(
+                    {"total_cost_usd": "0.02", "usage": {"input_tokens": 10, "output_tokens": 5}}
+                )
             )
         )
         remove_mock = mock.Mock()
@@ -199,7 +214,7 @@ class TestRunHarnessImplementationJobSuccess:
         _patch_happy_path_runner(monkeypatch, result=_wrapper_result())
         monkeypatch.setattr(implementation_execution.runner, "capture_logs", capture_mock)
         monkeypatch.setattr(implementation_execution.runner, "remove_container", remove_mock)
-        with mock.patch.object(implementation_execution, "dispatch_harness_review"):
+        with mock.patch.object(implementation_execution, "dispatch_created_review"):
             implementation_execution.run_harness_implementation_job(job.id)
         assert [c[0] for c in manager.mock_calls] == ["capture_logs", "remove_container"]
         usage = ModelUsage.objects.get(purpose="harness.implementation")
@@ -387,8 +402,13 @@ class TestRunHarnessImplementationJobFailurePaths:
             implementation_execution.runner,
             "capture_logs",
             mock.Mock(
-                return_value=json.dumps(
-                    {"total_cost_usd": "5.00", "usage": {"input_tokens": 100, "output_tokens": 50}}
+                return_value=_frame(
+                    json.dumps(
+                        {
+                            "total_cost_usd": "5.00",
+                            "usage": {"input_tokens": 100, "output_tokens": 50},
+                        }
+                    )
                 )
             ),
         )
@@ -433,7 +453,7 @@ class TestRunHarnessImplementationJobFailurePaths:
         repo.test_command = "   "
         repo.save(update_fields=["test_command"])
         _patch_happy_path_runner(monkeypatch, result=_wrapper_result())
-        with mock.patch.object(implementation_execution, "dispatch_harness_review"):
+        with mock.patch.object(implementation_execution, "dispatch_created_review"):
             implementation_execution.run_harness_implementation_job(job.id)
         launch_call = implementation_execution.runner.launch_implementation_container.call_args
         assert launch_call.kwargs["test_command"] == "pytest -q"

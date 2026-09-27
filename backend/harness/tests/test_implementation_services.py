@@ -134,6 +134,19 @@ class TestCreateHarnessImplementationJob:
                 workspace=workspace, actor=owner, repo=repo, goal="fix the bug"
             )
 
+    def test_unconfigured_self_repo_identifiers_refuse_every_implementation_job(
+        self, workspace, owner, repo, settings
+    ):
+        """Phase 3 branch 5 (2026-09-27 audit): the ADR-004 hard block fails
+        closed -- with no identifiers configured the guard can't recognize
+        Jarvis's own repo, so nothing is allowed through."""
+        settings.HARNESS_SELF_REPO_IDENTIFIERS = []
+        with pytest.raises(HarnessInvalidTransition):
+            create_harness_implementation_job(
+                workspace=workspace, actor=owner, repo=repo, goal="fix the bug"
+            )
+        assert not HarnessImplementationJob.objects.filter(workspace=workspace).exists()
+
     def test_missing_test_command_refused(self, workspace, owner, repo):
         repo.test_command = ""
         repo.save(update_fields=["test_command"])
