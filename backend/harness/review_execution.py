@@ -3,7 +3,9 @@ Celery-agnostic -- `harness.tasks` is a thin wrapper, mirroring
 `harness.execution`/`harness.implementation_execution`'s existing split.
 Its own narrowly-scoped execution function, not the discovery job's
 engine and not a shared one (brief §boundary, round-1 MEDIUM finding,
-accepted -- see `harness.implementation_execution`'s identical rationale).
+accepted -- see `harness.implementation_execution`'s identical rationale;
+only the leaf container lifecycle is shared, `harness.container_lifecycle`,
+Phase 5 D12).
 
 Read-only: the review container gets a CLEAN, agent-config-untouched
 checkout bind-mounted (`runner.prepare_review_clone`, Codex code-review
@@ -43,7 +45,7 @@ from ai_core.exceptions import GatewayError
 from ai_core.gateway import InferenceGateway, record_external_usage
 from ai_core.models import PromptTemplate
 from audit.services import record_audit
-from harness import runner
+from harness import container_lifecycle, runner
 from harness.execution import _resolve_cli_env, redact_harness_secrets
 from harness.models import HarnessImplementationJob, HarnessReview
 from memory.context import neutralize_fence, strip_invisible_formatting
@@ -239,12 +241,7 @@ def _claim_review(review_id):
 
 
 def _teardown_container(container_id):
-    try:
-        runner.stop_container(container_id, grace_seconds=settings.HARNESS_KILL_GRACE_SECONDS)
-        if runner.container_is_running(container_id):
-            runner.kill_container(container_id)
-    except Exception:
-        logger.exception("Failed to stop/kill harness review container %s", container_id)
+    container_lifecycle.teardown_container(container_id, label="harness review container")
 
 
 def _safe_remove_container(container_name):
@@ -255,14 +252,9 @@ def _safe_remove_container(container_name):
     (Phase 3 branch 4) is that retry: its own leaked-terminal-container
     case periodically re-attempts removal via this exact function, the
     same shape `HarnessJob`'s analogous case already has."""
-    try:
-        runner.remove_container(container_name)
-        return True
-    except Exception:
-        logger.exception(
-            "Failed to remove harness review container %s (leaked on host)", container_name
-        )
-        return False
+    return container_lifecycle.safe_remove_container(
+        container_name, label="harness review container"
+    )
 
 
 def _safe_cleanup_directory(path):
@@ -273,10 +265,7 @@ def _safe_cleanup_directory(path):
     cleanup failure just leaks a temp directory on the runner host, the
     same lesser residual risk `harness.execution`'s own read-only clones
     already accept."""
-    try:
-        runner.cleanup_directory(path)
-    except Exception:
-        logger.exception("Failed to clean up harness review directory %s", path)
+    container_lifecycle.cleanup_directory(path, confirm=False, label="harness review directory")
 
 
 def _review_no_longer_wanted(job_id):
@@ -291,34 +280,38 @@ def _review_no_longer_wanted(job_id):
 
 
 def _wait_for_review_container(container_id, started_monotonic, job_id=None):
-    """Timeout-only brake -- no `cancel_requested` equivalent exists on
+    """Timeout brake, plus -- given `job_id` -- the job-no-longer-wants-
+    this-review predicate. No `cancel_requested` equivalent exists on
     `HarnessReview` itself (brief §boundary: cancelling the underlying
     `HarnessImplementationJob` while it's `pending_review` already
     transitions the JOB straight to `cancelled` -- see
     `harness.services.cancel_harness_implementation_job` -- this
     container's own review is simply discarded once it finishes, since
     `request_harness_push`/`fail_implementation_job_for_review` both
-    re-check the job's live status before acting on the verdict)."""
-    while runner.container_is_running(container_id):
-        elapsed = time.monotonic() - started_monotonic
-        if elapsed >= settings.HARNESS_MAX_JOB_SECONDS:
-            transcript = runner.capture_logs(container_id)
-            _teardown_container(container_id)
-            return "failed", transcript
-        # Phase 3 branch 5 (2026-09-27 audit): cancelling the job used to
-        # leave an already-launched review running -- reading agent-authored
-        # code with the review CLI's credentials -- until it finished or hit
-        # the time brake. It is torn down as soon as the job stops waiting.
-        if job_id is not None and _review_no_longer_wanted(job_id):
-            transcript = runner.capture_logs(container_id)
-            _teardown_container(container_id)
-            return "failed", transcript
-        time.sleep(settings.HARNESS_CANCEL_POLL_SECONDS)
-    transcript = runner.capture_logs(container_id)
-    exit_code = runner.container_exit_code(container_id)
-    if exit_code != 0:
-        return "failed", transcript
-    return "succeeded", transcript
+    re-check the job's live status before acting on the verdict).
+
+    Phase 3 branch 5 (2026-09-27 audit): cancelling the job used to leave
+    an already-launched review running -- reading agent-authored code
+    with the review CLI's credentials -- until it finished or hit the
+    time brake. It is torn down as soon as the job stops waiting.
+
+    `container_lifecycle.wait_for_container` (Phase 5 D12) with the
+    transcript captured on every outcome and no post-exit re-check (a
+    verdict nobody wants any more is discarded downstream). Every
+    non-clean outcome is `"failed"` -- the caller turns it into
+    `review_unavailable`."""
+    should_stop = (lambda: _review_no_longer_wanted(job_id)) if job_id is not None else None
+    outcome = container_lifecycle.wait_for_container(
+        container_id,
+        started_monotonic=started_monotonic,
+        teardown=_teardown_container,
+        should_stop=should_stop,
+        recheck_stop_after_exit=False,
+        capture_transcript=True,
+    )
+    if outcome.result == container_lifecycle.WaitResult.EXITED_CLEANLY:
+        return "succeeded", outcome.transcript
+    return "failed", outcome.transcript
 
 
 def _build_review_goal(job):

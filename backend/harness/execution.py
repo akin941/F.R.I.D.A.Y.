@@ -31,7 +31,7 @@ from ai_core.exceptions import GatewayError
 from ai_core.gateway import InferenceGateway, record_external_usage
 from ai_core.models import PromptTemplate
 from audit.services import record_audit
-from harness import runner
+from harness import container_lifecycle, runner
 from harness.models import HarnessJob
 from harness.services import dispatch_harness_job
 from memory.context import neutralize_fence, strip_invisible_formatting
@@ -290,19 +290,23 @@ def _produce_briefing_summary(job, fenced_transcript):
 
 
 def _teardown_container(container_id):
-    """Best-effort stop/kill -- never lets a Docker-control failure (e.g.
-    `subprocess.run`'s own `TimeoutExpired` if the daemon itself is stuck)
-    escape and abort whatever caller is in the middle of computing a job's
-    outcome (Codex code-review P2, branch 2 round 4, same class of issue
-    as the `finally`-block cleanup in `run_harness_job`). Every caller
-    still unconditionally calls `remove_container` afterward on its own
-    exit path; this function only best-effort stops the process inside."""
-    try:
-        runner.stop_container(container_id, grace_seconds=settings.HARNESS_KILL_GRACE_SECONDS)
-        if runner.container_is_running(container_id):
-            runner.kill_container(container_id)
-    except Exception:
-        logger.exception("Failed to stop/kill harness container %s", container_id)
+    """Best-effort stop/kill (`container_lifecycle.teardown_container`).
+    Kept as this module's own seam: the wait loop and the recovery paths
+    below call it by this name."""
+    container_lifecycle.teardown_container(container_id, label="harness container")
+
+
+# `container_lifecycle.wait_for_container` outcome -> this job's own
+# `(status, failure_reason)` -- unchanged from the pre-extraction loop.
+_WAIT_OUTCOME_STATUS = {
+    container_lifecycle.WaitResult.TIMED_OUT: ("failed", HarnessJob.FailureReason.TIMEOUT),
+    container_lifecycle.WaitResult.STOPPED: ("cancelled", HarnessJob.FailureReason.KILLED),
+    container_lifecycle.WaitResult.EXITED_WITH_ERROR: (
+        "failed",
+        HarnessJob.FailureReason.RUNNER_ERROR,
+    ),
+    container_lifecycle.WaitResult.EXITED_CLEANLY: ("succeeded", ""),
+}
 
 
 def _wait_for_container(job_id, container_id, started_monotonic):
@@ -311,40 +315,26 @@ def _wait_for_container(job_id, container_id, started_monotonic):
     every `HARNESS_CANCEL_POLL_SECONDS`, not just once before/after the
     invocation -- a cancel during the one long phase (the CLI's own run)
     must be observed before the container exits on its own, matching the
-    branch's own mid-run kill-switch test."""
-    while runner.container_is_running(container_id):
-        elapsed = time.monotonic() - started_monotonic
-        if elapsed >= settings.HARNESS_MAX_JOB_SECONDS:
-            transcript = runner.capture_logs(container_id)
-            _teardown_container(container_id)
-            return "failed", HarnessJob.FailureReason.TIMEOUT, transcript
-        if HarnessJob.objects.filter(pk=job_id, cancel_requested=True).exists():
-            transcript = runner.capture_logs(container_id)
-            _teardown_container(container_id)
-            return "cancelled", HarnessJob.FailureReason.KILLED, transcript
-        time.sleep(settings.HARNESS_CANCEL_POLL_SECONDS)
-    # The container is no longer running -- that alone doesn't mean the
-    # CLI finished cleanly, only that it stopped (crash and clean exit look
-    # identical to container_is_running).
-    transcript = runner.capture_logs(container_id)
-    # Re-check cancel_requested one more time here (Codex code-review P1,
-    # branch 2 round 3): a cancel arriving in the gap between the loop's
-    # last "still running" check and the container's own natural exit
-    # would otherwise be silently dropped -- the loop above only polls the
-    # flag WHILE it still sees the container running, and this path never
-    # re-checks it once that condition goes false. Reporting "succeeded"
-    # here would misrepresent that the owner's cancel request was ignored.
-    if HarnessJob.objects.filter(pk=job_id, cancel_requested=True).exists():
-        return "cancelled", HarnessJob.FailureReason.KILLED, transcript
-    # Check its own exit code before calling this a success -- Codex
-    # round-2 P2: an unknown exit code (docker inspect itself failed, or
-    # returned something unparsable) is a Docker-control failure, not
-    # evidence of a clean exit; only a confirmed `0` counts as success,
-    # `None` fails closed the same as any other non-zero code.
-    exit_code = runner.container_exit_code(container_id)
-    if exit_code != 0:
-        return "failed", HarnessJob.FailureReason.RUNNER_ERROR, transcript
-    return "succeeded", "", transcript
+    branch's own mid-run kill-switch test.
+
+    The loop itself is `container_lifecycle.wait_for_container` (Phase 5
+    D12): the transcript is captured on every outcome, and
+    `cancel_requested` is re-checked once more after the container stops
+    running (Codex code-review P1, branch 2 round 3) -- a cancel arriving
+    in the gap between the loop's last "still running" check and the
+    container's own natural exit would otherwise be silently dropped.
+    Only a confirmed `0` exit code is a success; `None` fails closed as
+    `runner_error` (Codex round-2 P2)."""
+    outcome = container_lifecycle.wait_for_container(
+        container_id,
+        started_monotonic=started_monotonic,
+        teardown=_teardown_container,
+        should_stop=lambda: HarnessJob.objects.filter(pk=job_id, cancel_requested=True).exists(),
+        recheck_stop_after_exit=True,
+        capture_transcript=True,
+    )
+    status, failure_reason = _WAIT_OUTCOME_STATUS[outcome.result]
+    return status, failure_reason, outcome.transcript
 
 
 def run_harness_job(job_id):
@@ -412,19 +402,13 @@ def _safe_remove_container(container_name):
     already gone), `False` if removal genuinely failed -- callers must NOT
     clear `HarnessJob.container_id` on a `False` return (Codex code-review
     P2, branch 2 round 6)."""
-    try:
-        runner.remove_container(container_name)
-        return True
-    except Exception:
-        logger.exception("Failed to remove harness container %s (leaked on host)", container_name)
-        return False
+    return container_lifecycle.safe_remove_container(container_name, label="harness container")
 
 
 def _safe_cleanup_directory(clone_dir):
-    try:
-        runner.cleanup_directory(clone_dir)
-    except Exception:
-        logger.exception("Failed to clean up harness clone directory %s", clone_dir)
+    """Best-effort: the read-only clone is genuinely temporary, nothing
+    persists a pointer to it."""
+    container_lifecycle.cleanup_directory(clone_dir, confirm=False, label="harness clone directory")
 
 
 def _finalize(job, outcome, started_monotonic, removal_confirmed=True):
