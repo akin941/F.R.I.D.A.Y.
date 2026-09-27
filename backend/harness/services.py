@@ -70,10 +70,14 @@ class HarnessServiceError(Exception):
 class HarnessPermissionDenied(HarnessServiceError):
     """Actor's role does not allow the action -> 403."""
 
+    code = "harness.permission_denied"
+
 
 class HarnessInvalidTransition(HarnessServiceError):
     """Illegal state-machine move, or an unselectable agent/disabled repo
     -> 400."""
+
+    code = "harness.invalid_transition"
 
 
 def get_role(actor, workspace):

@@ -60,10 +60,14 @@ class AgentServiceError(Exception):
 class AgentPermissionDenied(AgentServiceError):
     """Actor's role does not allow the action -> 403."""
 
+    code = "agent.permission_denied"
+
 
 class AgentInvalidTransition(AgentServiceError):
     """Illegal state-machine move (e.g. confirming an already-resolved
     step, or one that no longer exists) -> 400."""
+
+    code = "agent.invalid_transition"
 
 
 def get_role(actor, workspace):
