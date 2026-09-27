@@ -71,6 +71,10 @@ class ConnectorError(Exception):
             "protocol_error",
             "tool_missing",
             "pin_mismatch",
+            # Native bridges (D9): the OAuth grant no longer covers the
+            # tool, or the refresh token was rejected (`invalid_grant`).
+            "scope_mismatch",
+            "reconnect_required",
         }
     )
 
