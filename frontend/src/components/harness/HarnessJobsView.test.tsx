@@ -112,4 +112,34 @@ describe("HarnessJobsView", () => {
 
     expect(await screen.findByRole("button", { name: /Harness işlerine dön/ })).toBeInTheDocument();
   });
+
+  it("opens a job's detail view from the keyboard", async () => {
+    const row = job({ id: "j1", goal: "Find the bug" });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string) => {
+        if (input === "/api/harness/jobs/j1") return jsonResponse({ ...row, briefing: {} });
+        return jsonResponse([row]);
+      }),
+    );
+
+    render(<HarnessJobsView />);
+    const card = await screen.findByRole("button", { name: /Find the bug/ });
+    card.focus();
+    await userEvent.keyboard(" ");
+
+    expect(await screen.findByRole("button", { name: /Harness işlerine dön/ })).toBeInTheDocument();
+  });
+
+  it("renders a Turkish label for the failure reason, never the raw value", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => jsonResponse([job({ status: "failed", failure_reason: "runner_error" })])),
+    );
+
+    render(<HarnessJobsView />);
+
+    expect(await screen.findByText(/Çalıştırıcı hatası/)).toBeInTheDocument();
+    expect(screen.queryByText(/runner_error/)).not.toBeInTheDocument();
+  });
 });

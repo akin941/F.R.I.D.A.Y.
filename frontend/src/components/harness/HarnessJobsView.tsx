@@ -7,9 +7,14 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Skeleton } from "@/components/ui/skeleton";
 import { HarnessJobGoalForm } from "@/components/harness/HarnessJobGoalForm";
 import { HarnessJobDetail } from "@/components/harness/HarnessJobDetail";
-import { HARNESS_JOB_IN_FLIGHT_STATUSES, HARNESS_JOB_STATUS_LABELS } from "@/components/harness/labels";
+import {
+  HARNESS_JOB_IN_FLIGHT_STATUSES,
+  HARNESS_JOB_STATUS_LABELS,
+  harnessFailureReasonLabel,
+} from "@/components/harness/labels";
 import { useWorkspace } from "@/contexts/workspace-context";
 import { apiGetJson } from "@/lib/api-client";
+import { clickableProps } from "@/lib/keyboard";
 import type { ApiHarnessJob } from "@/types/api";
 
 export function HarnessJobsView() {
@@ -125,8 +130,8 @@ export function HarnessJobsView() {
           {jobs.map((job) => (
             <Card
               key={job.id}
-              className="cursor-pointer transition-colors hover:bg-accent/50"
-              onClick={() => setSelectedJobId(job.id)}
+              className="cursor-pointer transition-colors hover:bg-accent/50 focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none"
+              {...clickableProps(() => setSelectedJobId(job.id))}
             >
               <CardHeader>
                 <CardTitle className="text-base">{job.goal}</CardTitle>
@@ -134,7 +139,7 @@ export function HarnessJobsView() {
               <CardContent>
                 <p className="text-sm text-muted-foreground">
                   {HARNESS_JOB_STATUS_LABELS[job.status]}
-                  {job.failure_reason ? ` — ${job.failure_reason}` : ""}
+                  {job.failure_reason ? ` — ${harnessFailureReasonLabel(job.failure_reason)}` : ""}
                 </p>
               </CardContent>
             </Card>

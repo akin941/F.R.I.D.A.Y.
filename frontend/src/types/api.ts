@@ -364,3 +364,121 @@ export interface ApiHarnessJobBriefing {
 export interface ApiHarnessJobDetail extends ApiHarnessJob {
   briefing: ApiHarnessJobBriefing;
 }
+
+// --- Harness repos (Phase 3) ---
+
+export interface ApiHarnessRepo {
+  id: string;
+  workspace: string;
+  name: string;
+  git_url: string;
+  default_branch: string;
+  runner: string;
+  enabled: boolean;
+  sensitive: boolean;
+  test_command: string;
+  created_at: string;
+  updated_at: string;
+}
+
+// --- Harness implementation jobs (Phase 3 branch 6/7) ---
+
+export type ImplStatus =
+  | "pending_gate_a"
+  | "implementing"
+  | "pending_review"
+  | "pending_gate_b"
+  | "pushing"
+  | "succeeded"
+  | "failed"
+  | "cancelled";
+
+export type ImplFailureReason =
+  | ""
+  | "timeout"
+  | "runner_error"
+  | "budget_exceeded"
+  | "killed"
+  | "gate_a_rejected"
+  | "gate_b_rejected"
+  | "gate_expired"
+  | "test_command_not_configured"
+  | "test_result_unavailable"
+  | "tests_failed"
+  | "review_changes_requested"
+  | "review_unavailable"
+  | "worktree_expired"
+  | "push_failed"
+  | "no_changes"
+  | "secret_leak";
+
+// A gate revoked by cancel/worktree expiry shows status "expired".
+export type ApiGateSummary = {
+  id: string;
+  status: ApprovalStatus;
+  decided_at: string | null;
+} | null;
+
+export interface ApiImplementationJob {
+  id: string;
+  workspace: string;
+  repo: string;
+  repo_name: string;
+  discovery_job: string | null;
+  goal: string;
+  agent: "claude_code";
+  reviewer_agent: "codex_cli";
+  status: ImplStatus;
+  failure_reason: ImplFailureReason;
+  cancel_requested: boolean;
+  branch_name: string;
+  created_by: string | null;
+  started_at: string | null;
+  elapsed_seconds: number | null;
+  created_at: string;
+  updated_at: string;
+  gate_a: ApiGateSummary;
+  gate_b: ApiGateSummary;
+}
+
+export interface ApiImplementationReview {
+  id: string;
+  agent: "codex_cli";
+  status: "pending" | "running" | "succeeded" | "failed";
+  verdict: "" | "approved" | "changes_requested";
+  // Gateway-produced -- Jarvis's own summarization, trusted-ish.
+  summary: string;
+  findings: string[];
+  // The reviewer CLI's own output -- LOW TRUST (R2), rendered only behind
+  // an explicit disclosure, never merged with `summary`/`findings`.
+  raw_transcript: string;
+  elapsed_seconds: number | null;
+  created_at: string;
+  updated_at: string;
+}
+
+// `{}` until the job has run tests / attempted a push.
+export type ApiImplTestResult =
+  | { ran: boolean; exit_code: number | null; passed: boolean; command: string }
+  | Record<string, never>;
+
+export type ApiImplPushResult =
+  | { pushed: boolean; branch_name?: string; error?: string }
+  | Record<string, never>;
+
+export interface ApiImplementationJobDetail extends ApiImplementationJob {
+  base_commit_sha: string;
+  produced_commit_sha: string;
+  changed_files: string[];
+  // Gateway-produced summary of the diff stat (deterministic fallback if
+  // the gateway fails) -- a model summary, not the diff itself.
+  diff_summary: string;
+  test_result: ApiImplTestResult;
+  push_result: ApiImplPushResult;
+  worktree_expires_at: string | null;
+  // The implementing CLI's own output -- LOW TRUST (R2), same rendering
+  // discipline as `ApiHarnessJobBriefing.raw_transcript`.
+  raw_transcript: string;
+  // Newest first.
+  reviews: ApiImplementationReview[];
+}

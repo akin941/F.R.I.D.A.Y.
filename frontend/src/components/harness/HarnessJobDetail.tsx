@@ -8,6 +8,7 @@ import {
   HARNESS_AGENT_LABELS,
   HARNESS_JOB_IN_FLIGHT_STATUSES,
   HARNESS_JOB_STATUS_LABELS,
+  harnessFailureReasonLabel,
 } from "@/components/harness/labels";
 import { apiGetJson, apiPostJson, ApiError } from "@/lib/api-client";
 import type { ApiHarnessJobDetail } from "@/types/api";
@@ -28,7 +29,7 @@ import type { ApiHarnessJobDetail } from "@/types/api";
  */
 export function HarnessJobDetail({ jobId, onBack }: { jobId: string; onBack: () => void }) {
   const [job, setJob] = useState<ApiHarnessJobDetail | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [cancelling, setCancelling] = useState(false);
   const [cancelError, setCancelError] = useState<string | null>(null);
@@ -109,11 +110,20 @@ export function HarnessJobDetail({ jobId, onBack }: { jobId: string; onBack: () 
         </Alert>
       ) : null}
 
-      {loading || !job ? (
-        <div className="flex flex-col gap-3">
-          <Skeleton className="h-8 w-2/3" />
-          <Skeleton className="h-24 w-full" />
-        </div>
+      {/* Skeleton only while a load is actually in flight -- after a failed
+          first load the error above stands alone (with a retry), rather
+          than sitting next to a skeleton that never resolves. */}
+      {!job ? (
+        loading ? (
+          <div className="flex flex-col gap-3">
+            <Skeleton className="h-8 w-2/3" />
+            <Skeleton className="h-24 w-full" />
+          </div>
+        ) : loadError ? (
+          <Button variant="outline" size="sm" className="self-start" onClick={() => void loadJob()}>
+            Tekrar dene
+          </Button>
+        ) : null
       ) : (
         <>
           <div className="flex flex-wrap items-start justify-between gap-4">
@@ -121,7 +131,7 @@ export function HarnessJobDetail({ jobId, onBack }: { jobId: string; onBack: () 
               <h1 className="text-xl font-semibold tracking-tight">{job.goal}</h1>
               <p className="text-sm text-muted-foreground">
                 {HARNESS_JOB_STATUS_LABELS[job.status]}
-                {job.failure_reason ? ` — ${job.failure_reason}` : ""}
+                {job.failure_reason ? ` — ${harnessFailureReasonLabel(job.failure_reason)}` : ""}
               </p>
               <p className="text-sm text-muted-foreground">
                 Ajan: {HARNESS_AGENT_LABELS[job.agent]}

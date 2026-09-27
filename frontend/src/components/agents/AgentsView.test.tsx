@@ -106,4 +106,36 @@ describe("AgentsView", () => {
 
     expect(await screen.findByRole("button", { name: /Ajanlara dön/ })).toBeInTheDocument();
   });
+
+  it("opens an agent's detail view from the keyboard", async () => {
+    const row = agent({ id: "a1", goal: "Summarize my notes" });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string) => {
+        if (input === "/api/agents/a1") return jsonResponse({ ...row, steps: [] });
+        return jsonResponse([row]);
+      }),
+    );
+
+    render(<AgentsView />);
+    const card = await screen.findByRole("button", { name: /Summarize my notes/ });
+    card.focus();
+    await userEvent.keyboard("{Enter}");
+
+    expect(await screen.findByRole("button", { name: /Ajanlara dön/ })).toBeInTheDocument();
+  });
+
+  it("renders a Turkish label for the failure reason, never the raw value", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        jsonResponse([agent({ status: "failed", failure_reason: "gateway_budget_exceeded" })]),
+      ),
+    );
+
+    render(<AgentsView />);
+
+    expect(await screen.findByText(/Model çağrı bütçesi aşıldı/)).toBeInTheDocument();
+    expect(screen.queryByText(/gateway_budget_exceeded/)).not.toBeInTheDocument();
+  });
 });

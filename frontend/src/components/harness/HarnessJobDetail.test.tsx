@@ -164,4 +164,38 @@ describe("HarnessJobDetail", () => {
 
     expect(screen.queryByRole("button", { name: "İşi iptal et" })).not.toBeInTheDocument();
   });
+
+  it("shows the error with a retry and no lingering skeleton after a failed load", async () => {
+    let calls = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        calls += 1;
+        if (calls === 1) return jsonResponse({ detail: "boom" }, 500);
+        return jsonResponse(detail());
+      }),
+    );
+
+    const { container } = render(<HarnessJobDetail jobId="j1" onBack={() => undefined} />);
+
+    expect(await screen.findByText("Bu iş yüklenemedi.")).toBeInTheDocument();
+    expect(container.querySelector('[data-slot="skeleton"]')).toBeNull();
+
+    await userEvent.click(screen.getByRole("button", { name: "Tekrar dene" }));
+
+    expect(await screen.findByText("Find the bug")).toBeInTheDocument();
+    expect(screen.queryByText("Bu iş yüklenemedi.")).not.toBeInTheDocument();
+  });
+
+  it("renders a Turkish label for the failure reason", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => jsonResponse(detail({ status: "failed", failure_reason: "timeout" }))),
+    );
+
+    render(<HarnessJobDetail jobId="j1" onBack={() => undefined} />);
+
+    expect(await screen.findByText(/Zaman aşımı/)).toBeInTheDocument();
+    expect(screen.queryByText(/— timeout/)).not.toBeInTheDocument();
+  });
 });

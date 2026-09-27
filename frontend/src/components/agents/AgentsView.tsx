@@ -7,9 +7,14 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Skeleton } from "@/components/ui/skeleton";
 import { AgentGoalForm } from "@/components/agents/AgentGoalForm";
 import { AgentDetail } from "@/components/agents/AgentDetail";
-import { AGENT_IN_FLIGHT_STATUSES, AGENT_STATUS_LABELS } from "@/components/agents/labels";
+import {
+  AGENT_IN_FLIGHT_STATUSES,
+  AGENT_STATUS_LABELS,
+  agentFailureReasonLabel,
+} from "@/components/agents/labels";
 import { useWorkspace } from "@/contexts/workspace-context";
 import { apiGetJson } from "@/lib/api-client";
+import { clickableProps } from "@/lib/keyboard";
 import type { ApiAgent } from "@/types/api";
 
 export function AgentsView() {
@@ -126,8 +131,8 @@ export function AgentsView() {
           {agents.map((agent) => (
             <Card
               key={agent.id}
-              className="cursor-pointer transition-colors hover:bg-accent/50"
-              onClick={() => setSelectedAgentId(agent.id)}
+              className="cursor-pointer transition-colors hover:bg-accent/50 focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none"
+              {...clickableProps(() => setSelectedAgentId(agent.id))}
             >
               <CardHeader>
                 <CardTitle className="text-base">{agent.goal}</CardTitle>
@@ -135,7 +140,7 @@ export function AgentsView() {
               <CardContent>
                 <p className="text-sm text-muted-foreground">
                   {AGENT_STATUS_LABELS[agent.status]}
-                  {agent.failure_reason ? ` — ${agent.failure_reason}` : ""}
+                  {agent.failure_reason ? ` — ${agentFailureReasonLabel(agent.failure_reason)}` : ""}
                 </p>
               </CardContent>
             </Card>
