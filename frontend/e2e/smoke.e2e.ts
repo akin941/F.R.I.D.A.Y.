@@ -1,5 +1,6 @@
 import { test, expect } from "@playwright/test";
 import type { Page } from "@playwright/test";
+import { issuePairingCode } from "./manage";
 
 // FakeAdapter's fixed reply (backend/ai_core/adapters/fake.py) — deterministic,
 // no network call, so this string is a safe, stable assertion target.
@@ -47,10 +48,10 @@ async function openAgentDetail(page: Page, goalText: string) {
 // suggestion already exists as a `pending_approval` Memory row.
 const FAKE_MEMORY_TITLE = "Fake extracted preference";
 
-test("signup, chat with the fake provider, curated memory, Today, logout, route guard", async ({
+test("enroll, chat with the fake provider, curated memory, Today, logout, route guard", async ({
   page,
   request,
-}) => {
+}, testInfo) => {
   // Above the config default (45s): this path waits out two SSE replies, an
   // extraction-job round trip (dispatch -> worker pickup -> gateway call ->
   // Memory write), and a knowledge-ingestion round trip (dispatch -> worker
@@ -78,17 +79,21 @@ test("signup, chat with the fake provider, curated memory, Today, logout, route 
   // message's persistence) -- bumped to 340s.
   test.setTimeout(340_000);
 
-  const email = `e2e-${Date.now()}@jarvis.test`;
-  const password = "Sup3rSecret!2026";
-
-  await page.goto("/signup");
-  await page.getByLabel("E-posta").fill(email);
-  await page.getByLabel("Parola").fill(password);
-  await page.getByRole("button", { name: "Kayıt ol" }).click();
+  // Device trust (Phase 4 branch 2): no signup -- this browser is enrolled
+  // as a trusted device of the owner with a host-issued pairing PIN
+  // (global-setup.ts). A retry needs a fresh one (codes are single-use).
+  const pairingCode =
+    testInfo.retry === 0 && process.env.E2E_PAIRING_CODE
+      ? process.env.E2E_PAIRING_CODE
+      : issuePairingCode();
+  await page.goto("/enroll");
+  await page.getByLabel("Eşleştirme kodu").fill(pairingCode);
+  await page.getByLabel("Cihaz adı").fill("e2e browser");
+  await page.getByRole("button", { name: "Cihazı eşleştir" }).click();
 
   await expect(page).toHaveURL(/\/chat$/);
 
-  // Personal workspace auto-created on signup (workspaces/services.py).
+  // The owner's personal workspace (bootstrap_owner -> register_user).
   await expect(page.getByRole("combobox", { name: "Aktif çalışma alanı" })).toContainText(
     "Personal",
   );
@@ -255,7 +260,7 @@ test("signup, chat with the fake provider, curated memory, Today, logout, route 
   const routerVaultExportRequestId = await page.evaluate(async () => {
     const workspaces = (await (await fetch("/api/workspaces")).json()) as { id: string }[];
     const workspace = workspaces[0];
-    if (!workspace) throw new Error("No workspace found for the freshly signed-up user.");
+    if (!workspace) throw new Error("No workspace found for the owner.");
     const requests = (await (
       await fetch(`/api/approvals/requests?workspace=${workspace.id}&status=pending`)
     ).json()) as { id: string; tool_name: string }[];
@@ -370,7 +375,7 @@ test("signup, chat with the fake provider, curated memory, Today, logout, route 
   const vaultExportRequestId = await page.evaluate(async () => {
     const workspaces = (await (await fetch("/api/workspaces")).json()) as { id: string }[];
     const workspace = workspaces[0];
-    if (!workspace) throw new Error("No workspace found for the freshly signed-up user.");
+    if (!workspace) throw new Error("No workspace found for the owner.");
     const requests = (await (
       await fetch(`/api/approvals/requests?workspace=${workspace.id}&status=pending`)
     ).json()) as { id: string; tool_name: string }[];
@@ -445,7 +450,7 @@ test("signup, chat with the fake provider, curated memory, Today, logout, route 
   const agentToolRequestId = await page.evaluate(async () => {
     const workspaces = (await (await fetch("/api/workspaces")).json()) as { id: string }[];
     const workspace = workspaces[0];
-    if (!workspace) throw new Error("No workspace found for the freshly signed-up user.");
+    if (!workspace) throw new Error("No workspace found for the owner.");
     const requests = (await (
       await fetch(`/api/approvals/requests?workspace=${workspace.id}&status=pending`)
     ).json()) as { id: string; tool_name: string }[];
@@ -518,7 +523,7 @@ test("signup, chat with the fake provider, curated memory, Today, logout, route 
   const skillToolRequestId = await page.evaluate(async () => {
     const workspaces = (await (await fetch("/api/workspaces")).json()) as { id: string }[];
     const workspace = workspaces[0];
-    if (!workspace) throw new Error("No workspace found for the freshly signed-up user.");
+    if (!workspace) throw new Error("No workspace found for the owner.");
     const requests = (await (
       await fetch(`/api/approvals/requests?workspace=${workspace.id}&status=pending`)
     ).json()) as { id: string; tool_name: string }[];
@@ -578,7 +583,7 @@ test("signup, chat with the fake provider, curated memory, Today, logout, route 
   const killSwitchRequestId = await page.evaluate(async () => {
     const workspaces = (await (await fetch("/api/workspaces")).json()) as { id: string }[];
     const workspace = workspaces[0];
-    if (!workspace) throw new Error("No workspace found for the freshly signed-up user.");
+    if (!workspace) throw new Error("No workspace found for the owner.");
     const requests = (await (
       await fetch(`/api/approvals/requests?workspace=${workspace.id}&status=pending`)
     ).json()) as { id: string; tool_name: string }[];
@@ -620,7 +625,7 @@ test("signup, chat with the fake provider, curated memory, Today, logout, route 
   const e2eWorkspaceId = await page.evaluate(async () => {
     const workspaces = (await (await fetch("/api/workspaces")).json()) as { id: string }[];
     const workspace = workspaces[0];
-    if (!workspace) throw new Error("No workspace found for the freshly signed-up user.");
+    if (!workspace) throw new Error("No workspace found for the owner.");
     return workspace.id;
   });
 
@@ -778,11 +783,24 @@ test("signup, chat with the fake provider, curated memory, Today, logout, route 
     expect(messages.some((m) => m.role === "assistant" && m.content === FAKE_REPLY)).toBe(true);
   }).toPass({ timeout: 20_000 });
 
+  // "Çıkış yap" ends the session; the device stays trusted.
   await page.getByRole("button", { name: "Çıkış yap" }).click();
-  await expect(page).toHaveURL(/\/login$/);
+  await expect(page).toHaveURL(/\/enroll\?signed_out=1$/);
 
-  // Optimistic route guard: an unauthenticated request for a protected path
-  // redirects back to /login (src/proxy.ts) rather than rendering the shell.
-  await page.goto("/chat");
-  await expect(page).toHaveURL(/\/login$/);
+  // Optimistic route guard: a request without a session for a shell route
+  // redirects to /enroll (src/proxy.ts) rather than rendering the shell.
+  const guarded = await request.get("/chat", { maxRedirects: 0 });
+  expect(guarded.status()).toBe(307);
+  expect(guarded.headers()["location"]).toMatch(/\/enroll$/);
+
+  // The trusted device resumes without a code...
+  await page.getByRole("button", { name: "Bu cihazla devam et" }).click();
+  await expect(page).toHaveURL(/\/chat$/);
+
+  // ...until it is forgotten: "Bu cihazı unut" revokes it for good, and the
+  // next visit asks for a pairing code again.
+  await page.getByRole("link", { name: "Entegrasyonlar" }).click();
+  await page.getByRole("button", { name: "Bu cihazı unut" }).click();
+  await expect(page).toHaveURL(/\/enroll$/);
+  await expect(page.getByLabel("Eşleştirme kodu")).toBeVisible();
 });

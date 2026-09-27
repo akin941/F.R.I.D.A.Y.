@@ -4,11 +4,44 @@ MVP 9 added two channels for reaching Jarvis outside the web app: a CLI
 (bearer-token authenticated) and a Telegram bot (relayed, no direct request
 of its own). Both are new *front doors* onto the existing chat pipeline —
 neither adds a new way to *act*. The one new concept both channels share is
-**channel trust** (`core/channels.py`): a request authenticated by anything
-other than the standard password+JWT web login is low-trust, and low-trust
-channels can never decide an `ApprovalRequest` (`approve`/`reject`) — they
-can still propose one, exactly as the web app can. See ADR-004 and
+**channel trust** (`core/channels.py`): only a trusted device's web session
+is high-trust; everything else is low-trust, and low-trust channels can never
+decide an `ApprovalRequest` (`approve`/`reject`) — they can still propose
+one, exactly as the web app can. See ADR-004 and
 `docs/prompts/mvp-09/brief.md` for the full design rationale.
+
+### The high-trust web channel, defined (Phase 4 branch 2)
+
+Default-deny since Phase 4 branch 2. A request is `CHANNEL_WEB` iff:
+
+1. it authenticated through `DeviceJWTAuthentication` (the sole
+   `DEFAULT_AUTHENTICATION_CLASSES` entry) with a valid access JWT carrying
+   the `did` (device id) claim — a JWT without it is rejected (401);
+2. `did` names a `TrustedDevice` of the token's user that is neither revoked
+   nor idle-expired (`DEVICE_IDLE_EXPIRY_DAYS`, default 90) — checked on
+   every request, so revoking a device ends its access with the next request
+   (an already-open chat stream finishes its reply);
+3. the user is active, the installation owner (`User.is_owner`) and not an
+   agent;
+4. it arrived through the Next.js BFF, whose Origin/Content-Type checks are
+   the CSRF boundary.
+
+The authenticator then sets `request.auth` to a `WebSessionPrincipal`;
+`request_channel()` returns `web` only for that type, the PAT's channel
+(`cli`) for a `ChannelPrincipal`, and `unknown` (low-trust) for anything
+else — so a future authenticator that forgets its channel is low-trust, and
+`config/tests/test_channel_matrix.py` fails until it is classified.
+`core.permissions.IsWebChannel` guards every web-only surface on top of the
+service checks: approval decisions, PAT mint/revoke, Telegram link codes,
+pairing codes, the remote key, devices, firm creation, owner deletes (ADR-009)
+and task-draft confirmation.
+
+Devices are enrolled at `/enroll` with a one-time pairing code (`manage.py
+issue_pairing_code`, or "Yeni cihaz eşleştir" on a trusted session) or the
+remote access key; there is no signup and no password login. PINs are
+LAN-gated: the BFF forwards the browser IP only from `TRUSTED_CLIENT_IP_HEADER`
+(set by the owner's reverse proxy) as `X-Jarvis-Client-IP` with
+`X-Jarvis-BFF-Key`, and Django ignores the IP without that key.
 
 ## CLI channel
 
@@ -19,7 +52,7 @@ workspace (minus the channel restriction on decisions above), not a
 narrower-scoped API key.
 
 - **Mint one**: from the web app's Integrations settings page
-  (`/integrations`), or `POST /api/v1/auth/tokens` (JWT-authenticated only —
+  (`/integrations`), or `POST /api/v1/auth/tokens` (web channel only —
   minting a token is itself a sensitive, human-decided action). The raw
   token is returned exactly once, in that response.
 - **Expiry** (Phase 4 branch 1): every token expires — 90 days by default,
