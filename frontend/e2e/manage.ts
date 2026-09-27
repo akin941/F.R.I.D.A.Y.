@@ -25,3 +25,19 @@ export function issuePairingCode(): string {
   }
   return code;
 }
+
+/**
+ * A fresh OpenAI-facade personal access token (`kind=openai`) for the e2e
+ * owner, bound to their personal workspace (`create_dev_pat`, DEBUG only).
+ */
+export function mintFacadeToken(email = "e2e@example.test"): string {
+  const output = execSync(
+    `${MANAGE_CMD} create_dev_pat ${email} "${email} — Personal" --kind openai`,
+    { encoding: "utf8", stdio: ["ignore", "pipe", "inherit"] },
+  );
+  const token = output.trim().split("\n").at(-1)?.trim() ?? "";
+  if (!token.startsWith("jpat_")) {
+    throw new Error(`create_dev_pat printed no token (got ${JSON.stringify(output)}).`);
+  }
+  return token;
+}

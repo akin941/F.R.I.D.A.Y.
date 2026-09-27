@@ -736,7 +736,7 @@ approval (Phase 5).
 | 1 | Memory v2: embeddings + semantic retrieval, `work_log` class, core memory blocks (owner + firm dossiers), personal read-only overlay | "What did we last do for firm X?" answerable | **done (2026-07-19)** — owner core block + consolidation carried forward (below) |
 | 2 | Harness v1: read-only discovery runs → briefing; runner abstraction (first runner: Mac); usage → ModelUsage; kill switch + budgets | "Analyze this bug in repo X, brief me" | **done (2026-07-20)** (mocked suite; first real run in Phase 3 closeout) |
 | 3 | Harness v2: plan approval → worktree implementation → tests → cross-vendor review → gated branch push | Approved feature development end-to-end | **done (2026-09-27)** — branches 1–4 (2026-07-20 → 07-22) + closeout 5a/5–8 (2026-09-27); first real paid run is an owner runbook step |
-| 4 | Security baseline; UI renewal: shell/chat/harness console/approvals inbox redesign; device-trust identity replaces signup/login; OpenAI-compatible facade (chat-only, low-trust) | Professional, safely-exposable daily driver | brief approved 2026-09-27 (`docs/prompts/phase-4-identity-ui/brief.md`); branches 1 and 3 merged into `integ/phase-4` (Sonnet 5 APPROVE) |
+| 4 | Security baseline; UI renewal: shell/chat/harness console/approvals inbox redesign; device-trust identity replaces signup/login; OpenAI-compatible facade (chat-only, low-trust) | Professional, safely-exposable daily driver | **done 2026-09-27** (`docs/prompts/phase-4-identity-ui/brief.md`, "Closeout"); six branches, each Sonnet 5 APPROVE, merged to `main` via PR #27 |
 | 5 | Deploy gate + VPS deploy (allowlisted commands); MCP client framework: GitHub, mail/calendar, external client (when an installation exposes MCP), Home Assistant bridge; tier routing + harness policy table | Request → code → live, end to end | brief approved 2026-09-27 (`docs/prompts/phase-5-deploy-mcp/brief.md`); starts after Phase 4 closeout |
 | 6 | Voice (ex-MVP 12): mic capture, faster-whisper STT, Piper TTS, local wake word, orb wired to real audio; then the animated visual identity layer | The real Jarvis experience | brief approved 2026-09-27 (`docs/prompts/phase-6-voice-identity/brief.md`); starts after Phase 5 closeout (foundation from MVP 12 shipped, dormant) |
 
@@ -864,5 +864,9 @@ shared per-turn query embedding; SSE log streaming for harness; revise-
 per-feedback loop; shared harness execution-engine extraction (its
 three-call-site trigger is now met — evaluate in Phase 5); dynamic runner
 registry (needed when a second runner appears); Gemini CLI / Ollama as
-harness agents; configurable branch-name prefix; MVP 9 persisted-draft
-reconstruction (Phase 4 UI candidate).
+harness agents; configurable branch-name prefix. From the Phase 4
+closeout: facade binding retention (`FacadeConversation` pruning); a
+shared (not per-process) BFF pre-auth limiter; `fork_conversation`'s
+no-usable-cut fallback copying the whole conversation; approvals list
+pagination; e2e retry isolation; the owner's manual Open WebUI smoke.
+(MVP 9 persisted-draft reconstruction landed in Phase 4 branch 4.)
