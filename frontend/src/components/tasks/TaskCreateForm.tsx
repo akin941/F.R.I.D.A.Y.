@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { TaskFields, type TaskFieldsValue } from "@/components/tasks/TaskFields";
-import { apiPostJson, ApiError } from "@/lib/api-client";
+import { apiPostJson, errorMessage } from "@/lib/api-client";
 import type { ApiTask } from "@/types/api";
 
 const EMPTY: TaskFieldsValue = {
@@ -43,11 +43,7 @@ export function TaskCreateForm({
       onCreated(task);
       setValue(EMPTY);
     } catch (err) {
-      if (err instanceof ApiError) {
-        setError(err.body.detail ?? "Görev oluşturulamadı.");
-      } else {
-        setError("Bir şeyler ters gitti. Lütfen tekrar deneyin.");
-      }
+      setError(errorMessage(err, "Görev oluşturulamadı."));
     } finally {
       setSubmitting(false);
     }

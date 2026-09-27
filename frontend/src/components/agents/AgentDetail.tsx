@@ -10,7 +10,7 @@ import {
   AGENT_STATUS_LABELS,
   agentFailureReasonLabel,
 } from "@/components/agents/labels";
-import { apiGetJson, apiPostJson, ApiError } from "@/lib/api-client";
+import { apiGetJson, apiPostJson, errorMessage } from "@/lib/api-client";
 import type { ApiAgentDetail } from "@/types/api";
 import { VIEW_SCROLL_ROOT } from "@/components/shell/view-scroll";
 import { cn } from "@/lib/utils";
@@ -67,9 +67,7 @@ export function AgentDetail({ agentId, onBack }: { agentId: string; onBack: () =
       await loadAgent({ silent: true });
     } catch (err) {
       setCancelError(
-        err instanceof ApiError
-          ? (err.body.detail ?? "Ajan iptal edilemedi.")
-          : "Bir şeyler ters gitti. Lütfen tekrar deneyin.",
+        errorMessage(err, "Ajan iptal edilemedi."),
       );
     } finally {
       setCancelling(false);

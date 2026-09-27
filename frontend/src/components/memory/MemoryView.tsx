@@ -14,7 +14,7 @@ import {
   MEMORY_TYPE_LABELS,
 } from "@/components/memory/labels";
 import { useWorkspace } from "@/contexts/workspace-context";
-import { apiGetJson, apiPostJson, ApiError } from "@/lib/api-client";
+import { apiGetJson, apiPostJson, errorMessage } from "@/lib/api-client";
 import type { ApiMemory, MemoryStatus, MemoryType } from "@/types/api";
 import { VIEW_SCROLL_ROOT } from "@/components/shell/view-scroll";
 import { cn } from "@/lib/utils";
@@ -130,10 +130,7 @@ export function MemoryView() {
       if (activeWorkspaceIdRef.current !== workspaceId) return;
       setVaultExportNotice({
         type: "error",
-        message:
-          err instanceof ApiError
-            ? (err.body.detail ?? "Dışa aktarma isteği oluşturulamadı.")
-            : "Dışa aktarma isteği oluşturulamadı.",
+        message: errorMessage(err, "Dışa aktarma isteği oluşturulamadı."),
       });
     } finally {
       if (activeWorkspaceIdRef.current === workspaceId) setVaultExportBusy(false);

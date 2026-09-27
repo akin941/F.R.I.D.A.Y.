@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Textarea } from "@/components/ui/textarea";
-import { apiPostJson, ApiError } from "@/lib/api-client";
+import { apiPostJson, errorMessage } from "@/lib/api-client";
 import type { ApiAgent } from "@/types/api";
 
 /**
@@ -39,9 +39,7 @@ export function AgentGoalForm({
       setGoal("");
     } catch (err) {
       setError(
-        err instanceof ApiError
-          ? (err.body.detail ?? "Ajan başlatılamadı.")
-          : "Bir şeyler ters gitti. Lütfen tekrar deneyin.",
+        errorMessage(err, "Ajan başlatılamadı."),
       );
     } finally {
       setSubmitting(false);

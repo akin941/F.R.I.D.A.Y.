@@ -19,7 +19,7 @@ import {
   isImplTerminal,
 } from "@/components/harness/labels";
 import { pipelineStepStates, type PipelineStepState } from "@/components/harness/pipeline";
-import { apiGetJson, apiPostJson, ApiError } from "@/lib/api-client";
+import { apiGetJson, apiPostJson, errorMessage } from "@/lib/api-client";
 import { usePolling } from "@/lib/use-polling";
 import { cn } from "@/lib/utils";
 import type {
@@ -211,9 +211,7 @@ export function ImplementationJobDetail({
       await loadJob({ silent: true });
     } catch (err) {
       setCancelError(
-        err instanceof ApiError
-          ? (err.body.detail ?? "İş iptal edilemedi.")
-          : "Bir şeyler ters gitti. Lütfen tekrar deneyin.",
+        errorMessage(err, "İş iptal edilemedi."),
       );
     } finally {
       setCancelling(false);

@@ -5,7 +5,7 @@ import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { AGENT_STEP_KIND_LABELS, AGENT_STEP_STATUS_LABELS } from "@/components/agents/labels";
-import { apiPostJson, ApiError } from "@/lib/api-client";
+import { apiPostJson, errorMessage } from "@/lib/api-client";
 import type { ApiAgentStep } from "@/types/api";
 
 function readResultSummary(step: ApiAgentStep): string | null {
@@ -45,9 +45,7 @@ export function AgentStepRow({
       onResolved();
     } catch (err) {
       setError(
-        err instanceof ApiError
-          ? (err.body.detail ?? "Görev oluşturulamadı.")
-          : "Bir şeyler ters gitti. Lütfen tekrar deneyin.",
+        errorMessage(err, "Görev oluşturulamadı."),
       );
       setBusy(false);
     }
@@ -61,9 +59,7 @@ export function AgentStepRow({
       onResolved();
     } catch (err) {
       setError(
-        err instanceof ApiError
-          ? (err.body.detail ?? "Adım atılamadı.")
-          : "Bir şeyler ters gitti. Lütfen tekrar deneyin.",
+        errorMessage(err, "Adım atılamadı."),
       );
       setBusy(false);
     }

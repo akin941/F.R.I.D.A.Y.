@@ -18,7 +18,7 @@ import {
   harnessFailureReasonLabel,
 } from "@/components/harness/labels";
 import { TechnicalDetail } from "@/components/harness/TechnicalDetail";
-import { apiPostJson, ApiError } from "@/lib/api-client";
+import { apiPostJson, errorMessage } from "@/lib/api-client";
 import { cn } from "@/lib/utils";
 import type {
   ApiApprovalRequest,
@@ -266,9 +266,7 @@ export function ApprovalCard({
       onChanged(updated);
     } catch (err) {
       setError(
-        err instanceof ApiError
-          ? (err.body.detail ?? "İşlem tamamlanamadı.")
-          : "Bir şeyler ters gitti. Lütfen tekrar deneyin.",
+        errorMessage(err, "İşlem tamamlanamadı."),
       );
     } finally {
       setBusy(false);

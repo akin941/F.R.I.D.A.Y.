@@ -6,7 +6,7 @@ import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/componen
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { TASK_PRIORITY_LABELS, TASK_STATUS_LABELS } from "@/components/tasks/labels";
 import { TaskFields, type TaskFieldsValue } from "@/components/tasks/TaskFields";
-import { apiDelete, apiPatchJson, apiPostJson, ApiError } from "@/lib/api-client";
+import { apiDelete, apiPatchJson, apiPostJson, errorMessage } from "@/lib/api-client";
 import type { ApiTask } from "@/types/api";
 
 function toFieldsValue(task: ApiTask): TaskFieldsValue {
@@ -39,9 +39,7 @@ export function TaskCard({
       return await action();
     } catch (err) {
       setError(
-        err instanceof ApiError
-          ? (err.body.detail ?? "İşlem tamamlanamadı.")
-          : "Bir şeyler ters gitti. Lütfen tekrar deneyin.",
+        errorMessage(err, "İşlem tamamlanamadı."),
       );
       return undefined;
     } finally {

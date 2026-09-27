@@ -12,7 +12,7 @@ import {
   HARNESS_JOB_STATUS_LABELS,
   harnessFailureReasonLabel,
 } from "@/components/harness/labels";
-import { apiGetJson, apiPostJson, ApiError } from "@/lib/api-client";
+import { apiGetJson, apiPostJson, errorMessage } from "@/lib/api-client";
 import type { ApiHarnessJobDetail } from "@/types/api";
 import { VIEW_SCROLL_ROOT } from "@/components/shell/view-scroll";
 import { cn } from "@/lib/utils";
@@ -87,9 +87,7 @@ export function HarnessJobDetail({
       await loadJob({ silent: true });
     } catch (err) {
       setCancelError(
-        err instanceof ApiError
-          ? (err.body.detail ?? "İş iptal edilemedi.")
-          : "Bir şeyler ters gitti. Lütfen tekrar deneyin.",
+        errorMessage(err, "İş iptal edilemedi."),
       );
     } finally {
       setCancelling(false);

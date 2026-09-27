@@ -12,7 +12,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { apiGetJson, apiPostJson, apiDelete, ApiError } from "@/lib/api-client";
+import { apiGetJson, apiPostJson, apiDelete, errorMessage } from "@/lib/api-client";
 import { useWorkspace } from "@/contexts/workspace-context";
 import type { ApiTelegramLinkCode, ApiTelegramLinkStatus } from "@/types/api";
 
@@ -104,9 +104,7 @@ export function TelegramLinkPanel() {
     } catch (err) {
       if (workspaceIdRef.current !== requestedWorkspaceId) return;
       setRequestError(
-        err instanceof ApiError
-          ? (err.body.detail ?? "Kod oluşturulamadı.")
-          : "Bir şeyler ters gitti. Lütfen tekrar deneyin.",
+        errorMessage(err, "Kod oluşturulamadı."),
       );
     } finally {
       // Unconditional, unlike the two branches above -- `requesting` is a
@@ -135,9 +133,7 @@ export function TelegramLinkPanel() {
     } catch (err) {
       if (workspaceIdRef.current !== requestedWorkspaceId) return;
       setUnlinkError(
-        err instanceof ApiError
-          ? (err.body.detail ?? "Sohbet bağlantısı kaldırılamadı.")
-          : "Bir şeyler ters gitti. Lütfen tekrar deneyin.",
+        errorMessage(err, "Sohbet bağlantısı kaldırılamadı."),
       );
     } finally {
       setUnlinking(false);

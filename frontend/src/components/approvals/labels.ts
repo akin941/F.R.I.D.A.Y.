@@ -1,25 +1,18 @@
 import { implPollInterval } from "@/components/harness/labels";
-import { POLL_FAST_MS } from "@/lib/use-polling";
+import { tr } from "@/lib/i18n/tr";
+import { POLL_FAST_MS } from "@/lib/query/polling";
 import type { ApiApprovalRequest, ApprovalStatus } from "@/types/api";
 
-export const APPROVAL_STATUS_LABELS: Record<ApprovalStatus, string> = {
-  pending: "Beklemede",
-  approved: "Onaylandı",
-  rejected: "Reddedildi",
-  expired: "Süresi doldu",
-};
+// Strings live in the Turkish catalog (lib/i18n/tr.ts); re-exported here
+// under their established names next to the approval logic.
+export const APPROVAL_STATUS_LABELS: Record<ApprovalStatus, string> = tr.status.approval;
 
 export const APPROVAL_STATUSES: ApprovalStatus[] = ["pending", "approved", "rejected", "expired"];
 
 // vault_export's (and any generic tool's) execution statuses. Harness tools
 // report the implementation job's own status instead -- see
 // IMPL_STATUS_LABELS in components/harness/labels.ts.
-export const EXECUTION_STATUS_LABELS: Record<string, string> = {
-  pending: "Çalışması bekleniyor",
-  running: "Çalışıyor",
-  succeeded: "Başarılı",
-  failed: "Başarısız",
-};
+export const EXECUTION_STATUS_LABELS: Record<string, string> = tr.status.execution;
 
 export const HARNESS_TOOL_NAMES = ["harness_implement", "harness_push"] as const;
 
@@ -28,27 +21,16 @@ export function isHarnessTool(toolName: string): boolean {
 }
 
 // Human title per tool; a tool without one keeps its raw `tool_name` title.
-export const TOOL_TITLES: Record<string, string> = {
-  harness_implement: "Uygulama planı onayı (Kapı A)",
-  harness_push: "Gönderim onayı (Kapı B)",
-};
+export const TOOL_TITLES: Record<string, string> = tr.approvals.toolTitles;
 
 // What deciding means, shown in the confirmation step before the
 // decision is sent.
 export function decisionConsequence(toolName: string, action: "approve" | "reject"): string {
-  if (toolName === "harness_implement") {
-    return action === "approve"
-      ? "Onaylarsan ajan bu plana göre ayrı bir çalışma ağacında değişiklik yapmaya başlar. Dal, ayrı bir gönderim onayı (Kapı B) olmadan uzak depoya gönderilmez."
-      : "Reddedersen uygulama işi başarısız olarak kapanır; depoda hiçbir değişiklik yapılmaz.";
+  const consequences = tr.approvals.consequence;
+  if (toolName === "harness_implement" || toolName === "harness_push") {
+    return consequences[toolName][action];
   }
-  if (toolName === "harness_push") {
-    return action === "approve"
-      ? "Onaylarsan bu dal uzak depoya gönderilir (push). Gönderim geri alınamaz."
-      : "Reddedersen değişiklikler gönderilmez ve uygulama işi başarısız olarak kapanır.";
-  }
-  return action === "approve"
-    ? "Onaylarsan bu istek çalıştırılır."
-    : "Reddedersen bu istek çalıştırılmaz.";
+  return consequences.generic[action];
 }
 
 /**

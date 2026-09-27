@@ -158,6 +158,10 @@ export interface ApiMemoryExport {
 
 export interface ApiErrorBody {
   detail?: string;
+  // Stable machine-readable error code (backend core/error_codes.py);
+  // resolved to Turkish by lib/i18n/error-codes.ts. A validation error on
+  // a field literally named `code` makes this a list -- treated as absent.
+  code?: unknown;
   [field: string]: unknown;
 }
 

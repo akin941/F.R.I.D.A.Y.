@@ -262,7 +262,10 @@ describe("MemoryView", () => {
       "fetch",
       vi.fn(async (input: string, init?: RequestInit) => {
         if (init?.method === "POST" && input === "/api/approvals/requests") {
-          return jsonResponse({ detail: "OBSIDIAN_VAULT_PATH is not configured." }, 400);
+          return jsonResponse(
+            { detail: "OBSIDIAN_VAULT_PATH is not configured.", code: "approval.invalid_transition" },
+            400,
+          );
         }
         return jsonResponse([]);
       }),
@@ -272,7 +275,10 @@ describe("MemoryView", () => {
     await screen.findByText("İncelemeyi bekleyen bir şey yok.");
     await userEvent.click(screen.getByRole("button", { name: "Obsidian vault'a aktar" }));
 
-    expect(await screen.findByText("OBSIDIAN_VAULT_PATH is not configured.")).toBeInTheDocument();
+    expect(
+      await screen.findByText("Bu onay isteği artık bu işleme uygun değil."),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("OBSIDIAN_VAULT_PATH is not configured.")).not.toBeInTheDocument();
   });
 
   it("disables the vault export button while a request is in flight, to avoid duplicate submissions", async () => {

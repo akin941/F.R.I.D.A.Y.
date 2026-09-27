@@ -13,7 +13,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { apiPostJson, ApiError } from "@/lib/api-client";
+import { apiPostJson, errorMessage } from "@/lib/api-client";
 import { useWorkspace } from "@/contexts/workspace-context";
 import type { ApiPersonalAccessTokenCreated } from "@/types/api";
 
@@ -62,9 +62,7 @@ export function CreateTokenForm({
       setName("");
     } catch (err) {
       setError(
-        err instanceof ApiError
-          ? (err.body.detail ?? "Token oluşturulamadı.")
-          : "Bir şeyler ters gitti. Lütfen tekrar deneyin.",
+        errorMessage(err, "Token oluşturulamadı."),
       );
     } finally {
       setSubmitting(false);

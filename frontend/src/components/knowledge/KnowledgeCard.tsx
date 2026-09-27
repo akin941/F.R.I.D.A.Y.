@@ -9,7 +9,7 @@ import {
   KNOWLEDGE_SOURCE_TYPE_LABELS,
   KNOWLEDGE_STATUS_LABELS,
 } from "@/components/knowledge/labels";
-import { apiDelete, ApiError } from "@/lib/api-client";
+import { apiDelete, errorMessage } from "@/lib/api-client";
 import type { ApiKnowledgeDocument } from "@/types/api";
 
 export function KnowledgeCard({
@@ -30,9 +30,7 @@ export function KnowledgeCard({
       onDeleted(document.id);
     } catch (err) {
       setError(
-        err instanceof ApiError
-          ? (err.body.detail ?? "Belge silinemedi.")
-          : "Bir şeyler ters gitti. Lütfen tekrar deneyin.",
+        errorMessage(err, "Belge silinemedi."),
       );
       setBusy(false);
     }

@@ -710,9 +710,13 @@ describe("ChatView", () => {
         }
         if (input === "/api/approvals/requests" && init?.method === "POST") {
           createCalls += 1;
-          return new Response(JSON.stringify({ detail: "Role does not allow this action." }), {
-            status: 403,
-          });
+          return new Response(
+            JSON.stringify({
+              detail: "Role does not allow requesting a gated action.",
+              code: "approval.permission_denied",
+            }),
+            { status: 403 },
+          );
         }
         throw new Error(`unexpected fetch ${input}`);
       }),
@@ -725,7 +729,11 @@ describe("ChatView", () => {
     expect(await screen.findByText("Bu bir araç isteği gibi görünüyor")).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "İsteği onayla" }));
 
-    expect(await screen.findByText("Role does not allow this action.")).toBeInTheDocument();
+    // The Turkish catalog message for the code -- never the English detail.
+    expect(
+      await screen.findByText("Rolün bu onay isteğine karar vermeye yetmiyor."),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/Role does not allow/)).not.toBeInTheDocument();
     await waitFor(() => expect(createCalls).toBe(1));
     // The card must still be here (not silently dismissed) so the user can
     // discard or retry.

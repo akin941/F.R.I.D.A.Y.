@@ -260,7 +260,10 @@ describe("ImplementationJobDetail", () => {
       "fetch",
       vi.fn(async (_input: string, init?: RequestInit) =>
         init?.method === "POST"
-          ? jsonResponse({ detail: "Job already finished." }, 400)
+          ? jsonResponse(
+              { detail: "Job already finished.", code: "harness.invalid_transition" },
+              400,
+            )
           : jsonResponse(implDetail()),
       ),
     );
@@ -269,7 +272,10 @@ describe("ImplementationJobDetail", () => {
     await userEvent.click(await screen.findByRole("button", { name: "İşi iptal et" }));
     await userEvent.click(screen.getByRole("button", { name: "Evet, iptal et" }));
 
-    expect(await screen.findByText("Job already finished.")).toBeInTheDocument();
+    expect(
+      await screen.findByText("Bu harness işi, deposu ya da ajanı artık bu işleme uygun değil."),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("Job already finished.")).not.toBeInTheDocument();
   });
 
   it("never offers cancel for a terminal job", async () => {

@@ -8,7 +8,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { HarnessRepoPicker } from "@/components/harness/HarnessRepoPicker";
 import { HARNESS_GOAL_MAX_LENGTH } from "@/components/harness/HarnessJobGoalForm";
-import { apiPostJson, ApiError } from "@/lib/api-client";
+import { apiPostJson, errorMessage } from "@/lib/api-client";
 import type { ApiImplementationJob } from "@/types/api";
 
 export interface ImplementationPrefill {
@@ -57,9 +57,7 @@ export function ImplementationJobForm({
       onCreated(job);
     } catch (err) {
       setError(
-        err instanceof ApiError
-          ? (err.body.detail ?? "Uygulama işi oluşturulamadı.")
-          : "Bir şeyler ters gitti. Lütfen tekrar deneyin.",
+        errorMessage(err, "Uygulama işi oluşturulamadı."),
       );
     } finally {
       setSubmitting(false);
