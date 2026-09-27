@@ -6,11 +6,21 @@ dynamic registry, a DB-backed `ToolDefinition` model would be exactly the
 kind of speculative generality CLAUDE.md's simplicity rule warns against.
 Extract one once a second tool, or agent-driven tool selection, actually
 needs it (MVP 7).
+
+Two registries live here (Phase 5 branch 1, ADR-010):
+
+- `ToolSpec` -- gated writes, decided through `approvals` (ADR-004).
+- `ReadToolSpec` -- ungated, audited connector reads the chat router may
+  pick (brief D4). `connectors` registers them; `assistant` discovers them
+  only through `list_read_tools()`, so it never imports `connectors`
+  (import-linter contract). A name belongs to exactly one registry.
 """
 
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
+
+from core.channels import CHANNEL_CLI, CHANNEL_WEB
 
 
 class ToolValidationError(Exception):
@@ -86,6 +96,13 @@ class ToolSpec:
     -- built only from the request's own snapshotted payload and immutable
     snapshots, never the raw `payload` itself (which the serializer still
     never exposes). Optional.
+
+    `records_work_log` (Phase 5 branch 1, brief D13): whether a terminal
+    execution of this tool leaves a Jarvis-authored `work_log` memory
+    (`tools.work_log.record_tool_outcome`, ADR-008 decision 4). Default
+    True; a tool whose outcomes are audit-worthy but not memory-worthy
+    (e.g. a Home Assistant light toggle, VISION R5) sets False. Audit rows
+    are unaffected either way.
     """
 
     name: str
@@ -97,12 +114,15 @@ class ToolSpec:
     user_invocable: bool = True
     describe_request: Callable[[Any], dict | None] | None = None
     proposable: bool = True
+    records_work_log: bool = True
 
 
 _REGISTRY: dict[str, ToolSpec] = {}
 
 
 def register_tool(spec: ToolSpec) -> None:
+    if spec.name in _READ_REGISTRY:
+        raise ValueError(f"{spec.name!r} is already registered as a read tool.")
     _REGISTRY[spec.name] = spec
 
 
@@ -129,3 +149,107 @@ def list_tool_names() -> list[str]:
     return sorted(
         name for name, spec in _REGISTRY.items() if spec.user_invocable and spec.proposable
     )
+
+
+# --- Read tools (Phase 5 branch 1, ADR-010, brief D4) ---
+
+DATA_CLASS_FIRM = "firm"
+DATA_CLASS_PERSONAL = "personal"
+DATA_CLASSES = frozenset({DATA_CLASS_FIRM, DATA_CLASS_PERSONAL})
+
+# Channels a read may ever run over (brief Q8): `firm` reads web + CLI,
+# `personal` reads web only; Telegram and the OpenAI-compatible facade never.
+# Checked at registration, so a manifest cannot widen it -- only a change
+# here (and to ADR-010) can.
+READ_CHANNELS = {
+    DATA_CLASS_FIRM: frozenset({CHANNEL_WEB, CHANNEL_CLI}),
+    DATA_CLASS_PERSONAL: frozenset({CHANNEL_WEB}),
+}
+
+
+@dataclass(frozen=True)
+class ReadResult:
+    """What a read hands back to the caller: text and, optionally, the
+    server's `structuredContent`. Everything else an MCP result may carry
+    (images, resources, links) is dropped before this object exists. Still
+    low-trust data: the caller bounds, strips and fences it (brief D4)
+    before it gets anywhere near a prompt."""
+
+    text: str
+    structured: Any = None
+
+
+@dataclass(frozen=True)
+class ReadToolSpec:
+    """An ungated connector read the chat router may pick (brief D4).
+
+    - `name`/`description`: Jarvis-authored, never the server's own text
+      (server descriptions never reach an LLM prompt, brief D3).
+    - `argument_serializer`: a strict DRF serializer class validating the
+      router-extracted arguments; invalid -> a plain refusal, no read.
+    - `data_class`: `firm` or `personal`; a `personal` read marks the
+      conversation private and routes to personal-data providers only
+      (brief D5).
+    - `channels`: the request channels the read may run over, a subset of
+      `READ_CHANNELS[data_class]`.
+    - `execute(*, workspace, actor, args, channel) -> ReadResult`: performs
+      the read; the caller audits it.
+    - `is_available(workspace) -> bool`: whether the workspace has an
+      enabled binding for the read's connector. A callback rather than a
+      query here because `tools` must never import `connectors`
+      (ADR-010). Required: no read is available by default.
+    """
+
+    name: str
+    description: str
+    argument_serializer: Any
+    data_class: str
+    channels: frozenset
+    execute: Callable[..., ReadResult]
+    is_available: Callable[[Any], bool]
+
+
+_READ_REGISTRY: dict[str, ReadToolSpec] = {}
+
+
+def register_read_tool(spec: ReadToolSpec) -> None:
+    """Validates the spec's data class and channels and registers it.
+    Raises `ValueError` -- a boot-time programming error, never a runtime
+    refusal -- for an unknown data class, an empty channel set, a channel
+    outside `READ_CHANNELS[data_class]`, or a name already used by a
+    gated tool."""
+    if spec.data_class not in DATA_CLASSES:
+        raise ValueError(f"{spec.name!r}: unknown data class {spec.data_class!r}.")
+    channels = frozenset(spec.channels)
+    if not channels:
+        raise ValueError(f"{spec.name!r}: a read tool needs at least one channel.")
+    widened = channels - READ_CHANNELS[spec.data_class]
+    if widened:
+        raise ValueError(
+            f"{spec.name!r}: channels {sorted(widened)} are not allowed for "
+            f"{spec.data_class!r} reads."
+        )
+    if spec.name in _REGISTRY:
+        raise ValueError(f"{spec.name!r} is already registered as a gated tool.")
+    _READ_REGISTRY[spec.name] = spec
+
+
+def unregister_read_tool(name: str) -> None:
+    """Test-only, like `unregister_tool`."""
+    _READ_REGISTRY.pop(name, None)
+
+
+def get_read_tool(name: str) -> ReadToolSpec | None:
+    return _READ_REGISTRY.get(name)
+
+
+def list_read_tools(*, workspace, channel) -> list[ReadToolSpec]:
+    """The read tools the router may offer for one turn: those allowed over
+    `channel` whose connector has an enabled binding in `workspace`. Both
+    arguments are required -- there is no "any channel" or "any workspace"
+    listing. Sorted by name for a deterministic prompt/test ordering."""
+    return [
+        spec
+        for name, spec in sorted(_READ_REGISTRY.items())
+        if channel in spec.channels and spec.is_available(workspace)
+    ]

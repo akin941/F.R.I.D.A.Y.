@@ -51,3 +51,52 @@ class TestListToolNames:
 
     def test_unregistered_name_is_absent(self):
         assert "definitely_not_registered" not in list_tool_names()
+
+    def test_system_only_and_human_only_tools_are_never_listed(self):
+        """The router/planner vocabulary excludes `user_invocable=False`
+        (system-only gates, minted only with `system_created=True`) and
+        `proposable=False` (human-only, e.g. `purge_trash`)."""
+        register_tool(
+            ToolSpec(
+                name="system_only_stub",
+                gated=True,
+                create_execution=lambda approval_request: None,
+                dispatch=lambda execution_id: None,
+                user_invocable=False,
+            )
+        )
+        register_tool(
+            ToolSpec(
+                name="human_only_stub",
+                gated=True,
+                create_execution=lambda approval_request: None,
+                dispatch=lambda execution_id: None,
+                proposable=False,
+            )
+        )
+        try:
+            names = list_tool_names()
+            assert "system_only_stub" not in names
+            assert "human_only_stub" not in names
+        finally:
+            unregister_tool("system_only_stub")
+            unregister_tool("human_only_stub")
+
+
+class TestRecordsWorkLog:
+    def test_defaults_to_true(self):
+        assert _spec().records_work_log is True
+
+    def test_can_be_turned_off(self):
+        spec = ToolSpec(
+            name="quiet_tool",
+            gated=True,
+            create_execution=lambda approval_request: None,
+            dispatch=lambda execution_id: None,
+            records_work_log=False,
+        )
+        assert spec.records_work_log is False
+
+    def test_registered_gates_keep_the_default(self):
+        for name in ("vault_export", "purge_trash", "harness_implement", "harness_push"):
+            assert get_tool(name).records_work_log is True
