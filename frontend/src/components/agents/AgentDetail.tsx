@@ -1,10 +1,9 @@
 "use client";
 
-import { useState } from "react";
 import Link from "next/link";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
-import { Alert, AlertDescription } from "@/components/ui/alert";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { ErrorState } from "@/components/ui/error-state";
 import { Skeleton } from "@/components/ui/skeleton";
 import { StatusPill } from "@/components/ui/status-pill";
@@ -15,7 +14,7 @@ import {
   agentFailureReasonLabel,
 } from "@/components/agents/labels";
 import { useWorkspace } from "@/contexts/workspace-context";
-import { apiGetJson, apiPostJson, errorMessage } from "@/lib/api-client";
+import { apiGetJson, apiPostJson } from "@/lib/api-client";
 import { tr } from "@/lib/i18n/tr";
 import { queryKeys } from "@/lib/query/keys";
 import { POLL_FAST_MS, pollWhile } from "@/lib/query/polling";
@@ -44,8 +43,6 @@ export function AgentDetail({ agentId }: { agentId: string }) {
 
 function AgentDetailBody({ workspaceId, agentId }: { workspaceId: string; agentId: string }) {
   const queryClient = useQueryClient();
-  const [cancelling, setCancelling] = useState(false);
-  const [cancelError, setCancelError] = useState<string | null>(null);
 
   const detailKey = queryKeys.agent(workspaceId, agentId);
   const query = useQuery({
@@ -63,17 +60,10 @@ function AgentDetailBody({ workspaceId, agentId }: { workspaceId: string; agentI
     void queryClient.invalidateQueries({ queryKey: queryKeys.agents(workspaceId), exact: true });
   }
 
+  // Runs only from the confirmation dialog, which reports a failure.
   async function handleCancel() {
-    setCancelling(true);
-    setCancelError(null);
-    try {
-      await apiPostJson(`/api/agents/${agentId}/cancel`);
-      refresh();
-    } catch (err) {
-      setCancelError(errorMessage(err, "Ajan iptal edilemedi."));
-    } finally {
-      setCancelling(false);
-    }
+    await apiPostJson(`/api/agents/${agentId}/cancel`);
+    refresh();
   }
 
   const canCancel =
@@ -122,17 +112,17 @@ function AgentDetailBody({ workspaceId, agentId }: { workspaceId: string; agentI
               ) : null}
             </div>
             {canCancel ? (
-              <Button variant="outline" onClick={() => void handleCancel()} disabled={cancelling}>
-                {cancelling ? "İptal ediliyor…" : "Ajanı iptal et"}
-              </Button>
+              <ConfirmDialog
+                trigger={<Button variant="outline">Ajanı iptal et</Button>}
+                title={tr.confirm.agent.title}
+                description={tr.confirm.agent.description(agent.goal)}
+                confirmLabel={tr.confirm.agent.confirm}
+                busyLabel={tr.confirm.agent.busy}
+                errorFallback={tr.confirm.agent.failed}
+                onConfirm={handleCancel}
+              />
             ) : null}
           </div>
-
-          {cancelError ? (
-            <Alert variant="destructive" role="alert">
-              <AlertDescription>{cancelError}</AlertDescription>
-            </Alert>
-          ) : null}
 
           <ul className="flex flex-col gap-2">
             {agent.steps.map((step) => (

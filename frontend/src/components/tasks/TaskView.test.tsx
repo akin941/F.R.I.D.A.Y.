@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { TaskView } from "@/components/tasks/TaskView";
+import { calledWith, cancelDialog, confirmInDialog, findConfirmDialog } from "@/test/confirm";
 import type { ApiTask } from "@/types/api";
 
 const { workspaceHolder } = vi.hoisted(() => ({
@@ -165,21 +166,29 @@ describe("TaskView", () => {
     expect(await screen.findByText("Buy oat milk")).toBeInTheDocument();
   });
 
-  it("deletes a task", async () => {
+  it("moves a task to the trash only after confirmation, naming it and the retention", async () => {
     const row = task();
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async (input: string, init?: RequestInit) => {
-        if (init?.method === "DELETE") {
-          return new Response(null, { status: 204 });
-        }
-        return jsonResponse([row]);
-      }),
-    );
+    const fetchMock = vi.fn(async (input: string, init?: RequestInit) => {
+      if (init?.method === "DELETE") {
+        return new Response(null, { status: 204 });
+      }
+      return jsonResponse([row]);
+    });
+    vi.stubGlobal("fetch", fetchMock);
 
     render(<TaskView />);
     await screen.findByText("Buy milk");
     await userEvent.click(screen.getByRole("button", { name: "Sil" }));
+    const dialog = await findConfirmDialog();
+    expect(dialog).toHaveTextContent("“Buy milk” çöp kutusuna taşınır");
+    expect(dialog).toHaveTextContent("30 gün içinde");
+    await cancelDialog();
+    expect(calledWith(fetchMock, "DELETE", `/api/tasks/${row.id}`)).toBe(false);
+    expect(screen.getByText("Buy milk")).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "Sil" }));
+    await confirmInDialog("Çöp kutusuna taşı");
+    expect(calledWith(fetchMock, "DELETE", `/api/tasks/${row.id}`)).toBe(true);
 
     await waitFor(() => {
       expect(screen.queryByText("Buy milk")).not.toBeInTheDocument();

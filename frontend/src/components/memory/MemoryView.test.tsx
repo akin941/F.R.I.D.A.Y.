@@ -3,6 +3,7 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryView } from "@/components/memory/MemoryView";
 import type { ApiMemory } from "@/types/api";
+import { calledWith, cancelDialog, confirmInDialog, findConfirmDialog } from "@/test/confirm";
 
 const { workspaceHolder } = vi.hoisted(() => ({
   workspaceHolder: { current: { id: "w1", name: "Alice", type: "personal", role: "owner" } } as {
@@ -89,21 +90,25 @@ describe("MemoryView", () => {
     expect(options.method).toBe("POST");
   });
 
-  it("rejects a pending memory", async () => {
+  it("rejects a pending memory only after confirmation", async () => {
     const pending = memory({ id: "p1", status: "pending_approval", source: "ai_suggested" });
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async (input: string) => {
-        if (input.includes("/reject")) {
-          return jsonResponse({ ...pending, status: "rejected" });
-        }
-        return jsonResponse([pending]);
-      }),
-    );
+    const fetchMock = vi.fn(async (input: string) => {
+      if (input.includes("/reject")) {
+        return jsonResponse({ ...pending, status: "rejected" });
+      }
+      return jsonResponse([pending]);
+    });
+    vi.stubGlobal("fetch", fetchMock);
 
     render(<MemoryView />);
     await screen.findByText("Coffee");
     await userEvent.click(screen.getByRole("button", { name: "Reddet" }));
+    expect(await findConfirmDialog()).toHaveTextContent("“Coffee” hafızaya eklenmez");
+    await cancelDialog();
+    expect(calledWith(fetchMock, "POST", "/api/memories/p1/reject")).toBe(false);
+
+    await userEvent.click(screen.getByRole("button", { name: "Reddet" }));
+    await confirmInDialog("Evet, reddet");
 
     await waitFor(() => {
       expect(screen.getByText("İncelemeyi bekleyen bir şey yok.")).toBeInTheDocument();
@@ -157,21 +162,22 @@ describe("MemoryView", () => {
     expect(await screen.findByText("Coffee (edited)")).toBeInTheDocument();
   });
 
-  it("forgets an approved memory", async () => {
+  it("forgets an approved memory only after confirmation", async () => {
     const approved = memory();
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async (input: string) => {
-        if (input.includes("/forget")) {
-          return jsonResponse({ ...approved, status: "archived" });
-        }
-        return jsonResponse([approved]);
-      }),
-    );
+    const fetchMock = vi.fn(async (input: string) => {
+      if (input.includes("/forget")) {
+        return jsonResponse({ ...approved, status: "archived" });
+      }
+      return jsonResponse([approved]);
+    });
+    vi.stubGlobal("fetch", fetchMock);
 
     render(<MemoryView />);
     await screen.findByText("Coffee");
     await userEvent.click(screen.getByRole("button", { name: "Unut" }));
+    expect(await findConfirmDialog()).toHaveTextContent("“Coffee” arşivlenir");
+    expect(calledWith(fetchMock, "POST", `/api/memories/${approved.id}/forget`)).toBe(false);
+    await confirmInDialog("Evet, unut");
 
     await waitFor(() => {
       expect(screen.getByRole("button", { name: "Geri yükle" })).toBeInTheDocument();
@@ -199,21 +205,22 @@ describe("MemoryView", () => {
     });
   });
 
-  it("hard-deletes a rejected memory", async () => {
+  it("hard-deletes a rejected memory only after confirmation", async () => {
     const rejected = memory({ status: "rejected" });
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async (input: string, init?: RequestInit) => {
-        if (init?.method === "DELETE") {
-          return new Response(null, { status: 204 });
-        }
-        return jsonResponse([rejected]);
-      }),
-    );
+    const fetchMock = vi.fn(async (input: string, init?: RequestInit) => {
+      if (init?.method === "DELETE") {
+        return new Response(null, { status: 204 });
+      }
+      return jsonResponse([rejected]);
+    });
+    vi.stubGlobal("fetch", fetchMock);
 
     render(<MemoryView />);
     await screen.findByText("Coffee");
     await userEvent.click(screen.getByRole("button", { name: "Sil" }));
+    expect(await findConfirmDialog()).toHaveTextContent("geri alınamaz");
+    expect(calledWith(fetchMock, "DELETE", `/api/memories/${rejected.id}`)).toBe(false);
+    await confirmInDialog("Evet, kalıcı olarak sil");
 
     await waitFor(() => {
       expect(screen.queryByText("Coffee")).not.toBeInTheDocument();

@@ -295,6 +295,118 @@ export const tr = {
       openApprovals: "Onaylara git",
     },
   },
+  // Confirmation dialogs in front of every destructive action (Phase 4
+  // branch 5). Each names the object and states the consequence.
+  confirm: {
+    memory: {
+      rejectTitle: "Bu hafıza önerisi reddedilsin mi?",
+      reject: (title: string) =>
+        `“${title}” hafızaya eklenmez. Reddedilen öneri listede kalır; istersen sonra kalıcı olarak silebilirsin.`,
+      rejectConfirm: "Evet, reddet",
+      rejecting: "Reddediliyor…",
+      forgetTitle: "Bu hafıza kaydı unutulsun mu?",
+      forget: (title: string) =>
+        `“${title}” arşivlenir ve Jarvis onu artık kullanmaz. Arşivden istediğin zaman geri yükleyebilirsin.`,
+      forgetConfirm: "Evet, unut",
+      forgetting: "Unutuluyor…",
+      deleteTitle: "Reddedilen öneri kalıcı olarak silinsin mi?",
+      delete: (title: string) =>
+        `“${title}” kalıcı olarak silinir. Hiç onaylanmamış bir öneri olduğu için çöp kutusuna gitmez; bu işlem geri alınamaz.`,
+      deleteConfirm: "Evet, kalıcı olarak sil",
+      failed: "İşlem tamamlanamadı.",
+    },
+    trash: {
+      deleting: "Taşınıyor…",
+      confirm: "Çöp kutusuna taşı",
+      taskTitle: "Bu görev çöp kutusuna taşınsın mı?",
+      documentTitle: "Bu belge çöp kutusuna taşınsın mı?",
+      task: (title: string, days: number) =>
+        `“${title}” çöp kutusuna taşınır. ${days} gün içinde Çöp kutusu sayfasından geri yükleyebilirsin; bu sürenin sonunda kalıcı olarak silinir.`,
+      document: (title: string, days: number) =>
+        `“${title}” çöp kutusuna taşınır ve aramalarda artık kullanılmaz. ${days} gün içinde Çöp kutusu sayfasından geri yükleyebilirsin; bu sürenin sonunda kalıcı olarak silinir.`,
+      taskFailed: "Görev silinemedi.",
+      documentFailed: "Belge silinemedi.",
+    },
+    token: {
+      title: "Bu token iptal edilsin mi?",
+      description: (name: string) =>
+        `“${name}” ile yapılan istekler hemen reddedilir. İptal geri alınamaz; gerekirse yeni bir token oluşturursun.`,
+      confirm: "Evet, iptal et",
+      busy: "İptal ediliyor…",
+      failed: "Token iptal edilemedi.",
+    },
+    telegram: {
+      title: "Telegram bağlantısı kaldırılsın mı?",
+      description:
+        "Bu çalışma alanına bağlı Telegram sohbeti artık Jarvis'e mesaj iletemez. Yeniden bağlamak için yeni bir bağlantı kodu gerekir.",
+      confirm: "Evet, kaldır",
+      busy: "Kaldırılıyor…",
+      failed: "Sohbet bağlantısı kaldırılamadı.",
+    },
+    device: {
+      revokeTitle: "Bu cihaz iptal edilsin mi?",
+      revoke: (name: string) =>
+        `“${name}” oturumunu hemen kaybeder. Yeniden kullanmak için yeniden eşleştirilmesi gerekir; bu işlem geri alınamaz.`,
+      revokeConfirm: "Evet, iptal et",
+      revoking: "İptal ediliyor…",
+      revokeFailed: "Cihaz iptal edilemedi.",
+      forgetTitle: "Bu cihaz unutulsun mu?",
+      forget:
+        "Bu tarayıcı artık güvenilen bir cihaz olmaz ve oturumun kapanır. Tekrar kullanmak için yeni bir eşleştirme kodu gerekir.",
+      forgetConfirm: "Evet, unut",
+      forgetting: "Unutuluyor…",
+      forgetFailed: "Bu cihaz unutulamadı.",
+    },
+    remoteKey: {
+      createTitle: "Uzaktan erişim anahtarı oluşturulsun mu?",
+      create:
+        "Anahtarı bilen biri herhangi bir ağdan yeni cihaz eşleştirebilir. Anahtar bir kez gösterilir; her kullanımı tüm cihazlarda bildirilir.",
+      createConfirm: "Evet, oluştur",
+      rotateTitle: "Uzaktan erişim anahtarı yenilensin mi?",
+      rotate:
+        "Mevcut anahtar hemen geçersiz olur ve yerine yenisi oluşturulur. Eski anahtarla artık cihaz eşleştirilemez.",
+      rotateConfirm: "Evet, yenile",
+      revokeTitle: "Uzaktan erişim anahtarı kapatılsın mı?",
+      revoke:
+        "Anahtar hemen geçersiz olur; yerel ağ dışından yalnızca güçlü kodla cihaz eşleştirilebilir.",
+      revokeConfirm: "Evet, kapat",
+      busy: "İşleniyor…",
+      createFailed: "Uzaktan erişim anahtarı oluşturulamadı.",
+      revokeFailed: "Uzaktan erişim anahtarı kapatılamadı.",
+    },
+    agent: {
+      title: "Bu ajan iptal edilsin mi?",
+      description: (goal: string) =>
+        `“${goal}” durdurulur ve kalan adımları çalıştırılmaz. İptal edilen ajan devam ettirilemez.`,
+      confirm: "Evet, iptal et",
+      busy: "İptal ediliyor…",
+      failed: "Ajan iptal edilemedi.",
+    },
+    harnessJob: {
+      title: "Bu keşif işi iptal edilsin mi?",
+      description: (goal: string) =>
+        `“${goal}” için çalışan inceleme durdurulur ve brifing üretilmez. İptal edilen iş devam ettirilemez.`,
+      confirm: "Evet, iptal et",
+      busy: "İptal ediliyor…",
+      failed: "İş iptal edilemedi.",
+    },
+    implementationJob: {
+      title: "Bu uygulama işi iptal edilsin mi?",
+      description:
+        "Bu uygulama işi iptal edilsin mi? Bekleyen onay istekleri geri alınır ve iş kaldığı yerden devam ettirilemez.",
+      confirm: "Evet, iptal et",
+      busy: "İptal ediliyor…",
+      failed: "İş iptal edilemedi.",
+    },
+    repo: {
+      deleteTitle: "Bu depo kaydı silinsin mi?",
+      delete: (name: string) =>
+        `“${name}” harness kayıtlarından kaldırılır; uzak depoya dokunulmaz. İş geçmişi olan bir depo silinemez — onun yerine devre dışı bırak.`,
+      deleteConfirm: "Evet, sil",
+      deleting: "Siliniyor…",
+      deleteFailed: "Depo silinemedi.",
+    },
+  },
   markdown: {
     imageOmitted: (alt: string) => (alt ? `[görsel gösterilmedi: ${alt}]` : "[görsel gösterilmedi]"),
   },

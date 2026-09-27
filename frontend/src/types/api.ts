@@ -70,6 +70,8 @@ export interface SessionResponse {
   user: ApiUser;
   workspaces: ApiWorkspaceSummary[];
   security_notices?: ApiSecurityNotice[];
+  // ADR-009 retention window (backend TRASH_RETENTION_DAYS).
+  trash_retention_days?: number;
 }
 
 // --- Device trust (Phase 4 branch 2) ---

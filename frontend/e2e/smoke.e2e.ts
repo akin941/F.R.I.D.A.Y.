@@ -614,7 +614,10 @@ test("enroll, chat with the fake provider, curated memory, Today, logout, route 
     timeout: 20_000,
   });
 
+  // Every destructive action sits behind a confirmation dialog (Phase 4
+  // branch 5): the cancel only happens once "Evet, iptal et" is clicked.
   await page.getByRole("button", { name: "Ajanı iptal et" }).click();
+  await page.getByRole("alertdialog").getByRole("button", { name: "Evet, iptal et" }).click();
   await expect(page.getByRole("button", { name: "Ajanı iptal et" })).not.toBeVisible();
   await expect(page.getByText("İptal edildi", { exact: true })).toBeVisible();
 
@@ -839,6 +842,7 @@ test("enroll, chat with the fake provider, curated memory, Today, logout, route 
   // next visit asks for a pairing code again.
   await page.getByRole("link", { name: "Cihazlar" }).click();
   await page.getByRole("button", { name: "Bu cihazı unut" }).click();
+  await page.getByRole("alertdialog").getByRole("button", { name: "Evet, unut" }).click();
   await expect(page).toHaveURL(/\/enroll$/);
   await expect(page.getByLabel("Eşleştirme kodu")).toBeVisible();
 });
