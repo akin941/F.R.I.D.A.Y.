@@ -101,3 +101,33 @@ once decision 3 is implemented and is removed with it. MASTER_PLAN §O
 gains/resolves the matching open-decision entries; §Z gains the local
 wake-word and visual-identity notes. ADR-004/005/007 are amended by this
 ADR where stated, not replaced; every other rule in them stays in force.
+
+## Implementation notes (2026-09-27)
+Dated status notes on how the decisions above landed; they record
+implementation facts and open items, not new decisions.
+
+- **Decision 7 (CLI auth) — finalized in Phase 3 branch 3.** Headless CLI
+  agents authenticate with API keys only: `ANTHROPIC_API_KEY` for Claude
+  Code, `CODEX_API_KEY` for Codex CLI (both in `.env.example`, injected per
+  agent by `backend/harness/execution.py`). The ChatGPT-subscription OAuth
+  ("Sign in with ChatGPT") path is never used. See the Phase 3 brief,
+  "Open question resolved: Codex CLI vendor terms".
+- **Decision 3 (two deploy-automation gates) — made concrete.** Phase 3's
+  implementation pipeline has **Gate A** (plan approval, requested at job
+  creation) and **Gate B** (push approval, after cross-vendor review);
+  the deploy gate proper lands with Phase 5.
+- **Decision 4 (`work_log` producers) — partially implemented.** Today the
+  only producer is harness discovery (`record_work_log()` called from
+  `backend/harness/execution.py` on job success). The remaining producers
+  are scheduled: implementation/push outcomes in the Phase 3 closeout
+  (`feat/p3-implementation-api`); gated-tool executions, task outcomes and
+  deploy outcomes in Phase 5 (MASTER_PLAN §AA outline).
+- **Open item for the Phase 4 brief — decision 3 "delete" vs owner
+  deletes.** The gate-class list names "delete", yet the owner hard-deletes
+  memory, knowledge documents and tasks directly over the web channel
+  (`memory/views.py`, `knowledge/views.py`, `tasks/views.py`) without an
+  `ApprovalRequest`. Whether a direct owner action over the high-trust web
+  channel *is* the explicit decision for self-scoped deletes (recoverable
+  only by backup), or whether these must move behind the gate, is not yet
+  decided. Flagged for the Phase 4 brief; per decision 3, any reclassification
+  requires a new ADR.

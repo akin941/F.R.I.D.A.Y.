@@ -19,6 +19,14 @@ module. Contracts enforced with import-linter (see `backend/pyproject.toml`).
 > split off as an external product in ADR-006. The decision itself (the
 > modular monolith) remains in force; the first concrete module pack is TBD.
 
+> Note (2026-09-27): the kernel app list above is out of date — there never
+> was a `files` app, and it omits `core` and `harness` (the latter added by
+> ADR-008). The actual kernel apps, per `INSTALLED_APPS` in
+> `backend/config/settings/base.py`, are: `core`, `accounts`, `workspaces`,
+> `audit`, `ai_core`, `assistant`, `memory`, `knowledge`, `tasks`,
+> `approvals`, `tools`, `skills`, `agents`, `integrations`, `harness`. No
+> `apps.modules.*` pack exists yet.
+
 ## Consequences
 A module can be extracted into a service later because boundaries stay clean.
 The first extraction candidate, if ever needed, is the AI gateway.

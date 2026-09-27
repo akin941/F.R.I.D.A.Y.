@@ -34,6 +34,11 @@ decisions tracked in MASTER_PLAN §O and must be resolved before MVP 12's
 real implementation branches (STT/TTS capability, async transcription jobs)
 can start.
 
+> Note (2026-07-17): amended by ADR-008 decision 5 — the shipped voice
+> foundation stands, but the remaining voice work is re-sequenced to Phase 6
+> of the Jarvis 2.0 roadmap (MASTER_PLAN §AA), with wake-word detection fixed
+> as local (audio never leaves the device) and STT/TTS kept local.
+
 ## Consequences
 MASTER_PLAN §L's closing sentence is rewritten to point at MVP 12/§Z instead
 of naming voice as unscoped-last (orchestration/productization remain

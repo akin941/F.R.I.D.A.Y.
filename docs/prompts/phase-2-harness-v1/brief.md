@@ -17,6 +17,13 @@
 > mitigation applied both in the pipeline and at render time (branch 3),
 > and drive all of it from a plain list/detail UI (branch 4).
 >
+> Closeout note (2026-09-27): R6's Codex CLI go/no-go was recorded in the
+> Phase 3 brief (resolved GO, API-key auth only). "Real end-to-end" above
+> means the mocked suite — no real (non-mocked) harness run has happened
+> yet (the image versions/digests are placeholders, see
+> `backend/harness/docker/README.md`); a real run is scheduled in the
+> Phase 3 closeout.
+>
 > Status: **approved for implementation, with two items explicitly deferred
 > to branch 2's own PR rather than pinned here** (plan-review arc: round 1
 > 6H/3M/1L, round 2 4H/2M/1L, round 3 2H/1M/1L, round 4 3H/1M/1L — no

@@ -35,9 +35,36 @@ make e2e-install           # one-time: downloads the Chromium browser
 make test-e2e              # boots/reuses the frontend dev server, runs the suite
 ```
 
+## First run
+
+Jarvis is a single-owner system (ADR-008): signup is off (`SIGNUP_ENABLED=false`
+everywhere). Create the one owner account once, after `make migrate`:
+
+```bash
+cd backend
+JARVIS_OWNER_PASSWORD=... uv run python manage.py bootstrap_owner --email you@example.com [--name "..."]
+```
+
+The password comes from `JARVIS_OWNER_PASSWORD` or an interactive prompt — never a
+CLI argument. The command refuses to run if any user already exists. It also
+creates the owner's personal workspace.
+
+The agent harness launches its CLI workers (Claude Code, Codex CLI) from locally
+built Docker images; see `backend/harness/docker/README.md` for how to build them
+(the pinned versions/digests there are still placeholders).
+
+## Roadmap
+
+The current roadmap is Jarvis 2.0 (ADR-008): `docs/VISION_JARVIS_2.md` (approved
+vision) and `docs/MASTER_PLAN.md` §AA (per-phase status). MVP numbering elsewhere in
+the docs belongs to the earlier track (MVP 1–9 done; later MVP slots were cancelled or
+re-sequenced into phases by ADR-008).
+
 ## Repository layout
 
-- `backend/` — Django project (`config`) + apps (`core` for now; kernel apps arrive in MVP 1)
+- `backend/` — Django project (`config`) + kernel apps: `core`, `accounts`, `workspaces`,
+  `audit`, `ai_core`, `assistant`, `memory`, `knowledge`, `tasks`, `approvals`, `tools`,
+  `skills`, `agents`, `integrations`, `harness`
 - `frontend/` — Next.js web shell (MVP 1)
 - `cli/` — Jarvis CLI client (MVP 9)
 - `deploy/docker/` — Compose stack + dev Dockerfile

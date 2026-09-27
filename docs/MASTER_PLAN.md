@@ -1,8 +1,9 @@
 # Jarvis OS Master Plan
 
-> Skeleton only (MVP 0). The full Master Plan v2 + addendum will be placed here
-> section by section. Until then, ADRs in `docs/adr/` are the binding source for
-> architecture rules.
+> Living plan. ADRs in `docs/adr/` are the binding source for architecture
+> rules; §AA is the current roadmap (Jarvis 2.0, ADR-008) and carries the
+> per-phase status. Last full plan audit: **2026-09-27** (§AA "Plan audit
+> 2026-09-27").
 
 ## A. Executive Summary
 
@@ -104,9 +105,11 @@ MVP 0–20, simplified to **personal kernel + platform capabilities** (ADR-006):
 personal kernel first (shell/chat → memory → knowledge/RAG *(done — §S)* →
 tasks *(done — §T)* → tools/approvals *(done — §U)* → router *(done — §V)* →
 agents *(done — §W)* → skills *(done — §X)* → integrations
-*(done — §Y)*). Model-tier/cost routing (a DB-backed cheap/mid/strong tier table +
-`ModelUsage.routing_reason` auditability) is a separate, unstarted Gateway
-sub-task — deliberately not folded into the router MVP (§V); see §J.
+*(done — §Y)*). Model-tier/cost routing: the skeleton (`ModelTier` +
+`ModelUsage.routing_reason`) shipped in Jarvis 2.0 Phase 0, but the
+purpose→tier map (`AI_PURPOSE_TIERS`) is still empty, so no call is
+actually tier-routed yet; populating it together with the harness
+job-distribution policy table is scheduled in Phase 5 (§AA).
 
 MVP 10 (company workspaces: multi-user tenancy *inside* Jarvis — invite flows,
 company membership management, company-scoped memory) is **cancelled
@@ -147,30 +150,52 @@ Status: **done (2026-07-05)** — all 6 branches merged to main.
   as deferred (2026-07-17):** MVP 8 came and went with no memory-graph
   need. Re-evaluate once during Phase 1 (memory v2) design — embeddings +
   consolidation may cover the need without a graph; if so, reject for good.
-- NotebookLM external gateway — optional, public data only, MVP 9+
-- Private conversation flag: ADR-005's `private` sensitivity applies to
-  `Memory` rows, not to conversation messages — a message that happens to
-  restate private content is still sent to the gateway verbatim (MVP 2 §2).
-  Whether conversations need their own privacy flag (and what that implies
-  for extraction input and context injection) is unresolved; revisit once
-  memory consolidation or cross-workspace overlay work begins.
+- ~~Graphiti re-evaluation (Phase 1)~~ — **rejected (recorded 2026-09-27;
+  the Phase 1 closeout omitted it):** embeddings + `work_log` + firm
+  dossier + the personal overlay answer "what did we last do for firm X"
+  without a graph. Revisit only if multi-hop relational queries become a
+  real, observed need.
+- NotebookLM external gateway — optional, public data only. Re-triaged
+  (2026-09-27): evaluated in the Phase 5 MCP review, not before.
+- ~~Private conversation flag~~ — **resolved (Phase 1 branch 2,
+  2026-07-19):** one-way `Conversation.private` (`assistant/models.py`),
+  enforced at extraction input, context injection, the overlay and
+  gateway payload assembly. A private conversation never becomes
+  non-private again.
 - Jarvis ↔ external bridge (optional, post-ADR-006): if built, it takes the MCP
   route — Jarvis as MCP client of the installation's MCP-compatible tools
   (installation side), e.g. read-only access for
   Jarvis's personal assistant to data in a external installation. Auth model,
-  approval-gate treatment (ADR-004) and audit trail unresolved. Explicitly
-  not committed — revisit with the fleet phase (§P).
-- ~~Cross-workspace memory overlay~~ — **direction set (ADR-008), design in
-  Phase 1:** a personal-assistant read-only overlay over firm workspaces
-  exists; every read audited, `private` never included. The Phase 1 brief
-  fixes the exact read rules; ADR-001 isolation for writes is untouched.
+  approval-gate treatment (ADR-004) and audit trail unresolved. **Reconciled
+  with §AA (2026-09-27):** the *client* side is committed to Phase 5 via the
+  generic MCP client framework (read-only tools first, writes gated); the
+  external-specific connection waits on the panel exposing an MCP server (VISION
+  O-5, external dependency). The fleet phase (§P) stays vision-only.
+- ~~Cross-workspace memory overlay~~ — **resolved (Phase 1 branch 4,
+  2026-07-19):** the personal assistant reads approved, non-private
+  `work_log` memories of firm workspaces read-only; every read audited;
+  gated off entirely if the personal workspace has any other member;
+  `overlay_source_workspaces` redacted on low-trust reads. ADR-001
+  isolation for writes is untouched.
 - ~~Harness runner placement (ADR-008)~~ — **resolved (2026-07-17):** runner
   abstraction; any machine running a registered runner can execute harness
   jobs. First runner is the owner's Mac.
-- CLI-agent headless auth (subscription session vs API key) per vendor:
-  Claude Code headless/SDK is officially supported; Codex CLI terms to be
-  verified in the Phase 2 brief, with an API-key fallback designed if
-  vendor terms block automation. Open until Phase 2.
+- ~~CLI-agent headless auth~~ — **resolved (Phase 3 branch 3,
+  2026-07-21):** API keys only — `ANTHROPIC_API_KEY` (Claude Code),
+  `CODEX_API_KEY` (Codex CLI). ChatGPT/subscription OAuth is never used by
+  the harness. See the Phase 3 brief, "Open question resolved: Codex CLI
+  vendor terms".
+- **O-3 — `agents` (MVP 7) ↔ `harness` merge (due at Phase 3 closeout).**
+  Both now create `ApprovalRequest`s through `tools.registry` and carry
+  their own brake systems. Decision recorded in the Phase 3 closeout
+  (§AA): keep separate; re-evaluate only if a chat-born plan needs repo
+  write authority.
+- Owner hard-deletes vs ADR-008's gate-class "delete" (found in the
+  2026-09-27 audit): memory/knowledge/task deletes are direct owner
+  actions over the high-trust web channel with no `ApprovalRequest`.
+  Decide in the Phase 4 brief whether a direct owner action over the web
+  channel *is* the explicit decision (ADR amendment) or deletes move to
+  soft-delete/gated.
 - Home Assistant bridge details (Phase 5): transport (native API vs MCP),
   auth, and which device domains are exposed through the approval gate.
   Open until Phase 5; the architectural hook (bridge, never drivers) is
@@ -316,7 +341,10 @@ tool. `approvals` kernel app: workspace-scoped `ApprovalRequest` rows with a
 `pending -> approved | rejected | expired` state machine, requester != decider
 enforced at the model/service level with no production exception (a
 narrowly-scoped `DEV_ALLOW_SELF_APPROVAL` flag exists for dev/test only, and
-the app refuses to boot under `DEBUG=False` if it's ever left on), a curator
+the app refuses to boot under `DEBUG=False` if it's ever left on — **both
+superseded by ADR-008 decision 3 (Phase 0): the flag is removed from code
+and requester≠decider is replaced by the single-owner explicit, separate,
+audited decision rule; machine origins never decide**), a curator
 role check (owner/admin only may decide), a decision-time expiry backstop
 layered on top of a periodic Celery sweep, and full audit coverage. `tools`
 kernel app: a plain-dict `ToolSpec` registry (no DB model — one concrete
@@ -697,18 +725,138 @@ The post-MVP 9 roadmap. Full analysis and rationale:
 **single-owner system** (ADR-008): the kernel is the control plane, a new
 `harness` kernel app drives external CLI coding agents (Claude Code, Codex
 CLI, Gemini CLI, Ollama) as workers under the approval gate, with
-cross-vendor review (the implementing agent never reviews its own diff)
-and two gates on deploy (plan approval + deploy approval).
+cross-vendor review (the implementing agent never reviews its own diff).
+Repo-write automation carries **three** separate owner decisions: plan
+approval (Gate A, Phase 3), push approval (Gate B, Phase 3) and deploy
+approval (Phase 5).
 
-| Phase | Scope | Usable outcome |
-|---|---|---|
-| 0 | ADR-008 in code: firm profiles on Workspace, Ollama embedding provider, model-tier routing skeleton (§J), approvals machine-requester fix, signup off | Daily local-LLM use; firms defined; agent approvals decidable |
-| 1 | Memory v2: embeddings + semantic retrieval, `work_log` class, core memory blocks (owner + firm dossiers), personal read-only overlay | "What did we last do for firm X?" answerable |
-| 2 | Harness v1: read-only discovery runs → briefing; runner abstraction (first runner: Mac); usage → ModelUsage; kill switch + budgets | "Analyze this bug in repo X, brief me" |
-| 3 | Harness v2: plan approval → worktree implementation → tests → cross-vendor review → gated branch push | Approved feature development end-to-end |
-| 4 | UI renewal: shell/chat/harness console/approvals inbox redesign; device-trust identity replaces signup/login; OpenAI-compatible facade (chat-only, low-trust) | Professional daily driver |
-| 5 | Deploy gate #2 + VPS deploy (allowlisted commands); MCP: GitHub, mail/calendar, external client (when an installation exposes MCP), Home Assistant bridge; social media via existing services | Request → code → live, end to end |
-| 6 | Voice (ex-MVP 12): mic capture, faster-whisper STT, Piper TTS, local wake word, orb wired to real audio; then the animated visual identity layer | The real Jarvis experience |
+| Phase | Scope | Usable outcome | Status |
+|---|---|---|---|
+| 0 | ADR-008 in code: firm profiles on Workspace, Ollama embedding provider, model-tier routing skeleton (§J), approvals machine-requester fix, signup off | Daily local-LLM use; firms defined; agent approvals decidable | **done (2026-07-17)** |
+| 1 | Memory v2: embeddings + semantic retrieval, `work_log` class, core memory blocks (owner + firm dossiers), personal read-only overlay | "What did we last do for firm X?" answerable | **done (2026-07-19)** — owner core block + consolidation carried forward (below) |
+| 2 | Harness v1: read-only discovery runs → briefing; runner abstraction (first runner: Mac); usage → ModelUsage; kill switch + budgets | "Analyze this bug in repo X, brief me" | **done (2026-07-20)** (mocked suite; first real run in Phase 3 closeout) |
+| 3 | Harness v2: plan approval → worktree implementation → tests → cross-vendor review → gated branch push | Approved feature development end-to-end | **in progress** — branches 1–4 done (2026-07-20 → 07-22); closeout branches 5–8 re-planned 2026-09-27 (below) |
+| 4 | Security baseline; UI renewal: shell/chat/harness console/approvals inbox redesign; device-trust identity replaces signup/login; OpenAI-compatible facade (chat-only, low-trust) | Professional, safely-exposable daily driver | not started — brief to be written at Phase 3 closeout |
+| 5 | Deploy gate + VPS deploy (allowlisted commands); MCP client framework: GitHub, mail/calendar, external client (when an installation exposes MCP), Home Assistant bridge; tier routing + harness policy table | Request → code → live, end to end | not started |
+| 6 | Voice (ex-MVP 12): mic capture, faster-whisper STT, Piper TTS, local wake word, orb wired to real audio; then the animated visual identity layer | The real Jarvis experience | not started (foundation from MVP 12 shipped, dormant) |
 
 Phase briefs live in `docs/prompts/phase-N-<topic>/brief.md`, same
 discipline as MVP briefs (branch tables, test strategy, closeout).
+
+**Integration state (2026-09-27):** all Phase 0–3 work (119 commits) lives
+on the shared session branch `claude/repo-setup-env-transition-1g94hx`,
+not on `main`, and CI (push-to-main / PR only) had never run on it. Draft
+integration PR akin941/jarvis-os#26 was opened on 2026-09-27 so CI runs; a
+green CI run and the merge of that PR are Phase 3 closeout gates.
+
+### Plan audit 2026-09-27
+
+A full re-read of plans + four independent audits (plans/docs, harness
+code, kernel rules, frontend) after a two-month pause. Kernel rules held:
+single-door gateway, ModelUsage on every path, `for_actor()` on every
+view, machine origins never decide, `private` never reaches a payload,
+27/27 import contracts, ~1.8k backend + 392 frontend tests green. The
+audit found the following, all folded into the branches below:
+
+- **Harness (Phase 3 code):** the uncommitted branch-3 follow-up diff
+  (`.env.example` harness block) breaks boot when copied (`KEY=` parses as
+  an empty string for `env.int`); the wrapper's tested-tree == committed-
+  tree check is still bypassable (assume-unchanged, lowercase `s`, paths
+  with spaces, `.git/info/exclude`); a `pending_review` job with no review
+  row is a permanent stuck state no recovery case covers; non-`RunnerError`
+  exceptions (invalid UTF-8 `result.json`, raw `TimeoutExpired` from
+  `capture_logs`/`container_is_running`/`container_exit_code`) leave jobs
+  to the 35-min recovery path with 0 recorded cost; cost parsing trusts the
+  first JSON object on container stdout (agent-writable); agent-set
+  `chmod 500` defeats host cleanup; self-repo canonicalization misses
+  alternate spellings and the guard is fail-open when unconfigured;
+  cancelling a job doesn't stop a running review container; the test
+  command inherits the CLI API key; no `--cap-drop`/`no-new-privileges`;
+  headless write mode likely can't `git commit` (wrapper should own the
+  commit). The harness has **never run for real** (placeholder image
+  digests, no compose wiring).
+- **Phase 3 branch 5's original definition was stale:** there is no
+  implementation-job API at all (services exist, no views/serializers/
+  URLs); the implementation CLI transcript is discarded, not stored;
+  `diff_summary` is a deterministic placeholder, never gateway-produced
+  (boundary section promised otherwise); Gate B's approver sees only
+  `tool_name`; `ApprovalCard` prints "undefined" counters for harness
+  executions; `harness_implement`/`harness_push` leak into the router and
+  planner tool vocabulary as dead-end proposals; implementation/push
+  outcomes write no `work_log` (ADR-008 decision 4).
+- **Kernel/security:** dev compose publishes Postgres/Redis/MinIO/web on
+  `0.0.0.0` with committed credentials and a committed SECRET_KEY;
+  settings fall back to a hard-coded key; `prod.py` is a TODO; no login
+  throttle or password validators on the single owner account (the only
+  decider); rotated refresh tokens never revoked, no logout endpoint;
+  approval decisions don't check `is_agent`; `approvals` CLI requests are
+  stamped `origin=HUMAN` with no channel; private memories are exported to
+  the main vault tree instead of `_private/`; throttles use per-process
+  LocMem cache; `.env.example` is missing ~25 variables read in code.
+- **Frontend:** the whole app renders in Times (self-referential
+  `--font-sans` token) and Geist lacks `latin-ext` for Turkish; the
+  Playwright smoke is broken since the i18n commits (English selectors) and
+  still depends on signup; shell height/overflow chain doesn't bound
+  scroll areas; chat flickers/blank-flashes after every reply, swallows
+  load errors; backend English `detail` strings override Turkish fallbacks;
+  cards not keyboard-reachable; no confirmation on destructive actions.
+
+### Phase 3 closeout (re-planned 2026-09-27)
+
+The original branch 5 (`feat/p3-harness-ui`) is split into four branches;
+detail in `docs/prompts/phase-3-harness-v2/brief.md` branch table.
+
+| # | Branch | Scope |
+|---|---|---|
+| 5 | `feat/p3-harness-hardening` | The pending branch-3 follow-ups (fixed `.env.example`: commented defaults) + every harness audit finding above + O-3 decision recorded |
+| 6 | `feat/p3-implementation-api` | Implementation-job + review API (create/list/detail/cancel), stored implementation transcript, gateway-produced `diff_summary`, a safe approval display summary for Gate A/B, `work_log` for implementation/push outcomes, `ToolSpec.user_invocable` filter for router/planner |
+| 7 | `feat/p3-harness-ui` | Frontend: repo picker, request implementation (fresh or from a discovery job), pipeline view, gate status + `/approvals` deep links, review verdict/findings/diff summary with fenced transcripts, harness-aware approval cards; plus the frontend "fix now" list (font, e2e, shell height, chat error/flicker, keyboard cards) |
+| 8 | closeout | Real-container smoke (actual Docker launch with a stubbed CLI, no paid calls) + owner runbook for the first paid run; CI green on PR #26; merge to `main` |
+
+### Phase 4–6 outline (briefs written at each phase start)
+
+- **Phase 4 — security baseline + UI renewal + identity.**
+  (1) `feat/p4-security-baseline`: loopback-only compose ports, no
+  committed secrets, fail-hard `prod.py` (HSTS, secure cookies, SSL
+  redirect), login/refresh throttles, password validators, refresh-token
+  blacklist + logout, `is_agent` never decides, request channel on
+  approval audit, private memories → `_private/` in vault export, Redis
+  cache for throttles, agent-create throttle, configurable test DB name,
+  complete `.env.example`, obsolete TODOs removed. (2)
+  `feat/p4-device-trust`: device enrollment (owner-issued pairing code/PIN
+  on LAN, strong external key) replacing signup/login; signup endpoint and
+  route removed; e2e seeded with `bootstrap_owner`; owner-only firm
+  workspace creation. (3) `feat/p4-design-system`: tokens (semantic
+  status colors, light/dark), primitives (Badge, AlertDialog, Tabs,
+  Tooltip, Toast, Empty/ErrorState, Markdown), shared data hook, routed
+  shell with grouped nav + approval badge, i18n catalog + backend error
+  mapping. (4) `feat/p4-chat-redesign`: markdown, smart scroll, no
+  post-stream flash, visible errors, mobile conversation drawer. (5)
+  `feat/p4-console-and-inbox`: routed harness console, repo registry UI,
+  approvals inbox with per-tool renderers, confirmations, filters. (6)
+  `feat/p4-openai-facade`: `/v1/chat/completions`, chat-only, PAT auth,
+  low-trust channel.
+- **Phase 5 — deploy + MCP.** Deploy-target allowlist model + deploy gate
+  + allowlisted SSH command runner with health check; generic MCP client
+  framework (manifested servers, read-only tools ungated, writes gated,
+  audited); GitHub (PR for a pushed harness branch, CI status), Home
+  Assistant bridge (domain allowlist, service calls gated), mail/calendar
+  (read first, send gated); external client when O-5 unblocks; tier-routing map
+  + harness policy table; remaining `work_log` producers (gated tools,
+  tasks, deploys). "Social media via existing services" stays undefined
+  until a concrete service is named — explicitly out of scope until then.
+- **Phase 6 — voice.** Browser mic capture → gateway STT (local
+  faster-whisper behind an OpenAI-compatible server) → assistant → TTS
+  (local Piper) playback, orb wired to real audio levels; local wake word
+  (in-browser, audio never leaves the device before the wake word); voice
+  is a web-session channel but approval decisions still need an explicit
+  on-screen confirm; then the visual identity layer.
+
+**Carried-forward items (not yet scheduled in a branch):** owner core
+memory block; memory consolidation/distillation (ADR-005, VISION R5);
+shared per-turn query embedding; SSE log streaming for harness; revise-
+per-feedback loop; shared harness execution-engine extraction (its
+three-call-site trigger is now met — evaluate in Phase 5); dynamic runner
+registry (needed when a second runner appears); Gemini CLI / Ollama as
+harness agents; configurable branch-name prefix; MVP 9 persisted-draft
+reconstruction (Phase 4 UI candidate).

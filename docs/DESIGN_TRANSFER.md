@@ -101,3 +101,37 @@ Format per entry: **Concept transferred** / **Source in Jarvis** /
   vector-distance ordering (a variable-dimension vector column only compares
   operands of equal dimension). Record provenance and the audit event on the
   same transaction as the answer persistence.
+
+## 6. Agent harness patterns (Phase 2–3) — transfer candidates
+
+> Added 2026-09-27. Proven in Jarvis's `harness` app (ADR-008) across the
+> Phase 2–3 review arcs; listed as candidates only — none is required
+> downstream until an installation runs external CLI agents itself.
+
+- **Concept transferred:** running untrusted, vendor-supplied CLI agents as
+  workers without trusting them: (a) a **container brake system** — runtime
+  timeout, post-hoc cost ceiling (`budget_exceeded`), a kill switch polled by
+  the owning worker (teardown only ever by that worker), and recovery scans
+  that sweep leaked containers/worktrees; (b) **bundle-only push** — the
+  agent's worktree never talks to the remote; a bundle is fetched into a
+  separate clean clone and pushed by explicit SHA with a create-only
+  compare-and-swap (`--force-with-lease=<ref>:`); (c) **process quiescence
+  before reading agent-written state** — the wrapper stops agent processes
+  before writing its result file, and the host reads it off the filesystem
+  (regular file only, never via container stdout); (d) **fenced CLI output
+  is never trusted as its own summary** — transcripts are bounded, fenced and
+  neutralized, and the summary/verdict is produced by a separate gateway
+  call; (e) **`record_external_usage()`** — non-gateway LLM spend (a CLI's
+  own provider calls) still lands as exactly one `ModelUsage` row.
+- **Source in Jarvis:** `backend/harness/execution.py` (brakes, recovery,
+  fencing), `backend/harness/runner.py` (`push_bundled_commit`,
+  `prepare_review_clone`, `read_implementation_result`),
+  `backend/harness/docker/*_run.sh`, `backend/ai_core/gateway.py`
+  (`record_external_usage`); `docs/prompts/phase-2-harness-v1/brief.md`,
+  `docs/prompts/phase-3-harness-v2/brief.md`.
+- **Independent re-implementation notes:** the review clone must also strip
+  agent-instruction files (`AGENTS.md`, `CLAUDE.md`, case-insensitively) and
+  isolate global/system git config, and diffs must be taken with
+  `--text --no-ext-diff --no-textconv` — each was a real finding in the
+  Phase 3 review arc. The cost ceiling cannot cancel spend already incurred;
+  treat it as a flag, not a guard.

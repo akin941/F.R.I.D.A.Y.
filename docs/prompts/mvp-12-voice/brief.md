@@ -9,7 +9,11 @@
 > device) for always-listening operation, and the animated visual-identity
 > layer coming only **after** the voice pipeline works.
 >
-> Status: **in progress (2026-07-17)** — roadmap slot created by ADR-007,
+> Status: **dormant (2026-09-27)** — re-sequenced to Phase 6 by ADR-008
+> decision 5; the foundation already shipped (below) stays in place. No
+> branch of this brief is active until Phase 6 opens.
+>
+> Earlier status: **in progress (2026-07-17)** — roadmap slot created by ADR-007,
 > promoting voice off MASTER_PLAN §L's unscoped "last" bucket. The two
 > MASTER_PLAN §O open decisions are now **resolved**: STT/TTS runs **fully
 > local** (Whisper-class STT + Piper-class TTS on the user's own machine),
@@ -71,7 +75,9 @@ while it's silently working feels broken.
   needs a real decision: wire the dormant `MINIO_*` / `django-storages`
   settings (`config/settings/base.py`), or a bounded temp-file-then-delete
   pattern that never persists raw audio past the transcription job. Open
-  (MASTER_PLAN §O).
+  (MASTER_PLAN §O). **Resolved (2026-09-27 note):** MASTER_PLAN §O settled
+  on a bounded temp file, deleted on completion — raw audio is never
+  persisted.
 - **No realtime client→server transport exists.** SSE (`StreamingHttpResponse`
   in `assistant/views.py`) only streams server→client text. Live mic-audio
   ingestion (as opposed to upload-then-transcribe) would need a new
@@ -157,9 +163,12 @@ indicator, cancel-mid-record, error recovery when STT/TTS/Gateway fails).
 
 ## Out of scope (explicit)
 
-- Wake-word detection ("Hey Jarvis") — push-to-talk only, for any version of
+- ~~Wake-word detection ("Hey Jarvis") — push-to-talk only, for any version of
   this MVP. A wake-word pipeline is continuous audio processing, a much
-  larger privacy/always-listening decision the owner hasn't made.
+  larger privacy/always-listening decision the owner hasn't made.~~
+  **Superseded (2026-09-27 note):** ADR-008 decision 5 made the decision — a
+  **local** wake word (openWakeWord/Porcupine-class, audio never leaves the
+  device) is in scope for Phase 6.
 - Multi-turn barge-in / interrupting the assistant mid-reply — the existing
   chat pipeline has no notion of a client-initiated stream cancellation
   beyond the web UI's "Durdur" stop button; voice doesn't get a new one here.

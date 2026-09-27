@@ -1,6 +1,9 @@
 # Phase 1 — Memory v2
 
-> Status: **approved (Codex plan-review, 5 rounds, 2026-07-18)** — the
+> Status: **done (2026-07-19)** — all four branches merged; see the
+> closeout note at the end of this brief.
+>
+> Approval history: **approved (Codex plan-review, 5 rounds, 2026-07-18)** — the
 > review arc: round 1 CRITICAL+3HIGH (branch 1 would have embedded
 > private/unapproved content); round 2 found the round-1 fix incomplete
 > (leftover contradictory sentence, no channel to gate branch 4's overlay
@@ -430,3 +433,20 @@ turn between memory and knowledge retrieval (currently two independent
 `gateway.embed()` calls) — an idea from a parallel session's draft that
 didn't make it into this branch's shipped design; see the spawned
 background-task suggestion for the fix.
+
+## Closeout (2026-09-27)
+
+- **Graphiti / memory-graph re-evaluation (MASTER_PLAN §O) — REJECTED for
+  now.** Embeddings-backed retrieval, the `work_log` class, the firm dossier
+  and the personal overlay together cover the "what did we last do for firm
+  X" need without a graph store. Revisit only if multi-hop relational
+  queries become a real, observed need.
+- **Carried forward (not shipped in Phase 1):**
+  - Owner core memory block — `docs/VISION_JARVIS_2.md` §6 (Phase 1 row)
+    named both an owner ("kişi") and a firm block; only the firm block
+    shipped (branch 3).
+  - Consolidation / distillation of memory (ADR-005 consequences; VISION
+    §8 R5) — `work_log` now grows without curation beyond manual deletion.
+  - Shared per-turn query embedding — `memory/context.py` and
+    `knowledge/context.py` still each call `embed()` independently (the
+    follow-up filed under the branch table above).
