@@ -799,4 +799,118 @@ describe("ChatView", () => {
 
     await waitFor(() => expect(createCalls).toBe(1));
   });
+
+  it("shows a visible error when creating a new chat fails", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string, init?: RequestInit) => {
+        if (input.startsWith("/api/conversations?")) {
+          return new Response(JSON.stringify([]), { status: 200 });
+        }
+        if (input === "/api/conversations" && init?.method === "POST") {
+          return new Response(JSON.stringify({ detail: "boom" }), { status: 500 });
+        }
+        throw new Error(`unexpected fetch ${input}`);
+      }),
+    );
+
+    render(<ChatView />);
+    await userEvent.click(await screen.findByText("Yeni sohbet"));
+
+    expect(
+      await screen.findByText("Yeni sohbet başlatılamadı. Lütfen tekrar deneyin."),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Yeni sohbet" })).toBeEnabled();
+  });
+
+  it("shows an error state (not the empty state) when the conversation list fails to load, and retries", async () => {
+    let listCalls = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string) => {
+        if (input.startsWith("/api/conversations?")) {
+          listCalls += 1;
+          if (listCalls === 1) return new Response(JSON.stringify({}), { status: 500 });
+          return new Response(JSON.stringify([CONVERSATION]), { status: 200 });
+        }
+        throw new Error(`unexpected fetch ${input}`);
+      }),
+    );
+
+    render(<ChatView />);
+
+    expect(await screen.findByText("Sohbetler yüklenemedi.")).toBeInTheDocument();
+    expect(screen.queryByText("Henüz sohbet yok.")).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "Tekrar dene" }));
+
+    expect(await screen.findByText("Test conversation")).toBeInTheDocument();
+    expect(screen.queryByText("Sohbetler yüklenemedi.")).not.toBeInTheDocument();
+  });
+
+  it("keeps the message list mounted while reconciling after a reply", async () => {
+    const earlier = {
+      id: "m0",
+      conversation: "c1",
+      role: "user",
+      content: "Earlier message",
+      status: "complete",
+      model_usage: null,
+      created_by: "u1",
+      created_at: "t",
+    };
+    let messagesCallCount = 0;
+    let releaseReload: (() => void) | null = null;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string, init?: RequestInit) => {
+        if (input.startsWith("/api/conversations?")) {
+          return new Response(JSON.stringify([CONVERSATION]), { status: 200 });
+        }
+        if (input === "/api/conversations/c1/messages" && (!init?.method || init.method === "GET")) {
+          messagesCallCount += 1;
+          if (messagesCallCount === 1) {
+            return new Response(JSON.stringify([earlier]), { status: 200 });
+          }
+          // Hold the post-reply reload open so the in-between state is observable.
+          await new Promise<void>((resolve) => {
+            releaseReload = resolve;
+          });
+          return new Response(
+            JSON.stringify([
+              earlier,
+              { ...earlier, id: "m1", content: "Hi there" },
+              { ...earlier, id: "m2", role: "assistant", content: "Hello!" },
+            ]),
+            { status: 200 },
+          );
+        }
+        if (input === "/api/conversations/c1/messages" && init?.method === "POST") {
+          return sseResponse([
+            `data: ${JSON.stringify({ type: "chunk", text: "Hello!" })}\n\n`,
+            `data: ${JSON.stringify({ type: "done", message_id: "m2" })}\n\n`,
+          ]);
+        }
+        throw new Error(`unexpected fetch ${input}`);
+      }),
+    );
+
+    await selectConversation();
+    expect(await screen.findByText("Earlier message")).toBeInTheDocument();
+    await userEvent.type(screen.getByPlaceholderText("Jarvis'e yaz…"), "Hi there");
+    await userEvent.click(screen.getByRole("button", { name: "Gönder" }));
+
+    // The reload is in flight: the earlier history AND this turn's bubbles
+    // stay on screen -- no blank flash while reconciling.
+    await waitFor(() => expect(messagesCallCount).toBe(2));
+    expect(screen.getByText("Earlier message")).toBeInTheDocument();
+    expect(screen.getByText("Hi there")).toBeInTheDocument();
+    expect(screen.getByText("Hello!")).toBeInTheDocument();
+
+    act(() => releaseReload?.());
+
+    await waitFor(() => expect(screen.getAllByText("Hello!")).toHaveLength(1));
+    expect(screen.getAllByText("Hi there")).toHaveLength(1);
+    expect(screen.getByText("Earlier message")).toBeInTheDocument();
+  });
 });

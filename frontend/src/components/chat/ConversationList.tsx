@@ -12,6 +12,8 @@ interface ConversationListProps {
   onSelect: (id: string) => void;
   onNewChat: () => void;
   loading: boolean;
+  error?: string | null;
+  onRetry?: () => void;
   disabled: boolean;
 }
 
@@ -21,6 +23,8 @@ export function ConversationList({
   onSelect,
   onNewChat,
   loading,
+  error,
+  onRetry,
   disabled,
 }: ConversationListProps) {
   return (
@@ -30,13 +34,22 @@ export function ConversationList({
           Yeni sohbet
         </Button>
       </div>
-      <ScrollArea className="flex-1">
+      <ScrollArea className="min-h-0 flex-1">
         <div className="flex flex-col gap-1 p-2">
           {loading ? (
             <>
               <Skeleton className="h-9 w-full" />
               <Skeleton className="h-9 w-full" />
             </>
+          ) : error ? (
+            <div role="alert" className="flex flex-col gap-2 p-2 text-sm text-destructive">
+              <p>{error}</p>
+              {onRetry ? (
+                <Button variant="outline" size="sm" className="self-start" onClick={onRetry}>
+                  Tekrar dene
+                </Button>
+              ) : null}
+            </div>
           ) : conversations.length === 0 ? (
             <p className="p-2 text-sm text-muted-foreground">Henüz sohbet yok.</p>
           ) : (

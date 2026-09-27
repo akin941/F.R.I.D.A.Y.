@@ -121,7 +121,7 @@ export function VoiceView() {
   }
 
   return (
-    <div className="flex flex-1 flex-col items-center justify-center gap-8 p-8">
+    <div className="flex flex-1 flex-col items-center justify-center-safe gap-8 overflow-y-auto p-8">
       <JarvisOrb state={orbState} size={220} />
 
       {transcript ? (
