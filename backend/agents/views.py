@@ -29,6 +29,7 @@ from agents.serializers import (
     AgentStepSerializer,
 )
 from core.channels import is_low_trust, scoped_for_actor
+from core.throttling import CreateScopedRateThrottle
 from tasks.serializers import TaskSerializer
 from tasks.services import InvalidTransition, TaskPermissionDenied
 from workspaces.models import Workspace
@@ -87,6 +88,9 @@ def _resolve_workspace(request):
 class AgentListCreateView(APIView):
     permission_classes = [IsAuthenticated]
     authentication_classes = _PAT_ALLOWLISTED_AUTHENTICATION_CLASSES
+    # Creation blocks on the planner's LLM call (cost-bearing).
+    throttle_classes = [CreateScopedRateThrottle]
+    throttle_scope = "cost"
 
     def get(self, request):
         workspace, error = _resolve_workspace(request)

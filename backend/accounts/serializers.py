@@ -1,3 +1,4 @@
+from django.conf import settings
 from django.contrib.auth.password_validation import validate_password
 from rest_framework import serializers
 
@@ -33,9 +34,24 @@ class WorkspaceSummarySerializer(serializers.Serializer):
     role = serializers.CharField()
 
 
+class LogoutSerializer(serializers.Serializer):
+    refresh = serializers.CharField()
+
+
 class PersonalAccessTokenCreateSerializer(serializers.Serializer):
     workspace = serializers.UUIDField()
     name = serializers.CharField(max_length=255)
+    # Optional lifetime chosen at mint; omitted -> PAT_DEFAULT_TTL_DAYS.
+    expires_in_days = serializers.IntegerField(required=False, min_value=1)
+
+    def validate_expires_in_days(self, value):
+        # Validated here, not via max_value=, so the cap follows the live
+        # setting rather than its value at import time.
+        if value > settings.PAT_MAX_TTL_DAYS:
+            raise serializers.ValidationError(
+                f"Ensure this value is less than or equal to {settings.PAT_MAX_TTL_DAYS}."
+            )
+        return value
 
 
 class PersonalAccessTokenSerializer(serializers.ModelSerializer):
@@ -43,5 +59,13 @@ class PersonalAccessTokenSerializer(serializers.ModelSerializer):
     # exactly once, in the mint response only (see views.py).
     class Meta:
         model = PersonalAccessToken
-        fields = ["id", "name", "workspace", "last_used_at", "revoked_at", "created_at"]
+        fields = [
+            "id",
+            "name",
+            "workspace",
+            "last_used_at",
+            "revoked_at",
+            "expires_at",
+            "created_at",
+        ]
         read_only_fields = fields

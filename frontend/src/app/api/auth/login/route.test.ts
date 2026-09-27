@@ -89,7 +89,7 @@ describe("POST /api/auth/login", () => {
 
     expect(refresh?.value).toBe("refresh-token-value");
     expect(refresh?.httpOnly).toBe(true);
-    expect(refresh?.path).toBe("/api/auth/refresh");
+    expect(refresh?.path).toBe("/api/auth");
 
     expect(session?.httpOnly).toBe(true);
     expect(session?.path).toBe("/");

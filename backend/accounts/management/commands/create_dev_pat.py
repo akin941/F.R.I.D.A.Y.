@@ -11,6 +11,7 @@ from django.core.management.base import BaseCommand, CommandError
 
 from accounts.authentication import TOKEN_PREFIX, hash_token
 from accounts.models import PersonalAccessToken, User
+from audit.services import record_audit
 from workspaces.models import Workspace
 
 
@@ -61,11 +62,20 @@ class Command(BaseCommand):
         workspace = matches[0]
 
         raw_token = TOKEN_PREFIX + secrets.token_urlsafe(32)
-        PersonalAccessToken.objects.create(
+        token = PersonalAccessToken.objects.create(
             user=user,
             workspace=workspace,
             name="dev cli",
             token_hash=hash_token(raw_token),
+        )
+        # Same audit row as the mint endpoint, marked as coming from a
+        # management command (no request, so no web channel behind it).
+        record_audit(
+            action="accounts.pat.created",
+            actor=user,
+            workspace=workspace,
+            resource=token,
+            metadata={"via": "management_command", "expires_at": token.expires_at.isoformat()},
         )
         # Raw token only ever appears here -- same one-time-display
         # discipline as the mint endpoint (accounts/views.py).

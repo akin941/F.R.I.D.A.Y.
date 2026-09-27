@@ -8,6 +8,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from core.throttling import CreateScopedRateThrottle
 from knowledge.models import KnowledgeDocument
 from knowledge.serializers import (
     FileUploadCreateSerializer,
@@ -97,6 +98,9 @@ class KnowledgePastedTextCreateView(APIView):
     """
 
     permission_classes = [IsAuthenticated]
+    # Ingestion embeds every chunk (cost-bearing).
+    throttle_classes = [CreateScopedRateThrottle]
+    throttle_scope = "cost"
 
     def post(self, request):
         serializer = PastedTextCreateSerializer(data=request.data)
@@ -127,6 +131,9 @@ class KnowledgeUrlCreateView(APIView):
     re-validates everything from scratch in the worker."""
 
     permission_classes = [IsAuthenticated]
+    # Ingestion embeds every chunk (cost-bearing).
+    throttle_classes = [CreateScopedRateThrottle]
+    throttle_scope = "cost"
 
     def post(self, request):
         serializer = UrlCreateSerializer(data=request.data)
@@ -182,6 +189,9 @@ class _MaxSizeUploadHandler(FileUploadHandler):
 
 class KnowledgeFileUploadCreateView(APIView):
     permission_classes = [IsAuthenticated]
+    # Ingestion embeds every chunk (cost-bearing).
+    throttle_classes = [CreateScopedRateThrottle]
+    throttle_scope = "cost"
     parser_classes = [MultiPartParser]
 
     def post(self, request):

@@ -1,9 +1,19 @@
+from datetime import timedelta
+
 from django.conf import settings
 from django.contrib.auth.models import AbstractBaseUser, BaseUserManager, PermissionsMixin
 from django.db import models
+from django.utils import timezone
 
 from core.db import WorkspaceScopedModel
 from core.models import TimestampedModel
+
+
+def default_pat_expiry():
+    """Default `PersonalAccessToken.expires_at` (Phase 4 branch 1): now +
+    PAT_DEFAULT_TTL_DAYS. The mint view may choose a shorter or longer
+    lifetime, capped at PAT_MAX_TTL_DAYS."""
+    return timezone.now() + timedelta(days=settings.PAT_DEFAULT_TTL_DAYS)
 
 
 class UserManager(BaseUserManager):
@@ -76,6 +86,10 @@ class PersonalAccessToken(WorkspaceScopedModel, TimestampedModel):
     last_used_at = models.DateTimeField(null=True, blank=True)
     # Soft-revoke, never deleted — audit trail of what credentials existed.
     revoked_at = models.DateTimeField(null=True, blank=True)
+    # Hard expiry (Phase 4 branch 1): `PersonalAccessTokenAuthentication`
+    # rejects the token from this moment on. Tokens minted before expiry
+    # existed were backfilled to migration time + 30 days.
+    expires_at = models.DateTimeField(default=default_pat_expiry)
 
     class Meta:
         ordering = ["-created_at"]

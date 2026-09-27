@@ -1,4 +1,5 @@
 import secrets
+from datetime import timedelta
 
 from django.conf import settings
 from django.utils import timezone
@@ -6,14 +7,17 @@ from rest_framework import status
 from rest_framework.exceptions import AuthenticationFailed
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
+from rest_framework.throttling import ScopedRateThrottle
 from rest_framework.views import APIView
-from rest_framework_simplejwt.exceptions import InvalidToken
+from rest_framework_simplejwt.exceptions import InvalidToken, TokenError
+from rest_framework_simplejwt.settings import api_settings as jwt_settings
 from rest_framework_simplejwt.tokens import RefreshToken
-from rest_framework_simplejwt.views import TokenObtainPairView
+from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 
 from accounts.authentication import TOKEN_PREFIX, hash_token
-from accounts.models import PersonalAccessToken
+from accounts.models import PersonalAccessToken, User
 from accounts.serializers import (
+    LogoutSerializer,
     PersonalAccessTokenCreateSerializer,
     PersonalAccessTokenSerializer,
     SignupSerializer,
@@ -35,7 +39,13 @@ class AuditedLoginView(TokenObtainPairView):
 
     Behaviour is unchanged (401 on bad credentials); we only observe. The email
     is recorded to support abuse investigation; the password never is.
+
+    Throttled by the "login" scope -- effectively a global rate, since
+    Django only ever sees the BFF's address (config/settings/base.py).
     """
+
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "login"
 
     def post(self, request, *args, **kwargs):
         try:
@@ -52,8 +62,63 @@ class AuditedLoginView(TokenObtainPairView):
             raise
 
 
+class ThrottledTokenRefreshView(TokenRefreshView):
+    """simplejwt's refresh (rotation + blacklist-after-rotation) under the
+    "refresh" throttle scope."""
+
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "refresh"
+
+
+class LogoutView(APIView):
+    """Ends a web session server-side (Phase 4 branch 1): blacklists the
+    refresh token in the body, so it can never mint another access token.
+    Called by the BFF's logout route. The outstanding access token simply
+    runs out (ACCESS_TOKEN_LIFETIME).
+
+    Possession of a valid refresh token is the credential here -- an
+    access token may already be expired at logout -- so no authentication
+    is required. The view keeps the default (JWT-only) authenticators, so
+    a CLI personal access token is refused outright (401): this is a web
+    channel endpoint. When a valid access token IS sent, it must belong to
+    the same user as the refresh token.
+    """
+
+    permission_classes = [AllowAny]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "refresh"
+
+    def post(self, request):
+        serializer = LogoutSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            token = RefreshToken(serializer.validated_data["refresh"])
+        except TokenError:
+            # Invalid, expired or already blacklisted: nothing left to end.
+            return Response(
+                {"detail": "Invalid or expired refresh token."},
+                status=status.HTTP_401_UNAUTHORIZED,
+            )
+        user_id = token.get(jwt_settings.USER_ID_CLAIM)
+        if request.user.is_authenticated and str(request.user.pk) != str(user_id):
+            return Response(
+                {"detail": "Refresh token belongs to another user."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        token.blacklist()
+        record_audit(
+            action="auth.logout",
+            actor=User.objects.filter(pk=user_id).first(),
+            metadata={"jti": token.get(jwt_settings.JTI_CLAIM, "")},
+        )
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
 class SignupView(APIView):
     permission_classes = [AllowAny]
+    # Same anonymous, password-setting shape as login (and off by default).
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "login"
 
     def post(self, request):
         if not settings.SIGNUP_ENABLED:
@@ -114,18 +179,23 @@ class PersonalAccessTokenListCreateView(APIView):
         if workspace is None:
             return Response(status=status.HTTP_404_NOT_FOUND)
 
+        ttl_days = serializer.validated_data.get("expires_in_days") or (
+            settings.PAT_DEFAULT_TTL_DAYS
+        )
         raw_token = TOKEN_PREFIX + secrets.token_urlsafe(32)
         token = PersonalAccessToken.objects.create(
             workspace=workspace,
             user=request.user,
             name=serializer.validated_data["name"],
             token_hash=hash_token(raw_token),
+            expires_at=timezone.now() + timedelta(days=ttl_days),
         )
         record_audit(
             action="accounts.pat.created",
             actor=request.user,
             workspace=workspace,
             resource=token,
+            metadata={"via": "web", "expires_at": token.expires_at.isoformat()},
         )
         data = PersonalAccessTokenSerializer(token).data
         data["token"] = raw_token  # only ever appears in this one response

@@ -16,12 +16,15 @@ it is released automatically at commit/rollback.
 
 The password is read from the JARVIS_OWNER_PASSWORD env var, or prompted
 for interactively -- never accepted as a CLI argument (argv leaks into
-shell history and process listings).
+shell history and process listings). It must pass AUTH_PASSWORD_VALIDATORS
+(Phase 4 branch 1: Django's four, 12 characters minimum).
 """
 
 import getpass
 import os
 
+from django.contrib.auth.password_validation import validate_password
+from django.core.exceptions import ValidationError
 from django.core.management.base import BaseCommand, CommandError
 from django.db import connection, transaction
 
@@ -46,6 +49,12 @@ class Command(BaseCommand):
             password = getpass.getpass("Owner password: ")
         if not password.strip():
             raise CommandError("A non-empty password is required.")
+        try:
+            # An unsaved User so UserAttributeSimilarityValidator can compare
+            # against the email/name the owner is about to get.
+            validate_password(password, user=User(email=options["email"], name=options["name"]))
+        except ValidationError as exc:
+            raise CommandError("Password rejected: " + " ".join(exc.messages)) from exc
 
         with transaction.atomic():
             with connection.cursor() as cursor:

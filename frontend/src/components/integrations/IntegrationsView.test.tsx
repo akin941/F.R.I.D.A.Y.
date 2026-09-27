@@ -23,6 +23,7 @@ function token(overrides: Partial<ApiPersonalAccessToken> = {}): ApiPersonalAcce
     workspace: "w1",
     last_used_at: null,
     revoked_at: null,
+    expires_at: "2999-01-01T00:00:00Z",
     created_at: "2026-07-13T00:00:00Z",
     ...overrides,
   };
@@ -147,6 +148,69 @@ describe("IntegrationsView", () => {
     // token A's "Copied" state -- it hasn't actually been copied yet.
     expect(await screen.findByText("jpat_b")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Kopyala" })).toBeInTheDocument();
+  });
+
+  it("sends the chosen expiry with the mint request", async () => {
+    const created = { ...token({ id: "new1", name: "short" }), token: "jpat_short" };
+    const fetchMock = fetchRouter({
+      "GET /api/auth/tokens": () => jsonResponse([]),
+      "POST /api/auth/tokens": () => jsonResponse(created, 201),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<IntegrationsView />);
+    await screen.findByText("Henüz kişisel erişim token'ı yok.");
+
+    await userEvent.click(screen.getByRole("button", { name: "Yeni token" }));
+    await userEvent.type(screen.getByLabelText("İsim"), "short");
+    await userEvent.click(screen.getByRole("combobox", { name: "Token çalışma alanı" }));
+    await userEvent.click(await screen.findByRole("option", { name: "Alice" }));
+    await userEvent.click(screen.getByRole("combobox", { name: "Token geçerlilik süresi" }));
+    await userEvent.click(await screen.findByRole("option", { name: "30 gün" }));
+    await userEvent.click(screen.getByRole("button", { name: "Token oluştur" }));
+    await screen.findByText("jpat_short");
+
+    const postCall = fetchMock.mock.calls.find(([, init]) => init?.method === "POST");
+    expect(JSON.parse(postCall![1]!.body as string)).toEqual({
+      workspace: "w1",
+      name: "short",
+      expires_in_days: 30,
+    });
+  });
+
+  it("defaults the expiry to 90 days", async () => {
+    const created = { ...token({ id: "new1", name: "dflt" }), token: "jpat_dflt" };
+    const fetchMock = fetchRouter({
+      "GET /api/auth/tokens": () => jsonResponse([]),
+      "POST /api/auth/tokens": () => jsonResponse(created, 201),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<IntegrationsView />);
+    await screen.findByText("Henüz kişisel erişim token'ı yok.");
+    await userEvent.click(screen.getByRole("button", { name: "Yeni token" }));
+    await userEvent.type(screen.getByLabelText("İsim"), "dflt");
+    await userEvent.click(screen.getByRole("combobox", { name: "Token çalışma alanı" }));
+    await userEvent.click(await screen.findByRole("option", { name: "Alice" }));
+    await userEvent.click(screen.getByRole("button", { name: "Token oluştur" }));
+    await screen.findByText("jpat_dflt");
+
+    const postCall = fetchMock.mock.calls.find(([, init]) => init?.method === "POST");
+    expect(JSON.parse(postCall![1]!.body as string).expires_in_days).toBe(90);
+  });
+
+  it("shows an expired token as expired, without a revoke button", async () => {
+    vi.stubGlobal(
+      "fetch",
+      fetchRouter({
+        "GET /api/auth/tokens": () =>
+          jsonResponse([token({ expires_at: "2026-01-01T00:00:00Z" })]),
+      }),
+    );
+
+    render(<IntegrationsView />);
+    expect(await screen.findByText(/Süresi doldu/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "İptal et" })).not.toBeInTheDocument();
   });
 
   it("revokes a token", async () => {

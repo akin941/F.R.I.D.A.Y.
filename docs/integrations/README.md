@@ -22,9 +22,16 @@ narrower-scoped API key.
   (`/integrations`), or `POST /api/v1/auth/tokens` (JWT-authenticated only —
   minting a token is itself a sensitive, human-decided action). The raw
   token is returned exactly once, in that response.
+- **Expiry** (Phase 4 branch 1): every token expires — 90 days by default,
+  or a lifetime chosen at mint (`expires_in_days`, at most 365;
+  `PAT_DEFAULT_TTL_DAYS`/`PAT_MAX_TTL_DAYS`). Tokens minted before expiry
+  existed were given 30 days. Expired, revoked, unknown and
+  deactivated-user tokens all get the same 401; each failure is audited
+  (`accounts.pat.auth_failed`, token prefix only, rate-limited).
 - **Dev bootstrapping**: `manage.py create_dev_pat <email> <workspace-name>`
   mints a token for an already-existing user/workspace without needing the
-  settings UI first (dev-only, requires `DEBUG=True`).
+  settings UI first (dev-only, requires `DEBUG=True`; audited as
+  `accounts.pat.created` with `via=management_command`).
 - **Use it**: `Authorization: Bearer jpat_...` against any of the
   PAT-allowlisted endpoints — chat (`/api/v1/ai/conversations*`), agents
   (`/api/v1/agents*`), and approvals *creation* (`/api/v1/approvals/requests`,
