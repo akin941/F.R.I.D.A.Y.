@@ -19,6 +19,7 @@ class ConversationSerializer(serializers.ModelSerializer):
             "created_by",
             "created_at",
             "private",
+            "personal_data",
             "origin_channel",
         ]
         read_only_fields = fields
@@ -84,6 +85,7 @@ class MessageSerializer(serializers.ModelSerializer):
             "intent",
             "intent_payload",
             "channel",
+            "connector_reads",
             "confirmed_task",
         ]
         read_only_fields = fields

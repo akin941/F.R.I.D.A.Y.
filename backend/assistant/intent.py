@@ -6,10 +6,11 @@ object of this shape:
     {"intent": "chat", "tool_name": null}
 
 `intent` is exactly one of: chat, memory_query, knowledge_query, task_draft,
-tool_request. `tool_name` names the registered tool the message appears to
-request and is populated ONLY when `intent` is `tool_request` — it must be
-null for every other intent value (never a value the caller has to strip
-back out itself).
+tool_request, connector_read. `tool_name` names the registered tool the
+message appears to request (a gated tool for `tool_request`, a read tool for
+`connector_read`, Phase 5 branch 4) and is populated ONLY for those two
+intents — it must be null for every other intent value (never a value the
+caller has to strip back out itself).
 
 This parser validates `tool_name`'s *shape* only (non-empty string) —
 whether it names a tool that actually exists is deliberately NOT checked
@@ -36,6 +37,7 @@ from assistant.models import Message
 
 _ALLOWED_INTENTS = frozenset(Message.Intent.values)
 _TOP_LEVEL_KEYS = {"intent", "tool_name"}
+_NAMED_TOOL_INTENTS = frozenset({Message.Intent.TOOL_REQUEST, Message.Intent.CONNECTOR_READ})
 
 
 class IntentParseError(Exception):
@@ -64,9 +66,9 @@ def parse_intent(raw_text):
         raise IntentParseError(f"unrecognized intent value: {intent!r}")
 
     tool_name = payload["tool_name"]
-    if intent == Message.Intent.TOOL_REQUEST:
+    if intent in _NAMED_TOOL_INTENTS:
         if not isinstance(tool_name, str) or not tool_name.strip():
-            raise IntentParseError("tool_request intent requires a non-empty tool_name")
+            raise IntentParseError(f"{intent} intent requires a non-empty tool_name")
     elif tool_name is not None:
         raise IntentParseError(f"tool_name must be null for intent {intent!r}")
 

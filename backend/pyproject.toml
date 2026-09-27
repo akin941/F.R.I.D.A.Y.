@@ -388,6 +388,8 @@ forbidden_modules = ["config", "accounts", "assistant", "knowledge", "tasks", "a
 ignore_imports = [
     "connectors.tests.** -> accounts.**",
     "connectors.tests.** -> approvals.**",
+    "connectors.tests.** -> assistant.**",
+    "connectors.tests.** -> integrations.**",
 ]
 
 # deploys may import the same set plus connectors (GitHub title/CI reads

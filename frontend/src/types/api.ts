@@ -116,7 +116,19 @@ export type MessageIntent =
   | "memory_query"
   | "knowledge_query"
   | "task_draft"
-  | "tool_request";
+  | "tool_request"
+  // Phase 5 branch 4: one connector read this turn.
+  | "connector_read";
+
+// Bookkeeping of one connector read supplied as context for a reply
+// (Phase 5 branch 4) -- never the content itself.
+export interface ApiConnectorRead {
+  tool: string;
+  source: string;
+  data_class: "firm" | "personal";
+  size: number;
+  truncated: boolean;
+}
 
 export interface ApiConversation {
   id: string;
@@ -126,6 +138,9 @@ export interface ApiConversation {
   created_at: string;
   // One-way (false -> true only): a private conversation feeds no memory.
   private: boolean;
+  // One-way (Phase 5 branch 4): personal-class connector data entered this
+  // conversation, so it only ever runs on providers allowed personal data.
+  personal_data?: boolean;
   // The first message's channel (Phase 4 branch 4 channel badge); null
   // until the conversation has a message.
   origin_channel: MessageChannel | null;
@@ -161,6 +176,8 @@ export interface ApiMessage {
   intent: MessageIntent;
   intent_payload: Record<string, unknown>;
   channel: MessageChannel;
+  // Connector reads supplied as context for this reply (Phase 5 branch 4).
+  connector_reads?: ApiConnectorRead[];
   // The task confirmed from this task-draft message (Task.source_message),
   // or null -- how a reloaded chat knows a draft was already confirmed.
   confirmed_task: string | null;
@@ -178,6 +195,7 @@ export type ChatStreamEvent =
       memories_used: string[];
       chunks_used: string[];
       overlay_source_workspaces: Record<string, string>;
+      connector_reads?: ApiConnectorRead[];
     }
   | { type: "error"; error_type: string }
   // Non-terminal, optional, emitted once (only for a task_draft/tool_request

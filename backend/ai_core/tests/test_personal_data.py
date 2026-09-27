@@ -414,3 +414,25 @@ def test_seed_never_flips_an_existing_row(monkeypatch):
     call_command("set_provider_personal_data", "ollama-local", "--deny")
     call_command("seed_ai_defaults")
     assert ModelProvider.objects.get(name="ollama-local").personal_data_allowed is False
+
+
+# --- pre-flight (Phase 5 branch 4, D5) ---
+
+
+def test_preflight_mirrors_selection_without_a_call_or_a_usage_row():
+    gateway = InferenceGateway()
+    assert gateway.has_eligible_provider(purpose="chat", personal_data=True) is False
+    ModelProvider.objects.create(
+        name="cloud", provider_type=ModelProvider.ProviderType.FAKE, model_id="f", priority=0
+    )
+    assert gateway.has_eligible_provider(purpose="chat") is True
+    assert gateway.has_eligible_provider(purpose="chat", personal_data=True) is False
+    ModelProvider.objects.create(
+        name="local",
+        provider_type=ModelProvider.ProviderType.FAKE,
+        model_id="f",
+        priority=1,
+        personal_data_allowed=True,
+    )
+    assert gateway.has_eligible_provider(purpose="chat", personal_data=True) is True
+    assert not ModelUsage.objects.exists()

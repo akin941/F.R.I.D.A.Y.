@@ -44,6 +44,17 @@ def test_seed_creates_router_intent_prompt():
     assert "JSON" in template.active_version.content
 
 
+def test_seed_creates_router_connector_args_prompt():
+    """Phase 5 branch 4 (brief D4): the argument-extraction prompt."""
+    call_command("seed_ai_defaults")
+    call_command("seed_ai_defaults")
+    template = PromptTemplate.objects.get(name="jarvis_router_connector_args")
+    assert template.purpose == "router.connector_args"
+    assert template.active_version.version == 1
+    assert "JSON" in template.active_version.content
+    assert PromptVersion.objects.filter(template=template).count() == 1
+
+
 def test_seed_creates_agent_plan_prompt():
     call_command("seed_ai_defaults")
     template = PromptTemplate.objects.get(name="jarvis_agent_plan")
