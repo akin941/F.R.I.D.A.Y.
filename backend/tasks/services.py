@@ -173,9 +173,8 @@ def _record_outcome_work_log(task, outcome):
     D13): completed or cancelled. Bookkeeping only -- the outcome, the
     date, the task id and its owner-authored (or owner-confirmed) title;
     never the description. Calls `memory.services.record_work_log`
-    directly rather than `tools.work_log.record_tool_outcome`: a task is
-    not a gated tool (no `ApprovalRequest`), and `tools` already imports
-    `tasks` (`tools.purge`), so the reverse edge would be a cycle.
+    directly rather than `tools.work_log.record_tool_outcome`, which is
+    keyed on an `ApprovalRequest`: a task is not a gated tool and has none.
 
     `private` when the task was confirmed from a chat draft in a
     conversation that is private now (ADR-005: its title came out of that

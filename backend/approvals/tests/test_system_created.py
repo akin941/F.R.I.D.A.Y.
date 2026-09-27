@@ -243,22 +243,35 @@ def _is_literal_false(node):
 
 def system_created_violations(source, filename="<string>"):
     """Every place a module passes `system_created` as anything other than
-    the literal `False`: a keyword argument (`f(system_created=...)`) or a
-    dict literal key (`f(**{"system_created": ...})`). Returned as
-    `filename:line` strings."""
+    the literal `False`: a keyword argument (`f(system_created=...)`), a
+    dict literal key (`f(**{"system_created": ...})`), or the name as a
+    string anywhere else -- item assignment, `.update()`, `setattr`,
+    `.get(...)` -- since a dict built up that way and splatted into
+    `create_request(**d)` has no keyword or dict-literal node to match.
+    The only allowed string use is a dict-literal key whose value is the
+    literal `False`. Returned as `filename:line` strings."""
     violations = []
-    for node in ast.walk(ast.parse(source, filename=filename)):
+    tree = ast.parse(source, filename=filename)
+    allowed_keys = set()
+    for node in ast.walk(tree):
         if isinstance(node, ast.keyword) and node.arg == "system_created":
             if not _is_literal_false(node.value):
                 violations.append(f"{filename}:{node.value.lineno}")
         elif isinstance(node, ast.Dict):
             for key, value in zip(node.keys, node.values, strict=True):
-                if (
-                    isinstance(key, ast.Constant)
-                    and key.value == "system_created"
-                    and not _is_literal_false(value)
-                ):
-                    violations.append(f"{filename}:{key.lineno}")
+                if isinstance(key, ast.Constant) and key.value == "system_created":
+                    if _is_literal_false(value):
+                        allowed_keys.add(id(key))
+                    else:
+                        violations.append(f"{filename}:{key.lineno}")
+                        allowed_keys.add(id(key))  # reported once, above
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.Constant)
+            and node.value == "system_created"
+            and id(node) not in allowed_keys
+        ):
+            violations.append(f"{filename}:{node.lineno}")
     return violations
 
 
@@ -312,6 +325,11 @@ def test_approvals_view_passes_the_flag_explicitly_as_false():
         "create_request(system_created=request.data.get('system_created', False))",
         "create_request(**{'system_created': True})",
         "kwargs = {'system_created': is_system}",
+        "d = {}; d['system_created'] = True; create_request(**d)",
+        "d = dict(origin=HUMAN); d.update({'system_created': True})",
+        "d = {}; d.update(system_created=True)",
+        "setattr(options, 'system_created', True)",
+        "create_request(**{k: True for k in ['system_created']})",
     ],
 )
 def test_scanner_catches_violations(source):
@@ -320,7 +338,12 @@ def test_scanner_catches_violations(source):
 
 @pytest.mark.parametrize(
     "source",
-    ["create_request(system_created=False)", "create_request(origin=HUMAN)", "x = {'a': True}"],
+    [
+        "create_request(system_created=False)",
+        "create_request(origin=HUMAN)",
+        "x = {'a': True}",
+        "create_request(**{'system_created': False})",
+    ],
 )
 def test_scanner_allows_the_literal_false(source):
     assert system_created_violations(source) == []
