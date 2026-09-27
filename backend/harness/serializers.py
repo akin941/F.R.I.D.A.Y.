@@ -166,12 +166,15 @@ class HarnessJobSerializer(serializers.ModelSerializer):
     job a curator is actually looking at). Mirrors
     `agents.serializers.AgentSerializer`'s identical light/detail split."""
 
+    repo_name = serializers.CharField(source="repo.name", read_only=True)
+
     class Meta:
         model = HarnessJob
         fields = [
             "id",
             "workspace",
             "repo",
+            "repo_name",
             "goal",
             "agent",
             "sensitivity",

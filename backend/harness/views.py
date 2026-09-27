@@ -151,7 +151,11 @@ class HarnessJobListCreateView(APIView):
         if error is not None:
             return error
         try:
-            jobs = list_jobs(workspace=workspace, actor=request.user).order_by("-created_at")
+            jobs = (
+                list_jobs(workspace=workspace, actor=request.user)
+                .select_related("repo")
+                .order_by("-created_at")
+            )
         except HarnessPermissionDenied as exc:
             return _service_error_response(exc)
         return Response(HarnessJobSerializer(jobs, many=True).data)
