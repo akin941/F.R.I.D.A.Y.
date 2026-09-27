@@ -1,3 +1,4 @@
+import { POLL_FAST_MS, POLL_SLOW_MS } from "@/lib/use-polling";
 import type {
   HarnessAgent,
   HarnessJobFailureReason,
@@ -72,6 +73,27 @@ export const IMPL_TERMINAL_STATUSES: ImplStatus[] = ["succeeded", "failed", "can
 
 export function isImplTerminal(status: ImplStatus | string): boolean {
   return IMPL_TERMINAL_STATUSES.includes(status as ImplStatus);
+}
+
+// Statuses where the job only waits for the owner's gate decision --
+// nothing changes on its own, so a slow refresh is enough.
+export const IMPL_AWAITING_OWNER_STATUSES: ImplStatus[] = ["pending_gate_a", "pending_gate_b"];
+
+/**
+ * Poll cadence for an implementation job in `status`: none once terminal,
+ * slow while it only awaits a gate decision, fast while a container is
+ * actually working (implementing / pending_review / pushing).
+ */
+export function implPollInterval(status: ImplStatus | string): number | null {
+  if (isImplTerminal(status)) return null;
+  if (IMPL_AWAITING_OWNER_STATUSES.includes(status as ImplStatus)) return POLL_SLOW_MS;
+  return POLL_FAST_MS;
+}
+
+/** The fastest cadence any of `statuses` needs (null when all are terminal). */
+export function fastestPollInterval(intervals: (number | null)[]): number | null {
+  const active = intervals.filter((ms): ms is number => ms != null);
+  return active.length > 0 ? Math.min(...active) : null;
 }
 
 // The linear happy path the pipeline stepper walks; `failed`/`cancelled`

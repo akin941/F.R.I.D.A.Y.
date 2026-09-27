@@ -12,18 +12,22 @@ import {
 import {
   GATE_STATUS_LABELS,
   IMPL_STATUS_LABELS,
+  fastestPollInterval,
   harnessFailureReasonLabel,
+  implPollInterval,
   isImplTerminal,
 } from "@/components/harness/labels";
 import { apiGetJson } from "@/lib/api-client";
 import { clickableProps } from "@/lib/keyboard";
+import { usePolling } from "@/lib/use-polling";
 import type { ApiImplementationJob } from "@/types/api";
 
 /**
  * "Uygulama işleri" list + request form. Same data-loading discipline as
  * HarnessJobsView's discovery list: an `activeWorkspaceIdRef` guard drops a
  * response for a workspace the user already switched away from, and the
- * list polls silently every 3s only while some row is non-terminal.
+ * list polls silently only while some row is non-terminal (fast while a
+ * job is working, slow while jobs only await a gate; paused when hidden).
  *
  * `prefill` (set when the user asked for an implementation from a
  * discovery job) opens the form pre-populated; `onPrefillConsumed` lets
@@ -73,14 +77,10 @@ export function ImplementationJobsPanel({
   }, [workspaceId, loadJobs]);
   /* eslint-enable react-hooks/set-state-in-effect */
 
-  useEffect(() => {
-    const hasInFlight = jobs.some((j) => !isImplTerminal(j.status));
-    if (!hasInFlight) return;
-    const interval = setInterval(() => {
-      void loadJobs(workspaceId, { silent: true });
-    }, 3000);
-    return () => clearInterval(interval);
-  }, [jobs, workspaceId, loadJobs]);
+  usePolling(
+    () => void loadJobs(workspaceId, { silent: true }),
+    fastestPollInterval(jobs.map((j) => implPollInterval(j.status))),
+  );
 
   function closeForm() {
     setCreating(false);

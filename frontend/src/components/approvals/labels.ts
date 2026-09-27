@@ -1,4 +1,5 @@
-import { isImplTerminal } from "@/components/harness/labels";
+import { implPollInterval } from "@/components/harness/labels";
+import { POLL_FAST_MS } from "@/lib/use-polling";
 import type { ApiApprovalRequest, ApprovalStatus } from "@/types/api";
 
 export const APPROVAL_STATUS_LABELS: Record<ApprovalStatus, string> = {
@@ -51,14 +52,16 @@ export function decisionConsequence(toolName: string, action: "approve" | "rejec
 }
 
 /**
- * Whether a request's execution may still change on its own, so the
- * approvals view should keep polling. Harness executions report the
- * implementation job's status (non-terminal until succeeded/failed/
- * cancelled); every other tool uses the vault-export vocabulary.
+ * How often the approvals view should refresh for this request's
+ * execution, or null when it can no longer change. Harness executions
+ * report the implementation job's own status: fast while a container is
+ * working, slow while the job merely waits at a gate for a human (it can
+ * sit there for hours), none once terminal. Every other tool uses the
+ * vault-export vocabulary (pending/running -> fast).
  */
-export function isExecutionInFlight(request: ApiApprovalRequest): boolean {
+export function executionPollInterval(request: ApiApprovalRequest): number | null {
   const status = request.execution?.status;
-  if (typeof status !== "string") return false;
-  if (isHarnessTool(request.tool_name)) return !isImplTerminal(status);
-  return status === "pending" || status === "running";
+  if (typeof status !== "string") return null;
+  if (isHarnessTool(request.tool_name)) return implPollInterval(status);
+  return status === "pending" || status === "running" ? POLL_FAST_MS : null;
 }

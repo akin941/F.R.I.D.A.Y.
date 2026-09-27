@@ -14,10 +14,12 @@ import {
   REVIEW_STATUS_LABELS,
   REVIEW_VERDICT_LABELS,
   harnessFailureReasonLabel,
+  implPollInterval,
   isImplTerminal,
 } from "@/components/harness/labels";
 import { pipelineStepStates, type PipelineStepState } from "@/components/harness/pipeline";
 import { apiGetJson, apiPostJson, ApiError } from "@/lib/api-client";
+import { usePolling } from "@/lib/use-polling";
 import { cn } from "@/lib/utils";
 import type {
   ApiGateSummary,
@@ -118,9 +120,10 @@ function ReviewBlock({ review }: { review: ApiImplementationReview }) {
 }
 
 /**
- * Detail view for one implementation job. Polls silently every 3s while
- * the job is non-terminal (same pattern as HarnessJobDetail/AgentDetail),
- * stopping on its own at succeeded/failed/cancelled. A response for a job
+ * Detail view for one implementation job. Polls silently while the job is
+ * non-terminal -- every 3s while a container is working, every 30s while
+ * it only waits at a gate, paused while the tab is hidden -- and stops on
+ * its own at succeeded/failed/cancelled. A response for a job
  * id this view is no longer showing is discarded (stale-response guard).
  *
  * Trust layering (R2): `diff_summary`, review `summary`/`findings` are
@@ -172,13 +175,7 @@ export function ImplementationJobDetail({
   }, [loadJob]);
   /* eslint-enable react-hooks/set-state-in-effect */
 
-  useEffect(() => {
-    if (!job || isImplTerminal(job.status)) return;
-    const interval = setInterval(() => {
-      void loadJob({ silent: true });
-    }, 3000);
-    return () => clearInterval(interval);
-  }, [job, loadJob]);
+  usePolling(() => void loadJob({ silent: true }), job ? implPollInterval(job.status) : null);
 
   async function handleCancel() {
     setCancelling(true);

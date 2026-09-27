@@ -194,6 +194,26 @@ describe("ImplementationJobDetail", () => {
     expect(calls).toBe(callsAtTerminal);
   });
 
+  it("polls only slowly while the job waits at a gate", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    let calls = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        calls += 1;
+        return jsonResponse(implDetail({ status: "pending_gate_a" }));
+      }),
+    );
+
+    renderDetail();
+    expect(await screen.findByText("Plan onayı bekleniyor (Kapı A)")).toBeInTheDocument();
+
+    await vi.advanceTimersByTimeAsync(29_000);
+    expect(calls).toBe(1);
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(calls).toBe(2);
+  });
+
   it("asks for confirmation before cancelling, and can back out", async () => {
     const fetchMock = vi.fn<(input: string, init?: RequestInit) => Promise<Response>>(async () =>
       jsonResponse(implDetail()),

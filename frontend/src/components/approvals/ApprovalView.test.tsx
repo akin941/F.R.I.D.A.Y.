@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { ApprovalView } from "@/components/approvals/ApprovalView";
 import type {
@@ -368,27 +368,52 @@ describe("ApprovalView", () => {
     expect(screen.getAllByText("Bu istek için özet bilgisi yok.")).toHaveLength(2);
   });
 
-  it("keeps polling while a harness execution is non-terminal, then stops", async () => {
+  function harnessExecution(status: string) {
+    return approvalRequest({
+      tool_name: "harness_implement",
+      status: "approved",
+      decided_by: "u1",
+      execution: {
+        status: status as "implementing",
+        failure_reason: "",
+        branch_name: "b",
+      },
+    });
+  }
+
+  it("polls fast while a harness job is working, then stops once terminal", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     let callCount = 0;
     vi.stubGlobal(
       "fetch",
       vi.fn(async () => {
         callCount += 1;
-        return jsonResponse([
-          approvalRequest({
-            tool_name: "harness_implement",
-            status: "approved",
-            decided_by: "u1",
-            execution: {
-              // pending_gate_b is not a vault-export status -- the old
-              // pending/running check would never have polled on it.
-              status: callCount < 3 ? "pending_gate_b" : "succeeded",
-              failure_reason: "",
-              branch_name: "b",
-            },
-          }),
-        ]);
+        // `implementing` is not a vault-export status -- the old
+        // pending/running check would never have polled on it.
+        return jsonResponse([harnessExecution(callCount < 3 ? "implementing" : "succeeded")]);
+      }),
+    );
+
+    render(<ApprovalView />);
+    expect(await screen.findByText("İş durumu: Uygulanıyor")).toBeInTheDocument();
+
+    await vi.advanceTimersByTimeAsync(3000);
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(await screen.findByText("İş durumu: Tamamlandı")).toBeInTheDocument();
+    const callsAtTerminal = callCount;
+
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(callCount).toBe(callsAtTerminal);
+  });
+
+  it("polls only slowly while a harness job just waits at a gate for the owner", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    let callCount = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        callCount += 1;
+        return jsonResponse([harnessExecution("pending_gate_b")]);
       }),
     );
 
@@ -396,14 +421,44 @@ describe("ApprovalView", () => {
     expect(
       await screen.findByText("İş durumu: Gönderim onayı bekleniyor (Kapı B)"),
     ).toBeInTheDocument();
+    expect(callCount).toBe(1);
 
-    await vi.advanceTimersByTimeAsync(3000);
-    await vi.advanceTimersByTimeAsync(3000);
-    expect(await screen.findByText("İş durumu: Tamamlandı")).toBeInTheDocument();
-    const callsAtTerminal = callCount;
+    // No 3s fast polling while nothing can change without a human...
+    await vi.advanceTimersByTimeAsync(29_000);
+    expect(callCount).toBe(1);
+    // ...but a slow refresh still picks up a decision made elsewhere.
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(callCount).toBe(2);
+  });
 
-    await vi.advanceTimersByTimeAsync(9000);
-    expect(callCount).toBe(callsAtTerminal);
+  it("pauses polling while the tab is hidden and refreshes on return", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    let callCount = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        callCount += 1;
+        return jsonResponse([harnessExecution("implementing")]);
+      }),
+    );
+    const setHidden = (hidden: boolean) => {
+      Object.defineProperty(document, "hidden", { configurable: true, get: () => hidden });
+      document.dispatchEvent(new Event("visibilitychange"));
+    };
+
+    try {
+      render(<ApprovalView />);
+      await screen.findByText("İş durumu: Uygulanıyor");
+
+      act(() => setHidden(true));
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(callCount).toBe(1);
+
+      act(() => setHidden(false));
+      await waitFor(() => expect(callCount).toBe(2));
+    } finally {
+      setHidden(false);
+    }
   });
 
   it("scrolls to and highlights the card named by ?request=<id>", async () => {
