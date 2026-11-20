@@ -314,6 +314,22 @@ def test_one_model_usage_per_consolidation_call_without_text(git, personal, llm)
     assert "Distinctive" not in json.dumps(usage.context_report)
 
 
+def test_extraction_jobs_do_not_outlive_the_episode_ttl(git, personal, firm, settings):
+    from memory.ingestion.services import purge_stale_extraction_jobs
+
+    old_personal = waiting_job(personal, [candidate(git, 1)])
+    old_firm = waiting_job(firm, [candidate(git, 2)])
+    fresh = waiting_job(personal, [candidate(git, 3)])
+    EpisodeExtractionJob.objects.filter(pk=old_personal.pk).update(
+        created_at=timezone.now() - timedelta(days=settings.MEMORY_EPISODE_TTL_DAYS_PERSONAL + 1)
+    )
+    EpisodeExtractionJob.objects.filter(pk=old_firm.pk).update(
+        created_at=timezone.now() - timedelta(days=settings.MEMORY_EPISODE_TTL_DAYS_FIRM + 1)
+    )
+    assert purge_stale_extraction_jobs() == 2
+    assert list(EpisodeExtractionJob.objects.values_list("pk", flat=True)) == [fresh.pk]
+
+
 def test_dispatch_runs_inline_in_eager_mode_and_swallows_broker_errors(settings, personal):
     with mock.patch("memory.ingestion.tasks.consolidate_workspace_task.delay") as delay:
         consolidation.dispatch_consolidation(personal.id)

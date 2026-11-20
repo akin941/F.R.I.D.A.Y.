@@ -151,9 +151,7 @@ def test_restore_leaves_a_privacy_locked_memory_archived(owner, world):
     services.forget_source(world["git"], actor=owner, channel=CHANNEL_WEB)
     Memory.objects.filter(pk=world["rows"]["git_approved"].pk).update(privacy_locked=True)
     services.restore_source(world["git"], actor=owner, channel=CHANNEL_WEB)
-    assert (
-        Memory.objects.get(pk=world["rows"]["git_approved"].pk).status == Memory.Status.ARCHIVED
-    )
+    assert Memory.objects.get(pk=world["rows"]["git_approved"].pk).status == Memory.Status.ARCHIVED
     assert Memory.objects.get(pk=world["rows"]["git_firm"].pk).status == Memory.Status.APPROVED
 
 

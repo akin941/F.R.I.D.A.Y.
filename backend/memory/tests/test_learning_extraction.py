@@ -229,7 +229,9 @@ def test_personal_data_with_only_cloud_providers_fails_closed(sources, personal,
 
 def test_provenance_keeps_only_verbatim_owner_quotes(git, personal, llm):
     fake_provider()
-    first = episode(git, owner_text=OWNER_LINE, context_text="The reviewer approved the plan quickly")
+    first = episode(
+        git, owner_text=OWNER_LINE, context_text="The reviewer approved the plan quickly"
+    )
     second = episode(git, owner_text="Write the runbook for the hook relay this week")
     llm.overrides["memory.episode_extraction"] = candidates_reply(
         [
