@@ -16,7 +16,9 @@ in their own `authentication_classes`, ordered BEFORE
 `DeviceJWTAuthentication`; the facade views use `FacadeTokenAuthentication`
 alone. `HookTokenAuthentication` (Phase 8A D6) is the same check for the
 Claude Code hook relay and accepts only `hook`-kind tokens; only the
-hook-event ingest view uses it. DRF's authentication loop stops at the first
+hook-event ingest view uses it. `NodeCredentialAuthentication` (Phase 9
+spike S9.0) accepts only `jnd_` Friday Node secrets -> CHANNEL_NODE; only
+the node credential rotation view uses it. DRF's authentication loop stops at the first
 authenticator that raises `AuthenticationFailed` — `JWTAuthentication`
 raises `InvalidToken` (an `AuthenticationFailed` subclass) for any
 non-JWT-shaped string, including a `jpat_...` token, so if it ran first on
@@ -41,6 +43,7 @@ from audit.services import record_audit
 from core.channels import (
     CHANNEL_CLI,
     CHANNEL_HOOK,
+    CHANNEL_NODE,
     CHANNEL_OPENAI,
     ChannelPrincipal,
     WebSessionPrincipal,
@@ -222,3 +225,59 @@ class DeviceJWTAuthentication(JWTAuthentication):
             raise AuthenticationFailed("This device is no longer trusted.", code="device_untrusted")
         touch_device(device, client_ip=trusted_client_ip(request))
         return user, WebSessionPrincipal(device_id=str(device.pk))
+
+
+class NodeCredentialAuthentication(BaseAuthentication):
+    """A Friday Node's credential (Phase 9 spike S9.0, ADR-013 decision 2):
+    `Authorization: Bearer jnd_...` of a usable `kind=node` device of the
+    active, human owner whose kill switch is released
+    (`accounts.devices.authenticate_node_secret`, which audits failures under
+    the PAT flood cap). Sets `request.auth` to a
+    `ChannelPrincipal(channel=CHANNEL_NODE, bound_workspace_id=<owner's
+    personal workspace>, token_id=<device id>)` -- low-trust, never web.
+
+    Used by exactly one DRF view, the node credential rotation endpoint
+    (pinned by config/tests/test_node_credential_surfaces.py); the node
+    WebSocket handshake calls the service directly. Every other
+    authenticator refuses a node secret (not a JWT -> 401; not a PAT
+    prefix -> falls through), and this one ignores every other credential
+    shape, so a web session or PAT on the rotate endpoint is unauthenticated
+    (401)."""
+
+    def authenticate_header(self, request):
+        return "Bearer"
+
+    def authenticate(self, request):
+        from accounts.devices import (
+            NODE_SECRET_PREFIX,
+            NodeCredentialRejected,
+            authenticate_node_secret,
+        )
+        from workspaces.models import Workspace
+
+        header = request.headers.get("Authorization", "")
+        scheme, _, raw_secret = header.partition(" ")
+        if scheme.lower() != "bearer" or not raw_secret.startswith(NODE_SECRET_PREFIX):
+            return None  # not a node-shaped credential
+        try:
+            credential = authenticate_node_secret(
+                raw_secret=raw_secret, client_ip=trusted_client_ip(request), surface="api"
+            )
+        except NodeCredentialRejected as exc:
+            raise AuthenticationFailed("Invalid, expired or revoked node credential.") from exc
+        device = credential.device
+        workspace_id = (
+            Workspace.objects.filter(owner=device.user, type=Workspace.Type.PERSONAL)
+            .values_list("pk", flat=True)
+            .first()
+        )
+        if workspace_id is None:
+            raise AuthenticationFailed("Invalid, expired or revoked node credential.")
+        return (
+            device.user,
+            ChannelPrincipal(
+                channel=CHANNEL_NODE,
+                bound_workspace_id=str(workspace_id),
+                token_id=str(device.pk),
+            ),
+        )

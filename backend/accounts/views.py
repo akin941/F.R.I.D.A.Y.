@@ -13,8 +13,14 @@ from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.views import TokenRefreshView
 
 from accounts import devices
-from accounts.authentication import TOKEN_PREFIX, hash_token
-from accounts.models import DevicePairingCode, PersonalAccessToken, TrustedDevice, User
+from accounts.authentication import TOKEN_PREFIX, NodeCredentialAuthentication, hash_token
+from accounts.models import (
+    DevicePairingCode,
+    NodeKillSwitch,
+    PersonalAccessToken,
+    TrustedDevice,
+    User,
+)
 from accounts.serializers import (
     DeviceRefreshSerializer,
     DeviceSessionStartSerializer,
@@ -30,7 +36,7 @@ from accounts.serializers import (
 from audit.services import record_audit
 from core.channels import request_device_id
 from core.client_ip import trusted_client_ip
-from core.permissions import IsOwner, IsWebChannel
+from core.permissions import IsNodeChannel, IsOwner, IsWebChannel
 from core.throttling import EnrollGlobalThrottle, EnrollPerSourceThrottle, ScopedRateThrottle
 from workspaces.models import Workspace, WorkspaceMember
 
@@ -230,16 +236,109 @@ class PairingCodeCreateView(APIView):
         issuing_device = TrustedDevice.objects.filter(
             pk=request_device_id(request), user=request.user
         ).first()
-        raw, code = devices.issue_pairing_code(
-            owner=request.user,
-            kind=serializer.validated_data["kind"],
-            issued_via=DevicePairingCode.IssuedVia.WEB,
-            issued_by_device=issuing_device,
-        )
+        try:
+            raw, code = devices.issue_pairing_code(
+                owner=request.user,
+                kind=serializer.validated_data["kind"],
+                issued_via=DevicePairingCode.IssuedVia.WEB,
+                issued_by_device=issuing_device,
+                device_kind=serializer.validated_data["device_kind"],
+            )
+        except devices.NodeKillSwitchEngaged:
+            return Response(
+                {
+                    "detail": "The node kill switch is engaged; release it before pairing a node.",
+                    "code": "conflict",
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
         return Response(
-            {"code": raw, "kind": code.kind, "expires_at": code.expires_at},
+            {
+                "code": raw,
+                "kind": code.kind,
+                "device_kind": code.device_kind,
+                "expires_at": code.expires_at,
+            },
             status=status.HTTP_201_CREATED,
         )
+
+
+class NodeCredentialRotateView(APIView):
+    """`POST /api/v1/auth/nodes/credential/rotate` (Phase 9 D1) -- a Friday
+    Node rotates its `jnd_` secret without re-pairing. Authenticated ONLY by
+    the current node secret (`NodeCredentialAuthentication`, plus
+    `IsNodeChannel` so no other principal -- not even a forced web session
+    -- gets through). Returns the new secret exactly once; the previous one
+    stays valid for NODE_ROTATION_GRACE_SECONDS or until the new one is
+    first used. A rotation presented with the previous secret is 403."""
+
+    authentication_classes = [NodeCredentialAuthentication]
+    permission_classes = [IsAuthenticated, IsNodeChannel]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "node_rotate"
+
+    def post(self, request):
+        _, _, raw_secret = request.headers.get("Authorization", "").partition(" ")
+        try:
+            device, new_secret = devices.rotate_node_secret(
+                raw_secret=raw_secret, client_ip=trusted_client_ip(request)
+            )
+        except devices.NodeCredentialRejected:
+            return Response(
+                {
+                    "detail": "Invalid, expired or revoked node credential.",
+                    "code": "not_authenticated",
+                },
+                status=status.HTTP_401_UNAUTHORIZED,
+            )
+        except devices.NodeRotationRefused:
+            return Response(
+                {
+                    "detail": "Rotate with the current node secret.",
+                    "code": "permission_denied",
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        return Response(
+            {
+                "node_id": str(device.pk),
+                "node_secret": new_secret,  # only ever appears in this response
+                "secret_issued_at": device.secret_issued_at,
+                "previous_valid_until": device.previous_secret_valid_until,
+                "credential_expires_at": device.credential_expires_at(),
+                "rotate_after_days": settings.NODE_CREDENTIAL_ROTATE_AFTER_DAYS,
+            }
+        )
+
+
+class NodeKillSwitchView(APIView):
+    """`GET/POST/DELETE /api/v1/auth/nodes/kill-switch` (Phase 9 D1) -- the
+    owner's node kill switch: state, engage, release. Web channel, owner,
+    human only. Engaging closes every live node socket of the owner and
+    refuses every node authentication and node pairing until released;
+    releasing restores the nodes without re-pairing."""
+
+    permission_classes = _OWNER_WEB_PERMISSIONS
+
+    def _device(self, request):
+        return TrustedDevice.objects.filter(
+            pk=request_device_id(request), user=request.user
+        ).first()
+
+    def get(self, request):
+        return Response(devices.node_kill_switch_state(request.user))
+
+    def post(self, request):
+        devices.engage_node_kill_switch(
+            owner=request.user, via=NodeKillSwitch.Via.WEB, device=self._device(request)
+        )
+        return Response(devices.node_kill_switch_state(request.user))
+
+    def delete(self, request):
+        devices.release_node_kill_switch(
+            owner=request.user, via=NodeKillSwitch.Via.WEB, device=self._device(request)
+        )
+        return Response(devices.node_kill_switch_state(request.user))
 
 
 def _remote_key_state(owner):

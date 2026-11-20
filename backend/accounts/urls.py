@@ -9,6 +9,8 @@ from accounts.views import (
     EnrollView,
     LogoutView,
     MeView,
+    NodeCredentialRotateView,
+    NodeKillSwitchView,
     PairingCodeCreateView,
     PersonalAccessTokenListCreateView,
     PersonalAccessTokenRevokeView,
@@ -37,6 +39,14 @@ urlpatterns = [
         name="auth-devices-revoke",
     ),
     path("pairing-codes", PairingCodeCreateView.as_view(), name="auth-pairing-codes"),
+    # Phase 9 D1: Friday Node credential rotation (node secret only) and the
+    # owner's node kill switch (web, owner only).
+    path(
+        "nodes/credential/rotate",
+        NodeCredentialRotateView.as_view(),
+        name="auth-nodes-credential-rotate",
+    ),
+    path("nodes/kill-switch", NodeKillSwitchView.as_view(), name="auth-nodes-kill-switch"),
     path("remote-key", RemoteAccessKeyView.as_view(), name="auth-remote-key"),
     path("remote-key/revoke", RemoteAccessKeyRevokeView.as_view(), name="auth-remote-key-revoke"),
     path("tokens", PersonalAccessTokenListCreateView.as_view(), name="auth-tokens"),

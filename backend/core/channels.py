@@ -28,6 +28,12 @@ CHANNEL_OPENAI = "openai"
 # ingest endpoint. Can write episodes through the ingestion port and read
 # nothing.
 CHANNEL_HOOK = "hook"
+# Low-trust: a Friday Node's `jnd_` credential (a `kind=node`
+# TrustedDevice, Phase 9 spike S9.0), produced only by
+# `accounts.authentication.NodeCredentialAuthentication`. Reaches only the
+# node credential rotation endpoint and (through `nodes`) the node
+# WebSocket. Never mints a JWT, never decides or confirms anything.
+CHANNEL_NODE = "node"
 CHANNEL_TELEGRAM = "telegram"  # low-trust: relayed, no direct request at all
 # Not a request channel: machine-originated actions (agent engine, harness
 # gates, sweeps) that record "which channel" in audit metadata or on
@@ -59,9 +65,10 @@ class ChannelPrincipal:
     `PersonalAccessTokenAuthentication` / `FacadeTokenAuthentication`).
 
     `channel` is CHANNEL_CLI, CHANNEL_OPENAI or CHANNEL_HOOK (the token's
-    `kind`);
+    `kind`), or CHANNEL_NODE (a node credential);
     `token_id` names the PersonalAccessToken, for per-token limits (the
-    facade's throttle and stream cap). CHANNEL_TELEGRAM never appears here --
+    facade's throttle and stream cap) -- for CHANNEL_NODE it names the
+    node's TrustedDevice. CHANNEL_TELEGRAM never appears here --
     Telegram has no direct request/response cycle with our API at all (it's
     relayed via a webhook + Celery task), so there is no request to
     authenticate as Telegram in the first place.

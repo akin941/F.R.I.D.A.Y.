@@ -283,6 +283,10 @@ REST_FRAMEWORK = {
         # Phase 8A branch 3: Claude Code hook-event batches from
         # `friday-hook`, per hook token (one POST per hook invocation).
         "hook_ingest": env("HOOK_INGEST_RATE", default="240/min"),
+        # Phase 9 branch 1: node credential rotation, per node owner (a node
+        # rotates every NODE_CREDENTIAL_ROTATE_AFTER_DAYS; this only bounds
+        # a stolen secret hammering the endpoint).
+        "node_rotate": env("NODE_ROTATE_RATE", default="10/hour"),
     },
 }
 
@@ -326,6 +330,18 @@ PAT_MAX_TTL_DAYS = env.int("PAT_MAX_TTL_DAYS", default=365)
 # A device unused for this long can no longer authenticate or mint a
 # session (re-enroll it).
 DEVICE_IDLE_EXPIRY_DAYS = env.int("DEVICE_IDLE_EXPIRY_DAYS", default=90)
+# Friday Node credentials (Phase 9 spike S9.0, ADR-013 decision 2): a
+# `kind=node` TrustedDevice holds a `jnd_` secret in the Mac's Keychain and
+# never mints a JWT. No browser idle expiry; instead:
+# - a hard age cap counted from the last rotation (refused afterwards);
+NODE_CREDENTIAL_MAX_AGE_DAYS = env.int("NODE_CREDENTIAL_MAX_AGE_DAYS", default=90)
+# - the rotation age the server advertises to the node (`hello.ack`);
+NODE_CREDENTIAL_ROTATE_AFTER_DAYS = env.int("NODE_CREDENTIAL_ROTATE_AFTER_DAYS", default=30)
+# - a node with no successful connection for this long is expired;
+NODE_IDLE_EXPIRY_DAYS = env.int("NODE_IDLE_EXPIRY_DAYS", default=30)
+# - after a rotation the previous secret stays valid this long, or until the
+#   new secret is first used, whichever comes first.
+NODE_ROTATION_GRACE_SECONDS = env.int("NODE_ROTATION_GRACE_SECONDS", default=600)
 # PIN pairing codes are accepted only from these networks (LAN gating):
 # loopback, RFC 1918, IPv6 ULA and the CGNAT range Tailscale uses. Strong
 # codes and the remote key work from any network. Defense in depth, not the

@@ -2,7 +2,7 @@
 
 from rest_framework.permissions import BasePermission
 
-from core.channels import CHANNEL_WEB, request_channel
+from core.channels import CHANNEL_NODE, CHANNEL_WEB, request_channel
 
 
 class IsWebChannel(BasePermission):
@@ -18,6 +18,18 @@ class IsWebChannel(BasePermission):
 
     def has_permission(self, request, view):
         return request_channel(request) == CHANNEL_WEB
+
+
+class IsNodeChannel(BasePermission):
+    """Only a Friday Node credential (`request_channel` == CHANNEL_NODE,
+    Phase 9 D1). Guards the node's own surfaces, so a web session (even a
+    force-authenticated one) or a PAT never reaches them."""
+
+    message = "This endpoint only accepts a Friday Node credential."
+    code = "channel_forbidden"
+
+    def has_permission(self, request, view):
+        return request_channel(request) == CHANNEL_NODE
 
 
 class IsOwner(BasePermission):

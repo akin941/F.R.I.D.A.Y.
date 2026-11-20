@@ -20,16 +20,23 @@ from accounts.authentication import (
     DeviceJWTAuthentication,
     FacadeTokenAuthentication,
     HookTokenAuthentication,
+    NodeCredentialAuthentication,
     PersonalAccessTokenAuthentication,
     hash_token,
 )
-from accounts.devices import enroll_device, issue_pairing_code, issue_session_tokens
-from accounts.models import DevicePairingCode, PersonalAccessToken
+from accounts.devices import (
+    enroll_device,
+    enroll_node_device,
+    issue_pairing_code,
+    issue_session_tokens,
+)
+from accounts.models import DevicePairingCode, PersonalAccessToken, TrustedDevice
 from accounts.services import register_user
 from approvals.models import ApprovalRequest
 from core.channels import (
     CHANNEL_CLI,
     CHANNEL_HOOK,
+    CHANNEL_NODE,
     CHANNEL_OPENAI,
     CHANNEL_UNKNOWN,
     CHANNEL_WEB,
@@ -49,6 +56,7 @@ KNOWN_AUTHENTICATORS = {
     PersonalAccessTokenAuthentication: CHANNEL_CLI,
     FacadeTokenAuthentication: CHANNEL_OPENAI,
     HookTokenAuthentication: CHANNEL_HOOK,
+    NodeCredentialAuthentication: CHANNEL_NODE,
 }
 
 
@@ -159,6 +167,22 @@ def test_cli_pat_is_refused_by_the_facade_authenticator(owner, workspace):
     )
     with pytest.raises(PermissionDenied):
         _authenticate(FacadeTokenAuthentication, f"Bearer {raw}")
+
+
+def test_node_secret_yields_node_never_web(owner, workspace):
+    raw, _ = issue_pairing_code(
+        owner=owner,
+        kind=DevicePairingCode.Kind.PIN,
+        issued_via=DevicePairingCode.IssuedVia.MANAGEMENT_COMMAND,
+        device_kind=TrustedDevice.Kind.NODE,
+    )
+    device, secret = enroll_node_device(raw_code=raw, node_name="Mac", client_ip="10.0.0.2")
+    request = _authenticate(NodeCredentialAuthentication, f"Bearer {secret}")
+    assert request.user == owner
+    assert request_channel(request) == CHANNEL_NODE
+    assert request.auth == ChannelPrincipal(
+        channel=CHANNEL_NODE, bound_workspace_id=str(workspace.pk), token_id=str(device.pk)
+    )
 
 
 @pytest.mark.parametrize(
