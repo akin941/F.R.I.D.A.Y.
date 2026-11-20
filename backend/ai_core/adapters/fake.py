@@ -12,6 +12,7 @@ from ai_core.adapters.base import (
     SynthesizeAdapterResult,
     TranscribeAdapterResult,
 )
+from ai_core.audio import silent_wav, wav_seconds_or_zero
 
 FAKE_RESPONSE = "Merhaba, ben Friday. MVP 1 gateway üzerinden çalışıyorum."
 
@@ -23,9 +24,12 @@ FAKE_RESPONSE = "Merhaba, ben Friday. MVP 1 gateway üzerinden çalışıyorum."
 # hit a real model). `audio_seconds` is a fixed fake duration so the
 # gateway's cost/observability recording has a non-zero value to store.
 FAKE_TRANSCRIPT = "Bu, sahte adaptörün ürettiği örnek bir çevrim yazısıdır."
-FAKE_AUDIO_BYTES = b"FAKE-AUDIO"
-FAKE_AUDIO_CONTENT_TYPE = "audio/wav"
 FAKE_AUDIO_SECONDS = 1.5
+# Phase 6 D3: the fake TTS output is a real (silent) 16 kHz mono PCM16 WAV,
+# so callers that validate TTS output (the voice endpoints, branch 2) accept
+# it exactly as they would a real speech server's.
+FAKE_AUDIO_BYTES = silent_wav(FAKE_AUDIO_SECONDS)
+FAKE_AUDIO_CONTENT_TYPE = "audio/wav"
 
 # Fixed, small dimension for the fake embedding provider (MVP 3 §1) — chosen
 # purely for fast test fixtures. It does not need to match any real
@@ -255,12 +259,16 @@ class FakeAdapter(BaseAdapter):
             vectors=vectors, input_tokens=input_tokens, raw_usage={"fake": True}
         )
 
-    def transcribe(self, audio, *, content_type="", purpose=""):
+    def transcribe(self, audio, *, content_type="", params=None, purpose=""):
+        # A valid WAV reports its real header duration (like the real
+        # adapter, D3); anything else keeps the fixed fake duration.
+        seconds = wav_seconds_or_zero(audio) or FAKE_AUDIO_SECONDS
         return TranscribeAdapterResult(
             text=FAKE_TRANSCRIPT,
-            audio_seconds=FAKE_AUDIO_SECONDS,
+            audio_seconds=seconds,
             output_tokens=self.estimate_tokens(FAKE_TRANSCRIPT),
             raw_usage={"fake": True},
+            language=(params or {}).get("language", ""),
         )
 
     def synthesize(self, text, *, params=None, purpose=""):

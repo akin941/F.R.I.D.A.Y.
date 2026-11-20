@@ -616,6 +616,7 @@ def fake_stt_provider():
         provider_type=ModelProvider.ProviderType.FAKE,
         capability=ModelProvider.Capability.STT,
         model_id="fake-stt-1",
+        personal_data_allowed=True,
         priority=0,
     )
 
@@ -627,6 +628,7 @@ def fake_tts_provider():
         provider_type=ModelProvider.ProviderType.FAKE,
         capability=ModelProvider.Capability.TTS,
         model_id="fake-tts-1",
+        personal_data_allowed=True,
         priority=0,
     )
 
@@ -703,6 +705,7 @@ def test_transcribe_retryable_error_then_success_single_usage(user, workspace):
         provider_type=ModelProvider.ProviderType.OPENAI_COMPATIBLE,
         capability=ModelProvider.Capability.STT,
         model_id="whisper-x",
+        personal_data_allowed=True,
         api_key_env_var="PATH",  # always present; no network happens (mocked)
         priority=10,
     )
@@ -727,6 +730,7 @@ def test_synthesize_permanent_failure_single_usage(user, workspace):
         provider_type=ModelProvider.ProviderType.OPENAI_COMPATIBLE,
         capability=ModelProvider.Capability.TTS,
         model_id="piper-x",
+        personal_data_allowed=True,
         api_key_env_var="PATH",
         priority=10,
     )

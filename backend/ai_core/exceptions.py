@@ -20,6 +20,20 @@ class GatewayError(FridayError):
         super().__init__(message or error_type)
 
 
+class BudgetExceeded(GatewayError):
+    """A configured `AIBudget` cap refused the call before any provider was
+    selected (Phase 6 A3). Not retryable: the window must roll over or the
+    owner must raise the cap. `budget`/`window` name which cap tripped
+    (`"daily"`, `"monthly"` or `"session"`) -- no amounts, no content."""
+
+    def __init__(self, budget="", window=""):
+        self.budget = budget
+        self.window = window
+        super().__init__(
+            "budget_exceeded", f"AI budget {budget!r} ({window}) exhausted", retryable=False
+        )
+
+
 class NoProviderAvailable(GatewayError):
     def __init__(self, message="No active LLM provider is available"):
         # No provider configured/active is itself a transient operational

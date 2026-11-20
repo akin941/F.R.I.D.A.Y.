@@ -425,8 +425,60 @@ AI_UNTIERED_PURPOSES = frozenset(
         "harness.discovery",
         "harness.implementation",
         "harness.review",
+        # speech (Phase 6 D5): capability, not tier, selects audio providers
+        "voice.stt",
+        "voice.tts",
     }
 )
+
+# --- Gateway budgets (Phase 6 A3, ADR-003 amendment 2026-11-20) ---
+# Seed values for the `audio` ai_core.AIBudget row (`seed_ai_defaults`
+# creates it once; afterwards the owner edits the row in the admin, and a
+# reseed never overwrites it). The budget covers AI_AUDIO_PURPOSES; local
+# speech providers cost 0 and never trip it. Empty = no cap for that window.
+AI_AUDIO_PURPOSES = ("voice.stt", "voice.tts")
+AI_BUDGET_AUDIO_MONTHLY_USD = env("AI_BUDGET_AUDIO_MONTHLY_USD", default="20")
+AI_BUDGET_AUDIO_SESSION_USD = env("AI_BUDGET_AUDIO_SESSION_USD", default="1")
+AI_BUDGET_AUDIO_DAILY_USD = env("AI_BUDGET_AUDIO_DAILY_USD", default="")
+
+# --- Voice / speech gateway (Phase 6 branch 1, ADR-011) ---
+# Utterance cap (D2/D3): 30 s of 16 kHz mono PCM16 = 960 KB, below Django's
+# 2.5 MB in-memory upload threshold, so audio never touches disk.
+VOICE_MAX_UTTERANCE_SECONDS = env.int("VOICE_MAX_UTTERANCE_SECONDS", default=30)
+# TTS caps (D3/D7): text per /voice/speech request and the synthesized
+# audio's maximum duration (longer output is rejected, never passed on).
+VOICE_TTS_MAX_CHARS = env.int("VOICE_TTS_MAX_CHARS", default=400)
+VOICE_TTS_MAX_SECONDS = env.int("VOICE_TTS_MAX_SECONDS", default=60)
+# STT language hint passed as `params["language"]` by the voice app (Q7);
+# "" = provider auto-detect.
+VOICE_STT_LANGUAGE = env("VOICE_STT_LANGUAGE", default="tr")
+# Default TTS voice for a provider with no route/provider-specific voice.
+VOICE_TTS_VOICE = env("VOICE_TTS_VOICE", default="tr_TR-dfki-medium")
+# A2: language -> provider row name + voice (+ optional response_format /
+# pcm_sample_rate). The routed provider is used only if it is eligible
+# (active, keyed, personal_data_allowed); otherwise the gateway falls back
+# to priority order among eligible rows. Switching `tr` to OpenRouter after
+# the branch-3a listening test is VOICE_TTS_ROUTE_TR_PROVIDER=openrouter-tts
+# plus the owner's d2 toggle on that row.
+VOICE_TTS_ROUTES = {
+    "tr": {
+        "provider": env("VOICE_TTS_ROUTE_TR_PROVIDER", default="voice-tts-local"),
+        "voice": env("VOICE_TTS_ROUTE_TR_VOICE", default="tr_TR-dfki-medium"),
+    },
+    "en": {
+        "provider": env("VOICE_TTS_ROUTE_EN_PROVIDER", default="voice-tts-local"),
+        "voice": env("VOICE_TTS_ROUTE_EN_VOICE", default="en_US-lessac-medium"),
+    },
+}
+# Per-provider TTS defaults (voice id, wire format). OpenRouter's
+# /audio/speech returns `pcm` or `mp3` only (spike A1); the adapter wraps
+# PCM into WAV.
+VOICE_TTS_PROVIDER_PARAMS = {
+    "openrouter-tts": {
+        "voice": env("OPENROUTER_TTS_VOICE", default="alloy"),
+        "response_format": "pcm",
+    },
+}
 
 # --- Knowledge/RAG (MVP 3) ---
 

@@ -8,10 +8,26 @@ pricing/priority edits made in the admin.
 """
 
 import os
+from decimal import Decimal, InvalidOperation
 
-from django.core.management.base import BaseCommand
+from django.conf import settings
+from django.core.management.base import BaseCommand, CommandError
 
-from ai_core.models import ModelProvider, ModelTier, PromptTemplate, PromptVersion
+from ai_core.models import AIBudget, ModelProvider, ModelTier, PromptTemplate, PromptVersion
+
+
+def _usd_or_none(value):
+    """A budget setting ("20", "1.5", "" = no cap) as Decimal or None."""
+    if value in (None, ""):
+        return None
+    try:
+        amount = Decimal(str(value))
+    except InvalidOperation as exc:
+        raise CommandError(f"invalid budget amount {value!r}") from exc
+    if not amount.is_finite() or amount < 0:
+        raise CommandError(f"invalid budget amount {value!r}")
+    return amount
+
 
 FRIDAY_SYSTEM_V1 = (
     "You are Friday OS, a concise and reliable personal AI operating layer. "
@@ -454,6 +470,8 @@ class Command(BaseCommand):
         )
         self._log("fake-embedding-local provider", created)
 
+        self._seed_speech_providers()
+
         if os.environ.get("ANTHROPIC_API_KEY"):
             _, created = ModelProvider.objects.get_or_create(
                 name="anthropic-primary",
@@ -648,6 +666,115 @@ class Command(BaseCommand):
         self._seed_default_tiers()
 
         self.stdout.write(self.style.SUCCESS("seed_ai_defaults completed."))
+
+    def _seed_speech_providers(self):
+        """Phase 6 branch 1 (D4, D5, A1, A3). Audio calls are always
+        personal data, so every audio row the gateway may select must carry
+        `personal_data_allowed=True`; like every flag here it is set on
+        creation only (an existing row keeps the owner's choice)."""
+        for name, capability, model_id in (
+            ("fake-stt-local", ModelProvider.Capability.STT, "fake-stt-1"),
+            ("fake-tts-local", ModelProvider.Capability.TTS, "fake-tts-1"),
+        ):
+            _, created = ModelProvider.objects.get_or_create(
+                name=name,
+                defaults={
+                    "provider_type": ModelProvider.ProviderType.FAKE,
+                    "capability": capability,
+                    "model_id": model_id,
+                    "priority": 0,  # first when AI_FAKE_PROVIDER=true; filtered out otherwise
+                    "is_active": True,
+                    # In-process: nothing leaves the host. Without the flag
+                    # D5 would make every fake audio call NoProviderAvailable
+                    # (plan-review H1); fail-closed tests use their own stub.
+                    "personal_data_allowed": True,
+                },
+            )
+            self._log(f"{name} provider", created)
+
+        if os.environ.get("VOICE_API_KEY"):
+            # The local speech server (speaches, or the deploy/voice/
+            # sidecar) runs natively on the owner's Mac next to Ollama.
+            # VOICE_API_KEY is a non-secret placeholder like OLLAMA_API_KEY:
+            # the server ignores it, BaseAdapter just needs it non-empty.
+            base_url = os.environ.get("VOICE_BASE_URL") or "http://host.docker.internal:8000/v1"
+            for name, capability, model_env, default_model in (
+                (
+                    "voice-stt-local",
+                    ModelProvider.Capability.STT,
+                    "VOICE_STT_MODEL_ID",
+                    "Systran/faster-whisper-small",
+                ),
+                (
+                    "voice-tts-local",
+                    ModelProvider.Capability.TTS,
+                    "VOICE_TTS_MODEL_ID",
+                    "speaches-ai/piper-tr_TR-dfki-medium",
+                ),
+            ):
+                _, created = ModelProvider.objects.get_or_create(
+                    name=name,
+                    defaults={
+                        "provider_type": ModelProvider.ProviderType.OPENAI_COMPATIBLE,
+                        "capability": capability,
+                        "model_id": os.environ.get(model_env) or default_model,
+                        "base_url": base_url,
+                        "api_key_env_var": "VOICE_API_KEY",
+                        "priority": 5,
+                        # Local, free, private (D5): the owner's own hardware.
+                        "personal_data_allowed": True,
+                    },
+                )
+                self._log(f"{name} provider", created)
+
+        # A1/d2: OpenRouter audio rows exist from day one but are seeded
+        # DISABLED and NOT personal-data-allowed, so the gateway's D5 filter
+        # never selects them until the owner deliberately turns both on
+        # (`manage.py set_provider_personal_data <name> --allow --activate`).
+        # Prices are placeholders from the provider's public list at the
+        # spike date (configured-price estimate, corrected per call from the
+        # response cost or the generation lookup, A3).
+        base_url = os.environ.get("OPENROUTER_BASE_URL") or "https://openrouter.ai/api/v1"
+        for name, capability, model_id, prices in (
+            (
+                "openrouter-stt",
+                ModelProvider.Capability.STT,
+                os.environ.get("OPENROUTER_STT_MODEL_ID") or "openai/whisper-1",
+                {"price_per_audio_second": Decimal("0.0001")},  # 0.006 USD/min
+            ),
+            (
+                "openrouter-tts",
+                ModelProvider.Capability.TTS,
+                os.environ.get("OPENROUTER_TTS_MODEL_ID") or "openai/gpt-4o-mini-tts",
+                {"price_per_mchar": Decimal("15")},  # 15 USD per 1M chars
+            ),
+        ):
+            _, created = ModelProvider.objects.get_or_create(
+                name=name,
+                defaults={
+                    "provider_type": ModelProvider.ProviderType.OPENAI_COMPATIBLE,
+                    "capability": capability,
+                    "model_id": model_id,
+                    "base_url": base_url,
+                    "api_key_env_var": "OPENROUTER_API_KEY",
+                    "priority": 50,
+                    "is_active": False,
+                    "personal_data_allowed": False,
+                    **prices,
+                },
+            )
+            self._log(f"{name} provider (disabled)", created)
+
+        _, created = AIBudget.objects.get_or_create(
+            name="audio",
+            defaults={
+                "purposes": list(settings.AI_AUDIO_PURPOSES),
+                "monthly_limit_usd": _usd_or_none(settings.AI_BUDGET_AUDIO_MONTHLY_USD),
+                "session_limit_usd": _usd_or_none(settings.AI_BUDGET_AUDIO_SESSION_USD),
+                "daily_limit_usd": _usd_or_none(settings.AI_BUDGET_AUDIO_DAILY_USD),
+            },
+        )
+        self._log("audio budget", created)
 
     def _seed_default_tiers(self):
         """D11 default `ModelTier` rows for the chat providers this command

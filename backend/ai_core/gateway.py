@@ -23,20 +23,30 @@ construct a `ModelUsage` row. `harness` must never import `ModelUsage`
 directly.
 """
 
+import logging
 import os
 import time
 from dataclasses import dataclass
 from decimal import Decimal
 
 from django.conf import settings
+from django.db import transaction
 
+from ai_core import budgets
 from ai_core.adapters import AdapterError, get_adapter
-from ai_core.exceptions import GatewayError, NoProviderAvailable
+from ai_core.audio import wav_seconds_or_zero
+from ai_core.exceptions import BudgetExceeded, GatewayError, NoProviderAvailable
 from ai_core.models import ModelProvider, ModelUsage
 from core.context import get_request_id
 
+logger = logging.getLogger(__name__)
+
 _MTOK = Decimal(1_000_000)
 _COST_PRECISION = Decimal("0.000001")
+_AUDIO_CAPABILITIES = {ModelProvider.Capability.STT, ModelProvider.Capability.TTS}
+# TTS params every call starts from; the provider defaults and the language
+# route (A2) override them per provider (`_tts_params`).
+_TTS_PARAM_KEYS = ("voice", "response_format", "pcm_sample_rate")
 
 
 def record_external_usage(
@@ -110,6 +120,7 @@ class TranscribeGatewayResult:
     text: str
     usage: ModelUsage
     audio_seconds: float = 0.0
+    language: str = ""
 
 
 @dataclass
@@ -144,6 +155,7 @@ class InferenceGateway:
         context_report=None,
         on_usage=None,
         personal_data=False,
+        budget_session="",
     ):
         """One chat completion (or, with `stream=True`, a generator of
         chunks). Provider selection -- including the `personal_data` filter
@@ -155,12 +167,30 @@ class InferenceGateway:
         `personal_data_allowed=True` are eligible -- primary AND fallback.
         With none, the call fails closed (`NoProviderAvailable`, one
         `ModelUsage` row, `routing_reason="personal_data_required"`); there
-        is never a silent fallback to a cloud provider."""
+        is never a silent fallback to a cloud provider.
+
+        Budgets (A3): a configured `AIBudget` covering `purpose` is checked
+        first, also eagerly; a refusal raises `BudgetExceeded` with one
+        `budget_exceeded` row. Token cost cannot be known before the call,
+        so a chat call is refused only once its window is already spent."""
         started = time.monotonic()
         merged_params = dict(prompt_version.model_params) if prompt_version else {}
         merged_params.update(params or {})
-        base_report = self._base_report(context_report, personal_data)
+        base_report = self._base_report(context_report, personal_data, budget_session)
 
+        self._enforce_budget(
+            purpose=purpose,
+            capability=ModelProvider.Capability.CHAT,
+            personal_data=personal_data,
+            units=0,
+            session=budget_session,
+            actor=actor,
+            workspace=workspace,
+            prompt_version=prompt_version,
+            started=started,
+            report=base_report,
+            on_usage=on_usage,
+        )
         providers = self._select_providers(
             capability=ModelProvider.Capability.CHAT,
             purpose=purpose,
@@ -215,16 +245,30 @@ class InferenceGateway:
         context_report=None,
         on_usage=None,
         personal_data=False,
+        budget_session="",
     ):
         """Embed a batch of texts. Same retry/fallback/accounting contract as
         `complete()` (ADR-003: embeddings are a gateway call like any other,
         exactly one ModelUsage row) -- including `personal_data`'s
-        allowed-providers-only, fail-closed selection. No streaming
-        variant."""
+        allowed-providers-only, fail-closed selection and the budget check.
+        No streaming variant."""
         started = time.monotonic()
-        base_report = self._base_report(context_report, personal_data)
+        base_report = self._base_report(context_report, personal_data, budget_session)
         base_report["item_count"] = len(texts)
 
+        self._enforce_budget(
+            purpose=purpose,
+            capability=ModelProvider.Capability.EMBEDDING,
+            personal_data=personal_data,
+            units=0,
+            session=budget_session,
+            actor=actor,
+            workspace=workspace,
+            prompt_version=prompt_version,
+            started=started,
+            report=base_report,
+            on_usage=on_usage,
+        )
         providers = self._select_providers(
             capability=ModelProvider.Capability.EMBEDDING,
             purpose=purpose,
@@ -304,36 +348,48 @@ class InferenceGateway:
         audio,
         *,
         content_type="",
+        params=None,
         actor=None,
         workspace=None,
         prompt_version=None,
         context_report=None,
         on_usage=None,
-        personal_data=False,
+        budget_session="",
     ):
-        """Speech-to-text (MVP 12). Same single-door/one-ModelUsage-row/
-        retry/fallback/`personal_data` contract as `embed()` (ADR-003) — STT
-        is a gateway call like any other. `audio` is raw bytes; returns the
-        transcript. No streaming variant."""
+        """Speech-to-text (MVP 12, Phase 6 D4/D5). Same single-door/one-
+        ModelUsage-row/retry/fallback contract as `embed()` (ADR-003). `audio`
+        is D3's 16 kHz mono PCM16 WAV as bytes -- held in memory only, never
+        logged or stored; `params` may carry `language` (ISO 639-1, empty =
+        auto-detect). Always personal data (D5): only
+        `personal_data_allowed` providers, no kwarg relaxes it. No
+        streaming variant."""
+        params = dict(params or {})
         started = time.monotonic()
-        base_report = self._base_report(context_report, personal_data)
+        base_report = self._base_report(context_report, True, budget_session)
+        base_report["input_bytes"] = len(audio or b"")
+        base_report["language"] = str(params.get("language") or "")
+        seconds = wav_seconds_or_zero(audio)
 
         result, usage = self._run_audio(
             purpose=purpose,
             capability=ModelProvider.Capability.STT,
             adapter_call=lambda adapter: adapter.transcribe(
-                audio, content_type=content_type, purpose=purpose
+                audio, content_type=content_type, params=params, purpose=purpose
             ),
+            units=seconds,
             actor=actor,
             workspace=workspace,
             prompt_version=prompt_version,
             base_report=base_report,
             started=started,
             on_usage=on_usage,
-            personal_data=personal_data,
+            budget_session=budget_session,
         )
         return TranscribeGatewayResult(
-            text=result.text, usage=usage, audio_seconds=result.audio_seconds
+            text=result.text,
+            usage=usage,
+            audio_seconds=result.audio_seconds,
+            language=getattr(result, "language", "") or base_report["language"],
         )
 
     def synthesize(
@@ -347,24 +403,41 @@ class InferenceGateway:
         prompt_version=None,
         context_report=None,
         on_usage=None,
-        personal_data=False,
+        budget_session="",
     ):
-        """Text-to-speech (MVP 12). Same contract as `transcribe()`. `text`
-        in, synthesized audio bytes out. No streaming variant."""
+        """Text-to-speech (MVP 12, Phase 6 D4/D5/A2). Same contract as
+        `transcribe()`, personal data included. `params["language"]` selects
+        the provider through `settings.VOICE_TTS_ROUTES` -- still only among
+        eligible (active, keyed, `personal_data_allowed`) rows, never chosen
+        by the client; voice and response format come from the route / the
+        provider defaults (`settings.VOICE_TTS_PROVIDER_PARAMS`). No
+        streaming variant."""
+        params = dict(params or {})
         started = time.monotonic()
-        base_report = self._base_report(context_report, personal_data)
+        language = str(params.get("language") or "")
+        base_report = self._base_report(context_report, True, budget_session)
+        base_report["input_bytes"] = len((text or "").encode("utf-8"))
+        base_report["language"] = language
+        route = (getattr(settings, "VOICE_TTS_ROUTES", None) or {}).get(language) or {}
+        if route.get("provider"):
+            base_report["tts_route"] = route["provider"]
 
         result, usage = self._run_audio(
             purpose=purpose,
             capability=ModelProvider.Capability.TTS,
-            adapter_call=lambda adapter: adapter.synthesize(text, params=params, purpose=purpose),
+            adapter_call=lambda adapter: adapter.synthesize(
+                text, params=self._tts_params(adapter.provider, params, route), purpose=purpose
+            ),
+            units=len(text or ""),
             actor=actor,
             workspace=workspace,
             prompt_version=prompt_version,
             base_report=base_report,
             started=started,
             on_usage=on_usage,
-            personal_data=personal_data,
+            budget_session=budget_session,
+            preferred=route.get("provider") or "",
+            preferred_reason=f"route:{language}"[:50] if language else "",
         )
         return SynthesizeGatewayResult(
             audio=result.audio,
@@ -373,28 +446,71 @@ class InferenceGateway:
             audio_seconds=result.audio_seconds,
         )
 
+    @staticmethod
+    def _tts_params(provider, params, route):
+        """Effective TTS params for one provider: the global default voice
+        < the caller's params < the provider's own defaults
+        (`VOICE_TTS_PROVIDER_PARAMS[name]`) < the language route, when this
+        provider is the routed one. A voice id belongs to one provider, so a
+        fallback provider never receives the route's voice."""
+        effective = {
+            "voice": getattr(settings, "VOICE_TTS_VOICE", ""),
+            "response_format": "wav",
+        }
+        effective.update(params)
+        provider_defaults = (getattr(settings, "VOICE_TTS_PROVIDER_PARAMS", None) or {}).get(
+            provider.name, {}
+        )
+        effective.update({k: v for k, v in provider_defaults.items() if v})
+        if route.get("provider") == provider.name:
+            effective.update({k: route[k] for k in _TTS_PARAM_KEYS if route.get(k)})
+        return effective
+
     def _run_audio(
         self,
         *,
         purpose,
         capability,
         adapter_call,
+        units,
         actor,
         workspace,
         prompt_version,
         base_report,
         started,
         on_usage,
-        personal_data=False,
+        budget_session="",
+        preferred="",
+        preferred_reason="",
     ):
-        """Shared STT/TTS execution: provider selection + retry/fallback +
-        exactly one ModelUsage row, mirroring `embed()`'s non-streaming
+        """Shared STT/TTS execution: budget check, then provider selection
+        (personal-data providers only, D5 -- unconditionally), retry/fallback
+        and exactly one ModelUsage row, mirroring `embed()`'s non-streaming
         shape. `adapter_call(adapter)` performs the one provider call and
-        returns a Transcribe/Synthesize AdapterResult carrying `audio_seconds`
-        (recorded in context_report — the real STT/TTS cost signal, since
-        this class of provider is priced by duration, not tokens)."""
+        returns a Transcribe/Synthesize AdapterResult carrying
+        `audio_seconds` (recorded in context_report). `units` is the call's
+        billable quantity known before the call -- input seconds (STT) or
+        characters (TTS) -- used for the pre-call budget estimate and the
+        configured-price cost."""
+        self._enforce_budget(
+            purpose=purpose,
+            capability=capability,
+            personal_data=True,
+            units=units,
+            session=budget_session,
+            actor=actor,
+            workspace=workspace,
+            prompt_version=prompt_version,
+            started=started,
+            report=base_report,
+            on_usage=on_usage,
+        )
         providers = self._select_providers(
-            capability=capability, purpose=purpose, personal_data=personal_data
+            capability=capability,
+            purpose=purpose,
+            personal_data=True,
+            preferred=preferred,
+            preferred_reason=preferred_reason,
         )
         if not providers:
             raise self._no_provider_error(
@@ -404,7 +520,7 @@ class InferenceGateway:
                 prompt_version=prompt_version,
                 started=started,
                 report=base_report,
-                personal_data=personal_data,
+                personal_data=True,
                 on_usage=on_usage,
             )
 
@@ -432,6 +548,11 @@ class InferenceGateway:
                 attempts.append(self._attempt_entry(provider, attempt, None))
                 report = dict(base_report)
                 report["audio_seconds"] = getattr(result, "audio_seconds", 0.0)
+                cost, cost_source = self._audio_cost(provider, capability, result, units)
+                report["cost_source"] = cost_source
+                generation_id = getattr(result, "generation_id", "") or ""
+                if generation_id:
+                    report["generation_id"] = generation_id
                 usage = self._record(
                     purpose=purpose,
                     actor=actor,
@@ -445,7 +566,10 @@ class InferenceGateway:
                     report=report,
                     attempts=attempts,
                     on_usage=on_usage,
+                    cost=cost,
                 )
+                if cost_source == "configured_price" and generation_id:
+                    self._schedule_cost_correction(usage.pk)
                 return result, usage
         self._record(
             purpose=purpose,
@@ -466,6 +590,47 @@ class InferenceGateway:
             retryable=last_error.retryable if last_error else False,
         )
 
+    @classmethod
+    def _audio_cost(cls, provider, capability, result, units):
+        """`(cost, cost_source)` for one successful audio call (A3): the
+        provider-reported cost when the response carried one
+        (`"provider"`), else the row's configured per-second (STT) /
+        per-million-characters (TTS) price plus any token price
+        (`"configured_price"`), `"free"` when that is 0."""
+        reported = getattr(result, "reported_cost", None)
+        if reported is not None:
+            return Decimal(reported).quantize(_COST_PRECISION), "provider"
+        cost = cls._estimate_cost(provider, result.input_tokens, result.output_tokens)
+        cost += cls._audio_unit_cost(provider, capability, units, result)
+        cost = cost.quantize(_COST_PRECISION)
+        return cost, ("configured_price" if cost > 0 else "free")
+
+    @staticmethod
+    def _audio_unit_cost(provider, capability, units, result=None):
+        if capability == ModelProvider.Capability.STT:
+            seconds = getattr(result, "audio_seconds", 0.0) if result is not None else units
+            return Decimal(str(seconds or units or 0)) * provider.price_per_audio_second
+        if capability == ModelProvider.Capability.TTS:
+            return Decimal(int(units or 0)) * provider.price_per_mchar / _MTOK
+        return Decimal("0")
+
+    @staticmethod
+    def _schedule_cost_correction(usage_id):
+        """A1/A3: the response carried no cost, so the row holds the
+        configured-price estimate; a Celery task replaces it with the
+        provider's generation-lookup figure once the transaction commits.
+        Best effort -- a broker outage leaves the estimate in place."""
+
+        def enqueue():
+            try:
+                from ai_core.tasks import correct_usage_cost
+
+                correct_usage_cost.delay(usage_id)
+            except Exception:  # noqa: BLE001 -- accounting already holds an estimate
+                logger.warning("ai_core: could not enqueue cost correction for usage %s", usage_id)
+
+        transaction.on_commit(enqueue)
+
     def has_eligible_provider(
         self, *, purpose, personal_data=False, capability=ModelProvider.Capability.CHAT
     ):
@@ -474,17 +639,99 @@ class InferenceGateway:
         including the `personal_data` filter -- but no LLM call is made and
         no `ModelUsage` row is written (nothing was attempted). A connector
         read that must not happen without an allowed provider asks this
-        first."""
+        first. Audio capabilities are always personal data (Phase 6 D5)."""
         return bool(
             self._select_providers(
-                capability=capability, purpose=purpose, personal_data=personal_data
+                capability=capability,
+                purpose=purpose,
+                personal_data=personal_data or capability in _AUDIO_CAPABILITIES,
             )
         )
 
     # --- provider selection ---
 
+    @staticmethod
+    def _eligible_providers(*, capability, personal_data):
+        """Active providers of `capability` that could serve a call right
+        now, by priority: fake only behind `AI_FAKE_PROVIDER`, real ones
+        only when their key env var is set, and -- with `personal_data` --
+        only `personal_data_allowed` rows. Inactive (`is_active=False`)
+        rows, e.g. the seeded-disabled OpenRouter audio rows, never
+        appear."""
+        eligible = []
+        for provider in ModelProvider.objects.filter(
+            is_active=True, capability=capability
+        ).order_by("priority", "name"):
+            if provider.provider_type == ModelProvider.ProviderType.FAKE:
+                if getattr(settings, "AI_FAKE_PROVIDER", False):
+                    eligible.append(provider)
+            elif os.environ.get(provider.api_key_env_var or "", ""):
+                eligible.append(provider)
+        if personal_data:
+            eligible = [p for p in eligible if p.personal_data_allowed]
+        return eligible
+
+    def _enforce_budget(
+        self,
+        *,
+        purpose,
+        capability,
+        personal_data,
+        units,
+        session,
+        actor,
+        workspace,
+        prompt_version,
+        started,
+        report,
+        on_usage,
+    ):
+        """A3: refuse BEFORE provider selection when a covering `AIBudget`
+        cap is spent or this call's worst-case estimate would break it.
+        The estimate is the dearest eligible candidate's price for `units`
+        (audio); a call whose every candidate is unpriced (local) is never
+        refused. A refusal writes one `budget_exceeded` row (provider None,
+        cost 0) and raises `BudgetExceeded`."""
+        if not budgets.budgets_for(purpose):
+            return
+        candidates = self._eligible_providers(capability=capability, personal_data=personal_data)
+        priced = any(p.is_priced for p in candidates)
+        estimate = Decimal("0")
+        if capability in _AUDIO_CAPABILITIES and units:
+            estimate = max(
+                (self._audio_unit_cost(p, capability, units) for p in candidates),
+                default=Decimal("0"),
+            ).quantize(_COST_PRECISION)
+        refusal = budgets.find_refusal(purpose, estimate=estimate, priced=priced, session=session)
+        if refusal is None:
+            return
+        refused_report = dict(report)
+        refused_report["budget"] = refusal.report()
+        self._record(
+            purpose=purpose,
+            actor=actor,
+            workspace=workspace,
+            prompt_version=prompt_version,
+            provider=None,
+            result=None,
+            success=False,
+            error_type="budget_exceeded",
+            started=started,
+            report=refused_report,
+            attempts=[],
+            on_usage=on_usage,
+            routing_reason=f"budget:{refusal.budget}:{refusal.window}"[:50],
+        )
+        raise BudgetExceeded(refusal.budget, refusal.window)
+
     def _select_providers(
-        self, *, capability=ModelProvider.Capability.CHAT, purpose="", personal_data=False
+        self,
+        *,
+        capability=ModelProvider.Capability.CHAT,
+        purpose="",
+        personal_data=False,
+        preferred="",
+        preferred_reason="",
     ):
         """Active providers of the given capability, by priority; fake only
         behind the flag, real ones only when their key env var is actually
@@ -504,18 +751,25 @@ class InferenceGateway:
         priority order behind them. With no tier configuration the result
         is byte-for-byte the old priority order. Each selected provider is
         annotated with an in-memory `_routing_reason`, persisted onto its
-        `ModelUsage` row by `_record` — the single usage writer."""
-        eligible = []
-        for provider in ModelProvider.objects.filter(
-            is_active=True, capability=capability
-        ).order_by("priority", "name"):
-            if provider.provider_type == ModelProvider.ProviderType.FAKE:
-                if getattr(settings, "AI_FAKE_PROVIDER", False):
-                    eligible.append(provider)
-            elif os.environ.get(provider.api_key_env_var or "", ""):
-                eligible.append(provider)
-        if personal_data:
-            eligible = [p for p in eligible if p.personal_data_allowed]
+        `ModelUsage` row by `_record` — the single usage writer.
+
+        `preferred` (Phase 6 A2, TTS language routes): a provider name moved
+        to the front IF it is already eligible (reason `preferred_reason`,
+        e.g. "route:tr"); an ineligible routed provider -- inactive,
+        keyless or not personal-data-allowed -- is simply skipped, so a
+        route can never widen the eligible set."""
+        eligible = self._eligible_providers(capability=capability, personal_data=personal_data)
+
+        if preferred:
+            routed = [p for p in eligible if p.name == preferred]
+            if routed:
+                eligible = routed + [p for p in eligible if p.name != preferred]
+                selected = eligible[:2]
+                for position, provider in enumerate(selected):
+                    provider._routing_reason = (
+                        (preferred_reason or "route") if position == 0 else f"fallback:{position}"
+                    )
+                return selected
 
         tier_name = (getattr(settings, "AI_PURPOSE_TIERS", None) or {}).get(purpose, "")
         primary_reason = "priority"
@@ -754,11 +1008,14 @@ class InferenceGateway:
     # --- accounting ---
 
     @staticmethod
-    def _base_report(context_report, personal_data):
+    def _base_report(context_report, personal_data, budget_session=""):
         report = dict(context_report or {})
         if personal_data:
             # The row explains why only allowed providers were eligible.
             report["personal_data"] = True
+        if budget_session:
+            # A3 session window: budgets.spent() sums rows by this key.
+            report[budgets.SESSION_KEY] = str(budget_session)[:64]
         return report
 
     def _no_provider_error(
@@ -827,7 +1084,10 @@ class InferenceGateway:
         fallback_output_chars=0,
         on_usage=None,
         routing_reason="",
+        cost=None,
     ):
+        """The single in-process `ModelUsage` writer. `cost` overrides the
+        token-priced estimate (audio rows, A3)."""
         latency_ms = int((time.monotonic() - started) * 1000)
         input_tokens = result.input_tokens if result else 0
         output_tokens = result.output_tokens if result else 0
@@ -855,7 +1115,11 @@ class InferenceGateway:
             routing_reason=(
                 getattr(provider, "_routing_reason", "") if provider else routing_reason
             ),
-            estimated_cost=self._estimate_cost(provider, input_tokens, output_tokens),
+            estimated_cost=(
+                cost
+                if cost is not None
+                else self._estimate_cost(provider, input_tokens, output_tokens)
+            ),
             context_report=context_report,
         )
         if on_usage is not None:

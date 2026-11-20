@@ -586,6 +586,76 @@ manual refusal on the Mac); A6 release gates green; preflight green.
 4. Train the custom `hey_friday` model offline (branch 4 note).
 5. The manual Mac passes: latency (A5), GPU/battery (A8), reduced motion.
 
+### Branch 1 — spike results and implementation notes (2026-11-20)
+
+**Step 0b — OpenRouter audio (A1), from OpenRouter's official docs only.**
+Verified by web search of `openrouter.ai` on 2026-11-20 (the docs pages
+themselves could not be fetched from the build sandbox; no real call was
+made — paid calls are an owner step):
+
+| Item | Finding | Consequence in code |
+|---|---|---|
+| STT endpoint | `POST /api/v1/audio/transcriptions` **exists**. JSON body with base64 `input_audio`, and it also accepts OpenAI-style `multipart/form-data` (OpenAI SDKs work against the OpenRouter base URL). Params: `model` (e.g. `openai/whisper-1`), `language`, `temperature`, `response_format` `json`/`verbose_json` (`text`/`srt`/`vtt` → 400). ~60 s upstream processing timeout; no audio URLs. | One code path: the adapter's multipart `transcribe()`; a 30 s WAV is far below the timeout. |
+| STT usage/cost | Response `{text, usage}`; `usage` carries `seconds`, token counts for token-priced models, and `cost` (USD). | `usage.cost` → `reported_cost` → `ModelUsage.estimated_cost` (`cost_source="provider"`). |
+| TTS endpoint | `POST /api/v1/audio/speech` **exists**, OpenAI-Audio-Speech compatible (`model`, `input`, `voice`). Returns raw audio bytes, not JSON. `response_format` is `mp3` or `pcm` only (default `pcm`; some models support only one); **no `wav`**. PCM is 16-bit LE; rate is model-dependent and reported in the `Content-Type` (e.g. `audio/pcm;rate=24000;channels=1`). | `openrouter-tts` uses `response_format="pcm"` (`VOICE_TTS_PROVIDER_PARAMS`); the adapter wraps PCM into a checked WAV (D3 holds: the browser only ever gets `audio/wav`). |
+| TTS cost | No cost/usage in the response; `X-Generation-Id` header present. | Row written with the configured per-character price; `ai_core.tasks.correct_usage_cost` replaces it from `GET /api/v1/generation?id=` (`total_cost`). |
+| Turkish TTS voices | **Unverified** — voice ids are model-specific; no Turkish list found. | Owner step (below). |
+| Realtime bidirectional audio | None found in the docs (still **unverified**, as in the proposal). | Nothing built; realtime stays on the "later" list. |
+
+**Step 0 — speech server (D4).** speaches (formerly faster-whisper-server)
+is current and still lists **both Piper and Kokoro** for TTS
+(project listing updated 2026-04); `/v1/audio/transcriptions` and
+`/v1/audio/speech` are its OpenAI-compatible surface. Not verifiable from
+the sandbox and therefore owner steps: the current release/licence, the
+exact model ids for a Turkish Piper voice and a Whisper model as speaches
+names them, the WAV response shape (the adapter also accepts a
+streaming-style WAV header with an unknown length and rebuilds it from the
+received PCM), and cold/warm latency on the Mac. Seed defaults
+(`Systran/faster-whisper-small`, `speaches-ai/piper-tr_TR-dfki-medium`,
+voice `tr_TR-dfki-medium`) are placeholders until then — all env-overridable.
+The `deploy/voice/` fallback sidecar is **not** built: nothing so far says
+speaches fails.
+
+**Implementation notes.**
+- `ai_core/audio.py`: stdlib-`wave` validation (RIFF size = bytes received,
+  `data` fully present, no trailing bytes, PCM16, rate/channels, frames > 0,
+  duration cap), `pcm_to_wav`, `silent_wav` (the fake TTS now returns a
+  real silent WAV).
+- Audio entry points no longer accept `personal_data` at all (D5: no kwarg
+  can relax it; passing one is a `TypeError`, tested).
+- Budgets (A3): `ai_core.AIBudget` (purposes, daily/monthly/session
+  limits, owner-editable in the admin); the seeded `audio` row covers
+  `voice.stt`/`voice.tts` (20 USD/month, 1 USD/session). Checked in every
+  entry point before provider selection. A call is refused when some
+  eligible candidate is priced and the window is spent or the call's
+  worst-case estimate (dearest candidate × seconds or characters) would
+  cross it; a session window applies to calls passing `budget_session`
+  (branch 2 passes the voice session id). Chat/embedding calls have no
+  pre-call estimate, so a chat budget refuses only once spent. Known
+  residual: two concurrent calls can overshoot a cap by one call's cost.
+- `ModelProvider` gains `price_per_audio_second` and `price_per_mchar`
+  (migration `ai_core/0007`). OpenRouter seed prices are placeholders
+  (whisper-1 0.006 USD/min; TTS 15 USD per 1M chars) corrected per call.
+- `set_provider_personal_data` gains `--activate`/`--deactivate` so the d2
+  toggle (flag + `is_active`) is one audited act.
+- `VOICE_TTS_ROUTES` (A2) lives in settings; a routed provider that is not
+  eligible is skipped, never forced; a route's voice id goes only to the
+  routed provider.
+
+**Owner steps (pending) — `feat/p6-speech-gateway`, recorded 2026-11-20.**
+1. Step 0 on the Mac: install speaches, confirm release/licence and that
+   Piper is served, record the exact STT/TTS model ids and voice ids, the
+   WAV response shape and cold/warm latency here; set `VOICE_*` in `.env`.
+2. Step 0b with the owner's OpenRouter key (paid): one real STT call (30 s
+   WAV, multipart) and one TTS call; confirm `usage.cost` on STT, the
+   PCM `Content-Type` rate on TTS, that `/generation?id=` returns
+   `total_cost` for an audio generation, and which voices speak Turkish
+   acceptably; correct the seeded OpenRouter prices/model ids if needed.
+3. Done-when on the Mac: `InferenceGateway().transcribe/synthesize`
+   round-trips a Turkish sentence through the local server with one
+   `ModelUsage` each (runbook §3).
+4. Confirm the monthly audio cap (d2; 20 USD default) in the admin.
+
 ## Scope (one branch each)
 
 ### 1. `feat/p6-speech-gateway` — ADR-011, adapter, personal-data rule, seeds
@@ -882,7 +952,8 @@ slice.
 | # | Status |
 |---|---|
 | amendment (`docs/friday-3-roadmap`) | **implemented 2026-11-20** (docs only; awaiting Sonnet 5 plan review of the amendment) |
-| 1–6 | not started (precondition: Phase 5 closeout on `main`) |
+| 1 `feat/p6-speech-gateway` | **implemented 2026-11-20** (cut from the local integration branch; spike results and owner steps under "Branch 1 — spike results and implementation notes"; awaiting the Sonnet 5 branch review) |
+| 2–6 | not started |
 
 ## Out of scope (explicit)
 
