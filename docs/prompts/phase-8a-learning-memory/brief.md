@@ -726,7 +726,8 @@ from yesterday".
 | brief (`docs/friday-3-roadmap`) | **implemented 2026-11-20** (draft brief; awaits Sonnet 5 plan review) |
 | 1 `feat/p8-ingestion-core` | **implemented 2026-11-20** (sources, mapping, scrubber + corpus gate, episodes, port, TTL beat, forget/restore (episodes), counters, owner API, contract, ADR-012 note; awaits Sonnet 5 review). Merged after branch 2: its migration is `0007_ingestion_core` |
 | 2 `feat/p8-core-blocks` | **implemented 2026-11-20** — see "Branch 2 implementation notes" below; awaits independent Sonnet 5 review |
-| 3–7 | not started |
+| 3, 5–7 | not started |
+| 4 `feat/p8-source-producers` | **implemented 2026-11-20** — git commit producer (runner `commit_log` primitive, cursor, authorship rules), harness outcome producer (discovery + implementation, every terminal path), calendar metadata producer; see "Branch 4 implementation notes" below; awaits independent Sonnet 5 review. Migration `harness/0013_repo_commit_cursor` |
 
 ## Out of scope (explicit)
 
@@ -980,3 +981,95 @@ PAT wording in this section and branch 2's matrix now says 401.
   `actor.is_owner`. Only the installation owner can write personal blocks, so
   nothing leaks today. Fix: add an `is_owner` check to the injection predicate
   as defence in depth.
+
+## Branch 4 implementation notes (`feat/p8-source-producers`, 2026-11-20)
+
+- **Runner primitive** (`harness/runner.py` `commit_log(git_url, branch,
+  since, clone_env)`): `git clone --filter=blob:none --no-checkout
+  --single-branch --branch <b> --shallow-since=<since>` into a temp dir
+  (removed on every path), then two reads: `git log -z
+  --format=%H%n%P%n%ae%n%aI%n%cI%n%B` (NUL-separated records, so a message
+  cannot forge a record) and `git log --format=%x00%H --shortstat` (counts
+  only). At most 200 commits per read. No `-p`/`--stat`/`--name-only`,
+  `show` or `diff` (test pins the argv). A window with no commits ("no
+  commits selected for shallow requests") is `[]`. Behind the module seam;
+  tests use a local `file://` fixture repo in `tmp_path`.
+- **Git producer** (`harness/ingestion.py`, `harness.tasks.
+  ingest_repo_commits`, runner beat every 6 h, harness queue): every enabled
+  `HarnessRepo`; one `git.commit` episode per commit, external id
+  `commit:<repo id>:<sha>`, mapping key `repo:<repo id>`, `private` for a
+  `sensitive` repo. Owner text only for authorship `owner`; otherwise the
+  recorded `authorship` is `merge` (a merge commit's subject is
+  machine-written — added rule), `foreign_author`, `agent_trailer`
+  (`Co-Authored-By:` Claude/Anthropic/Codex/OpenAI/Copilot/…,
+  `Claude-Session:`, "Generated with Claude Code/Codex",
+  `Generated-by:`/`Assisted-by:`) or `harness_branch` (a
+  `harness/pN-<uuid>` name in the message, or the `produced_commit_sha` of
+  one of the repo's implementation jobs). Metadata: sha, repo id/name,
+  branch, authored date, files changed / insertions / deletions,
+  `owner_authored`, `authorship` — never the author address.
+- **Cursor** (`HarnessRepo.last_ingested_sha` / `last_ingested_at`,
+  migration `harness/0013_repo_commit_cursor`): first run looks back
+  `MEMORY_GIT_INGEST_LOOKBACK_DAYS` (default 2); later runs re-read from 24 h
+  before the cursor's committer date (late-pushed commits) and skip the
+  cursor commit and its ancestors, so a re-run records nothing (and bumps no
+  `duplicate` counter); a lost cursor falls back to the port's dedupe. While
+  the git source is disabled or paused nothing is cloned and every enabled
+  repo's cursor moves to "now" with no sha, so re-enabling never back-fills
+  the paused window. A failing repo is logged and the others continue.
+- **Harness outcomes** (`harness.ingestion.record_discovery_outcome` /
+  `record_implementation_outcome`): called from `execution._finalize`
+  (after the briefing/work_log, with the CLI-reported cost), the recovery
+  scan, `resolve_running_job_after_unexpected_error`, `cancel_harness_job`
+  (pending → cancelled), `record_implementation_work_log` (every post-run
+  terminal path), Gate A rejection/expiry and the pre-Gate-A cancel. Kinds
+  `harness.discovery` / `harness.implementation`, external ids
+  `harness:<id>` / `harness-impl:<id>`, mapping key `repo:<repo id>`, the
+  job's `sensitivity`. The goal is owner text only when the installation
+  owner (human, `is_owner`, not `is_agent`) created the job; otherwise it is
+  context ("Goal (not owner-authored): …"). Context: briefing summary /
+  diff summary / latest review summary, each ≤ 1000 chars; the raw CLI
+  transcript never. Each write runs in its own savepoint and never raises.
+- **Calendar producer** (`connectors/ingestion.py`,
+  `connectors.tasks.ingest_calendar_metadata`, compose beat every 6 h):
+  every enabled `google` binding whose `calendar_agenda` tool is `ok`,
+  yesterday and today, through the new `google.read_calendar_metadata` —
+  the same request shape (so the existing `calendar.events.agenda` pin
+  covers it), credentials and granted-scope check, outside the chat tool
+  registry (a system read: no channel, nothing shown to a model; one
+  `connector.ingest_read` audit row per binding with counts only).
+  `GoogleCalendarReader.event_metadata` copies only id, title, start/end,
+  all-day, attendee count and `organizer.self`. Owner-organised titles →
+  owner text; others → context. Kind `calendar.event`, external id
+  `gcal:<binding id>:<event id>`, mapping key `calendar:<binding id>`,
+  metadata `data_class: personal` (the source's `is_personal_class` drives
+  branch 5's `personal_data=True`).
+- **Port helper** `memory.ingestion.ports.source_accepting(kind)` lets
+  producers skip expensive reads for a disabled/paused source.
+- Tests: `harness/tests/test_commit_ingestion.py`,
+  `test_outcome_ingestion.py`, `test_source_producers_e2e.py` (the
+  "done when" fixture day: four sources, personal + firm repos, a job, a
+  hook event through the port, a calendar event → episodes in the right
+  workspaces, counters equal row counts, no raw secret),
+  `connectors/tests/test_calendar_ingestion.py`,
+  `config/tests/test_source_producers_beat.py`.
+
+### Owner steps (pending) — `feat/p8-source-producers`, recorded 2026-11-20
+
+1. On the Mac runner: `manage.py migrate` (harness `0013`), restart `make
+   harness-runner` so its beat picks up `memory-ingest-git-commits`; confirm
+   `git` ≥ 2.27 (blob-less + `--shallow-since`) and that the runner's clone
+   credentials reach every enabled repo (the producer uses the same
+   ambient/env credentials as discovery clones).
+2. Set `MEMORY_OWNER_GIT_EMAILS` to the e-mails the owner commits with by
+   hand; add `repo:<HarnessRepo id>` mapping rules for the git and harness
+   sources (firm repos → the firm workspace) and a `calendar:<binding id>`
+   rule for the Google binding.
+3. Enable the git, harness and calendar sources and, after a day, check the
+   audit view: stored counts per source, the `authorship` mix of commits
+   (tighten the e-mail list if agent commits show up as `owner`, R2) and
+   the unmapped-keys list.
+4. Real-Google pass: the calendar producer has only run against the fake
+   bridge; confirm one real read lands owner-organised titles only and no
+   location/description/attendee address (DB check).
+5. Independent Sonnet 5 review of this branch before merge.
