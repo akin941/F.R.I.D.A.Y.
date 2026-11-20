@@ -9,6 +9,7 @@ function device(overrides: Partial<ApiTrustedDevice>): ApiTrustedDevice {
   return {
     id: "d1",
     name: "Mac",
+    kind: "browser",
     enrolled_via: "pin",
     enrolled_ip: "192.168.1.5",
     user_agent: "",
@@ -18,6 +19,8 @@ function device(overrides: Partial<ApiTrustedDevice>): ApiTrustedDevice {
     revoked_at: null,
     revoke_reason: "",
     idle_expires_at: "2026-12-26T10:00:00Z",
+    credential_expires_at: null,
+    secret_issued_at: null,
     is_current: false,
     ...overrides,
   };
@@ -146,5 +149,42 @@ describe("DevicesPanel", () => {
       expect(screen.getByRole("button", { name: "Anahtar oluştur" })).toBeInTheDocument(),
     );
     expect(calledWith(fetchMock, "POST", "/api/auth/remote-key/revoke")).toBe(true);
+  });
+
+  it("badges a Friday Node and uses node wording to revoke it", async () => {
+    const node = device({
+      id: "33333333-3333-4333-8333-333333333333",
+      name: "MacBook Pro",
+      kind: "node",
+      enrolled_via: "strong_code",
+      credential_expires_at: "2027-02-18T10:00:00Z",
+      secret_issued_at: "2026-11-20T10:00:00Z",
+    });
+    const fetchMock = stubBackend((url) => {
+      if (url === "/api/auth/devices") return jsonResponse([DEVICES[0], node]);
+      if (url.endsWith("/revoke") && url.includes("3333")) {
+        return jsonResponse({ ...node, revoked_at: "2026-11-20T11:00:00Z" });
+      }
+      return undefined;
+    });
+    render(<DevicesPanel />);
+    expect(await screen.findByText("MacBook Pro")).toBeInTheDocument();
+    // Exactly one badge: the browser rows carry none.
+    expect(screen.getAllByText("Mac düğümü")).toHaveLength(1);
+    await userEvent.click(screen.getByRole("button", { name: "İptal et" }));
+    const dialog = await findConfirmDialog();
+    expect(dialog).toHaveTextContent("Bu Mac düğümü iptal edilsin mi?");
+    expect(dialog).toHaveTextContent("“MacBook Pro” düğümünün bağlantısı hemen kesilir");
+    expect(calledWith(fetchMock, "POST", `/api/auth/devices/${node.id}/revoke`)).toBe(false);
+    await confirmInDialog("Evet, düğümü iptal et");
+    await waitFor(() => expect(screen.getByText(/İptal edildi/)).toBeInTheDocument());
+    expect(calledWith(fetchMock, "POST", `/api/auth/devices/${node.id}/revoke`)).toBe(true);
+  });
+
+  it("shows no badge for browsers", async () => {
+    stubBackend();
+    render(<DevicesPanel />);
+    expect(await screen.findByText("Telefon")).toBeInTheDocument();
+    expect(screen.queryByText("Mac düğümü")).not.toBeInTheDocument();
   });
 });

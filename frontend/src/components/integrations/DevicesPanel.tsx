@@ -85,6 +85,7 @@ function DeviceRow({
   onForgotten: () => void;
 }) {
   const copy = tr.confirm.device;
+  const isNode = device.kind === "node";
 
   // Both run only from their confirmation dialog, which reports a failure.
   async function handleRevoke() {
@@ -101,6 +102,11 @@ function DeviceRow({
       <CardHeader>
         <CardTitle className="flex flex-wrap items-center gap-2 text-base">
           {device.name}
+          {isNode ? (
+            <span className="rounded-md border px-2 py-0.5 text-xs font-medium">
+              {copy.nodeBadge}
+            </span>
+          ) : null}
           {device.is_current ? (
             <span className="rounded-md bg-muted px-2 py-0.5 text-xs font-medium">Bu cihaz</span>
           ) : null}
@@ -124,7 +130,7 @@ function DeviceRow({
           <p className="text-sm text-muted-foreground">
             İptal edildi {formatDate(device.revoked_at)}
           </p>
-        ) : device.is_current ? (
+        ) : device.is_current && !isNode ? (
           <div>
             <ConfirmDialog
               trigger={
@@ -148,9 +154,9 @@ function DeviceRow({
                   İptal et
                 </Button>
               }
-              title={copy.revokeTitle}
-              description={copy.revoke(device.name)}
-              confirmLabel={copy.revokeConfirm}
+              title={isNode ? copy.revokeNodeTitle : copy.revokeTitle}
+              description={isNode ? copy.revokeNode(device.name) : copy.revoke(device.name)}
+              confirmLabel={isNode ? copy.revokeNodeConfirm : copy.revokeConfirm}
               busyLabel={copy.revoking}
               errorFallback={copy.revokeFailed}
               onConfirm={handleRevoke}
@@ -165,7 +171,10 @@ function DeviceRow({
 /**
  * Trusted devices (Phase 4 branch 2): the list with revoke / "Bu cihazı
  * unut", "Yeni cihaz eşleştir" (a PIN, or a strong code for another
- * network) and the remote access key.
+ * network) and the remote access key. Friday Nodes (Phase 9 D1, the Mac
+ * app) are listed with a "Mac düğümü" badge and their own revoke wording;
+ * node pairing and the kill switch toggle arrive with the /devices node
+ * section (Phase 9 branch 7).
  */
 export function DevicesPanel() {
   const [devices, setDevices] = useState<ApiTrustedDevice[]>([]);
