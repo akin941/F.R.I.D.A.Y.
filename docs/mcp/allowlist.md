@@ -20,9 +20,20 @@ and each has a manifest in `backend/connectors/manifests/` and a twin in
 `docs/mcp/<name>.md`; see `docs/security/mcp-governance.md` "Runtime
 connectors".
 
-Pending / rejected: NotebookLM MCPs (unofficial, cookie-based — public data only,
-re-evaluate during the Phase 5 MCP review), browser/Playwright MCP (prompt-injection
-surface — not before the Phase 5 MCP review; sandboxed + domain allowlist only).
+Rejected for Friday runtime (Phase 5 closeout governance pass, 2026-11-20):
+
+- **NotebookLM MCPs** stay rejected for runtime: every available server is
+  unofficial and authenticates with a scraped Google session cookie, which
+  no manifest can pin, scope or rotate, and Google offers no supported
+  API behind it. Binding rule 2 of `docs/security/mcp-governance.md`
+  still allows public/educational documents on a separate Google account
+  as a manual dev tool outside Friday; re-open only if Google ships an
+  official API or MCP server.
+- **Browser/Playwright MCP** stays rejected for runtime: a page is fully
+  attacker-authored input, and a browser tool turns it into actions
+  (clicks, form posts, downloads) that the approval gate cannot snapshot
+  as an exact payload (D6). Re-open only with a new ADR that defines a
+  sandboxed, domain-allowlisted, read-only profile.
 
 > Note (2026-09-27): the earlier MVP 9 references were replaced by Friday 2.0
 > phase references (ADR-008; MCP client work is Phase 5, MASTER_PLAN §AA).

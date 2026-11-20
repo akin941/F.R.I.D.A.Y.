@@ -23,6 +23,9 @@ GitHub powers; treat every installation as a security decision.
 2. Unofficial browser-automation / cookie-based MCPs (e.g. NotebookLM MCPs) are
    **never** enabled for sensitive or company workspaces; public/educational
    documents only, on a separate Google account.
+   Phase 5 closeout (2026-11-20): NotebookLM MCPs and browser/Playwright MCP
+   stay rejected as Friday *runtime* connectors (reasons in
+   `docs/mcp/allowlist.md`); no manifest exists for either.
 3. MCP write actions cannot bypass the Friday approval gate — MCPs are wrapped by
    the tool registry, never wired raw into production agents.
 4. Every MCP call is logged; unmaintained tools get removed at the periodic

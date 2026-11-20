@@ -4,6 +4,10 @@
 > APPROVE after two REVISE rounds (see "Plan-review rounds"; Codex CLI
 > is retired)**. Precondition met 2026-09-27 (Phase 4 merged to `main`,
 > former repository, PR #27); step-0 spikes recorded below.
+> **Closeout (2026-11-20): all ten branches implemented** on the
+> integration branch `claude/inspiring-franklin-pw7avo`, which supersedes
+> the former repository's `integ/phase-5` PR #29 (§10); owner steps
+> pending per branch.
 > Parent decisions: ADR-001, ADR-002 (import contracts), ADR-003
 > (single gateway door, ModelUsage), ADR-004 + ADR-008 decision 3
 > (gate-class vs confirm-class: every deploy, external send and git
@@ -821,6 +825,122 @@ cookie-based), browser/Playwright MCP stays rejected; e2e: harness job
 (stubbed CLI) → PR (fake MCP server) → deploy (sshd smoke target) →
 `work_log` visible.
 
+**Added to the closeout (2026-11-20, MASTER_PLAN "Roadmap update
+2026-11-20" and the Friday 3.0 plan, order 1):** (a) `manage.py
+preflight`, (b) a seeded OpenRouter provider row, (c) a record that the
+former repository's Phase 5 PR is superseded.
+
+**Status: implemented 2026-11-20** (branch `chore/p5-closeout`, cut from
+the integration branch `claude/inspiring-franklin-pw7avo` with branches
+1–9 merged).
+
+- **Superseded PR (c).** The former repository's Phase 5 integration PR
+  (`integ/phase-5` → `main`, PR #29, opened 2026-09-28 with branches 1–6
+  and 8) is **superseded** by the integration branch
+  `claude/inspiring-franklin-pw7avo` in this repository, which carries all
+  ten Phase 5 branches. PR #29 is not merged and not updated; it should be
+  closed with a pointer here (owner step 6). "`integ/phase-5`" elsewhere in
+  this brief means this integration branch from now on.
+- **`manage.py preflight` (a).** A new leaf app `backend/ops/` (no models,
+  views or URLs; an import-linter contract forbids every other app from
+  importing it, and it is in the "no `config`" and MCP-client-only
+  contracts). `ops/preflight.py` holds one function per check and every
+  outside contact behind a module-level seam (`http_get`, `db_fetchone`,
+  `redis_ping`, `celery_ping`, `gateway_factory`, `pin_report`). Checks:
+  `web` (`PREFLIGHT_WEB_URL`, compose default `http://localhost:8000/healthz`
+  inside `web`), `bff` (`PREFLIGHT_BFF_URL`), `postgres` (`SELECT 1`),
+  `pgvector` (`pg_extension`), `redis` (PING on `REDIS_URL`), `celery`
+  (control ping; `warn` under eager mode, `fail` when no worker answers),
+  `provider:<name>` for **every** `ModelProvider` row — one minimal call
+  (`max_tokens` 5, no data) through the gateway, chat via `complete()`,
+  embedding via `embed()`, pinned to that row with the new
+  `only_provider=` argument so a fallback can never hide a broken provider
+  or model id; purpose `ops.preflight` (in `AI_UNTIERED_PURPOSES`), one
+  `ModelUsage` row each; a disabled, unkeyed or flag-off fake row is
+  `warn` — `mcp_pins:<connector>` for every MCP connector with an enabled
+  binding (`connectors.services.live_pin_report`: a live `tools/list`
+  against the manifest pins that stores and audits nothing; the pin beat
+  stays the one writer; `not_configured` is `warn`), `frontend_build` (the
+  build id the BFF serves — `/_next/static/<id>/_buildManifest.js` or the
+  App Router's `"b":"<id>"` — equals `PREFLIGHT_FRONTEND_BUILD_ID_FILE`,
+  i.e. `.next/BUILD_ID`), `browser_secrets` (every secret-named env var of
+  the running process, ≥ 12 chars, must not appear in the served page or
+  any same-origin script it loads; reported by NAME only) and
+  `voice_mute` (a standing `warn` until Phase 6 builds the voice layer).
+  A check that is not configured is `warn`; a check that crashes is one
+  `fail` row and the rest still run. Output: one line per check, then
+  `N pass / N fail / N warn`; exit 1 on any `fail`. `--no-model-calls`
+  skips the paid calls; `make preflight` runs it inside `web`. New env:
+  `PREFLIGHT_WEB_URL`, `PREFLIGHT_BFF_URL`,
+  `PREFLIGHT_FRONTEND_BUILD_ID_FILE`, `PREFLIGHT_TIMEOUT_SECONDS`
+  (`.env.example`).
+  - **Gateway change.** `InferenceGateway.complete()`/`embed()` gain
+    `only_provider` (a provider name): selection is restricted to that row,
+    still only if active, keyed and (for `personal_data=True`) allowed; no
+    fallback; `routing_reason="pinned"`. Callers that omit it are
+    byte-for-byte unchanged (tested).
+- **OpenRouter provider row (b).** `seed_ai_defaults` always seeds
+  `openrouter`: `openai_compatible`, `chat`, base URL
+  `https://openrouter.ai/api/v1`, key env `OPENROUTER_API_KEY`, model
+  `OPENROUTER_MODEL_ID` or `openrouter/auto`, priority 40 (behind every
+  direct provider), `personal_data_allowed=False` (D5: it forwards to
+  third-party hosts; flipping it is the audited
+  `set_provider_personal_data`). It is created **inactive while the key is
+  absent** and switched off on any later seed run that finds the key gone;
+  a key added later does not re-enable an existing inactive row (that may
+  be the owner's own choice) — enable it in the admin. No default tier row
+  (it is a last-resort fallback, not a tier member). Compose passes
+  `OPENROUTER_API_KEY`/`OPENROUTER_MODEL_ID` through.
+- **Docs and governance.** MASTER_PLAN §AA row 5 → done, §O Home
+  Assistant and external-installation entries updated, NotebookLM entry
+  closed; ADR-008 implementation notes (deploy gate, decision-4 producers
+  complete); `docs/integrations/README.md` "Other integrations" rewritten;
+  governance pass: NotebookLM MCPs and browser/Playwright MCP stay rejected
+  for runtime (`docs/mcp/allowlist.md`, `docs/security/mcp-governance.md`).
+- **E2E.** `backend/ops/tests/test_closeout_e2e.py`: harness
+  implementation job (stubbed container/CLI) → review verdict (stubbed) →
+  Gate B decided over the web → push (stubbed git) → "PR aç" →
+  `github_open_pr` decided over the web → PR opened on the fake
+  `github-mcp-server` → deploy request with the GitHub title/green-CI
+  snapshot → `deploy` decided over the web → SSH runner against the
+  scripted remote (`deploys.ssh.run_verb` seam) → target live on the new
+  SHA → the push and deploy `work_log` rows visible through
+  `GET /api/v1/memories`. It lives in `ops` because it spans `harness`,
+  `connectors` and `deploys`. The sshd smoke target is real infrastructure
+  (`make deploy-smoke`), so it is an owner step, not a CI test.
+- **Tests.** `ops/tests/test_preflight.py` (every check's pass/fail/warn
+  path through its seam, the real gateway against the fake provider and
+  recording adapters with `ModelUsage` assertions, error details that never
+  echo an exception message or a secret, crash isolation, command output
+  and exit codes, `--no-model-calls`), `ai_core/tests/test_only_provider.py`,
+  `ai_core/tests/test_openrouter_seed.py`,
+  `connectors/tests/test_live_pin_report.py`, the e2e above. No new API
+  surface, so no new role × endpoint matrix; the e2e goes through the
+  existing owner-web endpoints.
+
+**Owner steps (pending, recorded 2026-11-20).** These need the owner's
+Mac, real credentials, paid calls or real hardware:
+1. `make up && make preflight` on the real stack (with
+   `PREFLIGHT_BFF_URL` pointing at the running frontend and
+   `PREFLIGHT_FRONTEND_BUILD_ID_FILE` at its `.next/BUILD_ID` after
+   `make frontend-build`): record the summary line here; "done" for the
+   phase means 0 fail. Confirm the `frontend_build` check finds the build
+   id in the real Next.js output (both id patterns are unit-tested only).
+2. Put a real `OPENROUTER_API_KEY` in `deploy/docker/.env`, re-run
+   `seed_ai_defaults` (or enable the existing `openrouter` row in the
+   admin if it was seeded without a key), then `make preflight` and check
+   `provider:openrouter` passes and one `ops.preflight` `ModelUsage` row
+   shows its cost.
+3. `make deploy-smoke` against the local sshd smoke target, then the
+   e2e by hand: a real harness job → "PR aç" on GitHub → "Deploy" on the
+   staging target → the work_log rows on Hafıza.
+4. The open owner steps of branches 5–9 (real GitHub sidecar pins, Google
+   OAuth consent, Home Assistant token, phone-width checks).
+5. Sonnet 5 review of this branch and of the integration branch
+   (CLAUDE.md review rule), then merge the integration branch to `main`
+   once CI is green.
+6. Close the former repository's PR #29 with a pointer to this section.
+
 ## Branch table
 
 | # | Branch | Scope | Depends on |
@@ -834,7 +954,7 @@ cookie-based), browser/Playwright MCP stays rejected; e2e: harness job
 | 7 | `feat/p5-home-assistant` | Native HA bridge, allowlists, gated service calls — **implemented 2026-11-20** (reconciled with 5/8; owner steps pending, see §7) | 4 |
 | 8 | `feat/p5-mail-calendar` | Google bridge, host OAuth, reads, gated send/invite | 4 |
 | 9 | `feat/p5-connectors-ui` | Settings, deploy targets, PR panel, renderers, chat badges — **implemented 2026-11-20** (all five renderers; owner steps pending, see §9) | 5, 6 (7, 8 renderers as they land) |
-| 10 | closeout | Docs, governance pass, end-to-end | 1–9 |
+| 10 | `chore/p5-closeout` | Docs, governance pass, end-to-end; `manage.py preflight`; seeded `openrouter` provider; former PR #29 superseded — **implemented 2026-11-20** (owner steps pending, see §10) | 1–9 |
 
 Minimum usable cut if the phase runs long: 1, 2, 4, 5, 6, 9 deliver
 "request → code → live"; 7 and 8 may land after without holding it.
