@@ -1991,3 +1991,33 @@ The first three are from the stub and are kept.
    findings until APPROVE (CLAUDE.md "Reviews").
 2. Confirm the platform-boundary split: the server branches now, and the
    Swift app in a later Mac session.
+
+### Known follow-ups (LOW, from the `docs/p9-brief` plan review)
+
+These were left open at merge time. Each implementing branch resolves the
+one that touches it before its own review.
+
+1. **Dollar amounts in canonical JSON (D5/D7).** D5 makes canonical JSON
+   integers-only, but D7's `usage.ccusage` fields `total_usd` and `usd`
+   are dollar amounts. State that they are integer micro-USD (e.g.
+   `usd_micros`) or decimal strings, and say whether `output_sha256` is
+   computed over canonical JSON of `output`, so the Swift port and the
+   server's total recomputation agree on rounding.
+2. **`nodes` must not import `approvals` in Phase 9 (D2 / branch 2).** The
+   import-linter contract `tools must not import approvals` has no
+   `allow_indirect_imports`, and branch 5 makes `tools` import `nodes`, so
+   any `nodes` → `approvals` import breaks lint via
+   tools → nodes → approvals. Phase 9 `nodes` imports no `approvals` code;
+   if that changes, branch 5 adds an `ignore_imports` entry for the chain.
+3. **Where the in-flight cap lives (D6).** `NODE_MAX_INFLIGHT` must be a
+   Redis counter (INCR/DECR with a TTL) shared across web, worker and
+   `node-gateway`, not a per-process counter. Add a test where callers in
+   two processes hit the limit together.
+4. **Node idle window wording (D1).** Read D1 as: nodes use a
+   node-specific idle window (`NODE_IDLE_EXPIRY_DAYS`) instead of
+   `DEVICE_IDLE_EXPIRY_DAYS`. `TrustedDevice.is_usable()` branches on
+   `kind`.
+5. **Workspace scoping of `Node` and `CapabilitySnapshot` (branch 2).**
+   Both are `WorkspaceScopedModel`s in the owner's personal workspace
+   (CLAUDE.md rule 1). Extend the `for_actor()` isolation test and the
+   node API 404 test to cover them, not only `NodeInvocation`.
