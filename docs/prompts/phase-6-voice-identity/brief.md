@@ -1427,6 +1427,29 @@ own "Done when" passes on the Mac are owner steps below.
 6. Phase-6 closeout e2e (`/hud` showing voice state and a pending-approval
    deep link) stays with branch 6.
 
+**Known follow-ups (branch 5 review, LOW, unresolved at merge).**
+- `backend/hud/services.py`: the budget `spent` figure is aggregated
+  install-wide across all workspaces, so the health panel's spend includes
+  the owner's other workspaces. It only exposes numbers to the same single
+  owner and matches the `AIBudget` model's documented semantics (no
+  cross-principal leak). Fix: add a one-line comment that budget rows are
+  install-wide by design, or filter by workspace if per-workspace budgets
+  are ever introduced.
+- `frontend/src/lib/hud/events.ts`: `HudStream` retries with backoff for as
+  long as the HUD is mounted on any non-OK response, including a permanent
+  401/403 from a revoked device, and keeps streaming while the tab is
+  hidden. Not harmful (throttle 20/min, backoff capped at 60 s), but a
+  revoked device keeps hitting the endpoint. Fix: stop retrying on 403 (and
+  on 401 after `apiFetch`'s refresh fails); optionally pause while
+  `document.hidden`.
+- `frontend/src/components/hud/orb/HudOrbGL.tsx`: the review worktree could
+  not typecheck this file or run `npm run check:hud-bundle` (missing the
+  newly pinned `three` / `@react-three/fiber`). Confirmed at integration
+  merge on the real dependency tree: `npm ci`, `tsc --noEmit`,
+  `npm run build` and `npm run check:hud-bundle` (1 three.js chunk,
+  reachable from `/hud` only, lazily, 97 routes) all pass; CI runs the same
+  steps.
+
 ### 6. closeout
 
 MASTER_PLAN §AA row 6 → done, §Z and §O updated (async job and temp file
