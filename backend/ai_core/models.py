@@ -47,9 +47,29 @@ class ModelProvider(TimestampedModel):
     # `InferenceGateway.complete(..., personal_data=True)` selects ONLY
     # providers with this flag and fails closed when there are none.
     personal_data_allowed = models.BooleanField(default=False)
+    # Phase 6 A3 (ADR-003 amendment 2026-11-20): audio is metered like text.
+    # STT is priced per second of input audio, TTS per million input
+    # characters; both 0 for local providers (which therefore never trip a
+    # budget). A provider-reported cost (OpenRouter `usage.cost`) wins over
+    # these configured prices when the response carries one.
+    price_per_audio_second = models.DecimalField(max_digits=12, decimal_places=8, default=0)
+    price_per_mchar = models.DecimalField(max_digits=10, decimal_places=4, default=0)
 
     class Meta:
         ordering = ["priority", "name"]
+
+    @property
+    def is_priced(self):
+        """True when any configured price is non-zero (budget relevance)."""
+        return any(
+            price > 0
+            for price in (
+                self.input_price_per_mtok,
+                self.output_price_per_mtok,
+                self.price_per_audio_second,
+                self.price_per_mchar,
+            )
+        )
 
     def __str__(self):
         return f"{self.name} ({self.model_id})"
@@ -82,6 +102,35 @@ class ModelTier(TimestampedModel):
 
     def __str__(self):
         return f"{self.tier}: {self.provider.name}"
+
+
+class AIBudget(TimestampedModel):
+    """A spending cap enforced by the gateway BEFORE provider selection
+    (Phase 6 A3, ADR-003 amendment 2026-11-20).
+
+    Covers the purposes listed in `purposes`; each limit is optional (null =
+    no cap for that window): `daily_limit_usd` (calendar day,
+    `settings.TIME_ZONE`), `monthly_limit_usd` (calendar month) and
+    `session_limit_usd` (all calls a caller tagged with the same
+    `budget_session`, e.g. one voice session). Spend is the sum of
+    `ModelUsage.estimated_cost` over the covered purposes -- install-wide,
+    since Friday has one owner. A refused call is itself a `ModelUsage` row
+    (`error_type="budget_exceeded"`, cost 0). Owner-editable in the admin;
+    `seed_ai_defaults` creates the `audio` budget once and never overwrites
+    an owner's edit."""
+
+    name = models.CharField(max_length=50, unique=True)
+    purposes = models.JSONField(default=list)
+    daily_limit_usd = models.DecimalField(max_digits=10, decimal_places=4, null=True, blank=True)
+    monthly_limit_usd = models.DecimalField(max_digits=10, decimal_places=4, null=True, blank=True)
+    session_limit_usd = models.DecimalField(max_digits=10, decimal_places=4, null=True, blank=True)
+    is_active = models.BooleanField(default=True)
+
+    class Meta:
+        ordering = ["name"]
+
+    def __str__(self):
+        return self.name
 
 
 class PromptTemplate(TimestampedModel):

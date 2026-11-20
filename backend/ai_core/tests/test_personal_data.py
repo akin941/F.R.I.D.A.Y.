@@ -70,9 +70,9 @@ class CountingFakeAdapter(FakeAdapter):
         self._log("embed", texts=texts, purpose=purpose)
         return super().embed(texts, purpose=purpose)
 
-    def transcribe(self, audio, *, content_type="", purpose=""):
+    def transcribe(self, audio, *, content_type="", params=None, purpose=""):
         self._log("transcribe", purpose=purpose)
-        return super().transcribe(audio, content_type=content_type, purpose=purpose)
+        return super().transcribe(audio, content_type=content_type, params=params, purpose=purpose)
 
     def synthesize(self, text, *, params=None, purpose=""):
         self._log("synthesize", purpose=purpose)
@@ -335,7 +335,7 @@ def test_audio_entry_points_fail_closed(
     make_provider("cloud-audio", priority=1, capability=capability)
     with pytest.raises(NoProviderAvailable):
         getattr(InferenceGateway(), method)(
-            purpose="voice.x", actor=user, workspace=workspace, personal_data=True, **kwargs
+            purpose="voice.x", actor=user, workspace=workspace, **kwargs
         )
     assert counting_adapter.calls == []
     assert ModelUsage.objects.get().routing_reason == "personal_data_required"
@@ -405,7 +405,16 @@ def test_seed_flags_only_local_providers(monkeypatch):
     allowed = set(
         ModelProvider.objects.filter(personal_data_allowed=True).values_list("name", flat=True)
     )
-    assert allowed == {"ollama-local", "ollama-embedding", "fake-local", "fake-embedding-local"}
+    # Phase 6: the in-process fake STT/TTS rows are allowed too (H1); the
+    # local speech rows only exist with VOICE_API_KEY (test_speech_seeds).
+    assert allowed == {
+        "ollama-local",
+        "ollama-embedding",
+        "fake-local",
+        "fake-embedding-local",
+        "fake-stt-local",
+        "fake-tts-local",
+    }
 
 
 def test_seed_never_flips_an_existing_row(monkeypatch):

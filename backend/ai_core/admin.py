@@ -1,6 +1,29 @@
 from django.contrib import admin
 
-from ai_core.models import ModelProvider, ModelTier, ModelUsage, PromptTemplate, PromptVersion
+from ai_core.models import (
+    AIBudget,
+    ModelProvider,
+    ModelTier,
+    ModelUsage,
+    PromptTemplate,
+    PromptVersion,
+)
+
+
+@admin.register(AIBudget)
+class AIBudgetAdmin(admin.ModelAdmin):
+    """Owner-editable spending caps (Phase 6 A3). Enforced by the gateway
+    before provider selection; a refusal is a `budget_exceeded` usage row."""
+
+    list_display = [
+        "name",
+        "purposes",
+        "daily_limit_usd",
+        "monthly_limit_usd",
+        "session_limit_usd",
+        "is_active",
+    ]
+    list_filter = ["is_active"]
 
 
 @admin.register(ModelTier)
@@ -22,6 +45,8 @@ class ModelProviderAdmin(admin.ModelAdmin):
         "personal_data_allowed",
         "input_price_per_mtok",
         "output_price_per_mtok",
+        "price_per_audio_second",
+        "price_per_mchar",
     ]
     list_filter = ["provider_type", "capability", "is_active", "personal_data_allowed"]
     search_fields = ["name", "model_id"]

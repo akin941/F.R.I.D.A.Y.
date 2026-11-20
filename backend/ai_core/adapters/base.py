@@ -7,6 +7,7 @@ secrets leak into exception messages.
 
 import os
 from dataclasses import dataclass, field
+from decimal import Decimal
 
 
 @dataclass
@@ -49,6 +50,14 @@ class TranscribeAdapterResult:
     output_tokens: int = 0
     raw_usage: dict = field(default_factory=dict)
     usage_estimated: bool = False
+    # Phase 6 A3: the provider-reported cost in USD when the response
+    # carries one (OpenRouter `usage.cost`), else None -> the gateway falls
+    # back to the provider row's configured audio price. `generation_id`
+    # (OpenRouter `X-Generation-Id` / response `id`) lets a later Celery
+    # task correct that estimate from the provider's generation lookup.
+    reported_cost: Decimal | None = None
+    generation_id: str = ""
+    language: str = ""
 
 
 @dataclass
@@ -69,6 +78,8 @@ class SynthesizeAdapterResult:
     output_tokens: int = 0
     raw_usage: dict = field(default_factory=dict)
     usage_estimated: bool = False
+    reported_cost: Decimal | None = None  # see TranscribeAdapterResult
+    generation_id: str = ""
 
 
 class AdapterError(Exception):
@@ -121,9 +132,10 @@ class BaseAdapter:
             "not_supported", retryable=False, safe_message="provider does not support embeddings"
         )
 
-    def transcribe(self, audio, *, content_type="", purpose=""):
+    def transcribe(self, audio, *, content_type="", params=None, purpose=""):
         """Return a TranscribeAdapterResult (speech-to-text). `audio` is raw
-        bytes. Providers with no STT endpoint inherit this default (MVP 12)."""
+        bytes; `params` may carry `language` (ISO 639-1 hint, Phase 6 D4).
+        Providers with no STT endpoint inherit this default (MVP 12)."""
         raise AdapterError(
             "not_supported", retryable=False, safe_message="provider does not support transcription"
         )
@@ -134,6 +146,12 @@ class BaseAdapter:
         raise AdapterError(
             "not_supported", retryable=False, safe_message="provider does not support synthesis"
         )
+
+    def generation_cost(self, generation_id):
+        """The provider's own final cost (USD, Decimal) of one earlier call,
+        or None when not (yet) known. Only providers with a generation-lookup
+        API (OpenRouter) implement it (Phase 6 A1/A3)."""
+        return None
 
     @staticmethod
     def estimate_tokens(text):

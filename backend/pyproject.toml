@@ -134,6 +134,8 @@ ignore_imports = [
     "ai_core.management.commands.set_provider_personal_data -> audit.services",
     # ...and its tests read back the audit rows it writes.
     "ai_core.tests.test_personal_data -> audit.models",
+    # Phase 6 branch 1: the `--activate` (d2 toggle) path is audited too.
+    "ai_core.tests.test_speech_gateway -> audit.models",
 ]
 
 [[tool.importlinter.contracts]]

@@ -76,6 +76,19 @@ services:
       OLLAMA_BASE_URL: "${OLLAMA_BASE_URL:-http://host.docker.internal:11434/v1}"
       OLLAMA_EMBED_MODEL_ID: "${OLLAMA_EMBED_MODEL_ID:-}"
       OLLAMA_EMBED_DIMENSION: "${OLLAMA_EMBED_DIMENSION:-}"
+      # Voice (Phase 6, ADR-011): the local speech server (speaches) runs
+      # natively on the host like Ollama; VOICE_API_KEY is a placeholder
+      # opt-in. OpenRouter audio rows stay disabled until the owner's d2
+      # toggle; the key only matters after it. See docs/runbooks/voice-setup.md.
+      VOICE_API_KEY: "${VOICE_API_KEY:-}"
+      VOICE_BASE_URL: "${VOICE_BASE_URL:-http://host.docker.internal:8000/v1}"
+      VOICE_STT_MODEL_ID: "${VOICE_STT_MODEL_ID:-}"
+      VOICE_TTS_MODEL_ID: "${VOICE_TTS_MODEL_ID:-}"
+      VOICE_STT_LANGUAGE: "${VOICE_STT_LANGUAGE:-tr}"
+      VOICE_TTS_VOICE: "${VOICE_TTS_VOICE:-tr_TR-dfki-medium}"
+      OPENROUTER_API_KEY: "${OPENROUTER_API_KEY:-}"
+      AI_BUDGET_AUDIO_MONTHLY_USD: "${AI_BUDGET_AUDIO_MONTHLY_USD:-20}"
+      AI_BUDGET_AUDIO_SESSION_USD: "${AI_BUDGET_AUDIO_SESSION_USD:-1}"
       # Obsidian vault export (MVP 5 §3): the STRING value is shared by both
       # containers (web validates it, tier 1, with zero filesystem access at
       # request time) but only `worker` actually has anything bind-mounted
