@@ -1,6 +1,6 @@
 import pytest
 
-from core.repo_identity import canonicalize_git_url, is_self_repo
+from core.repo_identity import CANONICAL_SELF_REPO, canonicalize_git_url, is_self_repo
 
 # Known-equivalent pairs (brief §boundary, round-2 MEDIUM finding, O-5): a
 # direct test table drives this so the hard-block fires on any of them.
@@ -40,8 +40,38 @@ class TestIsSelfRepo:
             self_repo_identifiers=["git@github.com:akin941/F.R.I.D.A.Y..git"],
         )
 
-    def test_empty_identifier_list_never_matches(self):
-        assert not is_self_repo("git@github.com:akin941/F.R.I.D.A.Y..git", self_repo_identifiers=[])
+    def test_empty_identifier_list_matches_no_unrelated_repo(self):
+        assert not is_self_repo("git@github.com:acme/other.git", self_repo_identifiers=[])
+
+    @pytest.mark.parametrize(
+        "spelling",
+        [
+            "https://github.com/akin941/F.R.I.D.A.Y..git",
+            "git@github.com:akin941/F.R.I.D.A.Y..git",
+            "https://github.com/akin941/F.R.I.D.A.Y.",
+            "git@github.com:akin941/jarvis-os.git",
+            "https://github.com/akin941/jarvis-os",
+        ],
+    )
+    def test_builtin_self_repos_match_even_with_only_a_legacy_identifier(self, spelling):
+        """Rename review MEDIUM: an owner `.env` still listing only the
+        pre-rename remote must not let the renamed repo through."""
+        assert is_self_repo(
+            spelling, self_repo_identifiers=["git@github.com:akin941/jarvis-os.git"]
+        )
+
+
+@pytest.mark.parametrize(
+    "spelling",
+    [
+        "https://github.com/akin941/F.R.I.D.A.Y..git",
+        "git@github.com:akin941/F.R.I.D.A.Y..git",
+        "https://github.com/akin941/F.R.I.D.A.Y.",
+    ],
+)
+def test_trailing_dot_repo_name_canonicalizes_to_the_canonical_self_repo(spelling):
+    assert canonicalize_git_url(spelling) == "github.com/akin941/f.r.i.d.a.y."
+    assert canonicalize_git_url(spelling) == canonicalize_git_url(CANONICAL_SELF_REPO)
 
 
 @pytest.mark.parametrize(

@@ -219,6 +219,8 @@ volumes:
   postgres-data:
     # Pinned to the pre-rename name (project `jarvis-os`) so the owner's
     # existing database survives the Jarvis -> Friday rename (2026-11-20).
+    # Fresh installs get this legacy name too, on purpose: one fixed name
+    # for every install, so no upgrade path ever has to move the volume.
     name: jarvis-os_postgres-data
 
 networks:

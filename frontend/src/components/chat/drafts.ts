@@ -1,4 +1,5 @@
 import type { ChatMessageView } from "@/components/chat/types";
+import { migrateLegacyStorageKey } from "@/lib/legacy-storage";
 
 export interface TaskDraft {
   sourceMessageId: string;
@@ -54,9 +55,11 @@ export function toolDraftFromMessage(message: ChatMessageView): ToolRequestDraft
  * just means discarded drafts reappear after a reload.
  */
 const DISMISSED_KEY = "friday:chat:dismissed-drafts";
+const LEGACY_DISMISSED_KEY = "jarvis:chat:dismissed-drafts";
 const DISMISSED_LIMIT = 200;
 
 export function loadDismissedDrafts(): Set<string> {
+  migrateLegacyStorageKey(DISMISSED_KEY, LEGACY_DISMISSED_KEY);
   try {
     const raw = window.localStorage.getItem(DISMISSED_KEY);
     const parsed: unknown = raw ? JSON.parse(raw) : [];

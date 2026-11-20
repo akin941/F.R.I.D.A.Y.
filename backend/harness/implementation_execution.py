@@ -66,6 +66,11 @@ logger = logging.getLogger(__name__)
 # line -- anything printed before it is ignored, and a missing or malformed
 # last frame fails closed (usage unavailable -> `runner_error`).
 CLI_OUTPUT_PREFIX = "FRIDAY_HARNESS_CLI_OUTPUT_V1"
+# The pre-rename marker, still emitted by images built before the Jarvis ->
+# Friday rename. Accepted on read so such an image can still report; the
+# last-frame rule is unchanged -- whichever accepted marker comes LAST wins.
+LEGACY_CLI_OUTPUT_PREFIX = "JARVIS_HARNESS_CLI_OUTPUT_V1"
+_CLI_OUTPUT_PREFIXES = (CLI_OUTPUT_PREFIX, LEGACY_CLI_OUTPUT_PREFIX)
 
 # Literal-substring secret scan over the produced diff (Phase 3 branch 5):
 # values shorter than this can't be matched without false positives.
@@ -79,11 +84,14 @@ def extract_framed_cli_output(raw_logs):
     so only the final frame is the wrapper's."""
     last = None
     for line in (raw_logs or "").splitlines():
-        if line.startswith(CLI_OUTPUT_PREFIX + " ") or line == CLI_OUTPUT_PREFIX:
-            last = line
+        for prefix in _CLI_OUTPUT_PREFIXES:
+            if line.startswith(prefix + " ") or line == prefix:
+                last = (prefix, line)
+                break
     if last is None:
         return None
-    payload = last[len(CLI_OUTPUT_PREFIX) :].strip()
+    prefix, line = last
+    payload = line[len(prefix) :].strip()
     try:
         return base64.b64decode(payload, validate=True).decode("utf-8", errors="replace")
     except (binascii.Error, ValueError):

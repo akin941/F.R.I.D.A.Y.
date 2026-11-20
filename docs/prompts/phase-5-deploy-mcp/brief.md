@@ -3,7 +3,7 @@
 > Status: **Approved (2026-09-27) — Sonnet 5 plan-review round 3
 > APPROVE after two REVISE rounds (see "Plan-review rounds"; Codex CLI
 > is retired)**. Precondition met 2026-09-27 (Phase 4 merged to `main`,
-> PR #27); step-0 spikes recorded below.
+> former repository, PR #27); step-0 spikes recorded below.
 > Parent decisions: ADR-001, ADR-002 (import contracts), ADR-003
 > (single gateway door, ModelUsage), ADR-004 + ADR-008 decision 3
 > (gate-class vs confirm-class: every deploy, external send and git

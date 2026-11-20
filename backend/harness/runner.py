@@ -88,6 +88,29 @@ class RunnerError(Exception):
     """A runner-level operation (clone/launch/stop) failed unrecoverably."""
 
 
+# `docker run` reports a missing `--network` as e.g.
+# `Error response from daemon: network friday-harness-egress not found`.
+_MISSING_NETWORK_RE = re.compile(r"network \S+ not found", re.IGNORECASE)
+
+
+def _launch_failure(exc, what):
+    """A `RunnerError` for a failed `docker run`. A missing restricted-
+    egress network gets an explicit, actionable message: the Jarvis ->
+    Friday rename changed the default `HARNESS_DOCKER_NETWORK` to
+    `friday-harness-egress`, and an install upgraded without creating it
+    (runbook step 5) would otherwise only see an opaque daemon error."""
+    stderr = getattr(exc, "stderr", None) or ""
+    if isinstance(exc, subprocess.CalledProcessError) and _MISSING_NETWORK_RE.search(stderr):
+        network = settings.HARNESS_DOCKER_NETWORK
+        return RunnerError(
+            f"{what} failed: docker network '{network}' does not exist. Create the "
+            f"restricted-egress network (`docker network create --internal {network}` plus "
+            "the allowlist proxy, see docs/runbooks/rename-jarvis-to-friday.md step 5) or "
+            "point HARNESS_DOCKER_NETWORK at the existing one."
+        )
+    return RunnerError(f"{what} failed: {exc}")
+
+
 def image_for_agent(agent):
     return _AGENT_IMAGES[agent]()
 
@@ -780,7 +803,7 @@ def launch_container(*, image, clone_dir, goal, cli_env, name):
             timeout=_CONTAINER_LAUNCH_TIMEOUT_SECONDS,
         )
     except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
-        raise RunnerError(f"container launch failed: {exc}") from exc
+        raise _launch_failure(exc, "container launch") from exc
     finally:
         if env_file_path:
             os.unlink(env_file_path)
@@ -868,7 +891,7 @@ def launch_implementation_container(
             timeout=_CONTAINER_LAUNCH_TIMEOUT_SECONDS,
         )
     except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
-        raise RunnerError(f"implementation container launch failed: {exc}") from exc
+        raise _launch_failure(exc, "implementation container launch") from exc
     finally:
         if env_file_path:
             os.unlink(env_file_path)

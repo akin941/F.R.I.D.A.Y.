@@ -86,13 +86,29 @@ def _join(host, path):
     return f"{host}/{_collapse_path(path)}"
 
 
+# The canonical remote of this installation's own source, plus its
+# pre-rename name (the Jarvis -> Friday rename moved the repo from
+# `akin941/jarvis-os` to `akin941/F.R.I.D.A.Y.` -- the trailing dot is part
+# of the real GitHub name). Always treated as self-repo identifiers IN
+# ADDITION to the configured `HARNESS_SELF_REPO_IDENTIFIERS`, so an owner
+# `.env` that still lists only the old remote cannot weaken the ADR-004
+# self-modification guard. This only ever widens what is refused: the
+# fail-closed "empty configured list refuses every write job" rule stays
+# with the callers, which check the configured setting itself, never this.
+CANONICAL_SELF_REPO = "https://github.com/akin941/F.R.I.D.A.Y."
+LEGACY_SELF_REPO = "https://github.com/akin941/jarvis-os"
+BUILTIN_SELF_REPO_IDENTIFIERS = (CANONICAL_SELF_REPO, LEGACY_SELF_REPO)
+
+
 def is_self_repo(git_url: str, *, self_repo_identifiers) -> bool:
     """`True` if `git_url` canonically matches any configured
-    `HARNESS_SELF_REPO_IDENTIFIERS` entry. Both sides are normalized the
-    same way, so a `HarnessRepo.git_url` registered as
+    `HARNESS_SELF_REPO_IDENTIFIERS` entry or one of the built-in
+    `BUILTIN_SELF_REPO_IDENTIFIERS`. Both sides are normalized the same
+    way, so a `HarnessRepo.git_url` registered as
     `https://github.com/akin941/F.R.I.D.A.Y.` correctly matches a configured
     identifier of `git@github.com:akin941/F.R.I.D.A.Y..git`, and vice versa."""
     canonical = canonicalize_git_url(git_url)
     return any(
-        canonical == canonicalize_git_url(identifier) for identifier in self_repo_identifiers
+        canonical == canonicalize_git_url(identifier)
+        for identifier in (*self_repo_identifiers, *BUILTIN_SELF_REPO_IDENTIFIERS)
     )

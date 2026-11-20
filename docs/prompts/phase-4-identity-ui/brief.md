@@ -13,7 +13,7 @@
 > only, low trust), `docs/VISION_FRIDAY_2.md` §0/§2/§5/§6, MASTER_PLAN §AA
 > ("Plan audit 2026-09-27", "Phase 4–6 outline") and §O.
 > **Precondition:** the Phase 3 closeout (branches 5a, 5, 6, 7, 8) is
-> merged and akin941/F.R.I.D.A.Y.#26 has landed on `main`; Phase 4 branches
+> merged and the Phase 3 integration PR (former repository, PR #26) has landed on `main`; Phase 4 branches
 > cut from `main`. Phase 3 branch 7 (`feat/p3-harness-ui`, in progress)
 > owns the font token + `latin-ext`, the shell height/overflow chain, chat
 > error surfaces and post-stream flash, keyboard-reachable cards, the
@@ -743,7 +743,7 @@ image or raw HTML.
 - **R9 — New dependencies** (`@tanstack/react-query`, `next-themes`,
   `sonner`, `react-markdown`, `remark-gfm`, `gunicorn`): locked, covered by
   Dependabot, each justified; `django-storages`/`boto3` leave.
-- **R10 — Phase 3 closeout slips** (branch 7 in progress, #26 unmerged):
+- **R10 — Phase 3 closeout slips** (branch 7 in progress, the integration PR — former repository, PR #26 — unmerged):
   branch 3 may start in a worktree but merges only after Phase 3 branch 7.
 
 ## Open questions (with recommended answers)
@@ -803,7 +803,7 @@ image or raw HTML.
 
 Every branch was reviewed by an independent Sonnet 5 subagent until
 APPROVE, merged `--no-ff` into `integ/phase-4` with the Playwright smoke
-green locally, and the phase went to `main` through PR #27.
+green locally, and the phase went to `main` through the integration PR (former repository, PR #27).
 
 | # | Branch | Review | Notes |
 |---|---|---|---|

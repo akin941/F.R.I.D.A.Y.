@@ -4,11 +4,14 @@ import { useState } from "react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { useWorkspace } from "@/contexts/workspace-context";
+import { migrateLegacyStorageKey } from "@/lib/legacy-storage";
 
 const DISMISSED_KEY = "friday:dismissed-security-notices";
+const LEGACY_DISMISSED_KEY = "jarvis:dismissed-security-notices";
 
-function readDismissed(): string[] {
+export function readDismissed(): string[] {
   if (typeof window === "undefined") return [];
+  migrateLegacyStorageKey(DISMISSED_KEY, LEGACY_DISMISSED_KEY);
   try {
     return JSON.parse(window.localStorage.getItem(DISMISSED_KEY) ?? "[]") as string[];
   } catch {

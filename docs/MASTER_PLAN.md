@@ -736,8 +736,8 @@ approval (Phase 5).
 | 1 | Memory v2: embeddings + semantic retrieval, `work_log` class, core memory blocks (owner + firm dossiers), personal read-only overlay | "What did we last do for firm X?" answerable | **done (2026-07-19)** — owner core block + consolidation carried forward (below) |
 | 2 | Harness v1: read-only discovery runs → briefing; runner abstraction (first runner: Mac); usage → ModelUsage; kill switch + budgets | "Analyze this bug in repo X, brief me" | **done (2026-07-20)** (mocked suite; first real run in Phase 3 closeout) |
 | 3 | Harness v2: plan approval → worktree implementation → tests → cross-vendor review → gated branch push | Approved feature development end-to-end | **done (2026-09-27)** — branches 1–4 (2026-07-20 → 07-22) + closeout 5a/5–8 (2026-09-27); first real paid run is an owner runbook step |
-| 4 | Security baseline; UI renewal: shell/chat/harness console/approvals inbox redesign; device-trust identity replaces signup/login; OpenAI-compatible facade (chat-only, low-trust) | Professional, safely-exposable daily driver | **done 2026-09-27** (`docs/prompts/phase-4-identity-ui/brief.md`, "Closeout"); six branches, each Sonnet 5 APPROVE, merged to `main` via PR #27 |
-| 5 | Deploy gate + VPS deploy (allowlisted commands); MCP client framework: GitHub, mail/calendar, external-installation client (when one exposes MCP), Home Assistant bridge; tier routing + harness policy table | Request → code → live, end to end | in progress (`docs/prompts/phase-5-deploy-mcp/brief.md`); on `integ/phase-5` (PR #29) as of 2026-09-28: branches 1–6 and 8 merged (Sonnet 5 APPROVE); 7 (Home Assistant) approved but waits on reconciling its native-bridge dispatch with branch 8's; 9 (UI) and 10 (closeout) open |
+| 4 | Security baseline; UI renewal: shell/chat/harness console/approvals inbox redesign; device-trust identity replaces signup/login; OpenAI-compatible facade (chat-only, low-trust) | Professional, safely-exposable daily driver | **done 2026-09-27** (`docs/prompts/phase-4-identity-ui/brief.md`, "Closeout"); six branches, each Sonnet 5 APPROVE, merged to `main` (former repository, PR #27) |
+| 5 | Deploy gate + VPS deploy (allowlisted commands); MCP client framework: GitHub, mail/calendar, external-installation client (when one exposes MCP), Home Assistant bridge; tier routing + harness policy table | Request → code → live, end to end | in progress (`docs/prompts/phase-5-deploy-mcp/brief.md`); on `integ/phase-5` (former repository, PR #29) as of 2026-09-28: branches 1–6 and 8 merged (Sonnet 5 APPROVE); 7 (Home Assistant) approved but waits on reconciling its native-bridge dispatch with branch 8's; 9 (UI) and 10 (closeout) open |
 | 6 | Voice (ex-MVP 12): mic capture, faster-whisper STT, Piper TTS, local wake word, orb wired to real audio; then the animated visual identity layer | The real Friday experience | brief approved 2026-09-27 (`docs/prompts/phase-6-voice-identity/brief.md`); starts after Phase 5 closeout (foundation from MVP 12 shipped, dormant) |
 | 7 | Workshop (first module pack, `apps.modules.workshop`): sandboxed 3D stage, gateway-driven part-stream builder, change-never-restart conversation, teardown/labels/STL export, saved-build shelf, cost receipt, workshop drill; then picture-in (vision) and studio-photo finish (image capability) | "Friday, bana bir saat mekanizması tasarla" → live, editable 3D model | planned 2026-11-20 (`docs/prompts/phase-7-workshop/brief.md`, written at phase start); starts after Phase 6 closeout |
 
@@ -747,7 +747,7 @@ discipline as MVP briefs (branch tables, test strategy, closeout).
 **Integration state (2026-09-27):** all Phase 0–3 work (119 commits) lives
 on the shared session branch `claude/repo-setup-env-transition-1g94hx`,
 not on `main`, and CI (push-to-main / PR only) had never run on it. Draft
-integration PR akin941/F.R.I.D.A.Y.#26 was opened on 2026-09-27 so CI runs; a
+integration PR (former repository, PR #26) was opened on 2026-09-27 so CI runs; a
 green CI run and the merge of that PR are Phase 3 closeout gates.
 
 **Review process (2026-09-27):** Codex CLI is retired from the development
@@ -818,7 +818,7 @@ detail in `docs/prompts/phase-3-harness-v2/brief.md` branch table.
 | 5 | `feat/p3-harness-hardening` | The pending branch-3 follow-ups (fixed `.env.example`: commented defaults) + every harness audit finding above + O-3 decision recorded |
 | 6 | `feat/p3-implementation-api` | Implementation-job + review API (create/list/detail/cancel), stored implementation transcript, gateway-produced `diff_summary`, a safe approval display summary for Gate A/B, `work_log` for implementation/push outcomes, `ToolSpec.user_invocable` filter for router/planner |
 | 7 | `feat/p3-harness-ui` | Frontend: repo picker, request implementation (fresh or from a discovery job), pipeline view, gate status + `/approvals` deep links, review verdict/findings/diff summary with fenced transcripts, harness-aware approval cards; plus the frontend "fix now" list (font, e2e, shell height, chat error/flicker, keyboard cards) |
-| 8 | closeout | Real-container smoke (actual Docker launch with a stubbed CLI, no paid calls) + owner runbook for the first paid run; CI green on PR #26; merge to `main` |
+| 8 | closeout | Real-container smoke (actual Docker launch with a stubbed CLI, no paid calls) + owner runbook for the first paid run; CI green on the integration PR (former repository, PR #26); merge to `main` |
 
 ### Phase 4–6 outline (briefs written at each phase start)
 

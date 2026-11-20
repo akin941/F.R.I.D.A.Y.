@@ -50,6 +50,37 @@ def test_extract_returns_none_without_a_frame(logs):
     assert implementation_execution.extract_framed_cli_output(logs) is None
 
 
+def _legacy_frame(text):
+    legacy = implementation_execution.LEGACY_CLI_OUTPUT_PREFIX
+    return f"{legacy} {base64.b64encode(text.encode()).decode()}"
+
+
+def test_extract_accepts_the_pre_rename_marker():
+    """Images built before the Jarvis -> Friday rename still emit
+    `JARVIS_HARNESS_CLI_OUTPUT_V1`; they must still be able to report."""
+    assert implementation_execution.LEGACY_CLI_OUTPUT_PREFIX == "JARVIS_HARNESS_CLI_OUTPUT_V1"
+    logs = "\n".join(["noise", _legacy_frame('{"total_cost_usd": 2}'), ""])
+    assert implementation_execution.extract_framed_cli_output(logs) == '{"total_cost_usd": 2}'
+
+
+@pytest.mark.parametrize(
+    "first,last,expected",
+    [
+        (_frame, _legacy_frame, '{"n": "last"}'),
+        (_legacy_frame, _frame, '{"n": "last"}'),
+    ],
+)
+def test_extract_last_frame_wins_across_both_markers(first, last, expected):
+    logs = "\n".join([first('{"n": "first"}'), last('{"n": "last"}')])
+    assert implementation_execution.extract_framed_cli_output(logs) == expected
+
+
+def test_extract_fails_closed_on_malformed_last_legacy_frame():
+    legacy = implementation_execution.LEGACY_CLI_OUTPUT_PREFIX
+    logs = "\n".join([_frame('{"total_cost_usd": 0}'), f"{legacy} !!!not-base64!!!"])
+    assert implementation_execution.extract_framed_cli_output(logs) is None
+
+
 # --- runner helper failure conversion -----------------------------------
 
 
@@ -427,3 +458,50 @@ def test_cleanup_handles_directories_without_any_owner_permission(tmp_path):
     os.chmod(root / "a", 0)
     runner.cleanup_directory(str(root))
     assert not root.exists()
+
+
+# --- missing restricted-egress network (Jarvis -> Friday rename) ---------
+
+_MISSING_NETWORK = subprocess.CalledProcessError(
+    125,
+    "docker",
+    stderr="docker: Error response from daemon: network friday-harness-egress not found.",
+)
+
+
+def _launch(kind):
+    if kind == "read":
+        return runner.launch_container(
+            image="img", clone_dir="/tmp/clone", goal="g", cli_env={}, name="harness-job-x"
+        )
+    return runner.launch_implementation_container(
+        image="img",
+        workspace_dir="/tmp/workspace",
+        goal="g",
+        test_command="pytest -q",
+        base_sha="base111",
+        cli_env={},
+        name="harness-impl-x",
+    )
+
+
+@pytest.mark.parametrize("kind", ["read", "implementation"])
+def test_missing_docker_network_is_an_actionable_error(monkeypatch, settings, kind):
+    settings.HARNESS_DOCKER_NETWORK = "friday-harness-egress"
+    monkeypatch.setattr(runner.subprocess, "run", mock.Mock(side_effect=_MISSING_NETWORK))
+    with pytest.raises(runner.RunnerError) as excinfo:
+        _launch(kind)
+    message = str(excinfo.value)
+    assert "docker network 'friday-harness-egress' does not exist" in message
+    assert "docker network create --internal friday-harness-egress" in message
+    assert "HARNESS_DOCKER_NETWORK" in message
+
+
+def test_other_launch_failures_keep_the_generic_message(monkeypatch, settings):
+    settings.HARNESS_DOCKER_NETWORK = "friday-harness-egress"
+    exc = subprocess.CalledProcessError(125, "docker", stderr="No such image: img")
+    monkeypatch.setattr(runner.subprocess, "run", mock.Mock(side_effect=exc))
+    with pytest.raises(runner.RunnerError) as excinfo:
+        _launch("read")
+    assert "does not exist" not in str(excinfo.value)
+    assert "container launch failed" in str(excinfo.value)

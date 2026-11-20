@@ -56,4 +56,12 @@ describe("dismissed drafts", () => {
     window.localStorage.setItem("friday:chat:dismissed-drafts", "{not json");
     expect(loadDismissedDrafts().size).toBe(0);
   });
+
+  it("carries pre-rename dismissals over once", () => {
+    window.localStorage.removeItem("friday:chat:dismissed-drafts");
+    window.localStorage.setItem("jarvis:chat:dismissed-drafts", JSON.stringify(["old1"]));
+    expect(loadDismissedDrafts().has("old1")).toBe(true);
+    expect(window.localStorage.getItem("jarvis:chat:dismissed-drafts")).toBeNull();
+    expect(window.localStorage.getItem("friday:chat:dismissed-drafts")).toBe('["old1"]');
+  });
 });

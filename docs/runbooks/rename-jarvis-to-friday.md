@@ -6,6 +6,27 @@ On 2026-11-20 the assistant was renamed from **Jarvis** to **Friday**
 (the owner's Mac): what changed, what keeps working on its own, and the
 few steps worth doing. Nothing here deletes data.
 
+> **Do this first — self-repo guard.** Before running any harness
+> implementation job or deploy, add the renamed remote to
+> `HARNESS_SELF_REPO_IDENTIFIERS` (keep the old one while it exists):
+>
+> ```
+> HARNESS_SELF_REPO_IDENTIFIERS=git@github.com:akin941/F.R.I.D.A.Y..git,git@github.com:akin941/jarvis-os.git
+> ```
+>
+> The repository name really ends in a dot (`F.R.I.D.A.Y.`), so the SSH
+> form has two dots before `git`. The guard also refuses
+> `github.com/akin941/F.R.I.D.A.Y.` and `github.com/akin941/jarvis-os` on
+> its own (built in), but a list that names neither renamed spelling
+> triggers the system-check warning `harness.W001` on every boot
+> (`manage.py check`) until it is fixed. Leaving the list empty still
+> refuses every implementation job and deploy (fail closed).
+>
+> **Deploy backend and frontend together.** The BFF's internal headers were
+> renamed (`X-Friday-Client-IP`, `X-Friday-BFF-Key`); with a mismatched pair
+> the backend ignores the forwarded client IP and sees every browser as the
+> BFF's own address (throttling and audit IPs collapse into one).
+
 ## TL;DR
 
 ```bash
@@ -47,16 +68,25 @@ still accepted for now.
    `frontend/.env.local` and `deploy/docker/.env` (`make secrets` already
    added `FRIDAY_BFF_SHARED_SECRET` there; delete the old line afterwards).
    The fallback will be removed in a later release.
-3. **Self-repo guard — do this one.** Add the new remote to
-   `HARNESS_SELF_REPO_IDENTIFIERS` (keep the old one while it exists):
-   `git@github.com:akin941/F.R.I.D.A.Y..git`. Without it the harness and
-   deploy self-modification guard would not recognize the new repository as
-   Friday itself.
+3. **Self-repo guard — do this one** (see the box at the top). Add the new
+   remote to `HARNESS_SELF_REPO_IDENTIFIERS` (keep the old one while it
+   exists): `git@github.com:akin941/F.R.I.D.A.Y..git`. The canonical old and
+   new GitHub remotes are refused regardless, but a mirror or other alias of
+   the repo is only recognized through this list, and `harness.W001` keeps
+   warning until the new remote is listed.
 4. **Re-seed.** `make up` runs `migrate` and `seed_ai_defaults`; on a host
    run use `uv run python manage.py migrate && uv run python manage.py
    seed_ai_defaults` from `backend/`. Check with
    `uv run python manage.py shell -c "from ai_core.models import PromptTemplate as P; print(sorted(P.objects.values_list('name', flat=True)))"`
-   — only `friday_*` names should remain.
+   — only `friday_*` names should remain. A leftover `jarvis_X` next to a
+   `friday_X` means migration `0006` found the new name already seeded and
+   skipped the old row on purpose (it never merges two templates). The
+   code only reads `friday_*`, so the stale row is harmless; to remove it,
+   first check nothing in `ModelUsage` points at its versions (deleting it
+   would null their `prompt_version` link, `SET_NULL`):
+   `uv run python manage.py shell -c "from ai_core.models import ModelUsage, PromptTemplate as P; t = P.objects.get(name='jarvis_X'); print(ModelUsage.objects.filter(prompt_version__template=t).count())"`
+   and, if that prints `0`, `... t.delete()` in the same shell. Otherwise
+   leave it as history.
 5. **Harness images.** The images are now `friday-harness-claude-code` /
    `friday-harness-codex-cli` and their output marker is
    `FRIDAY_HARNESS_CLI_OUTPUT_V1`, so images built before the rename can no
@@ -64,7 +94,11 @@ still accepted for now.
    If `HARNESS_IMAGE_*` is set in `.env`, update the tags. The default
    network is now `friday-harness-egress`: either
    `docker network create --internal friday-harness-egress`, or keep the old
-   network with `HARNESS_DOCKER_NETWORK=jarvis-harness-egress`.
+   network with `HARNESS_DOCKER_NETWORK=jarvis-harness-egress`. A missing
+   network now fails a run with an explicit `docker network '…' does not
+   exist` error naming this step. Results from an image that still emits the
+   pre-rename marker `JARVIS_HARNESS_CLI_OUTPUT_V1` are accepted for now, but
+   rebuild anyway — the old images also carry the old names everywhere else.
 6. **CLI.** Move `~/.config/jarvis/cli.toml` to `~/.config/friday/cli.toml`,
    export `FRIDAY_CLI_URL` / `FRIDAY_CLI_TOKEN` instead of the `JARVIS_`
    names, and run it as `uv run python -m integrations.cli.friday_cli`.
