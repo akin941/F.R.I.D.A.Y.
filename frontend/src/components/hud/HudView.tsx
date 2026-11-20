@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { X } from "lucide-react";
+import { HudLearningPanel, HudSessionsPanel } from "@/components/hud/HudLearningPanels";
 import { HudOrb } from "@/components/hud/HudOrb";
 import {
   ApprovalsPanel,
@@ -188,8 +189,9 @@ export function HudView({ streamFactory, webglAvailable, earconDeps }: HudViewPr
         <div className="order-3 flex flex-col gap-3">
           <CostPanel cost={data?.cost ?? null} />
           <HealthPanel health={data?.health ?? null} mic={mic} stream={status} />
-          {/* Phase 8A: the sessions panel goes here. */}
-          <div data-testid="hud-sessions-slot" data-slot="sessions" hidden />
+          {/* Phase 8A branch 6: the sessions panel and the morning-card summary. */}
+          <HudSessionsPanel />
+          <HudLearningPanel />
           <fieldset className={cn("flex flex-col gap-1 rounded-xl border border-border/60 p-3 text-xs")}>
             <legend className="px-1 text-hud-caption-muted">{tr.hud.settings.heading}</legend>
             <label className="flex items-center gap-2">

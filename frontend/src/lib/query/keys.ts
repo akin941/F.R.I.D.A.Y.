@@ -49,4 +49,19 @@ export const queryKeys = {
   approvalInbox: (filters: Record<string, string>) =>
     [ALL_WORKSPACES, "approvals", "inbox", filters] as const,
   approvalDetail: (requestId: string) => [ALL_WORKSPACES, "approvals", "detail", requestId] as const,
+  // Phase 8A branch 6. The morning card and the coding sessions span every
+  // workspace the owner is in (the backend groups/labels each row by
+  // workspace); the self anchors are repository text, not workspace data.
+  learningDigest: () => [ALL_WORKSPACES, "memory", "learning", "digest"] as const,
+  codingSessions: () => [ALL_WORKSPACES, "memory", "sessions"] as const,
+  selfSources: () => [ALL_WORKSPACES, "memory", "self-sources"] as const,
+  ingestionSources: (workspaceId: string) => [workspaceId, "memory", "ingestion", "sources"] as const,
+  ingestionSource: (workspaceId: string, sourceId: string) =>
+    [workspaceId, "memory", "ingestion", "sources", sourceId] as const,
+  mappingRules: (workspaceId: string, sourceId: string) =>
+    [workspaceId, "memory", "ingestion", "sources", sourceId, "rules"] as const,
+  scrubTerms: (workspaceId: string) => [workspaceId, "memory", "ingestion", "scrub-terms"] as const,
+  coreBlocks: (workspaceId: string) => [workspaceId, "memory", "core-blocks"] as const,
+  coreBlockVersions: (workspaceId: string, label: string) =>
+    [workspaceId, "memory", "core-blocks", label, "versions"] as const,
 };

@@ -13,7 +13,9 @@ import {
   Plug,
   Rocket,
   ShieldCheck,
+  Sunrise,
   Terminal,
+  TerminalSquare,
   Trash2,
   type LucideIcon,
 } from "lucide-react";
@@ -51,6 +53,7 @@ export const NAV_GROUPS: NavGroup[] = [
       { href: "/hud", label: items.hud, icon: Gauge },
       { href: "/approvals", label: items.approvals, icon: ShieldCheck, badge: "approvals" },
       { href: "/harness", label: items.harness, icon: Terminal, badge: "harness" },
+      { href: "/sessions", label: items.sessions, icon: TerminalSquare },
     ],
   },
   {
@@ -58,6 +61,7 @@ export const NAV_GROUPS: NavGroup[] = [
     label: groups.memory,
     items: [
       { href: "/memory", label: items.memory, icon: Brain },
+      { href: "/memory/learning", label: items.learning, icon: Sunrise },
       { href: "/knowledge", label: items.knowledge, icon: BookOpen },
       { href: "/tasks", label: items.tasks, icon: ListTodo },
       { href: "/today", label: items.today, icon: CalendarCheck },
@@ -91,4 +95,21 @@ export const NAV_GROUPS: NavGroup[] = [
 /** Whether `href` is the current section (a detail route counts too). */
 export function isActivePath(pathname: string, href: string): boolean {
   return pathname === href || pathname.startsWith(`${href}/`);
+}
+
+/**
+ * The one nav href that marks `pathname` current: the longest matching
+ * one, so `/memory/learning` (and its sibling learning pages) does not
+ * also light up `/memory`.
+ */
+export function activeNavHref(pathname: string, groups: NavGroup[] = NAV_GROUPS): string | null {
+  let best: string | null = null;
+  for (const group of groups) {
+    for (const item of group.items) {
+      if (isActivePath(pathname, item.href) && (best === null || item.href.length > best.length)) {
+        best = item.href;
+      }
+    }
+  }
+  return best;
 }
