@@ -16,9 +16,29 @@ import logging
 
 from django.core.exceptions import ValidationError
 from django.db import transaction
+from rest_framework import serializers
 
-from harness.models import HarnessImplementationJob
-from tools.registry import ToolSpec, ToolValidationError, register_tool
+from core.channels import CHANNEL_WEB
+from harness.models import HarnessImplementationJob, HarnessJob
+from harness.services import HarnessPermissionDenied, list_implementation_jobs, list_jobs
+from memory.models import Memory
+from tools.owner_reads import (
+    bounded_json_lines,
+    record_read,
+    require_owner_web_reader,
+    validate_args,
+)
+from tools.registry import (
+    DATA_CLASS_FIRM,
+    DATA_CLASS_PERSONAL,
+    ReadResult,
+    ReadToolError,
+    ReadToolSpec,
+    ToolSpec,
+    ToolValidationError,
+    register_read_tool,
+    register_tool,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -345,3 +365,133 @@ def _register():
             user_invocable=False,
         )
     )
+    register_read_tool(HARNESS_JOBS_SPEC)
+
+
+# --- `harness_jobs_status` read tool (Phase 8A brief D12, branch 6) ----------
+#
+# An ungated `ReadToolSpec` (registered here because `tools` may never import
+# `harness`): the workspace's latest discovery and implementation jobs, for
+# "Claude Code oturumlarım ne yapıyor?" next to `coding_sessions_status`.
+# Web channel only, a human installation owner with a curator role in the
+# conversation's own workspace (`harness.services.list_jobs` re-checks it),
+# `for_actor()` -- another workspace's jobs are never listed. The goal is the
+# owner's own typed request; model-produced briefings are left out. A job of
+# a `sensitive` repo (sensitivity `private`) makes the whole result
+# personal-class, like a GitHub read of a sensitive repo (Phase 5 D5): only
+# a personal-data provider may consume it. One `read_tool.read` audit row per
+# call (`tools.owner_reads`), ids and counts only.
+
+HARNESS_JOBS_TOOL = "harness_jobs_status"
+_JOBS_DEFAULT_LIMIT = 10
+_JOBS_MAX_LIMIT = 20
+_GOAL_MAX_CHARS = 200
+
+
+class HarnessJobsArgs(serializers.Serializer):
+    """Strict arguments: an optional page size, nothing else."""
+
+    limit = serializers.IntegerField(
+        required=False, min_value=1, max_value=_JOBS_MAX_LIMIT, default=_JOBS_DEFAULT_LIMIT
+    )
+
+
+def _job_row(job, kind):
+    goal = " ".join((job.goal or "").split())
+    if len(goal) > _GOAL_MAX_CHARS:
+        goal = goal[: _GOAL_MAX_CHARS - 1] + "…"
+    return {
+        "kind": kind,
+        "repo": job.repo.name,
+        "status": job.status,
+        "failure_reason": job.failure_reason,
+        "agent": job.agent,
+        "goal": goal,
+        "created_at": job.created_at.isoformat(),
+        "started_at": job.started_at.isoformat() if job.started_at else None,
+        "elapsed_seconds": job.elapsed_seconds,
+    }
+
+
+def read_harness_jobs(*, workspace, actor, args, channel):
+    audit = {"outcome": "ok", "count": 0, "size": 0}
+    try:
+        require_owner_web_reader(workspace=workspace, actor=actor, channel=channel)
+        limit = validate_args(HarnessJobsArgs, args)["limit"]
+        try:
+            discovery = list(
+                list_jobs(workspace=workspace, actor=actor)
+                .select_related("repo")
+                .order_by("-created_at")[:limit]
+            )
+            implementation = list(
+                list_implementation_jobs(workspace=workspace, actor=actor)
+                .select_related("repo")
+                .order_by("-created_at")[:limit]
+            )
+        except HarnessPermissionDenied:
+            raise ReadToolError("forbidden") from None
+        jobs = sorted(
+            [(job, "discovery") for job in discovery]
+            + [(job, "implementation") for job in implementation],
+            key=lambda pair: pair[0].created_at,
+            reverse=True,
+        )[:limit]
+        rows = [_job_row(job, kind) for job, kind in jobs]
+        text, size, truncated = bounded_json_lines(rows)
+        if not rows:
+            text = "No harness jobs in this workspace."
+        private = any(job.sensitivity == Memory.Sensitivity.PRIVATE for job, _ in jobs)
+        audit.update(
+            {
+                "count": len(rows),
+                "size": size,
+                "truncated": truncated,
+                "job_ids": [str(job.id) for job, _ in jobs],
+            }
+        )
+        if private:
+            audit["data_class"] = DATA_CLASS_PERSONAL
+        return ReadResult(
+            text=text,
+            size=size,
+            truncated=truncated,
+            data_class=DATA_CLASS_PERSONAL if private else "",
+        )
+    except ReadToolError as exc:
+        audit["outcome"] = exc.code
+        raise
+    finally:
+        record_read(
+            tool=HARNESS_JOBS_TOOL,
+            actor=actor,
+            workspace=workspace,
+            channel=channel,
+            metadata=audit,
+        )
+
+
+def harness_jobs_available(workspace):
+    """Offered to the router only where the workspace has harness jobs."""
+    workspace_id = getattr(workspace, "id", None)
+    if workspace_id is None:
+        return False
+    return (
+        HarnessJob.objects.filter(workspace_id=workspace_id).exists()
+        or HarnessImplementationJob.objects.filter(workspace_id=workspace_id).exists()
+    )
+
+
+HARNESS_JOBS_SPEC = ReadToolSpec(
+    name=HARNESS_JOBS_TOOL,
+    description=(
+        "the latest harness jobs (discovery and implementation) in this "
+        "workspace: repo, status, agent and the owner's goal"
+    ),
+    argument_serializer=HarnessJobsArgs,
+    data_class=DATA_CLASS_FIRM,
+    channels=frozenset({CHANNEL_WEB}),
+    execute=read_harness_jobs,
+    is_available=harness_jobs_available,
+    source="harness",
+)
