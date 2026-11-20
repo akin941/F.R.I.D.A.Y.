@@ -407,7 +407,9 @@ def _describe_arguments(serializer_class):
     return "\n".join(lines) or "- (no arguments)"
 
 
-def _extract_connector_args(conversation, *, actor, content, spec, personal_data):
+def _extract_connector_args(
+    conversation, *, actor, content, spec, personal_data, context_report=None
+):
     """`router.connector_args` (D4): the read tool is already named, so its
     data class is known -- a `personal` tool's call carries
     `personal_data=True` (D5). Sees only the owner's message and the
@@ -429,7 +431,7 @@ def _extract_connector_args(conversation, *, actor, content, spec, personal_data
         workspace=conversation.workspace,
         prompt_version=prompt_version,
         stream=False,
-        context_report={"connector_tool": spec.name},
+        context_report={**(context_report or {}), "connector_tool": spec.name},
         personal_data=personal_data,
     )
     return parse_connector_args(result.text)
@@ -449,7 +451,9 @@ class ConnectorTurn:
     reads: list = field(default_factory=list)
 
 
-def prepare_connector_read(conversation, *, actor, content, channel, tool_name):
+def prepare_connector_read(
+    conversation, *, actor, content, channel, tool_name, context_report=None
+):
     """Run the one connector read of a `connector_read` turn (D4/D5), in
     this order:
 
@@ -469,7 +473,9 @@ def prepare_connector_read(conversation, *, actor, content, channel, tool_name):
        completion reads the flag fresh and passes `personal_data=True`.
 
     The result is fenced here (`render_connector_block`) and never stored:
-    `Message.connector_reads` keeps bookkeeping only."""
+    `Message.connector_reads` keeps bookkeeping only. `context_report`
+    (optional, Phase 6 A5) joins the argument call's ModelUsage report --
+    e.g. the voice turn's trace id."""
     from tools.registry import DATA_CLASS_PERSONAL, ReadToolError, list_read_tools
 
     spec = next(
@@ -500,6 +506,7 @@ def prepare_connector_read(conversation, *, actor, content, channel, tool_name):
             content=content,
             spec=spec,
             personal_data=personal_context,
+            context_report=context_report,
         )
     except NoProviderAvailable as exc:
         if personal_context:
@@ -548,6 +555,55 @@ def prepare_connector_read(conversation, *, actor, content, channel, tool_name):
     if personal:
         mark_conversation_personal_data(conversation=conversation, actor=actor)
     return ConnectorTurn(tool_name=tool_name, outcome="ok", block=block, reads=[report])
+
+
+# --- Voice-turn capability cap (Phase 6 A6, ADR-015 decision 1) ---
+
+# What each router intent's turn may DO. A voice turn (speaker unverified:
+# a TV, a guest or Friday's own speaker can say anything) may only read and
+# propose; nothing it produces executes without an on-screen act by the
+# owner. Every `Message.Intent` must be listed (a coverage test enforces it),
+# so a future intent that executes something is capped for voice the moment
+# it is added -- it is absent from VOICE_ALLOWED_EFFECTS -- rather than
+# inheriting voice access by accident.
+EFFECT_READ = "read"
+EFFECT_PROPOSAL = "proposal"
+INTENT_EFFECTS = {
+    Message.Intent.CHAT: EFFECT_READ,
+    Message.Intent.MEMORY_QUERY: EFFECT_READ,
+    Message.Intent.KNOWLEDGE_QUERY: EFFECT_READ,
+    # One `ReadToolSpec` read (never a gated `ToolSpec`), re-resolved by
+    # `prepare_connector_read` against `list_read_tools`.
+    Message.Intent.CONNECTOR_READ: EFFECT_READ,
+    # A `draft` SSE event: a card the owner confirms by click (tasks) or
+    # turns into an approval request by click, decided on /approvals.
+    Message.Intent.TASK_DRAFT: EFFECT_PROPOSAL,
+    Message.Intent.TOOL_REQUEST: EFFECT_PROPOSAL,
+}
+VOICE_ALLOWED_EFFECTS = frozenset({EFFECT_READ, EFFECT_PROPOSAL})
+_CHAT_RESULT = {"intent": Message.Intent.CHAT, "intent_payload": {}}
+
+
+def apply_voice_capability_cap(classification, *, input_mode):
+    """ADR-015 decision 1, server-side, per turn: for an `input_mode="voice"`
+    turn, keep the classification only if its intent's effect is a read or
+    a proposal; anything else (an unknown or executing intent) degrades to
+    plain chat before any of the turn's paths run. A `connector_read` must
+    name a registered read tool (a `ReadToolSpec`), never a gated tool.
+    Typed turns pass through untouched: the cap narrows voice, it adds no
+    trust to text. Returns the (possibly degraded) classification."""
+    from tools.registry import get_read_tool
+
+    if input_mode != Message.InputMode.VOICE:
+        return classification
+    intent = classification.get("intent")
+    if INTENT_EFFECTS.get(intent) not in VOICE_ALLOWED_EFFECTS:
+        return dict(_CHAT_RESULT)
+    if intent == Message.Intent.CONNECTOR_READ:
+        tool_name = (classification.get("intent_payload") or {}).get("tool_name")
+        if get_read_tool(tool_name) is None:
+            return dict(_CHAT_RESULT)
+    return classification
 
 
 @transaction.atomic

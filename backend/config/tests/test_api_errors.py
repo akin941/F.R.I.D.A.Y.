@@ -42,6 +42,7 @@ from harness.services import HarnessServiceError
 from knowledge.services import KnowledgeServiceError
 from memory.services import MemoryServiceError
 from tasks.services import TaskServiceError
+from voice.services import VoiceServiceError
 from workspaces.models import Workspace, WorkspaceMember
 from workspaces.services import WorkspacePermissionDenied
 
@@ -56,6 +57,7 @@ _DOMAIN_BASES = [
     KnowledgeServiceError,
     MemoryServiceError,
     TaskServiceError,
+    VoiceServiceError,
 ]
 
 

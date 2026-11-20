@@ -20,6 +20,7 @@ from assistant.serializers import (
     MessageSerializer,
 )
 from assistant.services import (
+    apply_voice_capability_cap,
     build_gateway_stream,
     classify_intent,
     create_conversation,
@@ -28,8 +29,9 @@ from assistant.services import (
     rename_conversation,
     stream_assistant_reply,
 )
-from core.channels import is_low_trust, request_channel, scoped_for_actor
+from core.channels import CHANNEL_WEB, is_low_trust, request_channel, scoped_for_actor
 from core.throttling import ScopedRateThrottle
+from core.tracing import request_trace_id, trace_report
 from knowledge.models import KnowledgeChunk
 from workspaces.models import Workspace
 
@@ -262,6 +264,16 @@ class ConversationMessageListView(APIView):
         # and its assistant reply (MVP 9 §1) -- never independently
         # re-derived for the reply, so the two rows can never drift apart.
         channel = request_channel(request)
+        # Phase 6 D9: provenance only, client-asserted; a voice turn exists
+        # only on the trusted web session, every other channel is `text`.
+        input_mode = serializer.validated_data["input_mode"]
+        if channel != CHANNEL_WEB:
+            input_mode = Message.InputMode.TEXT
+        # Phase 6 A5: the client's per-turn trace id (ignored when malformed)
+        # and the input mode join every ModelUsage row of this turn.
+        turn_report = trace_report(request_trace_id(request))
+        if input_mode == Message.InputMode.VOICE:
+            turn_report["input_mode"] = input_mode
 
         # Classify before building the reply context (MVP 6 §1) — a wholly
         # new step inserted ahead of the existing build_gateway_stream/persist
@@ -275,7 +287,11 @@ class ConversationMessageListView(APIView):
             content=content,
             client_local_date=serializer.validated_data["client_local_date"],
             channel=channel,
+            context_report=turn_report or None,
         )
+        # ADR-015 decision 1 (Phase 6 A6): a voice turn reads and proposes
+        # only -- capped here, before any of the turn's paths run.
+        classification = apply_voice_capability_cap(classification, input_mode=input_mode)
 
         # Phase 5 branch 4 (brief D4/D5): at most one connector read per
         # turn, run and fenced here -- and, for a personal read, the
@@ -289,6 +305,7 @@ class ConversationMessageListView(APIView):
                 content=content,
                 channel=channel,
                 tool_name=classification["intent_payload"]["tool_name"],
+                context_report=turn_report or None,
             )
             classification["intent_payload"] = {
                 "tool_name": connector_turn.tool_name,
@@ -303,6 +320,7 @@ class ConversationMessageListView(APIView):
                 channel=channel,
                 intent=classification["intent"],
                 connector_turn=connector_turn,
+                report_extra=turn_report or None,
             )
         )
         user_message = Message.objects.create(
@@ -315,6 +333,7 @@ class ConversationMessageListView(APIView):
             intent=classification["intent"],
             intent_payload=classification["intent_payload"],
             channel=channel,
+            input_mode=input_mode,
         )
 
         # `draft` SSE event (MVP 6 §3/§4/§5): non-terminal, emitted only for

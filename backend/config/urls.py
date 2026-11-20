@@ -7,6 +7,7 @@ from rest_framework.settings import api_settings
 from accounts.authentication import PersonalAccessTokenAuthentication
 from config.activity import ActivitySummaryView
 from deploys.urls import build_urlpatterns as deploy_urlpatterns
+from voice.urls import build_urlpatterns as voice_urlpatterns
 
 
 def healthz(request):
@@ -41,6 +42,20 @@ urlpatterns = [
         "api/v1/",
         include(
             deploy_urlpatterns(
+                authentication_classes=[
+                    PersonalAccessTokenAuthentication,
+                    *api_settings.DEFAULT_AUTHENTICATION_CLASSES,
+                ]
+            )
+        ),
+    ),
+    # Phase 6 branch 2: same injection for `voice` (D11: it may not import
+    # `accounts`); the PAT authenticator is there only so a PAT gets the
+    # views' deliberate 403 -- both endpoints are web-session only.
+    path(
+        "api/v1/",
+        include(
+            voice_urlpatterns(
                 authentication_classes=[
                     PersonalAccessTokenAuthentication,
                     *api_settings.DEFAULT_AUTHENTICATION_CLASSES,

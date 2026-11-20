@@ -67,6 +67,7 @@ testpaths = [
     "harness",
     "connectors",
     "deploys",
+    "voice",
 ]
 
 [tool.importlinter]
@@ -89,6 +90,7 @@ root_packages = [
     "harness",
     "connectors",
     "deploys",
+    "voice",
     # The MCP SDK (Phase 5 branch 4, ADR-010 decision 3) is analysed as a
     # root package only so the contract below can name its `mcp.server`
     # subpackage -- import-linter cannot forbid a subpackage of an external
@@ -111,12 +113,12 @@ forbidden_modules = ["config"]
 name = "core must stay independent of kernel apps"
 type = "forbidden"
 source_modules = ["core"]
-forbidden_modules = ["accounts", "workspaces", "audit", "ai_core", "assistant", "memory", "knowledge", "tasks", "approvals", "tools", "agents", "skills", "integrations", "harness", "connectors", "deploys"]
+forbidden_modules = ["accounts", "workspaces", "audit", "ai_core", "assistant", "memory", "knowledge", "tasks", "approvals", "tools", "agents", "skills", "integrations", "harness", "connectors", "deploys", "voice"]
 
 [[tool.importlinter.contracts]]
 name = "kernel apps must not import the Django project config"
 type = "forbidden"
-source_modules = ["accounts", "workspaces", "audit", "ai_core", "assistant", "memory", "knowledge", "tasks", "approvals", "tools", "agents", "skills", "integrations", "harness", "connectors", "deploys"]
+source_modules = ["accounts", "workspaces", "audit", "ai_core", "assistant", "memory", "knowledge", "tasks", "approvals", "tools", "agents", "skills", "integrations", "harness", "connectors", "deploys", "voice"]
 forbidden_modules = ["config"]
 
 # ai_core is the single door for LLM traffic (ADR-003): it must never depend on
@@ -125,7 +127,7 @@ forbidden_modules = ["config"]
 name = "ai_core must not import business apps"
 type = "forbidden"
 source_modules = ["ai_core"]
-forbidden_modules = ["accounts", "workspaces", "audit", "assistant", "memory", "knowledge", "tasks", "approvals", "tools", "agents", "skills", "integrations", "harness", "connectors", "deploys"]
+forbidden_modules = ["accounts", "workspaces", "audit", "assistant", "memory", "knowledge", "tasks", "approvals", "tools", "agents", "skills", "integrations", "harness", "connectors", "deploys", "voice"]
 ignore_imports = [
     "ai_core.tests.* -> accounts.*",
     # D5 (Phase 5 branch 2): flipping `personal_data_allowed` must be
@@ -142,7 +144,7 @@ ignore_imports = [
 name = "audit must not depend on business apps (one-way: apps call audit)"
 type = "forbidden"
 source_modules = ["audit"]
-forbidden_modules = ["accounts", "workspaces", "assistant", "memory", "knowledge", "tasks", "approvals", "tools", "agents", "harness", "connectors", "deploys"]
+forbidden_modules = ["accounts", "workspaces", "assistant", "memory", "knowledge", "tasks", "approvals", "tools", "agents", "harness", "connectors", "deploys", "voice"]
 # Tests exercise the wired flows end-to-end; the contract targets production code.
 ignore_imports = [
     "audit.tests.* -> accounts.*",
@@ -367,7 +369,7 @@ forbidden_modules = ["harness"]
 [[tool.importlinter.contracts]]
 name = "no other app may import harness (harness is a leaf dependency root)"
 type = "forbidden"
-source_modules = ["accounts", "assistant", "knowledge", "tasks", "approvals", "tools", "agents", "skills", "integrations", "connectors", "deploys"]
+source_modules = ["accounts", "assistant", "knowledge", "tasks", "approvals", "tools", "agents", "skills", "integrations", "connectors", "deploys", "voice"]
 forbidden_modules = ["harness"]
 
 # Phase 5 (ADR-010): two new kernel apps, `connectors` (MCP servers and
@@ -444,7 +446,7 @@ forbidden_modules = ["deploys"]
 [[tool.importlinter.contracts]]
 name = "production code imports only the MCP client side (ADR-010, D2)"
 type = "forbidden"
-source_modules = ["core", "accounts", "workspaces", "audit", "ai_core", "assistant", "memory", "knowledge", "tasks", "approvals", "tools", "agents", "skills", "integrations", "harness", "connectors", "deploys"]
+source_modules = ["core", "accounts", "workspaces", "audit", "ai_core", "assistant", "memory", "knowledge", "tasks", "approvals", "tools", "agents", "skills", "integrations", "harness", "connectors", "deploys", "voice"]
 forbidden_modules = ["mcp.server", "mcp.client.stdio", "mcp.client.sse", "mcp.cli", "mcp.os"]
 allow_indirect_imports = true
 ignore_imports = [
@@ -455,3 +457,36 @@ ignore_imports = [
     "connectors.docker.stdio_bridge -> mcp.server",
     "connectors.docker.stdio_bridge -> mcp.client.stdio",
 ]
+
+# Phase 6 branch 2 (ADR-011 decision 6, brief D11): `voice` may import
+# `core`, `workspaces`, `ai_core` and `assistant` (conversation lookup and
+# `Message.InputMode` only). It must not reach any app that decides,
+# executes or stores anything else -- a spoken utterance never approves,
+# confirms or runs anything (D8, ADR-015). `audit` is deliberately not in
+# this list (brief D11): D2 records no audit row per utterance, so voice
+# does not import it today, and adding one later needs a named event.
+[[tool.importlinter.contracts]]
+name = "voice may import only core, workspaces, ai_core, assistant (ADR-011, D11)"
+type = "forbidden"
+source_modules = ["voice"]
+forbidden_modules = ["config", "accounts", "approvals", "tasks", "tools", "agents", "skills", "memory", "knowledge", "integrations", "harness", "connectors", "deploys"]
+# `voice -> assistant` is allowed, and `assistant` itself imports memory,
+# knowledge, tools and audit -- those are assistant's edges, not voice's.
+allow_indirect_imports = true
+# Tests build users and PATs for the role x endpoint matrix and drive whole
+# turns (a chat message, a task/tool draft) end to end; the contract targets
+# production code (the deploys/connectors exemption).
+ignore_imports = [
+    "voice.tests.** -> accounts.**",
+    "voice.tests.** -> approvals.**",
+    "voice.tests.** -> tasks.**",
+    "voice.tests.** -> tools.**",
+]
+
+# ...and `voice` is a leaf: nothing imports it (like `harness`). The
+# composition root (`config/urls.py`) mounts its routes.
+[[tool.importlinter.contracts]]
+name = "no app may import voice (voice is a leaf, ADR-011)"
+type = "forbidden"
+source_modules = ["core", "accounts", "workspaces", "audit", "ai_core", "assistant", "memory", "knowledge", "tasks", "approvals", "tools", "agents", "skills", "integrations", "harness", "connectors", "deploys"]
+forbidden_modules = ["voice"]
