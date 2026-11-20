@@ -1066,3 +1066,27 @@ PAT wording in this section and branch 2's matrix now says 401.
    through start → permission prompt → stop → end, and a pasted fake key in
    a notification never reaches the DB (runbook §6).
 5. Independent Sonnet 5 review of this branch before merge.
+
+### Branch 3 (`feat/p8-hook-relay`) — known follow-ups (from review, unresolved at merge)
+
+- **LOW — body-size check buffers chunked bodies**
+  (`backend/memory/ingestion/views.py`). When Content-Length is absent or the
+  body is chunked, `HookEventIngestView` calls `len(request.body)`. That
+  buffers up to Django's `DATA_UPLOAD_MAX_MEMORY_SIZE` before the 64 KB check
+  runs, so an oversized chunked body gets the framework's 400 instead of a
+  413. The impact is small, because the caller is already authenticated and
+  throttled. Fix (optional): read at most `MAX_BODY_BYTES + 1` from the
+  request stream before parsing.
+- **LOW — forget hides sessions but keeps notification text**
+  (`backend/memory/ingestion/hooks.py`). Forgetting a source only hides its
+  `CodingSession` rows, because the sessions API filters on `forgotten_at`.
+  The scrubbed `last_notification` text stays in the table until restore, the
+  TTL purge or deletion of the source. This matches the reversible-trash model
+  and the docstring, but it should be checked against the D10/D11 forget
+  semantics. Fix (optional): blank `last_notification` on forget and rebuild
+  it on restore, or record this behaviour in the runbook.
+- **LOW — throttle keyed per user, not per token**
+  (`backend/memory/ingestion/hooks.py`). The throttle scope uses DRF's
+  `ScopedRateThrottle` ident, which is per user, where the brief says per
+  token. With a single owner the effect is the same. Fix: none needed, or key
+  the throttle on `token_id` for strictness.
