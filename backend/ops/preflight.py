@@ -226,6 +226,9 @@ def _provider_skip_reason(provider):
     return ""
 
 
+AUDIO_CAPABILITIES = ("stt", "tts")
+
+
 def check_providers(*, model_calls=True):
     """One minimal gateway call per seeded provider (chat: `complete`,
     embedding: `embed`), each pinned to its provider so a fallback can
@@ -240,6 +243,12 @@ def check_providers(*, model_calls=True):
     gateway = None
     for provider in providers:
         name = f"provider:{provider.name}"
+        if provider.capability in AUDIO_CAPABILITIES:
+            # Phase 6 speech rows (STT/TTS) need real audio in/out; a chat
+            # call pinned to them would only fail. A standing warn until
+            # the voice layer gets its own preflight (see `voice_mute`).
+            results.append(CheckResult(name, WARN, "audio provider: not checked yet"))
+            continue
         skip = _provider_skip_reason(provider)
         if skip:
             results.append(CheckResult(name, WARN, f"not configured: {skip}"))

@@ -276,6 +276,29 @@ def test_fake_provider_answers_through_the_real_gateway(settings):
     assert set(ModelUsage.objects.values_list("purpose", flat=True)) == {"ops.preflight"}
 
 
+def test_audio_provider_rows_warn_and_are_never_called(settings, monkeypatch, adapters):
+    calls, _ = adapters
+    settings.AI_FAKE_PROVIDER = False
+    monkeypatch.setenv("PREFLIGHT_TEST_KEY", "k" * 20)
+    _provider("stt-a", capability=ModelProvider.Capability.STT)
+    _provider("tts-a", capability=ModelProvider.Capability.TTS)
+    results = {r.name: r for r in preflight.check_providers()}
+    assert {n: r.status for n, r in results.items()} == {
+        "provider:stt-a": WARN,
+        "provider:tts-a": WARN,
+    }
+    assert results["provider:tts-a"].detail == "audio provider: not checked yet"
+    assert calls == []
+    assert not ModelUsage.objects.exists()
+
+
+def test_seeded_stack_has_no_failing_provider_rows(settings):
+    settings.AI_FAKE_PROVIDER = True
+    call_command("seed_ai_defaults", stdout=StringIO())
+    results = preflight.check_providers()
+    assert [r.name for r in results if r.status == FAIL] == []
+
+
 def test_no_model_calls_skips_every_call(settings, monkeypatch, adapters):
     calls, _ = adapters
     settings.AI_FAKE_PROVIDER = False
