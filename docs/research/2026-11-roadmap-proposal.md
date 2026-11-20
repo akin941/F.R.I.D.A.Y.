@@ -1,8 +1,8 @@
 # Friday 3.0 roadmap proposal (revision 2)
 
-Status: proposal for the owner. Written 2026-11-20, revised the same day after an independent review (verdict REVISE, 26 points). It does not edit any repo file. Inputs: CLAUDE.md, `docs/MASTER_PLAN.md` §Z/§AA and "Roadmap update 2026-11-20", `docs/VISION_FRIDAY_2.md`, the Phase 4/5/6 briefs, ADR-003/004/005/007/008/009/010, the `accounts` (TrustedDevice, DevicePairingCode, PersonalAccessToken.kind), `harness`, `connectors`, `memory`, `skills` and `integrations` apps, `backend/pyproject.toml` import-linter contracts, and `landscape.md` (same folder).
+Status: **accepted by the owner on 2026-11-20** — every recommended answer of §g (d1–d10) approved; the §e document edits are applied on branch `docs/friday-3-roadmap` (see "Implementation status" at the end). Written 2026-11-20, revised the same day after an independent review (verdict REVISE, 26 points). **ADR numbering (fixed on acceptance):** ADR-011 is reserved by the approved Phase 6 brief for "voice transport", so this plan's ADRs are numbered ADR-012 (continuous-learning ingestion), ADR-013 (node protocol), ADR-014 (node action classification) and ADR-015 (voice-originated turns); every reference below uses the final numbers. Inputs: CLAUDE.md, `docs/MASTER_PLAN.md` §Z/§AA and "Roadmap update 2026-11-20", `docs/VISION_FRIDAY_2.md`, the Phase 4/5/6 briefs, ADR-003/004/005/007/008/009/010, the `accounts` (TrustedDevice, DevicePairingCode, PersonalAccessToken.kind), `harness`, `connectors`, `memory`, `skills` and `integrations` apps, `backend/pyproject.toml` import-linter contracts, and `landscape.md` (same folder).
 
-What changed in revision 2, in one line each: node actions are now gate-class by default under a new ADR-013 (no ADR-009 amendment); node policy is local-only with Touch ID; invocations are bound to approvals; voice turns can never execute; a privacy pipeline (scrubber, workspace mapping, TTL, audit view, forget-source) now comes before ingestion; extraction sees only owner-authored text; learning memory moves before the node; scope is cut to a minimal vertical slice with go/no-go checkpoints; cost caps, latency budgets, offline behaviour, observability, testing and credential handling are specified; phase numbers stay stable (Workshop keeps number 7, deferred).
+What changed in revision 2, in one line each: node actions are now gate-class by default under a new ADR-014 (no ADR-009 amendment); node policy is local-only with Touch ID; invocations are bound to approvals; voice turns can never execute; a privacy pipeline (scrubber, workspace mapping, TTL, audit view, forget-source) now comes before ingestion; extraction sees only owner-authored text; learning memory moves before the node; scope is cut to a minimal vertical slice with go/no-go checkpoints; cost caps, latency budgets, offline behaviour, observability, testing and credential handling are specified; phase numbers stay stable (Workshop keeps number 7, deferred).
 
 ## Yönetici özeti (Türkçe)
 
@@ -23,7 +23,7 @@ What changed in revision 2, in one line each: node actions are now gate-class by
 | Terim (TR) | Term (EN) | Meaning in this plan |
 |---|---|---|
 | Onay kapısı | Approval gate (gate-class) | An `ApprovalRequest` decided by the owner in the web UI, plus, for node actions, a local click on the Mac (ADR-004/013). |
-| Tek tık onay | Confirm-class | A human click, never the model. Today it covers reversible, self-scoped, in-app rows (ADR-009). For the node it covers only open/focus app and read-only calls (ADR-013). |
+| Tek tık onay | Confirm-class | A human click, never the model. Today it covers reversible, self-scoped, in-app rows (ADR-009). For the node it covers only open/focus app and read-only calls (ADR-014). |
 | Node | Friday Node | Signed Mac menu-bar app. It holds mic/Accessibility grants and runs a fixed capability catalogue. It makes no LLM calls. |
 | Bölüm / kayıt | Episode | One raw, scrubbed activity record (a commit, an owner message from a session, a calendar item), kept with a TTL. |
 | Çekirdek blok | Core block | A short, always-in-prompt memory block: `self`, `developer`, `current_focus`, `preferences`, ... |
@@ -33,9 +33,9 @@ What changed in revision 2, in one line each: node actions are now gate-class by
 | Söz kesme | Barge-in | Interrupting Friday while it is speaking. |
 | Yanlış kabul / ret | FAR / FRR | Wake-word false accepts per hour / false rejects in %. |
 
-## Decision table (summary of §g)
+## Decision table (summary of §g) — all approved by the owner on 2026-11-20
 
-| # | Decision | Recommended |
+| # | Decision | Recommended (approved 2026-11-20) |
 |---|---|---|
 | d1 | Node shell technology | Swift menu-bar app; Python voice child process |
 | d2 | Audio to cloud (OpenRouter) | Local by default; per-provider owner toggle; needed at P6 start for Turkish TTS |
@@ -43,7 +43,7 @@ What changed in revision 2, in one line each: node actions are now gate-class by
 | d4 | Third-party agent terms (Antigravity, Claude Code on a subscription) | Owner checks ToS before any automation driver is enabled |
 | d5 | Default ingestion sources | Git, harness runs, Claude Code hook events, calendar metadata on; transcripts on from 8B; others opt-in; screen never |
 | d6 | Auto-approve learned memories | No; capped nightly card; per-item for core blocks |
-| d7 | Node action classes | New ADR-013: gate-class by default; confirm-class only open/focus app + read-only |
+| d7 | Node action classes | New ADR-014: gate-class by default; confirm-class only open/focus app + read-only |
 | d8 | Workshop | Keep number 7, defer to backlog |
 | d9 | Apple Developer account + signing | Yes, before Phase 9 (99 USD/year) |
 | d10 | Raw episode retention | 30 days (14 days for firm workspaces); derived memories keep only a provenance quote |
@@ -60,9 +60,9 @@ All timings and money amounts below are **illustrative examples**, not measureme
 
 **3. "Claude Code oturumlarım ne yapıyor?"** In the vertical slice (before the node), Claude Code command hooks (SessionStart, Notification, Stop) send scrubbed events to the server through a tiny `friday-hook` command with an append-only token, and harness jobs come from the DB. From Phase 9 the node also indexes local transcripts and Codex threads. Example answer: "Üç oturum var. *auth-refactor* testleri geçirdi ve bir süredir seni bekliyor (izin istemi). *friday-hud* hâlâ çalışıyor. Biri dün bitti, yaklaşık 2 dolar tuttu." Summaries go through the gateway (purpose `sessions.summarize`).
 
-**4. "Repo X'te Codex ile bir çalışma başlat: login throttle testini düzelt."** Friday creates a harness implementation request (existing Phase 3 pipeline: plan, Gate A, worktree, tests, cross-vendor review, Gate B). A voice turn can only *propose* this. Friday says "Plan onayı ekranda" and the orb shows *awaiting approval*. The owner approves on screen. Voice never approves (Phase 6 D8, ADR-014).
+**4. "Repo X'te Codex ile bir çalışma başlat: login throttle testini düzelt."** Friday creates a harness implementation request (existing Phase 3 pipeline: plan, Gate A, worktree, tests, cross-vendor review, Gate B). A voice turn can only *propose* this. Friday says "Plan onayı ekranda" and the orb shows *awaiting approval*. The owner approves on screen. Voice never approves (Phase 6 D8, ADR-015).
 
-**5. "Terminali aç ve testleri çalıştır."** "Open terminal" is confirm-class: a click on the node's own window. "Run tests" is **gate-class** until ADR-013 proves the throwaway-worktree sandbox (§b.B1). Gate-class means an ApprovalRequest in the web UI plus a click on the node window. The node window shows the arguments as the node itself renders them, not as the server describes them. Output streams into a HUD panel as fenced, untrusted data.
+**5. "Terminali aç ve testleri çalıştır."** "Open terminal" is confirm-class: a click on the node's own window. "Run tests" is **gate-class** until ADR-014 proves the throwaway-worktree sandbox (§b.B1). Gate-class means an ApprovalRequest in the web UI plus a click on the node window. The node window shows the arguments as the node itself renders them, not as the server describes them. Output streams into a HUD panel as fenced, untrusted data.
 
 **6. HUD states.** idle · armed · listening · thinking · tool-running · awaiting-approval · speaking · error · muted · **disconnected** · **offline-local**. The side panels show the transcript and captions, sessions, approvals, today's tasks, live cost and a health panel (mic, node link, providers, preflight).
 
@@ -78,7 +78,7 @@ Rules: **R1** workspace scoping / `for_actor()` · **R2/R3** single gateway door
 
 - **Shape.** One **signed and notarized** macOS menu-bar app, `friday-node`. It holds the TCC grants (Microphone, Accessibility, later Screen Recording and Automation), the wake word and the voice child process (Phase 11). It opens an **outbound-only** WSS connection to the server. It has no TCP listeners at all. Signing and notarization are a hard prerequisite: an unsigned app cannot keep stable TCC grants (decision d9).
 - **Identity (spike S9.0, before Phase 9).** The repo already has device trust: `accounts.TrustedDevice` (hashed secret, soft revoke, `revoke_all_devices`), `DevicePairingCode` (PIN/strong codes) and `PersonalAccessToken.kind`. But `TrustedDevice` is shaped for a browser: an HttpOnly cookie and idle expiry. The spike must show that a `kind=node` principal works: a long-lived node credential in the macOS Keychain, rotation without re-pairing, immediate revocation, an owner kill-switch (web UI + `manage.py`), and that `revoke_all_devices` covers nodes. If the spike fails, Phase 9 does not start.
-- **Protocol (ADR-012).** On connect the node sends `hello` with its **node-owned** capability catalogue (name, version, class, JSON schema). The server can only invoke catalogue entries. It sends `invoke` with the capability id, typed args and, for gated calls, an **invocation grant**. The node sends `result` (exit, truncated output, artifacts hash) and `event`. There is no generic "run this string" capability.
+- **Protocol (ADR-013).** On connect the node sends `hello` with its **node-owned** capability catalogue (name, version, class, JSON schema). The server can only invoke catalogue entries. It sends `invoke` with the capability id, typed args and, for gated calls, an **invocation grant**. The node sends `result` (exit, truncated output, artifacts hash) and `event`. There is no generic "run this string" capability.
 - **Invocation grant (binds approval to execution).** When the owner approves, the server issues a grant signed with a server key whose public half is pinned in the node at pairing. The grant covers: capability id + version, the canonical-JSON args hash, workspace id, node id, the approval id, a random nonce, `issued_at` and `expires_at` (at most 120 s). The node checks the signature, expiry and args hash. It stores used nonces until they expire, so each grant works once and replay fails. The grant alone is never enough: the node still shows its own confirmation window, rendered by the node from the args. If the server is compromised it can sign grants, but it still cannot get past the local click or run anything outside the catalogue.
 - **Node policy is local-only.** The allowlist, exec policy and capability catalogue can be changed **only in the node's own UI, behind a local user-presence check** (Touch ID or the macOS password, through LocalAuthentication). There is **no** WS message, server endpoint or web-UI path that reads or writes node policy. This is the direct OpenClaw lesson: an approval-settings endpoint reachable over a hijacked WebSocket was exploited. A test asserts that the protocol has no policy-mutation message type.
 - **Owner away.** Deny by default. The local confirmation window times out after 60 s → deny. An ApprovalRequest for a node action expires after 10 min. Nothing is queued to run later: an expired grant is dead, and the server must create a new proposal. If the node goes offline, invocations in flight fail and are not retried.
@@ -86,13 +86,13 @@ Rules: **R1** workspace scoping / `for_actor()` · **R2/R3** single gateway door
 - **Capabilities in Phase 9 (read):** `claude.sessions.list/read`, `codex.threads.list/read`, `usage.ccusage`, `git.status` (registered repos only), `apps.frontmost`, `windows.list`. Reading `~/.claude/projects` and `~/.codex/sessions` needs an **explicit per-directory owner grant** in the node UI (Touch ID). It is off by default.
 - **Claude Code hook relay.** Command hooks (not HTTP hooks) call the signed `friday-node hook` CLI. The CLI writes to a **Unix domain socket** owned by the user with mode 0600, and the node checks the peer's uid. There is no loopback HTTP port for browsers or other users to probe. Before the node exists (vertical slice), `friday-hook` posts straight to the server with an append-only `hook` PAT kind kept in the Keychain.
 - **Kernel rules.**
-  - R4: see ADR-013 below. Voice never decides (ADR-014).
+  - R4: see ADR-014 below. Voice never decides (ADR-015).
   - R1: every Invocation and every event carries `workspace_id`, resolved from the repo registry. An unmapped path is **dropped**, never defaulted to personal.
   - R2/R3: the node makes no LLM calls and **holds no provider API keys**. Summaries run server-side through the gateway.
   - Audit: one row per invoke (capability, args hash, grant nonce, exit, duration, workspace, trace id), hash-chained.
   - Prompt injection: everything the node returns is fenced as untrusted data (Phase 5 D4).
 
-**ADR-013, node action classification (replaces the draft's "ADR-009 amendment"; ADR-009 is not touched).**
+**ADR-014, node action classification (replaces the draft's "ADR-009 amendment"; ADR-009 is not touched).**
 
 | Class | Node actions | Who acts |
 |---|---|---|
@@ -100,14 +100,14 @@ Rules: **R1** workspace scoping / `for_actor()` · **R2/R3** single gateway door
 | confirm-class (narrow exception) | open or focus an app (bundle id from a local list) | a human click on the node window; the model can never confirm |
 | gate-class (**default**) | every command execution: test, lint, build, dev servers, AppleScript recipes, AX click/type, keystrokes into other apps, screenshots, starting a write-mode coding agent, any file write, any outbound network | ApprovalRequest in the web UI **and** a click on the node window, bound by the invocation grant |
 
-Test and lint commands may move to confirm-class **only if** ADR-013 shows they are reversible and self-scoped. The required evidence: the command runs in a throwaway git worktree created by the node, under `srt` with write root = that worktree, network denied, environment stripped, a CPU/time limit, and the worktree deleted afterwards; tests prove that a write outside the worktree, a network call and a sandbox escape attempt all fail. Dev servers stay gate-class (long-lived, open ports). Until ADR-013 is approved with this evidence, everything except open/focus app is gate-class.
+Test and lint commands may move to confirm-class **only if** ADR-014 shows they are reversible and self-scoped. The required evidence: the command runs in a throwaway git worktree created by the node, under `srt` with write root = that worktree, network denied, environment stripped, a CPU/time limit, and the worktree deleted afterwards; tests prove that a write outside the worktree, a network call and a sandbox escape attempt all fail. Dev servers stay gate-class (long-lived, open ports). Until ADR-014 is approved with this evidence, everything except open/focus app is gate-class.
 
 ### B2. Voice pipeline
 
 - **Phase 6 stays as approved**, with a short amendment: browser push-to-talk, a browser wake word, local faster-whisper/Piper behind `openai_compatible`, half-duplex, D8 "voice never decides". Changes: (1) TTS routing by language; (2) OpenRouter STT/TTS adapter methods, seeded disabled; (3) a **Turkish evaluation set** and latency budget as exit criteria; (4) the TTS fallback for Turkish is chosen in the branch-1 spike (OpenRouter TTS if Piper fails the owner listening test), which needs decision d2 at P6 start; (5) audio budget caps in the gateway; (6) HUD v1 in place of branch 5's identity layer.
 - **Phase 11 (local live voice).** A Pipecat child process of `friday-node`, running natively: openWakeWord ("hey friday", custom-trained) → Silero VAD → smart-turn v3 → MLX Whisper (whisper.cpp fallback) → **an LLM step that calls Friday's streaming chat endpoint**, never a provider → language-routed TTS. It adds macOS voice-processing AEC and barge-in.
-- **Cloud live mode** (OpenAI Realtime / Gemini Live) moves to the "later" list. When it comes back, the rule is fixed now: the session is **proxied through a gateway WebSocket relay**. The provider key and session stay server-side, the client never gets a provider token, and usage events are read by the relay. This keeps ADR-003 intact. It needs an ADR-003 amendment that makes a realtime session a metered unit, with per-session and monthly caps that close the relay. Function calls from the realtime model are treated as untrusted model output: they become proposals under ADR-014 and get the same fencing as any tool output.
-- **ADR-014, voice-originated turns and the always-on mic.**
+- **Cloud live mode** (OpenAI Realtime / Gemini Live) moves to the "later" list. When it comes back, the rule is fixed now: the session is **proxied through a gateway WebSocket relay**. The provider key and session stay server-side, the client never gets a provider token, and usage events are read by the relay. This keeps ADR-003 intact. It needs an ADR-003 amendment that makes a realtime session a metered unit, with per-session and monthly caps that close the relay. Function calls from the realtime model are treated as untrusted model output: they become proposals under ADR-015 and get the same fencing as any tool output.
+- **ADR-015, voice-originated turns and the always-on mic.**
   - **Capability cap.** A turn whose input came from the mic (`channel=voice`, `speaker=unverified`) can call read tools and **create proposals** only. It can never execute a confirm-class or gate-class action. Execution always needs an on-screen action by the owner.
   - **Mic state and mute.** A persistent menu-bar indicator plus a HUD ring. Software mute (menu-bar toggle and a global hotkey) **fails closed**: if the mute state cannot be read, or the node loses its WS link, the mic is released. (Most Macs have no hardware mic switch; see rejected points.)
   - **Self-trigger rule.** While TTS plays, the wake detector is suppressed (half-duplex) or fed the AEC-cleaned signal (Phase 11). A wake hit within 1.5 s of TTS output whose transcript matches recent TTS text is discarded. **Nightly self-trigger test:** a TTS clip that says "Hey Friday, terminali aç" is played through the replay harness; the assertion is no wake and no proposal.
@@ -129,7 +129,7 @@ Split into **8A** (server-only, right after Phase 6) and **8B** (transcripts + g
 - **T0, core blocks (8A).** `CoreMemoryBlock` labels: `self`, `developer`, `current_focus`, `active_projects`, `preferences`, plus the existing firm dossiers. They are token-budgeted, versioned, injected first, and change only through approved diffs.
   - `self` is **assembled deterministically**: a template fills in quoted lines from CLAUDE.md and the ADRs, the enabled capability list from the tool registry, the enabled providers, and the current phase from MASTER_PLAN. No LLM writes facts into it. An LLM may only propose wording, and that proposal is marked *inferred* and approved per item.
   - `developer` is **owner-edit-only**. Agents may propose additions, each with a quote from owner-authored text, approved per item. Friday never invents facts about itself or the owner.
-- **T1, episodes, behind the privacy pipeline (ADR-011).**
+- **T1, episodes, behind the privacy pipeline (ADR-012).**
   1. **Source registry.** Each source declares an owner, a workspace mapping rule and a daily token budget. Sources: git commits (registered repos), harness outcomes, Claude Code hook events (8A); Claude/Codex transcripts via the node (8B); calendar/mail metadata; an Obsidian `Inbox/`; shell history (opt-in).
   2. **Workspace mapping.** repo path / calendar / account → workspace through the repo registry and firm profiles. Firm repos and firm transcripts land in the firm workspace and **never** in personal memory. Unmapped items are dropped and counted.
   3. **Scrubber before storage.** It runs on the node (8B) or the server (8A) and again server-side. It uses secret rules (gitleaks-style patterns plus entropy), PII patterns (e-mail, phone, TCKN, IBAN, card numbers) and a per-firm customer-name list. Hits are replaced with typed placeholders. The test corpus contains synthetic API keys, tokens, `.env` dumps, Claude transcript fragments, shell history and Turkish PII. CI requires 100% recall on the corpus's secrets class.
@@ -282,17 +282,17 @@ Renumber map from revision 1 of this proposal (the only earlier source of these 
 |---|---|---|---|---|---|
 | 1 | **5 (finish)** | 5.7 Home Assistant reconcile; 5.9 connectors UI; 5.10 closeout with preflight; CI green on `integ/phase-5` (former repository, PR #29) → `main`; seed an `openrouter` text provider row | Deploy + MCP usable from the UI | preflight green; `integ/phase-5` merged to `main` | 2–3 wk |
 | 2 | **6 Voice core + web HUD** | Approved branches 1–4 + amendment (§B2); OpenRouter audio spike; Turkish eval set; latency trace; audio caps; HUD v1 (+ health panel, a11y) | Push-to-talk Friday in a browser with a real HUD, Turkish tested | c.3 P6 targets met or consciously re-set; c.1 local p50 ≤ 1.5 s; caps enforced | 5–7 wk |
-| 3 | **8A Learning memory core** (server only) | ADR-011; core blocks (`self` deterministic, `developer` owner-edit); source registry + workspace mapping + scrubber + TTL + audit view + forget-source; sources: git (registered repos), harness outcomes, Claude Code hook events via `friday-hook` (append-only PAT), calendar metadata; owner-only extraction, capped morning card; sessions panel v0 | **Vertical slice complete**: talk to Friday, it knows itself and you, shows your Claude Code sessions, learns from yesterday | scrubber corpus 100%; zero cross-workspace leaks in tests; owner accepts at least 60% of proposals over 2 weeks (else tune before 8B) | 5–7 wk |
-| 4 | **9 Friday Node v1 (read-only)** | Prereqs: spike S9.0 (device trust `kind=node`), Apple Developer signing + notarization (d9), ADR-012. Then: `nodes` app + WS; Swift menu-bar app; pairing; read capabilities; per-directory grants; Unix-socket hook relay; spool; heartbeat; preflight extension | "Claude Code / Codex oturumlarım ne yapıyor?" with local transcript detail | spike passes; compromised-server tests pass; notarized build keeps its TCC grants across updates | 6–8 wk |
+| 3 | **8A Learning memory core** (server only) | ADR-012; core blocks (`self` deterministic, `developer` owner-edit); source registry + workspace mapping + scrubber + TTL + audit view + forget-source; sources: git (registered repos), harness outcomes, Claude Code hook events via `friday-hook` (append-only PAT), calendar metadata; owner-only extraction, capped morning card; sessions panel v0 | **Vertical slice complete**: talk to Friday, it knows itself and you, shows your Claude Code sessions, learns from yesterday | scrubber corpus 100%; zero cross-workspace leaks in tests; owner accepts at least 60% of proposals over 2 weeks (else tune before 8B) | 5–7 wk |
+| 4 | **9 Friday Node v1 (read-only)** | Prereqs: spike S9.0 (device trust `kind=node`), Apple Developer signing + notarization (d9), ADR-013. Then: `nodes` app + WS; Swift menu-bar app; pairing; read capabilities; per-directory grants; Unix-socket hook relay; spool; heartbeat; preflight extension | "Claude Code / Codex oturumlarım ne yapıyor?" with local transcript detail | spike passes; compromised-server tests pass; notarized build keeps its TCC grants across updates | 6–8 wk |
 | 5 | **8B Transcripts + knowledge graph** | Claude/Codex transcript ingestion via node (owner turns only); temporal Entity/Fact; RRF retrieval; Graphify AST job; Headroom behind flag + eval; Obsidian mirror format + Inbox import-once; private eval set | Friday knows the details of your work across tools | eval set baseline recorded; Headroom stays off unless ≤ 1 pt loss | 5–6 wk |
-| 6 | **10 Control** | ADR-013; gate-class node capabilities (allowlisted repo commands under `srt`, AppleScript recipe catalogue, AX primitives, app open/focus as confirm-class); node confirmation window; invocation grants; HUD terminal panel; harness v3 (Codex app-server + Agent SDK pinned, approval mapping, trust check); voice tools that only propose | "Testleri çalıştır", "Codex ile başlat": proposed by voice, approved on screen, run safely | fuzz/escape suites green; ADR-013 decision on test/lint confirm-class recorded | 6–8 wk |
-| 7 | **11 Local live voice** | ADR-014 in full; Pipecat child process; always-on wake word; smart-turn; AEC; barge-in; self-trigger nightly test | Natural, interruptible voice anywhere on the Mac | FAR ≤ 0.2/h on 24 h household audio; self-trigger test green; latency targets met | 5–7 wk |
+| 6 | **10 Control** | ADR-014; gate-class node capabilities (allowlisted repo commands under `srt`, AppleScript recipe catalogue, AX primitives, app open/focus as confirm-class); node confirmation window; invocation grants; HUD terminal panel; harness v3 (Codex app-server + Agent SDK pinned, approval mapping, trust check); voice tools that only propose | "Testleri çalıştır", "Codex ile başlat": proposed by voice, approved on screen, run safely | fuzz/escape suites green; ADR-014 decision on test/lint confirm-class recorded | 6–8 wk |
+| 7 | **11 Local live voice** | ADR-015 in full; Pipecat child process; always-on wake word; smart-turn; AEC; barge-in; self-trigger nightly test | Natural, interruptible voice anywhere on the Mac | FAR ≤ 0.2/h on 24 h household audio; self-trigger test green; latency targets met | 5–7 wk |
 | 8 | **12 Reach and proactivity** | n8n MCP (allowlisted workflows); heartbeat/cron + spoken morning digest; SKILL.md skills + curator; procedural playbooks from harness runs | Friday starts useful conversations and uses your automations | owner keeps the digest on after 2 weeks | 4–5 wk |
 | — | **7 Workshop** (number kept) | Unchanged brief intent | — | after 12, or earlier by owner decision | backlog |
 
 Estimates assume one owner with Claude implementing and an independent Sonnet 5 review loop per branch (often 2–3 rounds). Phases 5 → 8A (the vertical slice) take about 3–4 months; 9 → 10 about 3–4 months more; 11–12 after that. **The whole plan is likely more than 12 months.** Each checkpoint is a real decision point: stop, re-scope, or continue.
 
-**Later list (not scheduled):** cloud realtime live mode (gateway WS relay, ADR-003 amendment); desktop WKWebView overlay; Antigravity driver; ACP generic driver; DSPy/GEPA prompt optimisation; speaker verification; Cua/VM computer use; LiveKit multi-device/phone; Chatterbox Turkish TTS benchmark; WhatsApp.
+**Later list (not scheduled):** cloud realtime live mode (gateway WS relay, ADR-003 amendment); desktop WKWebView overlay; Antigravity driver; ACP generic driver; DSPy/GEPA prompt optimisation; speaker verification; Cua/VM computer use; LiveKit multi-device/phone; Chatterbox Turkish TTS benchmark; WhatsApp; OmniRoute-style routing trace and circuit breaker copied into `ai_core` (idea only, not the dependency); morluto/rea as a pinned tool inside harness discovery containers (see "Research verdicts").
 
 ---
 
@@ -300,20 +300,24 @@ Estimates assume one owner with Claude implementing and an independent Sonnet 5 
 
 Each item is written on its own docs branch, reviewed by an independent Sonnet 5 subagent until APPROVE, then accepted by the owner. The implementing model never reviews its own document.
 
-| Document | Edit | When |
-|---|---|---|
-| `docs/adr/ADR-011-continuous-learning-ingestion.md` (new) | Source registry, workspace mapping, scrubber + corpus, TTL, audit view, forget-source, owner-only extraction, caps, never-ingested list; extends ADR-005 | before 8A branch 1 |
-| `docs/adr/ADR-012-friday-node-protocol.md` (new) | Outbound WSS, `kind=node` identity, node-owned catalogue, invocation grant (args hash, nonce, expiry ≤ 120 s, single use), local-only policy with Touch ID, no policy over WS, fail-closed, owner-away rules, Unix-socket hooks | after spike S9.0, before Phase 9 branch 1 |
-| `docs/adr/ADR-013-node-action-classification.md` (new) | Table in §B1; gate-class default; confirm-class = open/focus app only; evidence bar for test/lint; dev servers gate-class; "confirm" = human click on the node. ADR-009 unchanged | before Phase 10 |
-| `docs/adr/ADR-014-voice-originated-turns.md` (new) | Capability cap, mic indicator, fail-closed mute, self-trigger rule + test, untrusted audio, accepted risk (no speaker ID) | with the Phase 6 amendment (cap + indicator); completed before Phase 11 |
-| `docs/adr/ADR-003-ai-gateway-single-door.md` (amend) | Audio purposes and gateway-enforced budget caps (P6); later, a second amendment for the realtime relay as a metered session | P6; the realtime part only when it leaves "later" |
-| `docs/MASTER_PLAN.md` §AA table | Phase 7 status → "deferred to backlog (2026-11-xx, owner decision d8)"; add rows 8A/8B, 9, 10, 11, 12 with scope and status "planned"; note the stable-numbering rule | after the owner accepts this proposal |
-| `docs/MASTER_PLAN.md` "Roadmap update 2026-11-20" | Point to this plan; move the Workshop paragraph under "Backlog" | same branch |
-| `docs/prompts/phase-6-voice-identity/brief.md` | Amendment section: §B2 items 1–6, Turkish eval exit criteria, latency budget, ADR-014 voice cap | before P6 branch 1 |
-| `docs/prompts/phase-8-learning-memory/brief.md`, `phase-9-friday-node/`, `phase-10-control/`, `phase-11-live-voice/`, `phase-12-reach/` | New briefs, each written at phase start | at each phase start |
-| `docs/security/mcp-governance.md` manifests | One per dependency in c.8 | in the branch that adds it |
-| `backend/pyproject.toml` import-linter | Contracts in c.9 | in the branch that adds each app |
-| `.env.example` | Budget caps, OpenRouter key name, node WS settings (names only) | in the relevant branches |
+The owner accepted the plan on 2026-11-20; the "Status" column records what branch `docs/friday-3-roadmap` applied. Items whose "When" is a later code branch stay with that branch.
+
+| Document | Edit | When | Status (2026-11-20) |
+|---|---|---|---|
+| `docs/adr/ADR-012-continuous-learning-ingestion.md` (new) | Source registry, workspace mapping, scrubber + corpus, TTL, audit view, forget-source, owner-only extraction, caps, never-ingested list; extends ADR-005 | before 8A branch 1 | **written**, Accepted 2026-11-20; ADR-005 note added |
+| `docs/adr/ADR-013-friday-node-protocol.md` (new) | Outbound WSS, `kind=node` identity, node-owned catalogue, invocation grant (args hash, nonce, expiry ≤ 120 s, single use), local-only policy with Touch ID, no policy over WS, fail-closed, owner-away rules, Unix-socket hooks | after spike S9.0, before Phase 9 branch 1 | **written**, Accepted 2026-11-20, conditional on spike S9.0 confirming the identity decision |
+| `docs/adr/ADR-014-node-action-classification.md` (new) | Table in §B1; gate-class default; confirm-class = open/focus app only; evidence bar for test/lint; dev servers gate-class; "confirm" = human click on the node. ADR-009 unchanged | before Phase 10 | **written**, Accepted 2026-11-20 |
+| `docs/adr/ADR-015-voice-originated-turns.md` (new) | Capability cap, mic indicator, fail-closed mute, self-trigger rule + test, untrusted audio, accepted risk (no speaker ID) | with the Phase 6 amendment (cap + indicator); completed before Phase 11 | **written**, Accepted 2026-11-20 (decisions 1–3 from Phase 6, 4–6 before Phase 11) |
+| `docs/adr/ADR-003-ai-gateway-single-door.md` (amend) | Audio purposes and gateway-enforced budget caps (P6); later, a second amendment for the realtime relay as a metered session | P6; the realtime part only when it leaves "later" | **amended** (audio + budgets); realtime part deferred as planned |
+| `docs/MASTER_PLAN.md` §AA table | Phase 7 status → "deferred to backlog (2026-11-20, owner decision d8)"; add rows 8A/8B, 9, 10, 11, 12 with scope and status "planned"; note the stable-numbering rule | after the owner accepts this proposal | **applied** ("Friday 3.0 phases" table under §AA) |
+| `docs/MASTER_PLAN.md` "Roadmap update 2026-11-20" | Point to this plan; move the Workshop paragraph under "Backlog" | same branch | **applied** |
+| `docs/MASTER_PLAN.md` §O | Record d1–d10 as decided; research verdicts (OmniRoute, morluto/rea) | same branch | **applied** |
+| `docs/prompts/phase-6-voice-identity/brief.md` | Amendment section: §B2 items 1–6, Turkish eval exit criteria, latency budget, ADR-015 voice cap | before P6 branch 1 | **applied** ("Amendment 2026-11-20"; branch table updated) |
+| `docs/prompts/phase-8a-learning-memory/brief.md` | Full brief | before 8A branch 1 | **written** (status: draft, awaiting plan review) |
+| `docs/prompts/phase-8b-transcripts-graph/`, `phase-9-friday-node/`, `phase-10-control/`, `phase-11-live-voice/`, `phase-12-reach/` | Stub briefs now; full briefs written at each phase start | stubs now; full brief at each phase start | **stubs written** |
+| `docs/security/mcp-governance.md` manifests | One per dependency in c.8 | in the branch that adds it | pending (code branches) |
+| `backend/pyproject.toml` import-linter | Contracts in c.9 | in the branch that adds each app | pending (code branches) |
+| `.env.example` | Budget caps, OpenRouter key name, node WS settings (names only) | in the relevant branches | pending (code branches) |
 
 ---
 
@@ -328,7 +332,7 @@ Each item is written on its own docs branch, reviewed by an independent Sonnet 5
 
 ---
 
-## (g) Open decisions for the owner (recommended answers in bold)
+## (g) Decisions for the owner (recommended answers in bold) — every recommended answer approved 2026-11-20
 
 1. **d1 Node shell technology.** **A Swift menu-bar app, with the Python voice process as a child (Phase 11).** It gives native TCC grants, Keychain, LocalAuthentication (Touch ID) and voice-processing AEC. Tauri v2 only if a Windows node is ever needed.
 2. **d2 May audio go to OpenRouter or another cloud STT/TTS?** **Local by default. Each cloud audio provider is a separate owner toggle (`personal_data_allowed`), never before the wake word, and within the gateway audio cap (default 20 USD/month).** Needed at the **start of Phase 6**, because Turkish TTS will probably need OpenRouter if Piper fails the listening test.
@@ -336,7 +340,34 @@ Each item is written on its own docs branch, reviewed by an independent Sonnet 5
 4. **d4 Third-party agent terms.** **Before any driver is enabled, the owner checks: (a) whether the Claude subscription plan's terms allow automating Claude Code / the Agent SDK from Friday, or whether an API key is needed; (b) the same for Codex; (c) Antigravity's terms on wrapping `agy`.** Any driver whose terms are unclear stays off.
 5. **d5 Default ingestion sources.** **On in 8A: git commits of registered repos, harness outcomes, Claude Code hook events, calendar metadata. On in 8B, after the per-directory grant: Claude/Codex transcripts (owner turns only). Opt-in: shell history, mail bodies, Obsidian Inbox. Never: screen content, screenshots, AX trees, keystrokes, browser history.**
 6. **d6 Auto-approve learned memories?** **No.** At most 10 proposals per night, each with a quote of your own words. Changes to core blocks are approved one by one. Only `work_log` stays auto-approved (ADR-008). Review this after a month.
-7. **d7 Node action classes.** **New ADR-013 (ADR-009 untouched): everything is gate-class (web approval + click on the Mac) except open/focus app (one click on the Mac) and read-only calls. Test/lint may become one-click only if the throwaway-worktree sandbox evidence is accepted. Dev servers stay gate-class.**
+7. **d7 Node action classes.** **New ADR-014 (ADR-009 untouched): everything is gate-class (web approval + click on the Mac) except open/focus app (one click on the Mac) and read-only calls. Test/lint may become one-click only if the throwaway-worktree sandbox evidence is accepted. Dev servers stay gate-class.**
 8. **d8 Workshop.** **Keep its number (7), defer it to the backlog after Phase 12.** Its lessons already live in Phases 5–6.
 9. **d9 Apple Developer account and signing.** **Yes: enrol in the Apple Developer Program (99 USD/year) before Phase 9.** Developer ID signing and notarization are required for stable TCC grants and Keychain access. The signing key stays on the owner's Mac; CI never holds it.
 10. **d10 Raw episode retention.** **30 days for personal sources, 14 days for firm workspaces. Derived memories keep only a provenance quote and the episode id. "Forget source X" is available from day one.**
+
+---
+
+## Research verdicts recorded on acceptance (2026-11-20)
+
+Two further projects were assessed alongside this plan; the owner accepted these verdicts with it. The research notes themselves are not in this repo; only the verdicts are recorded, here and in MASTER_PLAN §O.
+
+- **OmniRoute — avoid as a dependency.** It would be a second door for model traffic next to the AI Gateway (ADR-003). Its routing-trace and circuit-breaker ideas are worth copying into `ai_core` later (a per-call routing trace in the `ModelUsage` context report; a per-provider circuit breaker in front of the existing retry/fallback loop). "Later" list; no branch yet.
+- **morluto/rea — copy the pattern; adopt only as a tool later.** If it is adopted, it runs **only** as an exact-pinned (version + hash) tool inside harness *discovery* containers (read-only, as today), never in web, worker, the node or a write-mode container; each run needs an explicit owner-authorization checkbox on the discovery request; its output is a **spec only** (data in the briefing, fenced as untrusted), never code applied to a repo. It goes through the `docs/security/mcp-governance.md` allowlist + manifest process before installation. "Later" list; no branch yet.
+
+## Implementation status
+
+| Branch | Scope | Status |
+|---|---|---|
+| `docs/friday-3-roadmap` | Every §e edit that is due now: ADR-012–015 (Accepted 2026-11-20), ADR-003 amendment, ADR-005 note, MASTER_PLAN §AA "Friday 3.0 phases" table + backlog + later list, §O decisions d1–d10 and research verdicts, Phase 6 brief amendment, Phase 8A brief, stub briefs for 8B/9/10/11/12 | **implemented 2026-11-20** (docs only; awaiting the independent Sonnet 5 review) |
+
+### Owner steps (pending) — recorded 2026-11-20
+
+These cannot happen in a cloud session (they need the owner's Mac, accounts, money or real hardware). Each is also listed in the brief of the phase that needs it.
+
+1. Review and accept the documents of `docs/friday-3-roadmap` after the independent Sonnet 5 review returns APPROVE.
+2. Phase 6 start (d2): confirm which cloud audio provider rows may be turned on (`personal_data_allowed`) and the monthly audio cap (default 20 USD).
+3. Phase 6 branch 1: run the OpenRouter audio spike against the real API with the owner's key (paid calls) and record the results in the Phase 6 brief.
+4. Phase 6 branch 3a: record the Turkish evaluation set (about 200 utterances plus 2 h of negative audio) on the Mac; rate the Turkish TTS voice.
+5. Phase 6 branch 4: train the custom `hey_friday` openWakeWord model offline (already recorded in the Phase 6 brief).
+6. Before Phase 9 (d9): enrol in the Apple Developer Program (99 USD/year) and create a Developer ID signing identity on the Mac.
+7. Before any coding-agent driver is enabled (d4): check the Claude, Codex and Antigravity terms for automation and record the result.
