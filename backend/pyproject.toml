@@ -93,6 +93,7 @@ root_packages = [
     "deploys",
     "ops",
     "voice",
+    "hud",
     # The MCP SDK (Phase 5 branch 4, ADR-010 decision 3) is analysed as a
     # root package only so the contract below can name its `mcp.server`
     # subpackage -- import-linter cannot forbid a subpackage of an external
@@ -115,12 +116,12 @@ forbidden_modules = ["config"]
 name = "core must stay independent of kernel apps"
 type = "forbidden"
 source_modules = ["core"]
-forbidden_modules = ["accounts", "workspaces", "audit", "ai_core", "assistant", "memory", "knowledge", "tasks", "approvals", "tools", "agents", "skills", "integrations", "harness", "connectors", "deploys", "voice"]
+forbidden_modules = ["accounts", "workspaces", "audit", "ai_core", "assistant", "memory", "knowledge", "tasks", "approvals", "tools", "agents", "skills", "integrations", "harness", "connectors", "deploys", "voice", "hud"]
 
 [[tool.importlinter.contracts]]
 name = "kernel apps must not import the Django project config"
 type = "forbidden"
-source_modules = ["accounts", "workspaces", "audit", "ai_core", "assistant", "memory", "knowledge", "tasks", "approvals", "tools", "agents", "skills", "integrations", "harness", "connectors", "deploys", "ops", "voice"]
+source_modules = ["accounts", "workspaces", "audit", "ai_core", "assistant", "memory", "knowledge", "tasks", "approvals", "tools", "agents", "skills", "integrations", "harness", "connectors", "deploys", "ops", "voice", "hud"]
 forbidden_modules = ["config"]
 
 # ai_core is the single door for LLM traffic (ADR-003): it must never depend on
@@ -129,7 +130,7 @@ forbidden_modules = ["config"]
 name = "ai_core must not import business apps"
 type = "forbidden"
 source_modules = ["ai_core"]
-forbidden_modules = ["accounts", "workspaces", "audit", "assistant", "memory", "knowledge", "tasks", "approvals", "tools", "agents", "skills", "integrations", "harness", "connectors", "deploys", "voice"]
+forbidden_modules = ["accounts", "workspaces", "audit", "assistant", "memory", "knowledge", "tasks", "approvals", "tools", "agents", "skills", "integrations", "harness", "connectors", "deploys", "voice", "hud"]
 ignore_imports = [
     "ai_core.tests.* -> accounts.*",
     # D5 (Phase 5 branch 2): flipping `personal_data_allowed` must be
@@ -146,7 +147,7 @@ ignore_imports = [
 name = "audit must not depend on business apps (one-way: apps call audit)"
 type = "forbidden"
 source_modules = ["audit"]
-forbidden_modules = ["accounts", "workspaces", "assistant", "memory", "knowledge", "tasks", "approvals", "tools", "agents", "harness", "connectors", "deploys", "voice"]
+forbidden_modules = ["accounts", "workspaces", "assistant", "memory", "knowledge", "tasks", "approvals", "tools", "agents", "harness", "connectors", "deploys", "voice", "hud"]
 # Tests exercise the wired flows end-to-end; the contract targets production code.
 ignore_imports = [
     "audit.tests.* -> accounts.*",
@@ -371,7 +372,7 @@ forbidden_modules = ["harness"]
 [[tool.importlinter.contracts]]
 name = "no other app may import harness (harness is a leaf dependency root)"
 type = "forbidden"
-source_modules = ["accounts", "assistant", "knowledge", "tasks", "approvals", "tools", "agents", "skills", "integrations", "connectors", "deploys", "voice"]
+source_modules = ["accounts", "assistant", "knowledge", "tasks", "approvals", "tools", "agents", "skills", "integrations", "connectors", "deploys", "voice", "hud"]
 forbidden_modules = ["harness"]
 
 # Phase 5 (ADR-010): two new kernel apps, `connectors` (MCP servers and
@@ -441,7 +442,7 @@ forbidden_modules = ["deploys"]
 [[tool.importlinter.contracts]]
 name = "no app may import ops (ops is a leaf: operations tooling only)"
 type = "forbidden"
-source_modules = ["core", "accounts", "workspaces", "audit", "ai_core", "assistant", "memory", "knowledge", "tasks", "approvals", "tools", "agents", "skills", "integrations", "harness", "connectors", "deploys", "voice"]
+source_modules = ["core", "accounts", "workspaces", "audit", "ai_core", "assistant", "memory", "knowledge", "tasks", "approvals", "tools", "agents", "skills", "integrations", "harness", "connectors", "deploys", "voice", "hud"]
 forbidden_modules = ["ops"]
 
 # The MCP SDK (ADR-010 decision 3, brief D2) ships server-side code
@@ -458,7 +459,7 @@ forbidden_modules = ["ops"]
 [[tool.importlinter.contracts]]
 name = "production code imports only the MCP client side (ADR-010, D2)"
 type = "forbidden"
-source_modules = ["core", "accounts", "workspaces", "audit", "ai_core", "assistant", "memory", "knowledge", "tasks", "approvals", "tools", "agents", "skills", "integrations", "harness", "connectors", "deploys", "ops", "voice"]
+source_modules = ["core", "accounts", "workspaces", "audit", "ai_core", "assistant", "memory", "knowledge", "tasks", "approvals", "tools", "agents", "skills", "integrations", "harness", "connectors", "deploys", "ops", "voice", "hud"]
 forbidden_modules = ["mcp.server", "mcp.client.stdio", "mcp.client.sse", "mcp.cli", "mcp.os"]
 allow_indirect_imports = true
 ignore_imports = [
@@ -502,3 +503,30 @@ name = "no app may import voice (voice is a leaf, ADR-011)"
 type = "forbidden"
 source_modules = ["core", "accounts", "workspaces", "audit", "ai_core", "assistant", "memory", "knowledge", "tasks", "approvals", "tools", "agents", "skills", "integrations", "harness", "connectors", "deploys", "ops"]
 forbidden_modules = ["voice"]
+
+# Phase 6 branch 5 (brief A8, "5. `feat/p6-hud`"): `hud` -- the HUD's
+# read-only event stream -- may import `core`, `workspaces`, `ai_core`
+# (ModelUsage, provider and budget reads only; no gateway call), `approvals`
+# and `tasks`. It is a separate app, not part of `voice`, precisely because
+# `voice` may not import `approvals` or `tasks` (D11). It writes nothing and
+# decides nothing (D8): no `audit`, `tools`, `agents` or `assistant` edge.
+[[tool.importlinter.contracts]]
+name = "hud may import only core, workspaces, ai_core, approvals, tasks (Phase 6 A8)"
+type = "forbidden"
+source_modules = ["hud"]
+forbidden_modules = ["config", "accounts", "audit", "assistant", "memory", "knowledge", "tools", "agents", "skills", "integrations", "harness", "connectors", "deploys", "ops", "voice"]
+# `approvals` and `tasks` reach `tools`, `audit`, `assistant` themselves;
+# those are their edges, not hud's.
+allow_indirect_imports = true
+# Tests build users and PATs for the role x endpoint matrix.
+ignore_imports = [
+    "hud.tests.** -> accounts.**",
+]
+
+# ...and `hud` is a leaf: nothing imports it. The composition root
+# (`config/urls.py`) mounts its route.
+[[tool.importlinter.contracts]]
+name = "no app may import hud (hud is a leaf, Phase 6 A8)"
+type = "forbidden"
+source_modules = ["core", "accounts", "workspaces", "audit", "ai_core", "assistant", "memory", "knowledge", "tasks", "approvals", "tools", "agents", "skills", "integrations", "harness", "connectors", "deploys", "ops", "voice"]
+forbidden_modules = ["hud"]

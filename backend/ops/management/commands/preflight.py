@@ -5,11 +5,23 @@ that is not configured here is a warning, never a failure.
 
 `--no-model-calls` skips the one minimal gateway call per provider (they
 are real, possibly paid calls, each recorded as `ModelUsage` with purpose
-`ops.preflight`); those providers then report `warn`."""
+`ops.preflight`); those providers then report `warn`.
 
+Phase 6 branch 5: the summary (counts, overall status, failing check names
+-- never a detail string, which can name a host or an env var) is left in
+the shared cache under `HUD_PREFLIGHT_CACHE_KEY` for the HUD's health
+panel. A cache outage never fails the run."""
+
+import logging
+
+from django.conf import settings
+from django.core.cache import cache
 from django.core.management.base import BaseCommand
+from django.utils import timezone
 
 from ops import preflight
+
+logger = logging.getLogger(__name__)
 
 _LABELS = {preflight.PASS: "PASS", preflight.FAIL: "FAIL", preflight.WARN: "WARN"}
 
@@ -37,6 +49,33 @@ class Command(BaseCommand):
             self.stdout.write(f"{label}  {result.name}{detail}")
         summary = preflight.summarize(results)
         failed = any(r.status == preflight.FAIL for r in results)
+        record_last_result(results)
         self.stdout.write(self.style.ERROR(summary) if failed else self.style.SUCCESS(summary))
         if failed:
             raise SystemExit(1)
+
+
+def record_last_result(results):
+    counts = {
+        status: sum(1 for r in results if r.status == status)
+        for status in (preflight.PASS, preflight.FAIL, preflight.WARN)
+    }
+    if counts[preflight.FAIL]:
+        overall = preflight.FAIL
+    elif counts[preflight.WARN]:
+        overall = preflight.WARN
+    else:
+        overall = preflight.PASS
+    summary = {
+        "status": overall,
+        **counts,
+        "at": timezone.now().isoformat(),
+        "failed_checks": [r.name for r in results if r.status == preflight.FAIL],
+    }
+    try:
+        cache.set(
+            settings.HUD_PREFLIGHT_CACHE_KEY, summary, timeout=settings.HUD_PREFLIGHT_CACHE_SECONDS
+        )
+    except Exception:  # the cache is a convenience for the HUD, never a gate
+        logger.warning("preflight: could not record the last result for the HUD", exc_info=True)
+    return summary

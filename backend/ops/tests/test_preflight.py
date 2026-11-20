@@ -508,3 +508,37 @@ def test_command_no_model_calls(settings, monkeypatch):
     call_command("preflight", "--no-model-calls", stdout=out)
     assert "WARN  provider:fake-local  skipped (--no-model-calls)" in out.getvalue()
     assert not ModelUsage.objects.exists()
+
+
+# --- Phase 6 branch 5: the last result for the HUD's health panel ---
+
+
+def test_command_records_the_last_result_for_the_hud(settings, monkeypatch):
+    from django.core.cache import cache
+
+    settings.AI_FAKE_PROVIDER = True
+    settings.CELERY_TASK_ALWAYS_EAGER = False
+    settings.REDIS_URL = "redis://redis:6379/0"
+    call_command("seed_ai_defaults", stdout=StringIO())
+    _stub_infra(monkeypatch, celery_replies=[])  # no worker -> one failure
+    with pytest.raises(SystemExit):
+        call_command("preflight", stdout=StringIO())
+    summary = cache.get(settings.HUD_PREFLIGHT_CACHE_KEY)
+    assert summary["status"] == FAIL
+    assert summary["fail"] == 1
+    assert summary["failed_checks"] == ["celery"]
+    assert summary["at"]
+    # Names and counts only: no detail strings (hosts, env var names).
+    assert "no worker" not in str(summary)
+
+
+def test_record_last_result_survives_a_cache_outage(monkeypatch):
+    from ops.management.commands import preflight as command
+
+    def boom(*args, **kwargs):
+        raise ConnectionError("cache down")
+
+    monkeypatch.setattr(command.cache, "set", boom)
+    summary = command.record_last_result([CheckResult("a", PASS), CheckResult("b", WARN)])
+    assert summary["status"] == WARN
+    assert summary["pass"] == 1 and summary["warn"] == 1
