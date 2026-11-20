@@ -98,6 +98,9 @@ INSTALLED_APPS = [
     # registered empty in branch 1 so their import contracts bite first.
     "connectors",
     "deploys",
+    # Phase 5 closeout: operations tooling (`manage.py preflight`). A leaf:
+    # no app imports it (import-linter).
+    "ops",
 ]
 
 AUTH_USER_MODEL = "accounts.User"
@@ -428,6 +431,9 @@ AI_UNTIERED_PURPOSES = frozenset(
         # speech (Phase 6 D5): capability, not tier, selects audio providers
         "voice.stt",
         "voice.tts",
+        # `manage.py preflight` (Phase 5 closeout): pinned to one provider at
+        # a time (`only_provider`), so a tier would never apply.
+        "ops.preflight",
     }
 )
 
@@ -479,6 +485,17 @@ VOICE_TTS_PROVIDER_PARAMS = {
         "response_format": "pcm",
     },
 }
+
+# --- Preflight (Phase 5 closeout, `manage.py preflight`) ---
+# Live checks of the running stack. Each URL left empty makes its check a
+# warning ("not configured"), never a failure.
+# Backend liveness URL, e.g. http://localhost:8000/healthz inside `web`.
+PREFLIGHT_WEB_URL = env("PREFLIGHT_WEB_URL", default="")
+# The Next.js BFF's base URL (served page, its scripts, its build id).
+PREFLIGHT_BFF_URL = env("PREFLIGHT_BFF_URL", default="")
+# The built frontend's `.next/BUILD_ID`, compared with the served build.
+PREFLIGHT_FRONTEND_BUILD_ID_FILE = env("PREFLIGHT_FRONTEND_BUILD_ID_FILE", default="")
+PREFLIGHT_TIMEOUT_SECONDS = env.int("PREFLIGHT_TIMEOUT_SECONDS", default=10)
 
 # --- Knowledge/RAG (MVP 3) ---
 

@@ -159,8 +159,10 @@ Status: **done (2026-07-05)** — all 6 branches merged to main.
   dossier + the personal overlay answer "what did we last do for firm X"
   without a graph. Revisit only if multi-hop relational queries become a
   real, observed need.
-- NotebookLM external gateway — optional, public data only. Re-triaged
-  (2026-09-27): evaluated in the Phase 5 MCP review, not before.
+- ~~NotebookLM external gateway~~ — **rejected for runtime (Phase 5
+  closeout governance pass, 2026-11-20):** every NotebookLM MCP is
+  unofficial and cookie-authenticated; browser/Playwright MCP stays
+  rejected too. Reasons in `docs/mcp/allowlist.md`.
 - ~~Private conversation flag~~ — **resolved (Phase 1 branch 2,
   2026-07-19):** one-way `Conversation.private` (`assistant/models.py`),
   enforced at extraction input, context injection, the overlay and
@@ -175,6 +177,12 @@ Status: **done (2026-07-05)** — all 6 branches merged to main.
   generic MCP client framework (read-only tools first, writes gated); any
   installation-specific connection waits on that installation exposing an
   MCP server (VISION O-5, external dependency). The fleet phase (§P) stays vision-only.
+  **Phase 5 closeout (2026-11-20):** the generic MCP client framework is
+  built (pinned schemas, audited fenced reads, gated at-most-once writes);
+  the `external_installation` manifest ships **blocked** (cannot be bound)
+  until an installation exposes an MCP server — auth model and per-tool
+  gates are then a manifest + `docs/mcp/external_installation.md` change,
+  not a framework change.
 - ~~Cross-workspace memory overlay~~ — **resolved (Phase 1 branch 4,
   2026-07-19):** the personal assistant reads approved, non-private
   `work_log` memories of firm workspaces read-only; every read audited;
@@ -200,10 +208,14 @@ Status: **done (2026-07-05)** — all 6 branches merged to main.
   Decide in the Phase 4 brief whether a direct owner action over the web
   channel *is* the explicit decision (ADR amendment) or deletes move to
   soft-delete/gated.
-- Home Assistant bridge details (Phase 5): transport (native API vs MCP),
-  auth, and which device domains are exposed through the approval gate.
-  Open until Phase 5; the architectural hook (bridge, never drivers) is
-  fixed by ADR-008.
+- ~~Home Assistant bridge details (Phase 5)~~ — **resolved (Phase 5
+  branch 7, recorded at the closeout 2026-11-20):** native HA REST API, not
+  HA's MCP server (exact entity ids keep the gate display true, brief D8);
+  a dedicated non-admin HA user's long-lived token in env only; reads are
+  personal, web only; every service call is the gate-class
+  `ha_call_service` inside a code-bounded service/data allowlist narrowed by
+  `HA_ALLOWED_DOMAINS` (no confirm-class domain, Q7; scripts, automations,
+  locks and alarms out). Bridge, never drivers (ADR-008) holds.
 - Shared library extraction: whether the transferred patterns
   (`docs/DESIGN_TRANSFER.md` — gateway, scoping, lease-fenced jobs, approval
   gate) ever become a shared package across Friday and external products, or the projects
@@ -799,7 +811,7 @@ approval (Phase 5).
 | 2 | Harness v1: read-only discovery runs → briefing; runner abstraction (first runner: Mac); usage → ModelUsage; kill switch + budgets | "Analyze this bug in repo X, brief me" | **done (2026-07-20)** (mocked suite; first real run in Phase 3 closeout) |
 | 3 | Harness v2: plan approval → worktree implementation → tests → cross-vendor review → gated branch push | Approved feature development end-to-end | **done (2026-09-27)** — branches 1–4 (2026-07-20 → 07-22) + closeout 5a/5–8 (2026-09-27); first real paid run is an owner runbook step |
 | 4 | Security baseline; UI renewal: shell/chat/harness console/approvals inbox redesign; device-trust identity replaces signup/login; OpenAI-compatible facade (chat-only, low-trust) | Professional, safely-exposable daily driver | **done 2026-09-27** (`docs/prompts/phase-4-identity-ui/brief.md`, "Closeout"); six branches, each Sonnet 5 APPROVE, merged to `main` (former repository, PR #27) |
-| 5 | Deploy gate + VPS deploy (allowlisted commands); MCP client framework: GitHub, mail/calendar, external-installation client (when one exposes MCP), Home Assistant bridge; tier routing + harness policy table | Request → code → live, end to end | in progress (`docs/prompts/phase-5-deploy-mcp/brief.md`); on `integ/phase-5` (former repository, PR #29) as of 2026-09-28: branches 1–6 and 8 merged (Sonnet 5 APPROVE); 7 (Home Assistant) approved but waits on reconciling its native-bridge dispatch with branch 8's; 9 (UI) and 10 (closeout) open |
+| 5 | Deploy gate + VPS deploy (allowlisted commands); MCP client framework: GitHub, mail/calendar, external-installation client (when one exposes MCP), Home Assistant bridge; tier routing + harness policy table | Request → code → live, end to end | **done (2026-11-20)** (`docs/prompts/phase-5-deploy-mcp/brief.md`, §10): branches 1–10 implemented on the integration branch `claude/inspiring-franklin-pw7avo`, which **supersedes** the former repository's `integ/phase-5` PR (#29); closeout adds `manage.py preflight`, the seeded `openrouter` provider and the harness → PR → deploy e2e. Owner steps pending: a green preflight on the real stack, real-credential smokes and the merge to `main` (brief §10 "Owner steps (pending)") |
 | 6 | Voice (ex-MVP 12): mic capture, faster-whisper STT, Piper TTS, local wake word, orb wired to real audio; then the animated visual identity layer | The real Friday experience | brief approved 2026-09-27, amended 2026-11-20 for Friday 3.0 (OpenRouter audio spike, Turkish eval set, latency trace, audio caps, ADR-015 voice cap, HUD v1 replacing the identity branch) (`docs/prompts/phase-6-voice-identity/brief.md`); starts after Phase 5 closeout (foundation from MVP 12 shipped, dormant) |
 | 7 | Workshop (first module pack, `apps.modules.workshop`): sandboxed 3D stage, gateway-driven part-stream builder, change-never-restart conversation, teardown/labels/STL export, saved-build shelf, cost receipt, workshop drill; then picture-in (vision) and studio-photo finish (image capability) | "Friday, bana bir saat mekanizması tasarla" → live, editable 3D model | **deferred to backlog (2026-11-20, owner decision d8)** — number kept; scheduled after Phase 12 or earlier by owner decision (`docs/prompts/phase-7-workshop/brief.md`, written at phase start; design notes under "Roadmap update 2026-11-20" → "Backlog") |
 
@@ -951,7 +963,7 @@ in a go/no-go checkpoint: stop, re-scope or continue.
 
 | Order | Phase | Scope | Usable outcome | Go/no-go checkpoint | Brief | Status |
 |---|---|---|---|---|---|---|
-| 1 | **5 (finish)** | 5.7 Home Assistant reconcile, 5.9 connectors UI, 5.10 closeout with preflight; `integ/phase-5` → `main`; seed an `openrouter` text provider row | Deploy + MCP usable from the UI | preflight green; `integ/phase-5` merged | `phase-5-deploy-mcp/brief.md` | in progress (row 5 above) |
+| 1 | **5 (finish)** | 5.7 Home Assistant reconcile, 5.9 connectors UI, 5.10 closeout with preflight; `integ/phase-5` → `main`; seed an `openrouter` text provider row | Deploy + MCP usable from the UI | preflight green; integration branch merged to `main` | `phase-5-deploy-mcp/brief.md` | implemented 2026-11-20 (preflight + `openrouter` row landed; real-stack preflight and merge are owner steps, row 5 above) |
 | 2 | **6 Voice core + web HUD** | Approved branches 1–4 + the 2026-11-20 amendment: OpenRouter audio spike, Turkish eval set, latency trace, gateway audio caps, ADR-015 voice cap, HUD v1 (health panel, accessibility) | Push-to-talk Friday in a browser with a real HUD, Turkish tested | Turkish WER/TTS targets met or consciously re-set; local p50 end-of-speech → first audio ≤ 1.5 s; caps enforced | `phase-6-voice-identity/brief.md` ("Amendment 2026-11-20") | approved, amended 2026-11-20; starts after Phase 5 closeout |
 | 3 | **8A Learning memory core** (server only) | ADR-012 pipeline (source registry, workspace mapping, scrubber + corpus, TTL, audit view, forget-source); core blocks (`self` deterministic, `developer` owner-edit); sources: git commits, harness outcomes, Claude Code hook events via `friday-hook` (append-only PAT), calendar metadata; owner-only extraction; capped morning card; sessions panel v0 | **Vertical slice complete:** talk to Friday, it knows itself and you, shows your Claude Code sessions, learns from yesterday | scrubber corpus 100% secrets recall; zero cross-workspace leaks in tests; ≥ 60% of proposals accepted over 2 weeks (else tune before 8B) | `phase-8a-learning-memory/brief.md` | planned (brief drafted 2026-11-20, awaiting plan review) |
 | 4 | **9 Friday Node v1 (read-only)** | Prereqs: spike S9.0 (`kind=node` device trust), Apple Developer signing + notarization (d9), ADR-013. Then `nodes` app + WS, Swift menu-bar app, pairing, read capabilities, per-directory grants, Unix-socket hook relay, spool, heartbeat, preflight extension | "Claude Code / Codex oturumlarım ne yapıyor?" with local transcript detail | spike passes; compromised-server tests pass; notarized build keeps its TCC grants across updates | `phase-9-friday-node/brief.md` (stub) | planned |
@@ -997,7 +1009,8 @@ Gateway (ADR-003), keeps no ModelUsage (rule 3), and its browser Web Speech
 API sends audio to a cloud recognizer (contradicts Phase 6 D5). Their
 *operational lessons* are sound and are folded into the plan as follows:
 
-- **Preflight (Phase 5 closeout, then every phase):** `manage.py preflight`
+- **Preflight (Phase 5 closeout, then every phase; implemented
+  2026-11-20 in `backend/ops/`, `make preflight`):** `manage.py preflight`
   — live end-to-end checks against the running stack, not mocks: web and
   BFF up, Postgres/pgvector/Redis/Celery reachable, every seeded provider
   answers one minimal gateway call (recorded as ModelUsage, purpose
@@ -1005,7 +1018,10 @@ API sends audio to a cloud recognizer (contradicts Phase 6 D5). Their
   served frontend build == built build, secrets not reachable from the
   browser, a `?mute=1` voice tab is silent. One summary line `N pass / N
   fail / N warn`, non-zero exit on failure. Each later phase adds its own
-  checks; "done" in a closeout means preflight passed.
+  checks; "done" in a closeout means preflight passed. A service that is
+  not configured on the machine running it reports `warn`, never `fail`;
+  the voice-tab check is a standing `warn` until Phase 6 builds the voice
+  layer; `--no-model-calls` skips the per-provider gateway calls.
 - **Voice (Phase 6 branch 3/4 additions):** an end-of-speech *finish
   window* (`VOICE_FINISH_MS`, default 900 ms — a mid-sentence pause appends
   instead of dispatching); short interrupt words ("dur", "bekle", "stop")

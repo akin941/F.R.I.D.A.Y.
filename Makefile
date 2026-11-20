@@ -11,7 +11,7 @@ DEV_SETTINGS := DJANGO_SETTINGS_MODULE=$${DJANGO_SETTINGS_MODULE:-config.setting
 FRONTEND := cd frontend &&
 
 .PHONY: up up-daily down logs secrets test lint fmt shell migrate makemigrations \
-	harness-images harness-smoke harness-runner deploy-smoke \
+	harness-images harness-smoke harness-runner deploy-smoke preflight \
 	test-backend test-frontend test-e2e lint-backend lint-frontend \
 	frontend-install frontend-dev frontend-build e2e-install
 
@@ -111,3 +111,10 @@ harness-runner:
 # refused non-merged SHA. Needs Docker and a test database (DATABASE_URL).
 deploy-smoke:
 	./deploy/remote/smoke/run-smoke.sh
+
+# Live end-to-end checks of the running stack (Phase 5 closeout): one line per
+# check, then `N pass / N fail / N warn`; non-zero exit on any failure. Runs
+# inside `web` (its env reaches Postgres/Redis/the providers). Pass
+# PREFLIGHT_ARGS=--no-model-calls to skip the per-provider gateway calls.
+preflight:
+	$(COMPOSE) exec web uv run python manage.py preflight $(PREFLIGHT_ARGS)

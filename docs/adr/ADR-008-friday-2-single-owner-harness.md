@@ -138,3 +138,30 @@ implementation facts and open items, not new decisions.
   `ApprovalRequest`. ADR-009 (Phase 4) settles it: owner deletes of
   self-scoped rows are confirm-class soft deletes with a 30-day trash
   (`deleted_at`), and permanent removal is the gate-class `purge_trash`.
+
+## Implementation notes (Phase 5 closeout, 2026-11-20)
+
+- **Decision 3 (deploy-automation gates) — complete.** The third owner
+  decision landed in Phase 5 branch 6: the `deploys` app, a per-workspace
+  `DeployTarget` allowlist, the system-created `deploy` gate showing the
+  full plan (full SHAs, SSH destination, CI conclusion, health plan,
+  rollback SHA), a forced-command SSH runner that sends verbs only, and a
+  health window. Automatic rollback is part of the same decision only by
+  ADR-010's explicit extension (previous recorded SHA, inside the stated
+  window, after three consecutive failures, `auto_rollback` opt-out); a
+  later manual rollback is a new request and a new decision. Opening a PR
+  for a pushed harness branch is its own gate (`github_open_pr`, branch
+  5); merging stays a human action outside Friday.
+- **Decision 4 (`work_log` producers) — complete.** Every producer now
+  writes through `memory.services.record_work_log`: harness discovery
+  (`harness/execution.py`), implementation/push outcomes
+  (`harness/implementation_execution.py`), gated-tool executions
+  (`tools/work_log.record_tool_outcome`: vault export, connector writes,
+  deploy runs via `deploys/outcomes.py`) and task outcomes
+  (`tasks/services.py`). Content is Friday-authored bookkeeping only, never
+  connector or remote output. The closeout e2e
+  (`backend/ops/tests/test_closeout_e2e.py`) drives harness job → PR →
+  deploy and asserts the push and deploy rows are visible to the owner.
+- **Preflight.** `manage.py preflight` (`backend/ops/`) is the live
+  "done" check named in MASTER_PLAN's "Roadmap update 2026-11-20"; later
+  phases add their own checks to it.

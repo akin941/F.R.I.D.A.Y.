@@ -156,6 +156,7 @@ class InferenceGateway:
         on_usage=None,
         personal_data=False,
         budget_session="",
+        only_provider=None,
     ):
         """One chat completion (or, with `stream=True`, a generator of
         chunks). Provider selection -- including the `personal_data` filter
@@ -172,7 +173,12 @@ class InferenceGateway:
         Budgets (A3): a configured `AIBudget` covering `purpose` is checked
         first, also eagerly; a refusal raises `BudgetExceeded` with one
         `budget_exceeded` row. Token cost cannot be known before the call,
-        so a chat call is refused only once its window is already spent."""
+        so a chat call is refused only once its window is already spent.
+
+        `only_provider` (a `ModelProvider.name`; Phase 5 closeout, used by
+        `manage.py preflight`) restricts selection to that one row -- still
+        only if it is active, keyed and allowed for `personal_data`; there
+        is no fallback. Same single-door accounting: one `ModelUsage` row."""
         started = time.monotonic()
         merged_params = dict(prompt_version.model_params) if prompt_version else {}
         merged_params.update(params or {})
@@ -195,6 +201,7 @@ class InferenceGateway:
             capability=ModelProvider.Capability.CHAT,
             purpose=purpose,
             personal_data=personal_data,
+            only_provider=only_provider,
         )
         if not providers:
             raise self._no_provider_error(
@@ -246,12 +253,13 @@ class InferenceGateway:
         on_usage=None,
         personal_data=False,
         budget_session="",
+        only_provider=None,
     ):
         """Embed a batch of texts. Same retry/fallback/accounting contract as
         `complete()` (ADR-003: embeddings are a gateway call like any other,
         exactly one ModelUsage row) -- including `personal_data`'s
         allowed-providers-only, fail-closed selection and the budget check.
-        No streaming variant."""
+        No streaming variant. `only_provider`: as for `complete()`."""
         started = time.monotonic()
         base_report = self._base_report(context_report, personal_data, budget_session)
         base_report["item_count"] = len(texts)
@@ -273,6 +281,7 @@ class InferenceGateway:
             capability=ModelProvider.Capability.EMBEDDING,
             purpose=purpose,
             personal_data=personal_data,
+            only_provider=only_provider,
         )
         if not providers:
             raise self._no_provider_error(
@@ -732,6 +741,7 @@ class InferenceGateway:
         personal_data=False,
         preferred="",
         preferred_reason="",
+        only_provider=None,
     ):
         """Active providers of the given capability, by priority; fake only
         behind the flag, real ones only when their key env var is actually
@@ -757,8 +767,18 @@ class InferenceGateway:
         to the front IF it is already eligible (reason `preferred_reason`,
         e.g. "route:tr"); an ineligible routed provider -- inactive,
         keyless or not personal-data-allowed -- is simply skipped, so a
-        route can never widen the eligible set."""
+        route can never widen the eligible set.
+
+        `only_provider` (Phase 5 closeout): selection is pinned to that one
+        eligible row, with no fallback (reason "pinned")."""
         eligible = self._eligible_providers(capability=capability, personal_data=personal_data)
+        if only_provider is not None:
+            # Phase 5 closeout pin (`manage.py preflight`): that one row or
+            # nothing -- no route, tier or fallback can widen it.
+            eligible = [p for p in eligible if p.name == only_provider]
+            for provider in eligible:
+                provider._routing_reason = "pinned"
+            return eligible[:1]
 
         if preferred:
             routed = [p for p in eligible if p.name == preferred]

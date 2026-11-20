@@ -232,8 +232,30 @@ CLI ones (`accounts.pat.auth_failed`, `surface: openai`, rate-limited).
 - A manual Open WebUI smoke (streaming, history continuity, `friday-lite`
   as the task model) is still to be recorded here by the owner.
 
-## Other integrations (not yet built)
+## Other integrations (rewritten at the Phase 5 closeout, 2026-11-20)
 
-Candidates from the original MVP 9 scoping, still unstarted:
-Gmail/Calendar/Drive (own OAuth apps, read-only first, minimal scopes),
-GitHub, local folder sync.
+The channels above are front doors. Phase 5 (ADR-010) added Friday's first
+outside-world *reach*, under the same kernel rules: reads are audited,
+fenced and bounded ("data, not instructions"); every write is a gated,
+snapshot-backed `ApprovalRequest` executed at most once; nothing holds a
+credential in Postgres. They are **connectors** (`backend/connectors/`,
+one code manifest each, a twin in `docs/mcp/<name>.md`, listed in
+`docs/mcp/allowlist.md`) plus the `deploys` app:
+
+| Integration | Kind | Reads | Writes (gated) | Docs |
+|---|---|---|---|---|
+| GitHub | official `github-mcp-server`, digest-pinned sidecar | PR, CI and branch-head status for registered `HarnessRepo`s | `github_open_pr` (system-created from a pushed harness job); merge never | `docs/mcp/github.md` |
+| Gmail + Google Calendar | native REST bridge, host-side owner OAuth (`manage.py connect_google`) | recent mail, agenda (personal, web only, local model only) | `mail_send`, `calendar_create_event` | `docs/mcp/google.md`, `docs/runbooks/google-connector.md` |
+| Home Assistant | native REST bridge | entity states (personal, web only) | `ha_call_service` within a code-bounded allowlist | `docs/mcp/home-assistant.md` |
+| External installation (ADR-006) | MCP client placeholder | — (manifest **blocked**, O-5) | — | `docs/mcp/external_installation.md` |
+| VPS deploy | `deploys` app, forced-command SSH runner | target status (live SHA) | `deploy` (health window, automatic rollback per ADR-010) | `docs/runbooks/deploy-target-setup.md` |
+
+Connectors are switched on per workspace under Ayarlar → Bağlantılar, deploy
+targets under Firma → Deploy hedefleri; every gate renders its full
+snapshot on Onaylar. `manage.py preflight` (`make preflight`) checks the
+running stack, including a live pin check of every enabled MCP connector.
+
+Still not built: Google Drive, local folder sync, social media (undefined
+until a concrete service is named), firm mailboxes and non-Google mail.
+Rejected for runtime: NotebookLM MCPs and browser/Playwright MCP
+(`docs/mcp/allowlist.md`).

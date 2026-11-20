@@ -232,6 +232,18 @@ def _statuses(manifest, listing):
     return statuses
 
 
+def live_pin_report(manifest, *, timeout=None):
+    """`{tool_name: "ok" | "mismatch" | "missing"}` from a live `tools/list`
+    against `manifest`'s pins -- read-only: nothing is stored on a binding
+    and nothing is audited (`manage.py preflight`, Phase 5 closeout; the
+    pin beat above stays the one writer). Raises `mcp_client.
+    ConnectorError` when the server cannot be listed."""
+    if timeout is None:
+        timeout = settings.CONNECTOR_HEALTH_TIMEOUT_SECONDS
+    listing = mcp_client.list_tools(manifest, timeout=timeout)
+    return _statuses(manifest, listing)
+
+
 def check_binding_pins(binding_id):
     """Run one pin/health check for an enabled binding and record it.
     Returns the binding (or `None` if it no longer exists / is disabled)."""

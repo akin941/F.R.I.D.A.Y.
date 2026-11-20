@@ -62,6 +62,14 @@ services:
       # provider (e.g. NVIDIA NIM) for personal dogfooding. Untouched, this
       # still defaults to "true" so `make test-e2e`/CI stay deterministic.
       AI_FAKE_PROVIDER: "${AI_FAKE_PROVIDER:-true}"
+      # `make preflight` (Phase 5 closeout) runs inside `web`: its liveness
+      # URL is in-container; the BFF (host `make frontend-dev`) is opt-in.
+      PREFLIGHT_WEB_URL: "${PREFLIGHT_WEB_URL:-http://localhost:8000/healthz}"
+      PREFLIGHT_BFF_URL: "${PREFLIGHT_BFF_URL:-}"
+      # OpenRouter (Phase 5 closeout): the seeded `openrouter` row stays
+      # disabled while this is empty.
+      OPENROUTER_API_KEY: "${OPENROUTER_API_KEY:-}"
+      OPENROUTER_MODEL_ID: "${OPENROUTER_MODEL_ID:-}"
       NVIDIA_API_KEY: "${NVIDIA_API_KEY:-}"
       NVIDIA_MODEL_ID: "${NVIDIA_MODEL_ID:-}"
       NVIDIA_BASE_URL: "${NVIDIA_BASE_URL:-}"
