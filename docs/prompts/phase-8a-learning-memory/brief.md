@@ -1230,7 +1230,8 @@ PAT wording in this section and branch 2's matrix now says 401.
   `triage_no_owner_text`, `triage_short`, `triage_duplicate`,
   `deferred_budget`, `no_provenance`, `self_target`, `invalid_target`,
   `duplicate`, `merged`, `nightly_cap`, `weekly_cap`, `over_budget`,
-  `consolidation_failed`, `consolidation_schema_invalid`).
+  `consolidation_failed`, `consolidation_schema_invalid`,
+  `private_block_target`, `source_forgotten`, `source_paused`).
 - **Planning** (`memory/ingestion/extraction.py`, nightly beat
   `memory.ingestion.tasks.run_learning_night_task`, compose beat every
   24 h): per workspace with un-extracted live episodes of an accepting
@@ -1257,7 +1258,17 @@ PAT wording in this section and branch 2's matrix now says 401.
   substring of the cited episode's (sent) owner text in the same job; else
   `no_provenance`. `self` targets → `self_target`; a core-block target the
   workspace cannot hold (`developer`/`preferences` from a firm episode) →
-  `invalid_target`.
+  `invalid_target`; a core-block target from a `private` or personal-class
+  (calendar) episode → `private_block_target` (ADR-005: a block has no
+  per-line sensitivity and normal blocks reach cloud payloads, so such
+  content may only become a sensitivity-carrying memory proposal;
+  consolidation refuses it again as defence in depth).
+- **Inactive sources** (review round 1): `finalize_success`, the start of
+  consolidation and `_finish` (under the job lock) re-check each
+  candidate's source; one forgotten (`source_forgotten`), paused or
+  disabled (`source_paused`) meanwhile yields no proposal, closing the race
+  with `forget_source`, whose candidate strip is scoped to the source's
+  workspace.
 - **Consolidation** (`memory/ingestion/consolidation.py`, purpose
   `memory.consolidation`, tier `mid`, prompt `friday_memory_consolidation`
   v1): triggered on commit when a workspace's last extraction job closes

@@ -219,6 +219,61 @@ def test_private_candidates_are_consolidated_with_personal_data_and_stay_private
     assert Memory.objects.get(title="Learned 1").sensitivity == Memory.Sensitivity.PRIVATE
 
 
+def test_a_private_candidate_targeting_a_block_never_becomes_block_content(git, personal, llm):
+    """Defence in depth for candidates already waiting: a private
+    candidate aimed at a core block yields no proposal, so its content never
+    lands in a cloud-eligible (normal) block."""
+    waiting_job(
+        personal,
+        [candidate(git, 1, target="preferences", sensitivity="private")],
+        personal_data=True,
+    )
+    assert consolidate_workspace(personal.id) == 0
+    assert not CoreBlockProposal.objects.exists()
+    assert not CoreMemoryBlock.objects.filter(
+        workspace=personal,
+        sensitivity=Memory.Sensitivity.NORMAL,
+        content__contains="approach number 1",
+    ).exists()
+    drops = IngestionCounter.objects.get(source=git).learning_drops
+    assert drops["private_block_target"] == 1
+
+
+@pytest.mark.parametrize("state", ["forgotten", "paused", "disabled"])
+def test_candidates_of_an_inactive_source_become_no_proposals(git, personal, llm, state):
+    waiting_job(personal, [candidate(git, 1), candidate(git, 2, target="current_focus")])
+    now = timezone.now()
+    if state == "forgotten":
+        git.forgotten_at, git.paused_at = now, now
+    elif state == "paused":
+        git.paused_at = now
+    else:
+        git.enabled = False
+    git.save()
+    assert consolidate_workspace(personal.id) == 0
+    assert learned_rows() == 0
+    reason = "source_forgotten" if state == "forgotten" else "source_paused"
+    assert IngestionCounter.objects.get(source=git).learning_drops[reason] == 2
+    assert EpisodeExtractionJob.objects.get().candidates == []
+    assert not llm.of("memory.consolidation")  # no spend on an inactive source
+
+
+def test_a_source_forgotten_after_the_claim_yields_no_proposals(git, personal, llm, monkeypatch):
+    waiting_job(personal, [candidate(git, 1)])
+    original = consolidation.dedupe
+
+    def forget_then_dedupe(*args, **kwargs):
+        IngestionSource.objects.filter(pk=git.pk).update(
+            forgotten_at=timezone.now(), paused_at=timezone.now()
+        )
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(consolidation, "dedupe", forget_then_dedupe)
+    assert consolidate_workspace(personal.id) == 0
+    assert learned_rows() == 0
+    assert IngestionCounter.objects.get(source=git).learning_drops["source_forgotten"] == 1
+
+
 def test_existing_private_memories_never_reach_the_payload(git, personal, llm):
     Memory.objects.create(
         workspace=personal,

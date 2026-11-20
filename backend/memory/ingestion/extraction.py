@@ -276,11 +276,45 @@ def _mark_extracted(episode_ids):
         Episode.all_objects.filter(pk__in=list(episode_ids)).update(extracted_at=timezone.now())
 
 
+def inactive_source_reason(source):
+    """Why a source's candidates may no longer become proposals, or ""."""
+    if source.forgotten_at is not None:
+        return "source_forgotten"
+    if not source.is_accepting:
+        return "source_paused"
+    return ""
+
+
+def drop_inactive_source_candidates(candidates, drops=None):
+    """Re-check the sources at commit time: a source forgotten, paused or
+    disabled while the model call ran yields no candidates (its forget
+    cascade already ran and would not see them). Returns `(kept, drops)`."""
+    merged = defaultdict(Counter)
+    for source_id, reasons in (drops or {}).items():
+        merged[source_id].update(reasons)
+    if not candidates:
+        return candidates, merged
+    sources = {
+        str(s.id): s
+        for s in IngestionSource.objects.filter(pk__in={c["source_id"] for c in candidates})
+    }
+    kept = []
+    for candidate in candidates:
+        source = sources.get(candidate["source_id"])
+        reason = "source_forgotten" if source is None else inactive_source_reason(source)
+        if reason:
+            merged[candidate["source_id"]][reason] += 1
+            continue
+        kept.append(candidate)
+    return kept, merged
+
+
 @transaction.atomic
 def finalize_success(job_id, claim_token, *, candidates, sent_episode_ids, drops=None):
     job = _fenced(job_id, claim_token)
     if job is None:
         return False
+    candidates, drops = drop_inactive_source_candidates(candidates, drops)
     _close(job, EpisodeExtractionJob.Status.SUCCEEDED, candidates=candidates)
     _mark_extracted(sent_episode_ids)
     _record_drops(drops)
@@ -449,6 +483,12 @@ def verify_candidates(raw, items_by_id, workspace):
             drops[source_id]["invalid_target"] += 1
             continue
         episode = item["episode"]
+        if target != MEMORY_TARGET and needs_personal_data(episode):
+            # ADR-005: a core block has no per-line sensitivity and normal
+            # blocks reach cloud payloads, so private/personal-class content
+            # may only become a (sensitivity-carrying) memory proposal.
+            drops[source_id]["private_block_target"] += 1
+            continue
         survivors.append(
             {
                 "type": candidate["type"],

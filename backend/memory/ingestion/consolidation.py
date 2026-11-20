@@ -40,7 +40,12 @@ from audit.services import record_audit
 from memory.context import neutralize_fence, strip_invisible_formatting
 from memory.core_blocks import CORE_BLOCK_CHAR_BUDGETS
 from memory.ingestion import services
-from memory.ingestion.extraction import MEMORY_TARGET, prompt_version
+from memory.ingestion.extraction import (
+    MEMORY_TARGET,
+    drop_inactive_source_candidates,
+    inactive_source_reason,
+    prompt_version,
+)
 from memory.models import (
     CoreBlockProposal,
     CoreMemoryBlock,
@@ -363,7 +368,12 @@ def consolidate_workspace(workspace_id, now=None):
 
 def _consolidate_claimed(workspace_id, personal_data, token, candidates, now):
     workspace = Workspace.objects.get(pk=workspace_id)
+    # No model spend on a source that stopped accepting since extraction;
+    # `_finish` re-checks under the job lock for the race with forget.
+    candidates, inactive = drop_inactive_source_candidates(candidates)
     kept, drops = dedupe(workspace, candidates, personal_data)
+    for source_id, reasons in inactive.items():
+        drops[source_id].update(reasons)
     ranked = []
     if kept:
         version = prompt_version(PROMPT_NAME)
@@ -431,7 +441,12 @@ def _finish(token, ranked, drops, *, discard=(), reason="", now=None):
         }
         for candidate in ranked:
             source = sources.get(candidate["source_id"])
-            if source is None:
+            # Re-checked under the job lock: a source forgotten, paused or
+            # disabled after the claim yields no proposals (its forget
+            # cascade ran earlier and would not see them).
+            reason = "source_forgotten" if source is None else inactive_source_reason(source)
+            if reason:
+                drops[candidate["source_id"]][reason] += 1
                 continue
             if used >= MAX_PROPOSALS_PER_NIGHT:
                 drops[candidate["source_id"]]["nightly_cap"] += 1
@@ -494,6 +509,11 @@ def _create_proposal(workspace, source, candidate):
             metadata={"source_kind": source.kind, "target": MEMORY_TARGET},
         )
         return "created"
+    if candidate.get("sensitivity") == Memory.Sensitivity.PRIVATE or source.is_personal_class:
+        # ADR-005, defence in depth (extraction already refuses these): a
+        # block has no per-line sensitivity and normal blocks reach cloud
+        # payloads, so private/personal-class content never becomes one.
+        return "private_block_target"
     label = candidate["target"]
     current = CoreMemoryBlock.objects.filter(workspace=workspace, label=label).first()
     base = current.content if current else ""

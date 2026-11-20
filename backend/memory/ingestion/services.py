@@ -309,7 +309,9 @@ def _strip_waiting_candidates(source):
     normally."""
     removed = 0
     source_id = str(source.id)
-    jobs = EpisodeExtractionJob.objects.select_for_update().filter(consolidated_at__isnull=True)
+    jobs = EpisodeExtractionJob.objects.select_for_update().filter(
+        workspace=source.workspace, consolidated_at__isnull=True
+    )
     for job in jobs:
         kept = [c for c in job.candidates if c.get("source_id") != source_id]
         if len(kept) != len(job.candidates):

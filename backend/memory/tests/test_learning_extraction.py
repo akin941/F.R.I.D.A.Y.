@@ -288,6 +288,70 @@ def test_self_target_is_dropped_and_counted_firm_cannot_target_personal_blocks(
     assert drops["self_target"] == 1 and drops["invalid_target"] == 1
 
 
+def test_private_and_calendar_episodes_cannot_target_a_core_block(sources, git, personal, llm):
+    """ADR-005: a block has no per-line sensitivity and normal blocks reach
+    cloud payloads, so private/personal-class content may only become a
+    (sensitivity-carrying) memory proposal."""
+    fake_provider(personal_data_allowed=True)
+    calendar = sources[Kind.CALENDAR]
+    from memory.tests.ingestion_helpers import add_rule
+
+    add_rule(calendar, "calendar_binding", "b1", personal)
+    private = episode(
+        git, owner_text="Private repo: rotate the backup schedule", sensitivity="private"
+    )
+    cal = episode(
+        calendar,
+        owner_text="Plan the quarterly review with the design team",
+        kind="calendar.event",
+        mapping_key="calendar:b1",
+    )
+
+    def reply(messages):
+        return candidates_reply(
+            [
+                (private, "rotate the backup schedule", {"target": "preferences"}),
+                (private, "rotate the backup schedule", {"target": "memory"}),
+                (cal, "Plan the quarterly review", {"target": "current_focus"}),
+            ]
+        )
+
+    llm.overrides["memory.episode_extraction"] = reply
+    run_all(plan())
+    kept = [c for j in EpisodeExtractionJob.objects.all() for c in j.candidates]
+    assert [(c["target"], c["sensitivity"]) for c in kept] == [("memory", "private")]
+    drops = IngestionCounter.objects.get(source=git).learning_drops
+    assert drops["private_block_target"] == 1
+    cal_drops = IngestionCounter.objects.get(source=calendar).learning_drops
+    assert cal_drops["private_block_target"] == 1
+
+
+def test_a_source_forgotten_during_the_call_yields_no_candidates(git, personal, llm):
+    fake_provider()
+    episode(git, owner_text=OWNER_LINE)
+    jobs = plan()
+    claimed = extraction.claim_episode_extraction_job(jobs[0])
+    from ai_core.gateway import InferenceGateway
+
+    original = InferenceGateway.complete
+
+    def forget_mid_call(self, purpose, messages, **kwargs):
+        result = original(self, purpose, messages, **kwargs)
+        IngestionSource.objects.filter(pk=git.pk).update(
+            forgotten_at=timezone.now(), paused_at=timezone.now()
+        )
+        return result
+
+    with (
+        mock.patch.object(InferenceGateway, "complete", forget_mid_call),
+        mock.patch("memory.ingestion.consolidation.dispatch_consolidation"),
+    ):
+        extraction.process_claimed_job(*claimed)
+    job = EpisodeExtractionJob.objects.get()
+    assert job.status == EpisodeExtractionJob.Status.SUCCEEDED and job.candidates == []
+    assert IngestionCounter.objects.get(source=git).learning_drops["source_forgotten"] == 1
+
+
 # --- schema --------------------------------------------------------------------
 
 
