@@ -278,8 +278,8 @@ Non-owner commits keep metadata only.
   `content`, `version`, `sensitivity`, `updated_by_kind` (`owner`,
   `assembler`, `approved_proposal`). Unique `(workspace, label)`. Char
   budgets: `self` 1500, `developer` 1200, `current_focus` 600,
-  `active_projects` 800, `preferences` 1000 (≤ 5100 chars total, below
-  the memory block's 4000 + firm profile's 2000 already in the prompt).
+  `active_projects` 800, `preferences` 1000 (≤ 5100 chars total, on top of
+  the memory block's 4000 and the firm profile's 2000 chars).
   `CoreMemoryBlockVersion` keeps every prior content (owner can view and
   roll back; rollback is a confirm-class in-app edit).
 - **Who writes what.** `self`: only the deterministic assembler (D8).
@@ -346,7 +346,9 @@ Non-owner commits keep metadata only.
   `untrusted_context` fence that the prompt says cannot be quoted. Output
   schema v1: `{"version":1,"candidates":[{"type","title","content",
   "quote","episode_id","target"}]}` where `target` is `memory` or a core
-  block label; parsed with the same strictness as
+  block label other than `self` (a candidate targeting `self` is dropped
+  and counted; a `developer` target becomes a `CoreBlockProposal`, never a
+  direct write); parsed with the same strictness as
   `memory/extraction.py` (unknown keys → schema error, terminal).
 - **Provenance check in code.** A candidate survives only if `quote`
   (≥ 12 chars after whitespace normalisation) is a verbatim substring of
@@ -355,7 +357,8 @@ Non-owner commits keep metadata only.
   stored (≤ 300 chars) and shown on the card.
 - **Gateway.** New purposes `memory.episode_extraction` (tier `cheap`)
   and `memory.consolidation` (tier `mid`), added to `AI_PURPOSE_TIERS`
-  (coverage test). `personal_data=True` for any episode whose source is
+  (coverage test); the proposal's `memory.extract`/`memory.consolidate`
+  are renamed to match the existing `memory.extraction` style. `personal_data=True` for any episode whose source is
   personal-class (calendar) or whose sensitivity is `private`, so only
   `personal_data_allowed` (local) providers serve them; such episodes are
   never batched with cloud-eligible ones. One `ModelUsage` per call; the
@@ -489,7 +492,9 @@ written; approvals reuse the existing memory confirm-class path).
 **Scope.** D1–D4, D11's TTL and forget-source (episode side and source
 pause; memory cascade lands in branch 5), `IngestionCounter`, the seed
 command `seed_ingestion_sources` (four disabled sources), the
-`record_episode` port, contracts (D14), ADR-012 implementation note,
+`record_episode` port, the owner APIs (sources enable/pause, mapping
+rules, scrub terms, forget/restore, the D11 audit-view reads; web channel,
+owner only, `for_actor()`), contracts (D14), ADR-012 implementation note,
 settings and `.env.example` names (`MEMORY_OWNER_GIT_EMAILS`, TTL days,
 default daily budget). No producer yet.
 **Files.** `backend/memory/models.py` + migration,
@@ -511,7 +516,11 @@ text over the cap truncated after scrubbing. TTL: 30/14 days by
 pauses, trashes, is reversible, requires `CHANNEL_WEB` and a human actor
 (agent, PAT channels refused), audited with counts only. Isolation:
 `Episode.objects.for_actor()` of a firm-only actor never sees personal
-episodes and vice versa. Contracts green.
+episodes and vice versa. Owner APIs (sources enable/pause, mapping rules,
+scrub terms, forget/restore, the D11 audit-view reads): role × endpoint
+against the five Phase 4 principals (owner web session 200; owner
+`cli`/`openai` PAT 403; non-owner 403; `is_agent` 403; anonymous 401) and
+another workspace's sources, rules and episodes → 404. Contracts green.
 **Done when:** the four sources exist disabled; an episode posted through
 the port in a test lands scrubbed in the mapped workspace or is dropped;
 the corpus gate is in CI.
@@ -569,7 +578,9 @@ refuses web sessions, `cli`/`openai` PATs, revoked/expired hook tokens,
 anonymous; response contains counts only; unknown event names and fields
 dropped; oversize batch 413; throttle 429 and Redis-down 503; secrets in a
 payload never reach the DB (DB scan); an unmapped `cwd` stores nothing;
-events map to a firm workspace only through a rule; `CodingSession`
+events map to a firm workspace only through a rule; role × endpoint for
+`GET /memory/sessions` (five Phase 4 principals, a hook token refused,
+another workspace's sessions never listed); `CodingSession`
 status transitions (start → waiting on a permission notification →
 running → stopped; stale after 24 h); `friday_hook.py` imports only the
 standard library, exits 0 on server errors and timeouts (mocked
@@ -659,8 +670,8 @@ naming the source and counts), the core-block editor with version
 history and rollback (`self` read-only with its source anchors),
 `/sessions` and the HUD sessions panel; the two read tools
 (`coding_sessions_status` in `tools/`, `harness_jobs_status` in
-`harness/tools.py`); mapping-rule and scrub-term APIs if not already in
-branch 1.
+`harness/tools.py`). The backend APIs it calls exist from branches 1, 2,
+3 and 5.
 **Files.** `frontend/src/app/(shell)/memory/{learning,ingestion}/`,
 `frontend/src/app/(shell)/sessions/`, `frontend/src/components/memory/`,
 `frontend/src/components/hud/` (panels), `frontend/src/app/api/memory/`,

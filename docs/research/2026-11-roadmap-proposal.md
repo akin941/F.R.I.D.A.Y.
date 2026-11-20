@@ -253,7 +253,7 @@ For all of them: the `docs/security/mcp-governance.md` allowlist + manifest; **h
 New contracts, added in the branch that adds each app:
 
 - `nodes` → forbidden: `ai_core`, `memory`, `knowledge`, `harness`, `assistant`, `apps.modules.*`. Added to the "kernel apps must not import config" and "ai_core must not import business apps" lists.
-- `memory.ingestion.*` connectors may import `memory`, `workspaces`, `audit`, `ai_core` (gateway only); forbidden: `nodes` (they receive data through a `memory`-owned port), `harness` internals (they read harness outcomes through a read model), `connectors` internals.
+- `memory.ingestion.*` connectors may import `memory`, `workspaces`, `audit`, `ai_core` (gateway only); forbidden: `nodes` (they receive data through a `memory`-owned port), `harness` internals (they read harness outcomes through a read model), `connectors` internals. *(Refined on acceptance, 2026-11-20, in the Phase 8A brief D1/D14: `memory` may not import `harness` or `connectors` at all under the existing contracts, so harness, git and calendar producers live in those apps and push into the same `memory`-owned port; there is no read model of harness inside memory.)*
 - A Graphify importer and transcript parser live in `knowledge.importers` / `memory.ingestion` and never import a third-party package outside the pinned manifest.
 
 ### c.10 Projected monthly cost (illustrative, to verify in P6/8A)
