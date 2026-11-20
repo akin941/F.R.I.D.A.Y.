@@ -1,8 +1,8 @@
 # Jarvis OS — development stack. Not production-ready by design (MVP 0);
 # `compose.daily.yml` is the daily-driver override (gunicorn, prod settings,
 # `next start`).
-# Host ports are shifted (+1) because the other local stack commonly occupies
-# 8000/5432/6379 on this machine. In-network ports are unchanged. Every port
+# Host ports are shifted (+1) to avoid clashing with other local stacks that
+# commonly occupy 8000/5432/6379. In-network ports are unchanged. Every port
 # is published on 127.0.0.1 only (Phase 4 branch 1): nothing in this stack
 # is reachable from the LAN.
 #

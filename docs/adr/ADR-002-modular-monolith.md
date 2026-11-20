@@ -12,11 +12,11 @@ operational cost without solving any current problem.
 Single Django project; each module is a Django app. Kernel apps (accounts,
 workspaces, audit, ai_core, assistant, memory, files, knowledge, tasks, tools,
 approvals, agents, skills, integrations) never import `apps.modules.*`; module
-packs (e.g. external module) may import kernel apps; `ai_core` imports no business
+packs (e.g. a document-intelligence pack) may import kernel apps; `ai_core` imports no business
 module. Contracts enforced with import-linter (see `backend/pyproject.toml`).
 
-> Note (2026-07-07): the external examples in this decision are historical — external
-> split off as an external product in ADR-006. The decision itself (the
+> Note (2026-07-07): the company-workspace examples in this decision are
+> historical (see ADR-006: workplace products run as external installations). The decision itself (the
 > modular monolith) remains in force; the first concrete module pack is TBD.
 
 > Note (2026-09-27): the kernel app list above is out of date — there never

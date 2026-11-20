@@ -6,13 +6,13 @@
 > Parent decisions: ADR-001, ADR-002 (import contracts), ADR-003
 > (single gateway door, ModelUsage), ADR-004 + ADR-008 decision 3
 > (gate-class vs confirm-class: every deploy, external send and git
-> push/merge is gate-class), ADR-005 (`private` contract), ADR-006 (external
-> is external; Jarvis is only its MCP client), ADR-008 decisions 4
+> push/merge is gate-class), ADR-005 (`private` contract), ADR-006 (workplace
+> products are external installations; Jarvis is only their MCP client), ADR-008 decisions 4
 > (`work_log` producers), 6 (bridges, never drivers) and 7 (runners),
 > ADR-009 (Phase 4: no confirm-class growth by precedent),
 > `docs/VISION_JARVIS_2.md` §4 steps [5]–[7], §6 row 5, §8 (R1–R3, O-5),
 > MASTER_PLAN §AA ("Phase 4–6 outline", "Carried-forward items") and §O
-> (HA bridge, external bridge, NotebookLM), `docs/security/mcp-governance.md`,
+> (HA bridge, external-installation bridge, NotebookLM), `docs/security/mcp-governance.md`,
 > `docs/mcp/allowlist.md`.
 > **Precondition — hard:** Phase 4 closeout merged (`integ/phase-4` →
 > `main`). State when this brief was written (2026-09-27): only Phase 4
@@ -37,7 +37,7 @@ deploy target allowlist, the third owner decision and an allowlisted SSH
 runner with health check and rollback; a connector framework (manifested
 MCP servers plus native bridges) with audited, fenced reads and gated,
 snapshot-backed writes; GitHub, Home Assistant, Google mail/calendar and
-a external placeholder (O-5); the tier map and harness policy table; the
+an external-installation MCP client placeholder (O-5); the tier map and harness policy table; the
 remaining `work_log` producers; the engine-extraction decision. Usable
 outcome (MASTER_PLAN §AA): "Request → code → live, end to end", plus home
 control and mail/calendar awareness.
@@ -432,12 +432,13 @@ audit-worthy, not memory-worthy (VISION R5). Content carries the date so
 a repeated outcome is not swallowed as `DuplicateMemory`. MVP 7 agent
 runs are not added (ADR-008's list does not name them).
 
-### D14 — external placeholder (O-5); no dynamic runner registry
+### D14 — External-installation MCP client placeholder (O-5); no dynamic runner registry
 
-`connectors/manifests/external_installation.py` ships `status="blocked"` (company
-workspaces, reads only, `firm`); `docs/mcp/external_installation.md` records the open auth
-model and approval treatment (§O). A blocked manifest can never bind
-(tested); a later brief flips it when an installation exposes MCP. The deploy
+`connectors/manifests/external_installation.py` ships `status="blocked"`
+(company workspaces, reads only, `firm`); `docs/mcp/external_installation.md`
+records the open auth model and approval treatment (§O). A blocked manifest
+can never bind (tested); a later brief flips it when an external
+installation exposes MCP. The deploy
 queue rides the one existing runner; the dynamic registry waits for a
 second runner host.
 
@@ -526,7 +527,7 @@ take the PAT from its own env or per request (either way env-only).
 `Conversation.personal_data` (D5 wiring); generic write `ToolSpec`
 factory (D6) with recovery and work_log; error redaction; binding API
 (`/api/v1/connectors/bindings`, `IsWebChannel` + owner, web only);
-compose network/profile; external blocked manifest; `mcp-governance.md` gains
+compose network/profile; external-installation blocked manifest; `mcp-governance.md` gains
 the code-manifest and pin rules and the concrete logging design
 (replacing its 2026-09-27 note), plus `docs/mcp/_template.md`.
 **Files.** `backend/connectors/` (models, manifests/, mcp_client.py,
@@ -668,7 +669,7 @@ flows work at phone width.
 
 ### 10. closeout
 
-MASTER_PLAN §AA row 5 → done and §O (HA, external) updated; ADR-008
+MASTER_PLAN §AA row 5 → done and §O (HA, external-installation bridge) updated; ADR-008
 implementation notes (deploy gate, decision-4 producers);
 `docs/integrations/README.md` "Other integrations" rewritten; governance
 pass: NotebookLM MCPs stay rejected for runtime (unofficial,
@@ -683,7 +684,7 @@ cookie-based), browser/Playwright MCP stays rejected; e2e: harness job
 | 1 | `feat/p5-kernel-hooks` | ADR-010, `system_created`, `ReadToolSpec`, `records_work_log`, vault-export/task producers, `core/repo_identity`, contracts | Phase 4 closeout on `main` (device trust, query layer, inbox, facade) |
 | 2 | `feat/p5-tier-routing` | Tier map, `harness.review_summary`, purpose coverage, personal-data routing, harness policy table, routing reasons | 1 |
 | 3 | `refactor/p5-harness-lifecycle` | Leaf lifecycle extraction, zero behavior change | Phase 4 closeout on `main`; parallel with 1–2 |
-| 4 | `feat/p5-connector-framework` | Spike, `connectors`, MCP client, pins, reads → chat, gated writes, external blocked manifest, governance | 1, 2 |
+| 4 | `feat/p5-connector-framework` | Spike, `connectors`, MCP client, pins, reads → chat, gated writes, external-installation blocked manifest, governance | 1, 2 |
 | 5 | `feat/p5-github` | Sidecar, scope check, PR gate, PR/CI reads | 4 |
 | 6 | `feat/p5-deploy` | `deploys`, deploy gate, SSH runner, remote script, health/rollback, smoke, runbook | 1 (GitHub title/CI snapshot wired by whichever of 5/6 lands second) |
 | 7 | `feat/p5-home-assistant` | Native HA bridge, allowlists, gated service calls | 4 |
@@ -705,7 +706,7 @@ containers or MVP 7 agents · an autonomous tool loop in chat · connector
 reads over Telegram or the facade · structured mail/agenda/home
 dashboards · firm mailboxes, non-Google providers · HA scripts,
 automations, locks, alarms, HA's MCP server · confirm-class for any HA
-domain (Q7) · external beyond the blocked manifest (O-5), fleet (§P) · a
+domain (Q7) · external installations beyond the blocked manifest (O-5), fleet (§P) · a
 second runner / dynamic registry · Gemini CLI / Ollama as harness agents
 · SSE log streaming, revise-per-feedback loop, owner core memory block,
 consolidation, shared per-turn query embedding (still carried forward) ·
@@ -825,7 +826,7 @@ to the D5 "local model required" reply).
 - **Q11 — GitHub server: local or hosted?** Local, digest-pinned; hosted
   only if the step-0 spike finds no local HTTP/bridge path.
 - **Q12 — Where do build commands live?** On the VPS in root-owned per-app
-  config; Jarvis sends verbs only (D10). **Q13 — external?** Blocked manifest
+  config; Jarvis sends verbs only (D10). **Q13 — External installations?** Blocked manifest
   only; O-5 unchanged (D14).
 - **Q14 — Do connector reads become memories?** No: only Jarvis-authored
   `work_log` about writes and deploys; conversations with personal reads

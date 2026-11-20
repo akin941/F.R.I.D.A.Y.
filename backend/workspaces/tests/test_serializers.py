@@ -19,8 +19,8 @@ class TestValidProfiles:
             "repos": [
                 {"name": "jarvis-os", "url": "https://github.com/x/jarvis-os"},
                 {
-                    "name": "external_installation",
-                    "url": "https://github.com/x/external_installation",
+                    "name": "acme",
+                    "url": "https://github.com/x/acme",
                     "default_branch": "main",
                 },
             ],

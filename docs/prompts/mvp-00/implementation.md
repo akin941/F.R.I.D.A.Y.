@@ -12,8 +12,8 @@ frontend/cli README placeholders. **No feature code** — auth, chat, memory, RA
 agents and UI all start at MVP 1.
 
 Deviations recorded during execution:
-- Host ports shifted (web 8001, postgres 5433, redis 6380) because the other local
-  stack occupies the defaults on this machine.
+- Host ports shifted (web 8001, postgres 5433, redis 6380) to avoid clashing
+  with other local stacks that commonly occupy the defaults.
 - Tooling: `uv` manages Python 3.12 both locally and in the dev image
   (UV_PROJECT_ENVIRONMENT=/opt/venv so the bind mount doesn't shadow the venv).
 - MVP 0 tests intentionally require no database; sqlite fallback exists only so

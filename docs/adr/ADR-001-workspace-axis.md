@@ -4,13 +4,13 @@
 Accepted
 
 ## Context
-Jarvis OS is personal-first but must host company workspaces (external first) and,
-later, other tenants on the same kernel. The original external-centric draft used
+Jarvis OS is personal-first but must host company workspaces and,
+later, other tenants on the same kernel. The original company-centric draft used
 `Company` as the data axis, which made the personal product a second-class citizen
 and multi-tenancy expensive to retrofit.
 
-> Note (2026-07-07): the external examples in this decision are historical — external
-> split off as an external product in ADR-006. The decision itself (the
+> Note (2026-07-07): the company-workspace examples in this decision are
+> historical (see ADR-006: workplace products run as external installations). The decision itself (the
 > workspace axis) remains in force.
 
 ## Decision

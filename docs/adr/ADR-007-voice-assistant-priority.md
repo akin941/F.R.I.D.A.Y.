@@ -24,7 +24,7 @@ STT/TTS provider call goes through `InferenceGateway` (ADR-003's single door
 stays in force — no direct SDK calls from a new `voice` app), every such
 call is still recorded as `ModelUsage` (rule 3), and a local Ollama endpoint
 is wired as an opt-in, personal-only chat provider exactly the way NVIDIA
-NIM was (`a78b6de`) — never wired into the external product, same
+NIM was (`a78b6de`) — never wired into any external workplace product, same
 personal/company infra separation ADR-006 already draws. Which STT/TTS
 provider(s) to use (local Whisper/Piper on the user's own machine vs. a
 cloud API) and how raw audio gets stored (the dormant MinIO settings vs. a

@@ -5,8 +5,8 @@
 > `docs/VISION_JARVIS_2.md` §2 and `docs/MASTER_PLAN.md` §AA (ADR-008).
 
 > Not (2026-07-07): Bu rapor tarihli bir durum tespitidir; son bölümdeki
-> "domain-uzmanı agent'lar external modül paketine girer" varsayımı ADR-006 ile
-> geçersizleşmiştir.
+> "domain-uzmanı agent'lar bir şirket modül paketine girer" varsayımı ADR-006
+> ile geçersizleşmiştir (iş yeri ürünleri harici kurulumlar olarak çalışır).
 
 > Tarih: 2026-07-07 · Branch: `feat/mvp3-knowledge-foundation` · Hazırlayan: Claude Code
 > Not: Talepte anılan "CRM" ve genel "dosya yönetimi" özellikleri bu projede **mevcut değil**;
@@ -15,8 +15,8 @@
 ## 1. Genel Bakış
 
 - **Amaç:** Kişisel-öncelikli "Personal AI Operating System + Workspace Platform".
-  Ortak kimlik/hafıza/izin/audit çekirdeği + takılabilir modüller. external (şirket
-  workspace'i) çekirdek ürün değil, ileride gelecek ilk modül paketi.
+  Ortak kimlik/hafıza/izin/audit çekirdeği + takılabilir modüller. Şirket
+  workspace'leri çekirdek ürün değil, ileride gelecek modül paketleri.
 - **Mevcut özellikler (main + aktif branch):** JWT auth, çok kullanıcılı workspace'ler
   (personal/company), SSE tabanlı AI chat, workspace-kapsamlı semantik hafıza
   (onay akışıyla), knowledge/doküman ingest + chunking (RAG'in ilk yarısı, devam ediyor),
@@ -97,7 +97,7 @@
 - **Roadmap (MASTER_PLAN §L):** MVP 0–20. Kişisel çekirdek sırası:
   shell/chat → memory → **knowledge/RAG (şu an)** → tasks → tools/approvals →
   router → **agents** → skills → integrations. Şirket workspace'leri MVP 10+,
-  external module paketi MVP 11–15.
+  doküman-zekâsı (document intelligence) paketi MVP 11–15.
 - **Tamamlanan:** MVP 0 (iskelet), MVP 1 (auth, workspace, gateway v0, SSE chat,
   Next.js), MVP 2 (memory + onay akışı + çıkarım pipeline'ı) — main'de.
 - **Devam eden — MVP 3 (6 branch):** 1) embedding gateway ✅ main'de,
@@ -139,5 +139,5 @@
 - Kullanıcı-bazlı semantik hafıza büyük ölçüde mevcut (workspace-kapsamlı Memory);
   "kullanıcı bazlı, workspace'ler-arası" bir hafıza isteniyorsa bu ADR-001/005'e dokunan
   yeni bir karar gerektirir (Open Decisions'taki cross-workspace overlay notuna bakınız).
-- Domain-uzmanı agent'lar muhtemelen external modül paketi kapsamına girer;
+- Domain-uzmanı agent'lar muhtemelen bir şirket modül paketi kapsamına girer;
   kernel'e değil `apps.modules.*` tarafına konmalı ki tek yönlü bağımlılık kuralı korunsun.

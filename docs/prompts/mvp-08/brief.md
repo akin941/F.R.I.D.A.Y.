@@ -361,8 +361,8 @@ backfill needed — existing agents simply read as "no skill used"):
 - `skill_content_hash` (CharField, blank/default `""`): the `SkillSpec`'s
   `content_hash` **at the moment the agent used it**, copied onto the
   `Agent` row at plan-creation time — not looked up from the live catalog
-  later. This directly mirrors an existing
-  `prompt_key + prompt_version` usage-record pattern the user cited: months
+  later. This directly mirrors a common
+  `prompt_key + prompt_version` usage-record pattern: months
   later, "why did this agent behave this way" is answerable from the
   `Agent` row itself even if the skill's template has since changed in a
   later deploy (a new git commit changes `content_hash`, but old `Agent`

@@ -4,8 +4,8 @@ Personal AI Operating System + Workspace Platform.
 
 Jarvis OS is a **personal-first**, web-based AI operating layer: one entry point for
 projects, documents, tasks, memory, knowledge, and AI agents. Workplace systems are
-not built inside Jarvis: they run as independent external installations (external is the
-first — see `docs/adr/ADR-006-external-workplace-products.md`), and Jarvis connects to them
+not built inside Jarvis: they run as independent external installations (see
+`docs/adr/ADR-006-external-workplace-products.md`), and Jarvis connects to them
 as an external client, with a long-term fleet-management layer over many
 installations.
 

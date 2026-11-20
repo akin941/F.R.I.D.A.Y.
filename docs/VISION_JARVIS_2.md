@@ -24,8 +24,8 @@ Jarvis, kullanıcının hayatının merkezinde duran gerçek bir asistana dönü
    her konuşmada bağlam tekrarı gerekmez.
 4. **UI + Ses** — mevcut UI yenilenir (hazır arayüzler değerlendirildi,
    aşağıda); ses yol haritasında kalır ama ilk fazda değildir.
-5. **Entegrasyonlar (MCP)** — GitHub, VPS/deploy, external installation (MCP sunucusu
-   olduğunda), sosyal medya (mevcut servislere bağlanarak), mail/takvim.
+5. **Entegrasyonlar (MCP)** — GitHub, VPS/deploy, harici iş yeri kurulumları
+   (MCP sunucusu olduğunda), sosyal medya (mevcut servislere bağlanarak), mail/takvim.
 
 Pazarlıksız kısıtlar: ADR-004 onay kapıları, self-mod koruması, scope
 disiplini her mimaride korunur; deploy otomasyonunda **çift onay**; olgun
@@ -251,7 +251,7 @@ Celery worker'ın koştuğu her makine runner olabilir; ilk sürüm Mac.
 | **2. Harness v1 — keşif/brifing** | `harness` app; workspace'e repo kaydı; CLI agent'ı salt-okunur headless çalıştır → brifing üret; ModelUsage raporu; kill switch + bütçe; iş dağıtım politikası v0 | "X reposunda şu bug'ı analiz et, brifing ver" çalışır — yazma yok, risk düşük |
 | **3. Harness v2 — implementasyon** | Onay kapısı #1 → worktree'de implementasyon → test → çapraz review → dal push (gated) | "X firmasına şu özelliği ekle" → onaylı, test edilmiş, review'lu dal |
 | **4. UI yenileme** | Kabuk + chat + harness konsolu + onay gelen kutusu redesign; kayıt/login yerine **cihaz-güveni kimliği** (LAN token/PIN + dış güçlü anahtar, signup kodu kaldırılır); OpenAI-uyumlu cephe endpoint'i | Her gün kullanılan profesyonel arayüz; istenirse Open WebUI ikincil istemci |
-| **5. Deploy + MCP** | Onay kapısı #2 + VPS deploy (allowlist); GitHub MCP; mail/takvim MCP; external MCP istemcisi (panel sunucu olduğunda); **Home Assistant köprüsü** (cihaz sürücüsü yazılmaz — lamba/klima/Wake-on-LAN HA üzerinden, onay kapısı arkasında); sosyal medya mevcut servis bağlantıları | Uçtan uca: istek → brifing → onay → kod → onay → canlıda; ev/cihaz kontrolü |
+| **5. Deploy + MCP** | Onay kapısı #2 + VPS deploy (allowlist); GitHub MCP; mail/takvim MCP; harici kurulum MCP istemcisi (kurulum MCP sunucusu sunduğunda); **Home Assistant köprüsü** (cihaz sürücüsü yazılmaz — lamba/klima/Wake-on-LAN HA üzerinden, onay kapısı arkasında); sosyal medya mevcut servis bağlantıları | Uçtan uca: istek → brifing → onay → kod → onay → canlıda; ev/cihaz kontrolü |
 | **6. Ses (eski MVP 12)** | Mic capture, faster-whisper STT, Piper TTS, **lokal wake-word** ("Hey Jarvis" — openWakeWord/Porcupine sınıfı, ses cihazdan çıkmaz, komut ancak wake-word sonrası işlenir), orb'un gerçek sese bağlanması | Sürekli dinleyen, tamamen lokal sesli Jarvis |
 | **6+. Görsel kimlik** | Animasyonlu, konuşan Jarvis arayüz katmanı (uykudaki orb temeli üzerine) — bilinçli olarak EN SON: altyapı çalışmadan görsel kabuk boş kostümdür | Jarvis-benzeri görsel deneyim |
 
@@ -325,7 +325,7 @@ sızdırmadığının kanıtı release gate).
   konuşma-türevi adaylar §O private-flag kararı çözülene dek
   `pending_approval`; sensitivity + private-asla-cloud sözleşmesi aynen;
   başka otomatik-onaylı tür türetilemez (yenisi yeni ADR ister).
-- **O-5 (açık, dış bağımlılık):** external MCP sunucusunun zamanlaması — Faz 5'in
-  external ayağı kurulum tarafına bağlı.
+- **O-5 (açık, dış bağımlılık):** harici kurulumların MCP sunucusunun
+  zamanlaması — Faz 5'in harici kurulum ayağı ilgili kurulumun tarafına bağlı.
 - ~~O-6~~ **çözüldü (ADR-008 k.6):** cephe endpoint'i sadece chat;
   tool-calling geçmez, tool'lar yüksek-güven kanalda kalır.

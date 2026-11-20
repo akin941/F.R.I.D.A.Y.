@@ -8,9 +8,10 @@
 ## A. Executive Summary
 
 Personal AI Operating System + a platform core that workplaces can integrate
-with. Personal-first. external is **not** a module pack built inside Jarvis: the external installation is a separate, independently developed Django application
-(ADR-006). Jarvis's long-term company-facing role is the operator's
-multi-company management/assistant layer over such external installations (§P).
+with. Personal-first. Workplace products are **not** module packs built inside
+Jarvis: they are separate, independently developed and deployed external
+installations (ADR-006). Jarvis's long-term company-facing role is the
+operator's multi-installation management/assistant layer over such external installations (§P).
 
 ## B. Product Vision
 
@@ -20,19 +21,17 @@ Binding repositioning (2026-07-07, ADR-006):
   integrated into workplaces — not a host for company products built in-tree.
 - **Integration mechanism:** Jarvis integrates with workplaces by connecting
   to external installations as an **MCP client** — consuming an
-  installation's MCP-compatible tools on the user's behalf (the mirror of
-  (installation side) — not by hosting companies inside Jarvis.
-- **external is an external product.** The external installation is an independent
-  Django application, mature with real data,
-  deployed with Docker on the its own server. It is developed outside
-  this repository and outside this roadmap.
-- **Multi-company future:** the external platform is planned to be offered to other
-  firms; each customer runs its own installation. Jarvis then becomes the
-  operator's fleet layer — monitoring, version tracking and tenant-level
-  reporting across installations (§P) — plus the personal assistant over that
-  portfolio.
+  installation's MCP-compatible tools on the user's behalf (read-only first,
+  writes behind the approval gate) — not by hosting companies inside Jarvis.
+- **Workplace products are external.** A workplace product is an independent
+  application with its own codebase and its own deployment. It is developed
+  outside this repository and outside this roadmap.
+- **Multi-installation future:** where several organizations each run their
+  own external installation, Jarvis can become the operator's fleet layer —
+  monitoring, version tracking and tenant-level reporting across
+  installations (§P) — plus the personal assistant over that portfolio.
 - **Design transfer, not code transfer:** patterns proven in Jarvis are
-  reference designs for external and future installations; the two projects remain
+  reference designs for external installations; the projects remain
   independent codebases (`docs/DESIGN_TRANSFER.md`).
 
 ## C. Core Principles
@@ -119,8 +118,8 @@ grouping "organization" concept. (This does not touch the workspace *axis* —
 ADR-001 stays: the scoping column and `for_actor()` gate are already in the
 data model and remain the isolation mechanism for firm/context profiles.)
 
-Fleet/Organization Management at MVP 11 (vision only — §P). The external module
-pack formerly occupying MVP 11–15 is removed from scope (ADR-006); MVP 12–15
+Fleet/Organization Management at MVP 11 (vision only — §P). The in-repo
+document-intelligence pack formerly occupying MVP 11–15 is removed from scope (ADR-006); MVP 12–15
 are reserved. **The roadmap after MVP 9 is reorganized into Jarvis 2.0
 Phases 0–6 (ADR-008, §AA, `docs/VISION_JARVIS_2.md`).** Voice Assistant,
 promoted to MVP 12 by ADR-007, is re-sequenced by ADR-008 into Phase 6 —
@@ -162,15 +161,15 @@ Status: **done (2026-07-05)** — all 6 branches merged to main.
   enforced at extraction input, context injection, the overlay and
   gateway payload assembly. A private conversation never becomes
   non-private again.
-- Jarvis ↔ external bridge (optional, post-ADR-006): if built, it takes the MCP
-  route — Jarvis as MCP client of the installation's MCP-compatible tools
-  (installation side), e.g. read-only access for
-  Jarvis's personal assistant to data in a external installation. Auth model,
+- Jarvis ↔ external-installation bridge (optional, post-ADR-006): if built,
+  it takes the MCP route — Jarvis as MCP client of the installation's
+  MCP-compatible tools, e.g. read-only access for Jarvis's personal
+  assistant to data in an external workplace installation. Auth model,
   approval-gate treatment (ADR-004) and audit trail unresolved. **Reconciled
   with §AA (2026-09-27):** the *client* side is committed to Phase 5 via the
-  generic MCP client framework (read-only tools first, writes gated); the
-  external-specific connection waits on the panel exposing an MCP server (VISION
-  O-5, external dependency). The fleet phase (§P) stays vision-only.
+  generic MCP client framework (read-only tools first, writes gated); any
+  installation-specific connection waits on that installation exposing an
+  MCP server (VISION O-5, external dependency). The fleet phase (§P) stays vision-only.
 - ~~Cross-workspace memory overlay~~ — **resolved (Phase 1 branch 4,
   2026-07-19):** the personal assistant reads approved, non-private
   `work_log` memories of firm workspaces read-only; every read audited;
@@ -202,7 +201,7 @@ Status: **done (2026-07-05)** — all 6 branches merged to main.
   fixed by ADR-008.
 - Shared library extraction: whether the transferred patterns
   (`docs/DESIGN_TRANSFER.md` — gateway, scoping, lease-fenced jobs, approval
-  gate) ever become a shared package across Jarvis and external, or the projects
+  gate) ever become a shared package across Jarvis and external products, or the projects
   stay on independent re-implementations permanently. Open; independent
   re-implementation is the working default.
 - ~~AI-suggested task extraction (MVP 4)~~ — **resolved, amended (MVP 6 §3):**
@@ -224,7 +223,7 @@ Status: **done (2026-07-05)** — all 6 branches merged to main.
   fully local.** STT via a Whisper-class model (e.g. faster-whisper), TTS
   via a local synthesizer (e.g. Piper), both running on the user's own
   machine — free, private (audio never leaves the device), and consistent
-  with the local-first Ollama decision and ADR-006's personal/external infra
+  with the local-first Ollama decision and ADR-006's personal/workplace infra
   separation. Wired as `openai_compatible`/local `ModelProvider` rows behind
   new `Capability.STT`/`.TTS`, no cloud key required. A cloud fallback stays
   possible later (same gateway, another provider row) but is not built. See
@@ -241,9 +240,8 @@ Status: **done (2026-07-05)** — all 6 branches merged to main.
 
 Vision + requirements draft only. **Detailed design is deliberately deferred**
 — revisit once the personal kernel (through skills/integrations) is done and a
-second external installation is concrete. Jarvis monitors and manages multiple
-external installations (external today, future customer installations later)
-without hosting their data:
+multi-installation setup is concrete. Jarvis monitors and manages multiple
+external installations without hosting their data:
 
 - Health/usage metrics per installation: uptime, error rates, queue depth,
   cost/usage aggregates exposed by the installation itself (its own
@@ -539,7 +537,7 @@ exactly like an explicit `null` would). A match skips `agent.plan`
 entirely — the actual efficiency gain, not just a faster plan. Two new
 `Agent` audit fields, `skill_name`/`skill_content_hash`, record which
 skill (and which exact version of its template) produced a given plan,
-mirroring the panel's `prompt_key`+`prompt_version` usage-record pattern —
+mirroring a common `prompt_key`+`prompt_version` usage-record pattern —
 answerable months later even after the skill's own template has since
 changed in a later deploy.
 
@@ -681,7 +679,7 @@ has local-LLM infrastructure (Ollama) available for dogfooding:
 
 - Local-first "thinking" LLM: an opt-in, personal-only `ollama-local`
   `ModelProvider` (`openai_compatible`, mirrors NVIDIA NIM's pattern,
-  `a78b6de`) — never wired into the external product, same personal/company
+  `a78b6de`) — never wired into any external workplace product, same personal/company
   infra separation ADR-006 already draws. Ships ahead of the rest of MVP 12
   as low-risk foundation work.
 - Speech in: push-to-talk mic capture in the web shell, transcribed to text
@@ -737,7 +735,7 @@ approval (Phase 5).
 | 2 | Harness v1: read-only discovery runs → briefing; runner abstraction (first runner: Mac); usage → ModelUsage; kill switch + budgets | "Analyze this bug in repo X, brief me" | **done (2026-07-20)** (mocked suite; first real run in Phase 3 closeout) |
 | 3 | Harness v2: plan approval → worktree implementation → tests → cross-vendor review → gated branch push | Approved feature development end-to-end | **done (2026-09-27)** — branches 1–4 (2026-07-20 → 07-22) + closeout 5a/5–8 (2026-09-27); first real paid run is an owner runbook step |
 | 4 | Security baseline; UI renewal: shell/chat/harness console/approvals inbox redesign; device-trust identity replaces signup/login; OpenAI-compatible facade (chat-only, low-trust) | Professional, safely-exposable daily driver | **done 2026-09-27** (`docs/prompts/phase-4-identity-ui/brief.md`, "Closeout"); six branches, each Sonnet 5 APPROVE, merged to `main` via PR #27 |
-| 5 | Deploy gate + VPS deploy (allowlisted commands); MCP client framework: GitHub, mail/calendar, external client (when an installation exposes MCP), Home Assistant bridge; tier routing + harness policy table | Request → code → live, end to end | brief approved 2026-09-27 (`docs/prompts/phase-5-deploy-mcp/brief.md`); starts after Phase 4 closeout |
+| 5 | Deploy gate + VPS deploy (allowlisted commands); MCP client framework: GitHub, mail/calendar, external-installation client (when one exposes MCP), Home Assistant bridge; tier routing + harness policy table | Request → code → live, end to end | brief approved 2026-09-27 (`docs/prompts/phase-5-deploy-mcp/brief.md`); starts after Phase 4 closeout |
 | 6 | Voice (ex-MVP 12): mic capture, faster-whisper STT, Piper TTS, local wake word, orb wired to real audio; then the animated visual identity layer | The real Jarvis experience | brief approved 2026-09-27 (`docs/prompts/phase-6-voice-identity/brief.md`); starts after Phase 5 closeout (foundation from MVP 12 shipped, dormant) |
 
 Phase briefs live in `docs/prompts/phase-N-<topic>/brief.md`, same
@@ -847,7 +845,7 @@ detail in `docs/prompts/phase-3-harness-v2/brief.md` branch table.
   framework (manifested servers, read-only tools ungated, writes gated,
   audited); GitHub (PR for a pushed harness branch, CI status), Home
   Assistant bridge (domain allowlist, service calls gated), mail/calendar
-  (read first, send gated); external client when O-5 unblocks; tier-routing map
+  (read first, send gated); external-installation client when O-5 unblocks; tier-routing map
   + harness policy table; remaining `work_log` producers (gated tools,
   tasks, deploys). "Social media via existing services" stays undefined
   until a concrete service is named — explicitly out of scope until then.

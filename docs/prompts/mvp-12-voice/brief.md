@@ -33,7 +33,7 @@ real spoken assistant — say something, hear it think, hear it answer — runni
 against a **locally-hosted model on their own hardware** (Ollama on a
 MacBook Pro M5 today, a Mac Pro later) rather than a cloud API for the
 "thinking" step, for both cost and privacy reasons consistent with why
-personal-Jarvis and the external product already keep separate infra
+personal-Jarvis and external workplace installations already keep separate infra
 (ADR-006). Alongside the audio itself, the owner wants a visible on-screen
 presence — an animated indicator that reacts to the assistant listening,
 thinking, and speaking — because a voice assistant with no visual feedback

@@ -1,12 +1,12 @@
 # CLAUDE.md — Jarvis OS Development Rules
 
 Jarvis OS is a **personal-first** Personal AI Operating System + a platform
-core that workplaces can integrate with. external is **not** a module pack built
-inside Jarvis: the external installation is an independent external product
-(ADR-006). Jarvis's future contact with external is an external-client relationship
-only — an MCP client consuming the installation's MCP-compatible tools on a
-user's behalf (installation side) — and, long term, a
-fleet layer monitoring multiple external installations (MASTER_PLAN §P). "OS"
+core that workplaces can integrate with. Workplace products are **not**
+module packs built inside Jarvis: they are independent external installations
+(ADR-006). Jarvis's future contact with them is an external-client relationship
+only — an MCP client consuming an external installation's MCP-compatible tools
+on a user's behalf (read-only first, writes behind the approval gate) — and,
+long term, a fleet layer monitoring multiple external installations (MASTER_PLAN §P). "OS"
 means a shared identity/memory/permission/audit layer with pluggable modules —
 not a real operating system.
 

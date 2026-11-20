@@ -1,7 +1,7 @@
-# Design Transfer Contract — Jarvis → external (and future installations)
+# Design Transfer Contract — Jarvis → external installations
 
-> Status: accepted 2026-07-07, alongside ADR-006. Jarvis and the external Denetim
-> Platformu are **independent codebases**. What transfers is the *pattern* —
+> Status: accepted 2026-07-07, alongside ADR-006. Jarvis and any external
+> workplace product are **independent codebases**. What transfers is the *pattern* —
 > the design, its invariants and its hard-won review lessons — never the code.
 > Whether any of these patterns ever become a shared library is an open
 > question (MASTER_PLAN §O); until decided, independent re-implementation is
@@ -43,7 +43,7 @@ Format per entry: **Concept transferred** / **Source in Jarvis** /
   `transaction.on_commit` and never let dispatch failures propagate into the
   request path; the recovery scan runs on Celery beat — Jarvis embeds beat in
   its single worker, which is safe only at exactly one replica; a
-  multi-worker external deployment must split beat into its own service before
+  multi-worker deployment must split beat into its own service before
   copying the topology.
 
 ## 3. Approval gate rules (ADR-004) + cloud-eligibility negative contract
@@ -62,9 +62,9 @@ Format per entry: **Concept transferred** / **Source in Jarvis** /
 - **Independent re-implementation notes:** keep the two gates structurally
   independent (different code paths, both tested with negative-contract
   tests). Auto-approval, if ever added, is per low-risk tool per user based
-  on observed error rates — never for the hard rules. external should map
-  "external-send" to its own boundary (e.g. anything leaving the customer's
-  server).
+  on observed error rates — never for the hard rules. An external
+  installation should map "external-send" to its own boundary (e.g. anything
+  leaving the customer's server).
 
 ## 4. `for_actor()` scope gate (ADR-001)
 
@@ -74,10 +74,11 @@ Format per entry: **Concept transferred** / **Source in Jarvis** /
   package.
 - **Source in Jarvis:** `backend/core/db.py` (`for_actor()`,
   `WorkspaceScopedModel`/`QuerySet`/`Manager`); ADR-001.
-- **Independent re-implementation notes:** in external the axis widens from
-  `workspace_id` to the **tenant × department intersection** — the gate
-  should take the actor and resolve both dimensions in one place rather than
-  scattering department checks per view. Denormalize the scope column onto
+- **Independent re-implementation notes:** where an installation's scope
+  axis is wider than `workspace_id` (e.g. a **tenant × department
+  intersection**), the gate should take the actor and resolve every
+  dimension in one place rather than scattering per-dimension checks per
+  view. Denormalize the scope column onto
   child tables (as Jarvis does on `KnowledgeChunk.workspace`) so the gate
   filters without joins. Role × endpoint permission tests accompany every
   API surface.
