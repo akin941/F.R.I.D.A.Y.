@@ -1323,7 +1323,9 @@ PAT wording in this section and branch 2's matrix now says 401.
 - **TTL**: the daily TTL beat also deletes extraction jobs older than their
   workspace's episode TTL (their candidates derive from episode text).
 - Tests: `memory/tests/test_learning_{extraction,consolidation,digest,
-  forget,night}.py`, `config/tests/test_learning_beat.py`, chat v2 cases in
+  night}.py`, `tools/tests/test_learning_forget.py` (forget cascade, purge,
+  vault mirror -- in `tools/tests` because memory may not import tools),
+  `config/tests/test_learning_beat.py`, chat v2 cases in
   `memory/tests/test_{extraction,tasks}.py`.
 
 ### Owner steps (pending) — `feat/p8-learning-loop`, recorded 2026-11-20

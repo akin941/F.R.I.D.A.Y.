@@ -1,4 +1,6 @@
-"""Phase 8A branch 5 (brief D11): the forget-source cascade to derived
+"""Phase 8A branch 5 (brief D11), in `tools/tests` because it drives the
+`purge_trash` tool and the vault export (memory may not import tools): the
+forget-source cascade to derived
 memories and proposals, its exact restore, the gate-class `purge_trash`
 extension and the vault mirror dropping archived rows."""
 
@@ -27,6 +29,37 @@ from tools import export
 pytestmark = pytest.mark.django_db
 
 Kind = IngestionSource.Kind
+
+
+@pytest.fixture
+def owner(db):
+    from accounts.services import register_user
+    from memory.tests.ingestion_helpers import PASSWORD
+
+    user = register_user(email="owner@test.dev", password=PASSWORD, name="Owner")
+    user.is_owner = True
+    user.save()
+    return user
+
+
+@pytest.fixture
+def personal(owner):
+    from workspaces.models import Workspace
+
+    return Workspace.objects.get(owner=owner, type=Workspace.Type.PERSONAL)
+
+
+@pytest.fixture
+def firm(owner):
+    from workspaces.services import create_firm_workspace
+
+    return create_firm_workspace(actor=owner, name="Acme", channel=CHANNEL_WEB)
+
+
+@pytest.fixture
+def sources(owner, personal):
+    services.ensure_default_sources(workspace=personal, created_by=owner)
+    return {s.kind: s for s in IngestionSource.objects.filter(workspace=personal)}
 
 
 @pytest.fixture
