@@ -1204,6 +1204,37 @@ fixture clip, mocked detector, CI) asserts no upload and no proposal.
 6. Nightly: a Playwright run with Chromium `--use-file-for-fake-audio-capture`
    playing a "hey friday" fixture once the model exists.
 
+**Known follow-ups (branch 4 review, LOW, unresolved at merge).**
+- `frontend/src/lib/voice/wakeword/openwakeword.ts`: after every
+  `detector.reset()` (arm, resume from pause, end of each utterance) the
+  keyword head returns 0 until 16 real embeddings exist (~1.3 s), so a
+  "Hey Friday" spoken right after Friday finishes speaking or right after a
+  turn can be missed. Python openWakeWord pre-fills the buffer; this port
+  does not (documented in the file header; the nightly parity test compares
+  steady-state scores only). Treat the 1.3 s dead time as a known FRR
+  contributor in the owner FAR/FRR measurement, or pre-fill the embedding
+  buffer as Python does.
+- `frontend/src/lib/voice/wake-mode.ts` (`onFrame`): the half-duplex pause
+  fires only when `state === 'armed'`. If Friday starts speaking while
+  `capturing`, frames are dropped page-side but the Worker engine is not
+  paused, so it sees a gap and keeps its VAD/no-speech timers (impact small:
+  the turn is guarded by `isBusy()`). A hung Worker that never posts `ready`
+  leaves state `loading` until the user disarms. Fix: post `pause` (or cancel
+  the capture) when speaking begins during `capturing`, and add a ready
+  timeout (e.g. 15 s) in `arm()` that tears down and reports `wake_failed`.
+- `frontend/scripts/voice-models.mjs`: the onnxruntime-web WASM/mjs runtime
+  copied to `public/voice-models/ort/` is not hash-pinned in the manifest;
+  its integrity rests on npm lockfile integrity at copy time (same-origin,
+  gitignored). Acceptable under this brief, but it is executable code the
+  model hash check does not cover. Optional fix: pin the runtime files'
+  sha256 in the manifest and verify them in the script.
+- Not built/measured (recorded, not blocking): the Playwright run with
+  Chromium fake audio capture, the real `hey_friday` parity run, the Mac CPU
+  measurement, the FAR/FRR measurement and the Done-when check on the Mac
+  are owner/nightly steps above; the A6 replay test uses a simulated clip
+  because branch 3a's fixture does not exist yet. Keep this owner-step list
+  in the phase closeout.
+
 ### 4a. `feat/p6-wake-word-dsp` — conditional, only if the branch-4 spike is marginal
 
 Triggered only when step 0 of branch 4 records parity delta > 0.02 or CPU
