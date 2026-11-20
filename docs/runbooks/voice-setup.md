@@ -164,3 +164,38 @@ curl -s -X POST http://localhost:3001/api/voice/transcriptions \
   -F conversation=<conversation-uuid> -F audio=@utterance.wav
 ```
 
+## 5. Push-to-talk on `/voice` (Phase 6 branch 3)
+
+Open **Sesli** in the sidebar (needs HTTPS or `localhost` for the mic; on the
+LAN use the Phase 4 Tailscale/TLS recipe). Then:
+
+- **Hold** the mic button (or hold **Space** outside a text field) while you
+  speak and let go; or **click** once to start and once to stop. `Escape` /
+  **Durdur** stops listening, the reply stream's audio and every pending
+  synthesis request.
+- After you let go Friday waits `NEXT_PUBLIC_VOICE_FINISH_MS` (900 ms): press
+  again within it and the next piece is **appended** to the same turn.
+- **Göndermeden önce göster** (per device) shows the transcript for editing
+  before it is sent.
+- Deterministic voice routes run before the brain: `dur` / `bekle` / `stop`
+  (stop audio, send nothing), `sessize al` (mute), `hatırla ki …` (a memory
+  **proposal** — `pending_approval`, approve it on **Hafıza**), `bu ne kadar
+  tuttu?` (the previous spoken turn's `ModelUsage` receipt via
+  `GET /api/v1/voice/receipt`, plus today's workspace total). A spoken
+  `evet` / `onayla` confirms nothing: decisions are made on screen.
+- Task and tool-request drafts from a voice turn are the same cards as chat;
+  only a click creates the task / approval request, and only then does Friday
+  say so (a confirmation needs the created row's id).
+- The shell's **Sesi kapat** toggle (or opening a tab with `?mute=1`) is read
+  inside the capture path and the speak function: nothing is captured or
+  played. If the setting cannot be read (blocked storage) the mic is closed.
+
+Measuring latency (owner step): open the browser devtools, speak one Turkish
+sentence, and read the turn's `voice.VoiceTurnTrace` row (`playback_start_ms`
+= end of speech → first audio) in the Django shell:
+
+```python
+from voice.models import VoiceTurnTrace
+VoiceTurnTrace.objects.order_by("-created_at").values()[:5]
+```
+
