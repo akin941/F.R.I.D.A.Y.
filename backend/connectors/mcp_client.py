@@ -75,6 +75,12 @@ class ConnectorError(Exception):
             # tool, or the refresh token was rejected (`invalid_grant`).
             "scope_mismatch",
             "reconnect_required",
+            # Native bridges (Phase 5 branch 7): the named target (e.g. a
+            # Home Assistant entity) no longer exists -- checked before any
+            # send, so a write fails closed; and arguments the code/env
+            # allowlist no longer admits at execution time.
+            "target_missing",
+            "not_allowed",
         }
     )
 

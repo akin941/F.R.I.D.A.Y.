@@ -23,6 +23,14 @@ never offered to the router, never callable. Each listed tool carries:
   the tool until a commit updates the pin (fail closed, tool poisoning);
 - for writes: the gate name, `user_invocable`, a renderer for the decision
   dialog and `records_work_log` (brief D6, D13).
+
+A `native` manifest (brief D8/D9) has no MCP server: its module exports a
+`BRIDGE` (`connectors.bridges`) serving the same `call_tool` contract plus a
+`check_health`. Its "schema pin" is the sha256 of the bridge's own
+code-defined request shape (for Home Assistant, the whole service/data
+allowlist) -- so widening that contract without bumping the manifest's pin
+and version in the same reviewed commit disables the tool, exactly like a
+drifted MCP schema.
 """
 
 import hashlib
@@ -100,6 +108,11 @@ class ToolPolicy:
     # code (a `ConnectorWriteExecution.ErrorType` value) ends the execution
     # `failed` with nothing sent (e.g. GitHub's `head_moved`).
     precondition: Callable[[Any, Any, dict], str | None] | None = None
+    # Writes of native bridges only: `(workspace, arguments) -> rows`, a
+    # request-time read of the target appended to the decision dialog (D8:
+    # a Home Assistant entity's HA-supplied name and current state). Raises
+    # `tools.registry.ToolValidationError` to refuse the request.
+    request_rows: Callable[[Any, dict], list] | None = None
 
 
 @dataclass(frozen=True)
@@ -216,8 +229,10 @@ def _validate_tool(manifest, policy):
         and issubclass(policy.context_serializer, serializers.Serializer)
     ):
         raise ValueError(f"{where}: context_serializer must be a DRF Serializer class.")
-    if policy.kind == TOOL_READ and (policy.context_serializer or policy.precondition):
-        raise ValueError(f"{where}: context and preconditions apply to writes only.")
+    if policy.kind == TOOL_READ and (
+        policy.context_serializer or policy.precondition or policy.request_rows
+    ):
+        raise ValueError(f"{where}: context, preconditions and request rows apply to writes only.")
 
 
 _MANIFESTS: dict[str, ConnectorManifest] = {}

@@ -351,6 +351,29 @@ def record_native_health(binding, manifest, health, *, checked_at=None):
                     "manifest_version": manifest.version,
                 },
             )
+        # A bridge whose own request contract no longer matches the
+        # manifest pin (e.g. Home Assistant's allowlist widened without a
+        # manifest update) -- the same audit as MCP schema drift.
+        hashes = health.details.get("tool_hashes") or {}
+        for name, status in sorted(tools.items()):
+            if status in _DISABLED_STATUSES and previous.get(name) != status:
+                policy = manifest.get_tool(name)
+                logger.warning("connector %s tool %s pin %s", manifest.name, name, status)
+                record_audit(
+                    action="connector.pin_mismatch",
+                    actor=None,
+                    actor_type=AuditLog.ActorType.SYSTEM,
+                    workspace=locked.workspace,
+                    resource=locked,
+                    metadata={
+                        "connector": manifest.name,
+                        "tool": name,
+                        "status": status,
+                        "expected_sha256": policy.schema_sha256,
+                        "actual_sha256": hashes.get(policy.server_tool) or "",
+                        "manifest_version": manifest.version,
+                    },
+                )
         if health.error in _CREDENTIAL_ERRORS and last.get("error") != health.error:
             record_audit(
                 action="connector.reconnect_required",
