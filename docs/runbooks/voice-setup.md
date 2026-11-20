@@ -132,3 +132,35 @@ STT/TTS row exists (is `VOICE_API_KEY` set in the backend's environment and
 was the seed rerun?). `invalid_audio` in the usage row's attempts means the
 input was not 16 kHz mono PCM16 WAV, or the server's output was not a valid
 PCM16 WAV within `VOICE_TTS_MAX_SECONDS`.
+
+## 4. The voice API (Phase 6 branch 2)
+
+Two web-only endpoints (owner, trusted device session; a PAT gets 403):
+
+- `POST /api/v1/voice/transcriptions` — multipart `audio` (16 kHz mono PCM16
+  WAV, at most `VOICE_MAX_UTTERANCE_SECONDS`) + `conversation` →
+  `{text, audio_seconds, language}`. The upload is held in request memory only
+  (no temp-file handler is installed). Errors: 413 `voice.upload_too_large`,
+  415 `voice.unsupported_audio`, 503 `voice.no_local_provider`, 502
+  `voice.stt_failed`, 429 `voice.budget_exceeded` (or `throttled`).
+- `POST /api/v1/voice/speech` — JSON `{conversation, text (≤ VOICE_TTS_MAX_CHARS),
+  language?, timings?}` → `audio/wav`. Same error codes with `voice.tts_failed`.
+
+The browser goes through the BFF (`/api/voice/transcriptions`,
+`/api/voice/speech`). The transcript is sent on as an ordinary chat message
+with `input_mode: "voice"`; a voice turn can read and propose only (ADR-015).
+An optional `X-Friday-Trace: <uuid>` on all three requests ties the turn's
+`ModelUsage` rows together and fills one `voice.VoiceTurnTrace` row (timings
+only, pruned after `VOICE_TRACE_RETENTION_DAYS`). The per-session audio budget
+is keyed on the conversation (`voice:<conversation id>`), never on a request
+field.
+
+Quick check from the Mac once the stack runs (replace the ids; the access
+token is the web session's — normally the browser does this):
+
+```bash
+curl -s -X POST http://localhost:3001/api/voice/transcriptions \
+  -H "Origin: http://localhost:3001" -b cookies.txt \
+  -F conversation=<conversation-uuid> -F audio=@utterance.wav
+```
+
