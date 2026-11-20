@@ -46,6 +46,7 @@ from deploys.services import (
     edit_target,
     request_deploy,
     request_target_status,
+    resolve_branch_head,
 )
 from workspaces.models import Workspace
 
@@ -174,6 +175,26 @@ class DeployTargetStatusView(APIView):
         except (DeployPermissionDenied, DeployInvalidTransition) as exc:
             return _service_error_response(exc)
         return Response(status=status.HTTP_202_ACCEPTED)
+
+
+class DeployTargetHeadView(APIView):
+    """`GET .../targets/<id>/head` -- the "Deploy" dialog's SHA prefill:
+    the tracked branch's head commit, title and CI state from audited GitHub
+    reads, or an empty `sha` on the manual path (Phase 5 branch 9)."""
+
+    permission_classes = _WEB_OWNER
+
+    def get(self, request, target_id):
+        target = _target(request, target_id)
+        if target is None:
+            return Response(status=status.HTTP_404_NOT_FOUND)
+        try:
+            head = resolve_branch_head(
+                target=target, actor=request.user, channel=request_channel(request)
+            )
+        except DeployPermissionDenied as exc:
+            return _service_error_response(exc)
+        return Response(head)
 
 
 class DeployRunListView(APIView):

@@ -5,6 +5,11 @@ class BindingQuerySerializer(serializers.Serializer):
     workspace = serializers.UUIDField()
 
 
+class RecentReadsQuerySerializer(serializers.Serializer):
+    workspace = serializers.UUIDField()
+    connector = serializers.RegexField(r"^[a-z][a-z0-9_]{0,63}$", required=False)
+
+
 class BindingUpdateSerializer(serializers.Serializer):
     """`PUT /connectors/bindings/<connector>`: the only writable field.
     `workspace` names the binding's workspace (resolved through

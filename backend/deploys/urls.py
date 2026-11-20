@@ -12,6 +12,7 @@ from deploys.views import (
     DeployRunDetailView,
     DeployRunListView,
     DeployTargetDetailView,
+    DeployTargetHeadView,
     DeployTargetListCreateView,
     DeployTargetStatusView,
 )
@@ -34,6 +35,11 @@ def build_urlpatterns(*, authentication_classes):
             "deploys/targets/<uuid:target_id>/status",
             DeployTargetStatusView.as_view(**auth),
             name="deploy-target-status",
+        ),
+        path(
+            "deploys/targets/<uuid:target_id>/head",
+            DeployTargetHeadView.as_view(**auth),
+            name="deploy-target-head",
         ),
         path("deploys/runs", DeployRunListView.as_view(**auth), name="deploy-run-list"),
         path(
