@@ -296,7 +296,9 @@ payload.
   as `stale` after `MEMORY_CODING_SESSION_STALE_HOURS`). Read with `GET
   /api/v1/memory/sessions` (owner, web session, `for_actor()`).
 
-Setup: `docs/runbooks/claude-code-hooks.md`. Design:
+Setup: `docs/runbooks/claude-code-hooks.md`; the other learning sources,
+mapping rules, the audit view and forget/restore:
+`docs/runbooks/learning-memory.md`. Design:
 `docs/prompts/phase-8a-learning-memory/brief.md` (D6, D12).
 
 ## Other integrations (rewritten at the Phase 5 closeout, 2026-11-20)

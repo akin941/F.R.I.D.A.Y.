@@ -251,10 +251,10 @@
   ],
   "phase": {
     "file": "docs/MASTER_PLAN.md",
-    "line": 983,
-    "phase": "8A Learning memory core (server only)",
-    "outcome": "Vertical slice complete: talk to Friday, it knows itself and you, shows your Claude Code sessions, learns from yesterday",
-    "status": "planned (brief drafted 2026-11-20, awaiting plan review)"
+    "line": 984,
+    "phase": "9 Friday Node v1 (read-only)",
+    "outcome": "\"Claude Code / Codex oturumlarım ne yapıyor?\" with local transcript detail",
+    "status": "planned"
   },
-  "content_hash": "e8499d078e36bb3d85b28157c6b976f521ad28a962fc835fe673423b2d593219"
+  "content_hash": "a3028aa6b2477108b3bfa50f50e313cea651e1992b688f6571be0dfa4bf87caa"
 }

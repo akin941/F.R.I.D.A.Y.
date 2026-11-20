@@ -1,6 +1,7 @@
 # Runbook — Claude Code hooks → Friday sessions panel
 
-Phase 8A branch 3 (brief D6/D12, ADR-012). Makes the owner's Claude Code
+Phase 8A branch 3 (brief D6/D12, ADR-012); verified in the Phase 8A
+closeout (preflight section 7, e2e `backend/ops/tests/test_learning_e2e.py`). Makes the owner's Claude Code
 sessions show up in `GET /api/v1/memory/sessions` (and, from branch 6, the
 HUD sessions panel) with live status. Everything below runs on the **owner's
 Mac**; nothing here is needed on the server beyond the deployed code.
@@ -110,6 +111,17 @@ context).
    per failure: error class / HTTP status only), check the source is enabled
    and the `cwd` is covered by a rule (the source audit view lists unmapped
    keys).
+
+## 7. Check it with preflight (Phase 8A closeout)
+
+`make preflight` (or `manage.py preflight --no-model-calls`) prints
+`learning_sources`: it warns while `claude_code_hooks` is enabled without a
+path-prefix rule ("has no mapping rule (every item is dropped)") or paused,
+and `learning_beat` fails if a learning task lost its beat. The hook source
+never produces proposals (no owner text in 8A), so it does not show up on
+the morning card; its sessions appear on `/sessions` and the HUD sessions
+panel. Enabling the other sources, the audit view and forget/restore are in
+`docs/runbooks/learning-memory.md`.
 
 ## Limits (8A)
 

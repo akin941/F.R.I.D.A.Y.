@@ -22,6 +22,14 @@ speech rows / TTS routes / audio budget configuration (`voice_providers`,
 is silent, proven by a real browser run of `e2e/voice-mute.e2e.ts`
 (`PREFLIGHT_VOICE_MUTE_CMD`).
 
+Phase 8A closeout adds the learning checks (`check_learning`, read-only, no
+model call): `learning_sources` (the four ingestion sources seeded, which
+are enabled, mapped, paused), `learning_beat` (the producer, nightly,
+recovery and TTL tasks on the right beat and registered), `learning_scrubber`
+(the scrubber self-test over the labelled corpus: 100% secrets recall or
+`fail`), `learning_budget` (an active budget covers each learning purpose)
+and `learning_last_run` (the latest night's episode-extraction jobs).
+
 Rules this module keeps:
 
 - Provider calls go through the single door (ADR-003): one minimal
@@ -34,11 +42,13 @@ Rules this module keeps:
   NAME only; the value is never printed or stored.
 """
 
+import json
 import math
 import os
 import re
 import shlex
 import struct
+from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urljoin, urlparse
@@ -124,6 +134,17 @@ def celery_ping(*, timeout):
     from celery import current_app
 
     return current_app.control.ping(timeout=timeout) or []
+
+
+def beat_schedules():
+    """Both beats' schedules as `config.celery` publishes them
+    (`{"worker": {...}, "runner": {...}}`) and the registered task names.
+    `ops` may not import `config`, so this reads the Celery app's conf."""
+    from celery import current_app
+
+    current_app.loader.import_default_modules()
+    schedules = current_app.conf.get("friday_beat_schedules") or {}
+    return schedules, set(current_app.tasks)
 
 
 def gateway_factory():
@@ -668,6 +689,262 @@ def check_voice_mute():
     return [CheckResult("voice_mute", PASS, "muted tab opened no mic and played nothing")]
 
 
+# --- Phase 8A: learning memory (closeout) ---------------------------------
+
+# Which beat runs each learning task (config/celery.py): the git producer
+# clones with the runner's credentials, so it is on the runner beat.
+LEARNING_BEAT_TASKS = {
+    "worker": (
+        "memory.ingestion.tasks.run_learning_night_task",
+        "memory.ingestion.tasks.recover_stale_episode_extraction_jobs",
+        "memory.ingestion.tasks.purge_expired_episodes_task",
+        "connectors.tasks.ingest_calendar_metadata",
+        "assistant.tasks.assemble_self_block_task",
+    ),
+    "runner": ("harness.tasks.ingest_repo_commits",),
+}
+# The corpus files and the marker that keeps provider prefixes split in the
+# committed files (see memory/tests/test_scrubber.py).
+SCRUBBER_CORPUS_FILES = {"secrets": "secrets.jsonl", "pii": "pii.jsonl", "benign": "benign.jsonl"}
+_SCRUBBER_SPLIT_MARKER = "<<>>"
+
+
+def _installation_owner_workspace():
+    from django.contrib.auth import get_user_model
+
+    from workspaces.models import Workspace
+
+    owner = (
+        get_user_model()
+        .objects.filter(is_owner=True, is_agent=False, is_active=True)
+        .order_by("created_at")
+        .first()
+    )
+    if owner is None:
+        return None
+    return (
+        Workspace.objects.filter(owner=owner, type=Workspace.Type.PERSONAL)
+        .order_by("created_at")
+        .first()
+    )
+
+
+def _check_learning_sources():
+    from memory.models import IngestionSource, WorkspaceMappingRule
+
+    workspace = _installation_owner_workspace()
+    if workspace is None:
+        return CheckResult("learning_sources", WARN, "no installation owner workspace")
+    sources = {s.kind: s for s in IngestionSource.objects.filter(workspace=workspace)}
+    missing = [kind for kind in IngestionSource.Kind.values if kind not in sources]
+    if missing:
+        return CheckResult(
+            "learning_sources",
+            FAIL,
+            f"no {', '.join(missing)} source: run seed_ingestion_sources",
+        )
+    enabled = [s for s in sources.values() if s.enabled]
+    if not enabled:
+        return CheckResult("learning_sources", WARN, "all four sources are disabled")
+    mapped = set(
+        WorkspaceMappingRule.objects.filter(source__in=enabled, enabled=True).values_list(
+            "source_id", flat=True
+        )
+    )
+    problems = []
+    for source in sorted(enabled, key=lambda s: s.kind):
+        if source.forgotten_at is not None:
+            problems.append(f"{source.kind} forgotten")
+        elif source.paused_at is not None:
+            problems.append(f"{source.kind} paused")
+        if source.id not in mapped:
+            problems.append(f"{source.kind} has no mapping rule (every item is dropped)")
+    git = sources[IngestionSource.Kind.GIT]
+    if git.enabled and not getattr(settings, "MEMORY_OWNER_GIT_EMAILS", []):
+        problems.append("MEMORY_OWNER_GIT_EMAILS is empty (no commit counts as owner text)")
+    detail = "enabled: " + ", ".join(sorted(s.kind for s in enabled))
+    if problems:
+        return CheckResult("learning_sources", WARN, f"{detail}; " + "; ".join(problems))
+    return CheckResult("learning_sources", PASS, detail)
+
+
+def _check_learning_beat():
+    schedules, registered = beat_schedules()
+    if not schedules:
+        return CheckResult("learning_beat", FAIL, "no beat schedule published by the Celery app")
+    problems = []
+    for mode, tasks in LEARNING_BEAT_TASKS.items():
+        scheduled = {entry["task"] for entry in (schedules.get(mode) or {}).values()}
+        for task in tasks:
+            if task not in scheduled:
+                problems.append(f"{task} not on the {mode} beat")
+            if task not in registered:
+                problems.append(f"{task} not registered")
+    if problems:
+        return CheckResult("learning_beat", FAIL, "; ".join(problems))
+    return CheckResult(
+        "learning_beat",
+        PASS,
+        f"{len(LEARNING_BEAT_TASKS['worker'])} worker-beat and "
+        f"{len(LEARNING_BEAT_TASKS['runner'])} runner-beat learning tasks scheduled",
+    )
+
+
+def scrubber_corpus_dir():
+    configured = getattr(settings, "PREFLIGHT_SCRUBBER_CORPUS_DIR", "")
+    if configured:
+        return Path(configured)
+    import memory
+
+    return Path(memory.__file__).resolve().parent / "tests" / "scrubber_corpus"
+
+
+def _load_scrubber_corpus(directory):
+    corpus = {}
+    for name, filename in SCRUBBER_CORPUS_FILES.items():
+        rows = []
+        for line in (directory / filename).read_text(encoding="utf-8").splitlines():
+            if line.strip():
+                row = json.loads(line)
+                rows.append(
+                    {
+                        "id": str(row["id"]),
+                        "text": row["text"].replace(_SCRUBBER_SPLIT_MARKER, ""),
+                        "needles": [
+                            n.replace(_SCRUBBER_SPLIT_MARKER, "") for n in row.get("needles", [])
+                        ],
+                    }
+                )
+        corpus[name] = rows
+    return corpus
+
+
+def _check_learning_scrubber():
+    """The scrubber self-test (ADR-012 decision 3) on this deployment's
+    code: every corpus secret must be gone (else `fail` -- a release-gate
+    regression), every PII needle too (else `warn`), benign text unchanged
+    (else `warn`). Only corpus ids are reported, never text."""
+    from memory.ingestion.scrubber import scrub_text
+
+    directory = scrubber_corpus_dir()
+    if not all((directory / f).is_file() for f in SCRUBBER_CORPUS_FILES.values()):
+        return CheckResult("learning_scrubber", WARN, "scrubber corpus not found here")
+    try:
+        corpus = _load_scrubber_corpus(directory)
+    except (ValueError, KeyError, TypeError, AttributeError, OSError) as exc:
+        return CheckResult("learning_scrubber", FAIL, f"corpus unreadable: {_error_label(exc)}")
+
+    def missed(rows):
+        return [
+            row["id"]
+            for row in rows
+            if any(needle in scrub_text(row["text"]).text for needle in row["needles"])
+        ]
+
+    if not corpus["secrets"]:
+        return CheckResult("learning_scrubber", FAIL, "the secrets corpus is empty")
+    secrets_missed = missed(corpus["secrets"])
+    pii_missed = missed(corpus["pii"])
+    benign_changed = [
+        row["id"] for row in corpus["benign"] if scrub_text(row["text"]).text != row["text"]
+    ]
+    secrets_total, pii_total = len(corpus["secrets"]), len(corpus["pii"])
+    benign_total = len(corpus["benign"])
+    detail = (
+        f"secrets {secrets_total - len(secrets_missed)}/{secrets_total}, "
+        f"PII {pii_total - len(pii_missed)}/{pii_total}, "
+        f"benign {benign_total - len(benign_changed)}/{benign_total} unchanged"
+    )
+    if secrets_missed:
+        return CheckResult(
+            "learning_scrubber", FAIL, f"{detail}; missed: {', '.join(secrets_missed)}"
+        )
+    if pii_missed or benign_changed:
+        flagged = ", ".join(pii_missed + benign_changed)
+        return CheckResult("learning_scrubber", WARN, f"{detail}; check: {flagged}")
+    return CheckResult("learning_scrubber", PASS, detail)
+
+
+def _check_learning_budget():
+    from ai_core.budgets import budgets_for
+
+    purposes = tuple(getattr(settings, "AI_LEARNING_PURPOSES", ()) or ())
+    if not purposes:
+        return CheckResult("learning_budget", FAIL, "AI_LEARNING_PURPOSES is empty")
+    covers = {p: budgets_for(p) for p in purposes}
+    uncovered = [p for p in purposes if not covers[p]]
+    if uncovered:
+        return CheckResult(
+            "learning_budget",
+            FAIL,
+            f"no active budget covers {', '.join(uncovered)}: run seed_ai_defaults",
+        )
+    budgets = {b.pk: b for found in covers.values() for b in found}
+    described = "; ".join(
+        _describe_budget(b) for b in sorted(budgets.values(), key=lambda b: b.name)
+    )
+    uncapped = [p for p in purposes if all(b.monthly_limit_usd is None for b in covers[p])]
+    if uncapped:
+        return CheckResult(
+            "learning_budget", WARN, f"no monthly cap on {', '.join(uncapped)}: {described}"
+        )
+    return CheckResult("learning_budget", PASS, described)
+
+
+def _check_learning_last_run():
+    """The latest night's episode-extraction jobs: a terminal `failed` job is
+    a `fail` (its episodes were never learned); deferred (budget), pending,
+    lease-expired running or not-yet-consolidated jobs are a `warn`."""
+    from django.utils import timezone
+
+    from memory.models import EpisodeExtractionJob
+
+    status = EpisodeExtractionJob.Status
+    latest = EpisodeExtractionJob.objects.order_by("-night", "-created_at").first()
+    if latest is None:
+        return CheckResult("learning_last_run", WARN, "no extraction run yet")
+    jobs = list(EpisodeExtractionJob.objects.filter(night=latest.night))
+    counts = Counter(job.status for job in jobs)
+    detail = f"night {latest.night.isoformat()}: " + ", ".join(
+        f"{counts[s]} {s}" for s in status.values if counts[s]
+    )
+    if counts[status.FAILED]:
+        errors = sorted({j.error_type or "error" for j in jobs if j.status == status.FAILED})
+        return CheckResult("learning_last_run", FAIL, f"{detail} ({', '.join(errors)})")
+    now = timezone.now()
+    stuck = [
+        j
+        for j in jobs
+        if j.status == status.RUNNING and j.lease_expires_at and j.lease_expires_at < now
+    ]
+    waiting = [j for j in jobs if j.status == status.SUCCEEDED and j.consolidated_at is None]
+    notes = []
+    if stuck:
+        notes.append(f"{len(stuck)} with an expired lease")
+    if counts[status.DEFERRED]:
+        notes.append("deferred by a budget")
+    if counts[status.PENDING]:
+        notes.append("pending retry")
+    if waiting:
+        notes.append(f"{len(waiting)} awaiting consolidation")
+    if notes:
+        return CheckResult("learning_last_run", WARN, f"{detail}; " + "; ".join(notes))
+    return CheckResult("learning_last_run", PASS, detail)
+
+
+def check_learning():
+    """Phase 8A configuration and health, read-only (no model call, no
+    `ModelUsage`): `learning_sources`, `learning_beat`, `learning_scrubber`,
+    `learning_budget`, `learning_last_run`."""
+    return [
+        _check_learning_sources(),
+        _check_learning_beat(),
+        _check_learning_scrubber(),
+        _check_learning_budget(),
+        _check_learning_last_run(),
+    ]
+
+
 CHECKS = (
     ("web", check_web),
     ("bff", check_bff),
@@ -681,6 +958,7 @@ CHECKS = (
     ("browser_secrets", check_browser_secrets),
     ("voice_config", check_voice_config),
     ("voice_mute", check_voice_mute),
+    ("learning", check_learning),
 )
 
 

@@ -730,7 +730,7 @@ from yesterday".
 | 4 `feat/p8-source-producers` | **implemented 2026-11-20** — git commit producer (runner `commit_log` primitive, cursor, authorship rules), harness outcome producer (discovery + implementation, every terminal path), calendar metadata producer; see "Branch 4 implementation notes" below; awaits independent Sonnet 5 review. Migration `harness/0013_repo_commit_cursor` |
 | 5 `feat/p8-learning-loop` | **implemented 2026-11-20** — owner-text episode extraction (lease-fenced jobs, triage, second scrub, provenance check), consolidation (dedupe, merge/rank, nightly cap 10, weekly core-block cap 3), digest + per-item actions + work_log-only bulk approve, learning budgets, forget cascade + exact restore, `purge_trash` episode/forgotten-memory keys, vault-mirror check, chat extraction schema v2; see "Branch 5 implementation notes" below; awaits independent Sonnet 5 review. Migration `memory/0009_learning_loop` |
 | 6 `feat/p8-learning-ui` | **implemented 2026-11-20** — morning card (`/memory/learning`, per-item approve/edit/reject, work_log-only bulk), ingestion audit view (`/memory/ingestion`: sources, enable/pause/budget, counters, last items, scrubber hits, unmapped keys, mapping rules, scrub terms, forget/restore naming source and counts), core-block editor (`/memory/core-blocks`, version history + rollback, `self` read-only with its source anchors), `/sessions` + HUD sessions panel and morning-card summary, read tools `coding_sessions_status` / `harness_jobs_status`; see "Branch 6 implementation notes" below; awaits independent Sonnet 5 review. No migration |
-| 7 | not started |
+| 7 closeout | **implemented 2026-11-20** — MASTER_PLAN §AA row 8A → done, ADR-012 implementation notes completed (branches 2–7), runbooks `claude-code-hooks.md` (preflight section) + new `learning-memory.md`, `manage.py preflight` learning checks (`learning_sources`, `learning_beat`, `learning_scrubber`, `learning_budget`, `learning_last_run`), e2e commit + hook event → nightly job → card → approve → next chat answer; `self` snapshot regenerated (current phase is now 9); see "Closeout implementation notes" below; awaits independent Sonnet 5 review. No migration |
 
 ## Out of scope (explicit)
 
@@ -1482,3 +1482,83 @@ in full. Worth a look at the fixture's commit dates vs the
   pasted into a goal would reach the provider (it is already stored in that
   field). Optional fix: pass the goal through the memory scrubber before
   building the row. Non-blocking.
+
+## Closeout implementation notes (`closeout`, 2026-11-20)
+
+- **Preflight** (`backend/ops/preflight.py`, `check_learning`, registered
+  last in `CHECKS` as `learning`; read-only, no model call, no
+  `ModelUsage`; only ids, counts and kinds are printed):
+  - `learning_sources` — the installation owner's personal workspace holds
+    all four sources (`fail` otherwise: run `seed_ingestion_sources`); all
+    disabled → `warn`; an enabled source that is paused, forgotten or has no
+    enabled mapping rule, or git enabled with `MEMORY_OWNER_GIT_EMAILS`
+    empty → `warn`; no owner → `warn`.
+  - `learning_beat` — the nightly run, extraction recovery scan, episode TTL
+    purge, calendar producer and `self` assembly on the worker beat and the
+    git producer on the runner beat, each also registered with Celery;
+    anything missing → `fail`. `config/celery.py` now publishes both beats'
+    schedules as `app.conf.friday_beat_schedules` because `ops` may not import
+    `config` (and one process runs only one beat).
+  - `learning_scrubber` — the scrubber self-test over the committed corpus
+    (`memory/tests/scrubber_corpus/`, shipped in the image;
+    `PREFLIGHT_SCRUBBER_CORPUS_DIR` overrides): a missed secret → `fail`
+    (ids only); a PII miss or an altered benign item → `warn`; corpus
+    absent → `warn`; unreadable or empty secrets file → `fail`.
+  - `learning_budget` — an active budget covers both `AI_LEARNING_PURPOSES`
+    (`fail` otherwise: run `seed_ai_defaults`); no monthly cap → `warn`.
+  - `learning_last_run` — the latest night's `EpisodeExtractionJob`s: a
+    terminal `failed` job → `fail` (error type named, never the message);
+    deferred by a budget, pending retry, expired lease or awaiting
+    consolidation → `warn`; no run yet → `warn`.
+- **E2E** (`backend/ops/tests/test_learning_e2e.py`, in `ops` because it
+  spans `harness`, `memory` and `assistant`): `seed_ai_defaults` +
+  `seed_ingestion_sources`; the owner enables git and hooks and writes the
+  repo and path-prefix rules over the web API; an owner commit (with a
+  pasted token), an agent-trailer commit and a firm-repo commit in local
+  `file://` fixture repos → `harness.tasks.ingest_repo_commits`; a
+  `SessionStart` hook event with a real `hook` PAT → `CodingSession` in
+  `/memory/sessions`; `run_learning_night_task` with on-commit dispatch
+  executed; preflight `learning_sources` / `learning_last_run` /
+  `learning_budget` pass; the digest quotes the owner commit in the personal
+  group and the firm commit only in the firm group, never the agent commit;
+  approve over the web; the next chat turn's payload carries the approved
+  memory and its `ModelUsage.context_report["memory_ids"]` names it. No
+  secret in any gateway payload, firm text never in a personal payload, one
+  `ModelUsage` per extraction call with no text in its context report.
+- Tests: `backend/ops/tests/test_preflight_learning.py` (each check's
+  pass/warn/fail paths, registration, the command's lines),
+  `test_preflight.py` registration assertion updated.
+- **Docs:** MASTER_PLAN §AA row 8A → done with the checkpoint result;
+  ADR-012 implementation notes for branches 2–7; `docs/runbooks/
+  learning-memory.md` (prerequisites, enable sources, mapping rules,
+  preflight, audit view, morning card, forget/restore, go/no-go,
+  troubleshooting); `docs/runbooks/claude-code-hooks.md` §7 (preflight);
+  `docs/integrations/README.md` link. `assistant/self_sources.json`
+  regenerated: with 8A done the "current phase" line moves to Phase 9.
+
+### Go/no-go record (Phase 8A checkpoint)
+
+| Criterion | Result |
+|---|---|
+| Scrubber corpus 100% secrets recall | **met in CI** (`memory/tests/test_scrubber.py` gate) and checked on the running stack by preflight `learning_scrubber` |
+| Zero cross-workspace leaks in tests | **met in CI** (isolation tests of branches 1–6 and the closeout e2e) |
+| ≥ 60% of proposals accepted over two weeks of real use | **pending (owner)** — read the acceptance in the audit view after two weeks; below 60% tune prompts, caps and owner-text rules before Phase 8B |
+
+### Owner steps (pending) — `closeout`, recorded 2026-11-20
+
+1. Deploy, then run the prerequisites in `docs/runbooks/learning-memory.md`
+   §1 in order (`migrate`, `seed_ai_defaults`, `seed_ingestion_sources`, set
+   `MEMORY_OWNER_GIT_EMAILS`), enable the four sources and write the real
+   mapping rules (repos, Mac paths, calendar binding).
+2. Run `make preflight` on the real stack (once with model calls, which are
+   real and possibly paid) and on the harness runner host; every
+   `learning_*` line should be `pass` after the first real night
+   (`learning_last_run` warns until then).
+3. Manual pass with a real model: a real commit and a live hooked Claude Code
+   session → next morning's card → approve one item → ask about it in a web
+   chat and check the answer uses it.
+4. Two weeks of real use, then fill the acceptance row of the go/no-go
+   record above.
+5. Independent Sonnet 5 review of this branch (and of the brief's pending
+   plan review) before merging to `main`.
+

@@ -156,3 +156,61 @@ Today memory comes only from chat (Phase 1 extraction, every candidate
 - **Contract:** "memory.ingestion may import only memory, workspaces,
   audit, core, ai_core" in `backend/pyproject.toml`; `nodes` is added when
   that app exists (import-linter refuses unknown module names).
+
+**Phase 8A branches 2–6 (2026-11-20).** Details in the brief's per-branch
+implementation notes; the decision-relevant facts:
+
+- **Core blocks** (branch 2, `memory/0006_core_memory_blocks`):
+  `CoreMemoryBlock` + `CoreMemoryBlockVersion` + `CoreBlockProposal`; `self`
+  is written only by the deterministic assembler (`assistant/self_block.py`,
+  no model call) from the committed `assistant/self_sources.json` snapshot
+  (`build_self_sources --check` in CI); `developer`/`preferences` live only
+  in a personal workspace and are written only by the owner; injection is
+  first in `build_context`, fenced, web/Telegram rules as D7.
+- **Hook relay** (branch 3): `PersonalAccessToken.Kind.HOOK` +
+  `CHANNEL_HOOK`; the append-only `POST /api/v1/memory/ingest/hook-events`
+  is the only route the hook token authenticates (URL-walk test); events go
+  through `record_episode`; `CodingSession` (`memory/0008`) is the sessions
+  read model. `friday-hook` is stdlib-only and carries a vendored scrubber
+  copy CI keeps identical to `memory/ingestion/scrubber.py`.
+- **Producers** (branch 4): the git producer on the runner beat (blob-less
+  shallow clone, `git log` messages and `--shortstat` counts only, owner
+  e-mail + agent-trailer + harness-branch rules, `harness/0013` cursor), the
+  harness outcome producer (owner's `goal` only as owner text), the calendar
+  metadata producer (owner-organised titles only; personal-class). Each
+  calls the port; none can raise into its caller.
+- **Learning loop** (branch 5, `memory/0009_learning_loop`):
+  `EpisodeExtractionJob` (lease-fenced; personal-class and `private`
+  episodes in their own `personal_data=True` jobs); second scrub before
+  every call; verbatim-quote provenance check (`memory/provenance.py`, also
+  used by chat extraction schema v2, where only `user` text is quotable);
+  consolidation with code-held quote/episode/target; caps in code (10
+  proposals per owner-night, 3 core-block proposals per week); budgets
+  `learning`/`learning_extraction_daily`/`learning_consolidation_daily`;
+  forget-source cascade to memories and proposals with exact restore;
+  `purge_trash` keys `episode_ids` and `forgotten_memory_ids`.
+- **UI and read tools** (branch 6): `/memory/learning`, `/memory/ingestion`,
+  `/memory/core-blocks`, `/sessions`, HUD panels; read tools
+  `coding_sessions_status` and `harness_jobs_status` (web only, fenced,
+  `for_actor()`, audited).
+
+**Phase 8A closeout (2026-11-20).**
+
+- **Preflight** (`backend/ops/preflight.py` `check_learning`, read-only, no
+  model call): `learning_sources`, `learning_beat` (reads both beats'
+  schedules from the Celery app's `friday_beat_schedules`, since `ops` may
+  not import `config`), `learning_scrubber` (the scrubber self-test over the
+  committed corpus, `PREFLIGHT_SCRUBBER_CORPUS_DIR` to override; any missed
+  secret is a `fail`), `learning_budget`, `learning_last_run`.
+- **End to end** (`backend/ops/tests/test_learning_e2e.py`, fake providers):
+  owner web API enables and maps the sources → a fixture commit (local
+  `file://` repo) and a hook event → nightly job (eager) → morning card →
+  approve → the memory is in the next chat answer's fenced context and its
+  `ModelUsage` context report; no secret in any gateway payload, firm text
+  never in a personal payload.
+- **Runbooks:** `docs/runbooks/claude-code-hooks.md` (preflight section) and
+  `docs/runbooks/learning-memory.md` (enable sources, mapping rules, the
+  audit view, the morning card, forget/restore, go/no-go).
+- **Go/no-go** (owner, after two weeks of real use): scrubber corpus 100%
+  secrets recall, zero cross-workspace leaks in tests (both met in CI),
+  ≥ 60% of proposals accepted (pending, recorded in the brief).
