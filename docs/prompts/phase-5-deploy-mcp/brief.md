@@ -941,6 +941,25 @@ Mac, real credentials, paid calls or real hardware:
    once CI is green.
 6. Close the former repository's PR #29 with a pointer to this section.
 
+**Known follow-ups (LOW, from review; recorded at integration merge
+2026-11-20):**
+- `backend/ops/preflight.py` (`http_get`): the docstring says it follows
+  no redirects to another host, but `httpx.get` is called with
+  `follow_redirects=True` and no host check, so a redirecting BFF or web
+  URL could send the `browser_secrets` scan off-origin. The URLs are
+  operator-set, so the risk is small. Fix: `follow_redirects=False`, or
+  compare the final `response.url` host with the request host, or correct
+  the docstring.
+- `backend/ops/preflight.py` (`browser_secrets`): any secret-named env var
+  of 12 or more characters is treated as a secret and matched by
+  substring, so a long non-secret value under a KEY/TOKEN-style name could
+  cause a false `fail`. If false fails appear on the real stack, add an
+  explicit ignore-list setting; no change needed now.
+- The sshd smoke target and the real Next.js build-id patterns are
+  recorded as owner steps rather than tested here (explicitly documented
+  and acceptable). Record the real-stack preflight summary line after
+  owner step 1.
+
 ## Branch table
 
 | # | Branch | Scope | Depends on |
