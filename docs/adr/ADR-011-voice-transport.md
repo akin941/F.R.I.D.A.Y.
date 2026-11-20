@@ -89,3 +89,17 @@ It moves nothing between gate-class and confirm-class.
   memories stay `pending_approval` (ADR-005), so a stray transcript is at
   most a suggestion the owner rejects.
 - ADR-002's kernel-app list gains `voice` (note there).
+
+## Implementation note (2026-11-20, Phase 6 closeout)
+
+All six decisions are implemented (brief branches 1–5). Closeout additions:
+`manage.py preflight` checks every speech row with one pinned gateway call
+(`only_provider` now also on `transcribe()`/`synthesize()`; the
+personal-data rule of decision 4 still applies to a pinned row, so a
+disallowed cloud row is reported, never called), checks the TTS routes and
+the audio budget, and runs a real browser to prove a `?mute=1` voice tab is
+silent (`frontend/e2e/voice-mute.e2e.ts`). The CI e2e
+(`frontend/e2e/voice.e2e.ts`) drives push-to-talk with a stubbed
+microphone through fake STT/TTS to a task draft confirmed by click
+(decision 5), and the HUD showing the voice state and a pending approval
+deep link.

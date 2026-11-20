@@ -244,14 +244,21 @@ Status: **done (2026-07-05)** — all 6 branches merged to main.
   separation. Wired as `openai_compatible`/local `ModelProvider` rows behind
   new `Capability.STT`/`.TTS`, no cloud key required. A cloud fallback stays
   possible later (same gateway, another provider row) but is not built. See
-  §Z.
+  §Z. *Phase 6 closeout (2026-11-20):* landed as the local `voice-stt-local`
+  / `voice-tts-local` rows (speaches or the `deploy/voice/` sidecar behind
+  the `openai_compatible` adapter, ADR-011); the cloud fallback now exists
+  as the seeded-disabled `openrouter-stt`/`-tts` rows behind the d2 owner
+  toggle (below).
 - ~~Binary-audio storage mechanism (MVP 12, ADR-007)~~ — **resolved
   (2026-07-17): bounded temp-file, delete-on-completion.** Raw audio is
   written to a temp file only for the duration of the transcription job and
   deleted as soon as the transcript exists — raw audio is never persisted,
   so the dormant MinIO/`django-storages` settings stay dormant and no
   binary-blob column is added. Only the resulting transcript (already text)
-  flows into the existing `assistant` pipeline. See §Z.
+  flows into the existing `assistant` pipeline. See §Z. **Superseded by
+  ADR-011 (Phase 6, 2026-11-20):** transcription is synchronous and
+  in-memory -- no Celery job, no temp file; raw audio is never written to
+  disk, a DB row, a log or a `ModelUsage` by Friday (decision 3).
 - ~~Friday 3.0 roadmap decisions d1–d10~~ — **decided 2026-11-20** (owner
   approved every recommended answer of
   `docs/research/2026-11-roadmap-proposal.md` §g; plan in §AA "Friday 3.0
@@ -743,6 +750,14 @@ branch status: `docs/prompts/mvp-09/brief.md`.
 
 ## Z. Voice Assistant (MVP 12 — vision draft)
 
+> **Implemented by Phase 6 (closeout 2026-11-20).** The pipeline below
+> shipped as `docs/prompts/phase-6-voice-identity/brief.md` branches 1–5
+> and ADR-011 (voice transport) / ADR-015 (voice-originated turns). Two
+> details changed from this draft: the async transcription job with a temp
+> file became a synchronous, in-memory call (ADR-011 decision 3), and the
+> "visual identity layer" became HUD v1 (`/hud`, brief A8). The section is
+> kept as the original vision.
+
 Vision section (ADR-007; re-sequenced to Phase 6 by ADR-008). At creation
 this section's two §O decisions (STT/TTS provider choice, binary-audio
 storage) blocked all implementation; **both are resolved (2026-07-17, §O)**
@@ -812,7 +827,7 @@ approval (Phase 5).
 | 3 | Harness v2: plan approval → worktree implementation → tests → cross-vendor review → gated branch push | Approved feature development end-to-end | **done (2026-09-27)** — branches 1–4 (2026-07-20 → 07-22) + closeout 5a/5–8 (2026-09-27); first real paid run is an owner runbook step |
 | 4 | Security baseline; UI renewal: shell/chat/harness console/approvals inbox redesign; device-trust identity replaces signup/login; OpenAI-compatible facade (chat-only, low-trust) | Professional, safely-exposable daily driver | **done 2026-09-27** (`docs/prompts/phase-4-identity-ui/brief.md`, "Closeout"); six branches, each Sonnet 5 APPROVE, merged to `main` (former repository, PR #27) |
 | 5 | Deploy gate + VPS deploy (allowlisted commands); MCP client framework: GitHub, mail/calendar, external-installation client (when one exposes MCP), Home Assistant bridge; tier routing + harness policy table | Request → code → live, end to end | **done (2026-11-20)** (`docs/prompts/phase-5-deploy-mcp/brief.md`, §10): branches 1–10 implemented on the integration branch `claude/inspiring-franklin-pw7avo`, which **supersedes** the former repository's `integ/phase-5` PR (#29); closeout adds `manage.py preflight`, the seeded `openrouter` provider and the harness → PR → deploy e2e. Owner steps pending: a green preflight on the real stack, real-credential smokes and the merge to `main` (brief §10 "Owner steps (pending)") |
-| 6 | Voice (ex-MVP 12): mic capture, faster-whisper STT, Piper TTS, local wake word, orb wired to real audio; then the animated visual identity layer | The real Friday experience | brief approved 2026-09-27, amended 2026-11-20 for Friday 3.0 (OpenRouter audio spike, Turkish eval set, latency trace, audio caps, ADR-015 voice cap, HUD v1 replacing the identity branch) (`docs/prompts/phase-6-voice-identity/brief.md`); starts after Phase 5 closeout (foundation from MVP 12 shipped, dormant) |
+| 6 | Voice (ex-MVP 12): mic capture, faster-whisper STT, Piper TTS, local wake word, orb wired to real audio; then the animated visual identity layer | The real Friday experience | **done (2026-11-20)** (`docs/prompts/phase-6-voice-identity/brief.md`, "6. closeout"): speech gateway (ADR-011), voice API, push-to-talk, in-tab wake word, HUD v1 implemented on the integration branch `claude/inspiring-franklin-pw7avo`; closeout adds the preflight voice checks and the voice/HUD e2e. Branch 3a (Turkish eval harness) is not on the integration branch yet, so the A9 exit measurements are pending: owner steps (brief "Owner steps (pending) — closeout") |
 | 7 | Workshop (first module pack, `apps.modules.workshop`): sandboxed 3D stage, gateway-driven part-stream builder, change-never-restart conversation, teardown/labels/STL export, saved-build shelf, cost receipt, workshop drill; then picture-in (vision) and studio-photo finish (image capability) | "Friday, bana bir saat mekanizması tasarla" → live, editable 3D model | **deferred to backlog (2026-11-20, owner decision d8)** — number kept; scheduled after Phase 12 or earlier by owner decision (`docs/prompts/phase-7-workshop/brief.md`, written at phase start; design notes under "Roadmap update 2026-11-20" → "Backlog") |
 
 Phases 8A–12 continue this table in "Friday 3.0 phases" below.
@@ -964,7 +979,7 @@ in a go/no-go checkpoint: stop, re-scope or continue.
 | Order | Phase | Scope | Usable outcome | Go/no-go checkpoint | Brief | Status |
 |---|---|---|---|---|---|---|
 | 1 | **5 (finish)** | 5.7 Home Assistant reconcile, 5.9 connectors UI, 5.10 closeout with preflight; `integ/phase-5` → `main`; seed an `openrouter` text provider row | Deploy + MCP usable from the UI | preflight green; integration branch merged to `main` | `phase-5-deploy-mcp/brief.md` | implemented 2026-11-20 (preflight + `openrouter` row landed; real-stack preflight and merge are owner steps, row 5 above) |
-| 2 | **6 Voice core + web HUD** | Approved branches 1–4 + the 2026-11-20 amendment: OpenRouter audio spike, Turkish eval set, latency trace, gateway audio caps, ADR-015 voice cap, HUD v1 (health panel, accessibility) | Push-to-talk Friday in a browser with a real HUD, Turkish tested | Turkish WER/TTS targets met or consciously re-set; local p50 end-of-speech → first audio ≤ 1.5 s; caps enforced | `phase-6-voice-identity/brief.md` ("Amendment 2026-11-20") | approved, amended 2026-11-20; starts after Phase 5 closeout |
+| 2 | **6 Voice core + web HUD** | Approved branches 1–4 + the 2026-11-20 amendment: OpenRouter audio spike, Turkish eval set, latency trace, gateway audio caps, ADR-015 voice cap, HUD v1 (health panel, accessibility) | Push-to-talk Friday in a browser with a real HUD, Turkish tested | Turkish WER/TTS targets met or consciously re-set; local p50 end-of-speech → first audio ≤ 1.5 s; caps enforced | `phase-6-voice-identity/brief.md` ("Amendment 2026-11-20", "6. closeout") | **done (2026-11-20)** — implemented incl. closeout (preflight voice checks, voice + HUD e2e); caps enforced in tests; the checkpoint's measurements (WER, TTS rating, Mac latency, one manual cap refusal) and branch 3a are pending owner steps (brief "A9 — exit criteria record") |
 | 3 | **8A Learning memory core** (server only) | ADR-012 pipeline (source registry, workspace mapping, scrubber + corpus, TTL, audit view, forget-source); core blocks (`self` deterministic, `developer` owner-edit); sources: git commits, harness outcomes, Claude Code hook events via `friday-hook` (append-only PAT), calendar metadata; owner-only extraction; capped morning card; sessions panel v0 | **Vertical slice complete:** talk to Friday, it knows itself and you, shows your Claude Code sessions, learns from yesterday | scrubber corpus 100% secrets recall; zero cross-workspace leaks in tests; ≥ 60% of proposals accepted over 2 weeks (else tune before 8B) | `phase-8a-learning-memory/brief.md` | planned (brief drafted 2026-11-20, awaiting plan review) |
 | 4 | **9 Friday Node v1 (read-only)** | Prereqs: spike S9.0 (`kind=node` device trust), Apple Developer signing + notarization (d9), ADR-013. Then `nodes` app + WS, Swift menu-bar app, pairing, read capabilities, per-directory grants, Unix-socket hook relay, spool, heartbeat, preflight extension | "Claude Code / Codex oturumlarım ne yapıyor?" with local transcript detail | spike passes; compromised-server tests pass; notarized build keeps its TCC grants across updates | `phase-9-friday-node/brief.md` (stub) | planned |
 | 5 | **8B Transcripts + knowledge graph** | Claude/Codex transcript ingestion via the node (owner turns only); temporal entities/facts in Postgres; RRF retrieval; Graphify AST-only job; Headroom behind a flag + eval; Obsidian mirror format + `Inbox/` import-once; weekly reflection; private eval set | Friday knows the details of your work across tools | eval baseline recorded; Headroom stays off unless ≤ 1 point loss | `phase-8b-transcripts-graph/brief.md` (stub) | planned |

@@ -288,3 +288,42 @@ chunk in Node. The browser figure (Chromium and Safari, the always-on Worker
 in Activity Monitor; target < 5% of one core) and the false-accept count over
 the A4 negative set (target FAR ≤ 0.5/h, FRR ≤ 10%) are measured on the Mac
 and recorded in the Phase 6 brief.
+
+## 7. Preflight voice checks (Phase 6 closeout)
+
+`manage.py preflight` (`make preflight`) checks the voice layer of the
+running stack (brief A7):
+
+| Check | Passes when | Warns when | Fails when |
+|---|---|---|---|
+| `provider:<stt row>` | the row transcribes the in-memory fixture WAV (1 s tone, 16 kHz mono PCM16) through the gateway, pinned, purpose `ops.preflight` | the row is disabled, unkeyed, not `personal_data_allowed`, or `--no-model-calls` | the call errors |
+| `provider:<tts row>` | the row synthesizes "Friday preflight." and the audio passes D3's output rule (the route's voice is used when a route names the row) | as above | the call errors or the audio is not a usable PCM16 WAV |
+| `voice_providers` | at least one eligible STT and one eligible TTS row (an eligible priced cloud row is named) | no eligible row (no `VOICE_API_KEY` / `AI_FAKE_PROVIDER`) | no STT or no TTS rows at all (run `seed_ai_defaults`) |
+| `voice_routes` | every `VOICE_TTS_ROUTES` language names an eligible TTS row | a route names a missing or ineligible row (the gateway falls back to priority order) | — |
+| `voice_budget` | an active `AIBudget` with a monthly cap covers `voice.stt` and `voice.tts` | a cover has no monthly cap | an audio purpose has no active budget |
+| `voice_mute` | `PREFLIGHT_VOICE_MUTE_CMD` exits 0 | the command is not set | it exits non-zero, times out or cannot start |
+
+Each speech call is a `ModelUsage` row like the chat rows' (paid only for
+an enabled cloud row; `--no-model-calls` skips all of them). Nothing
+personal is sent and neither the transcript nor the audio is printed.
+
+`voice_mute` is browser behaviour, so it runs a real browser: the
+Playwright spec `frontend/e2e/voice-mute.e2e.ts` opens `/voice?mute=1`,
+holds push-to-talk and sends a typed turn, and asserts no microphone was
+opened, no `/api/voice/*` request was made and nothing was played. It
+enrolls its own browser as a device (a pairing code through
+`E2E_MANAGE_CMD`), so on the real stack revoke the "e2e voice-mute browser"
+device afterwards under Cihazlar. Playwright is not in the `web` image:
+run this preflight from the host checkout, e.g.
+
+```bash
+cd backend
+PREFLIGHT_VOICE_MUTE_CMD="npm --prefix ../frontend run test:e2e -- e2e/voice-mute.e2e.ts" \
+E2E_BROWSER_CHANNEL=chrome \
+E2E_MANAGE_CMD="docker compose -f ../deploy/docker/compose.yml exec -T web uv run python manage.py" \
+uv run python manage.py preflight
+```
+
+(`E2E_BROWSER_CHANNEL=chrome` uses the installed Chrome instead of
+Playwright's own download.) Inside `make preflight` the check stays a
+warning.

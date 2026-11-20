@@ -13,6 +13,9 @@
 > (branch 5, `feat/p6-hud`, replaces the visual-identity branch). Source:
 > `docs/research/2026-11-roadmap-proposal.md` §B2/B3/B5, §c.1–c.6. The
 > amendment awaits its own Sonnet 5 plan review before branch 1 starts.
+> **Closeout implemented 2026-11-20** (`chore/p6-closeout`): see
+> "Closeout — implementation notes" and "A9 — exit criteria record";
+> the exit measurements are pending owner steps.
 > Parent decisions: ADR-001 (workspace axis), ADR-002 (import contracts),
 > ADR-003 (single gateway door, one `ModelUsage` per call), ADR-004 +
 > ADR-008 decision 3 (explicit, separate owner decision; gate-class vs
@@ -1465,6 +1468,95 @@ voice checks (A7); MASTER_PLAN §AA "Friday 3.0 phases" row 6 → done;
 ADR-015 implementation note (decisions 1–3 landed); e2e adds `/hud`
 showing the voice state and a pending approval deep link.
 
+### Closeout — implementation notes (2026-11-20, `chore/p6-closeout`)
+
+Cut from the local integration branch `claude/inspiring-franklin-pw7avo`
+(branches 1, 2, 3, 4 and 5 merged; **branch 3a is not on it** -- see A9).
+
+- **Preflight voice checks (A7)** in `backend/ops/preflight.py`:
+  - every STT/TTS row gets one gateway call pinned with `only_provider`
+    (new on `InferenceGateway.transcribe()`/`synthesize()`; a pin keeps
+    D5's personal-data rule and beats the A2 route, the route's voice is
+    used only when the pinned row is the routed one), purpose
+    `ops.preflight`, one `ModelUsage` row each: STT transcribes an
+    in-memory fixture WAV (1 s, 440 Hz tone, 16 kHz mono PCM16, built in
+    code -- not a recording), TTS synthesizes "Friday preflight." and the
+    audio must pass `normalize_tts_wav` (D3). A row the gateway would
+    refuse (disabled, unkeyed, not `personal_data_allowed`) warns and is
+    never called -- the seeded OpenRouter audio rows stay untouched. The
+    former standing "audio provider: not checked yet" warning is gone.
+  - `voice_providers` / `voice_routes` / `voice_budget` (read-only, no
+    model call): speech rows exist and one of each capability is eligible;
+    every `VOICE_TTS_ROUTES` language names an eligible TTS row (a missing
+    or ineligible one is a warning -- the gateway falls back to priority
+    order); an active budget with a monthly cap covers every
+    `AI_AUDIO_PURPOSES` entry (no cover is a failure, no monthly cap a
+    warning). An eligible priced (cloud) speech row is named in the detail,
+    so the owner's d2 toggle is visible in every run.
+  - `voice_mute`: "a `?mute=1` voice tab is silent" is browser behaviour,
+    so the check runs `PREFLIGHT_VOICE_MUTE_CMD` (shlex-split, no shell,
+    output captured and dropped, `PREFLIGHT_VOICE_MUTE_TIMEOUT_SECONDS`,
+    default 180) and passes on exit 0; unset = warning. The intended
+    command is the Playwright spec `frontend/e2e/voice-mute.e2e.ts`.
+    Playwright is not in the `web` image, so inside `make preflight` the
+    check stays a warning; the host-side invocation is in
+    `docs/runbooks/voice-setup.md` §7.
+- **e2e (CI, fake providers):** `frontend/e2e/voice.e2e.ts` -- the page's
+  `getUserMedia` is stubbed with an oscillator stream (no real mic),
+  push-to-talk by holding Space, fake STT transcript held for review
+  ("Göndermeden önce göster"), sent as a voice turn; the FakeAdapter reply
+  is spoken with exactly one `/api/voice/speech` request per sentence, in
+  order, and played; a second turn edited to the task-draft trigger shows
+  the draft card, nothing is created until the "Görevi onayla" click, then
+  the task exists; a typed tool request becomes a pending approval by
+  click; `/hud` shows the voice state (`awaiting-approval` at rest with a
+  pending approval, `listening` while Space is held) and the approval as a
+  deep link to `/approvals/<id>`, with no decide control.
+  `frontend/e2e/voice-mute.e2e.ts` -- `/voice?mute=1`: mic button
+  disabled, holding Space opens nothing, a typed turn's reply is shown but
+  never spoken: zero `getUserMedia` calls, zero `/api/voice/*` requests,
+  zero playback starts. Both run in the existing CI e2e job (after
+  `smoke.e2e.ts`); verified locally against a fresh database: 4/4 specs
+  green (installed Chrome via the new optional `E2E_BROWSER_CHANNEL`).
+- **Docs:** MASTER_PLAN §AA row 6 and "Friday 3.0 phases" row 2 → done,
+  §Z header note, §O STT/TTS and binary-audio entries marked superseded by
+  ADR-011; `docs/prompts/mvp-12-voice/brief.md` closed; implementation
+  notes on ADR-007, ADR-008 (decision 5 landed), ADR-011 and ADR-015
+  (decisions 1–3 landed); `docs/integrations/README.md` voice section;
+  Phase 4 Q4 and Phase 5 Q7 marked answered; runbook §7 (preflight).
+
+### A9 — exit criteria record (closeout, 2026-11-20)
+
+| Criterion | State at closeout | Evidence / what remains |
+|---|---|---|
+| A4 WER (≤ 12% TR quiet, ≤ 18% TR noise, ≤ 15% code-switched), TTS ≥ 4/5, wake FRR ≤ 10% / FAR ≤ 0.5/h | **not measured; targets unchanged (not re-set)** | Branch 3a (`voice_eval` scorer, replay harness, manifest) is not on the integration branch, and the recordings are an owner step. Measured after 3a merges; any re-set is recorded here. |
+| A5 local p50 ≤ 1.5 s / p95 ≤ 2.5 s end of speech → first audio | **not measured; target unchanged** | Needs the owner's Mac with real models (`VoiceTurnTrace` rows give the stage timings). If missed, the target is re-set here with the dominant stage named. |
+| A3 caps enforced | **met in tests**; manual refusal pending | Gateway budget tests (branch 1) and `voice_budget` preflight check; one manual `429 voice.budget_exceeded` on the Mac is an owner step. |
+| A6 release gates | **green in CI** | Branch 2–4 suites (voice cap, proposals, fail-closed mute, self-trigger in-tab, wake storms) plus this branch's e2e (draft only by click, muted tab silent). The replay-harness self-trigger fixture belongs to branch 3a. |
+| Preflight green | **green on the fake stack** (`test_command_all_green_exits_zero`); real stack pending | A green run on the owner's stack with `VOICE_API_KEY` and `PREFLIGHT_VOICE_MUTE_CMD` set is an owner step. |
+
+The phase is **implemented** with these measurements outstanding; the
+Friday 3.0 go/no-go checkpoint for Phase 6 is decided once they are in.
+
+### Owner steps (pending) — closeout (recorded 2026-11-20)
+
+1. Merge branch 3a (`feat/p6-voice-eval`) and record the A4 measurements
+   (WER per condition, TTS rating, wake FRR/FAR) in "A9 — exit criteria
+   record"; re-set a target consciously if needed.
+2. Measure A5 on the Mac (p50/p95 end of speech → first audio, local
+   path); record the result or a re-set target with the dominant stage.
+3. Trigger one audio budget refusal by hand on the Mac (e.g. a tiny
+   session cap on an enabled priced row) and record the `429
+   voice.budget_exceeded` + `budget_exceeded` usage row.
+4. Run `manage.py preflight` on the real stack from the host checkout with
+   `VOICE_API_KEY` and `PREFLIGHT_VOICE_MUTE_CMD` set (runbook §7); record
+   the summary line here; revoke the "e2e voice-mute browser" device it
+   enrolls.
+5. Earlier owner steps still open: the A1 OpenRouter spike call, the d2
+   decision on cloud audio rows, the `hey_friday` model, the manual Mac
+   passes (GPU/battery, reduced motion) -- "Owner steps (pending) —
+   recorded 2026-11-20" and the branch sections above.
+
 ## Branch table
 
 | # | Branch | Scope | Depends on |
@@ -1492,7 +1584,7 @@ slice.
 | 4 `feat/p6-wake-word` | **implemented 2026-11-20** (cut from the local integration branch; step 0 spike results, notes and owner steps under "Branch 4 — step 0 spike results" / "implementation notes"; push-to-talk stays the default (d3); `hey_friday` model training and the Mac CPU/parity/FAR measurements are owner steps; awaiting the Sonnet 5 branch review) |
 | 4a `feat/p6-wake-word-dsp` | not triggered so far (parity holds; CPU decided by the Mac measurement) |
 | 5 `feat/p6-hud` (built as `feat/p6-visual-identity`) | **implemented 2026-11-20** (cut from the local integration branch; notes and owner steps under "Branch 5 — implementation notes"; the "3–4 done on the Mac" precondition, the GPU/battery and reduced-motion passes are owner steps; awaiting the Sonnet 5 branch review) |
-| 6 closeout | not started |
+| 6 closeout (`chore/p6-closeout`) | **implemented 2026-11-20** (cut from the local integration branch; preflight voice checks, voice + HUD e2e, docs/ADR notes; notes, the A9 record and owner steps under "Closeout — implementation notes", "A9 — exit criteria record", "Owner steps (pending) — closeout"; branch 3a not yet merged, so the A4/A5 measurements are pending; awaiting the Sonnet 5 branch review) |
 
 ## Out of scope (explicit)
 

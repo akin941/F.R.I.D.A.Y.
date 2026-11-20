@@ -9,7 +9,14 @@
 > device) for always-listening operation, and the animated visual-identity
 > layer coming only **after** the voice pipeline works.
 >
-> Status: **dormant (2026-09-27)** — re-sequenced to Phase 6 by ADR-008
+> Status: **closed (2026-11-20)** — superseded and completed by Phase 6
+> (`docs/prompts/phase-6-voice-identity/brief.md`, closeout 2026-11-20):
+> this brief's branches 2b, 3 and 4 were replaced by Phase 6 branches 1–5
+> (ADR-011 voice transport, ADR-015 voice-originated turns). Its async
+> transcription job and temp file were superseded by ADR-011's synchronous,
+> in-memory design. Nothing in this brief is pending.
+>
+> Earlier status: **dormant (2026-09-27)** — re-sequenced to Phase 6 by ADR-008
 > decision 5; the foundation already shipped (below) stays in place. No
 > branch of this brief is active until Phase 6 opens.
 >
