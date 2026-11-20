@@ -63,6 +63,10 @@ describe("query keys", () => {
       "allApprovals",
       "approvalInbox",
       "approvalDetail",
+      // Phase 8A branch 6: owner-wide aggregates the backend labels per workspace.
+      "learningDigest",
+      "codingSessions",
+      "selfSources",
     ]);
     const scoped = Object.entries(queryKeys).filter(([name]) => !crossWorkspace.has(name));
     for (const [name, key] of scoped) {
@@ -73,6 +77,9 @@ describe("query keys", () => {
     expect(queryKeys.allApprovals()[0]).toBe(ALL_WORKSPACES);
     expect(queryKeys.approvalInbox({})[0]).toBe(ALL_WORKSPACES);
     expect(queryKeys.approvalDetail("id-y")[0]).toBe(ALL_WORKSPACES);
+    expect(queryKeys.learningDigest()[0]).toBe(ALL_WORKSPACES);
+    expect(queryKeys.codingSessions()[0]).toBe(ALL_WORKSPACES);
+    expect(queryKeys.selfSources()[0]).toBe(ALL_WORKSPACES);
   });
 });
 

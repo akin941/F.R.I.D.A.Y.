@@ -26,6 +26,11 @@ export function isConnectorName(value: string): boolean {
   return CONNECTOR_NAME.test(value);
 }
 
+/** A core-block label as the backend names it (`self`, `current_focus`, ...). */
+export function isCoreBlockLabel(value: string): boolean {
+  return /^[a-z_]{1,32}$/.test(value);
+}
+
 /** Every segment must be a UUID (or pass `check`) before it reaches a backend path. */
 export function validSegments(
   segments: string[],
@@ -118,6 +123,31 @@ export async function proxyMutation(
   }
   const response = await backendFetch(backendPath, { method, accessToken, body: payload });
   return forward(response, {});
+}
+
+/** A body-less DELETE to `backendPath` (Origin checked first, then the session). */
+export async function proxyDelete(request: NextRequest, backendPath: string) {
+  const originError = rejectCrossOrigin(request);
+  if (originError) return originError;
+  const accessToken = await getAccessToken();
+  if (!accessToken) return NOT_AUTHENTICATED();
+  const response = await backendFetch(backendPath, { method: "DELETE", accessToken });
+  return forward(response, {});
+}
+
+/**
+ * The `?workspace=<uuid>` suffix for a backend path, or a 400 response when
+ * it is missing or not a UUID (mutations that scope by query string).
+ */
+export function workspaceSuffix(request: NextRequest): string | NextResponse {
+  const workspace = request.nextUrl.searchParams.get("workspace");
+  if (!workspace) {
+    return NextResponse.json({ detail: "workspace query parameter is required." }, { status: 400 });
+  }
+  if (!isValidUuid(workspace)) {
+    return NextResponse.json({ detail: "workspace must be a valid UUID." }, { status: 400 });
+  }
+  return `?workspace=${encodeURIComponent(workspace)}`;
 }
 
 export { NOT_FOUND as notFound };

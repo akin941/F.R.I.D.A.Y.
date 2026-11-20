@@ -968,3 +968,186 @@ export interface ApiPullRequestState {
   pull_request: { number: number | null; url: string } | null;
   ci: { state: CiConclusion; runs: ApiCiRun[]; error?: string } | null;
 }
+
+// --- Phase 8A learning memory (branch 6 UI) ---
+
+export type CoreBlockLabel = "self" | "developer" | "current_focus" | "active_projects" | "preferences";
+export type CoreBlockWriterKind = "owner" | "assembler" | "approved_proposal";
+
+export interface ApiCoreBlock {
+  label: CoreBlockLabel;
+  content: string;
+  version: number;
+  sensitivity: MemorySensitivity;
+  updated_by_kind: CoreBlockWriterKind | null;
+  updated_at: string | null;
+  char_budget: number;
+  editable: boolean;
+}
+
+export interface ApiCoreBlockVersion {
+  version: number;
+  content: string;
+  sensitivity: MemorySensitivity;
+  updated_by_kind: CoreBlockWriterKind;
+  created_at: string;
+}
+
+export type SelfAnchorGroup = "identity" | "rule" | "adr" | "phase";
+
+export interface ApiSelfAnchor {
+  group: SelfAnchorGroup;
+  label: string;
+  file: string;
+  line: number | null;
+  text: string;
+}
+
+export interface ApiSelfSources {
+  content_hash: string;
+  anchors: ApiSelfAnchor[];
+}
+
+export type IngestionSourceKind = "git" | "harness" | "claude_code_hooks" | "calendar";
+export type MappingRuleType = "repo" | "path_prefix" | "calendar_binding";
+
+export interface ApiIngestionCounter {
+  day: string;
+  stored: number;
+  duplicate: number;
+  dropped_unmapped: number;
+  dropped_paused: number;
+  scrubber_hits: Record<string, number>;
+  tokens_spent: number;
+  proposals_created: number;
+  proposals_accepted: number;
+  proposals_rejected: number;
+}
+
+export interface ApiIngestionSource {
+  id: string;
+  workspace: string;
+  kind: IngestionSourceKind;
+  enabled: boolean;
+  paused: boolean;
+  paused_at: string | null;
+  daily_token_budget: number;
+  forgotten_at: string | null;
+  restorable: boolean;
+  today: ApiIngestionCounter | null;
+}
+
+export interface ApiEpisode {
+  id: string;
+  workspace: string;
+  workspace_name: string;
+  kind: string;
+  occurred_at: string;
+  owner_text: string;
+  context_text: string;
+  metadata: Record<string, unknown>;
+  sensitivity: MemorySensitivity;
+  scrub_report: Record<string, number>;
+  token_estimate: number;
+  expires_at: string;
+  extracted: boolean;
+}
+
+export interface ApiForgetPreview {
+  episodes: number;
+  memories: number;
+  core_block_proposals: number;
+}
+
+export interface ApiIngestionAudit extends ApiIngestionSource {
+  counters: ApiIngestionCounter[];
+  episodes: ApiEpisode[];
+  scrubber_hits: Record<string, number>;
+  unmapped_keys: { hash: string; short: string }[];
+  tokens_spent_today: number;
+  acceptance: { created: number; accepted: number; rejected: number; rate: number | null };
+  forget_preview: ApiForgetPreview;
+}
+
+export interface ApiForgetResult {
+  operation_id: string;
+  episodes: number;
+  memories_archived?: number;
+  memories_rejected?: number;
+  memories?: number;
+  core_block_proposals: number;
+  candidates_discarded?: number;
+  source: ApiIngestionSource;
+}
+
+export interface ApiMappingRule {
+  id: string;
+  source: string;
+  rule_type: MappingRuleType;
+  pattern: string;
+  target_workspace: string;
+  enabled: boolean;
+  created_at: string;
+}
+
+export interface ApiScrubTerm {
+  id: string;
+  workspace: string;
+  term: string;
+}
+
+export type CodingSessionStatus = "running" | "waiting_for_owner" | "stopped" | "stale";
+
+export interface ApiCodingSession {
+  id: string;
+  workspace: { id: string; name: string };
+  tool: string;
+  session_id: string;
+  project: string;
+  status: CodingSessionStatus;
+  stored_status: Exclude<CodingSessionStatus, "stale">;
+  started_at: string;
+  last_event_at: string;
+  last_event: string;
+  last_notification: string;
+  event_count: number;
+}
+
+export type LearningItemKind = "memory" | "core-block";
+
+interface ApiLearningItemBase {
+  id: string;
+  title: string;
+  content: string;
+  quote: string;
+  source_kind: IngestionSourceKind | null;
+  created_at: string;
+  bulk_approvable: boolean;
+}
+
+export interface ApiLearningMemoryItem extends ApiLearningItemBase {
+  kind: "memory";
+  memory_type: MemoryType;
+  sensitivity: MemorySensitivity;
+  actions: ("approve" | "edit" | "reject")[];
+}
+
+export interface ApiLearningCoreBlockItem extends ApiLearningItemBase {
+  kind: "core-block";
+  label: CoreBlockLabel;
+  diff: string;
+  base_version: number;
+  inferred: boolean;
+  actions: ("approve" | "reject")[];
+}
+
+export type ApiLearningItem = ApiLearningMemoryItem | ApiLearningCoreBlockItem;
+
+export interface ApiLearningDigest {
+  since: string;
+  count: number;
+  workspaces: {
+    workspace: { id: string; name: string; type: "personal" | "company" };
+    items: ApiLearningItem[];
+  }[];
+}

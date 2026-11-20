@@ -71,6 +71,7 @@ describe("SidebarContent", () => {
       "HUD",
       "Onaylar",
       "Harness",
+      "Oturumlar",
     ]);
     // Phase 6 A8: the HUD route, next to voice.
     expect(within(navigation).getByRole("link", { name: "HUD" })).toHaveAttribute("href", "/hud");

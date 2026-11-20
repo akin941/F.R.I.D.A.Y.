@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
+import { SESSION_HUD_TOKENS } from "@/components/hud/HudLearningPanels";
 import { HUD_STATES } from "@/lib/hud/states";
 import { STATUS_TONES, TONE_PILL_CLASSES, type StatusTone } from "@/lib/theme/status";
 
@@ -121,6 +122,20 @@ describe("status tone map", () => {
         expect(classes).toContain(`text-${tone}`);
       }
     }
+  });
+
+  it("colours the HUD sessions panel only with checked HUD text tokens (Phase 8A)", () => {
+    const checked = new Set(PAIRS.filter(([, bg]) => bg === "hud-surface").map(([fg]) => fg));
+    for (const className of Object.values(SESSION_HUD_TOKENS)) {
+      expect(className.startsWith("text-")).toBe(true);
+      expect(checked.has(className.slice("text-".length))).toBe(true);
+    }
+  });
+
+  it("maps every coding-session status to a tone (Phase 8A)", () => {
+    expect(Object.keys(STATUS_TONES.codingSession).sort()).toEqual(
+      ["running", "stale", "stopped", "waiting_for_owner"],
+    );
   });
 
   it("covers the 8 implementation pipeline statuses", () => {

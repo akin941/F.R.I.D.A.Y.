@@ -729,7 +729,8 @@ from yesterday".
 | 3 `feat/p8-hook-relay` | **implemented 2026-11-20** — see "Branch 3 implementation notes" below; awaits independent Sonnet 5 review |
 | 4 `feat/p8-source-producers` | **implemented 2026-11-20** — git commit producer (runner `commit_log` primitive, cursor, authorship rules), harness outcome producer (discovery + implementation, every terminal path), calendar metadata producer; see "Branch 4 implementation notes" below; awaits independent Sonnet 5 review. Migration `harness/0013_repo_commit_cursor` |
 | 5 `feat/p8-learning-loop` | **implemented 2026-11-20** — owner-text episode extraction (lease-fenced jobs, triage, second scrub, provenance check), consolidation (dedupe, merge/rank, nightly cap 10, weekly core-block cap 3), digest + per-item actions + work_log-only bulk approve, learning budgets, forget cascade + exact restore, `purge_trash` episode/forgotten-memory keys, vault-mirror check, chat extraction schema v2; see "Branch 5 implementation notes" below; awaits independent Sonnet 5 review. Migration `memory/0009_learning_loop` |
-| 6–7 | not started |
+| 6 `feat/p8-learning-ui` | **implemented 2026-11-20** — morning card (`/memory/learning`, per-item approve/edit/reject, work_log-only bulk), ingestion audit view (`/memory/ingestion`: sources, enable/pause/budget, counters, last items, scrubber hits, unmapped keys, mapping rules, scrub terms, forget/restore naming source and counts), core-block editor (`/memory/core-blocks`, version history + rollback, `self` read-only with its source anchors), `/sessions` + HUD sessions panel and morning-card summary, read tools `coding_sessions_status` / `harness_jobs_status`; see "Branch 6 implementation notes" below; awaits independent Sonnet 5 review. No migration |
+| 7 | not started |
 
 ## Out of scope (explicit)
 
@@ -1382,3 +1383,84 @@ PAT wording in this section and branch 2's matrix now says 401.
   one but the reworded content is not re-checked against it. The owner sees
   both on the card and approval is required (accepted design). Optional:
   reject rewordings that grow far past the candidate's length.
+
+## Branch 6 implementation notes (`feat/p8-learning-ui`, 2026-11-20)
+
+- **Read tools** (D12; ungated `ReadToolSpec`s, web channel only, data class
+  `firm`): `coding_sessions_status` (`backend/tools/coding_sessions.py`,
+  registered in `tools.apps`) and `harness_jobs_status`
+  (`backend/harness/tools.py`, registered beside the harness gates). Shared
+  rules in `tools/owner_reads.py`: a human installation owner who is a
+  member of the conversation's workspace (else `ReadToolError("forbidden")`),
+  any non-web channel → `channel_forbidden`, strict arguments (only an
+  optional `limit` ≤ 20), the listing scoped to the conversation's own
+  workspace with `for_actor()` (another workspace's sessions/jobs never
+  listed), a bounded JSON-lines result that the chat turn fences with the
+  existing `render_connector_block` (untrusted data), and one
+  `read_tool.read` audit row per call, every outcome, ids and counts only.
+  Sessions of a forgotten source are hidden; `harness_jobs_status` re-checks
+  the curator role through `list_jobs`, lists the owner's goal (≤ 200 chars)
+  but never model-written briefings, and a job of a `sensitive` repo makes
+  the result personal-class (`ReadResult.data_class`, the Phase 5 GitHub
+  precedent). Each tool is offered to the router only where the workspace
+  has something to read (a live-source session / a harness job), so existing
+  read-vocabulary behaviour is unchanged elsewhere. No summarisation call:
+  the normal `chat` completion answers from the fenced block (e2e test with
+  the FakeAdapter: purposes `router.intent`, `router.connector_args`,
+  `chat`).
+- **`self` anchors.** `GET /api/v1/ai/self-sources`
+  (`assistant/self_views.py`; owner, web session, default authentication so
+  every PAT kind gets 401): the committed snapshot as a flat anchor list
+  (identity, rules, each accepted ADR's decision line, current phase) with
+  `file:line`. Lives in `assistant` because `memory` may not import it.
+- **Frontend.** BFF routes under `frontend/src/app/api/memory/` (segments,
+  labels and action names validated before interpolation; `proxyDelete` and
+  `workspaceSuffix` added to `lib/bff-proxy.ts`). Pages `/memory/learning`
+  (`LearningCardView`), `/memory/ingestion` (`IngestionView`; sources live in
+  the owner's personal workspace whatever workspace is active),
+  `/memory/core-blocks` (`CoreBlocksView`, active workspace; edits send
+  `base_version`; rollback = confirm dialog; `self` shows no edit/rollback
+  control) and `/sessions` (`SessionsView`: coding sessions across the
+  owner's workspaces + the active workspace's harness jobs, composed
+  client-side). HUD: `HudSessionsPanel` fills the Phase 6 sessions slot and
+  `HudLearningPanel` shows the pending count — both read-only with deep links
+  (D8). Nav: "Oturumlar" (work) and "Sabah kartı" (memory); the sidebar
+  marks only the most specific matching item. `/sessions` added to the
+  proxy guard. Cross-workspace query keys (`learningDigest`,
+  `codingSessions`, `selfSources`) live under `ALL_WORKSPACES`. New status
+  domain `codingSession` maps onto the checked tones; the HUD panel uses only
+  HUD text tokens already contrast-checked on `--hud-surface` (test).
+- Tests: `tools/tests/test_coding_sessions_read.py`,
+  `harness/tests/test_jobs_read_tool.py`,
+  `assistant/tests/test_owner_read_tools.py` (chat e2e, CLI never offered the
+  tool, fence, self-sources role matrix); vitest
+  `src/app/api/memory/memory-routes.test.ts`,
+  `components/memory/{LearningCardView,IngestionView,CoreBlocksView,SessionsView}.test.tsx`,
+  `components/shell/nav.test.ts`, token/tone checks in
+  `lib/theme/tokens.test.ts`.
+
+### Owner steps (pending) — `feat/p8-learning-ui`, recorded 2026-11-20
+
+1. Deploy (no migration) and open `/memory/learning`, `/memory/ingestion`,
+   `/memory/core-blocks` and `/sessions` from a trusted device: run one full
+   morning review (approve, edit, reject one item each), inspect every
+   source, forget and restore one source and check the counts in the dialog
+   match the audit view.
+2. Repeat the review and the sessions page at phone width (real phone or
+   devtools 375 px): no horizontal page scroll; the counters table scrolls
+   inside its own box.
+3. Manual pass with a real model (CI uses the fake provider): in a web chat
+   ask "Claude Code oturumlarım ne yapıyor?" while a hooked Claude Code
+   session is live on the Mac, and check the answer comes from the fenced
+   session list (and harness jobs where present) of that workspace only.
+4. Write the `developer` block from the editor (owner step 2 of branch 2).
+5. Independent Sonnet 5 review of this branch before merge.
+
+Note (branch 6 run, 2026-11-20): one full-suite run hit a flaky failure in
+the branch 4 test
+`harness/tests/test_commit_ingestion.py::test_harness_branch_and_produced_commits_keep_metadata_only`
+(the commit dated "now" missing from the ingested set under load). It is not
+touched by this branch; the file passes 3/3 alone and `harness/tests` passes
+in full. Worth a look at the fixture's commit dates vs the
+`--shallow-since` window.
+

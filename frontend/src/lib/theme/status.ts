@@ -3,6 +3,7 @@ import type {
   AgentStepStatus,
   ApprovalStatus,
   CiConclusion,
+  CodingSessionStatus,
   ConnectorWriteStatus,
   DeployRunStatus,
   HarnessJobStatus,
@@ -129,6 +130,13 @@ export const STATUS_TONES = {
     missing: "danger",
     unchecked: "neutral",
   },
+  // Phase 8A branch 6: a coding session waiting on the owner is a warning.
+  codingSession: {
+    running: "info",
+    waiting_for_owner: "warning",
+    stopped: "neutral",
+    stale: "neutral",
+  },
 } as const satisfies {
   approval: Record<ApprovalStatus, StatusTone>;
   agent: Record<AgentStatus, StatusTone>;
@@ -143,6 +151,7 @@ export const STATUS_TONES = {
   connectorWrite: Record<ConnectorWriteStatus, StatusTone>;
   ci: Record<CiConclusion, StatusTone>;
   pin: Record<"ok" | "mismatch" | "missing" | "unchecked", StatusTone>;
+  codingSession: Record<CodingSessionStatus, StatusTone>;
 };
 
 export type StatusDomain = keyof typeof STATUS_TONES;

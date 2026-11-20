@@ -26,6 +26,12 @@ vi.mock("@/components/voice/VoiceView", () => ({
   VoiceView: ({ variant }: { variant: string }) => <div data-testid="voice-view-stub" data-variant={variant} />,
 }));
 
+// The Phase 8A cards fetch through TanStack Query (tested in HudLearningPanels.test).
+vi.mock("@/components/hud/HudLearningPanels", () => ({
+  HudSessionsPanel: () => <section data-testid="hud-sessions" data-slot="sessions" />,
+  HudLearningPanel: () => <section data-testid="hud-learning" />,
+}));
+
 vi.mock("@/components/hud/orb/HudOrbGL", () => ({
   default: () => <div data-testid="hud-orb-gl-stub" />,
 }));
@@ -290,9 +296,10 @@ describe("HudView (A8)", () => {
     expect(screen.getByTestId("hud")).toHaveAttribute("data-fps", "30");
   });
 
-  it("leaves a sessions slot for Phase 8A", () => {
+  it("renders the Phase 8A sessions panel in its slot and the morning-card summary", () => {
     setup();
-    expect(screen.getByTestId("hud-sessions-slot")).toHaveAttribute("data-slot", "sessions");
+    expect(screen.getByTestId("hud-sessions")).toHaveAttribute("data-slot", "sessions");
+    expect(screen.getByTestId("hud-learning")).toBeInTheDocument();
   });
 
   it("remembers the battery and earcon toggles per device", () => {

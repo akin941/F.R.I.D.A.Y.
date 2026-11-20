@@ -8,7 +8,7 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
-import { NAV_GROUPS, isActivePath, type NavBadge } from "@/components/shell/nav";
+import { NAV_GROUPS, activeNavHref, type NavBadge } from "@/components/shell/nav";
 import { WorkspaceSwitcher } from "@/components/shell/WorkspaceSwitcher";
 import { ThemeToggle } from "@/components/theme/ThemeToggle";
 import { VoiceMuteToggle } from "@/components/shell/VoiceMuteToggle";
@@ -77,6 +77,7 @@ function NavBadgeView({ info }: { info: BadgeInfo }) {
 
 export function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
   const pathname = usePathname();
+  const activeHref = activeNavHref(pathname ?? "");
   const router = useRouter();
   const { user, loading, activeWorkspace } = useWorkspace();
   const activity = useActivitySummary(!loading && user != null);
@@ -109,7 +110,7 @@ export function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
             </p>
             <ul aria-labelledby={`${idPrefix}-${group.id}`} className="flex flex-col gap-0.5">
               {group.items.map((item) => {
-                const active = isActivePath(pathname, item.href);
+                const active = activeHref === item.href;
                 const badge = badgeFor(item.badge, activity.data, activeWorkspace?.id);
                 const Icon = item.icon;
                 return (
