@@ -253,3 +253,125 @@ class MemoryExtractionJob(WorkspaceScopedModel, TimestampedModel):
 
     def __str__(self):
         return f"extraction job {self.id} ({self.status})"
+
+
+class CoreMemoryBlock(WorkspaceScopedModel, TimestampedModel):
+    """Always-in-prompt core memory (Phase 8A D7).
+
+    One row per `(workspace, label)`. `self` lives in the owner's personal
+    workspace and is written only by `memory.services.
+    set_assembled_self_block` (the deterministic assembler, D8);
+    `developer`/`preferences` are the owner's personal blocks (personal
+    workspace only); `current_focus`/`active_projects` exist per workspace.
+    Every content change appends a `CoreMemoryBlockVersion`; char budgets
+    live in `memory.core_blocks`, the who-writes-what rules in
+    `memory.services`.
+    """
+
+    class Label(models.TextChoices):
+        SELF = "self"
+        DEVELOPER = "developer"
+        CURRENT_FOCUS = "current_focus"
+        ACTIVE_PROJECTS = "active_projects"
+        PREFERENCES = "preferences"
+
+    class WriterKind(models.TextChoices):
+        OWNER = "owner"
+        ASSEMBLER = "assembler"
+        APPROVED_PROPOSAL = "approved_proposal"
+
+    label = models.CharField(max_length=32, choices=Label.choices)
+    content = models.TextField(blank=True, default="")
+    # sha256 of `content`: the assembler writes a new version only when it
+    # changes (D8).
+    content_hash = models.CharField(max_length=64, blank=True, default="")
+    version = models.PositiveIntegerField(default=0)
+    sensitivity = models.CharField(
+        max_length=20, choices=Memory.Sensitivity.choices, default=Memory.Sensitivity.NORMAL
+    )
+    updated_by_kind = models.CharField(max_length=24, choices=WriterKind.choices)
+    updated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="+",
+    )
+
+    class Meta:
+        ordering = ["label"]
+        constraints = [
+            models.UniqueConstraint(fields=["workspace", "label"], name="unique_core_block_label")
+        ]
+
+    def __str__(self):
+        return f"core block {self.label} v{self.version}"
+
+
+class CoreMemoryBlockVersion(WorkspaceScopedModel, TimestampedModel):
+    """Immutable history: one row per content version of a block (the
+    current one included), so the owner can view and roll back (D7)."""
+
+    block = models.ForeignKey(CoreMemoryBlock, on_delete=models.CASCADE, related_name="versions")
+    version = models.PositiveIntegerField()
+    content = models.TextField(blank=True, default="")
+    content_hash = models.CharField(max_length=64)
+    sensitivity = models.CharField(max_length=20, choices=Memory.Sensitivity.choices)
+    updated_by_kind = models.CharField(max_length=24, choices=CoreMemoryBlock.WriterKind.choices)
+    updated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="+",
+    )
+
+    class Meta:
+        ordering = ["-version"]
+        constraints = [
+            models.UniqueConstraint(fields=["block", "version"], name="unique_core_block_version")
+        ]
+
+    def __str__(self):
+        return f"core block {self.block_id} v{self.version}"
+
+
+class CoreBlockProposal(WorkspaceScopedModel, TimestampedModel):
+    """A model-made (`inferred=True`) proposed new content for a core block
+    (D7, D9). Never applied without a per-item owner approval over the web
+    channel; a proposal whose `base_version` is stale is refused at
+    approval. The producer (nightly consolidation) lands in Phase 8A branch
+    5, which also adds the `ingestion_source` FK (the `IngestionSource`
+    table comes from branch 1); this branch ships the model and services.
+    """
+
+    class Status(models.TextChoices):
+        PENDING = "pending"
+        APPROVED = "approved"
+        REJECTED = "rejected"
+
+    label = models.CharField(max_length=32, choices=CoreMemoryBlock.Label.choices)
+    proposed_content = models.TextField()
+    # Rendered unified line diff of base content -> proposed content.
+    diff = models.TextField(blank=True, default="")
+    base_version = models.PositiveIntegerField(default=0)
+    provenance_quote = models.CharField(max_length=300)
+    # Plain UUID, not an FK: the episode may expire (D2, d10).
+    source_episode_id = models.UUIDField(null=True, blank=True)
+    inferred = models.BooleanField(default=True)
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDING)
+    decided_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="+",
+    )
+    decided_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [models.Index(fields=["workspace", "status"])]
+
+    def __str__(self):
+        return f"core block proposal {self.label} ({self.status})"

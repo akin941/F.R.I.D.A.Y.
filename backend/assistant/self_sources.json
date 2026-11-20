@@ -1,0 +1,260 @@
+{
+  "version": 1,
+  "identity": {
+    "file": "CLAUDE.md",
+    "line": 3,
+    "text": "Friday OS is a personal-first Personal AI Operating System + a platform core that workplaces can integrate with."
+  },
+  "rules": [
+    {
+      "file": "CLAUDE.md",
+      "line": 15,
+      "text": "Workspace scoping is inviolable."
+    },
+    {
+      "file": "CLAUDE.md",
+      "line": 19,
+      "text": "The AI Gateway is the single door."
+    },
+    {
+      "file": "CLAUDE.md",
+      "line": 21,
+      "text": "Every LLM call will be recorded as ModelUsage"
+    },
+    {
+      "file": "CLAUDE.md",
+      "line": 24,
+      "text": "No write/delete/deploy/external-send without the approval gate."
+    },
+    {
+      "file": "CLAUDE.md",
+      "line": 28,
+      "text": "LLM-calling code must be mockable."
+    },
+    {
+      "file": "CLAUDE.md",
+      "line": 30,
+      "text": "Modular monolith dependencies are one-way:"
+    },
+    {
+      "file": "CLAUDE.md",
+      "line": 33,
+      "text": "No feature without tests."
+    },
+    {
+      "file": "CLAUDE.md",
+      "line": 35,
+      "text": "Ruff, pytest and CI must be green"
+    },
+    {
+      "file": "CLAUDE.md",
+      "line": 36,
+      "text": "Obsidian vault is a mirror, never the primary store."
+    }
+  ],
+  "adrs": [
+    {
+      "id": "ADR-001",
+      "title": "Workspace Is the Data Axis",
+      "file": "docs/adr/ADR-001-workspace-axis.md",
+      "status": {
+        "line": 4,
+        "text": "Accepted"
+      },
+      "decision": {
+        "line": 17,
+        "text": "Every business table carries a `workspace_id`."
+      }
+    },
+    {
+      "id": "ADR-002",
+      "title": "Django Modular Monolith",
+      "file": "docs/adr/ADR-002-modular-monolith.md",
+      "status": {
+        "line": 4,
+        "text": "Accepted"
+      },
+      "decision": {
+        "line": 12,
+        "text": "Single Django project; each module is a Django app."
+      }
+    },
+    {
+      "id": "ADR-003",
+      "title": "AI Gateway Is the Single Door",
+      "file": "docs/adr/ADR-003-ai-gateway-single-door.md",
+      "status": {
+        "line": 4,
+        "text": "Accepted"
+      },
+      "decision": {
+        "line": 11,
+        "text": "Every LLM call — chat, extraction, embeddings, agent steps, skills, external CLI backends' usage reports — goes through `ai_core`'s InferenceGateway and writes a ModelUsage row (tokens, cost, latency, purpose, workspace, prompt version, ro…"
+      }
+    },
+    {
+      "id": "ADR-004",
+      "title": "Approval Gate Rules",
+      "file": "docs/adr/ADR-004-approval-gate-rules.md",
+      "status": {
+        "line": 4,
+        "text": "Accepted"
+      },
+      "decision": {
+        "line": 11,
+        "text": "Write/delete/deploy/external-send actions require an ApprovalRequest approved by a human."
+      }
+    },
+    {
+      "id": "ADR-005",
+      "title": "Memory Governance",
+      "file": "docs/adr/ADR-005-memory-governance.md",
+      "status": {
+        "line": 4,
+        "text": "Accepted"
+      },
+      "decision": {
+        "line": 12,
+        "text": "PostgreSQL is the source of truth for memory; the Obsidian vault is a human-readable mirror (export) plus a human-authored ingestion source — never the primary store."
+      }
+    },
+    {
+      "id": "ADR-006",
+      "title": "Workplace Products Are External Installations, Not Friday Module Packs",
+      "file": "docs/adr/ADR-006-external-workplace-products.md",
+      "status": {
+        "line": 4,
+        "text": "Accepted (2026-07-07)"
+      },
+      "decision": {
+        "line": 16,
+        "text": "Workplace products are out of Friday's scope as in-repo code."
+      }
+    },
+    {
+      "id": "ADR-007",
+      "title": "Voice Assistant Moves Up the Roadmap",
+      "file": "docs/adr/ADR-007-voice-assistant-priority.md",
+      "status": {
+        "line": 4,
+        "text": "Accepted (2026-07-16)"
+      },
+      "decision": {
+        "line": 19,
+        "text": "Voice assistant work is promoted out of the unscoped \"last\" bucket into a named slot: MVP 12 (the first of the MVP 12–15 slots reserved by ADR-006), with a vision section at MASTER_PLAN §Z mirroring §P's format."
+      }
+    },
+    {
+      "id": "ADR-008",
+      "title": "Friday 2.0 — Single-Owner System, Agent Harness, Phase Roadmap",
+      "file": "docs/adr/ADR-008-friday-2-single-owner-harness.md",
+      "status": {
+        "line": 4,
+        "text": "Accepted (2026-07-17)"
+      },
+      "decision": {
+        "line": 26,
+        "text": "Option C is binding."
+      }
+    },
+    {
+      "id": "ADR-009",
+      "title": "Owner Deletes Are Reversible (Confirm-Class); Permanent Purge Is Gate-Class",
+      "file": "docs/adr/ADR-009-owner-deletes-confirm-class.md",
+      "status": {
+        "line": 4,
+        "text": "Accepted (2026-09-27, Phase 4 branch 2 — `docs/prompts/phase-4-identity-ui/brief.md`,"
+      },
+      "decision": {
+        "line": 29,
+        "text": "ADR-008's confirm-class definition stays exactly as written."
+      }
+    },
+    {
+      "id": "ADR-010",
+      "title": "Phase 5 — Connectors, Deploys, MCP Client",
+      "file": "docs/adr/ADR-010-connectors-deploys-mcp.md",
+      "status": {
+        "line": 4,
+        "text": "Accepted (2026-09-27, Phase 5 branch 1 — `docs/prompts/phase-5-deploy-mcp/brief.md`,"
+      },
+      "decision": {
+        "line": 36,
+        "text": "Two new kernel apps, one-way contracts."
+      }
+    },
+    {
+      "id": "ADR-011",
+      "title": "Voice Transport",
+      "file": "docs/adr/ADR-011-voice-transport.md",
+      "status": {
+        "line": 4,
+        "text": "Accepted 2026-11-20 — Phase 6 branch 1 (`feat/p6-speech-gateway`), as"
+      },
+      "decision": {
+        "line": 23,
+        "text": "Voice is a transport, not a pipeline."
+      }
+    },
+    {
+      "id": "ADR-012",
+      "title": "Continuous-Learning Ingestion Behind a Privacy Pipeline",
+      "file": "docs/adr/ADR-012-continuous-learning-ingestion.md",
+      "status": {
+        "line": 4,
+        "text": "Accepted 2026-11-20 — owner approval of the Friday 3.0 roadmap"
+      },
+      "decision": {
+        "line": 34,
+        "text": "Source registry."
+      }
+    },
+    {
+      "id": "ADR-013",
+      "title": "Friday Node Protocol",
+      "file": "docs/adr/ADR-013-friday-node-protocol.md",
+      "status": {
+        "line": 4,
+        "text": "Accepted 2026-11-20 — owner approval of the Friday 3.0 roadmap"
+      },
+      "decision": {
+        "line": 29,
+        "text": "Shape (d1, d9)."
+      }
+    },
+    {
+      "id": "ADR-014",
+      "title": "Friday Node Action Classification",
+      "file": "docs/adr/ADR-014-node-action-classification.md",
+      "status": {
+        "line": 4,
+        "text": "Accepted 2026-11-20 — owner approval of the Friday 3.0 roadmap"
+      },
+      "decision": {
+        "line": 30,
+        "text": "Anything not listed is gate-class."
+      }
+    },
+    {
+      "id": "ADR-015",
+      "title": "Voice-Originated Turns and the Always-On Microphone",
+      "file": "docs/adr/ADR-015-voice-originated-turns.md",
+      "status": {
+        "line": 4,
+        "text": "Accepted 2026-11-20 — owner approval of the Friday 3.0 roadmap"
+      },
+      "decision": {
+        "line": 25,
+        "text": "Capability cap."
+      }
+    }
+  ],
+  "phase": {
+    "file": "docs/MASTER_PLAN.md",
+    "line": 983,
+    "phase": "8A Learning memory core (server only)",
+    "outcome": "Vertical slice complete: talk to Friday, it knows itself and you, shows your Claude Code sessions, learns from yesterday",
+    "status": "planned (brief drafted 2026-11-20, awaiting plan review)"
+  },
+  "content_hash": "e8499d078e36bb3d85b28157c6b976f521ad28a962fc835fe673423b2d593219"
+}

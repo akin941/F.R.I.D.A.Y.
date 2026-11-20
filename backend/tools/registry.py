@@ -285,6 +285,13 @@ def get_read_tool(name: str) -> ReadToolSpec | None:
     return _READ_REGISTRY.get(name)
 
 
+def list_read_tool_names() -> list[str]:
+    """Every registered read tool's name, sorted -- names only, no
+    availability check (Phase 8A D8: the `self` block lists what Friday can
+    read in general, never which workspace has a binding)."""
+    return sorted(_READ_REGISTRY)
+
+
 def list_read_tools(*, workspace, channel) -> list[ReadToolSpec]:
     """The read tools the router may offer for one turn: those allowed over
     `channel` whose connector has an enabled binding in `workspace`. Both

@@ -87,6 +87,12 @@ _BEAT_SCHEDULE = {
         "task": "knowledge.tasks.purge_expired_trashed_documents_task",
         "schedule": 24 * 60 * 60.0,
     },
+    # Phase 8A D8: re-assemble the deterministic `self` core block (no
+    # model call; a new version only when its sources changed).
+    "assistant-self-block-assembly": {
+        "task": "assistant.tasks.assemble_self_block_task",
+        "schedule": 24 * 60 * 60.0,
+    },
     # Phase 6 A5: voice turn traces (timings only) live VOICE_TRACE_RETENTION_DAYS.
     "voice-turn-trace-prune": {
         "task": "voice.tasks.prune_voice_turn_traces_task",

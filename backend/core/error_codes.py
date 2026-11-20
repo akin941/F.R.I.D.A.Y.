@@ -74,6 +74,11 @@ DOMAIN_ERROR_CODES = frozenset(
         "memory.permission_denied",
         "memory.invalid_transition",
         "memory.duplicate",
+        # Core memory blocks (Phase 8A branch 2, D7).
+        "memory.core_block.permission_denied",
+        "memory.core_block.invalid",
+        "memory.core_block.stale_version",
+        "memory.core_block.weekly_cap",
         "task.permission_denied",
         "task.invalid_transition",
         "task.draft_already_confirmed",

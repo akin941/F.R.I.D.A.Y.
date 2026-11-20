@@ -8,10 +8,23 @@ from rest_framework.views import APIView
 
 from core.api_errors import service_error_response
 from core.channels import request_channel
-from core.permissions import IsWebChannel
-from memory.models import Memory
-from memory.serializers import MemoryCreateSerializer, MemoryCurateSerializer, MemorySerializer
+from core.permissions import IsOwner, IsWebChannel
+from memory.core_blocks import (
+    CORE_BLOCK_CHAR_BUDGETS,
+    CORE_BLOCK_ORDER,
+    OWNER_EDITABLE_LABELS,
+    labels_for_workspace,
+)
+from memory.models import CoreMemoryBlock, CoreMemoryBlockVersion, Memory
+from memory.serializers import (
+    CoreBlockRollbackSerializer,
+    CoreBlockUpdateSerializer,
+    MemoryCreateSerializer,
+    MemoryCurateSerializer,
+    MemorySerializer,
+)
 from memory.services import (
+    CoreBlockInvalid,
     DuplicateMemory,
     InvalidTransition,
     MemoryPermissionDenied,
@@ -20,10 +33,13 @@ from memory.services import (
     delete_memory,
     edit_memory,
     forget_memory,
+    record_core_block_view,
     record_export,
     record_read,
     reject_memory,
     restore_memory,
+    rollback_core_block,
+    update_core_block,
 )
 from workspaces.models import Workspace
 
@@ -198,3 +214,133 @@ class MemoryExportView(APIView):
         response["Cache-Control"] = "no-store"
         response["Content-Disposition"] = 'attachment; filename="friday-memories.json"'
         return response
+
+
+# --- Core memory blocks (Phase 8A D7) ---
+#
+# Owner only, trusted web session only (no PAT allowlist: a cli/openai
+# token is refused by authentication itself), `for_actor()` workspace
+# resolution (another workspace -> 404). `self` is listed read-only and can
+# never be written here: its only writer is the deterministic assembler.
+
+_CORE_BLOCK_PERMISSIONS = [IsAuthenticated, IsWebChannel, IsOwner]
+
+
+def _core_block_error_response(exc):
+    if isinstance(exc, CoreBlockInvalid):
+        return service_error_response(exc, status.HTTP_400_BAD_REQUEST)
+    return _service_error_response(exc)
+
+
+def _block_payload(label, block):
+    return {
+        "label": label,
+        "content": block.content if block else "",
+        "version": block.version if block else 0,
+        "sensitivity": block.sensitivity if block else Memory.Sensitivity.NORMAL,
+        "updated_by_kind": block.updated_by_kind if block else None,
+        "updated_at": block.updated_at.isoformat() if block else None,
+        "char_budget": CORE_BLOCK_CHAR_BUDGETS[label],
+        "editable": label in OWNER_EDITABLE_LABELS,
+    }
+
+
+class CoreBlockListView(APIView):
+    permission_classes = _CORE_BLOCK_PERMISSIONS
+
+    def get(self, request):
+        workspace, error = _resolve_workspace(request)
+        if error is not None:
+            return error
+        blocks = {
+            b.label: b for b in CoreMemoryBlock.objects.for_actor(request.user, workspace=workspace)
+        }
+        allowed = labels_for_workspace(workspace)
+        labels = [label for label in CORE_BLOCK_ORDER if label in allowed]
+        record_core_block_view(actor=request.user, workspace=workspace, labels=labels)
+        return Response([_block_payload(label, blocks.get(label)) for label in labels])
+
+
+class CoreBlockDetailView(APIView):
+    permission_classes = _CORE_BLOCK_PERMISSIONS
+
+    def get(self, request, label):
+        workspace, error = _resolve_workspace(request)
+        if error is not None:
+            return error
+        if label not in labels_for_workspace(workspace):
+            return Response(status=status.HTTP_404_NOT_FOUND)
+        block = (
+            CoreMemoryBlock.objects.for_actor(request.user, workspace=workspace)
+            .filter(label=label)
+            .first()
+        )
+        record_core_block_view(actor=request.user, workspace=workspace, labels=[label])
+        return Response(_block_payload(label, block))
+
+    def patch(self, request, label):
+        workspace, error = _resolve_workspace(request)
+        if error is not None:
+            return error
+        serializer = CoreBlockUpdateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            block = update_core_block(
+                workspace=workspace,
+                label=label,
+                actor=request.user,
+                channel=request_channel(request),
+                **serializer.validated_data,
+            )
+        except (MemoryPermissionDenied, InvalidTransition, CoreBlockInvalid) as exc:
+            return _core_block_error_response(exc)
+        return Response(_block_payload(label, block))
+
+
+class CoreBlockVersionListView(APIView):
+    permission_classes = _CORE_BLOCK_PERMISSIONS
+
+    def get(self, request, label):
+        workspace, error = _resolve_workspace(request)
+        if error is not None:
+            return error
+        if label not in labels_for_workspace(workspace):
+            return Response(status=status.HTTP_404_NOT_FOUND)
+        versions = CoreMemoryBlockVersion.objects.for_actor(
+            request.user, workspace=workspace
+        ).filter(block__label=label)
+        record_core_block_view(actor=request.user, workspace=workspace, labels=[label])
+        return Response(
+            [
+                {
+                    "version": v.version,
+                    "content": v.content,
+                    "sensitivity": v.sensitivity,
+                    "updated_by_kind": v.updated_by_kind,
+                    "created_at": v.created_at.isoformat(),
+                }
+                for v in versions.order_by("-version")
+            ]
+        )
+
+
+class CoreBlockRollbackView(APIView):
+    permission_classes = _CORE_BLOCK_PERMISSIONS
+
+    def post(self, request, label):
+        workspace, error = _resolve_workspace(request)
+        if error is not None:
+            return error
+        serializer = CoreBlockRollbackSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            block = rollback_core_block(
+                workspace=workspace,
+                label=label,
+                version=serializer.validated_data["version"],
+                actor=request.user,
+                channel=request_channel(request),
+            )
+        except (MemoryPermissionDenied, InvalidTransition, CoreBlockInvalid) as exc:
+            return _core_block_error_response(exc)
+        return Response(_block_payload(label, block))

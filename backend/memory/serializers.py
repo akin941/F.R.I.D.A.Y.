@@ -44,6 +44,19 @@ class MemoryCreateSerializer(serializers.Serializer):
         return value
 
 
+class CoreBlockUpdateSerializer(serializers.Serializer):
+    """Owner edit of a core block (Phase 8A D7). Budgets are checked by the
+    service (`memory.core_blocks.CORE_BLOCK_CHAR_BUDGETS`)."""
+
+    content = serializers.CharField(trim_whitespace=False, allow_blank=True, max_length=5000)
+    sensitivity = serializers.ChoiceField(choices=Memory.Sensitivity.choices, required=False)
+    base_version = serializers.IntegerField(min_value=0, required=False)
+
+
+class CoreBlockRollbackSerializer(serializers.Serializer):
+    version = serializers.IntegerField(min_value=1)
+
+
 class MemoryCurateSerializer(serializers.Serializer):
     """Optional curated fields for edit and approve-with-curation."""
 

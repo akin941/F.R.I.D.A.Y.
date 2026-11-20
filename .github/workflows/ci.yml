@@ -50,6 +50,11 @@ jobs:
       - name: Missing migrations check
         run: uv run python manage.py makemigrations --check --dry-run
 
+      # Phase 8A D8: the `self` block's source snapshot must match CLAUDE.md,
+      # the accepted ADRs and the MASTER_PLAN phases table.
+      - name: Self sources snapshot check
+        run: uv run python manage.py build_self_sources --check
+
       # Production settings must import from a complete environment and
       # pass Django's deployment checklist (Phase 4 branch 1). Dummy values
       # only -- the secret key is generated per run, never committed.
