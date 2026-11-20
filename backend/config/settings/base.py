@@ -273,6 +273,8 @@ REST_FRAMEWORK = {
         "cost": "60/hour",
         "voice_stt": env("VOICE_STT_RATE", default="20/min"),
         "voice_tts": env("VOICE_TTS_RATE", default="120/min"),
+        # Phase 6 branch 3: the "bu ne kadar tuttu?" receipt read.
+        "voice_receipt": env("VOICE_RECEIPT_RATE", default="30/min"),
     },
 }
 

@@ -370,3 +370,84 @@ class TestPermissionMatrixTransitions:
         )
         response = web_client(user).post(f"/api/v1/memories/{row.id}/forget", format="json")
         assert response.status_code == 403
+
+
+class TestVoiceProposal:
+    """Phase 6 branch 3 (ADR-015, brief A6): the voice route "hatırla ki ..."
+    creates a `pending_approval` proposal through this same create path --
+    never an approved row -- that the owner approves by click."""
+
+    def test_proposal_is_born_pending_and_user_created(self, workspace, owner, web_client):
+        response = web_client(owner).post(
+            "/api/v1/memories", create_payload(workspace, proposal=True), format="json"
+        )
+        assert response.status_code == 201
+        body = response.json()
+        assert body["status"] == "pending_approval"
+        assert body["source"] == "user_created"
+        memory = Memory.objects.get(id=body["id"])
+        assert memory.status == Memory.Status.PENDING_APPROVAL
+        assert memory.embedding is None
+        entry = AuditLog.objects.get(action="memory.created")
+        assert entry.metadata["status"] == "pending_approval"
+        assert entry.metadata["proposal"] is True
+        assert "content" not in entry.metadata and "title" not in entry.metadata
+
+    def test_proposal_cannot_request_a_status(self, workspace, owner, web_client):
+        response = web_client(owner).post(
+            "/api/v1/memories",
+            {**create_payload(workspace, proposal=True), "status": "approved"},
+            format="json",
+        )
+        assert response.status_code == 201
+        assert response.json()["status"] == "pending_approval"
+
+    def test_default_create_is_still_approved(self, workspace, owner, web_client):
+        response = web_client(owner).post(
+            "/api/v1/memories", create_payload(workspace), format="json"
+        )
+        assert response.json()["status"] == "approved"
+        assert "proposal" not in AuditLog.objects.get(action="memory.created").metadata
+
+    def test_owner_approves_the_proposal_by_click(self, workspace, owner, web_client):
+        client = web_client(owner)
+        created = client.post(
+            "/api/v1/memories", create_payload(workspace, proposal=True), format="json"
+        ).json()
+        response = client.post(f"/api/v1/memories/{created['id']}/approve", format="json")
+        assert response.status_code == 200
+        assert Memory.objects.get(id=created["id"]).status == Memory.Status.APPROVED
+
+    @pytest.mark.parametrize(
+        "role,expected",
+        [
+            (WorkspaceMember.Role.OWNER, 201),
+            (WorkspaceMember.Role.ADMIN, 201),
+            (WorkspaceMember.Role.MEMBER, 201),
+            (WorkspaceMember.Role.VIEWER, 403),
+        ],
+    )
+    def test_proposal_role_matrix(self, workspace, role, expected, web_client):
+        user = user_with_role(workspace, role, f"proposal-{role}@test.dev")
+        response = web_client(user).post(
+            "/api/v1/memories", create_payload(workspace, proposal=True), format="json"
+        )
+        assert response.status_code == expected
+        if expected == 201:
+            assert response.json()["status"] == "pending_approval"
+
+    def test_proposal_into_another_workspace_is_404(self, workspace, outsider, web_client):
+        response = web_client(outsider).post(
+            "/api/v1/memories", create_payload(workspace, proposal=True), format="json"
+        )
+        assert response.status_code == 404
+        assert not Memory.objects.exists()
+
+    def test_pending_proposal_is_never_context(self, workspace, owner, web_client):
+        from memory.context import select_context_memories
+
+        web_client(owner).post(
+            "/api/v1/memories", create_payload(workspace, proposal=True), format="json"
+        )
+        selected = select_context_memories(actor=owner, workspace=workspace, query_text="")
+        assert selected == []

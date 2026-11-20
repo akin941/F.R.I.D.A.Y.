@@ -53,3 +53,11 @@ class SpeechCreateSerializer(serializers.Serializer):
         if value not in known:
             raise serializers.ValidationError("Unsupported language.")
         return value
+
+
+class ReceiptQuerySerializer(serializers.Serializer):
+    """`GET /api/v1/voice/receipt` query: the conversation (scoped through
+    `for_actor()` by the view) and, optionally, the turn's trace id."""
+
+    conversation = serializers.UUIDField()
+    trace = serializers.UUIDField(required=False)

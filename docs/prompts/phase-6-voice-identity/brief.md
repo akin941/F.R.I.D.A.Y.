@@ -887,6 +887,117 @@ no playback call; mute-state read failure releases the mic track; a
 spoken "evet" never produces a confirmation without a receipt id; voice
 routes never call the decision helpers (extends the D8 scan).
 
+**Branch 3 — implementation notes (2026-11-20).**
+- `frontend/src/lib/voice/`: `capture-worklet.ts` (self-contained
+  AudioWorklet source: mono mix, 16 kHz downsampling, RMS per frame, a flush
+  of the partial frame on stop; tests evaluate that exact string), `capture.ts`
+  (`getUserMedia` with echo cancellation → worklet → PCM16 chunks; the mic
+  track is released on every exit; the 30 s cap; mic errors mapped to
+  `mic_denied` / `mic_missing` / `mic_insecure` / `mic_failed`), `wav.ts`
+  (44-byte RIFF header, data size = bytes sent), `segmenter.ts` (streaming
+  sentence segmentation, 20–300 chars, Turkish/English abbreviations,
+  initials, decimals, never a cut at the end of a chunk; code fences → "Kod
+  ekranda.", tables → "Tablo ekranda.", links → label, half-streamed fences/
+  links held back), `playback.ts` (`Speaker`: one synthesis request in flight
+  + one prefetched, one `AudioContext` + `AnalyserNode`, `stop()` aborts
+  every pending request), `voice-machine.ts` (pure reducer: idle → listening
+  → transcribing → finishing → thinking → speaking → idle | error),
+  `controller.ts` (the loop, framework-free, driven with fakes in tests),
+  `routes.ts`, `receipts.ts`, `mute.ts`, `trace.ts`, `api.ts`, `config.ts`.
+- **Finish window (A7):** `NEXT_PUBLIC_VOICE_FINISH_MS` (900). The
+  `finishing` phase holds the transcript; a press within the window appends
+  the next piece to the same turn (same trace id), otherwise the buffer is
+  routed/dispatched when the window elapses.
+- **Interrupt words (A7):** `dur`, `durdur`, `bekle`, `sus`, `stop`, `yeter`
+  (whole utterance only). They bypass the finish window and the buffer: the
+  buffered utterance is discarded, playback and pending synthesis stop, and
+  no message or speech request is made. Detection is on the transcript (the
+  transcription request has already happened; "without a request" means no
+  turn and no TTS). A mic press while Friday speaks also stops playback
+  (half-duplex, D7; barge-in *by voice* stays out of scope, Q4).
+- **Mute (A6/A7):** `lib/voice/mute.ts` — localStorage flag
+  `friday:voice:muted`, `?mute=1` forces it, an unreadable state reads as
+  muted (`readable: false`). Checked inside the capture path (before the mic
+  opens and on every frame: muted/unreadable → audio discarded, track
+  released) and inside `Speaker.speak` — the single speak function — plus once
+  more before each sentence plays. Shell toggle `components/shell/
+  VoiceMuteToggle.tsx` in the sidebar footer; `sessize al` sets it by voice.
+- **Voice routes before the brain (A7):** `routeTranscript()` — interrupt,
+  `sessize al`, `hatırla ki` / `unutma ki` / `hatırla:` (explicit forms
+  only; "hatırla bakalım …" goes to the brain), `bu ne kadar tuttu?` (and
+  variants), and every spoken yes/approve/reject/cancel word → a fixed reply
+  ("Sesle onay veremem…") and nothing else.
+- **"Hatırla ki" (A6):** the client posts to the existing `POST
+  /api/memories` with `proposal: true`. Branch 3 added that minimal path:
+  `MemoryCreateSerializer.proposal` → `create_memory(proposal=True)` births a
+  `user_created` row as `pending_approval` (audit `memory.created` with
+  `proposal: true`, ids/statuses only). The flag can only weaken a row; a
+  pending row is never embedded or used as context until approved (tested).
+  `voice` (backend) does not import `memory` (D11 unchanged).
+- **"Bu ne kadar tuttu?" (A7):** new read-only `GET /api/v1/voice/receipt?
+  conversation=&trace=` in the `voice` app (owner web session only, the five
+  principals tested, conversation through `for_actor()`, throttle
+  `voice_receipt` 30/min): sums the turn's `ModelUsage` rows by
+  `context_report.trace_id` within the conversation's workspace (calls,
+  failed calls, tokens, audio seconds, estimated cost, purposes, `local_only`)
+  plus today's workspace total — numbers only, no model call, no write. BFF
+  `app/api/voice/receipt/route.ts` forwards only the two UUIDs. The client
+  asks for the previous spoken turn's trace.
+- **Receipts-only confirmations (A7):** `spokenConfirmation()` returns a
+  sentence only for a receipt with a non-empty id (task id, approval-request
+  id, memory id, execution id + status). VoiceView calls
+  `controller.announce()` from the draft cards' `onConfirmed(task)` /
+  `onCreated(request)` callbacks — i.e. after the click created the row. A
+  created approval request is announced as *created*, never as decided.
+- **Voice-turn safety (ADR-015):** a voice turn reads (receipt) and proposes
+  (memory proposal, the chat turn's draft cards) only. Drafts render as the
+  same `TaskDraftCard` / `ToolRequestCard` (`canDecide` stays false);
+  `lib/voice/d8-scan.test.ts` scans every non-test file in `lib/voice/` and
+  `components/voice/` for task/approval endpoints, decision/confirm routes,
+  memory transitions, programmatic clicks, synthetic input events and
+  decision helpers, and pins that the only voice write is the memory proposal.
+  The server-side cap from branch 2 still applies to every `input_mode=voice`
+  turn.
+- **Fail-closed (A6):** a dropped turn connection → error state
+  "Bağlantı kesildi; güvenlik için mikrofon kapatıldı", any capture cancelled;
+  mute read failure → capture refused/stopped and the track released.
+- **Trace (A5):** one UUID per spoken turn on the transcription, message and
+  every speech request; client timings (`end_of_turn_ms` = finish-window
+  wait, `llm_first_sentence_ms`, `playback_start_ms` = release → first audio,
+  `total_ms` = release → last sentence requested) sent with each speech
+  request (the server keeps the latest). Typed turns on `/voice` carry no
+  trace and are not spoken.
+- UI: `VoiceView` mic button (hold ≥ 350 ms = push-to-talk, a short click =
+  toggle, Space hold, keyboard activation toggles), Durdur/Escape, captions
+  (heard + reply) always on, `aria-live` phase text, tab title "● Dinliyor"
+  while the mic is open, "Göndermeden önce göster" (per device), Turkish
+  explanations for mic permission/missing/insecure context,
+  `voice.no_local_provider`, `voice.budget_exceeded`, mute; `FridayOrb`
+  states `idle | armed | listening | transcribing | thinking | speaking |
+  error` on real levels (mic RMS / AnalyserNode; synthetic jitter removed;
+  reduced motion draws one static frame per state); mic badge (`Sesli`) on
+  voice user turns in chat history; "Sesli" back in the "Çalışma" nav group.
+- Not built here (by scope): the server-held voice session id for the A3
+  per-session budget (still `voice:<conversation id>`; VoiceView starts one
+  conversation per page visit/workspace, so the cap is per voice page
+  session in practice), the ADR-015 30 s-silence session close and wake-storm
+  auto-mute (branch 4, wake mode), the self-trigger rule (branch 4).
+
+**Owner steps (pending) — `feat/p6-push-to-talk`, recorded 2026-11-20.**
+1. Done-when on the Mac with local models (Whisper `small`, `llama3.1:8b`,
+   Piper medium): push-to-talk → spoken Turkish answer end to end in Chromium
+   and Safari; record the median end-of-speech → first-audio latency
+   (`VoiceTurnTrace.playback_start_ms`, runbook §5) here with the dominant
+   stage (target ≤ 3 s; ship-with-note ≤ 6 s; hold above).
+2. Re-run the Phase 4 R4b load check with voice STT/TTS requests mixed into
+   the SSE and polling load (no SSE stream starved, no 503 from the pool).
+3. On the Mac: a task drafted by voice is created only after its card is
+   clicked; "hatırla ki …" shows a pending proposal on Hafıza; "bu ne kadar
+   tuttu?" reads a plausible receipt; the shell mute and a `?mute=1` tab are
+   silent; echo cancellation on laptop speakers acceptable (R6).
+4. Listen to the segmenter on real replies (abbreviations, numbers, code)
+   and note any Turkish abbreviation missing from `segmenter.ts`.
+
 ### 3a. `feat/p6-voice-eval` — Turkish evaluation set, replay harness, latency baseline
 
 **Scope.** A4 and A5's measurement side: `docs/voice/eval-manifest.md`
@@ -1059,7 +1170,8 @@ slice.
 | amendment (`docs/friday-3-roadmap`) | **implemented 2026-11-20** (docs only; awaiting Sonnet 5 plan review of the amendment) |
 | 1 `feat/p6-speech-gateway` | **implemented 2026-11-20** (cut from the local integration branch; spike results and owner steps under "Branch 1 — spike results and implementation notes"; awaiting the Sonnet 5 branch review) |
 | 2 `feat/p6-voice-api` | **implemented 2026-11-20** (cut from the local integration branch; notes and owner steps under "Branch 2 — implementation notes"; awaiting the Sonnet 5 branch review) |
-| 3–6 | not started |
+| 3 `feat/p6-push-to-talk` | **implemented 2026-11-20** (cut from the local integration branch; notes and owner steps under "Branch 3 — implementation notes"; awaiting the Sonnet 5 branch review) |
+| 3a–6 | not started |
 
 ## Out of scope (explicit)
 

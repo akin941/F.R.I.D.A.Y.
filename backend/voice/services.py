@@ -22,15 +22,19 @@ follow-up).
 """
 
 import logging
+from decimal import Decimal
 
 from django.conf import settings
 from django.db import IntegrityError, transaction
+from django.db.models import Count, Sum
+from django.utils import timezone
 
 from ai_core.audio import InvalidAudio, normalize_tts_wav, parse_stt_input
 from ai_core.exceptions import BudgetExceeded, GatewayError, NoProviderAvailable
 from ai_core.gateway import InferenceGateway
+from ai_core.models import ModelUsage
 from assistant.models import Message
-from core.tracing import trace_report
+from core.tracing import TRACE_REPORT_KEY, trace_report
 from voice.models import CLIENT_STAGES, MAX_STAGE_MS, VoiceTurnTrace
 
 logger = logging.getLogger(__name__)
@@ -239,3 +243,67 @@ def record_trace(*, conversation, trace_id, server_timings=None, client_timings=
     except IntegrityError:
         logger.warning("voice trace upsert raced; timings dropped")
         return None
+
+
+# A turn has a handful of calls (router, chat, STT, a few TTS sentences); a
+# trace id that matches more rows than this is not one turn.
+_RECEIPT_MAX_ROWS = 200
+
+
+def _money(value):
+    return str((value or Decimal("0")).quantize(Decimal("0.000001")))
+
+
+def usage_receipt(*, conversation, trace_id=""):
+    """The "bu ne kadar tuttu?" voice route (Phase 6 A7): a READ of the
+    `ModelUsage` rows already written -- the cost of the turn that carried
+    `trace_id` (every gateway call of a spoken turn records it, A5) plus
+    today's total in the conversation's workspace. Numbers only: purposes,
+    counts, tokens, audio seconds and the estimated cost; never a prompt,
+    transcript or reply. The conversation was resolved through
+    `for_actor()`, so the workspace is one the actor can reach."""
+    workspace_rows = ModelUsage.objects.filter(workspace=conversation.workspace)
+    turn = None
+    if trace_id:
+        rows = list(
+            workspace_rows.filter(**{f"context_report__{TRACE_REPORT_KEY}": trace_id})
+            .select_related("provider")
+            .order_by("created_at")[:_RECEIPT_MAX_ROWS]
+        )
+        if rows:
+            purposes = {}
+            for row in rows:
+                purposes[row.purpose] = purposes.get(row.purpose, 0) + 1
+            audio_seconds = 0.0
+            for row in rows:
+                value = (row.context_report or {}).get("audio_seconds", 0)
+                if isinstance(value, int | float) and not isinstance(value, bool):
+                    audio_seconds += float(value)
+            turn = {
+                "trace_id": trace_id,
+                "calls": len(rows),
+                "failed_calls": sum(1 for row in rows if not row.success),
+                "input_tokens": sum(row.input_tokens for row in rows),
+                "output_tokens": sum(row.output_tokens for row in rows),
+                "audio_seconds": round(audio_seconds, 3),
+                "estimated_cost": _money(sum((row.estimated_cost for row in rows), Decimal("0"))),
+                "local_only": all(row.provider is None or row.estimated_cost == 0 for row in rows),
+                "purposes": purposes,
+            }
+    start = timezone.localtime().replace(hour=0, minute=0, second=0, microsecond=0)
+    today = workspace_rows.filter(created_at__gte=start).aggregate(
+        calls=Count("id"),
+        input_tokens=Sum("input_tokens"),
+        output_tokens=Sum("output_tokens"),
+        cost=Sum("estimated_cost"),
+    )
+    return {
+        "turn": turn,
+        "today": {
+            "calls": today["calls"] or 0,
+            "input_tokens": today["input_tokens"] or 0,
+            "output_tokens": today["output_tokens"] or 0,
+            "estimated_cost": _money(today["cost"]),
+        },
+        "currency": "USD",
+    }

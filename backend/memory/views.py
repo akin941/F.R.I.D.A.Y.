@@ -105,6 +105,7 @@ class MemoryListCreateView(APIView):
                 content=serializer.validated_data["content"],
                 memory_type=serializer.validated_data["memory_type"],
                 sensitivity=serializer.validated_data["sensitivity"],
+                proposal=serializer.validated_data["proposal"],
             )
         except (MemoryPermissionDenied, InvalidTransition, DuplicateMemory) as exc:
             return _service_error_response(exc)

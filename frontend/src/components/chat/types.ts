@@ -2,6 +2,7 @@ import type {
   ApiConnectorRead,
   ApiMessage,
   MessageChannel,
+  MessageInputMode,
   MessageIntent,
   MessageRole,
   MessageStatus,
@@ -19,6 +20,8 @@ export interface ChatMessageView {
   status: MessageStatus | "streaming";
   local?: boolean;
   channel?: MessageChannel;
+  // Provenance only (Phase 6 D9): a spoken turn shows a mic badge.
+  inputMode?: MessageInputMode;
   intent?: MessageIntent;
   intentPayload?: Record<string, unknown>;
   confirmedTask?: string | null;
@@ -43,6 +46,7 @@ export function toView(message: ApiMessage): ChatMessageView {
     content: message.content,
     status: message.status,
     channel: message.channel,
+    inputMode: message.input_mode,
     intent: message.intent,
     intentPayload: message.intent_payload,
     confirmedTask: message.confirmed_task ?? null,
