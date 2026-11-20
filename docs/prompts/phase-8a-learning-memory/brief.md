@@ -519,7 +519,9 @@ pauses, trashes, is reversible, requires `CHANNEL_WEB` and a human actor
 episodes and vice versa. Owner APIs (sources enable/pause, mapping rules,
 scrub terms, forget/restore, the D11 audit-view reads): role × endpoint
 against the five Phase 4 principals (owner web session 200; owner
-`cli`/`openai` PAT 403; non-owner 403; `is_agent` 403; anonymous 401) and
+`cli`/`openai` PAT 401 — the views are default-authentication only, as in the
+connectors-bindings matrix, so a PAT is never authenticated there; non-owner
+403; `is_agent` 403; anonymous 401) and
 another workspace's sources, rules and episodes → 404. Contracts green.
 **Done when:** the four sources exist disabled; an episode posted through
 the port in a test lands scrubbed in the mapped workspace or is dropped;
@@ -542,8 +544,9 @@ migration, `backend/memory/core_blocks.py`,
 `.github/workflows/` (the `--check` step), `frontend/src/lib/i18n/tr.ts`
 (error strings only).
 **Tests.** Role × endpoint for the block API against the five Phase 4
-principals (owner web 200; owner `cli`/`openai` PAT 403; non-owner 403;
-`is_agent` 403; anonymous 401); `self` cannot be written through the API
+principals (owner web 200; owner `cli`/`openai` PAT 401 — default-
+authentication-only views, as in branch 1; non-owner 403; `is_agent` 403;
+anonymous 401); `self` cannot be written through the API
 (405/403) — only the assembler; the assembler makes zero gateway calls
 (FakeAdapter call count) and every sentence traces to the template,
 snapshot or registries; `--check` fails on a changed CLAUDE.md line;
@@ -721,8 +724,9 @@ from yesterday".
 | # | Status |
 |---|---|
 | brief (`docs/friday-3-roadmap`) | **implemented 2026-11-20** (draft brief; awaits Sonnet 5 plan review) |
-| 1, 3–7 | not started (precondition: Phase 6 closeout on `main`) |
+| 1 `feat/p8-ingestion-core` | **implemented 2026-11-20** (sources, mapping, scrubber + corpus gate, episodes, port, TTL beat, forget/restore (episodes), counters, owner API, contract, ADR-012 note; awaits Sonnet 5 review). Merged after branch 2: its migration is `0007_ingestion_core` |
 | 2 `feat/p8-core-blocks` | **implemented 2026-11-20** — see "Branch 2 implementation notes" below; awaits independent Sonnet 5 review |
+| 3–7 | not started |
 
 ## Out of scope (explicit)
 
@@ -896,6 +900,38 @@ model call without a `ModelUsage` row; an episode surviving past its TTL.
 3. Manual pass with a real model: ask "Sen kimsin, seni kim
    geliştiriyor?" in a web chat and confirm the answer comes from `self`
    and `developer` (CI covers this with the fake provider only).
+
+### Owner steps (pending) — `feat/p8-ingestion-core`, recorded 2026-11-20
+
+1. On the deployed stack run `manage.py migrate` and `manage.py
+   seed_ingestion_sources` (creates the four sources, disabled).
+2. Set `MEMORY_OWNER_GIT_EMAILS` (and, if wanted, the TTL / daily budget
+   overrides) in the server env — names are in `.env.example`.
+3. Add the real mapping rules (repo ids, `~/…` or absolute path prefixes,
+   calendar bindings) and any scrub terms (customer names, code names) from
+   the web, then enable sources once their producers (branches 3–4) land.
+4. Independent Sonnet 5 review of this branch before merge.
+
+Implementation notes for later branches (branch 1, 2026-11-20): the owner
+APIs are default-authentication only, so an owner `cli`/`openai` PAT gets
+**401** (not 403) — the established connectors-bindings matrix; branch 3's
+hook token must likewise be refused there. Domain errors reuse the
+`memory.permission_denied` / `memory.invalid_transition` codes (no new
+frontend strings). `~` in path rules is a literal home marker (not resolved
+server-side); producers must send `path:~/…` or the absolute form matching
+the rule.
+
+Review round 1 fixes (branch 1, 2026-11-20): the scrubber caps raw input at
+64 KB per string *before* any rule runs (cut at the last whitespace so a
+straddling token is dropped whole), the `assignment` rule is anchored at a
+key boundary with a bounded key prefix/suffix, the e-mail, URL-scheme and
+PEM rules are bounded, and placeholder spans are computed once per pass — a
+100 KB hostile run (`A`×N, hex, e-mails, `password`×N, PEM headers) now
+scrubs in well under a second, with a time-budget test. Quoted secret values
+are consumed up to their closing quote (`"password": "hunter two three"` is
+fully replaced; corpus rows added). `path:~/../x` (a key climbing above `~`)
+is now an invalid key, hence unmapped, instead of normalising to `~/x`. The
+PAT wording in this section and branch 2's matrix now says 401.
 
 ## Known follow-ups (from review, unresolved at merge)
 
