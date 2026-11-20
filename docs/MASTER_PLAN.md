@@ -1,9 +1,10 @@
 # Friday OS Master Plan
 
 > Living plan. ADRs in `docs/adr/` are the binding source for architecture
-> rules; §AA is the current roadmap (Friday 2.0, ADR-008) and carries the
-> per-phase status. Last full plan audit: **2026-09-27** (§AA "Plan audit
-> 2026-09-27").
+> rules; §AA is the current roadmap (Friday 2.0 phases 0–6, ADR-008, and
+> since 2026-11-20 the Friday 3.0 phases 8A–12, §AA "Friday 3.0 phases")
+> and carries the per-phase status. Last full plan audit: **2026-09-27**
+> (§AA "Plan audit 2026-09-27").
 
 ## A. Executive Summary
 
@@ -127,7 +128,9 @@ Phases 0–6 (ADR-008, §AA, `docs/VISION_FRIDAY_2.md`).** Voice Assistant,
 promoted to MVP 12 by ADR-007, is re-sequenced by ADR-008 into Phase 6 —
 its shipped foundation (§Z) stands; orchestration/productization are
 absorbed into the phase model (the agent harness *is* the orchestration
-layer).
+layer). **After Phase 6 the roadmap continues as the Friday 3.0 phases
+(accepted 2026-11-20, §AA "Friday 3.0 phases"):** 8A → 9 → 8B → 10 → 11
+→ 12, with Phase 7 (Workshop) kept as number 7 but moved to the backlog.
 
 ## M. MVP 0
 
@@ -237,6 +240,65 @@ Status: **done (2026-07-05)** — all 6 branches merged to main.
   so the dormant MinIO/`django-storages` settings stay dormant and no
   binary-blob column is added. Only the resulting transcript (already text)
   flows into the existing `assistant` pipeline. See §Z.
+- ~~Friday 3.0 roadmap decisions d1–d10~~ — **decided 2026-11-20** (owner
+  approved every recommended answer of
+  `docs/research/2026-11-roadmap-proposal.md` §g; plan in §AA "Friday 3.0
+  phases"):
+  - **d1 Node shell:** a Swift menu-bar app (`friday-node`) with the Python
+    voice pipeline as a child process (Phase 11). Tauri v2 only if a
+    Windows node is ever needed. (ADR-013)
+  - **d2 Audio to the cloud:** local by default; each cloud audio provider
+    (e.g. OpenRouter STT/TTS) is a separate owner toggle
+    (`personal_data_allowed`), never before the wake word, within a
+    gateway-enforced audio cap (default 20 USD/month, ADR-003 amendment
+    2026-11-20). Needed at the start of Phase 6 because Turkish TTS may
+    need OpenRouter if Piper fails the listening test. This narrows the
+    2026-07-17 "fully local" STT/TTS decision above: local stays the
+    default, a cloud row is a deliberate owner act.
+  - **d3 Always-on wake word / cloud live mode:** push-to-talk (and the
+    in-tab browser wake word of Phase 6) until the Phase 11
+    false-activation budget is met; always-on after that, with the
+    indicator and fail-closed mute (ADR-015). Cloud live mode (OpenAI
+    Realtime / Gemini Live) stays on the "later" list; if revived, only
+    through a gateway WebSocket relay.
+  - **d4 Third-party agent terms:** before any coding-agent driver is
+    enabled, the owner checks whether the Claude plan's terms allow
+    automating Claude Code / the Agent SDK from Friday (or an API key is
+    needed), the same for Codex, and Antigravity's terms on wrapping
+    `agy`. A driver whose terms are unclear stays off.
+  - **d5 Default ingestion sources:** on in 8A — git commits of registered
+    repos, harness outcomes, Claude Code hook events (metadata),
+    calendar metadata; on in 8B, after the per-directory node grant —
+    Claude/Codex transcripts (owner turns only); opt-in — shell history,
+    mail bodies, Obsidian `Inbox/`; never — screen content, screenshots,
+    AX trees, keystrokes, browser history. (ADR-012)
+  - **d6 Auto-approve learned memories:** no. At most 10 proposals per
+    night, each with a quote of the owner's own words; core-block changes
+    approved one by one; only `work_log` stays auto-approved (ADR-008).
+    Review after a month of use. (ADR-012)
+  - **d7 Node action classes:** new ADR-014 (ADR-009 untouched):
+    everything is gate-class (web approval + click on the Mac) except
+    open/focus app (one click on the Mac) and read-only calls; test/lint
+    may become one-click only with the throwaway-worktree sandbox
+    evidence; dev servers stay gate-class.
+  - **d8 Workshop:** keeps its number (7), deferred to the backlog after
+    Phase 12.
+  - **d9 Apple Developer account and signing:** yes, enrol (99 USD/year)
+    before Phase 9; Developer ID signing + notarization; the signing key
+    stays on the owner's Mac, CI never holds it.
+  - **d10 Raw episode retention:** 30 days for personal sources, 14 days
+    for firm workspaces; derived memories keep only a provenance quote
+    and the episode id; "forget source X" from day one. (ADR-012)
+- ~~OmniRoute (LLM router) adoption~~ — **rejected as a dependency
+  (2026-11-20):** it would be a second door next to the AI Gateway
+  (ADR-003). Its routing-trace and circuit-breaker ideas may be copied
+  into `ai_core` later ("later" list in §AA).
+- ~~morluto/rea adoption~~ — **pattern copied, tool deferred
+  (2026-11-20):** if adopted later, it runs only as an exact-pinned tool
+  inside harness discovery containers (read-only), each run behind an
+  owner-authorization checkbox on the discovery request, producing a spec
+  only (fenced data in the briefing, never applied code); allowlist +
+  manifest first (`docs/security/mcp-governance.md`). On the "later" list.
 
 ## P. Fleet / Organization Management (MVP 11 — vision draft)
 
@@ -738,8 +800,10 @@ approval (Phase 5).
 | 3 | Harness v2: plan approval → worktree implementation → tests → cross-vendor review → gated branch push | Approved feature development end-to-end | **done (2026-09-27)** — branches 1–4 (2026-07-20 → 07-22) + closeout 5a/5–8 (2026-09-27); first real paid run is an owner runbook step |
 | 4 | Security baseline; UI renewal: shell/chat/harness console/approvals inbox redesign; device-trust identity replaces signup/login; OpenAI-compatible facade (chat-only, low-trust) | Professional, safely-exposable daily driver | **done 2026-09-27** (`docs/prompts/phase-4-identity-ui/brief.md`, "Closeout"); six branches, each Sonnet 5 APPROVE, merged to `main` (former repository, PR #27) |
 | 5 | Deploy gate + VPS deploy (allowlisted commands); MCP client framework: GitHub, mail/calendar, external-installation client (when one exposes MCP), Home Assistant bridge; tier routing + harness policy table | Request → code → live, end to end | in progress (`docs/prompts/phase-5-deploy-mcp/brief.md`); on `integ/phase-5` (former repository, PR #29) as of 2026-09-28: branches 1–6 and 8 merged (Sonnet 5 APPROVE); 7 (Home Assistant) approved but waits on reconciling its native-bridge dispatch with branch 8's; 9 (UI) and 10 (closeout) open |
-| 6 | Voice (ex-MVP 12): mic capture, faster-whisper STT, Piper TTS, local wake word, orb wired to real audio; then the animated visual identity layer | The real Friday experience | brief approved 2026-09-27 (`docs/prompts/phase-6-voice-identity/brief.md`); starts after Phase 5 closeout (foundation from MVP 12 shipped, dormant) |
-| 7 | Workshop (first module pack, `apps.modules.workshop`): sandboxed 3D stage, gateway-driven part-stream builder, change-never-restart conversation, teardown/labels/STL export, saved-build shelf, cost receipt, workshop drill; then picture-in (vision) and studio-photo finish (image capability) | "Friday, bana bir saat mekanizması tasarla" → live, editable 3D model | planned 2026-11-20 (`docs/prompts/phase-7-workshop/brief.md`, written at phase start); starts after Phase 6 closeout |
+| 6 | Voice (ex-MVP 12): mic capture, faster-whisper STT, Piper TTS, local wake word, orb wired to real audio; then the animated visual identity layer | The real Friday experience | brief approved 2026-09-27, amended 2026-11-20 for Friday 3.0 (OpenRouter audio spike, Turkish eval set, latency trace, audio caps, ADR-015 voice cap, HUD v1 replacing the identity branch) (`docs/prompts/phase-6-voice-identity/brief.md`); starts after Phase 5 closeout (foundation from MVP 12 shipped, dormant) |
+| 7 | Workshop (first module pack, `apps.modules.workshop`): sandboxed 3D stage, gateway-driven part-stream builder, change-never-restart conversation, teardown/labels/STL export, saved-build shelf, cost receipt, workshop drill; then picture-in (vision) and studio-photo finish (image capability) | "Friday, bana bir saat mekanizması tasarla" → live, editable 3D model | **deferred to backlog (2026-11-20, owner decision d8)** — number kept; scheduled after Phase 12 or earlier by owner decision (`docs/prompts/phase-7-workshop/brief.md`, written at phase start; design notes under "Roadmap update 2026-11-20" → "Backlog") |
+
+Phases 8A–12 continue this table in "Friday 3.0 phases" below.
 
 Phase briefs live in `docs/prompts/phase-N-<topic>/brief.md`, same
 discipline as MVP briefs (branch tables, test strategy, closeout).
@@ -859,7 +923,71 @@ detail in `docs/prompts/phase-3-harness-v2/brief.md` branch table.
   is a web-session channel but approval decisions still need an explicit
   on-screen confirm; then the visual identity layer.
 
+### Friday 3.0 phases (accepted 2026-11-20)
+
+Plan: `docs/research/2026-11-roadmap-proposal.md` (revision 2; the owner
+approved every recommended answer of its §g, d1–d10, on 2026-11-20 — see
+§O). Goal: a continuously learning Friday that knows itself, its
+developer and the owner's work, talks (push-to-talk first, always-on
+later), shows an animated HUD, watches and drives Claude Code / Codex
+sessions, and acts on the Mac only with approval. The kernel rules do not
+change: one gateway door with `ModelUsage` on every call, the approval
+gate, `for_actor()` workspace isolation, Postgres as the source of truth.
+New ADRs (all Accepted 2026-11-20): **ADR-012** continuous-learning
+ingestion (privacy pipeline), **ADR-013** Friday Node protocol (identity
+part conditional on spike S9.0), **ADR-014** node action classification,
+**ADR-015** voice-originated turns; plus the ADR-003 amendment (audio
+purposes, gateway-enforced budgets). ADR-011 stays reserved for Phase 6's
+"voice transport".
+
+**Stable-numbering rule.** Existing phase numbers keep their meaning.
+Phase 7 stays "Workshop" (deferred to the backlog; no brief or branch
+exists, so nothing becomes ambiguous). New phases take numbers 8–12;
+Phase 8 is split into 8A and 8B. Branches follow `feat/pN-<topic>` with
+these numbers (`feat/p8-…` for both 8A and 8B, e.g. `feat/p8-core-blocks`,
+`feat/p9-node-pairing`). The execution order is the row order below, not
+the numeric order: **5 → 6 → 8A → 9 → 8B → 10 → 11 → 12**. Each phase ends
+in a go/no-go checkpoint: stop, re-scope or continue.
+
+| Order | Phase | Scope | Usable outcome | Go/no-go checkpoint | Brief | Status |
+|---|---|---|---|---|---|---|
+| 1 | **5 (finish)** | 5.7 Home Assistant reconcile, 5.9 connectors UI, 5.10 closeout with preflight; `integ/phase-5` → `main`; seed an `openrouter` text provider row | Deploy + MCP usable from the UI | preflight green; `integ/phase-5` merged | `phase-5-deploy-mcp/brief.md` | in progress (row 5 above) |
+| 2 | **6 Voice core + web HUD** | Approved branches 1–4 + the 2026-11-20 amendment: OpenRouter audio spike, Turkish eval set, latency trace, gateway audio caps, ADR-015 voice cap, HUD v1 (health panel, accessibility) | Push-to-talk Friday in a browser with a real HUD, Turkish tested | Turkish WER/TTS targets met or consciously re-set; local p50 end-of-speech → first audio ≤ 1.5 s; caps enforced | `phase-6-voice-identity/brief.md` ("Amendment 2026-11-20") | approved, amended 2026-11-20; starts after Phase 5 closeout |
+| 3 | **8A Learning memory core** (server only) | ADR-012 pipeline (source registry, workspace mapping, scrubber + corpus, TTL, audit view, forget-source); core blocks (`self` deterministic, `developer` owner-edit); sources: git commits, harness outcomes, Claude Code hook events via `friday-hook` (append-only PAT), calendar metadata; owner-only extraction; capped morning card; sessions panel v0 | **Vertical slice complete:** talk to Friday, it knows itself and you, shows your Claude Code sessions, learns from yesterday | scrubber corpus 100% secrets recall; zero cross-workspace leaks in tests; ≥ 60% of proposals accepted over 2 weeks (else tune before 8B) | `phase-8a-learning-memory/brief.md` | planned (brief drafted 2026-11-20, awaiting plan review) |
+| 4 | **9 Friday Node v1 (read-only)** | Prereqs: spike S9.0 (`kind=node` device trust), Apple Developer signing + notarization (d9), ADR-013. Then `nodes` app + WS, Swift menu-bar app, pairing, read capabilities, per-directory grants, Unix-socket hook relay, spool, heartbeat, preflight extension | "Claude Code / Codex oturumlarım ne yapıyor?" with local transcript detail | spike passes; compromised-server tests pass; notarized build keeps its TCC grants across updates | `phase-9-friday-node/brief.md` (stub) | planned |
+| 5 | **8B Transcripts + knowledge graph** | Claude/Codex transcript ingestion via the node (owner turns only); temporal entities/facts in Postgres; RRF retrieval; Graphify AST-only job; Headroom behind a flag + eval; Obsidian mirror format + `Inbox/` import-once; weekly reflection; private eval set | Friday knows the details of your work across tools | eval baseline recorded; Headroom stays off unless ≤ 1 point loss | `phase-8b-transcripts-graph/brief.md` (stub) | planned |
+| 6 | **10 Control** | ADR-014 gate-class node capabilities (allowlisted repo commands under `srt`, AppleScript recipes, AX primitives; open/focus app confirm-class); node confirmation window; invocation grants; HUD terminal panel; harness v3 (Codex app-server + Agent SDK pinned, approval mapping, trust check); voice tools that only propose | "Testleri çalıştır", "Codex ile başlat": proposed by voice, approved on screen, run safely | fuzz/escape suites green; ADR-014 test/lint decision recorded | `phase-10-control/brief.md` (stub) | planned |
+| 7 | **11 Local live voice** | ADR-015 in full; Pipecat child process of the node; always-on wake word; smart-turn; AEC; barge-in; nightly self-trigger test | Natural, interruptible voice anywhere on the Mac | FAR ≤ 0.2/h on 24 h household audio; self-trigger test green; latency targets met | `phase-11-live-voice/brief.md` (stub) | planned |
+| 8 | **12 Reach and proactivity** | n8n MCP (allowlisted workflows); heartbeat/cron + spoken morning digest; SKILL.md skills + curator; procedural playbooks from harness runs | Friday starts useful conversations and uses your automations | owner keeps the digest on after 2 weeks | `phase-12-reach/brief.md` (stub) | planned |
+| — | **7 Workshop** (number kept) | Unchanged intent (see "Backlog" below) | — | after 12, or earlier by owner decision | written at phase start | **backlog (d8)** |
+
+Estimates (illustrative, one owner with Claude implementing and a Sonnet 5
+review loop per branch): 5 → 8A (the vertical slice) about 3–4 months;
+9 → 10 about 3–4 months more; 11–12 after that. The whole plan is likely
+more than 12 months. Projected learning + voice running cost: about
+13–30 USD/month, capped by gateway budgets (learning 20 USD/month, audio
+20 USD/month by default).
+
+**Later list (not scheduled):** cloud realtime live mode (gateway WS relay,
+second ADR-003 amendment); desktop WKWebView overlay for the HUD;
+Antigravity driver; ACP generic driver; DSPy/GEPA prompt optimisation;
+speaker verification; Cua/VM computer use; LiveKit multi-device/phone;
+Chatterbox Turkish TTS benchmark; WhatsApp; OmniRoute's routing-trace and
+circuit-breaker ideas copied into `ai_core` (§O: OmniRoute itself
+rejected); morluto/rea as an exact-pinned tool inside harness discovery
+containers only, owner-authorization checkbox per run, spec output only
+(§O).
+
+**Not dependencies (ideas copied only):** OpenClaw, Hermes, Nod, Ruflo
+(avoided entirely), OpenJarvis, LiteLLM, OmniRoute.
+
 ### Roadmap update 2026-11-20 — lessons adopted from two external "Friday" prompt packs
+
+> The full Friday 3.0 plan accepted the same day supersedes the ordering
+> implied here: see "Friday 3.0 phases" above and
+> `docs/research/2026-11-roadmap-proposal.md`. The preflight and voice
+> lessons below stand (the voice ones are folded into the Phase 6
+> amendment of 2026-11-20); the Workshop paragraph moved to "Backlog".
 
 Two third-party prompt packs ("Give Your Friday a Workshop" and "Friday 3D
 Builds: Draft to Showpiece", Nov 2026) describe a single-file hobby Friday
@@ -887,8 +1015,14 @@ API sends audio to a cloud recognizer (contradicts Phase 6 D5). Their
   is not a done": a spoken confirmation only references an action whose
   receipt (task id, approval id, execution status) exists; voice routes for
   "hatırla ki …" (memory capture through the existing ADR-005 service) and
-  "bu ne kadar tuttu?" (ModelUsage receipt).
-- **Phase 7 — Workshop (new, first module pack):** generative 3D builds
+  "bu ne kadar tuttu?" (ModelUsage receipt). Under ADR-015 (2026-11-20)
+  a voice route that writes ("hatırla ki …") creates a proposal, never an
+  approved row.
+
+#### Backlog
+
+- **Phase 7 — Workshop (first module pack; deferred to backlog
+  2026-11-20, owner decision d8, number kept):** generative 3D builds
   as an optional `apps.modules.workshop` pack (ADR-002's first module
   pack; kernel never imports it). Laws carried from the packs and mapped to
   ours: model-written code runs only in a sandboxed, separate-origin
@@ -905,8 +1039,10 @@ API sends audio to a cloud recognizer (contradicts Phase 6 D5). Their
   a new image capability behind the gateway. Webcam hand tracking stays
   out of scope until the voice layer is in daily use.
 
-**Carried-forward items (not yet scheduled in a branch):** owner core
-memory block; memory consolidation/distillation (ADR-005, VISION R5);
+**Carried-forward items (not yet scheduled in a branch):** ~~owner core
+memory block; memory consolidation/distillation (ADR-005, VISION R5)~~ —
+scheduled 2026-11-20 in Phase 8A (core blocks `self`/`developer`/
+`preferences`/…, nightly capped consolidation; weekly reflection in 8B);
 shared per-turn query embedding; SSE log streaming for harness; revise-
 per-feedback loop; shared harness execution-engine extraction (its
 three-call-site trigger is now met — evaluate in Phase 5); dynamic runner
