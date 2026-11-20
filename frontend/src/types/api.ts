@@ -110,6 +110,16 @@ export interface ApiRemoteKeyState {
 // `openai`: the OpenAI-compatible facade (Phase 4 branch 6), e.g. Open WebUI.
 export type MessageChannel = "web" | "cli" | "telegram" | "openai";
 
+// backend Message.InputMode (Phase 6 D9).
+export type MessageInputMode = "text" | "voice";
+
+// `POST /api/voice/transcriptions` (Phase 6 D1).
+export interface ApiTranscription {
+  text: string;
+  audio_seconds: number;
+  language: string;
+}
+
 export type MessageIntent =
   | ""
   | "chat"
@@ -176,6 +186,10 @@ export interface ApiMessage {
   intent: MessageIntent;
   intent_payload: Record<string, unknown>;
   channel: MessageChannel;
+  // How the user message's text was produced (Phase 6 D9): `voice` for a
+  // transcript. Provenance for the mic badge only, never trust. Optional:
+  // rows from before the field existed read as `text`.
+  input_mode?: MessageInputMode;
   // Connector reads supplied as context for this reply (Phase 5 branch 4).
   connector_reads?: ApiConnectorRead[];
   // The task confirmed from this task-draft message (Task.source_message),

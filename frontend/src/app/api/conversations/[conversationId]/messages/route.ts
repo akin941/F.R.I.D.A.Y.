@@ -4,6 +4,7 @@ import { backendFetch } from "@/lib/backend-fetch";
 import { env } from "@/lib/env";
 import { getAccessToken } from "@/lib/auth-cookies";
 import { rejectCrossOrigin, rejectNonJson } from "@/lib/csrf";
+import { traceHeaders } from "@/lib/voice-trace";
 
 export const runtime = "nodejs";
 
@@ -57,6 +58,8 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
         "Content-Type": "application/json",
         Accept: "text/event-stream",
         Authorization: `Bearer ${accessToken}`,
+        // Phase 6 A5: a voice turn's trace id (forwarded only when a UUID).
+        ...traceHeaders(request),
       },
       body: JSON.stringify(payload),
       signal: request.signal,

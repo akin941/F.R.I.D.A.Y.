@@ -176,6 +176,27 @@ export const ERROR_MESSAGES = {
     message: "Bu taslaktan zaten bir görev oluşturuldu.",
     specific: true,
   },
+  // Voice (Phase 6 branch 2)
+  "voice.unsupported_audio": {
+    message: "Ses kaydı okunamadı: 16 kHz mono 16-bit PCM WAV bekleniyordu.",
+    specific: true,
+  },
+  "voice.upload_too_large": {
+    message: "Konuşma çok uzun. En fazla 30 saniyelik bir cümle söyle.",
+    specific: true,
+  },
+  "voice.no_local_provider": {
+    message:
+      "Kişisel veriyi işlemeye izinli bir konuşma sunucusu yok. Mac'teki yerel konuşma sunucusunu başlat.",
+    specific: true,
+  },
+  "voice.stt_failed": { message: "Konuşma yazıya dökülemedi. Tekrar dene.", specific: true },
+  "voice.tts_failed": { message: "Yanıt seslendirilemedi; metin ekranda.", specific: true },
+  "voice.budget_exceeded": {
+    message:
+      "Ses bütçesi doldu. Bütçe yenilenene kadar sesli mod kullanılamaz; yazarak devam edebilirsin.",
+    specific: true,
+  },
   // Workspaces
   "workspace.permission_denied": {
     message: "Rolün bu çalışma alanını düzenlemeye yetmiyor.",
