@@ -35,6 +35,15 @@ module. Contracts enforced with import-linter (see `backend/pyproject.toml`).
 > `connectors`; no other kernel app imports either. `core` also gains the
 > shared `repo_identity` helpers.
 
+> Note (2026-11-20, Phase 6): ADR-011 adds the kernel app `voice` (created
+> by Phase 6 branch 2), a leaf like `harness`: it may import `core`,
+> `workspaces`, `ai_core` and `assistant` (conversation lookup and
+> `Message.InputMode` only), must not import `approvals`, `tasks`, `tools`,
+> `agents`, `skills`, `memory`, `knowledge`, `integrations`, `harness`,
+> `connectors` or `deploys`, and no app imports it. `voice` joins the
+> `ai_core`/`audit` forbidden lists in `backend/pyproject.toml` when the app
+> lands. Speech engines stay out of process (ADR-011 decision 6).
+
 ## Consequences
 A module can be extracted into a service later because boundaries stay clean.
 The first extraction candidate, if ever needed, is the AI gateway.
