@@ -830,6 +830,22 @@ stored.
 2. The Phase 4 R4b load check with voice STT/TTS mixed in stays branch 3's
    done-when; the two blocking endpoints it exercises exist from this branch.
 
+**Known follow-ups (branch 2 review, LOW, unresolved at merge).**
+- `voice/services.py`: `record_trace` catches only `IntegrityError`. A DB
+  `OperationalError` during the trace upsert would surface as a 500 on an
+  otherwise successful STT/TTS call, although the docstring says it never
+  raises and a trace must not fail the voice request. Fix (optional): catch
+  `DatabaseError` (or `Exception`, logging content-free) around the atomic
+  block.
+- `voice/services.py`: the 1 USD per-voice-session cap is keyed on
+  `voice:<conversation id>`, so it is really per conversation until branch 3
+  adds a server-held voice session id (a known consequence recorded above).
+  No action in branch 2; branch 3 introduces the server-held session id.
+- This brief, owner steps: the real-Mac STT/TTS check and the load check are
+  still open. Review confirmed no code path stores the transcript, but the
+  real-provider check has not been run; keep the owner steps open until the
+  live check is done.
+
 ### 3. `feat/p6-push-to-talk` — the full loop, push-to-talk
 
 **Scope.** `lib/voice/`: `capture-worklet.ts` (16 kHz mono downsampling,
