@@ -296,8 +296,9 @@ These changes land in `accounts` (branch 1).
   secrets of a usable `kind=node` device of the active, human owner with
   the kill switch released. It sets
   `request.auth = ChannelPrincipal(channel=CHANNEL_NODE, …)`. It is used
-  only by the rotate endpoint and, through `nodes`, by the pair-time key
-  fetch and the WebSocket handshake. Failures are audited with the same
+  only by the rotate endpoint and, through `nodes`, by the WebSocket
+  handshake. Nothing else accepts it: the server's signing keys reach
+  the node only in the anonymous pairing response (D4). Failures are audited with the same
   flood cap as PAT failures (`AUTH_FAILURE_AUDIT_LIMIT`).
 - **Spike pass criteria.** All of these must hold, in tests on the
   server:
@@ -362,7 +363,8 @@ every other kernel app as a source. `memory` and `memory.ingestion` gain
   - `websocket` scope on `/ws/node/v1` →
     `nodes.gateway.NodeSocketApp`;
   - `http` `GET /healthz` → a liveness JSON (process up, Redis
-    reachable, connected node count);
+    reachable, connected node count, the configured signing key id —
+    never key material — for the closeout `node_signing_key` check);
   - everything else → 404.
 
   Django is set up for ORM access, and ORM calls go through
@@ -559,7 +561,12 @@ every other kernel app as a source. `memory` and `memory.ingestion` gain
     one `BLPOP` loop per connected node. It forwards to the socket,
     matches the node's `result` by `invocation_id`, validates it against
     the server's `result_schema` for that capability, and `LPUSH`es it
-    to the result key with a 30 s TTL.
+    to the result key with a 30 s TTL (`EXPIRE` set in the same
+    `MULTI` as the `LPUSH`, so a result key never exists without one).
+    The caller `DEL`s the key right after its `BLPOP` returns, so a
+    result normally lives in Redis for milliseconds and at most 30 s
+    when no caller is waiting. This transit is ephemeral and is the
+    only copy of output outside the caller (D7).
   - A late result, after the caller timed out, is discarded and counted.
     It never runs anything.
 - **Fail closed.**
@@ -617,7 +624,7 @@ every other kernel app as a source. `memory` and `memory.ingestion` gain
   | `claude.sessions.read` | `session_id`, `last_turns` (1–20) | `[{role (user/assistant), at, text ≤ 2000}]`; tool calls and results as counts only | personal | the session's `cwd` |
   | `codex.threads.list` | as `claude.sessions.list` | as above (`thread_id`) | firm | `cwd` per row |
   | `codex.threads.read` | `thread_id`, `last_turns` (1–20) | as `claude.sessions.read` | personal | the thread's `cwd` |
-  | `usage.ccusage` | `period` (`today`/`week`/`month`), `cwd_prefixes` (optional) | `{total_usd, tokens_in, tokens_out, by_project:[{cwd, usd}]}` | firm | `cwd` per row |
+  | `usage.ccusage` | `period` (`today`/`week`/`month`), `cwd_prefixes` (optional) | `{total_usd, tokens_in, tokens_out, by_project:[{cwd, usd, tokens_in, tokens_out}]}`; the server discards the node's totals and recomputes them (D9) | firm | `cwd` per row |
   | `git.status` | `repo_path` | `{branch, ahead, behind, dirty_files_count, untracked_count, last_commit_sha, last_commit_at}`; never file names or diffs | firm | `repo_path` |
   | `apps.frontmost` | none | `{bundle_id, app_name}` | personal | none |
   | `windows.list` | `limit` (≤ 30) | `[{bundle_id, app_name, window_count, on_screen}]`; titles only if the owner enabled them locally (D13) | personal | none |
@@ -639,7 +646,9 @@ every other kernel app as a source. `memory` and `memory.ingestion` gain
   the absolute and the `~/` form of its own home. It is a narrowing
   hint, not a trust boundary: the server's row filter (D9) still runs
   on every result. For `usage.ccusage` the node's totals then cover the
-  matching projects only. An empty list means "the workspace has no
+  matching projects only, but the server never trusts them: it
+  recomputes every aggregate from the rows that survive its own filter
+  (D9, "Aggregates"). An empty list means "the workspace has no
   rules", so `is_available` is already false and no call is made.
 - **`invoke_read(*, node, capability, args, workspace, actor, trace_id)
   -> ReadOutcome`** runs these steps:
@@ -656,7 +665,10 @@ every other kernel app as a source. `memory` and `memory.ingestion` gain
      contains args or output content.
 
   It returns the validated output to the caller and **stores none of
-  it**.
+  it**. The only place output exists outside the caller's memory is the
+  Redis result key in transit (D6): ephemeral, with a 30 s TTL, and
+  deleted by the caller right after its `BLPOP`. It is never written to
+  Postgres, logs or the audit tables.
 - **`refuse_read(*, node, capability, args, workspace, actor, trace_id,
   code) -> ReadOutcome`** is the second entry point. `tools` calls it
   when its own pre-invoke check fails (D9: `path_not_in_workspace`,
@@ -803,7 +815,21 @@ every other kernel app as a source. `memory` and `memory.ingestion` gain
   - List results are then filtered row by row on the server anyway.
     Unmapped rows and rows of another workspace (from a node that
     ignored or mis-applied `cwd_prefixes`) are dropped and counted,
-    never shown.
+    never shown. Each surviving row's `cwd` must resolve, through 8A
+    `resolve_workspace` (longest prefix wins), to the conversation's
+    workspace, so a nested rule of another workspace (W = `~/work`,
+    X = `~/work/secret`) removes the X rows even though they lie under a
+    W prefix.
+  - **Aggregates.** Any node-supplied aggregate over rows that this
+    filter applies to is discarded, never shown or passed on. For
+    `usage.ccusage` the server drops the node's `total_usd`, `tokens_in`
+    and `tokens_out` and recomputes all three as sums over the
+    surviving `by_project` rows (hence per-project tokens in the D7
+    schema). The shown totals therefore always equal the rows shown,
+    and cannot include another workspace's spend even when the node
+    ignores `cwd_prefixes` or the rules nest. Every future capability
+    with a row-filtered result follows the same rule: aggregates are
+    derived server-side after filtering, never taken from the node.
   - `apps.frontmost` and `windows.list` have no path. They are personal
     and allowed only in the owner's personal workspace; elsewhere `tools`
     calls `refuse_read(code="workspace_not_allowed")`.
@@ -1249,7 +1275,13 @@ prints all-pass. The case files are what M1's Swift test target loads.
 - `backend/nodes/{gateway,bus,presence,selectors,services,views,urls}.py`,
   `backend/nodes/tests/`;
 - `backend/pyproject.toml` (`uvicorn` direct, exact pin), `backend/uv.lock`;
-- `deploy/docker/{compose.yml,compose.daily.yml}`;
+- `deploy/docker/{compose.yml,compose.daily.yml}`: the new
+  `node-gateway` service, and `NODE_SIGNING_KEY` (plus
+  `NODE_SIGNING_KEYS_RETIRED`) passed to **web, worker and
+  node-gateway**. `invoke_read` signs in whichever process runs it (a
+  chat turn in web, a task in worker), so all three need the key; the
+  gateway forwards envelopes others signed, and needs the key for its
+  refuse-on-missing-key rule (D4) and the key id in `/healthz`;
 - `backend/config/settings/base.py`, `.env.example`;
 - `docs/runbooks/friday-node.md`;
 - `docs/mcp/dependencies/node-gateway.md`.
@@ -1293,7 +1325,12 @@ Postgres.
     assertion on the reference node's received frames);
   - `NODE_MAX_INFLIGHT`+1 → `busy`;
   - no presence → `node_offline` immediately, with nothing pushed;
-  - Redis down → `bus_unavailable`, and handshake 1013.
+  - Redis down → `bus_unavailable`, and handshake 1013;
+  - result keys are ephemeral: after a round trip the
+    `nodes:result:<invocation_id>` key no longer exists (deleted after
+    the `BLPOP`); a late result pushed after a timeout carries a TTL
+    ≤ 30 s and has expired after it (asserted with `TTL` and a
+    fake-clock/short-TTL setting).
 - **Limits:** oversize frame, frame rate → 4429; logs carry no bodies
   (captured log assertion).
 - **Node APIs:** role × endpoint (five principals plus node secret plus
@@ -1344,6 +1381,14 @@ of `revoke_device`.
     the other workspace;
   - a hostile reference-node variant that ignores `cwd_prefixes` still
     has the other workspace's rows dropped server-side;
+  - **nested rules and aggregates:** with rules W = `~/work` and
+    X = `~/work/secret`, a hostile reference node that ignores
+    `cwd_prefixes` and returns `usage.ccusage` rows for both, with
+    inflated `total_usd`/`tokens_in`/`tokens_out` covering everything,
+    yields in a W conversation exactly the W rows and totals equal to
+    the sum of only those rows; the X rows and the node's own totals
+    appear nowhere in the fenced output or the `ModelUsage` context
+    report;
 - **Isolation:** a firm-only actor never sees personal rows, and the
   reverse holds.
 - **Personal data:** `node_session_detail` marks the conversation
@@ -1466,7 +1511,7 @@ reference node.
   | Check | What it verifies |
   |---|---|
   | `node_gateway` | `/healthz` reachable, Redis OK |
-  | `node_signing_key` | Configured, valid, not the conformance key; key id matches what active nodes pinned at pairing (stored on `Node.pinned_key_id`) |
+  | `node_signing_key` | Configured, valid, not the conformance key; key id matches what active nodes pinned at pairing (stored on `Node.pinned_key_id`); the same key id is configured in web, worker and node-gateway: preflight compares its own (web-side) key id with the one the gateway's `/healthz` reports and with the one a worker returns from a `nodes.signing_key_id` Celery task (a new fakeable preflight seam `worker_signing_key_id`, beside `celery_ping`); a missing key in any of the three fails |
   | `node_link` | Per active node: presence, last heartbeat age, catalogue version and short hash, invocable/advertised counts; **warn** if none paired, which is not a failure because the Mac session is deferred |
   | `node_tls_pin` | When `NODE_TLS_PIN_SHA256` is set, the served certificate's SPKI matches |
   | `node_audit_chain` | `verify_node_audit_chain` passes |
@@ -1489,6 +1534,8 @@ reference node.
   evaluation.
 
 **Files.**
+- `backend/nodes/tasks.py` (the `nodes.signing_key_id` task: returns
+  the key id only);
 - `backend/ops/preflight.py`, `backend/ops/tests/test_preflight_nodes.py`,
   `backend/ops/tests/test_node_e2e.py`;
 - `docs/runbooks/friday-node.md`, `docs/adr/ADR-013-friday-node-protocol.md`;
@@ -1499,6 +1546,8 @@ reference node.
 - Every new preflight check passes, fails and warns with fakes:
   - unreachable gateway;
   - conformance key configured;
+  - signing key id differing between web, worker and gateway, or
+    missing in one of them;
   - mismatched pin;
   - broken chain;
   - stale case files.
@@ -1512,7 +1561,7 @@ node paired, the e2e test is green, and the go/no-go record is written.
 
 | # | Branch | Scope | Depends on | Status |
 |---|---|---|---|---|
-| brief | `docs/p9-brief` | This brief (full, from the stub), MASTER_PLAN §AA row 9 Brief/Status, regenerated `self_sources.json` | Phase 8A closeout | **implemented 2026-11-20** (docs only; review round 1 findings addressed 2026-11-20 — D7 terminal-status table and `refuse_read`, D8 deletion policy, vendored node scrubber + `scrub.json` parity, `cwd_prefixes`, per-owner kill-switch payload, per-socket result routing, `CONFORMANCE` build-only mode; awaits re-review) |
+| brief | `docs/p9-brief` | This brief (full, from the stub), MASTER_PLAN §AA row 9 Brief/Status, regenerated `self_sources.json` | Phase 8A closeout | **implemented 2026-11-20** (docs only; review round 1 findings addressed 2026-11-20 — D7 terminal-status table and `refuse_read`, D8 deletion policy, vendored node scrubber + `scrub.json` parity, `cwd_prefixes`, per-owner kill-switch payload, per-socket result routing, `CONFORMANCE` build-only mode; review round 2 findings addressed 2026-11-20 — server-recomputed `usage.ccusage` aggregates with per-project tokens and the nested-rule test, authenticator wording, `NODE_SIGNING_KEY` in web/worker/gateway + preflight, ephemeral TTL-bound Redis result keys; awaits re-review) |
 | 1 | `feat/p9-node-pairing` | Spike S9.0: `TrustedDevice.kind=node`, node pairing codes, `jnd_` secrets, rotation with grace, age cap, revocation fan-out, kill switch, `CHANNEL_NODE`, URL walk, ADR-013 spike note | brief approved | not started |
 | 2 | `feat/p9-node-protocol` | `nodes` app + contracts, protocol v1 schemas, canonical JSON, Ed25519 envelopes, capability contracts, pairing endpoint, signing key config, hash-chained `NodeInvocation`, dependency manifest | 1 | not started |
 | 3 | `feat/p9-reference-node` | Python reference node, conformance cases + `--check`, hostile fake gateway, reference spool and Unix-socket relay | 2 | not started |
@@ -1813,7 +1862,10 @@ confusion, generated per schema.
   `grant` non-null or with `class` ≠ `read`;
 - a read whose path maps to another workspace reaching the node;
 - an unmapped row shown;
-- node output stored outside the chain row's hashes and sizes;
+- node output stored outside the chain row's hashes and sizes (the
+  ephemeral, TTL-bound Redis result key of D6 excepted);
+- an aggregate computed over rows of another workspace, or a
+  node-supplied aggregate shown or passed on;
 - a raw corpus secret in any row, log or gateway payload;
 - a personal-class read sent to a provider without
   `personal_data_allowed`;
