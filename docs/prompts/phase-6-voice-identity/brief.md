@@ -998,6 +998,30 @@ routes never call the decision helpers (extends the D8 scan).
 4. Listen to the segmenter on real replies (abbreviations, numbers, code)
    and note any Turkish abbreviation missing from `segmenter.ts`.
 
+**Known follow-ups (branch 3 review, LOW, unresolved at merge).**
+- `voice/services.py` (`usage_receipt`, `local_only`): `local_only` is
+  inferred as `provider is None or estimated_cost == 0`. A cloud audio
+  provider with an unset or placeholder price, or a cost not yet corrected by
+  `correct_usage_cost`, would make the spoken receipt say it ran locally at
+  zero cost, misstating where the data went. Fix: derive `local_only` from
+  the provider row (e.g. providers on the configured local base URL, or the
+  `personal_data_allowed`/cloud flag); when cost is 0 but the provider is not
+  known to be local, fall back to "unknown" wording rather than
+  "yerel çalıştı".
+- `voice/services.py` (`usage_receipt`): the trace lookup filters on the
+  JSON path `context_report__trace_id` over the workspace's ModelUsage rows
+  with no index (capped at 200 rows, but still a scan; receipt reads are
+  throttled at 30/min, so not blocking). Fix if ModelUsage grows large: add a
+  `created_at` lower bound (e.g. last 24 h) to the trace filter, or index the
+  trace id.
+- `frontend/src/lib/voice/controller.ts` (review-before-send path): with
+  "Göndermeden önce göster" on, the edited transcript goes through
+  `sendText` and skips the deterministic routes, so a held "hatırla ki …" or
+  "bu ne kadar tuttu" reaches the brain once confirmed. Safe (the server caps
+  voice turns to read and propose) but inconsistent with the direct path.
+  Fix: route the held text through `routeTranscript` on send, or document
+  that preview mode sends to the brain.
+
 ### 3a. `feat/p6-voice-eval` — Turkish evaluation set, replay harness, latency baseline
 
 **Scope.** A4 and A5's measurement side: `docs/voice/eval-manifest.md`
