@@ -1289,6 +1289,144 @@ battery behaviour.
 **Done when:** every state is visually and textually distinct, at phone
 width too; the reduced-motion and GPU passes are recorded in this brief.
 
+### Branch 5 — implementation notes (2026-11-20)
+
+Implemented on the branch `feat/p6-visual-identity` (the name the build
+workflow assigned; the scope is A8's `feat/p6-hud`, which replaced the
+visual-identity branch). Cut from the local integration branch, which holds
+branches 1–4. **Precondition not met here, recorded as an owner step:** the
+"branches 3 and 4 done on the Mac" gate (ADR-008 decision 5) needs the
+owner's Mac; the HUD was built against the merged code with fakes, and its
+own "Done when" passes on the Mac are owner steps below.
+
+- **Backend: leaf app `hud`** (`backend/hud/`, no models, writes nothing).
+  `GET /api/v1/hud/events?workspace=<uuid>[&date=YYYY-MM-DD]` —
+  `IsAuthenticated + IsWebChannel + IsOwner`; the PAT authenticator is
+  injected by `config/urls.py` (the voice pattern) so a PAT gets a
+  deliberate 403; the workspace is resolved through `for_actor()` (404 for
+  another workspace). SSE frames: `retry:` hint, `snapshot` (approvals,
+  tasks, cost, health), then per tick (`HUD_STREAM_INTERVAL_SECONDS`, 5 s)
+  a `delta` with only the changed sections or a `: keepalive` comment, and
+  `end` (`max_age` after `HUD_STREAM_MAX_SECONDS`, 55 s; `scope_lost` when
+  the membership disappears mid-stream). The stream is bounded on purpose:
+  a sync worker is never held indefinitely (Phase 4 R4b budget) and every
+  reconnect re-runs authentication and the permission checks. Throttle
+  scope `hud_events` (`HUD_EVENTS_RATE`, 20/min).
+  - Approvals: fresh pending requests (the activity summary's TTL rule),
+    id / tool name / origin / channel / age only — never the payload;
+    "tool running" = requests approved within `HUD_TOOL_RUNNING_SECONDS`
+    (approval dispatches the tool right after the decision; there is no
+    execution-status row to read — a closer signal is a later item).
+  - Tasks: open tasks due today or overdue (`/today`'s rule; the client's
+    local date when sent). Cost: today's `ModelUsage` of the workspace
+    (numbers only). Health: per provider the last call in
+    `HUD_PROVIDER_WINDOW_MINUTES` (workspace + system rows; budget refusals
+    and client disconnects do not count as a provider failure) → `ok` /
+    `down` / `unknown` / `disabled`; active budgets with daily/monthly
+    spent vs limit and `exhausted`; the last `manage.py preflight` summary,
+    which the command now leaves in the shared cache under
+    `HUD_PREFLIGHT_CACHE_KEY` (counts, overall status, failing check names —
+    no detail strings; `ops` stays a leaf, the key is the only coupling).
+  - Import-linter: `hud` may import only `core`, `workspaces`, `ai_core`,
+    `approvals`, `tasks`; nothing imports `hud`; `hud` joins the
+    `core`/`ai_core`/`audit`/`ops`/`harness`/MCP lists. ADR-002 note added.
+- **Frontend.** `/hud` (`app/(shell)/hud/`, in `proxy.ts`'s shell paths and
+  the nav next to "Sesli"); the shell hides its sidebar there (full screen,
+  own exit link). `components/hud/`: `HudView` (layout: tasks + approvals |
+  orb, state, captions, push-to-talk | cost + health + settings; one column
+  at phone width, orb first), `HudPanels`, `HudOrb` (renderer choice),
+  `HudCanvasOrb` (Canvas-2D fallback), `orb/HudOrbGL` (R3F + GLSL).
+  `lib/hud/`: `states` (the eleven states, priority, colour tokens, shader
+  uniforms), `frame-loop` (budget + capped rAF loop + reduced-motion /
+  hidden / battery watchers), `events` (fetch-based SSE client through
+  `apiFetch`, so a 401 refreshes like every request; planned reconnect after
+  `end`, capped backoff and *disconnected* on any other loss), `earcons`,
+  `settings`, `use-hud`. BFF `app/api/hud/events/route.ts` (GET only,
+  validated `workspace`/`date`, body streamed through).
+- **Voice on the HUD.** `lib/voice/presence.ts` is a tab-wide, in-memory
+  mirror of the mounted voice loop (phase, captions, level); `VoiceView`
+  publishes it and clears it on unmount. The HUD embeds the same
+  `VoiceView` in a controls-only `variant="hud"` (mic, stop, review, drafts,
+  notices — no orb, captions, composer or wake settings), so a turn from
+  the HUD is the unchanged chat turn and wake detections land there too.
+  The shell mini-orb (`components/shell/HudMiniOrb.tsx`, desktop sidebar
+  header and the mobile header) mirrors presence + wake + mute + online +
+  the active workspace's pending approvals from the existing badge feed (no
+  second stream); a link to `/hud`; CSS `motion-safe:` pulse only for live
+  states, no frame loop.
+- **States.** Priority: muted > disconnected (HUD stream lost, or the voice
+  turn's `disconnected`/network error) > error > listening (incl. the
+  finish window) > thinking (incl. D10 `transcribing`, captioned "yazıya
+  dökülüyor…") > speaking > tool-running > awaiting-approval >
+  offline-local (`navigator.onLine` false while Friday's own stack still
+  answers) > armed > idle. Each: a label in `tr.hud.states`, an `aria-live`
+  announcement, a `--hud-<state>` token in both palettes (AA as text on
+  `--hud-surface`, in `tokens.test.ts`), distinct shader colours/uniforms
+  and a distinct canvas motion pattern.
+- **Orb.** Seeded from the ElevenLabs UI `Orb` (MIT; licence and changes in
+  `frontend/THIRD_PARTY_NOTICES.md`): the CDN Perlin texture is replaced by
+  in-shader noise (no cross-origin load), no `drei`, `frameloop="never"`
+  advanced only by the HUD frame loop. `three@0.186.1` and
+  `@react-three/fiber@9.8.2` pinned exact (`@types/three@0.186.0` dev).
+  The GL module is reached only through `next/dynamic(() => import(...),
+  {ssr:false})`; WebGL is probed after mount (no hydration mismatch); a
+  missing context, a render error or a lost context falls back to canvas.
+  Measured on this build: the three.js chunk (one ~0.9 MB file)
+  is referenced only by the `/hud` route's lazy loader chunk.
+- **Budget.** 30 fps active (listening/thinking/tool-running/speaking), 5
+  fps at rest, 0 when hidden or with reduced motion (one static frame per
+  change; the colour and the text carry the state), and on battery
+  (Battery Status API where present; unknown = mains) no resting animation
+  unless "Pilde boşta animasyon" is on for the device. At 0 fps no rAF is
+  pending at all. Earcons: WebAudio oscillators, four short tones (listen,
+  done, error, approval), silent while muted (read at play time), per-device
+  toggle, unlocked by the first gesture.
+- **D8.** Approvals are `<Link href="/approvals/<id>">` only; no button,
+  POST or decision helper anywhere in the HUD sources
+  (`lib/hud/hud-scan.test.ts`, the D8 scan extended).
+- **Tests.** Backend (`hud/tests/test_events.py`, 30 cases): role × endpoint for
+  the five Phase 4 principals + anonymous; `Accept: text/event-stream` not
+  refused; read-only methods; bad/missing workspace; another user's
+  workspace 404; another workspace's approvals/tasks/cost never appear
+  (including the owner's own firm workspace); payload never sent; each
+  section's rules; provider ok/down/unknown/disabled; system rows and the
+  window; budget exhausted; last preflight; keepalive/end; delta carries
+  only changed sections; `scope_lost`; nothing written; throttle. `ops`:
+  the preflight command records its summary; a cache outage never fails it.
+  Frontend: state → uniform/colour mapping for all eleven; every state's
+  text label and `aria-live` announcement in the rendered HUD; reduced
+  motion → canvas, 0 fps, no rAF loop; WebGL unavailable → canvas; hidden
+  tab stops rAF and resumes; frame cap (fake rAF at 60/120 Hz); battery
+  rule; no decide control (render + source scan); caption contrast and
+  every state token in both palettes; three.js import graph (only
+  `HudOrbGL` imports it, only via `HudOrb`'s dynamic import, no route entry
+  reaches it statically); BFF route; stream client (planned reconnect,
+  loss, backoff, abort); earcons (muted, disabled, suspended); presence;
+  `VoiceView` `hud` variant; mini-orb. **Build-manifest check:**
+  `npm run check:hud-bundle` (CI, after `npm run build`) walks every
+  route's client-reference manifest and chunk references and fails if any
+  route but `/hud` can reach the three.js chunk or if `/hud` loads it
+  eagerly; it passed on this branch's build (97 routes).
+
+**Owner steps (pending) — `feat/p6-visual-identity` (HUD v1), recorded 2026-11-20.**
+1. Precondition (ADR-008 decision 5): confirm branches 3 and 4 meet their
+   "done when" on the Mac (their own owner-step lists above) before calling
+   the HUD done.
+2. Manual Mac pass on the owner's Apple-silicon laptop: idle GPU < 5%
+   (Activity Monitor → GPU history, `/hud` idle for 5 min, WebGL orb), frame
+   time ≤ 2 ms at the 30 fps cap while speaking, and the battery rule
+   (unplugged: resting orb static unless the toggle is on). Record the
+   numbers here.
+3. Reduced-motion pass: macOS "Reduce motion" on → static orb, every state
+   still distinct by colour and text; VoiceOver announces state changes.
+4. Every state visually distinct at phone width too (iPhone Safari over the
+   Tailscale/TLS recipe): walk the eleven states (mute, pull the network,
+   stop the backend for *disconnected*, a pending approval, a tool run).
+5. Safari: WebGL2 orb renders (else the canvas fallback) and the event
+   stream reconnects after a laptop sleep.
+6. Phase-6 closeout e2e (`/hud` showing voice state and a pending-approval
+   deep link) stays with branch 6.
+
 ### 6. closeout
 
 MASTER_PLAN §AA row 6 → done, §Z and §O updated (async job and temp file
@@ -1330,7 +1468,8 @@ slice.
 | 3a `feat/p6-voice-eval` | not started |
 | 4 `feat/p6-wake-word` | **implemented 2026-11-20** (cut from the local integration branch; step 0 spike results, notes and owner steps under "Branch 4 — step 0 spike results" / "implementation notes"; push-to-talk stays the default (d3); `hey_friday` model training and the Mac CPU/parity/FAR measurements are owner steps; awaiting the Sonnet 5 branch review) |
 | 4a `feat/p6-wake-word-dsp` | not triggered so far (parity holds; CPU decided by the Mac measurement) |
-| 5–6 | not started |
+| 5 `feat/p6-hud` (built as `feat/p6-visual-identity`) | **implemented 2026-11-20** (cut from the local integration branch; notes and owner steps under "Branch 5 — implementation notes"; the "3–4 done on the Mac" precondition, the GPU/battery and reduced-motion passes are owner steps; awaiting the Sonnet 5 branch review) |
+| 6 closeout | not started |
 
 ## Out of scope (explicit)
 
