@@ -726,7 +726,8 @@ from yesterday".
 | brief (`docs/friday-3-roadmap`) | **implemented 2026-11-20** (draft brief; awaits Sonnet 5 plan review) |
 | 1 `feat/p8-ingestion-core` | **implemented 2026-11-20** (sources, mapping, scrubber + corpus gate, episodes, port, TTL beat, forget/restore (episodes), counters, owner API, contract, ADR-012 note; awaits Sonnet 5 review). Merged after branch 2: its migration is `0007_ingestion_core` |
 | 2 `feat/p8-core-blocks` | **implemented 2026-11-20** — see "Branch 2 implementation notes" below; awaits independent Sonnet 5 review |
-| 3–7 | not started |
+| 3 `feat/p8-hook-relay` | **implemented 2026-11-20** — see "Branch 3 implementation notes" below; awaits independent Sonnet 5 review |
+| 4–7 | not started |
 
 ## Out of scope (explicit)
 
@@ -980,3 +981,88 @@ PAT wording in this section and branch 2's matrix now says 401.
   `actor.is_owner`. Only the installation owner can write personal blocks, so
   nothing leaks today. Fix: add an `is_owner` check to the injection predicate
   as defence in depth.
+
+## Branch 3 implementation notes (`feat/p8-hook-relay`, 2026-11-20)
+
+- **Token and channel.** `PersonalAccessToken.Kind.HOOK` (migration
+  `accounts/0007_pat_kind_hook`), `core.channels.CHANNEL_HOOK`,
+  `KIND_CHANNELS[HOOK]`, `accounts.authentication.HookTokenAuthentication`
+  (`accepted_kind = HOOK`, surface `hook`). Minting a `hook` token requires
+  the installation owner (human) and their **personal** workspace; anything
+  else is a 400 (`code: invalid`). The frontend token form offers the kind
+  (`PatKind` + Turkish label/hint). `create_dev_pat --kind hook` works for dev.
+- **Endpoint.** `POST /api/v1/memory/ingest/hook-events`
+  (`memory.ingestion.views.HookEventIngestView`), routed by
+  `memory.urls.build_hook_urlpatterns` from `config/urls.py` with
+  `HookTokenAuthentication` as its **only** authenticator (`memory` does not
+  import `accounts`); `IsHookChannel` permission on top. Body
+  `{"events": [...]}`: > 50 events or > 64 KB → 413; not an `events` list →
+  400; throttle scope `hook_ingest` (`HOOK_INGEST_RATE`, default 240/min,
+  fail closed 503). Answers `202` with counts only (`received`, `stored`,
+  `duplicate`, `dropped_unmapped`, `dropped_paused`, `ignored` — event name
+  outside the allow list, `invalid` — schema failure). No audit row per
+  batch (high volume); the `IngestionCounter` series is the audit trail.
+- **Schema** (`memory/ingestion/hooks.py`): kept fields `hook_event_name`,
+  `session_id` (`[A-Za-z0-9_-]{1,128}`), `cwd` (absolute or `~/`, normalised
+  by the D4 helper), optional `occurred_at` (aware ISO; future → clamped to
+  now; older than 24 h → invalid), `event_id` (`[A-Za-z0-9_-]{8,64}`, the
+  dedupe key with the session id), `notification_type`/`source`/`reason`
+  (short lowercase tokens, per event) and `message` (Notification only).
+  Everything else is dropped. Each event goes through `record_episode`
+  (kind `hook.<event>`, mapping key `path:<cwd>`, `owner_text` empty, message
+  → `context_text` cut to 200 chars after scrubbing, metadata = event,
+  session id, project label = last `cwd` component, type/source/reason).
+- **D6 follow-up (LOW, "hook PAT workspace vs D4 mapping") — resolved:** the
+  token's bound workspace only authenticates the principal and names the
+  owner's `claude_code_hooks` source (`for_actor()`); D4 mapping alone decides
+  the target workspace, and only workspaces the owner owns. Tested: a token
+  bound to personal lands a mapped firm `cwd` only in the firm workspace; a
+  disabled firm rule or lost firm ownership → dropped, never personal.
+- **`CodingSession`** (migration `memory/0008_coding_sessions`): unique
+  `(workspace, tool, session_id)` — a session that `cd`s into another
+  workspace's tree gets one row per workspace. Upserted only for a
+  **stored** episode, from the episode's scrubbed fields (a session id the
+  scrubber would touch is replaced by a digest). Transitions: `SessionStart`
+  → `running`; `Notification` of type `permission_prompt`/`idle_prompt`/
+  `elicitation_dialog` (or untyped) → `waiting_for_owner`, other types keep
+  the status; `Stop` → `running`; `SessionEnd` → `stopped`; an older event
+  never overwrites newer state. `stale` is computed at read time
+  (`MEMORY_CODING_SESSION_STALE_HOURS`, default 24). Rows of a forgotten
+  source are hidden from the API until restored; the existing TTL beat also
+  deletes sessions idle past their workspace's episode TTL.
+- **Sessions API.** `GET /api/v1/memory/sessions[?workspace=&limit=]`
+  (owner, web session, `for_actor()`, default-authentication only, so
+  `cli`/`openai`/`hook` PATs get 401). Each row: workspace id + name, tool,
+  session id, project, effective and stored status, timestamps, last event,
+  last notification (scrubbed; branch 6's read tool must fence it as
+  untrusted), event count. Not audited per read (HUD polling).
+- **`friday-hook`** (`integrations/cli/friday_hook.py`): stdlib only (AST
+  test + an isolated `python -I` run that asserts Django is never imported +
+  an import-linter contract), Keychain service `friday-hook`
+  (`FRIDAY_HOOK_TOKEN` fallback without a Keychain), base URL from
+  `FRIDAY_HOOK_URL` or `~/.config/friday/hook.toml`, ~3 s deadline, always
+  exit 0, nothing on stdout/stderr, one log line (0600, error class/status
+  only) on failure. Vendored scrubber `integrations/cli/_scrubber_vendored.py`
+  = fixed header + the source module verbatim, regenerated by
+  `python -m integrations.cli.vendor_scrubber` (`--check` mode too); a test
+  fails when it drifts.
+- **URL walk.** `config/tests/test_hook_token_surfaces.py` calls every routed
+  DRF view (GET/POST/PATCH/DELETE) with a valid hook token: 401/403 on every
+  authenticating route, `last_used_at` untouched; only the ingest view uses
+  the hook authenticator. The channel matrix now reads injected
+  `authentication_classes` (`view_initkwargs`) too.
+
+### Owner steps (pending) — `feat/p8-hook-relay`, recorded 2026-11-20
+
+1. Deploy and `manage.py migrate` (accounts `0007`, memory `0008`).
+2. Enable the `claude_code_hooks` source and add path-prefix rules for the
+   real code trees (personal and each firm) — runbook §1.
+3. Mint the `hook` token from the web UI, store it in the macOS Keychain
+   (service `friday-hook`), install `friday_hook.py` + `_scrubber_vendored.py`
+   and the four hook entries in `~/.claude/settings.json` —
+   `docs/runbooks/claude-code-hooks.md` §2–5.
+4. Manual pass on the Mac (cannot run in CI: real Claude Code, Keychain,
+   network): a session shows in `GET /memory/sessions` with live status
+   through start → permission prompt → stop → end, and a pasted fake key in
+   a notification never reaches the DB (runbook §6).
+5. Independent Sonnet 5 review of this branch before merge.

@@ -616,3 +616,56 @@ class IngestionCounter(WorkspaceScopedModel, TimestampedModel):
 
     def __str__(self):
         return f"counter {self.source_id} {self.day}"
+
+
+class CodingSession(WorkspaceScopedModel, TimestampedModel):
+    """Read model of one coding-agent session (Phase 8A brief D12), upserted
+    by the hook-event ingest (`memory.ingestion.hooks`) in the workspace the
+    event's `cwd` mapped to (D4) -- never defaulted. Holds only scrubbed,
+    bounded fields: the session id, a project label (the mapped directory's
+    name), the status, timestamps and the last notification (tool/model
+    text, <= 200 chars, fenced as untrusted when shown to a model).
+
+    A session that moves between workspaces (a `cd` into another mapped
+    tree) gets one row per workspace: firm events never update a personal
+    row and vice versa. "Stale" (no event for
+    `MEMORY_CODING_SESSION_STALE_HOURS`) is computed at read time. Rows of a
+    forgotten source are hidden from the sessions API until it is restored;
+    the TTL beat deletes rows idle past their workspace's episode TTL."""
+
+    MAX_NOTIFICATION_CHARS = 200
+    MAX_PROJECT_CHARS = 100
+
+    class Tool(models.TextChoices):
+        CLAUDE_CODE = "claude_code"
+
+    class Status(models.TextChoices):
+        RUNNING = "running"
+        WAITING_FOR_OWNER = "waiting_for_owner"
+        STOPPED = "stopped"
+
+    source = models.ForeignKey(
+        IngestionSource, on_delete=models.CASCADE, related_name="coding_sessions"
+    )
+    tool = models.CharField(max_length=20, choices=Tool.choices, default=Tool.CLAUDE_CODE)
+    session_id = models.CharField(max_length=128)
+    project = models.CharField(max_length=MAX_PROJECT_CHARS, blank=True, default="")
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.RUNNING)
+    started_at = models.DateTimeField()
+    last_event_at = models.DateTimeField()
+    last_event = models.CharField(max_length=40, blank=True, default="")
+    last_notification = models.CharField(max_length=MAX_NOTIFICATION_CHARS, blank=True, default="")
+    event_count = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        ordering = ["-last_event_at", "-id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["workspace", "tool", "session_id"],
+                name="memory_coding_session_unique",
+            )
+        ]
+        indexes = [models.Index(fields=["workspace", "-last_event_at"])]
+
+    def __str__(self):
+        return f"{self.tool} session {self.id}"

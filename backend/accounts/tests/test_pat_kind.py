@@ -9,18 +9,20 @@ import uuid
 
 import pytest
 from django.core.management import call_command
+from rest_framework.exceptions import PermissionDenied
 from rest_framework.request import Request
 from rest_framework.test import APIClient, APIRequestFactory
 
 from accounts.authentication import (
     FacadeTokenAuthentication,
+    HookTokenAuthentication,
     PersonalAccessTokenAuthentication,
     hash_token,
 )
 from accounts.models import PersonalAccessToken
 from accounts.services import register_user
 from audit.models import AuditLog
-from core.channels import CHANNEL_CLI, CHANNEL_OPENAI, request_channel
+from core.channels import CHANNEL_CLI, CHANNEL_HOOK, CHANNEL_OPENAI, CHANNEL_WEB, request_channel
 from workspaces.models import Workspace
 
 pytestmark = pytest.mark.django_db
@@ -165,3 +167,51 @@ def test_cli_token_keeps_working_on_cli_surfaces(owner, workspace, web_client):
     raw = mint(web_client, owner, workspace).data["token"]
     response = bearer_client(raw).get("/api/v1/ai/conversations")
     assert response.status_code == 200
+
+
+# --- hook kind (Phase 8A branch 3, D6) ---
+
+
+def test_owner_mints_a_hook_token_bound_to_their_personal_workspace(owner, workspace, web_client):
+    response = mint(web_client, owner, workspace, kind="hook")
+    assert response.status_code == 201
+    assert response.data["kind"] == "hook"
+    request = _authenticate(HookTokenAuthentication, response.data["token"])
+    assert request_channel(request) == CHANNEL_HOOK
+    assert request.auth.bound_workspace_id == str(workspace.id)
+
+
+def test_hook_token_cannot_be_bound_to_a_firm_workspace(owner, web_client):
+    from workspaces.services import create_firm_workspace
+
+    firm = create_firm_workspace(actor=owner, name="Acme", channel=CHANNEL_WEB)
+    response = mint(web_client, owner, firm, kind="hook")
+    assert response.status_code == 400
+    assert not PersonalAccessToken.objects.exists()
+
+
+def test_only_the_installation_owner_mints_a_hook_token(web_client):
+    member = register_user(email="member@test.dev", password=PASSWORD, name="Member")
+    personal = Workspace.objects.get(owner=member)
+    response = mint(web_client, member, personal, kind="hook")
+    assert response.status_code == 400
+    assert not PersonalAccessToken.objects.exists()
+    # The same member may still mint an ordinary CLI token.
+    assert mint(web_client, member, personal).status_code == 201
+
+
+@pytest.mark.parametrize("kind", ["cli", "openai"])
+def test_hook_authenticator_refuses_every_other_kind(owner, workspace, web_client, kind):
+    raw = mint(web_client, owner, workspace, kind=kind).data["token"]
+    with pytest.raises(PermissionDenied):
+        _authenticate(HookTokenAuthentication, raw)
+
+
+@pytest.mark.parametrize(
+    "auth_class", [PersonalAccessTokenAuthentication, FacadeTokenAuthentication]
+)
+def test_other_authenticators_refuse_a_hook_token(owner, workspace, web_client, auth_class):
+    raw = mint(web_client, owner, workspace, kind="hook").data["token"]
+    with pytest.raises(PermissionDenied):
+        _authenticate(auth_class, raw)
+    assert PersonalAccessToken.objects.get(token_hash=hash_token(raw)).last_used_at is None

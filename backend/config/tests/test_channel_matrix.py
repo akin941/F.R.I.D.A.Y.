@@ -19,6 +19,7 @@ from accounts.authentication import (
     TOKEN_PREFIX,
     DeviceJWTAuthentication,
     FacadeTokenAuthentication,
+    HookTokenAuthentication,
     PersonalAccessTokenAuthentication,
     hash_token,
 )
@@ -28,6 +29,7 @@ from accounts.services import register_user
 from approvals.models import ApprovalRequest
 from core.channels import (
     CHANNEL_CLI,
+    CHANNEL_HOOK,
     CHANNEL_OPENAI,
     CHANNEL_UNKNOWN,
     CHANNEL_WEB,
@@ -46,24 +48,34 @@ KNOWN_AUTHENTICATORS = {
     DeviceJWTAuthentication: CHANNEL_WEB,
     PersonalAccessTokenAuthentication: CHANNEL_CLI,
     FacadeTokenAuthentication: CHANNEL_OPENAI,
+    HookTokenAuthentication: CHANNEL_HOOK,
 }
 
 
-def _views(resolver=None):
+def routed_api_views(resolver=None):
+    """(view class, the authentication classes it actually runs with) for
+    every routed DRF view -- including the ones injected through
+    `as_view(authentication_classes=...)` by the composition root."""
     resolver = resolver or get_resolver()
     for pattern in resolver.url_patterns:
         if isinstance(pattern, URLResolver):
-            yield from _views(pattern)
+            yield from routed_api_views(pattern)
         elif isinstance(pattern, URLPattern):
             view_class = getattr(pattern.callback, "view_class", None)
             if view_class is not None and issubclass(view_class, APIView):
-                yield view_class
+                initkwargs = getattr(pattern.callback, "view_initkwargs", {}) or {}
+                yield (
+                    view_class,
+                    list(
+                        initkwargs.get("authentication_classes", view_class.authentication_classes)
+                    ),
+                )
 
 
 def test_every_routed_authenticator_has_a_known_channel():
     seen = set()
-    for view_class in _views():
-        for auth_class in view_class.authentication_classes:
+    for view_class, auth_classes in routed_api_views():
+        for auth_class in auth_classes:
             seen.add(auth_class)
             assert auth_class in KNOWN_AUTHENTICATORS, (
                 f"{view_class.__name__} uses {auth_class.__name__}, which has no entry in the "

@@ -14,7 +14,9 @@ added to `DEFAULT_AUTHENTICATION_CLASSES`: only the specific view classes
 MVP 9 allowlists (assistant/agents/approvals) set the PAT class explicitly
 in their own `authentication_classes`, ordered BEFORE
 `DeviceJWTAuthentication`; the facade views use `FacadeTokenAuthentication`
-alone. DRF's authentication loop stops at the first
+alone. `HookTokenAuthentication` (Phase 8A D6) is the same check for the
+Claude Code hook relay and accepts only `hook`-kind tokens; only the
+hook-event ingest view uses it. DRF's authentication loop stops at the first
 authenticator that raises `AuthenticationFailed` — `JWTAuthentication`
 raises `InvalidToken` (an `AuthenticationFailed` subclass) for any
 non-JWT-shaped string, including a `jpat_...` token, so if it ran first on
@@ -36,7 +38,13 @@ from rest_framework_simplejwt.authentication import JWTAuthentication
 from accounts.models import PersonalAccessToken, TrustedDevice
 from audit.models import AuditLog
 from audit.services import record_audit
-from core.channels import CHANNEL_CLI, CHANNEL_OPENAI, ChannelPrincipal, WebSessionPrincipal
+from core.channels import (
+    CHANNEL_CLI,
+    CHANNEL_HOOK,
+    CHANNEL_OPENAI,
+    ChannelPrincipal,
+    WebSessionPrincipal,
+)
 from core.client_ip import trusted_client_ip
 
 TOKEN_PREFIX = "jpat_"
@@ -62,6 +70,7 @@ def hash_token(raw_token: str) -> str:
 KIND_CHANNELS = {
     PersonalAccessToken.Kind.CLI: CHANNEL_CLI,
     PersonalAccessToken.Kind.OPENAI: CHANNEL_OPENAI,
+    PersonalAccessToken.Kind.HOOK: CHANNEL_HOOK,
 }
 
 
@@ -157,6 +166,18 @@ class FacadeTokenAuthentication(PersonalAccessTokenAuthentication):
 
     accepted_kind = PersonalAccessToken.Kind.OPENAI
     surface = "openai"
+
+
+class HookTokenAuthentication(PersonalAccessTokenAuthentication):
+    """The Claude Code hook relay's only authenticator (Phase 8A D6):
+    `hook`-kind tokens -> CHANNEL_HOOK. Used by exactly one view, the
+    append-only hook-event ingest (injected by `config/urls.py`, since
+    `memory` does not import `accounts`). Every other authenticator refuses a
+    hook token (wrong kind -> 403, or not a JWT -> 401), and this one refuses
+    every other kind with a 403."""
+
+    accepted_kind = PersonalAccessToken.Kind.HOOK
+    surface = "hook"
 
 
 class DeviceJWTAuthentication(JWTAuthentication):

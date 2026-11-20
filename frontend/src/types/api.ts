@@ -497,8 +497,10 @@ export interface ApiAgentDetail extends ApiAgent {
 // --- Integrations (MVP 9) ---
 
 // Which surface a token reaches (Phase 4 branch 6): `cli` the Friday CLI
-// endpoints, `openai` only the OpenAI-compatible facade (/v1). Fixed at mint.
-export type PatKind = "cli" | "openai";
+// endpoints, `openai` only the OpenAI-compatible facade (/v1), `hook` only
+// the Claude Code hook-event ingest (Phase 8A D6; owner's personal workspace
+// only). Fixed at mint.
+export type PatKind = "cli" | "openai" | "hook";
 
 export interface ApiPersonalAccessToken {
   id: string;

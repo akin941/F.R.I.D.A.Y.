@@ -25,7 +25,10 @@ class Command(BaseCommand):
             "--kind",
             choices=PersonalAccessToken.Kind.values,
             default=PersonalAccessToken.Kind.CLI,
-            help="Token kind: cli (default) or openai (the OpenAI-compatible facade).",
+            help=(
+                "Token kind: cli (default), openai (the OpenAI-compatible facade) or "
+                "hook (the Claude Code hook relay)."
+            ),
         )
 
     def handle(self, *args, **options):
