@@ -665,6 +665,20 @@ cloud session (real hardware and a real HA token):
    private/personal.
 6. Sonnet 5 re-review of the reconciliation diff (CLAUDE.md review rule).
 
+**Known follow-ups (LOW, from review; recorded at integration merge
+2026-11-20):**
+- `connectors/bridges/home_assistant.py`: the default code maximum includes
+  `scene.turn_on`. A scene is an owner-configured intent that HA resolves at
+  activation time, so the dialog cannot show which entities it touches (a
+  scene could include locks or alarms, which are `NEVER_DOMAINS`). Recorded
+  as residual risk in `docs/mcp/home-assistant.md` and owner step 2.
+  Optional fix: make `scene` opt-in (omit it from the default maximum unless
+  `HA_ALLOWED_DOMAINS` names it), or keep it and rely on the owner step.
+- `connectors/bridges/home_assistant.py`: `target_present` re-reads the
+  entity in the precondition and `_call_service` reads it again before the
+  POST, so each execution costs two extra GETs. Deliberate defence in depth
+  and harmless; no fix required.
+
 ### 8. `feat/p5-mail-calendar` — D9
 
 **Step 0 — Google vendor spike, run at phase start (in parallel with
