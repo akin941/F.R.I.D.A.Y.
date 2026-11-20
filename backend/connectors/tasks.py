@@ -10,6 +10,7 @@ from celery import shared_task
 from django.conf import settings
 from django.utils import timezone
 
+from connectors import ingestion
 from connectors.manifest import get_manifest
 from connectors.models import ConnectorBinding, ConnectorWriteExecution
 from connectors.services import check_binding_pins
@@ -68,6 +69,13 @@ def recover_stale_connector_writes():
 @shared_task
 def check_binding_pins_task(binding_id):
     check_binding_pins(binding_id)
+
+
+@shared_task
+def ingest_calendar_metadata():
+    """Phase 8A branch 4 (brief D5): the calendar metadata producer -- see
+    `connectors.ingestion.ingest_calendar_metadata`. Compose-worker beat."""
+    return ingestion.ingest_calendar_metadata()
 
 
 @shared_task

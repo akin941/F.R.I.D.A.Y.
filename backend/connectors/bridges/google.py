@@ -436,7 +436,9 @@ class GoogleCalendarReader:
     def __init__(self, api):
         self.api = api
 
-    def agenda(self, *, start_date, days):
+    def _events(self, *, start_date, days):
+        """The one `calendar.events.agenda` request shape (its pin covers
+        both `agenda` and `event_metadata`): the window's raw items."""
         zone = ZoneInfo(settings.TIME_ZONE)
         start = start_date or timezone.localdate()
         time_min = datetime.combine(start, dt_time.min, tzinfo=zone)
@@ -455,10 +457,17 @@ class GoogleCalendarReader:
                 },
             )
         )
+        items = [
+            item
+            for item in body.get("items") or []
+            if isinstance(item, dict) and item.get("status") != "cancelled"
+        ]
+        return time_min, time_max, items[:AGENDA_MAX_EVENTS]
+
+    def agenda(self, *, start_date, days):
+        time_min, time_max, items = self._events(start_date=start_date, days=days)
         events = []
-        for item in body.get("items") or []:
-            if item.get("status") == "cancelled":
-                continue
+        for item in items:
             start_at, end_at = item.get("start") or {}, item.get("end") or {}
             events.append(
                 {
@@ -475,6 +484,55 @@ class GoogleCalendarReader:
             "to": time_max.isoformat(),
             "events": events[:AGENDA_MAX_EVENTS],
         }
+
+    def event_metadata(self, *, start_date, days):
+        """Metadata-only events for the Phase 8A calendar producer (brief
+        D5): id, title, start/end, all-day flag, attendee **count** and
+        whether the owner organises it. Never a description, location,
+        attendee address or conference link -- they are not even copied
+        out of the response."""
+        _, _, items = self._events(start_date=start_date, days=days)
+        events = []
+        for item in items:
+            event_id = str(item.get("id") or "")
+            if not event_id:
+                continue
+            start_at, end_at = item.get("start") or {}, item.get("end") or {}
+            organizer = item.get("organizer") if isinstance(item.get("organizer"), dict) else {}
+            attendees = item.get("attendees")
+            events.append(
+                {
+                    "id": event_id[:256],
+                    "summary": str(item.get("summary", "")),
+                    "start": str(start_at.get("dateTime") or start_at.get("date") or ""),
+                    "end": str(end_at.get("dateTime") or end_at.get("date") or ""),
+                    "all_day": "date" in start_at and "dateTime" not in start_at,
+                    "attendee_count": len(attendees) if isinstance(attendees, list) else 0,
+                    "organizer_self": organizer.get("self") is True,
+                }
+            )
+        return events
+
+
+def read_calendar_metadata(*, start_date, days, timeout):
+    """A Friday-internal (system) calendar read for the Phase 8A producer:
+    the same request shape, credentials and granted-scope check as the
+    `calendar.events.agenda` tool, outside the chat tool registry (no
+    channel: nothing is shown to a model here). Raises `ConnectorError`
+    (closed vocabulary) on any failure."""
+    with build_client(timeout) as client:
+        token = access_token(client)
+        if scope_status(token.scopes, TOOL_SCOPES["calendar.events.agenda"]) != TOOL_OK:
+            raise ConnectorError("scope_mismatch")
+        try:
+            return GoogleCalendarReader(_Api(client, token, {"sent": False})).event_metadata(
+                start_date=start_date, days=days
+            )
+        except (ValueError, TypeError, KeyError, AttributeError):
+            logger.warning("google calendar metadata: malformed response")
+            raise ConnectorError("protocol_error") from None
+        except GoogleHTTPError:
+            raise ConnectorError("tool_error") from None
 
 
 # --- writes: built only from the snapshotted payload arguments ---

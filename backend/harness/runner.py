@@ -444,6 +444,146 @@ def diff_stat(directory, *, base_sha, head_sha):
     return result.stdout
 
 
+# --- Phase 8A branch 4 (brief D5): the git-commit ingestion primitive ---
+
+_COMMIT_LOG_MAX_COMMITS = 200
+_COMMIT_LOG_TIMEOUT_SECONDS = 60
+_SHA_RE = re.compile(r"\A[0-9a-f]{40}([0-9a-f]{24})?\Z")
+_SHORTSTAT_RE = {
+    "files_changed": re.compile(r"(\d+) files? changed"),
+    "insertions": re.compile(r"(\d+) insertions?\(\+\)"),
+    "deletions": re.compile(r"(\d+) deletions?\(-\)"),
+}
+# The message log: one NUL-terminated record per commit (`-z`); inside a
+# record the first five lines are fixed-format fields (none of them can
+# contain a newline), the rest is the raw message. Git commit messages
+# cannot contain NUL, so a message can never forge a record boundary.
+_COMMIT_MESSAGE_FORMAT = "%H%n%P%n%ae%n%aI%n%cI%n%B"
+# The stat log: NUL + sha, then git's own `--shortstat` line. No free text.
+_COMMIT_STAT_FORMAT = "%x00%H"
+
+
+def commit_log_argv(directory, *args):
+    """`git log` argv for the commit-log reads. `-p`/`--patch`/`--stat`/
+    `--name-only` are never passed: diffs, file names and file contents
+    are never read (brief D5); a test pins this."""
+    return ["git", "-C", directory, "log", f"--max-count={_COMMIT_LOG_MAX_COMMITS}", *args, "HEAD"]
+
+
+def _run_git_log(argv):
+    try:
+        result = subprocess.run(
+            argv,
+            capture_output=True,
+            env={**os.environ, **_ISOLATED_GIT_ENV},
+            timeout=_COMMIT_LOG_TIMEOUT_SECONDS,
+        )
+    except (subprocess.TimeoutExpired, OSError) as exc:
+        raise RunnerError(f"git log failed: {exc}") from exc
+    if result.returncode != 0:
+        raise RunnerError("git log failed")
+    return result.stdout.decode("utf-8", "replace")
+
+
+def parse_commit_messages(output):
+    commits = []
+    for record in output.split("\x00"):
+        record = record.lstrip("\n")
+        if not record:
+            continue
+        parts = record.split("\n", 5)
+        if len(parts) < 5:
+            continue
+        sha, parents, email, authored, committed = (p.strip() for p in parts[:5])
+        if not _SHA_RE.match(sha):
+            continue
+        commits.append(
+            {
+                "sha": sha,
+                "parents": [p for p in parents.split() if _SHA_RE.match(p)],
+                "author_email": email.lower(),
+                "authored_at": authored,
+                "committed_at": committed,
+                "message": parts[5].strip() if len(parts) > 5 else "",
+            }
+        )
+    return commits
+
+
+def parse_commit_stats(output):
+    stats = {}
+    for chunk in output.split("\x00"):
+        sha, _, rest = chunk.strip().partition("\n")
+        sha = sha.strip()
+        if not _SHA_RE.match(sha):
+            continue
+        stats[sha] = {
+            name: int(match.group(1)) if (match := pattern.search(rest)) else 0
+            for name, pattern in _SHORTSTAT_RE.items()
+        }
+    return stats
+
+
+def commit_log(*, git_url, branch, since, clone_env=None):
+    """Phase 8A brief D5 / branch 4: the commits on `branch` committed since
+    `since` (an aware datetime), newest first, at most 200 -- metadata and
+    commit messages only. A blob-less (`--filter=blob:none`), no-checkout,
+    single-branch, `--shallow-since` clone into a fresh temp directory,
+    then two `git log` reads (messages; `--shortstat` counts); the clone is
+    removed on every exit path. No file content or diff is ever read: the
+    clone never checks out a tree and no `git log` asks for a patch.
+
+    Returns a list of dicts: `sha`, `parents`, `author_email` (lowercased),
+    `authored_at`/`committed_at` (ISO 8601 strings), `message`,
+    `files_changed`, `insertions`, `deletions`. A window with no commits is
+    `[]`, not an error. Raises `RunnerError` on any other failure. Runs on
+    the runner (it needs the clone credentials, like `clone_repo`), behind
+    this module's attribute seam so tests never reach a real remote."""
+    directory = tempfile.mkdtemp(prefix="harness-commit-log-")
+    try:
+        try:
+            result = subprocess.run(
+                [
+                    "git",
+                    "clone",
+                    "--quiet",
+                    "--filter=blob:none",
+                    "--no-checkout",
+                    "--single-branch",
+                    "--branch",
+                    branch,
+                    f"--shallow-since={since.isoformat()}",
+                    "--",
+                    git_url,
+                    directory,
+                ],
+                capture_output=True,
+                env={**os.environ, **(clone_env or {})},
+                timeout=_GIT_CLONE_TIMEOUT_SECONDS,
+            )
+        except (subprocess.TimeoutExpired, OSError) as exc:
+            raise RunnerError(f"commit-log clone failed: {exc}") from exc
+        if result.returncode != 0:
+            stderr = (result.stderr or b"").decode("utf-8", "replace")
+            # git refuses a shallow clone whose window selects no commit;
+            # that is simply "nothing new since the cursor".
+            if "no commits selected" in stderr:
+                return []
+            raise RunnerError("commit-log clone failed")
+        messages = parse_commit_messages(
+            _run_git_log(commit_log_argv(directory, "-z", f"--format={_COMMIT_MESSAGE_FORMAT}"))
+        )
+        stats = parse_commit_stats(
+            _run_git_log(
+                commit_log_argv(directory, f"--format={_COMMIT_STAT_FORMAT}", "--shortstat")
+            )
+        )
+    finally:
+        cleanup_directory(directory)
+    zero = dict.fromkeys(_SHORTSTAT_RE, 0)
+    return [{**commit, **stats.get(commit["sha"], zero)} for commit in messages]
+
+
 def _clone_full(*, git_url, default_branch, clone_env):
     """A non-shallow clone -- the clean-clone counterpart to `clone_repo`
     above, used by `push_bundled_commit` and `prepare_review_clone`

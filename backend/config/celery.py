@@ -99,6 +99,19 @@ _BEAT_SCHEDULE = {
         "task": "memory.ingestion.tasks.purge_expired_episodes_task",
         "schedule": 24 * 60 * 60.0,
     },
+    # Phase 8A branch 4 (brief D5): the git-commit producer clones with the
+    # runner's credentials, so it runs on the runner beat (`harness.tasks.`
+    # prefix below); the calendar producer reads Google from the compose
+    # worker like every connector read. Both are no-ops while their
+    # ingestion source is disabled or paused.
+    "memory-ingest-git-commits": {
+        "task": "harness.tasks.ingest_repo_commits",
+        "schedule": 6 * 60 * 60.0,
+    },
+    "memory-ingest-calendar-metadata": {
+        "task": "connectors.tasks.ingest_calendar_metadata",
+        "schedule": 6 * 60 * 60.0,
+    },
     # Phase 6 A5: voice turn traces (timings only) live VOICE_TRACE_RETENTION_DAYS.
     "voice-turn-trace-prune": {
         "task": "voice.tasks.prune_voice_turn_traces_task",
