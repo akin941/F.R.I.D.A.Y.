@@ -268,8 +268,10 @@ These changes land in `accounts` (branch 1).
 - **Immediate revocation.**
   - The existing `revoke_device` and `revoke_all_devices` cover nodes
     unchanged: they filter on `user`, not `kind`. A test pins this.
-  - Revoking calls `core.revocation.publish_device_revoked(device_id)`.
-    This is a best-effort Redis `PUBLISH` on `friday:device-revoked`.
+  - Revoking calls `core.revocation.publish_device_revoked(device_id,
+    user_id)`. This is a best-effort Redis `PUBLISH` on
+    `friday:device-revoked` with the payload `{"device_id": "<uuid>",
+    "user_id": "<uuid>"}`; both keys are always present.
     It is an explicit call, not a Django signal, following the
     `accounts/services.py` "explicit over signals" note. The gateway
     subscribes to the channel (D6) and closes that node's socket within
@@ -280,8 +282,10 @@ These changes land in `accounts` (branch 1).
 - **Owner kill switch.** `accounts.NodeKillSwitch` is a per-owner row
   with `engaged_at`, `engaged_via` and `engaged_by_device`.
   - While engaged, every node authentication fails and every live node
-    socket is closed (published like a revocation). Pairing a new node
-    is refused too.
+    socket **of that owner** is closed. It is published on the same
+    channel as `{"device_id": "*", "user_id": "<owner uuid>"}`; the
+    wildcard is always scoped by `user_id` and is never published
+    without it. Pairing a new node is refused too.
   - It is reversible without re-pairing. That is the difference from
     revocation, which is permanent.
   - Controls: `manage.py node_kill_switch on|off|status`, plus
@@ -327,8 +331,9 @@ ADR-013 decision 9, verbatim:
   `connectors`, `deploys`, `voice`, `hud` or `ops`.
 
 **Pure-Python packages.** `nodes.protocol` and `nodes.reference` must not
-import Django or any project package outside `nodes.protocol`. Two things
-enforce this: a contract over the project packages, and a test that
+import Django or any project package outside `nodes.protocol` (the
+reference node's vendored scrubber is a generated sibling module inside
+`nodes.reference`, D13 item 6). Two things enforce this: a contract over the project packages, and a test that
 imports them in a subprocess with Django absent from `sys.modules`. These
 two packages are the shared spec that the Swift app mirrors.
 
@@ -568,9 +573,23 @@ every other kernel app as a source. `memory` and `memory.ingestion` gain
   - At most `NODE_MAX_INFLIGHT` (default 4) concurrent invocations per
     node. Beyond that, `busy`.
 - **Revocation fan-out.** The gateway subscribes to
-  `friday:device-revoked`, and to the kill-switch publication that uses
-  the same channel with `device_id="*"`. It sends `bye` and closes the
-  matching sockets within 2 s.
+  `friday:device-revoked`. A message matches a socket when its
+  `device_id` equals that node's device id, or when `device_id` is `"*"`
+  **and** `user_id` equals that node's owner id (the kill switch, D1).
+  It sends `bye` and closes the matching sockets within 2 s. A payload
+  that fails to parse, lacks `user_id`, or carries `"*"` without a
+  `user_id` closes nothing and is counted. That fails safe: the
+  heartbeat re-check (≤ 15 s) still applies.
+- **Result routing is per node.** Each socket keeps the set of
+  invocation ids it has forwarded and not yet resolved. Before
+  forwarding, the gateway checks that the envelope's `node_id` equals
+  the socket's node (otherwise the envelope is dropped and the caller
+  resolved `error`). A `result` is accepted only if its `invocation_id`
+  is in **that socket's** in-flight set; a result for an unknown,
+  finished or other node's invocation is discarded, counted as a frame
+  error (D5's three-in-60 s rule closes the socket), and never pushed
+  to any result key. One node therefore cannot answer, or poison, an
+  invocation sent to another.
 - **Limits.**
   - Frame ≤ 256 KiB inbound.
   - ≤ 20 inbound frames/s per socket, beyond which the socket closes
@@ -590,21 +609,38 @@ every other kernel app as a source. `memory` and `memory.ingestion` gain
   schemas** with the node's advertised entry. A node that advertises a
   wider schema cannot get the server to send arguments outside its own
   contract, and the reverse holds too.
-- **The six v1 read capabilities.** All are `class: read` (ADR-014).
+- **The eight v1 read capabilities.** All are `class: read` (ADR-014).
 
   | Capability | Args | Result (bounded) | `data_class` | Workspace resolved from |
   |---|---|---|---|---|
-  | `claude.sessions.list` | `since_hours` (1–168), `limit` (≤ 50) | `[{session_id, cwd, started_at, last_activity_at, message_count, model, status_hint}]`; no text | firm | `cwd` per row |
+  | `claude.sessions.list` | `since_hours` (1–168), `limit` (≤ 50), `cwd_prefixes` (optional) | `[{session_id, cwd, started_at, last_activity_at, message_count, model, status_hint}]`; no text | firm | `cwd` per row |
   | `claude.sessions.read` | `session_id`, `last_turns` (1–20) | `[{role (user/assistant), at, text ≤ 2000}]`; tool calls and results as counts only | personal | the session's `cwd` |
   | `codex.threads.list` | as `claude.sessions.list` | as above (`thread_id`) | firm | `cwd` per row |
   | `codex.threads.read` | `thread_id`, `last_turns` (1–20) | as `claude.sessions.read` | personal | the thread's `cwd` |
-  | `usage.ccusage` | `period` (`today`/`week`/`month`) | `{total_usd, tokens_in, tokens_out, by_project:[{cwd, usd}]}` | firm | `cwd` per row |
+  | `usage.ccusage` | `period` (`today`/`week`/`month`), `cwd_prefixes` (optional) | `{total_usd, tokens_in, tokens_out, by_project:[{cwd, usd}]}` | firm | `cwd` per row |
   | `git.status` | `repo_path` | `{branch, ahead, behind, dirty_files_count, untracked_count, last_commit_sha, last_commit_at}`; never file names or diffs | firm | `repo_path` |
   | `apps.frontmost` | none | `{bundle_id, app_name}` | personal | none |
   | `windows.list` | `limit` (≤ 30) | `[{bundle_id, app_name, window_count, on_screen}]`; titles only if the owner enabled them locally (D13) | personal | none |
 
-  These are eight wire capabilities in six families, the ADR-014 read
-  list.
+  These eight wire capabilities are the ADR-014 read list. They group
+  into five families (`claude`, `codex`, `usage`, `git`,
+  `apps`/`windows`). D9 exposes them through five read tools, grouped
+  by what a turn asks rather than by family.
+
+  `cwd_prefixes` (optional on the three per-row lists, ≤ 20 path
+  prefixes, absolute or `~/`-anchored, each ≤ 1024 chars) asks the node
+  to return only rows whose `cwd` lies under one of them. `tools` fills it from the
+  conversation workspace's 8A `path_prefix` rules (D9), so another
+  workspace's rows are filtered at the source and never transit the
+  server. Prefixes are sent in `normalise_path` form (`~` kept as the
+  home marker, mapping.py:39); the node matches a row when its `cwd`,
+  normalised the same way, equals a prefix or starts with prefix + `/`
+  (the `_path_matches` rule, segment boundaries only), and checks both
+  the absolute and the `~/` form of its own home. It is a narrowing
+  hint, not a trust boundary: the server's row filter (D9) still runs
+  on every result. For `usage.ccusage` the node's totals then cover the
+  matching projects only. An empty list means "the workspace has no
+  rules", so `is_available` is already false and no call is made.
 - **`invoke_read(*, node, capability, args, workspace, actor, trace_id)
   -> ReadOutcome`** runs these steps:
   1. Check the snapshot entry is invocable.
@@ -614,14 +650,51 @@ every other kernel app as a source. `memory` and `memory.ingestion` gain
   5. Wait.
   6. Validate the result against `result_schema`.
   7. Write exactly one `NodeInvocation` chain row (D8) at the terminal
-     state: `ok`, `refused:<code>`, `error`, `timeout`, `node_offline`,
-     `node_disconnected`, `busy` or `bus_unavailable`.
+     state (the closed set below).
   8. Write one `nodes.invoke` `AuditLog` row with the capability, args
      hash, nonce, status, duration, workspace and trace id. It never
      contains args or output content.
 
   It returns the validated output to the caller and **stores none of
   it**.
+- **`refuse_read(*, node, capability, args, workspace, actor, trace_id,
+  code) -> ReadOutcome`** is the second entry point. `tools` calls it
+  when its own pre-invoke check fails (D9: `path_not_in_workspace`,
+  `workspace_not_allowed`, `session_not_found`). It signs and sends
+  nothing, and writes the same chain row and `AuditLog` row as step 7–8.
+  `tools` never writes either table itself.
+- **Terminal statuses (closed set).** `status` and `refusal_code` are
+  two columns; the pair below is the whole vocabulary, pinned by a test.
+
+  | `status` | `refusal_code` | Where it ends | Anything signed or sent? |
+  |---|---|---|---|
+  | `ok` | — | node answered, result valid | yes |
+  | `refused` | a D5 node code (`replay`, `not_granted`, …) | node refused | yes |
+  | `error` | `node_error` / `result_schema` / `result_too_large` | node error frame, or step 6 failed | yes |
+  | `timeout` | — | no result within `NODE_INVOKE_TIMEOUT_SECONDS` | yes |
+  | `node_disconnected` | — | socket dropped in flight | yes |
+  | `server_refused` | `not_invocable` / `args_contract` / `signing_unavailable` | `invoke_read` steps 1–2, or no usable signing key | no |
+  | `server_refused` | `path_not_in_workspace` / `workspace_not_allowed` / `session_not_found` | `tools` pre-check via `refuse_read` (D9) | no |
+  | `node_offline` | — | no presence key | no |
+  | `busy` | — | `NODE_MAX_INFLIGHT` reached | no |
+  | `bus_unavailable` | — | Redis down | no |
+
+  **Every call that reaches `invoke_read` or `refuse_read` writes
+  exactly one chain row and one `AuditLog` row**, including the
+  not-sent statuses. A row with nothing sent has `nonce = ""` (the
+  empty string, hashed as such), `output_sha256 = ""`, `output_bytes =
+  0` and the `args_sha256` of the args as given (args are hashed, never
+  stored, so even an out-of-contract args object is safe to hash). A
+  tool call stopped earlier by the tools registry (wrong channel,
+  `is_available` false) never reaches `nodes` and writes no chain row;
+  that is not a node call.
+- **A `*.read` is two node calls and two chain rows**, sharing one
+  `trace_id`: the `*.list` lookup (D9), then the read itself. When the
+  lookup decides the read must not happen, the second row is a
+  `server_refused` row (`path_not_in_workspace` or
+  `session_not_found`) and nothing is sent for it. When the lookup itself
+  ends in a non-`ok` status, the read is not attempted and only the
+  lookup's row exists.
 
 ### D8 — Hash-chained invocation audit
 
@@ -636,7 +709,40 @@ every other kernel app as a source. `memory` and `memory.ingestion` gain
   - `prev_hash`, `row_hash`.
 
   `row_hash` is sha256 of the canonical JSON of every other field, with
-  `prev_hash` included. The genesis `prev_hash` is 64 zeros.
+  `prev_hash` included. Foreign keys enter the hash as their id strings
+  (`workspace_id`, `node_id`, `actor_id`), never as related objects. The
+  genesis `prev_hash` is 64 zeros.
+- **Deletion policy (no SET_NULL, no CASCADE).** An append-only, hashed
+  row must never be touched by a cascade, so every FK on
+  `NodeInvocation` is `on_delete=PROTECT`:
+  - `workspace` overrides `WorkspaceScopedModel`'s `CASCADE` with
+    `PROTECT` (an abstract parent's field may be redeclared). The column
+    stays `workspace_id`, so `for_actor()` and rule 1 are unchanged.
+  - `node` is `PROTECT`. Nodes are never deleted: revocation flips the
+    `TrustedDevice` row (D1), and `Node` rows stay as the chain's
+    subject. `Node.device` (one-to-one to its `TrustedDevice`) is
+    likewise `PROTECT`.
+  - `actor` is `PROTECT` and nullable (null only for system calls), not
+    `SET_NULL`: a `SET_NULL` would be an UPDATE, which the trigger
+    refuses and which would also break `row_hash`.
+
+  Consequences, stated so that no implementer has to guess:
+  - **Workspace deletion or purge** is refused while chain rows exist
+    (`ProtectedError`, and the trigger as the backstop). Whole-workspace
+    deletion is already gate-class and unimplemented (ADR-009, "a whole
+    workspace (firm deletion/archival)"); whichever later phase builds
+    it must define a chain-aware archival (for example export plus a
+    signed tombstone row) in its own ADR. Phase 9 adds no tombstone
+    path, and the trigger has no exception.
+  - **Owner trash and purge (ADR-009)** cover tasks, knowledge and
+    memory rows. `NodeInvocation` is not trashable and holds no
+    content, so ADR-009 never reaches it.
+  - **User deletion** is refused while the user is an actor or node
+    owner on chain rows. This matches today's `AuditLog`, whose
+    `SET_NULL` actor FK already makes a user delete fail on its
+    append-only trigger (audit migration 0002); Friday deactivates users
+    (`is_active=False`) and never deletes them. Phase 9 does not change
+    `AuditLog`.
 - **Writing.** Rows are written under `select_for_update` on a
   single-row `NodeAuditHead`, which serializes the chain. They are
   append-only through a DB trigger, the same pattern as audit migration
@@ -682,17 +788,32 @@ every other kernel app as a source. `memory` and `memory.ingestion` gain
     Workspace | None`. `tools` may import `memory`.
   - For a capability with a path argument (`git.status`), the path must
     resolve to the conversation's workspace, otherwise the call is
-    refused **before** invoking (`path_not_in_workspace`).
-  - For `*.read`, the server first runs the matching `*.list` to learn
-    the session's `cwd`, then applies the same rule.
-  - List results are filtered row by row. Unmapped rows and rows of
-    another workspace are dropped and counted, never shown.
+    refused **before** invoking: `tools` calls
+    `nodes.services.refuse_read(code="path_not_in_workspace")`, which
+    writes the chain row and sends nothing (D7).
+  - For `*.read`, the server first runs the matching `*.list` (with
+    `cwd_prefixes`) to learn the session's `cwd`, then applies the same
+    rule. That is two node calls and two chain rows (D7). A session
+    absent from the lookup is refused `session_not_found`; one whose
+    `cwd` maps elsewhere is refused `path_not_in_workspace`.
+  - Every list call carries `cwd_prefixes`: the `path_prefix` values of
+    the rules that target the conversation's workspace, via a new memory
+    helper `memory.ingestion.mapping.prefixes_for_workspace(owner,
+    workspace) -> list[str]`. The node filters at the source (D13).
+  - List results are then filtered row by row on the server anyway.
+    Unmapped rows and rows of another workspace (from a node that
+    ignored or mis-applied `cwd_prefixes`) are dropped and counted,
+    never shown.
   - `apps.frontmost` and `windows.list` have no path. They are personal
-    and allowed only in the owner's personal workspace.
+    and allowed only in the owner's personal workspace; elsewhere `tools`
+    calls `refuse_read(code="workspace_not_allowed")`.
 - **Second scrub.** Every string in a result passes through
   `memory.ingestion.scrubber.scrub` with the target workspace's
-  `ScrubTerm`s before it is fenced. The node scrubs first (M2), so this
-  is defence in depth, as in 8A D3.
+  `ScrubTerm`s before it is fenced. The node scrubs first (D13 item 6:
+  the reference node with a vendored copy of the same module, branch 3;
+  the Swift app with a port proven against shared vectors, M2), so this
+  is defence in depth, as in 8A D3. Only the server applies workspace
+  `ScrubTerm`s; the node never receives them.
 - **Fencing.** Output is rendered as
   `<connector_result source="friday-node">`, with `neutralize_fence` and
   `strip_invisible_formatting`, capped at 8 000 characters per tool
@@ -817,8 +938,16 @@ the protocol half of it in Python.
    - None of these is reachable from the protocol.
 6. **Readers.** Bounded, read-only parsers of the Claude Code JSONL
    transcripts and the Codex rollout JSONL. The output schemas follow D7.
-   Tool results and file contents are never returned. Every string is
-   scrubbed with a port of the 8A scrubber that passes the same corpus.
+   Tool results and file contents are never returned. Rows outside the
+   invoke's `cwd_prefixes` are skipped before parsing. Every returned
+   string is scrubbed with the 8A rules (no workspace terms):
+   - the reference node uses `nodes/reference/_scrubber_vendored.py`, a
+     generated, byte-identical copy of `memory/ingestion/scrubber.py`
+     (the `integrations/cli` pattern; branch 3), so the purity and
+     import contracts hold;
+   - the Swift app uses a port that must reproduce
+     `backend/nodes/conformance/vectors/scrub.json` exactly and pass the
+     corpus (M2).
 7. **Hook relay.**
    - `friday-node hook` writes stdin to a user-owned Unix domain socket
      (mode 0600, in a 0700 directory), and the node checks the peer uid
@@ -893,10 +1022,14 @@ Phase 10.
 - **Revocation:** revoking one node, then `revoke_all_devices`, leads to
   authentication failure. `revoke_all_devices` counts nodes (pins
   "covers nodes"). `publish_device_revoked` is called once per revoked
-  device (mocked Redis), and a Redis error never fails the revoke.
+  device (mocked Redis) with both `device_id` and `user_id` in the
+  payload, and a Redis error never fails the revoke.
 - **Kill switch:**
   - engaged means authentication fails and pairing is refused;
   - released restores it without re-pairing;
+  - engaging publishes `{"device_id": "*", "user_id": <owner id>}`
+    (payload asserted on mocked Redis), and owner A's kill switch leaves
+    owner B's node authenticating;
   - the endpoints are web channel, owner and human only;
   - the command prints the state;
   - audited.
@@ -980,6 +1113,12 @@ There is no socket yet.
   - append under concurrency (two threads) gives a contiguous `seq`
     and a valid chain;
   - UPDATE and DELETE are refused by the trigger;
+  - deletion policy (D8): deleting the row's workspace, node,
+    `TrustedDevice` or actor user raises `ProtectedError`, no chain row
+    changes, and `verify_node_audit_chain` still passes afterwards; a
+    raw-SQL `DELETE FROM workspaces_workspace` for that workspace is
+    refused by the FK, and a raw `UPDATE … SET actor_id = NULL` by the
+    trigger;
   - the verify command detects a tampered row (trigger disabled inside
     the test) and reports its `seq`.
 - **Workspace scoping:** `NodeInvocation.objects.for_actor()` isolation
@@ -1004,13 +1143,24 @@ half) as executable spec:
   - a `wsproto` client transport, an in-process transport for tests,
     and backoff;
   - a Unix-socket hook relay with a peer-uid check (`SO_PEERCRED` on
-    Linux; the Swift app uses `LOCAL_PEERCRED`) as the reference for M3.
+    Linux; the Swift app uses `LOCAL_PEERCRED`) as the reference for M3;
+  - the node-side scrub (D13 item 6). **Decision:** vendor, do not
+    import. `nodes/reference/_scrubber_vendored.py` is generated from
+    `memory/ingestion/scrubber.py` (stdlib-only today) by
+    `nodes/reference/vendor_scrubber.py`, which reads and writes text
+    and imports nothing from the project, exactly like
+    `integrations/cli/vendor_scrubber.py`. The fake readers scrub every
+    returned string with it and honour `cwd_prefixes`.
 - `nodes/conformance/`:
   - case definitions in Python, and generated case files
     `cases/v1/*.json` (each case lists server frames, the expected node
     frames and refusal codes, and asserts that no reader ran);
   - `manage.py build_node_conformance [--check]`, so the files cannot
-    drift from the definitions (CI step);
+    drift from the definitions (CI step). It also writes
+    `nodes/conformance/vectors/scrub.json`: every
+    `memory/tests/scrubber_corpus/*.jsonl` item and every fixture string
+    with its expected scrubbed output from the vendored scrubber. This
+    is the parity file M2's Swift port must reproduce byte for byte;
   - a test-only server key pair `conformance/keys/` (clearly labelled,
     never accepted by a production server: settings refuse it);
   - `manage.py node_conformance_server`: a hostile fake gateway on
@@ -1035,7 +1185,8 @@ half) as executable spec:
 - disconnect mid-invoke → no late result.
 
 **Files.**
-- `backend/nodes/reference/{__init__,node,transport,readers,spool,hook_relay}.py`;
+- `backend/nodes/reference/{__init__,node,transport,readers,spool,hook_relay,vendor_scrubber,_scrubber_vendored}.py`;
+- `backend/nodes/conformance/vectors/scrub.json` (generated);
 - `backend/nodes/reference/fixtures/` (synthetic Claude and Codex JSONL,
   with fake secrets for the scrub tests);
 - `backend/nodes/conformance/{__init__,cases,runner}.py`,
@@ -1060,7 +1211,19 @@ half) as executable spec:
   refused (simulated by a test seam over the peer-credential call);
   oversized input is dropped.
 - Readers never return tool-result text or file contents.
-- Purity: no Django import (subprocess).
+- Readers honour `cwd_prefixes`: rows outside them are never returned.
+- **Scrub:**
+  - `_scrubber_vendored.py` equals `vendor_scrubber.render()` (the
+    byte-identity check, as `integrations/tests/test_friday_hook.py`),
+    and `vendor_scrubber --check` exits 0;
+  - the vendored copy reaches 100% secrets recall on
+    `memory/tests/scrubber_corpus/` (the corpus files are read as data;
+    nothing imports `memory`);
+  - a reference-node read of the fixtures with fake secrets returns no
+    raw secret value in any `result` frame;
+  - `scrub.json` is current (`build_node_conformance --check`).
+- Purity: no Django import (subprocess), including
+  `_scrubber_vendored.py`.
 
 **Done when:** `node_conformance_server` against the reference node
 prints all-pass. The case files are what M1's Swift test target loads.
@@ -1114,7 +1277,14 @@ Postgres.
   - three missed heartbeats → presence gone and socket closed;
   - revocation detected at the next heartbeat with pub/sub disabled.
 - **Kill switch and revocation:** `bye` within 2 s with pub/sub. A
-  second connection replaces the first.
+  second connection replaces the first. **Two owners:** with nodes of
+  owner A and owner B connected (B's created directly), A's kill switch
+  closes only A's sockets and B's stays connected; a `"*"` payload
+  without `user_id` closes nothing.
+- **Result routing:** node B sending a `result` with node A's in-flight
+  `invocation_id` is discarded, A's caller still gets A's own result
+  (or `timeout`), and nothing is pushed to A's result key by B; a
+  `result` for an unknown id counts toward the frame-error close.
 - **Invoke bus:**
   - round trip;
   - timeout → `timeout`, and the late result is discarded;
@@ -1141,8 +1311,10 @@ of `revoke_device`.
 - D7: `invoke_read` complete, with result validation and the
   `NodeInvocation` row plus `AuditLog` row per call.
 - D9: `tools/node_reads.py` with the five `ReadToolSpec`s,
-  `memory.ingestion.mapping.workspace_for_path`, the pre-invoke path
-  refusal, row filtering, the second scrub, fencing and the size caps.
+  `memory.ingestion.mapping.workspace_for_path` and
+  `prefixes_for_workspace`, `cwd_prefixes` on every list call, the
+  pre-invoke refusals through `refuse_read`, row filtering, the second
+  scrub, fencing and the size caps.
 - `GET /nodes/<id>/invocations` (D11).
 - The router description strings for the five tools (Friday-authored,
   Turkish).
@@ -1163,7 +1335,14 @@ of `revoke_device`.
     before invoking (the reference node receives nothing);
   - list rows of other or unmapped workspaces are dropped and counted;
   - `*.read` of a session in another workspace is refused;
-  - `apps.frontmost` in a firm workspace is refused.
+  - `apps.frontmost` in a firm workspace is refused
+    (`workspace_not_allowed`, nothing sent);
+  - every list `invoke` carries `cwd_prefixes` equal to the
+    conversation workspace's rule prefixes (asserted on the frame the
+    reference node received), and the reference node returns no row of
+    the other workspace;
+  - a hostile reference-node variant that ignores `cwd_prefixes` still
+    has the other workspace's rows dropped server-side;
 - **Isolation:** a firm-only actor never sees personal rows, and the
   reverse holds.
 - **Personal data:** `node_session_detail` marks the conversation
@@ -1177,8 +1356,16 @@ of `revoke_device`.
   call or approval, and is never a provenance quote (the 8A
   prompt-injection corpus is extended with transcript items).
 - **Chain:**
-  - exactly one `NodeInvocation` and one `AuditLog` row per call, for
-    every terminal status;
+  - exactly one `NodeInvocation` and one `AuditLog` row per node call,
+    for every row of the D7 terminal-status table, including each
+    not-sent `server_refused`, `node_offline`, `busy` and
+    `bus_unavailable` case (each with `nonce = ""` and the reference
+    node receiving nothing);
+  - a `*.read` writes two rows with one `trace_id` (lookup, then read);
+    a lookup that resolves to another workspace gives an `ok` lookup
+    row plus a `server_refused:path_not_in_workspace` read row;
+  - the `(status, refusal_code)` vocabulary equals the D7 table (a test
+    over the model's choices);
   - no args or output content in either (field scan);
   - chain verifies after a mixed run.
 - **Tools:**
@@ -1324,7 +1511,7 @@ node paired, the e2e test is green, and the go/no-go record is written.
 
 | # | Branch | Scope | Depends on | Status |
 |---|---|---|---|---|
-| brief | `docs/p9-brief` | This brief (full, from the stub), MASTER_PLAN §AA row 9 Brief/Status, regenerated `self_sources.json` | Phase 8A closeout | **implemented 2026-11-20** (docs only; awaits the independent Sonnet 5 plan review) |
+| brief | `docs/p9-brief` | This brief (full, from the stub), MASTER_PLAN §AA row 9 Brief/Status, regenerated `self_sources.json` | Phase 8A closeout | **implemented 2026-11-20** (docs only; review round 1 findings addressed 2026-11-20 — D7 terminal-status table and `refuse_read`, D8 deletion policy, vendored node scrubber + `scrub.json` parity, `cwd_prefixes`, per-owner kill-switch payload, per-socket result routing, `CONFORMANCE` build-only mode; awaits re-review) |
 | 1 | `feat/p9-node-pairing` | Spike S9.0: `TrustedDevice.kind=node`, node pairing codes, `jnd_` secrets, rotation with grace, age cap, revocation fan-out, kill switch, `CHANNEL_NODE`, URL walk, ADR-013 spike note | brief approved | not started |
 | 2 | `feat/p9-node-protocol` | `nodes` app + contracts, protocol v1 schemas, canonical JSON, Ed25519 envelopes, capability contracts, pairing endpoint, signing key config, hash-chained `NodeInvocation`, dependency manifest | 1 | not started |
 | 3 | `feat/p9-reference-node` | Python reference node, conformance cases + `--check`, hostile fake gateway, reference spool and Unix-socket relay | 2 | not started |
@@ -1384,8 +1571,12 @@ Apple frameworks unless one goes through the governance manifest
   - `Pairing.swift` (calls `POST /api/v1/nodes/pair`);
   - `Rotation.swift` (calls `POST /api/v1/auth/nodes/credential/rotate`);
 - `Tests/NodeCoreTests/`;
-- `scripts/build-sign-notarize.sh` (`codesign --options runtime
-  --timestamp`, `notarytool submit --wait`, `stapler staple`);
+- `scripts/build-sign-notarize.sh` (`Release` configuration only;
+  conformance-marker check on the binary, see contract test 2; then
+  `codesign --options runtime --timestamp`, `notarytool submit --wait`,
+  `stapler staple`);
+- a `Conformance` build configuration (unsigned, debug, compilation
+  condition `CONFORMANCE`) used only for contract test 2;
 - entitlements: hardened runtime, `com.apple.security.network.client`
   only. No server entitlement, no microphone.
 
@@ -1403,10 +1594,31 @@ Apple frameworks unless one goes through the governance manifest
    `Tests/NodeCoreTests/ConformanceTests.swift`. It must give the same
    verdicts and codes as the reference node, with no case skipped.
 2. **Live conformance.** `uv run python manage.py node_conformance_server
-   --port 8765 --tls-self-signed` on the Mac, with the app started in
-   conformance mode (`FRIDAY_NODE_CONFORMANCE=1`, pinning the fake
-   server's self-signed SPKI and the conformance key). It must print
+   --port 8765 --tls-self-signed` on the Mac, with a **separate
+   conformance build** of the app connected to it. It must print
    all-pass.
+   - Conformance mode exists only in a distinct, unsigned debug build
+     configuration (`Conformance`) that defines the Swift compilation
+     condition `CONFORMANCE`. All code that pins the fake server's
+     self-signed SPKI and the conformance key sits inside
+     `#if CONFORMANCE … #endif`, and its inputs come from compile-time
+     constants or a launch argument read only inside that block.
+   - There is **no environment variable, user default or launch
+     argument in the release build** that changes the TLS pin, the
+     pinned signing keys or the server URL. A runtime switch in the
+     notarized binary would be a backdoor that any local process or
+     launch agent could flip, defeating ADR-013 decisions 2 and 4.
+   - The conformance build is never signed with the Developer ID
+     identity, never notarized and never installed as a login item.
+   - `scripts/build-sign-notarize.sh` builds the `Release`
+     configuration only and, before `codesign`, fails if the release
+     binary contains any conformance marker: `strings` over the Mach-O
+     must not find `FRIDAY_NODE_CONFORMANCE`, `conformance`, or the
+     conformance public key's base64 (read from
+     `backend/nodes/conformance/keys/`). A test
+     (`Tests/NodeCoreTests/ReleaseHygieneTests.swift`, run in the
+     `Release` configuration) asserts that the conformance pin type is
+     not compiled in.
 3. **Real stack.** Pair against the real stack with a node code from
    `/devices`, then check that:
    - `hello.ack` arrives;
@@ -1455,6 +1667,11 @@ Apple frameworks unless one goes through the governance manifest
 - The scrubber passes `backend/memory/tests/scrubber_corpus/` at 100%
   secrets recall: `friday-node scrub` over every corpus item compared
   with the labels, in a script `node/scripts/scrubber-corpus.sh`.
+- **Parity:** `Tests/NodeCoreTests/ScrubParityTests.swift` loads
+  `backend/nodes/conformance/vectors/scrub.json` from the repo path and
+  requires byte-identical output for every vector. Recall alone is not
+  enough: a different redaction shape would diverge from the server's
+  second scrub and from the reference node.
 
 **Contract tests:**
 - conformance cases `not_granted` and the args-schema family;
@@ -1587,7 +1804,10 @@ confusion, generated per schema.
   policy-shaped;
 - a node credential accepted on any surface but its own, or yielding
   `CHANNEL_WEB`;
-- a revoked or killed node still connected after its next heartbeat;
+- a revoked or killed node still connected after its next heartbeat,
+  or one owner's kill switch closing another owner's node;
+- a `result` accepted from a socket other than the one the invocation
+  was sent on;
 - an `invoke` sent without a valid signature, with a reused nonce, with
   `grant` non-null or with `class` ≠ `read`;
 - a read whose path maps to another workspace reaching the node;
@@ -1597,7 +1817,8 @@ confusion, generated per schema.
 - a personal-class read sent to a provider without
   `personal_data_allowed`;
 - a node-relayed event causing anything but an ack;
-- a missing or broken chain row;
+- a node call (any D7 terminal status, sent or not sent) without
+  exactly one chain row and one `AuditLog` row, or a broken chain;
 - a model call from `nodes`.
 
 ## Risks
