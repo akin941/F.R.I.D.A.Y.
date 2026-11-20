@@ -1355,3 +1355,30 @@ PAT wording in this section and branch 2's matrix now says 401.
    view against the 7–13 USD/month estimate.
 4. Start the two-week acceptance count for the go/no-go (closeout).
 5. Independent Sonnet 5 review of this branch before merge.
+
+### Branch 5 (`feat/p8-learning-loop`) — known follow-ups (from review, unresolved at merge)
+
+- **LOW — `backend/tools/purge.py` / `backend/memory/ingestion/services.py`**:
+  the permanent-purge extension only covers trashed episodes and forgotten
+  memories. Core-block proposals that forget-source rejected stay in the DB
+  permanently, as does the `provenance_quote` text of anything the owner
+  decides to purge; no purge key covers them. Fix: add a
+  `forgotten_proposal_ids` key to `purge_trash`, or delete forget-rejected
+  `CoreBlockProposal` rows when the matching memories are purged (or accept
+  this as a known residual).
+- **LOW — `backend/memory/ingestion/consolidation.py` (`_create_proposal`)**:
+  several core-block proposals for the same label in one night are all built
+  from the block's current content; the first approval makes the others stale
+  (400 `stale_version`) and their appended lines are lost. Optional fix: at
+  most one core-block proposal per label per night, or build the base from
+  the pending proposal.
+- **LOW — `backend/ai_core/management/commands/seed_ai_defaults.py`**:
+  `memory.extraction` now parses schema v2 only, so between `migrate` and
+  `seed_ai_defaults` the active prompt is still v1 and chat extraction fails
+  with a terminal schema error. Already covered by owner step 1; keep the
+  ordering (seed before the workers run).
+- **LOW — `backend/memory/ingestion/consolidation.py`**: the consolidation
+  model may reword a candidate's content; the stored quote stays the verified
+  one but the reworded content is not re-checked against it. The owner sees
+  both on the card and approval is required (accepted design). Optional:
+  reject rewordings that grow far past the candidate's length.
