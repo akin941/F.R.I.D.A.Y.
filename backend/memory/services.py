@@ -29,14 +29,30 @@ are admin-managed at every stage):
     hard-delete never-approved yes          no           no
 """
 
+import difflib
+import hashlib
+from datetime import timedelta
+
 from django.db import IntegrityError, transaction
+from django.utils import timezone
 
 from audit.models import AuditLog
 from audit.services import record_audit
 from core.channels import CHANNEL_WEB
+from memory.core_blocks import (
+    CORE_BLOCK_CHAR_BUDGETS,
+    OWNER_EDITABLE_LABELS,
+    labels_for_workspace,
+)
 from memory.jobs import dispatch_memory_embedding
-from memory.models import Memory, compute_fingerprint
-from workspaces.models import WorkspaceMember
+from memory.models import (
+    CoreBlockProposal,
+    CoreMemoryBlock,
+    CoreMemoryBlockVersion,
+    Memory,
+    compute_fingerprint,
+)
+from workspaces.models import Workspace, WorkspaceMember
 
 # Audit metadata carries ids/statuses/classifications only — never
 # title/content (private or not). Reads larger than the cap emit multiple
@@ -588,4 +604,338 @@ def _record(memory, action, actor, **metadata):
         workspace=memory.workspace,
         resource=memory,
         metadata={"status": memory.status, "source": memory.source, **metadata},
+    )
+
+
+# --- Core memory blocks (Phase 8A D7, D8) ---
+#
+# Who writes what (D7): `self` only through `set_assembled_self_block` (the
+# deterministic assembler, D8); `developer`, `preferences`,
+# `current_focus`, `active_projects` through an owner edit
+# (`update_core_block` / `rollback_core_block`: the installation owner, a
+# human, over CHANNEL_WEB, in a workspace they own) or an approved
+# `CoreBlockProposal`. Agents never write a block; they may only file a
+# proposal (branch 5's producer). Every change appends a version and leaves
+# a `memory.core_block.updated` audit row with label, version and writer
+# kind -- never content.
+
+# At most this many approved-or-pending core-block proposals per owner per
+# ISO week (D7, D10), enforced here, not in a prompt.
+CORE_BLOCK_PROPOSALS_PER_WEEK = 3
+
+
+class CoreBlockPermissionDenied(MemoryPermissionDenied):
+    """Not the owner, not a human, not the web channel, or a label the
+    caller may not write (`self`) -> 403."""
+
+    code = "memory.core_block.permission_denied"
+
+
+class CoreBlockInvalid(MemoryServiceError):
+    """Unknown label for this workspace, over the char budget, or an
+    unknown version -> 400."""
+
+    code = "memory.core_block.invalid"
+
+
+class CoreBlockStale(InvalidTransition):
+    """The block moved on since the caller's base version -> 400 (a stale
+    proposal is refused at approval and re-proposed next night)."""
+
+    code = "memory.core_block.stale_version"
+
+
+class CoreBlockProposalCapReached(MemoryServiceError):
+    """The weekly core-block proposal cap is used up: the proposal is
+    discarded (the caller counts it), never queued."""
+
+    code = "memory.core_block.weekly_cap"
+
+
+def _content_hash(content):
+    return hashlib.sha256(content.encode()).hexdigest()
+
+
+def _require_owner_web(*, actor, workspace, channel):
+    """The owner-edit predicate: the installation owner, a human, over the
+    trusted web channel, acting in a workspace they own."""
+    if channel != CHANNEL_WEB:
+        raise CoreBlockPermissionDenied("Core blocks are changed only from a web session.")
+    if (
+        actor is None
+        or not getattr(actor, "is_authenticated", False)
+        or getattr(actor, "is_agent", False)
+        or not getattr(actor, "is_owner", False)
+        or not actor.is_active
+    ):
+        raise CoreBlockPermissionDenied("Only the owner can change core blocks.")
+    if workspace.owner_id != actor.id or get_role(actor, workspace) != WorkspaceMember.Role.OWNER:
+        raise CoreBlockPermissionDenied("Only the workspace owner can change core blocks.")
+
+
+def _check_label(workspace, label, *, allow_self=False):
+    if label not in CoreMemoryBlock.Label.values:
+        raise CoreBlockInvalid(f"Unknown core block label {label!r}.")
+    if label == CoreMemoryBlock.Label.SELF and not allow_self:
+        raise CoreBlockPermissionDenied("The self block is written only by its assembler.")
+    if label not in labels_for_workspace(workspace):
+        raise CoreBlockInvalid(f"A {workspace.type} workspace has no {label!r} block.")
+
+
+def _check_budget(label, content):
+    budget = CORE_BLOCK_CHAR_BUDGETS[label]
+    if len(content) > budget:
+        raise CoreBlockInvalid(f"The {label} block is limited to {budget} characters.")
+
+
+def _locked_block(workspace, label):
+    """Lock (creating if needed) the block row inside the caller's
+    transaction. A new row starts at version 0 with no content."""
+    block = (
+        CoreMemoryBlock.objects.filter(workspace=workspace, label=label).select_for_update().first()
+    )
+    if block is None:
+        try:
+            with transaction.atomic():
+                CoreMemoryBlock.objects.create(
+                    workspace=workspace,
+                    label=label,
+                    updated_by_kind=CoreMemoryBlock.WriterKind.OWNER,
+                )
+        except IntegrityError:
+            pass  # a concurrent writer created it; lock theirs
+        block = CoreMemoryBlock.objects.select_for_update().get(workspace=workspace, label=label)
+    return block
+
+
+def _write_block_version(block, *, content, sensitivity, kind, actor):
+    block.content = content
+    block.content_hash = _content_hash(content)
+    block.sensitivity = sensitivity
+    block.version += 1
+    block.updated_by_kind = kind
+    block.updated_by = actor
+    block.save()
+    CoreMemoryBlockVersion.objects.create(
+        workspace=block.workspace,
+        block=block,
+        version=block.version,
+        content=content,
+        content_hash=block.content_hash,
+        sensitivity=sensitivity,
+        updated_by_kind=kind,
+        updated_by=actor,
+    )
+    is_system = kind == CoreMemoryBlock.WriterKind.ASSEMBLER
+    record_audit(
+        action="memory.core_block.updated",
+        actor=actor,
+        actor_type=AuditLog.ActorType.SYSTEM if is_system else AuditLog.ActorType.HUMAN,
+        workspace=block.workspace,
+        resource=block,
+        metadata={"label": block.label, "version": block.version, "writer_kind": kind},
+    )
+    return block
+
+
+def set_assembled_self_block(*, workspace, content):
+    """The ONLY writer of `label=self` (D8). Called by the deterministic
+    assembler (`assistant.self_block`), never by a view or an agent. Writes
+    a new version only when the content hash changes; returns
+    `(block, changed)`."""
+    if workspace.type != Workspace.Type.PERSONAL:
+        raise CoreBlockInvalid("The self block lives in the owner's personal workspace.")
+    _check_budget(CoreMemoryBlock.Label.SELF, content)
+    with transaction.atomic():
+        block = _locked_block(workspace, CoreMemoryBlock.Label.SELF)
+        if block.version > 0 and block.content_hash == _content_hash(content):
+            return block, False
+        block = _write_block_version(
+            block,
+            content=content,
+            sensitivity=Memory.Sensitivity.NORMAL,
+            kind=CoreMemoryBlock.WriterKind.ASSEMBLER,
+            actor=None,
+        )
+    return block, True
+
+
+def update_core_block(
+    *, workspace, label, content, actor, channel, sensitivity=None, base_version=None
+):
+    """Owner edit of an editable block (D7): `developer`/`preferences` in the
+    personal workspace, `current_focus`/`active_projects` anywhere.
+    `base_version`, when given, must match the current version (optimistic
+    concurrency for the editor). A no-op edit writes nothing."""
+    _require_owner_web(actor=actor, workspace=workspace, channel=channel)
+    _check_label(workspace, label)
+    if label not in OWNER_EDITABLE_LABELS:
+        raise CoreBlockPermissionDenied("This block is not owner-editable.")
+    _check_budget(label, content)
+    with transaction.atomic():
+        block = _locked_block(workspace, label)
+        if base_version is not None and base_version != block.version:
+            raise CoreBlockStale("The block changed since you opened it.")
+        new_sensitivity = sensitivity or block.sensitivity
+        if block.version > 0 and block.content == content and block.sensitivity == new_sensitivity:
+            return block
+        return _write_block_version(
+            block,
+            content=content,
+            sensitivity=new_sensitivity,
+            kind=CoreMemoryBlock.WriterKind.OWNER,
+            actor=actor,
+        )
+
+
+def rollback_core_block(*, workspace, label, version, actor, channel):
+    """Confirm-class in-app edit (D7): restore an earlier version's content
+    as a NEW version (history is never rewritten)."""
+    _require_owner_web(actor=actor, workspace=workspace, channel=channel)
+    _check_label(workspace, label)
+    with transaction.atomic():
+        block = _locked_block(workspace, label)
+        target = CoreMemoryBlockVersion.objects.filter(block=block, version=version).first()
+        if target is None:
+            raise CoreBlockInvalid("No such version.")
+        if target.version == block.version:
+            return block
+        return _write_block_version(
+            block,
+            content=target.content,
+            sensitivity=target.sensitivity,
+            kind=CoreMemoryBlock.WriterKind.OWNER,
+            actor=actor,
+        )
+
+
+def _render_diff(old, new):
+    return "\n".join(
+        difflib.unified_diff(old.splitlines(), new.splitlines(), "current", "proposed", lineterm="")
+    )
+
+
+def _iso_week_start(now):
+    local = timezone.localtime(now)
+    start = local - timedelta(days=local.isoweekday() - 1)
+    return start.replace(hour=0, minute=0, second=0, microsecond=0)
+
+
+def create_core_block_proposal(
+    *, workspace, label, proposed_content, provenance_quote, source_episode_id=None
+):
+    """File a model-made proposal (D7, D9) -- system code only (branch 5's
+    consolidation). Never applies anything; `self` is never a target.
+    Enforces the weekly cap (<= 3 approved-or-pending per owner per ISO
+    week, across the owner's workspaces): over it, raises
+    `CoreBlockProposalCapReached` and nothing is stored."""
+    _check_label(workspace, label)
+    _check_budget(label, proposed_content)
+    quote = (provenance_quote or "").strip()
+    if not quote:
+        raise CoreBlockInvalid("A core block proposal needs a provenance quote.")
+    with transaction.atomic():
+        # Serialize proposal creation per owner so two concurrent producers
+        # cannot both slip under the cap.
+        list(Workspace.objects.select_for_update().filter(owner_id=workspace.owner_id))
+        start = _iso_week_start(timezone.now())
+        used = CoreBlockProposal.objects.filter(
+            workspace__owner_id=workspace.owner_id,
+            created_at__gte=start,
+            created_at__lt=start + timedelta(days=7),
+            status__in=[CoreBlockProposal.Status.PENDING, CoreBlockProposal.Status.APPROVED],
+        ).count()
+        if used >= CORE_BLOCK_PROPOSALS_PER_WEEK:
+            raise CoreBlockProposalCapReached("Weekly core block proposal cap reached.")
+        current = CoreMemoryBlock.objects.filter(workspace=workspace, label=label).first()
+        base_content = current.content if current else ""
+        proposal = CoreBlockProposal.objects.create(
+            workspace=workspace,
+            label=label,
+            proposed_content=proposed_content,
+            diff=_render_diff(base_content, proposed_content),
+            base_version=current.version if current else 0,
+            provenance_quote=quote[:300],
+            source_episode_id=source_episode_id,
+            inferred=True,
+        )
+        record_audit(
+            action="memory.core_block.proposed",
+            actor_type=AuditLog.ActorType.SYSTEM,
+            workspace=workspace,
+            resource=proposal,
+            metadata={"label": label, "base_version": proposal.base_version},
+        )
+    return proposal
+
+
+def _locked_proposal(proposal):
+    locked = CoreBlockProposal.objects.select_for_update().filter(pk=proposal.pk).first()
+    if locked is None:
+        raise InvalidTransition("Proposal no longer exists.")
+    return locked
+
+
+def _decide_proposal(proposal, status, actor):
+    proposal.status = status
+    proposal.decided_by = actor
+    proposal.decided_at = timezone.now()
+    proposal.save(update_fields=["status", "decided_by", "decided_at", "updated_at"])
+
+
+def approve_core_block_proposal(*, proposal, actor, channel):
+    """Per-item owner approval over the web channel (D7, D10): applies the
+    proposed content as a new version (`approved_proposal`). A proposal
+    whose base version is stale is refused and left untouched."""
+    _require_owner_web(actor=actor, workspace=proposal.workspace, channel=channel)
+    with transaction.atomic():
+        proposal = _locked_proposal(proposal)
+        if proposal.status != CoreBlockProposal.Status.PENDING:
+            raise InvalidTransition("Proposal is not pending.")
+        block = _locked_block(proposal.workspace, proposal.label)
+        if block.version != proposal.base_version:
+            raise CoreBlockStale("The block changed since this proposal was made.")
+        _write_block_version(
+            block,
+            content=proposal.proposed_content,
+            sensitivity=block.sensitivity,
+            kind=CoreMemoryBlock.WriterKind.APPROVED_PROPOSAL,
+            actor=actor,
+        )
+        _decide_proposal(proposal, CoreBlockProposal.Status.APPROVED, actor)
+        record_audit(
+            action="memory.core_block.proposal_approved",
+            actor=actor,
+            workspace=proposal.workspace,
+            resource=proposal,
+            metadata={"label": proposal.label, "version": block.version},
+        )
+    return proposal
+
+
+def reject_core_block_proposal(*, proposal, actor, channel):
+    _require_owner_web(actor=actor, workspace=proposal.workspace, channel=channel)
+    with transaction.atomic():
+        proposal = _locked_proposal(proposal)
+        if proposal.status != CoreBlockProposal.Status.PENDING:
+            raise InvalidTransition("Proposal is not pending.")
+        _decide_proposal(proposal, CoreBlockProposal.Status.REJECTED, actor)
+        record_audit(
+            action="memory.core_block.proposal_rejected",
+            actor=actor,
+            workspace=proposal.workspace,
+            resource=proposal,
+            metadata={"label": proposal.label},
+        )
+    return proposal
+
+
+def record_core_block_view(*, actor, workspace, labels):
+    """Audit an owner's API read of core blocks (ADR-005: every memory
+    access is auditable) -- labels only, never content."""
+    record_audit(
+        action="memory.core_block.viewed",
+        actor=actor,
+        workspace=workspace,
+        metadata={"labels": sorted(labels)},
     )

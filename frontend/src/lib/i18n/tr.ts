@@ -166,6 +166,23 @@ export const ERROR_MESSAGES = {
     message: "Aynı hafıza kaydı bu çalışma alanında zaten var.",
     specific: true,
   },
+  "memory.core_block.permission_denied": {
+    message:
+      "Çekirdek blokları yalnızca sahip, web oturumundan düzenleyebilir; 'self' bloğu elle düzenlenemez.",
+    specific: true,
+  },
+  "memory.core_block.invalid": {
+    message: "Bu çekirdek blok değişikliği geçersiz (etiket, karakter sınırı ya da sürüm uygun değil).",
+    specific: true,
+  },
+  "memory.core_block.stale_version": {
+    message: "Blok sen açtıktan sonra değişti; sayfayı yenileyip tekrar dene.",
+    specific: true,
+  },
+  "memory.core_block.weekly_cap": {
+    message: "Bu hafta için çekirdek blok önerisi sınırına ulaşıldı.",
+    specific: true,
+  },
   // Tasks
   "task.permission_denied": { message: "Rolün bu görev işlemine yetmiyor.", specific: true },
   "task.invalid_transition": {
