@@ -14,6 +14,7 @@ three). No real LLM, Claude Code, Keychain, GitHub or git remote."""
 
 import json
 import secrets
+from io import StringIO
 
 import pytest
 from django.core.management import call_command
@@ -30,6 +31,7 @@ from harness.tasks import ingest_repo_commits
 from harness.tests.test_commit_ingestion import FixtureRepo
 from memory.ingestion.tasks import run_learning_night_task
 from memory.models import CodingSession, CoreBlockProposal, Episode, IngestionSource, Memory
+from ops import preflight
 from workspaces.models import Workspace
 from workspaces.services import create_firm_workspace
 
@@ -51,7 +53,7 @@ def stack(settings):
     settings.AI_FAKE_PROVIDER = True
     settings.AI_RETRY_BACKOFF_SECONDS = 0
     settings.MEMORY_OWNER_GIT_EMAILS = [OWNER_EMAIL]
-    call_command("seed_ai_defaults", stdout=open("/dev/null", "w"))  # noqa: SIM115
+    call_command("seed_ai_defaults", stdout=StringIO())
 
 
 @pytest.fixture
@@ -112,7 +114,7 @@ def _sse(response):
 
 def _setup_sources(web, personal, firm, repo, firm_repo):
     """The runbook's steps over the web API: seed, enable, map."""
-    call_command("seed_ingestion_sources", stdout=open("/dev/null", "w"))  # noqa: SIM115
+    call_command("seed_ingestion_sources", stdout=StringIO())
     rows = web.get(f"{SOURCES}?workspace={personal.id}").json()
     by_kind = {row["kind"]: row["id"] for row in rows}
     assert set(by_kind) == {Kind.GIT, Kind.HARNESS, Kind.CLAUDE_CODE_HOOKS, Kind.CALENDAR}
@@ -186,7 +188,9 @@ def test_commit_and_hook_event_to_an_approved_memory_used_in_chat(
     extraction_payloads = [m for p, m in calls if p == "memory.episode_extraction"]
     assert extraction_payloads
     assert all(SECRET not in m for m in extraction_payloads)
-    assert all("Agent refactor" not in m.split("<untrusted_context>")[0] for m in extraction_payloads)
+    # The agent-written commit is never offered as owner text.
+    for payload in extraction_payloads:
+        assert "Agent refactor" not in payload.split("<untrusted_context>")[0]
     # Firm text never reaches a personal-workspace payload, and vice versa.
     for payload in extraction_payloads:
         assert not (COMMIT_MESSAGE in payload and FIRM_COMMIT in payload)
@@ -199,6 +203,12 @@ def test_commit_and_hook_event_to_an_approved_memory_used_in_chat(
     usage = ModelUsage.objects.filter(purpose="memory.episode_extraction")
     assert usage.count() == len(extraction_payloads)
     assert all(COMMIT_MESSAGE not in json.dumps(u.context_report) for u in usage)
+
+    # The preflight learning checks see a configured, healthy pipeline.
+    health = {r.name: r for r in preflight.check_learning()}
+    assert health["learning_sources"].status == preflight.PASS, health["learning_sources"]
+    assert health["learning_last_run"].status == preflight.PASS, health["learning_last_run"]
+    assert health["learning_budget"].status == preflight.PASS
 
     # 4. The morning card: the owner's own words, in the right workspace.
     body = web.get(f"{LEARNING}/digest").json()

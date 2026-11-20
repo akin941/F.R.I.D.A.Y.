@@ -568,6 +568,10 @@ PREFLIGHT_TIMEOUT_SECONDS = env.int("PREFLIGHT_TIMEOUT_SECONDS", default=10)
 # dropped). Empty = the check is a warning.
 PREFLIGHT_VOICE_MUTE_CMD = env("PREFLIGHT_VOICE_MUTE_CMD", default="")
 PREFLIGHT_VOICE_MUTE_TIMEOUT_SECONDS = env.int("PREFLIGHT_VOICE_MUTE_TIMEOUT_SECONDS", default=180)
+# Phase 8A closeout: the `learning_scrubber` check runs the scrubber over the
+# labelled corpus. Empty = the committed `memory/tests/scrubber_corpus/`
+# shipped with the backend; a missing directory makes the check a warning.
+PREFLIGHT_SCRUBBER_CORPUS_DIR = env("PREFLIGHT_SCRUBBER_CORPUS_DIR", default="")
 
 # --- Knowledge/RAG (MVP 3) ---
 

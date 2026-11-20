@@ -765,7 +765,7 @@ def test_a_crashing_check_becomes_one_fail_row():
 
 def test_the_voice_checks_are_registered():
     names = [name for name, _ in preflight.CHECKS]
-    assert names[-2:] == ["voice_config", "voice_mute"]
+    assert names[-3:-1] == ["voice_config", "voice_mute"]
 
 
 def test_summarize():

@@ -154,3 +154,10 @@ def build_beat_schedule(*, runner_mode):
 app.conf.beat_schedule = build_beat_schedule(
     runner_mode=os.environ.get("HARNESS_RUNNER_BEAT", "").lower() == "true"
 )
+# Both beats' schedules, read-only, for `manage.py preflight`'s
+# `learning_beat` check (Phase 8A closeout): `ops` may not import `config`,
+# and one process only runs one of the two beats.
+app.conf.friday_beat_schedules = {
+    "worker": build_beat_schedule(runner_mode=False),
+    "runner": build_beat_schedule(runner_mode=True),
+}
