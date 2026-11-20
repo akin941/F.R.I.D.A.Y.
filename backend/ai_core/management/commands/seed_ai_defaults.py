@@ -13,6 +13,10 @@ from django.core.management.base import BaseCommand
 
 from ai_core.models import ModelProvider, ModelTier, PromptTemplate, PromptVersion
 
+OPENROUTER_PROVIDER_NAME = "openrouter"
+OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
+OPENROUTER_KEY_ENV = "OPENROUTER_API_KEY"
+
 FRIDAY_SYSTEM_V1 = (
     "You are Friday OS, a concise and reliable personal AI operating layer. "
     "Answer clearly, respect workspace boundaries, and do not claim access to "
@@ -583,6 +587,8 @@ class Command(BaseCommand):
             )
             self._log("deepseek provider", created)
 
+        self._seed_openrouter()
+
         if os.environ.get("OLLAMA_API_KEY"):
             _, created = ModelProvider.objects.get_or_create(
                 name="ollama-local",
@@ -662,6 +668,47 @@ class Command(BaseCommand):
             for tier in tiers:
                 ModelTier.objects.get_or_create(tier=tier, provider=provider)
             self._log(f"{name} tiers ({', '.join(tiers)})", True)
+
+    def _seed_openrouter(self):
+        """OpenRouter (Phase 5 closeout): one OpenAI-compatible endpoint in
+        front of many hosted models. Unlike the providers above, the row is
+        seeded whether or not `OPENROUTER_API_KEY` is set, so the owner sees
+        it in the admin -- but it is **disabled while the key is absent**:
+        created inactive without a key, and switched off on any later run
+        that finds the key gone. A key added later does NOT switch an
+        existing inactive row back on (it may be the owner's own choice):
+        enable it in the admin. `personal_data_allowed` stays False (D5):
+        OpenRouter forwards prompts to third-party hosts, so it never sees
+        personal-class data unless the owner flips it with
+        `manage.py set_provider_personal_data` (audited)."""
+        has_key = bool(os.environ.get(OPENROUTER_KEY_ENV))
+        provider, created = ModelProvider.objects.get_or_create(
+            name=OPENROUTER_PROVIDER_NAME,
+            defaults={
+                "provider_type": ModelProvider.ProviderType.OPENAI_COMPATIBLE,
+                "capability": ModelProvider.Capability.CHAT,
+                # `or`, not a `.get()` default: Compose materializes an
+                # unset `${VAR:-}` as an empty string (see nvidia-nim).
+                # `openrouter/auto` is OpenRouter's own model router; pin a
+                # concrete model with OPENROUTER_MODEL_ID.
+                "model_id": os.environ.get("OPENROUTER_MODEL_ID") or "openrouter/auto",
+                "base_url": OPENROUTER_BASE_URL,
+                "api_key_env_var": OPENROUTER_KEY_ENV,
+                # Behind every direct provider: an aggregator is the last
+                # cloud resort, never a silent replacement for a deliberate
+                # first choice.
+                "priority": 40,
+                "is_active": has_key,
+                "personal_data_allowed": False,
+            },
+        )
+        if not created and not has_key and provider.is_active:
+            provider.is_active = False
+            provider.save(update_fields=["is_active", "updated_at"])
+            self.stdout.write(f"  {OPENROUTER_PROVIDER_NAME} provider: disabled (no key)")
+            return
+        state = "enabled" if provider.is_active else "disabled"
+        self._log(f"{OPENROUTER_PROVIDER_NAME} provider ({state})", created)
 
     def _log(self, label, created):
         self.stdout.write(f"  {label}: {'created' if created else 'already present'}")

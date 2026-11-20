@@ -144,6 +144,7 @@ class InferenceGateway:
         context_report=None,
         on_usage=None,
         personal_data=False,
+        only_provider=None,
     ):
         """One chat completion (or, with `stream=True`, a generator of
         chunks). Provider selection -- including the `personal_data` filter
@@ -155,7 +156,12 @@ class InferenceGateway:
         `personal_data_allowed=True` are eligible -- primary AND fallback.
         With none, the call fails closed (`NoProviderAvailable`, one
         `ModelUsage` row, `routing_reason="personal_data_required"`); there
-        is never a silent fallback to a cloud provider."""
+        is never a silent fallback to a cloud provider.
+
+        `only_provider` (a `ModelProvider.name`; Phase 5 closeout, used by
+        `manage.py preflight`) restricts selection to that one row -- still
+        only if it is active, keyed and allowed for `personal_data`; there
+        is no fallback. Same single-door accounting: one `ModelUsage` row."""
         started = time.monotonic()
         merged_params = dict(prompt_version.model_params) if prompt_version else {}
         merged_params.update(params or {})
@@ -165,6 +171,7 @@ class InferenceGateway:
             capability=ModelProvider.Capability.CHAT,
             purpose=purpose,
             personal_data=personal_data,
+            only_provider=only_provider,
         )
         if not providers:
             raise self._no_provider_error(
@@ -215,12 +222,13 @@ class InferenceGateway:
         context_report=None,
         on_usage=None,
         personal_data=False,
+        only_provider=None,
     ):
         """Embed a batch of texts. Same retry/fallback/accounting contract as
         `complete()` (ADR-003: embeddings are a gateway call like any other,
         exactly one ModelUsage row) -- including `personal_data`'s
         allowed-providers-only, fail-closed selection. No streaming
-        variant."""
+        variant. `only_provider`: as for `complete()`."""
         started = time.monotonic()
         base_report = self._base_report(context_report, personal_data)
         base_report["item_count"] = len(texts)
@@ -229,6 +237,7 @@ class InferenceGateway:
             capability=ModelProvider.Capability.EMBEDDING,
             purpose=purpose,
             personal_data=personal_data,
+            only_provider=only_provider,
         )
         if not providers:
             raise self._no_provider_error(
@@ -484,7 +493,12 @@ class InferenceGateway:
     # --- provider selection ---
 
     def _select_providers(
-        self, *, capability=ModelProvider.Capability.CHAT, purpose="", personal_data=False
+        self,
+        *,
+        capability=ModelProvider.Capability.CHAT,
+        purpose="",
+        personal_data=False,
+        only_provider=None,
     ):
         """Active providers of the given capability, by priority; fake only
         behind the flag, real ones only when their key env var is actually
@@ -506,9 +520,10 @@ class InferenceGateway:
         annotated with an in-memory `_routing_reason`, persisted onto its
         `ModelUsage` row by `_record` — the single usage writer."""
         eligible = []
-        for provider in ModelProvider.objects.filter(
-            is_active=True, capability=capability
-        ).order_by("priority", "name"):
+        rows = ModelProvider.objects.filter(is_active=True, capability=capability)
+        if only_provider is not None:
+            rows = rows.filter(name=only_provider)
+        for provider in rows.order_by("priority", "name"):
             if provider.provider_type == ModelProvider.ProviderType.FAKE:
                 if getattr(settings, "AI_FAKE_PROVIDER", False):
                     eligible.append(provider)
@@ -529,6 +544,11 @@ class InferenceGateway:
             if in_tier:
                 eligible = in_tier + [p for p in eligible if p.id not in tier_provider_ids]
                 primary_reason = f"tier:{tier_name}"
+
+        if only_provider is not None:
+            for provider in eligible:
+                provider._routing_reason = "pinned"
+            return eligible[:1]
 
         selected = eligible[:2]
         for position, provider in enumerate(selected):

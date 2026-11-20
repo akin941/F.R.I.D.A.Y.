@@ -67,6 +67,7 @@ testpaths = [
     "harness",
     "connectors",
     "deploys",
+    "ops",
 ]
 
 [tool.importlinter]
@@ -89,6 +90,7 @@ root_packages = [
     "harness",
     "connectors",
     "deploys",
+    "ops",
     # The MCP SDK (Phase 5 branch 4, ADR-010 decision 3) is analysed as a
     # root package only so the contract below can name its `mcp.server`
     # subpackage -- import-linter cannot forbid a subpackage of an external
@@ -116,7 +118,7 @@ forbidden_modules = ["accounts", "workspaces", "audit", "ai_core", "assistant", 
 [[tool.importlinter.contracts]]
 name = "kernel apps must not import the Django project config"
 type = "forbidden"
-source_modules = ["accounts", "workspaces", "audit", "ai_core", "assistant", "memory", "knowledge", "tasks", "approvals", "tools", "agents", "skills", "integrations", "harness", "connectors", "deploys"]
+source_modules = ["accounts", "workspaces", "audit", "ai_core", "assistant", "memory", "knowledge", "tasks", "approvals", "tools", "agents", "skills", "integrations", "harness", "connectors", "deploys", "ops"]
 forbidden_modules = ["config"]
 
 # ai_core is the single door for LLM traffic (ADR-003): it must never depend on
@@ -428,6 +430,16 @@ type = "forbidden"
 source_modules = ["harness"]
 forbidden_modules = ["deploys"]
 
+# `ops` (Phase 5 closeout: `manage.py preflight`) is a leaf like harness:
+# it reads kernel state (gateway, connector pins, the database) to check a
+# running stack, and nothing imports it -- operations tooling must never
+# become a dependency of product code.
+[[tool.importlinter.contracts]]
+name = "no app may import ops (ops is a leaf: operations tooling only)"
+type = "forbidden"
+source_modules = ["core", "accounts", "workspaces", "audit", "ai_core", "assistant", "memory", "knowledge", "tasks", "approvals", "tools", "agents", "skills", "integrations", "harness", "connectors", "deploys"]
+forbidden_modules = ["ops"]
+
 # The MCP SDK (ADR-010 decision 3, brief D2) ships server-side code
 # (starlette, uvicorn, the stdio server/client) next to the client. Friday is
 # only ever an MCP *client* speaking Streamable HTTP to its sidecars:
@@ -442,7 +454,7 @@ forbidden_modules = ["deploys"]
 [[tool.importlinter.contracts]]
 name = "production code imports only the MCP client side (ADR-010, D2)"
 type = "forbidden"
-source_modules = ["core", "accounts", "workspaces", "audit", "ai_core", "assistant", "memory", "knowledge", "tasks", "approvals", "tools", "agents", "skills", "integrations", "harness", "connectors", "deploys"]
+source_modules = ["core", "accounts", "workspaces", "audit", "ai_core", "assistant", "memory", "knowledge", "tasks", "approvals", "tools", "agents", "skills", "integrations", "harness", "connectors", "deploys", "ops"]
 forbidden_modules = ["mcp.server", "mcp.client.stdio", "mcp.client.sse", "mcp.cli", "mcp.os"]
 allow_indirect_imports = true
 ignore_imports = [
