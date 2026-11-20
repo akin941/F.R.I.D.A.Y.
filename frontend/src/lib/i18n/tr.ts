@@ -314,7 +314,51 @@ export const tr = {
       "voice.tts_failed": "Yanıtın bir kısmı seslendirilemedi; metin ekranda.",
       receipt_failed: "Maliyet bilgisi alınamadı.",
       memory_proposal_failed: "Hafıza önerisi kaydedilemedi.",
+      self_trigger: "Friday kendi sesini duydu; bu söz yok sayıldı.",
     } as Record<string, string>,
+    wake: {
+      heading: "Uyandırma sözcüğü",
+      description: (phrase: string) =>
+        `"${phrase}" dediğinde Friday dinlemeye başlar. Uyandırma sözcüğü bu sekmede, cihazında algılanır; sözcükten önceki ses hiçbir yere gönderilmez.`,
+      arm: (phrase: string) => `"${phrase}" modunu aç`,
+      disarm: "Uyandırma modunu kapat",
+      defaultHint: "Varsayılan bas-konuş; uyandırma modu yalnızca bu sekmede ve sen açınca çalışır.",
+      indicator: (phrase: string) => `Dinliyor — "${phrase}"`,
+      indicatorPaused: "Dinleme duraklatıldı (Friday konuşuyor)",
+      indicatorCapturing: "Seni dinliyorum…",
+      loading: "Uyandırma modeli yükleniyor…",
+      threshold: "Algılama eşiği",
+      thresholdHint: "Yüksek eşik daha az yanlış uyanma, daha çok kaçırma demek.",
+      idleMinutes: "Şu kadar dakika algılama olmazsa kapat",
+      state: {
+        off: "Uyandırma modu kapalı.",
+        loading: "Uyandırma modeli yükleniyor…",
+        armed: "Uyandırma modu açık: mikrofon açık, yalnızca uyandırma sözcüğü bekleniyor.",
+        capturing: "Uyandırma sözcüğü duyuldu; seni dinliyorum.",
+        paused: "Friday konuşurken uyandırma duraklatıldı.",
+        error: "Uyandırma modu açılamadı.",
+      } as Record<string, string>,
+      notices: {
+        idle_disarmed: "Uzun süre algılama olmadığı için uyandırma modu kapatıldı.",
+        auth_lost: "Oturum kapandığı için uyandırma modu kapatıldı.",
+        storm_muted:
+          "Bir dakika içinde çok fazla uyanma oldu; güvenlik için ses kapatıldı. Kontrol edip sesi yeniden aç.",
+        muted: "Ses kapalı; uyandırma modu açılmadı.",
+        mute_unreadable: "Ses durumu okunamadı; güvenlik için mikrofon kapatıldı.",
+        mic_ended: "Mikrofon bağlantısı koptu; uyandırma modu kapatıldı.",
+        gesture_required: "Uyandırma modu yalnızca düğmeye tıklayarak açılabilir.",
+      } as Record<string, string>,
+      errors: {
+        model_unpinned:
+          "Uyandırma modeli henüz sabitlenmedi (hey_friday eğitilip özeti model listesine yazılmalı). Bas-konuş çalışmaya devam ediyor.",
+        model_missing: "Uyandırma modeli bulunamadı. Sunucuda `make voice-models` çalıştır.",
+        model_hash_mismatch:
+          "Uyandırma modeli doğrulanamadı (özet uyuşmuyor); güvenlik için açılmadı. `make voice-models` ile yeniden indir.",
+        model_cross_origin: "Uyandırma modeli başka bir adresten yüklenemez.",
+        model_unsupported: "Bu tarayıcı model doğrulamasını desteklemiyor.",
+        wake_failed: "Uyandırma motoru başlatılamadı.",
+      } as Record<string, string>,
+    },
     errors: {
       mic_denied:
         "Mikrofon izni verilmedi. Tarayıcının adres çubuğundaki site izinlerinden mikrofona izin verip tekrar dene.",

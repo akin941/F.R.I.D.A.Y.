@@ -1,5 +1,6 @@
 "use client";
 
+import { signalAuthLost } from "@/lib/auth-events";
 import { isSpecificError, messageForError, resolveErrorCode } from "@/lib/i18n/error-codes";
 import { tr } from "@/lib/i18n/tr";
 import type { ApiErrorBody } from "@/types/api";
@@ -77,6 +78,7 @@ export async function apiFetch(input: string, init: RequestInit = {}, isRetry = 
     // session was revoked mid-flight) — this is not a transient failure to
     // retry further, it's a hard logout.
     if (typeof window !== "undefined") {
+      signalAuthLost();
       // A full-page navigation is deliberate: it drops every in-memory
       // view state along with the dead session (not a client-side push).
       // eslint-disable-next-line @next/next/no-location-assign-relative-destination
@@ -87,6 +89,7 @@ export async function apiFetch(input: string, init: RequestInit = {}, isRetry = 
   const refreshed = await refreshSession();
   if (!refreshed) {
     if (typeof window !== "undefined") {
+      signalAuthLost();
       // A full-page navigation is deliberate: it drops every in-memory
       // view state along with the dead session (not a client-side push).
       // eslint-disable-next-line @next/next/no-location-assign-relative-destination

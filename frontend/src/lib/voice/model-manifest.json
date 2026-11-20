@@ -1,0 +1,40 @@
+{
+  "$comment": "Phase 6 branch 4 (D6): the wake-word and VAD models, self-hosted under /voice-models/ and pinned by sha256. `make voice-models` downloads `source` (or copies the owner-trained keyword model from VOICE_WAKE_MODEL_SRC), verifies `sha256` and writes public/voice-models/<file>. The browser refuses to arm wake mode unless every file's sha256 matches. Swapping or retraining the wake phrase is a change to this file only. An empty sha256 means 'not pinned yet' and always refuses to arm.",
+  "basePath": "/voice-models/",
+  "wakePhrase": "Hey Friday",
+  "models": [
+    {
+      "role": "melspectrogram",
+      "file": "melspectrogram.onnx",
+      "source": "https://github.com/dscripka/openWakeWord/releases/download/v0.5.1/melspectrogram.onnx",
+      "sha256": "ba2b0e0f8b7b875369a2c89cb13360ff53bac436f2895cced9f479fa65eb176f",
+      "license": "openWakeWord pre-trained model: CC BY-NC-SA 4.0 (non-commercial, R3)"
+    },
+    {
+      "role": "embedding",
+      "file": "embedding_model.onnx",
+      "source": "https://github.com/dscripka/openWakeWord/releases/download/v0.5.1/embedding_model.onnx",
+      "sha256": "70d164290c1d095d1d4ee149bc5e00543250a7316b59f31d056cff7bd3075c1f",
+      "license": "openWakeWord re-implementation of Google speech_embedding: shipped under the repo's CC BY-NC-SA 4.0 model terms (R3)"
+    },
+    {
+      "role": "keyword",
+      "file": "hey_friday.onnx",
+      "source": null,
+      "sha256": "",
+      "license": "Owner-trained with openWakeWord's synthetic-data pipeline (owner step); pin its sha256 here after training"
+    },
+    {
+      "role": "vad",
+      "file": "silero_vad.onnx",
+      "source": "https://raw.githubusercontent.com/snakers4/silero-vad/v5.1.2/src/silero_vad/data/silero_vad.onnx",
+      "sha256": "2623a2953f6ff3d2c1e61740c6cdb7168133479b267dfef114a4a3cc5bdd788f",
+      "license": "Silero VAD v5.1.2: MIT"
+    }
+  ],
+  "runtime": {
+    "package": "onnxruntime-web",
+    "dir": "ort/",
+    "files": ["ort-wasm-simd-threaded.wasm", "ort-wasm-simd-threaded.mjs"]
+  }
+}

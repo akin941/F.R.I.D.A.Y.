@@ -12,6 +12,7 @@ describe("securityHeaderRules", () => {
     expect(headers["X-Frame-Options"]).toBe("DENY");
     expect(headers["X-Content-Type-Options"]).toBe("nosniff");
     expect(headers["Referrer-Policy"]).toBe("same-origin");
+    expect(headers["Permissions-Policy"]).toBe("microphone=(self), camera=(), geolocation=()");
   });
 
   it("adds nothing outside production", () => {

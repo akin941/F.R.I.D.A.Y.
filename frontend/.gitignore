@@ -37,6 +37,10 @@ yarn-error.log*
 .env*
 !.env.example
 
+# wake-word / VAD models and the ORT WASM runtime (Phase 6 D6): downloaded
+# and hash-checked by `make voice-models`, never committed (licences, R3)
+/public/voice-models/
+
 # vercel
 .vercel
 
