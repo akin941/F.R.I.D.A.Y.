@@ -827,3 +827,29 @@ model call without a `ModelUsage` row; an episode surviving past its TTL.
 4. Enable the four sources (d5) once branches 1–5 are merged.
 5. Use the morning card for two weeks and record the acceptance rate for
    the go/no-go (closeout).
+
+## Known follow-ups (from review, unresolved at merge)
+
+- **LOW — D11 reference.** D11 cites "ADR-009 decision 3a" for the TTL
+  hard-delete. ADR-009 has no "3a"; the clause is decision 3(a), the 30-day
+  automatic trash purge. The analogy is loose: that clause purges rows already
+  trashed by a confirmed owner delete, while episode TTL hard-deletes untrashed
+  rows on a system schedule (ADR-012 decision 4 and owner decision d10 do
+  justify it). Fix: change the reference to "ADR-009 decision 3(a)" and add that
+  TTL expiry is a retention rule the owner accepted in d10, not an owner delete.
+- **LOW — D7 `self` block on low-trust channels.** D7 injects the `self` block
+  on every channel, including the cli and openai facade channels. The block
+  lists enabled tool names and provider names, exposing capability and provider
+  inventory to those channels (mild: both tokens belong to the owner, but not
+  stated as deliberate). Fix: either restrict `self` to CHANNEL_WEB and Telegram
+  turns, or add one sentence accepting the exposure; add a test that the facade
+  turn's `self` block contains no tool or provider names beyond what the facade
+  already exposes.
+- **LOW — D6 hook PAT workspace vs D4 mapping.** D6 says the hook PAT is scoped
+  to the owner's personal workspace, while existing PATs carry a bound workspace
+  id (`bound_workspace_id` in `accounts/authentication.py`) and D4 rules let hook
+  events map to firm workspaces. The brief does not say which rule decides.
+  Fix: state that the PAT's bound workspace only authenticates the principal and
+  D4 mapping alone decides the target workspace; add a test that a hook token
+  bound to personal lands a mapped firm `cwd` only in the firm workspace, and
+  only when the owner owns that workspace.
