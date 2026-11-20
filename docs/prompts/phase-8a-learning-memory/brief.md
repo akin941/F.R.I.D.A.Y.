@@ -1562,3 +1562,13 @@ in full. Worth a look at the fixture's commit dates vs the
 5. Independent Sonnet 5 review of this branch (and of the brief's pending
    plan review) before merging to `main`.
 
+
+### Closeout (`closeout`) — known follow-ups (from review, unresolved at merge)
+
+- **LOW — `backend/ops/preflight.py` (`learning_scrubber` corpus
+  location):** the check depends on `backend/memory/tests/scrubber_corpus`
+  being present in the deployed image; if the image excludes tests, the check
+  silently degrades to WARN, so the 100% secrets-recall gate is not enforced
+  on that deployment. Fix: confirm the Dockerfile and `.dockerignore` ship
+  `memory/tests/scrubber_corpus`, or set `PREFLIGHT_SCRUBBER_CORPUS_DIR` in the
+  runbook (a one-line note in `docs/runbooks/learning-memory.md` is enough).
