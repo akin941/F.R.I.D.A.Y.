@@ -1456,3 +1456,11 @@ PAT wording in this section and branch 2's matrix now says 401.
 4. Write the `developer` block from the editor (owner step 2 of branch 2).
 5. Independent Sonnet 5 review of this branch before merge.
 
+Note (branch 6 run, 2026-11-20): one full-suite run hit a flaky failure in
+the branch 4 test
+`harness/tests/test_commit_ingestion.py::test_harness_branch_and_produced_commits_keep_metadata_only`
+(the commit dated "now" missing from the ingested set under load). It is not
+touched by this branch; the file passes 3/3 alone and `harness/tests` passes
+in full. Worth a look at the fixture's commit dates vs the
+`--shallow-since` window.
+
