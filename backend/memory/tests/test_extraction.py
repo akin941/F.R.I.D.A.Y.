@@ -14,9 +14,14 @@ from memory.extraction import (
 
 def valid_payload(**overrides):
     payload = {
-        "version": 1,
+        "version": 2,
         "candidates": [
-            {"type": "preference", "title": "Coffee", "content": "Drinks coffee black."}
+            {
+                "type": "preference",
+                "title": "Coffee",
+                "content": "Drinks coffee black.",
+                "quote": "I drink it black",
+            }
         ],
     }
     payload.update(overrides)
@@ -27,7 +32,12 @@ class TestHappyPath:
     def test_parses_valid_candidates(self):
         candidates = parse_candidates(valid_payload())
         assert candidates == [
-            {"type": "preference", "title": "Coffee", "content": "Drinks coffee black."}
+            {
+                "type": "preference",
+                "title": "Coffee",
+                "content": "Drinks coffee black.",
+                "quote": "I drink it black",
+            }
         ]
 
     def test_empty_candidates_list_is_valid(self):
@@ -44,9 +54,39 @@ class TestHappyPath:
             if memory_type == Memory.Type.WORK_LOG:
                 continue
             payload = valid_payload(
-                candidates=[{"type": memory_type, "title": "T", "content": "C"}]
+                candidates=[{"type": memory_type, "title": "T", "content": "C", "quote": "Q"}]
             )
             assert parse_candidates(payload)[0]["type"] == memory_type
+
+
+class TestSchemaV2:
+    """Phase 8A D9: chat extraction schema v2 -- a quote is required and a
+    v1-shaped output is a schema error."""
+
+    def test_v1_shaped_output_is_rejected(self):
+        payload = json.dumps(
+            {"version": 1, "candidates": [{"type": "semantic", "title": "T", "content": "C"}]}
+        )
+        with pytest.raises(ExtractionParseError):
+            parse_candidates(payload)
+
+    def test_v2_without_a_quote_is_rejected(self):
+        payload = json.dumps(
+            {"version": 2, "candidates": [{"type": "semantic", "title": "T", "content": "C"}]}
+        )
+        with pytest.raises(ExtractionParseError):
+            parse_candidates(payload)
+
+    @pytest.mark.parametrize("quote", ["", "   ", 5, None, "x" * 1001])
+    def test_invalid_quote_is_rejected(self, quote):
+        payload = json.dumps(
+            {
+                "version": 2,
+                "candidates": [{"type": "semantic", "title": "T", "content": "C", "quote": quote}],
+            }
+        )
+        with pytest.raises(ExtractionParseError):
+            parse_candidates(payload)
 
 
 class TestWorkLogTypeRejected:
@@ -54,7 +94,7 @@ class TestWorkLogTypeRejected:
         from memory.models import Memory
 
         payload = valid_payload(
-            candidates=[{"type": Memory.Type.WORK_LOG, "title": "T", "content": "C"}]
+            candidates=[{"type": Memory.Type.WORK_LOG, "title": "T", "content": "C", "quote": "Q"}]
         )
         with pytest.raises(ExtractionParseError):
             parse_candidates(payload)
@@ -82,7 +122,7 @@ class TestMalformedInput:
 
     def test_wrong_schema_version_is_rejected(self):
         with pytest.raises(ExtractionParseError):
-            parse_candidates(valid_payload(version=2))
+            parse_candidates(valid_payload(version=3))
 
     def test_missing_version_is_rejected(self):
         payload = json.dumps({"candidates": []})
@@ -95,7 +135,7 @@ class TestMalformedInput:
 
     def test_too_many_candidates_is_rejected(self):
         candidates = [
-            {"type": "semantic", "title": f"T{i}", "content": f"C{i}"}
+            {"type": "semantic", "title": f"T{i}", "content": f"C{i}", "quote": "Q"}
             for i in range(MAX_CANDIDATES_PER_JOB + 1)
         ]
         with pytest.raises(ExtractionParseError):
@@ -103,7 +143,7 @@ class TestMalformedInput:
 
     def test_exactly_max_candidates_is_accepted(self):
         candidates = [
-            {"type": "semantic", "title": f"T{i}", "content": f"C{i}"}
+            {"type": "semantic", "title": f"T{i}", "content": f"C{i}", "quote": "Q"}
             for i in range(MAX_CANDIDATES_PER_JOB)
         ]
         assert len(parse_candidates(valid_payload(candidates=candidates))) == MAX_CANDIDATES_PER_JOB
@@ -119,13 +159,17 @@ class TestMalformedInput:
     def test_invalid_type_is_rejected(self):
         with pytest.raises(ExtractionParseError):
             parse_candidates(
-                valid_payload(candidates=[{"type": "bogus", "title": "T", "content": "C"}])
+                valid_payload(
+                    candidates=[{"type": "bogus", "title": "T", "content": "C", "quote": "Q"}]
+                )
             )
 
     def test_empty_title_is_rejected(self):
         with pytest.raises(ExtractionParseError):
             parse_candidates(
-                valid_payload(candidates=[{"type": "semantic", "title": "  ", "content": "C"}])
+                valid_payload(
+                    candidates=[{"type": "semantic", "title": "  ", "content": "C", "quote": "Q"}]
+                )
             )
 
     def test_oversized_title_is_rejected(self):
@@ -133,7 +177,12 @@ class TestMalformedInput:
             parse_candidates(
                 valid_payload(
                     candidates=[
-                        {"type": "semantic", "title": "x" * (MAX_TITLE_CHARS + 1), "content": "C"}
+                        {
+                            "type": "semantic",
+                            "title": "x" * (MAX_TITLE_CHARS + 1),
+                            "content": "C",
+                            "quote": "Q",
+                        }
                     ]
                 )
             )
@@ -161,7 +210,9 @@ class TestMalformedInput:
     def test_non_string_title_is_rejected(self):
         with pytest.raises(ExtractionParseError):
             parse_candidates(
-                valid_payload(candidates=[{"type": "semantic", "title": 5, "content": "C"}])
+                valid_payload(
+                    candidates=[{"type": "semantic", "title": 5, "content": "C", "quote": "Q"}]
+                )
             )
 
     def test_extra_keys_on_candidate_are_rejected(self):
@@ -175,7 +226,7 @@ class TestMalformedInput:
             )
 
     def test_extra_top_level_keys_are_rejected(self):
-        payload = json.dumps({"version": 1, "candidates": [], "note": "hi"})
+        payload = json.dumps({"version": 2, "candidates": [], "note": "hi"})
         with pytest.raises(ExtractionParseError):
             parse_candidates(payload)
 
@@ -191,11 +242,15 @@ class TestMalformedInput:
         it must be reported as the same terminal ExtractionParseError."""
         with pytest.raises(ExtractionParseError):
             parse_candidates(
-                valid_payload(candidates=[{"type": ["semantic"], "title": "T", "content": "C"}])
+                valid_payload(
+                    candidates=[{"type": ["semantic"], "title": "T", "content": "C", "quote": "Q"}]
+                )
             )
 
     def test_boolean_type_value_is_rejected(self):
         with pytest.raises(ExtractionParseError):
             parse_candidates(
-                valid_payload(candidates=[{"type": True, "title": "T", "content": "C"}])
+                valid_payload(
+                    candidates=[{"type": True, "title": "T", "content": "C", "quote": "Q"}]
+                )
             )

@@ -17,6 +17,7 @@ from django.utils import timezone
 from ai_core.exceptions import GatewayError
 from ai_core.gateway import InferenceGateway
 from ai_core.models import PromptTemplate
+from memory.context import neutralize_fence, strip_invisible_formatting
 from memory.extraction import ExtractionParseError, parse_candidates
 from memory.ingestion import tasks as _ingestion_tasks  # noqa: F401 (Phase 8A beat tasks)
 from memory.jobs import (
@@ -34,6 +35,7 @@ from memory.jobs import (
     message_range,
 )
 from memory.models import Memory, MemoryExtractionJob
+from memory.provenance import quote_is_verbatim
 
 logger = logging.getLogger(__name__)
 
@@ -155,11 +157,9 @@ def _process_claimed_job(claimed_job_id, claim_token):
         finalize_extraction_success(claimed_job_id, claim_token, [])
         return
     prompt_version = _extraction_prompt_version()
-    messages = [{"role": "system", "content": prompt_version.content}]
-    messages.extend(
-        {"role": role, "content": content}
-        for role, content in message_range(job).values_list("role", "content")
-    )
+    rows = list(message_range(job).values_list("role", "content"))
+    messages = build_chat_extraction_messages(prompt_version.content, rows)
+    user_texts = [content for role, content in rows if role == "user"]
 
     gateway = InferenceGateway()
     try:
@@ -196,7 +196,34 @@ def _process_claimed_job(claimed_job_id, claim_token):
         )
         return
 
+    # Schema v2 (Phase 8A D9): a candidate survives only when its quote is
+    # the owner's own words -- a `user`-role message of this range -- never
+    # assistant text, which the model saw only inside the untrusted fence.
+    candidates = [c for c in candidates if quote_is_verbatim(c["quote"], *user_texts)]
     finalize_extraction_success(claimed_job_id, claim_token, candidates)
+
+
+_CHAT_FENCE_WORDS = ("untrusted_context",)
+
+
+def build_chat_extraction_messages(prompt_content, rows):
+    """Chat extraction v2 payload (Phase 8A D9): the system prompt, then the
+    range in order -- `user` messages verbatim (the only quotable text),
+    every other role's content inside an `untrusted_context` fence whose
+    tag cannot be closed from inside (`neutralize_fence`)."""
+    messages = [{"role": "system", "content": prompt_content}]
+    for role, content in rows:
+        if role == "user":
+            messages.append({"role": "user", "content": content})
+            continue
+        fenced = neutralize_fence(strip_invisible_formatting(content or ""), *_CHAT_FENCE_WORDS)
+        messages.append(
+            {
+                "role": role,
+                "content": (f'<untrusted_context role="{role}">\n{fenced}\n</untrusted_context>'),
+            }
+        )
+    return messages
 
 
 @shared_task

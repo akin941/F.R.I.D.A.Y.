@@ -427,6 +427,7 @@ def approve_memory(*, memory, actor, **curated_fields):
     memory.status = Memory.Status.APPROVED
     _save_curated(memory, [*changed, "status", "updated_at"])
     _record(memory, "memory.approved", actor, fields_changed=sorted(changed))
+    _count_learning_decision(memory.ingestion_source_id, "proposals_accepted")
     _reconcile_embedding(memory, text_changed=bool({"title", "content"} & set(changed)))
     return memory
 
@@ -442,6 +443,7 @@ def reject_memory(*, memory, actor):
     memory.status = Memory.Status.REJECTED
     memory.save(update_fields=["status", "updated_at"])
     _record(memory, "memory.rejected", actor)
+    _count_learning_decision(memory.ingestion_source_id, "proposals_rejected")
     # Defense-in-depth: a pending row's embedding is always None already.
     _reconcile_embedding(memory)
     return memory
@@ -595,6 +597,19 @@ def _reconcile_embedding(memory, *, text_changed=False):
         memory.embedding = None
         memory.embedding_provider = None
         memory.save(update_fields=["embedding", "embedding_provider"])
+
+
+def _count_learning_decision(source_id, field):
+    """Acceptance metric (D10): an owner decision on a learned proposal
+    bumps its source's daily counter. Counts only."""
+    if source_id is None:
+        return
+    from memory.ingestion.services import bump_counter
+    from memory.models import IngestionSource
+
+    source = IngestionSource.objects.filter(pk=source_id).first()
+    if source is not None:
+        bump_counter(source, field)
 
 
 def _record(memory, action, actor, **metadata):
@@ -822,7 +837,13 @@ def _iso_week_start(now):
 
 
 def create_core_block_proposal(
-    *, workspace, label, proposed_content, provenance_quote, source_episode_id=None
+    *,
+    workspace,
+    label,
+    proposed_content,
+    provenance_quote,
+    source_episode_id=None,
+    ingestion_source=None,
 ):
     """File a model-made proposal (D7, D9) -- system code only (branch 5's
     consolidation). Never applies anything; `self` is never a target.
@@ -857,6 +878,7 @@ def create_core_block_proposal(
             base_version=current.version if current else 0,
             provenance_quote=quote[:300],
             source_episode_id=source_episode_id,
+            ingestion_source=ingestion_source,
             inferred=True,
         )
         record_audit(
@@ -903,6 +925,7 @@ def approve_core_block_proposal(*, proposal, actor, channel):
             actor=actor,
         )
         _decide_proposal(proposal, CoreBlockProposal.Status.APPROVED, actor)
+        _count_learning_decision(proposal.ingestion_source_id, "proposals_accepted")
         record_audit(
             action="memory.core_block.proposal_approved",
             actor=actor,
@@ -920,6 +943,7 @@ def reject_core_block_proposal(*, proposal, actor, channel):
         if proposal.status != CoreBlockProposal.Status.PENDING:
             raise InvalidTransition("Proposal is not pending.")
         _decide_proposal(proposal, CoreBlockProposal.Status.REJECTED, actor)
+        _count_learning_decision(proposal.ingestion_source_id, "proposals_rejected")
         record_audit(
             action="memory.core_block.proposal_rejected",
             actor=actor,

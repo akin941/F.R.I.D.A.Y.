@@ -24,6 +24,7 @@ from django.db.models import Q
 from django.utils import timezone
 
 from memory.models import Memory, MemoryExtractionJob, compute_fingerprint
+from memory.provenance import stored_quote
 
 logger = logging.getLogger(__name__)
 
@@ -252,6 +253,8 @@ def finalize_extraction_success(job_id, claim_token, candidates):
             content=c["content"],
             fingerprint=compute_fingerprint(c["content"]),
             source_conversation=job.conversation,
+            # Schema v2 (Phase 8A D9): the verified owner quote.
+            provenance_quote=stored_quote(c.get("quote", "")),
         )
         for c in candidates
     ]

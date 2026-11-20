@@ -10,7 +10,6 @@ from ai_core.adapters.fake import (
     FAKE_EMBEDDING_DIMENSION,
     FAKE_HARNESS_BRIEFING_RESPONSE,
     FAKE_HARNESS_REVIEW_RESPONSE,
-    FAKE_MEMORY_EXTRACTION_RESPONSE,
     FAKE_RESPONSE,
     FAKE_ROUTER_INTENT_RESPONSE,
     FAKE_ROUTER_KNOWLEDGE_QUERY_INTENT_RESPONSE,
@@ -21,6 +20,7 @@ from ai_core.adapters.fake import (
     FAKE_TRANSCRIPT,
     FakeAdapter,
     embed_text,
+    fake_memory_extraction_response,
 )
 
 
@@ -91,7 +91,7 @@ class TestPurposeAwareFixtures:
         result = make_adapter().complete(
             [{"role": "user", "content": "hi"}], {}, purpose="memory.extraction"
         )
-        assert result.text == FAKE_MEMORY_EXTRACTION_RESPONSE
+        assert result.text == fake_memory_extraction_response([{"role": "user", "content": "hi"}])
 
     def test_stream_default_purpose_reassembles_to_chat_fixture(self):
         gen = make_adapter().stream([{"role": "user", "content": "hi"}], {})
@@ -113,7 +113,9 @@ class TestPurposeAwareFixtures:
                 chunks.append(next(gen))
         except StopIteration:
             pass
-        assert "".join(chunks) == FAKE_MEMORY_EXTRACTION_RESPONSE
+        assert "".join(chunks) == fake_memory_extraction_response(
+            [{"role": "user", "content": "hi"}]
+        )
 
     def test_router_intent_purpose_returns_router_fixture(self):
         result = make_adapter().complete(

@@ -414,6 +414,10 @@ MEMORY_CODING_SESSION_STALE_HOURS = env.int("MEMORY_CODING_SESSION_STALE_HOURS",
 # this many days; later runs start an hour before the cursor's committer
 # date. The calendar producer reads yesterday and today.
 MEMORY_GIT_INGEST_LOOKBACK_DAYS = env.int("MEMORY_GIT_INGEST_LOOKBACK_DAYS", default=2)
+# Branch 5 (D10): the morning card lists pending learned proposals created
+# in the last this-many days (the caps themselves are code constants in
+# memory.ingestion.consolidation, not settings).
+MEMORY_LEARNING_DIGEST_DAYS = env.int("MEMORY_LEARNING_DIGEST_DAYS", default=2)
 
 CORS_ALLOWED_ORIGINS = [o for o in env.list("CORS_ALLOWED_ORIGINS", default=[]) if o] or [
     "http://localhost:3001"
@@ -452,6 +456,10 @@ AI_PURPOSE_TIERS = {
     "chat": "mid",
     "memory.extraction": "mid",
     "agent.read_step": "mid",
+    # Phase 8A learning loop (brief D9/D10): owner-text episode extraction is
+    # a short structured pass; consolidation dedupes, merges and ranks.
+    "memory.episode_extraction": "cheap",
+    "memory.consolidation": "mid",
     # strong: planning
     "agent.plan": "strong",
 }
@@ -487,6 +495,15 @@ AI_AUDIO_PURPOSES = ("voice.stt", "voice.tts")
 AI_BUDGET_AUDIO_MONTHLY_USD = env("AI_BUDGET_AUDIO_MONTHLY_USD", default="20")
 AI_BUDGET_AUDIO_SESSION_USD = env("AI_BUDGET_AUDIO_SESSION_USD", default="1")
 AI_BUDGET_AUDIO_DAILY_USD = env("AI_BUDGET_AUDIO_DAILY_USD", default="")
+# Phase 8A D13: the learning loop's gateway caps. `learning` is the shared
+# monthly cap over both learning purposes (20 USD, ADR-012); each purpose
+# also gets its own daily cap. Seeded once by `seed_ai_defaults`
+# (`learning`, `learning_extraction_daily`, `learning_consolidation_daily`
+# AIBudget rows), owner-editable afterwards. Empty = no cap.
+AI_LEARNING_PURPOSES = ("memory.episode_extraction", "memory.consolidation")
+AI_BUDGET_LEARNING_MONTHLY_USD = env("AI_BUDGET_LEARNING_MONTHLY_USD", default="20")
+AI_BUDGET_EPISODE_EXTRACTION_DAILY_USD = env("AI_BUDGET_EPISODE_EXTRACTION_DAILY_USD", default="1")
+AI_BUDGET_CONSOLIDATION_DAILY_USD = env("AI_BUDGET_CONSOLIDATION_DAILY_USD", default="0.5")
 
 # --- Voice / speech gateway (Phase 6 branch 1, ADR-011) ---
 # Utterance cap (D2/D3): 30 s of 16 kHz mono PCM16 = 960 KB, below Django's

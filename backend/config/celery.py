@@ -108,6 +108,17 @@ _BEAT_SCHEDULE = {
         "task": "harness.tasks.ingest_repo_commits",
         "schedule": 6 * 60 * 60.0,
     },
+    # Phase 8A branch 5 (brief D9/D10): the nightly learning run (consolidate
+    # leftovers, then plan owner-text extraction jobs) and the extraction
+    # jobs' lease-recovery scan.
+    "memory-learning-nightly": {
+        "task": "memory.ingestion.tasks.run_learning_night_task",
+        "schedule": 24 * 60 * 60.0,
+    },
+    "memory-episode-extraction-recovery-scan": {
+        "task": "memory.ingestion.tasks.recover_stale_episode_extraction_jobs",
+        "schedule": 60.0,
+    },
     "memory-ingest-calendar-metadata": {
         "task": "connectors.tasks.ingest_calendar_metadata",
         "schedule": 6 * 60 * 60.0,

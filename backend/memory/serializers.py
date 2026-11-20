@@ -18,6 +18,8 @@ class MemorySerializer(serializers.ModelSerializer):
             "content",
             "created_by",
             "source_conversation",
+            # Phase 8A D9: the verified owner quote of a learned proposal.
+            "provenance_quote",
             "created_at",
             "updated_at",
         ]
@@ -55,6 +57,17 @@ class CoreBlockUpdateSerializer(serializers.Serializer):
 
 class CoreBlockRollbackSerializer(serializers.Serializer):
     version = serializers.IntegerField(min_value=1)
+
+
+class LearningDigestQuerySerializer(serializers.Serializer):
+    """Morning card window (Phase 8A D10): pending learned proposals of the
+    last `days` local days (default `MEMORY_LEARNING_DIGEST_DAYS`)."""
+
+    days = serializers.IntegerField(min_value=1, max_value=14, required=False)
+
+
+class LearningBulkApproveSerializer(serializers.Serializer):
+    ids = serializers.ListField(child=serializers.UUIDField(), min_length=1, max_length=50)
 
 
 class MemoryCurateSerializer(serializers.Serializer):

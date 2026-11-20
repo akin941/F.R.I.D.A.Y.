@@ -13,7 +13,7 @@ import uuid
 from datetime import timedelta
 
 from django.db import IntegrityError, transaction
-from django.db.models import F
+from django.db.models import F, Q
 from django.utils import timezone
 
 from audit.services import record_audit
@@ -25,9 +25,12 @@ from memory.ingestion.mapping import (
 )
 from memory.ingestion.scrubber import merge_reports
 from memory.models import (
+    CoreBlockProposal,
     Episode,
+    EpisodeExtractionJob,
     IngestionCounter,
     IngestionSource,
+    Memory,
     ScrubTerm,
     WorkspaceMappingRule,
 )
@@ -93,6 +96,28 @@ def record_scrub_hits(source, report):
 
 
 @transaction.atomic
+def record_learning_drops(source, reasons):
+    """Add `{reason: count}` to today's learning drop counts (branch 5, D9/
+    D10); `no_provenance` also feeds the typed
+    `proposals_dropped_no_provenance` counter. Counts only, never text."""
+    reasons = {k: int(v) for k, v in (reasons or {}).items() if v}
+    if not reasons:
+        return
+    counter = IngestionCounter.objects.select_for_update().get(pk=_counter(source).pk)
+    drops = dict(counter.learning_drops or {})
+    for reason, count in reasons.items():
+        drops[reason] = int(drops.get(reason, 0)) + count
+    counter.learning_drops = drops
+    counter.proposals_dropped_no_provenance += reasons.get("no_provenance", 0)
+    counter.save(update_fields=["learning_drops", "proposals_dropped_no_provenance", "updated_at"])
+
+
+def tokens_spent_today(source):
+    counter = IngestionCounter.objects.filter(source=source, day=timezone.localdate()).first()
+    return counter.tokens_spent if counter else 0
+
+
+@transaction.atomic
 def record_unmapped(source, entry):
     counter = IngestionCounter.objects.select_for_update().get(pk=_counter(source).pk)
     counter.dropped_unmapped += 1
@@ -123,6 +148,21 @@ def purge_expired_episodes(now=None):
     d10, not an owner delete. Only expired rows are touched."""
     now = now or timezone.now()
     deleted, _ = Episode.all_objects.filter(expires_at__lte=now).delete()
+    return deleted
+
+
+def purge_stale_extraction_jobs(now=None):
+    """Branch 5: delete extraction jobs older than their workspace's
+    episode TTL -- a job's waiting candidates derive from episode text and
+    must not outlive it (d10)."""
+    from django.conf import settings
+
+    now = now or timezone.now()
+    personal = now - timedelta(days=settings.MEMORY_EPISODE_TTL_DAYS_PERSONAL)
+    firm = now - timedelta(days=settings.MEMORY_EPISODE_TTL_DAYS_FIRM)
+    deleted, _ = EpisodeExtractionJob.objects.filter(
+        Q(workspace__type=Workspace.Type.COMPANY, created_at__lt=firm) | Q(created_at__lt=personal)
+    ).delete()
     return deleted
 
 
@@ -212,22 +252,73 @@ def forget_source(source, *, actor, channel):
     operation_id = uuid.uuid4()
     episodes = Episode.all_objects.filter(source=source, deleted_at__isnull=True)
     trashed = episodes.update(deleted_at=now, forget_operation_id=operation_id)
+    # Branch 5 cascade: every memory derived from the source (found through
+    # `ingestion_source`, so it works after the episodes expired) --
+    # approved -> archived, pending -> rejected -- and every pending
+    # core-block proposal -> rejected, each marked with the operation id and
+    # its prior status so restore undoes exactly these rows.
+    archived = Memory.objects.filter(ingestion_source=source, status=Memory.Status.APPROVED).update(
+        status=Memory.Status.ARCHIVED,
+        forget_operation_id=operation_id,
+        forget_prior_status=Memory.Status.APPROVED,
+        # An archived row's vector must not persist (memory.services'
+        # embedding reconciliation rule).
+        embedding=None,
+        embedding_provider=None,
+    )
+    rejected = Memory.objects.filter(
+        ingestion_source=source, status=Memory.Status.PENDING_APPROVAL
+    ).update(
+        status=Memory.Status.REJECTED,
+        forget_operation_id=operation_id,
+        forget_prior_status=Memory.Status.PENDING_APPROVAL,
+    )
+    proposals = CoreBlockProposal.objects.filter(
+        ingestion_source=source, status=CoreBlockProposal.Status.PENDING
+    ).update(
+        status=CoreBlockProposal.Status.REJECTED,
+        forget_operation_id=operation_id,
+        forget_prior_status=CoreBlockProposal.Status.PENDING,
+    )
+    candidates = _strip_waiting_candidates(source)
     source.paused_at = source.paused_at or now
     source.forgotten_at = now
     source.forget_operation_id = operation_id
     source.save(update_fields=["paused_at", "forgotten_at", "forget_operation_id", "updated_at"])
+    counts = {
+        "episodes": trashed,
+        "memories_archived": archived,
+        "memories_rejected": rejected,
+        "core_block_proposals": proposals,
+        "candidates_discarded": candidates,
+    }
     record_audit(
         action="memory.source_forgotten",
         actor=actor,
         workspace=source.workspace,
         resource=source,
-        metadata={
-            "kind": source.kind,
-            "operation_id": str(operation_id),
-            "episodes": trashed,
-        },
+        metadata={"kind": source.kind, "operation_id": str(operation_id), **counts},
     )
-    return {"operation_id": str(operation_id), "episodes": trashed}
+    return {"operation_id": str(operation_id), **counts}
+
+
+def _strip_waiting_candidates(source):
+    """Drop the source's not-yet-consolidated candidates from extraction
+    jobs (they quote now-trashed episodes). Not restorable: the episodes
+    come back extracted, and the next real item from the source is learned
+    normally."""
+    removed = 0
+    source_id = str(source.id)
+    jobs = EpisodeExtractionJob.objects.select_for_update().filter(
+        workspace=source.workspace, consolidated_at__isnull=True
+    )
+    for job in jobs:
+        kept = [c for c in job.candidates if c.get("source_id") != source_id]
+        if len(kept) != len(job.candidates):
+            removed += len(job.candidates) - len(kept)
+            job.candidates = kept
+            job.save(update_fields=["candidates", "updated_at"])
+    return removed
 
 
 @transaction.atomic
@@ -246,22 +337,113 @@ def restore_source(source, *, actor, channel):
         deleted_at__isnull=False,
         expires_at__gt=timezone.now(),
     ).update(deleted_at=None, forget_operation_id=None)
+    memories = _restore_memories(source, operation_id)
+    proposals = CoreBlockProposal.objects.filter(
+        ingestion_source=source, forget_operation_id=operation_id
+    ).update(status=F("forget_prior_status"), forget_operation_id=None, forget_prior_status="")
     source.forgotten_at = None
     source.forget_operation_id = None
     source.save(update_fields=["forgotten_at", "forget_operation_id", "updated_at"])
+    counts = {"episodes": restored, "memories": memories, "core_block_proposals": proposals}
     record_audit(
         action="memory.source_restored",
         actor=actor,
         workspace=source.workspace,
         resource=source,
-        metadata={"kind": source.kind, "operation_id": str(operation_id), "episodes": restored},
+        metadata={"kind": source.kind, "operation_id": str(operation_id), **counts},
     )
-    return {"operation_id": str(operation_id), "episodes": restored}
+    return {"operation_id": str(operation_id), **counts}
+
+
+def _restore_memories(source, operation_id):
+    """Put back exactly the memories this forget operation marked, at their
+    prior status. A row the private-conversation cascade locked meanwhile
+    stays archived (`privacy_locked`, memory.services.restore_memory's
+    rule); a restored approved row is re-embedded."""
+    from memory.jobs import dispatch_memory_embedding
+
+    marked = Memory.objects.filter(
+        ingestion_source=source, forget_operation_id=operation_id, privacy_locked=False
+    )
+    rows = list(marked.values_list("id", "forget_prior_status"))
+    for status in {prior for _, prior in rows}:
+        Memory.objects.filter(pk__in=[pk for pk, prior in rows if prior == status]).update(
+            status=status, forget_operation_id=None, forget_prior_status=""
+        )
+    for pk, prior in rows:
+        if prior == Memory.Status.APPROVED:
+            transaction.on_commit(lambda pk=pk: dispatch_memory_embedding(pk))
+    return len(rows)
+
+
+def trashed_episodes(workspace):
+    """Episodes in this workspace's trash (a forget-source move), for the
+    gate-class `purge_trash` (ADR-009)."""
+    return Episode.all_objects.filter(workspace=workspace, deleted_at__isnull=False)
+
+
+def forgotten_memories(workspace):
+    """Memories a forget-source operation archived/rejected and that are
+    still in that state -- `purge_trash`'s `forgotten_memory_ids` scope."""
+    return Memory.objects.filter(
+        workspace=workspace,
+        forget_operation_id__isnull=False,
+        status__in=[Memory.Status.ARCHIVED, Memory.Status.REJECTED],
+    )
+
+
+def _purge_audit(action, row, *, actor, approval_request_id):
+    from audit.models import AuditLog
+
+    record_audit(
+        action=action,
+        actor=actor,
+        actor_type=AuditLog.ActorType.HUMAN if actor else AuditLog.ActorType.SYSTEM,
+        workspace=row.workspace,
+        resource=row,
+        metadata={"reason": "approval", "approval_request_id": approval_request_id or ""},
+    )
+
+
+def purge_trashed_episode(episode, *, actor=None, approval_request_id=None):
+    """Permanently delete one trashed episode -- only from an approved
+    `purge_trash` request (or the TTL beat). Caller holds the transaction;
+    a row restored meanwhile is left alone."""
+    if episode.deleted_at is None:
+        return False
+    _purge_audit(
+        "memory.episode_purged", episode, actor=actor, approval_request_id=approval_request_id
+    )
+    episode.delete()
+    return True
+
+
+def purge_forgotten_memory(memory, *, actor=None, approval_request_id=None):
+    """Permanently delete one memory a forget-source operation archived or
+    rejected -- only from an approved `purge_trash` request. A row restored
+    meanwhile is left alone."""
+    if memory.forget_operation_id is None or memory.status not in (
+        Memory.Status.ARCHIVED,
+        Memory.Status.REJECTED,
+    ):
+        return False
+    _purge_audit("memory.purged", memory, actor=actor, approval_request_id=approval_request_id)
+    memory.delete()
+    return True
 
 
 def forget_preview(source):
     """Counts the forget confirmation names (ADR-009 conditions)."""
-    return {"episodes": Episode.all_objects.filter(source=source, deleted_at__isnull=True).count()}
+    return {
+        "episodes": Episode.all_objects.filter(source=source, deleted_at__isnull=True).count(),
+        "memories": Memory.objects.filter(
+            ingestion_source=source,
+            status__in=[Memory.Status.APPROVED, Memory.Status.PENDING_APPROVAL],
+        ).count(),
+        "core_block_proposals": CoreBlockProposal.objects.filter(
+            ingestion_source=source, status=CoreBlockProposal.Status.PENDING
+        ).count(),
+    }
 
 
 # --- mapping rules -----------------------------------------------------------

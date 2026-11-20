@@ -1,6 +1,7 @@
 """Deterministic adapter for tests and local development. No network access."""
 
 import hashlib
+import json
 import math
 import random
 import re
@@ -77,11 +78,83 @@ def embed_text(text, dimension=FAKE_EMBEDDING_DIMENSION):
 # the shape of `memory.extraction.SCHEMA_VERSION`/candidate schema rather
 # than referencing it. If that schema changes, this fixture must be updated
 # by hand; a schema-parser test against this exact string guards the drift.
-FAKE_MEMORY_EXTRACTION_RESPONSE = (
-    '{"version": 1, "candidates": [{"type": "preference", '
-    '"title": "Fake extracted preference", '
-    '"content": "Deterministic FakeAdapter candidate for memory.extraction."}]}'
+#
+# Schema v2 (Phase 8A brief D9): every candidate carries a `quote` that must
+# match a `user`-role message verbatim, so the fixture quotes the latest
+# plain (unfenced) user message -- a short one ("hi") is still quoted and
+# then dropped by memory's provenance check, exactly like a real model's.
+FAKE_MEMORY_EXTRACTION_TITLE = "Fake extracted preference"
+FAKE_MEMORY_EXTRACTION_CONTENT = "Deterministic FakeAdapter candidate for memory.extraction."
+_FAKE_QUOTE_CHARS = 200
+
+
+def _latest_plain_user_text(messages):
+    for message in reversed(messages or []):
+        content = str(message.get("content", ""))
+        if message.get("role") == "user" and not content.startswith("<untrusted_context"):
+            return content.strip()
+    return ""
+
+
+def fake_memory_extraction_response(messages):
+    quote = _latest_plain_user_text(messages)[:_FAKE_QUOTE_CHARS]
+    candidates = []
+    if quote:
+        candidates.append(
+            {
+                "type": "preference",
+                "title": FAKE_MEMORY_EXTRACTION_TITLE,
+                "content": FAKE_MEMORY_EXTRACTION_CONTENT,
+                "quote": quote,
+            }
+        )
+    return json.dumps({"version": 2, "candidates": candidates})
+
+
+FAKE_MEMORY_EXTRACTION_RESPONSE = fake_memory_extraction_response(
+    [{"role": "user", "content": "I always prefer short answers."}]
 )
+
+# Purpose-aware fixtures for the Phase 8A learning loop (brief D9, D10),
+# hand-written mirrors of `memory.ingestion.extraction` / `.consolidation`'s
+# v1 schemas (ai_core must not import memory). Episode extraction: one
+# `memory` candidate per `<owner_item>` of the payload, quoting the item's
+# first characters verbatim. Consolidation: keep every candidate, in order,
+# with its own title/content.
+_OWNER_ITEM = re.compile(r'<owner_item episode_id="([^"]+)"[^>]*>\n(.*?)\n</owner_item>', re.DOTALL)
+_CANDIDATE_INDEX = re.compile(r'<candidate index="(\d+)"')
+
+
+def _all_content(messages):
+    return "\n".join(str(m.get("content", "")) for m in messages or [])
+
+
+def fake_episode_extraction_response(messages):
+    candidates = []
+    for episode_id, text in _OWNER_ITEM.findall(_all_content(messages)):
+        text = text.strip()
+        candidates.append(
+            {
+                "type": "semantic",
+                "title": "Fake learned fact",
+                "content": f"Fake learned: {text[:80]}",
+                "quote": text[:_FAKE_QUOTE_CHARS],
+                "episode_id": episode_id,
+                "target": "memory",
+            }
+        )
+    return json.dumps({"version": 1, "candidates": candidates})
+
+
+def fake_consolidation_response(messages):
+    indexes = [int(i) for i in _CANDIDATE_INDEX.findall(_all_content(messages))]
+    return json.dumps(
+        {
+            "version": 1,
+            "proposals": [{"index": i, "title": None, "content": None} for i in indexes],
+        }
+    )
+
 
 # Purpose-aware fixture for `router.intent` (MVP 6 §1): a hand-written
 # literal mirroring assistant.intent's schema — ai_core must never import a
@@ -196,7 +269,11 @@ def _latest_user_content(messages):
 class FakeAdapter(BaseAdapter):
     def _text_for(self, purpose, messages=None):
         if purpose == "memory.extraction":
-            return FAKE_MEMORY_EXTRACTION_RESPONSE
+            return fake_memory_extraction_response(messages)
+        if purpose == "memory.episode_extraction":
+            return fake_episode_extraction_response(messages)
+        if purpose == "memory.consolidation":
+            return fake_consolidation_response(messages)
         if purpose == "router.intent":
             latest = _latest_user_content(messages)
             if _TASK_DRAFT_TRIGGER in latest:
