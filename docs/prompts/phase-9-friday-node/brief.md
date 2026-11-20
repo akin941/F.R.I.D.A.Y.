@@ -1117,7 +1117,8 @@ There is no socket yet.
     `TrustedDevice` or actor user raises `ProtectedError`, no chain row
     changes, and `verify_node_audit_chain` still passes afterwards; a
     raw-SQL `DELETE FROM workspaces_workspace` for that workspace is
-    refused by the FK, and a raw `UPDATE … SET actor_id = NULL` by the
+    refused by the FK constraint (at commit: Django FK constraints are
+    deferred), and a raw `UPDATE … SET actor_id = NULL` by the
     trigger;
   - the verify command detects a tampered row (trigger disabled inside
     the test) and reports its `seq`.
