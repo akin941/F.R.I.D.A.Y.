@@ -562,7 +562,13 @@ def test_seed_local_speech_rows_with_voice_key_and_idempotent(monkeypatch):
     assert (
         ModelProvider.objects.filter(name__in=["voice-stt-local", "voice-tts-local"]).count() == 2
     )
-    assert AIBudget.objects.count() == 1
+    # audio + the three Phase 8A learning budgets.
+    assert set(AIBudget.objects.values_list("name", flat=True)) == {
+        "audio",
+        "learning",
+        "learning_extraction_daily",
+        "learning_consolidation_daily",
+    }
 
 
 def test_reseed_keeps_owner_budget_and_toggle_edits():

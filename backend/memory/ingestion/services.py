@@ -374,6 +374,62 @@ def _restore_memories(source, operation_id):
     return len(rows)
 
 
+def trashed_episodes(workspace):
+    """Episodes in this workspace's trash (a forget-source move), for the
+    gate-class `purge_trash` (ADR-009)."""
+    return Episode.all_objects.filter(workspace=workspace, deleted_at__isnull=False)
+
+
+def forgotten_memories(workspace):
+    """Memories a forget-source operation archived/rejected and that are
+    still in that state -- `purge_trash`'s `forgotten_memory_ids` scope."""
+    return Memory.objects.filter(
+        workspace=workspace,
+        forget_operation_id__isnull=False,
+        status__in=[Memory.Status.ARCHIVED, Memory.Status.REJECTED],
+    )
+
+
+def _purge_audit(action, row, *, actor, approval_request_id):
+    from audit.models import AuditLog
+
+    record_audit(
+        action=action,
+        actor=actor,
+        actor_type=AuditLog.ActorType.HUMAN if actor else AuditLog.ActorType.SYSTEM,
+        workspace=row.workspace,
+        resource=row,
+        metadata={"reason": "approval", "approval_request_id": approval_request_id or ""},
+    )
+
+
+def purge_trashed_episode(episode, *, actor=None, approval_request_id=None):
+    """Permanently delete one trashed episode -- only from an approved
+    `purge_trash` request (or the TTL beat). Caller holds the transaction;
+    a row restored meanwhile is left alone."""
+    if episode.deleted_at is None:
+        return False
+    _purge_audit(
+        "memory.episode_purged", episode, actor=actor, approval_request_id=approval_request_id
+    )
+    episode.delete()
+    return True
+
+
+def purge_forgotten_memory(memory, *, actor=None, approval_request_id=None):
+    """Permanently delete one memory a forget-source operation archived or
+    rejected -- only from an approved `purge_trash` request. A row restored
+    meanwhile is left alone."""
+    if memory.forget_operation_id is None or memory.status not in (
+        Memory.Status.ARCHIVED,
+        Memory.Status.REJECTED,
+    ):
+        return False
+    _purge_audit("memory.purged", memory, actor=actor, approval_request_id=approval_request_id)
+    memory.delete()
+    return True
+
+
 def forget_preview(source):
     """Counts the forget confirmation names (ADR-009 conditions)."""
     return {

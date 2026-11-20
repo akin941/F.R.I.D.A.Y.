@@ -6,12 +6,19 @@ TRASH_RETENTION_DAYS elapse is irreversible, so it is gate-class: the trash
 view's "Kalıcı olarak sil" creates an `ApprovalRequest` for this tool, and
 only the owner's separate, explicit decision over the web channel runs it.
 
+Phase 8A branch 5 (brief D11) adds two payload keys for forget-source:
+`episode_ids` (episodes a forget operation moved to the trash) and
+`forgotten_memory_ids` (memories a forget operation archived or rejected).
+Forget-source itself stays a reversible confirm-class move; only this
+approved request deletes them for good.
+
 The purge itself happens in `create_execution`, i.e. inside the approval
 decision's own transaction: a handful of row deletes needs no worker, and
 the decision and its effect commit (or roll back) together. There is no
-separate execution row -- the per-row `task.purged` / `knowledge.purged`
-audit entries (carrying the approval request id) are the execution record.
-Rows restored between request and decision are left alone.
+separate execution row -- the per-row `task.purged` / `knowledge.purged` /
+`memory.episode_purged` / `memory.purged` audit entries (carrying the
+approval request id) are the execution record. Rows restored between
+request and decision are left alone.
 
 Human-only (`proposable=False`): the chat router and the agent planner
 never see it, and a machine origin cannot request it.
@@ -23,6 +30,12 @@ from django.db import transaction
 
 from knowledge.models import KnowledgeDocument
 from knowledge.services import purge_trashed_document
+from memory.ingestion.services import (
+    forgotten_memories,
+    purge_forgotten_memory,
+    purge_trashed_episode,
+    trashed_episodes,
+)
 from tasks.models import Task
 from tasks.services import purge_trashed_task
 from tools.registry import ToolSpec, ToolValidationError, register_tool
@@ -31,7 +44,47 @@ TOOL_NAME = "purge_trash"
 MAX_ITEMS = 200
 _TITLE_MAX = 120
 _DISPLAY_TITLES_MAX = 10
-_KEYS = {"task_ids": Task, "document_ids": KnowledgeDocument}
+
+
+def _trashed_tasks(workspace):
+    return Task.all_objects.filter(workspace=workspace, deleted_at__isnull=False)
+
+
+def _trashed_documents(workspace):
+    return KnowledgeDocument.all_objects.filter(workspace=workspace, deleted_at__isnull=False)
+
+
+def _purge_task(row, actor, request_id):
+    return purge_trashed_task(row, reason="approval", actor=actor, approval_request_id=request_id)
+
+
+def _purge_document(row, actor, request_id):
+    return purge_trashed_document(
+        row, reason="approval", actor=actor, approval_request_id=request_id
+    )
+
+
+def _purge_episode(row, actor, request_id):
+    return purge_trashed_episode(row, actor=actor, approval_request_id=request_id)
+
+
+def _purge_memory(row, actor, request_id):
+    return purge_forgotten_memory(row, actor=actor, approval_request_id=request_id)
+
+
+# key -> (purgeable queryset for a workspace, purge one row, display field)
+_KEYS = {
+    "task_ids": (_trashed_tasks, _purge_task, "title"),
+    "document_ids": (_trashed_documents, _purge_document, "title"),
+    "episode_ids": (trashed_episodes, _purge_episode, "kind"),
+    "forgotten_memory_ids": (forgotten_memories, _purge_memory, "title"),
+}
+_COUNT_NAMES = {
+    "task_ids": "task_count",
+    "document_ids": "document_count",
+    "episode_ids": "episode_count",
+    "forgotten_memory_ids": "forgotten_memory_count",
+}
 
 
 def _ids(payload, key):
@@ -52,13 +105,10 @@ def validate_purge_trash_request(workspace, payload):
     if unknown:
         raise ToolValidationError(f"Unknown payload keys: {sorted(unknown)}.")
     total = 0
-    for key, model in _KEYS.items():
+    for key, (purgeable, _, _) in _KEYS.items():
         ids = _ids(payload, key)
         total += len(ids)
-        trashed = model.all_objects.filter(
-            workspace=workspace, pk__in=ids, deleted_at__isnull=False
-        ).count()
-        if trashed != len(ids):
+        if purgeable(workspace).filter(pk__in=ids).count() != len(ids):
             raise ToolValidationError("Only items in this workspace's trash can be purged.")
     if not 0 < total <= MAX_ITEMS:
         raise ToolValidationError(f"Name between 1 and {MAX_ITEMS} trashed items.")
@@ -69,22 +119,15 @@ def create_purge_trash_execution(approval_request):
     actor = approval_request.decided_by
     request_id = str(approval_request.pk)
     with transaction.atomic():
-        for model, purge in (
-            (Task, purge_trashed_task),
-            (KnowledgeDocument, purge_trashed_document),
-        ):
-            key = "task_ids" if model is Task else "document_ids"
+        for key, (purgeable, purge, _) in _KEYS.items():
             rows = (
-                model.all_objects.select_for_update(of=("self",))
-                .filter(
-                    workspace=approval_request.workspace,
-                    pk__in=_ids(payload, key),
-                    deleted_at__isnull=False,
-                )
+                purgeable(approval_request.workspace)
+                .select_for_update(of=("self",))
+                .filter(pk__in=_ids(payload, key))
                 .select_related("workspace")
             )
             for row in rows:
-                purge(row, reason="approval", actor=actor, approval_request_id=request_id)
+                purge(row, actor, request_id)
     return request_id
 
 
@@ -95,21 +138,19 @@ def dispatch_purge_trash(execution_id):
 
 def describe_purge_trash_request(approval_request):
     payload = approval_request.payload or {}
-    task_ids = _safe_ids(payload, "task_ids")
-    document_ids = _safe_ids(payload, "document_ids")
-    titles = [
-        title[:_TITLE_MAX]
-        for model, ids in ((Task, task_ids), (KnowledgeDocument, document_ids))
-        for title in model.all_objects.filter(
-            workspace=approval_request.workspace, pk__in=ids
-        ).values_list("title", flat=True)
-    ]
-    return {
-        "kind": TOOL_NAME,
-        "task_count": len(task_ids),
-        "document_count": len(document_ids),
-        "titles": titles[:_DISPLAY_TITLES_MAX],
-    }
+    description = {"kind": TOOL_NAME}
+    titles = []
+    for key, (purgeable, _, field) in _KEYS.items():
+        ids = _safe_ids(payload, key)
+        description[_COUNT_NAMES[key]] = len(ids)
+        titles.extend(
+            str(value)[:_TITLE_MAX]
+            for value in purgeable(approval_request.workspace)
+            .filter(pk__in=ids)
+            .values_list(field, flat=True)
+        )
+    description["titles"] = titles[:_DISPLAY_TITLES_MAX]
+    return description
 
 
 def _safe_ids(payload, key):
