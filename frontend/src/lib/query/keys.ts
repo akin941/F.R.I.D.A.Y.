@@ -23,6 +23,16 @@ export const queryKeys = {
   implementationJob: (workspaceId: string, jobId: string) =>
     [workspaceId, "harness", "implementation-jobs", jobId] as const,
   harnessRepos: (workspaceId: string) => [workspaceId, "harness", "repos"] as const,
+  pullRequest: (workspaceId: string, jobId: string) =>
+    [workspaceId, "harness", "implementation-jobs", jobId, "pull-request"] as const,
+  connectorBindings: (workspaceId: string) => [workspaceId, "connectors", "bindings"] as const,
+  connectorReads: (workspaceId: string) => [workspaceId, "connectors", "reads"] as const,
+  deployTargets: (workspaceId: string) => [workspaceId, "deploys", "targets"] as const,
+  deployTargetHead: (workspaceId: string, targetId: string) =>
+    [workspaceId, "deploys", "targets", targetId, "head"] as const,
+  deployRuns: (workspaceId: string) => [workspaceId, "deploys", "runs"] as const,
+  deployRun: (workspaceId: string, runId: string) =>
+    [workspaceId, "deploys", "runs", runId] as const,
   trashTasks: (workspaceId: string) => [workspaceId, "trash", "tasks"] as const,
   trashDocuments: (workspaceId: string) => [workspaceId, "trash", "documents"] as const,
   conversations: (workspaceId: string) => [workspaceId, "conversations"] as const,

@@ -2,6 +2,9 @@ import type {
   AgentStatus,
   AgentStepStatus,
   ApprovalStatus,
+  CiConclusion,
+  ConnectorWriteStatus,
+  DeployRunStatus,
   HarnessJobStatus,
   ImplStatus,
   KnowledgeStatus,
@@ -89,6 +92,43 @@ export const STATUS_TONES = {
     done: "success",
     cancelled: "neutral",
   },
+  // Phase 5 branch 9. A degraded deploy is a warning, never success; an
+  // unknown outcome or a failed rollback is danger.
+  deployRun: {
+    pending: "neutral",
+    checking: "info",
+    deploying: "info",
+    health_checking: "info",
+    rolling_back: "warning",
+    succeeded: "success",
+    succeeded_degraded: "warning",
+    rolled_back: "warning",
+    rollback_failed: "danger",
+    health_failed: "danger",
+    unknown_outcome: "danger",
+    refused: "neutral",
+    failed: "danger",
+    cancelled: "neutral",
+  },
+  connectorWrite: {
+    pending: "neutral",
+    running: "info",
+    succeeded: "success",
+    failed: "danger",
+    unknown_outcome: "danger",
+  },
+  ci: {
+    success: "success",
+    failure: "danger",
+    pending: "info",
+    unknown: "neutral",
+  },
+  pin: {
+    ok: "success",
+    mismatch: "danger",
+    missing: "danger",
+    unchecked: "neutral",
+  },
 } as const satisfies {
   approval: Record<ApprovalStatus, StatusTone>;
   agent: Record<AgentStatus, StatusTone>;
@@ -99,6 +139,10 @@ export const STATUS_TONES = {
   memory: Record<MemoryStatus, StatusTone>;
   knowledge: Record<KnowledgeStatus, StatusTone>;
   task: Record<TaskStatus, StatusTone>;
+  deployRun: Record<DeployRunStatus, StatusTone>;
+  connectorWrite: Record<ConnectorWriteStatus, StatusTone>;
+  ci: Record<CiConclusion, StatusTone>;
+  pin: Record<"ok" | "mismatch" | "missing" | "unchecked", StatusTone>;
 };
 
 export type StatusDomain = keyof typeof STATUS_TONES;

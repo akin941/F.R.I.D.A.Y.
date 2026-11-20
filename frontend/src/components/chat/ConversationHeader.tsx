@@ -24,7 +24,7 @@ import {
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { ChannelBadge, PrivateBadge } from "@/components/chat/badges";
+import { ChannelBadge, PersonalDataBadge, PrivateBadge } from "@/components/chat/badges";
 import type { ConversationPatch } from "@/lib/query/chat";
 import { errorMessage } from "@/lib/api-client";
 import { tr } from "@/lib/i18n/tr";
@@ -69,6 +69,7 @@ export function ConversationHeader({
         <div className="flex shrink-0 items-center gap-1">
           <ChannelBadge channel={conversation.origin_channel} />
           {conversation.private ? <PrivateBadge /> : null}
+          {conversation.personal_data ? <PersonalDataBadge /> : null}
           <Button
             variant="ghost"
             size="icon-sm"

@@ -259,6 +259,14 @@ function ChatWorkspace({ workspaceId }: { workspaceId: string }) {
           } else if (event.type === "done") {
             outcome = "done";
             doneMessageId = event.message_id;
+            // A personal read turned the conversation private + personal
+            // server-side (one-way): refresh its flags for the header.
+            if (event.connector_reads?.some((read) => read.data_class === "personal")) {
+              void queryClient.invalidateQueries({
+                queryKey: queryKeys.conversations(workspaceId),
+                exact: true,
+              });
+            }
           } else if (event.type === "error") {
             outcome = "error";
             setBannerError(mapErrorType(event.error_type));
@@ -474,6 +482,15 @@ function ChatWorkspace({ workspaceId }: { workspaceId: string }) {
           onUpdate={updateConversationFor}
           actionsDisabled={isStreaming}
         />
+        {selectedConversation?.personal_data ? (
+          <p
+            role="status"
+            data-testid="personal-data-notice"
+            className="mx-4 mt-3 rounded-md border border-warning/30 bg-warning-muted px-3 py-2 text-xs text-warning"
+          >
+            {tr.chat.personalDataNotice}
+          </p>
+        ) : null}
         {bannerError ? (
           <Alert variant="destructive" role="alert" className="mx-4 mt-3 w-auto">
             <AlertDescription>{bannerError}</AlertDescription>

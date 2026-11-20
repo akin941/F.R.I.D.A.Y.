@@ -6,6 +6,9 @@ import type {
   ApprovalOrigin,
   ApprovalRequestedChannel,
   ApprovalStatus,
+  CiConclusion,
+  ConnectorWriteStatus,
+  DeployRunStatus,
   HarnessAgent,
   HarnessJobStatus,
   ImplFailureReason,
@@ -232,6 +235,8 @@ export const tr = {
       agents: "Ajanlar",
       devices: "Cihazlar",
       integrations: "Entegrasyonlar",
+      connectors: "Bağlantılar",
+      deploys: "Deploy hedefleri",
     },
     pendingApprovals: (count: number) => `${count} bekleyen onay`,
     pendingElsewhere: (count: number) => `Diğer çalışma alanlarında ${count} bekleyen onay`,
@@ -297,6 +302,19 @@ export const tr = {
       openai: "OpenAI uyumlu istemci",
     } satisfies Record<MessageChannel, string> as Record<string, string>,
     viaChannel: (label: string) => `${label} üzerinden`,
+    // Connector reads (Phase 5 branch 9): where a reply's context came from.
+    source: (label: string) => `Kaynak: ${label}`,
+    sourceHint:
+      "Bu yanıt için dış bir sistemden bir okuma yapıldı; sonuç modele veri olarak verildi, talimat olarak değil.",
+    sourceLabels: {
+      github: "GitHub",
+      google_mail: "Posta",
+      google_calendar: "Takvim",
+      home_assistant: "Ev",
+    } as Record<string, string>,
+    personalData: "Kişisel veri",
+    personalDataNotice:
+      "Bu sohbete kişisel veri (posta, takvim, ev ya da hassas bir depo) girdi. Sohbet özel yapıldı ve bundan sonra yalnızca kişisel veriye izinli (yerel) modellerle çalışır; bu geri alınamaz.",
     rename: "Yeniden adlandır",
     renameTitle: "Sohbeti yeniden adlandır",
     renameLabel: "Sohbet adı",
@@ -509,6 +527,41 @@ export const tr = {
       succeeded: "Başarılı",
       failed: "Başarısız",
     } as Record<string, string>,
+    deployRun: {
+      pending: "Başlaması bekleniyor",
+      checking: "Hedef kontrol ediliyor",
+      deploying: "Dağıtılıyor",
+      health_checking: "Sağlık kontrolü",
+      rolling_back: "Geri alınıyor",
+      succeeded: "Başarılı",
+      succeeded_degraded: "Kısmen başarılı (sağlık adresi başarısız)",
+      rolled_back: "Geri alındı",
+      rollback_failed: "Geri alma başarısız",
+      health_failed: "Sağlık kontrolü başarısız",
+      unknown_outcome: "Sonuç bilinmiyor",
+      refused: "Reddedildi (hiçbir şeye dokunulmadı)",
+      failed: "Başarısız (dağıtım yapılmadı)",
+      cancelled: "İptal edildi",
+    } satisfies Record<DeployRunStatus, string>,
+    connectorWrite: {
+      pending: "Gönderilmesi bekleniyor",
+      running: "Gönderiliyor",
+      succeeded: "Gönderildi",
+      failed: "Başarısız — hiçbir şey gönderilmedi",
+      unknown_outcome: "Sonuç bilinmiyor — yeniden gönderilmez",
+    } satisfies Record<ConnectorWriteStatus, string>,
+    ci: {
+      success: "CI başarılı",
+      failure: "CI başarısız",
+      pending: "CI sürüyor",
+      unknown: "CI durumu bilinmiyor",
+    } satisfies Record<CiConclusion, string>,
+    pin: {
+      ok: "Doğrulandı",
+      mismatch: "Şema değişti — kapalı",
+      missing: "Sunucuda yok — kapalı",
+      unchecked: "Henüz kontrol edilmedi",
+    } as Record<string, string>,
     agent: {
       planning: "Planlanıyor",
       running: "Çalışıyor",
@@ -703,7 +756,15 @@ export const tr = {
       harness_push: "Gönderim onayı (Kapı B)",
       vault_export: "Obsidian vault dışa aktarımı",
       purge_trash: "Çöp kutusundan kalıcı silme",
+      deploy: "Deploy onayı",
+      github_open_pr: "GitHub PR açma onayı",
+      ha_call_service: "Ev (Home Assistant) komutu onayı",
+      mail_send: "E-posta gönderme onayı",
+      calendar_create_event: "Takvim etkinliği oluşturma onayı",
     } as Record<string, string>,
+    // Generic connector writes (`mcp_<connector>_<tool>`).
+    connectorWriteTitle: (connector: string, tool: string) =>
+      `${connector || "Bağlantı"} yazma onayı (${tool})`,
     // What deciding means, stated in the decision dialog (per-tool
     // renderers, components/approvals/renderers/).
     consequence: {
@@ -732,6 +793,45 @@ export const tr = {
           `Onaylarsan çöp kutusundaki ${tasks} görev ve ${documents} belge kalıcı olarak silinir. Bu işlem geri alınamaz; bu arada geri yüklenen öğeler silinmez.`,
         reject:
           "Reddedersen öğeler çöp kutusunda kalır; saklama süresi dolunca yine otomatik olarak silinir.",
+      },
+      deploy: {
+        approve:
+          "Onaylarsan Friday bu commit'i hedefe dağıtır (deploy). Sağlık kontrolü ve gerekirse geri alma, yukarıdaki plana göre çalışır.",
+        approveWith: (sha: string, target: string, rollback: boolean, rollbackSha: string) =>
+          `Onaylarsan Friday “${sha}” commit'ini ${target} hedefine dağıtır. ` +
+          (rollback
+            ? `Sağlık kontrolü başarısız olursa yalnızca önceki commit'e (“${rollbackSha}”) otomatik geri alınır.`
+            : "Sağlık kontrolü başarısız olursa hiçbir şey geri alınmaz; yeni bir karar gerekir."),
+        reject: "Reddedersen hiçbir şey dağıtılmaz; hedef olduğu gibi kalır.",
+      },
+      github_open_pr: {
+        approve:
+          "Onaylarsan Friday GitHub'da yukarıdaki başlık ve açıklamayla bir pull request açar. PR açmak dış bir sistemde kalıcı bir kayıt oluşturur.",
+        approveWith: (repo: string, head: string, base: string) =>
+          `Onaylarsan Friday ${repo} deposunda “${head}” → “${base}” pull request'ini tam olarak yukarıdaki alanlarla açar. Friday PR'ı birleştirmez (merge).`,
+        reject: "Reddedersen GitHub'da hiçbir şey açılmaz.",
+      },
+      ha_call_service: {
+        approve:
+          "Onaylarsan Friday Home Assistant'a tam olarak yukarıdaki hizmet çağrısını bir kez gönderir; evdeki cihaz gerçekten değişir.",
+        approveWith: (service: string) =>
+          `Onaylarsan Friday Home Assistant'a “${service}” çağrısını tam olarak yukarıdaki değerlerle bir kez gönderir; evdeki cihaz gerçekten değişir.`,
+        reject: "Reddedersen Home Assistant'a hiçbir şey gönderilmez.",
+      },
+      mail_send: {
+        approve:
+          "Onaylarsan Friday bu e-postayı bağlı Google hesabından, yukarıdaki alıcılara tam olarak bu metinle gönderir. Gönderilen e-posta geri alınamaz.",
+        reject: "Reddedersen e-posta gönderilmez.",
+      },
+      calendar_create_event: {
+        approve:
+          "Onaylarsan Friday bu etkinliği bağlı Google takvimine yukarıdaki alanlarla oluşturur; katılımcı varsa Google onlara davet e-postası gönderir.",
+        reject: "Reddedersen takvime hiçbir şey eklenmez.",
+      },
+      connector_write: {
+        approve:
+          "Onaylarsan Friday bu isteği dış sisteme tam olarak yukarıdaki argümanlarla bir kez gönderir. Sonuç belirsiz kalırsa yeniden gönderilmez.",
+        reject: "Reddedersen dış sisteme hiçbir şey gönderilmez.",
       },
       generic: {
         approve: "Onaylarsan bu istek çalıştırılır.",
@@ -847,5 +947,284 @@ export const tr = {
       openai:
         "Open WebUI gibi OpenAI uyumlu istemciler için: yalnızca sohbet, araç ve onay yok. CLI uç noktalarında çalışmaz.",
     } satisfies Record<PatKind, string>,
+  },
+  // Settings → "Bağlantılar" (Phase 5 branch 9).
+  connectors: {
+    title: "Bağlantılar",
+    description:
+      "Friday'nin bu çalışma alanında okuyabildiği ve (her seferinde onayınla) yazabildiği dış sistemler. Bağlantı açmak hiçbir aracı kendiliğinden çalıştırmaz: her araç önce şema doğrulamasından (pin) geçer.",
+    loadFailed: "Bağlantılar yüklenemedi.",
+    empty: "Bu çalışma alanı türü için tanımlı bağlantı yok.",
+    kind: { mcp: "MCP sunucusu", native: "Yerel köprü" } as Record<string, string>,
+    dataClass: {
+      firm: "Firma verisi",
+      personal: "Kişisel veri (yalnızca yerel model)",
+    } as Record<string, string>,
+    blocked: "Engelli — bu sürümde açılamaz",
+    notBindable: "Bu çalışma alanı türünde açılamaz",
+    enabled: "Açık",
+    disabled: "Kapalı",
+    enable: "Aç",
+    disable: "Kapat",
+    enableTitle: (name: string) => `${name} bağlantısı açılsın mı?`,
+    enableDescription: (name: string, personal: boolean) =>
+      `${name} bu çalışma alanında açılır. Araçlar şema doğrulaması (pin) geçene kadar kapalı kalır; okumalar denetim kaydına yazılır, her yazma ayrı bir onay ister.` +
+      (personal
+        ? " Bu kişisel veri içerir: okumalar yalnızca web uygulamasından ve yalnızca kişisel veriye izinli (yerel) modellerle yapılır."
+        : ""),
+    disableTitle: (name: string) => `${name} bağlantısı kapatılsın mı?`,
+    disableDescription: (name: string) =>
+      `${name} bu çalışma alanında kapatılır: Friday artık okuma yapmaz; bekleyen yazma onayları çalıştırılmadan başarısız olur.`,
+    busy: "Kaydediliyor…",
+    toggleFailed: "Bağlantı güncellenemedi.",
+    tools: "Araçlar",
+    toolKind: { read: "Okuma", write: "Yazma (onaylı)" } as Record<string, string>,
+    health: "Sağlık",
+    neverChecked: "Henüz kontrol edilmedi.",
+    checkedAt: (when: string) => `Son kontrol: ${when}`,
+    server: (name: string, version: string) => `Sunucu: ${name}${version ? ` ${version}` : ""}`,
+    protocol: (version: string) => `Protokol: ${version}`,
+    healthError: (code: string) => `Son kontrol hatası: ${code}`,
+    pinNote:
+      "Şeması değişen ya da sunucudan kaybolan bir araç, yeni bir manifest commit'i gelene kadar kapalı kalır.",
+    recentReads: "Son okumalar",
+    recentReadsHint:
+      "Denetim kaydından: araç, sonuç, boyut ve süre. Okunan içerik ve argümanlar burada gösterilmez.",
+    recentReadsEmpty: "Henüz okuma yok.",
+    recentReadsFailed: "Son okumalar yüklenemedi.",
+    readOutcome: {
+      ok: "Başarılı",
+      channel_forbidden: "Bu kanaldan izin yok",
+      not_available: "Araç kapalı",
+      invalid_arguments: "Geçersiz argüman",
+      out_of_scope: "Çalışma alanı dışında",
+      tool_error: "Sunucu hata döndü",
+      timeout: "Zaman aşımı",
+      transport_error: "Bağlantı hatası",
+      protocol_error: "Protokol hatası",
+      pin_mismatch: "Şema değişti",
+      not_configured: "Yapılandırılmamış",
+      reconnect_required: "Yeniden bağlanma gerekli",
+    } as Record<string, string>,
+    columns: {
+      when: "Zaman",
+      tool: "Araç",
+      outcome: "Sonuç",
+      size: "Boyut",
+      duration: "Süre",
+      channel: "Kanal",
+    },
+    truncated: "kırpıldı",
+    personalRead: "kişisel",
+    chars: (n: number) => `${n} karakter`,
+    ms: (n: number) => `${n} ms`,
+    // ConnectorWriteExecution.ErrorType (backend connectors/models.py).
+    writeError: {
+      connector_changed:
+        "Bağlantı ya da araç onaydan sonra değişti; hiçbir şey gönderilmedi.",
+      pin_mismatch: "Aracın şeması değişti; hiçbir şey gönderilmedi.",
+      not_configured: "Bağlantı sunucuda yapılandırılmamış; hiçbir şey gönderilmedi.",
+      timeout: "Zaman aşımı: gönderildi mi bilinmiyor. Yeniden gönderilmez.",
+      transport_error: "Bağlantı hatası.",
+      protocol_error: "Sunucu beklenmeyen bir yanıt verdi.",
+      tool_error: "Dış sistem isteği reddetti.",
+      target_missing: "Hedef (ör. cihaz) artık yok; hiçbir şey gönderilmedi.",
+      worker_lost:
+        "Çalışan süreç gönderim sırasında kayboldu: gönderildi mi bilinmiyor. Yeniden gönderilmez.",
+      head_moved: "Dalın ucu onaylanan commit'ten ilerledi; hiçbir şey gönderilmedi.",
+      unknown: "Beklenmeyen hata: gönderildi mi bilinmiyor. Yeniden gönderilmez.",
+    } as Record<string, string>,
+    unknownOutcomeNote:
+      "Sonuç bilinmiyor: Friday bu isteği asla yeniden göndermez. Dış sistemde gerçekten olup olmadığını kendin kontrol et.",
+  },
+  // Firma → "Deploy hedefleri" (Phase 5 branch 9).
+  deploys: {
+    title: "Deploy hedefleri",
+    description:
+      "Friday'nin yalnızca senin ayrı onayınla, birleştirilmiş commit'leri dağıtabildiği sunucular. Friday kendi deposunu asla dağıtmaz.",
+    loadFailed: "Deploy hedefleri yüklenemedi.",
+    empty: "Henüz deploy hedefi yok.",
+    emptyHint:
+      "Yeni bir hedef kapalı olarak oluşturulur: önce durum kontrolü çalıştır, sonra etkinleştir.",
+    newTarget: "Yeni hedef",
+    enabled: "Etkin",
+    disabled: "Kapalı",
+    enable: "Etkinleştir",
+    disable: "Devre dışı bırak",
+    enableTitle: (name: string) => `${name} hedefi etkinleştirilsin mi?`,
+    enableDescription:
+      "Etkin bir hedefe deploy istenebilir; her deploy yine ayrı bir onay ister.",
+    disableTitle: (name: string) => `${name} hedefi devre dışı bırakılsın mı?`,
+    disableDescription: "Devre dışı bir hedefe deploy istenemez; çalışan bir deploy etkilenmez.",
+    toggleFailed: "Hedef güncellenemedi.",
+    liveSha: "Canlı commit",
+    liveUnknown: "Bilinmiyor — durum kontrolü çalıştır",
+    lastStatus: (when: string) => `Son durum kontrolü: ${when}`,
+    lastStatusError: (code: string) => `Son durum kontrolü hatası: ${code}`,
+    refreshStatus: "Durum kontrolü",
+    refreshQueued: "Durum kontrolü sıraya alındı.",
+    refreshFailed: "Durum kontrolü başlatılamadı.",
+    branch: "İzlenen dal",
+    destination: "SSH",
+    app: "Uygulama",
+    repo: "Depo",
+    health: "Sağlık",
+    healthWindow: (seconds: number) => `${seconds} sn içinde`,
+    requireCi: "Başarılı CI şart",
+    autoRollback: "Otomatik geri alma",
+    yes: "evet",
+    no: "hayır",
+    busyTarget: "Bu hedefte bir deploy sürüyor.",
+    deploy: "Deploy",
+    runs: "Çalıştırmalar",
+    runsEmpty: "Henüz çalıştırma yok.",
+    runsFailed: "Çalıştırmalar yüklenemedi.",
+    openRun: "Ayrıntı",
+    backToTargets: "Deploy hedefleri",
+    runFailed: "Bu çalıştırma yüklenemedi.",
+    runTitle: (target: string, sha: string) => `${target} · ${sha}`,
+    sha: "Commit",
+    previousSha: "Önceki commit",
+    rollbackSha: "Geri alma commit'i",
+    startedAt: "Dağıtım başladı",
+    finishedAt: "Bitti",
+    errorCode: "Neden",
+    healthChecks: "Sağlık kontrolleri",
+    healthCheckPass: "geçti",
+    healthCheckFail: "başarısız",
+    healthPlan: (checks: number, window: number, fail: number) =>
+      `${window} sn içinde ${checks} kontrol; art arda ${fail} başarısızlık başarısız sayılır.`,
+    approval: "Onay isteği",
+    output: "Adım günlüğü",
+    showOutput: "Uzak sunucu çıktısını göster",
+    hideOutput: "Uzak sunucu çıktısını gizle",
+    outputWarning:
+      "Bu, uzak sunucudaki betiğin kendi çıktısıdır (kısaltılmış, gizli bilgiler ayıklanmış) ve güvenilmeyen veri olarak ele alınmalıdır. Durum ve neden alanları Friday'nin kendi kaydıdır.",
+    noOutput: "Çıktı yok.",
+    cancel: "İptal et",
+    cancelTitle: "Bu deploy iptal edilsin mi?",
+    cancelDescription:
+      "Deploy komutu henüz gönderilmediyse çalıştırma iptal edilir ve hedefe dokunulmaz. Komut gönderildiyse iptal reddedilir.",
+    cancelConfirm: "Evet, iptal et",
+    cancelBusy: "İptal ediliyor…",
+    cancelFailed: "Deploy iptal edilemedi.",
+    // The "Deploy" dialog.
+    dialog: {
+      title: (target: string) => `${target} için deploy iste`,
+      description:
+        "Bu bir onay isteği oluşturur; deploy ancak Onaylar sayfasında ayrıca karar verdiğinde çalışır.",
+      shaLabel: "Commit SHA",
+      shaHint: (branch: string) =>
+        `“${branch}” dalındaki birleştirilmiş bir commit (7–40 onaltılık karakter).`,
+      prefilled: (branch: string) => `“${branch}” dalının ucu GitHub'dan dolduruldu.`,
+      manual: "GitHub bağlı değil ya da okunamadı: SHA'yı kendin yaz; CI durumu bilinmiyor.",
+      loadingHead: "Dal ucu okunuyor…",
+      commitTitle: "Commit başlığı (depodan gelen metin)",
+      ciRequired: "Bu hedef başarılı CI ister; CI başarılı değilse istek reddedilir.",
+      shaInvalid: "Geçerli bir commit SHA'sı gir (7–40 onaltılık karakter).",
+      shaIsLive: "Bu commit zaten canlıda.",
+      submit: "Devam et",
+      confirmTitle: "Deploy isteği oluşturulsun mu?",
+      confirmDescription: (sha: string, target: string) =>
+        `${target} hedefine “${sha}” için bir deploy onay isteği oluşturulur. Hiçbir şey hemen dağıtılmaz.`,
+      confirm: "Onay isteği oluştur",
+      busy: "Oluşturuluyor…",
+      failed: "Deploy isteği oluşturulamadı.",
+      created: "Deploy onay isteği oluşturuldu.",
+      openApproval: "Onaylar sayfasında karar ver",
+    },
+    // The target form.
+    form: {
+      title: "Yeni deploy hedefi",
+      name: "Ad",
+      environment: "Ortam",
+      sshHost: "SSH sunucusu",
+      sshPort: "SSH portu",
+      sshUser: "SSH kullanıcısı",
+      hostKey: "Sunucu açık anahtarı (known_hosts satırı)",
+      hostKeyHint: "Sabitlenir: ilk bağlantıda güvenme yoktur.",
+      remoteApp: "Uzak uygulama adı",
+      repo: "Depo git adresi",
+      branch: "İzlenen dal",
+      healthUrl: "Sağlık adresi (isteğe bağlı)",
+      healthTimeout: "Sağlık penceresi (saniye)",
+      requireCi: "Başarılı CI şart",
+      autoRollback: "Sağlık başarısız olursa önceki commit'e otomatik geri al",
+      submit: "Hedefi oluştur",
+      busy: "Oluşturuluyor…",
+      failed: "Hedef oluşturulamadı.",
+      createdDisabled: "Hedef kapalı olarak oluşturuldu. Önce durum kontrolü çalıştır.",
+    },
+    // A finished run's banner, per state (a degraded deploy must never look clean).
+    banner: {
+      succeeded: "Deploy başarılı: yeni commit canlıda ve sağlık kontrolünü geçti.",
+      succeeded_degraded:
+        "Kısmen başarılı — temiz değil: uygulama ayakta ama sağlık adresi (health_url) kontrolü başarısız oldu. Uygulamayı kontrol et.",
+      rolled_back: (sha: string) =>
+        `Geri alındı: sağlık kontrolü başarısız oldu ve Friday hedefi önceki commit'e (“${sha}”) döndürdü. Yeni commit canlıda DEĞİL.`,
+      rollback_failed:
+        "Geri alma BAŞARISIZ: sağlık kontrolü başarısız oldu ve önceki commit'e dönülemedi. Hedef bozuk durumda olabilir — hemen elle kontrol et, ardından durum kontrolü çalıştır.",
+      health_failed:
+        "Sağlık kontrolü başarısız: yeni commit canlıda ama sağlıklı görünmüyor. Otomatik geri alma kapalı; hiçbir şey geri alınmadı. Geri dönmek için yeni bir deploy isteği gerekir.",
+      unknown_outcome:
+        "Sonuç bilinmiyor: çalıştırıcıyla bağlantı dağıtım sırasında koptu. Friday hiçbir şeyi yeniden göndermez; hedefin gerçek durumunu görmek için durum kontrolü çalıştır.",
+      failed: "Deploy yapılmadı: çalıştırıcı deploy komutundan önce durdu. Hedef değişmedi.",
+      refused: "Deploy reddedildi: onay anında hedefe hiç dokunulmadı.",
+      cancelled: "Deploy iptal edildi; hedefe dokunulmadı.",
+      active: "Deploy sürüyor…",
+      runnerOffline:
+        "Çalıştırıcı (Mac) çevrimdışıysa deploy, çalıştırıcı geri gelene kadar bekler.",
+    },
+    // DeployRun.ErrorCode (backend deploys/models.py).
+    errorCodes: {
+      target_busy: "Hedefte başka bir deploy sürüyor.",
+      target_changed: "Hedefin yapılandırması onaydan sonra değişti.",
+      target_disabled: "Hedef devre dışı.",
+      self_repo_unconfigured: "Kendi-depo koruması yapılandırılmamış.",
+      ssh_key_missing: "Çalıştırıcıda SSH anahtarı yok.",
+      ssh_failed: "SSH bağlantısı kurulamadı.",
+      status_failed: "Durum komutu başarısız.",
+      status_unparseable: "Durum çıktısı okunamadı.",
+      repo_mismatch: "Uzak sunucudaki depo hedefle eşleşmiyor.",
+      self_repo: "Friday'nin kendi deposu dağıtılamaz.",
+      target_drifted: "Canlı commit beklenenden farklı (sapma); hiçbir şey dağıtılmadı.",
+      deploy_refused: "Uzak sunucu deploy'u reddetti.",
+      remote_busy: "Uzak sunucu meşgul.",
+      remote_unavailable: "Uzak sunucuya ulaşılamadı.",
+      build_failed: "Derleme başarısız.",
+      deploy_command_failed: "Deploy komutu başarısız.",
+      health_url_failed: "Sağlık adresi kontrolü başarısız.",
+      health_checks_failed: "Sağlık kontrolleri art arda başarısız.",
+      health_window_elapsed: "Sağlık penceresi art arda iki başarılı kontrol olmadan doldu.",
+      rollback_command_failed: "Geri alma komutu başarısız.",
+      rollback_outcome_unknown: "Geri almanın sonucu bilinmiyor.",
+      rollback_health_failed: "Geri alma sonrası sağlık kontrolü başarısız.",
+      runner_lost: "Çalıştırıcı çalışma sırasında kayboldu.",
+      unexpected_error: "Beklenmeyen hata.",
+    } as Record<string, string>,
+  },
+  // Harness implementation detail: "PR aç" + PR/CI panel (Phase 5 branch 9).
+  pullRequest: {
+    title: "Pull request",
+    loadFailed: "PR durumu yüklenemedi.",
+    open: "PR aç",
+    branches: (head: string, base: string) => `${head} → ${base}`,
+    notReady: "PR yalnızca başarıyla tamamlanıp dalı gönderilmiş işler için açılabilir.",
+    dialogTitle: "PR açma isteği oluşturulsun mu?",
+    dialogDescription:
+      "Bu bir onay isteği oluşturur; PR ancak Onaylar sayfasında ayrıca karar verdiğinde GitHub'da açılır. Friday PR'ı birleştirmez.",
+    titleLabel: "PR başlığı",
+    titleHint: "Boş bırakırsan işin hedefinin ilk satırı kullanılır.",
+    confirm: "Onay isteği oluştur",
+    busy: "Oluşturuluyor…",
+    failed: "PR isteği oluşturulamadı.",
+    request: "PR onay isteği",
+    decide: "Onaylar sayfasında karar ver",
+    viewRequest: "Onay isteğini gör",
+    opened: (number: number | null) => (number ? `PR #${number} açıldı` : "PR açıldı"),
+    openOnGithub: "GitHub'da aç",
+    ci: "CI",
+    ciUnavailable: "CI durumu okunamadı",
+    noCi: "CI durumu yok (GitHub bağlı değil ya da iş henüz tamamlanmadı).",
   },
 } as const;

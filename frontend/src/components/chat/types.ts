@@ -1,4 +1,5 @@
 import type {
+  ApiConnectorRead,
   ApiMessage,
   MessageChannel,
   MessageIntent,
@@ -31,6 +32,8 @@ export interface ChatMessageView {
   chunkDocuments?: Record<string, string>;
   // {memory_id: source_workspace_id} for overlay-sourced memories.
   overlaySourceWorkspaces?: Record<string, string>;
+  // Connector reads supplied as context (Phase 5): bookkeeping only.
+  connectorReads?: ApiConnectorRead[];
 }
 
 export function toView(message: ApiMessage): ChatMessageView {
@@ -47,5 +50,6 @@ export function toView(message: ApiMessage): ChatMessageView {
     chunksUsed: message.chunks_used,
     chunkDocuments: message.chunk_documents ?? {},
     overlaySourceWorkspaces: message.overlay_source_workspaces ?? {},
+    connectorReads: message.connector_reads ?? [],
   };
 }

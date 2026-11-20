@@ -1,6 +1,7 @@
 import {
   Bot,
   Building2,
+  Cable,
   CalendarCheck,
   Brain,
   BookOpen,
@@ -8,6 +9,7 @@ import {
   MonitorSmartphone,
   MessageSquare,
   Plug,
+  Rocket,
   ShieldCheck,
   Terminal,
   Trash2,
@@ -61,7 +63,10 @@ export const NAV_GROUPS: NavGroup[] = [
   {
     id: "firm",
     label: groups.firm,
-    items: [{ href: "/workspaces", label: items.workspaces, icon: Building2 }],
+    items: [
+      { href: "/workspaces", label: items.workspaces, icon: Building2 },
+      { href: "/deploys", label: items.deploys, icon: Rocket },
+    ],
   },
   {
     id: "automation",
@@ -74,6 +79,7 @@ export const NAV_GROUPS: NavGroup[] = [
     items: [
       { href: "/devices", label: items.devices, icon: MonitorSmartphone },
       { href: "/integrations", label: items.integrations, icon: Plug },
+      { href: "/connectors", label: items.connectors, icon: Cable },
     ],
   },
 ];
