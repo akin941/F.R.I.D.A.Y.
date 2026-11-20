@@ -627,6 +627,44 @@ personal-data routing on reads.
 **Done when:** "salonun ışığını %40 yap" yields an exact, decidable
 request whose execution matches the dialog.
 
+**Status: implemented 2026-11-20.** The branch reviewed on 2026-09-28
+(`origin/feat/p5-home-assistant`) was merged onto the integration branch
+and reconciled with what branches 5 and 8 landed meanwhile: its private
+`connectors/transport.py` dispatch is gone — the manifest module exports
+`BRIDGE` (`HomeAssistantBridge`) for `connectors.bridges.call_tool`, and
+the pin/health check is `BRIDGE.check_health` (`NativeHealth`: per-tool
+`ok`/`mismatch`/`missing` against the bridge's own contract hashes,
+`not_configured` for a missing env or a refused token; native pin drift is
+now audited `connector.pin_mismatch` by `record_native_health`). The
+execution-time entity/allowlist re-check moved into the framework's
+`ToolPolicy.precondition` (`bridges.home_assistant.target_present`:
+`target_missing` / `connector_changed` / transport codes, nothing sent),
+with the bridge's own pre-POST re-read kept as defence in depth.
+`ToolPolicy.request_rows` (request-time state in the dialog) is kept and
+now validated as write-only. `target_missing` joins the error vocabulary
+next to branch 5's `head_moved` (migration `0003`). Names follow the
+Jarvis→Friday rename. Tests: `connectors/tests/test_home_assistant.py`,
+`test_home_assistant_chat.py` (`httpx.MockTransport` only).
+
+**Owner steps (pending, recorded 2026-11-20)** — cannot happen in CI or a
+cloud session (real hardware and a real HA token):
+1. Create a dedicated **non-admin** HA user and a long-lived access token
+   for it (R5); set `HA_BASE_URL` (LAN/Tailscale only) and `HA_TOKEN` in
+   the host env (never in a file in the repo).
+2. Optionally narrow `HA_ALLOWED_DOMAINS`; set `HA_WOL_ALLOWED_MACS` if
+   Wake-on-LAN is wanted; keep security devices out of scenes the Friday
+   HA user can activate (or drop `scene`).
+3. Enable the `home_assistant` binding in the personal workspace (web,
+   owner) and confirm the health check shows both tools `ok` and the HA
+   version.
+4. Live smoke: ask "salonun ışığını %40 yap", check the dialog (service,
+   exact entity id, `data.brightness_pct`, HA name, request-time state),
+   approve, and confirm the light and the execution's read-back state.
+5. Ask "salonun durumu ne?" and confirm the reply comes from a
+   personal-data-allowed (local) model and the conversation turned
+   private/personal.
+6. Sonnet 5 re-review of the reconciliation diff (CLAUDE.md review rule).
+
 ### 8. `feat/p5-mail-calendar` — D9
 
 **Step 0 — Google vendor spike, run at phase start (in parallel with
@@ -688,7 +726,7 @@ cookie-based), browser/Playwright MCP stays rejected; e2e: harness job
 | 4 | `feat/p5-connector-framework` | Spike, `connectors`, MCP client, pins, reads → chat, gated writes, external-installation blocked manifest, governance | 1, 2 |
 | 5 | `feat/p5-github` | Sidecar, scope check, PR gate, PR/CI reads | 4 |
 | 6 | `feat/p5-deploy` | `deploys`, deploy gate, SSH runner, remote script, health/rollback, smoke, runbook | 1 (GitHub title/CI snapshot wired by whichever of 5/6 lands second) |
-| 7 | `feat/p5-home-assistant` | Native HA bridge, allowlists, gated service calls | 4 |
+| 7 | `feat/p5-home-assistant` | Native HA bridge, allowlists, gated service calls — **implemented 2026-11-20** (reconciled with 5/8; owner steps pending, see §7) | 4 |
 | 8 | `feat/p5-mail-calendar` | Google bridge, host OAuth, reads, gated send/invite | 4 |
 | 9 | `feat/p5-connectors-ui` | Settings, deploy targets, PR panel, renderers, chat badges | 5, 6 (7, 8 renderers as they land) |
 | 10 | closeout | Docs, governance pass, end-to-end | 1–9 |
