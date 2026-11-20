@@ -17,7 +17,7 @@ pytestmark = pytest.mark.django_db
 
 
 def test_creates_owner_with_personal_workspace(monkeypatch):
-    monkeypatch.setenv("JARVIS_OWNER_PASSWORD", "s3cure-enough")
+    monkeypatch.setenv("FRIDAY_OWNER_PASSWORD", "s3cure-enough")
     call_command("bootstrap_owner", "--email", "owner@test.dev", "--name", "Owner")
 
     user = User.objects.get(email="owner@test.dev")
@@ -30,8 +30,16 @@ def test_creates_owner_with_personal_workspace(monkeypatch):
     assert AuditLog.objects.filter(action="user.signup").exists()
 
 
-def test_refuses_if_any_user_exists(monkeypatch):
+def test_reads_the_deprecated_jarvis_owner_password(monkeypatch):
+    monkeypatch.delenv("FRIDAY_OWNER_PASSWORD", raising=False)
     monkeypatch.setenv("JARVIS_OWNER_PASSWORD", "s3cure-enough")
+    call_command("bootstrap_owner", "--email", "owner@test.dev")
+
+    assert User.objects.get(email="owner@test.dev").check_password("s3cure-enough")
+
+
+def test_refuses_if_any_user_exists(monkeypatch):
+    monkeypatch.setenv("FRIDAY_OWNER_PASSWORD", "s3cure-enough")
     User.objects.create_user(email="existing@test.dev", password="x")
     with pytest.raises(CommandError, match="already exists"):
         call_command("bootstrap_owner", "--email", "owner@test.dev")
@@ -39,7 +47,7 @@ def test_refuses_if_any_user_exists(monkeypatch):
 
 
 def test_refuses_blank_password(monkeypatch):
-    monkeypatch.setenv("JARVIS_OWNER_PASSWORD", "   ")
+    monkeypatch.setenv("FRIDAY_OWNER_PASSWORD", "   ")
     with pytest.raises(CommandError, match="password"):
         call_command("bootstrap_owner", "--email", "owner@test.dev")
     assert not User.objects.exists()
@@ -51,7 +59,7 @@ def test_parallel_bootstrap_creates_exactly_one_owner(monkeypatch):
     two bootstrap runs with different emails hit the advisory-lock critical
     section at once. Exactly one may create the owner; the loser must see
     the winner's committed user and refuse -- never two owners."""
-    monkeypatch.setenv("JARVIS_OWNER_PASSWORD", "s3cure-enough")
+    monkeypatch.setenv("FRIDAY_OWNER_PASSWORD", "s3cure-enough")
     barrier = threading.Barrier(2)
     results = {}
     errors = []

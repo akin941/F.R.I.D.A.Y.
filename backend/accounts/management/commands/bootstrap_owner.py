@@ -20,7 +20,7 @@ two owners, and the email unique constraint would not stop them. The
 advisory lock serializes the whole check-then-create critical section;
 it is released automatically at commit/rollback.
 
-The password is read from the JARVIS_OWNER_PASSWORD env var, or prompted
+The password is read from the FRIDAY_OWNER_PASSWORD env var, or prompted
 for interactively -- never accepted as a CLI argument (argv leaks into
 shell history and process listings). It must pass AUTH_PASSWORD_VALIDATORS
 (Phase 4 branch 1: Django's four, 12 characters minimum). No API endpoint
@@ -28,7 +28,6 @@ accepts it any more: it is only a break-glass credential for Django admin.
 """
 
 import getpass
-import os
 
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError
@@ -37,6 +36,7 @@ from django.db import connection, transaction
 
 from accounts.models import User
 from accounts.services import register_user
+from core import legacy_env
 
 # Arbitrary but stable app-wide key for pg_advisory_xact_lock; only
 # bootstrap_owner uses it, so it serializes exactly this critical section.
@@ -61,7 +61,8 @@ class Command(BaseCommand):
             if owner is not None:
                 self.stdout.write(f"Owner account already exists: {owner.email}")
                 return
-        password = os.environ.get("JARVIS_OWNER_PASSWORD") or ""
+        # FRIDAY_OWNER_PASSWORD, or the deprecated JARVIS_OWNER_PASSWORD.
+        password = legacy_env.getenv("FRIDAY_OWNER_PASSWORD")
         if not password:
             password = getpass.getpass("Owner password: ")
         if not password.strip():

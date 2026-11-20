@@ -41,7 +41,7 @@ logger = logging.getLogger(__name__)
 # commit time) — long enough to never race a normal, near-instant dispatch.
 PENDING_RECOVERY_GRACE_SECONDS = 60
 
-_EXTRACTION_PROMPT_NAME = "jarvis_memory_extraction"
+_EXTRACTION_PROMPT_NAME = "friday_memory_extraction"
 
 # Gateway worst case (see memory.jobs.CLAIM_LEASE_SECONDS): 2 providers *
 # up to 3 attempts * AI_TIMEOUT_READ (default 60s) ~= 360s. Soft/hard limits

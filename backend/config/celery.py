@@ -8,7 +8,7 @@ from celery import Celery
 # path names config.settings.dev explicitly (compose, Makefile).
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings.prod")
 
-app = Celery("jarvis")
+app = Celery("friday")
 app.config_from_object("django.conf:settings", namespace="CELERY")
 app.autodiscover_tasks()
 

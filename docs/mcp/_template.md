@@ -21,7 +21,7 @@ not pass review.
 - MCP protocol version negotiated (from the binding's health report)
 
 ## Tools
-| Jarvis name | Server tool | Kind | Schema pin (sha256) | Scope check | Gate / user-invocable | work_log |
+| Friday name | Server tool | Kind | Schema pin (sha256) | Scope check | Gate / user-invocable | work_log |
 |---|---|---|---|---|---|---|
 | `<name>_...` | `...` | read | `...` | ... | — | — |
 | `<name>_...` | `...` | write | `...` | ... | `mcp_<name>_...` / yes | yes |
@@ -29,7 +29,7 @@ not pass review.
 Tools the server offers that are deliberately NOT listed (and why):
 
 ## Credentials
-- Env var names only (never values): sidecar-side `...`; Jarvis-side URL
+- Env var names only (never values): sidecar-side `...`; Friday-side URL
   `..._MCP_URL`
 - Minimal scopes / permissions, expiry, rotation, where it is created
 - Never in Postgres, a payload, an audit row or a log line
@@ -39,7 +39,7 @@ Tools the server offers that are deliberately NOT listed (and why):
 - stdio bridge? `BRIDGE_ALLOWED_TOOLS`, `BRIDGE_ENV_PASSTHROUGH`
 
 ## Outbound data
-- What Jarvis sends (arguments), what the server may send elsewhere
+- What Friday sends (arguments), what the server may send elsewhere
   (telemetry?), personal data exposure
 
 ## Prompt-injection surface

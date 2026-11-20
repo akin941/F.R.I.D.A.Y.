@@ -92,7 +92,7 @@ describe("ImplementationJobDetail", () => {
       "href",
       "/approvals/gb1",
     );
-    expect(screen.getByText("jarvis/impl-ij1")).toBeInTheDocument();
+    expect(screen.getByText("friday/impl-ij1")).toBeInTheDocument();
 
     await userEvent.click(screen.getByRole("tab", { name: "Diff" }));
     expect(screen.getByText("0123456789ab")).toHaveAttribute(
@@ -324,7 +324,7 @@ describe("ImplementationJobDetail", () => {
     renderDetail();
 
     expect(
-      await screen.findByText("Depo: jarvis · Uygulayıcı: Claude Code · İnceleyici: —"),
+      await screen.findByText("Depo: friday · Uygulayıcı: Claude Code · İnceleyici: —"),
     ).toBeInTheDocument();
   });
 

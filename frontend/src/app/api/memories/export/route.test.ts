@@ -9,7 +9,7 @@ vi.mock("next/headers", () => ({
 function cookieStore(accessToken?: string) {
   return {
     get: (name: string) =>
-      name === "jarvis_access" && accessToken ? { name, value: accessToken } : undefined,
+      name === "friday_access" && accessToken ? { name, value: accessToken } : undefined,
   };
 }
 
@@ -54,7 +54,7 @@ describe("GET /api/memories/export", () => {
       async () =>
         new Response(JSON.stringify({ workspace: "w1", count: 0, memories: [] }), {
           status: 200,
-          headers: { "Content-Disposition": 'attachment; filename="jarvis-memories.json"' },
+          headers: { "Content-Disposition": 'attachment; filename="friday-memories.json"' },
         }),
     );
     vi.stubGlobal("fetch", fetchMock);
@@ -67,7 +67,7 @@ describe("GET /api/memories/export", () => {
     expect(response.status).toBe(200);
     expect(response.headers.get("Cache-Control")).toBe("no-store");
     expect(response.headers.get("Content-Disposition")).toBe(
-      'attachment; filename="jarvis-memories.json"',
+      'attachment; filename="friday-memories.json"',
     );
     expect(await response.json()).toEqual({ workspace: "w1", count: 0, memories: [] });
   });

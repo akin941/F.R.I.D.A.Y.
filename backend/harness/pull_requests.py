@@ -5,7 +5,7 @@
 and only for a `succeeded` `HarnessImplementationJob` -- a branch that went
 through Gate A, tests, cross-vendor review and Gate B, and was pushed. The
 payload snapshots the repo, `head=branch_name`, `base=repo_default_branch`,
-`head_sha=produced_commit_sha`, an owner-editable title and a Jarvis-
+`head_sha=produced_commit_sha`, an owner-editable title and a Friday-
 authored body (goal, the model-written diff summary labelled as such, the
 test result and the review verdict). The decision stays explicit, separate,
 owner-only and web-only (ADR-008 decision 3); at execution the connectors
@@ -89,7 +89,7 @@ def _require_web_owner(actor, workspace, channel, action):
 
 def default_title(job):
     first = next((line.strip() for line in job.goal.splitlines() if line.strip()), "")
-    return clean_title(first) or f"Jarvis harness job {job.id}"
+    return clean_title(first) or f"Friday harness job {job.id}"
 
 
 def clean_title(title):
@@ -114,15 +114,15 @@ def _test_line(job):
 
 
 def build_body(job):
-    """Jarvis-authored PR body. The diff summary is model-written and
-    labelled so; everything else is Jarvis's own bookkeeping."""
+    """Friday-authored PR body. The diff summary is model-written and
+    labelled so; everything else is Friday's own bookkeeping."""
     body = "\n".join(
         [
             "## Goal",
             "",
             job.goal.strip(),
             "",
-            "## Change summary (model-written, not verified by Jarvis)",
+            "## Change summary (model-written, not verified by Friday)",
             "",
             (job.diff_summary or "").strip() or "(none)",
             "",
@@ -135,7 +135,7 @@ def build_body(job):
             _review_line(job),
             "",
             "---",
-            f"Opened by Jarvis for harness implementation job `{job.id}` at commit "
+            f"Opened by Friday for harness implementation job `{job.id}` at commit "
             f"`{job.produced_commit_sha}`, after an explicit owner decision.",
         ]
     )

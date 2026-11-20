@@ -8,11 +8,11 @@ schema pin -- is a reviewed commit, never a database write (ADR-004: no
 self-granted permissions). The database only holds per-workspace
 `ConnectorBinding`s (enabled or not) and their last health/pin report.
 
-A manifest lists every tool Jarvis may ever call on that server. Anything
+A manifest lists every tool Friday may ever call on that server. Anything
 the server offers beyond the list is unreachable: it is never registered,
 never offered to the router, never callable. Each listed tool carries:
 
-- a Jarvis-authored name and description -- the only text about the tool
+- a Friday-authored name and description -- the only text about the tool
   that ever reaches an LLM prompt (server descriptions never do);
 - a strict DRF argument serializer (no `jsonschema`, brief D2) -- the router's
   extracted arguments and a write's payload are validated by it;
@@ -86,7 +86,7 @@ class ToolPolicy:
     renderer: Callable[[dict], list] | None = None
     records_work_log: bool = True
     gate_name: str = ""
-    # Phase 5 branch 5 (GitHub): optional per-call hooks, all Jarvis code.
+    # Phase 5 branch 5 (GitHub): optional per-call hooks, all Friday code.
     # `classify(workspace, args) -> "firm" | "personal"`: a read whose
     # arguments name personal-class data (a `sensitive` repo) is treated as
     # `personal` for that call even on a `firm` connector (brief D7/D5).
@@ -112,7 +112,7 @@ class ConnectorManifest:
     data_class: str
     workspace_types: frozenset
     read_channels: frozenset
-    # Jarvis-side env var holding the server's internal URL (MCP kind). The
+    # Friday-side env var holding the server's internal URL (MCP kind). The
     # credential lives only in the sidecar's own environment (D1); a native
     # bridge names its credential env vars in `credential_envs` -- names only,
     # the values never leave the environment.
@@ -201,7 +201,7 @@ def _validate_tool(manifest, policy):
     if policy.kind not in (TOOL_READ, TOOL_WRITE):
         raise ValueError(f"{where}: unknown tool kind {policy.kind!r}.")
     if not policy.description.strip():
-        raise ValueError(f"{where}: a Jarvis-authored description is required.")
+        raise ValueError(f"{where}: a Friday-authored description is required.")
     if not (
         isinstance(policy.argument_serializer, type)
         and issubclass(policy.argument_serializer, serializers.Serializer)

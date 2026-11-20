@@ -17,7 +17,7 @@ from connectors.tests import fakes
 
 @pytest.fixture
 def bridged(monkeypatch, fake_manifest, fake_state):
-    """Jarvis's real client -> bridge (Streamable HTTP) -> child session ->
+    """Friday's real client -> bridge (Streamable HTTP) -> child session ->
     fake server."""
     from mcp.client.client import Client
 

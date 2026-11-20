@@ -1,6 +1,6 @@
 # Runbook — Google mail/calendar connector (owner)
 
-Phase 5 branch 8 (brief D9, R4). Jarvis reads the owner's Gmail and primary
+Phase 5 branch 8 (brief D9, R4). Friday reads the owner's Gmail and primary
 Google Calendar and — after a web decision on the exact payload — sends a
 mail or creates an event. Governance: `docs/mcp/google.md`.
 
@@ -9,15 +9,15 @@ the web app except switching the connector on.
 
 ## 1. Create the OAuth client (Google Cloud Console)
 
-1. Create (or pick) a Google Cloud project for Jarvis only.
+1. Create (or pick) a Google Cloud project for Friday only.
 2. **APIs & Services → Library:** enable **Gmail API** and **Google Calendar
    API**.
 3. **Google Auth Platform → Branding / Audience (OAuth consent screen):**
    - User type **External** (a personal Google account has no Internal).
-   - App name e.g. "Jarvis (personal)", your own address as support and
+   - App name e.g. "Friday (personal)", your own address as support and
      developer contact.
    - **Data access (scopes):** add `…/auth/gmail.readonly`,
-     `…/auth/calendar.readonly`, and — only if you will let Jarvis send —
+     `…/auth/calendar.readonly`, and — only if you will let Friday send —
      `…/auth/gmail.send`, `…/auth/calendar.events`. Nothing else: a grant
      with any other scope is refused by `connect_google` and disables the
      connector.
@@ -50,7 +50,7 @@ uv run python manage.py connect_google --send # read + send scopes
 (`--no-browser` only prints the URL; `--timeout` defaults to 300 s.)
 
 - The browser shows **"Google hasn't verified this app"**: this is expected
-  for a personal unverified app. Click **Advanced → Go to Jarvis
+  for a personal unverified app. Click **Advanced → Go to Friday
   (unsafe)** — you are the developer. Then allow the listed scopes. You may
   untick a scope; the tools that need it stay disabled and the command
   lists what was declined.
@@ -97,5 +97,5 @@ old grant at myaccount.google.com/permissions and run it again.
 
 ## 5. Revoke
 
-myaccount.google.com/permissions → Jarvis → remove access; then delete the
+myaccount.google.com/permissions → Friday → remove access; then delete the
 three `GOOGLE_OAUTH_*` lines and switch the binding off.

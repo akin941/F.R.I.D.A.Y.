@@ -54,7 +54,7 @@ def fake_provider():
 
 @pytest.fixture
 def agent_plan_prompt():
-    template = PromptTemplate.objects.create(name="jarvis_agent_plan", purpose="agent.plan")
+    template = PromptTemplate.objects.create(name="friday_agent_plan", purpose="agent.plan")
     version = PromptVersion.objects.create(template=template, version=1, content="Plan the goal.")
     template.active_version = version
     template.save(update_fields=["active_version"])

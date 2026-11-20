@@ -7,7 +7,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 /**
  * R2 mitigation (prompt injection): a CLI agent's own raw output is
  * low-trust content. It is never shown by default and never merged with
- * Jarvis's own gateway-produced summaries -- it sits collapsed behind an
+ * Friday's own gateway-produced summaries -- it sits collapsed behind an
  * explicit disclosure, and when opened it renders as preformatted plain
  * text (React escapes it; no markdown/HTML interpretation) under an
  * explicit warning label. Shared by the discovery briefing and the

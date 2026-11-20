@@ -14,8 +14,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Jarvis",
-  description: "Jarvis OS web shell",
+  title: "F.R.I.D.A.Y.",
+  description: "Friday OS web shell",
 };
 
 export default function RootLayout({

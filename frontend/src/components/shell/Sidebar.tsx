@@ -27,7 +27,7 @@ export function Sidebar() {
             <SidebarContent onNavigate={() => setOpen(false)} />
           </SheetContent>
         </Sheet>
-        <span className="ml-2 text-sm font-semibold">Jarvis</span>
+        <span className="ml-2 text-sm font-semibold">Friday</span>
       </div>
     </>
   );

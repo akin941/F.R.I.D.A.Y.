@@ -159,7 +159,7 @@ def test_request_refusals(owner, workspace, target, change, message):
 def test_request_refuses_a_self_repo_target(owner, workspace, target):
     DeployTarget.objects.filter(pk=target.pk).update(repo_git_url=SELF_REPO)
     target.refresh_from_db()
-    with pytest.raises(DeployInvalidTransition, match="Jarvis's own"):
+    with pytest.raises(DeployInvalidTransition, match="Friday's own"):
         _request(owner, workspace, target)
 
 
@@ -205,7 +205,7 @@ def test_display_text_states_the_whole_plan(owner, workspace, target):
     summary = tool.describe_deploy_request(request)
     assert summary["text"] == (
         "Deploy `a1b2c3d` to ADİA production (deploy@203.0.113.7, app `adia-web`). "
-        "Current `9f8e7d6`. If health fails within 120 s, Jarvis rolls back to `9f8e7d6`."
+        "Current `9f8e7d6`. If health fails within 120 s, Friday rolls back to `9f8e7d6`."
     )
     assert summary["rollback_sha"] == SHA_A
     assert summary["commit_title_trust"] == "repo_text"

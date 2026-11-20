@@ -44,7 +44,7 @@ def setup_ai(settings):
         model_id="fake-1",
         priority=0,
     )
-    for name, purpose in [("jarvis_system", "chat"), ("jarvis_router_intent", "router.intent")]:
+    for name, purpose in [("friday_system", "chat"), ("friday_router_intent", "router.intent")]:
         template = PromptTemplate.objects.create(name=name, purpose=purpose)
         version = PromptVersion.objects.create(template=template, version=1, content="x")
         template.active_version = version
@@ -119,7 +119,7 @@ def _check_golden(name, actual):
 def _stream(client, **extra):
     return client.post(
         COMPLETIONS,
-        {"model": "jarvis", "messages": [{"role": "user", "content": "hi"}], "stream": True}
+        {"model": "friday", "messages": [{"role": "user", "content": "hi"}], "stream": True}
         | extra,
         format="json",
     )
@@ -176,7 +176,7 @@ def test_mid_stream_error_contract(client, monkeypatch):
 def test_non_streaming_contract(client):
     response = client.post(
         COMPLETIONS,
-        {"model": "jarvis", "messages": [{"role": "user", "content": "hi"}]},
+        {"model": "friday", "messages": [{"role": "user", "content": "hi"}]},
         format="json",
     )
     assert response.status_code == 200
@@ -188,7 +188,7 @@ def test_lite_stream_contract(client):
     response = client.post(
         COMPLETIONS,
         {
-            "model": "jarvis-lite",
+            "model": "friday-lite",
             "messages": [{"role": "user", "content": "title?"}],
             "stream": True,
             "stream_options": {"include_usage": True},

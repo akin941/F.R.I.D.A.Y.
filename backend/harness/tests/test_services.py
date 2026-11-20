@@ -45,7 +45,7 @@ def user_with_role(workspace, role, email):
 
 
 def make_repo(workspace, **overrides):
-    fields = {"workspace": workspace, "name": "jarvis-os", "git_url": "git@example.com:x/y.git"}
+    fields = {"workspace": workspace, "name": "friday", "git_url": "git@example.com:x/y.git"}
     fields.update(overrides)
     return HarnessRepo.objects.create(**fields)
 
@@ -53,7 +53,7 @@ def make_repo(workspace, **overrides):
 class TestCreateRepo:
     def test_owner_can_create(self, workspace, owner):
         repo = create_repo(
-            workspace=workspace, actor=owner, name="jarvis-os", git_url="git@example.com:x/y.git"
+            workspace=workspace, actor=owner, name="friday", git_url="git@example.com:x/y.git"
         )
         assert repo.workspace_id == workspace.id
         assert repo.enabled is False
@@ -72,7 +72,7 @@ class TestCreateRepo:
         repo = create_repo(
             workspace=workspace,
             actor=owner,
-            name="jarvis-os",
+            name="friday",
             git_url="git@example.com:x/y.git",
             test_command="pytest -q",
         )
@@ -80,7 +80,7 @@ class TestCreateRepo:
 
     def test_create_writes_audit_row(self, workspace, owner):
         repo = create_repo(
-            workspace=workspace, actor=owner, name="jarvis-os", git_url="git@example.com:x/y.git"
+            workspace=workspace, actor=owner, name="friday", git_url="git@example.com:x/y.git"
         )
         entry = AuditLog.objects.get(action="harness.repo_registered")
         assert entry.resource_id == str(repo.id)
@@ -96,7 +96,7 @@ class TestCreateRepo:
             create_repo(
                 workspace=workspace,
                 actor=user,
-                name="jarvis-os",
+                name="friday",
                 git_url="git@example.com:x/y.git",
             )
         assert not HarnessRepo.objects.filter(workspace=workspace).exists()
@@ -104,7 +104,7 @@ class TestCreateRepo:
     def test_admin_can_create(self, workspace):
         admin = user_with_role(workspace, WorkspaceMember.Role.ADMIN, "admin@test.dev")
         repo = create_repo(
-            workspace=workspace, actor=admin, name="jarvis-os", git_url="git@example.com:x/y.git"
+            workspace=workspace, actor=admin, name="friday", git_url="git@example.com:x/y.git"
         )
         assert repo.pk is not None
 

@@ -59,7 +59,7 @@ def fake_provider():
 
 @pytest.fixture
 def agent_plan_prompt():
-    template = PromptTemplate.objects.create(name="jarvis_agent_plan", purpose="agent.plan")
+    template = PromptTemplate.objects.create(name="friday_agent_plan", purpose="agent.plan")
     version = PromptVersion.objects.create(template=template, version=1, content="Plan the goal.")
     template.active_version = version
     template.save(update_fields=["active_version"])
@@ -69,7 +69,7 @@ def agent_plan_prompt():
 @pytest.fixture
 def skill_match_prompt():
     template = PromptTemplate.objects.create(
-        name="jarvis_agent_skill_match", purpose="agent.skill_match"
+        name="friday_agent_skill_match", purpose="agent.skill_match"
     )
     version = PromptVersion.objects.create(template=template, version=1, content="Match a skill.")
     template.active_version = version
@@ -128,7 +128,7 @@ class TestSkillMatchDegradePaths:
     def test_missing_skill_match_config_writes_no_modelusage_row_and_falls_through(
         self, workspace, owner, fake_provider, agent_plan_prompt
     ):
-        """No `jarvis_agent_skill_match` PromptTemplate/active version at
+        """No `friday_agent_skill_match` PromptTemplate/active version at
         all -- resolution fails before any gateway call is attempted, so no
         `ModelUsage` row for `purpose="agent.skill_match"` is written,
         unlike a missing `agent.plan` config, which must still fail today

@@ -1,7 +1,7 @@
 [project]
-name = "jarvis-backend"
+name = "friday-backend"
 version = "0.1.0"
-description = "Jarvis OS backend — Django modular monolith"
+description = "Friday OS backend — Django modular monolith"
 requires-python = ">=3.12,<3.13"
 dependencies = [
     "django>=5.1,<6.0",
@@ -429,7 +429,7 @@ source_modules = ["harness"]
 forbidden_modules = ["deploys"]
 
 # The MCP SDK (ADR-010 decision 3, brief D2) ships server-side code
-# (starlette, uvicorn, the stdio server/client) next to the client. Jarvis is
+# (starlette, uvicorn, the stdio server/client) next to the client. Friday is
 # only ever an MCP *client* speaking Streamable HTTP to its sidecars:
 # production code may import `mcp.client.*` (never the stdio/SSE
 # transports) and `mcp.types`/`mcp_types`, never `mcp.server`. Direct imports

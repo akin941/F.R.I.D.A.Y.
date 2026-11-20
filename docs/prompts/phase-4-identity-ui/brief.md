@@ -10,10 +10,10 @@
 > Parent decisions: ADR-001, ADR-003, ADR-004 + ADR-008 decision 3
 > (gate-class vs confirm-class), ADR-005 (`private` contract), ADR-008
 > decisions 2 (single owner, device-trust identity) and 6 (facade: chat
-> only, low trust), `docs/VISION_JARVIS_2.md` §0/§2/§5/§6, MASTER_PLAN §AA
+> only, low trust), `docs/VISION_FRIDAY_2.md` §0/§2/§5/§6, MASTER_PLAN §AA
 > ("Plan audit 2026-09-27", "Phase 4–6 outline") and §O.
 > **Precondition:** the Phase 3 closeout (branches 5a, 5, 6, 7, 8) is
-> merged and akin941/jarvis-os#26 has landed on `main`; Phase 4 branches
+> merged and akin941/F.R.I.D.A.Y.#26 has landed on `main`; Phase 4 branches
 > cut from `main`. Phase 3 branch 7 (`feat/p3-harness-ui`, in progress)
 > owns the font token + `latin-ext`, the shell height/overflow chain, chat
 > error surfaces and post-stream flash, keyboard-reachable cards, the
@@ -30,7 +30,7 @@ web channel" a precise, testable definition; (3) renew the UI on the
 existing Next.js / Tailwind v4 / shadcn + Radix stack — design system
 first, then chat, harness console and a cross-workspace approvals inbox;
 (4) ship the OpenAI-compatible facade so Open WebUI-class clients can use
-Jarvis as a low-trust, chat-only secondary channel. Usable outcome
+Friday as a low-trust, chat-only secondary channel. Usable outcome
 (MASTER_PLAN §AA): "Professional, safely-exposable daily driver."
 
 ## Boundary vs existing systems
@@ -116,7 +116,7 @@ Every item was re-verified against the code for this brief.
 **Stack and secrets.** `deploy/docker/compose.yml` publishes `8001`,
 `5433`, `6380`, `9000`, `9001` on all interfaces and commits
 `DJANGO_SECRET_KEY: dev-insecure-key-change-me`, `POSTGRES_PASSWORD:
-jarvis`, `MINIO_*`/`MINIO_ROOT_PASSWORD: jarvis-dev-secret`. Every publish
+friday`, `MINIO_*`/`MINIO_ROOT_PASSWORD: friday-dev-secret`. Every publish
 becomes `127.0.0.1:<port>:…`; secrets become `${VAR:?}` from the
 gitignored `deploy/docker/.env`, with a committed
 `deploy/docker/.env.example` and a `make secrets` target generating random
@@ -203,8 +203,8 @@ start`. The dev stack keeps `runserver` + bind mounts.
   `AI_RETRY_BACKOFF_SECONDS`, the four `KNOWLEDGE_*`,
   `DATA_UPLOAD_MAX_MEMORY_SIZE`, the seven `AGENT_*` knobs,
   `ANTHROPIC_MODEL_ID`, `DEEPSEEK_MODEL_ID`, `OPENAI_MODEL_ID`,
-  `OPENAI_EMBEDDING_DIMENSION`, `JARVIS_OWNER_PASSWORD` — plus the CLI
-  client's three `JARVIS_CLI_*` in a separate block (the `HARNESS_*` block
+  `OPENAI_EMBEDDING_DIMENSION`, `FRIDAY_OWNER_PASSWORD` — plus the CLI
+  client's three `FRIDAY_CLI_*` in a separate block (the `HARNESS_*` block
   is Phase 3 branch 5's). `GEMINI_API_KEY` is read nowhere and is removed.
   New entries are commented-out defaults (an uncommented `KEY=` breaks
   `env.int`). A test scans settings for `env*("NAME"` and fails on any
@@ -261,7 +261,7 @@ fail hard and pass `check --deploy`.
   `manage.py rotate_remote_key`; reusable until rotated; every use audited
   and surfaced as a "new device enrolled remotely" banner on all devices.
 - *Session:* enrollment returns `{device_secret, access, refresh}`. The
-  BFF stores `jarvis_device` (HttpOnly, `Secure` in production,
+  BFF stores `friday_device` (HttpOnly, `Secure` in production,
   `SameSite=Strict`, `path=/api/auth`, 400-day max-age) next to the
   existing JWT cookies. JWTs carry a `did` claim. When refresh fails the
   BFF silently re-mints via `POST /api/v1/auth/devices/session`; only a
@@ -285,14 +285,14 @@ fail hard and pass `check --deploy`.
 only sees the BFF's address, so the BFF takes the client IP **only** from
 the header named in `TRUSTED_CLIENT_IP_HEADER` (set by the owner's reverse
 proxy — never a client-supplied `X-Forwarded-For`) and forwards it as
-`X-Jarvis-Client-IP` with `X-Jarvis-BFF-Key` (`JARVIS_BFF_SHARED_SECRET`);
+`X-Friday-Client-IP` with `X-Friday-BFF-Key` (`FRIDAY_BFF_SHARED_SECRET`);
 Django ignores the IP header without a valid key. An unknown IP may use a
 PIN only if `DEVICE_PAIRING_ALLOW_UNKNOWN_IP` (dev true, prod false).
 Strong codes and the remote key work from any network. The LAN check is
 defense in depth, not the boundary: codes are issuable only by an
 already-trusted principal, single-use, short-lived, attempt-burned and
 hashed. **Throttling is two-tier** (plan-review round 1, HIGH): a tight
-per-source limit keyed on the BFF-key-validated `X-Jarvis-Client-IP`
+per-source limit keyed on the BFF-key-validated `X-Friday-Client-IP`
 (`ENROLL_RATE_PER_SOURCE`, default 5/10min) plus a much looser global
 ceiling (`ENROLL_RATE_GLOBAL`, default 60/hour) — so an internet-side
 flood from one source can't exhaust the bucket the owner needs. When no
@@ -395,7 +395,7 @@ authenticator's `request_channel()`; JWT without `did` → 401; a revoked
 device's unexpired access token → 401 immediately; refresh on a revoked
 or idle-expired device → 401. Codes: TTL, single use under concurrent
 consumption (`select_for_update`), 5-attempt burn, PIN from a non-LAN IP
-refused, spoofed `X-Jarvis-Client-IP` without the key ignored, strong code
+refused, spoofed `X-Friday-Client-IP` without the key ignored, strong code
 accepted anywhere. Isolation: firm creation adds no other membership; a
 non-owner cannot enroll. The 13 per-app `auth_client` fixtures built on
 `force_authenticate` (e.g. `approvals/tests/test_views.py:52`,
@@ -586,7 +586,7 @@ field can name another. The token form gains a kind selector and a
 copyable Open WebUI setup snippet.
 
 **Stateless → conversation mapping.** Clients resend the whole history;
-Jarvis's context comes from server-side history
+Friday's context comes from server-side history
 (`assistant/context.py:build_context`). New `FacadeConversation`
 (`WorkspaceScopedModel`): `token`, `conversation`, `anchor_hash` (sha256
 over token id + first user message), `user_turn_hashes`. Per request the
@@ -598,13 +598,13 @@ client's prior user turns gets the new turn; no match → new conversation.
 A regenerate/edit (client history diverges from the binding) **forks**:
 a new conversation seeded with copies of the source's server-side
 messages up to the divergence (trusted rows, same workspace; extraction
-cursor placed after them). An optional `X-Jarvis-Conversation-Id` pins a
+cursor placed after them). An optional `X-Friday-Conversation-Id` pins a
 conversation in the bound workspace (404 otherwise). Conversations come
 from the audited `create_conversation` and appear in web chat with the
 channel badge.
 
-**Models.** `/v1/models` lists `jarvis` (full pipeline, persisted) and
-`jarvis-lite` (ephemeral: no Jarvis context, nothing persisted, no
+**Models.** `/v1/models` lists `friday` (full pipeline, persisted) and
+`friday-lite` (ephemeral: no Friday context, nothing persisted, no
 extraction, purpose `facade.ephemeral`) — the target for Open WebUI's
 background "task model" (titles, tags, follow-ups). Unknown model → 404
 `model_not_found`. Provider/tier selection stays server-side; a client
@@ -657,7 +657,7 @@ usage chunk, `[DONE]`, mid-stream error) on the FakeAdapter — no real LLM
 clean). `ModelUsage` rows asserted per call.
 
 **Done when:** contract tests green; a manual Open WebUI smoke
-(streaming, history continuity, `jarvis-lite` as task model) is recorded
+(streaming, history continuity, `friday-lite` as task model) is recorded
 in a new "OpenAI-compatible facade" section of
 `docs/integrations/README.md`.
 
@@ -670,7 +670,7 @@ in a new "OpenAI-compatible facade" section of
 | 3 | `feat/p4-design-system` | Semantic tokens + light/dark, primitives incl. safe Markdown, TanStack Query migration, activity summary badge, grouped routed shell, `?workspace=` deep links, Turkish catalog + backend error codes | Phase 3 branch 7; parallel with 1–2 |
 | 4 | `feat/p4-chat-redesign` | Markdown, smart scroll, stop/recover, mobile drawer, rename/private, badges, sources, task-draft reconstruction (`Task.source_message`) | 3 |
 | 5 | `feat/p4-console-and-inbox` | Routed harness console + repo registry UI, cross-workspace approvals inbox with per-tool renderers and filters, confirmations on every destructive action | 2, 3 |
-| 6 | `feat/p4-openai-facade` | `/v1/chat/completions` + `/v1/models`, PAT `kind`, `CHANNEL_OPENAI`, conversation mapping with forks, `jarvis`/`jarvis-lite`, chat-only router, OpenAI SSE, structured reply events, throttles | 1, 2; parallel with 3–5 |
+| 6 | `feat/p4-openai-facade` | `/v1/chat/completions` + `/v1/models`, PAT `kind`, `CHANNEL_OPENAI`, conversation mapping with forks, `friday`/`friday-lite`, chat-only router, OpenAI SSE, structured reply events, throttles | 1, 2; parallel with 3–5 |
 | 7 | closeout | Phase notes, MASTER_PLAN §AA row 4 → done, ADR-008 implementation note (decision 2 landed), e2e covering enroll → chat → approve + a facade smoke | 1–6 |
 
 ## Out of scope (explicit)
@@ -682,7 +682,7 @@ step-up re-auth for approval decisions (Q4) · SSE for approvals/harness
 and harness log streaming (carried forward, needs ASGI) · server-side
 chat stream resume · syntax highlighting · a second UI locale · tool
 calling, embeddings, `/v1/completions`, `/v1/responses`, audio or image
-endpoints on the facade (ADR-008 decision 6) · deploying Jarvis itself to
+endpoints on the facade (ADR-008 decision 6) · deploying Friday itself to
 a VPS (Phase 5 deploys firm apps) · public-exposure tooling beyond
 `compose.daily.yml` and a documented reverse-proxy/Tailscale recipe · the
 carried-forward kernel items (owner core memory block, consolidation,
@@ -735,7 +735,7 @@ image or raw HTML.
   memory only as `pending_approval` suggestions, the overlay stays
   web-only (`assistant/context.py:250`), `private` never reaches a
   payload, the channel has no tools, background tasks go to
-  `jarvis-lite`, per-token throttle and concurrency caps bound cost.
+  `friday-lite`, per-token throttle and concurrency caps bound cost.
 - **R7 — Conversation-mapping surprises.** Forks keep server history,
   are visible in web chat; the pinning header gives determinism.
 - **R8 — Scope creep across three frontend branches.** Per-branch "done
@@ -774,8 +774,8 @@ image or raw HTML.
 - **Q8 — Facade fork semantics.** Fork with a copied server-side prefix;
   appending regenerations to one conversation pollutes history and memory.
 - **Q9 — Do facade conversations feed memory extraction?** Yes for
-  `jarvis` (suggestions stay `pending_approval`), never for `jarvis-lite`.
-- **Q10 — Facade model names.** Only `jarvis` and `jarvis-lite`; tier
+  `friday` (suggestions stay `pending_approval`), never for `friday-lite`.
+- **Q10 — Facade model names.** Only `friday` and `friday-lite`; tier
   aliases wait for Phase 5's tier-routing map.
 - **Q11 — PAT expiry.** 90-day default, 365-day max, existing tokens
   backfilled to now + 30 days, expiry shown in the token list.
@@ -815,7 +815,7 @@ green locally, and the phase went to `main` through PR #27.
 | 6 | `feat/p4-openai-facade` | APPROVE (round 1) | `openai`-client smoke + R4b load check recorded in the branch report; e2e `facade.e2e.ts` covers models, completion, streaming, 401, `tools` refusal |
 
 **Owner-only follow-up:** the manual Open WebUI smoke required by branch
-6's "done when" (streaming, history continuity, `jarvis-lite` as task
+6's "done when" (streaming, history continuity, `friday-lite` as task
 model) needs Open WebUI installed; record it in
 `docs/integrations/README.md` ("OpenAI-compatible facade").
 

@@ -49,7 +49,7 @@ describe("POST /api/auth/refresh", () => {
   });
 
   it("rotation updates both the access and refresh cookies", async () => {
-    const cookieStore = createCookieStore({ jarvis_refresh: "old-refresh" });
+    const cookieStore = createCookieStore({ friday_refresh: "old-refresh" });
     cookiesMock.mockResolvedValue(cookieStore);
     vi.stubGlobal(
       "fetch",
@@ -65,12 +65,12 @@ describe("POST /api/auth/refresh", () => {
     const response = await POST(makeRequest());
 
     expect(response.status).toBe(200);
-    expect(cookieStore.store.get("jarvis_access")?.value).toBe("new-access");
-    expect(cookieStore.store.get("jarvis_refresh")?.value).toBe("new-refresh");
+    expect(cookieStore.store.get("friday_access")?.value).toBe("new-access");
+    expect(cookieStore.store.get("friday_refresh")?.value).toBe("new-refresh");
   });
 
   it("clears all auth cookies when the backend rejects the refresh token", async () => {
-    const cookieStore = createCookieStore({ jarvis_refresh: "stale-refresh" });
+    const cookieStore = createCookieStore({ friday_refresh: "stale-refresh" });
     cookiesMock.mockResolvedValue(cookieStore);
     vi.stubGlobal(
       "fetch",
@@ -82,7 +82,7 @@ describe("POST /api/auth/refresh", () => {
 
     expect(response.status).toBe(401);
     expect(cookieStore.deleted).toEqual(
-      expect.arrayContaining(["jarvis_access", "jarvis_refresh", "jarvis_session"]),
+      expect.arrayContaining(["friday_access", "friday_refresh", "friday_session"]),
     );
   });
 
@@ -100,7 +100,7 @@ describe("POST /api/auth/refresh", () => {
   });
 
   it("rejects a mismatched Origin before touching the backend", async () => {
-    const cookieStore = createCookieStore({ jarvis_refresh: "old-refresh" });
+    const cookieStore = createCookieStore({ friday_refresh: "old-refresh" });
     cookiesMock.mockResolvedValue(cookieStore);
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
@@ -113,7 +113,7 @@ describe("POST /api/auth/refresh", () => {
   });
 
   it("rejects a non-JSON Content-Type before touching the backend", async () => {
-    const cookieStore = createCookieStore({ jarvis_refresh: "old-refresh" });
+    const cookieStore = createCookieStore({ friday_refresh: "old-refresh" });
     cookiesMock.mockResolvedValue(cookieStore);
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
@@ -127,8 +127,8 @@ describe("POST /api/auth/refresh", () => {
 
   it("silently re-mints from the device cookie when the refresh token is rejected", async () => {
     const cookieStore = createCookieStore({
-      jarvis_refresh: "stale-refresh",
-      jarvis_device: "jdv_secret",
+      friday_refresh: "stale-refresh",
+      friday_device: "jdv_secret",
     });
     cookiesMock.mockResolvedValue(cookieStore);
     const fetchMock = vi.fn(async (url: string) =>
@@ -148,12 +148,12 @@ describe("POST /api/auth/refresh", () => {
       expect.stringMatching(/\/auth\/refresh$/),
       expect.stringMatching(/\/auth\/devices\/session$/),
     ]);
-    expect(cookieStore.store.get("jarvis_access")?.value).toBe("minted-access");
-    expect(cookieStore.deleted).not.toContain("jarvis_device");
+    expect(cookieStore.store.get("friday_access")?.value).toBe("minted-access");
+    expect(cookieStore.deleted).not.toContain("friday_device");
   });
 
   it("drops the device cookie only when the device itself is rejected", async () => {
-    const cookieStore = createCookieStore({ jarvis_device: "jdv_revoked" });
+    const cookieStore = createCookieStore({ friday_device: "jdv_revoked" });
     cookiesMock.mockResolvedValue(cookieStore);
     vi.stubGlobal(
       "fetch",
@@ -165,7 +165,7 @@ describe("POST /api/auth/refresh", () => {
 
     expect(response.status).toBe(401);
     expect(cookieStore.deleted).toEqual(
-      expect.arrayContaining(["jarvis_access", "jarvis_session", "jarvis_device"]),
+      expect.arrayContaining(["friday_access", "friday_session", "friday_device"]),
     );
   });
 });

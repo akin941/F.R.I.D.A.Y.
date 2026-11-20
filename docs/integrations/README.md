@@ -1,6 +1,6 @@
 # Integrations
 
-MVP 9 added two channels for reaching Jarvis outside the web app: a CLI
+MVP 9 added two channels for reaching Friday outside the web app: a CLI
 (bearer-token authenticated) and a Telegram bot (relayed, no direct request
 of its own). Both are new *front doors* onto the existing chat pipeline —
 neither adds a new way to *act*. The one new concept both channels share is
@@ -40,8 +40,8 @@ Devices are enrolled at `/enroll` with a one-time pairing code (`manage.py
 issue_pairing_code`, or "Yeni cihaz eşleştir" on a trusted session) or the
 remote access key; there is no signup and no password login. PINs are
 LAN-gated: the BFF forwards the browser IP only from `TRUSTED_CLIENT_IP_HEADER`
-(set by the owner's reverse proxy) as `X-Jarvis-Client-IP` with
-`X-Jarvis-BFF-Key`, and Django ignores the IP without that key.
+(set by the owner's reverse proxy) as `X-Friday-Client-IP` with
+`X-Friday-BFF-Key`, and Django ignores the IP without that key.
 
 ## CLI channel
 
@@ -74,9 +74,9 @@ narrower-scoped API key.
   bound token (`core.channels.scoped_for_actor`); the web inbox's
   `scope=all` (every membership, Phase 4 branch 5) is ignored for a PAT,
   which stays on its bound workspace. A minimal reference client
-  ships at `backend/integrations/cli/jarvis_cli.py`
-  (`uv run python -m integrations.cli.jarvis_cli`), configured via
-  `~/.config/jarvis/cli.toml` or `JARVIS_CLI_TOKEN`/`JARVIS_CLI_URL` env vars.
+  ships at `backend/integrations/cli/friday_cli.py`
+  (`uv run python -m integrations.cli.friday_cli`), configured via
+  `~/.config/friday/cli.toml` or `FRIDAY_CLI_TOKEN`/`FRIDAY_CLI_URL` env vars.
 - **Revoke**: `/integrations` settings page, or
   `POST /api/v1/auth/tokens/<id>/revoke` (soft-revoke, audit trail kept).
 - **Kind** (Phase 4 branch 6): a token is minted as `cli` (the default) or
@@ -135,7 +135,7 @@ deliberate simplification, not an oversight).
 
 ## OpenAI-compatible facade (Phase 4 branch 6)
 
-Lets Open WebUI-class clients use Jarvis as a **low-trust, chat-only**
+Lets Open WebUI-class clients use Friday as a **low-trust, chat-only**
 secondary channel (ADR-008 decision 6). Django serves
 `POST /api/v1/openai/chat/completions` and `GET /api/v1/openai/models`
 (`backend/integrations/openai_facade.py`); the BFF exposes them as
@@ -146,7 +146,7 @@ client's base URL is `https://<host>/v1`.
 **Setup.** On `/integrations` create a token with kind "OpenAI uyumlu
 istemci"; the reveal banner shows a copyable snippet. In Open WebUI: Admin
 Panel → Settings → Connections → OpenAI API, base URL `https://<host>/v1`,
-API key = the token. Use `jarvis` for chat and set `jarvis-lite` as the
+API key = the token. Use `friday` for chat and set `friday-lite` as the
 "task model" (titles, tags, follow-up suggestions).
 
 **What it can and cannot do.**
@@ -154,26 +154,26 @@ API key = the token. Use `jarvis` for chat and set `jarvis-lite` as the
 - Auth is an `openai`-kind PAT only (`FacadeTokenAuthentication` →
   `CHANNEL_OPENAI`); web sessions and `cli` tokens are refused. The
   workspace is the token's; no request field can name another.
-- `jarvis` runs the web chat's pipeline (router → memory/knowledge context →
+- `friday` runs the web chat's pipeline (router → memory/knowledge context →
   persisted reply) with the router restricted to `chat`, `memory_query`,
   `knowledge_query`: no task drafts, no tool proposals, no approvals, no
   writes. Its conversations appear in web chat with the "OpenAI uyumlu
   istemci" badge; memory extraction runs as usual, so anything learned
   arrives as a `pending_approval` suggestion. The cross-workspace overlay
   stays web-only.
-- `jarvis-lite` is ephemeral: the client's system/user/assistant messages
-  go to the gateway as they are (purpose `facade.ephemeral`), with no Jarvis
+- `friday-lite` is ephemeral: the client's system/user/assistant messages
+  go to the gateway as they are (purpose `facade.ephemeral`), with no Friday
   context; nothing is persisted, nothing is extracted.
 - `tools`, `functions`, a non-`none` `tool_choice`/`function_call`, `n>1`
   and a non-text `response_format` are rejected (400
   `unsupported_parameter`); `temperature`, `max_tokens`, `top_p` etc. are
   accepted and ignored — prompt-version parameters and server-side routing
-  govern. Unknown model → 404 `model_not_found`. Only `jarvis` and
-  `jarvis-lite` exist (no tier aliases until Phase 5's routing map).
+  govern. Unknown model → 404 `model_not_found`. Only `friday` and
+  `friday-lite` exist (no tier aliases until Phase 5's routing map).
 - Every call goes through the `InferenceGateway`; `ModelUsage` rows carry
   `context_report.channel = "openai"` and the model alias.
 
-**Conversation mapping.** Clients resend the whole history; Jarvis reads
+**Conversation mapping.** Clients resend the whole history; Friday reads
 only the *user* turns, as hashes, to find the server-side conversation
 (`integrations/facade_mapping.py`, `FacadeConversation`). Client
 `system`/`assistant`/`tool` messages are never persisted — a client cannot
@@ -184,8 +184,8 @@ a regenerate or edit **forks**: a new conversation seeded with copies of the
 server-side messages before the divergence (audited
 `assistant.conversation.forked`, extraction cursor after the copies). A new
 chat with the same first message starts a new conversation.
-`X-Jarvis-Conversation-Id: <uuid>` pins a conversation of the bound
-workspace (404 otherwise); every `jarvis` response returns that header.
+`X-Friday-Conversation-Id: <uuid>` pins a conversation of the bound
+workspace (404 otherwise); every `friday` response returns that header.
 
 **Wire format.** Non-streaming: `chat.completion` with `usage`. Streaming
 (`stream: true`): `chat.completion.chunk`s — a `delta.role` chunk, content
@@ -198,7 +198,7 @@ OpenAI's `{"error": {message, type, param, code}}` shape. Golden files:
 
 **Limits.** Per token: `FACADE_RATE` (default `20/min`, Redis, fail-closed
 503) and `FACADE_MAX_CONCURRENT_STREAMS` (default 2) completions in flight
-(429 with `Retry-After`); a new user turn (for `jarvis-lite` the whole
+(429 with `Retry-After`); a new user turn (for `friday-lite` the whole
 message list) of at most `FACADE_MAX_REQUEST_CHARS` (32000). In front of
 Django the BFF answers requests without a `Bearer jpat_...` credential
 itself and, after too many failed authentications in a minute
@@ -217,9 +217,9 @@ CLI ones (`accounts.pat.auth_failed`, `surface: openai`, rate-limited).
   `openai` SDK in the backend code or tests).
 - Client smoke with the official `openai` Python client (2.44) through the
   BFF (`next start` → `/v1` → `runserver`, FakeAdapter): `models.list()` →
-  `jarvis`, `jarvis-lite`; non-streaming and streaming (`include_usage`)
+  `friday`, `friday-lite`; non-streaming and streaming (`include_usage`)
   completions; a second request with the history continued the same
-  conversation; `jarvis-lite` persisted nothing; unknown model 404, `tools`
+  conversation; `friday-lite` persisted nothing; unknown model 404, `tools`
   400, `cli` key 403, bad key 401 — all in OpenAI's error shape.
 - Load check (plan-review R4b): gunicorn gthread 3 × 16 (the daily-stack
   default), Redis-backed limits, FakeAdapter slowed to 0.8 s per chunk
@@ -229,7 +229,7 @@ CLI ones (`accounts.pat.auth_failed`, `surface: openai`, rate-limited).
   whose first byte is the first model chunk after the simulated 0.8 s) /
   0.11 s (facade role chunk); 64 polling requests, median 15 ms, max 46 ms
   — nothing waited more than 2 s; all stream slots were back at 0 after.
-- A manual Open WebUI smoke (streaming, history continuity, `jarvis-lite`
+- A manual Open WebUI smoke (streaming, history continuity, `friday-lite`
   as the task model) is still to be recorded here by the owner.
 
 ## Other integrations (not yet built)

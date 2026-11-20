@@ -24,7 +24,7 @@
 
 ## Goal and user value
 
-MVP 7 gave Jarvis the ability to turn a goal into a plan, via one
+MVP 7 gave Friday the ability to turn a goal into a plan, via one
 `purpose="agent.plan"` gateway call per agent, every time. For goals that
 recur in a predictable shape ("export my weekly notes," "turn this note into
 a task"), that call is pure waste: the same LLM, given essentially the same
@@ -220,8 +220,8 @@ A new, narrower gateway call precedes today's `agent.plan` call in
 working," never a new way for agent creation to fail.
 
 **Prompt** (new `purpose="agent.skill_match"`, `PromptTemplate.name =
-"jarvis_agent_skill_match"` — following the same name/purpose pairing
-`jarvis_agent_plan`/`purpose="agent.plan"` already establishes — seeded via
+"friday_agent_skill_match"` — following the same name/purpose pairing
+`friday_agent_plan`/`purpose="agent.plan"` already establishes — seeded via
 `seed_ai_defaults.py` following the existing hand-typed-constant
 convention): given the goal and the registered skill list (name +
 description + trigger_hint, from `list_skill_prompt_entries()`), return

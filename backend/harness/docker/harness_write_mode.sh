@@ -44,7 +44,7 @@
 #    command that modifies tracked files or leaves new non-ignored files
 #    fails closed.
 # 9. Final quiesce, result file written, and the CLI's captured stdout
-#    emitted as ONE wrapper-framed line (`JARVIS_HARNESS_CLI_OUTPUT_V1
+#    emitted as ONE wrapper-framed line (`FRIDAY_HARNESS_CLI_OUTPUT_V1
 #    <base64>`) -- the host parses only the last well-formed such line for
 #    cost/usage and the implementation transcript (plan-review round 9
 #    item 2). Nothing else is alive to print after it.
@@ -53,7 +53,7 @@
 # environment): the production wrappers never set it, so it is always
 # /workspace in a real container. Tests set it after sourcing this file.
 
-HARNESS_CLI_OUTPUT_PREFIX="JARVIS_HARNESS_CLI_OUTPUT_V1"
+HARNESS_CLI_OUTPUT_PREFIX="FRIDAY_HARNESS_CLI_OUTPUT_V1"
 HARNESS_WORKSPACE_DIR="/workspace"
 
 json_escape() {
@@ -172,8 +172,8 @@ harness_write_mode_main() {
         elif ! sgit diff --cached --quiet >/dev/null 2>&1; then
             goal_line=$(printf '%s\n' "$goal" | head -n 1 | cut -c1-200)
             if ! printf 'harness: implementation\n\nGoal: %s\n' "$goal_line" \
-                | GIT_AUTHOR_NAME="Jarvis Harness" GIT_AUTHOR_EMAIL="harness@jarvis.invalid" \
-                    GIT_COMMITTER_NAME="Jarvis Harness" GIT_COMMITTER_EMAIL="harness@jarvis.invalid" \
+                | GIT_AUTHOR_NAME="Friday Harness" GIT_AUTHOR_EMAIL="harness@friday.invalid" \
+                    GIT_COMMITTER_NAME="Friday Harness" GIT_COMMITTER_EMAIL="harness@friday.invalid" \
                     sgit commit -q --no-verify -F - >/dev/null 2>&1; then
                 run_ok=false
             fi

@@ -35,15 +35,15 @@
 
 ## Goal and user value
 
-Every surface Jarvis has shipped so far (chat, tasks, approvals, agents,
+Every surface Friday has shipped so far (chat, tasks, approvals, agents,
 skills) is reached through exactly one channel: the web app, authenticated by
 a short-lived JWT a human obtained by logging in with a password. That's the
-right *only* channel while Jarvis has no other client, but it's also the
+right *only* channel while Friday has no other client, but it's also the
 whole reason a personal AI OS is worth building: it should be reachable from
 wherever the user actually is — a phone's Telegram app, a terminal — not only
 a browser tab.
 
-This MVP adds two new ways to *reach* Jarvis — a Telegram bot and an
+This MVP adds two new ways to *reach* Friday — a Telegram bot and an
 authenticated CLI — without adding a single new way to *act*. Both are new
 front doors onto the exact same chat pipeline (`assistant`) and, for the CLI,
 the exact same `agents`/`approvals` endpoints the web app already calls nothing
@@ -411,9 +411,9 @@ Given §1's workspace-fixation + PAT authentication, the CLI channel adds
 channel check) is handled by the exact same views the web app already calls.
 What this branch actually delivers:
 
-- A minimal CLI client (`backend/integrations/cli/jarvis_cli.py`, invoked via
-  `uv run python -m integrations.cli.jarvis_cli`): reads a token + base URL
-  from `~/.config/jarvis/cli.toml` (or `JARVIS_CLI_TOKEN`/`JARVIS_CLI_URL`
+- A minimal CLI client (`backend/integrations/cli/friday_cli.py`, invoked via
+  `uv run python -m integrations.cli.friday_cli`): reads a token + base URL
+  from `~/.config/friday/cli.toml` (or `FRIDAY_CLI_TOKEN`/`FRIDAY_CLI_URL`
   env vars), sends a one-off message to a conversation (creating one if none
   is configured) and prints the streamed reply to stdout. Deliberately thin —
   a script that proves the channel works end-to-end, not a polished terminal
@@ -463,7 +463,7 @@ class LinkedTelegramChat(WorkspaceScopedModel, TimestampedModel):
 ```
 **`(user, workspace)` uniqueness, not just `chat_id` uniqueness.** A Codex
 plan-review round-4 P2 finding caught that the model as drafted only made
-`chat_id` unique — nothing stopped the same Jarvis user from linking the
+`chat_id` unique — nothing stopped the same Friday user from linking the
 same workspace from two different private Telegram chats (e.g. relinking
 from a new phone without unlinking the old one first), which would leave
 two `LinkedTelegramChat` rows for one `(user, workspace)` pair and make the
@@ -515,7 +515,7 @@ relays no message, and creates no `LinkedTelegramChat` — silently ignored,
 or at most a one-time "this bot only works in a direct message" reply, never
 a partial/best-effort handling. The **webhook view**
 (`POST /api/v1/integrations/telegram/webhook`, `AllowAny` — Telegram is not a
-Jarvis user and holds no JWT) verifies the inbound request is actually from
+Friday user and holds no JWT) verifies the inbound request is actually from
 Telegram via the `X-Telegram-Bot-Api-Secret-Token` header, which must equal
 `settings.TELEGRAM_WEBHOOK_SECRET` (a secret chosen by us and registered with
 Telegram's `setWebhook` call, not the bot API token itself — Telegram's own
@@ -679,7 +679,7 @@ expired and unconsumed, unlike an `ApprovalRequest` or `PersonalAccessToken`)
 | # | Branch | Contents |
 |---|---|---|
 | 1 | `feat/mvp9-channel-foundation` | **Done (2026-07-13, merged to main `12ad4f9`).** `integrations` app scaffold (Telegram-only); `core/channels.py` (`ChannelPrincipal`, `request_channel`, `is_low_trust`, `scoped_for_actor`); `PersonalAccessToken` model + migration (`accounts`); `PersonalAccessTokenAuthentication` (`accounts`), explicitly allowlisted (never global) onto exactly the assistant/agents/approvals view classes named in §1, each with `PersonalAccessTokenAuthentication` ordered before `JWTAuthentication`; PAT mint/list/revoke endpoints (`accounts`); every `for_actor()` call in those allowlisted views routed through `scoped_for_actor()`, with each view's existing "workspace required" validation updated to skip that requirement for low-trust channels; `approvals.services` channel restriction on `approve_request`/`reject_request` + tests; `Message.channel` field + migration + stamping threaded through both the user-message and assistant-reply persistence paths in `assistant/services.py`; import-linter contracts. 3 rounds of Codex code review, 2 real P2 fixes. |
-| 2 | `feat/mvp9-cli-channel` | **Done (2026-07-13, merged to main `6d69147`).** CLI client script (`integrations/cli/jarvis_cli.py`); `create_dev_pat` management command; tests exercising a PAT-authenticated request against the existing chat/agents/approvals endpoints (including a request that omits `workspace` entirely, and the negative case: a PAT-authenticated approve/reject attempt is rejected). 4 rounds of Codex code review, 4 real P2 fixes (ambiguous workspace-name match, missing `client_local_date`, a whitespace-mutation bug, a missing `DEBUG` gate). |
+| 2 | `feat/mvp9-cli-channel` | **Done (2026-07-13, merged to main `6d69147`).** CLI client script (`integrations/cli/friday_cli.py`); `create_dev_pat` management command; tests exercising a PAT-authenticated request against the existing chat/agents/approvals endpoints (including a request that omits `workspace` entirely, and the negative case: a PAT-authenticated approve/reject attempt is rejected). 4 rounds of Codex code review, 4 real P2 fixes (ambiguous workspace-name match, missing `client_local_date`, a whitespace-mutation bug, a missing `DEBUG` gate). |
 | 3 | `feat/mvp9-telegram-bot` | **Done (2026-07-14, merged to main `db00dee`).** `TelegramLinkCode`/`LinkedTelegramChat` models + migration; link-code mint endpoint; link-status/unlink endpoints; webhook view (secret verification, `chat.type == "private"` check, fast-ack, enqueue); `telegram_client.py` (mockable HTTP wrapper); `process_telegram_update` Celery task (link flow + relay flow); `sweep_expired_link_codes` periodic task + beat wiring; `register_telegram_webhook` management command; `.env.example` additions; tests (webhook secret rejection, group-chat rejection, link-code consume/expire/reuse, link-status/unlink, relay-through-existing-pipeline, `Message.channel="telegram"` stamped correctly, no synchronous gateway call inside the webhook request). 4 rounds of Codex code review: round 1 escalated 1 new P1 to the user (relay-time link revalidation) + 1 real P2 (throttling); round 2, 1 real P2 (link flow bypassed the audited `create_conversation` service); round 3, 1 real P2 (link-code consumption not revalidating access the same way relay already did); round 4, 2 real P2s (webhook accepting traffic with no bot token, unbounded outbound HTTP call) — approved directly by the user without a 5th round. A recurring `update_id`-deduplication finding was correctly recognized each time as a re-raise of an already-decided, documented scope exclusion. |
 | 4 | `feat/mvp9-frontend-settings` | **Done (2026-07-14, merged to main `65ea9fa`).** Integrations settings UI (§3): token list/create/revoke, Telegram link-code request + status + unlink; frontend types/BFF routes/component tests. 4 rounds of Codex code review, all P2s, all fixed: raw PAT token retained in list state after banner dismissal; a link-code response race after a mid-flight workspace switch; the same race pattern in the Unlink flow; the reveal banner's "Copied" state carrying over to a newly created token — the user was consulted directly after the third consecutive round with a new finding and chose to run one more round before merging. |
 | 5 | `feat/mvp9-e2e-docs` | **Done (2026-07-14, merged to main `7780919`).** Playwright e2e (PAT-authenticated chat round trip against the real Docker stack, including the channel-restriction invariant proven live: a PAT-authenticated approve attempt 403s, the same request approved over the web channel 200s; Telegram flow via real webhook POSTs against the real backend, asserted on DB-observable state — see Risks for the accepted one-real-outbound-call trade-off); `docs/integrations/README.md` fleshed out from a stub into a real guide; `MASTER_PLAN.md` new §Y section + roadmap line. Codex code review: round 1, 0 findings, direct APPROVE. |

@@ -49,7 +49,7 @@ def user_with_role(workspace, role, email):
 def repo(workspace):
     return HarnessRepo.objects.create(
         workspace=workspace,
-        name="jarvis-os",
+        name="friday",
         git_url="git@example.com:x/y.git",
         enabled=True,
         test_command="pytest -q",
@@ -147,7 +147,7 @@ class TestCreateHarnessImplementationJob:
     ):
         """Phase 3 branch 5 (2026-09-27 audit): the ADR-004 hard block fails
         closed -- with no identifiers configured the guard can't recognize
-        Jarvis's own repo, so nothing is allowed through."""
+        Friday's own repo, so nothing is allowed through."""
         settings.HARNESS_SELF_REPO_IDENTIFIERS = []
         with pytest.raises(HarnessInvalidTransition):
             create_harness_implementation_job(
@@ -211,7 +211,7 @@ class TestCreateHarnessImplementationJob:
             workspace=workspace, actor=owner, repo=repo, goal="fix the bug"
         )
         original_url = job.repo_git_url
-        repo.git_url = "git@github.com:akin941/jarvis-os.git"
+        repo.git_url = "git@github.com:akin941/F.R.I.D.A.Y..git"
         repo.save(update_fields=["git_url"])
         job.refresh_from_db()
         assert job.repo_git_url == original_url
@@ -560,7 +560,7 @@ def test_concurrent_cancel_and_approve_gate_a_do_not_deadlock(monkeypatch):
     WorkspaceMember.objects.create(workspace=workspace, user=admin, role=WorkspaceMember.Role.ADMIN)
     repo = HarnessRepo.objects.create(
         workspace=workspace,
-        name="jarvis-os",
+        name="friday",
         git_url="git@example.com:x/y.git",
         enabled=True,
         test_command="pytest -q",

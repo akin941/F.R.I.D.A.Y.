@@ -1,9 +1,9 @@
-# CLAUDE.md — Jarvis OS Development Rules
+# CLAUDE.md — Friday OS Development Rules
 
-Jarvis OS is a **personal-first** Personal AI Operating System + a platform
+Friday OS is a **personal-first** Personal AI Operating System + a platform
 core that workplaces can integrate with. Workplace products are **not**
-module packs built inside Jarvis: they are independent external installations
-(ADR-006). Jarvis's future contact with them is an external-client relationship
+module packs built inside Friday: they are independent external installations
+(ADR-006). Friday's future contact with them is an external-client relationship
 only — an MCP client consuming an external installation's MCP-compatible tools
 on a user's behalf (read-only first, writes behind the approval gate) — and,
 long term, a fleet layer monitoring multiple external installations (MASTER_PLAN §P). "OS"
@@ -52,7 +52,7 @@ Backend tooling is `uv` (Python 3.12); run backend commands as `uv run ...` from
 ## Conventions
 
 - Conventional Commits (`feat:`, `fix:`, `chore:`, `docs:`, `test:`).
-- Branches: `feat/mvpX-<topic>` (legacy MVP track) / `feat/pN-<topic>` (Jarvis 2.0
+- Branches: `feat/mvpX-<topic>` (legacy MVP track) / `feat/pN-<topic>` (Friday 2.0
   phases); `main` is protected — never commit to it directly.
 - Secrets only via env; update `.env.example` when adding config, never real values.
 - Prompt packs live in `docs/prompts/` (masters + per-MVP / per-phase briefs); ADRs in
@@ -61,7 +61,7 @@ Backend tooling is `uv` (Python 3.12); run backend commands as `uv run ...` from
   subagent running **Sonnet 5** before merge (the implementing model never reviews
   its own work); findings are fixed and re-reviewed until the verdict is APPROVE.
   **Codex CLI is not used in this repo's development workflow** (since
-  2026-09-27). This is about how Jarvis is built — the `harness` product's own
+  2026-09-27). This is about how Friday is built — the `harness` product's own
   cross-vendor reviewer (Codex CLI via `CODEX_API_KEY`) is a separate matter.
 - MCPs/external tools require the allowlist + manifest process
   (`docs/security/mcp-governance.md`) before installation.

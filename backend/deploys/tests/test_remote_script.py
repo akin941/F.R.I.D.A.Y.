@@ -1,4 +1,4 @@
-"""The real forced-command script (`deploy/remote/jarvis-deploy.sh`) under
+"""The real forced-command script (`deploy/remote/friday-deploy.sh`) under
 pytest -- the `harness/tests/test_write_mode_wrapper.py` pattern: a throwaway
 origin + app checkout under `tmp_path`, real `git`, a stub `docker` first on
 the script's PATH recording every call, and the script's constants rewritten
@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-SCRIPT = Path(__file__).resolve().parents[3] / "deploy" / "remote" / "jarvis-deploy.sh"
+SCRIPT = Path(__file__).resolve().parents[3] / "deploy" / "remote" / "friday-deploy.sh"
 
 pytestmark = pytest.mark.skipif(
     shutil.which("git") is None or shutil.which("bash") is None,
@@ -95,10 +95,10 @@ class Env:
 
         script = SCRIPT.read_text()
         script = script.replace(
-            "readonly CONFIG_DIR=/etc/jarvis-deploy/apps", f"readonly CONFIG_DIR={self.config_dir}"
+            "readonly CONFIG_DIR=/etc/friday-deploy/apps", f"readonly CONFIG_DIR={self.config_dir}"
         )
         script = script.replace(
-            "readonly STATE_DIR=/var/lib/jarvis-deploy", f"readonly STATE_DIR={self.state_dir}"
+            "readonly STATE_DIR=/var/lib/friday-deploy", f"readonly STATE_DIR={self.state_dir}"
         )
         script = script.replace(
             "readonly REQUIRE_ROOT_OWNED_CONFIG=1", "readonly REQUIRE_ROOT_OWNED_CONFIG=0"
@@ -109,7 +109,7 @@ class Env:
             "/usr/local/sbin:",
         )
         assert script.count(str(self.config_dir)) == 1
-        self.script = tmp_path / "jarvis-deploy.sh"
+        self.script = tmp_path / "friday-deploy.sh"
         self.script.write_text(script)
         self.script.chmod(0o755)
 

@@ -1,12 +1,12 @@
-"""The closed grammar of what Jarvis may ever send to a deploy target
+"""The closed grammar of what Friday may ever send to a deploy target
 (ADR-010 decision 7, brief D10) and the field-level checks of a
 `DeployTarget`. Pure functions, no Django models: the serializers, the
 services, the SSH client and the tests all share one definition, and the
-remote forced-command script (`deploy/remote/jarvis-deploy.sh`) enforces the
+remote forced-command script (`deploy/remote/friday-deploy.sh`) enforces the
 same grammar on the other end -- a mismatch between the two ends is a bug
 the remote-script tests catch.
 
-Allowlist on both ends: Jarvis sends only `<verb> <remote_app> [<sha>]`,
+Allowlist on both ends: Friday sends only `<verb> <remote_app> [<sha>]`,
 verbs `status|deploy|health|rollback`, the SHA 40 lowercase hex characters,
 the app name `[a-z0-9][a-z0-9-]{0,62}`.
 """
@@ -26,7 +26,7 @@ SHA_VERBS = frozenset({VERB_DEPLOY, VERB_ROLLBACK})
 
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 APP_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,62}$")
-# A git branch name Jarvis will ever store or show: conservative subset of
+# A git branch name Friday will ever store or show: conservative subset of
 # git-check-ref-format (no `..`, no leading `-` or `/`, no `@{`, no spaces).
 BRANCH_RE = re.compile(r"^(?![-/.])(?!.*\.\.)(?!.*//)(?!.*@\{)[A-Za-z0-9._/-]{1,200}(?<![/.])$")
 # A POSIX-ish account name (the dedicated deploy user on the VPS).

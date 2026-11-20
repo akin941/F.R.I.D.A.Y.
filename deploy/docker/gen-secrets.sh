@@ -34,7 +34,13 @@ has_key DJANGO_SECRET_KEY || append DJANGO_SECRET_KEY "$(random_hex 32)"
 has_key REDIS_PASSWORD || append REDIS_PASSWORD "$(random_hex 24)"
 # BFF <-> Django shared secret (Phase 4 branch 2): lets the daily stack's
 # frontend container state the browser's IP (LAN gating for PIN pairing).
-has_key JARVIS_BFF_SHARED_SECRET || append JARVIS_BFF_SHARED_SECRET "$(random_hex 32)"
+# An install from before the Jarvis -> Friday rename (2026-11-20) has the
+# value under the legacy JARVIS_ name: carry it over so the BFF and Django
+# keep agreeing (docs/runbooks/rename-jarvis-to-friday.md).
+if ! has_key FRIDAY_BFF_SHARED_SECRET && has_key JARVIS_BFF_SHARED_SECRET; then
+    append FRIDAY_BFF_SHARED_SECRET "$(sed -n 's/^JARVIS_BFF_SHARED_SECRET=//p' "$ENV_FILE" | tail -n 1)"
+fi
+has_key FRIDAY_BFF_SHARED_SECRET || append FRIDAY_BFF_SHARED_SECRET "$(random_hex 32)"
 
 if ! has_key POSTGRES_PASSWORD; then
     # POSTGRES_PASSWORD only takes effect when the data volume is first
@@ -44,6 +50,8 @@ if ! has_key POSTGRES_PASSWORD; then
     # value for an existing volume and say how to rotate it.
     if command -v docker >/dev/null 2>&1 \
         && docker volume inspect jarvis-os_postgres-data >/dev/null 2>&1; then
+        # Legacy volume, user and default password from before the rename
+        # (2026-11-20): the volume name is pinned in compose.yml.
         append POSTGRES_PASSWORD jarvis
         cat >&2 <<'EOF'
 secrets: WARNING -- an existing Postgres volume (jarvis-os_postgres-data)

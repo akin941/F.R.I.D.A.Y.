@@ -45,7 +45,7 @@ def fake_provider():
 @pytest.fixture
 def briefing_prompt():
     template = PromptTemplate.objects.create(
-        name="jarvis_harness_briefing", purpose="harness.briefing"
+        name="friday_harness_briefing", purpose="harness.briefing"
     )
     version = PromptVersion.objects.create(
         template=template, version=1, content="Summarize the transcript."
@@ -69,7 +69,7 @@ def workspace(owner):
 def repo(workspace):
     return HarnessRepo.objects.create(
         workspace=workspace,
-        name="jarvis-os",
+        name="friday",
         git_url="git@example.com:x/y.git",
         enabled=True,
     )

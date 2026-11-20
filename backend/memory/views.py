@@ -195,5 +195,5 @@ class MemoryExportView(APIView):
         )
         # Exports include private content; they must never be cached anywhere.
         response["Cache-Control"] = "no-store"
-        response["Content-Disposition"] = 'attachment; filename="jarvis-memories.json"'
+        response["Content-Disposition"] = 'attachment; filename="friday-memories.json"'
         return response

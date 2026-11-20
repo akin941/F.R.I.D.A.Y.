@@ -100,7 +100,7 @@ the authoritative description; the operator-facing consequences are:
   the produced diff for the literal key values before review — a match
   fails the job as `secret_leak`.
 - **Cost/usage come from one wrapper-framed line only**
-  (`JARVIS_HARNESS_CLI_OUTPUT_V1 <base64>`, emitted after the final
+  (`FRIDAY_HARNESS_CLI_OUTPUT_V1 <base64>`, emitted after the final
   quiescence); a missing/malformed frame fails the job as `runner_error`.
 - **`HARNESS_SELF_REPO_IDENTIFIERS` is required.** While it is empty every
   implementation job is refused (ADR-004 self-modification guard fails

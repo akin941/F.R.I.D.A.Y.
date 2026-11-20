@@ -33,7 +33,7 @@ def setup_ai(settings):
         model_id="fake-1",
         priority=0,
     )
-    for name, purpose in [("jarvis_system", "chat"), ("jarvis_router_intent", "router.intent")]:
+    for name, purpose in [("friday_system", "chat"), ("friday_router_intent", "router.intent")]:
         template = PromptTemplate.objects.create(name=name, purpose=purpose)
         version = PromptVersion.objects.create(template=template, version=1, content="x")
         template.active_version = version
@@ -79,12 +79,12 @@ def send(raw, *turns, pin=None):
     ]
     client = APIClient()
     client.credentials(HTTP_AUTHORIZATION=f"Bearer {raw}")
-    extra = {"HTTP_X_JARVIS_CONVERSATION_ID": str(pin)} if pin else {}
+    extra = {"HTTP_X_FRIDAY_CONVERSATION_ID": str(pin)} if pin else {}
     response = client.post(
-        COMPLETIONS, {"model": "jarvis", "messages": messages}, format="json", **extra
+        COMPLETIONS, {"model": "friday", "messages": messages}, format="json", **extra
     )
     assert response.status_code == 200, response.content
-    conversation = Conversation.objects.get(pk=response["X-Jarvis-Conversation-Id"])
+    conversation = Conversation.objects.get(pk=response["X-Friday-Conversation-Id"])
     return conversation, response.json()["choices"][0]["message"]["content"]
 
 
@@ -205,6 +205,22 @@ def test_pin_appends_to_the_named_conversation(owner, workspace, token):
     assert not FacadeConversation.objects.exists()  # pins bypass the mapping
 
 
+def test_pre_rename_pin_header_is_still_accepted(owner, workspace, token):
+    """Jarvis -> Friday (2026-11-20): X-Jarvis-Conversation-Id still pins."""
+    web_conversation = Conversation.objects.create(workspace=workspace, created_by=owner)
+    client = APIClient()
+    client.credentials(HTTP_AUTHORIZATION=f"Bearer {token}")
+    response = client.post(
+        COMPLETIONS,
+        {"model": "friday", "messages": [{"role": "user", "content": "legacy pin"}]},
+        format="json",
+        HTTP_X_JARVIS_CONVERSATION_ID=str(web_conversation.id),
+    )
+    assert response.status_code == 200, response.content
+    assert response["X-Friday-Conversation-Id"] == str(web_conversation.id)
+    assert [c for r, c in history(web_conversation) if r == "user"] == ["legacy pin"]
+
+
 def test_pinning_another_workspaces_conversation_is_404(owner, token):
     stranger = register_user(email="stranger@test.dev", password=PASSWORD, name="Stranger")
     theirs = Conversation.objects.create(
@@ -214,9 +230,9 @@ def test_pinning_another_workspaces_conversation_is_404(owner, token):
     client.credentials(HTTP_AUTHORIZATION=f"Bearer {token}")
     response = client.post(
         COMPLETIONS,
-        {"model": "jarvis", "messages": [{"role": "user", "content": "x"}]},
+        {"model": "friday", "messages": [{"role": "user", "content": "x"}]},
         format="json",
-        HTTP_X_JARVIS_CONVERSATION_ID=str(theirs.id),
+        HTTP_X_FRIDAY_CONVERSATION_ID=str(theirs.id),
     )
     assert response.status_code == 404
     assert not theirs.messages.exists()
@@ -235,9 +251,9 @@ def test_pinning_the_owners_other_workspace_is_404(owner, token):
     client.credentials(HTTP_AUTHORIZATION=f"Bearer {token}")
     response = client.post(
         COMPLETIONS,
-        {"model": "jarvis", "messages": [{"role": "user", "content": "x"}]},
+        {"model": "friday", "messages": [{"role": "user", "content": "x"}]},
         format="json",
-        HTTP_X_JARVIS_CONVERSATION_ID=str(firm_conversation.id),
+        HTTP_X_FRIDAY_CONVERSATION_ID=str(firm_conversation.id),
     )
     assert response.status_code == 404
 
@@ -247,9 +263,9 @@ def test_malformed_pin_is_400(token):
     client.credentials(HTTP_AUTHORIZATION=f"Bearer {token}")
     response = client.post(
         COMPLETIONS,
-        {"model": "jarvis", "messages": [{"role": "user", "content": "x"}]},
+        {"model": "friday", "messages": [{"role": "user", "content": "x"}]},
         format="json",
-        HTTP_X_JARVIS_CONVERSATION_ID="not-a-uuid",
+        HTTP_X_FRIDAY_CONVERSATION_ID="not-a-uuid",
     )
     assert response.status_code == 400
 

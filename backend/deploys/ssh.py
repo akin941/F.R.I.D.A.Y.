@@ -42,7 +42,7 @@ from deploys.validation import build_remote_command
 OUTPUT_MAX_CHARS = 16 * 1024
 # The known_hosts entry name; `HostKeyAlias` makes ssh look the key up under
 # it whatever host/port is dialled, so the file never needs `[host]:port`.
-HOST_KEY_ALIAS = "jarvis-deploy-target"
+HOST_KEY_ALIAS = "friday-deploy-target"
 # ssh's own exit status for a connection-level failure (auth, host key,
 # network). The remote script never exits 255.
 SSH_TRANSPORT_EXIT = 255
@@ -173,7 +173,7 @@ def run_verb(target, verb, sha=None, *, timeout):
     fields = target if isinstance(target, dict) else vars(target)
     remote_command = build_remote_command(verb, fields["remote_app"], sha)
     key_path = resolve_key_path()
-    with tempfile.TemporaryDirectory(prefix="jarvis-deploy-ssh-") as home:
+    with tempfile.TemporaryDirectory(prefix="friday-deploy-ssh-") as home:
         known_hosts = os.path.join(home, "known_hosts")
         fd = os.open(known_hosts, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
         with os.fdopen(fd, "w") as handle:

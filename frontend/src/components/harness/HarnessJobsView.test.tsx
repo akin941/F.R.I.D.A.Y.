@@ -91,7 +91,7 @@ describe("HarnessJobsView", () => {
     // No raw repo-id input any more -- repos are picked from the registry.
     expect(screen.queryByLabelText("Depo kimliği")).not.toBeInTheDocument();
     await userEvent.click(await screen.findByRole("combobox", { name: "Depo" }));
-    await userEvent.click(await screen.findByRole("option", { name: "jarvis" }));
+    await userEvent.click(await screen.findByRole("option", { name: "friday" }));
     await userEvent.type(screen.getByLabelText("Hedef"), "Audit the auth module");
     await userEvent.click(screen.getByRole("button", { name: "İşi başlat" }));
 
@@ -170,7 +170,7 @@ describe("HarnessJobsView", () => {
       "aria-selected",
       "true",
     );
-    expect(await screen.findByRole("combobox", { name: "Depo" })).toHaveTextContent("jarvis");
+    expect(await screen.findByRole("combobox", { name: "Depo" })).toHaveTextContent("friday");
 
     await userEvent.click(screen.getByRole("button", { name: "Uygulama iste" }));
 

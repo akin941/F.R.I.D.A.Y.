@@ -7,6 +7,8 @@ from urllib.parse import urlsplit, urlunsplit
 import environ
 from django.core.exceptions import ImproperlyConfigured
 
+from core import legacy_env
+
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
 
 env = environ.Env(DJANGO_DEBUG=(bool, False))
@@ -72,7 +74,7 @@ INSTALLED_APPS = [
     # current one; `flushexpiredtokens` runs from beat (config/celery.py).
     "rest_framework_simplejwt.token_blacklist",
     "corsheaders",
-    # Jarvis kernel
+    # Friday kernel
     "core",
     "accounts",
     "workspaces",
@@ -136,6 +138,8 @@ ASGI_APPLICATION = "config.asgi.application"
 # Default points at the Compose postgres (host port 5433) with the password
 # `make secrets` generated into deploy/docker/.env -- never a committed one.
 _compose_pg_password = _compose_secret("POSTGRES_PASSWORD")
+# The Compose database keeps its pre-rename user/name `jarvis` (an existing
+# data volume was initialized with them; see deploy/docker/compose.yml).
 _DEFAULT_DATABASE_URL = (
     f"postgres://jarvis:{_compose_pg_password}@localhost:5433/jarvis"
     if _compose_pg_password
@@ -326,10 +330,11 @@ DEVICE_PAIRING_NETWORKS = [
 ]
 # Django only ever sees the BFF's address. The BFF forwards the browser's IP
 # (taken ONLY from its TRUSTED_CLIENT_IP_HEADER, set by the owner's reverse
-# proxy) as X-Jarvis-Client-IP together with X-Jarvis-BFF-Key; Django
+# proxy) as X-Friday-Client-IP together with X-Friday-BFF-Key; Django
 # ignores the IP header unless the key matches this shared secret. Empty =
 # no client IP is ever trusted.
-JARVIS_BFF_SHARED_SECRET = env("JARVIS_BFF_SHARED_SECRET", default="")
+# Falls back to the deprecated pre-rename JARVIS_BFF_SHARED_SECRET.
+FRIDAY_BFF_SHARED_SECRET = legacy_env.getenv("FRIDAY_BFF_SHARED_SECRET")
 # Without a validated client IP (no trusted proxy, e.g. bare `next start`),
 # a PIN is accepted only when this is on ("LAN gating off"). Dev default
 # true (config/settings/dev.py), production default false: pair with a
@@ -353,7 +358,7 @@ ENROLL_RATE_GLOBAL = env("ENROLL_RATE_GLOBAL", default="60/h")
 # PAT of kind `openai`: chat only, low trust. Per token: FACADE_RATE requests
 # ("<count>/<n><s|m|h|d>"), at most FACADE_MAX_CONCURRENT_STREAMS completions
 # in flight (a slot expires after FACADE_STREAM_SLOT_TTL_SECONDS if a worker
-# dies mid-stream), and a new user turn (or, for `jarvis-lite`, the whole
+# dies mid-stream), and a new user turn (or, for `friday-lite`, the whole
 # message list) of at most FACADE_MAX_REQUEST_CHARS characters.
 FACADE_RATE = env("FACADE_RATE", default="20/min")
 FACADE_MAX_CONCURRENT_STREAMS = env.int("FACADE_MAX_CONCURRENT_STREAMS", default=2)
@@ -469,7 +474,7 @@ APPROVAL_REQUEST_TTL_HOURS = env.int("APPROVAL_REQUEST_TTL_HOURS", default=24)
 
 # Manifests are code (`connectors/manifests/`); these are only the runtime
 # bounds. Server URLs and credentials are never settings: each manifest names
-# its own env vars (URL on the Jarvis side, credential in the sidecar only).
+# its own env vars (URL on the Friday side, credential in the sidecar only).
 # A read runs in the chat request thread, bounded by this timeout (D4).
 CONNECTOR_READ_TIMEOUT_SECONDS = env.int("CONNECTOR_READ_TIMEOUT_SECONDS", default=10)
 # What survives of a read (text + structuredContent), in characters -- the
@@ -633,23 +638,23 @@ HARNESS_LEAKED_CONTAINER_RECOVERY_GRACE_SECONDS = env.int(
     "HARNESS_LEAKED_CONTAINER_RECOVERY_GRACE_SECONDS", default=300
 )
 
-# Per-agent container image (brief: "a single Jarvis-owned Dockerfile per
+# Per-agent container image (brief: "a single Friday-owned Dockerfile per
 # supported agent, pinned to a specific, recorded base-image digest --
 # never `latest`" -- see harness/docker/*.Dockerfile). Image *tags* are
 # configured here rather than hardcoded so a reviewed digest bump
 # (the brief's own "reviewed bump/rebuild cadence") is an env change, not
 # a code change.
 HARNESS_IMAGE_CLAUDE_CODE = env(
-    "HARNESS_IMAGE_CLAUDE_CODE", default="jarvis-harness-claude-code:unbuilt"
+    "HARNESS_IMAGE_CLAUDE_CODE", default="friday-harness-claude-code:unbuilt"
 )
-HARNESS_IMAGE_CODEX_CLI = env("HARNESS_IMAGE_CODEX_CLI", default="jarvis-harness-codex-cli:unbuilt")
+HARNESS_IMAGE_CODEX_CLI = env("HARNESS_IMAGE_CODEX_CLI", default="friday-harness-codex-cli:unbuilt")
 
 # Docker network implementing the container policy's egress allowlist
 # (brief: "no general internet access... enforced via Docker network
 # policy"). Provisioning the actual restricted-egress network is runner
 # setup, not application code -- this only names which network a launched
 # container joins.
-HARNESS_DOCKER_NETWORK = env("HARNESS_DOCKER_NETWORK", default="jarvis-harness-egress")
+HARNESS_DOCKER_NETWORK = env("HARNESS_DOCKER_NETWORK", default="friday-harness-egress")
 
 # Resource limits applied to every launched container (brief: "a runaway or
 # hostile process inside the container cannot exhaust the runner").
@@ -674,12 +679,12 @@ HARNESS_GIT_SSH_KEY_PATH = env("HARNESS_GIT_SSH_KEY_PATH", default="")
 # --- Harness implementation jobs (Phase 3 branch 2, brief §boundary) ---
 
 # Self-modification hard-block (ADR-004: "agents can never modify their own
-# definitions or permissions"): remote URLs recognized as "this Jarvis
+# definitions or permissions"): remote URLs recognized as "this Friday
 # installation itself", compared via core.repo_identity's canonical
 # normalizer, not exact string match -- so the https/ssh/scp-like forms of
 # the same remote are all correctly recognized. Empty by default -- and since
 # Phase 3 branch 5 an empty list REFUSES every implementation job (fail
-# closed): the guard cannot tell whether a repo is Jarvis itself until the
+# closed): the guard cannot tell whether a repo is Friday itself until the
 # owner configures this installation's own remote(s) here.
 HARNESS_SELF_REPO_IDENTIFIERS = [
     value.strip()

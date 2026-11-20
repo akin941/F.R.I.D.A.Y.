@@ -2,7 +2,7 @@
 brief D10/D13): every terminal state -- rollbacks, refusals and
 cancellations included -- gets one audit row and one `work_log` memory.
 
-Both carry Jarvis-authored facts only: ids, SHAs, the closed-vocabulary
+Both carry Friday-authored facts only: ids, SHAs, the closed-vocabulary
 error code and the owner-authored target name/environment. Never remote
 output, never a commit title (repo text), never anything from a payload
 beyond those owner-authored labels.

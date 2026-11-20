@@ -1,4 +1,4 @@
-# Jarvis 2.0 — Kişisel + Ajans İşletim Sistemi (Vizyon Mimarisi ve Yol Haritası)
+# Friday 2.0 — Kişisel + Ajans İşletim Sistemi (Vizyon Mimarisi ve Yol Haritası)
 
 > **Durum: ONAYLANDI (2026-07-17)** — bağlayıcı hali **ADR-008** +
 > MASTER_PLAN §AA'dır. Onayla birlikte dört ek gereksinim işlendi:
@@ -12,7 +12,7 @@
 
 ## 0. Vizyonun özeti
 
-Jarvis, kullanıcının hayatının merkezinde duran gerçek bir asistana dönüşür:
+Friday, kullanıcının hayatının merkezinde duran gerçek bir asistana dönüşür:
 
 1. **Çoklu-firma yönetimi** — her firma bir workspace: kendi bağlamı,
    repoları, servisleri, geçmişi. "ADİA'ya en son ne yaptık?" cevaplanabilir.
@@ -31,7 +31,7 @@ Pazarlıksız kısıtlar: ADR-004 onay kapıları, self-mod koruması, scope
 disiplini her mimaride korunur; deploy otomasyonunda **çift onay**; olgun
 araç varken sıfırdan yazılmaz; her faz sonunda **kullanılabilir** bir şey.
 
-**Tek-efendi sistemi (ADR-008 k.2, onayla eklendi):** Jarvis yalnız
+**Tek-efendi sistemi (ADR-008 k.2, onayla eklendi):** Friday yalnız
 sahibine hizmet eder. Çok-kullanıcılı SaaS deseni (mail ile kayıt, giriş
 formu, davet/üyelik akışları) kaldırılır; kimlik = cihaz güveni (lokal
 ağda cihaz token'ı/PIN, dışarıdan tek güçlü anahtar) — Faz 4'te login
@@ -48,12 +48,12 @@ onaylanamıyor — Faz 0'da düzeltilir.)
 
 ## 1. Ana mimari karar: A / B / C analizi
 
-### Seçenek A — Jarvis çekirdek kalır; Open WebUI ön yüz; harness yan servis
+### Seçenek A — Friday çekirdek kalır; Open WebUI ön yüz; harness yan servis
 
 **Ne korunur:** Backend'in tamamı. **Ne atılır:** Next.js frontend'in çoğu.
 
 **Değerlendirme:** Open WebUI (ve LibreChat) OpenAI-uyumlu bir chat API'sine
-bağlanmak üzere tasarlanmış **chat-first** ürünlerdir. Jarvis'in günlük
+bağlanmak üzere tasarlanmış **chat-first** ürünlerdir. Friday'nin günlük
 değerinin kalbi olan akışlar — onay kutusu (ApprovalRequest kararı), task
 draft confirm kartları, agent adım görünürlüğü + kill switch, harness
 brifing/plan/deploy onayları — bu ürünlerin veri modelinde yoktur. İki çıkış
@@ -69,9 +69,9 @@ var, ikisi de kötü:
 
 Ayrıca kritik bir kural çelişkisi: ADR-004 kararları **yüksek-güven kanal**
 gerektirir (MVP 9 kanal-güven modeli: web login dışındaki her kanal düşük
-güven, ApprovalRequest **karar veremez**). Open WebUI, Jarvis'e API ile
+güven, ApprovalRequest **karar veremez**). Open WebUI, Friday'ye API ile
 bağlanan bir istemci olarak tanımı gereği düşük-güven kanaldır → onaylar
-yine ayrı bir Jarvis UI'sinde verilmek zorunda kalır → "tek arayüz" vaadi
+yine ayrı bir Friday UI'sinde verilmek zorunda kalır → "tek arayüz" vaadi
 zaten çöker.
 
 **Sonuç: birincil arayüz olarak reddedilir.** Ama tamamen çöpe de gitmez —
@@ -91,11 +91,11 @@ arabayı bagaja göre tasarlamaktır. Kazanım yok, risk devasa.
 
 **Sonuç: reddedilir.**
 
-### Seçenek C (ÖNERİ) — Jarvis = kontrol düzlemi; harness = yeni kernel app; UI = kendi arayüzünde odaklı yenileme
+### Seçenek C (ÖNERİ) — Friday = kontrol düzlemi; harness = yeni kernel app; UI = kendi arayüzünde odaklı yenileme
 
 Üçüncü yol, mevcut mimarinin zaten işaret ettiği yerdir:
 
-- **Jarvis çekirdeği kontrol düzlemi (control plane) olarak kalır:** kimlik,
+- **Friday çekirdeği kontrol düzlemi (control plane) olarak kalır:** kimlik,
   workspace ekseni (ADR-001), gateway (ADR-003), onay kapısı (ADR-004),
   hafıza (ADR-005), audit. Bunlar tam da harness'in ihtiyaç duyduğu şeyler —
   ADR-003 bugünkü haliyle bile "**external CLI backends' usage reports**"
@@ -143,7 +143,7 @@ yok.
 | `integrations` (788/1052) | **KORU** | Telegram + CLI kanalları; cephe endpoint'i üçüncü kanal olarak eklenir |
 | Frontend kabuk/BFF/auth/SSE (~8.1k) | **KORU altyapı** | BFF deseni, `sse.ts`, api route'ları kalır |
 | Frontend görünümler (chat, shell, sayfalar) | **UYARLA/YENİLE** | "Amatör ve buglı" olan katman bu — Faz 4'te tasarım sistemi + bileşen yenileme; sıfırdan framework değişikliği YOK |
-| `voice` (JarvisOrb, VoiceView) + STT/TTS gateway temeli | **KORU (uykuda)** | MVP 12 dalları Faz 6'ya kayar; yazılan temel (Capability.STT/TTS, transcribe/synthesize, orb) durur, atılmaz |
+| `voice` (FridayOrb, VoiceView) + STT/TTS gateway temeli | **KORU (uykuda)** | MVP 12 dalları Faz 6'ya kayar; yazılan temel (Capability.STT/TTS, transcribe/synthesize, orb) durur, atılmaz |
 
 **Atılan:** pratikte hiçbir backend modülü atılmıyor. Atılan tek şey
 frontend'in *görsel katmanı* ve "voice'un sıradaki MVP olması" varsayımı
@@ -252,8 +252,8 @@ Celery worker'ın koştuğu her makine runner olabilir; ilk sürüm Mac.
 | **3. Harness v2 — implementasyon** | Onay kapısı #1 → worktree'de implementasyon → test → çapraz review → dal push (gated) | "X firmasına şu özelliği ekle" → onaylı, test edilmiş, review'lu dal |
 | **4. UI yenileme** | Kabuk + chat + harness konsolu + onay gelen kutusu redesign; kayıt/login yerine **cihaz-güveni kimliği** (LAN token/PIN + dış güçlü anahtar, signup kodu kaldırılır); OpenAI-uyumlu cephe endpoint'i | Her gün kullanılan profesyonel arayüz; istenirse Open WebUI ikincil istemci |
 | **5. Deploy + MCP** | Onay kapısı #2 + VPS deploy (allowlist); GitHub MCP; mail/takvim MCP; harici kurulum MCP istemcisi (kurulum MCP sunucusu sunduğunda); **Home Assistant köprüsü** (cihaz sürücüsü yazılmaz — lamba/klima/Wake-on-LAN HA üzerinden, onay kapısı arkasında); sosyal medya mevcut servis bağlantıları | Uçtan uca: istek → brifing → onay → kod → onay → canlıda; ev/cihaz kontrolü |
-| **6. Ses (eski MVP 12)** | Mic capture, faster-whisper STT, Piper TTS, **lokal wake-word** ("Hey Jarvis" — openWakeWord/Porcupine sınıfı, ses cihazdan çıkmaz, komut ancak wake-word sonrası işlenir), orb'un gerçek sese bağlanması | Sürekli dinleyen, tamamen lokal sesli Jarvis |
-| **6+. Görsel kimlik** | Animasyonlu, konuşan Jarvis arayüz katmanı (uykudaki orb temeli üzerine) — bilinçli olarak EN SON: altyapı çalışmadan görsel kabuk boş kostümdür | Jarvis-benzeri görsel deneyim |
+| **6. Ses (eski MVP 12)** | Mic capture, faster-whisper STT, Piper TTS, **lokal wake-word** ("Hey Friday" — openWakeWord/Porcupine sınıfı, ses cihazdan çıkmaz, komut ancak wake-word sonrası işlenir), orb'un gerçek sese bağlanması | Sürekli dinleyen, tamamen lokal sesli Friday |
+| **6+. Görsel kimlik** | Animasyonlu, konuşan Friday arayüz katmanı (uykudaki orb temeli üzerine) — bilinçli olarak EN SON: altyapı çalışmadan görsel kabuk boş kostümdür | Friday-benzeri görsel deneyim |
 
 Sıralama gerekçesi kullanıcının verdiği değer sırasıdır: önce
 hafıza+harness, sonra UI, en son ses. Hafıza harness'ten önce gelir çünkü

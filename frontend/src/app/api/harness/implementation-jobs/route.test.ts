@@ -9,7 +9,7 @@ vi.mock("next/headers", () => ({
 function cookieStore(accessToken?: string) {
   return {
     get: (name: string) =>
-      name === "jarvis_access" && accessToken ? { name, value: accessToken } : undefined,
+      name === "friday_access" && accessToken ? { name, value: accessToken } : undefined,
   };
 }
 

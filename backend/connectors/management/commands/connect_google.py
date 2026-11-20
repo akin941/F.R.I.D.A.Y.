@@ -96,7 +96,7 @@ def _handler(redirect):
             self.send_response(200)
             self.send_header("Content-Type", "text/plain; charset=utf-8")
             self.end_headers()
-            self.wfile.write(b"Jarvis: bu sekmeyi kapatabilirsin.\n")
+            self.wfile.write(b"Friday: bu sekmeyi kapatabilirsin.\n")
 
         def log_message(self, *args):  # the query string carries the code
             return

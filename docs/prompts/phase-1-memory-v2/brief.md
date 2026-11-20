@@ -17,7 +17,7 @@
 > implementation. (Phase-0 precedent: 3 rounds; this phase needed 5 —
 > branch 4's cross-workspace overlay and branch 2's private-conversation
 > flag were genuinely harder designs than anything in Phase 0.)
-> Parent decisions: ADR-008, `docs/VISION_JARVIS_2.md` §6-7, MASTER_PLAN §O/§F.
+> Parent decisions: ADR-008, `docs/VISION_FRIDAY_2.md` §6-7, MASTER_PLAN §O/§F.
 
 ## Goal / value
 
@@ -442,7 +442,7 @@ background-task suggestion for the fix.
   X" need without a graph store. Revisit only if multi-hop relational
   queries become a real, observed need.
 - **Carried forward (not shipped in Phase 1):**
-  - Owner core memory block — `docs/VISION_JARVIS_2.md` §6 (Phase 1 row)
+  - Owner core memory block — `docs/VISION_FRIDAY_2.md` §6 (Phase 1 row)
     named both an owner ("kişi") and a firm block; only the firm block
     shipped (branch 3).
   - Consolidation / distillation of memory (ADR-005 consequences; VISION

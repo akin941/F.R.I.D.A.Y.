@@ -20,7 +20,7 @@ Rules that make this safe (ADR-010 decision 7):
   cancelled nor retried.
 - Drift: the remote's live SHA must equal `expected_current_sha`, else
   `target_drifted` and nothing is touched. The remote repo must
-  canonicalize to the target's repo and never to Jarvis's own.
+  canonicalize to the target's repo and never to Friday's own.
 - Health: two consecutive passes of the remote `health` verb succeed;
   three consecutive failures fail; a window that elapses without two
   consecutive passes fails (fail closed). A failing `health_url` alone
@@ -66,7 +66,7 @@ S = DeployRun.Status
 E = DeployRun.ErrorCode
 
 # The remote script's exit codes for a verb it refused or failed BEFORE
-# changing anything live (deploy/remote/jarvis-deploy.sh): usage, refused
+# changing anything live (deploy/remote/friday-deploy.sh): usage, refused
 # (not an ancestor of the tracked branch, already live, bad config), build
 # failed with the previous checkout restored, remote unavailable (fetch),
 # and busy (another deploy holds the app's lock).
@@ -162,7 +162,7 @@ def _mutate(run_id, token, statuses, **changes):
 
 def _finish(run_id, token, statuses, status, error_code="", *, current_sha=None, output=None):
     """Terminal write + audit + work_log, fenced. `current_sha` (when not
-    None) is what Jarvis now believes is live on the target; "" means
+    None) is what Friday now believes is live on the target; "" means
     unknown -- a new request then needs a status refresh first."""
     with transaction.atomic():
         run = _fenced(run_id, token, statuses)

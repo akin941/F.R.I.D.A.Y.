@@ -11,8 +11,8 @@ set -euo pipefail
 
 here=$(cd "$(dirname "$0")" && pwd)
 root=$(cd "$here/../../.." && pwd)
-image=${DEPLOY_SMOKE_IMAGE:-jarvis-deploy-smoke:local}
-work=$(mktemp -d "${TMPDIR:-/tmp}/jarvis-deploy-smoke.XXXXXX")
+image=${DEPLOY_SMOKE_IMAGE:-friday-deploy-smoke:local}
+work=$(mktemp -d "${TMPDIR:-/tmp}/friday-deploy-smoke.XXXXXX")
 cid=""
 
 cleanup() {
@@ -24,7 +24,7 @@ cleanup() {
 trap cleanup EXIT
 
 docker build -q -t "$image" -f "$here/Dockerfile" "$root/deploy/remote" >/dev/null
-ssh-keygen -q -t ed25519 -N '' -C jarvis-deploy-smoke -f "$work/runner_key"
+ssh-keygen -q -t ed25519 -N '' -C friday-deploy-smoke -f "$work/runner_key"
 cid=$(docker run -d --rm \
     -e AUTHORIZED_KEY="$(cat "$work/runner_key.pub")" \
     -p 127.0.0.1::22 -p 127.0.0.1::8080 \

@@ -14,7 +14,7 @@ the same remote, and two different-looking spellings must never compare
 unequal where a guard depends on it (Phase 3 branch 2, round-2 MEDIUM
 finding, O-5). The first consumer remains the harness hard-block (ADR-004:
 "agents can never modify their own definitions or permissions"): a
-`HarnessRepo` whose remote resolves to this Jarvis installation's own repo
+`HarnessRepo` whose remote resolves to this Friday installation's own repo
 is refused for implementation and review jobs -- see
 `harness/repo_identity.py`, which re-exports these functions.
 """
@@ -90,8 +90,8 @@ def is_self_repo(git_url: str, *, self_repo_identifiers) -> bool:
     """`True` if `git_url` canonically matches any configured
     `HARNESS_SELF_REPO_IDENTIFIERS` entry. Both sides are normalized the
     same way, so a `HarnessRepo.git_url` registered as
-    `https://github.com/akin941/jarvis-os` correctly matches a configured
-    identifier of `git@github.com:akin941/jarvis-os.git`, and vice versa."""
+    `https://github.com/akin941/F.R.I.D.A.Y.` correctly matches a configured
+    identifier of `git@github.com:akin941/F.R.I.D.A.Y..git`, and vice versa."""
     canonical = canonicalize_git_url(git_url)
     return any(
         canonical == canonicalize_git_url(identifier) for identifier in self_repo_identifiers

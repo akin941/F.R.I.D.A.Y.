@@ -316,7 +316,7 @@ class HarnessImplementationJob(WorkspaceScopedModel, TimestampedModel):
     # git_url` at clone/push time (potentially hours later, across the
     # whole Gate A/implementation/review/Gate B wait) would silently pick
     # up whatever the row says NOW, letting a curator edit an
-    # already-approved job's target repo to Jarvis's own remote after the
+    # already-approved job's target repo to Friday's own remote after the
     # one-time guard already passed, with no second check anywhere to
     # catch it. Snapshotting makes the job permanently bound to what was
     # actually validated, the same immutability principle already applied
@@ -364,7 +364,7 @@ class HarnessImplementationJob(WorkspaceScopedModel, TimestampedModel):
     # The implementing CLI's own output (Phase 3 branch 6): read only from
     # the wrapper's post-quiescence frame, bounded at write time, stored
     # unmutated for audit/debugging. LOW-TRUST content -- the UI renders it
-    # fenced behind a disclosure, never as Jarvis's own words (R2).
+    # fenced behind a disclosure, never as Friday's own words (R2).
     raw_transcript = models.TextField(blank=True, default="")
     # The claim fence for `run_harness_push_job` (Codex code-review P1,
     # branch 2 round 3): a Celery redelivery, or `dispatch()` firing

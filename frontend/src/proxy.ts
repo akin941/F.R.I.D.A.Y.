@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
-import { SESSION_COOKIE } from "@/lib/cookie-names";
+import { hasSessionCookie } from "@/lib/cookie-names";
 
 const ENROLL_PATH = "/enroll";
 
@@ -27,7 +27,8 @@ function isShellPath(pathname: string) {
 }
 
 /**
- * Optimistic navigation guard only — `jarvis_session` is not a credential, it
+ * Optimistic navigation guard only — `friday_session` (or its pre-rename
+ * `jarvis_session`) is not a credential, it
  * just signals "the user probably has a session." Every Route Handler still
  * re-authorizes against the (HttpOnly) access-token cookie independently, so
  * a stale/missing session cookie here can only cause an extra redirect, never
@@ -38,7 +39,7 @@ function isShellPath(pathname: string) {
  */
 export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
-  const hasSession = request.cookies.has(SESSION_COOKIE);
+  const hasSession = hasSessionCookie(request.cookies);
 
   if (isShellPath(pathname) && !hasSession) {
     return NextResponse.redirect(new URL(ENROLL_PATH, request.url));

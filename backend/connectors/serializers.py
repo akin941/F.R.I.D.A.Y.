@@ -16,7 +16,7 @@ class BindingUpdateSerializer(serializers.Serializer):
 
 def serialize_binding(manifest, binding, workspace):
     """Manifest facts (code) + binding state (row). Pin statuses and server
-    identity are Jarvis bookkeeping; no server description, URL or
+    identity are Friday bookkeeping; no server description, URL or
     credential is ever part of this."""
     health = (binding.last_health if binding else {}) or {}
     return {

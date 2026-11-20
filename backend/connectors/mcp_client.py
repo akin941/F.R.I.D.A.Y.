@@ -1,5 +1,5 @@
 """The one sync facade over the official MCP Python SDK (ADR-010 decision 3,
-brief D1/D2). Every MCP operation Jarvis performs goes through here.
+brief D1/D2). Every MCP operation Friday performs goes through here.
 
 - **Sync over async, one loop per operation.** Django and Celery are sync;
   the SDK is async. Each operation runs inside its own `anyio.run()` and
@@ -54,7 +54,7 @@ logger = logging.getLogger(__name__)
 # broken or hostile.
 MAX_LIST_PAGES = 10
 
-CLIENT_INFO = Implementation(name="jarvis-os", version="1")
+CLIENT_INFO = Implementation(name="friday", version="1")
 
 
 class ConnectorError(Exception):

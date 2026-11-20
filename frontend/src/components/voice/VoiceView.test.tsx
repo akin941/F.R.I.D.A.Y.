@@ -52,13 +52,13 @@ describe("VoiceView", () => {
     );
 
     render(<VoiceView />);
-    expect(screen.getByRole("img", { name: "Jarvis boşta" })).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "Friday boşta" })).toBeInTheDocument();
 
-    await userEvent.type(screen.getByPlaceholderText("Jarvis'e yaz…"), "Merhaba Jarvis");
+    await userEvent.type(screen.getByPlaceholderText("Friday'ye yaz…"), "Merhaba Friday");
     await userEvent.click(screen.getByRole("button", { name: "Gönder" }));
 
     expect(await screen.findByText("Merhaba")).toBeInTheDocument();
-    expect(await screen.findByRole("img", { name: "Jarvis boşta" })).toBeInTheDocument();
+    expect(await screen.findByRole("img", { name: "Friday boşta" })).toBeInTheDocument();
   });
 
   it("returns the orb to idle and shows an error banner on a stream error", async () => {
@@ -77,12 +77,12 @@ describe("VoiceView", () => {
     );
 
     render(<VoiceView />);
-    await userEvent.type(screen.getByPlaceholderText("Jarvis'e yaz…"), "Merhaba Jarvis");
+    await userEvent.type(screen.getByPlaceholderText("Friday'ye yaz…"), "Merhaba Friday");
     await userEvent.click(screen.getByRole("button", { name: "Gönder" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "Şu anda yapılandırılmış bir yapay zeka sağlayıcısı yok. Lütfen daha sonra tekrar deneyin.",
     );
-    expect(await screen.findByRole("img", { name: "Jarvis boşta" })).toBeInTheDocument();
+    expect(await screen.findByRole("img", { name: "Friday boşta" })).toBeInTheDocument();
   });
 });

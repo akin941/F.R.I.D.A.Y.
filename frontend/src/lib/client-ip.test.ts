@@ -18,7 +18,7 @@ describe("clientIpHeaders", () => {
   });
 
   it("forwards nothing without a configured trusted header (bare next start)", async () => {
-    const { clientIpHeaders } = await load({ JARVIS_BFF_SHARED_SECRET: "k" });
+    const { clientIpHeaders } = await load({ FRIDAY_BFF_SHARED_SECRET: "k" });
     // x-forwarded-for / x-real-ip are client-controlled here: never read.
     const headers = clientIpHeaders(
       request({ "x-forwarded-for": "192.168.1.5", "x-real-ip": "192.168.1.5" }),
@@ -29,29 +29,48 @@ describe("clientIpHeaders", () => {
   it("forwards the configured header's IP with the BFF key", async () => {
     const { clientIpHeaders } = await load({
       TRUSTED_CLIENT_IP_HEADER: "X-Real-IP",
-      JARVIS_BFF_SHARED_SECRET: "shared",
+      FRIDAY_BFF_SHARED_SECRET: "shared",
     });
     expect(clientIpHeaders(request({ "x-real-ip": "192.168.1.5" }))).toEqual({
-      "X-Jarvis-Client-IP": "192.168.1.5",
-      "X-Jarvis-BFF-Key": "shared",
+      "X-Friday-Client-IP": "192.168.1.5",
+      "X-Friday-BFF-Key": "shared",
+    });
+  });
+
+  it("falls back to the deprecated JARVIS_BFF_SHARED_SECRET", async () => {
+    const { clientIpHeaders } = await load({
+      TRUSTED_CLIENT_IP_HEADER: "X-Real-IP",
+      FRIDAY_BFF_SHARED_SECRET: "",
+      JARVIS_BFF_SHARED_SECRET: "legacy",
+    });
+    expect(clientIpHeaders(request({ "x-real-ip": "192.168.1.5" }))).toEqual({
+      "X-Friday-Client-IP": "192.168.1.5",
+      "X-Friday-BFF-Key": "legacy",
     });
   });
 
   it("takes the right-most entry of a list-valued header", async () => {
     const { trustedClientIp } = await load({
       TRUSTED_CLIENT_IP_HEADER: "X-Forwarded-For",
-      JARVIS_BFF_SHARED_SECRET: "shared",
+      FRIDAY_BFF_SHARED_SECRET: "shared",
     });
-    expect(trustedClientIp(request({ "x-forwarded-for": "10.9.9.9, 203.0.113.7" }))).toBe(
-      "203.0.113.7",
-    );
+    expect(
+      trustedClientIp(request({ "x-forwarded-for": "10.9.9.9, 203.0.113.7" })),
+    ).toBe("203.0.113.7");
   });
 
   it("ignores an unparseable value and a missing shared secret", async () => {
-    let mod = await load({ TRUSTED_CLIENT_IP_HEADER: "X-Real-IP", JARVIS_BFF_SHARED_SECRET: "k" });
-    expect(mod.clientIpHeaders(request({ "x-real-ip": "not-an-ip" }))).toEqual({});
+    let mod = await load({
+      TRUSTED_CLIENT_IP_HEADER: "X-Real-IP",
+      FRIDAY_BFF_SHARED_SECRET: "k",
+    });
+    expect(mod.clientIpHeaders(request({ "x-real-ip": "not-an-ip" }))).toEqual(
+      {},
+    );
     vi.unstubAllEnvs();
     mod = await load({ TRUSTED_CLIENT_IP_HEADER: "X-Real-IP" });
-    expect(mod.clientIpHeaders(request({ "x-real-ip": "192.168.1.5" }))).toEqual({});
+    expect(
+      mod.clientIpHeaders(request({ "x-real-ip": "192.168.1.5" })),
+    ).toEqual({});
   });
 });

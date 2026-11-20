@@ -1,6 +1,6 @@
 """Native bridges next to MCP manifests (ADR-010, brief D8/D9).
 
-A `native` manifest has no MCP server: Jarvis calls the vendor's REST API
+A `native` manifest has no MCP server: Friday calls the vendor's REST API
 itself through a bridge object the manifest module exports as `BRIDGE`.
 The read and write paths (`connectors.reads`, `connectors.writes`) stay the
 same for both kinds -- serializer, scope check, snapshot, gate, audit --

@@ -173,12 +173,12 @@ def display_text(payload):
     window = plan.get("window_seconds")
     if payload.get("auto_rollback"):
         text += (
-            f"If health fails within {window} s, Jarvis rolls back to "
+            f"If health fails within {window} s, Friday rolls back to "
             f"`{_short(payload.get('rollback_sha'))}`."
         )
     else:
         text += (
-            f"If health fails within {window} s, Jarvis stops and reports it; "
+            f"If health fails within {window} s, Friday stops and reports it; "
             "nothing is rolled back without a new decision."
         )
     return text

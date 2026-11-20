@@ -12,11 +12,12 @@ diff: every run rewrites every currently-approved memory's file (an edit
 naturally reconciles -- the file is fully regenerated from the current row,
 never patched), then scans the vault's `Memory/` folder and deletes a file
 ONLY if it passes every one of: parses as valid frontmatter, `source:
-jarvis_export`, `workspace` frontmatter matches, `jarvis_id` parses as a
-UUID, and that UUID is not in the current approved set. Any file failing
-any single check is left untouched and counted as skipped, never deleted --
-a human-authored note or a file this job doesn't fully recognize must never
-be silently destroyed by a prune pass.
+friday_export` (or the pre-rename `jarvis_export`), `workspace` frontmatter
+matches, `friday_id` (`jarvis_id`) parses as a UUID, and that UUID is not in
+the current approved set. Any file failing any single check is left
+untouched and counted as skipped, never deleted -- a human-authored note or
+a file this job doesn't fully recognize must never be silently destroyed by
+a prune pass.
 
 Lease-fenced claim/finalize mirrors `memory.jobs`/`knowledge.jobs` exactly.
 `memory.Memory` is imported directly (tools -> memory is an allowed
@@ -360,15 +361,25 @@ def _export_memory_dir(vault_root_real, memory_fd, memory_path, workspace, appro
     return written, updated, removed
 
 
+# Export-owned `source` tags -> the frontmatter key holding the memory id.
+# Files exported before the Jarvis -> Friday rename (2026-11-20) carry
+# `source: jarvis_export` / `jarvis_id`; they are just as export-owned, so
+# the prune treats both alike (else they would be orphaned forever). A
+# still-approved memory's legacy file is rewritten in the new format by the
+# same run (same file name).
+EXPORT_SOURCE_ID_KEYS = {"friday_export": "friday_id", "jarvis_export": "jarvis_id"}
+
+
 def _is_prunable(fields, workspace, approved_ids) -> bool:
     if fields is None:
         return False
-    if fields.get("source") != "jarvis_export":
+    id_key = EXPORT_SOURCE_ID_KEYS.get(fields.get("source"))
+    if id_key is None:
         return False
     if fields.get("workspace") != str(workspace.id):
         return False
     try:
-        parsed = uuid.UUID(fields.get("jarvis_id", ""))
+        parsed = uuid.UUID(fields.get(id_key, ""))
     except (ValueError, AttributeError):
         return False
     return parsed not in approved_ids

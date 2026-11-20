@@ -48,7 +48,7 @@ describe("HarnessRepoPicker", () => {
 
     await userEvent.click(await screen.findByRole("combobox", { name: "Depo" }));
 
-    expect(await screen.findByRole("option", { name: "jarvis" })).toBeInTheDocument();
+    expect(await screen.findByRole("option", { name: "friday" })).toBeInTheDocument();
     expect(screen.queryByRole("option", { name: /old-repo/ })).not.toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/harness/repos?workspace=w1",
@@ -62,7 +62,7 @@ describe("HarnessRepoPicker", () => {
 
     render(<Harness onChange={onChange} />);
     await userEvent.click(await screen.findByRole("combobox", { name: "Depo" }));
-    await userEvent.click(await screen.findByRole("option", { name: "jarvis" }));
+    await userEvent.click(await screen.findByRole("option", { name: "friday" }));
 
     expect(onChange).toHaveBeenCalledWith(REPO_ID);
     expect(screen.getByTestId("value")).toHaveTextContent(REPO_ID);
@@ -121,7 +121,7 @@ describe("HarnessRepoPicker", () => {
 
     render(<Harness initial={REPO_ID} requireTestCommand />);
 
-    expect(await screen.findByRole("combobox", { name: "Depo" })).toHaveTextContent("jarvis");
+    expect(await screen.findByRole("combobox", { name: "Depo" })).toHaveTextContent("friday");
     expect(screen.getByTestId("value")).toHaveTextContent(REPO_ID);
   });
 });

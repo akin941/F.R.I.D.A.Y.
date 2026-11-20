@@ -17,7 +17,7 @@
 
 ## Goal and user value
 
-Jarvis starts remembering: durable facts, preferences and episodes are distilled
+Friday starts remembering: durable facts, preferences and episodes are distilled
 from conversations (as `pending_approval` suggestions), curated by the user, and
 injected back into chat context so answers stop being stateless. Everything is
 workspace-scoped, auditable, editable, forgettable and exportable — memory is a
@@ -157,7 +157,7 @@ trust feature before it is an intelligence feature.
   unvalidated rows. Retryable provider failures instead return the job to
   `pending` with an incremented retry count (bounded).
 - Extraction prompt: its own `PromptTemplate` + `PromptVersion`
-  (`jarvis_memory_extraction`, seeded in `seed_ai_defaults`),
+  (`friday_memory_extraction`, seeded in `seed_ai_defaults`),
   `purpose="memory.extraction"`, ModelUsage recorded (gateway rules apply).
   Prompt-version lineage tested.
 - FakeAdapter today receives only `messages`/`params` and returns plain chat
@@ -268,7 +268,7 @@ trust feature before it is an intelligence feature.
   (incl. `project`), `OBSIDIAN_VAULT_PATH` (existing setting name), symlink-safe
   path jail, atomic writes, and a worker bind mount. Recorded here so the
   requirements are not rediscovered.
-- Vault ingestion (vault → Jarvis) and echo-chamber guard (MVP 3+).
+- Vault ingestion (vault → Friday) and echo-chamber guard (MVP 3+).
 - Embeddings / vector retrieval / semantic search (MVP 3); dedup here is
   textual only.
 - Memory consolidation/merging beyond the fingerprint guard.

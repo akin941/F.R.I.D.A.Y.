@@ -46,7 +46,7 @@ def user_with_role(workspace, role, email):
 
 
 def make_repo(workspace, **overrides):
-    fields = {"workspace": workspace, "name": "jarvis-os", "git_url": "git@example.com:x/y.git"}
+    fields = {"workspace": workspace, "name": "friday", "git_url": "git@example.com:x/y.git"}
     fields.update(overrides)
     return HarnessRepo.objects.create(**fields)
 
@@ -54,7 +54,7 @@ def make_repo(workspace, **overrides):
 def create_payload(workspace, **overrides):
     payload = {
         "workspace": str(workspace.id),
-        "name": "jarvis-os",
+        "name": "friday",
         "git_url": "git@example.com:x/y.git",
     }
     payload.update(overrides)
@@ -91,7 +91,7 @@ class TestListCreate:
         )
         assert response.status_code == 201
         body = response.json()
-        assert body["name"] == "jarvis-os"
+        assert body["name"] == "friday"
         assert body["enabled"] is False
         assert body["sensitive"] is False
         assert body["runner"] == "mac_local"

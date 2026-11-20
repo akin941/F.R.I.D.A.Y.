@@ -53,15 +53,15 @@ describe("HarnessRepoRegistry", () => {
     renderWithClient(<HarnessRepoRegistry />);
 
     await screen.findByText("site");
-    const jarvis = card(REPO_ID);
-    expect(within(jarvis).getByText("Etkin")).toBeInTheDocument();
-    expect(within(jarvis).getByText("Hassas")).toBeInTheDocument();
-    expect(within(jarvis).getByText("Jarvis'in kendi deposu")).toBeInTheDocument();
-    expect(within(jarvis).getByText("make test")).toBeInTheDocument();
+    const friday = card(REPO_ID);
+    expect(within(friday).getByText("Etkin")).toBeInTheDocument();
+    expect(within(friday).getByText("Hassas")).toBeInTheDocument();
+    expect(within(friday).getByText("Friday'nin kendi deposu")).toBeInTheDocument();
+    expect(within(friday).getByText("make test")).toBeInTheDocument();
     const site = card(REPO_2_ID);
     expect(within(site).getByText("Devre dışı")).toBeInTheDocument();
     expect(within(site).getByText(/Test komutu tanımlı değil/)).toBeInTheDocument();
-    expect(within(site).queryByText("Jarvis'in kendi deposu")).not.toBeInTheDocument();
+    expect(within(site).queryByText("Friday'nin kendi deposu")).not.toBeInTheDocument();
     // Nothing in the UI edits the guard's view of a repo.
     expect(screen.queryByText(/HARNESS_SELF_REPO_IDENTIFIERS/)).not.toBeInTheDocument();
   });
@@ -140,16 +140,16 @@ describe("HarnessRepoRegistry", () => {
     );
 
     renderWithClient(<HarnessRepoRegistry />);
-    await screen.findByText("jarvis");
+    await screen.findByText("friday");
     await userEvent.click(within(card(REPO_ID)).getByRole("button", { name: "Düzenle" }));
     const dialog = await screen.findByRole("dialog");
-    expect(within(dialog).getByLabelText("Ad")).toHaveValue("jarvis");
+    expect(within(dialog).getByLabelText("Ad")).toHaveValue("friday");
     await userEvent.click(within(dialog).getByRole("checkbox", { name: /^Etkin/ }));
     await userEvent.click(within(dialog).getByRole("button", { name: "Değişiklikleri kaydet" }));
 
     await waitFor(() => expect(within(card(REPO_ID)).getByText("Devre dışı")).toBeInTheDocument());
     const patch = fetchMock.mock.calls.find(([, init]) => init?.method === "PATCH");
-    expect(JSON.parse(patch?.[1]?.body as string)).toMatchObject({ enabled: false, name: "jarvis" });
+    expect(JSON.parse(patch?.[1]?.body as string)).toMatchObject({ enabled: false, name: "friday" });
   });
 
   it("deletes a repo only after confirmation, and shows a refusal inside the dialog", async () => {
@@ -164,9 +164,9 @@ describe("HarnessRepoRegistry", () => {
     });
 
     renderWithClient(<HarnessRepoRegistry />);
-    await screen.findByText("jarvis");
+    await screen.findByText("friday");
     await userEvent.click(within(card(REPO_ID)).getByRole("button", { name: "Sil" }));
-    expect(await findConfirmDialog()).toHaveTextContent("“jarvis” harness kayıtlarından kaldırılır");
+    expect(await findConfirmDialog()).toHaveTextContent("“friday” harness kayıtlarından kaldırılır");
     await cancelDialog();
     expect(calledWith(fetchMock, "DELETE", `/api/harness/repos/${REPO_ID}`)).toBe(false);
 
@@ -179,6 +179,6 @@ describe("HarnessRepoRegistry", () => {
 
     refuse = false;
     await confirmInDialog("Evet, sil");
-    await waitFor(() => expect(screen.queryByText("jarvis")).not.toBeInTheDocument());
+    await waitFor(() => expect(screen.queryByText("friday")).not.toBeInTheDocument());
   });
 });

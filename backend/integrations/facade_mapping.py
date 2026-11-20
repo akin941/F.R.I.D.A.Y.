@@ -2,7 +2,7 @@
 facade (Phase 4 branch 6, brief §6 "Stateless -> conversation mapping").
 
 An OpenAI-compatible client (Open WebUI, ...) resends the whole history on
-every request. Jarvis never trusts it: only the client's *user* turns are
+every request. Friday never trusts it: only the client's *user* turns are
 read, and only as hashes to find the server-side conversation the new turn
 belongs to; the context the model sees is always the server's own history
 (`assistant.context.build_context`). Client `system`/`assistant`/`tool`
@@ -12,12 +12,12 @@ assistant turns into memory extraction.
 Per request (the new turn is the last user message; "prior" are the user
 turns before it):
 
-- a pinned conversation (`X-Jarvis-Conversation-Id`) gets the turn as is --
+- a pinned conversation (`X-Friday-Conversation-Id`) gets the turn as is --
   bindings are not consulted or changed;
 - else the bindings of this token with the same anchor (token id + first
   user message) are candidates. The most recent one whose recorded turns are
   a prefix of the client's prior turns gets the turn ("append": the client
-  just continued, possibly after turns Jarvis never saw);
+  just continued, possibly after turns Friday never saw);
 - else, when some candidate shares at least one prior turn, the client
   regenerated or edited a turn: **fork** -- a new conversation seeded with
   copies of the best candidate's server-side messages up to the divergence

@@ -98,7 +98,7 @@ function ReviewBlock({ review }: { review: ApiImplementationReview }) {
       </p>
       {review.summary || review.findings.length > 0 ? (
         <p className="text-xs text-muted-foreground">
-          Özet ve bulgular: Jarvis&apos;in kendi özeti (model üretimi).
+          Özet ve bulgular: Friday&apos;nin kendi özeti (model üretimi).
         </p>
       ) : null}
       {review.summary ? <p className="whitespace-pre-wrap text-sm">{review.summary}</p> : null}
@@ -140,7 +140,7 @@ export function ImplementationJobDetailPage({ jobId }: { jobId: string }) {
  * into Plan / İnceleme / Diff / Transkriptler tabs.
  *
  * Trust layering (R2): `diff_summary`, review `summary`/`findings` are
- * Jarvis's own gateway output; both CLIs' `raw_transcript`s are low-trust,
+ * Friday's own gateway output; both CLIs' `raw_transcript`s are low-trust,
  * live only on the Transkriptler tab and are only ever rendered via
  * `LowTrustTranscript`. `changed_files` and the commit/branch are
  * host-derived facts, shown verbatim.
@@ -408,7 +408,7 @@ export function ImplementationJobDetail({
                         text={job.raw_transcript}
                         showLabel="Uygulayıcının ham çıktısını göster"
                         hideLabel="Uygulayıcının ham çıktısını gizle"
-                        warning="Bu, uygulayıcı ajanın (Claude Code) kendi ham çıktısıdır ve güvenilmeyen içerik olarak ele alınmalıdır. Test sonucu ve değişen dosyalar Jarvis'in çalıştırıcısından gelir; değişiklik ve inceleme özetleri Jarvis'in kendi özetidir (model üretimi)."
+                        warning="Bu, uygulayıcı ajanın (Claude Code) kendi ham çıktısıdır ve güvenilmeyen içerik olarak ele alınmalıdır. Test sonucu ve değişen dosyalar Friday'nin çalıştırıcısından gelir; değişiklik ve inceleme özetleri Friday'nin kendi özetidir (model üretimi)."
                       />
                     </section>
                   ) : null}
@@ -421,7 +421,7 @@ export function ImplementationJobDetail({
                         text={review.raw_transcript}
                         showLabel="İnceleyicinin ham çıktısını göster"
                         hideLabel="İnceleyicinin ham çıktısını gizle"
-                        warning="Bu, inceleyici ajanın (Codex CLI) kendi ham çıktısıdır ve güvenilmeyen içerik olarak ele alınmalıdır. İnceleme sekmesindeki karar, özet ve bulgular ise Jarvis'in kendi özetidir (model üretimi); ikisini birbirine karıştırma."
+                        warning="Bu, inceleyici ajanın (Codex CLI) kendi ham çıktısıdır ve güvenilmeyen içerik olarak ele alınmalıdır. İnceleme sekmesindeki karar, özet ve bulgular ise Friday'nin kendi özetidir (model üretimi); ikisini birbirine karıştırma."
                       />
                     </section>
                   ))}

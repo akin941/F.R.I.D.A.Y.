@@ -1,6 +1,15 @@
 import "server-only";
 import { cookies } from "next/headers";
-import { ACCESS_COOKIE, DEVICE_COOKIE, REFRESH_COOKIE, SESSION_COOKIE } from "@/lib/cookie-names";
+import {
+  ACCESS_COOKIE,
+  DEVICE_COOKIE,
+  LEGACY_ACCESS_COOKIE,
+  LEGACY_DEVICE_COOKIE,
+  LEGACY_REFRESH_COOKIE,
+  LEGACY_SESSION_COOKIE,
+  REFRESH_COOKIE,
+  SESSION_COOKIE,
+} from "@/lib/cookie-names";
 
 const isProduction = process.env.NODE_ENV === "production";
 
@@ -27,8 +36,23 @@ interface Tokens {
   refresh?: string;
 }
 
+type CookieStore = Awaited<ReturnType<typeof cookies>>;
+
+// Pre-rename (Jarvis -> Friday) session cookies: dropped whenever the new
+// names are set or cleared, so a migrated browser carries only one set.
+function deleteLegacyAuthCookies(store: CookieStore) {
+  if (store.has(LEGACY_ACCESS_COOKIE))
+    store.delete({ name: LEGACY_ACCESS_COOKIE, path: "/api" });
+  if (store.has(LEGACY_REFRESH_COOKIE)) {
+    store.delete({ name: LEGACY_REFRESH_COOKIE, path: REFRESH_COOKIE_PATH });
+  }
+  if (store.has(LEGACY_SESSION_COOKIE))
+    store.delete({ name: LEGACY_SESSION_COOKIE, path: "/" });
+}
+
 export async function setAuthCookies({ access, refresh }: Tokens) {
   const store = await cookies();
+  deleteLegacyAuthCookies(store);
   store.set(ACCESS_COOKIE, access, {
     httpOnly: true,
     sameSite: "lax",
@@ -59,16 +83,21 @@ export async function clearAuthCookies() {
   store.delete({ name: ACCESS_COOKIE, path: "/api" });
   store.delete({ name: REFRESH_COOKIE, path: REFRESH_COOKIE_PATH });
   store.delete({ name: SESSION_COOKIE, path: "/" });
+  deleteLegacyAuthCookies(store);
 }
 
 export async function getAccessToken(): Promise<string | undefined> {
   const store = await cookies();
-  return store.get(ACCESS_COOKIE)?.value;
+  return (
+    store.get(ACCESS_COOKIE)?.value ?? store.get(LEGACY_ACCESS_COOKIE)?.value
+  );
 }
 
 export async function getRefreshToken(): Promise<string | undefined> {
   const store = await cookies();
-  return store.get(REFRESH_COOKIE)?.value;
+  return (
+    store.get(REFRESH_COOKIE)?.value ?? store.get(LEGACY_REFRESH_COOKIE)?.value
+  );
 }
 
 /**
@@ -79,6 +108,9 @@ export async function getRefreshToken(): Promise<string | undefined> {
  */
 export async function setDeviceCookie(secret: string) {
   const store = await cookies();
+  if (store.has(LEGACY_DEVICE_COOKIE)) {
+    store.delete({ name: LEGACY_DEVICE_COOKIE, path: REFRESH_COOKIE_PATH });
+  }
   store.set(DEVICE_COOKIE, secret, {
     httpOnly: true,
     sameSite: "strict",
@@ -90,10 +122,23 @@ export async function setDeviceCookie(secret: string) {
 
 export async function getDeviceSecret(): Promise<string | undefined> {
   const store = await cookies();
-  return store.get(DEVICE_COOKIE)?.value;
+  return (
+    store.get(DEVICE_COOKIE)?.value ?? store.get(LEGACY_DEVICE_COOKIE)?.value
+  );
+}
+
+/**
+ * A browser paired before the rename holds its secret under the legacy
+ * name only: re-set it under the new name (which drops the legacy one).
+ */
+export async function migrateLegacyDeviceCookie() {
+  const store = await cookies();
+  const legacy = store.get(LEGACY_DEVICE_COOKIE)?.value;
+  if (legacy && !store.has(DEVICE_COOKIE)) await setDeviceCookie(legacy);
 }
 
 export async function clearDeviceCookie() {
   const store = await cookies();
   store.delete({ name: DEVICE_COOKIE, path: REFRESH_COOKIE_PATH });
+  store.delete({ name: LEGACY_DEVICE_COOKIE, path: REFRESH_COOKIE_PATH });
 }

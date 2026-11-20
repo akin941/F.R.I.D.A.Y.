@@ -96,7 +96,7 @@ describe("POST /api/auth/enroll", () => {
     expect(serialized).not.toContain("access-token-value");
     expect(serialized).not.toContain("refresh-token-value");
 
-    const device = cookieStore.store.get("jarvis_device");
+    const device = cookieStore.store.get("friday_device");
     expect(device?.value).toBe("jdv_secret-value");
     expect(device?.httpOnly).toBe(true);
     expect(device?.sameSite).toBe("strict");
@@ -104,9 +104,9 @@ describe("POST /api/auth/enroll", () => {
     expect(device?.maxAge).toBe(400 * 24 * 60 * 60);
     expect(device?.secure).toBe(false);
 
-    expect(cookieStore.store.get("jarvis_access")?.path).toBe("/api");
-    expect(cookieStore.store.get("jarvis_refresh")?.path).toBe("/api/auth");
-    expect(cookieStore.store.get("jarvis_session")?.path).toBe("/");
+    expect(cookieStore.store.get("friday_access")?.path).toBe("/api");
+    expect(cookieStore.store.get("friday_refresh")?.path).toBe("/api/auth");
+    expect(cookieStore.store.get("friday_session")?.path).toBe("/");
   });
 
   it("marks the device cookie Secure in production", async () => {
@@ -114,7 +114,7 @@ describe("POST /api/auth/enroll", () => {
     vi.stubGlobal("fetch", backend());
     const { POST } = await import("@/app/api/auth/enroll/route");
     await POST(makeRequest({ code: "12345678", device_name: "Mac" }));
-    expect(cookieStore.store.get("jarvis_device")?.secure).toBe(true);
+    expect(cookieStore.store.get("friday_device")?.secure).toBe(true);
   });
 
   it("passes the code, device name and browser user agent to the backend", async () => {
@@ -129,12 +129,12 @@ describe("POST /api/auth/enroll", () => {
       user_agent: "Mozilla/5.0 (Macintosh) Chrome/140",
     });
     // No trusted proxy header configured: no client IP is forwarded.
-    expect(init!.headers).not.toHaveProperty("X-Jarvis-Client-IP");
+    expect(init!.headers).not.toHaveProperty("X-Friday-Client-IP");
   });
 
   it("forwards the trusted proxy's client IP with the BFF key", async () => {
     vi.stubEnv("TRUSTED_CLIENT_IP_HEADER", "X-Real-IP");
-    vi.stubEnv("JARVIS_BFF_SHARED_SECRET", "bff-key");
+    vi.stubEnv("FRIDAY_BFF_SHARED_SECRET", "bff-key");
     const fetchMock = backend();
     vi.stubGlobal("fetch", fetchMock);
     const { POST } = await import("@/app/api/auth/enroll/route");
@@ -143,8 +143,8 @@ describe("POST /api/auth/enroll", () => {
     );
     const [, init] = fetchMock.mock.calls[0]!;
     expect(init!.headers).toMatchObject({
-      "X-Jarvis-Client-IP": "192.168.1.5",
-      "X-Jarvis-BFF-Key": "bff-key",
+      "X-Friday-Client-IP": "192.168.1.5",
+      "X-Friday-BFF-Key": "bff-key",
     });
   });
 

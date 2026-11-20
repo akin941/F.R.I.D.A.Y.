@@ -22,7 +22,7 @@ class ConnectorBinding(WorkspaceScopedModel, TimestampedModel):
     defaults False: creating a binding row never enables anything; the
     owner enables it explicitly over the web (audited, D3).
 
-    `last_health` is the most recent pin/health report, Jarvis-authored
+    `last_health` is the most recent pin/health report, Friday-authored
     bookkeeping only: `checked_at`, `server_name`/`server_version`
     (server-supplied identifiers, bounded and stripped, display-only),
     `protocol_version`, `error` (closed vocabulary) and `tools` --

@@ -44,7 +44,7 @@ def workspace(owner):
 def repo(workspace):
     return HarnessRepo.objects.create(
         workspace=workspace,
-        name="jarvis-os",
+        name="friday",
         git_url="git@example.com:x/y.git",
         enabled=True,
         test_command="pytest -q",

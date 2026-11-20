@@ -43,7 +43,7 @@ class UserManager(BaseUserManager):
 
 
 class User(TimestampedModel, AbstractBaseUser, PermissionsMixin):
-    """Jarvis user, identified by email (no username).
+    """Friday user, identified by email (no username).
 
     `is_agent` marks agent service accounts (MVP 7+); agents authenticate like
     users but can never widen their scope (ADR-004).
@@ -158,7 +158,7 @@ class TrustedDevice(TimestampedModel):
     )
     name = models.CharField(max_length=100)
     # sha256 hex digest of the 256-bit device secret (held only in the
-    # browser's HttpOnly `jarvis_device` cookie); the raw value is returned
+    # browser's HttpOnly `friday_device` cookie); the raw value is returned
     # exactly once, in the enrollment response.
     secret_hash = models.CharField(max_length=64, unique=True)
     enrolled_via = models.CharField(max_length=20, choices=EnrolledVia.choices)

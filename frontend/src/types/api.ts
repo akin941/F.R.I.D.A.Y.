@@ -478,7 +478,7 @@ export interface ApiAgentDetail extends ApiAgent {
 
 // --- Integrations (MVP 9) ---
 
-// Which surface a token reaches (Phase 4 branch 6): `cli` the Jarvis CLI
+// Which surface a token reaches (Phase 4 branch 6): `cli` the Friday CLI
 // endpoints, `openai` only the OpenAI-compatible facade (/v1). Fixed at mint.
 export type PatKind = "cli" | "openai";
 
@@ -573,7 +573,7 @@ export interface ApiHarnessRepo {
   sensitive: boolean;
   test_command: string;
   // Phase 4 branch 5, read-only: how the ADR-004 self-modification guard
-  // sees this repo (`self` = Jarvis's own remote, implementation refused;
+  // sees this repo (`self` = Friday's own remote, implementation refused;
   // `unconfigured` = HARNESS_SELF_REPO_IDENTIFIERS empty, all refused).
   self_repo_status?: ApiRepoSelfStatus;
   created_at: string;
@@ -650,7 +650,7 @@ export interface ApiImplementationReview {
   agent_routing_reason: HarnessAgentRoutingReason;
   status: "pending" | "running" | "succeeded" | "failed";
   verdict: "" | "approved" | "changes_requested";
-  // Gateway-produced -- Jarvis's own summarization, trusted-ish.
+  // Gateway-produced -- Friday's own summarization, trusted-ish.
   summary: string;
   findings: string[];
   // The reviewer CLI's own output -- LOW TRUST (R2), rendered only behind

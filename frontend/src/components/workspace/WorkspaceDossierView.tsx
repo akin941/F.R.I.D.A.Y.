@@ -231,7 +231,7 @@ export function WorkspaceDossierView() {
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Firma dosyası</h1>
           <p className="text-sm text-muted-foreground">
-            Repolar, servisler, deploy hedefleri ve notlar — Jarvis&apos;in sohbet
+            Repolar, servisler, deploy hedefleri ve notlar — Friday&apos;nin sohbet
             bağlamına dahil ettiği çalışma alanı özeti.
           </p>
         </div>

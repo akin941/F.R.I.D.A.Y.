@@ -21,7 +21,7 @@ SHA_A = "9f8e7d6" + "a" * 33
 SHA_B = "a1b2c3d" + "b" * 33
 SHA_C = "c0ffee0" + "c" * 33
 REPO = "git@github.com:acme/adia-web.git"
-SELF_REPO = "git@github.com:akin941/jarvis-os.git"
+SELF_REPO = "git@github.com:akin941/F.R.I.D.A.Y..git"
 
 
 def _ed25519_public_key():

@@ -9,7 +9,7 @@ from workspaces.models import Workspace
 
 pytestmark = pytest.mark.django_db
 
-SELF_URL = "git@github.com:akin941/jarvis-os.git"
+SELF_URL = "git@github.com:akin941/F.R.I.D.A.Y..git"
 
 
 @pytest.fixture
@@ -32,11 +32,11 @@ def test_self_and_other_repos_are_labeled(owner, workspace, settings, web_client
     settings.HARNESS_SELF_REPO_IDENTIFIERS = [SELF_URL]
     # A different spelling of the same remote still resolves to "self".
     HarnessRepo.objects.create(
-        workspace=workspace, name="jarvis", git_url="https://github.com/akin941/jarvis-os"
+        workspace=workspace, name="friday", git_url="https://github.com/akin941/F.R.I.D.A.Y."
     )
     HarnessRepo.objects.create(workspace=workspace, name="site", git_url="git@example.com:x/y.git")
 
-    assert status_by_name(web_client(owner), workspace) == {"jarvis": "self", "site": "other"}
+    assert status_by_name(web_client(owner), workspace) == {"friday": "self", "site": "other"}
 
 
 def test_malformed_legacy_url_is_reported_as_other(owner, workspace, settings, web_client):

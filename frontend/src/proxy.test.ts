@@ -7,7 +7,7 @@ import { config, proxy, SHELL_PATHS } from "@/proxy";
 function requestWithCookie(pathname: string, hasSession: boolean) {
   const request = new NextRequest(`http://localhost:3001${pathname}`);
   if (hasSession) {
-    request.cookies.set("jarvis_session", "1");
+    request.cookies.set("friday_session", "1");
   }
   return request;
 }
@@ -29,19 +29,32 @@ describe("proxy", () => {
     }
   });
 
-  it.each(SHELL_PATHS)("sends a visitor without a session from %s to /enroll", (route) => {
-    const response = proxy(requestWithCookie(route, false));
-    expect(response.headers.get("location")).toBe("http://localhost:3001/enroll");
-  });
+  it.each(SHELL_PATHS)(
+    "sends a visitor without a session from %s to /enroll",
+    (route) => {
+      const response = proxy(requestWithCookie(route, false));
+      expect(response.headers.get("location")).toBe(
+        "http://localhost:3001/enroll",
+      );
+    },
+  );
 
   it("guards nested shell paths too", () => {
     const response = proxy(requestWithCookie("/harness/jobs/123", false));
-    expect(response.headers.get("location")).toBe("http://localhost:3001/enroll");
+    expect(response.headers.get("location")).toBe(
+      "http://localhost:3001/enroll",
+    );
   });
 
   it("lets a visitor with a session through to a shell route", () => {
     const response = proxy(requestWithCookie("/chat", true));
     expect(response.headers.get("location")).toBeNull();
+  });
+
+  it("accepts the pre-rename jarvis_session cookie (Jarvis -> Friday)", () => {
+    const request = new NextRequest("http://localhost:3001/chat");
+    request.cookies.set("jarvis_session", "1");
+    expect(proxy(request).headers.get("location")).toBeNull();
   });
 
   it("sends a visitor with a session away from /enroll", () => {

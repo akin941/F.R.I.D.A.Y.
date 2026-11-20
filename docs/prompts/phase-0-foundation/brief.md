@@ -2,11 +2,11 @@
 
 > Status: **done (2026-07-17)** — approved after 3 rounds of Codex
 > plan-review; all four branches shipped, see branch table.
-> Parent decisions: ADR-008, `docs/VISION_JARVIS_2.md`, MASTER_PLAN §AA.
+> Parent decisions: ADR-008, `docs/VISION_FRIDAY_2.md`, MASTER_PLAN §AA.
 
 ## Goal / value
 
-Land the Jarvis 2.0 decisions as small, safe code so daily use starts
+Land the Friday 2.0 decisions as small, safe code so daily use starts
 immediately: firms become definable, the local Ollama stack covers
 embeddings too, gateway routing becomes auditable, and — the one real
 defect fix — gated agent requests become decidable by the owner in

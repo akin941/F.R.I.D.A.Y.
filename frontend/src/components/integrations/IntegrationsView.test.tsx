@@ -267,7 +267,7 @@ describe("IntegrationsView", () => {
     const setup = await screen.findByLabelText("Open WebUI kurulum bilgisi");
     expect(setup.textContent).toContain(`API Base URL: ${window.location.origin}/v1`);
     expect(setup.textContent).toContain("API Key: jpat_openai_raw");
-    expect(setup.textContent).toContain("jarvis-lite");
+    expect(setup.textContent).toContain("friday-lite");
     await userEvent.click(screen.getByRole("button", { name: "Kurulum bilgisini kopyala" }));
     expect(navigator.clipboard.writeText).toHaveBeenCalledWith(setup.textContent);
 

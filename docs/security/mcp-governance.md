@@ -12,7 +12,7 @@ GitHub powers; treat every installation as a security decision.
 - Outbound data: does it send data anywhere? telemetry?
 - Credentials: token/cookie/OAuth? minimal scopes? storage?
 - Sandbox: can it run isolated?
-- Logging: can calls be tied into Jarvis audit?
+- Logging: can calls be tied into Friday audit?
 - Scope: which workspaces, which agents, sensitive data allowed? (default: no)
 - Review: who reviewed, when.
 
@@ -23,14 +23,14 @@ GitHub powers; treat every installation as a security decision.
 2. Unofficial browser-automation / cookie-based MCPs (e.g. NotebookLM MCPs) are
    **never** enabled for sensitive or company workspaces; public/educational
    documents only, on a separate Google account.
-3. MCP write actions cannot bypass the Jarvis approval gate — MCPs are wrapped by
+3. MCP write actions cannot bypass the Friday approval gate — MCPs are wrapped by
    the tool registry, never wired raw into production agents.
 4. Every MCP call is logged; unmaintained tools get removed at the periodic
    re-review (first pass scheduled with the Phase 4 security baseline).
 
 ## Runtime connectors: code manifests (Phase 5, ADR-010)
 
-A connector Jarvis *calls at runtime* (an MCP server or a native bridge) is
+A connector Friday *calls at runtime* (an MCP server or a native bridge) is
 governed by code, not by configuration:
 
 1. **Three artifacts, one reviewed commit.** A connector exists only as
@@ -42,7 +42,7 @@ governed by code, not by configuration:
    pin -- is a new reviewed commit, never a database write (ADR-004).
 2. **The manifest is the tool ceiling.** Only tools the manifest lists are
    ever registered, offered to the chat router or callable; anything else a
-   server offers is unreachable. Each listed tool carries a Jarvis-authored
+   server offers is unreachable. Each listed tool carries a Friday-authored
    name and description (server descriptions and instructions never reach an
    LLM prompt), a strict DRF argument serializer, an optional scope check,
    and -- for writes -- a gate name, renderer and `records_work_log`.
@@ -110,7 +110,7 @@ calls around a read), and none of them carries content or credentials.
 The chat completion that consumed a read records the read's bookkeeping in
 `ModelUsage.context_report["connector_reads"]` and on
 `Message.connector_reads` (tool, source, data class, size, truncation).
-Every terminal write also leaves a Jarvis-authored `work_log` memory
+Every terminal write also leaves a Friday-authored `work_log` memory
 (`tools.work_log`; private for personal-class connectors). Log lines name the
 connector, operation, closed error code and exception class -- never
 exception text, arguments, results, URLs with credentials or tokens.
@@ -120,4 +120,4 @@ bridge reads its own from the environment at call time. A test
 asserts a credential value appears in no DB row, audit row or log line.
 
 > Note (2026-09-27): the earlier MVP numbering in this document was replaced
-> by Jarvis 2.0 phase references (ADR-008).
+> by Friday 2.0 phase references (ADR-008).

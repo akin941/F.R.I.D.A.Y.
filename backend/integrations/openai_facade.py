@@ -16,11 +16,11 @@ Low trust, chat only:
   explicitly (400 `unsupported_parameter`) rather than silently dropped.
   `temperature`/`max_tokens`/`top_p`/... are accepted and ignored: the prompt
   version's parameters govern, and provider/tier routing stays server-side.
-- **Models:** `jarvis` -- the full pipeline (router, memory/knowledge
+- **Models:** `friday` -- the full pipeline (router, memory/knowledge
   context, persisted in a server-side conversation, memory extraction as
-  `pending_approval` suggestions); `jarvis-lite` -- ephemeral: the client's
+  `pending_approval` suggestions); `friday-lite` -- ephemeral: the client's
   messages go to the gateway as they are (purpose `facade.ephemeral`), no
-  Jarvis context, nothing persisted, no extraction. It is the target for a
+  Friday context, nothing persisted, no extraction. It is the target for a
   client's background "task model" (titles, tags, follow-ups).
 - **Accounting:** every call goes through `InferenceGateway` and writes
   ModelUsage (`router.intent` + `chat`, or `facade.ephemeral`) with
@@ -64,22 +64,27 @@ from workspaces.models import Workspace
 
 logger = logging.getLogger(__name__)
 
-MODEL_JARVIS = "jarvis"
-MODEL_LITE = "jarvis-lite"
+MODEL_FRIDAY = "friday"
+MODEL_LITE = "friday-lite"
 # `created` of the model objects: a fixed date (the facade's release), not
 # a per-request timestamp, so `/v1/models` is stable.
 _MODELS_CREATED = 1790467200  # 2026-09-27T00:00:00Z
-FACADE_MODELS = (MODEL_JARVIS, MODEL_LITE)
+FACADE_MODELS = (MODEL_FRIDAY, MODEL_LITE)
+# Pre-rename model ids (Jarvis -> Friday, 2026-11-20): still accepted so a
+# client configured before the rename keeps working, never listed.
+LEGACY_MODEL_ALIASES = {"jarvis": MODEL_FRIDAY, "jarvis-lite": MODEL_LITE}
 
 # The router's vocabulary on this channel: no task drafts, no tool requests.
 FACADE_INTENTS = frozenset(
     {Message.Intent.CHAT, Message.Intent.MEMORY_QUERY, Message.Intent.KNOWLEDGE_QUERY}
 )
 EPHEMERAL_PURPOSE = "facade.ephemeral"
-CONVERSATION_HEADER = "X-Jarvis-Conversation-Id"
+CONVERSATION_HEADER = "X-Friday-Conversation-Id"
+# Accepted on requests from clients configured before the rename.
+LEGACY_CONVERSATION_HEADER = "X-Jarvis-Conversation-Id"
 
-# Roles a client may send. Only `user` turns matter for `jarvis`;
-# `jarvis-lite` forwards system/developer/user/assistant text as is.
+# Roles a client may send. Only `user` turns matter for `friday`;
+# `friday-lite` forwards system/developer/user/assistant text as is.
 _KNOWN_ROLES = {"system", "developer", "user", "assistant", "tool", "function"}
 _LITE_ROLES = {"system": "system", "developer": "system", "user": "user", "assistant": "assistant"}
 
@@ -89,8 +94,8 @@ _STREAM_SLOT_KEY = "openai-facade:streams:%s"
 class FacadeError(exceptions.APIException):
     """An error in OpenAI's wire shape. `openai_type`/`openai_code`/`param`
     fill `{"error": {"message", "type", "param", "code"}}` -- codes here are
-    OpenAI-client vocabulary, not the Jarvis API's `core.error_codes`
-    (nothing in the Jarvis UI ever reads a facade response)."""
+    OpenAI-client vocabulary, not the Friday API's `core.error_codes`
+    (nothing in the Friday UI ever reads a facade response)."""
 
     def __init__(
         self, status_code, message, *, openai_type="invalid_request_error", code=None, param=None
@@ -105,7 +110,7 @@ class FacadeError(exceptions.APIException):
 def _unsupported(param, message=None):
     return FacadeError(
         400,
-        message or f"'{param}' is not supported by Jarvis (chat only, no tools).",
+        message or f"'{param}' is not supported by Friday (chat only, no tools).",
         code="unsupported_parameter",
         param=param,
     )
@@ -195,7 +200,7 @@ class _FacadeView(APIView):
     authentication_classes = [FacadeTokenAuthentication]
     permission_classes = [IsAuthenticated, IsFacadeChannel]
     parser_classes = [JSONParser]
-    # Plain JSON: the error body is OpenAI's shape, never the Jarvis API's
+    # Plain JSON: the error body is OpenAI's shape, never the Friday API's
     # `code` backstop (core.api_errors.CodedJSONRenderer).
     renderer_classes = [JSONRenderer]
 
@@ -209,7 +214,7 @@ class _FacadeView(APIView):
 
 
 def _model_object(model_id):
-    return {"id": model_id, "object": "model", "created": _MODELS_CREATED, "owned_by": "jarvis"}
+    return {"id": model_id, "object": "model", "created": _MODELS_CREATED, "owned_by": "friday"}
 
 
 class FacadeModelsView(_FacadeView):
@@ -425,7 +430,7 @@ def _stream_body(events, completion, include_usage, slot):
     """Structured reply events -> OpenAI `chat.completion.chunk` SSE: a
     role chunk, content chunks, a `finish_reason: "stop"` chunk, the usage
     chunk when asked for, `[DONE]`. A gateway error mid-stream is one
-    `data: {"error": {...}}` line, then `[DONE]` (the `jarvis` reply is
+    `data: {"error": {...}}` line, then `[DONE]` (the `friday` reply is
     persisted `partial`/`failed` by the assistant pipeline)."""
     try:
         yield _sse(completion.chunk({"role": "assistant", "content": ""}, None, include_usage))
@@ -493,7 +498,7 @@ def _collect(events):
 
 
 def _ephemeral_events(gateway_stream, usage_holder, *, request_id):
-    """`jarvis-lite`'s events, in the same shape as the assistant pipeline's
+    """`friday-lite`'s events, in the same shape as the assistant pipeline's
     (`chunk`s, then `done` or `error`) but nothing is persisted."""
     token = request_id_var.set(request_id)
     try:
@@ -533,6 +538,7 @@ class FacadeChatCompletionsView(_FacadeView):
         model = body.get("model")
         if not isinstance(model, str) or not model:
             raise _invalid("'model' is required.", "model")
+        model = LEGACY_MODEL_ALIASES.get(model, model)
         if model not in FACADE_MODELS:
             raise FacadeError(
                 404,
@@ -546,7 +552,7 @@ class FacadeChatCompletionsView(_FacadeView):
         if model == MODEL_LITE:
             plan = _plan_lite(messages)
         else:
-            plan = _plan_jarvis(request, messages)
+            plan = _plan_friday(request, messages)
 
         # The token's own workspace, re-checked every request: a token whose
         # user lost membership is a 404, never a fallback.
@@ -563,7 +569,7 @@ class FacadeChatCompletionsView(_FacadeView):
             if model == MODEL_LITE:
                 events, completion, headers = _start_lite(request, plan, workspace)
             else:
-                events, completion, headers = _start_jarvis(request, plan, workspace, token)
+                events, completion, headers = _start_friday(request, plan, workspace, token)
         except BaseException:
             slot.release()
             raise
@@ -586,10 +592,10 @@ class FacadeChatCompletionsView(_FacadeView):
         return response
 
 
-# --- jarvis: the full, persisted pipeline ---
+# --- friday: the full, persisted pipeline ---
 
 
-def _plan_jarvis(request, messages):
+def _plan_friday(request, messages):
     if messages[-1][0] != "user":
         raise _invalid("The last message must have role 'user'.", "messages")
     user_turns = [text for role, text in messages if role == "user"]
@@ -600,7 +606,9 @@ def _plan_jarvis(request, messages):
 
 
 def _pinned_conversation(request):
-    raw = request.headers.get(CONVERSATION_HEADER)
+    raw = request.headers.get(CONVERSATION_HEADER) or request.headers.get(
+        LEGACY_CONVERSATION_HEADER
+    )
     if not raw:
         return None
     try:
@@ -614,7 +622,7 @@ def _pinned_conversation(request):
     return conversation
 
 
-def _start_jarvis(request, plan, workspace, token):
+def _start_friday(request, plan, workspace, token):
     """Map the turn to its conversation, then run the web chat's pipeline
     (classify -> context -> persist the user turn -> reply events) on
     CHANNEL_OPENAI with the chat-only router."""
@@ -634,7 +642,7 @@ def _start_jarvis(request, plan, workspace, token):
         actor=user,
         content=content,
         allowed_intents=FACADE_INTENTS,
-        context_report={"channel": CHANNEL_OPENAI, "model": MODEL_JARVIS},
+        context_report={"channel": CHANNEL_OPENAI, "model": MODEL_FRIDAY},
         # Connector reads never run over the facade (ADR-010 decision 4):
         # FACADE_INTENTS excludes connector_read, and no read tool is ever
         # registered for this channel either.
@@ -646,7 +654,7 @@ def _start_jarvis(request, plan, workspace, token):
         content=content,
         channel=CHANNEL_OPENAI,
         intent=classification["intent"],
-        report_extra={"model": MODEL_JARVIS},
+        report_extra={"model": MODEL_FRIDAY},
     )
     Message.objects.create(
         id=resolution.user_message_id,
@@ -672,10 +680,10 @@ def _start_jarvis(request, plan, workspace, token):
         channel=Message.Channel.OPENAI,
     )
     headers = {CONVERSATION_HEADER: str(conversation.id)}
-    return events, _Completion(f"chatcmpl-{reply_id}", MODEL_JARVIS), headers
+    return events, _Completion(f"chatcmpl-{reply_id}", MODEL_FRIDAY), headers
 
 
-# --- jarvis-lite: ephemeral, nothing persisted ---
+# --- friday-lite: ephemeral, nothing persisted ---
 
 
 def _plan_lite(messages):

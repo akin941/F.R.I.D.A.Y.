@@ -2,7 +2,7 @@
 
 from django.test import Client
 
-from core.exceptions import JarvisError, WorkspaceScopingError
+from core.exceptions import FridayError, WorkspaceScopingError
 
 
 def test_healthz_returns_ok_with_request_id():
@@ -31,4 +31,4 @@ def test_oversized_request_id_is_replaced():
 
 
 def test_exception_hierarchy():
-    assert issubclass(WorkspaceScopingError, JarvisError)
+    assert issubclass(WorkspaceScopingError, FridayError)

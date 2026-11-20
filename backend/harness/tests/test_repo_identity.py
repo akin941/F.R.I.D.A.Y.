@@ -21,6 +21,6 @@ def test_harness_guards_use_the_core_function():
 
 def test_harness_hard_block_still_matches_equivalent_spellings():
     assert harness.repo_identity.is_self_repo(
-        "https://github.com/akin941/jarvis-os",
-        self_repo_identifiers=["git@github.com:akin941/jarvis-os.git"],
+        "https://github.com/akin941/F.R.I.D.A.Y.",
+        self_repo_identifiers=["git@github.com:akin941/F.R.I.D.A.Y..git"],
     )

@@ -65,7 +65,7 @@ logger = logging.getLogger(__name__)
 # usage and the implementation transcript are read only from the LAST such
 # line -- anything printed before it is ignored, and a missing or malformed
 # last frame fails closed (usage unavailable -> `runner_error`).
-CLI_OUTPUT_PREFIX = "JARVIS_HARNESS_CLI_OUTPUT_V1"
+CLI_OUTPUT_PREFIX = "FRIDAY_HARNESS_CLI_OUTPUT_V1"
 
 # Literal-substring secret scan over the produced diff (Phase 3 branch 5):
 # values shorter than this can't be matched without false positives.
@@ -514,7 +514,7 @@ def run_harness_implementation_job(job_id):
 
     # `passed` is derived here, from the wrapper's own reported
     # `exit_code`, never trusted as a bare assertion (brief §boundary) --
-    # the wrapper's JSON is Jarvis-authored, deterministic code baked into
+    # the wrapper's JSON is Friday-authored, deterministic code baked into
     # the image, not the CLI agent's own self-report, but re-deriving the
     # single boolean this decision hinges on costs nothing and keeps the
     # trust boundary exactly where the brief states it.
@@ -724,7 +724,7 @@ def run_harness_implementation_job(job_id):
     dispatch_created_review(review)
 
 
-_DIFF_SUMMARY_PROMPT_NAME = "jarvis_harness_diff_summary"
+_DIFF_SUMMARY_PROMPT_NAME = "friday_harness_diff_summary"
 _DIFF_SUMMARY_MAX_CHARS = 1500
 _DIFF_STAT_MAX_CHARS = 6000
 _WORK_LOG_TITLE_MAX_CHARS = 200
@@ -809,7 +809,7 @@ def record_implementation_work_log(job):
     a terminal implementation job that actually ran (Gate A approved)
     leaves an auto-approved, deletable `work_log` memory in its workspace
     -- the system-generated activity summary "what did we last do for this
-    firm" relies on. Content is Jarvis-authored bookkeeping (status,
+    firm" relies on. Content is Friday-authored bookkeeping (status,
     branch, owner-written goal, the gateway-produced diff summary), never
     a CLI transcript. Best-effort: a duplicate or any error never affects
     the job itself."""

@@ -1,4 +1,4 @@
-# MVP 1 — Jarvis Web Shell: Auth + Workspace + Chat + AI Gateway v0
+# MVP 1 — Friday Web Shell: Auth + Workspace + Chat + AI Gateway v0
 
 Detailed plan agreed on 2026-07-04 (see conversation/planning doc). Implementation
 is split into branches:
@@ -67,8 +67,8 @@ is split into branches:
 - **Architecture: Next.js Route Handlers as a BFF**, not a browser-to-Django
   client. The browser only ever calls same-origin `/api/...` routes; those
   routes call Django server-side and translate the JWT pair into `HttpOnly`,
-  `SameSite=Lax` cookies (`jarvis_access` scoped to `/api`, `jarvis_refresh`
-  scoped to `/api/auth/refresh`, `jarvis_session` — not a credential, just an
+  `SameSite=Lax` cookies (`friday_access` scoped to `/api`, `friday_refresh`
+  scoped to `/api/auth/refresh`, `friday_session` — not a credential, just an
   optimistic route-guard flag — scoped to `/`). No JWT is ever readable from
   JS or present in a response body.
 - `src/proxy.ts` is Next.js 16's renamed `middleware.ts` (the file convention
@@ -184,7 +184,7 @@ is split into branches:
   the gateway's call sites.
 - `assistant.context.build_context()` returns `(messages, context_report,
   prompt_version)` — the resolved `PromptVersion` is threaded straight into the
-  gateway call instead of being re-queried, so a `jarvis_system.active_version`
+  gateway call instead of being re-queried, so a `friday_system.active_version`
   repoint mid-request can't desync the sent prompt from the recorded lineage.
 - SSE contract: the assistant `Message` row is persisted in `stream_assistant_
   reply`'s `finally` *before* the `done`/`error` event is yielded (not after,
@@ -245,7 +245,7 @@ is split into branches:
 - `AUTH_USER_MODEL = accounts.User` — dev DB was reset (`down -v`); MVP 0 dev data
   discarded by agreement.
 - sqlite fallback removed: Postgres is now the only database target; local default
-  `postgres://jarvis:jarvis@localhost:5433/jarvis` (Compose host port).
+  `postgres://friday:friday@localhost:5433/friday` (Compose host port).
 - Settings tolerate set-but-empty env vars (copied `.env.example` no longer breaks).
 - CI now runs against a pgvector/pg16 service container.
 - Scoped-model pattern: `core.db.WorkspaceScopedModel` / `WorkspaceScopedManager`;

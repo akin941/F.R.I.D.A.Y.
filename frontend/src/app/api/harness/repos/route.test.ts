@@ -9,7 +9,7 @@ vi.mock("next/headers", () => ({
 function cookieStore(accessToken?: string) {
   return {
     get: (name: string) =>
-      name === "jarvis_access" && accessToken ? { name, value: accessToken } : undefined,
+      name === "friday_access" && accessToken ? { name, value: accessToken } : undefined,
   };
 }
 
@@ -48,7 +48,7 @@ describe("GET /api/harness/repos", () => {
 
   it("forwards the workspace filter and bearer token to the backend", async () => {
     cookiesMock.mockResolvedValue(cookieStore("token"));
-    const repos = [{ id: "r1", name: "jarvis", enabled: true }];
+    const repos = [{ id: "r1", name: "friday", enabled: true }];
     const fetchMock = vi.fn<(input: string, init?: RequestInit) => Promise<Response>>(
       async () => new Response(JSON.stringify(repos), { status: 200 }),
     );

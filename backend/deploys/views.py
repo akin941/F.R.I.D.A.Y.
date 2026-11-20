@@ -231,7 +231,7 @@ class DeployRunCancelView(APIView):
 
 class DeployRequestCreateView(APIView):
     """`POST /deploys/requests {target, sha}` -- the owner's "Deploy"
-    click (or `jarvis deploy`): mints the pending `deploy` gate through
+    click (or `friday deploy`): mints the pending `deploy` gate through
     `deploys.services.request_deploy`. The decision is a separate web-only
     step on the approvals surface."""
 

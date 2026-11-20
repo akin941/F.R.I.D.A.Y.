@@ -1,6 +1,6 @@
 # GitHub connector sidecar (Phase 5 branch 5, brief D7, docs/mcp/github.md):
 # the official github-mcp-server binary, pinned by digest, run in stdio mode
-# as the child of the Jarvis stdio<->HTTP bridge. The PAT reaches only this
+# as the child of the Friday stdio<->HTTP bridge. The PAT reaches only this
 # container's environment (GITHUB_PERSONAL_ACCESS_TOKEN, passed to the child
 # via BRIDGE_ENV_PASSTHROUGH); web and worker hold only GITHUB_MCP_URL.
 # Bumping the digest is a reviewed commit that also re-records the schema

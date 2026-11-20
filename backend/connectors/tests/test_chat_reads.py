@@ -30,9 +30,9 @@ def ai(settings):
     settings.AI_FAKE_PROVIDER = True
     settings.AI_RETRY_BACKOFF_SECONDS = 0
     for name, purpose, content in [
-        ("jarvis_system", "chat", "You are Jarvis."),
-        ("jarvis_router_intent", "router.intent", "Classify the message."),
-        ("jarvis_router_connector_args", "router.connector_args", "Extract the arguments."),
+        ("friday_system", "chat", "You are Friday."),
+        ("friday_router_intent", "router.intent", "Classify the message."),
+        ("friday_router_connector_args", "router.connector_args", "Extract the arguments."),
     ]:
         template = PromptTemplate.objects.create(name=name, purpose=purpose)
         version = PromptVersion.objects.create(template=template, version=1, content=content)
@@ -161,7 +161,7 @@ def test_a_firm_read_reaches_chat_fenced_and_audited(
     for call in calls:
         assert fakes.SERVER_DESCRIPTION_CANARY not in call["messages"]
         assert fakes.SERVER_INSTRUCTIONS_CANARY not in call["messages"]
-    # The router's vocabulary is the Jarvis-authored one.
+    # The router's vocabulary is the Friday-authored one.
     assert "fake_search (Search the fake service" in calls[0]["messages"]
     # Bookkeeping, never content.
     reply = Message.objects.get(role="assistant")
@@ -438,7 +438,7 @@ def test_no_credential_value_anywhere(
 ):
     """Credentials are env-only (the sidecar's): after an enable, a pin
     check, a read and a write, the credential value is in no DB row, audit
-    row or log line, and was never sent by Jarvis."""
+    row or log line, and was never sent by Friday."""
     from approvals.models import ApprovalRequest
     from connectors.models import ConnectorBinding, ConnectorWriteExecution
     from connectors.tests.conftest import CREDENTIAL_CANARY

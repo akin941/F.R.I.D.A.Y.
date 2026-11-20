@@ -46,7 +46,7 @@ def _git(repo, *args):
 
 @pytest.fixture
 def smoke_network(settings):
-    name = f"jarvis-harness-smoke-{uuid.uuid4().hex[:8]}"
+    name = f"friday-harness-smoke-{uuid.uuid4().hex[:8]}"
     subprocess.run(["docker", "network", "create", "--internal", name], check=True)
     settings.HARNESS_DOCKER_NETWORK = name
     yield name

@@ -4,7 +4,7 @@
 Accepted
 
 ## Context
-Jarvis runs agents that can eventually write files, commit code, send messages and
+Friday runs agents that can eventually write files, commit code, send messages and
 trigger workflows. Trust must be earned per tool, never assumed.
 
 ## Decision

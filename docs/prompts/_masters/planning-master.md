@@ -5,7 +5,7 @@
 
 ## Context header (include verbatim in every prompt)
 
-Project: Jarvis OS. Read `CLAUDE.md`, the relevant `docs/MASTER_PLAN.md` section
+Project: Friday OS. Read `CLAUDE.md`, the relevant `docs/MASTER_PLAN.md` section
 and `docs/adr/`. Non-negotiable rules: (1) workspace scoping — every business
 table has workspace_id, every queryset goes through `for_actor()`; (2) all LLM
 calls go through the `ai_core` gateway and write ModelUsage; (3) write actions go

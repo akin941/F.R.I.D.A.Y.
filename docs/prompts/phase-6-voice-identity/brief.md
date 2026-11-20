@@ -13,7 +13,7 @@
 > device before it; local faster-whisper + Piper; visual identity after
 > voice works), ADR-009 (Phase 4: device-trust web channel, no
 > confirm-class growth by precedent), ADR-010 (Phase 5: personal-data
-> provider rule), `docs/VISION_JARVIS_2.md` §6 rows 6 and 6+,
+> provider rule), `docs/VISION_FRIDAY_2.md` §6 rows 6 and 6+,
 > MASTER_PLAN §Z, §AA ("Phase 4–6 outline") and §O (STT/TTS provider,
 > binary-audio storage — both resolved 2026-07-17),
 > `docs/prompts/mvp-12-voice/brief.md` (dormant; this brief supersedes
@@ -34,16 +34,16 @@
 
 ## Goal / value
 
-Every Jarvis exchange so far is typed and read. Phase 6 makes it spoken —
-say "Hey Jarvis", speak, hear the answer — **entirely on the owner's own
+Every Friday exchange so far is typed and read. Phase 6 makes it spoken —
+say "Hey Friday", speak, hear the answer — **entirely on the owner's own
 hardware**: the wake word runs in the browser, speech-to-text
 (faster-whisper) and text-to-speech (Piper) run on the owner's Mac next
 to Ollama, and nothing about the turn itself changes: the transcript goes
 through the same intent router, context builder, drafts and approval gate
 as a typed message. Only after that loop works does the orb become the
-animated "Jarvis" presence (ADR-008 decision 5: "a visual shell before
+animated "Friday" presence (ADR-008 decision 5: "a visual shell before
 the pipeline works would be an empty costume"). Usable outcome
-(MASTER_PLAN §AA): "The real Jarvis experience."
+(MASTER_PLAN §AA): "The real Friday experience."
 
 ## What already exists (verified 2026-09-27)
 
@@ -66,7 +66,7 @@ the pipeline works would be an empty costume"). Usable outcome
   (`ollama-local` at `seed_ai_defaults.py:523` is the pattern to mirror).
   `_estimate_cost` (`gateway.py:778`) is token-priced, so audio rows cost
   0 — correct for local providers, the only kind Phase 6 allows (D5).
-- **Frontend.** `components/voice/JarvisOrb.tsx` (Canvas 2D, states
+- **Frontend.** `components/voice/FridayOrb.tsx` (Canvas 2D, states
   `idle | thinking | speaking`, synthetic jitter for "speaking") and
   `VoiceView.tsx`, which sends typed text through the real chat SSE
   endpoint but ignores `draft` events and shows a disabled mic button
@@ -222,8 +222,9 @@ D11): capability, not tier, selects audio providers.
 ### D6 — Wake word in the browser; nothing leaves the device before it fires
 
 - **Engine: openWakeWord ONNX models via `onnxruntime-web`** (the one new
-  frontend runtime dependency, WASM backend). openWakeWord ships a
-  pre-trained "hey jarvis" model; its pipeline (melspectrogram →
+  frontend runtime dependency, WASM backend). openWakeWord's keyword
+  heads are small per-phrase models (a custom-trained `hey_friday` one
+  here — see the 2026-11-20 note under branch 4); its pipeline (melspectrogram →
   shared embedding → keyword head) is three small ONNX graphs, ported to
   TypeScript in-house and run in a Worker fed by an `AudioWorklet`
   (16 kHz mono frames). Rejected: **Porcupine** (needs a Picovoice
@@ -285,7 +286,7 @@ until the stream ends (`assistant/services.py:458`); this is acceptable
 for an owner-only, web-only, throttled, local-only endpoint whose worst
 case is speaking arbitrary text to the requester. Playback is one
 `AudioContext` with an `AnalyserNode` (feeds the orb, D10). **Half-duplex:**
-wake detection and capture pause while Jarvis speaks (echo would
+wake detection and capture pause while Friday speaks (echo would
 self-trigger); "Durdur" and `Escape` stop playback and abort pending
 synthesis (`AbortController`). Barge-in by voice is out of scope (Q4).
 
@@ -303,7 +304,7 @@ produce "evet, onayla". Therefore:
   request is a pointer/keyboard click, exactly as in chat;
 - `ToolRequestCard` keeps `canDecide={false}` (`ToolRequestCard.tsx:74`);
   the decision stays on `/approvals/[requestId]` (Phase 4 branch 5), which
-  the card deep-links. Jarvis may *say* "onay isteği ekranda" but never
+  the card deep-links. Friday may *say* "onay isteği ekranda" but never
   reads a decision back as done;
 - nothing in the client maps a transcript to a click (a test scans
   `lib/voice/` and `components/voice/` for calls to the task-confirm,
@@ -327,7 +328,7 @@ chunking), Redis-backed like Phase 4's, failing closed.
 
 ### D10 — Orb on real signals first; the visual identity layer last
 
-- **With the loop (branch 3):** `JarvisOrbState` grows to `idle | armed |
+- **With the loop (branch 3):** `FridayOrbState` grows to `idle | armed |
   listening | transcribing | thinking | speaking | error`; `listening` is
   driven by mic RMS from the worklet, `speaking` by the TTS `AnalyserNode`
   — the synthetic jitter goes. Still the existing Canvas-2D component.
@@ -361,7 +362,7 @@ Records: (1) voice is an input/output transport onto the unchanged
 conversation pipeline, web channel only; (2) wake-word detection runs in
 the browser and no audio leaves the device before it fires — no pre-roll,
 no cloud speech API, including the browser's Web Speech API; (3) raw
-audio is never persisted and never written to disk by Jarvis (tightens
+audio is never persisted and never written to disk by Friday (tightens
 §O); (4) STT/TTS calls require `personal_data_allowed` providers,
 enforced in the gateway; (5) a spoken utterance is never the explicit
 decision of ADR-008 decision 3 nor a confirm-class confirmation — voice
@@ -463,7 +464,7 @@ the Phase 4 R4b load check re-run with voice STT/TTS requests mixed in
 (no SSE stream starved, no 503 from the pool); a task drafted by voice
 is created only after its card is clicked.
 
-### 4. `feat/p6-wake-word` — local "Hey Jarvis"
+### 4. `feat/p6-wake-word` — local "Hey Friday"
 
 **Step 0 — wake-word spike**, recorded before code: openWakeWord model
 licence and download URLs/hashes; feature-pipeline parity of the TS port
@@ -492,10 +493,23 @@ assertion); no-speech timeout uploads nothing; arming requires a gesture
 and is not restored after reload; disarm on 401; detection ignored while
 speaking; model hash mismatch → refuses to arm; model URLs same-origin.
 Nightly/manual (real models, not CI): the parity test and a Playwright
-run with Chromium's fake audio capture playing a "hey jarvis" fixture.
-**Done when:** on the Mac, "Hey Jarvis, yarın saat 10'da diş hekimi"
+run with Chromium's fake audio capture playing a "hey friday" fixture.
+**Done when:** on the Mac, "Hey Friday, yarın saat 10'da diş hekimi"
 yields a spoken reply and a task draft card, with the network panel
 showing no voice request before the wake word.
+
+> **Note (2026-11-20, rename Jarvis → Friday):** openWakeWord ships a
+> pre-trained `hey_jarvis` model but no "hey friday" model, so branch 4
+> needs a custom-trained `hey_friday` openWakeWord keyword model. Training
+> it with openWakeWord's synthetic-data pipeline (generated TTS clips plus
+> negative data, then the small keyword head on top of the shared
+> melspectrogram/embedding graphs) is an **owner step**, done offline
+> before step 0; the resulting ONNX file is pinned by sha256 like the
+> others. The wake phrase/model stays configurable via the model manifest
+> (`lib/voice/model-manifest.ts`), so swapping or retraining it is a
+> manifest change, not a code change. The rest of the design (D6, the
+> spike, the tests, the privacy invariant) is unchanged; the spike's
+> false-accept measurement runs against the custom model.
 
 ### 4a. `feat/p6-wake-word-dsp` — conditional, only if the branch-4 spike is marginal
 
@@ -511,7 +525,7 @@ nightly/manual with real models. **Done when:** the parity test passes
 standalone (delta ≤ 0.02) and the CPU target holds; branch 4 then
 narrows to wiring (state machine, arming, indicator, headers) on top.
 
-### 5. `feat/p6-visual-identity` — the animated Jarvis layer
+### 5. `feat/p6-visual-identity` — the animated Friday layer
 
 Starts only after branches 3 and 4 meet "done when" on the Mac (ADR-008
 decision 5). **Scope.** D10 second bullet: WebGL2 orb + Canvas fallback,
@@ -560,7 +574,8 @@ HA or any domain via voice (Q2) · step-up re-auth (Q3) · barge-in by
 voice / full duplex (Q4) · speaker identification or voice biometrics ·
 persisted recordings, audio in memories or the vault · voice over
 Telegram, CLI or the facade · streaming STT (partial transcripts) ·
-languages beyond Turkish and English · custom wake-word training ·
+languages beyond Turkish and English · in-app wake-word training (the
+one `hey_friday` model is trained offline by the owner, branch 4 note) ·
 native/mobile apps or an OS-level always-on daemon (browser tab only) ·
 avatar, face or 3D character · the carried-forward kernel items
 (consolidation, owner core block, runner registry, SSE log streaming).
@@ -585,7 +600,7 @@ model files loaded cross-origin or with a mismatched hash.
 
 ## Risks
 
-- **R1 — False wake accepts.** A TV or conversation triggers "Hey Jarvis"
+- **R1 — False wake accepts.** A TV or conversation triggers "Hey Friday"
   and ≤ 30 s of room audio goes to the local speech server. Bounded: the
   audio stays on the owner's hardware, is never stored, and the worst
   outcome is a chat turn (no side effect without a click, D8); the
@@ -598,7 +613,7 @@ model files loaded cross-origin or with a mismatched hash.
   visible; push-to-talk always works.
 - **R3 — Licences.** openWakeWord's pre-trained models are published
   under a non-commercial licence (to be confirmed in the branch-4 spike):
-  fine for a single-owner personal system, a blocker if Jarvis is ever
+  fine for a single-owner personal system, a blocker if Friday is ever
   productized — hence downloaded, not committed, and a named item in
   ADR-011's consequences. Piper voices and Whisper weights carry their own
   licences, recorded in the runbook.

@@ -39,7 +39,7 @@ def _read(name="stub_read", data_class=DATA_CLASS_FIRM, channels=None, bound=(FI
     bound_ids = {workspace.id for workspace in bound}
     return ReadToolSpec(
         name=name,
-        description="Jarvis-authored description",
+        description="Friday-authored description",
         argument_serializer=object,
         data_class=data_class,
         channels=frozenset(channels if channels is not None else {CHANNEL_WEB}),

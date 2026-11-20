@@ -16,12 +16,12 @@ def render_frontmatter(memory) -> str:
     empty -- reserved per the vault-strategy doc, not invented here (no
     project concept exists in this codebase yet)."""
     fields = {
-        "jarvis_id": str(memory.id),
+        "friday_id": str(memory.id),
         "type": memory.memory_type,
         "workspace": str(memory.workspace_id),
         "project": "",
         "sensitivity": memory.sensitivity,
-        "source": "jarvis_export",
+        "source": "friday_export",
         "updated_at": memory.updated_at.isoformat(),
     }
     lines = [_DELIMITER]

@@ -1,7 +1,7 @@
-# Jarvis OS Master Plan
+# Friday OS Master Plan
 
 > Living plan. ADRs in `docs/adr/` are the binding source for architecture
-> rules; §AA is the current roadmap (Jarvis 2.0, ADR-008) and carries the
+> rules; §AA is the current roadmap (Friday 2.0, ADR-008) and carries the
 > per-phase status. Last full plan audit: **2026-09-27** (§AA "Plan audit
 > 2026-09-27").
 
@@ -9,9 +9,11 @@
 
 Personal AI Operating System + a platform core that workplaces can integrate
 with. Personal-first. Workplace products are **not** module packs built inside
-Jarvis: they are separate, independently developed and deployed external
-installations (ADR-006). Jarvis's long-term company-facing role is the
+Friday: they are separate, independently developed and deployed external
+installations (ADR-006). Friday's long-term company-facing role is the
 operator's multi-installation management/assistant layer over such external installations (§P).
+
+Renamed from Jarvis to Friday on 2026-11-20 (new repository akin941/F.R.I.D.A.Y.).
 
 ## B. Product Vision
 
@@ -19,18 +21,18 @@ Binding repositioning (2026-07-07, ADR-006):
 
 - **Identity:** personal AI operating system + a platform core that can be
   integrated into workplaces — not a host for company products built in-tree.
-- **Integration mechanism:** Jarvis integrates with workplaces by connecting
+- **Integration mechanism:** Friday integrates with workplaces by connecting
   to external installations as an **MCP client** — consuming an
   installation's MCP-compatible tools on the user's behalf (read-only first,
-  writes behind the approval gate) — not by hosting companies inside Jarvis.
+  writes behind the approval gate) — not by hosting companies inside Friday.
 - **Workplace products are external.** A workplace product is an independent
   application with its own codebase and its own deployment. It is developed
   outside this repository and outside this roadmap.
 - **Multi-installation future:** where several organizations each run their
-  own external installation, Jarvis can become the operator's fleet layer —
+  own external installation, Friday can become the operator's fleet layer —
   monitoring, version tracking and tenant-level reporting across
   installations (§P) — plus the personal assistant over that portfolio.
-- **Design transfer, not code transfer:** patterns proven in Jarvis are
+- **Design transfer, not code transfer:** patterns proven in Friday are
   reference designs for external installations; the projects remain
   independent codebases (`docs/DESIGN_TRANSFER.md`).
 
@@ -52,7 +54,7 @@ preference / procedural), curated through a `pending_approval -> approved |
 rejected` state machine with role-gated approve/reject/forget/restore
 (ADR-005). AI-suggested candidates come from an async extraction pipeline —
 a Celery worker claims lease-fenced jobs over fixed, non-overlapping message
-ranges and runs the `jarvis_memory_extraction` prompt through the AI Gateway.
+ranges and runs the `friday_memory_extraction` prompt through the AI Gateway.
 Approved, normal-sensitivity memories are injected into chat context
 (`build_context`) under a workspace-only, injection-safe framing; `private`
 memories never reach a gateway payload (the cloud-eligibility negative
@@ -64,7 +66,7 @@ see §Q.
 
 ## G. Agent Runtime
 
-Shipped in MVP 7 (§W): given a **goal**, Jarvis plans a bounded sequence of
+Shipped in MVP 7 (§W): given a **goal**, Friday plans a bounded sequence of
 `AgentStep`s (`read` / `task_draft` / `tool_request`) and executes them
 without requiring a human to type each one — the other half of the
 roadmap's `router → agents` line (§L), drawing the same autonomy boundary
@@ -105,14 +107,14 @@ personal kernel first (shell/chat → memory → knowledge/RAG *(done — §S)* 
 tasks *(done — §T)* → tools/approvals *(done — §U)* → router *(done — §V)* →
 agents *(done — §W)* → skills *(done — §X)* → integrations
 *(done — §Y)*). Model-tier/cost routing: the skeleton (`ModelTier` +
-`ModelUsage.routing_reason`) shipped in Jarvis 2.0 Phase 0, but the
+`ModelUsage.routing_reason`) shipped in Friday 2.0 Phase 0, but the
 purpose→tier map (`AI_PURPOSE_TIERS`) is still empty, so no call is
 actually tier-routed yet; populating it together with the harness
 job-distribution policy table is scheduled in Phase 5 (§AA).
 
-MVP 10 (company workspaces: multi-user tenancy *inside* Jarvis — invite flows,
+MVP 10 (company workspaces: multi-user tenancy *inside* Friday — invite flows,
 company membership management, company-scoped memory) is **cancelled
-(ADR-008)**: Jarvis is a single-owner system and will never host a second
+(ADR-008)**: Friday is a single-owner system and will never host a second
 human user. The fleet phase may still add a lightweight external-installation
 grouping "organization" concept. (This does not touch the workspace *axis* —
 ADR-001 stays: the scoping column and `for_actor()` gate are already in the
@@ -120,8 +122,8 @@ data model and remain the isolation mechanism for firm/context profiles.)
 
 Fleet/Organization Management at MVP 11 (vision only — §P). The in-repo
 document-intelligence pack formerly occupying MVP 11–15 is removed from scope (ADR-006); MVP 12–15
-are reserved. **The roadmap after MVP 9 is reorganized into Jarvis 2.0
-Phases 0–6 (ADR-008, §AA, `docs/VISION_JARVIS_2.md`).** Voice Assistant,
+are reserved. **The roadmap after MVP 9 is reorganized into Friday 2.0
+Phases 0–6 (ADR-008, §AA, `docs/VISION_FRIDAY_2.md`).** Voice Assistant,
 promoted to MVP 12 by ADR-007, is re-sequenced by ADR-008 into Phase 6 —
 its shipped foundation (§Z) stands; orchestration/productization are
 absorbed into the phase model (the agent harness *is* the orchestration
@@ -161,9 +163,9 @@ Status: **done (2026-07-05)** — all 6 branches merged to main.
   enforced at extraction input, context injection, the overlay and
   gateway payload assembly. A private conversation never becomes
   non-private again.
-- Jarvis ↔ external-installation bridge (optional, post-ADR-006): if built,
-  it takes the MCP route — Jarvis as MCP client of the installation's
-  MCP-compatible tools, e.g. read-only access for Jarvis's personal
+- Friday ↔ external-installation bridge (optional, post-ADR-006): if built,
+  it takes the MCP route — Friday as MCP client of the installation's
+  MCP-compatible tools, e.g. read-only access for Friday's personal
   assistant to data in an external workplace installation. Auth model,
   approval-gate treatment (ADR-004) and audit trail unresolved. **Reconciled
   with §AA (2026-09-27):** the *client* side is committed to Phase 5 via the
@@ -201,7 +203,7 @@ Status: **done (2026-07-05)** — all 6 branches merged to main.
   fixed by ADR-008.
 - Shared library extraction: whether the transferred patterns
   (`docs/DESIGN_TRANSFER.md` — gateway, scoping, lease-fenced jobs, approval
-  gate) ever become a shared package across Jarvis and external products, or the projects
+  gate) ever become a shared package across Friday and external products, or the projects
   stay on independent re-implementations permanently. Open; independent
   re-implementation is the working default.
 - ~~AI-suggested task extraction (MVP 4)~~ — **resolved, amended (MVP 6 §3):**
@@ -240,24 +242,24 @@ Status: **done (2026-07-05)** — all 6 branches merged to main.
 
 Vision + requirements draft only. **Detailed design is deliberately deferred**
 — revisit once the personal kernel (through skills/integrations) is done and a
-multi-installation setup is concrete. Jarvis monitors and manages multiple
+multi-installation setup is concrete. Friday monitors and manages multiple
 external installations without hosting their data:
 
 - Health/usage metrics per installation: uptime, error rates, queue depth,
   cost/usage aggregates exposed by the installation itself (its own
-  ModelUsage-equivalent), pulled or pushed into Jarvis.
+  ModelUsage-equivalent), pulled or pushed into Friday.
 - Version tracking: which installation runs which release; upgrade planning
   and rollout status across the fleet.
 - Tenant-based reporting: per-customer summaries surfaced through the
-  operator's Jarvis assistant (chat: "how is customer X's installation
+  operator's Friday assistant (chat: "how is customer X's installation
   doing?").
 - Carried-over constraints: read-only by default; any action that touches an
   installation goes through the approval gate (ADR-004); all fleet access is
-  audited; whatever fleet metadata Jarvis stores is workspace-scoped
+  audited; whatever fleet metadata Friday stores is workspace-scoped
   (ADR-001).
 
 Open questions live in §O (API bridge, transport pull vs push, auth model
-between Jarvis and installations).
+between Friday and installations).
 
 ## Q. Knowledge / RAG
 
@@ -356,7 +358,7 @@ The first real gated tool: Obsidian vault filesystem export, deferred from
 MVP 2 (see §F). `VaultExportRun` — a lease-fenced claim/finalize execution
 record mirroring memory/knowledge's own worker pattern — full-resync +
 conservative-prune reconciliation (a file is deleted only if every check
-passes: valid frontmatter, `source: jarvis_export`, matching workspace, a
+passes: valid frontmatter, `source: friday_export`, matching workspace, a
 valid UUID no longer in the approved set), two-tier vault-root validation
 (a zero-filesystem-access string check at request time, a real
 existence/safety check at execution time in the worker), and TOCTOU-
@@ -442,8 +444,8 @@ status: `docs/prompts/mvp-06/brief.md`.
 ## W. MVP 7
 
 MVP 7: Agent Runtime — the other half of the `router → agents` roadmap
-line (§L), and, in the user's own words, "Jarvis's riskiest MVP so far."
-Given a **goal**, Jarvis plans a sequence of steps and executes them
+line (§L), and, in the user's own words, "Friday's riskiest MVP so far."
+Given a **goal**, Friday plans a sequence of steps and executes them
 without requiring a human to type each one — a real increase in autonomy,
 scoped narrowly on purpose: ADR-004's approval gate is not rebuilt or
 given an "agent" exception, and the user made four brakes an explicit
@@ -570,9 +572,9 @@ status: `docs/prompts/mvp-08/brief.md`.
 
 MVP 9: Integrations — a CLI and a Telegram bot, the last stage of the
 `shell/chat → ... → skills → integrations` roadmap line (§L). Every surface
-Jarvis had shipped through MVP 8 was reachable only through the web app,
+Friday had shipped through MVP 8 was reachable only through the web app,
 authenticated by a password+JWT login. This MVP adds two more ways to
-*reach* Jarvis — a bearer-token CLI and a relayed Telegram bot — without
+*reach* Friday — a bearer-token CLI and a relayed Telegram bot — without
 adding a single new way to *act*: both are new front doors onto the exact
 same chat pipeline (and, for the CLI, the same agents/approvals endpoints)
 the web app already calls. The one new concept introduced on purpose is
@@ -688,7 +690,7 @@ has local-LLM infrastructure (Ollama) available for dogfooding:
   unchanged conversation flow.
 - Speech out: the assistant's existing streamed text reply synthesized to
   audio and played back.
-- A visible "Jarvis" state indicator in the web shell (idle / listening /
+- A visible "Friday" state indicator in the web shell (idle / listening /
   thinking / speaking), reacting to the same SSE stream `ChatView.tsx`
   already consumes.
 - Carried-over constraints: every STT/TTS call goes through
@@ -706,20 +708,20 @@ foundation and the orb UI shipped ahead of schedule (see
 **re-sequenced to Phase 6 by ADR-008**, with two design constraints fixed
 now:
 
-- **Always-listening via a local wake word** ("Hey Jarvis"): detection runs
+- **Always-listening via a local wake word** ("Hey Friday"): detection runs
   on-device with an openWakeWord/Porcupine-class model — audio never leaves
   the machine and nothing is processed until the wake word fires. The goal
   is that everything the owner does by hand on the computer can be done by
   voice or text.
 - **Visual identity comes after voice works:** the animated, speaking
-  "Jarvis" interface layer (built on the dormant orb foundation) is the
+  "Friday" interface layer (built on the dormant orb foundation) is the
   last layer — a visual shell before the pipeline works would be an empty
   costume.
 
-## AA. Jarvis 2.0 Phases (ADR-008)
+## AA. Friday 2.0 Phases (ADR-008)
 
 The post-MVP 9 roadmap. Full analysis and rationale:
-`docs/VISION_JARVIS_2.md` (approved 2026-07-17). Jarvis is a
+`docs/VISION_FRIDAY_2.md` (approved 2026-07-17). Friday is a
 **single-owner system** (ADR-008): the kernel is the control plane, a new
 `harness` kernel app drives external CLI coding agents (Claude Code, Codex
 CLI, Gemini CLI, Ollama) as workers under the approval gate, with
@@ -736,8 +738,8 @@ approval (Phase 5).
 | 3 | Harness v2: plan approval → worktree implementation → tests → cross-vendor review → gated branch push | Approved feature development end-to-end | **done (2026-09-27)** — branches 1–4 (2026-07-20 → 07-22) + closeout 5a/5–8 (2026-09-27); first real paid run is an owner runbook step |
 | 4 | Security baseline; UI renewal: shell/chat/harness console/approvals inbox redesign; device-trust identity replaces signup/login; OpenAI-compatible facade (chat-only, low-trust) | Professional, safely-exposable daily driver | **done 2026-09-27** (`docs/prompts/phase-4-identity-ui/brief.md`, "Closeout"); six branches, each Sonnet 5 APPROVE, merged to `main` via PR #27 |
 | 5 | Deploy gate + VPS deploy (allowlisted commands); MCP client framework: GitHub, mail/calendar, external-installation client (when one exposes MCP), Home Assistant bridge; tier routing + harness policy table | Request → code → live, end to end | in progress (`docs/prompts/phase-5-deploy-mcp/brief.md`); on `integ/phase-5` (PR #29) as of 2026-09-28: branches 1–6 and 8 merged (Sonnet 5 APPROVE); 7 (Home Assistant) approved but waits on reconciling its native-bridge dispatch with branch 8's; 9 (UI) and 10 (closeout) open |
-| 6 | Voice (ex-MVP 12): mic capture, faster-whisper STT, Piper TTS, local wake word, orb wired to real audio; then the animated visual identity layer | The real Jarvis experience | brief approved 2026-09-27 (`docs/prompts/phase-6-voice-identity/brief.md`); starts after Phase 5 closeout (foundation from MVP 12 shipped, dormant) |
-| 7 | Workshop (first module pack, `apps.modules.workshop`): sandboxed 3D stage, gateway-driven part-stream builder, change-never-restart conversation, teardown/labels/STL export, saved-build shelf, cost receipt, workshop drill; then picture-in (vision) and studio-photo finish (image capability) | "Jarvis, bana bir saat mekanizması tasarla" → live, editable 3D model | planned 2026-11-20 (`docs/prompts/phase-7-workshop/brief.md`, written at phase start); starts after Phase 6 closeout |
+| 6 | Voice (ex-MVP 12): mic capture, faster-whisper STT, Piper TTS, local wake word, orb wired to real audio; then the animated visual identity layer | The real Friday experience | brief approved 2026-09-27 (`docs/prompts/phase-6-voice-identity/brief.md`); starts after Phase 5 closeout (foundation from MVP 12 shipped, dormant) |
+| 7 | Workshop (first module pack, `apps.modules.workshop`): sandboxed 3D stage, gateway-driven part-stream builder, change-never-restart conversation, teardown/labels/STL export, saved-build shelf, cost receipt, workshop drill; then picture-in (vision) and studio-photo finish (image capability) | "Friday, bana bir saat mekanizması tasarla" → live, editable 3D model | planned 2026-11-20 (`docs/prompts/phase-7-workshop/brief.md`, written at phase start); starts after Phase 6 closeout |
 
 Phase briefs live in `docs/prompts/phase-N-<topic>/brief.md`, same
 discipline as MVP briefs (branch tables, test strategy, closeout).
@@ -745,7 +747,7 @@ discipline as MVP briefs (branch tables, test strategy, closeout).
 **Integration state (2026-09-27):** all Phase 0–3 work (119 commits) lives
 on the shared session branch `claude/repo-setup-env-transition-1g94hx`,
 not on `main`, and CI (push-to-main / PR only) had never run on it. Draft
-integration PR akin941/jarvis-os#26 was opened on 2026-09-27 so CI runs; a
+integration PR akin941/F.R.I.D.A.Y.#26 was opened on 2026-09-27 so CI runs; a
 green CI run and the merge of that PR are Phase 3 closeout gates.
 
 **Review process (2026-09-27):** Codex CLI is retired from the development
@@ -857,10 +859,10 @@ detail in `docs/prompts/phase-3-harness-v2/brief.md` branch table.
   is a web-session channel but approval decisions still need an explicit
   on-screen confirm; then the visual identity layer.
 
-### Roadmap update 2026-11-20 — lessons adopted from two external "Jarvis" prompt packs
+### Roadmap update 2026-11-20 — lessons adopted from two external "Friday" prompt packs
 
-Two third-party prompt packs ("Give Your Jarvis a Workshop" and "Jarvis 3D
-Builds: Draft to Showpiece", Nov 2026) describe a single-file hobby Jarvis
+Two third-party prompt packs ("Give Your Friday a Workshop" and "Friday 3D
+Builds: Draft to Showpiece", Nov 2026) describe a single-file hobby Friday
 (Python server + browser viewer, direct Anthropic SDK calls, keys in a
 `config.json`). Their architecture is not adoptable — it bypasses the AI
 Gateway (ADR-003), keeps no ModelUsage (rule 3), and its browser Web Speech

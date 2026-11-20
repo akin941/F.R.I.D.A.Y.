@@ -288,7 +288,7 @@ def test_agent_commits_are_squashed_into_one_wrapper_commit(tmp_path):
     message = _git(repo, "log", "-1", "--format=%B", head)
     assert "sk-hidden-in-message" not in message
     assert message.startswith("harness: implementation")
-    assert _git(repo, "log", "-1", "--format=%an", head).strip() == "Jarvis Harness"
+    assert _git(repo, "log", "-1", "--format=%an", head).strip() == "Friday Harness"
     assert result["changed_files"] == ["a.py"]
     assert result["tests"]["passed"] is True
 

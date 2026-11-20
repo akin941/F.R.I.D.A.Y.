@@ -5,7 +5,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { useWorkspace } from "@/contexts/workspace-context";
 
-const DISMISSED_KEY = "jarvis:dismissed-security-notices";
+const DISMISSED_KEY = "friday:dismissed-security-notices";
 
 function readDismissed(): string[] {
   if (typeof window === "undefined") return [];

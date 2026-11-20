@@ -152,7 +152,7 @@ def _handle_link(chat_id, code):
     if linked is None:
         telegram_client.send_message(chat_id, "Invalid or expired code.")
         return
-    telegram_client.send_message(chat_id, "Linked! You can now chat with Jarvis here.")
+    telegram_client.send_message(chat_id, "Linked! You can now chat with Friday here.")
 
 
 def _handle_relay(chat_id, text):
@@ -163,7 +163,7 @@ def _handle_relay(chat_id, text):
     )
     if linked is None:
         telegram_client.send_message(
-            chat_id, "This chat isn't linked yet -- get a code from the Jarvis settings page."
+            chat_id, "This chat isn't linked yet -- get a code from the Friday settings page."
         )
         return
 
@@ -178,7 +178,7 @@ def _handle_relay(chat_id, text):
     )
     if not still_valid:
         telegram_client.send_message(
-            chat_id, "This link is no longer valid -- please re-link from the Jarvis settings page."
+            chat_id, "This link is no longer valid -- please re-link from the Friday settings page."
         )
         return
 

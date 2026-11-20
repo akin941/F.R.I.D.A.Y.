@@ -4,7 +4,7 @@ D13).
 `record_tool_outcome` wraps `memory.services.record_work_log` -- still the
 only creation path for `work_log` rows -- for a gated tool's terminal
 execution: vault export today, connector writes and deploy runs from
-Phase 5 branches 4 and 6. The content is Jarvis-authored bookkeeping
+Phase 5 branches 4 and 6. The content is Friday-authored bookkeeping
 only: the tool name, the outcome token, the date, the approval request id
 and a summary the calling code composes from its own closed-vocabulary
 fields (counts, error types, ids). Never connector output, never payload

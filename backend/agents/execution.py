@@ -47,7 +47,7 @@ from workspaces.models import WorkspaceMember
 
 logger = logging.getLogger(__name__)
 
-_AGENT_READ_STEP_PROMPT_NAME = "jarvis_agent_read_step"
+_AGENT_READ_STEP_PROMPT_NAME = "friday_agent_read_step"
 
 _CURATOR_ROLES = {WorkspaceMember.Role.OWNER, WorkspaceMember.Role.ADMIN}
 _WRITER_ROLES = _CURATOR_ROLES | {WorkspaceMember.Role.MEMBER}
@@ -404,7 +404,7 @@ def advance_step(agent_id):
 def resolve_running_step_after_unexpected_error(agent_id):
     """Called by `agents.tasks.advance_agent_step`'s outer safety net when
     `advance_step` raises something other than `SoftTimeLimitExceeded`
-    (Codex round-7 fix) -- e.g. a missing `jarvis_agent_read_step` prompt
+    (Codex round-7 fix) -- e.g. a missing `friday_agent_read_step` prompt
     raising `ImproperlyConfigured`, or any other unexpected bug. Without
     this, `_claim_next_step` may have already committed a read step to
     `running` before the exception hit; the outer handler used to just log

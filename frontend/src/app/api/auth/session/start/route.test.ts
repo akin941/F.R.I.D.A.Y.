@@ -48,7 +48,7 @@ describe("POST /api/auth/session/start", () => {
   });
 
   it("mints a session from the device cookie", async () => {
-    const cookieStore = createCookieStore({ jarvis_device: "jdv_secret" });
+    const cookieStore = createCookieStore({ friday_device: "jdv_secret" });
     cookiesMock.mockResolvedValue(cookieStore);
     const fetchMock = vi.fn(async () =>
       new Response(JSON.stringify({ access: "a2", refresh: "r2", device: {} }), { status: 200 }),
@@ -62,8 +62,8 @@ describe("POST /api/auth/session/start", () => {
     const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
     expect(url).toMatch(/\/auth\/devices\/session$/);
     expect(JSON.parse(init.body as string)).toEqual({ device_secret: "jdv_secret" });
-    expect(cookieStore.store.get("jarvis_access")?.value).toBe("a2");
-    expect(cookieStore.store.get("jarvis_refresh")?.value).toBe("r2");
+    expect(cookieStore.store.get("friday_access")?.value).toBe("a2");
+    expect(cookieStore.store.get("friday_refresh")?.value).toBe("r2");
     expect(JSON.stringify(await response.json())).not.toContain("a2");
   });
 
@@ -78,7 +78,7 @@ describe("POST /api/auth/session/start", () => {
   });
 
   it("drops the device cookie when the backend rejects the device", async () => {
-    const cookieStore = createCookieStore({ jarvis_device: "jdv_revoked" });
+    const cookieStore = createCookieStore({ friday_device: "jdv_revoked" });
     cookiesMock.mockResolvedValue(cookieStore);
     vi.stubGlobal(
       "fetch",
@@ -87,16 +87,16 @@ describe("POST /api/auth/session/start", () => {
     const { POST } = await import("@/app/api/auth/session/start/route");
     const response = await POST(makeRequest());
     expect(response.status).toBe(401);
-    expect(cookieStore.deleted).toContain("jarvis_device");
+    expect(cookieStore.deleted).toContain("friday_device");
   });
 
   it("keeps the device cookie when the backend is merely unavailable", async () => {
-    const cookieStore = createCookieStore({ jarvis_device: "jdv_secret" });
+    const cookieStore = createCookieStore({ friday_device: "jdv_secret" });
     cookiesMock.mockResolvedValue(cookieStore);
     vi.stubGlobal("fetch", vi.fn(async () => new Response("{}", { status: 503 })));
     const { POST } = await import("@/app/api/auth/session/start/route");
     const response = await POST(makeRequest());
     expect(response.status).toBe(503);
-    expect(cookieStore.deleted).not.toContain("jarvis_device");
+    expect(cookieStore.deleted).not.toContain("friday_device");
   });
 });

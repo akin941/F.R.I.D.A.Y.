@@ -88,7 +88,7 @@ export function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
 
   return (
     <div className="flex h-full flex-col gap-4 p-4">
-      <div className="text-lg font-semibold tracking-tight">Jarvis</div>
+      <div className="text-lg font-semibold tracking-tight">Friday</div>
       <WorkspaceSwitcher />
       <Separator />
       <nav className="flex flex-col gap-4" aria-label={tr.nav.label}>

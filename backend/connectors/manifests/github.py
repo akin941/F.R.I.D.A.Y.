@@ -3,7 +3,7 @@
 Sidecar: `ghcr.io/github/github-mcp-server:v1.12.2` pinned by digest, run in
 **stdio mode inside its own sidecar behind our stdio<->HTTP bridge** (the
 server's HTTP mode takes the token from each request's `Authorization`
-header, i.e. Jarvis would hold the PAT -- D1 forbids it). The PAT lives in
+header, i.e. Friday would hold the PAT -- D1 forbids it). The PAT lives in
 the sidecar's env only (`GITHUB_PERSONAL_ACCESS_TOKEN`); the server starts
 with `--tools=` naming only the server tools below, and the bridge's
 `BRIDGE_ALLOWED_TOOLS` repeats the list, so merge, file, branch, issue and
@@ -18,7 +18,7 @@ a `sensitive` repo makes that call `personal` (`classify`).
 The one write, `create_pull_request`, is the system-only gate
 `github_open_pr` (`user_invocable=False`): minted only by the harness from
 a `succeeded` implementation job. `reviewers` and `maintainer_can_modify`
-are fixed by Jarvis (empty / false) -- the serializer refuses anything else
+are fixed by Friday (empty / false) -- the serializer refuses anything else
 -- and shown in the dialog. Before the send the task re-reads the branch
 head and fails `head_moved` unless it still equals the approved SHA.
 
@@ -154,7 +154,7 @@ class _RepoArgs(serializers.Serializer):
 
 class PullRequestStatusArgs(_RepoArgs):
     # Methods restricted to metadata/status (no diff, files or comments --
-    # attacker-authored text Jarvis has no use for).
+    # attacker-authored text Friday has no use for).
     method = serializers.ChoiceField(
         choices=["get", "get_status", "get_check_runs"], required=False, default="get"
     )
@@ -190,7 +190,7 @@ class OpenPullRequestArgs(_RepoArgs):
     head = serializers.RegexField(github.BRANCH_RE, max_length=255)
     base = serializers.RegexField(github.BRANCH_RE, max_length=255)
     draft = serializers.BooleanField(required=False, default=False)
-    # Fixed by Jarvis (brief Step-0): nobody is auto-requested, and the
+    # Fixed by Friday (brief Step-0): nobody is auto-requested, and the
     # head branch is not opened to upstream maintainers.
     maintainer_can_modify = serializers.BooleanField(required=False, default=False)
     reviewers = serializers.ListField(

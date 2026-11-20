@@ -46,7 +46,7 @@ export function HarnessJobDetailPage({ jobId }: { jobId: string }) {
  * own once the job reaches a terminal status.
  *
  * R2 mitigation (prompt injection, brief §3/§4): `summary`/`findings` are
- * Jarvis's own gateway-produced, trustworthy content; `raw_transcript` is
+ * Friday's own gateway-produced, trustworthy content; `raw_transcript` is
  * the CLI agent's own low-trust output. The two live on separate tabs
  * (Brifing / Transkript) and the transcript stays collapsed behind an
  * explicit, labeled disclosure (shared `LowTrustTranscript`) -- never
@@ -201,7 +201,7 @@ export function HarnessJobDetail({ jobId, workspaceId }: { jobId: string; worksp
                   text={rawTranscript}
                   showLabel="Ham çıktıyı göster"
                   hideLabel="Ham çıktıyı gizle"
-                  warning="Bu, ajanın kendi ham çıktısıdır ve güvenilmeyen içerik olarak ele alınmalıdır. Brifing sekmesindeki özet ve bulgular ise Jarvis'in kendi özetidir (model üretimi); ikisini birbirine karıştırma."
+                  warning="Bu, ajanın kendi ham çıktısıdır ve güvenilmeyen içerik olarak ele alınmalıdır. Brifing sekmesindeki özet ve bulgular ise Friday'nin kendi özetidir (model üretimi); ikisini birbirine karıştırma."
                 />
               ) : (
                 <p className="text-sm text-muted-foreground">{copy.noTranscript}</p>

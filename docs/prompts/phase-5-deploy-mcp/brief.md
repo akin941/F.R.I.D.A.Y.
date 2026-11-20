@@ -8,10 +8,10 @@
 > (single gateway door, ModelUsage), ADR-004 + ADR-008 decision 3
 > (gate-class vs confirm-class: every deploy, external send and git
 > push/merge is gate-class), ADR-005 (`private` contract), ADR-006 (workplace
-> products are external installations; Jarvis is only their MCP client), ADR-008 decisions 4
+> products are external installations; Friday is only their MCP client), ADR-008 decisions 4
 > (`work_log` producers), 6 (bridges, never drivers) and 7 (runners),
 > ADR-009 (Phase 4: no confirm-class growth by precedent),
-> `docs/VISION_JARVIS_2.md` §4 steps [5]–[7], §6 row 5, §8 (R1–R3, O-5),
+> `docs/VISION_FRIDAY_2.md` §4 steps [5]–[7], §6 row 5, §8 (R1–R3, O-5),
 > MASTER_PLAN §AA ("Phase 4–6 outline", "Carried-forward items") and §O
 > (HA bridge, external-installation bridge, NotebookLM), `docs/security/mcp-governance.md`,
 > `docs/mcp/allowlist.md`.
@@ -73,7 +73,7 @@ control and mail/calendar awareness.
   (`harness/models.py:1-12`).
 - **The assistant keeps its router architecture.** No autonomous
   tool-calling loop exists (intents: `assistant/models.py:75`) and none is
-  added: the router picks at most one read per turn, Jarvis executes it,
+  added: the router picks at most one read per turn, Friday executes it,
   and the result enters the chat prompt fenced as low-trust data — the
   pattern of `render_knowledge_block` (`knowledge/context.py:173`) and
   the harness transcripts (`neutralize_fence`/`strip_invisible_formatting`,
@@ -89,7 +89,7 @@ control and mail/calendar awareness.
 
 A stdio server is a subprocess of whoever spawns it — in web/worker
 that means third-party code beside `DJANGO_SECRET_KEY`, the database
-credentials and every provider key. So Jarvis's client speaks **only
+credentials and every provider key. So Friday's client speaks **only
 Streamable HTTP**, and each server runs as its own compose sidecar
 (`deploy/docker/compose.yml` profile `connectors`, and
 `compose.daily.yml`): digest-pinned image, `read_only`, `cap_drop: [ALL]`,
@@ -120,7 +120,7 @@ enforced by an import-linter contract forbidding `mcp.server` (tests use
 the SDK's in-memory server as a fixture); it moves fast → pinned minor
 version, Dependabot, negotiated `protocolVersion` recorded per binding.
 `httpx` (transitive today via `anthropic`/`openai`) becomes a direct
-dependency for native bridges. No `jsonschema`: Jarvis-side argument
+dependency for native bridges. No `jsonschema`: Friday-side argument
 schemas are strict DRF serializers, as `workspaces/serializers.py` does.
 
 ### D3 — Framework shape: manifest-as-code + DB bindings + pins
@@ -130,7 +130,7 @@ schemas are strict DRF serializers, as `workspaces/serializers.py` does.
   `ConnectorManifest` — kind `mcp`|`native`, status `active`|`blocked`,
   `data_class` `firm`|`personal`, allowed workspace types, read channels,
   env var names (URL, credential), sidecar digest, and per tool a
-  `ToolPolicy`: read|write, Jarvis-authored name/description, argument
+  `ToolPolicy`: read|write, Friday-authored name/description, argument
   serializer, scope check, server `inputSchema` sha256 pin, gate name,
   `user_invocable`, renderer. Each has a governance twin
   `docs/mcp/<name>.md` and an allowlist row; a test fails if any of the
@@ -225,7 +225,7 @@ First MCP consumer. Sidecar: `github/github-mcp-server`, digest-pinned,
 toolsets limited to repos, pull requests and actions. Credential: a
 fine-grained PAT over the `HarnessRepo`-registered repos only
 (`contents:read`, `pull_requests:write`, `actions:read`,
-`metadata:read`). Three layers: server toolsets, Jarvis manifest (the
+`metadata:read`). Three layers: server toolsets, Friday manifest (the
 only write is `create_pull_request`; merge, file, issue and branch
 mutations are unlisted, hence unreachable), PAT scope. Argument scope:
 every call must name an `owner/repo` that canonicalizes
@@ -287,17 +287,17 @@ the dialog states that Google will send invitations).
   `health_url` (optional), `health_timeout_seconds`, `require_ci_success`
   (default True), `enabled` (default False), `current_sha`,
   `config_hash`. Create/edit: owner, web only.
-- **Allowlist on both ends.** Jarvis sends only `<verb> <remote_app>
+- **Allowlist on both ends.** Friday sends only `<verb> <remote_app>
   [<sha>]`, verbs `status|deploy|health|rollback`, SHA 40-hex. On the VPS
-  the key is `command="/opt/jarvis-deploy/jarvis-deploy.sh",restrict` in
-  `authorized_keys`; the script (`deploy/remote/jarvis-deploy.sh`,
+  the key is `command="/opt/friday-deploy/friday-deploy.sh",restrict` in
+  `authorized_keys`; the script (`deploy/remote/friday-deploy.sh`,
   versioned here) parses `SSH_ORIGINAL_COMMAND` strictly and runs only
-  root-owned per-app config (`/etc/jarvis-deploy/apps/<app>.conf`: app
+  root-owned per-app config (`/etc/friday-deploy/apps/<app>.conf`: app
   dir, tracked branch, build/restart and local health commands). A
   compromised runner gets four verbs, not a shell; build commands are not
-  Jarvis's to change.
+  Friday's to change.
 - **Only merged commits deploy:** `deploy` requires `git merge-base
-  --is-ancestor <sha> origin/<tracked_branch>`; Jarvis never merges.
+  --is-ancestor <sha> origin/<tracked_branch>`; Friday never merges.
   `rollback` accepts only the script's recorded previous SHA.
 - **SSH client:** system OpenSSH, argv only (`-F /dev/null`,
   `-i $DEPLOY_SSH_KEY_PATH`, `IdentitiesOnly`, `BatchMode`, timeouts),
@@ -314,7 +314,7 @@ the dialog states that Google will send invitations).
   required and not `success`), `expected_current_sha`, `rollback_sha`,
   health plan, verb sequence. Display: "Deploy `a1b2c3d` to ADİA
   production (deploy@203.0.113.7, app `adia-web`). Current `9f8e7d6`. If
-  health fails within 120 s, Jarvis rolls back to `9f8e7d6`."
+  health fails within 120 s, Friday rolls back to `9f8e7d6`."
   `create_execution` refuses if `config_hash` changed — the lesson of
   `HarnessImplementationJob.repo_git_url`'s snapshot
   (`harness/models.py:281-300`) — and refuses with a named, audited
@@ -328,7 +328,7 @@ the dialog states that Google will send invitations).
   drift check unless `expected_current_sha` still holds.
 - **Run (`DeployRun`, lease-fenced, one active per target by partial
   unique constraint):** `status` first — remote repo must canonicalize to
-  the target's and not to Jarvis's own (`is_self_repo`,
+  the target's and not to Friday's own (`is_self_repo`,
   `HARNESS_SELF_REPO_IDENTIFIERS`); remote SHA must equal
   `expected_current_sha` (else `target_drifted`, nothing touched) →
   `deploy` → health (VPS `health` verb + optional `health_url` GET, two
@@ -423,7 +423,7 @@ parameterized by those three differences); each caller maps
 `tools.work_log.record_tool_outcome(approval_request, *, outcome,
 summary, sensitivity)` wraps `memory.services.record_work_log`
 (`memory/services.py:224`, still the only creation path) with
-Jarvis-authored bookkeeping — never connector content or payload free
+Friday-authored bookkeeping — never connector content or payload free
 text beyond owner-authored titles. Producers: vault export finalize
 (`tools/export.py:163,208`), terminal `ConnectorWriteExecution`s,
 terminal `DeployRun`s (rollbacks included), and task outcomes
@@ -567,7 +567,7 @@ for a `sensitive` repo); gate `github_open_pr`, system-created from a
 `succeeded` `HarnessImplementationJob` — payload snapshots repo,
 `head=branch_name`, `base=repo_default_branch`,
 `head_sha=produced_commit_sha`, an owner-editable title and a
-Jarvis-authored body (goal, `diff_summary` labelled model-written, test
+Friday-authored body (goal, `diff_summary` labelled model-written, test
 result, review verdict); execution reads the remote head first and fails
 `head_moved` unless it equals `head_sha`. Harness API: `POST`/`GET
 /api/v1/harness/implementations/<id>/pull-request`, web only.
@@ -587,7 +587,7 @@ manual SHA otherwise, CI "unknown" and refused if required),
 `deploys/ssh.py`, runner tasks + recovery beat on the `deploy` queue,
 health/rollback state machine, work_log on every terminal state, API
 (targets: owner + web; runs: list/detail; request: web + CLI),
-`deploy/remote/jarvis-deploy.sh` + example app config, runbook
+`deploy/remote/friday-deploy.sh` + example app config, runbook
 `docs/runbooks/deploy-target-setup.md` (dedicated VPS user, forced
 command, host key captured out of band, first `status`).
 **Files.** `backend/deploys/`, `config/settings/base.py` (`DEPLOY_*`,
@@ -698,9 +698,9 @@ Minimum usable cut if the phase runs long: 1, 2, 4, 5, 6, 9 deliver
 
 ## Out of scope (explicit)
 
-Social media (undefined until a concrete service is named) · Jarvis
-merging PRs · deploying Jarvis itself (self-repo guard) · free-form or
-per-target commands sent by Jarvis · SSH password auth, agent
+Social media (undefined until a concrete service is named) · Friday
+merging PRs · deploying Friday itself (self-repo guard) · free-form or
+per-target commands sent by Friday · SSH password auth, agent
 forwarding, trust on first use · stdio servers in web/worker · MCP
 resources, prompts, sampling, elicitation, roots · MCP access for harness
 containers or MVP 7 agents · an autonomous tool loop in chat · connector
@@ -741,14 +741,14 @@ MCP tool callable; a credential in the DB, a payload, audit or logs.
   full plan; forced-command verbs; pinned host key; merged commits only;
   drift check; one run per target; no retries; key only on the runner.
   Residual: the VPS app config and `docker` group are root-equivalent on
-  that VPS — installed and owned by the owner, never by Jarvis.
+  that VPS — installed and owned by the owner, never by Friday.
 - **R2 — Prompt injection through connector data** (mail is fully
   attacker-authored). Fenced, bounded, stripped results; one read per
   turn; no tool loop; router blind to connector text; every write gated
   with its exact payload shown; Phase 4 markdown drops images. Residual:
   persuasive prose can still mislead — hence no action without a decision.
 - **R3 — MCP supply chain / tool poisoning.** Digest-pinned sidecars,
-  code manifests, schema pins, Jarvis-authored descriptions, no sampling,
+  code manifests, schema pins, Friday-authored descriptions, no sampling,
   per-sidecar credentials.
 - **R4 — Google OAuth friction.** A consent screen in "Testing" issues
   refresh tokens that expire after 7 days; `gmail.readonly` is restricted
@@ -783,7 +783,7 @@ source URLs in the spike notes kept with the branch-4/branch-8 PRs.
 - `github-mcp-server` (v1.12.2, `ghcr.io/github/github-mcp-server`,
   pin by digest) has a Streamable-HTTP mode (`http` subcommand), but in
   that mode it takes the token **only from each request's
-  `Authorization` header** — Jarvis would hold the PAT, which D1 forbids
+  `Authorization` header** — Friday would hold the PAT, which D1 forbids
   (a sidecar holds only its own credential; R6: the PAT can merge via
   REST). **Decision:** run it in **stdio mode inside its sidecar behind
   our stdio↔HTTP bridge** (D1's stdio path), with
@@ -799,7 +799,7 @@ source URLs in the spike notes kept with the branch-4/branch-8 PRs.
   these), `get_commit` (takes a branch name → branch head; there is no
   `get_branch`), `list_branches`, `list_commits`, `list_pull_requests`,
   and the one write `create_pull_request`. Its `reviewers[]` and
-  `maintainer_can_modify` arguments are fixed by Jarvis (empty / false)
+  `maintainer_can_modify` arguments are fixed by Friday (empty / false)
   and shown in the dialog. Schemas have changed across minor releases
   (e.g. `perPage` in v1.12.0) — the schema pins are needed.
 - MCP Python SDK: `mcp` 2.x (2.2.0, 2026-09-07) is the stable line; 1.x
@@ -889,8 +889,8 @@ to the D5 "local model required" reply).
 - **Q11 — GitHub server: local or hosted?** Local, digest-pinned; hosted
   only if the step-0 spike finds no local HTTP/bridge path.
 - **Q12 — Where do build commands live?** On the VPS in root-owned per-app
-  config; Jarvis sends verbs only (D10). **Q13 — External installations?** Blocked manifest
+  config; Friday sends verbs only (D10). **Q13 — External installations?** Blocked manifest
   only; O-5 unchanged (D14).
-- **Q14 — Do connector reads become memories?** No: only Jarvis-authored
+- **Q14 — Do connector reads become memories?** No: only Friday-authored
   `work_log` about writes and deploys; conversations with personal reads
   are private, so extraction never runs on them.

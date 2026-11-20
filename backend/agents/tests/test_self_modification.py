@@ -73,7 +73,7 @@ def fake_provider():
 @pytest.fixture
 def read_step_prompt():
     template = PromptTemplate.objects.create(
-        name="jarvis_agent_read_step", purpose="agent.read_step"
+        name="friday_agent_read_step", purpose="agent.read_step"
     )
     version = PromptVersion.objects.create(template=template, version=1, content="Summarize.")
     template.active_version = version
@@ -83,7 +83,7 @@ def read_step_prompt():
 
 @pytest.fixture
 def agent_plan_prompt():
-    template = PromptTemplate.objects.create(name="jarvis_agent_plan", purpose="agent.plan")
+    template = PromptTemplate.objects.create(name="friday_agent_plan", purpose="agent.plan")
     version = PromptVersion.objects.create(template=template, version=1, content="Plan the goal.")
     template.active_version = version
     template.save(update_fields=["active_version"])
@@ -93,7 +93,7 @@ def agent_plan_prompt():
 @pytest.fixture
 def skill_match_prompt():
     template = PromptTemplate.objects.create(
-        name="jarvis_agent_skill_match", purpose="agent.skill_match"
+        name="friday_agent_skill_match", purpose="agent.skill_match"
     )
     version = PromptVersion.objects.create(template=template, version=1, content="Match a skill.")
     template.active_version = version

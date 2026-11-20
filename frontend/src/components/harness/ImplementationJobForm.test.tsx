@@ -56,7 +56,7 @@ describe("ImplementationJobForm", () => {
     expect(submit).toBeDisabled();
 
     await userEvent.click(await screen.findByRole("combobox", { name: "Depo" }));
-    await userEvent.click(await screen.findByRole("option", { name: "jarvis" }));
+    await userEvent.click(await screen.findByRole("option", { name: "friday" }));
     await userEvent.type(screen.getByLabelText("Uygulama hedefi"), "Add a health endpoint");
     await userEvent.click(submit);
 
@@ -83,7 +83,7 @@ describe("ImplementationJobForm", () => {
 
     expect(screen.getByText(/Bir keşif işinden oluşturuluyor/)).toBeInTheDocument();
     expect(screen.getByLabelText("Uygulama hedefi")).toHaveValue("Find the flaky test");
-    expect(await screen.findByRole("combobox", { name: "Depo" })).toHaveTextContent("jarvis");
+    expect(await screen.findByRole("combobox", { name: "Depo" })).toHaveTextContent("friday");
 
     await userEvent.click(screen.getByRole("button", { name: "Uygulama iste" }));
 

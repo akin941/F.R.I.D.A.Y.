@@ -3,13 +3,13 @@
 Runs ONLY inside a connector sidecar container -- never in web, worker or on
 the harness runner. A stdio-only MCP server is a subprocess of whoever
 spawns it; spawned here, it shares a container with nothing but this bridge
-and its own credential, and Jarvis reaches it the one way it reaches every
+and its own credential, and Friday reaches it the one way it reaches every
 connector: Streamable HTTP over the internal `connectors` network.
 
 What it forwards: `tools/list` and `tools/call`, nothing else (no resources,
 prompts, sampling, elicitation or roots -- a server that asks for them gets
 nothing). `BRIDGE_ALLOWED_TOOLS` (comma-separated server tool names,
-required) is a second, sidecar-side ceiling below the Jarvis manifest:
+required) is a second, sidecar-side ceiling below the Friday manifest:
 anything else is neither listed nor callable. The child's environment is
 exactly the names in `BRIDGE_ENV_PASSTHROUGH` (e.g. its token) plus
 `PATH`/`HOME` -- nothing else of the container's environment leaks in.
@@ -62,7 +62,7 @@ async def stdio_child(parameters):
             yield session
 
 
-def build_bridge(child_factory, *, allowed_tools, name="jarvis-stdio-bridge"):
+def build_bridge(child_factory, *, allowed_tools, name="friday-stdio-bridge"):
     """The bridge server. `child_factory()` is an async context manager
     yielding a `ClientSession` to the stdio server (in tests: to an
     in-process server)."""

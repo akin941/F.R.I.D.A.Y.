@@ -32,8 +32,8 @@ def conversation(workspace, alice):
 
 @pytest.fixture
 def system_prompt():
-    template = PromptTemplate.objects.create(name="jarvis_system", purpose="chat")
-    version = PromptVersion.objects.create(template=template, version=1, content="You are Jarvis.")
+    template = PromptTemplate.objects.create(name="friday_system", purpose="chat")
+    version = PromptVersion.objects.create(template=template, version=1, content="You are Friday.")
     template.active_version = version
     template.save(update_fields=["active_version"])
     return version
@@ -43,7 +43,7 @@ def test_system_prompt_is_first_message(conversation, alice, system_prompt):
     messages, _, _, _, _, _ = build_context(
         conversation, actor=alice, new_user_content="Merhaba", channel=CHANNEL_WEB
     )
-    assert messages[0] == {"role": "system", "content": "You are Jarvis."}
+    assert messages[0] == {"role": "system", "content": "You are Friday."}
 
 
 def test_build_context_returns_the_resolved_prompt_version(conversation, alice, system_prompt):
@@ -186,7 +186,7 @@ def test_missing_prompt_template_fails_clearly(conversation, alice):
 
 
 def test_missing_active_version_fails_clearly(conversation, alice):
-    PromptTemplate.objects.create(name="jarvis_system", purpose="chat")
+    PromptTemplate.objects.create(name="friday_system", purpose="chat")
     with pytest.raises(ImproperlyConfigured):
         build_context(conversation, actor=alice, new_user_content="hi", channel=CHANNEL_WEB)
 
@@ -226,7 +226,7 @@ def test_approved_memory_is_injected_into_system_message_only(
         conversation, actor=alice, new_user_content="hi", channel=CHANNEL_WEB
     )
     assert messages[0]["role"] == "system"
-    assert messages[0]["content"].startswith("You are Jarvis.")
+    assert messages[0]["content"].startswith("You are Friday.")
     assert "Drinks coffee black." in messages[0]["content"]
     assert all("Drinks coffee black." not in m["content"] for m in messages[1:])
     assert memory_ids == [str(row.id)]
@@ -287,7 +287,7 @@ def test_without_memories_system_prompt_is_untouched(conversation, alice, system
     messages, _, _, memory_ids, _, _ = build_context(
         conversation, actor=alice, new_user_content="hi", channel=CHANNEL_WEB
     )
-    assert messages[0]["content"] == "You are Jarvis."
+    assert messages[0]["content"] == "You are Friday."
     assert memory_ids == []
 
 
@@ -456,7 +456,7 @@ def test_without_knowledge_chunks_system_prompt_is_untouched(conversation, alice
     messages, _, _, _, chunk_ids, _ = build_context(
         conversation, actor=alice, new_user_content="hi", channel=CHANNEL_WEB
     )
-    assert messages[0]["content"] == "You are Jarvis."
+    assert messages[0]["content"] == "You are Friday."
     assert chunk_ids == []
 
 
@@ -532,7 +532,7 @@ def test_chat_intent_adds_no_framing_instruction(conversation, alice, system_pro
     messages, _, _, _, _, _ = build_context(
         conversation, actor=alice, new_user_content="hi", channel=CHANNEL_WEB
     )
-    assert messages[0]["content"] == "You are Jarvis."
+    assert messages[0]["content"] == "You are Friday."
 
 
 def test_task_draft_and_tool_request_intents_add_no_framing_instruction(
@@ -545,7 +545,7 @@ def test_task_draft_and_tool_request_intents_add_no_framing_instruction(
         messages, _, _, _, _, _ = build_context(
             conversation, actor=alice, new_user_content="hi", intent=intent, channel=CHANNEL_WEB
         )
-        assert messages[0]["content"] == "You are Jarvis."
+        assert messages[0]["content"] == "You are Friday."
 
 
 # --- firm profile injection (Phase 1 p1-firm-dossier) ---
@@ -557,7 +557,7 @@ def test_firm_profile_is_injected_into_system_message_only(
     from assistant.context import render_firm_profile_block
 
     workspace.profile = {
-        "repos": [{"name": "jarvis-os", "url": "https://example.test/jarvis-os"}],
+        "repos": [{"name": "friday", "url": "https://example.test/friday"}],
         "notes": "Prod deploys go through the release branch only.",
     }
     workspace.save(update_fields=["profile"])
@@ -565,9 +565,9 @@ def test_firm_profile_is_injected_into_system_message_only(
         conversation, actor=alice, new_user_content="hi", channel=CHANNEL_WEB
     )
     assert messages[0]["role"] == "system"
-    assert "jarvis-os" in messages[0]["content"]
+    assert "friday" in messages[0]["content"]
     assert "release branch only" in messages[0]["content"]
-    assert all("jarvis-os" not in m["content"] for m in messages[1:])
+    assert all("friday" not in m["content"] for m in messages[1:])
     assert report["firm_profile_injected"] is True
     assert report["firm_profile_char_count"] == len(render_firm_profile_block(workspace.profile))
 
@@ -576,7 +576,7 @@ def test_empty_firm_profile_injects_nothing(conversation, alice, system_prompt):
     messages, report, _, _, _, _ = build_context(
         conversation, actor=alice, new_user_content="hi", channel=CHANNEL_WEB
     )
-    assert messages[0]["content"] == "You are Jarvis."
+    assert messages[0]["content"] == "You are Friday."
     assert report["firm_profile_injected"] is False
     assert report["firm_profile_char_count"] == 0
 
@@ -630,7 +630,7 @@ def test_firm_profile_optional_fields_reach_the_model(
     workspace.profile = {
         "repos": [
             {
-                "name": "jarvis-os",
+                "name": "friday",
                 "url": "https://example.test/repo",
                 "default_branch": "release",
             }
@@ -657,13 +657,13 @@ def test_firm_profile_long_url_is_truncated_not_dropped(
     budget-selection loop (which would inject nothing at all if it were the
     only row)."""
     long_url = "https://example.test/" + ("x" * 1900)
-    workspace.profile = {"repos": [{"name": "jarvis-os", "url": long_url}]}
+    workspace.profile = {"repos": [{"name": "friday", "url": long_url}]}
     workspace.save(update_fields=["profile"])
     messages, report, _, _, _, _ = build_context(
         conversation, actor=alice, new_user_content="hi", channel=CHANNEL_WEB
     )
     assert report["firm_profile_injected"] is True
-    assert "jarvis-os" in messages[0]["content"]
+    assert "friday" in messages[0]["content"]
     assert long_url not in messages[0]["content"]  # truncated, not the full 1900-char URL
     # well under the ~1900-char full URL -- proves it was truncated, not
     # merely wrapped alongside preamble/tag overhead

@@ -21,7 +21,7 @@
 
 ## Goal and user value
 
-Jarvis gets a durable, workspace-scoped to-do list: users create tasks with an
+Friday gets a durable, workspace-scoped to-do list: users create tasks with an
 optional due date and priority, mark them done/cancelled/reopened, and see
 what's due today on a real Today page (currently a skeleton placeholder).
 Nothing here is AI-written or AI-injected — every row is user intent, plainly

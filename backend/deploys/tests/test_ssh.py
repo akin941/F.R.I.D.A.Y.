@@ -90,7 +90,7 @@ def test_env_is_sanitized_no_agent_socket(recorder, monkeypatch):
     assert "SSH_AUTH_SOCK" not in env
 
 
-@pytest.mark.parametrize("key_path", ["", "/nonexistent/jarvis/deploy_key"])
+@pytest.mark.parametrize("key_path", ["", "/nonexistent/friday/deploy_key"])
 def test_missing_key_fails_closed_before_spawning(recorder, settings, key_path):
     settings.DEPLOY_SSH_KEY_PATH = key_path
     with pytest.raises(ssh.SSHConfigError):

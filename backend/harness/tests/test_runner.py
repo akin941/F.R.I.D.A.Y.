@@ -78,7 +78,7 @@ class TestLaunchContainer:
         monkeypatch.setattr(runner.subprocess, "run", run_mock)
 
         runner.launch_container(
-            image="jarvis-harness-claude-code:1",
+            image="friday-harness-claude-code:1",
             clone_dir="/tmp/clone",
             goal="; rm -rf / #",
             cli_env={"ANTHROPIC_API_KEY": "secret"},
@@ -348,7 +348,7 @@ class TestLaunchImplementationContainer:
         monkeypatch.setattr(runner.subprocess, "run", run_mock)
 
         runner.launch_implementation_container(
-            image="jarvis-harness-claude-code:1",
+            image="friday-harness-claude-code:1",
             workspace_dir="/tmp/workspace",
             goal="implement the feature",
             test_command="pytest -q",

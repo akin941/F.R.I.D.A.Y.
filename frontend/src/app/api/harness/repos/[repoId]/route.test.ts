@@ -12,7 +12,7 @@ const INJECTION_IDS = ["../ai/conversations", "not-a-uuid"];
 function cookieStore(accessToken?: string) {
   return {
     get: (name: string) =>
-      name === "jarvis_access" && accessToken ? { name, value: accessToken } : undefined,
+      name === "friday_access" && accessToken ? { name, value: accessToken } : undefined,
   };
 }
 

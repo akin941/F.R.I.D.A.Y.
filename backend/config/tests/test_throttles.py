@@ -48,12 +48,12 @@ BAD_CODE = {"code": "ABCDEFGHIJKLMNOPQRSTUVWXYZ", "device_name": "x"}
 
 def _from(ip):
     client = APIClient()
-    client.credentials(HTTP_X_JARVIS_CLIENT_IP=ip, HTTP_X_JARVIS_BFF_KEY=BFF_KEY)
+    client.credentials(HTTP_X_FRIDAY_CLIENT_IP=ip, HTTP_X_FRIDAY_BFF_KEY=BFF_KEY)
     return client
 
 
 def test_enroll_per_source_limit_does_not_block_other_sources(owner, settings):
-    settings.JARVIS_BFF_SHARED_SECRET = BFF_KEY
+    settings.FRIDAY_BFF_SHARED_SECRET = BFF_KEY
     settings.ENROLL_RATE_PER_SOURCE = "2/10m"
     settings.ENROLL_RATE_GLOBAL = "100/h"
     attacker = _from("203.0.113.7")
@@ -65,7 +65,7 @@ def test_enroll_per_source_limit_does_not_block_other_sources(owner, settings):
 
 
 def test_enroll_global_ceiling_applies_without_a_validated_ip(owner, settings):
-    settings.JARVIS_BFF_SHARED_SECRET = BFF_KEY
+    settings.FRIDAY_BFF_SHARED_SECRET = BFF_KEY
     settings.ENROLL_RATE_PER_SOURCE = "1/10m"
     settings.ENROLL_RATE_GLOBAL = "2/h"
     anonymous = APIClient()  # no validated client IP: only the global tier
@@ -76,11 +76,11 @@ def test_enroll_global_ceiling_applies_without_a_validated_ip(owner, settings):
 
 
 def test_a_spoofed_client_ip_without_the_key_gets_no_own_bucket(owner, settings):
-    settings.JARVIS_BFF_SHARED_SECRET = BFF_KEY
+    settings.FRIDAY_BFF_SHARED_SECRET = BFF_KEY
     settings.ENROLL_RATE_PER_SOURCE = "1/10m"
     settings.ENROLL_RATE_GLOBAL = "100/h"
     spoofed = APIClient()
-    spoofed.credentials(HTTP_X_JARVIS_CLIENT_IP="203.0.113.7")  # no key: ignored
+    spoofed.credentials(HTTP_X_FRIDAY_CLIENT_IP="203.0.113.7")  # no key: ignored
     for _ in range(3):
         assert spoofed.post(ENROLL, BAD_CODE, format="json").status_code == 400
 

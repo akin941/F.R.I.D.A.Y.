@@ -53,7 +53,7 @@ describe("dismissed drafts", () => {
   });
 
   it("survives corrupt storage", () => {
-    window.localStorage.setItem("jarvis:chat:dismissed-drafts", "{not json");
+    window.localStorage.setItem("friday:chat:dismissed-drafts", "{not json");
     expect(loadDismissedDrafts().size).toBe(0);
   });
 });

@@ -27,7 +27,7 @@ R4; ADR-010). Setup and recovery: `docs/runbooks/google-connector.md`.
   `schema_sha256` and bump the manifest `version` in the same commit.
 
 ## Tools
-| Jarvis name | Bridge tool | Kind | Schema pin (sha256) | Scope (any of) | Gate / user-invocable | work_log |
+| Friday name | Bridge tool | Kind | Schema pin (sha256) | Scope (any of) | Gate / user-invocable | work_log |
 |---|---|---|---|---|---|---|
 | `mail_search` | `gmail.messages.search` | read | `1e9d499346a7f61e…` | `gmail.readonly` | — | — |
 | `mail_read` | `gmail.messages.read` | read | `0d95b8182eb2bff1…` | `gmail.readonly` | — | — |

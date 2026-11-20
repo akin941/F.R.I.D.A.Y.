@@ -49,14 +49,14 @@ class FacadeConversation(WorkspaceScopedModel, TimestampedModel):
     """Binds a stateless OpenAI-compatible client's chat to a server-side
     Conversation (Phase 4 branch 6, `integrations.facade_mapping`).
 
-    Clients resend the whole history on every request; Jarvis's context
+    Clients resend the whole history on every request; Friday's context
     comes from its own history, so each request is matched to a binding of
     the same token whose `anchor_hash` (sha256 over the token id and the
     first user message) matches and whose recorded user turns are a prefix
     of the client's prior user turns. `user_turn_hashes` are the sha256s of
     the client's user turns in order; `user_turn_message_ids` is the
     parallel list of the server-side user Message each turn became (None
-    for a turn Jarvis never saw -- history the client brought along, or a
+    for a turn Friday never saw -- history the client brought along, or a
     turn answered by another model). The workspace is always the token's."""
 
     token = models.ForeignKey(

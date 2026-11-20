@@ -21,7 +21,12 @@ export const env = {
   // Device pairing LAN gating (Phase 4 branch 2) -- see lib/client-ip.ts.
   // Both optional: without them no client IP is ever forwarded.
   TRUSTED_CLIENT_IP_HEADER: process.env.TRUSTED_CLIENT_IP_HEADER ?? "",
-  JARVIS_BFF_SHARED_SECRET: process.env.JARVIS_BFF_SHARED_SECRET ?? "",
+  // Falls back to the deprecated pre-rename JARVIS_BFF_SHARED_SECRET
+  // (Jarvis -> Friday, 2026-11-20) so an existing install keeps pairing.
+  FRIDAY_BFF_SHARED_SECRET:
+    process.env.FRIDAY_BFF_SHARED_SECRET ||
+    process.env.JARVIS_BFF_SHARED_SECRET ||
+    "",
   KNOWLEDGE_MAX_UPLOAD_BYTES: process.env.KNOWLEDGE_MAX_UPLOAD_BYTES
     ? Number(process.env.KNOWLEDGE_MAX_UPLOAD_BYTES)
     : DEFAULT_KNOWLEDGE_MAX_UPLOAD_BYTES,

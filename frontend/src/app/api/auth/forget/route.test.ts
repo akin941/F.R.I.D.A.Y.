@@ -37,10 +37,10 @@ describe('POST /api/auth/forget ("Bu cihazı unut")', () => {
 
   it("revokes the current device, ends the session and drops every cookie", async () => {
     const cookieStore = createCookieStore({
-      jarvis_access: "a",
-      jarvis_refresh: "r",
-      jarvis_device: "jdv_x",
-      jarvis_session: "1",
+      friday_access: "a",
+      friday_refresh: "r",
+      friday_device: "jdv_x",
+      friday_session: "1",
     });
     cookiesMock.mockResolvedValue(cookieStore);
     const fetchMock = vi.fn(async () => new Response(null, { status: 204 }));
@@ -54,12 +54,12 @@ describe('POST /api/auth/forget ("Bu cihazı unut")', () => {
     expect(urls[0]).toMatch(/\/auth\/devices\/current\/revoke$/);
     expect(urls[1]).toMatch(/\/auth\/logout$/);
     expect(cookieStore.deleted).toEqual(
-      expect.arrayContaining(["jarvis_access", "jarvis_refresh", "jarvis_session", "jarvis_device"]),
+      expect.arrayContaining(["friday_access", "friday_refresh", "friday_session", "friday_device"]),
     );
   });
 
   it("keeps everything when the revoke fails", async () => {
-    const cookieStore = createCookieStore({ jarvis_access: "a", jarvis_device: "jdv_x" });
+    const cookieStore = createCookieStore({ friday_access: "a", friday_device: "jdv_x" });
     cookiesMock.mockResolvedValue(cookieStore);
     vi.stubGlobal("fetch", vi.fn(async () => new Response("{}", { status: 500 })));
     const { POST } = await import("@/app/api/auth/forget/route");

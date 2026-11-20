@@ -35,8 +35,8 @@ _REMOVED = ["DJANGO_SETTINGS_MODULE", "DJANGO_SECURE_HSTS_SECONDS", "DJANGO_SECU
 PROD_ENV = {
     "DJANGO_SETTINGS_MODULE": "config.settings.prod",
     "DJANGO_SECRET_KEY": secrets.token_urlsafe(50),
-    "DATABASE_URL": "postgres://jarvis:pw@db.internal:5432/jarvis",
-    "DJANGO_ALLOWED_HOSTS": "web,jarvis.example",
+    "DATABASE_URL": "postgres://friday:pw@db.internal:5432/friday",
+    "DJANGO_ALLOWED_HOSTS": "web,friday.example",
     "REDIS_URL": "redis://:pw@redis:6379/0",
 }
 
@@ -179,9 +179,9 @@ def test_test_settings_always_use_locmem():
 
 def test_test_database_name_comes_from_the_environment():
     settings = _dump(
-        DJANGO_SETTINGS_MODULE="config.settings.dev", DJANGO_TEST_DATABASE_NAME="test_jarvis_wt"
+        DJANGO_SETTINGS_MODULE="config.settings.dev", DJANGO_TEST_DATABASE_NAME="test_friday_wt"
     )
-    assert settings["test_db"] == "test_jarvis_wt"
+    assert settings["test_db"] == "test_friday_wt"
     assert _dump(DJANGO_SETTINGS_MODULE="config.settings.dev")["test_db"] is None
 
 

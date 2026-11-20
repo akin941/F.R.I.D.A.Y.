@@ -5,7 +5,7 @@ import { Mic } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { JarvisOrb, type JarvisOrbState } from "@/components/voice/JarvisOrb";
+import { FridayOrb, type FridayOrbState } from "@/components/voice/FridayOrb";
 import { mapErrorType } from "@/components/chat/errors";
 import { apiFetch, apiPostJson } from "@/lib/api-client";
 import { SSEStreamParser } from "@/lib/sse";
@@ -28,7 +28,7 @@ export function VoiceView() {
   const [creatingConversation, setCreatingConversation] = useState(false);
   const [value, setValue] = useState("");
   const [transcript, setTranscript] = useState("");
-  const [orbState, setOrbState] = useState<JarvisOrbState>("idle");
+  const [orbState, setOrbState] = useState<FridayOrbState>("idle");
   const [isSending, setIsSending] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
@@ -124,7 +124,7 @@ export function VoiceView() {
 
   return (
     <div className={cn(VIEW_SCROLL_ROOT, "items-center justify-center-safe gap-8 p-8")}>
-      <JarvisOrb state={orbState} size={220} />
+      <FridayOrb state={orbState} size={220} />
 
       {transcript ? (
         <p className="max-w-xl text-center text-sm text-muted-foreground">{transcript}</p>
@@ -141,7 +141,7 @@ export function VoiceView() {
           value={value}
           onChange={(e) => setValue(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder="Jarvis'e yaz…"
+          placeholder="Friday'ye yaz…"
           disabled={isSending || creatingConversation}
           rows={2}
           className="flex-1 resize-none"

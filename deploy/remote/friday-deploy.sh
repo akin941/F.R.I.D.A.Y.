@@ -1,16 +1,16 @@
 #!/usr/bin/env bash
-# jarvis-deploy.sh -- the forced command behind Jarvis's deploy key
+# friday-deploy.sh -- the forced command behind Friday's deploy key
 # (Phase 5 branch 6, ADR-010 decision 7, brief D10/Q12).
 #
-# Installed root-owned (0755) at /opt/jarvis-deploy/jarvis-deploy.sh and
-# bound to Jarvis's public key in the dedicated deploy user's
+# Installed root-owned (0755) at /opt/friday-deploy/friday-deploy.sh and
+# bound to Friday's public key in the dedicated deploy user's
 # ~/.ssh/authorized_keys:
 #
-#   command="/opt/jarvis-deploy/jarvis-deploy.sh",restrict ssh-ed25519 AAAA... jarvis-deploy
+#   command="/opt/friday-deploy/friday-deploy.sh",restrict ssh-ed25519 AAAA... friday-deploy
 #
 # sshd runs this script for every connection made with that key and puts the
 # client's requested command in SSH_ORIGINAL_COMMAND. Exactly four commands
-# are accepted, the grammar Jarvis itself enforces on its side
+# are accepted, the grammar Friday itself enforces on its side
 # (backend/deploys/validation.py):
 #
 #   status   <app>          print app/sha/branch/remote/previous (read-only)
@@ -22,8 +22,8 @@
 #                           out; build; restart; forget "previous"
 #
 # <app> matches [a-z0-9][a-z0-9-]{0,62}; <sha> is 40 lowercase hex. What an
-# app's build/restart/health commands are is NOT Jarvis's to choose: they
-# live in root-owned per-app config, /etc/jarvis-deploy/apps/<app>.conf
+# app's build/restart/health commands are is NOT Friday's to choose: they
+# live in root-owned per-app config, /etc/friday-deploy/apps/<app>.conf
 # (see apps/example.conf). A compromised runner gets four verbs, not a shell.
 #
 # Exit codes (the runner maps them, backend/deploys/execution.py):
@@ -40,8 +40,8 @@ set -euo pipefail
 umask 027
 
 # Constants (the tests rewrite these lines to point at a temp tree).
-readonly CONFIG_DIR=/etc/jarvis-deploy/apps
-readonly STATE_DIR=/var/lib/jarvis-deploy
+readonly CONFIG_DIR=/etc/friday-deploy/apps
+readonly STATE_DIR=/var/lib/friday-deploy
 readonly REQUIRE_ROOT_OWNED_CONFIG=1
 readonly SAFE_PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
@@ -60,7 +60,7 @@ readonly EX_BUSY=75
 die() {
     local code=$1
     shift
-    printf 'jarvis-deploy: %s\n' "$*" >&2
+    printf 'friday-deploy: %s\n' "$*" >&2
     exit "$code"
 }
 
@@ -198,7 +198,7 @@ deploy)
     git_app fetch --quiet --prune origin "+refs/heads/$TRACKED_BRANCH:refs/remotes/origin/$TRACKED_BRANCH" \
         || die "$EX_UNAVAILABLE" "git fetch failed"
     git_app cat-file -e "$sha^{commit}" 2>/dev/null || die "$EX_REFUSED" "refused: unknown commit $sha"
-    # Only merged commits deploy (brief D10): Jarvis never merges.
+    # Only merged commits deploy (brief D10): Friday never merges.
     git_app merge-base --is-ancestor "$sha" "refs/remotes/origin/$TRACKED_BRANCH" \
         || die "$EX_REFUSED" "refused: $sha is not on origin/$TRACKED_BRANCH"
     current=$(live_sha)

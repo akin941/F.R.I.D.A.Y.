@@ -15,18 +15,18 @@ jobs:
       postgres:
         image: pgvector/pgvector:pg16
         env:
-          POSTGRES_USER: jarvis
-          POSTGRES_PASSWORD: jarvis
-          POSTGRES_DB: jarvis
+          POSTGRES_USER: friday
+          POSTGRES_PASSWORD: friday
+          POSTGRES_DB: friday
         ports:
           - 5432:5432
         options: >-
-          --health-cmd "pg_isready -U jarvis -d jarvis"
+          --health-cmd "pg_isready -U friday -d friday"
           --health-interval 5s
           --health-timeout 5s
           --health-retries 10
     env:
-      DATABASE_URL: postgres://jarvis:jarvis@localhost:5432/jarvis
+      DATABASE_URL: postgres://friday:friday@localhost:5432/friday
     steps:
       - uses: actions/checkout@v4
 
@@ -56,7 +56,7 @@ jobs:
       - name: Deploy checks (prod settings, dummy env)
         env:
           DJANGO_SETTINGS_MODULE: config.settings.prod
-          DJANGO_ALLOWED_HOSTS: jarvis.example
+          DJANGO_ALLOWED_HOSTS: friday.example
           REDIS_URL: redis://localhost:6379/0
         run: |
           DJANGO_SECRET_KEY="$(python3 -c 'import secrets; print(secrets.token_urlsafe(50))')" \
@@ -104,18 +104,18 @@ jobs:
       postgres:
         image: pgvector/pgvector:pg16
         env:
-          POSTGRES_USER: jarvis
-          POSTGRES_PASSWORD: jarvis
-          POSTGRES_DB: jarvis
+          POSTGRES_USER: friday
+          POSTGRES_PASSWORD: friday
+          POSTGRES_DB: friday
         ports:
           - 5432:5432
         options: >-
-          --health-cmd "pg_isready -U jarvis -d jarvis"
+          --health-cmd "pg_isready -U friday -d friday"
           --health-interval 5s
           --health-timeout 5s
           --health-retries 10
     env:
-      DATABASE_URL: postgres://jarvis:jarvis@localhost:5432/jarvis
+      DATABASE_URL: postgres://friday:friday@localhost:5432/friday
       AI_FAKE_PROVIDER: "true"
       # No Redis service in this job (MVP 2 §4/§6): eager mode runs the
       # memory-extraction task inline instead of publishing to a broker that
@@ -130,7 +130,7 @@ jobs:
       # frontend/e2e/global-setup.ts enrolls the browser with a PIN from
       # `issue_pairing_code --plain`, run through E2E_MANAGE_CMD. Dev
       # settings accept that PIN without a trusted client IP.
-      JARVIS_OWNER_PASSWORD: "e2e-Owner-Fixture-2026!"
+      FRIDAY_OWNER_PASSWORD: "e2e-Owner-Fixture-2026!"
       E2E_MANAGE_CMD: "uv run --directory ../backend python manage.py"
       # DEV/TEST ONLY fixture values (MVP 9 §4) -- same reasoning as
       # compose.yml's identical block: not real Telegram credentials, just
@@ -145,7 +145,7 @@ jobs:
       # any test runs, since the backend process starts before that and
       # can't create it itself at boot (tier-2 vault-root validation only
       # runs at request time, not at startup).
-      OBSIDIAN_VAULT_PATH: /tmp/jarvis-e2e-vault
+      OBSIDIAN_VAULT_PATH: /tmp/friday-e2e-vault
     steps:
       - uses: actions/checkout@v4
 

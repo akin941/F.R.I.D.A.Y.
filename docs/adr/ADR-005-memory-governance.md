@@ -4,7 +4,7 @@
 Accepted
 
 ## Context
-Jarvis learns continuously (semantic/episodic/preference/procedural memory), but
+Friday learns continuously (semantic/episodic/preference/procedural memory), but
 uncontrolled remembering pollutes context, leaks company data into personal scope,
 and destroys trust.
 

@@ -14,11 +14,11 @@ test("OpenAI-compatible facade: models, completion, streaming, token kind", asyn
   const models = await request.get("/v1/models", { headers: auth });
   expect(models.status()).toBe(200);
   const ids = ((await models.json()).data as { id: string }[]).map((m) => m.id);
-  expect(ids).toEqual(expect.arrayContaining(["jarvis", "jarvis-lite"]));
+  expect(ids).toEqual(expect.arrayContaining(["friday", "friday-lite"]));
 
   const completion = await request.post("/v1/chat/completions", {
     headers: auth,
-    data: { model: "jarvis", messages: [{ role: "user", content: "Merhaba Jarvis" }] },
+    data: { model: "friday", messages: [{ role: "user", content: "Merhaba Friday" }] },
   });
   expect(completion.status()).toBe(200);
   const body = await completion.json();
@@ -29,7 +29,7 @@ test("OpenAI-compatible facade: models, completion, streaming, token kind", asyn
   const stream = await request.post("/v1/chat/completions", {
     headers: auth,
     data: {
-      model: "jarvis-lite",
+      model: "friday-lite",
       stream: true,
       messages: [{ role: "user", content: "Kısa bir selam" }],
     },
@@ -47,7 +47,7 @@ test("OpenAI-compatible facade: models, completion, streaming, token kind", asyn
   const withTools = await request.post("/v1/chat/completions", {
     headers: auth,
     data: {
-      model: "jarvis",
+      model: "friday",
       messages: [{ role: "user", content: "x" }],
       tools: [{ type: "function", function: { name: "f", parameters: {} } }],
     },

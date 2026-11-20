@@ -1,5 +1,5 @@
 """OpenAI-compatible facade (Phase 4 branch 6): role x endpoint, request
-contract, jarvis vs jarvis-lite, chat-only router, limits and accounting.
+contract, friday vs friday-lite, chat-only router, limits and accounting.
 Conversation mapping has its own module (test_facade_mapping.py) and the
 wire format its golden files (test_facade_contract.py). FakeAdapter only --
 no real LLM (rule 5) and no `openai` SDK (the ADR-003 import guard)."""
@@ -61,9 +61,9 @@ def setup_ai():
         priority=0,
     )
     for name, purpose, content in [
-        ("jarvis_system", "chat", "You are Jarvis."),
-        ("jarvis_router_intent", "router.intent", "Classify the message."),
-        ("jarvis_router_task_draft", "router.task_draft", "Extract a task."),
+        ("friday_system", "chat", "You are Friday."),
+        ("friday_router_intent", "router.intent", "Classify the message."),
+        ("friday_router_task_draft", "router.task_draft", "Extract a task."),
     ]:
         template = PromptTemplate.objects.create(name=name, purpose=purpose)
         version = PromptVersion.objects.create(template=template, version=1, content=content)
@@ -91,7 +91,7 @@ def bearer(raw):
     return client
 
 
-def complete(client, messages, model="jarvis", **extra):
+def complete(client, messages, model="friday", **extra):
     return client.post(
         COMPLETIONS, {"model": model, "messages": messages, **extra}, format="json", **{}
     )
@@ -113,13 +113,13 @@ def sse_payloads(response):
 # --- role x endpoint ---
 
 
-def test_models_lists_jarvis_and_jarvis_lite(openai_token):
+def test_models_lists_friday_and_friday_lite(openai_token):
     response = bearer(openai_token).get(MODELS)
     assert response.status_code == 200
     body = response.json()
     assert body["object"] == "list"
-    assert [m["id"] for m in body["data"]] == ["jarvis", "jarvis-lite"]
-    assert all(m["object"] == "model" and m["owned_by"] == "jarvis" for m in body["data"])
+    assert [m["id"] for m in body["data"]] == ["friday", "friday-lite"]
+    assert all(m["object"] == "model" and m["owned_by"] == "friday" for m in body["data"])
 
 
 def test_owner_openai_token_completes(openai_token, setup_ai):
@@ -127,7 +127,7 @@ def test_owner_openai_token_completes(openai_token, setup_ai):
     assert response.status_code == 200
     body = response.json()
     assert body["object"] == "chat.completion"
-    assert body["model"] == "jarvis"
+    assert body["model"] == "friday"
     assert body["choices"][0]["message"]["role"] == "assistant"
     assert body["choices"][0]["message"]["content"]
     assert body["choices"][0]["finish_reason"] == "stop"
@@ -138,7 +138,7 @@ def test_owner_openai_token_completes(openai_token, setup_ai):
 def test_cli_token_is_403_on_the_facade(owner, workspace, method, path, setup_ai):
     raw = make_token(owner, workspace, kind=PersonalAccessToken.Kind.CLI)
     response = getattr(bearer(raw), method)(
-        path, {"model": "jarvis", "messages": [user("hi")]}, format="json"
+        path, {"model": "friday", "messages": [user("hi")]}, format="json"
     )
     assert response.status_code == 403
     assert response.json()["error"]["code"] == "token_kind_forbidden"
@@ -151,7 +151,7 @@ def test_web_session_is_refused(owner, method, path, web_client, setup_ai):
     forced WebSessionPrincipal the channel permission refuses it (403), and
     a real device JWT is not a credential the facade reads at all (401)."""
     response = getattr(web_client(owner), method)(
-        path, {"model": "jarvis", "messages": [user("hi")]}, format="json"
+        path, {"model": "friday", "messages": [user("hi")]}, format="json"
     )
     assert response.status_code == 403
     assert response.json()["error"]["type"] == "permission_error"
@@ -164,7 +164,7 @@ def test_web_session_is_refused(owner, method, path, web_client, setup_ai):
     device, _ = enroll_device(raw_code=raw, device_name="Mac", client_ip="10.0.0.2")
     access = issue_session_tokens(device)["access"]
     response = getattr(bearer(access), method)(
-        path, {"model": "jarvis", "messages": [user("hi")]}, format="json"
+        path, {"model": "friday", "messages": [user("hi")]}, format="json"
     )
     assert response.status_code == 401
     assert not Conversation.objects.exists()
@@ -228,9 +228,9 @@ def test_non_owner_uses_their_own_workspace_only(owner, openai_token, setup_ai):
 
     pinned = bearer(raw).post(
         COMPLETIONS,
-        {"model": "jarvis", "messages": [user("x")]},
+        {"model": "friday", "messages": [user("x")]},
         format="json",
-        HTTP_X_JARVIS_CONVERSATION_ID=str(owner_conversation.id),
+        HTTP_X_FRIDAY_CONVERSATION_ID=str(owner_conversation.id),
     )
     assert pinned.status_code == 404
     assert pinned.json()["error"]["code"] == "conversation_not_found"
@@ -255,6 +255,17 @@ def test_unknown_model_is_404_model_not_found(openai_token, setup_ai):
     error = response.json()["error"]
     assert error["code"] == "model_not_found"
     assert error["param"] == "model"
+
+
+@pytest.mark.parametrize(
+    ("legacy", "canonical"), [("jarvis", "friday"), ("jarvis-lite", "friday-lite")]
+)
+def test_pre_rename_model_ids_are_still_accepted(openai_token, setup_ai, legacy, canonical):
+    """Jarvis -> Friday (2026-11-20): a client configured with the old model
+    id keeps working; the reply names the canonical model."""
+    response = complete(bearer(openai_token), [user("hi")], model=legacy)
+    assert response.status_code == 200
+    assert response.json()["model"] == canonical
 
 
 def test_missing_model_is_400(openai_token):
@@ -337,7 +348,7 @@ def test_too_long_turn_is_400_context_length_exceeded(openai_token, settings, se
     response = complete(bearer(openai_token), [user("x" * 11)])
     assert response.status_code == 400
     assert response.json()["error"]["code"] == "context_length_exceeded"
-    # Only the new turn counts for `jarvis` (history is server-side).
+    # Only the new turn counts for `friday` (history is server-side).
     ok = complete(bearer(openai_token), [user("y" * 50), assistant("z" * 50), user("short")])
     assert ok.status_code == 200
 
@@ -350,10 +361,10 @@ def test_invalid_json_body_is_400_in_openai_shape(openai_token):
     assert response.json()["error"]["code"] == "invalid_json"
 
 
-# --- jarvis: server history is authoritative ---
+# --- friday: server history is authoritative ---
 
 
-def test_jarvis_persists_only_the_user_turn_and_the_reply(openai_token, workspace, setup_ai):
+def test_friday_persists_only_the_user_turn_and_the_reply(openai_token, workspace, setup_ai):
     response = complete(
         bearer(openai_token),
         [
@@ -366,7 +377,7 @@ def test_jarvis_persists_only_the_user_turn_and_the_reply(openai_token, workspac
     assert response.status_code == 200
     conversation = Conversation.objects.get()
     assert conversation.workspace == workspace
-    assert response["X-Jarvis-Conversation-Id"] == str(conversation.id)
+    assert response["X-Friday-Conversation-Id"] == str(conversation.id)
     rows = list(conversation.messages.order_by("created_at", "id"))
     assert [(m.role, m.content) for m in rows][0] == ("user", "second")
     assert [m.role for m in rows] == ["user", "assistant"]
@@ -377,13 +388,13 @@ def test_jarvis_persists_only_the_user_turn_and_the_reply(openai_token, workspac
     assert response.json()["id"] == f"chatcmpl-{reply.id}"
 
 
-def test_jarvis_usage_rows_carry_channel_and_model(openai_token, setup_ai):
+def test_friday_usage_rows_carry_channel_and_model(openai_token, setup_ai):
     complete(bearer(openai_token), [user("hi")])
     router = ModelUsage.objects.get(purpose="router.intent")
     chat = ModelUsage.objects.get(purpose="chat")
     for usage in (router, chat):
         assert usage.context_report["channel"] == "openai"
-        assert usage.context_report["model"] == "jarvis"
+        assert usage.context_report["model"] == "friday"
     # Everything else is the retrieval embeddings -- no task-draft call.
     others = set(
         ModelUsage.objects.exclude(purpose__in=["router.intent", "chat"]).values_list(
@@ -429,10 +440,10 @@ def test_facade_conversation_shows_the_openai_badge_in_web_chat(
     assert audit.metadata["channel"] == "openai"
 
 
-# --- jarvis-lite: ephemeral ---
+# --- friday-lite: ephemeral ---
 
 
-def test_jarvis_lite_is_ephemeral(openai_token, workspace, setup_ai):
+def test_friday_lite_is_ephemeral(openai_token, workspace, setup_ai):
     response = complete(
         bearer(openai_token),
         [
@@ -442,11 +453,11 @@ def test_jarvis_lite_is_ephemeral(openai_token, workspace, setup_ai):
             {"role": "tool", "content": "ignored"},
             user("### Task: title for this chat"),
         ],
-        model="jarvis-lite",
+        model="friday-lite",
     )
     assert response.status_code == 200
     body = response.json()
-    assert body["model"] == "jarvis-lite"
+    assert body["model"] == "friday-lite"
     assert body["choices"][0]["message"]["content"]
     assert not Conversation.objects.exists()
     assert not Message.objects.exists()
@@ -456,15 +467,15 @@ def test_jarvis_lite_is_ephemeral(openai_token, workspace, setup_ai):
     assert usage.purpose == "facade.ephemeral"
     assert usage.workspace == workspace
     assert usage.context_report["channel"] == "openai"
-    assert usage.context_report["model"] == "jarvis-lite"
+    assert usage.context_report["model"] == "friday-lite"
     assert usage.context_report["message_count"] == 4  # tool message dropped
-    assert "X-Jarvis-Conversation-Id" not in response
+    assert "X-Friday-Conversation-Id" not in response
 
 
-def test_jarvis_lite_counts_every_message_against_the_limit(openai_token, settings, setup_ai):
+def test_friday_lite_counts_every_message_against_the_limit(openai_token, settings, setup_ai):
     settings.FACADE_MAX_REQUEST_CHARS = 10
     response = complete(
-        bearer(openai_token), [user("123456"), assistant("123456"), user("1")], model="jarvis-lite"
+        bearer(openai_token), [user("123456"), assistant("123456"), user("1")], model="friday-lite"
     )
     assert response.status_code == 400
     assert response.json()["error"]["code"] == "context_length_exceeded"
@@ -472,7 +483,7 @@ def test_jarvis_lite_counts_every_message_against_the_limit(openai_token, settin
 
 def test_no_provider_is_503_for_a_non_streaming_completion(openai_token):
     # Prompts configured, no ModelProvider row at all.
-    for name, purpose in [("jarvis_system", "chat"), ("jarvis_router_intent", "router.intent")]:
+    for name, purpose in [("friday_system", "chat"), ("friday_router_intent", "router.intent")]:
         template = PromptTemplate.objects.create(name=name, purpose=purpose)
         version = PromptVersion.objects.create(template=template, version=1, content="x")
         template.active_version = version
@@ -481,7 +492,7 @@ def test_no_provider_is_503_for_a_non_streaming_completion(openai_token):
     assert response.status_code == 503
     assert response.json()["error"]["code"] == "no_provider"
     assert Message.objects.get(role=Message.Role.ASSISTANT).status == Message.Status.FAILED
-    lite = complete(bearer(openai_token), [user("hi")], model="jarvis-lite")
+    lite = complete(bearer(openai_token), [user("hi")], model="friday-lite")
     assert lite.status_code == 503
 
 
@@ -491,8 +502,8 @@ def test_no_provider_is_503_for_a_non_streaming_completion(openai_token):
 def test_per_token_rate_limit_is_429_with_retry_after(openai_token, settings, setup_ai):
     settings.FACADE_RATE = "2/min"
     for _ in range(2):
-        assert complete(bearer(openai_token), [user("hi")], model="jarvis-lite").status_code == 200
-    response = complete(bearer(openai_token), [user("hi")], model="jarvis-lite")
+        assert complete(bearer(openai_token), [user("hi")], model="friday-lite").status_code == 200
+    response = complete(bearer(openai_token), [user("hi")], model="friday-lite")
     assert response.status_code == 429
     assert response.json()["error"]["code"] == "rate_limit_exceeded"
     assert int(response["Retry-After"]) >= 1
@@ -500,7 +511,7 @@ def test_per_token_rate_limit_is_429_with_retry_after(openai_token, settings, se
     other = make_token(
         PersonalAccessToken.objects.first().user, PersonalAccessToken.objects.first().workspace
     )
-    assert complete(bearer(other), [user("hi")], model="jarvis-lite").status_code == 200
+    assert complete(bearer(other), [user("hi")], model="friday-lite").status_code == 200
 
 
 def test_models_listing_is_not_rate_limited(openai_token, settings):
@@ -530,7 +541,7 @@ def test_a_stream_holds_its_slot_until_the_body_is_done(openai_token, settings, 
     streaming = complete(bearer(openai_token), [user("hi")], stream=True)
     assert streaming.status_code == 200
     assert cache.get(f"openai-facade:streams:{token_id}") == 1
-    blocked = complete(bearer(openai_token), [user("hi")], model="jarvis-lite")
+    blocked = complete(bearer(openai_token), [user("hi")], model="friday-lite")
     assert blocked.status_code == 429
     b"".join(streaming.streaming_content)
     assert cache.get(f"openai-facade:streams:{token_id}") == 0
@@ -548,7 +559,7 @@ def test_a_client_disconnect_releases_the_slot_and_persists_partial(owner, works
 
     events = iter_assistant_reply_events(conversation, two_chunks(), {}, request_id="r")
     body = openai_facade._stream_body(
-        events, openai_facade._Completion("chatcmpl-x", "jarvis"), False, slot
+        events, openai_facade._Completion("chatcmpl-x", "friday"), False, slot
     )
     next(body)  # role chunk
     next(body)  # first content chunk
@@ -567,7 +578,7 @@ def test_a_body_closed_before_it_started_still_releases_the_slot(openai_token, s
         yield {"type": "chunk", "text": "x"}  # pragma: no cover
 
     body = openai_facade._StreamingBody(
-        never_started(), openai_facade._Completion("chatcmpl-x", "jarvis"), False, slot
+        never_started(), openai_facade._Completion("chatcmpl-x", "friday"), False, slot
     )
     body.close()
     assert cache.get(f"openai-facade:streams:{token_id}") == 0

@@ -29,9 +29,9 @@
 
 ## Goal and user value
 
-Jarvis can answer questions grounded in documents the user gives it, not just
+Friday can answer questions grounded in documents the user gives it, not just
 what it remembers from conversation. Users upload text, paste content, or
-point at a URL; Jarvis chunks and embeds it, then retrieves the most relevant
+point at a URL; Friday chunks and embeds it, then retrieves the most relevant
 chunks into chat context — scoped, auditable, deletable, and never leaking
 company data into personal scope, mirroring the trust model MVP 2 built for
 memory.
@@ -426,10 +426,10 @@ the existing `ModelProvider`/`ModelUsage` models — embeddings are a second
 
 ## Out of scope (explicit)
 
-- **Obsidian vault ingestion** (vault → Jarvis) — explicitly deferred past
+- **Obsidian vault ingestion** (vault → Friday) — explicitly deferred past
   this MVP per the 2026-07-07 scope decision. When it lands, it should be a
   *source adapter* onto this same ingestion pipeline (chunking/embedding/
-  retrieval unchanged), plus the echo-chamber guard (`source: jarvis_export`
+  retrieval unchanged), plus the echo-chamber guard (`source: friday_export`
   files never re-ingested) from `docs/memory/obsidian-vault-strategy.md`.
 - **Rich document parsing** (PDF, docx, pptx, etc.) — this MVP accepts plain
   text/markdown and text-like URL responses only. Binary document parsing is
@@ -537,7 +537,7 @@ user confirmation per the 2026-07-05 protocol).
   synchronous from branch 2 onward (for the source types that don't need a
   worker) — only *embedding* and *URL fetching* are asynchronous.
 - The SSRF hardening in branch 3 is the highest-risk piece of this MVP by a
-  wide margin — it is the first place Jarvis makes a server-side network
+  wide margin — it is the first place Friday makes a server-side network
   request to a user-supplied, non-provider destination. Treat it with the
   same scrutiny as an auth boundary, not as an implementation detail; the
   pinned-IP-connect + per-redirect-hop-revalidation design in §3 exists

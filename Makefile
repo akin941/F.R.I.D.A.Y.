@@ -1,4 +1,4 @@
-# Jarvis OS — development commands
+# Friday OS — development commands
 COMPOSE := docker compose -f deploy/docker/compose.yml
 COMPOSE_DAILY := $(COMPOSE) -f deploy/docker/compose.daily.yml
 BACKEND := cd backend &&
@@ -83,8 +83,8 @@ frontend-build:
 # --- Harness runner (Phase 3 branch 8; docs/runbooks/harness-first-run.md) ---
 # Builds both CLI images. Pin the real base-image digest and CLI versions in
 # the Dockerfiles first (they ship with placeholders on purpose).
-HARNESS_IMAGE_CLAUDE_CODE ?= jarvis-harness-claude-code:local
-HARNESS_IMAGE_CODEX_CLI ?= jarvis-harness-codex-cli:local
+HARNESS_IMAGE_CLAUDE_CODE ?= friday-harness-claude-code:local
+HARNESS_IMAGE_CODEX_CLI ?= friday-harness-codex-cli:local
 
 harness-images:
 	cd backend/harness/docker && docker build -f claude_code.Dockerfile -t $(HARNESS_IMAGE_CLAUDE_CODE) .
@@ -93,8 +93,8 @@ harness-images:
 # Real-container smoke: the real Claude Code image with its CLI stubbed out
 # (no paid call), then the write-mode round trip through actual Docker.
 harness-smoke:
-	cd backend/harness/docker/smoke && docker build --build-arg BASE_IMAGE=$(HARNESS_IMAGE_CLAUDE_CODE) -f smoke.Dockerfile -t jarvis-harness-smoke:local .
-	$(BACKEND) HARNESS_DOCKER_SMOKE_IMAGE=jarvis-harness-smoke:local uv run pytest harness/tests/test_docker_smoke.py -q
+	cd backend/harness/docker/smoke && docker build --build-arg BASE_IMAGE=$(HARNESS_IMAGE_CLAUDE_CODE) -f smoke.Dockerfile -t friday-harness-smoke:local .
+	$(BACKEND) HARNESS_DOCKER_SMOKE_IMAGE=friday-harness-smoke:local uv run pytest harness/tests/test_docker_smoke.py -q
 
 # The runner worker: consumes ONLY the harness and deploy queues, on this
 # host (it needs Docker and the images for harness jobs, and holds
@@ -103,10 +103,10 @@ harness-smoke:
 # never does). One runner at a time: a second `-B` runner would
 # double-schedule the scans.
 harness-runner:
-	$(BACKEND) $(DEV_SETTINGS) HARNESS_RUNNER_BEAT=true uv run celery -A config worker -B -s /tmp/jarvis-harness-beat-schedule -Q $${HARNESS_CELERY_QUEUE:-harness},$${DEPLOY_CELERY_QUEUE:-deploy} -l info -n harness-runner@%h
+	$(BACKEND) $(DEV_SETTINGS) HARNESS_RUNNER_BEAT=true uv run celery -A config worker -B -s /tmp/friday-harness-beat-schedule -Q $${HARNESS_CELERY_QUEUE:-harness},$${DEPLOY_CELERY_QUEUE:-deploy} -l info -n harness-runner@%h
 
 # Real-SSH deploy smoke (Phase 5 branch 6; manual/nightly): an sshd container
-# running the real deploy/remote/jarvis-deploy.sh as a forced command against
+# running the real deploy/remote/friday-deploy.sh as a forced command against
 # a dummy compose app -- status, deploy, forced health failure, rollback,
 # refused non-merged SHA. Needs Docker and a test database (DATABASE_URL).
 deploy-smoke:

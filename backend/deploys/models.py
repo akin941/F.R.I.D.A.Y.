@@ -71,7 +71,7 @@ class DeployTarget(WorkspaceScopedModel, TimestampedModel):
     # Pinned `<type> <base64>`; written to a per-run known_hosts with
     # `StrictHostKeyChecking=yes` (no trust on first use).
     host_public_key = models.TextField()
-    # The per-app config name on the VPS (`/etc/jarvis-deploy/apps/<app>.conf`).
+    # The per-app config name on the VPS (`/etc/friday-deploy/apps/<app>.conf`).
     remote_app = models.CharField(max_length=63)
     repo_git_url = models.CharField(max_length=2000)
     tracked_branch = models.CharField(max_length=200, default="main")
@@ -83,7 +83,7 @@ class DeployTarget(WorkspaceScopedModel, TimestampedModel):
     auto_rollback = models.BooleanField(default=True)
     # Off until the owner has run the first `status` and switched it on.
     enabled = models.BooleanField(default=False)
-    # What Jarvis believes is live: set by a `status` refresh and by a
+    # What Friday believes is live: set by a `status` refresh and by a
     # finished run. A request snapshots it as `expected_current_sha`; the
     # run's drift check compares the remote's real HEAD against that.
     current_sha = models.CharField(max_length=40, blank=True, default="")

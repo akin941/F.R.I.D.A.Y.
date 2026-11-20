@@ -97,7 +97,7 @@ def test_no_client_capability_is_advertised(fake_manifest, server):
     ]
     for caps in capability_sets:
         assert not {"sampling", "elicitation", "roots"} & set(caps)
-    # No credential or auth header is ever sent by Jarvis: the sidecar holds it.
+    # No credential or auth header is ever sent by Friday: the sidecar holds it.
     for request in server.http_requests:
         assert "authorization" not in {k.lower() for k in request["headers"]}
 

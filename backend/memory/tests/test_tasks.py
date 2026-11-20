@@ -54,7 +54,7 @@ def fake_provider():
 @pytest.fixture
 def extraction_prompt():
     template = PromptTemplate.objects.create(
-        name="jarvis_memory_extraction", purpose="memory.extraction"
+        name="friday_memory_extraction", purpose="memory.extraction"
     )
     version = PromptVersion.objects.create(
         template=template, version=1, content="Extract memories."

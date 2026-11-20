@@ -1,9 +1,9 @@
 """Shared exception hierarchy. Kept deliberately small in MVP 0."""
 
 
-class JarvisError(Exception):
-    """Base class for all Jarvis OS domain errors."""
+class FridayError(Exception):
+    """Base class for all Friday OS domain errors."""
 
 
-class WorkspaceScopingError(JarvisError):
+class WorkspaceScopingError(FridayError):
     """Raised when code attempts to access business data without an actor scope."""

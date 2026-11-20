@@ -7,9 +7,9 @@ list and import contracts) and ADR-008 decision 3 (see decisions 2 and 7
 below); amends nothing else.
 
 ## Context
-Phase 5 closes the loop `docs/VISION_JARVIS_2.md` §4 promised — request →
+Phase 5 closes the loop `docs/VISION_FRIDAY_2.md` §4 promised — request →
 briefing → Gate A → code → review → Gate B → PR → merge → **deploy gate** →
-live — and gives Jarvis its first reach into outside systems: GitHub, Home
+live — and gives Friday its first reach into outside systems: GitHub, Home
 Assistant, Google mail/calendar, and (blocked, O-5) an external installation. Every
 one of those is gate-class under ADR-008 decision 3 (deploy, external send,
 git push/merge). Four things in the kernel as it stood did not fit:
@@ -75,7 +75,7 @@ git push/merge). Four things in the kernel as it stood did not fit:
    pre-approves or relaxes a decision. The flag is recorded in the
    `approval.requested` audit row.
 
-3. **MCP client: official SDK, Streamable HTTP only, sidecars.** Jarvis
+3. **MCP client: official SDK, Streamable HTTP only, sidecars.** Friday
    adopts the official `mcp` Python SDK client-side (a pinned minor
    version; production code may import only `mcp.client.*`/`mcp.types`,
    and an import-linter contract forbidding `mcp.server` lands with the
@@ -136,7 +136,7 @@ git push/merge). Four things in the kernel as it stood did not fit:
 
 7. **The deploy gate, and the one extension of ADR-008 decision 3.** A
    deploy runs only a merged commit (ancestor of the target's tracked
-   branch; Jarvis never merges) to an enabled, owner-created target whose
+   branch; Friday never merges) to an enabled, owner-created target whose
    pinned host key, forced-command SSH verbs (`status|deploy|health|
    rollback`) and root-owned remote config bound what the runner can do.
    The `deploy` gate is system-created (decision 2) and its display states
@@ -174,7 +174,7 @@ git push/merge). Four things in the kernel as it stood did not fit:
 
 8. **Remaining `work_log` producers (ADR-008 decision 4).**
    `tools.work_log.record_tool_outcome` wraps `memory.services.
-   record_work_log` (still the only creation path) with Jarvis-authored
+   record_work_log` (still the only creation path) with Friday-authored
    bookkeeping — never connector content, never payload free text beyond
    an owner-authored title. Producers: vault export, terminal connector
    writes, terminal deploy runs (rollbacks included) and task outcomes
@@ -201,4 +201,4 @@ git push/merge). Four things in the kernel as it stood did not fit:
 - The deploy key, like the harness push key, lives only on the runner
   host; deploys wait while the runner is offline.
 - The external-installation connector ships as a `blocked` manifest that can never bind
-  (O-5 unchanged, ADR-006: Jarvis is only an MCP client of the installation).
+  (O-5 unchanged, ADR-006: Friday is only an MCP client of the installation).

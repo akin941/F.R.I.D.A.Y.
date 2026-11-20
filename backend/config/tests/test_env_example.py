@@ -12,6 +12,8 @@ ENV_EXAMPLE = BACKEND_DIR.parent / ".env.example"
 _SETTINGS_READ = re.compile(r"\benv(?:\.\w+)?\(\s*\"([A-Z][A-Z0-9_]*)\"")
 # os.environ.get("NAME" / os.environ["NAME"] / os.getenv("NAME" elsewhere.
 _OS_READ = re.compile(r"os\.(?:environ\.get\(|environ\[|getenv\()\s*\"([A-Z][A-Z0-9_]*)\"")
+# legacy_env.getenv("FRIDAY_NAME" (reads FRIDAY_NAME, else deprecated JARVIS_NAME).
+_LEGACY_READ = re.compile(r"legacy_env\.getenv\(\s*\"([A-Z][A-Z0-9_]*)\"")
 _DOCUMENTED = re.compile(r"^#?\s?([A-Z][A-Z0-9_]*)=", re.MULTILINE)
 
 # Not configuration: process plumbing set by Django itself / by git.
@@ -32,6 +34,7 @@ def _read_names():
         names |= set(_SETTINGS_READ.findall(path.read_text()))
     for path in _production_sources():
         names |= set(_OS_READ.findall(path.read_text()))
+        names |= set(_LEGACY_READ.findall(path.read_text()))
     return names - _NOT_CONFIG
 
 
@@ -39,7 +42,13 @@ def test_scanner_finds_settings_and_os_reads():
     # Guards the regexes themselves (multi-line env.int( calls included).
     names = _read_names()
     assert {"DJANGO_SECRET_KEY", "AGENT_APPROVAL_RESUME_RECOVERY_GRACE_SECONDS"} <= names
-    assert {"JARVIS_OWNER_PASSWORD", "ANTHROPIC_MODEL_ID", "JARVIS_CLI_TOKEN"} <= names
+    assert {"FRIDAY_OWNER_PASSWORD", "ANTHROPIC_MODEL_ID", "FRIDAY_CLI_TOKEN"} <= names
+    assert "FRIDAY_BFF_SHARED_SECRET" in names
+
+
+def test_deprecated_jarvis_names_are_documented_as_such():
+    text = ENV_EXAMPLE.read_text()
+    assert "Deprecated" in text and "JARVIS_BFF_SHARED_SECRET" in text
 
 
 def test_every_backend_env_var_is_documented_in_env_example():

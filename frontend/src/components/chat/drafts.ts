@@ -53,7 +53,7 @@ export function toolDraftFromMessage(message: ChatMessageView): ToolRequestDraft
  * not offer the same draft again. Bounded; a blocked or unavailable storage
  * just means discarded drafts reappear after a reload.
  */
-const DISMISSED_KEY = "jarvis:chat:dismissed-drafts";
+const DISMISSED_KEY = "friday:chat:dismissed-drafts";
 const DISMISSED_LIMIT = 200;
 
 export function loadDismissedDrafts(): Set<string> {

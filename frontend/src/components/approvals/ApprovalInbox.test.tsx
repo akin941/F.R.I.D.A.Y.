@@ -346,7 +346,7 @@ describe("ApprovalInbox", () => {
     renderWithClient(<ApprovalInbox />);
 
     expect(await screen.findByText("Add a health endpoint")).toBeInTheDocument();
-    expect(screen.getByText("git@example.test:me/jarvis.git")).toBeInTheDocument();
+    expect(screen.getByText("git@example.test:me/friday.git")).toBeInTheDocument();
     expect(screen.getByText("—")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Uygulama işini aç" })).toHaveAttribute(
       "href",

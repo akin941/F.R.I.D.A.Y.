@@ -7,12 +7,14 @@ thin: proves the CLI channel works end-to-end, not a polished terminal UI
 Standalone stdlib script -- no Django import, no ORM access, so it never
 needs DJANGO_SETTINGS_MODULE. Run it with:
 
-    uv run python -m integrations.cli.jarvis_cli "hello there"
-    echo "hello there" | uv run python -m integrations.cli.jarvis_cli
+    uv run python -m integrations.cli.friday_cli "hello there"
+    echo "hello there" | uv run python -m integrations.cli.friday_cli
 
 Config, in precedence order:
-    - JARVIS_CLI_TOKEN / JARVIS_CLI_URL env vars
-    - ~/.config/jarvis/cli.toml:
+    - FRIDAY_CLI_TOKEN / FRIDAY_CLI_URL env vars (deprecated fallback:
+      JARVIS_CLI_TOKEN / JARVIS_CLI_URL)
+    - ~/.config/friday/cli.toml (fallback: the pre-rename
+      ~/.config/jarvis/cli.toml):
         [cli]
         token = "jpat_..."
         base_url = "http://localhost:8001"
@@ -23,7 +25,6 @@ Config, in precedence order:
 
 import argparse
 import json
-import os
 import sys
 import tomllib
 import urllib.error
@@ -31,7 +32,12 @@ import urllib.request
 from datetime import date
 from pathlib import Path
 
-CONFIG_PATH = Path.home() / ".config" / "jarvis" / "cli.toml"
+from core import legacy_env
+
+CONFIG_PATH = Path.home() / ".config" / "friday" / "cli.toml"
+# Pre-rename location (Jarvis -> Friday, 2026-11-20): read when the new file
+# does not exist yet, so an existing CLI setup keeps working.
+LEGACY_CONFIG_PATH = Path.home() / ".config" / "jarvis" / "cli.toml"
 
 
 class CliConfigError(Exception):
@@ -40,20 +46,22 @@ class CliConfigError(Exception):
 
 def load_config():
     file_config = {}
-    if CONFIG_PATH.exists():
-        with CONFIG_PATH.open("rb") as f:
+    config_path = CONFIG_PATH if CONFIG_PATH.exists() else LEGACY_CONFIG_PATH
+    if config_path.exists():
+        with config_path.open("rb") as f:
             file_config = tomllib.load(f).get("cli", {})
 
-    token = os.environ.get("JARVIS_CLI_TOKEN") or file_config.get("token")
-    base_url = os.environ.get("JARVIS_CLI_URL") or file_config.get("base_url")
+    # FRIDAY_CLI_* first, then the deprecated JARVIS_CLI_* spelling.
+    token = legacy_env.getenv("FRIDAY_CLI_TOKEN") or file_config.get("token")
+    base_url = legacy_env.getenv("FRIDAY_CLI_URL") or file_config.get("base_url")
 
     if not token:
         raise CliConfigError(
-            f"No token configured -- set JARVIS_CLI_TOKEN or add [cli] token to {CONFIG_PATH}."
+            f"No token configured -- set FRIDAY_CLI_TOKEN or add [cli] token to {CONFIG_PATH}."
         )
     if not base_url:
         raise CliConfigError(
-            f"No base URL configured -- set JARVIS_CLI_URL or add [cli] base_url to {CONFIG_PATH}."
+            f"No base URL configured -- set FRIDAY_CLI_URL or add [cli] base_url to {CONFIG_PATH}."
         )
     return {
         "token": token,
@@ -129,7 +137,7 @@ def send_message(base_url, token, conversation_id, content, *, out=None):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(
-        description="Send one chat message to Jarvis over the CLI channel."
+        description="Send one chat message to Friday over the CLI channel."
     )
     parser.add_argument("message", nargs="?", help="Message text; reads stdin if omitted.")
     args = parser.parse_args(argv)
@@ -138,7 +146,7 @@ def main(argv=None):
     if content is None:
         stdin_content = sys.stdin.read()
         # Trim only the single trailing newline a shell pipe adds (`echo
-        # "..." | jarvis_cli`) -- never the surrounding whitespace itself.
+        # "..." | friday_cli`) -- never the surrounding whitespace itself.
         # MessageCreateSerializer declares trim_whitespace=False for
         # exactly this reason: meaningful leading/trailing whitespace (an
         # indented code snippet) must reach the API unmodified (Codex

@@ -14,7 +14,7 @@ import { env } from "@/lib/env";
  * `TRUSTED_CLIENT_IP_HEADER` (set by their proxy, e.g. Caddy's
  * `header_up X-Real-IP {remote_host}`), taking the right-most entry of a
  * list-valued header (the one the trusted proxy appended). It is forwarded
- * as `X-Jarvis-Client-IP` together with `X-Jarvis-BFF-Key`; Django ignores
+ * as `X-Friday-Client-IP` together with `X-Friday-BFF-Key`; Django ignores
  * the IP without a matching key. No configured header, no shared secret, or
  * an unparseable value -> nothing is forwarded (Django: "unknown IP").
  */
@@ -28,8 +28,8 @@ export function trustedClientIp(request: NextRequest): string | null {
 }
 
 export function clientIpHeaders(request: NextRequest): Record<string, string> {
-  const secret = env.JARVIS_BFF_SHARED_SECRET;
+  const secret = env.FRIDAY_BFF_SHARED_SECRET;
   const ip = trustedClientIp(request);
   if (!secret || !ip) return {};
-  return { "X-Jarvis-Client-IP": ip, "X-Jarvis-BFF-Key": secret };
+  return { "X-Friday-Client-IP": ip, "X-Friday-BFF-Key": secret };
 }

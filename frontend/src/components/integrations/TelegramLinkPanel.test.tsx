@@ -52,7 +52,7 @@ describe("TelegramLinkPanel", () => {
 
     await userEvent.click(screen.getByRole("button", { name: "Telegram'ı bağla" }));
 
-    expect(await screen.findByText("Jarvis Telegram botuna yaz")).toBeInTheDocument();
+    expect(await screen.findByText("Friday Telegram botuna yaz")).toBeInTheDocument();
     expect(screen.getByText("/link abc123")).toBeInTheDocument();
   });
 

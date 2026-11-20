@@ -160,7 +160,7 @@ export function MemoryView() {
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Hafıza</h1>
           <p className="text-sm text-muted-foreground">
-            Jarvis&apos;in hatırladığı, seçilmiş bilgiler, tercihler ve anılar.
+            Friday&apos;nin hatırladığı, seçilmiş bilgiler, tercihler ve anılar.
           </p>
         </div>
         <div className="flex gap-2">

@@ -16,7 +16,7 @@ class Command(BaseCommand):
 
     def add_arguments(self, parser):
         parser.add_argument(
-            "base_url", help="Public HTTPS base URL, e.g. https://jarvis.example.com"
+            "base_url", help="Public HTTPS base URL, e.g. https://friday.example.com"
         )
 
     def handle(self, *args, **options):

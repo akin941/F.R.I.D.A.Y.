@@ -54,7 +54,7 @@ logger = logging.getLogger(__name__)
 
 # D11 (Phase 5 branch 2): the gateway summary has its own purpose and
 # prompt row; `harness.review` now names only the external-CLI usage rows.
-_HARNESS_REVIEW_PROMPT_NAME = "jarvis_harness_review_summary"
+_HARNESS_REVIEW_PROMPT_NAME = "friday_harness_review_summary"
 _REVIEW_SUMMARY_PURPOSE = "harness.review_summary"
 # Same bounding discipline as `harness.execution`'s identical constants --
 # see that module's docstring for the full rationale.
@@ -381,7 +381,7 @@ def _review_prompt_version():
     """Mirrors `harness.execution._harness_briefing_prompt_version`'s
     identical shape -- a missing/misconfigured prompt template is a hard
     failure, not a silent degrade, since routing the verdict through
-    Jarvis's own gateway call (rather than trusting the CLI's own
+    Friday's own gateway call (rather than trusting the CLI's own
     self-report) is the actual R2/prompt-injection mitigation this
     pipeline exists to provide."""
     try:

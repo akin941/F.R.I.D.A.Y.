@@ -272,7 +272,7 @@ class TestConservativePrune:
 
     def test_wrong_source_is_skipped_not_deleted(self, workspace, tmp_path):
         text = (
-            "---\njarvis_id: "
+            "---\nfriday_id: "
             + str(uuid.uuid4())
             + "\nworkspace: "
             + str(workspace.id)
@@ -285,27 +285,43 @@ class TestConservativePrune:
     def test_mismatched_workspace_is_skipped_not_deleted(self, workspace, tmp_path):
         other_workspace_id = uuid.uuid4()
         text = (
-            "---\njarvis_id: "
+            "---\nfriday_id: "
             + str(uuid.uuid4())
             + "\nworkspace: "
             + str(other_workspace_id)
-            + "\nsource: jarvis_export\n---\nbody\n"
+            + "\nsource: friday_export\n---\nbody\n"
         )
         vault_root_real = self._plant(workspace, tmp_path, "foreign.md", text)
         export.export_workspace_memories(vault_root_real, workspace)
         assert (self._memory_dir(workspace, tmp_path) / "foreign.md").exists()
 
-    def test_non_uuid_jarvis_id_is_skipped_not_deleted(self, workspace, tmp_path):
+    def test_non_uuid_friday_id_is_skipped_not_deleted(self, workspace, tmp_path):
         text = (
-            "---\njarvis_id: not-a-uuid\nworkspace: "
+            "---\nfriday_id: not-a-uuid\nworkspace: "
             + str(workspace.id)
-            + "\nsource: jarvis_export\n---\nbody\n"
+            + "\nsource: friday_export\n---\nbody\n"
         )
         vault_root_real = self._plant(workspace, tmp_path, "bad-id.md", text)
         export.export_workspace_memories(vault_root_real, workspace)
         assert (self._memory_dir(workspace, tmp_path) / "bad-id.md").exists()
 
     def test_valid_own_export_no_longer_approved_is_pruned(self, workspace, tmp_path):
+        stale_id = uuid.uuid4()
+        text = (
+            "---\nfriday_id: "
+            + str(stale_id)
+            + "\nworkspace: "
+            + str(workspace.id)
+            + "\nsource: friday_export\n---\nbody\n"
+        )
+        vault_root_real = self._plant(workspace, tmp_path, f"{stale_id}.md", text)
+        written, updated, removed = export.export_workspace_memories(vault_root_real, workspace)
+        assert removed == 1
+        assert not (self._memory_dir(workspace, tmp_path) / f"{stale_id}.md").exists()
+
+    def test_pre_rename_jarvis_export_no_longer_approved_is_pruned(self, workspace, tmp_path):
+        """Jarvis -> Friday (2026-11-20): files exported before the rename
+        (`source: jarvis_export`, `jarvis_id`) are still export-owned."""
         stale_id = uuid.uuid4()
         text = (
             "---\njarvis_id: "
@@ -315,9 +331,38 @@ class TestConservativePrune:
             + "\nsource: jarvis_export\n---\nbody\n"
         )
         vault_root_real = self._plant(workspace, tmp_path, f"{stale_id}.md", text)
-        written, updated, removed = export.export_workspace_memories(vault_root_real, workspace)
+        _, _, removed = export.export_workspace_memories(vault_root_real, workspace)
         assert removed == 1
         assert not (self._memory_dir(workspace, tmp_path) / f"{stale_id}.md").exists()
+
+    def test_pre_rename_tag_with_the_new_id_key_is_skipped_not_deleted(self, workspace, tmp_path):
+        """Each source tag is paired with its own id key; a mixed file is not
+        something this job wrote, so it is left alone."""
+        text = (
+            "---\nfriday_id: "
+            + str(uuid.uuid4())
+            + "\nworkspace: "
+            + str(workspace.id)
+            + "\nsource: jarvis_export\n---\nbody\n"
+        )
+        vault_root_real = self._plant(workspace, tmp_path, "mixed.md", text)
+        export.export_workspace_memories(vault_root_real, workspace)
+        assert (self._memory_dir(workspace, tmp_path) / "mixed.md").exists()
+
+    def test_pre_rename_export_of_an_approved_memory_is_rewritten(self, workspace, tmp_path):
+        memory = make_memory(workspace)
+        legacy = (
+            "---\njarvis_id: "
+            + str(memory.id)
+            + "\nworkspace: "
+            + str(workspace.id)
+            + "\nsource: jarvis_export\n---\nold body\n"
+        )
+        vault_root_real = self._plant(workspace, tmp_path, f"{memory.id}.md", legacy)
+        export.export_workspace_memories(vault_root_real, workspace)
+        rewritten = (self._memory_dir(workspace, tmp_path) / f"{memory.id}.md").read_text()
+        assert "source: friday_export" in rewritten
+        assert f"friday_id: {memory.id}" in rewritten
 
     def test_non_utf8_file_is_skipped_not_fatal(self, workspace, tmp_path):
         """Codex review finding: `.read()` on a non-UTF-8 file raises

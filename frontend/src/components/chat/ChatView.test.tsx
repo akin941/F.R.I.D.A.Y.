@@ -125,7 +125,7 @@ function column() {
 
 async function openConversation(title = "Test conversation") {
   await userEvent.click(await column().findByRole("button", { name: title }));
-  await screen.findByPlaceholderText("Jarvis'e yaz…");
+  await screen.findByPlaceholderText("Friday'ye yaz…");
 }
 
 async function renderAndOpen() {
@@ -135,7 +135,7 @@ async function renderAndOpen() {
 }
 
 async function send(text: string) {
-  await userEvent.type(screen.getByPlaceholderText("Jarvis'e yaz…"), text);
+  await userEvent.type(screen.getByPlaceholderText("Friday'ye yaz…"), text);
   await userEvent.click(screen.getByRole("button", { name: "Gönder" }));
 }
 
@@ -381,7 +381,7 @@ describe("ChatView", () => {
     await screen.findByRole("button", { name: "Durdur" });
     expect(screen.queryByRole("button", { name: "Gönder" })).not.toBeInTheDocument();
 
-    const textarea = screen.getByPlaceholderText("Jarvis'e yaz…");
+    const textarea = screen.getByPlaceholderText("Friday'ye yaz…");
     expect(textarea).toBeEnabled();
     await userEvent.type(textarea, "Second{Enter}");
     expect(textarea).toHaveValue("Second");
@@ -405,7 +405,7 @@ describe("ChatView", () => {
     });
 
     await renderAndOpen();
-    await userEvent.type(screen.getByPlaceholderText("Jarvis'e yaz…"), "Double click");
+    await userEvent.type(screen.getByPlaceholderText("Friday'ye yaz…"), "Double click");
     const sendButton = screen.getByRole("button", { name: "Gönder" });
     act(() => {
       fireEvent.click(sendButton);
@@ -660,7 +660,7 @@ describe("ChatView", () => {
     });
 
     await waitFor(() => expect(creates).toBe(1));
-    expect(await screen.findByText("Jarvis'e bir şey sor.")).toBeInTheDocument();
+    expect(await screen.findByText("Friday'ye bir şey sor.")).toBeInTheDocument();
   });
 
   it("shows a visible error when creating a new chat fails", async () => {
@@ -997,7 +997,7 @@ describe("ChatView", () => {
 
     unmount();
     await renderAndOpen();
-    await screen.findByPlaceholderText("Jarvis'e yaz…");
+    await screen.findByPlaceholderText("Friday'ye yaz…");
     await waitFor(() => expect(screen.queryByTestId("task-draft-card")).not.toBeInTheDocument());
   });
 

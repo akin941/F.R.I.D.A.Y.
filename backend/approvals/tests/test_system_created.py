@@ -184,7 +184,7 @@ _SPOOF_BODIES = [
 _SPOOF_HEADERS = [
     {},
     {"HTTP_X_SYSTEM_CREATED": "true"},
-    {"HTTP_X_JARVIS_ORIGIN": "harness", "HTTP_X_SYSTEM_CREATED": "1"},
+    {"HTTP_X_FRIDAY_ORIGIN": "harness", "HTTP_X_SYSTEM_CREATED": "1"},
 ]
 
 

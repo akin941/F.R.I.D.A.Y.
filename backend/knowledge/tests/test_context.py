@@ -202,7 +202,7 @@ class TestPrivateNegativeContract:
         selected = select_context_chunks(
             actor=alice,
             workspace=workspace,
-            query_text="What lantern mode does Jarvis OS support?",
+            query_text="What lantern mode does Friday OS support?",
         )
         assert selected == []
 
@@ -218,7 +218,7 @@ class TestPrivateNegativeContract:
         selected = select_context_chunks(
             actor=alice,
             workspace=workspace,
-            query_text="What lantern mode does Jarvis OS support?",
+            query_text="What lantern mode does Friday OS support?",
         )
         block = render_knowledge_block(selected)
         assert "Extremely private" not in block

@@ -41,7 +41,7 @@ def fake_provider():
 @pytest.fixture
 def diff_summary_prompt():
     template = PromptTemplate.objects.create(
-        name="jarvis_harness_diff_summary", purpose="harness.diff_summary"
+        name="friday_harness_diff_summary", purpose="harness.diff_summary"
     )
     version = PromptVersion.objects.create(
         template=template, version=1, content="Summarize the diff stat as JSON."
@@ -161,7 +161,7 @@ def test_diff_summary_prompt_fences_the_stat_as_untrusted(
 def test_diff_summary_falls_back_deterministically(workspace, repo, owner, monkeypatch, failure):
     if failure != "no_prompt":
         template = PromptTemplate.objects.create(
-            name="jarvis_harness_diff_summary", purpose="harness.diff_summary"
+            name="friday_harness_diff_summary", purpose="harness.diff_summary"
         )
         version = PromptVersion.objects.create(template=template, version=1, content="x")
         template.active_version = version

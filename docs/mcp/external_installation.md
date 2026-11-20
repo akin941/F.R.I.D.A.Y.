@@ -12,7 +12,7 @@
 
 ## Why blocked (O-5)
 An external installation is an independent external product (ADR-006).
-Jarvis's only future relationship with it is as an MCP client consuming an
+Friday's only future relationship with it is as an MCP client consuming an
 installation's MCP-compatible tools on a user's behalf.
 The installation does not expose MCP yet, so there is nothing to pin.
 

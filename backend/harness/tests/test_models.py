@@ -23,7 +23,7 @@ def workspace(owner):
 class TestHarnessRepoDefaults:
     def test_defaults_are_inert(self, workspace):
         repo = HarnessRepo.objects.create(
-            workspace=workspace, name="jarvis-os", git_url="git@example.com:x/y.git"
+            workspace=workspace, name="friday", git_url="git@example.com:x/y.git"
         )
         assert repo.enabled is False
         assert repo.sensitive is False
@@ -32,7 +32,7 @@ class TestHarnessRepoDefaults:
 
     def test_str_includes_workspace(self, workspace):
         repo = HarnessRepo.objects.create(
-            workspace=workspace, name="jarvis-os", git_url="git@example.com:x/y.git"
+            workspace=workspace, name="friday", git_url="git@example.com:x/y.git"
         )
         assert str(workspace.id) in str(repo)
 
@@ -40,7 +40,7 @@ class TestHarnessRepoDefaults:
 class TestHarnessJobDefaults:
     def test_defaults(self, workspace):
         repo = HarnessRepo.objects.create(
-            workspace=workspace, name="jarvis-os", git_url="git@example.com:x/y.git"
+            workspace=workspace, name="friday", git_url="git@example.com:x/y.git"
         )
         job = HarnessJob.objects.create(workspace=workspace, repo=repo, goal="find the bug")
         assert job.agent == HarnessJob.Agent.CLAUDE_CODE
@@ -52,7 +52,7 @@ class TestHarnessJobDefaults:
 
     def test_str_includes_status(self, workspace):
         repo = HarnessRepo.objects.create(
-            workspace=workspace, name="jarvis-os", git_url="git@example.com:x/y.git"
+            workspace=workspace, name="friday", git_url="git@example.com:x/y.git"
         )
         job = HarnessJob.objects.create(workspace=workspace, repo=repo, goal="find the bug")
         assert "pending" in str(job)
@@ -76,7 +76,7 @@ class TestHarnessJobCrossWorkspaceInvariant:
 
     def test_save_allows_a_repo_from_the_same_workspace(self, workspace):
         repo = HarnessRepo.objects.create(
-            workspace=workspace, name="jarvis-os", git_url="git@example.com:x/y.git"
+            workspace=workspace, name="friday", git_url="git@example.com:x/y.git"
         )
         job = HarnessJob.objects.create(workspace=workspace, repo=repo, goal="find the bug")
         assert job.pk is not None

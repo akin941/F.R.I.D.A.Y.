@@ -31,7 +31,7 @@
 
 ## Goal and user value
 
-Jarvis gets a real write-class action for the first time: exporting curated
+Friday gets a real write-class action for the first time: exporting curated
 memories to the user's local Obsidian vault as human-readable, frontmatter-
 tagged markdown files, kept in sync (edits/forgets reconcile, not just
 one-shot dumps). The action is never silent — every filesystem write goes
@@ -236,13 +236,13 @@ rows actually get fenced.
   characters permitted are a smaller set than the fields users may freely
   edit).
 - **Frontmatter standard** (per the vault-strategy doc, all required):
-  `jarvis_id` (the memory's UUID — the reconciliation key, see below),
+  `friday_id` (the memory's UUID — the reconciliation key, see below),
   `type` (the memory's `memory_type`), `workspace` (`workspace.id`),
   `project` (empty/omitted for now — no project concept exists yet in this
   codebase; the field is reserved per the vault-strategy doc, not invented
-  here), `sensitivity`, `source: jarvis_export` (marks the file
+  here), `sensitivity`, `source: friday_export` (marks the file
   never-re-ingest, the echo-chamber guard the vault-strategy doc requires —
-  vault → Jarvis ingestion itself remains out of scope, still deferred past
+  vault → Friday ingestion itself remains out of scope, still deferred past
   MVP 3 and this MVP alike), `updated_at`.
 - **Reconciliation (forget/edit), full resync + conservative prune
   (tightened per Codex plan-review round-1 HIGH finding)**: each export run
@@ -250,12 +250,12 @@ rows actually get fenced.
   scope (edits naturally reconcile — the file is fully regenerated from the
   current row every run, never patched), then (ii) scans the workspace's
   `Memory/` vault folder and deletes a file **only if it passes every one
-  of these checks**: parses as valid frontmatter, `source: jarvis_export`,
+  of these checks**: parses as valid frontmatter, `source: friday_export`,
   `workspace` frontmatter equals the current export's workspace id,
-  `jarvis_id` parses as a UUID, and that UUID is **not** in the current
+  `friday_id` parses as a UUID, and that UUID is **not** in the current
   `approved` set. **Any file failing any single check — malformed
-  frontmatter, a missing field, `source` not `jarvis_export`, a mismatched
-  workspace, a non-UUID `jarvis_id` — is left untouched and counted as
+  frontmatter, a missing field, `source` not `friday_export`, a mismatched
+  workspace, a non-UUID `friday_id` — is left untouched and counted as
   "skipped," never deleted.** This is deliberately conservative: a
   human-authored note, a future non-memory export, or simply a file this
   job doesn't recognize must never be silently destroyed by a prune pass.
@@ -385,8 +385,8 @@ rows actually get fenced.
 - **Auto-approval per low-risk tool** (ADR-004: "may later be enabled...
   never for the hard rules") — every gated action in this MVP requires an
   explicit human decision, no exceptions, no per-tool config to skip it.
-- **Vault ingestion (vault → Jarvis)** and its echo-chamber guard — still
-  deferred (originally MVP 3+, remains open; `source: jarvis_export`
+- **Vault ingestion (vault → Friday)** and its echo-chamber guard — still
+  deferred (originally MVP 3+, remains open; `source: friday_export`
   frontmatter is written now so a future ingestion job can honor the guard
   from day one, but nothing reads the vault in this MVP).
 - **KnowledgeDocument vault export** — the vault-strategy doc's exported
@@ -487,9 +487,9 @@ rule as live here, not theoretical).
   the approval's transaction commits — a `VaultExportRun` row still exists
   in `pending` afterward, provable by the recovery scan reclaiming it),
   **conservative-prune tests** (a malformed
-  file, a file with `source` other than `jarvis_export`, a file whose
+  file, a file with `source` other than `friday_export`, a file whose
   `workspace` frontmatter doesn't match, and a file with a non-UUID
-  `jarvis_id` are each individually left untouched by a prune pass — not
+  `friday_id` are each individually left untouched by a prune pass — not
   one combined "prune works" assertion), reconciliation test (an approved
   memory gets a file; forgetting it removes the file on the next run; a
   hard-deleted memory's file is also removed; editing a memory's content

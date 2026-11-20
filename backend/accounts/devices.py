@@ -15,7 +15,7 @@ Flows:
 
 Every enrollment creates a `TrustedDevice` holding the sha256 of a fresh
 256-bit device secret; the raw secret goes to the browser once (HttpOnly
-`jarvis_device` cookie) and later mints JWT sessions carrying the device
+`friday_device` cookie) and later mints JWT sessions carrying the device
 id as the `did` claim. `accounts.authentication.DeviceJWTAuthentication`
 re-checks the device row on every request, so revocation takes effect on
 the next request.

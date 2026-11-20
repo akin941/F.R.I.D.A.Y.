@@ -42,9 +42,9 @@ def cosine(a, b):
 # seeded document above unrelated noise before the e2e test ever depends on
 # it (MVP 3 brief §1, round-3 review finding).
 SEED_DOCUMENT_TEXT = (
-    "Jarvis OS supports offline lantern mode for camping trips without cell signal."
+    "Friday OS supports offline lantern mode for camping trips without cell signal."
 )
-QUERY_TEXT = "What lantern mode does Jarvis OS support when camping offline?"
+QUERY_TEXT = "What lantern mode does Friday OS support when camping offline?"
 NOISE_DOCUMENT_TEXT = "The quarterly budget review meeting is scheduled for next Tuesday afternoon."
 
 

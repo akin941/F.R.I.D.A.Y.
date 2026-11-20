@@ -1,4 +1,4 @@
-# Jarvis OS — daily-driver override (Phase 4 branch 1). Layered on top of
+# Friday OS — daily-driver override (Phase 4 branch 1). Layered on top of
 # the dev stack:
 #
 #   make up-daily
@@ -21,7 +21,7 @@
 #     --profile connectors up -d
 # They publish no port here either.
 #
-# Everything is still published on 127.0.0.1 only. Exposing Jarvis beyond
+# Everything is still published on 127.0.0.1 only. Exposing Friday beyond
 # this machine goes through a private overlay (Tailscale/WireGuard) or a TLS
 # reverse proxy in front of the frontend -- never by publishing these ports
 # on 0.0.0.0. Django's only client is the BFF (the frontend container, over
@@ -45,7 +45,7 @@ services:
       # Device trust (Phase 4 branch 2): the frontend container forwards the
       # browser's IP with this key; PINs from an unknown IP are refused
       # unless the owner explicitly turns LAN gating off.
-      JARVIS_BFF_SHARED_SECRET: "${JARVIS_BFF_SHARED_SECRET:?run `make secrets`}"
+      FRIDAY_BFF_SHARED_SECRET: "${FRIDAY_BFF_SHARED_SECRET:?run `make secrets`}"
       DEVICE_PAIRING_ALLOW_UNKNOWN_IP: "${DEVICE_PAIRING_ALLOW_UNKNOWN_IP:-false}"
 
   worker:
@@ -77,7 +77,7 @@ services:
       # (bare `next start`): no client IP is forwarded -- PINs are refused,
       # pair with a strong code / `manage.py issue_pairing_code --strong`.
       TRUSTED_CLIENT_IP_HEADER: "${TRUSTED_CLIENT_IP_HEADER:-}"
-      JARVIS_BFF_SHARED_SECRET: "${JARVIS_BFF_SHARED_SECRET:?run `make secrets`}"
+      FRIDAY_BFF_SHARED_SECRET: "${FRIDAY_BFF_SHARED_SECRET:?run `make secrets`}"
     ports:
       - "127.0.0.1:3001:3001"
     depends_on:

@@ -1,20 +1,20 @@
-# ADR-008: Jarvis 2.0 — Single-Owner System, Agent Harness, Phase Roadmap
+# ADR-008: Friday 2.0 — Single-Owner System, Agent Harness, Phase Roadmap
 
 ## Status
 Accepted (2026-07-17)
 
 ## Context
 The personal kernel (MVP 1–9) is done, but the vision outgrew the original
-roadmap: the owner serves multiple firms and wants Jarvis to be the daily
+roadmap: the owner serves multiple firms and wants Friday to be the daily
 control plane over them — long-term memory that knows the owner *and* the
 firms, an agent harness that drives external CLI coding agents (Claude
 Code, Codex CLI, Gemini CLI, Ollama) as workers under the approval gate,
 a renewed UI, MCP integrations, and (later) an always-listening local
-voice layer. A full architecture analysis (`docs/VISION_JARVIS_2.md`)
-compared three options and the owner approved **Option C**: Jarvis stays
+voice layer. A full architecture analysis (`docs/VISION_FRIDAY_2.md`)
+compared three options and the owner approved **Option C**: Friday stays
 the control plane, the harness becomes a kernel app, the UI is renewed
 in-house. Two latent conflicts surfaced during analysis and are resolved
-here: (a) Jarvis carries a multi-user SaaS surface (signup, invites,
+here: (a) Friday carries a multi-user SaaS surface (signup, invites,
 memberships) that will never have a second user; (b) ADR-004's
 requester != decider rule assumes two humans — in production today the
 owner cannot approve a request created on their own behalf, including
@@ -23,7 +23,7 @@ agent-created tool requests (`agents/execution.py` passes
 single-human deployment.
 
 ## Decision
-1. **Option C is binding.** Jarvis's kernel (identity, workspace axis,
+1. **Option C is binding.** Friday's kernel (identity, workspace axis,
    gateway, approvals, memory, audit) is the control plane. A new
    `harness` kernel app (ADR-002 rules apply) runs external CLI agents
    headless as workers; their usage is reported through the
@@ -31,7 +31,7 @@ single-human deployment.
    backends' usage reports"). The internal `agents` runtime (MVP 7) stays
    for chat-born light plans; merging it with the harness is re-evaluated
    after Phase 3.
-2. **Jarvis is a single-owner system.** Exactly one human — the owner.
+2. **Friday is a single-owner system.** Exactly one human — the owner.
    The multi-user SaaS surface is removed: signup disabled and slated for
    removal, no invite/membership flows, MVP 10 (multi-user tenancy) is
    **cancelled** (the fleet phase may still add a lightweight external-
@@ -79,9 +79,9 @@ single-human deployment.
    fixed now: wake-word detection is **local** (openWakeWord/Porcupine
    class — audio never leaves the device; processing starts only after
    the wake word), STT/TTS stay local (faster-whisper, Piper). The
-   animated "Jarvis" visual identity layer comes **after** voice works.
+   animated "Friday" visual identity layer comes **after** voice works.
 6. **Integrations are bridges, never drivers.** Home/device control goes
-   through a Home Assistant API/MCP bridge (Phase 5) — Jarvis never
+   through a Home Assistant API/MCP bridge (Phase 5) — Friday never
    implements device drivers. An OpenAI-compatible facade endpoint may
    expose chat (only chat — no tool calls) as a low-trust secondary
    channel for mature clients like Open WebUI.
@@ -92,7 +92,7 @@ single-human deployment.
 
 ## Consequences
 The roadmap after MVP 9 is reorganized into Phases 0–6 (MASTER_PLAN §AA;
-detail in `docs/VISION_JARVIS_2.md`, now binding as approved vision).
+detail in `docs/VISION_FRIDAY_2.md`, now binding as approved vision).
 Phase 0 lands the decisions in code: firm profiles on Workspace, an
 Ollama embedding provider, the model-tier routing skeleton (§J), and the
 approvals machine-requester fix so agent-created requests become decidable

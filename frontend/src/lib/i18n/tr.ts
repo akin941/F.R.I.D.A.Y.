@@ -254,9 +254,9 @@ export const tr = {
     loadMessagesFailed: "Mesajlar yüklenemedi.",
     newChatFailed: "Yeni sohbet başlatılamadı. Lütfen tekrar deneyin.",
     pickConversation: "Bir sohbet seç ya da yeni bir sohbet başlat.",
-    emptyConversation: "Jarvis'e bir şey sor.",
+    emptyConversation: "Friday'ye bir şey sor.",
     unavailable: "Bu sohbete artık erişilemiyor.",
-    placeholder: "Jarvis'e yaz…",
+    placeholder: "Friday'ye yaz…",
     composerLabel: "Mesaj",
     send: "Gönder",
     stop: "Durdur",
@@ -390,7 +390,7 @@ export const tr = {
       rejecting: "Reddediliyor…",
       forgetTitle: "Bu hafıza kaydı unutulsun mu?",
       forget: (title: string) =>
-        `“${title}” arşivlenir ve Jarvis onu artık kullanmaz. Arşivden istediğin zaman geri yükleyebilirsin.`,
+        `“${title}” arşivlenir ve Friday onu artık kullanmaz. Arşivden istediğin zaman geri yükleyebilirsin.`,
       forgetConfirm: "Evet, unut",
       forgetting: "Unutuluyor…",
       deleteTitle: "Reddedilen öneri kalıcı olarak silinsin mi?",
@@ -422,7 +422,7 @@ export const tr = {
     telegram: {
       title: "Telegram bağlantısı kaldırılsın mı?",
       description:
-        "Bu çalışma alanına bağlı Telegram sohbeti artık Jarvis'e mesaj iletemez. Yeniden bağlamak için yeni bir bağlantı kodu gerekir.",
+        "Bu çalışma alanına bağlı Telegram sohbeti artık Friday'ye mesaj iletemez. Yeniden bağlamak için yeni bir bağlantı kodu gerekir.",
       confirm: "Evet, kaldır",
       busy: "Kaldırılıyor…",
       failed: "Sohbet bağlantısı kaldırılamadı.",
@@ -645,7 +645,7 @@ export const tr = {
         diff: "Diff",
         transcripts: "Transkriptler",
       },
-      ownSummaryNote: "Özet ve bulgular Jarvis'in kendi özetidir (model üretimi).",
+      ownSummaryNote: "Özet ve bulgular Friday'nin kendi özetidir (model üretimi).",
       noSummaryButTranscript:
         "Özet üretilemedi. Ajanın ham çıktısı Transkriptler sekmesinde, güvenilmeyen içerik olarak duruyor.",
       briefingPending: "Brifing iş bittiğinde burada görünecek.",
@@ -689,11 +689,11 @@ export const tr = {
       sensitive: "Hassas",
       sensitiveLabel: "Hassas müşteri işi",
       sensitiveHint: "Bu depodaki işler hassas olarak işaretlenir.",
-      selfRepo: "Jarvis'in kendi deposu",
+      selfRepo: "Friday'nin kendi deposu",
       selfRepoHint:
-        "Bu depo Jarvis'in kendi kurulumuna çözülüyor: kendini değiştirme koruması (ADR-004) uygulama işlerini reddeder. Salt okunur keşif çalışır.",
+        "Bu depo Friday'nin kendi kurulumuna çözülüyor: kendini değiştirme koruması (ADR-004) uygulama işlerini reddeder. Salt okunur keşif çalışır.",
       selfRepoUnconfigured:
-        "HARNESS_SELF_REPO_IDENTIFIERS tanımlı değil: kendini değiştirme koruması hangi deponun Jarvis olduğunu bilemediği için tüm uygulama işlerini reddeder. Keşif işleri çalışır.",
+        "HARNESS_SELF_REPO_IDENTIFIERS tanımlı değil: kendini değiştirme koruması hangi deponun Friday olduğunu bilemediği için tüm uygulama işlerini reddeder. Keşif işleri çalışır.",
     },
   },
   approvals: {
@@ -843,7 +843,7 @@ export const tr = {
       openai: "OpenAI uyumlu istemci",
     } satisfies Record<PatKind, string>,
     kindHint: {
-      cli: "Jarvis komut satırı (jarvis CLI) için.",
+      cli: "Friday komut satırı (friday CLI) için.",
       openai:
         "Open WebUI gibi OpenAI uyumlu istemciler için: yalnızca sohbet, araç ve onay yok. CLI uç noktalarında çalışmaz.",
     } satisfies Record<PatKind, string>,

@@ -16,8 +16,8 @@ export function openWebUiSnippet(origin: string, token: string) {
     "Open WebUI → Yönetici Paneli → Ayarlar → Bağlantılar → OpenAI API",
     `API Base URL: ${facadeBaseUrl(origin)}`,
     `API Key: ${token}`,
-    "Model: jarvis (sohbet)",
-    "Görev modeli (başlık, etiket, öneriler): jarvis-lite",
+    "Model: friday (sohbet)",
+    "Görev modeli (başlık, etiket, öneriler): friday-lite",
   ].join("\n");
 }
 
@@ -66,8 +66,8 @@ export function RevealedTokenBanner({
           <>
             <p className="text-sm">
               Open WebUI kurulumu: bağlantı ayarlarına bu adresi ve anahtarı gir. Sohbet için{" "}
-              <code>jarvis</code>, başlık ve etiket gibi arka plan görevleri için görev modeli olarak{" "}
-              <code>jarvis-lite</code> seç.
+              <code>friday</code>, başlık ve etiket gibi arka plan görevleri için görev modeli olarak{" "}
+              <code>friday-lite</code> seç.
             </p>
             <pre
               aria-label="Open WebUI kurulum bilgisi"

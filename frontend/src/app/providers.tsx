@@ -23,7 +23,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
       defaultTheme="system"
       enableSystem
       disableTransitionOnChange
-      storageKey="jarvis:theme"
+      storageKey="friday:theme"
     >
       <QueryClientProvider client={queryClient}>
         <TooltipProvider delayDuration={300}>

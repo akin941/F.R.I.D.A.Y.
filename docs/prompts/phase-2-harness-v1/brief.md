@@ -39,7 +39,7 @@
 > below, not silently dropped. No further plan-review round was run after
 > this revision; branch 2's own code-review is where these two remaining
 > items get closed out for real.).
-> Parent decisions: ADR-008, `docs/VISION_JARVIS_2.md` §4/§6/§7/§8,
+> Parent decisions: ADR-008, `docs/VISION_FRIDAY_2.md` §4/§6/§7/§8,
 > MASTER_PLAN §AA row 2.
 
 ## Goal / value
@@ -140,7 +140,7 @@ producer — this phase is that producer's first instance.
   vs. a second gateway call" question in favor of the gateway call, since
   trusting the CLI's own self-summary to have already done the low-trust/
   high-trust separation is exactly the framing risk CLAUDE.md rule 2 exists
-  to avoid: Jarvis's own reasoning about what the repo said must go through
+  to avoid: Friday's own reasoning about what the repo said must go through
   the same accounted, versioned, mockable path as everything else, not the
   external tool's own opinion of itself.
 - **Repo registration is new schema, not reuse of the firm-dossier JSON.**
@@ -421,7 +421,7 @@ producer — this phase is that producer's first instance.
     filesystem boundary raises exactly the questions a bare subprocess
     didn't have — what the container can reach over the network, whose
     image it runs, and whether it can exhaust the runner):
-    - **Image**: a single Jarvis-owned Dockerfile per supported agent
+    - **Image**: a single Friday-owned Dockerfile per supported agent
       (`CLAUDE_CODE`/`CODEX_CLI`), pinned to a specific, recorded base-image
       digest — never `latest` — built and version-controlled in this repo,
       not pulled from an unpinned third-party image at run time. Bumping
@@ -515,14 +515,14 @@ producer — this phase is that producer's first instance.
   never taken as-is from the CLI agent's own self-summary. The repo's own
   content
   (README, code comments, issues the CLI agent read) is low-trust input
-  that reached the CLI agent, not Jarvis's own reasoning, and the CLI
+  that reached the CLI agent, not Friday's own reasoning, and the CLI
   agent's own opinion of "what's a fact vs. what's my recommendation" is
-  not a boundary Jarvis controls or can verify — routing the actual
-  separation through Jarvis's own accounted, versioned, mockable gateway
+  not a boundary Friday controls or can verify — routing the actual
+  separation through Friday's own accounted, versioned, mockable gateway
   call (same `neutralize_fence`/`strip_invisible_formatting` discipline as
   every other injected block, `memory/context.py:341,359`, Codex round-2
   LOW: an earlier draft cited `:120-157`, the wrong range) is what makes
-  "the repo/tool said X" vs. "the harness recommends Y" a guarantee Jarvis
+  "the repo/tool said X" vs. "the harness recommends Y" a guarantee Friday
   itself produces, not one it takes on trust from an external tool.
   `raw_transcript` itself is still stored (for audit/debugging) but is
   always labeled as external, low-trust data in every render path (UI, any

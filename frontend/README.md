@@ -1,6 +1,6 @@
-# Jarvis OS — Frontend
+# Friday OS — Frontend
 
-Next.js (App Router) web shell for Jarvis OS: device enrollment (`/enroll`),
+Next.js (App Router) web shell for Friday OS: device enrollment (`/enroll`),
 workspace switcher, streaming Chat and the other shell views. Talks only to the Django backend's `/api/v1/*`
 endpoints through this app's own Route Handlers (a BFF layer) — the browser never
 sees a JWT or calls Django directly.
@@ -48,15 +48,15 @@ mocks the network so it can exercise them cheaply and deterministically.
 ## Architecture notes
 
 - **BFF, not a direct client**: `src/app/api/**/route.ts` proxy to Django,
-  translating JWTs into `HttpOnly` cookies (`jarvis_access`, `jarvis_refresh`,
-  `jarvis_session`) the browser can never read.
+  translating JWTs into `HttpOnly` cookies (`friday_access`, `friday_refresh`,
+  `friday_session`) the browser can never read.
 - **Device trust** (Phase 4 branch 2): there is no signup or password login.
   `/enroll` exchanges a pairing code (or the remote access key) for a trusted
-  device; its secret lives in the `jarvis_device` cookie (HttpOnly,
+  device; its secret lives in the `friday_device` cookie (HttpOnly,
   `SameSite=Strict`, `path=/api/auth`, 400 days). When a refresh fails the
   refresh route silently re-mints a session from it; only a rejected device
   sends the browser back to `/enroll`. `TRUSTED_CLIENT_IP_HEADER` +
-  `JARVIS_BFF_SHARED_SECRET` forward the browser's IP for PIN LAN gating
+  `FRIDAY_BFF_SHARED_SECRET` forward the browser's IP for PIN LAN gating
   (`src/lib/client-ip.ts`; only behind a reverse proxy that sets that header).
 - **`src/proxy.ts`** (Next 16 renamed `middleware.ts`) is an optimistic route guard
   only — every Route Handler re-checks the access-token cookie independently.

@@ -53,8 +53,8 @@ def fake_provider():
 
 @pytest.fixture
 def system_prompt():
-    template = PromptTemplate.objects.create(name="jarvis_system", purpose="chat")
-    version = PromptVersion.objects.create(template=template, version=1, content="You are Jarvis.")
+    template = PromptTemplate.objects.create(name="friday_system", purpose="chat")
+    version = PromptVersion.objects.create(template=template, version=1, content="You are Friday.")
     template.active_version = version
     template.save(update_fields=["active_version"])
     return version
@@ -64,8 +64,8 @@ def system_prompt():
 def router_intent_prompt():
     """Every POST that reaches classify_intent() needs this configured,
     exactly like `system_prompt` above — mirrors seed_ai_defaults' real
-    jarvis_router_intent entry (MVP 6 §1)."""
-    template = PromptTemplate.objects.create(name="jarvis_router_intent", purpose="router.intent")
+    friday_router_intent entry (MVP 6 §1)."""
+    template = PromptTemplate.objects.create(name="friday_router_intent", purpose="router.intent")
     version = PromptVersion.objects.create(
         template=template, version=1, content="Classify the message."
     )
@@ -77,9 +77,9 @@ def router_intent_prompt():
 @pytest.fixture
 def task_draft_prompt():
     """Needed only by task_draft-classified POSTs (MVP 6 §3) -- mirrors
-    seed_ai_defaults' real jarvis_router_task_draft entry."""
+    seed_ai_defaults' real friday_router_task_draft entry."""
     template = PromptTemplate.objects.create(
-        name="jarvis_router_task_draft", purpose="router.task_draft"
+        name="friday_router_task_draft", purpose="router.task_draft"
     )
     version = PromptVersion.objects.create(
         template=template, version=1, content="Extract the task."

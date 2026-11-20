@@ -26,7 +26,7 @@ channel only (`approvals.services.approve_request`). The request's life:
    session). Never retried: a failure before the send is `failed`, one
    after it (timeout, transport) is `unknown_outcome`, and a worker lost
    mid-call is moved to `unknown_outcome` by the recovery scan -- never
-   re-sent. Every terminal state is audited and leaves a Jarvis-authored
+   re-sent. Every terminal state is audited and leaves a Friday-authored
    `work_log` row (unless the tool opts out, D13).
 """
 

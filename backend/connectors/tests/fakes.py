@@ -204,7 +204,7 @@ def make_manifest(
                 name=f"{name}_search",
                 server_tool="fake_search",
                 kind=TOOL_READ,
-                description=f"Search the {name} service for items (Jarvis-authored).",
+                description=f"Search the {name} service for items (Friday-authored).",
                 argument_serializer=SearchArgs,
                 schema_sha256=search_pin or schema_hash(SEARCH_SCHEMA),
                 scope_check=forbid_scope,

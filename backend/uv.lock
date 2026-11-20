@@ -479,7 +479,7 @@ wheels = [
 ]
 
 [[package]]
-name = "jarvis-backend"
+name = "friday-backend"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [

@@ -67,7 +67,7 @@ describe("consequences", () => {
       display_summary: implementSummary(),
     });
     const text = rendererFor("harness_implement").consequence(request, "approve");
-    expect(text).toContain("“jarvis” deposunda");
+    expect(text).toContain("“friday” deposunda");
     expect(text).toContain("“harness/p3-ij1” dalı");
     expect(text).toContain("Kapı B");
   });

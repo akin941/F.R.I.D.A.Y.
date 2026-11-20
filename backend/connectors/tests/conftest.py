@@ -12,7 +12,7 @@ from core.channels import CHANNEL_WEB
 from workspaces.models import Workspace
 
 PASSWORD = "Str0ngDevPass!42"
-# A credential value that must never show up anywhere Jarvis writes.
+# A credential value that must never show up anywhere Friday writes.
 CREDENTIAL_CANARY = "ghp_CREDENTIAL-CANARY-0123456789"
 
 

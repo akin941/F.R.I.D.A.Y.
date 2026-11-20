@@ -87,7 +87,7 @@ SELF_REPO_STATUS_UNCONFIGURED = "unconfigured"
 
 class HarnessRepoSerializer(serializers.ModelSerializer):
     # Phase 4 branch 5 (repo registry UI, read-only): how the ADR-004
-    # self-modification guard sees this repo -- `self` (resolves to Jarvis's
+    # self-modification guard sees this repo -- `self` (resolves to Friday's
     # own remote: implementation runs refused), `other`, or `unconfigured`
     # (HARNESS_SELF_REPO_IDENTIFIERS empty: every implementation run is
     # refused). Display only; the guard itself stays in
@@ -269,7 +269,7 @@ def _gate_summary(approval_request):
 class HarnessReviewSerializer(serializers.ModelSerializer):
     """`summary`/`findings` are gateway-produced; `raw_transcript` is the
     reviewing CLI's own low-trust output -- the UI renders it fenced behind
-    a disclosure (R2), never as Jarvis's own words."""
+    a disclosure (R2), never as Friday's own words."""
 
     class Meta:
         model = HarnessReview

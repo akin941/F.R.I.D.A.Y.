@@ -17,7 +17,7 @@ class TestValidProfiles:
     def test_full_profile_is_accepted(self):
         profile = {
             "repos": [
-                {"name": "jarvis-os", "url": "https://github.com/x/jarvis-os"},
+                {"name": "friday", "url": "https://github.com/x/friday"},
                 {
                     "name": "acme",
                     "url": "https://github.com/x/acme",
@@ -41,7 +41,7 @@ class TestValidProfiles:
         assert validated["notes"] == "Firm-wide dossier notes."
 
     def test_optional_subfields_may_be_omitted(self):
-        profile = {"repos": [{"name": "jarvis-os", "url": "https://x"}]}
+        profile = {"repos": [{"name": "friday", "url": "https://x"}]}
         serializer = _serializer(profile)
         assert serializer.is_valid(), serializer.errors
         assert "default_branch" not in serializer.validated_data["profile"]["repos"][0]
@@ -92,7 +92,7 @@ class TestWrongTypesRejected:
         assert not serializer.is_valid()
 
     def test_repo_missing_required_url_rejected(self):
-        serializer = _serializer({"repos": [{"name": "jarvis-os"}]})
+        serializer = _serializer({"repos": [{"name": "friday"}]})
         assert not serializer.is_valid()
 
 

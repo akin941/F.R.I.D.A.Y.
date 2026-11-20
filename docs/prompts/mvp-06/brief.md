@@ -26,10 +26,10 @@
 
 ## Goal and user value
 
-Today, every Jarvis capability (memory, knowledge, tasks, the one gated
+Today, every Friday capability (memory, knowledge, tasks, the one gated
 tool) is a separate, manually-triggered UI surface — the user has to know
 which page to go to and which button to click. This MVP makes chat itself
-the front door: the user says what they want in plain language, and Jarvis
+the front door: the user says what they want in plain language, and Friday
 figures out which subsystem that concerns and acts on it — for reads,
 directly; for writes, by drafting the action and asking for a one-click
 confirmation before anything happens. Nothing here creates a new
@@ -83,7 +83,7 @@ crosses into MVP 7 territory this brief does not touch.
 A new gateway call, `purpose="router.intent"`, runs before the existing
 chat context-build step (`assistant.services.build_gateway_stream`) for
 every user message. Schema-constrained JSON output (same discipline as
-`jarvis_memory_extraction`'s prompt — a fixed shape, not free text),
+`friday_memory_extraction`'s prompt — a fixed shape, not free text),
 classifying the message into exactly one of:
 
 - `chat` — the default/fallback; ordinary conversation, no dispatch.
@@ -289,7 +289,7 @@ timezone is not.
 
 With that resolved: the classification step extracts a structured draft
 (title, optional due date) via the same schema-constrained-JSON discipline
-`jarvis_memory_extraction` already established — a second, small,
+`friday_memory_extraction` already established — a second, small,
 purpose-specific prompt (`purpose="router.task_draft"`), not a repurposing
 of the classification call's own output (classification decides *that*
 it's a task; a focused second call decides *what* the task should contain,

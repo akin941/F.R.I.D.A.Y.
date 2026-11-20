@@ -2,7 +2,7 @@
 which starts the container and sets the env below; skipped otherwise).
 
 Drives the whole path through the real system `ssh` client against an sshd
-container running the real `deploy/remote/jarvis-deploy.sh` as a forced
+container running the real `deploy/remote/friday-deploy.sh` as a forced
 command, with a dummy compose app: status refresh -> deploy of a merged
 commit -> deploy of a commit whose health fails, automatically rolled back
 -> a non-merged SHA refused by the remote. Every decision goes through the
@@ -57,7 +57,7 @@ def fake_clock():
 @pytest.fixture(autouse=True)
 def _deploy_settings(settings):
     settings.DEPLOY_SSH_KEY_PATH = os.environ["DEPLOY_SMOKE_KEY_PATH"]
-    settings.HARNESS_SELF_REPO_IDENTIFIERS = ["git@example.invalid:jarvis/self.git"]
+    settings.HARNESS_SELF_REPO_IDENTIFIERS = ["git@example.invalid:friday/self.git"]
     settings.DEPLOY_HEALTH_CHECKS_PER_WINDOW = 4
     settings.DEPLOY_SSH_DEPLOY_TIMEOUT_SECONDS = 120
 
@@ -104,7 +104,7 @@ def test_deploy_rollback_and_refusal_against_a_real_sshd(
     )
     assert _live_version() == "A"
 
-    # 1. First status: Jarvis learns the live SHA over the real ssh client.
+    # 1. First status: Friday learns the live SHA over the real ssh client.
     assert execution.refresh_target_status(str(target.id)) is None
     target.refresh_from_db()
     assert target.current_sha == sha_a

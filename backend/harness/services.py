@@ -439,7 +439,7 @@ def create_harness_implementation_job(
     fail-at-creation shape):
 
     1. Self-modification hard-block (ADR-004, brief §boundary) -- a repo
-       whose remote canonically matches this Jarvis installation's own is
+       whose remote canonically matches this Friday installation's own is
        refused outright for implementation, even though it's fine for
        Phase 2 read-only discovery.
     2. `test_command` must be configured -- brief §boundary: "a repo with
@@ -464,7 +464,7 @@ def create_harness_implementation_job(
     # Phase 3 branch 5 (2026-09-27 audit): an ADR-004 hard rule must not
     # relax because a setting was never filled in. With no self-repo
     # identifiers configured the guard cannot tell whether this repo IS
-    # Jarvis, so implementation (write) jobs are refused outright until
+    # Friday, so implementation (write) jobs are refused outright until
     # the owner sets HARNESS_SELF_REPO_IDENTIFIERS. Read-only discovery is
     # unaffected.
     if not settings.HARNESS_SELF_REPO_IDENTIFIERS:
@@ -477,7 +477,7 @@ def create_harness_implementation_job(
         locked_repo.git_url, self_repo_identifiers=settings.HARNESS_SELF_REPO_IDENTIFIERS
     ):
         raise HarnessInvalidTransition(
-            "This repo resolves to Jarvis's own installation; implementation/review "
+            "This repo resolves to Friday's own installation; implementation/review "
             "runs are refused (ADR-004 self-modification guard)."
         )
     # Codex code-review P2, branch 2 round 4: a bare truthiness check

@@ -21,9 +21,9 @@ from core.context import request_id_var
 from memory.jobs import create_extraction_job
 from memory.services import privatize_conversation_memories
 
-_ROUTER_INTENT_PROMPT_NAME = "jarvis_router_intent"
-_TASK_DRAFT_PROMPT_NAME = "jarvis_router_task_draft"
-_CONNECTOR_ARGS_PROMPT_NAME = "jarvis_router_connector_args"
+_ROUTER_INTENT_PROMPT_NAME = "friday_router_intent"
+_TASK_DRAFT_PROMPT_NAME = "friday_router_task_draft"
+_CONNECTOR_ARGS_PROMPT_NAME = "friday_router_connector_args"
 
 # Router-local tool vocabulary (MVP 6 §4) -- NOT on `ToolSpec` itself:
 # `tools/registry.py`'s own module docstring already rules out adding a
@@ -57,7 +57,7 @@ def _tool_vocabulary_line():
 
 def _read_vocabulary_line(read_specs):
     """The connector reads available this turn (Phase 5 branch 4, brief D4):
-    Jarvis-authored names and descriptions only -- never a server's own
+    Friday-authored names and descriptions only -- never a server's own
     tool description. Empty when nothing is available, so the router never
     hears of `connector_read` for a workspace/channel without a read."""
     if not read_specs:
@@ -232,9 +232,9 @@ def classify_intent(
     model output) both degrade to a bare `chat` result with an empty
     `intent_payload` — a router that can't classify must never block or
     corrupt the underlying conversation. A missing/misconfigured
-    `jarvis_router_intent` prompt template is a distinct, deploy-time
+    `friday_router_intent` prompt template is a distinct, deploy-time
     misconfiguration (mirrors `assistant.context.build_context`'s treatment
-    of `jarvis_system`) and is NOT caught here — it always raises
+    of `friday_system`) and is NOT caught here — it always raises
     `ImproperlyConfigured`.
 
     When classification decides `task_draft`, this also runs the second
@@ -390,7 +390,7 @@ def parse_connector_args(raw_text):
 
 def _describe_arguments(serializer_class):
     """The argument schema shown to `router.connector_args`: field names,
-    types and requiredness from the Jarvis-side serializer (never a server
+    types and requiredness from the Friday-side serializer (never a server
     `inputSchema` or description)."""
     lines = []
     for name, field_obj in serializer_class().fields.items():

@@ -45,9 +45,9 @@ describe("POST /api/auth/logout", () => {
 
   it("blacklists the refresh token at the backend and clears all auth cookies", async () => {
     const cookieStore = createCookieStore({
-      jarvis_access: "a",
-      jarvis_refresh: "r",
-      jarvis_session: "1",
+      friday_access: "a",
+      friday_refresh: "r",
+      friday_session: "1",
     });
     cookiesMock.mockResolvedValue(cookieStore);
     const fetchMock = vi.fn(async () => new Response(null, { status: 204 }));
@@ -66,12 +66,12 @@ describe("POST /api/auth/logout", () => {
     // must not be sent (it would make the backend reject the call).
     expect((init.headers as Record<string, string>).Authorization).toBeUndefined();
     expect(cookieStore.deleted).toEqual(
-      expect.arrayContaining(["jarvis_access", "jarvis_refresh", "jarvis_session"]),
+      expect.arrayContaining(["friday_access", "friday_refresh", "friday_session"]),
     );
   });
 
   it("still clears the cookies when the backend rejects the token", async () => {
-    const cookieStore = createCookieStore({ jarvis_refresh: "already-blacklisted" });
+    const cookieStore = createCookieStore({ friday_refresh: "already-blacklisted" });
     cookiesMock.mockResolvedValue(cookieStore);
     vi.stubGlobal("fetch", vi.fn(async () => new Response("{}", { status: 401 })));
 
@@ -79,11 +79,11 @@ describe("POST /api/auth/logout", () => {
     const response = await POST(makeRequest());
 
     expect(response.status).toBe(200);
-    expect(cookieStore.deleted).toEqual(expect.arrayContaining(["jarvis_refresh"]));
+    expect(cookieStore.deleted).toEqual(expect.arrayContaining(["friday_refresh"]));
   });
 
   it("still clears the cookies when the backend is unreachable", async () => {
-    const cookieStore = createCookieStore({ jarvis_refresh: "r" });
+    const cookieStore = createCookieStore({ friday_refresh: "r" });
     cookiesMock.mockResolvedValue(cookieStore);
     vi.stubGlobal(
       "fetch",
@@ -96,11 +96,11 @@ describe("POST /api/auth/logout", () => {
     const response = await POST(makeRequest());
 
     expect(response.status).toBe(200);
-    expect(cookieStore.deleted).toEqual(expect.arrayContaining(["jarvis_refresh"]));
+    expect(cookieStore.deleted).toEqual(expect.arrayContaining(["friday_refresh"]));
   });
 
   it("skips the backend call when there is no refresh cookie", async () => {
-    const cookieStore = createCookieStore({ jarvis_session: "1" });
+    const cookieStore = createCookieStore({ friday_session: "1" });
     cookiesMock.mockResolvedValue(cookieStore);
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);

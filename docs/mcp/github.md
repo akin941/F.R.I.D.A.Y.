@@ -2,7 +2,7 @@
 
 ## Summary
 - **Manifest:** `backend/connectors/manifests/github.py`, version 1
-- **Kind:** `mcp` — stdio server behind the Jarvis stdio↔HTTP bridge, in its
+- **Kind:** `mcp` — stdio server behind the Friday stdio↔HTTP bridge, in its
   own sidecar (brief D1/D7, Step-0 spike)
 - **Status:** active
 - **Data class:** `firm`; a call naming a `sensitive` `HarnessRepo` is
@@ -22,13 +22,13 @@
   (`backend/connectors/docker/Dockerfile.github`); bumping the digest is a
   reviewed commit that re-records every schema pin below.
 - The server's HTTP mode takes the PAT from each request's `Authorization`
-  header — Jarvis would hold the token, which D1 forbids — so it runs in
+  header — Friday would hold the token, which D1 forbids — so it runs in
   **stdio mode**; GitHub's hosted endpoint is not used (its tool limits are
   client-sent headers).
 - MCP protocol version: recorded per binding in `last_health` on each pin check.
 
 ## Tools
-| Jarvis name | Server tool | Kind | Schema pin (sha256) | Scope check | Gate / user-invocable | work_log |
+| Friday name | Server tool | Kind | Schema pin (sha256) | Scope check | Gate / user-invocable | work_log |
 |---|---|---|---|---|---|---|
 | `github_pr_status` | `pull_request_read` (`method` ∈ `get`, `get_status`, `get_check_runs`) | read | `3ae9d2e56991de3df6adef7492f2c64088f871df10e3a3a2ef741c42e65974d5` | owner/repo → workspace `HarnessRepo` | — | — |
 | `github_ci_status` | `actions_list` (`method` = `list_workflow_runs`) | read | `ad9af0e02784afe169f4b9f507dd365a4a72a1238f2e7123396ec7d47a15b441` | same | — | — |
@@ -48,7 +48,7 @@ update `SERVER_SCHEMAS` from the sidecar's `tools/list`.
 `maintainer_can_modify` always `false` (the serializer refuses anything
 else; both shown in the dialog as fixed rows). The payload snapshots repo,
 `head = branch_name`, `base = repo_default_branch`, an owner-editable title,
-a Jarvis-authored body (goal, the diff summary **labelled model-written**,
+a Friday-authored body (goal, the diff summary **labelled model-written**,
 test result, review verdict) and, as `context` (never sent),
 `head_sha = produced_commit_sha` plus the opaque
 `origin_ref = harness_implementation_job:<id>`. After the claim and before
@@ -63,10 +63,10 @@ issue and comment mutations, `run_workflow`/`rerun_*`/`cancel_*` workflow
 triggers — every mutation except opening a PR (R6: the PAT could merge via
 REST; the tool is unreachable). `actions_get`, `list_branches`,
 `list_commits`, `list_pull_requests` (named in the Step-0 spike) are not
-listed in v1 — no Jarvis surface needs them yet; adding one is a new
+listed in v1 — no Friday surface needs them yet; adding one is a new
 `ToolPolicy`, pin and twin row. Diffs, files and comments (`pull_request_read`
 methods `get_diff`, `get_files`, `get_*comments`, `get_reviews`) are refused
-by the argument serializer: attacker-authored text with no Jarvis use.
+by the argument serializer: attacker-authored text with no Friday use.
 
 Server-side ceiling: the sidecar starts
 `github-mcp-server stdio --tools=pull_request_read,actions_list,get_commit,create_pull_request`
@@ -77,7 +77,7 @@ the manifest (tested).
 
 ## Credentials
 - Sidecar only: `GITHUB_PERSONAL_ACCESS_TOKEN` (from `deploy/docker/.env`,
-  passed to the child via `BRIDGE_ENV_PASSTHROUGH`). Jarvis-side: only the
+  passed to the child via `BRIDGE_ENV_PASSTHROUGH`). Friday-side: only the
   URL `GITHUB_MCP_URL` (e.g. `http://github-mcp:8080/mcp`).
 - Fine-grained PAT, **only** the `HarnessRepo`-registered repositories:
   `contents: read`, `pull_requests: write`, `actions: read`,
@@ -94,7 +94,7 @@ the manifest (tested).
 - stdio bridge: `BRIDGE_ALLOWED_TOOLS` as above; `BRIDGE_ENV_PASSTHROUGH=GITHUB_PERSONAL_ACCESS_TOKEN`.
 
 ## Outbound data
-- Jarvis sends only the validated arguments: owner/repo (always a
+- Friday sends only the validated arguments: owner/repo (always a
   registered repo), PR number, branch name or SHA, and for the one write
   the PR title/body (the job's goal, model-written diff summary, test and
   review lines). Goes to GitHub under the owner's PAT.
@@ -105,7 +105,7 @@ the manifest (tested).
 - PR titles, commit messages, workflow names are attacker-reachable text
   (anyone who can push or open a PR). Chat reads are fenced
   (`<connector_result source="github">`), stripped and bounded (D4).
-  Jarvis-internal reads (harness PR panel, deploy snapshot) parse JSON into
+  Friday-internal reads (harness PR panel, deploy snapshot) parse JSON into
   bounded fields and never reach a prompt; the deploy snapshot's commit
   title is shown labelled as repo text.
 

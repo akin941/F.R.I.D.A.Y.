@@ -61,8 +61,8 @@ def fake_provider():
 
 @pytest.fixture
 def system_prompt():
-    template = PromptTemplate.objects.create(name="jarvis_system", purpose="chat")
-    version = PromptVersion.objects.create(template=template, version=1, content="You are Jarvis.")
+    template = PromptTemplate.objects.create(name="friday_system", purpose="chat")
+    version = PromptVersion.objects.create(template=template, version=1, content="You are Friday.")
     template.active_version = version
     template.save(update_fields=["active_version"])
     return version
@@ -70,7 +70,7 @@ def system_prompt():
 
 @pytest.fixture
 def router_intent_prompt():
-    template = PromptTemplate.objects.create(name="jarvis_router_intent", purpose="router.intent")
+    template = PromptTemplate.objects.create(name="friday_router_intent", purpose="router.intent")
     version = PromptVersion.objects.create(
         template=template, version=1, content="Classify the message."
     )
@@ -82,7 +82,7 @@ def router_intent_prompt():
 @pytest.fixture
 def task_draft_prompt():
     template = PromptTemplate.objects.create(
-        name="jarvis_router_task_draft", purpose="router.task_draft"
+        name="friday_router_task_draft", purpose="router.task_draft"
     )
     version = PromptVersion.objects.create(
         template=template, version=1, content="Extract the task."
@@ -775,7 +775,7 @@ class TestClassifyIntent:
             classify_intent(conversation, actor=alice, content="hi")
 
     def test_missing_active_version_raises_improperly_configured(self, conversation, alice):
-        PromptTemplate.objects.create(name="jarvis_router_intent", purpose="router.intent")
+        PromptTemplate.objects.create(name="friday_router_intent", purpose="router.intent")
         with pytest.raises(ImproperlyConfigured):
             classify_intent(conversation, actor=alice, content="hi")
 

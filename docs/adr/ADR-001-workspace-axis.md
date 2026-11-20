@@ -4,7 +4,7 @@
 Accepted
 
 ## Context
-Jarvis OS is personal-first but must host company workspaces and,
+Friday OS is personal-first but must host company workspaces and,
 later, other tenants on the same kernel. The original company-centric draft used
 `Company` as the data axis, which made the personal product a second-class citizen
 and multi-tenancy expensive to retrofit.

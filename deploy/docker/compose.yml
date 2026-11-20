@@ -1,4 +1,4 @@
-# Jarvis OS — development stack. Not production-ready by design (MVP 0);
+# Friday OS — development stack. Not production-ready by design (MVP 0);
 # `compose.daily.yml` is the daily-driver override (gunicorn, prod settings,
 # `next start`).
 # Host ports are shifted (+1) to avoid clashing with other local stacks that
@@ -10,20 +10,23 @@
 # REDIS_PASSWORD come from the gitignored `deploy/docker/.env` (Compose reads
 # it automatically; `make secrets` -- also run by `make up` -- generates any
 # missing value; `deploy/docker/.env.example` lists every supported key).
-name: jarvis-os
+# Project renamed from `jarvis-os` on 2026-11-20 (Jarvis -> Friday). The
+# Postgres data volume keeps its pre-rename name (pinned below) so an
+# existing install keeps its data; see docs/runbooks/rename-jarvis-to-friday.md.
+name: friday
 
 # Connector sidecars (Phase 5, ADR-010 decision 3, brief D1). Every MCP
-# server Jarvis talks to runs as its own service built on this anchor, in
+# server Friday talks to runs as its own service built on this anchor, in
 # the `connectors` profile (`docker compose --profile connectors up`):
 # digest-pinned image, read-only root filesystem, every capability dropped,
 # no new privileges, NO published ports, reachable only over the internal
 # `connectors` network -- and holding only its own credential, from
-# `deploy/docker/.env` (never Jarvis's env, never the database). A sidecar
+# `deploy/docker/.env` (never Friday's env, never the database). A sidecar
 # that needs the internet (e.g. GitHub) also joins `connectors-egress`. A
 # stdio-only server runs behind the stdio<->HTTP bridge
 # (backend/connectors/docker/stdio_bridge.py, image
 # backend/connectors/docker/Dockerfile.bridge) inside its own sidecar --
-# never in web or worker. Jarvis learns a sidecar's URL from the env var
+# never in web or worker. Friday learns a sidecar's URL from the env var
 # its manifest names (e.g. `GITHUB_MCP_URL: http://github-mcp:8080/mcp`).
 x-connector-sidecar: &connector-sidecar
   profiles: ["connectors"]
@@ -49,6 +52,8 @@ services:
       DJANGO_SECRET_KEY: "${DJANGO_SECRET_KEY:?run `make secrets` (writes deploy/docker/.env)}"
       DJANGO_DEBUG: "true"
       DJANGO_ALLOWED_HOSTS: localhost,127.0.0.1
+      # Database user/name stay `jarvis`: an existing data volume was
+      # initialized with them (POSTGRES_USER/DB only apply to an empty volume).
       DATABASE_URL: "postgres://jarvis:${POSTGRES_PASSWORD:?run `make secrets`}@postgres:5432/jarvis"
       REDIS_URL: "redis://:${REDIS_PASSWORD:?run `make secrets`}@redis:6379/0"
       # Dev stack uses the deterministic fake LLM provider by default; override
@@ -82,7 +87,7 @@ services:
       # on the host (`npm run dev`) without a trusted proxy, so PINs are
       # accepted with LAN gating off (dev settings default). The shared BFF
       # key is only used by the daily stack's frontend container.
-      JARVIS_BFF_SHARED_SECRET: "${JARVIS_BFF_SHARED_SECRET:-}"
+      FRIDAY_BFF_SHARED_SECRET: "${FRIDAY_BFF_SHARED_SECRET:-}"
       # Real values from deploy/docker/.env, empty by default (the webhook
       # then rejects everything, fail closed). A `make test-e2e` run against
       # this stack needs the e2e fixture values instead -- they live in the
@@ -159,7 +164,7 @@ services:
   # official github-mcp-server v1.12.2 (digest-pinned in the Dockerfile)
   # in STDIO mode behind the stdio<->HTTP bridge, so the PAT stays in this
   # container: its HTTP mode would take the token from each request's
-  # Authorization header, i.e. Jarvis would hold it. `--tools=` registers
+  # Authorization header, i.e. Friday would hold it. `--tools=` registers
   # only the four pinned tools; BRIDGE_ALLOWED_TOOLS repeats the ceiling.
   # Needs the internet (api.github.com) -> also joins `connectors-egress`.
   github-mcp:
@@ -178,6 +183,8 @@ services:
   postgres:
     image: pgvector/pgvector:pg16
     environment:
+      # Legacy names kept on purpose (pre-rename volumes were initialized
+      # with them; changing them would lock an existing install out).
       POSTGRES_USER: jarvis
       POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?run `make secrets`}"
       POSTGRES_DB: jarvis
@@ -210,10 +217,13 @@ services:
 
 volumes:
   postgres-data:
+    # Pinned to the pre-rename name (project `jarvis-os`) so the owner's
+    # existing database survives the Jarvis -> Friday rename (2026-11-20).
+    name: jarvis-os_postgres-data
 
 networks:
   default: {}
-  # No route out: sidecars and the Jarvis services that call them only.
+  # No route out: sidecars and the Friday services that call them only.
   connectors:
     internal: true
   # For sidecars whose server must reach its vendor API; never joined by

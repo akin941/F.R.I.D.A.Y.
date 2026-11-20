@@ -2,13 +2,13 @@
   "id": "chatcmpl-<id>",
   "object": "chat.completion",
   "created": 0,
-  "model": "jarvis",
+  "model": "friday",
   "choices": [
     {
       "index": 0,
       "message": {
         "role": "assistant",
-        "content": "Merhaba, ben Jarvis. MVP 1 gateway üzerinden çalışıyorum."
+        "content": "Merhaba, ben Friday. MVP 1 gateway üzerinden çalışıyorum."
       },
       "finish_reason": "stop",
       "logprobs": null

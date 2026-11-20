@@ -158,7 +158,7 @@ def test_flush_expired_tokens_task_removes_expired_outstanding_tokens(owner):
     ids=["too-short", "common", "numeric", "similar-to-email"],
 )
 def test_bootstrap_owner_rejects_a_weak_password(monkeypatch, password):
-    monkeypatch.setenv("JARVIS_OWNER_PASSWORD", password)
+    monkeypatch.setenv("FRIDAY_OWNER_PASSWORD", password)
     with pytest.raises(CommandError, match="Password rejected"):
         call_command("bootstrap_owner", "--email", "owner@test.dev", "--name", "Owner")
     assert not User.objects.exists()

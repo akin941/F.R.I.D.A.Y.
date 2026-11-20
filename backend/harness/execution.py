@@ -39,7 +39,7 @@ from memory.services import DuplicateMemory, record_work_log
 
 logger = logging.getLogger(__name__)
 
-_HARNESS_BRIEFING_PROMPT_NAME = "jarvis_harness_briefing"
+_HARNESS_BRIEFING_PROMPT_NAME = "friday_harness_briefing"
 # Bounded at write time (brief §3, mirrors the firm-dossier block's
 # bounded-line discipline, Phase 1 branch 3) -- a CLI transcript is
 # untrusted, potentially-unbounded text; storing it with no cap is a real
@@ -174,7 +174,7 @@ def _harness_briefing_prompt_version():
     """Mirrors `agents.execution._agent_read_step_prompt_version`'s
     identical shape exactly -- a missing/misconfigured prompt template is
     a hard failure, not a silent degrade, since routing summarization
-    through Jarvis's own gateway call (rather than the CLI's own
+    through Friday's own gateway call (rather than the CLI's own
     self-summary) is the actual R2/prompt-injection mitigation this
     branch exists to provide (brief §3), not an optional nicety."""
     try:
@@ -261,7 +261,7 @@ def _produce_briefing_summary(job, fenced_transcript):
     an explicit, in-process `InferenceGateway.complete()` call over the
     fenced transcript -- never taken as-is from the CLI agent's own
     self-summary, since the CLI's own opinion of "what's fact vs. what's
-    recommendation" is not a boundary Jarvis controls or can verify.
+    recommendation" is not a boundary Friday controls or can verify.
     Returns `(summary, findings)`. Raises `GatewayError`/
     `ImproperlyConfigured` on failure -- the caller decides what a failed
     summarization attempt means for the job's own briefing (Codex

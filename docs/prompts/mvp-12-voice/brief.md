@@ -1,11 +1,11 @@
 # MVP 12 — Voice Assistant (foundation + vision)
 
 > **Re-sequenced (2026-07-17, ADR-008):** the remaining branches of this
-> brief now execute as **Phase 6** of the Jarvis 2.0 roadmap
+> brief now execute as **Phase 6** of the Friday 2.0 roadmap
 > (MASTER_PLAN §AA) — after memory v2, the agent harness, the UI renewal
 > and deploy/MCP. Everything shipped so far stands. Phase 6 adds two fixed
 > design constraints on top of this brief: a **local wake word**
-> ("Hey Jarvis", openWakeWord/Porcupine-class, audio never leaves the
+> ("Hey Friday", openWakeWord/Porcupine-class, audio never leaves the
 > device) for always-listening operation, and the animated visual-identity
 > layer coming only **after** the voice pipeline works.
 >
@@ -19,7 +19,7 @@
 > local** (Whisper-class STT + Piper-class TTS on the user's own machine),
 > and raw audio uses a **bounded temp-file, deleted on completion** — never
 > persisted (see §O). Progress against the branch plan below: branch 1
-> (Ollama provider + Jarvis orb) and the Gateway STT/TTS capability
+> (Ollama provider + Friday orb) and the Gateway STT/TTS capability
 > foundation (part of branch 2's backend spine) have shipped; real mic
 > capture, the local STT/TTS adapters, and audio playback remain. The
 > parts that need real microphone/model hardware are built and verified on
@@ -28,12 +28,12 @@
 
 ## Goal and user value
 
-Every reply Jarvis has ever given has been typed and read. The owner wants a
+Every reply Friday has ever given has been typed and read. The owner wants a
 real spoken assistant — say something, hear it think, hear it answer — running
 against a **locally-hosted model on their own hardware** (Ollama on a
 MacBook Pro M5 today, a Mac Pro later) rather than a cloud API for the
 "thinking" step, for both cost and privacy reasons consistent with why
-personal-Jarvis and external workplace installations already keep separate infra
+personal-Friday and external workplace installations already keep separate infra
 (ADR-006). Alongside the audio itself, the owner wants a visible on-screen
 presence — an animated indicator that reacts to the assistant listening,
 thinking, and speaking — because a voice assistant with no visual feedback
@@ -87,7 +87,7 @@ while it's silently working feels broken.
 
 ## Scope
 
-### 1. Local LLM foundation + Jarvis orb UI (ships with this brief)
+### 1. Local LLM foundation + Friday orb UI (ships with this brief)
 
 - `backend/ai_core/management/commands/seed_ai_defaults.py`: an
   `ollama-local` `ModelProvider` (`openai_compatible`, gated on
@@ -102,7 +102,7 @@ while it's silently working feels broken.
   `OLLAMA_MODEL_ID`, `OLLAMA_BASE_URL`, mirroring the NVIDIA block's
   placement and comment style. Empty by default — `make test-e2e`/CI
   unaffected, identical guarantee to every other opt-in provider here.
-- `frontend/src/components/voice/JarvisOrb.tsx`: dependency-free Canvas-2D
+- `frontend/src/components/voice/FridayOrb.tsx`: dependency-free Canvas-2D
   component (no framer-motion/three.js — none exist in this frontend today
   and none are added), `state: "idle" | "thinking" | "speaking"`, styled off
   the existing OKLCH tokens in `globals.css` (`--sidebar-primary` as the one
@@ -163,7 +163,7 @@ indicator, cancel-mid-record, error recovery when STT/TTS/Gateway fails).
 
 ## Out of scope (explicit)
 
-- ~~Wake-word detection ("Hey Jarvis") — push-to-talk only, for any version of
+- ~~Wake-word detection ("Hey Friday") — push-to-talk only, for any version of
   this MVP. A wake-word pipeline is continuous audio processing, a much
   larger privacy/always-listening decision the owner hasn't made.~~
   **Superseded (2026-09-27 note):** ADR-008 decision 5 made the decision — a
@@ -184,7 +184,7 @@ indicator, cancel-mid-record, error recovery when STT/TTS/Gateway fails).
 
 | # | Branch | Contents | Status |
 |---|--------|----------|--------|
-| 1 | `feat/mvp12-ollama-orb-foundation` | §1: `ollama-local` provider, env/compose wiring, `JarvisOrb` + `VoiceView` + nav entry, wired to the existing real chat SSE endpoint. | **done** (on the working branch) |
+| 1 | `feat/mvp12-ollama-orb-foundation` | §1: `ollama-local` provider, env/compose wiring, `FridayOrb` + `VoiceView` + nav entry, wired to the existing real chat SSE endpoint. | **done** (on the working branch) |
 | 2 | `feat/mvp12-gateway-stt-tts` | §2: `Capability.STT/.TTS`, adapter contract + result dataclasses, `InferenceGateway.transcribe()/synthesize()`, `FakeAdapter` fixtures — the single-door spine, no real model. | **done** (backend, sandbox-verified) |
 | 2b | `feat/mvp12-stt-capture` (Mac) | Mic capture, `voice` app, bounded temp-file, lease-fenced transcription job against a local Whisper provider. | needs mic + local model |
 | 3 | `feat/mvp12-tts-playback` (Mac) | Local Piper provider adapter, audio playback, real-amplitude orb state. | needs local model |
@@ -195,7 +195,7 @@ indicator, cancel-mid-record, error recovery when STT/TTS/Gateway fails).
 - Branch 1: `seed_ai_defaults` idempotency (re-run creates nothing new) with
   `OLLAMA_API_KEY` set vs. unset (provider absent when unset, matching
   every other opt-in provider's existing test coverage pattern in
-  `ai_core/tests/`); frontend component test for `JarvisOrb`'s state prop
+  `ai_core/tests/`); frontend component test for `FridayOrb`'s state prop
   driving the correct visual class/animation branch; `VoiceView` reuses
   `ChatView`'s already-tested SSE parsing, so no duplicate SSE-parsing test
   is needed — only the state-machine mapping (chunk→speaking, done→idle,

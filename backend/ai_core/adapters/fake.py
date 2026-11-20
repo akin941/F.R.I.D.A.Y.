@@ -13,7 +13,7 @@ from ai_core.adapters.base import (
     TranscribeAdapterResult,
 )
 
-FAKE_RESPONSE = "Merhaba, ben Jarvis. MVP 1 gateway üzerinden çalışıyorum."
+FAKE_RESPONSE = "Merhaba, ben Friday. MVP 1 gateway üzerinden çalışıyorum."
 
 # Deterministic STT/TTS fixtures (MVP 12). No audio decoding/encoding —
 # `transcribe` returns a fixed transcript regardless of the input bytes, and

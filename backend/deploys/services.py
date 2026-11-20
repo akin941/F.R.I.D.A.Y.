@@ -91,7 +91,7 @@ def _require_web(channel, action):
 
 def self_repo_error(repo_git_url):
     """The ADR-004 self-modification guard, applied to deploys (brief D10
-    out-of-scope: "deploying Jarvis itself"). Fails closed with no
+    out-of-scope: "deploying Friday itself"). Fails closed with no
     identifiers configured, exactly like harness implementation jobs.
     Returns an error code or None."""
     if not settings.HARNESS_SELF_REPO_IDENTIFIERS:
@@ -107,7 +107,7 @@ _SELF_REPO_MESSAGES = {
         "installation's own remote(s) are set (ADR-004 self-modification guard)."
     ),
     DeployRun.ErrorCode.SELF_REPO: (
-        "This repo resolves to Jarvis's own installation; deploying Jarvis itself is refused."
+        "This repo resolves to Friday's own installation; deploying Friday itself is refused."
     ),
 }
 

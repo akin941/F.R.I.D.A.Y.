@@ -8,7 +8,7 @@ export default function DevicesPage() {
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">Cihazlar</h1>
         <p className="text-sm text-muted-foreground">
-          Jarvis&apos;e yalnızca eşleştirilmiş cihazlar erişir. İptal edilen bir cihaz bir sonraki
+          Friday&apos;ye yalnızca eşleştirilmiş cihazlar erişir. İptal edilen bir cihaz bir sonraki
           isteğinde oturumunu kaybeder.
         </p>
       </div>

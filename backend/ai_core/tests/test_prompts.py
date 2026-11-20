@@ -9,10 +9,10 @@ pytestmark = pytest.mark.django_db
 
 def test_seed_creates_prompt_and_fake_provider():
     call_command("seed_ai_defaults")
-    template = PromptTemplate.objects.get(name="jarvis_system")
+    template = PromptTemplate.objects.get(name="friday_system")
     assert template.active_version is not None
     assert template.active_version.version == 1
-    assert "Jarvis OS" in template.active_version.content
+    assert "Friday OS" in template.active_version.content
     assert ModelProvider.objects.filter(
         name="fake-local", provider_type=ModelProvider.ProviderType.FAKE
     ).exists()
@@ -28,7 +28,7 @@ def test_seed_creates_fake_embedding_provider():
 
 def test_seed_creates_memory_extraction_prompt():
     call_command("seed_ai_defaults")
-    template = PromptTemplate.objects.get(name="jarvis_memory_extraction")
+    template = PromptTemplate.objects.get(name="friday_memory_extraction")
     assert template.purpose == "memory.extraction"
     assert template.active_version is not None
     assert template.active_version.version == 1
@@ -37,7 +37,7 @@ def test_seed_creates_memory_extraction_prompt():
 
 def test_seed_creates_router_intent_prompt():
     call_command("seed_ai_defaults")
-    template = PromptTemplate.objects.get(name="jarvis_router_intent")
+    template = PromptTemplate.objects.get(name="friday_router_intent")
     assert template.purpose == "router.intent"
     assert template.active_version is not None
     assert template.active_version.version == 1
@@ -48,7 +48,7 @@ def test_seed_creates_router_connector_args_prompt():
     """Phase 5 branch 4 (brief D4): the argument-extraction prompt."""
     call_command("seed_ai_defaults")
     call_command("seed_ai_defaults")
-    template = PromptTemplate.objects.get(name="jarvis_router_connector_args")
+    template = PromptTemplate.objects.get(name="friday_router_connector_args")
     assert template.purpose == "router.connector_args"
     assert template.active_version.version == 1
     assert "JSON" in template.active_version.content
@@ -57,7 +57,7 @@ def test_seed_creates_router_connector_args_prompt():
 
 def test_seed_creates_agent_plan_prompt():
     call_command("seed_ai_defaults")
-    template = PromptTemplate.objects.get(name="jarvis_agent_plan")
+    template = PromptTemplate.objects.get(name="friday_agent_plan")
     assert template.purpose == "agent.plan"
     assert template.active_version is not None
     assert template.active_version.version == 1
@@ -66,7 +66,7 @@ def test_seed_creates_agent_plan_prompt():
 
 def test_seed_creates_agent_read_step_prompt():
     call_command("seed_ai_defaults")
-    template = PromptTemplate.objects.get(name="jarvis_agent_read_step")
+    template = PromptTemplate.objects.get(name="friday_agent_read_step")
     assert template.purpose == "agent.read_step"
     assert template.active_version is not None
     assert template.active_version.version == 1
@@ -77,29 +77,29 @@ def test_seed_creates_harness_review_summary_prompt():
     fresh deployment has no review prompt row at all, and every
     otherwise-successful review fails closed as `review_unavailable`.
     Phase 5 D11: the summary has its own purpose and template; the Phase 3
-    `jarvis_harness_review` row is no longer seeded."""
+    `friday_harness_review` row is no longer seeded."""
     call_command("seed_ai_defaults")
-    template = PromptTemplate.objects.get(name="jarvis_harness_review_summary")
+    template = PromptTemplate.objects.get(name="friday_harness_review_summary")
     assert template.purpose == "harness.review_summary"
     assert template.active_version is not None
     assert template.active_version.version == 1
     assert '"verdict"' in template.active_version.content
-    assert not PromptTemplate.objects.filter(name="jarvis_harness_review").exists()
+    assert not PromptTemplate.objects.filter(name="friday_harness_review").exists()
 
 
 def test_seed_is_idempotent():
     call_command("seed_ai_defaults")
     call_command("seed_ai_defaults")
-    assert PromptTemplate.objects.filter(name="jarvis_system").count() == 1
-    assert PromptVersion.objects.filter(template__name="jarvis_system").count() == 1
-    assert PromptTemplate.objects.filter(name="jarvis_memory_extraction").count() == 1
-    assert PromptVersion.objects.filter(template__name="jarvis_memory_extraction").count() == 1
-    assert PromptTemplate.objects.filter(name="jarvis_router_intent").count() == 1
-    assert PromptVersion.objects.filter(template__name="jarvis_router_intent").count() == 1
-    assert PromptTemplate.objects.filter(name="jarvis_agent_plan").count() == 1
-    assert PromptVersion.objects.filter(template__name="jarvis_agent_plan").count() == 1
-    assert PromptTemplate.objects.filter(name="jarvis_agent_read_step").count() == 1
-    assert PromptVersion.objects.filter(template__name="jarvis_agent_read_step").count() == 1
+    assert PromptTemplate.objects.filter(name="friday_system").count() == 1
+    assert PromptVersion.objects.filter(template__name="friday_system").count() == 1
+    assert PromptTemplate.objects.filter(name="friday_memory_extraction").count() == 1
+    assert PromptVersion.objects.filter(template__name="friday_memory_extraction").count() == 1
+    assert PromptTemplate.objects.filter(name="friday_router_intent").count() == 1
+    assert PromptVersion.objects.filter(template__name="friday_router_intent").count() == 1
+    assert PromptTemplate.objects.filter(name="friday_agent_plan").count() == 1
+    assert PromptVersion.objects.filter(template__name="friday_agent_plan").count() == 1
+    assert PromptTemplate.objects.filter(name="friday_agent_read_step").count() == 1
+    assert PromptVersion.objects.filter(template__name="friday_agent_read_step").count() == 1
     assert ModelProvider.objects.filter(name="fake-local").count() == 1
     assert ModelProvider.objects.filter(name="fake-embedding-local").count() == 1
 
@@ -167,6 +167,6 @@ def test_seed_creates_ollama_embedding_provider_with_overrides(monkeypatch):
 
 def test_prompt_version_unique_constraint():
     call_command("seed_ai_defaults")
-    template = PromptTemplate.objects.get(name="jarvis_system")
+    template = PromptTemplate.objects.get(name="friday_system")
     with pytest.raises(IntegrityError):
         PromptVersion.objects.create(template=template, version=1, content="dup")

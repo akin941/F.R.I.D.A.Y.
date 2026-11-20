@@ -150,7 +150,7 @@ function PushSummary({ request }: { request: ApiApprovalRequest }) {
               {summary.review.summary ? (
                 <>
                   <span className="block text-xs text-muted-foreground">
-                    Jarvis&apos;in kendi özeti (model üretimi).
+                    Friday&apos;nin kendi özeti (model üretimi).
                   </span>
                   <span className="block whitespace-pre-wrap">{summary.review.summary}</span>
                 </>

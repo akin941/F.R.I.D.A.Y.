@@ -107,7 +107,7 @@ class ToolSpec:
     Raise `ToolValidationError` to refuse. Optional.
 
     `records_work_log` (Phase 5 branch 1, brief D13): whether a terminal
-    execution of this tool leaves a Jarvis-authored `work_log` memory
+    execution of this tool leaves a Friday-authored `work_log` memory
     (`tools.work_log.record_tool_outcome`, ADR-008 decision 4). Default
     True; a tool whose outcomes are audit-worthy but not memory-worthy
     (e.g. a Home Assistant light toggle, VISION R5) sets False. Audit rows
@@ -219,7 +219,7 @@ class ReadResult:
 class ReadToolSpec:
     """An ungated connector read the chat router may pick (brief D4).
 
-    - `name`/`description`: Jarvis-authored, never the server's own text
+    - `name`/`description`: Friday-authored, never the server's own text
       (server descriptions never reach an LLM prompt, brief D3).
     - `argument_serializer`: a strict DRF serializer class validating the
       router-extracted arguments; invalid -> a plain refusal, no read.

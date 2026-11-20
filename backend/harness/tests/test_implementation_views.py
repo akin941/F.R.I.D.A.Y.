@@ -45,7 +45,7 @@ def outsider():
 def repo(workspace):
     return HarnessRepo.objects.create(
         workspace=workspace,
-        name="jarvis-os",
+        name="friday",
         git_url="git@example.com:x/y.git",
         enabled=True,
         test_command="pytest -q",
@@ -197,7 +197,7 @@ class TestShapes:
         assert body["status"] == "pending_gate_a"
         assert body["agent"] == "claude_code"
         assert body["reviewer_agent"] == "codex_cli"
-        assert body["repo_name"] == "jarvis-os"
+        assert body["repo_name"] == "friday"
         assert body["gate_a"]["status"] == "pending"
         assert set(body["gate_a"]) == {"id", "status", "decided_at"}
         assert body["gate_b"] is None
@@ -273,7 +273,7 @@ class TestApprovalsDisplaySummary:
         summary = row["display_summary"]
         assert summary["kind"] == "harness_implement"
         assert summary["goal"] == "add a health endpoint"
-        assert summary["repo_name"] == "jarvis-os"
+        assert summary["repo_name"] == "friday"
         assert summary["branch_name"] == job.branch_name
         assert summary["reviewer_agent"] == "codex_cli"
 

@@ -3,9 +3,9 @@
 Django's `REMOTE_ADDR` is always the BFF. The BFF takes the browser's IP
 only from the header its operator named in `TRUSTED_CLIENT_IP_HEADER` (set
 by the owner's reverse proxy, never a client-supplied `X-Forwarded-For`)
-and forwards it as `X-Jarvis-Client-IP`, authenticated by
-`X-Jarvis-BFF-Key`. Anything else -- a missing or wrong key, an unset
-`JARVIS_BFF_SHARED_SECRET`, an unparseable address -- means "unknown": the
+and forwards it as `X-Friday-Client-IP`, authenticated by
+`X-Friday-BFF-Key`. Anything else -- a missing or wrong key, an unset
+`FRIDAY_BFF_SHARED_SECRET`, an unparseable address -- means "unknown": the
 IP header is ignored entirely, so a client talking to Django directly (or
 through a BFF without the key) can never spoof a LAN address.
 """
@@ -15,13 +15,13 @@ import ipaddress
 
 from django.conf import settings
 
-CLIENT_IP_HEADER = "X-Jarvis-Client-IP"
-BFF_KEY_HEADER = "X-Jarvis-BFF-Key"
+CLIENT_IP_HEADER = "X-Friday-Client-IP"
+BFF_KEY_HEADER = "X-Friday-BFF-Key"
 
 
 def trusted_client_ip(request):
     """The validated client IP (normalized string), or None when unknown."""
-    secret = settings.JARVIS_BFF_SHARED_SECRET
+    secret = settings.FRIDAY_BFF_SHARED_SECRET
     if not secret:
         return None
     key = request.headers.get(BFF_KEY_HEADER, "")

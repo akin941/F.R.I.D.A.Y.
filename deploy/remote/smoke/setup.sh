@@ -3,21 +3,21 @@
 set -eu
 
 # Root-owned config, exactly as the runbook installs it.
-install -d -o root -g root -m 0755 /etc/jarvis-deploy /etc/jarvis-deploy/apps
-cat > /etc/jarvis-deploy/apps/smoke-app.conf <<'EOF'
+install -d -o root -g root -m 0755 /etc/friday-deploy /etc/friday-deploy/apps
+cat > /etc/friday-deploy/apps/smoke-app.conf <<'EOF'
 APP_DIR=/srv/app
 TRACKED_BRANCH=main
 BUILD_CMD="docker compose build"
 RESTART_CMD="docker compose up -d"
 HEALTH_CMD="wget -qO- http://127.0.0.1:8080/health | grep -qx ok"
 EOF
-chown root:root /etc/jarvis-deploy/apps/smoke-app.conf
-chmod 0644 /etc/jarvis-deploy/apps/smoke-app.conf
-install -d -o deploy -g deploy -m 0750 /var/lib/jarvis-deploy /srv/live
+chown root:root /etc/friday-deploy/apps/smoke-app.conf
+chmod 0644 /etc/friday-deploy/apps/smoke-app.conf
+install -d -o deploy -g deploy -m 0750 /var/lib/friday-deploy /srv/live
 
 # The app's origin: A (good, initially live) -> B (good) -> C (health says
 # "fail") on main, and D on a side branch that is never merged. The app
-# checkout's origin URL is the remote Jarvis knows; git rewrites it to the
+# checkout's origin URL is the remote Friday knows; git rewrites it to the
 # local bare repo.
 git config --system url./srv/git/app.git.insteadOf git@example.invalid:acme/smoke-app.git
 work=$(mktemp -d)

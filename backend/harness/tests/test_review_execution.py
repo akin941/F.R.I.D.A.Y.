@@ -43,7 +43,7 @@ def fake_provider():
 @pytest.fixture
 def review_prompt():
     template = PromptTemplate.objects.create(
-        name="jarvis_harness_review_summary", purpose="harness.review_summary"
+        name="friday_harness_review_summary", purpose="harness.review_summary"
     )
     version = PromptVersion.objects.create(
         template=template, version=1, content="Review the diff and respond with JSON."
@@ -67,7 +67,7 @@ def workspace(owner):
 def repo(workspace):
     return HarnessRepo.objects.create(
         workspace=workspace,
-        name="jarvis-os",
+        name="friday",
         git_url="git@example.com:x/y.git",
         enabled=True,
         test_command="pytest -q",

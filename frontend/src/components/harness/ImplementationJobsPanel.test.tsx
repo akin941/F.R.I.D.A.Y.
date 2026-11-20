@@ -39,7 +39,7 @@ describe("ImplementationJobsPanel", () => {
       screen.getByText("Değişikliklerde gizli bilgi sızıntısı tespit edildi"),
     ).toBeInTheDocument();
     expect(screen.getByText("Başarısız")).toHaveAttribute("data-tone", "danger");
-    expect(screen.getByText(/Depo: jarvis · Kapı A: Karar bekliyor/)).toBeInTheDocument();
+    expect(screen.getByText(/Depo: friday · Kapı A: Karar bekliyor/)).toBeInTheDocument();
   });
 
   it("shows an empty state", async () => {

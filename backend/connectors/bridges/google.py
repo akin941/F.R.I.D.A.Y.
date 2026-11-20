@@ -2,7 +2,7 @@
 
 No Google SDK: a handful of REST endpoints over `httpx`. The owner's OAuth
 grant is created on the host by `manage.py connect_google` (installed-app
-flow, PKCE S256, `127.0.0.1` loopback redirect); what Jarvis holds is
+flow, PKCE S256, `127.0.0.1` loopback redirect); what Friday holds is
 env-only:
 
 - `GOOGLE_OAUTH_CLIENT_ID` / `GOOGLE_OAUTH_CLIENT_SECRET` -- the Desktop-app
@@ -141,7 +141,7 @@ def build_client(timeout):
         timeout=timeout,
         follow_redirects=False,
         trust_env=False,
-        headers={"User-Agent": "jarvis-os"},
+        headers={"User-Agent": "friday"},
     )
 
 

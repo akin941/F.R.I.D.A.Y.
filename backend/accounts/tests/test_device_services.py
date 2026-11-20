@@ -102,7 +102,7 @@ def test_set_owner_refuses_an_agent():
 
 
 def test_bootstrap_owner_marks_the_owner_and_if_absent_is_idempotent(monkeypatch):
-    monkeypatch.setenv("JARVIS_OWNER_PASSWORD", PASSWORD)
+    monkeypatch.setenv("FRIDAY_OWNER_PASSWORD", PASSWORD)
     out = io.StringIO()
     call_command("bootstrap_owner", "--email", "boss@test.dev", "--if-absent", stdout=out)
     assert User.objects.get(email="boss@test.dev").is_owner
@@ -113,7 +113,7 @@ def test_bootstrap_owner_marks_the_owner_and_if_absent_is_idempotent(monkeypatch
 
 def test_bootstrap_owner_if_absent_still_refuses_an_ownerless_populated_db(monkeypatch):
     register_user(email="stray@test.dev", password=PASSWORD)
-    monkeypatch.setenv("JARVIS_OWNER_PASSWORD", PASSWORD)
+    monkeypatch.setenv("FRIDAY_OWNER_PASSWORD", PASSWORD)
     with pytest.raises(CommandError, match="set_owner"):
         call_command("bootstrap_owner", "--email", "boss@test.dev", "--if-absent")
 

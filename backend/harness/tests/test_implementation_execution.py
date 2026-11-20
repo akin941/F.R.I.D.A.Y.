@@ -49,7 +49,7 @@ def workspace(owner):
 def repo(workspace):
     return HarnessRepo.objects.create(
         workspace=workspace,
-        name="jarvis-os",
+        name="friday",
         git_url="git@example.com:x/y.git",
         enabled=True,
         test_command="pytest -q",
@@ -166,7 +166,7 @@ class TestRunHarnessImplementationJobSuccess:
         cloned -- execution must use `job.repo_git_url` (snapshotted),
         never a live `job.repo.git_url` read."""
         job = make_job(workspace, repo, created_by=owner)
-        repo.git_url = "git@github.com:akin941/jarvis-os.git"
+        repo.git_url = "git@github.com:akin941/F.R.I.D.A.Y..git"
         repo.save(update_fields=["git_url"])
         _patch_happy_path_runner(monkeypatch, result=_wrapper_result())
         with mock.patch.object(implementation_execution, "dispatch_created_review"):

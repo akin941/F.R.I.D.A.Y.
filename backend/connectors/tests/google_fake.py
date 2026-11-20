@@ -12,8 +12,8 @@ import httpx
 
 from connectors.bridges import google
 
-CLIENT_ID = "jarvis-test.apps.googleusercontent.com"
-# Canaries: credential values that must never show up anywhere Jarvis writes.
+CLIENT_ID = "friday-test.apps.googleusercontent.com"
+# Canaries: credential values that must never show up anywhere Friday writes.
 CLIENT_SECRET_CANARY = "GOCSPX-CLIENT-SECRET-CANARY"
 REFRESH_TOKEN_CANARY = "1//REFRESH-TOKEN-CANARY-0123456789"
 ACCESS_TOKEN_CANARY = "ya29.ACCESS-TOKEN-CANARY"

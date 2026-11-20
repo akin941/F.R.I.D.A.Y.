@@ -26,12 +26,12 @@ class TestRenderParseRoundTrip:
         text = render_frontmatter(memory)
         fields = parse_frontmatter(text)
         assert fields == {
-            "jarvis_id": str(memory.id),
+            "friday_id": str(memory.id),
             "type": "semantic",
             "workspace": str(memory.workspace_id),
             "project": "",
             "sensitivity": "normal",
-            "source": "jarvis_export",
+            "source": "friday_export",
             "updated_at": memory.updated_at.isoformat(),
         }
 
@@ -44,10 +44,10 @@ class TestRenderParseRoundTrip:
 
 class TestParseMalformedInput:
     def test_missing_opening_delimiter_returns_none(self):
-        assert parse_frontmatter("jarvis_id: abc\n---\n") is None
+        assert parse_frontmatter("friday_id: abc\n---\n") is None
 
     def test_missing_closing_delimiter_returns_none(self):
-        assert parse_frontmatter("---\njarvis_id: abc\n") is None
+        assert parse_frontmatter("---\nfriday_id: abc\n") is None
 
     def test_line_without_colon_returns_none(self):
         assert parse_frontmatter("---\nthis has no colon\n---\n") is None

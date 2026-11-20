@@ -4,7 +4,7 @@ import { issuePairingCode } from "./manage";
 
 // FakeAdapter's fixed reply (backend/ai_core/adapters/fake.py) — deterministic,
 // no network call, so this string is a safe, stable assertion target.
-const FAKE_REPLY = "Merhaba, ben Jarvis. MVP 1 gateway üzerinden çalışıyorum.";
+const FAKE_REPLY = "Merhaba, ben Friday. MVP 1 gateway üzerinden çalışıyorum.";
 
 // MVP 9 §5/§6: the PAT/Telegram sections below talk to the real backend
 // directly (Playwright's `request` fixture, not `page.evaluate` fetch) --
@@ -100,9 +100,9 @@ test("enroll, chat with the fake provider, curated memory, Today, logout, route 
   await expect(newChatButton).toBeEnabled();
   await newChatButton.click();
 
-  const composer = page.getByPlaceholder("Jarvis'e yaz…");
+  const composer = page.getByPlaceholder("Friday'ye yaz…");
   await expect(composer).toBeEnabled();
-  await composer.fill("Hello, Jarvis");
+  await composer.fill("Hello, Friday");
   await page.getByRole("button", { name: "Gönder" }).click();
 
   await expect(page.getByText(FAKE_REPLY)).toBeVisible({ timeout: 15_000 });
@@ -164,8 +164,8 @@ test("enroll, chat with the fake provider, curated memory, Today, logout, route 
   // embedding genuinely ranks this seed above unrelated noise before this
   // e2e test ever depends on that signal.
   const KNOWLEDGE_SEED_TEXT =
-    "Jarvis OS supports offline lantern mode for camping trips without cell signal.";
-  const KNOWLEDGE_QUERY_TEXT = "What lantern mode does Jarvis OS support when camping offline?";
+    "Friday OS supports offline lantern mode for camping trips without cell signal.";
+  const KNOWLEDGE_QUERY_TEXT = "What lantern mode does Friday OS support when camping offline?";
   const KNOWLEDGE_DOC_TITLE = "Lantern mode notes";
 
   await page.getByRole("link", { name: "Bilgi" }).click();

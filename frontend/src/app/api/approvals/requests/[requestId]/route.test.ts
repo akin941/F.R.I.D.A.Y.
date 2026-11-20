@@ -11,7 +11,7 @@ const VALID_ID = "11111111-1111-1111-1111-111111111111";
 function cookieStore(accessToken?: string) {
   return {
     get: (name: string) =>
-      name === "jarvis_access" && accessToken ? { name, value: accessToken } : undefined,
+      name === "friday_access" && accessToken ? { name, value: accessToken } : undefined,
   };
 }
 

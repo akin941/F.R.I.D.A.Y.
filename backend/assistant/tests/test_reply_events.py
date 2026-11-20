@@ -64,9 +64,9 @@ def _prompt(name, purpose, content):
 
 @pytest.fixture
 def prompts():
-    _prompt("jarvis_system", "chat", "You are Jarvis.")
-    _prompt("jarvis_router_intent", "router.intent", "Classify the message.")
-    _prompt("jarvis_router_task_draft", "router.task_draft", "Extract a task.")
+    _prompt("friday_system", "chat", "You are Friday.")
+    _prompt("friday_router_intent", "router.intent", "Classify the message.")
+    _prompt("friday_router_task_draft", "router.task_draft", "Extract a task.")
 
 
 def _two_chunks():
@@ -193,11 +193,11 @@ def test_router_usage_row_carries_the_context_report(conversation, alice, fake_p
         actor=alice,
         content="hi",
         allowed_intents=FACADE_INTENTS,
-        context_report={"channel": CHANNEL_OPENAI, "model": "jarvis"},
+        context_report={"channel": CHANNEL_OPENAI, "model": "friday"},
     )
     usage = ModelUsage.objects.get(purpose="router.intent")
     assert usage.context_report["channel"] == CHANNEL_OPENAI
-    assert usage.context_report["model"] == "jarvis"
+    assert usage.context_report["model"] == "friday"
 
 
 # --- chat call context report ---
@@ -209,12 +209,12 @@ def test_chat_context_report_records_channel_and_extra(conversation, alice, fake
         actor=alice,
         content="hi",
         channel=CHANNEL_OPENAI,
-        report_extra={"model": "jarvis"},
+        report_extra={"model": "friday"},
     )
     list(iter_assistant_reply_events(conversation, stream, usage_holder, request_id="r"))
     usage = ModelUsage.objects.get(purpose="chat")
     assert usage.context_report["channel"] == CHANNEL_OPENAI
-    assert usage.context_report["model"] == "jarvis"
+    assert usage.context_report["model"] == "friday"
 
 
 def test_web_chat_context_report_records_web(conversation, alice, fake_provider, prompts):

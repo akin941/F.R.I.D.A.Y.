@@ -19,7 +19,7 @@ once; after that the harness is a normal daily tool.
   mode (Phase 3 brief, "Codex CLI vendor terms"): `ANTHROPIC_API_KEY`
   (Claude Code implements), `CODEX_API_KEY` (Codex CLI reviews).
 - A deploy key (SSH) with **write access only to the repos you register**
-  and **no access to the Jarvis repo itself**: `HARNESS_GIT_SSH_KEY_PATH`.
+  and **no access to the Friday repo itself**: `HARNESS_GIT_SSH_KEY_PATH`.
   Push remotes must be SSH (`git@host:owner/repo.git`).
 
 ## 1. Pin and build the images
@@ -35,8 +35,8 @@ once; after that the harness is a normal daily tool.
    (Claude Code `--permission-mode acceptEdits`, Codex `--sandbox
    workspace-write`). The wrapper commits on the agent's behalf, so the
    agent only needs edit permission, not shell `git commit`.
-4. `make harness-images` (tags `jarvis-harness-claude-code:local` and
-   `jarvis-harness-codex-cli:local`; override with
+4. `make harness-images` (tags `friday-harness-claude-code:local` and
+   `friday-harness-codex-cli:local`; override with
    `HARNESS_IMAGE_CLAUDE_CODE=…` / `HARNESS_IMAGE_CODEX_CLI=…`).
 5. `make harness-smoke` — builds the smoke image (real image, stubbed CLI)
    and runs the real-container round trip. It must pass before any paid
@@ -50,7 +50,7 @@ already-cloned checkout, **not** for implementation, whose CLI must reach
 the model API and whose test command usually installs dependencies):
 
 ```
-docker network create --internal jarvis-harness-egress
+docker network create --internal friday-harness-egress
 ```
 
 For implementation, use a bridge network plus an egress allowlist (the
@@ -62,11 +62,11 @@ the containers are forced through. Record what you allowed.
 ```
 ANTHROPIC_API_KEY=…
 CODEX_API_KEY=…
-HARNESS_GIT_SSH_KEY_PATH=/Users/<you>/.ssh/jarvis_harness_deploy
-HARNESS_SELF_REPO_IDENTIFIERS=git@github.com:akin941/jarvis-os.git
-HARNESS_IMAGE_CLAUDE_CODE=jarvis-harness-claude-code:local
-HARNESS_IMAGE_CODEX_CLI=jarvis-harness-codex-cli:local
-HARNESS_DOCKER_NETWORK=jarvis-harness-egress
+HARNESS_GIT_SSH_KEY_PATH=/Users/<you>/.ssh/friday_harness_deploy
+HARNESS_SELF_REPO_IDENTIFIERS=git@github.com:akin941/F.R.I.D.A.Y..git
+HARNESS_IMAGE_CLAUDE_CODE=friday-harness-claude-code:local
+HARNESS_IMAGE_CODEX_CLI=friday-harness-codex-cli:local
+HARNESS_DOCKER_NETWORK=friday-harness-egress
 HARNESS_MAX_JOB_COST=1.00
 ```
 

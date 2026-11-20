@@ -1,6 +1,6 @@
 """External installation -- blocked placeholder (brief D14, O-5).
 
-An external installation is an independent external product (ADR-006); Jarvis will
+An external installation is an independent external product (ADR-006); Friday will
 only ever be an MCP client of an installation's MCP-compatible tools on a
 user's behalf. The installation does not expose MCP yet and its auth model and
 approval treatment are open (`docs/mcp/external_installation.md`), so this manifest ships

@@ -1,7 +1,7 @@
 """Self-modification hard-block helpers (Phase 3 branch 2, brief §boundary;
 ADR-004: "agents can never modify their own definitions or permissions").
 
-A `HarnessRepo` whose git remote resolves to this Jarvis installation's own
+A `HarnessRepo` whose git remote resolves to this Friday installation's own
 repo can still be registered and used for Phase 2 read-only discovery
 (unchanged, no risk there), but `create_harness_implementation_job`/
 `create_harness_review` refuse outright -- `HarnessInvalidTransition`,

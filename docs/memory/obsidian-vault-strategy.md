@@ -1,21 +1,21 @@
 # Obsidian Memory Vault Strategy
 
-Obsidian is Jarvis OS's **local-first, human-readable memory mirror** — never the
+Obsidian is Friday OS's **local-first, human-readable memory mirror** — never the
 primary database (ADR-005). Postgres remains the source of truth.
 
 ## Ownership model (no true two-way sync)
 
 | File class | Source of truth | Direction |
 |---|---|---|
-| Exported mirrors (memories, decisions, agent-run summaries, skill cards) | PostgreSQL | Jarvis → vault (idempotent export job, MVP 2+) |
-| Human-authored notes (daily, learning, research, prompts, CLI notes) | Vault | vault → Jarvis ingestion (RAG), MVP 3+ |
+| Exported mirrors (memories, decisions, agent-run summaries, skill cards) | PostgreSQL | Friday → vault (idempotent export job, MVP 2+) |
+| Human-authored notes (daily, learning, research, prompts, CLI notes) | Vault | vault → Friday ingestion (RAG), MVP 3+ |
 
 ## Frontmatter standard (required on synced files)
 
-`jarvis_id`, `type`, `workspace`, `project`, `sensitivity` (normal/private),
-`source` (jarvis_export/human), `updated_at`.
+`friday_id`, `type`, `workspace`, `project`, `sensitivity` (normal/private),
+`source` (friday_export/human), `updated_at`.
 
-Rules: files with `source: jarvis_export` are **never re-ingested** (echo-chamber
+Rules: files with `source: friday_export` are **never re-ingested** (echo-chamber
 guard). `sensitivity: private` content never reaches cloud models. Company
 workspace notes live under their workspace folder and never enter personal scope.
 
@@ -40,5 +40,5 @@ bulk changes require approval. Export/import operations are audited
 ## Relationship to repo docs (decision: hybrid)
 
 Repo `docs/` = official engineering truth (agents read this). Vault = thinking and
-memory space. Matured vault notes get *moved* into the repo; Jarvis exports flow
+memory space. Matured vault notes get *moved* into the repo; Friday exports flow
 only into the vault.

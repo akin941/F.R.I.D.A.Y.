@@ -2,7 +2,7 @@
 # The smoke's dummy "compose app": `compose build` stages the checkout's
 # www/ into .build (the live site is untouched), `compose up -d` swaps the
 # staged build live and (re)starts busybox-extras httpd on :8080. Anything else is
-# refused. Run by jarvis-deploy.sh inside APP_DIR as the deploy user.
+# refused. Run by friday-deploy.sh inside APP_DIR as the deploy user.
 set -eu
 case "$*" in
 "compose build")

@@ -152,7 +152,7 @@ function TelegramLinkStatus({ workspaceId }: { workspaceId: string }) {
           ) : null}
           {activeCode ? (
             <Alert>
-              <AlertTitle>Jarvis Telegram botuna yaz</AlertTitle>
+              <AlertTitle>Friday Telegram botuna yaz</AlertTitle>
               <AlertDescription className="flex flex-col gap-1">
                 <span>
                   Şunu gönder <code className="rounded-md bg-muted px-1 py-0.5">/link {activeCode.code}</code>

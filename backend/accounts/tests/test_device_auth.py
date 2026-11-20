@@ -82,9 +82,9 @@ def via_bff(ip=None, key=BFF_KEY):
     client = APIClient()
     headers = {}
     if ip is not None:
-        headers["HTTP_X_JARVIS_CLIENT_IP"] = ip
+        headers["HTTP_X_FRIDAY_CLIENT_IP"] = ip
     if key is not None:
-        headers["HTTP_X_JARVIS_BFF_KEY"] = key
+        headers["HTTP_X_FRIDAY_BFF_KEY"] = key
     client.credentials(**headers)
     return client
 
@@ -141,7 +141,7 @@ def test_enroll_ignores_a_bearer_credential(owner):
 
 @pytest.fixture
 def lan_gated(settings):
-    settings.JARVIS_BFF_SHARED_SECRET = BFF_KEY
+    settings.FRIDAY_BFF_SHARED_SECRET = BFF_KEY
     settings.DEVICE_PAIRING_ALLOW_UNKNOWN_IP = False
 
 
@@ -172,7 +172,7 @@ def test_a_spoofed_lan_ip_without_the_bff_key_is_ignored(owner, lan_gated, key):
 
 
 def test_no_shared_secret_configured_means_no_ip_is_ever_trusted(owner, settings):
-    settings.JARVIS_BFF_SHARED_SECRET = ""
+    settings.FRIDAY_BFF_SHARED_SECRET = ""
     settings.DEVICE_PAIRING_ALLOW_UNKNOWN_IP = False
     response = via_bff("192.168.1.20", key="").post(
         "/api/v1/auth/enroll", {"code": _pin(owner), "device_name": "x"}, format="json"
@@ -308,7 +308,7 @@ def test_a_device_of_another_user_cannot_be_named_in_a_token(owner):
 
 
 def test_request_updates_last_seen_with_the_validated_ip(owner, settings):
-    settings.JARVIS_BFF_SHARED_SECRET = BFF_KEY
+    settings.FRIDAY_BFF_SHARED_SECRET = BFF_KEY
     device, _ = _device(owner)
     TrustedDevice.objects.filter(pk=device.pk).update(
         last_seen_at=timezone.now() - timedelta(hours=1)
@@ -316,8 +316,8 @@ def test_request_updates_last_seen_with_the_validated_ip(owner, settings):
     client = via_bff("192.168.1.44")
     client.credentials(
         HTTP_AUTHORIZATION=f"Bearer {issue_session_tokens(device)['access']}",
-        HTTP_X_JARVIS_CLIENT_IP="192.168.1.44",
-        HTTP_X_JARVIS_BFF_KEY=BFF_KEY,
+        HTTP_X_FRIDAY_CLIENT_IP="192.168.1.44",
+        HTTP_X_FRIDAY_BFF_KEY=BFF_KEY,
     )
     assert client.get("/api/v1/auth/me").status_code == 200
     device.refresh_from_db()

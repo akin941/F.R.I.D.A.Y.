@@ -84,7 +84,7 @@ def fake_provider():
 @pytest.fixture
 def read_step_prompt():
     template = PromptTemplate.objects.create(
-        name="jarvis_agent_read_step", purpose="agent.read_step"
+        name="friday_agent_read_step", purpose="agent.read_step"
     )
     version = PromptVersion.objects.create(template=template, version=1, content="Summarize.")
     template.active_version = version
@@ -983,7 +983,7 @@ def test_real_on_commit_dispatch_chain_runs_a_multi_step_plan_to_completion(sett
         priority=0,
     )
     template = PromptTemplate.objects.create(
-        name="jarvis_agent_read_step", purpose="agent.read_step"
+        name="friday_agent_read_step", purpose="agent.read_step"
     )
     version = PromptVersion.objects.create(template=template, version=1, content="Summarize.")
     template.active_version = version

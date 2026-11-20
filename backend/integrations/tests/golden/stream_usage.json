@@ -3,7 +3,7 @@
     "id": "chatcmpl-<id>",
     "object": "chat.completion.chunk",
     "created": 0,
-    "model": "jarvis",
+    "model": "friday",
     "choices": [
       {
         "index": 0,
@@ -20,7 +20,7 @@
     "id": "chatcmpl-<id>",
     "object": "chat.completion.chunk",
     "created": 0,
-    "model": "jarvis",
+    "model": "friday",
     "choices": [
       {
         "index": 0,
@@ -36,7 +36,7 @@
     "id": "chatcmpl-<id>",
     "object": "chat.completion.chunk",
     "created": 0,
-    "model": "jarvis",
+    "model": "friday",
     "choices": [
       {
         "index": 0,
@@ -52,12 +52,12 @@
     "id": "chatcmpl-<id>",
     "object": "chat.completion.chunk",
     "created": 0,
-    "model": "jarvis",
+    "model": "friday",
     "choices": [
       {
         "index": 0,
         "delta": {
-          "content": "Jarvis. "
+          "content": "Friday. "
         },
         "finish_reason": null
       }
@@ -68,7 +68,7 @@
     "id": "chatcmpl-<id>",
     "object": "chat.completion.chunk",
     "created": 0,
-    "model": "jarvis",
+    "model": "friday",
     "choices": [
       {
         "index": 0,
@@ -84,7 +84,7 @@
     "id": "chatcmpl-<id>",
     "object": "chat.completion.chunk",
     "created": 0,
-    "model": "jarvis",
+    "model": "friday",
     "choices": [
       {
         "index": 0,
@@ -100,7 +100,7 @@
     "id": "chatcmpl-<id>",
     "object": "chat.completion.chunk",
     "created": 0,
-    "model": "jarvis",
+    "model": "friday",
     "choices": [
       {
         "index": 0,
@@ -116,7 +116,7 @@
     "id": "chatcmpl-<id>",
     "object": "chat.completion.chunk",
     "created": 0,
-    "model": "jarvis",
+    "model": "friday",
     "choices": [
       {
         "index": 0,
@@ -132,7 +132,7 @@
     "id": "chatcmpl-<id>",
     "object": "chat.completion.chunk",
     "created": 0,
-    "model": "jarvis",
+    "model": "friday",
     "choices": [
       {
         "index": 0,
@@ -148,7 +148,7 @@
     "id": "chatcmpl-<id>",
     "object": "chat.completion.chunk",
     "created": 0,
-    "model": "jarvis",
+    "model": "friday",
     "choices": [
       {
         "index": 0,
@@ -162,7 +162,7 @@
     "id": "chatcmpl-<id>",
     "object": "chat.completion.chunk",
     "created": 0,
-    "model": "jarvis",
+    "model": "friday",
     "choices": [],
     "usage": {
       "prompt_tokens": "<int>",

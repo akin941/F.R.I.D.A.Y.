@@ -2,10 +2,10 @@
 
 import { useEffect, useRef } from "react";
 
-export type JarvisOrbState = "idle" | "thinking" | "speaking";
+export type FridayOrbState = "idle" | "thinking" | "speaking";
 
-interface JarvisOrbProps {
-  state: JarvisOrbState;
+interface FridayOrbProps {
+  state: FridayOrbState;
   size?: number;
 }
 
@@ -15,9 +15,9 @@ interface JarvisOrbProps {
  * are read once from the active theme's CSS custom properties so the orb
  * stays in sync with globals.css without hardcoding a palette here.
  */
-export function JarvisOrb({ state, size = 220 }: JarvisOrbProps) {
+export function FridayOrb({ state, size = 220 }: FridayOrbProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const stateRef = useRef<JarvisOrbState>(state);
+  const stateRef = useRef<FridayOrbState>(state);
 
   useEffect(() => {
     stateRef.current = state;
@@ -121,7 +121,7 @@ export function JarvisOrb({ state, size = 220 }: JarvisOrbProps) {
       style={{ width: size, height: size }}
       role="img"
       aria-label={
-        state === "idle" ? "Jarvis boşta" : state === "thinking" ? "Jarvis düşünüyor" : "Jarvis konuşuyor"
+        state === "idle" ? "Friday boşta" : state === "thinking" ? "Friday düşünüyor" : "Friday konuşuyor"
       }
     />
   );

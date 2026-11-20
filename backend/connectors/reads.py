@@ -92,7 +92,7 @@ def compose_result_text(texts, structured):
 
 def parse_json_result(result):
     """A server result as data: its `structuredContent`, else the JSON of
-    its first text block, else `None` -- for Jarvis's own programmatic uses
+    its first text block, else `None` -- for Friday's own programmatic uses
     (a PR's number, a head SHA, CI runs), never for a prompt."""
     if result.structured is not None:
         return result.structured
@@ -105,7 +105,7 @@ def parse_json_result(result):
 
 
 def perform_read(manifest, policy, *, workspace, actor, args, channel, as_data=False):
-    """One audited read. `as_data=True` (Jarvis-internal callers: the
+    """One audited read. `as_data=True` (Friday-internal callers: the
     harness PR panel, the deploy snapshot) returns the parsed JSON in
     `ReadResult.structured` instead of bounded text; the same refusals,
     pin check and audit row apply."""

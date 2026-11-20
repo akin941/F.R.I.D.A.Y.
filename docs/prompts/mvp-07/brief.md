@@ -21,16 +21,16 @@
 > approving this MVP's autonomy increase. They are not nice-to-haves; if
 > plan-review or implementation ever proposes weakening one of them,
 > surface it to the user rather than resolving it unilaterally. The user
-> named this "Jarvis's riskiest MVP so far."
+> named this "Friday's riskiest MVP so far."
 
 ## Goal and user value
 
-Every capability Jarvis has shipped through MVP 6 requires a human to
+Every capability Friday has shipped through MVP 6 requires a human to
 either click a button or type one message per action — including the
 router (MVP 6), which is explicitly one utterance → one classified intent
 → one dispatched action, always inside the same turn the human is present
 for. This MVP adds the other half of the roadmap's `router → agents` line
-(`docs/MASTER_PLAN.md` §L): given a **goal**, Jarvis plans a **sequence of
+(`docs/MASTER_PLAN.md` §L): given a **goal**, Friday plans a **sequence of
 steps** and executes them **without requiring the human to type each one**.
 
 This is a real increase in autonomy, and it is scoped narrowly on purpose:
@@ -135,7 +135,7 @@ ordered list of `{kind, description, payload}` steps.
   `tools.registry.list_tool_names()` (the same check MVP 6 branch 4 added)
   at planning time — an unresolvable tool name fails the plan for the same
   reason a malformed shape does, not a per-step skip.
-- New `seed_ai_defaults` prompt entry (`jarvis_agent_plan`), following the
+- New `seed_ai_defaults` prompt entry (`friday_agent_plan`), following the
   same versioned-prompt pattern every gateway purpose already uses.
 
 ### 3. Execution engine (`agents` — the brake systems live here)

@@ -1,5 +1,5 @@
 """GitHub connector support (Phase 5 branch 5, brief D7): the repository
-scope check, per-call data classification and the Jarvis-internal reads the
+scope check, per-call data classification and the Friday-internal reads the
 harness PR panel and the deploy snapshot use.
 
 **Scope.** Every GitHub call names an `owner/repo`. Before any network
@@ -28,7 +28,7 @@ GITHUB_HOST = "github.com"
 OWNER_RE = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$")
 REPO_RE = re.compile(r"^[A-Za-z0-9._-]{1,100}$")
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
-# A git ref Jarvis sends as a branch name: conservative subset of
+# A git ref Friday sends as a branch name: conservative subset of
 # `git check-ref-format` (no `..`, no leading `-`/`/`, no control chars).
 BRANCH_RE = re.compile(r"^(?!-)(?!/)(?!.*\.\.)(?!.*//)[A-Za-z0-9._/-]{1,255}(?<!/)(?<!\.lock)$")
 
@@ -171,7 +171,7 @@ def ci_state(data, *, head_sha=""):
     return {"state": state, "runs": rows}
 
 
-# --- Jarvis-internal reads (same refusals, pins and audit as chat reads) ---
+# --- Friday-internal reads (same refusals, pins and audit as chat reads) ---
 
 
 def _read(workspace, actor, tool, args, channel):

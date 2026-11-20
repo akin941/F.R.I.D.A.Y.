@@ -38,7 +38,7 @@ interface WorkspaceContextValue {
 const WorkspaceContext = createContext<WorkspaceContextValue | null>(null);
 
 function storageKey(userId: string) {
-  return `jarvis:active-workspace:${userId}`;
+  return `friday:active-workspace:${userId}`;
 }
 
 /** The `?workspace=` deep-link parameter of the page being loaded, if any. */

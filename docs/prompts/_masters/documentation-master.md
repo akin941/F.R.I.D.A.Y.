@@ -14,7 +14,7 @@ Update, briefly and without repeating what code already says:
 4. Obsidian vault notes: `07_Roadmap/mvp-XX-retro.md` (planned vs. happened vs.
    learned), a `06_Decisions/` note if applicable, `05_Skills/` card if a new
    skill was born.
-5. Propose (do not write directly) Jarvis memory records worth keeping — the user
+5. Propose (do not write directly) Friday memory records worth keeping — the user
    approves them.
 
 Keep everything short; link instead of duplicating.

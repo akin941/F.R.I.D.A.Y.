@@ -52,7 +52,7 @@ def assert_terminal_bookkeeping(run):
     assert AuditLog.objects.filter(action=f"deploy.{run.status}", resource_id=str(run.id)).exists()
     log = work_log_for(run).get()
     assert f"deploy: {run.status}" in log.title
-    # Jarvis-authored facts only: never remote output.
+    # Friday-authored facts only: never remote output.
     assert "healthy" not in log.content and "deployed" not in log.content
 
 
@@ -204,7 +204,7 @@ def test_drift_touches_nothing(owner, workspace, target, remote):
 
 
 def test_self_repo_remote_is_refused(owner, workspace, target, remote):
-    remote.remote = "https://github.com/akin941/jarvis-os"
+    remote.remote = "https://github.com/akin941/F.R.I.D.A.Y."
     run = run_it(approved_run(owner, workspace, target))
     assert run.status == S.FAILED
     assert run.error_code == E.SELF_REPO

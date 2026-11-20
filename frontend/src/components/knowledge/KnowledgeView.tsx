@@ -90,7 +90,7 @@ export function KnowledgeView() {
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Bilgi</h1>
           <p className="text-sm text-muted-foreground">
-            Jarvis&apos;in sohbet bağlamına getirebileceği belgeler.
+            Friday&apos;nin sohbet bağlamına getirebileceği belgeler.
           </p>
         </div>
         <Button onClick={() => setCreating((v) => !v)}>

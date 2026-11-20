@@ -1,7 +1,7 @@
-from core.exceptions import JarvisError
+from core.exceptions import FridayError
 
 
-class GatewayError(JarvisError):
+class GatewayError(FridayError):
     """Raised when a gateway call ultimately fails. `error_type` is a short,
     secret-safe string (provider_error, timeout, rate_limit, auth_error,
     client_disconnect, no_provider, unknown).

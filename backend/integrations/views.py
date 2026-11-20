@@ -3,7 +3,7 @@ same as minting a PersonalAccessToken (accounts/views.py): both mint or
 manage a credential a low-trust channel could otherwise use to reach in and
 widen its own trust, so neither is ever allowlisted for PAT auth. The
 webhook view (below) is the one deliberate exception -- Telegram itself is
-not a Jarvis user and holds no JWT, so it authenticates via a shared
+not a Friday user and holds no JWT, so it authenticates via a shared
 secret header instead (see TelegramWebhookView)."""
 
 import hmac
@@ -101,7 +101,7 @@ class TelegramUnlinkView(APIView):
 
 
 class TelegramWebhookView(APIView):
-    """Telegram is not a Jarvis user and holds no JWT -- authenticity is
+    """Telegram is not a Friday user and holds no JWT -- authenticity is
     verified via the `X-Telegram-Bot-Api-Secret-Token` header instead
     (Telegram's own documented webhook-authenticity mechanism, set via
     `manage.py register_telegram_webhook`). Rejects with 403 before

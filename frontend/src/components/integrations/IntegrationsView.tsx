@@ -73,7 +73,7 @@ export function IntegrationsView() {
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">Entegrasyonlar</h1>
         <p className="text-sm text-muted-foreground">
-          Jarvis&apos;e CLI, Telegram veya Open WebUI gibi OpenAI uyumlu bir istemci üzerinden ulaş —
+          Friday&apos;ye CLI, Telegram veya Open WebUI gibi OpenAI uyumlu bir istemci üzerinden ulaş —
           aynı sohbet hattına açılan yeni kapılar, bir isteği onaylamanın ya da reddetmenin yeni bir
           yolu değil (o hâlâ web uygulamasını gerektirir).
         </p>

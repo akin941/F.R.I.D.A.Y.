@@ -20,7 +20,7 @@ ROLES = [
 ]
 
 VALID_PROFILE = {
-    "repos": [{"name": "jarvis-os", "url": "https://github.com/x/jarvis-os"}],
+    "repos": [{"name": "friday", "url": "https://github.com/x/friday"}],
     "notes": "dossier notes",
 }
 

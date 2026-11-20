@@ -68,7 +68,7 @@ def test_manifest_shape(manifest):
     assert manifest.status == "active" and manifest.kind == "mcp"
     assert manifest.data_class == "firm"
     assert manifest.url_env == "GITHUB_MCP_URL"
-    assert manifest.credential_envs == ()  # the PAT never reaches Jarvis
+    assert manifest.credential_envs == ()  # the PAT never reaches Friday
     assert manifest.sidecar_image.startswith("ghcr.io/github/github-mcp-server:v1.12.2@sha256:")
     assert {t.name for t in manifest.reads} == READS
     assert [t.server_tool for t in manifest.writes] == ["create_pull_request"]

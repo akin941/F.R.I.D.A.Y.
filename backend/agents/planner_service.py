@@ -29,8 +29,8 @@ from skills.catalog import (
 )
 from tools.registry import list_tool_names
 
-_AGENT_PLAN_PROMPT_NAME = "jarvis_agent_plan"
-_AGENT_SKILL_MATCH_PROMPT_NAME = "jarvis_agent_skill_match"
+_AGENT_PLAN_PROMPT_NAME = "friday_agent_plan"
+_AGENT_SKILL_MATCH_PROMPT_NAME = "friday_agent_skill_match"
 
 # Planner-local tool vocabulary (Codex round-1 LOW fix -- the prompt told
 # the model tool names were "listed below" without ever actually listing

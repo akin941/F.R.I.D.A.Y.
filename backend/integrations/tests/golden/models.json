@@ -2,16 +2,16 @@
   "object": "list",
   "data": [
     {
-      "id": "jarvis",
+      "id": "friday",
       "object": "model",
       "created": 1790467200,
-      "owned_by": "jarvis"
+      "owned_by": "friday"
     },
     {
-      "id": "jarvis-lite",
+      "id": "friday-lite",
       "object": "model",
       "created": 1790467200,
-      "owned_by": "jarvis"
+      "owned_by": "friday"
     }
   ]
 }

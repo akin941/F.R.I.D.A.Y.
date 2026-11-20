@@ -1,15 +1,15 @@
-# Design Transfer Contract — Jarvis → external installations
+# Design Transfer Contract — Friday → external installations
 
-> Status: accepted 2026-07-07, alongside ADR-006. Jarvis and any external
+> Status: accepted 2026-07-07, alongside ADR-006. Friday and any external
 > workplace product are **independent codebases**. What transfers is the *pattern* —
 > the design, its invariants and its hard-won review lessons — never the code.
 > Whether any of these patterns ever become a shared library is an open
 > question (MASTER_PLAN §O); until decided, independent re-implementation is
-> the rule. Jarvis is the design donor: when a pattern below evolves in
-> Jarvis, this file is the place to note whether the change is worth
+> the rule. Friday is the design donor: when a pattern below evolves in
+> Friday, this file is the place to note whether the change is worth
 > re-implementing downstream.
 
-Format per entry: **Concept transferred** / **Source in Jarvis** /
+Format per entry: **Concept transferred** / **Source in Friday** /
 **Independent re-implementation notes**.
 
 ## 1. InferenceGateway (ADR-003)
@@ -18,7 +18,7 @@ Format per entry: **Concept transferred** / **Source in Jarvis** /
   provider adapters, retry-then-fallback across providers, and a usage record
   (tokens, cost, latency, purpose, tenant scope, prompt version, context
   report) per call.
-- **Source in Jarvis:** `backend/ai_core/gateway.py`, `backend/ai_core/adapters/`,
+- **Source in Friday:** `backend/ai_core/gateway.py`, `backend/ai_core/adapters/`,
   `ModelUsage` / `ModelProvider` / `PromptVersion` in `backend/ai_core/models.py`;
   ADR-003.
 - **Independent re-implementation notes:** the load-bearing invariant is
@@ -36,12 +36,12 @@ Format per entry: **Concept transferred** / **Source in Jarvis** /
   fixed, non-overlapping input ranges, with an idempotent finalize step and a
   periodic recovery scan for expired leases — so duplicate delivery, worker
   death and beat restarts never double-process.
-- **Source in Jarvis:** `backend/memory/jobs.py` (+ `memory/tasks.py`);
+- **Source in Friday:** `backend/memory/jobs.py` (+ `memory/tasks.py`);
   reused by the knowledge ingestion worker (`backend/knowledge/jobs.py`,
   MVP 3 branch 3).
 - **Independent re-implementation notes:** dispatch with
   `transaction.on_commit` and never let dispatch failures propagate into the
-  request path; the recovery scan runs on Celery beat — Jarvis embeds beat in
+  request path; the recovery scan runs on Celery beat — Friday embeds beat in
   its single worker, which is safe only at exactly one replica; a
   multi-worker deployment must split beat into its own service before
   copying the topology.
@@ -56,7 +56,7 @@ Format per entry: **Concept transferred** / **Source in Jarvis** /
   by **two independent gates** — an ingestion-side gate (private content is
   never embedded/exported in the first place) and a retrieval-side queryset
   gate that never trusts the first.
-- **Source in Jarvis:** ADR-004; `Memory.objects.cloud_eligible()`
+- **Source in Friday:** ADR-004; `Memory.objects.cloud_eligible()`
   (`backend/memory/models.py`) and `KnowledgeChunkQuerySet.cloud_eligible()`
   (`backend/knowledge/models.py`).
 - **Independent re-implementation notes:** keep the two gates structurally
@@ -72,14 +72,14 @@ Format per entry: **Concept transferred** / **Source in Jarvis** /
   query reaching a view or agent tool must pass; the scope axis is a column
   on every business table; isolation is a release gate with its own test
   package.
-- **Source in Jarvis:** `backend/core/db.py` (`for_actor()`,
+- **Source in Friday:** `backend/core/db.py` (`for_actor()`,
   `WorkspaceScopedModel`/`QuerySet`/`Manager`); ADR-001.
 - **Independent re-implementation notes:** where an installation's scope
   axis is wider than `workspace_id` (e.g. a **tenant × department
   intersection**), the gate should take the actor and resolve every
   dimension in one place rather than scattering per-dimension checks per
   view. Denormalize the scope column onto
-  child tables (as Jarvis does on `KnowledgeChunk.workspace`) so the gate
+  child tables (as Friday does on `KnowledgeChunk.workspace`) so the gate
   filters without joins. Role × endpoint permission tests accompany every
   API surface.
 
@@ -93,7 +93,7 @@ Format per entry: **Concept transferred** / **Source in Jarvis** /
   (pgvector cosine) → injection-safe framing into chat context → persisted
   provenance (`memory_ids` / `chunks_used`) + a context-access audit event,
   recorded even for empty retrievals.
-- **Source in Jarvis:** `backend/memory/` (models, services, extraction,
+- **Source in Friday:** `backend/memory/` (models, services, extraction,
   `build_context`), `backend/knowledge/` + `docs/prompts/mvp-03/brief.md`
   (approved design; retrieval lands in MVP 3 branch 4); ADR-005.
 - **Independent re-implementation notes:** retrieved/injected text is
@@ -105,7 +105,7 @@ Format per entry: **Concept transferred** / **Source in Jarvis** /
 
 ## 6. Agent harness patterns (Phase 2–3) — transfer candidates
 
-> Added 2026-09-27. Proven in Jarvis's `harness` app (ADR-008) across the
+> Added 2026-09-27. Proven in Friday's `harness` app (ADR-008) across the
 > Phase 2–3 review arcs; listed as candidates only — none is required
 > downstream until an installation runs external CLI agents itself.
 
@@ -124,7 +124,7 @@ Format per entry: **Concept transferred** / **Source in Jarvis** /
   neutralized, and the summary/verdict is produced by a separate gateway
   call; (e) **`record_external_usage()`** — non-gateway LLM spend (a CLI's
   own provider calls) still lands as exactly one `ModelUsage` row.
-- **Source in Jarvis:** `backend/harness/execution.py` (brakes, recovery,
+- **Source in Friday:** `backend/harness/execution.py` (brakes, recovery,
   fencing), `backend/harness/runner.py` (`push_bundled_commit`,
   `prepare_review_clone`, `read_implementation_result`),
   `backend/harness/docker/*_run.sh`, `backend/ai_core/gateway.py`

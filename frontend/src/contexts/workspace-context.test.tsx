@@ -55,7 +55,7 @@ describe("WorkspaceProvider", () => {
   });
 
   it("falls back to the personal workspace when the saved id no longer exists", async () => {
-    window.localStorage.setItem("jarvis:active-workspace:u1", "deleted-workspace");
+    window.localStorage.setItem("friday:active-workspace:u1", "deleted-workspace");
     render(
       <WorkspaceProvider>
         <Consumer />
@@ -65,7 +65,7 @@ describe("WorkspaceProvider", () => {
   });
 
   it("honors a saved workspace id that still exists", async () => {
-    window.localStorage.setItem("jarvis:active-workspace:u1", "company-1");
+    window.localStorage.setItem("friday:active-workspace:u1", "company-1");
     render(
       <WorkspaceProvider>
         <Consumer />
@@ -76,7 +76,7 @@ describe("WorkspaceProvider", () => {
 
   describe("?workspace= deep links", () => {
     it("opens the linked workspace on load (over the saved one) with a toast", async () => {
-      window.localStorage.setItem("jarvis:active-workspace:u1", "personal-1");
+      window.localStorage.setItem("friday:active-workspace:u1", "personal-1");
       window.history.replaceState(null, "", "/approvals?workspace=company-1");
       render(
         <WorkspaceProvider>
@@ -85,7 +85,7 @@ describe("WorkspaceProvider", () => {
       );
       await waitFor(() => expect(screen.getByTestId("active")).toHaveTextContent("company-1"));
       expect(toastMock.info).toHaveBeenCalledWith("Bağlantı “Acme” çalışma alanını açtı.");
-      expect(window.localStorage.getItem("jarvis:active-workspace:u1")).toBe("company-1");
+      expect(window.localStorage.getItem("friday:active-workspace:u1")).toBe("company-1");
     });
 
     it("stays put and explains when the linked workspace is not accessible", async () => {

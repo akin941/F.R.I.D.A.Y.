@@ -14,7 +14,7 @@ COMPOSE_FILES = sorted(DOCKER_DIR.glob("compose*.yml"))
 # must never come back into a compose file.
 FORBIDDEN_LITERALS = [
     "dev-insecure-key",
-    "jarvis-dev-secret",
+    "friday-dev-secret",
     "e2e-fixture-bot-token",
     "e2e-fixture-webhook-secret",
     "MINIO",
@@ -74,11 +74,11 @@ def test_no_committed_secret_literal(path):
 def test_secret_checks_catch_a_literal():
     """The two checks above really fail on the shapes they guard against."""
     assert _SECRET_KEY_LINE.match('      DJANGO_SECRET_KEY: "abc"').group(3) == '"abc"'
-    assert _URL_WITH_LITERAL_PASSWORD.search("postgres://jarvis:jarvis@postgres:5432/jarvis")
+    assert _URL_WITH_LITERAL_PASSWORD.search("postgres://friday:friday@postgres:5432/friday")
     assert _URL_WITH_LITERAL_PASSWORD.search("redis://:hunter2@redis:6379/0")
     assert not _URL_WITH_LITERAL_PASSWORD.search("redis://:${REDIS_PASSWORD:?x}@redis:6379/0")
     assert not _URL_WITH_LITERAL_PASSWORD.search(
-        '"postgres://jarvis:${POSTGRES_PASSWORD:?run `make secrets`}@postgres:5432/jarvis"'
+        '"postgres://friday:${POSTGRES_PASSWORD:?run `make secrets`}@postgres:5432/friday"'
     )
 
 
