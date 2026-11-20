@@ -403,6 +403,26 @@ describe("disarming and safety", () => {
     expect(r.stream.closeSpy).toHaveBeenCalled();
   });
 
+  it("Durdur/Escape during a wake capture uploads nothing and re-arms for the next detection", async () => {
+    const r = rig();
+    await r.wake.arm({ type: "click" });
+    r.detector.fireOn.add(0);
+    await r.push(1);
+    await r.push(3);
+    expect(r.wake.snapshot.state).toBe("capturing");
+    r.controller.stop();
+    await r.push(silenceFrames, false);
+    expect(r.wake.snapshot.state).toBe("armed");
+    expect(voiceRequests(r.net)).toEqual([]);
+    r.detector.fireOn.add(r.detector.calls);
+    await r.push(1);
+    expect(r.wake.snapshot.state).toBe("capturing");
+    await r.push(3);
+    await r.push(silenceFrames, false);
+    await flush(20);
+    expect(r.net.uploads).toHaveLength(1);
+  });
+
   it("disarm on auth loss (401/logout) closes the mic and cancels a capture in progress", async () => {
     const r = rig();
     await r.wake.arm({ type: "click" });

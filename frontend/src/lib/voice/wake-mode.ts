@@ -117,9 +117,11 @@ class WakeCapture {
   private pcm: Int16Array | null = null;
   private waiters: ((pcm: Int16Array | null) => void)[] = [];
   private readonly port: WakePort;
+  private readonly onCancelled: () => void;
 
-  constructor(port: WakePort) {
+  constructor(port: WakePort, onCancelled: () => void) {
     this.port = port;
+    this.onCancelled = onCancelled;
   }
 
   settle(pcm: Int16Array | null) {
@@ -149,8 +151,10 @@ class WakeCapture {
         return pcm && pcm.length > 0 ? encodeWav(pcm) : null;
       },
       cancel: () => {
+        // The loop dropped the turn (Durdur/Escape, page left, a newer turn).
         if (!this.done) this.port.post({ type: "cancel" });
         this.settle(null);
+        this.onCancelled();
       },
     };
   }
@@ -395,7 +399,12 @@ export class WakeMode {
       return;
     }
     this.resetIdleTimer();
-    const capture = new WakeCapture(port);
+    const capture: WakeCapture = new WakeCapture(port, () => {
+      if (this.capture === capture) {
+        this.capture = null;
+        if (this.state === "capturing") this.set("armed");
+      }
+    });
     this.capture = capture;
     this.set("capturing");
     if (target) {
