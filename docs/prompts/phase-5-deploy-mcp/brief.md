@@ -796,6 +796,21 @@ cloud session (no running stack, browser or real services):
    recent-reads list fills after a chat read.
 5. Sonnet 5 review of this branch (CLAUDE.md review rule).
 
+**Known follow-ups (LOW, from review; recorded at integration merge
+2026-11-20):**
+- `deploys/services.py` (`resolve_branch_head`) / `deploys/views.py`
+  (`DeployTargetHeadView`): `GET /deploys/targets/<id>/head` performs
+  audited GitHub reads (`connector.read` audit rows) every time the
+  "Deploy" dialog opens (`staleTime` 0), so it is a read with side effects
+  that can add audit noise or rate-limit pressure if the dialog is opened
+  and closed repeatedly. Owner + web only, so exposure is small. Optional
+  fix: cache the head result server-side for about 30 s, or note the audit
+  volume in the runbook.
+- Phone-width checks and real-stack verification are recorded as owner
+  steps (they cannot run in a cloud session); no automated layout test
+  covers the phone-width requirement. No fix required; keep the owner
+  steps tracked until done.
+
 ### 10. closeout
 
 MASTER_PLAN §AA row 5 → done and §O (HA, external-installation bridge) updated; ADR-008
