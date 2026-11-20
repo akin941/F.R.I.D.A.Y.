@@ -1164,6 +1164,11 @@ to the D5 "local model required" reply).
 - **Q7 — Direct control for low-risk HA domains?** No; that adds a
   confirm-class kind and needs a new ADR (ADR-008 k.3, ADR-009). Revisit
   with Phase 6 voice, which needs an on-screen confirm anyway.
+  **Answered (Phase 6, 2026-11-20): no.** Voice-originated HA calls are
+  `tool_request` drafts like typed ones -- clicked on screen, decided on
+  `/approvals/[requestId]`; ADR-015's capability cap makes that an asserted
+  invariant per voice turn. Relief needs its own ADR and would still
+  require an on-screen decision (`docs/prompts/phase-6-voice-identity/brief.md` Q2).
 - **Q8 — Read channels?** `firm` reads web + CLI; `personal` reads web
   only; Telegram and the facade never in Phase 5.
 - **Q9–Q10 — Engine extraction, runner registry.** Leaf lifecycle layer

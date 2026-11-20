@@ -232,6 +232,38 @@ CLI ones (`accounts.pat.auth_failed`, `surface: openai`, rate-limited).
 - A manual Open WebUI smoke (streaming, history continuity, `friday-lite`
   as the task model) is still to be recorded here by the owner.
 
+## Voice (Phase 6, ADR-011 / ADR-015)
+
+Voice is a **transport, not a channel**: it exists only on the high-trust
+web channel (a trusted device's session through the BFF) and feeds the
+unchanged chat turn. There is no voice over the CLI, Telegram or the
+facade -- `/api/v1/voice/*` refuses a PAT, and `core.permissions
+.IsWebChannel` guards both voice endpoints.
+
+- **In:** push-to-talk on `/voice` (hold Space or the mic button) or the
+  in-tab "Hey Friday" wake word (off by default, d3). The browser encodes a
+  16 kHz mono PCM16 WAV and posts it to `POST /api/voice/transcriptions`;
+  the backend transcribes it in memory through the gateway (`voice.stt`)
+  and never stores it. The transcript is sent as an ordinary message with
+  `input_mode="voice"` (optionally shown for editing first, "Göndermeden
+  önce göster").
+- **Out:** each reply sentence is synthesized by `POST /api/voice/speech`
+  (`voice.tts`, language-routed, `VOICE_TTS_ROUTES`) and played half-duplex.
+- **Never decides (ADR-011 decision 5, ADR-015):** a voice turn may read and
+  draft only; a draft card, a tool request and a memory proposal are
+  confirmed by a click on screen, approvals on `/approvals/[requestId]`.
+  The HUD (`/hud`) shows voice state, tasks, approvals (deep links only),
+  cost and health; it has no decide control.
+- **Providers:** local by default (`voice-stt-local`/`voice-tts-local`, the
+  owner's Mac); the OpenRouter audio rows are seeded disabled and need the
+  owner's deliberate d2 toggle; every audio call needs a
+  `personal_data_allowed` row and is capped by the `audio` budget (A3).
+- **Mute:** the shell toggle, "sessize al" or `?mute=1` silences capture and
+  playback; an unreadable mute state fails closed.
+
+Setup, verification and the preflight voice checks:
+`docs/runbooks/voice-setup.md`. Design: `docs/prompts/phase-6-voice-identity/brief.md`.
+
 ## Other integrations (rewritten at the Phase 5 closeout, 2026-11-20)
 
 The channels above are front doors. Phase 5 (ADR-010) added Friday's first

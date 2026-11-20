@@ -27,5 +27,18 @@ export default defineConfig({
       APP_ORIGIN: baseURL,
     },
   },
-  projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
+  projects: [
+    {
+      name: "chromium",
+      use: {
+        ...devices["Desktop Chrome"],
+        // Optional: an installed browser instead of Playwright's download,
+        // e.g. E2E_BROWSER_CHANNEL=chrome (the owner's Mac, `manage.py
+        // preflight`'s voice_mute run). Unset in CI.
+        ...(process.env.E2E_BROWSER_CHANNEL ? { channel: process.env.E2E_BROWSER_CHANNEL } : {}),
+        // The voice specs play (silent) TTS audio without a user gesture.
+        launchOptions: { args: ["--autoplay-policy=no-user-gesture-required"] },
+      },
+    },
+  ],
 });

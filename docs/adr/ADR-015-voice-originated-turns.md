@@ -63,3 +63,28 @@ There is no speaker verification.
 - The capability cap is a release-gate regression in every voice branch.
 - Always-on wake (Phase 11) ships only with decisions 4–6 implemented and
   the false-accept budget met (≤ 0.2 per hour on 24 h of household audio).
+
+## Implementation note — decisions 1–3 landed (2026-11-20, Phase 6 closeout)
+
+Phase 6 implements decisions 1–3 for the browser path
+(`docs/prompts/phase-6-voice-identity/brief.md`, A6):
+
+1. **Capability cap** -- a turn posted with `input_mode="voice"` may run
+   read tools and produce drafts/proposals only, asserted server-side per
+   turn in the messages view; "hatırla ki …" creates a `pending_approval`
+   memory proposal, never an approved row; a spoken confirmation only
+   references an action whose receipt exists ("a yes is not a done").
+2. **Mic state visible** -- the shell indicator and the tab-title prefix
+   whenever audio is captured, and the HUD's mic state (health panel).
+3. **Mute fails closed** -- checked inside the capture path and inside the
+   single speak function; an unreadable mute state or a dropped turn/SSE
+   connection stops capture and releases the track.
+
+Closeout evidence: the voice e2e (`frontend/e2e/voice.e2e.ts`: a voice
+task draft becomes a task only through the card's click) and the
+`voice_mute` preflight check / `frontend/e2e/voice-mute.e2e.ts` (a muted
+tab opens no mic, uploads nothing and plays nothing). The in-tab parts of
+decisions 4–5 (half-duplex suppression, the 1.5 s self-trigger discard,
+wake-storm auto-mute) also shipped with Phase 6 branch 4; their replay-
+harness CI test belongs to the eval branch 3a, and their completion for
+always-on listening stays a Phase 11 precondition.

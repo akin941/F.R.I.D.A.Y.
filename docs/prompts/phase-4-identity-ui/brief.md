@@ -761,6 +761,10 @@ image or raw HTML.
   `bootstrap_owner` sets `is_staff`. The web has no password field.
 - **Q4 — Step-up PIN for approval decisions?** Not in Phase 4; revisit in
   Phase 6, where voice already requires an on-screen confirm.
+  **Answered (Phase 6, 2026-11-20): still no.** Voice adds no decision
+  surface (Phase 6 D8, ADR-011 decision 5, ADR-015), so the
+  stolen-unlocked-device threat model is unchanged; revisit with WebAuthn
+  (`docs/prompts/phase-6-voice-identity/brief.md` Q3).
 - **Q5 — Rotate the device secret on every session mint?** No —
   concurrent tabs would race into false reuse detection; idle expiry and
   instant revocation cover the threat.

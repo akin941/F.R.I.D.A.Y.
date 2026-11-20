@@ -10,8 +10,17 @@ Each check returns one or more `CheckResult`s with a status:
 
 Every outside contact goes through a module-level seam (`http_get`,
 `db_fetchone`, `redis_ping`, `celery_ping`, `gateway_factory`,
-`pin_report`) so the unit tests replace exactly that and nothing else --
-no test reaches a real provider, MCP server, browser or broker.
+`pin_report`, `run_command`) so the unit tests replace exactly that and
+nothing else -- no test reaches a real provider, MCP server, browser or
+broker.
+
+Phase 6 closeout (brief A7) adds the voice checks: one STT call on a
+fixture WAV and one TTS call on a fixed sentence per speech provider row
+(pinned, purpose `ops.preflight`, like the chat/embedding rows), the
+speech rows / TTS routes / audio budget configuration (`voice_providers`,
+`voice_routes`, `voice_budget`), and `voice_mute` -- a `?mute=1` voice tab
+is silent, proven by a real browser run of `e2e/voice-mute.e2e.ts`
+(`PREFLIGHT_VOICE_MUTE_CMD`).
 
 Rules this module keeps:
 
@@ -25,8 +34,11 @@ Rules this module keeps:
   NAME only; the value is never printed or stored.
 """
 
+import math
 import os
 import re
+import shlex
+import struct
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urljoin, urlparse
@@ -43,6 +55,14 @@ PREFLIGHT_PURPOSE = "ops.preflight"
 PREFLIGHT_MESSAGES = [{"role": "user", "content": "Reply with the single word: ok"}]
 PREFLIGHT_PARAMS = {"max_tokens": 5, "temperature": 0}
 PREFLIGHT_EMBED_TEXTS = ["preflight"]
+# Phase 6 closeout (A7): the speech round trip. The STT fixture is a 1 s
+# 440 Hz tone in D3's upload shape (16 kHz mono PCM16), built in memory --
+# not a recording, nothing personal, never written to disk. Its transcript
+# is irrelevant (and never printed): the check proves the provider and its
+# `model_id` accept the wire format and answer. The TTS sentence is fixed.
+PREFLIGHT_WAV_SECONDS = 1.0
+PREFLIGHT_WAV_HZ = 440
+PREFLIGHT_TTS_TEXT = "Friday preflight."
 
 # Env var names whose values count as secrets for the browser scan.
 _SECRET_NAME = re.compile(r"(KEY|TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL)S?$|_DSN$")
@@ -116,6 +136,18 @@ def pin_report(manifest, *, timeout):
     from connectors.services import live_pin_report
 
     return live_pin_report(manifest, timeout=timeout)
+
+
+def run_command(argv, *, timeout):
+    """Exit code of `argv` (no shell). Its output is captured and dropped:
+    a browser run's log can echo URLs, cookies or tokens, so nothing of it
+    reaches the preflight report. `TimeoutExpired`/`OSError` propagate."""
+    import subprocess
+
+    completed = subprocess.run(  # noqa: S603 -- argv from the owner's own setting, no shell
+        argv, capture_output=True, timeout=timeout, check=False
+    )
+    return completed.returncode
 
 
 # --- helpers --------------------------------------------------------------
@@ -231,9 +263,10 @@ AUDIO_CAPABILITIES = ("stt", "tts")
 
 def check_providers(*, model_calls=True):
     """One minimal gateway call per seeded provider (chat: `complete`,
-    embedding: `embed`), each pinned to its provider so a fallback can
-    never hide a broken one. A success proves the provider AND its
-    configured `model_id` answer."""
+    embedding: `embed`, Phase 6: STT `transcribe` on the fixture WAV, TTS
+    `synthesize` on the fixed sentence), each pinned to its provider so a
+    fallback can never hide a broken one. A success proves the provider AND
+    its configured `model_id` answer."""
     from ai_core.models import ModelProvider
 
     results = []
@@ -243,13 +276,11 @@ def check_providers(*, model_calls=True):
     gateway = None
     for provider in providers:
         name = f"provider:{provider.name}"
-        if provider.capability in AUDIO_CAPABILITIES:
-            # Phase 6 speech rows (STT/TTS) need real audio in/out; a chat
-            # call pinned to them would only fail. A standing warn until
-            # the voice layer gets its own preflight (see `voice_mute`).
-            results.append(CheckResult(name, WARN, "audio provider: not checked yet"))
-            continue
         skip = _provider_skip_reason(provider)
+        if not skip and provider.capability in AUDIO_CAPABILITIES:
+            # D5: audio is always personal data, so the gateway would refuse
+            # a disallowed row anyway -- the owner's d2 toggle is off.
+            skip = "" if provider.personal_data_allowed else "not personal_data_allowed (d2)"
         if skip:
             results.append(CheckResult(name, WARN, f"not configured: {skip}"))
             continue
@@ -258,6 +289,9 @@ def check_providers(*, model_calls=True):
             continue
         if gateway is None:
             gateway = gateway_factory()
+        if provider.capability in AUDIO_CAPABILITIES:
+            results.append(_check_speech_provider(gateway, provider))
+            continue
         try:
             if provider.capability == ModelProvider.Capability.EMBEDDING:
                 gateway.embed(PREFLIGHT_PURPOSE, PREFLIGHT_EMBED_TEXTS, only_provider=provider.name)
@@ -411,11 +445,227 @@ def check_browser_secrets():
     ]
 
 
+def preflight_wav():
+    """The STT fixture (see `PREFLIGHT_WAV_SECONDS`): a quiet sine tone as a
+    16 kHz mono PCM16 WAV, deterministic, in memory."""
+    from ai_core.audio import STT_SAMPLE_RATE, pcm_to_wav
+
+    frames = int(PREFLIGHT_WAV_SECONDS * STT_SAMPLE_RATE)
+    samples = (
+        int(8000 * math.sin(2 * math.pi * PREFLIGHT_WAV_HZ * i / STT_SAMPLE_RATE))
+        for i in range(frames)
+    )
+    pcm = struct.pack(f"<{frames}h", *samples)
+    return pcm_to_wav(pcm, sample_rate=STT_SAMPLE_RATE)
+
+
+def _route_language_for(provider_name):
+    """The TTS route language (A2) served by this row, so its pinned call
+    uses the voice the route configures; "" when no route names it."""
+    routes = getattr(settings, "VOICE_TTS_ROUTES", None) or {}
+    for language, route in sorted(routes.items()):
+        if (route or {}).get("provider") == provider_name:
+            return language
+    return ""
+
+
+def _check_speech_provider(gateway, provider):
+    """STT: the fixture WAV through `transcribe()`; TTS: the fixed sentence
+    through `synthesize()` and its audio through D3's output rule (the same
+    `normalize_tts_wav` the speech endpoint applies). Both pinned, purpose
+    `ops.preflight`, one `ModelUsage` row each. Neither the transcript nor
+    the audio is printed or kept."""
+    from ai_core.audio import InvalidAudio, normalize_tts_wav
+    from ai_core.models import ModelProvider
+
+    name = f"provider:{provider.name}"
+    model = f"model {provider.model_id}"
+    if provider.capability == ModelProvider.Capability.STT:
+        try:
+            gateway.transcribe(
+                PREFLIGHT_PURPOSE,
+                preflight_wav(),
+                content_type="audio/wav",
+                params={"language": getattr(settings, "VOICE_STT_LANGUAGE", "")},
+                only_provider=provider.name,
+            )
+        except Exception as exc:
+            return CheckResult(name, FAIL, f"{model}: {_error_label(exc)}")
+        return CheckResult(name, PASS, f"{model} transcribed the fixture WAV")
+    language = _route_language_for(provider.name)
+    try:
+        result = gateway.synthesize(
+            PREFLIGHT_PURPOSE,
+            PREFLIGHT_TTS_TEXT,
+            params={"language": language} if language else {},
+            only_provider=provider.name,
+        )
+    except Exception as exc:
+        return CheckResult(name, FAIL, f"{model}: {_error_label(exc)}")
+    try:
+        _, info = normalize_tts_wav(
+            result.audio, max_seconds=getattr(settings, "VOICE_TTS_MAX_SECONDS", 60)
+        )
+    except InvalidAudio as exc:
+        return CheckResult(name, FAIL, f"{model}: unusable audio ({exc.reason})")
+    route = f" (route {language})" if language else ""
+    return CheckResult(
+        name, PASS, f"{model} synthesized {info.seconds:.1f}s at {info.sample_rate} Hz{route}"
+    )
+
+
+def _speech_row_skip(provider):
+    """Why the gateway would never select this speech row ("" = eligible)."""
+    skip = _provider_skip_reason(provider)
+    if skip:
+        return skip
+    return "" if provider.personal_data_allowed else "not personal_data_allowed"
+
+
+def _check_voice_providers(rows):
+    missing = [c.upper() for c in AUDIO_CAPABILITIES if not rows[c]]
+    if missing:
+        return CheckResult(
+            "voice_providers", FAIL, f"no {'/'.join(missing)} provider rows: run seed_ai_defaults"
+        )
+    eligible = {c: [p.name for p in rows[c] if not _speech_row_skip(p)] for c in AUDIO_CAPABILITIES}
+    unusable = [c.upper() for c in AUDIO_CAPABILITIES if not eligible[c]]
+    selectable = set(eligible["stt"]) | set(eligible["tts"])
+    cloud_on = sorted(
+        p.name for c in AUDIO_CAPABILITIES for p in rows[c] if p.is_priced and p.name in selectable
+    )
+    note = f"; cloud audio enabled: {', '.join(cloud_on)}" if cloud_on else ""
+    if unusable:
+        return CheckResult(
+            "voice_providers",
+            WARN,
+            f"no eligible {'/'.join(unusable)} provider (VOICE_API_KEY / AI_FAKE_PROVIDER){note}",
+        )
+    return CheckResult(
+        "voice_providers",
+        PASS,
+        f"stt: {', '.join(eligible['stt'])}; tts: {', '.join(eligible['tts'])}{note}",
+    )
+
+
+def _check_voice_routes(tts_rows):
+    routes = getattr(settings, "VOICE_TTS_ROUTES", None) or {}
+    if not routes:
+        return CheckResult("voice_routes", WARN, "VOICE_TTS_ROUTES is empty")
+    broken, idle, ok = [], [], []
+    for language, route in sorted(routes.items()):
+        target = (route or {}).get("provider") or ""
+        row = tts_rows.get(target)
+        if row is None:
+            broken.append(f"{language} -> {target or '(none)'}")
+        elif _speech_row_skip(row):
+            idle.append(f"{language} -> {target} ({_speech_row_skip(row)})")
+        else:
+            ok.append(f"{language} -> {target}")
+    # The gateway falls back to priority order for both (A2), so voice still
+    # works: a warning that names what the route meant, never a failure.
+    problems = []
+    if broken:
+        problems.append("no TTS row for route: " + ", ".join(broken))
+    if idle:
+        problems.append("routed row not eligible: " + ", ".join(idle))
+    if problems:
+        return CheckResult("voice_routes", WARN, "; ".join(problems) + " (priority fallback)")
+    return CheckResult("voice_routes", PASS, ", ".join(ok))
+
+
+def _describe_budget(budget):
+    parts = [
+        f"{window} {limit.normalize():f} USD"
+        for window, limit in (
+            ("monthly", budget.monthly_limit_usd),
+            ("daily", budget.daily_limit_usd),
+            ("session", budget.session_limit_usd),
+        )
+        if limit is not None
+    ]
+    return f"{budget.name}: {', '.join(parts) or 'no caps'}"
+
+
+def _check_voice_budget():
+    from ai_core.budgets import budgets_for
+
+    purposes = tuple(getattr(settings, "AI_AUDIO_PURPOSES", ()) or ())
+    if not purposes:
+        return CheckResult("voice_budget", FAIL, "AI_AUDIO_PURPOSES is empty")
+    covers = {p: budgets_for(p) for p in purposes}
+    uncovered = [p for p in purposes if not covers[p]]
+    if uncovered:
+        return CheckResult(
+            "voice_budget",
+            FAIL,
+            f"no active budget covers {', '.join(uncovered)}: run seed_ai_defaults",
+        )
+    budgets = {b.pk: b for found in covers.values() for b in found}
+    described = "; ".join(
+        _describe_budget(b) for b in sorted(budgets.values(), key=lambda b: b.name)
+    )
+    uncapped = [p for p in purposes if all(b.monthly_limit_usd is None for b in covers[p])]
+    if uncapped:
+        return CheckResult(
+            "voice_budget", WARN, f"no monthly cap on {', '.join(uncapped)}: {described}"
+        )
+    return CheckResult("voice_budget", PASS, described)
+
+
+def check_voice_config():
+    """Phase 6 configuration, read-only (no model call, no `ModelUsage`):
+
+    - `voice_providers`: STT and TTS rows exist (else `fail`: run
+      `seed_ai_defaults`) and at least one of each is eligible for the
+      gateway (else `warn`: voice is not configured here). An eligible,
+      priced (cloud) speech row is named -- the owner's d2 toggle is on.
+    - `voice_routes`: every `VOICE_TTS_ROUTES` provider names an eligible
+      TTS row; a missing (e.g. no `VOICE_API_KEY`, so no local rows, or a
+      typo) or ineligible routed row is a `warn` -- the gateway falls back
+      to priority order (A2), the owner sees which route is not honoured.
+    - `voice_budget`: an active `AIBudget` covers every audio purpose
+      (`fail` otherwise -- A3); a cover without a monthly cap is a `warn`.
+    """
+    from ai_core.models import ModelProvider
+
+    rows = {
+        capability: list(
+            ModelProvider.objects.filter(capability=capability).order_by("priority", "name")
+        )
+        for capability in AUDIO_CAPABILITIES
+    }
+    return [
+        _check_voice_providers(rows),
+        _check_voice_routes({p.name: p for p in rows["tts"]}),
+        _check_voice_budget(),
+    ]
+
+
 def check_voice_mute():
-    """`?mute=1` voice tab is silent: the voice layer is Phase 6 and not
-    built yet, so there is nothing to check -- a standing warning until
-    Phase 6 replaces this check with a real one."""
-    return [CheckResult("voice_mute", WARN, "voice layer not built yet (Phase 6)")]
+    """A `?mute=1` voice tab is silent (brief A7): no mic opened, no speech
+    request, nothing played. That is browser behaviour, so the check runs a
+    real browser -- `PREFLIGHT_VOICE_MUTE_CMD`, normally the Playwright spec
+    `frontend/e2e/voice-mute.e2e.ts` against the running BFF -- and passes
+    on exit 0. Unset: a warning (not configured here). The command's output
+    is never shown (it may carry URLs or cookies)."""
+    command = getattr(settings, "PREFLIGHT_VOICE_MUTE_CMD", "")
+    try:
+        argv = shlex.split(command or "")
+    except ValueError:
+        return [CheckResult("voice_mute", FAIL, "PREFLIGHT_VOICE_MUTE_CMD does not parse")]
+    if not argv:
+        return [CheckResult("voice_mute", WARN, "PREFLIGHT_VOICE_MUTE_CMD not set")]
+    timeout = getattr(settings, "PREFLIGHT_VOICE_MUTE_TIMEOUT_SECONDS", 180)
+    try:
+        code = run_command(argv, timeout=timeout)
+    except Exception as exc:
+        if type(exc).__name__ == "TimeoutExpired":
+            return [CheckResult("voice_mute", FAIL, f"browser run timed out after {timeout}s")]
+        return [CheckResult("voice_mute", FAIL, f"browser run failed: {_error_label(exc)}")]
+    if code != 0:
+        return [CheckResult("voice_mute", FAIL, f"browser run exited {code}: muted tab not silent")]
+    return [CheckResult("voice_mute", PASS, "muted tab opened no mic and played nothing")]
 
 
 CHECKS = (
@@ -429,6 +679,7 @@ CHECKS = (
     ("mcp_pins", check_mcp_pins),
     ("frontend_build", check_frontend_build),
     ("browser_secrets", check_browser_secrets),
+    ("voice_config", check_voice_config),
     ("voice_mute", check_voice_mute),
 )
 

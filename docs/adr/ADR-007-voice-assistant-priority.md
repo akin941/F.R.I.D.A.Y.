@@ -48,3 +48,18 @@ binary-audio storage mechanism). A local Ollama `ModelProvider` ships now,
 independent of the rest of MVP 12, as low-risk foundation work. The full
 STT/TTS pipeline itself is a separate implementation pass
 (`docs/prompts/mvp-12-voice/brief.md`) gated on the two open decisions above.
+
+## Implementation note (2026-11-20, Phase 6 closeout)
+
+Voice shipped as Phase 6 (`docs/prompts/phase-6-voice-identity/brief.md`).
+The rules this ADR bound voice to held: every STT/TTS call goes through
+`InferenceGateway.transcribe()`/`synthesize()` with one `ModelUsage` row
+(audio purposes `voice.stt`/`voice.tts`, plus `ops.preflight` for the
+preflight round trip), no speech SDK is imported anywhere in the backend
+(`ai_core/tests/test_sdk_guard.py`), and the local Ollama provider stayed
+personal-only. The two decisions this ADR left open were resolved in
+MASTER_PLAN §O on 2026-07-17; the second (bounded temp file) is superseded
+by ADR-011 decision 3: transcription is synchronous and in-memory, and raw
+audio is never written to disk by Friday. The STT/TTS rows are local by
+default (`voice-stt-local`/`voice-tts-local`); cloud audio rows exist only
+seeded disabled behind the owner's d2 toggle.

@@ -165,3 +165,21 @@ implementation facts and open items, not new decisions.
 - **Preflight.** `manage.py preflight` (`backend/ops/`) is the live
   "done" check named in MASTER_PLAN's "Roadmap update 2026-11-20"; later
   phases add their own checks to it.
+
+## Implementation note — decision 5 landed (2026-11-20, Phase 6 closeout)
+
+Decision 5 (voice: local wake word, local STT/TTS, visual identity after
+voice works) is implemented by Phase 6
+(`docs/prompts/phase-6-voice-identity/brief.md`, ADR-011, ADR-015):
+the "Hey Friday" detector (openWakeWord + Silero VAD on `onnxruntime-web`)
+runs in the browser tab and no audio leaves the device before it fires
+(push-to-talk stays the default until Phase 11's false-activation budget,
+d3); STT/TTS run on the owner's Mac behind the `openai_compatible` adapter
+(faster-whisper / Piper via speaches or the `deploy/voice/` sidecar); the
+visual identity layer came last as HUD v1 (`/hud`), after the push-to-talk
+loop and the wake word worked. Decision 3 is unchanged by voice: a spoken
+utterance is never the explicit decision and never a confirm-class
+confirmation (ADR-011 decision 5, ADR-015); the closeout e2e proves a voice
+task draft becomes a task only through the card's click. Pending owner
+steps (the custom `hey_friday` model, the Mac measurements) are listed in
+the Phase 6 brief.

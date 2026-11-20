@@ -364,6 +364,7 @@ class InferenceGateway:
         context_report=None,
         on_usage=None,
         budget_session="",
+        only_provider=None,
     ):
         """Speech-to-text (MVP 12, Phase 6 D4/D5). Same single-door/one-
         ModelUsage-row/retry/fallback contract as `embed()` (ADR-003). `audio`
@@ -371,7 +372,9 @@ class InferenceGateway:
         logged or stored; `params` may carry `language` (ISO 639-1, empty =
         auto-detect). Always personal data (D5): only
         `personal_data_allowed` providers, no kwarg relaxes it. No
-        streaming variant."""
+        streaming variant. `only_provider` pins the call to one row, as in
+        `complete()` (Phase 6 closeout: the preflight voice checks) -- the
+        personal-data filter still applies to the pinned row."""
         params = dict(params or {})
         started = time.monotonic()
         base_report = self._base_report(context_report, True, budget_session)
@@ -393,6 +396,7 @@ class InferenceGateway:
             started=started,
             on_usage=on_usage,
             budget_session=budget_session,
+            only_provider=only_provider,
         )
         return TranscribeGatewayResult(
             text=result.text,
@@ -413,6 +417,7 @@ class InferenceGateway:
         context_report=None,
         on_usage=None,
         budget_session="",
+        only_provider=None,
     ):
         """Text-to-speech (MVP 12, Phase 6 D4/D5/A2). Same contract as
         `transcribe()`, personal data included. `params["language"]` selects
@@ -420,7 +425,9 @@ class InferenceGateway:
         eligible (active, keyed, `personal_data_allowed`) rows, never chosen
         by the client; voice and response format come from the route / the
         provider defaults (`settings.VOICE_TTS_PROVIDER_PARAMS`). No
-        streaming variant."""
+        streaming variant. `only_provider` pins the call to one eligible row
+        (no route, no fallback); the route's voice still applies when the
+        pinned row is the routed one."""
         params = dict(params or {})
         started = time.monotonic()
         language = str(params.get("language") or "")
@@ -447,6 +454,7 @@ class InferenceGateway:
             budget_session=budget_session,
             preferred=route.get("provider") or "",
             preferred_reason=f"route:{language}"[:50] if language else "",
+            only_provider=only_provider,
         )
         return SynthesizeGatewayResult(
             audio=result.audio,
@@ -491,6 +499,7 @@ class InferenceGateway:
         budget_session="",
         preferred="",
         preferred_reason="",
+        only_provider=None,
     ):
         """Shared STT/TTS execution: budget check, then provider selection
         (personal-data providers only, D5 -- unconditionally), retry/fallback
@@ -520,6 +529,7 @@ class InferenceGateway:
             personal_data=True,
             preferred=preferred,
             preferred_reason=preferred_reason,
+            only_provider=only_provider,
         )
         if not providers:
             raise self._no_provider_error(
