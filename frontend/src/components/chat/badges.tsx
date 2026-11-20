@@ -1,4 +1,4 @@
-import { Lock, Plug, Radio, ShieldAlert } from "lucide-react";
+import { Lock, Mic, Plug, Radio, ShieldAlert } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { tr } from "@/lib/i18n/tr";
 import { TONE_PILL_CLASSES } from "@/lib/theme/status";
@@ -90,6 +90,31 @@ export function ChannelBadge({
     >
       <Radio aria-hidden />
       {label}
+    </Badge>
+  );
+}
+
+/**
+ * A spoken turn (Phase 6 D9, `Message.input_mode="voice"`): provenance for
+ * display only -- client-asserted, never trust-bearing.
+ */
+export function VoiceInputBadge({
+  inputMode,
+  className,
+}: {
+  inputMode: string | null | undefined;
+  className?: string;
+}) {
+  if (inputMode !== "voice") return null;
+  return (
+    <Badge
+      variant="outline"
+      data-testid="voice-badge"
+      title={tr.voice.badgeHint}
+      className={cn("text-muted-foreground", className)}
+    >
+      <Mic aria-hidden />
+      {tr.voice.badge}
     </Badge>
   );
 }

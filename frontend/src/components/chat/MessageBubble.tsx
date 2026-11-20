@@ -3,7 +3,7 @@
 import { RotateCcw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { CopyButton, Markdown } from "@/components/ui/markdown";
-import { ChannelBadge, SourceBadges } from "@/components/chat/badges";
+import { ChannelBadge, SourceBadges, VoiceInputBadge } from "@/components/chat/badges";
 import { SourcesList } from "@/components/chat/SourcesList";
 import type { ChatMessageView } from "@/components/chat/types";
 import { tr } from "@/lib/i18n/tr";
@@ -45,7 +45,10 @@ export function MessageBubble({
         <div className="max-w-[85%] rounded-2xl bg-primary px-4 py-2 text-sm break-words whitespace-pre-wrap text-primary-foreground">
           {message.content}
         </div>
-        <ChannelBadge channel={message.channel} />
+        <div className="flex flex-wrap justify-end gap-1">
+          <VoiceInputBadge inputMode={message.inputMode} />
+          <ChannelBadge channel={message.channel} />
+        </div>
       </div>
     );
   }

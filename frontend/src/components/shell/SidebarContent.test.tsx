@@ -59,7 +59,7 @@ describe("SidebarContent", () => {
     vi.unstubAllGlobals();
   });
 
-  it("renders the grouped navigation, without the voice entry", () => {
+  it("renders the grouped navigation, with the voice entry back (Phase 6)", () => {
     stubSummary(summary(0, 0));
     renderWithClient(<SidebarContent />);
 
@@ -67,13 +67,26 @@ describe("SidebarContent", () => {
     const work = within(navigation).getByRole("list", { name: "Çalışma" });
     expect(within(work).getAllByRole("link").map((l) => l.textContent)).toEqual([
       "Sohbet",
+      "Sesli",
       "Onaylar",
       "Harness",
     ]);
     for (const group of ["Hafıza", "Firma", "Otomasyon", "Ayarlar"]) {
       expect(within(navigation).getByRole("list", { name: group })).toBeInTheDocument();
     }
-    expect(within(navigation).queryByRole("link", { name: /Sesli/ })).not.toBeInTheDocument();
+    expect(within(navigation).getByRole("link", { name: "Sesli" })).toHaveAttribute("href", "/voice");
+  });
+
+  it("offers the voice mute toggle in the shell (A6)", async () => {
+    stubSummary(summary(0, 0));
+    renderWithClient(<SidebarContent />);
+    const toggle = screen.getByRole("button", { name: "Sesi kapat" });
+    expect(toggle).toHaveAttribute("aria-pressed", "false");
+    await userEvent.click(toggle);
+    expect(window.localStorage.getItem("friday:voice:muted")).toBe("1");
+    expect(screen.getByRole("button", { name: "Sesi aç" })).toHaveAttribute("aria-pressed", "true");
+    await userEvent.click(screen.getByRole("button", { name: "Sesi aç" }));
+    expect(window.localStorage.getItem("friday:voice:muted")).toBeNull();
   });
 
   it("marks the current section with aria-current, detail routes included", () => {

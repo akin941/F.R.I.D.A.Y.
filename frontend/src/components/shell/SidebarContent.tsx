@@ -10,6 +10,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { NAV_GROUPS, isActivePath, type NavBadge } from "@/components/shell/nav";
 import { WorkspaceSwitcher } from "@/components/shell/WorkspaceSwitcher";
 import { ThemeToggle } from "@/components/theme/ThemeToggle";
+import { VoiceMuteToggle } from "@/components/shell/VoiceMuteToggle";
 import { useWorkspace } from "@/contexts/workspace-context";
 import { apiPostJson } from "@/lib/api-client";
 import { tr } from "@/lib/i18n/tr";
@@ -129,7 +130,10 @@ export function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
       </nav>
       <div className="mt-auto flex flex-col gap-2">
         <Separator />
-        <ThemeToggle className="self-start" />
+        <div className="flex flex-wrap items-center gap-1">
+          <ThemeToggle />
+          <VoiceMuteToggle />
+        </div>
         {loading ? (
           <Skeleton className="h-9 w-full" />
         ) : (

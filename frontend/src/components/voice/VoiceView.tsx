@@ -1,140 +1,498 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import { Mic } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import Link from "next/link";
+import { Mic, MicOff, Square } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { FridayOrb, type FridayOrbState } from "@/components/voice/FridayOrb";
+import { TaskDraftCard } from "@/components/chat/TaskDraftCard";
+import { ToolRequestCard } from "@/components/chat/ToolRequestCard";
+import type { TaskDraft, ToolRequestDraft } from "@/components/chat/drafts";
 import { mapErrorType } from "@/components/chat/errors";
-import { apiFetch, apiPostJson } from "@/lib/api-client";
-import { SSEStreamParser } from "@/lib/sse";
+import { localDateString } from "@/components/tasks/TodayView";
+import { apiPostJson } from "@/lib/api-client";
+import { isKnownErrorCode, messageForError } from "@/lib/i18n/error-codes";
+import { tr } from "@/lib/i18n/tr";
 import { useWorkspace } from "@/contexts/workspace-context";
-import type { ApiConversation } from "@/types/api";
 import { VIEW_SCROLL_ROOT } from "@/components/shell/view-scroll";
 import { cn } from "@/lib/utils";
+import * as voiceApi from "@/lib/voice/api";
+import { startCapture } from "@/lib/voice/capture";
+import { VOICE_FINISH_MS, VOICE_HOLD_THRESHOLD_MS } from "@/lib/voice/config";
+import { VoiceController, type VoiceControllerDeps, type VoiceSnapshot } from "@/lib/voice/controller";
+import { readMuteState, setVoiceMuted, useVoiceMute } from "@/lib/voice/mute";
+import type { VoicePhase } from "@/lib/voice/voice-machine";
+import type { ApiApprovalRequest, ApiConversation, ApiMemory } from "@/types/api";
 
 /**
- * MVP 12 §1 (ADR-007): a real integration, not a mockup — sends through the
- * exact same `/api/conversations/{id}/messages` SSE endpoint ChatView.tsx
- * uses, and drives the orb's state off the exact same event types
- * (ChatView.tsx's chunk/done/error handling). Mic capture and real audio
- * playback are MVP 12 §2-§3 (docs/prompts/mvp-12-voice/brief.md) — not
- * built yet; the mic button here is a visible placeholder.
+ * The push-to-talk voice page (Phase 6 branch 3). Voice is a transport onto
+ * the unchanged chat turn (D1): the transcript goes through the same
+ * messages endpoint with `input_mode="voice"`, and the reply is spoken
+ * sentence by sentence while it streams.
+ *
+ * D8 / ADR-015: drafts from a voice turn render as the same cards chat
+ * uses, confirmed only by a click on the card; Friday only *says* a
+ * confirmation once the card hands back a receipt id. Nothing on this page
+ * turns a transcript into a click.
  */
-export function VoiceView() {
-  const { activeWorkspace } = useWorkspace();
 
-  const [creatingConversation, setCreatingConversation] = useState(false);
+const PREVIEW_KEY = "friday:voice:preview";
+const LISTENING_TITLE_PREFIX = "● Dinliyor — ";
+
+function loadPreview(): boolean {
+  try {
+    return window.localStorage.getItem(PREVIEW_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function savePreview(value: boolean) {
+  try {
+    if (value) window.localStorage.setItem(PREVIEW_KEY, "1");
+    else window.localStorage.removeItem(PREVIEW_KEY);
+  } catch {
+    // Per-device convenience only.
+  }
+}
+
+function orbStateFor(phase: VoicePhase): FridayOrbState {
+  return phase === "finishing" ? "listening" : phase;
+}
+
+/** Turkish text for a voice error code (capture, catalog or stream). */
+export function voiceErrorMessage(code: string): string {
+  if (tr.voice.errors[code]) return tr.voice.errors[code];
+  if (isKnownErrorCode(code)) return messageForError(code, 0);
+  return mapErrorType(code);
+}
+
+interface LiveTool {
+  draft: ToolRequestDraft;
+  created: ApiApprovalRequest | null;
+}
+
+const EMPTY_SNAPSHOT: VoiceSnapshot = {
+  phase: "idle",
+  buffer: "",
+  error: null,
+  heard: "",
+  reply: "",
+  review: null,
+  notice: null,
+};
+
+export interface VoiceViewProps {
+  /** Test seam: replace the controller's media/network edges. */
+  depsOverride?: Partial<VoiceControllerDeps>;
+}
+
+export function VoiceView({ depsOverride }: VoiceViewProps = {}) {
+  const { activeWorkspace } = useWorkspace();
+  const workspaceId = activeWorkspace?.id ?? null;
+  const mute = useVoiceMute();
+  const { muted, readable } = mute;
+
+  const [snapshot, setSnapshot] = useState<VoiceSnapshot>(EMPTY_SNAPSHOT);
   const [value, setValue] = useState("");
-  const [transcript, setTranscript] = useState("");
-  const [orbState, setOrbState] = useState<FridayOrbState>("idle");
-  const [isSending, setIsSending] = useState(false);
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [reviewText, setReviewText] = useState("");
+  const [preview, setPreview] = useState(false);
+  const [taskDrafts, setTaskDrafts] = useState<TaskDraft[]>([]);
+  const [toolDrafts, setToolDrafts] = useState<Record<string, LiveTool>>({});
+  const [confirmed, setConfirmed] = useState<Record<string, string>>({});
+  const [proposals, setProposals] = useState<ApiMemory[]>([]);
 
   const conversationIdRef = useRef<string | null>(null);
-  const sendingRef = useRef(false);
+  const workspaceRef = useRef<string | null>(workspaceId);
+  const previewRef = useRef(preview);
+  const pressStartedRef = useRef(0);
+  const toggledRef = useRef(false);
+  const spaceDownRef = useRef(false);
 
   useEffect(() => {
-    conversationIdRef.current = null;
-  }, [activeWorkspace?.id]);
+    /* eslint-disable react-hooks/set-state-in-effect -- one-time read of a per-device setting after mount (not available during prerender) */
+    setPreview(loadPreview());
+    /* eslint-enable react-hooks/set-state-in-effect */
+  }, []);
+  useEffect(() => {
+    previewRef.current = preview;
+  }, [preview]);
 
-  async function ensureConversation(): Promise<string | null> {
+  const ensureConversation = useCallback(async (): Promise<string | null> => {
     if (conversationIdRef.current) return conversationIdRef.current;
-    if (!activeWorkspace) return null;
-    setCreatingConversation(true);
+    const workspace = workspaceRef.current;
+    if (!workspace) return null;
     try {
       const conversation = await apiPostJson<ApiConversation>("/api/conversations", {
-        workspace: activeWorkspace.id,
+        workspace,
         title: "Sesli",
       });
       conversationIdRef.current = conversation.id;
       return conversation.id;
     } catch {
-      setErrorMessage("Konuşma başlatılamadı. Lütfen tekrar deneyin.");
       return null;
-    } finally {
-      setCreatingConversation(false);
     }
-  }
+  }, []);
 
-  async function handleSend() {
-    if (sendingRef.current || isSending || !value.trim()) return;
-    const content = value;
-    setValue("");
-    setErrorMessage(null);
-    setTranscript("");
+  // One controller per mounted page; its edges are the real browser APIs
+  // and BFF routes unless a test overrides them. Constructing it touches no
+  // browser API (the mic and AudioContext open on first use). The closures
+  // below read refs only when the controller calls them (events, effects),
+  // never during render.
+  /* eslint-disable react-hooks/refs -- refs are read at call time, not during render */
+  const [controller] = useState(() => {
+    let lastReview: string | null = null;
+    const deps: VoiceControllerDeps = {
+      ensureConversation,
+      workspaceId: () => workspaceRef.current,
+      startCapture: (callbacks) => startCapture(callbacks),
+      transcribe: voiceApi.transcribe,
+      sendTurn: voiceApi.sendTurn,
+      synthesize: voiceApi.synthesize,
+      fetchReceipt: voiceApi.fetchReceipt,
+      proposeMemory: voiceApi.proposeMemory,
+      setMuted: setVoiceMuted,
+      readMute: readMuteState,
+      clientLocalDate: () => localDateString(new Date()),
+      previewBeforeSend: () => previewRef.current,
+      finishMs: VOICE_FINISH_MS,
+      onSnapshot: (next) => {
+        setSnapshot(next);
+        // A new transcript held for review seeds the editor once.
+        if (next.review !== lastReview) {
+          lastReview = next.review;
+          if (next.review !== null) setReviewText(next.review);
+        }
+      },
+      onDraft: (event) => {
+        if (event.kind === "task") {
+          setTaskDrafts((prev) => [
+            ...prev.filter((d) => d.sourceMessageId !== event.source_message_id),
+            { sourceMessageId: event.source_message_id, title: event.title, dueDate: event.due_date },
+          ]);
+        } else {
+          setToolDrafts((prev) => ({
+            ...prev,
+            [event.source_message_id]: {
+              draft: {
+                sourceMessageId: event.source_message_id,
+                toolName: event.tool_name,
+                payload: event.payload,
+              },
+              created: null,
+            },
+          }));
+        }
+      },
+      onMemoryProposal: (memory) => setProposals((prev) => [memory, ...prev].slice(0, 5)),
+      ...depsOverride,
+    };
+    return new VoiceController(deps);
+  });
+  /* eslint-enable react-hooks/refs */
 
-    const id = await ensureConversation();
-    if (!id) return;
+  // Leaving the page stops the mic, the reply stream and playback.
+  useEffect(() => {
+    return () => controller.stop();
+  }, [controller]);
 
-    sendingRef.current = true;
-    setIsSending(true);
-    setOrbState("thinking");
+  // A workspace switch starts a fresh voice conversation.
+  useEffect(() => {
+    if (workspaceRef.current !== workspaceId) {
+      workspaceRef.current = workspaceId;
+      conversationIdRef.current = null;
+      controller.resetConversation();
+      setTaskDrafts([]);
+      setToolDrafts({});
+    }
+  }, [workspaceId, controller]);
 
-    try {
-      const response = await apiFetch(`/api/conversations/${id}/messages`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ content }),
-      });
+  // The shell mute toggle / another tab / an unreadable state (A6).
+  useEffect(() => {
+    if (muted) controller.muteChanged({ muted, readable });
+  }, [muted, readable, controller]);
 
-      if (!response.ok || !response.body) {
-        setErrorMessage("Bir şeyler ters gitti. Lütfen tekrar deneyin.");
+  const phase = snapshot.phase;
+  const micOpen = phase === "listening";
+  const busy = phase === "thinking" || phase === "speaking" || phase === "transcribing";
+
+  // The mic indicator in the tab title while the mic is open (D6).
+  useEffect(() => {
+    if (!micOpen) return;
+    const original = document.title;
+    document.title = `${LISTENING_TITLE_PREFIX}${original}`;
+    return () => {
+      document.title = original;
+    };
+  }, [micOpen]);
+
+  // Space held = push-to-talk; Escape = Durdur (D7).
+  useEffect(() => {
+    function isTyping(target: EventTarget | null) {
+      const el = target as HTMLElement | null;
+      return !!el && (el.tagName === "TEXTAREA" || el.tagName === "INPUT" || el.isContentEditable);
+    }
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        controller.stop();
         return;
       }
-
-      const reader = response.body.getReader();
-      const parser = new SSEStreamParser();
-      let sawTerminal = false;
-
-      while (true) {
-        const { done, value: chunkValue } = await reader.read();
-        if (done) break;
-        for (const event of parser.push(chunkValue)) {
-          if (event.type === "chunk") {
-            setOrbState("speaking");
-            setTranscript((prev) => prev + event.text);
-          } else if (event.type === "done") {
-            sawTerminal = true;
-          } else if (event.type === "error") {
-            sawTerminal = true;
-            setErrorMessage(mapErrorType(event.error_type));
-          }
-        }
-      }
-      if (!sawTerminal) {
-        setErrorMessage("Bağlantı kesildi.");
-      }
-    } catch {
-      setErrorMessage("Bir şeyler ters gitti. Lütfen tekrar deneyin.");
-    } finally {
-      sendingRef.current = false;
-      setIsSending(false);
-      setOrbState("idle");
+      if (event.code !== "Space" || event.repeat || isTyping(event.target)) return;
+      if ((event.target as HTMLElement | null)?.tagName === "BUTTON") return;
+      event.preventDefault();
+      spaceDownRef.current = true;
+      void controller.press();
     }
+    function onKeyUp(event: KeyboardEvent) {
+      if (event.code !== "Space" || !spaceDownRef.current) return;
+      event.preventDefault();
+      spaceDownRef.current = false;
+      void controller.release();
+    }
+    window.addEventListener("keydown", onKeyDown);
+    window.addEventListener("keyup", onKeyUp);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("keyup", onKeyUp);
+    };
+  }, [controller]);
+
+  // The mic button: hold to talk (pointer down -> up after the threshold),
+  // or a short click to toggle (the next press ends the utterance).
+  function handlePointerDown(event: React.PointerEvent) {
+    if (event.button !== 0) return;
+    if (toggledRef.current) {
+      toggledRef.current = false;
+      void controller.release();
+      return;
+    }
+    pressStartedRef.current = performance.now();
+    void controller.press();
+  }
+
+  function handlePointerUp() {
+    if (pressStartedRef.current === 0) return;
+    const held = performance.now() - pressStartedRef.current;
+    pressStartedRef.current = 0;
+    if (held >= VOICE_HOLD_THRESHOLD_MS) void controller.release();
+    else toggledRef.current = true;
+  }
+
+  function handleClick(event: React.MouseEvent) {
+    // Keyboard activation (Enter/Space on the focused button) is a toggle;
+    // pointer clicks were handled by down/up above.
+    if (event.detail !== 0) return;
+    if (micOpen) void controller.release();
+    else void controller.press();
+  }
+
+  // A toggle left open is closed by any phase change away from listening.
+  useEffect(() => {
+    if (!micOpen) toggledRef.current = false;
+  }, [micOpen]);
+
+  async function handleTypedSend() {
+    if (!value.trim() || busy) return;
+    const content = value;
+    setValue("");
+    await controller.sendText(content, "text");
+  }
+
+  async function handleReviewSend() {
+    if (!reviewText.trim()) return;
+    const content = reviewText;
+    setReviewText("");
+    await controller.sendText(content, "voice");
   }
 
   function handleKeyDown(event: React.KeyboardEvent<HTMLTextAreaElement>) {
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
-      if (!isSending && value.trim()) void handleSend();
+      void handleTypedSend();
     }
   }
 
+  function dismissTask(id: string) {
+    setTaskDrafts((prev) => prev.filter((d) => d.sourceMessageId !== id));
+  }
+
+  function dismissTool(id: string) {
+    setToolDrafts((prev) => {
+      const next = { ...prev };
+      delete next[id];
+      return next;
+    });
+  }
+
+  const errorText = phase === "error" && snapshot.error ? voiceErrorMessage(snapshot.error) : null;
+  const noticeText = snapshot.notice ? (tr.voice.notices[snapshot.notice] ?? null) : null;
+  const statusText = tr.voice.phase[phase];
+
   return (
-    <div className={cn(VIEW_SCROLL_ROOT, "items-center justify-center-safe gap-8 p-8")}>
-      <FridayOrb state={orbState} size={220} />
+    <div className={cn(VIEW_SCROLL_ROOT, "items-center justify-center-safe gap-6 p-6 sm:p-8")}>
+      <FridayOrb state={orbStateFor(phase)} size={220} level={() => controller.level() ?? 0} />
 
-      {transcript ? (
-        <p className="max-w-xl text-center text-sm text-muted-foreground">{transcript}</p>
-      ) : null}
+      <p aria-live="polite" role="status" data-testid="voice-status" className="text-center text-sm text-muted-foreground">
+        {statusText}
+      </p>
 
-      {errorMessage ? (
-        <Alert variant="destructive" className="max-w-xl">
-          <AlertDescription>{errorMessage}</AlertDescription>
+      {mute.muted ? (
+        <Alert className="max-w-xl" data-testid="voice-muted">
+          <AlertDescription className="flex flex-wrap items-center gap-2">
+            <MicOff aria-hidden className="size-4" />
+            <span>{mute.readable ? tr.voice.mutedNotice : tr.voice.errors.mute_unreadable}</span>
+          </AlertDescription>
         </Alert>
       ) : null}
+
+      {/* Captions are always on: what Friday heard and what it answers. */}
+      {snapshot.heard || snapshot.buffer || snapshot.reply ? (
+        <div className="flex w-full max-w-xl flex-col gap-2 text-sm" data-testid="voice-captions">
+          {snapshot.heard || snapshot.buffer ? (
+            <p className="text-right">
+              <span className="sr-only">{tr.voice.heard}: </span>
+              <span className="rounded-2xl bg-primary px-3 py-1.5 text-primary-foreground">
+                {snapshot.buffer || snapshot.heard}
+              </span>
+            </p>
+          ) : null}
+          {snapshot.reply ? (
+            <p className="text-muted-foreground" data-testid="voice-reply">
+              <span className="sr-only">{tr.voice.reply}: </span>
+              {snapshot.reply}
+            </p>
+          ) : null}
+        </div>
+      ) : null}
+
+      {errorText ? (
+        <Alert variant="destructive" role="alert" className="max-w-xl">
+          <AlertDescription>{errorText}</AlertDescription>
+        </Alert>
+      ) : null}
+      {noticeText && !errorText ? (
+        <Alert className="max-w-xl" data-testid="voice-notice">
+          <AlertDescription>{noticeText}</AlertDescription>
+        </Alert>
+      ) : null}
+
+      {snapshot.review !== null ? (
+        <div className="flex w-full max-w-xl flex-col gap-2" data-testid="voice-review">
+          <label htmlFor="voice-review" className="text-xs text-muted-foreground">
+            {tr.voice.reviewLabel}
+          </label>
+          <Textarea
+            id="voice-review"
+            value={reviewText}
+            onChange={(e) => setReviewText(e.target.value)}
+            rows={2}
+          />
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" size="sm" onClick={() => controller.stop()}>
+              {tr.voice.reviewDiscard}
+            </Button>
+            <Button size="sm" onClick={() => void handleReviewSend()} disabled={!reviewText.trim()}>
+              {tr.voice.reviewSend}
+            </Button>
+          </div>
+        </div>
+      ) : null}
+
+      {taskDrafts.length > 0 || Object.keys(toolDrafts).length > 0 ? (
+        <section className="flex w-full max-w-xl flex-col gap-3" aria-label={tr.voice.draftsHeading}>
+          <h2 className="text-xs font-medium text-muted-foreground">{tr.voice.draftsHeading}</h2>
+          {workspaceId
+            ? taskDrafts.map((draft) => (
+                <TaskDraftCard
+                  key={draft.sourceMessageId}
+                  draft={draft}
+                  workspaceId={workspaceId}
+                  confirmedTaskId={confirmed[draft.sourceMessageId] ?? null}
+                  onConfirmed={(task) => {
+                    setConfirmed((prev) => ({ ...prev, [draft.sourceMessageId]: task.id }));
+                    // Spoken only with the created task's id (A7).
+                    controller.announce({ kind: "task", taskId: task.id });
+                  }}
+                  onAlreadyConfirmed={() => dismissTask(draft.sourceMessageId)}
+                  onDiscard={() => dismissTask(draft.sourceMessageId)}
+                />
+              ))
+            : null}
+          {workspaceId
+            ? Object.values(toolDrafts).map((live) => (
+                <ToolRequestCard
+                  key={live.draft.sourceMessageId}
+                  draft={live.draft}
+                  workspaceId={workspaceId}
+                  created={live.created}
+                  onCreated={(created) => {
+                    setToolDrafts((prev) => ({
+                      ...prev,
+                      [live.draft.sourceMessageId]: { draft: live.draft, created },
+                    }));
+                    controller.announce({ kind: "approval_request", approvalId: created.id });
+                  }}
+                  onDiscard={() => dismissTool(live.draft.sourceMessageId)}
+                />
+              ))
+            : null}
+        </section>
+      ) : null}
+
+      {proposals.length > 0 ? (
+        <ul className="flex w-full max-w-xl flex-col gap-1 text-xs text-muted-foreground" data-testid="voice-proposals">
+          {proposals.map((memory) => (
+            <li key={memory.id}>
+              <Link href="/memory" className="underline underline-offset-2">
+                {memory.title}
+              </Link>{" "}
+              — {tr.voice.memoryProposed}
+            </li>
+          ))}
+        </ul>
+      ) : null}
+
+      <div className="flex flex-wrap items-center justify-center gap-3">
+        <Button
+          type="button"
+          size="lg"
+          variant={micOpen ? "default" : "outline"}
+          className="size-16 rounded-full"
+          aria-pressed={micOpen}
+          aria-label={micOpen ? tr.voice.micStop : tr.voice.micStart}
+          title={tr.voice.micHint}
+          data-testid="voice-mic"
+          disabled={mute.muted || !workspaceId}
+          onPointerDown={handlePointerDown}
+          onPointerUp={handlePointerUp}
+          onPointerLeave={() => {
+            if (pressStartedRef.current !== 0) handlePointerUp();
+          }}
+          onClick={handleClick}
+        >
+          <Mic className="size-6" aria-hidden />
+        </Button>
+        {busy || micOpen || phase === "finishing" ? (
+          <Button type="button" variant="outline" onClick={() => controller.stop()}>
+            <Square aria-hidden className="size-4" />
+            {tr.voice.stop}
+          </Button>
+        ) : null}
+      </div>
+
+      <label className="flex items-center gap-2 text-xs text-muted-foreground">
+        <input
+          type="checkbox"
+          checked={preview}
+          onChange={(e) => {
+            setPreview(e.target.checked);
+            savePreview(e.target.checked);
+          }}
+        />
+        {tr.voice.previewToggle}
+      </label>
 
       <div className="flex w-full max-w-xl items-end gap-2">
         <Textarea
@@ -142,25 +500,11 @@ export function VoiceView() {
           onChange={(e) => setValue(e.target.value)}
           onKeyDown={handleKeyDown}
           placeholder="Friday'ye yaz…"
-          disabled={isSending || creatingConversation}
+          disabled={busy}
           rows={2}
           className="flex-1 resize-none"
         />
-        <Button
-          type="button"
-          variant="outline"
-          size="icon"
-          disabled
-          title="Sesli giriş yakında (MVP 12 §2)"
-          aria-label="Sesli giriş yakında"
-        >
-          <Mic className="size-4" />
-        </Button>
-        <Button
-          type="button"
-          onClick={() => void handleSend()}
-          disabled={isSending || creatingConversation || !value.trim()}
-        >
+        <Button type="button" onClick={() => void handleTypedSend()} disabled={busy || !value.trim()}>
           Gönder
         </Button>
       </div>
