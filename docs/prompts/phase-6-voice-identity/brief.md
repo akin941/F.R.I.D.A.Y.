@@ -1103,6 +1103,107 @@ fixture clip, mocked detector, CI) asserts no upload and no proposal.
 > spike, the tests, the privacy invariant) is unchanged; the spike's
 > false-accept measurement runs against the custom model.
 
+**Branch 4 — step 0 spike results (2026-11-20, build sandbox).**
+
+| Item | Finding | Consequence |
+|---|---|---|
+| Model URLs + hashes | Downloaded and hashed in the sandbox: `melspectrogram.onnx` (`ba2b0e0f…b176f`) and `embedding_model.onnx` (`70d16429…5c1f`) from the openWakeWord **v0.5.1** GitHub release; `silero_vad.onnx` (`2623a295…788f`) from silero-vad **v5.1.2**. Full hashes pinned in `frontend/src/lib/voice/model-manifest.json`. | `make voice-models` verifies these; the browser refuses to arm on any mismatch. |
+| Licences (R3) | openWakeWord README (main): code Apache-2.0, **all included pre-trained models CC BY-NC-SA 4.0** (the embedding graph is a re-implementation of Google's Apache-2.0 speech_embedding, shipped under the repo's model terms). Silero VAD: MIT. | Confirmed non-commercial: fine for the single-owner system, blocker if productized; downloaded, never committed (`frontend/public/voice-models/` gitignored). |
+| Graph I/O (inspected with `onnx`) | mel `input [batch, samples]` → `output [time, 1, frames, 32]`; embedding `input_1 [n, 76, 32, 1]` → `conv2d_19 [n, 1, 1, 96]`; Silero v5 `input [1, N]`, `state [2, 1, 128]`, `sr` int64 → `output [1, 1]`, `stateN`. | Encoded in `wakeword/openwakeword.ts` and `vad.ts` (64-sample context + 512-sample windows). |
+| Feature-pipeline parity | `parity.nightly.test.ts` (TS port on real graphs via onnxruntime-web 1.31.1 in Node) vs Python **openWakeWord 0.6.0 `AudioFeatures`** (`frontend/scripts/oww-parity.py`) on a 4 s synthetic tone+noise file, `hey_jarvis_v0.1` as the stand-in keyword head: max embedding delta **6.1e-5** after the 0.8 s warm-up (Python's first chunks lack the 480-sample overlap), max steady-state score delta **1.2e-7** (target ≤ 0.02). | **Parity holds** — no reason for 4a on parity. The real `hey_friday` comparison on a recorded "hey friday" clip is an owner step. |
+| CPU (indicative only) | Warm, single-threaded WASM in **Node on the sandbox's 2.1 GHz Xeon VM**: 5.6 ms per 80 ms chunk ≈ **7% of one core** (detector only; the VAD runs only while capturing). Not the Mac, not a browser. | Marginal against the < 5% target on this slower VM; the deciding measurement is Chromium + Safari on the owner's Apple-silicon Mac (owner step). If it misses there, 4a (`feat/p6-wake-word-dsp`) or a lower inference cadence is the follow-up; multi-threaded WASM (COOP/COEP) stays out unless that fails too. |
+| False accepts | Needs the custom `hey_friday` model and the A4 negative set. | Owner step. |
+
+**Branch 4 — implementation notes (2026-11-20).**
+- `onnxruntime-web` **1.31.1** pinned exactly (MIT; the one new runtime
+  dependency). The Worker imports `onnxruntime-web/wasm`, `numThreads = 1`,
+  `wasmPaths = /voice-models/ort/` (runtime copied same-origin by `make
+  voice-models` from `node_modules`, i.e. lockfile integrity); no COOP/COEP.
+- `lib/voice/model-manifest.json` (+ typed `model-manifest.ts`): the single
+  source for the Node download script and the browser. `wakePhrase: "Hey
+  Friday"`; keyword entry `hey_friday.onnx` with **no source and an empty
+  sha256** until the owner trains and pins it — wake mode explains
+  `model_unpinned` and refuses to arm; push-to-talk is unaffected.
+- `model-loader.ts`: same-origin check of every URL before any request, then
+  fetch + `crypto.subtle` sha256 per file; the **verified bytes are
+  transferred to the Worker**, which never fetches a model (scan-tested).
+- `wakeword/openwakeword.ts` (melspectrogram → x/10+2 → 76-frame embedding
+  windows → 16-embedding keyword head) and `vad.ts` (Silero v5) over an
+  injected `SessionLike`; `wake-engine.ts` is the Worker-side capture state
+  machine: armed → detection on frame k → utterance from frame k+1 (no
+  pre-roll) → VAD silence ≥ `VOICE_FINISH_MS` (A7 alignment) | 30 s cap |
+  no speech in 5 s (nothing posted) → armed; paused while Friday speaks;
+  detector buffers reset after every utterance. Raw pre-wake audio held:
+  ≤ one 80 ms chunk + 480-sample overlap (bounded at 2 s, tested).
+- `wakeword-worker.ts` (Worker entry), `wake-port.ts` (`new Worker(new
+  URL(...))`, bundled by Turbopack — `next build` checked), `mic-stream.ts`
+  (always-open mic, same worklet, mute checked per frame).
+- `wake-mode.ts` (page side, framework-free): arming only from a user
+  gesture (`click`/`keydown`/…, and `navigator.userActivation.isActive` where
+  supported), never persisted; model verification → Worker init → mic;
+  disarm on toggle/indicator, idle (`NEXT_PUBLIC_VOICE_WAKE_IDLE_MINUTES`,
+  per-device override), logout/hard 401 (`lib/auth-events.ts`
+  `friday:auth-lost`, dispatched by `apiFetch` before the `/enroll` redirect
+  and by logout), shell mute, mic track ended, worker error. Half-duplex:
+  while the loop speaks, frames are not even posted to the Worker
+  (`pause`/`resume`), and a detection while speaking or mid-turn is cancelled.
+  **Wake storm:** a 4th activation within 60 s without a dispatched turn mutes
+  (`setVoiceMuted(true)`), disarms and shows `storm_muted`.
+- `VoiceController.pressWake()` drives the unchanged loop with the wake
+  capture (transcribe → routes → chat turn with `input_mode="voice"`); for a
+  wake turn the controller's finish window is 0 (the VAD silence already was
+  `VOICE_FINISH_MS`). **Self-trigger rule:** the controller keeps the last
+  minute of spoken sentences (text only, memory only) and the playback-end
+  time; a wake turn detected ≤ 1.5 s after playback whose transcript matches
+  (normalized, wake phrase stripped, substring or ≥ 60% token overlap) is
+  dropped with the `self_trigger` notice — no message, no proposal.
+- Shell: `components/voice/VoiceProvider.tsx` in `app/(shell)/layout.tsx`
+  (wake mode survives navigation; a detection while `/voice` is not mounted
+  navigates there and hands the utterance over within 4 s, else drops it),
+  the persistent `WakeIndicator` (bottom-right, with a disarm button), the
+  reference-counted "● Dinliyor" title prefix (`title-indicator.ts`, shared
+  with push-to-talk); `WakeSettingsPanel` on `/voice` (toggle, threshold
+  slider 0.2–0.95, idle minutes; per device in localStorage — the armed state
+  is deliberately never stored); orb `armed` state when idle and armed.
+- `Permissions-Policy: microphone=(self), camera=(), geolocation=()` in
+  production headers, with the `'wasm-unsafe-eval'` / `worker-src` note for
+  any future `script-src`.
+- ADR-015 "voice session closes after 30 s of silence": in-tab wake mode has
+  no follow-up window — each detection opens one utterance (5 s no-speech,
+  30 s cap) and then re-arms — so it holds by construction; the A3
+  per-session budget id stays `voice:<conversation id>` (branch 3).
+- Tests (vitest, mocked detector/VAD/ONNX, in-memory Worker, fake mic, fetch
+  spy): no `/api/voice/*` request over a simulated hour armed without a
+  detection; uploaded WAV starts at detection frame + 1 (sample-index
+  assertion); no-speech timeout uploads nothing; gesture required and not
+  restored; disarm on auth loss (and `apiFetch` signals it on a hard 401),
+  idle, mute, mute-unreadable; detection ignored while speaking (the A6
+  self-trigger replay clip: no upload, no proposal); self-trigger discard
+  within 1.5 s; four detections in 60 s mute with the notice, a dispatched
+  turn resets the counter; hash mismatch / unpinned / missing / cross-origin
+  refuse to arm; manifest URLs same-origin; network scan of the pre-wake
+  modules; VAD window aligned with the finish window; `make voice-models`
+  helpers. The real-model parity test is `*.nightly.test.ts`, skipped
+  unless `VOICE_PARITY_DIR` is set. Not built: a Playwright run with
+  Chromium fake audio capture (needs the trained model — owner/nightly).
+
+**Owner steps (pending) — `feat/p6-wake-word`, recorded 2026-11-20.**
+1. Train `hey_friday.onnx` offline with openWakeWord's synthetic-data
+   pipeline (runbook §6.2), put its sha256 in `model-manifest.json`, run
+   `VOICE_WAKE_MODEL_SRC=… make voice-models`.
+2. Parity with the real keyword head on a recorded "hey friday" clip
+   (runbook §6.4; score delta ≤ 0.02) and record it here.
+3. CPU of the always-on Worker on the Mac in Chromium and Safari (target < 5%
+   of one core, single-threaded build); if missed, trigger 4a or a cadence
+   change and record the decision here.
+4. FAR/FRR on the A4 negative set and owner recordings at the chosen
+   threshold (FAR ≤ 0.5/h, FRR ≤ 10%); set the default threshold from it.
+5. Done-when on the Mac: "Hey Friday, yarın saat 10'da diş hekimi" → spoken
+   reply + task draft card, network panel showing no voice request before
+   the wake word; Safari background-tab behaviour (R2) noted.
+6. Nightly: a Playwright run with Chromium `--use-file-for-fake-audio-capture`
+   playing a "hey friday" fixture once the model exists.
+
 ### 4a. `feat/p6-wake-word-dsp` — conditional, only if the branch-4 spike is marginal
 
 Triggered only when step 0 of branch 4 records parity delta > 0.02 or CPU
@@ -1195,7 +1296,10 @@ slice.
 | 1 `feat/p6-speech-gateway` | **implemented 2026-11-20** (cut from the local integration branch; spike results and owner steps under "Branch 1 — spike results and implementation notes"; awaiting the Sonnet 5 branch review) |
 | 2 `feat/p6-voice-api` | **implemented 2026-11-20** (cut from the local integration branch; notes and owner steps under "Branch 2 — implementation notes"; awaiting the Sonnet 5 branch review) |
 | 3 `feat/p6-push-to-talk` | **implemented 2026-11-20** (cut from the local integration branch; notes and owner steps under "Branch 3 — implementation notes"; awaiting the Sonnet 5 branch review) |
-| 3a–6 | not started |
+| 3a `feat/p6-voice-eval` | not started |
+| 4 `feat/p6-wake-word` | **implemented 2026-11-20** (cut from the local integration branch; step 0 spike results, notes and owner steps under "Branch 4 — step 0 spike results" / "implementation notes"; push-to-talk stays the default (d3); `hey_friday` model training and the Mac CPU/parity/FAR measurements are owner steps; awaiting the Sonnet 5 branch review) |
+| 4a `feat/p6-wake-word-dsp` | not triggered so far (parity holds; CPU decided by the Mac measurement) |
+| 5–6 | not started |
 
 ## Out of scope (explicit)
 

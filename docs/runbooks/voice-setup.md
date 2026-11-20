@@ -199,3 +199,92 @@ from voice.models import VoiceTurnTrace
 VoiceTurnTrace.objects.order_by("-created_at").values()[:5]
 ```
 
+
+## 6. Wake word "Hey Friday" (Phase 6 branch 4)
+
+Push-to-talk stays the default (owner decision d3). Wake mode is an in-tab
+option: the wake word is detected **in the browser** (openWakeWord ONNX
+graphs + Silero VAD on `onnxruntime-web`, single-threaded WASM, in a Worker);
+audio before the wake word never leaves the tab, and the uploaded utterance
+starts at the first sample *after* the detection frame (no pre-roll).
+
+### 6.1 Models (`make voice-models`)
+
+The manifest `frontend/src/lib/voice/model-manifest.json` is the single
+source of truth: file names, pinned release URLs, sha256 and licences.
+
+| Model | Source | Licence |
+|---|---|---|
+| `melspectrogram.onnx` | openWakeWord v0.5.1 release | CC BY-NC-SA 4.0 (openWakeWord pre-trained models; non-commercial, R3) |
+| `embedding_model.onnx` | openWakeWord v0.5.1 release | same (re-implementation of Google's Apache-2.0 speech_embedding) |
+| `hey_friday.onnx` | **owner-trained** (6.2) | the owner's own model; trained on openWakeWord's pipeline |
+| `silero_vad.onnx` | silero-vad v5.1.2 | MIT |
+
+```bash
+# Downloads, verifies sha256, writes frontend/public/voice-models/ (gitignored)
+# and copies the onnxruntime-web WASM runtime to public/voice-models/ort/.
+VOICE_WAKE_MODEL_SRC=/path/to/hey_friday.onnx make voice-models
+```
+
+The browser refuses to arm wake mode if any file is missing, unpinned (empty
+sha256) or its hash differs; every model URL is same-origin (no CDN). Until
+`hey_friday.onnx` is trained and pinned, the toggle explains that and
+push-to-talk keeps working.
+
+### 6.2 Training `hey_friday` (owner step, offline)
+
+openWakeWord ships `hey_jarvis` but no "hey friday". Train a keyword head with
+openWakeWord's synthetic-data pipeline (its `automatic_model_training`
+notebook / `train.py`: generated TTS clips of "hey friday" in Turkish and
+English accents, plus negative data), export ONNX, then pin it:
+
+```bash
+sha256sum hey_friday.onnx      # put the hash into model-manifest.json ("keyword")
+VOICE_WAKE_MODEL_SRC=$PWD/hey_friday.onnx make voice-models
+```
+
+Swapping or retraining the phrase is a manifest change (`wakePhrase`, the
+keyword `file` and `sha256`), not a code change.
+
+### 6.3 Using it
+
+On **Sesli**, the "Uyandırma sözcüğü" panel arms wake mode with a click (a
+user gesture; never restored after a reload). While armed: a persistent
+indicator in the bottom-right corner, the tab title prefix "● Dinliyor", and
+the mic open in this tab only. Navigating between pages keeps it armed (the
+shell's `VoiceProvider`); a detection on another page opens `/voice`.
+
+- After "Hey Friday", speak; the turn ends after `NEXT_PUBLIC_VOICE_FINISH_MS`
+  of silence (VAD), at 30 s, or — if you say nothing within 5 s — nothing is
+  uploaded and wake mode re-arms.
+- While Friday speaks, the detector receives no audio (half-duplex). A
+  detection within 1.5 s after playback whose transcript repeats Friday's
+  own words is discarded (self-trigger rule).
+- More than 3 activations in 60 s without a dispatched turn mutes voice and
+  disarms (wake storm). Unmute with the shell's toggle.
+- Disarmed by: the toggle or the indicator, logout or a hard 401 (revoked
+  device), the shell mute, `NEXT_PUBLIC_VOICE_WAKE_IDLE_MINUTES` (default 60,
+  editable per device) without a detection, the mic track ending.
+- The detection threshold (default 0.5) is a per-device slider; raise it if
+  the TV wakes Friday, lower it if "Hey Friday" is missed.
+
+Browser support: Chromium and Safari (16.4+) with `AudioWorklet`, module
+Workers and WASM SIMD; HTTPS or `localhost` (Permissions-Policy
+`microphone=(self)` is sent in production). Background-tab throttling can
+starve the worklet (R2); keep the tab visible or use push-to-talk.
+
+### 6.4 Parity and CPU (manual / nightly, real models)
+
+```bash
+D=$(mktemp -d); cp frontend/public/voice-models/*.onnx "$D"/
+# Python reference (throwaway venv, see the script's docstring)
+/tmp/oww/bin/python -I frontend/scripts/oww-parity.py "$D" hey_friday.onnx
+cd frontend && VOICE_PARITY_DIR="$D" npx vitest run \
+  src/lib/voice/wakeword/parity.nightly.test.ts --reporter=verbose
+```
+
+It prints the max embedding/score delta (target ≤ 0.02) and ms per 80 ms
+chunk in Node. The browser figure (Chromium and Safari, the always-on Worker
+in Activity Monitor; target < 5% of one core) and the false-accept count over
+the A4 negative set (target FAR ≤ 0.5/h, FRR ≤ 10%) are measured on the Mac
+and recorded in the Phase 6 brief.
