@@ -1557,6 +1557,25 @@ Friday 3.0 go/no-go checkpoint for Phase 6 is decided once they are in.
    passes (GPU/battery, reduced motion) -- "Owner steps (pending) —
    recorded 2026-11-20" and the branch sections above.
 
+**Known follow-ups (closeout review, LOW, unresolved at merge).**
+- `backend/ops/preflight.py`: `check_voice_mute` runs
+  `PREFLIGHT_VOICE_MUTE_CMD` with the full inherited environment
+  (including secrets such as `VOICE_API_KEY`). Not exploitable — the
+  command comes only from the owner's own setting, runs without a shell
+  and its output is dropped — but it is an implicit trust in the env var.
+  Fix (optional): note in the runbook that this variable is trusted
+  configuration, equivalent to shell access.
+- `docs/runbooks/voice-setup.md`: on the real stack the `voice_mute` check
+  enrolls a device through the pairing flow, so every preflight run leaves
+  a device behind (the runbook and owner step 4 say to revoke it by hand);
+  repeated runs accumulate devices. Fix (optional): have the e2e spec or a
+  teardown revoke its own device.
+- `backend/ops/preflight.py`: a pinned TTS call to a non-routed row sends
+  `params={}` when no route names that row, so the gateway applies the
+  global default voice and provider defaults; a row that needs a
+  route-specific voice could fail preflight falsely. Matches the
+  documented design; no fix needed (optionally mention it in the runbook).
+
 ## Branch table
 
 | # | Branch | Scope | Depends on |
