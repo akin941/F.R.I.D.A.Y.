@@ -4,6 +4,15 @@
 > APPROVE after one REVISE round (see "Plan-review rounds"; Codex CLI is
 > retired from the development workflow)**. Implementation waits for the
 > precondition below.
+> **Amended 2026-11-20 (Friday 3.0, owner-approved):** see "Amendment
+> 2026-11-20" below — OpenRouter audio spike and disabled cloud audio rows
+> (d2), language-routed TTS, gateway audio caps (ADR-003 amendment), a
+> Turkish evaluation set and replay harness (new branch 3a), a latency
+> budget with a per-turn trace, the ADR-015 voice-turn safety rules, the
+> MASTER_PLAN "Roadmap update 2026-11-20" voice additions, and HUD v1
+> (branch 5, `feat/p6-hud`, replaces the visual-identity branch). Source:
+> `docs/research/2026-11-roadmap-proposal.md` §B2/B3/B5, §c.1–c.6. The
+> amendment awaits its own Sonnet 5 plan review before branch 1 starts.
 > Parent decisions: ADR-001 (workspace axis), ADR-002 (import contracts),
 > ADR-003 (single gateway door, one `ModelUsage` per call), ADR-004 +
 > ADR-008 decision 3 (explicit, separate owner decision; gate-class vs
@@ -332,8 +341,9 @@ chunking), Redis-backed like Phase 4's, failing closed.
   listening | transcribing | thinking | speaking | error`; `listening` is
   driven by mic RMS from the worklet, `speaking` by the TTS `AnalyserNode`
   — the synthetic jitter goes. Still the existing Canvas-2D component.
-- **Identity layer (branch 5), only after branches 3–4 are "done" on the
-  Mac:** an in-house WebGL2 fragment-shader orb (no three.js/framer-motion,
+- *(Replaced 2026-11-20 by Amendment A8, HUD v1 in `feat/p6-hud`; kept
+  for history.)* **Identity layer (branch 5), only after branches 3–4 are
+  "done" on the Mac:** an in-house WebGL2 fragment-shader orb (no three.js/framer-motion,
   continuing MVP 12 §1's no-animation-dependency stance) with the Canvas-2D
   orb as fallback; colors from the Phase 4 brand token; a mini-orb in the
   shell header mirroring global voice state; a full-screen voice mode on
@@ -369,7 +379,212 @@ decision of ADR-008 decision 3 nor a confirm-class confirmation — voice
 cannot approve, reject, confirm or cancel; (6) the `voice` app and its
 contracts. It moves nothing between gate-class and confirm-class and
 amends ADR-007/§O (async-job plan and temp file superseded). ADR-002's
-kernel-list note gains `voice`.
+kernel-list note gains `voice`. (2026-11-20: ADR-011 cross-references
+ADR-015, already Accepted, for the voice-turn capability cap and the mic
+rules; it does not restate them. Point (4) reads "require
+`personal_data_allowed` providers" — a cloud audio row qualifies only after
+the owner's deliberate toggle, d2.)
+
+## Amendment 2026-11-20 (Friday 3.0, owner-approved)
+
+The owner accepted the Friday 3.0 roadmap
+(`docs/research/2026-11-roadmap-proposal.md`) on 2026-11-20, including
+decisions d2 (cloud audio is a per-provider owner toggle, local by default)
+and d3 (push-to-talk / in-tab wake word until Phase 11's false-activation
+budget). D1–D11 stand except where an item below says what it replaces.
+
+### A1 — OpenRouter audio: spike, disabled rows, no new door
+
+- **Spike (branch 1, step 0b, before code).** Against OpenRouter's current
+  official documentation and one real call each (owner key, paid —
+  owner step): `/api/v1/audio/transcriptions` and `/audio/speech` request
+  and response shapes; multipart upload stability for a 30 s WAV; whether
+  responses (streamed and non-streamed) carry `usage.cost`; which Turkish
+  TTS voices exist; whether any real-time bidirectional audio endpoint
+  exists (the proposal found none; **unverified**). Results are recorded
+  in this brief before code. If cost is not in the response, a Celery task
+  corrects the `ModelUsage` cost from the generation lookup (the row is
+  written first with the configured price estimate, ADR-003 amendment).
+- **Rows.** `seed_ai_defaults` adds `openrouter-stt`/`openrouter-tts`
+  (`openai_compatible`, `base_url` `https://openrouter.ai/api/v1`,
+  `api_key_env_var="OPENROUTER_API_KEY"`) seeded **`enabled=False` and
+  `personal_data_allowed=False`** — D5's gateway filter therefore never
+  selects them until the owner turns both on with
+  `set_provider_personal_data` (d2). The text `openrouter` provider row is
+  seeded by the Phase 5 closeout (Friday 3.0 table, order 1). `.env.example`
+  gains the key **name** only.
+- **No second door.** OpenRouter is one more provider row behind the
+  existing `OpenAICompatibleAdapter` (D4); no LiteLLM/OmniRoute proxy
+  (MASTER_PLAN §O, 2026-11-20).
+
+### A2 — TTS routing by language; the Turkish fallback is chosen by measurement
+
+`voice.tts` calls pass `params={"language": ..., "voice": ...}`; a
+settings map `VOICE_TTS_ROUTES` (language → provider name + voice id,
+default `tr` → `voice-tts-local` / Piper Turkish, `en` → the same server's
+English voice) picks the provider row for the turn, still only among
+`personal_data_allowed` rows. If the Piper Turkish voice scores below 4/5
+in the owner's listening test (branch 3a), `tr` routes to `openrouter-tts`
+— which still needs the owner's d2 toggle; without it Friday keeps Piper
+and records the gap. The client never chooses the provider.
+
+### A3 — Gateway audio caps (ADR-003 amendment 2026-11-20)
+
+Branch 1 adds the budget primitive to `ai_core`: per-purpose daily budget,
+per-session cap and monthly cap, checked **before** provider selection;
+refusal → `BudgetExceeded`, one `ModelUsage` row
+`error_type="budget_exceeded"`, cost 0; the voice endpoints map it to `429
+voice.budget_exceeded` with a Turkish message. Defaults: audio monthly cap
+20 USD (`AI_BUDGET_AUDIO_MONTHLY_USD`), per voice session 1 USD, owner-
+editable; local providers cost 0 and never trip it. Audio cost for priced
+providers comes from the response or the configured per-second /
+per-character price (`_estimate_cost` gains an audio branch; today it is
+token-priced, `gateway.py`). A coverage test asserts every audio purpose
+that has a non-zero-cost provider row has a budget. Runaway guards from
+ADR-015: a voice session closes after 30 s of silence; more than 3
+activations in 60 s without a dispatched turn auto-mutes.
+
+### A4 — Turkish evaluation set and replay harness (new branch 3a)
+
+- **Set (owner step):** about 200 owner-recorded utterances — roughly 100
+  Turkish, 50 code-switched ("repo'yu aç", "PR'ı merge et", "deploy'u
+  durdur") and 50 English, including firm and project names, recorded in a
+  quiet room and with room noise (TV, fan) — plus 2 h of negative audio
+  (Turkish and English TV, podcasts, calls) for wake-word false accepts.
+  Stored **outside the repo** on the owner's Mac (biometric data; D2's
+  "audio never persisted by Friday" is about the product, the eval set is
+  the owner's own file set) with a manifest (file name, sha256, reference
+  transcript, condition) that *is* versioned: `docs/voice/eval-manifest.md`
+  holds only names, hashes and reference text.
+- **Harness:** `manage.py voice_eval --set <dir>` (WER per condition via a
+  small in-repo edit-distance scorer; Turkish normalisation of case,
+  punctuation and `İ/ı`) and a recorded-audio **replay harness** that feeds
+  golden WAVs through the pipeline with fakes. CI runs the harness on a
+  handful of synthetic fixture WAVs (tones/silence plus fake STT
+  responses) — never on the owner's recordings and never with a real
+  model.
+- **Exit targets (phase closeout; initial targets, re-settable after the
+  first measurement, any change recorded here):** WER ≤ 12% Turkish quiet,
+  ≤ 18% Turkish with noise, ≤ 15% code-switched; Turkish TTS rated ≥ 4/5
+  by the owner for intelligibility and naturalness; wake word (branch 4,
+  in-tab) FRR ≤ 10% and FAR ≤ 0.5 per hour on the negative set.
+
+### A5 — Latency budget and the per-turn trace
+
+Target, end of owner speech → first audio byte, local path: **p50 ≤ 1.5 s,
+p95 ≤ 2.5 s** (phase exit; branch 3's ≤ 3 s / ≤ 6 s rule stays the
+per-branch ship rule).
+
+| Stage | Budget (p50) |
+|---|---|
+| End-of-turn detection (VAD / finish window) | 300 ms |
+| STT (local Whisper, ≤ 8 s utterance) | 350 ms |
+| Gateway LLM, time to first sentence | 550 ms |
+| First-sentence TTS | 250 ms |
+| Transport + playback start | 50 ms |
+
+One **trace id** (client-generated UUID, sent as `X-Friday-Trace` on the
+transcription, message and speech requests) is stored in the
+`context_report` of each `ModelUsage` row of the turn. The client reports
+its own stage timings (end-of-turn, playback start) with the last speech
+request. **Amends D2:** the "no voice table" sentence becomes "no voice
+table holds audio or text" — branch 2 adds `voice.VoiceTurnTrace`
+(`WorkspaceScopedModel`: trace id, conversation, stage timings in ms,
+`input_mode`, created_at; never audio, transcript or reply text; pruned
+after 30 days). The nightly replay run fails if p50 regresses more than
+20% from the stored baseline.
+
+### A6 — Voice-turn safety (ADR-015 decisions 1–5)
+
+- **Capability cap, server-side.** A turn posted with
+  `input_mode="voice"` may run read tools and produce drafts/proposals
+  only; the messages view refuses to execute any confirm-class or
+  gate-class path for it (today no chat turn executes without a click;
+  the cap makes that an asserted invariant per turn, so a later
+  auto-execution feature cannot apply to voice by accident). `input_mode`
+  stays client-asserted (D9): the cap protects the honest voice path
+  against room audio, it adds no trust to a typed turn.
+- **Voice routes that write become proposals.** "Hatırla ki …" creates a
+  memory **proposal** (`pending_approval`, shown as a card the owner
+  approves by click) through the existing memory API from the client —
+  never through the `voice` app, which may not import `memory` (D11) —
+  and never an approved row; branch 3 adds the minimal memory-service
+  path for an owner-originated pending row if the current create path
+  cannot express it. "Bu ne kadar tuttu?" is a read.
+- **Mic indicator and fail-closed mute.** D6's indicator stands; a mute
+  toggle in the shell is checked inside the capture path and inside the
+  single speak function; if the mute state cannot be read or the SSE/turn
+  connection drops, capture stops and the mic track is released.
+- **Self-trigger rule (browser, half-duplex).** D7's pause of wake
+  detection during playback stands; additionally a detection within 1.5 s
+  after playback ends whose transcript matches recent TTS text is
+  discarded. A CI replay test plays a fake-TTS "Hey Friday, terminali aç"
+  clip through the harness with a mocked detector and asserts no upload
+  and no proposal; the real-model version runs nightly.
+- **Wake storms:** > 3 activations in 60 s without a dispatched turn →
+  auto-mute and a notice.
+
+### A7 — MASTER_PLAN "Roadmap update 2026-11-20" voice additions, placed
+
+- Branch 3: end-of-speech **finish window** `VOICE_FINISH_MS` (default
+  900 ms; a mid-sentence pause appends instead of dispatching); short
+  **interrupt words** ("dur", "bekle", "stop") bypass the buffer and stop
+  playback; a **mute flag** checked inside the single speak function (tests
+  never hear audio); deterministic client-side **voice routes** checked
+  before the brain (instant UI commands only — never approvals, D8);
+  **"a yes is not a done"**: a spoken confirmation only references an
+  action whose receipt (task id, approval id, execution status) exists;
+  voice routes "hatırla ki …" (A6) and "bu ne kadar tuttu?" (ModelUsage
+  receipt).
+- Branch 4: D6's VAD silence window for wake mode aligns with
+  `VOICE_FINISH_MS`.
+- Closeout: `manage.py preflight` gains voice checks — STT/TTS round trip
+  on a fixture WAV through the gateway (`ops.preflight`), provider rows and
+  budget configuration present, a `?mute=1` voice tab is silent.
+
+### A8 — HUD v1 replaces the visual-identity branch (branch 5, `feat/p6-hud`)
+
+Replaces D10's second bullet. A full-screen `/hud` route in Next.js, driven
+by one event stream (SSE) of voice state, approvals, tasks, cost and
+health. **Orb:** React Three Fiber + a GLSL shader, seeded from the
+ElevenLabs UI Orb component (MIT; licence recorded); this supersedes
+D10's "no three.js" stance **for the `/hud` route only** — the three.js
+bundle is code-split and dynamically imported there, the Canvas-2D orb
+stays the fallback (WebGL unavailable, reduced motion) and the rest of the
+app stays dependency-free. **States:** idle · armed · listening ·
+thinking · tool-running · awaiting-approval · speaking · error · muted ·
+disconnected · offline-local (D10's `transcribing` is shown as
+*thinking* with a "yazıya dökülüyor" caption; *disconnected* in Phase 6
+means the HUD event stream or the turn connection is lost; Phase 9 adds the
+node link). **Panels:** transcript and captions, today's
+tasks, approvals (deep links to `/approvals/[requestId]`, no decide
+button on the HUD, D8), live cost (today's `ModelUsage`), and a **health
+panel** (mic state, provider status, last preflight result, budgets used;
+node link added in Phase 9). A sessions panel slot is left for Phase 8A.
+**Accessibility and budget:** `prefers-reduced-motion` → static orb with
+a colour state; captions always available; every state also shown as
+text with `aria-live`; frame cap 30 fps active, 5 fps idle, 0 when the
+tab is hidden; GPU under 5% on the owner's Apple-silicon laptop when idle
+(measured in the manual Mac pass); on battery no always-on animation
+unless the owner turns it on. Every HUD read endpoint goes through
+`for_actor()`. Desktop WKWebView overlay: "later" list.
+
+### A9 — Phase exit criteria (closeout)
+
+A4 targets met or consciously re-set (recorded here); A5 local p50 ≤ 1.5 s
+or re-set with the dominant stage named; A3 caps enforced (tests + one
+manual refusal on the Mac); A6 release gates green; preflight green.
+
+### Owner steps (pending) — recorded 2026-11-20
+
+1. Decide at phase start which cloud audio rows may be enabled and
+   confirm the monthly audio cap (d2).
+2. Run the A1 spike with the owner's OpenRouter key (paid calls) and
+   record the results here.
+3. Record the A4 evaluation set and the negative audio on the Mac; rate
+   the Turkish TTS voice.
+4. Train the custom `hey_friday` model offline (branch 4 note).
+5. The manual Mac passes: latency (A5), GPU/battery (A8), reduced motion.
 
 ## Scope (one branch each)
 
@@ -401,6 +616,19 @@ allowed provider selected even at lower priority than a disallowed one;
 **Done when:** ADR-011 accepted; on the Mac, `InferenceGateway().
 transcribe/synthesize` round-trips a Turkish sentence through the local
 server with one `ModelUsage` each.
+**Amendment additions (2026-11-20).** Step 0b OpenRouter spike (A1);
+`openrouter-stt`/`openrouter-tts` rows seeded disabled and disallowed;
+`VOICE_TTS_ROUTES` (A2); the budget primitive, audio cost estimation and
+`BudgetExceeded` (A3, ADR-003 amendment); `.env.example` names
+(`OPENROUTER_API_KEY`, `AI_BUDGET_AUDIO_MONTHLY_USD`, per-session cap).
+Extra files: `ai_core/{budgets,models}.py` + migration. Extra tests: the
+OpenRouter rows are never selected while disabled or disallowed (adapter
+call count 0); a call over the daily/session/monthly cap is refused before
+provider selection with one `budget_exceeded` row; local cost-0 calls never
+trip a cap; cost taken from the response when present, else from the
+configured price; the audio-budget coverage test; TTS routed by language
+only among allowed rows (all against `httpx.MockTransport`/FakeAdapter, no
+real OpenRouter call).
 
 ### 2. `feat/p6-voice-api` — `voice` app, endpoints, `input_mode`
 
@@ -432,6 +660,16 @@ log by the voice app (captured log + DB scan); `input_mode` forced `text`
 for a PAT turn; throttle 429 and Redis-down 503; BFF CSRF checks.
 **Done when:** both endpoints pass the matrix; the knowledge upload suite
 is unchanged after the move.
+**Amendment additions (2026-11-20).** `X-Friday-Trace` accepted on the
+voice and messages endpoints and written to each turn's `ModelUsage`
+`context_report`; `voice.VoiceTurnTrace` (timings only) + migration +
+30-day prune beat (A5); the ADR-015 capability cap on `input_mode="voice"`
+turns (A6); `BudgetExceeded` → `429 voice.budget_exceeded`. Extra tests:
+the trace row holds no text/audio keys (model field allow-list test) and is
+workspace-scoped through `for_actor()`; a voice turn cannot reach any
+execute path (registry scan + an end-to-end turn with a write-capable
+intent yields only a draft); a malformed trace header is ignored, not
+stored.
 
 ### 3. `feat/p6-push-to-talk` — the full loop, push-to-talk
 
@@ -463,6 +701,42 @@ the brief; above 6 s the branch is held and the model sizes revisited);
 the Phase 4 R4b load check re-run with voice STT/TTS requests mixed in
 (no SSE stream starved, no 503 from the pool); a task drafted by voice
 is created only after its card is clicked.
+**Amendment additions (2026-11-20).** The A7 items (finish window,
+interrupt words, mute flag inside the speak function, voice routes, "a
+yes is not a done", "hatırla ki" as a proposal, "bu ne kadar tuttu?");
+fail-closed mute (A6); client trace id and stage timings (A5); a
+`budget_exceeded` state explained in Turkish. Extra tests: a pause shorter
+than `VOICE_FINISH_MS` appends instead of dispatching; an interrupt word
+stops playback without a request; with mute set the speak function makes
+no playback call; mute-state read failure releases the mic track; a
+spoken "evet" never produces a confirmation without a receipt id; voice
+routes never call the decision helpers (extends the D8 scan).
+
+### 3a. `feat/p6-voice-eval` — Turkish evaluation set, replay harness, latency baseline
+
+**Scope.** A4 and A5's measurement side: `docs/voice/eval-manifest.md`
+(names, hashes, reference transcripts — no audio in the repo);
+`manage.py voice_eval` (WER per condition, Turkish normalisation, report
+written to stdout and a JSON file outside the repo; every STT/TTS call goes
+through the gateway with its own purposes `voice.eval_stt`/`voice.eval_tts`
+— untiered like `voice.stt`/`voice.tts`, budgeted under A3, one
+`ModelUsage` each, the owner's personal workspace); the replay harness
+(golden WAVs → capture/segment/STT/TTS ports with fakes, timing capture);
+the self-trigger fixture clip (the test itself lands with branch 4,
+which owns the detector); the TTS listening-test sheet; the stored latency
+baseline and the nightly regression check (> 20% p50 → fail).
+**Files.** `backend/voice/eval/` (scorer, command, replay harness),
+`backend/voice/tests/`, `frontend/src/lib/voice/` (replay entry for
+vitest), `frontend/test/fixtures/voice/` (synthetic WAVs only),
+`docs/voice/eval-manifest.md`, `docs/runbooks/voice-setup.md` (how to
+record and run the set). **Tests.** Scorer golden cases (insertions,
+deletions, substitutions, Turkish casing `İ/i`, `I/ı`, punctuation);
+manifest hash check fails on a changed file; the replay harness runs in CI
+with fakes only; the regression check trips on a
+synthetic 25% slowdown. **Done when:** the owner's set is recorded and
+measured once on the Mac (owner step); results and the TTS choice (Piper
+or OpenRouter, A2) recorded in this brief; targets confirmed or re-set
+with reasons.
 
 ### 4. `feat/p6-wake-word` — local "Hey Friday"
 
@@ -497,6 +771,14 @@ run with Chromium's fake audio capture playing a "hey friday" fixture.
 **Done when:** on the Mac, "Hey Friday, yarın saat 10'da diş hekimi"
 yields a spoken reply and a task draft card, with the network panel
 showing no voice request before the wake word.
+**Amendment additions (2026-11-20).** Self-trigger discard rule and wake
+storm auto-mute (A6); VAD window aligned with `VOICE_FINISH_MS` (A7); the
+spike's false-accept measurement uses the A4 negative set (target FAR ≤ 0.5
+per hour, FRR ≤ 10% — in-tab only; always-on targets belong to Phase 11).
+Extra tests: a detection within 1.5 s after playback with a TTS-matching
+transcript is dropped; four detections in 60 s without a dispatched turn
+mute and show the notice; the A6 self-trigger replay test (branch 3a's
+fixture clip, mocked detector, CI) asserts no upload and no proposal.
 
 > **Note (2026-11-20, rename Jarvis → Friday):** openWakeWord ships a
 > pre-trained `hey_jarvis` model but no "hey friday" model, so branch 4
@@ -525,21 +807,45 @@ nightly/manual with real models. **Done when:** the parity test passes
 standalone (delta ≤ 0.02) and the CPU target holds; branch 4 then
 narrows to wiring (state machine, arming, indicator, headers) on top.
 
-### 5. `feat/p6-visual-identity` — the animated Friday layer
+### 5. `feat/p6-hud` — HUD v1 (replaces `feat/p6-visual-identity`, 2026-11-20)
 
 Starts only after branches 3 and 4 meet "done when" on the Mac (ADR-008
-decision 5). **Scope.** D10 second bullet: WebGL2 orb + Canvas fallback,
-shell mini-orb, full-screen voice mode with captions and inline cards,
-earcons, reduced motion, hidden-tab pause, `aria-live`.
-**Files.** `frontend/src/components/voice/` (`orb/` renderer, shaders as
-TS strings), `components/shell/`, `app/(shell)/voice/page.tsx`,
-`app/globals.css` (voice tokens only).
-**Tests.** State → uniform mapping; reduced-motion path renders no
-animation frame loop; WebGL unavailable → Canvas fallback; hidden tab
-stops `requestAnimationFrame`; token contrast for captions (Phase 4
-contrast test extended); a frame-time check in the manual Mac pass.
-**Done when:** every voice state is visually distinct, at phone width
-too; the reduced-motion pass is recorded.
+decision 5 — the HUD is still the visual layer that follows working
+voice). **Scope.** A8: the `/hud` route, R3F/GLSL orb (code-split,
+dynamically imported) with the Canvas-2D fallback, the eleven states, the
+panels (captions, tasks, approvals as deep links, live cost, health,
+sessions slot), the shell mini-orb mirroring global voice state, earcons
+synthesized with WebAudio oscillators, reduced motion, frame caps,
+hidden-tab stop, battery rule, `aria-live`; one backend SSE endpoint
+`GET /api/v1/hud/events` (web channel, owner, every queryset through
+`for_actor()`; voice state is client-side, the stream carries approval,
+task, cost and health deltas) and its BFF route. The endpoint lives in a
+new **leaf read-only app `hud`** — not in `voice`, which may not import
+`approvals` or `tasks` (D11): `hud` may import `core`, `workspaces`,
+`ai_core` (ModelUsage and provider reads only, no gateway call),
+`approvals` and `tasks`; it writes nothing; no app imports `hud`
+(import-linter contracts in `backend/pyproject.toml`, ADR-002 kernel-list
+note). The ElevenLabs UI Orb seed and the `three`/`@react-three/fiber`
+pins with licence notes. **Files.** `frontend/package.json`,
+`frontend/src/app/(shell)/hud/`, `frontend/src/components/hud/`,
+`components/voice/` (orb fallback, state), `components/shell/`,
+`app/globals.css` (HUD tokens only), `frontend/src/app/api/hud/`,
+`backend/hud/` (apps, views, tests), `backend/pyproject.toml`,
+`config/settings/base.py`, `config/urls.py`,
+`docs/adr/ADR-002-modular-monolith.md` (note), `lib/i18n/tr.ts`.
+**Tests.** State → uniform/colour mapping for all eleven states;
+reduced-motion path renders no animation frame loop; WebGL unavailable →
+Canvas fallback; hidden tab stops `requestAnimationFrame`; frame cap
+respected (fake timers); the three.js bundle is not part of any non-HUD
+route chunk (build-manifest check); every state has a text label and an
+`aria-live` announcement; no decide control on the HUD (D8 scan extended);
+caption token contrast (Phase 4 contrast test); the SSE endpoint's role ×
+endpoint matrix (five Phase 4 principals) and another workspace's
+approvals never appear; health panel renders provider-down and
+budget-exhausted states. Manual Mac pass: idle GPU < 5%, frame time,
+battery behaviour.
+**Done when:** every state is visually and textually distinct, at phone
+width too; the reduced-motion and GPU passes are recorded in this brief.
 
 ### 6. closeout
 
@@ -550,25 +856,42 @@ ADR-007 note and ADR-008 implementation note (decision 5 landed);
 marked answered; e2e (CI, fake providers): `/voice` push-to-talk with a
 stubbed capture → transcript → reply → `/api/voice/speech` called per
 sentence → task draft card → confirm click → task exists.
+**Amendment additions (2026-11-20).** A9 exit criteria recorded (A4/A5
+measurements or re-set targets, caps enforced, A6 gates green); preflight
+voice checks (A7); MASTER_PLAN §AA "Friday 3.0 phases" row 6 → done;
+ADR-015 implementation note (decisions 1–3 landed); e2e adds `/hud`
+showing the voice state and a pending approval deep link.
 
 ## Branch table
 
 | # | Branch | Scope | Depends on |
 |---|---|---|---|
-| 1 | `feat/p6-speech-gateway` | Spike, ADR-011, adapter STT/TTS, WAV checks, personal-data rule for audio, seeds/env, SDK guard, runbook | Phase 5 closeout on `main` |
-| 2 | `feat/p6-voice-api` | `voice` app, transcription/speech endpoints, `core/uploads.py`, `Message.input_mode`, throttles, BFF routes | 1 |
-| 3 | `feat/p6-push-to-talk` | Capture, WAV, segmenter, playback, state machine, drafts in voice, orb on real levels, nav | 2 |
+| 1 | `feat/p6-speech-gateway` | Spikes (speech server, OpenRouter audio), ADR-011, adapter STT/TTS, WAV checks, personal-data rule for audio, OpenRouter rows (disabled), TTS language routing, gateway audio budgets (ADR-003 amendment), seeds/env, SDK guard, runbook | Phase 5 closeout on `main` |
+| 2 | `feat/p6-voice-api` | `voice` app, transcription/speech endpoints, `core/uploads.py`, `Message.input_mode`, throttles, BFF routes, trace id + `VoiceTurnTrace`, ADR-015 capability cap | 1 |
+| 3 | `feat/p6-push-to-talk` | Capture, WAV, segmenter, playback, state machine, drafts in voice, orb on real levels, nav, finish window, interrupt words, mute flag, voice routes, fail-closed mute | 2 |
+| 3a | `feat/p6-voice-eval` | Turkish eval manifest, `voice_eval` scorer, replay harness, self-trigger fixture, latency baseline + nightly regression, TTS choice | 3 (owner recording in parallel) |
 | 4a | `feat/p6-wake-word-dsp` (conditional) | TS port of the openWakeWord/Silero pipeline in isolation, parity + CPU | branch-4 spike marginal; 3 |
-| 4 | `feat/p6-wake-word` | Spike, `onnxruntime-web`, openWakeWord + Silero, arming/indicator, half-duplex, headers | 3 (spike may run in parallel with 1); 4a if triggered |
-| 5 | `feat/p6-visual-identity` | WebGL orb, shell presence, voice mode, captions, earcons | 3, 4 done on the Mac |
-| 6 | closeout | Docs, ADR notes, e2e | 1–5 |
+| 4 | `feat/p6-wake-word` | Spike, `onnxruntime-web`, openWakeWord + Silero, arming/indicator, half-duplex, headers, self-trigger rule, wake-storm mute | 3 (spike may run in parallel with 1); 4a if triggered; 3a for the FAR/FRR measurement |
+| 5 | `feat/p6-hud` (replaces `feat/p6-visual-identity`) | HUD v1: `/hud`, R3F orb + Canvas fallback, eleven states, panels incl. health, `hud` leaf app + SSE, accessibility and frame/GPU budget | 3, 4 done on the Mac |
+| 6 | closeout | Docs, ADR notes (ADR-011, ADR-015), exit criteria A9, preflight voice checks, e2e | 1–5 (incl. 3a) |
 
-Minimum usable cut if the phase runs long: 1, 2, 3 (push-to-talk voice).
+Minimum usable cut if the phase runs long: 1, 2, 3 (push-to-talk voice);
+3a is needed for the phase exit criteria, 5 for the Friday 3.0 vertical
+slice.
+
+| # | Status |
+|---|---|
+| amendment (`docs/friday-3-roadmap`) | **implemented 2026-11-20** (docs only; awaiting Sonnet 5 plan review of the amendment) |
+| 1–6 | not started (precondition: Phase 5 closeout on `main`) |
 
 ## Out of scope (explicit)
 
-Cloud STT/TTS or any non-`personal_data_allowed` audio provider · the
-Web Speech API · server-side or pre-roll wake detection · voice
+Any audio provider without `personal_data_allowed` (2026-11-20: cloud
+audio rows such as OpenRouter exist but are seeded disabled and
+disallowed; using one is the owner's deliberate d2 toggle, never a
+default) · cloud realtime / live voice (OpenAI Realtime, Gemini Live —
+"later" list, gateway relay only) · a desktop overlay for the HUD
+("later") · the Web Speech API · server-side or pre-roll wake detection · voice
 approvals, confirmations, rejections or cancels (D8) · confirm-class for
 HA or any domain via voice (Q2) · step-up re-auth (Q3) · barge-in by
 voice / full duplex (Q4) · speaker identification or voice biometrics ·
@@ -597,6 +920,16 @@ or a `ModelUsage`; an STT/TTS call reaching a provider without
 `personal_data_allowed`; a voice path that confirms a draft or decides an
 approval; a voice endpoint reachable by a PAT, the facade or Telegram;
 model files loaded cross-origin or with a mismatched hash.
+**Amendment additions (2026-11-20):** the recorded-audio replay harness
+runs in CI with fakes (A4) and with real models only nightly; the owner's
+evaluation recordings never enter the repo or CI. Added release-gate
+regressions: a voice-originated turn that executes a confirm-class or
+gate-class action (ADR-015); a voice write route that produces an
+approved row; an audio call that bypasses or exceeds a configured budget
+without a `budget_exceeded` row; a disabled or disallowed cloud audio row
+selected; text or audio in `VoiceTurnTrace`; the HUD exposing a decide
+control or another workspace's rows; a mute-state read failure that keeps
+the mic open.
 
 ## Risks
 
@@ -629,8 +962,22 @@ model files loaded cross-origin or with a mismatched hash.
   `echoCancellation`; residual on laptop speakers at high volume.
 - **R7 — Secure-context friction.** Mic needs HTTPS off `localhost`; the
   runbook points to the Phase 4 Q6 Tailscale/TLS recipe.
-- **R8 — Scope creep in the identity branch.** D10's explicit
-  constraints and "done when"; no avatar work.
+- **R8 — Scope creep in the HUD branch.** A8's explicit constraints and
+  "done when"; no avatar work; desktop overlay stays "later".
+- **R9 — Cloud audio cost and privacy (2026-11-20).** If Piper's Turkish
+  fails, Turkish TTS goes to OpenRouter: reply text (not mic audio) leaves
+  the device, and money is spent. Bounded by the d2 toggle, the A3 caps
+  and the per-provider `personal_data_allowed` filter; STT stays local
+  unless the owner also enables the STT row.
+- **R10 — OpenRouter audio unverified.** Multipart stability and
+  `usage.cost` presence are unconfirmed; the A1 spike decides, and the
+  generation-lookup correction covers a missing cost.
+- **R11 — Three.js weight and GPU.** R3F adds a large bundle and GPU load;
+  code-split to `/hud`, frame caps, the Canvas fallback and the measured
+  idle GPU budget bound it.
+- **R12 — Eval set realism.** 200 utterances from one speaker in one room
+  is small; targets are initial and re-settable (A4), and the set grows
+  with real failures.
 
 ## Plan-review rounds (Sonnet 5, 2026-09-27)
 
