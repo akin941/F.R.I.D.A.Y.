@@ -4,10 +4,11 @@ from django.http import JsonResponse
 from django.urls import include, path
 from rest_framework.settings import api_settings
 
-from accounts.authentication import PersonalAccessTokenAuthentication
+from accounts.authentication import HookTokenAuthentication, PersonalAccessTokenAuthentication
 from config.activity import ActivitySummaryView
 from deploys.urls import build_urlpatterns as deploy_urlpatterns
 from hud.urls import build_urlpatterns as hud_urlpatterns
+from memory.urls import build_hook_urlpatterns
 from voice.urls import build_urlpatterns as voice_urlpatterns
 
 
@@ -29,6 +30,13 @@ urlpatterns = [
     path("api/v1/workspaces/", include("workspaces.urls")),
     path("api/v1/ai/", include("assistant.urls")),
     path("api/v1/", include("memory.urls")),
+    # Phase 8A branch 3 (D6): the append-only Claude Code hook-event ingest.
+    # Its ONLY authenticator is the hook PAT (no device session, no other
+    # PAT kind); `memory` may not import `accounts`, so it is injected here.
+    path(
+        "api/v1/",
+        include(build_hook_urlpatterns(authentication_classes=[HookTokenAuthentication])),
+    ),
     path("api/v1/", include("knowledge.urls")),
     path("api/v1/", include("tasks.urls")),
     path("api/v1/", include("approvals.urls")),

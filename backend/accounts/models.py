@@ -94,14 +94,21 @@ class PersonalAccessToken(WorkspaceScopedModel, TimestampedModel):
     `kind` (Phase 4 branch 6) decides the one surface a token can reach and
     the channel it authenticates as: a `cli` token only the PAT-allowlisted
     views (assistant/agents/approvals/activity, CHANNEL_CLI), an `openai`
-    token only the OpenAI-compatible facade (CHANNEL_OPENAI). An Open WebUI
-    server's token can never create agents or approval requests. Fixed at
-    mint, like the workspace.
+    token only the OpenAI-compatible facade (CHANNEL_OPENAI), a `hook` token
+    only the Claude Code hook-event ingest (CHANNEL_HOOK, Phase 8A D6). An
+    Open WebUI server's token can never create agents or approval requests.
+    Fixed at mint, like the workspace.
     """
 
     class Kind(models.TextChoices):
         CLI = "cli"
         OPENAI = "openai"
+        # Phase 8A D6: the Claude Code hook relay (`friday-hook`). Reaches
+        # exactly one endpoint, the append-only hook-event ingest; reads
+        # nothing back. Minted only by the installation owner, bound to
+        # their personal workspace (the binding authenticates the principal;
+        # D4 mapping rules alone decide where each event lands).
+        HOOK = "hook"
 
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="personal_access_tokens"

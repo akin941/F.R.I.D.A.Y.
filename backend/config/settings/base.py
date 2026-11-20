@@ -280,6 +280,9 @@ REST_FRAMEWORK = {
         # Phase 6 branch 5: HUD event-stream (re)connects; one stream lives
         # at most HUD_STREAM_MAX_SECONDS, so ~1/min per open HUD tab.
         "hud_events": env("HUD_EVENTS_RATE", default="20/min"),
+        # Phase 8A branch 3: Claude Code hook-event batches from
+        # `friday-hook`, per hook token (one POST per hook invocation).
+        "hook_ingest": env("HOOK_INGEST_RATE", default="240/min"),
     },
 }
 
@@ -402,6 +405,11 @@ MEMORY_INGESTION_DEFAULT_DAILY_TOKEN_BUDGET = env.int(
 MEMORY_OWNER_GIT_EMAILS = [
     e.strip().lower() for e in env.list("MEMORY_OWNER_GIT_EMAILS", default=[]) if e.strip()
 ]
+# Claude Code hook relay (Phase 8A branch 3, D6/D12): a coding session with
+# no hook event for this many hours shows as `stale` in the sessions API.
+# The ingest endpoint's per-token rate is HOOK_INGEST_RATE (throttle scope
+# `hook_ingest`, REST_FRAMEWORK above).
+MEMORY_CODING_SESSION_STALE_HOURS = env.int("MEMORY_CODING_SESSION_STALE_HOURS", default=24)
 
 CORS_ALLOWED_ORIGINS = [o for o in env.list("CORS_ALLOWED_ORIGINS", default=[]) if o] or [
     "http://localhost:3001"

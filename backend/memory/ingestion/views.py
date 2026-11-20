@@ -11,27 +11,36 @@ facade PAT never reaches these views. Every lookup goes through
 
 from django.utils import timezone
 from rest_framework import status
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import BasePermission, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from audit.services import record_audit
 from core.api_errors import service_error_response
-from core.channels import request_channel
+from core.channels import CHANNEL_HOOK, ChannelPrincipal, request_channel
 from core.permissions import IsOwner, IsWebChannel
-from memory.ingestion import services
+from core.throttling import ScopedRateThrottle
+from memory.ingestion import hooks, services
 from memory.ingestion.serializers import (
     RuleCreateSerializer,
     RuleUpdateSerializer,
     ScrubTermCreateSerializer,
+    SessionQuerySerializer,
     SourceUpdateSerializer,
     WorkspaceQuerySerializer,
     serialize_audit,
+    serialize_coding_session,
     serialize_rule,
     serialize_source,
     serialize_term,
 )
-from memory.models import IngestionCounter, IngestionSource, ScrubTerm, WorkspaceMappingRule
+from memory.models import (
+    CodingSession,
+    IngestionCounter,
+    IngestionSource,
+    ScrubTerm,
+    WorkspaceMappingRule,
+)
 from workspaces.models import Workspace
 
 _PERMISSIONS = [IsAuthenticated, IsWebChannel, IsOwner]
@@ -252,3 +261,94 @@ class ScrubTermDetailView(APIView):
         except services.IngestionError as exc:
             return _error(exc)
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+# --- Claude Code hook relay (Phase 8A branch 3, D6/D12) ----------------------
+
+
+class IsHookChannel(BasePermission):
+    """Only a `hook`-kind PAT (CHANNEL_HOOK). The view's sole authenticator
+    (`accounts.authentication.HookTokenAuthentication`, injected by
+    `config/urls.py`) already refuses every other credential; this keeps the
+    view closed if it ever gains another authenticator."""
+
+    message = "This endpoint accepts only a hook token."
+    code = "channel_forbidden"
+
+    def has_permission(self, request, view):
+        return request_channel(request) == CHANNEL_HOOK
+
+
+def _too_large():
+    return Response(
+        {"detail": "Hook-event batch too large."},
+        status=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+    )
+
+
+class HookEventIngestView(APIView):
+    """`POST /api/v1/memory/ingest/hook-events` -- append-only (D6).
+
+    Accepts `{"events": [...]}` (<= 50 events, <= 64 KB body), keeps only
+    the allow-listed events and fields, and hands each to the ingestion port
+    (scrub, map by `cwd`, dedupe). Answers `202` with counts only: it never
+    echoes a payload, lists nothing and reads nothing back. Authentication is
+    injected (`build_hook_urlpatterns`) because `memory` does not import
+    `accounts`; with none injected nobody is authenticated."""
+
+    authentication_classes = []
+    permission_classes = [IsAuthenticated, IsHookChannel]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "hook_ingest"
+
+    def post(self, request):
+        declared = request.META.get("CONTENT_LENGTH") or "0"
+        try:
+            declared = int(declared)
+        except ValueError:
+            declared = 0
+        if declared > hooks.MAX_BODY_BYTES or len(request.body) > hooks.MAX_BODY_BYTES:
+            return _too_large()
+        data = request.data
+        events = data.get("events") if isinstance(data, dict) else None
+        if not isinstance(events, list):
+            return Response(
+                {"detail": "Expected an object with an `events` list."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if len(events) > hooks.MAX_EVENTS_PER_BATCH:
+            return _too_large()
+        auth = request.auth
+        counts = hooks.ingest_hook_events(
+            user=request.user,
+            bound_workspace_id=auth.bound_workspace_id
+            if isinstance(auth, ChannelPrincipal)
+            else None,
+            events=events,
+        )
+        return Response(counts, status=status.HTTP_202_ACCEPTED)
+
+
+class CodingSessionListView(APIView):
+    """`GET /api/v1/memory/sessions` (D12): the owner's coding sessions,
+    newest first, through `for_actor()`. Owner, web session only; rows of a
+    forgotten source are hidden until it is restored."""
+
+    permission_classes = _PERMISSIONS
+
+    def get(self, request):
+        query = SessionQuerySerializer(data=request.query_params)
+        query.is_valid(raise_exception=True)
+        workspace_id = query.validated_data.get("workspace")
+        if workspace_id is not None and _workspace(request, workspace_id) is None:
+            return Response(status=status.HTTP_404_NOT_FOUND)
+        sessions = (
+            CodingSession.objects.for_actor(request.user, workspace=workspace_id)
+            .filter(source__forgotten_at__isnull=True)
+            .select_related("workspace")
+            .order_by("-last_event_at", "-id")[: query.validated_data["limit"]]
+        )
+        now = timezone.now()
+        return Response(
+            [serialize_coding_session(s, status=hooks.effective_status(s, now)) for s in sessions]
+        )

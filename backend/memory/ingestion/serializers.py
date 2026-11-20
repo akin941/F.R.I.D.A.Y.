@@ -122,3 +122,31 @@ class RuleUpdateSerializer(serializers.Serializer):
 class ScrubTermCreateSerializer(serializers.Serializer):
     workspace = serializers.UUIDField()
     term = serializers.CharField(max_length=200)
+
+
+class SessionQuerySerializer(serializers.Serializer):
+    """`GET /memory/sessions` filters: an optional workspace (else every
+    workspace the owner is a member of) and a bounded page size."""
+
+    workspace = serializers.UUIDField(required=False)
+    limit = serializers.IntegerField(required=False, min_value=1, max_value=100, default=50)
+
+
+def serialize_coding_session(session, *, status):
+    """A `CodingSession` row for the sessions panel (D12). Every text field
+    is the stored, already-scrubbed value; `last_notification` is tool/model
+    text and must be fenced as untrusted wherever a model sees it."""
+    return {
+        "id": str(session.id),
+        "workspace": {"id": str(session.workspace_id), "name": session.workspace.name},
+        "tool": session.tool,
+        "session_id": session.session_id,
+        "project": session.project,
+        "status": status,
+        "stored_status": session.status,
+        "started_at": session.started_at.isoformat(),
+        "last_event_at": session.last_event_at.isoformat(),
+        "last_event": session.last_event,
+        "last_notification": session.last_notification,
+        "event_count": session.event_count,
+    }

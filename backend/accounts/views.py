@@ -343,6 +343,23 @@ class PersonalAccessTokenListCreateView(APIView):
         ).first()
         if workspace is None:
             return Response(status=status.HTTP_404_NOT_FOUND)
+        if serializer.validated_data["kind"] == PersonalAccessToken.Kind.HOOK and not (
+            request.user.is_owner
+            and not request.user.is_agent
+            and workspace.type == Workspace.Type.PERSONAL
+            and workspace.owner_id == request.user.id
+        ):
+            # Phase 8A D6: the hook relay's token belongs to the installation
+            # owner and is bound to their personal workspace (the binding
+            # only authenticates; D4 mapping rules route each event).
+            return Response(
+                {
+                    "code": "invalid",
+                    "detail": "A hook token can only be minted by the owner, "
+                    "bound to their personal workspace.",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         ttl_days = serializer.validated_data.get("expires_in_days") or (
             settings.PAT_DEFAULT_TTL_DAYS

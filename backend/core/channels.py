@@ -23,6 +23,11 @@ CHANNEL_CLI = "cli"  # low-trust: bearer PAT of kind `cli`
 # facade (Phase 4 branch 6, ADR-008 decision 6: chat only, no tools, never
 # decides anything).
 CHANNEL_OPENAI = "openai"
+# Low-trust: bearer PAT of kind `hook` (Phase 8A D6), used only by the
+# Claude Code hook relay (`friday-hook`) on the append-only hook-event
+# ingest endpoint. Can write episodes through the ingestion port and read
+# nothing.
+CHANNEL_HOOK = "hook"
 CHANNEL_TELEGRAM = "telegram"  # low-trust: relayed, no direct request at all
 # Not a request channel: machine-originated actions (agent engine, harness
 # gates, sweeps) that record "which channel" in audit metadata or on
@@ -53,7 +58,8 @@ class ChannelPrincipal:
     """Set as `request.auth` by a low-trust authenticator (accounts'
     `PersonalAccessTokenAuthentication` / `FacadeTokenAuthentication`).
 
-    `channel` is CHANNEL_CLI or CHANNEL_OPENAI (the token's `kind`);
+    `channel` is CHANNEL_CLI, CHANNEL_OPENAI or CHANNEL_HOOK (the token's
+    `kind`);
     `token_id` names the PersonalAccessToken, for per-token limits (the
     facade's throttle and stream cap). CHANNEL_TELEGRAM never appears here --
     Telegram has no direct request/response cycle with our API at all (it's

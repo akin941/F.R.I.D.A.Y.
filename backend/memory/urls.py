@@ -1,6 +1,8 @@
 from django.urls import path
 
 from memory.ingestion.views import (
+    CodingSessionListView,
+    HookEventIngestView,
     IngestionSourceActionView,
     IngestionSourceDetailView,
     IngestionSourceListView,
@@ -83,4 +85,20 @@ urlpatterns = [
         ScrubTermDetailView.as_view(),
         name="memory-ingestion-scrub-term-detail",
     ),
+    # Phase 8A branch 3 (D12): the coding-sessions read model. Owner, web.
+    path("memory/sessions", CodingSessionListView.as_view(), name="memory-sessions"),
 ]
+
+
+def build_hook_urlpatterns(*, authentication_classes):
+    """The hook-event ingest route (Phase 8A D6). Not in `urlpatterns`: the
+    composition root (`config/urls.py`) passes `HookTokenAuthentication`,
+    because `memory` may not import `accounts` (the `deploys` precedent)."""
+    auth = {"authentication_classes": list(authentication_classes)}
+    return [
+        path(
+            "memory/ingest/hook-events",
+            HookEventIngestView.as_view(**auth),
+            name="memory-ingest-hook-events",
+        ),
+    ]

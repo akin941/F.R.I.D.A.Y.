@@ -4,10 +4,15 @@
 
 from celery import shared_task
 
+from memory.ingestion.hooks import purge_idle_coding_sessions
 from memory.ingestion.services import purge_expired_episodes
 
 
 @shared_task(name="memory.ingestion.tasks.purge_expired_episodes_task")
 def purge_expired_episodes_task():
-    """Daily beat (config/celery.py, d10): hard-delete expired episodes."""
-    return purge_expired_episodes()
+    """Daily beat (config/celery.py, d10): hard-delete expired episodes, and
+    the coding-session read rows idle past the same TTL (branch 3). Returns
+    the number of episodes deleted."""
+    deleted = purge_expired_episodes()
+    purge_idle_coding_sessions()
+    return deleted
