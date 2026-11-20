@@ -1,10 +1,18 @@
 """Structured output contract for the `memory.extraction` gateway call
-(MVP 2 §3).
+(MVP 2 §3; schema v2 since Phase 8A brief D9).
 
 The extraction prompt instructs the model to return exactly one JSON object
 of this shape:
 
-    {"version": 1, "candidates": [{"type": "semantic", "title": "...", "content": "..."}]}
+    {"version": 2, "candidates": [{"type": "semantic", "title": "...",
+                                   "content": "...", "quote": "..."}]}
+
+Schema v2 (Phase 8A D9, "chat extraction brought under the same rule"):
+assistant turns reach the model only inside an `untrusted_context` fence and
+every candidate must carry a `quote` -- the owner's own words it rests on.
+`memory.tasks` keeps a candidate only when that quote matches a `user`-role
+message of the job's range verbatim (`memory.provenance`); a v1-shaped
+output (`version: 1`, no `quote`) is a schema error.
 
 Anything else — malformed JSON, wrong shape, unexpected keys, an invalid
 `type`, an oversized/empty field, too many candidates — is a parse failure.
@@ -21,10 +29,11 @@ import json
 
 from memory.models import Memory
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 MAX_CANDIDATES_PER_JOB = 10
 MAX_TITLE_CHARS = 255  # matches Memory.title's max_length
 MAX_CONTENT_CHARS = 4000
+MAX_QUOTE_CHARS = 1000
 
 # WORK_LOG excluded (Codex round-6 P2 on feat/p1-work-log): it is reserved
 # for `record_work_log()`'s `system_generated` pairing (ADR-008 k.4) —
@@ -34,7 +43,7 @@ MAX_CONTENT_CHARS = 4000
 # curator approves it without touching memory_type.
 _ALLOWED_TYPES = frozenset(Memory.Type.values) - {Memory.Type.WORK_LOG}
 _TOP_LEVEL_KEYS = {"version", "candidates"}
-_CANDIDATE_KEYS = {"type", "title", "content"}
+_CANDIDATE_KEYS = {"type", "title", "content", "quote"}
 
 
 class ExtractionParseError(Exception):
@@ -46,7 +55,7 @@ class ExtractionParseError(Exception):
 def parse_candidates(raw_text):
     """Strictly parse and validate a `memory.extraction` response.
 
-    Returns a list of `{"type", "title", "content"}` dicts in the model's
+    Returns a list of `{"type", "title", "content", "quote"}` dicts in the model's
     original order. Raises `ExtractionParseError` on the first violation
     found — no partial results.
     """
@@ -111,6 +120,12 @@ def parse_candidates(raw_text):
                 f"candidate {index} content exceeds {MAX_CONTENT_CHARS} chars"
             )
 
-        parsed.append({"type": candidate_type, "title": title, "content": content})
+        quote = candidate["quote"]
+        if not isinstance(quote, str) or not quote.strip():
+            raise ExtractionParseError(f"candidate {index} has an empty/invalid quote")
+        if len(quote) > MAX_QUOTE_CHARS:
+            raise ExtractionParseError(f"candidate {index} quote exceeds {MAX_QUOTE_CHARS} chars")
+
+        parsed.append({"type": candidate_type, "title": title, "content": content, "quote": quote})
 
     return parsed

@@ -31,7 +31,8 @@ def test_seed_creates_memory_extraction_prompt():
     template = PromptTemplate.objects.get(name="friday_memory_extraction")
     assert template.purpose == "memory.extraction"
     assert template.active_version is not None
-    assert template.active_version.version == 1
+    assert template.active_version.version == 2
+    assert "untrusted_context" in template.active_version.content
     assert "JSON" in template.active_version.content
 
 
@@ -93,7 +94,7 @@ def test_seed_is_idempotent():
     assert PromptTemplate.objects.filter(name="friday_system").count() == 1
     assert PromptVersion.objects.filter(template__name="friday_system").count() == 1
     assert PromptTemplate.objects.filter(name="friday_memory_extraction").count() == 1
-    assert PromptVersion.objects.filter(template__name="friday_memory_extraction").count() == 1
+    assert PromptVersion.objects.filter(template__name="friday_memory_extraction").count() == 2
     assert PromptTemplate.objects.filter(name="friday_router_intent").count() == 1
     assert PromptVersion.objects.filter(template__name="friday_router_intent").count() == 1
     assert PromptTemplate.objects.filter(name="friday_agent_plan").count() == 1

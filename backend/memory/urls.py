@@ -11,6 +11,11 @@ from memory.ingestion.views import (
     ScrubTermDetailView,
     ScrubTermListView,
 )
+from memory.learning_views import (
+    LearningBulkApproveView,
+    LearningDigestView,
+    LearningItemActionView,
+)
 from memory.views import (
     CoreBlockDetailView,
     CoreBlockListView,
@@ -87,6 +92,18 @@ urlpatterns = [
     ),
     # Phase 8A branch 3 (D12): the coding-sessions read model. Owner, web.
     path("memory/sessions", CodingSessionListView.as_view(), name="memory-sessions"),
+    # Phase 8A branch 5 (D10): the morning card. Owner, web.
+    path("memory/learning/digest", LearningDigestView.as_view(), name="memory-learning-digest"),
+    path(
+        "memory/learning/bulk-approve",
+        LearningBulkApproveView.as_view(),
+        name="memory-learning-bulk-approve",
+    ),
+    path(
+        "memory/learning/proposals/<slug:kind>/<uuid:item_id>/<str:action>",
+        LearningItemActionView.as_view(),
+        name="memory-learning-item-action",
+    ),
 ]
 
 

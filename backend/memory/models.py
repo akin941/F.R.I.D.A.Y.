@@ -142,6 +142,11 @@ class Memory(WorkspaceScopedModel, TimestampedModel):
     )
     source_episode_id = models.UUIDField(null=True, blank=True)
     provenance_quote = models.CharField(max_length=300, blank=True, default="")
+    # Forget-source cascade marker (Phase 8A branch 5, D11): the forget
+    # operation that archived/rejected this row and the status it had
+    # before, so `restore_source` undoes exactly that operation's rows.
+    forget_operation_id = models.UUIDField(null=True, blank=True)
+    forget_prior_status = models.CharField(max_length=20, blank=True, default="")
     # Semantic retrieval (Phase 1 branch p1-memory-embeddings). No fixed
     # `dimensions` kwarg (MVP 3 §1 vector dimension policy, mirrored from
     # `knowledge.KnowledgeChunk.embedding`) — comparison operators only
@@ -374,6 +379,17 @@ class CoreBlockProposal(WorkspaceScopedModel, TimestampedModel):
     provenance_quote = models.CharField(max_length=300)
     # Plain UUID, not an FK: the episode may expire (D2, d10).
     source_episode_id = models.UUIDField(null=True, blank=True)
+    # The learned proposal's source (branch 5): forget-source finds and
+    # rejects its pending proposals through this FK.
+    ingestion_source = models.ForeignKey(
+        "memory.IngestionSource",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="core_block_proposals",
+    )
+    forget_operation_id = models.UUIDField(null=True, blank=True)
+    forget_prior_status = models.CharField(max_length=20, blank=True, default="")
     inferred = models.BooleanField(default=True)
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDING)
     decided_by = models.ForeignKey(
@@ -607,6 +623,12 @@ class IngestionCounter(WorkspaceScopedModel, TimestampedModel):
     proposals_created = models.PositiveIntegerField(default=0)
     proposals_accepted = models.PositiveIntegerField(default=0)
     proposals_rejected = models.PositiveIntegerField(default=0)
+    # Branch 5 (D9, D10): candidates dropped because their quote is not
+    # verbatim owner text of the cited episode, and every other learning
+    # drop/defer reason (`self_target`, `nightly_cap`, `weekly_cap`,
+    # `duplicate`, `triage_short`, `deferred_budget`, ...) -> count.
+    proposals_dropped_no_provenance = models.PositiveIntegerField(default=0)
+    learning_drops = models.JSONField(default=dict, blank=True)
 
     class Meta:
         ordering = ["-day"]
@@ -669,3 +691,51 @@ class CodingSession(WorkspaceScopedModel, TimestampedModel):
 
     def __str__(self):
         return f"{self.tool} session {self.id}"
+
+
+class EpisodeExtractionJob(WorkspaceScopedModel, TimestampedModel):
+    """One owner-text extraction attempt over a fixed set of episodes of one
+    workspace (Phase 8A brief D9), lease-fenced like `MemoryExtractionJob`.
+
+    Planned nightly (`memory.ingestion.extraction.plan_nightly_extraction`):
+    at most one open job per workspace and data class; `personal_data` jobs
+    hold only personal-class (calendar) or `private` episodes and are sent
+    with `personal_data=True` -- never batched with cloud-eligible ones.
+    `candidates` holds the provenance-checked survivors until the
+    workspace's consolidation turns them into proposals (D10); they are
+    derived from scrubbed owner text, so forget-source strips a source's
+    entries and the TTL beat deletes old jobs.
+    """
+
+    class Status(models.TextChoices):
+        PENDING = "pending"
+        RUNNING = "running"
+        SUCCEEDED = "succeeded"
+        FAILED = "failed"
+        # The per-source daily budget or a gateway budget refused the call:
+        # the episodes stay un-extracted for the next night (D13).
+        DEFERRED = "deferred"
+
+    night = models.DateField()
+    personal_data = models.BooleanField(default=False)
+    episode_ids = models.JSONField(default=list, blank=True)
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDING)
+    retry_count = models.PositiveIntegerField(default=0)
+    claim_token = models.UUIDField(null=True, blank=True)
+    lease_expires_at = models.DateTimeField(null=True, blank=True)
+    error_type = models.CharField(max_length=50, blank=True, default="")
+    error_message = models.CharField(max_length=500, blank=True, default="")
+    candidates = models.JSONField(default=list, blank=True)
+    consolidation_token = models.UUIDField(null=True, blank=True)
+    consolidation_lease_expires_at = models.DateTimeField(null=True, blank=True)
+    consolidated_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["created_at"]
+        indexes = [
+            models.Index(fields=["workspace", "status"]),
+            models.Index(fields=["workspace", "consolidated_at"]),
+        ]
+
+    def __str__(self):
+        return f"episode extraction job {self.id} ({self.status})"
