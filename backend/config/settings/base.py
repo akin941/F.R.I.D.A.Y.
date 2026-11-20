@@ -103,6 +103,8 @@ INSTALLED_APPS = [
     "ops",
     # Phase 6 branch 2 (ADR-011 decision 6): the voice transport, a leaf app.
     "voice",
+    # Phase 6 branch 5 (brief A8): the HUD's read-only event stream, a leaf.
+    "hud",
 ]
 
 AUTH_USER_MODEL = "accounts.User"
@@ -275,6 +277,9 @@ REST_FRAMEWORK = {
         "voice_tts": env("VOICE_TTS_RATE", default="120/min"),
         # Phase 6 branch 3: the "bu ne kadar tuttu?" receipt read.
         "voice_receipt": env("VOICE_RECEIPT_RATE", default="30/min"),
+        # Phase 6 branch 5: HUD event-stream (re)connects; one stream lives
+        # at most HUD_STREAM_MAX_SECONDS, so ~1/min per open HUD tab.
+        "hud_events": env("HUD_EVENTS_RATE", default="20/min"),
     },
 }
 
@@ -553,6 +558,28 @@ OBSIDIAN_VAULT_PATH = env("OBSIDIAN_VAULT_PATH", default="")
 # backstop, by the decision endpoints themselves regardless of the sweep's
 # timing.
 APPROVAL_REQUEST_TTL_HOURS = env.int("APPROVAL_REQUEST_TTL_HOURS", default=24)
+
+# --- HUD (Phase 6 branch 5, brief A8) ---
+# `GET /api/v1/hud/events`: one bounded SSE stream per HUD tab. It re-reads
+# its sections every HUD_STREAM_INTERVAL_SECONDS and closes itself after
+# HUD_STREAM_MAX_SECONDS (the client reconnects after HUD_STREAM_RETRY_MS,
+# re-running auth and every permission check), so a sync worker is never
+# held indefinitely.
+HUD_STREAM_INTERVAL_SECONDS = env.int("HUD_STREAM_INTERVAL_SECONDS", default=5)
+HUD_STREAM_MAX_SECONDS = env.int("HUD_STREAM_MAX_SECONDS", default=55)
+HUD_STREAM_RETRY_MS = env.int("HUD_STREAM_RETRY_MS", default=3000)
+# Items per HUD list (pending approvals, today's tasks).
+HUD_LIST_LIMIT = env.int("HUD_LIST_LIMIT", default=8)
+# A request approved this recently counts as "tool running" on the HUD.
+HUD_TOOL_RUNNING_SECONDS = env.int("HUD_TOOL_RUNNING_SECONDS", default=30)
+# A provider's last call within this window decides its health status
+# (ok / down); older or none is "unknown".
+HUD_PROVIDER_WINDOW_MINUTES = env.int("HUD_PROVIDER_WINDOW_MINUTES", default=30)
+# Where `manage.py preflight` leaves its last summary for the health panel
+# (the shared cache; `ops` is a leaf no app imports, the key is the only
+# coupling). Kept for HUD_PREFLIGHT_CACHE_SECONDS.
+HUD_PREFLIGHT_CACHE_KEY = "ops:preflight:last"
+HUD_PREFLIGHT_CACHE_SECONDS = env.int("HUD_PREFLIGHT_CACHE_SECONDS", default=7 * 24 * 3600)
 
 # --- Connectors (Phase 5 branch 4, ADR-010, brief D1-D6) ---
 

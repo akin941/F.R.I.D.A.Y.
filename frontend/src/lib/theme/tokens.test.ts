@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
+import { HUD_STATES } from "@/lib/hud/states";
 import { STATUS_TONES, TONE_PILL_CLASSES, type StatusTone } from "@/lib/theme/status";
 
 /**
@@ -79,6 +80,10 @@ const PAIRS: [string, string][] = [
   ["sidebar-foreground", "sidebar"],
   ["sidebar-primary-foreground", "sidebar-primary"],
   ["sidebar-accent-foreground", "sidebar-accent"],
+  // Phase 6 A8: HUD captions, and every HUD state colour as text.
+  ["hud-caption", "hud-surface"],
+  ["hud-caption-muted", "hud-surface"],
+  ...HUD_STATES.map((state): [string, string] => [`hud-${state}`, "hud-surface"]),
   ...SEMANTIC.flatMap((tone): [string, string][] => [
     [`${tone}-foreground`, tone],
     [tone, `${tone}-muted`],

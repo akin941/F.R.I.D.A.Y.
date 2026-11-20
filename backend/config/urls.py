@@ -7,6 +7,7 @@ from rest_framework.settings import api_settings
 from accounts.authentication import PersonalAccessTokenAuthentication
 from config.activity import ActivitySummaryView
 from deploys.urls import build_urlpatterns as deploy_urlpatterns
+from hud.urls import build_urlpatterns as hud_urlpatterns
 from voice.urls import build_urlpatterns as voice_urlpatterns
 
 
@@ -56,6 +57,19 @@ urlpatterns = [
         "api/v1/",
         include(
             voice_urlpatterns(
+                authentication_classes=[
+                    PersonalAccessTokenAuthentication,
+                    *api_settings.DEFAULT_AUTHENTICATION_CLASSES,
+                ]
+            )
+        ),
+    ),
+    # Phase 6 branch 5: the HUD event stream, same injection (`hud` may not
+    # import `accounts`); web-session owner only.
+    path(
+        "api/v1/",
+        include(
+            hud_urlpatterns(
                 authentication_classes=[
                     PersonalAccessTokenAuthentication,
                     *api_settings.DEFAULT_AUTHENTICATION_CLASSES,

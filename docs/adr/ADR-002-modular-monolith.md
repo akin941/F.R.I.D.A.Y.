@@ -44,6 +44,17 @@ module. Contracts enforced with import-linter (see `backend/pyproject.toml`).
 > `ai_core`/`audit` forbidden lists in `backend/pyproject.toml` when the app
 > lands. Speech engines stay out of process (ADR-011 decision 6).
 
+> Note (2026-11-20, Phase 6 branch 5, brief A8): the kernel app `hud` --
+> the HUD's read-only SSE endpoint `GET /api/v1/hud/events` -- is a leaf
+> like `voice`: it may import `core`, `workspaces`, `ai_core` (ModelUsage,
+> provider and budget reads only, never a gateway call), `approvals` and
+> `tasks`; it writes nothing, has no models, and no app imports it. It is
+> separate from `voice` because `voice` may not import `approvals` or
+> `tasks` (D11). `hud` joins the `core`/`ai_core`/`audit`/`ops`/`harness`
+> forbidden lists in `backend/pyproject.toml`; the last `manage.py
+> preflight` summary reaches it through the shared cache
+> (`HUD_PREFLIGHT_CACHE_KEY`), never an `ops` import.
+
 ## Consequences
 A module can be extracted into a service later because boundaries stay clean.
 The first extraction candidate, if ever needed, is the AI gateway.

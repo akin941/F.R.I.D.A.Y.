@@ -98,6 +98,10 @@ jobs:
       - name: Build
         run: npm run build
 
+      # Phase 6 A8: three.js / R3F reachable from /hud only, lazily.
+      - name: HUD bundle split
+        run: npm run check:hud-bundle
+
   e2e:
     runs-on: ubuntu-latest
     services:

@@ -3,6 +3,7 @@ import {
   Building2,
   Cable,
   CalendarCheck,
+  Gauge,
   Brain,
   BookOpen,
   ListTodo,
@@ -47,6 +48,7 @@ export const NAV_GROUPS: NavGroup[] = [
     items: [
       { href: "/chat", label: items.chat, icon: MessageSquare },
       { href: "/voice", label: items.voice, icon: Mic },
+      { href: "/hud", label: items.hud, icon: Gauge },
       { href: "/approvals", label: items.approvals, icon: ShieldCheck, badge: "approvals" },
       { href: "/harness", label: items.harness, icon: Terminal, badge: "harness" },
     ],

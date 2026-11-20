@@ -51,6 +51,20 @@
   --color-popover: var(--popover);
   --color-card-foreground: var(--card-foreground);
   --color-card: var(--card);
+  --color-hud-surface: var(--hud-surface);
+  --color-hud-caption: var(--hud-caption);
+  --color-hud-caption-muted: var(--hud-caption-muted);
+  --color-hud-idle: var(--hud-idle);
+  --color-hud-armed: var(--hud-armed);
+  --color-hud-listening: var(--hud-listening);
+  --color-hud-thinking: var(--hud-thinking);
+  --color-hud-tool-running: var(--hud-tool-running);
+  --color-hud-awaiting-approval: var(--hud-awaiting-approval);
+  --color-hud-speaking: var(--hud-speaking);
+  --color-hud-error: var(--hud-error);
+  --color-hud-muted: var(--hud-muted);
+  --color-hud-disconnected: var(--hud-disconnected);
+  --color-hud-offline-local: var(--hud-offline-local);
   --radius-sm: calc(var(--radius) * 0.6);
   --radius-md: calc(var(--radius) * 0.8);
   --radius-lg: var(--radius);
@@ -113,6 +127,24 @@
   --sidebar-accent-foreground: var(--accent-foreground);
   --sidebar-border: oklch(0.922 0 0);
   --sidebar-ring: var(--ring);
+
+  /* HUD (Phase 6 A8) -- HUD tokens only. One colour per HUD state, each
+     usable as text on --hud-surface (WCAG AA, tokens.test.ts). The WebGL
+     orb's shader colours live in lib/hud/states.ts (three.js reads no oklch). */
+  --hud-surface: oklch(0.985 0.004 275);
+  --hud-caption: oklch(0.2 0.01 275);
+  --hud-caption-muted: oklch(0.48 0.01 275);
+  --hud-idle: oklch(0.48 0.02 275);
+  --hud-armed: oklch(0.5 0.1 195);
+  --hud-listening: oklch(0.5 0.2 275);
+  --hud-thinking: oklch(0.5 0.2 305);
+  --hud-tool-running: oklch(0.5 0.13 245);
+  --hud-awaiting-approval: oklch(0.52 0.12 65);
+  --hud-speaking: oklch(0.5 0.11 160);
+  --hud-error: oklch(0.52 0.2 27);
+  --hud-muted: oklch(0.45 0 0);
+  --hud-disconnected: oklch(0.5 0.18 350);
+  --hud-offline-local: oklch(0.5 0.12 125);
 }
 
 .dark {
@@ -161,6 +193,21 @@
   --sidebar-accent-foreground: var(--accent-foreground);
   --sidebar-border: oklch(1 0 0 / 10%);
   --sidebar-ring: var(--ring);
+
+  --hud-surface: oklch(0.16 0.015 275);
+  --hud-caption: oklch(0.96 0.005 275);
+  --hud-caption-muted: oklch(0.74 0.01 275);
+  --hud-idle: oklch(0.74 0.02 275);
+  --hud-armed: oklch(0.8 0.11 195);
+  --hud-listening: oklch(0.74 0.14 275);
+  --hud-thinking: oklch(0.76 0.14 305);
+  --hud-tool-running: oklch(0.76 0.12 245);
+  --hud-awaiting-approval: oklch(0.82 0.14 80);
+  --hud-speaking: oklch(0.8 0.13 160);
+  --hud-error: oklch(0.72 0.17 22);
+  --hud-muted: oklch(0.68 0 0);
+  --hud-disconnected: oklch(0.75 0.15 350);
+  --hud-offline-local: oklch(0.82 0.15 125);
 }
 
 @layer base {

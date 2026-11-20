@@ -1,14 +1,22 @@
 "use client";
 
 import { useState } from "react";
+import { usePathname } from "next/navigation";
 import { Menu } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTrigger, SheetTitle } from "@/components/ui/sheet";
+import { HudMiniOrb } from "@/components/shell/HudMiniOrb";
 import { SidebarContent } from "@/components/shell/SidebarContent";
+import { isActivePath } from "@/components/shell/nav";
 import { tr } from "@/lib/i18n/tr";
 
 export function Sidebar() {
   const [open, setOpen] = useState(false);
+  const pathname = usePathname();
+
+  // /hud is full screen (Phase 6 A8): no sidebar, no mobile header; the
+  // HUD carries its own exit link.
+  if (isActivePath(pathname ?? "", "/hud")) return null;
 
   return (
     <>
@@ -28,6 +36,7 @@ export function Sidebar() {
           </SheetContent>
         </Sheet>
         <span className="ml-2 text-sm font-semibold">Friday</span>
+        <HudMiniOrb className="ml-auto" />
       </div>
     </>
   );
