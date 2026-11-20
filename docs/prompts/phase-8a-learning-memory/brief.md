@@ -1464,3 +1464,21 @@ touched by this branch; the file passes 3/3 alone and `harness/tests` passes
 in full. Worth a look at the fixture's commit dates vs the
 `--shallow-since` window.
 
+
+### Branch 6 (`feat/p8-learning-ui`) — known follow-ups (from review, unresolved at merge)
+
+- **LOW — `frontend/src/components/memory/CoreBlocksView.tsx`**: after a save
+  or rollback only the `coreBlocks` query is invalidated; the cached
+  `coreBlockVersions` query for that label stays as it was, so reopening
+  History right after a save can briefly show a list without the new version
+  until it refetches. The block remounts on the version key, so it usually
+  refetches; cosmetic. Fix: also invalidate
+  `queryKeys.coreBlockVersions(workspaceId, label)` in `save()` and in the
+  rollback `onConfirm`.
+- **LOW — `backend/harness/tools.py`**: `harness_jobs_status` returns the
+  owner's job goal (truncated to 200 chars) into the fenced chat context. It
+  is correctly fenced as untrusted data and only the owner can read it, but
+  the goal is not run through the scrubber first, so a secret the owner
+  pasted into a goal would reach the provider (it is already stored in that
+  field). Optional fix: pass the goal through the memory scrubber before
+  building the row. Non-blocking.
