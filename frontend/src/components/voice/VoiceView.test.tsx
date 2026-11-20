@@ -5,6 +5,7 @@ import { VoiceView } from "@/components/voice/VoiceView";
 import type { CaptureSession } from "@/lib/voice/capture";
 import { CaptureError } from "@/lib/voice/capture";
 import { MUTE_STORAGE_KEY } from "@/lib/voice/mute";
+import { readVoicePresence } from "@/lib/voice/presence";
 
 vi.mock("@/contexts/workspace-context", () => ({
   useWorkspace: () => ({ activeWorkspace: { id: "w1", name: "Alice", type: "personal", role: "owner" } }),
@@ -311,5 +312,44 @@ describe("VoiceView", () => {
     expect(capture.session.cancel).toHaveBeenCalled();
     expect(screen.getByRole("img", { name: "Friday boşta" })).toBeInTheDocument();
     expect(document.title.startsWith("● Dinliyor")).toBe(false);
+  });
+
+  // --- Phase 6 A8: the HUD variant and the published presence ---
+
+  it("publishes its phase and captions as the tab's voice presence, cleared on unmount", async () => {
+    stubFetch({
+      "/api/conversations": () => new Response(JSON.stringify(CONVERSATION), { status: 201 }),
+      "/api/voice/transcriptions": () =>
+        new Response(JSON.stringify({ text: "Yarın hava nasıl?", audio_seconds: 1, language: "tr" })),
+      "/api/conversations/c1/messages": () =>
+        sseResponse(['data: {"type":"chunk","text":"Güneşli."}\n\n', DONE]),
+      "/api/voice/speech": () => wavResponse(),
+    });
+    const { unmount } = render(<VoiceView depsOverride={baseDeps()} />);
+    expect(readVoicePresence()).toMatchObject({ phase: "idle", active: true });
+    await holdToTalk();
+    await waitFor(() => expect(readVoicePresence().reply).toBe("Güneşli."));
+    expect(readVoicePresence().heard).toBe("Yarın hava nasıl?");
+    unmount();
+    expect(readVoicePresence()).toMatchObject({ phase: "idle", active: false, heard: "" });
+  });
+
+  it("hud variant: controls only -- no orb, no captions, no typed composer or wake settings", async () => {
+    stubFetch({
+      "/api/conversations": () => new Response(JSON.stringify(CONVERSATION), { status: 201 }),
+      "/api/voice/transcriptions": () =>
+        new Response(JSON.stringify({ text: "Merhaba", audio_seconds: 1, language: "tr" })),
+      "/api/conversations/c1/messages": () => sseResponse(['data: {"type":"chunk","text":"Selam."}\n\n', DONE]),
+      "/api/voice/speech": () => wavResponse(),
+    });
+    render(<VoiceView variant="hud" depsOverride={baseDeps()} />);
+    expect(screen.getByTestId("voice-mic")).toBeInTheDocument();
+    expect(screen.queryByRole("img")).toBeNull();
+    expect(screen.queryByPlaceholderText("Friday'ye yaz…")).toBeNull();
+    // The HUD announces state itself: the hint is not a second live region.
+    expect(screen.getByTestId("voice-status")).not.toHaveAttribute("aria-live");
+    await holdToTalk();
+    await waitFor(() => expect(readVoicePresence().reply).toBe("Selam."));
+    expect(screen.queryByTestId("voice-captions")).toBeNull();
   });
 });

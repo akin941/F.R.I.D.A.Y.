@@ -68,9 +68,12 @@ describe("SidebarContent", () => {
     expect(within(work).getAllByRole("link").map((l) => l.textContent)).toEqual([
       "Sohbet",
       "Sesli",
+      "HUD",
       "Onaylar",
       "Harness",
     ]);
+    // Phase 6 A8: the HUD route, next to voice.
+    expect(within(navigation).getByRole("link", { name: "HUD" })).toHaveAttribute("href", "/hud");
     for (const group of ["Hafıza", "Firma", "Otomasyon", "Ayarlar"]) {
       expect(within(navigation).getByRole("list", { name: group })).toBeInTheDocument();
     }

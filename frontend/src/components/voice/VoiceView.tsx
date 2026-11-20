@@ -25,6 +25,7 @@ import { startCapture } from "@/lib/voice/capture";
 import { VOICE_FINISH_MS, VOICE_HOLD_THRESHOLD_MS } from "@/lib/voice/config";
 import { VoiceController, type VoiceControllerDeps, type VoiceSnapshot } from "@/lib/voice/controller";
 import { readMuteState, setVoiceMuted, useVoiceMute } from "@/lib/voice/mute";
+import { clearVoicePresence, publishVoicePresence } from "@/lib/voice/presence";
 import { holdListeningTitle } from "@/lib/voice/title-indicator";
 import type { VoicePhase } from "@/lib/voice/voice-machine";
 import type { ApiApprovalRequest, ApiConversation, ApiMemory } from "@/types/api";
@@ -90,9 +91,17 @@ const EMPTY_SNAPSHOT: VoiceSnapshot = {
 export interface VoiceViewProps {
   /** Test seam: replace the controller's media/network edges. */
   depsOverride?: Partial<VoiceControllerDeps>;
+  /**
+   * `page` (/voice, default) or `hud`: embedded in /hud (Phase 6 A8), the
+   * same loop renders only its controls -- mic, stop, review, drafts and
+   * notices -- while the HUD draws the orb, the state text and the captions
+   * from the published voice presence.
+   */
+  variant?: "page" | "hud";
 }
 
-export function VoiceView({ depsOverride }: VoiceViewProps = {}) {
+export function VoiceView({ depsOverride, variant = "page" }: VoiceViewProps = {}) {
+  const full = variant === "page";
   const { activeWorkspace } = useWorkspace();
   const workspaceId = activeWorkspace?.id ?? null;
   const mute = useVoiceMute();
@@ -203,6 +212,21 @@ export function VoiceView({ depsOverride }: VoiceViewProps = {}) {
   useEffect(() => {
     return () => controller.stop();
   }, [controller]);
+
+  // The tab-wide voice presence (A8): the shell mini-orb and the HUD
+  // mirror this loop; cleared when the loop unmounts.
+  useEffect(() => {
+    publishVoicePresence(
+      {
+        phase: snapshot.phase,
+        heard: snapshot.buffer || snapshot.heard,
+        reply: snapshot.reply,
+        error: snapshot.error,
+      },
+      () => controller.level() ?? 0,
+    );
+  }, [snapshot, controller]);
+  useEffect(() => () => clearVoicePresence(), []);
 
   // Wake mode (shell, branch 4) hands its detections to this page's loop.
   useEffect(() => {
@@ -339,12 +363,27 @@ export function VoiceView({ depsOverride }: VoiceViewProps = {}) {
   const statusText = tr.voice.phase[phase];
 
   return (
-    <div className={cn(VIEW_SCROLL_ROOT, "items-center justify-center-safe gap-6 p-6 sm:p-8")}>
-      <FridayOrb state={orbStateFor(phase, wakeArmed)} size={220} level={() => controller.level() ?? 0} />
-
-      <p aria-live="polite" role="status" data-testid="voice-status" className="text-center text-sm text-muted-foreground">
-        {statusText}
-      </p>
+    <div
+      className={cn(
+        full ? VIEW_SCROLL_ROOT : "flex w-full flex-col",
+        "items-center justify-center-safe",
+        full ? "gap-6 p-6 sm:p-8" : "gap-3",
+      )}
+      data-variant={variant}
+    >
+      {full ? (
+        <>
+          <FridayOrb state={orbStateFor(phase, wakeArmed)} size={220} level={() => controller.level() ?? 0} />
+          <p aria-live="polite" role="status" data-testid="voice-status" className="text-center text-sm text-muted-foreground">
+            {statusText}
+          </p>
+        </>
+      ) : (
+        // The HUD announces its own state (aria-live); this is the hint.
+        <p data-testid="voice-status" className="text-center text-xs text-hud-caption-muted">
+          {statusText}
+        </p>
+      )}
 
       {mute.muted ? (
         <Alert className="max-w-xl" data-testid="voice-muted">
@@ -355,8 +394,9 @@ export function VoiceView({ depsOverride }: VoiceViewProps = {}) {
         </Alert>
       ) : null}
 
-      {/* Captions are always on: what Friday heard and what it answers. */}
-      {snapshot.heard || snapshot.buffer || snapshot.reply ? (
+      {/* Captions are always on: what Friday heard and what it answers
+          (on the HUD, the HUD's own captions panel draws them). */}
+      {full && (snapshot.heard || snapshot.buffer || snapshot.reply) ? (
         <div className="flex w-full max-w-xl flex-col gap-2 text-sm" data-testid="voice-captions">
           {snapshot.heard || snapshot.buffer ? (
             <p className="text-right">
@@ -490,6 +530,8 @@ export function VoiceView({ depsOverride }: VoiceViewProps = {}) {
         ) : null}
       </div>
 
+      {full ? (
+        <>
       <WakeSettingsPanel disabled={mute.muted || !workspaceId} />
 
       <label className="flex items-center gap-2 text-xs text-muted-foreground">
@@ -518,6 +560,8 @@ export function VoiceView({ depsOverride }: VoiceViewProps = {}) {
           Gönder
         </Button>
       </div>
+        </>
+      ) : null}
     </div>
   );
 }

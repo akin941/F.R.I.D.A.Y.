@@ -12,6 +12,7 @@ import { NAV_GROUPS, isActivePath, type NavBadge } from "@/components/shell/nav"
 import { WorkspaceSwitcher } from "@/components/shell/WorkspaceSwitcher";
 import { ThemeToggle } from "@/components/theme/ThemeToggle";
 import { VoiceMuteToggle } from "@/components/shell/VoiceMuteToggle";
+import { HudMiniOrb } from "@/components/shell/HudMiniOrb";
 import { useWorkspace } from "@/contexts/workspace-context";
 import { apiPostJson } from "@/lib/api-client";
 import { tr } from "@/lib/i18n/tr";
@@ -91,7 +92,10 @@ export function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
 
   return (
     <div className="flex h-full flex-col gap-4 p-4">
-      <div className="text-lg font-semibold tracking-tight">Friday</div>
+      <div className="flex items-center justify-between gap-2">
+        <div className="text-lg font-semibold tracking-tight">Friday</div>
+        <HudMiniOrb onNavigate={onNavigate} />
+      </div>
       <WorkspaceSwitcher />
       <Separator />
       <nav className="flex flex-col gap-4" aria-label={tr.nav.label}>
