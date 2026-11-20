@@ -721,7 +721,8 @@ from yesterday".
 | # | Status |
 |---|---|
 | brief (`docs/friday-3-roadmap`) | **implemented 2026-11-20** (draft brief; awaits Sonnet 5 plan review) |
-| 1–7 | not started (precondition: Phase 6 closeout on `main`) |
+| 1, 3–7 | not started (precondition: Phase 6 closeout on `main`) |
+| 2 `feat/p8-core-blocks` | **implemented 2026-11-20** — see "Branch 2 implementation notes" below; awaits independent Sonnet 5 review |
 
 ## Out of scope (explicit)
 
@@ -827,6 +828,74 @@ model call without a `ModelUsage` row; an episode surviving past its TTL.
 4. Enable the four sources (d5) once branches 1–5 are merged.
 5. Use the morning card for two weeks and record the acceptance rate for
    the go/no-go (closeout).
+
+## Branch 2 implementation notes (`feat/p8-core-blocks`, 2026-11-20)
+
+- **Models** (`memory/models.py`, migration `0006_core_memory_blocks`):
+  `CoreMemoryBlock` (unique `(workspace, label)`, `content_hash`,
+  `version`, `updated_by_kind`), `CoreMemoryBlockVersion` (every version,
+  current included), `CoreBlockProposal` (`proposed_content`, rendered
+  `diff`, `base_version`, `provenance_quote`, plain `source_episode_id`,
+  `inferred`, `status`). The proposal's `ingestion_source` FK is **not**
+  added here: `IngestionSource` comes from branch 1 (parallel); branch 5
+  adds the FK when it lands the producer. If branch 1 also ships a
+  `memory` migration numbered `0006`, the merge renumbers one of them.
+- **Labels per workspace.** All five labels live in a personal workspace;
+  a company workspace holds only `current_focus` / `active_projects`
+  (`developer` / `preferences` are the owner's personal blocks). `self`
+  lives in the installation owner's personal workspace.
+- **Services** (`memory/services.py`): `set_assembled_self_block` (only
+  writer of `self`, versions on hash change), `update_core_block`,
+  `rollback_core_block` (rollback = a new version with the old content),
+  `create_core_block_proposal` (weekly cap of 3 approved-or-pending per
+  owner per ISO week, `self` never a target, quote required),
+  `approve_core_block_proposal` (stale `base_version` refused, proposal
+  left pending), `reject_core_block_proposal`. Every owner write requires
+  the installation owner, a human, `CHANNEL_WEB` and workspace ownership.
+  New error codes `memory.core_block.{permission_denied,invalid,
+  stale_version,weekly_cap}` with Turkish strings in `tr.ts`.
+- **API** (owner, web session, `for_actor()`; not on the PAT allowlist, so
+  `cli`/`openai` PATs get **401**, like every web-only surface):
+  `GET /api/v1/memory/core-blocks?workspace=`,
+  `GET|PATCH /api/v1/memory/core-blocks/<label>?workspace=`,
+  `GET …/<label>/versions`, `POST …/<label>/rollback`. `self` is listed
+  read-only (`editable: false`); PATCH/rollback of `self` → 403, PUT → 405.
+  Reads are audited (`memory.core_block.viewed`, labels only).
+- **Snapshot** (`assistant/self_sources.py`, `manage.py build_self_sources
+  [--check]`, committed `assistant/self_sources.json`, CI step in
+  `.github/workflows/ci.yml`): identity sentence + rule headlines from
+  CLAUDE.md, title/status/first decision sentence of each accepted ADR,
+  the MASTER_PLAN phases row ("in progress", else first "planned"). Line
+  anchors are part of the snapshot, so a doc edit that shifts a quoted
+  line also requires re-running `build_self_sources` (CI says so).
+- **Assembler** (`assistant/self_block.py`): fixed Turkish `TEMPLATES`,
+  filled from the snapshot, `tools.registry.list_tool_names` /
+  `list_read_tool_names` (new helper) and active `ModelProvider` names;
+  lines added in priority order and skipped when over the 1500-char
+  budget. No model call (test spies on every gateway method). Runs on
+  `post_migrate` (errors logged, never fail a deploy) and daily
+  (`assistant.tasks.assemble_self_block_task`, compose beat).
+- **Injection** (`memory.core_blocks.select_core_blocks` +
+  `assistant.context.render_core_blocks`): first after the system prompt,
+  `<core_blocks>`/`<core_block label=…>` fence with its own vocabulary;
+  rules exactly as D7; `memory.core_block.read` audit row (labels,
+  versions, target workspace) whenever the owner's personal blocks are
+  injected; context report carries labels, versions and char count only.
+- **Follow-up "D7 `self` block on low-trust channels" — resolved:** the
+  `self` block's tool / read-tool / provider lines are injected only on
+  `web` and `telegram` turns; `cli`/`openai` facade turns get `self`
+  without them (test asserts no tool or provider name on those turns).
+
+### Owner steps (pending) — branch 2, recorded 2026-11-20
+
+1. After deploy, run `manage.py migrate` (the `post_migrate` handler
+   assembles `self`) and check the block in the core-block API.
+2. Write the `developer` (and optionally `preferences`, `current_focus`,
+   `active_projects`) blocks from the web UI/API (the editor UI is
+   branch 6; until then `PATCH /api/v1/memory/core-blocks/<label>`).
+3. Manual pass with a real model: ask "Sen kimsin, seni kim
+   geliştiriyor?" in a web chat and confirm the answer comes from `self`
+   and `developer` (CI covers this with the fake provider only).
 
 ## Known follow-ups (from review, unresolved at merge)
 
