@@ -26,7 +26,10 @@ def test_every_manifest_module_is_builtin_and_has_its_governance_twin():
     allowlist = (DOCS / "allowlist.md").read_text()
     for name in BUILTIN:
         assert get_manifest(name) is not None, name
-        assert (DOCS / f"{name}.md").exists(), f"docs/mcp/{name}.md is missing"
+        # The twin may spell underscores as hyphens (`home_assistant` ->
+        # `docs/mcp/home-assistant.md`, the file name the Phase 5 brief uses).
+        twins = {DOCS / f"{name}.md", DOCS / f"{name.replace('_', '-')}.md"}
+        assert any(twin.exists() for twin in twins), f"docs/mcp/{name}.md is missing"
         assert f"`{name}` connector" in allowlist, f"allowlist row for {name} is missing"
 
 

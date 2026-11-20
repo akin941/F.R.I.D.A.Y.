@@ -109,6 +109,15 @@ def prepare_write_payload(connector, tool, workspace, payload):
             policy.scope_check(workspace, clean)
         except ScopeError as exc:
             raise ToolValidationError("The arguments are outside this workspace.") from exc
+    rows = _display_rows(policy, clean)
+    if policy.request_rows is not None:
+        # A native bridge's request-time read of the target (e.g. a Home
+        # Assistant entity's name and current state, D8); raises
+        # `ToolValidationError` to refuse (target missing, unreachable).
+        rows += [
+            {"label": str(row["label"]), "value": str(row["value"])}
+            for row in policy.request_rows(workspace, clean)
+        ]
     stored = {
         "connector": manifest.name,
         "tool": policy.name,
@@ -122,7 +131,7 @@ def prepare_write_payload(connector, tool, workspace, payload):
             "connector_name": manifest.display_name,
             "tool_description": policy.description,
             "data_class": manifest.data_class,
-            "rows": _display_rows(policy, clean),
+            "rows": rows,
         },
     }
     if policy.context_serializer is not None:
@@ -326,6 +335,10 @@ def execute_claimed_write(execution_id, claim_token):
             # Native bridges (D9): the grant changed since the request.
             "scope_mismatch": ErrorType.CONNECTOR_CHANGED,
             "reconnect_required": ErrorType.NOT_CONFIGURED,
+            "target_missing": ErrorType.TARGET_MISSING,
+            # The allowlist narrowed between request and execution (e.g.
+            # `HA_ALLOWED_DOMAINS`): the connector changed under the decision.
+            "not_allowed": ErrorType.CONNECTOR_CHANGED,
         }.get(exc.code, ErrorType.UNKNOWN)
         _finalize_fenced(
             execution_id,

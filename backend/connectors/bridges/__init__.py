@@ -45,7 +45,16 @@ def get_bridge(manifest):
     """The bridge object of a native manifest (its module's `BRIDGE`)."""
     if manifest.kind != KIND_NATIVE:
         return None
-    return getattr(import_module(f"connectors.manifests.{manifest.name}"), "BRIDGE", None)
+    module_name = f"connectors.manifests.{manifest.name}"
+    try:
+        module = import_module(module_name)
+    except ModuleNotFoundError as exc:
+        # A native manifest without a committed module has no bridge: it
+        # cannot be called (`not_configured`), never falls back to anything.
+        if exc.name != module_name:
+            raise
+        return None
+    return getattr(module, "BRIDGE", None)
 
 
 def call_tool(manifest, *, server_tool, arguments, schema_sha256, timeout):

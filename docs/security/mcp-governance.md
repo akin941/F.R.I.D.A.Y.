@@ -35,7 +35,8 @@ governed by code, not by configuration:
 
 1. **Three artifacts, one reviewed commit.** A connector exists only as
    `backend/connectors/manifests/<name>.py` (a `ConnectorManifest`, listed in
-   `BUILTIN`), its governance twin `docs/mcp/<name>.md` (from
+   `BUILTIN`), its governance twin `docs/mcp/<name>.md` (underscores may be
+   spelled as hyphens, e.g. `home-assistant.md`; from
    `docs/mcp/_template.md`) and a `` `<name>` connector `` row in
    `docs/mcp/allowlist.md`. `connectors/tests/test_manifests.py` fails if any
    of them is missing. Widening a connector -- a new tool, channel, scope or
@@ -115,7 +116,20 @@ Every terminal write also leaves a Friday-authored `work_log` memory
 connector, operation, closed error code and exception class -- never
 exception text, arguments, results, URLs with credentials or tokens.
 Credentials are env-only: MCP credentials live only in the sidecar; a native
-bridge reads its own from the environment at call time. A test
+bridge reads its own from the environment at call time (Home Assistant:
+`HA_BASE_URL`/`HA_TOKEN`, `connectors/tests/test_home_assistant.py::
+test_the_token_is_nowhere_but_the_authorization_header`).
+
+Native-bridge pins (rule 7): with no remote `inputSchema`, a native tool's
+pin is the sha256 of the bridge's own code-defined request contract (for
+Home Assistant the whole service/data allowlist, `tool_schemas()`): widening
+it without updating the manifest's pin and version reports the tool
+`mismatch` at the next health check (audited `connector.pin_mismatch`, like
+MCP drift) and refuses every call. Execution-time checks that must hold
+before the one send (Home Assistant: the entity still exists, the call is
+still inside the narrowed allowlist) are the tool's `ToolPolicy.precondition`
+-- a refusal ends the execution `failed` (`target_missing` /
+`connector_changed`) with nothing sent. A test
 (`connectors/tests/test_chat_reads.py::test_no_credential_value_anywhere`)
 asserts a credential value appears in no DB row, audit row or log line.
 

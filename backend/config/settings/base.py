@@ -499,6 +499,15 @@ CONNECTOR_WRITE_LEASE_SECONDS = env.int("CONNECTOR_WRITE_LEASE_SECONDS", default
 # CONNECTOR_RESULT_MAX_CHARS).
 GOOGLE_MAIL_BODY_MAX_CHARS = env.int("GOOGLE_MAIL_BODY_MAX_CHARS", default=6000)
 
+# Home Assistant native bridge (Phase 5 branch 7, brief D8, R5). The base URL
+# and the token are NOT settings: `connectors.bridges.home_assistant` reads
+# `HA_BASE_URL` / `HA_TOKEN` from the environment at call time only. These
+# two can only narrow the code-defined maximum (`bridges/home_assistant.py`
+# `SERVICES`): unset/empty = the code maximum; names outside it are ignored.
+HA_ALLOWED_DOMAINS = env.list("HA_ALLOWED_DOMAINS", default=[])
+# Wake-on-LAN targets; empty = `wake_on_lan.send_magic_packet` is refused.
+HA_WOL_ALLOWED_MACS = env.list("HA_WOL_ALLOWED_MACS", default=[])
+
 # --- Agent runtime (MVP 7) ---
 
 # Plan step-count bound (brief §1, user-mandated brake #1): a planner call
