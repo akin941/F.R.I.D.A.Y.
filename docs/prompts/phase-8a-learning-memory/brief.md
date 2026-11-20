@@ -728,7 +728,8 @@ from yesterday".
 | 2 `feat/p8-core-blocks` | **implemented 2026-11-20** — see "Branch 2 implementation notes" below; awaits independent Sonnet 5 review |
 | 3 `feat/p8-hook-relay` | **implemented 2026-11-20** — see "Branch 3 implementation notes" below; awaits independent Sonnet 5 review |
 | 4 `feat/p8-source-producers` | **implemented 2026-11-20** — git commit producer (runner `commit_log` primitive, cursor, authorship rules), harness outcome producer (discovery + implementation, every terminal path), calendar metadata producer; see "Branch 4 implementation notes" below; awaits independent Sonnet 5 review. Migration `harness/0013_repo_commit_cursor` |
-| 5–7 | not started |
+| 5 `feat/p8-learning-loop` | **implemented 2026-11-20** — owner-text episode extraction (lease-fenced jobs, triage, second scrub, provenance check), consolidation (dedupe, merge/rank, nightly cap 10, weekly core-block cap 3), digest + per-item actions + work_log-only bulk approve, learning budgets, forget cascade + exact restore, `purge_trash` episode/forgotten-memory keys, vault-mirror check, chat extraction schema v2; see "Branch 5 implementation notes" below; awaits independent Sonnet 5 review. Migration `memory/0009_learning_loop` |
+| 6–7 | not started |
 
 ## Out of scope (explicit)
 
@@ -1214,3 +1215,130 @@ PAT wording in this section and branch 2's matrix now says 401.
   a git commit, so a foreign commit carrying the owner's e-mail would enter
   `owner_text`. This is the brief's accepted rule and stays as a residual risk.
   Fix (optional): also require the committer e-mail to match.
+
+## Branch 5 implementation notes (`feat/p8-learning-loop`, 2026-11-20)
+
+- **Models** (migration `memory/0009_learning_loop`): `EpisodeExtractionJob`
+  (workspace-scoped, lease-fenced like `MemoryExtractionJob`: `night`,
+  `personal_data`, fixed `episode_ids`, `status` pending/running/succeeded/
+  failed/**deferred**, `candidates` waiting for consolidation, its own
+  consolidation claim token/lease and `consolidated_at`);
+  `CoreBlockProposal.ingestion_source` (the FK branch 2 deferred);
+  `Memory`/`CoreBlockProposal.forget_operation_id` + `forget_prior_status`
+  (the forget cascade marker); `IngestionCounter.
+  proposals_dropped_no_provenance` and `learning_drops` (reason → count:
+  `triage_no_owner_text`, `triage_short`, `triage_duplicate`,
+  `deferred_budget`, `no_provenance`, `self_target`, `invalid_target`,
+  `duplicate`, `merged`, `nightly_cap`, `weekly_cap`, `over_budget`,
+  `consolidation_failed`, `consolidation_schema_invalid`).
+- **Planning** (`memory/ingestion/extraction.py`, nightly beat
+  `memory.ingestion.tasks.run_learning_night_task`, compose beat every
+  24 h): per workspace with un-extracted live episodes of an accepting
+  source, at most one open job set at a time; deterministic triage (empty /
+  < 20 chars / duplicate fingerprint → marked extracted, counted, no call);
+  personal-class (calendar) and `private` episodes in their own jobs (sent
+  with `personal_data=True`), ≤ 25 episodes per job.
+- **The call** (`memory.episode_extraction`, tier `cheap`, prompt
+  `friday_episode_extraction` v1): per-source daily budget checked first
+  (episodes over it stay un-extracted → `deferred`, no call); every text and
+  metadata value scrubbed a second time; payload = system prompt + one user
+  message with `<owner_items>` (owner text only, each with its episode id)
+  and one `<untrusted_context>` (context text + metadata JSON), all fenced
+  with `neutralize_fence` / `strip_invisible_formatting`. Context report:
+  job id, source kinds, episode count, token estimate — never text. Tokens
+  spent are attributed to sources by estimate share (`tokens_spent`).
+  `BudgetExceeded` → `deferred` (episodes for the next night, nothing loops);
+  a retryable gateway error (e.g. `NoProviderAvailable` for a personal-data
+  job with only cloud providers) → back to `pending` (recovery scan, ≤ 3
+  attempts); a schema error → `failed`, terminal, the sent episodes are
+  marked extracted so the same input is never re-sent.
+- **Provenance** (`memory/provenance.py`, shared with chat extraction): the
+  quote must be ≥ 12 chars after whitespace normalisation and a verbatim
+  substring of the cited episode's (sent) owner text in the same job; else
+  `no_provenance`. `self` targets → `self_target`; a core-block target the
+  workspace cannot hold (`developer`/`preferences` from a firm episode) →
+  `invalid_target`.
+- **Consolidation** (`memory/ingestion/consolidation.py`, purpose
+  `memory.consolidation`, tier `mid`, prompt `friday_memory_consolidation`
+  v1): triggered on commit when a workspace's last extraction job closes
+  (plus the nightly leftovers pass). Per workspace and data class: fingerprint
+  dedupe against every memory of the workspace and within the batch,
+  core-block line already in the block, embedding similarity (existing
+  `memory.retrieval` path, cosine distance < 0.08, best effort); then one
+  call that may only select candidates by index, reword title/content and
+  rank — quote, episode, source and target stay code-held. The existing
+  context sent is `cloud_eligible()` memories and non-private, non-`self`
+  blocks only. Caps in code: `MAX_PROPOSALS_PER_NIGHT = 10` per owner per
+  local day across all workspaces (serialised by locking the owner's
+  workspaces; the rest discarded and counted), the weekly core-block cap via
+  `create_core_block_proposal`. A core-block proposal appends the candidate
+  line to the block's current content (refused over the label budget).
+  Every output row is `pending_approval` / `pending`; job candidates are
+  cleared after consolidation. Budget refusal / retryable error → claim
+  released, candidates wait for the next night; schema error → discarded.
+- **Budgets** (D13): `seed_ai_defaults` creates `learning` (both purposes,
+  monthly `AI_BUDGET_LEARNING_MONTHLY_USD`=20), `learning_extraction_daily`
+  (`AI_BUDGET_EPISODE_EXTRACTION_DAILY_USD`=1) and
+  `learning_consolidation_daily` (`AI_BUDGET_CONSOLIDATION_DAILY_USD`=0.5)
+  once; owner edits are never overwritten.
+- **Morning card** (`memory/ingestion/digest.py`, `memory/learning_views.py`;
+  owner, web session, default authentication so every PAT kind is 401):
+  `GET /api/v1/memory/learning/digest[?days=]` (pending learned proposals of
+  the last `MEMORY_LEARNING_DIGEST_DAYS`=2 local days, grouped by workspace,
+  each with title, content, quote, source kind, date, `bulk_approvable`;
+  audited `memory.learning.digest_viewed`, ids only);
+  `POST /api/v1/memory/learning/proposals/memory/<id>/{approve,edit,reject}`
+  (existing `approve_memory`/`edit_memory`/`reject_memory`, curated fields
+  allowed) and `…/core-block/<id>/{approve,reject}` (existing core-block
+  services; stale base version → 400 `memory.core_block.stale_version`);
+  `POST /api/v1/memory/learning/bulk-approve {"ids"}` — only when every id is
+  a pending `work_log` memory, otherwise the whole request is refused.
+  Decisions bump `proposals_accepted`/`proposals_rejected` (acceptance
+  metric). Core-block proposals have no "edit" action in 8A (approve or
+  reject; the owner edits the block itself afterwards).
+- **Chat extraction schema v2**: `friday_memory_extraction` v2 is seeded and
+  activated over the seeded v1; user messages are sent verbatim, every other
+  role inside `<untrusted_context role=…>`; candidates need a `quote` that
+  matches a `user` message verbatim (stored as `provenance_quote`); a
+  v1-shaped output is a terminal schema error. The FakeAdapter quotes the
+  latest plain user message (the e2e smoke's "Hello, Friday" still yields
+  its suggestion).
+- **Forget cascade** (`forget_source`): approved derived memories →
+  `archived` (embedding cleared), pending → `rejected`, pending core-block
+  proposals → `rejected`, all marked with the operation id and prior status;
+  waiting candidates of the source are stripped from jobs (not restorable).
+  `restore_source` puts back exactly the marked rows at their prior status
+  (a `privacy_locked` row stays archived; restored approved rows are
+  re-embedded). `updated_at` is not touched, so a round trip leaves the rows
+  as before. `forget_preview` now names memories and proposals too.
+  Already-*approved* core-block content derived from the source stays in the
+  block (it is the owner's versioned block; rollback is the owner's tool).
+- **Purge** (`tools/purge.py`): new payload keys `episode_ids` (trashed
+  episodes) and `forgotten_memory_ids` (memories a forget operation
+  archived/rejected); gate-class as before, audited `memory.episode_purged`
+  / `memory.purged` with the approval request id.
+- **Vault mirror**: verified, no change needed — the export prunes notes of
+  rows that are no longer approved; a test exports, forgets, re-exports
+  (note removed) and restores (note back).
+- **TTL**: the daily TTL beat also deletes extraction jobs older than their
+  workspace's episode TTL (their candidates derive from episode text).
+- Tests: `memory/tests/test_learning_{extraction,consolidation,digest,
+  forget,night}.py`, `config/tests/test_learning_beat.py`, chat v2 cases in
+  `memory/tests/test_{extraction,tasks}.py`.
+
+### Owner steps (pending) — `feat/p8-learning-loop`, recorded 2026-11-20
+
+1. Deploy, `manage.py migrate` (memory `0009`) and `manage.py
+   seed_ai_defaults` (prompts `friday_episode_extraction`,
+   `friday_memory_consolidation`, `friday_memory_extraction` v2, the three
+   learning budgets); check the budgets in the admin.
+2. Make sure a `personal_data_allowed` (local) chat provider is active:
+   calendar and private episodes are extracted only through one; without it
+   those jobs fail closed and the episodes expire unlearned.
+3. Manual pass with a real model (CI uses the fake provider only): after a
+   real night, read the morning card (`GET /api/v1/memory/learning/digest`;
+   the UI is branch 6), confirm every quote is the owner's own words and the
+   firm items sit in the firm workspace, and check the spend in the audit
+   view against the 7–13 USD/month estimate.
+4. Start the two-week acceptance count for the go/no-go (closeout).
+5. Independent Sonnet 5 review of this branch before merge.
