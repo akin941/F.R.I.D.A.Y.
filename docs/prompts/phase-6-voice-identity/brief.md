@@ -699,6 +699,30 @@ trip a cap; cost taken from the response when present, else from the
 configured price; the audio-budget coverage test; TTS routed by language
 only among allowed rows (all against `httpx.MockTransport`/FakeAdapter, no
 real OpenRouter call).
+**Known follow-ups (branch 1 review, LOW, unresolved at merge).**
+- `ai_core/adapters/openai_compat.py`: `synthesize()` buffers the whole TTS
+  response body (`raw.http_response.content`) before the
+  `VOICE_TTS_MAX_SECONDS` check, so a misbehaving speech server or provider
+  could force a large in-memory read (owner-configured server, output bounded
+  after buffering, so the risk is small). Fix: optionally cap bytes before
+  parsing (e.g. `max_seconds * 96000 * 2 + 1 KiB` for 96 kHz stereo) by
+  streaming or checking `Content-Length` first.
+- `ai_core/gateway.py`: `budget_session` is caller-supplied and stored in
+  `context_report` (truncated to 64 chars). Branch 2 must derive it from a
+  server-held voice session id (or conversation id), never from a request
+  field, so a client cannot dodge the per-session cap with a fresh value per
+  call; add a test for that.
+- `ai_core/gateway.py`: with both OpenRouter TTS and local TTS enabled, a
+  local-provider failure falls back to OpenRouter with the personal text and no
+  per-call notice. Allowed by D2 and recorded in the `ModelUsage` attempts
+  list, but it is a silent cloud fallback. Fix: document it in
+  `docs/runbooks/voice-setup.md`, or add a setting disabling cross-provider
+  fallback for audio.
+- This brief, step 0b: the OpenRouter spike rests on web search only (docs
+  pages could not be fetched); endpoint shapes, pcm/mp3 formats and the
+  `usage.cost` field are unverified against a live call, and seeded model ids
+  and prices are placeholders. Keep owner steps 1–4 open until done; both
+  OpenRouter rows stay disabled and disallowed by default meanwhile.
 
 ### 2. `feat/p6-voice-api` — `voice` app, endpoints, `input_mode`
 
