@@ -12,6 +12,8 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Downloaded wake-word models + the ORT runtime (`make voice-models`).
+    "public/voice-models/**",
   ]),
 ]);
 

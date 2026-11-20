@@ -1,5 +1,6 @@
 "use client";
 
+import { signalAuthLost } from "@/lib/auth-events";
 import { useId } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
@@ -82,6 +83,7 @@ export function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
   const idPrefix = useId();
 
   async function handleLogout() {
+    signalAuthLost();
     await apiPostJson("/api/auth/logout").catch(() => undefined);
     router.push("/enroll?signed_out=1");
     router.refresh();

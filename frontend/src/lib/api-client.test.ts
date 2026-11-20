@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { apiFetch } from "@/lib/api-client";
+import { AUTH_LOST_EVENT } from "@/lib/auth-events";
 
 describe("apiFetch", () => {
   beforeEach(() => {
@@ -82,11 +83,16 @@ describe("apiFetch", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
 
+    const authLost = vi.fn();
+    window.addEventListener(AUTH_LOST_EVENT, authLost);
     const response = await apiFetch("/api/data");
+    window.removeEventListener(AUTH_LOST_EVENT, authLost);
 
     expect(response.status).toBe(401);
     expect(dataCalls).toBe(1);
     expect(locationStub.href).toBe("/enroll");
+    // Wake mode's mic is closed on this signal (Phase 6 branch 4, D6).
+    expect(authLost).toHaveBeenCalledTimes(1);
   });
 
   it("redirects to /enroll if the retried request is still 401 after a successful refresh", async () => {

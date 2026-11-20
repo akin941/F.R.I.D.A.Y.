@@ -7,6 +7,8 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { FridayOrb, type FridayOrbState } from "@/components/voice/FridayOrb";
+import { useVoiceWake } from "@/components/voice/VoiceProvider";
+import { WakeSettingsPanel } from "@/components/voice/WakeSettingsPanel";
 import { TaskDraftCard } from "@/components/chat/TaskDraftCard";
 import { ToolRequestCard } from "@/components/chat/ToolRequestCard";
 import type { TaskDraft, ToolRequestDraft } from "@/components/chat/drafts";
@@ -23,6 +25,7 @@ import { startCapture } from "@/lib/voice/capture";
 import { VOICE_FINISH_MS, VOICE_HOLD_THRESHOLD_MS } from "@/lib/voice/config";
 import { VoiceController, type VoiceControllerDeps, type VoiceSnapshot } from "@/lib/voice/controller";
 import { readMuteState, setVoiceMuted, useVoiceMute } from "@/lib/voice/mute";
+import { holdListeningTitle } from "@/lib/voice/title-indicator";
 import type { VoicePhase } from "@/lib/voice/voice-machine";
 import type { ApiApprovalRequest, ApiConversation, ApiMemory } from "@/types/api";
 
@@ -39,7 +42,6 @@ import type { ApiApprovalRequest, ApiConversation, ApiMemory } from "@/types/api
  */
 
 const PREVIEW_KEY = "friday:voice:preview";
-const LISTENING_TITLE_PREFIX = "● Dinliyor — ";
 
 function loadPreview(): boolean {
   try {
@@ -58,7 +60,8 @@ function savePreview(value: boolean) {
   }
 }
 
-function orbStateFor(phase: VoicePhase): FridayOrbState {
+function orbStateFor(phase: VoicePhase, wakeArmed: boolean): FridayOrbState {
+  if (phase === "idle" && wakeArmed) return "armed";
   return phase === "finishing" ? "listening" : phase;
 }
 
@@ -94,6 +97,9 @@ export function VoiceView({ depsOverride }: VoiceViewProps = {}) {
   const workspaceId = activeWorkspace?.id ?? null;
   const mute = useVoiceMute();
   const { muted, readable } = mute;
+  const wake = useVoiceWake();
+  const { registerTarget } = wake;
+  const wakeArmed = wake.snapshot.state === "armed" || wake.snapshot.state === "paused";
 
   const [snapshot, setSnapshot] = useState<VoiceSnapshot>(EMPTY_SNAPSHOT);
   const [value, setValue] = useState("");
@@ -198,6 +204,12 @@ export function VoiceView({ depsOverride }: VoiceViewProps = {}) {
     return () => controller.stop();
   }, [controller]);
 
+  // Wake mode (shell, branch 4) hands its detections to this page's loop.
+  useEffect(() => {
+    registerTarget(controller);
+    return () => registerTarget(null);
+  }, [controller, registerTarget]);
+
   // A workspace switch starts a fresh voice conversation.
   useEffect(() => {
     if (workspaceRef.current !== workspaceId) {
@@ -221,11 +233,7 @@ export function VoiceView({ depsOverride }: VoiceViewProps = {}) {
   // The mic indicator in the tab title while the mic is open (D6).
   useEffect(() => {
     if (!micOpen) return;
-    const original = document.title;
-    document.title = `${LISTENING_TITLE_PREFIX}${original}`;
-    return () => {
-      document.title = original;
-    };
+    return holdListeningTitle();
   }, [micOpen]);
 
   // Space held = push-to-talk; Escape = Durdur (D7).
@@ -332,7 +340,7 @@ export function VoiceView({ depsOverride }: VoiceViewProps = {}) {
 
   return (
     <div className={cn(VIEW_SCROLL_ROOT, "items-center justify-center-safe gap-6 p-6 sm:p-8")}>
-      <FridayOrb state={orbStateFor(phase)} size={220} level={() => controller.level() ?? 0} />
+      <FridayOrb state={orbStateFor(phase, wakeArmed)} size={220} level={() => controller.level() ?? 0} />
 
       <p aria-live="polite" role="status" data-testid="voice-status" className="text-center text-sm text-muted-foreground">
         {statusText}
@@ -481,6 +489,8 @@ export function VoiceView({ depsOverride }: VoiceViewProps = {}) {
           </Button>
         ) : null}
       </div>
+
+      <WakeSettingsPanel disabled={mute.muted || !workspaceId} />
 
       <label className="flex items-center gap-2 text-xs text-muted-foreground">
         <input

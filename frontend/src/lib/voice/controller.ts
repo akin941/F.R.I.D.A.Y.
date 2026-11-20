@@ -15,6 +15,13 @@ import {
 } from "@/lib/voice/receipts";
 import { isInterruptWord, routeTranscript } from "@/lib/voice/routes";
 import { SentenceSegmenter } from "@/lib/voice/segmenter";
+import {
+  SPOKEN_MEMORY_MS,
+  matchesRecentSpeech,
+  withinSelfTriggerWindow,
+  type SpokenRecord,
+} from "@/lib/voice/self-trigger";
+import type { WakeTurnOptions, WakeTurnTarget } from "@/lib/voice/wake-mode";
 import { TurnTimer, newTraceId, type StageTimings } from "@/lib/voice/trace";
 import type { Transcript, TurnHandlers, TurnOutcome } from "@/lib/voice/api";
 import {
@@ -96,7 +103,15 @@ function errorCode(err: unknown, fallback: string): string {
   return fallback;
 }
 
-export class VoiceController {
+/** The wake detection behind the current turn (branch 4), if any. */
+interface WakeTurn {
+  detectedAt: number;
+  /** Detected within 1.5 s after playback ended (A6 self-trigger window). */
+  suspect: boolean;
+  onDispatched(): void;
+}
+
+export class VoiceController implements WakeTurnTarget {
   private readonly deps: VoiceControllerDeps;
   private state: VoiceMachineState = INITIAL_VOICE_STATE;
   private heard = "";
@@ -118,6 +133,9 @@ export class VoiceController {
   private streaming = false;
   private disposed = false;
   private conversationId: string | null = null;
+  private wakeTurn: WakeTurn | null = null;
+  private playbackEndedAt: number | null = null;
+  private spoken: SpokenRecord[] = [];
 
   constructor(deps: VoiceControllerDeps) {
     this.deps = deps;
@@ -131,6 +149,7 @@ export class VoiceController {
         this.send({ type: "speaking" });
       },
       onIdle: () => {
+        this.playbackEndedAt = this.clock();
         if (!this.streaming) this.send({ type: "done" });
       },
       onError: () => this.setNotice("voice.tts_failed"),
@@ -156,8 +175,42 @@ export class VoiceController {
     return 0;
   }
 
+  /** Friday is speaking (or about to): wake detection pauses (half-duplex, D7). */
+  isSpeaking(): boolean {
+    return this.speaker.busy || this.state.phase === "speaking";
+  }
+
+  /** A turn is in progress (a wake detection is then ignored). */
+  isBusy(): boolean {
+    const phase = this.state.phase;
+    return phase !== "idle" && phase !== "error";
+  }
+
+  /**
+   * A wake detection starts a turn (branch 4): the capture is the wake
+   * Worker's utterance (it starts after the detection frame, D6), and wake
+   * mode calls `release()` when the VAD ends it.
+   */
+  async pressWake(options: WakeTurnOptions): Promise<void> {
+    if (this.disposed || this.isBusy() || this.isSpeaking()) return;
+    this.wakeTurn = {
+      detectedAt: options.detectedAt,
+      suspect: withinSelfTriggerWindow(options.detectedAt, this.playbackEndedAt),
+      onDispatched: options.onDispatched,
+    };
+    await this.beginCapture(options.startCapture);
+  }
+
   /** Mic button down / Space down / a toggle click while idle. */
   async press(): Promise<void> {
+    const current = this.state.phase;
+    if (current === "listening" || current === "transcribing") return;
+    // A manual press is not a wake turn (even one continuing in the finish window).
+    this.wakeTurn = null;
+    await this.beginCapture(this.deps.startCapture);
+  }
+
+  private async beginCapture(start: VoiceControllerDeps["startCapture"]): Promise<void> {
     if (this.disposed) return;
     const phase = this.state.phase;
     if (phase === "listening" || phase === "transcribing") return;
@@ -181,8 +234,7 @@ export class VoiceController {
     this.notice = null;
     this.review = null;
     this.send({ type: "press" });
-    const pending = this.deps
-      .startCapture({
+    const pending = start({
         onLevel: (level) => {
           this.micLevel = level;
         },
@@ -247,6 +299,7 @@ export class VoiceController {
 
   /** "Durdur" / Escape: stop everything now, nothing more is sent. */
   stop(): void {
+    this.wakeTurn = null;
     this.clearFinishTimer();
     this.capture?.cancel();
     this.capture = null;
@@ -361,12 +414,43 @@ export class VoiceController {
       this.send({ type: "routed" });
       return;
     }
+    // A6 self-trigger rule: a wake turn detected right after playback whose
+    // transcript repeats what Friday just said is Friday hearing itself.
+    const wake = this.wakeTurn;
+    if (text && wake?.suspect && matchesRecentSpeech(text, this.recentSpoken())) {
+      this.wakeTurn = null;
+      this.send({ type: "routed" });
+      this.setNotice("self_trigger");
+      return;
+    }
     this.send({ type: "transcript", text });
-    if (this.state.phase !== "finishing") return;
+    if (this.state.phase !== "finishing") {
+      this.wakeTurn = null;
+      return;
+    }
+    // Wake mode: the VAD silence window (= VOICE_FINISH_MS, A7) already was
+    // the finish window, so the turn is routed right away.
+    const wait = wake ? 0 : this.deps.finishMs;
     this.finishTimer = (this.deps.setTimer ?? setTimeout)(() => {
       this.finishTimer = null;
       void this.finish();
-    }, this.deps.finishMs);
+    }, wait);
+  }
+
+  private clock(): number {
+    return (this.deps.now ?? Date.now)();
+  }
+
+  private recentSpoken(): SpokenRecord[] {
+    const now = this.clock();
+    this.spoken = this.spoken.filter((r) => now - r.at <= SPOKEN_MEMORY_MS);
+    return this.spoken;
+  }
+
+  /** Remember what Friday says (self-trigger comparison); text only, in memory. */
+  private noteSpoken(text: string) {
+    this.recentSpoken().push({ text, at: this.clock() });
+    if (this.spoken.length > 20) this.spoken.shift();
   }
 
   /** The finish window elapsed: route the whole buffered utterance. */
@@ -375,6 +459,9 @@ export class VoiceController {
     const text = this.state.buffer;
     this.heard = text;
     const route = routeTranscript(text);
+    const wake = this.wakeTurn;
+    this.wakeTurn = null;
+    if (wake && text.trim()) wake.onDispatched();
     switch (route.kind) {
       case "interrupt":
         this.speaker.stop();
@@ -448,6 +535,7 @@ export class VoiceController {
   private say(sentence: string): boolean {
     if (!this.traceId) this.traceId = newTraceId();
     const spoken = this.speaker.speak(sentence);
+    if (spoken) this.noteSpoken(sentence);
     if (spoken) this.speaker.end();
     return spoken;
   }
@@ -472,7 +560,7 @@ export class VoiceController {
       for (const sentence of sentences) {
         if (!this.speakReply) return;
         this.timer.mark("firstSentence");
-        this.speaker.speak(sentence);
+        if (this.speaker.speak(sentence)) this.noteSpoken(sentence);
       }
     };
     const result = await this.deps.sendTurn(

@@ -13,7 +13,7 @@ FRONTEND := cd frontend &&
 .PHONY: up up-daily down logs secrets test lint fmt shell migrate makemigrations \
 	harness-images harness-smoke harness-runner deploy-smoke preflight \
 	test-backend test-frontend test-e2e lint-backend lint-frontend \
-	frontend-install frontend-dev frontend-build e2e-install
+	frontend-install frontend-dev frontend-build e2e-install voice-models
 
 # Generates any missing secret into the gitignored deploy/docker/.env
 # (never overwrites an existing key). `make up` runs it first, so a fresh
@@ -79,6 +79,14 @@ frontend-dev:
 
 frontend-build:
 	$(FRONTEND) npm run build
+
+# --- Wake word (Phase 6 branch 4, D6; docs/runbooks/voice-setup.md) ---
+# Downloads the pinned openWakeWord + Silero models, verifies sha256 against
+# frontend/src/lib/voice/model-manifest.json and writes them (plus the
+# onnxruntime-web WASM runtime) to the gitignored frontend/public/voice-models/.
+# The owner-trained keyword model is copied from VOICE_WAKE_MODEL_SRC.
+voice-models:
+	$(FRONTEND) node scripts/voice-models.mjs
 
 # --- Harness runner (Phase 3 branch 8; docs/runbooks/harness-first-run.md) ---
 # Builds both CLI images. Pin the real base-image digest and CLI versions in
