@@ -46,8 +46,14 @@ def normalise_path(path):
     if not path or "\x00" in path:
         raise InvalidMappingKey("empty path")
     if path == "~" or path.startswith("~/"):
-        rest = posixpath.normpath("/" + path[1:].lstrip("/")) if len(path) > 1 else "/"
-        return "~" if rest == "/" else "~" + rest
+        if len(path) == 1:
+            return "~"
+        relative = posixpath.normpath(path[1:].lstrip("/") or ".")
+        # Normalised relative to '~', a leading '..' climbs out of the home
+        # directory: '~/../x' is not '~/x' and must not match its rules.
+        if relative == ".." or relative.startswith("../"):
+            raise InvalidMappingKey("path climbs above ~")
+        return "~" if relative == "." else "~/" + relative
     if not path.startswith("/"):
         raise InvalidMappingKey("path must be absolute or start with ~/")
     normalised = posixpath.normpath(path)

@@ -94,6 +94,10 @@ def test_sources_only_live_in_a_personal_workspace(owner, firm):
         ("//Users//o/./code/x/..", "/Users/o/code"),
         ("~/code/friday/", "~/code/friday"),
         ("~", "~"),
+        ("~/", "~"),
+        ("~//code/./x/../friday", "~/code/friday"),
+        ("~/code/..", "~"),
+        ("/../x", "/x"),
     ],
 )
 def test_normalise_path(raw, expected):
@@ -105,6 +109,21 @@ def test_relative_path_is_refused():
 
     with pytest.raises(InvalidMappingKey):
         normalise_path("code/friday")
+
+
+@pytest.mark.parametrize("raw", ["~/..", "~/../x", "~/code/../../x", "~//../x"])
+def test_home_path_climbing_above_home_is_refused(raw):
+    from memory.ingestion.mapping import InvalidMappingKey
+
+    with pytest.raises(InvalidMappingKey):
+        normalise_path(raw)
+
+
+def test_home_path_climbing_above_home_never_matches_a_home_rule(hooks, personal):
+    add_rule(hooks, PATH, "~/x", personal)
+    assert resolve_workspace(hooks, "path:~/x/y") == personal
+    assert resolve_workspace(hooks, "path:~/../x") is None
+    assert resolve_workspace(hooks, "path:~/../x/y") is None
 
 
 def test_longest_prefix_wins(hooks, personal, firm):

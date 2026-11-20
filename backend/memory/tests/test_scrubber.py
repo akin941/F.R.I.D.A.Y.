@@ -12,6 +12,7 @@ reported; benign items must come through unchanged.
 
 import json
 import re
+import time
 from pathlib import Path
 
 import pytest
@@ -169,5 +170,84 @@ def test_scrubber_is_standard_library_only():
     """Branch 3 vendors this module into the stdlib-only `friday-hook`."""
     source = Path(scrubber.__file__).read_text(encoding="utf-8")
     imports = re.findall(r"^(?:from|import)\s+([a-zA-Z_][\w.]*)", source, re.MULTILINE)
-    allowed = {"math", "re", "collections", "dataclasses"}
+    allowed = {"bisect", "math", "re", "collections", "dataclasses"}
     assert set(imports) <= allowed, set(imports) - allowed
+
+
+# --- bounded work (review round 1: ReDoS / CPU DoS) --------------------------
+
+# Generous for a slow CI box; the unbounded version took 15s+ on 20 KB.
+SCRUB_TIME_BUDGET_S = 3.0
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "A" * 100_000,
+        "ab" * 50_000,
+        "0123456789abcdef" * 6_250,
+        " ".join(f"user{i}@example.com" for i in range(6_000)),
+        "a." * 50_000,
+        "password" * 12_500,
+        "pwd-" * 25_000,
+        "password= " * 12_000,
+        "-----BEGIN X-----\n" * 5_000,
+        "x://" * 25_000,
+    ],
+    ids=[
+        "run-A",
+        "run-ab",
+        "hex",
+        "emails",
+        "dots",
+        "secret-word",
+        "secret-dash",
+        "assignments",
+        "pem-headers",
+        "schemes",
+    ],
+)
+def test_hostile_input_is_scrubbed_within_a_time_budget(text):
+    started = time.perf_counter()
+    scrub_text(text)
+    assert time.perf_counter() - started < SCRUB_TIME_BUDGET_S
+
+
+def test_input_is_capped_before_scrubbing_at_whitespace():
+    secret = "Zx81Kd02LmQpRt5UvWy7Ab9Cd3Ef4GhZx81Kd02"
+    filler = "word " * ((scrubber.MAX_SCRUB_INPUT - 10) // 5)
+    text = filler + secret + " tail"
+    assert len(text) > scrubber.MAX_SCRUB_INPUT
+    bounded = scrubber.bound_input(text)
+    assert len(bounded) <= scrubber.MAX_SCRUB_INPUT
+    # The token straddling the cap is dropped whole, never kept as a fragment.
+    assert bounded == filler.rstrip()
+    assert "Zx81" not in scrub_text(text).text
+
+
+def test_input_without_whitespace_is_cut_hard_at_the_cap():
+    assert len(scrubber.bound_input("A" * 200_000)) == scrubber.MAX_SCRUB_INPUT
+    assert scrubber.bound_input("short") == "short"
+
+
+def test_scrub_value_bounds_raw_strings_before_scrubbing():
+    started = time.perf_counter()
+    value, _ = scrub_value({"desc": "password" * 100_000})
+    assert time.perf_counter() - started < SCRUB_TIME_BUDGET_S
+    assert len(value["desc"]) == scrubber.METADATA_MAX_STRING
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ('{"password": "hunter two three"}', '{"password": "[SECRET:assignment]"}'),
+        ('pwd: "my long pass"', 'pwd: "[SECRET:assignment]"'),
+        ("secret='a b c'", "secret='[SECRET:assignment]'"),
+        ("token=abc def", "token=[SECRET:assignment] def"),
+    ],
+)
+def test_quoted_secret_values_are_scrubbed_up_to_the_closing_quote(text, expected):
+    result = scrub_text(text)
+    assert result.text == expected
+    assert result.report == {"SECRET:assignment": 1}
+    assert scrub_text(result.text).text == result.text

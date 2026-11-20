@@ -27,6 +27,7 @@ Placeholders are idempotent: running the scrubber over its own output
 changes nothing (the second scrub before every gateway call relies on it).
 """
 
+import bisect
 import math
 import re
 from collections import Counter
@@ -62,9 +63,14 @@ _SECRET_RULES = [
         ),
         None,
     ),
+    # The body may not cross another BEGIN header, so a text full of
+    # unterminated headers is scanned once, not once per header.
     (
         "pem_block",
-        re.compile(r"-----BEGIN [A-Z0-9 ]+-----[\s\S]*?-----END [A-Z0-9 ]+-----"),
+        re.compile(
+            r"-----BEGIN [A-Z0-9 ]{1,64}-----(?:(?!-----BEGIN )[\s\S]){0,16384}?"
+            r"-----END [A-Z0-9 ]{1,64}-----"
+        ),
         None,
     ),
     ("anthropic_key", re.compile(r"\bsk-ant-[A-Za-z0-9_\-]{16,}"), None),
@@ -83,7 +89,7 @@ _SECRET_RULES = [
     # scheme://user:password@host -> keep the scheme and host.
     (
         "url_credentials",
-        re.compile(r"(?i)\b[a-z][a-z0-9+.\-]*://([^\s/:@\[\]]+:[^\s/@\[\]]+)@"),
+        re.compile(r"(?i)\b[a-z][a-z0-9+.\-]{0,31}://([^\s/:@\[\]]+:[^\s/@\[\]]+)@"),
         1,
     ),
     (
@@ -92,13 +98,22 @@ _SECRET_RULES = [
         1,
     ),
     # KEY=value / "key": "value" / key: value where the key names a secret.
+    # The key starts at a key boundary and its prefix and suffix around the
+    # secret word are bounded, so a long identifier-like run is scanned from
+    # its start only, a bounded number of steps, never from every offset
+    # (ReDoS: unanchored, 'password'*N was quadratic).
+    # A quoted value is taken up to its closing quote (a passphrase may hold
+    # spaces); otherwise up to whitespace or a delimiter.
     (
         "assignment",
         re.compile(
-            r"(?i)[A-Za-z0-9_.\-]*" + _SECRET_WORDS + r"[A-Za-z0-9_.\-]*"
-            r"[\"']?\s*(?:=|:)\s*[\"']?([^\s\"',;]+)"
+            r"(?i)(?<![A-Za-z0-9_.\-])[A-Za-z0-9_.\-]{0,128}"
+            + _SECRET_WORDS
+            + r"[A-Za-z0-9_.\-]{0,64}"
+            r"[\"']?[ \t]{0,16}(?:=|:)[ \t]{0,16}"
+            r"(?:\"([^\"\n]{1,1024})\"|'([^'\n]{1,1024})'|[\"']?([^\s\"',;]+))"
         ),
-        1,
+        (1, 2, 3),
     ),
 ]
 
@@ -139,7 +154,9 @@ def _looks_like_secret_run(run):
 _IBAN_CANDIDATE = re.compile(r"\b[A-Z]{2}\d{2}(?:[ ]?[A-Z0-9]){11,30}\b")
 _CARD_CANDIDATE = re.compile(r"(?<![\d\-])\d(?:[ \-]?\d){12,18}(?![\d])")
 _TCKN_CANDIDATE = re.compile(r"(?<!\d)[1-9]\d{10}(?!\d)")
-_EMAIL = re.compile(r"(?i)\b[a-z0-9._%+\-]+@[a-z0-9\-]+(?:\.[a-z0-9\-]+)*\.[a-z]{2,}\b")
+_EMAIL = re.compile(
+    r"(?i)\b[a-z0-9._%+\-]{1,64}@[a-z0-9\-]{1,63}(?:\.[a-z0-9\-]{1,63}){0,8}\.[a-z]{2,24}\b"
+)
 # Turkish numbers: mobile 5xx and landline 2xx-4xx, with +90 / 0090 / 0
 # prefixes and the usual separators; then any other E.164 number.
 _PHONE_TR = re.compile(
@@ -209,19 +226,42 @@ class _Scrubber:
         return placeholder(kind, name)
 
     @staticmethod
-    def _protected(text, start, end):
-        """True when [start, end) overlaps an existing placeholder."""
-        for match in PLACEHOLDER_RE.finditer(text):
-            if match.start() < end and start < match.end():
+    def _protected(spans, start, end):
+        """True when [start, end) overlaps an existing placeholder. `spans`
+        are the placeholder spans of the text, computed once per pass and
+        sorted (placeholders never overlap each other)."""
+        index = max(bisect.bisect_left(spans, (start, start)) - 1, 0)
+        while index < len(spans):
+            span_start, span_end = spans[index]
+            if span_start >= end:
+                return False
+            if start < span_end:
                 return True
+            index += 1
         return False
+
+    @staticmethod
+    def _span(match, group):
+        if group is None:
+            return match.span()
+        if isinstance(group, tuple):
+            # Alternatives: the first group that took part in the match.
+            for candidate in group:
+                if match.group(candidate) is not None:
+                    return match.span(candidate)
+            return None
+        return match.span(group)
 
     def _apply(self, text, pattern, kind, name, group=None, validate=None):
         out = []
         last = 0
+        spans = [m.span() for m in PLACEHOLDER_RE.finditer(text)]
         for match in pattern.finditer(text):
-            start, end = match.span(group) if group else match.span()
-            if start < last or self._protected(text, start, end):
+            span = self._span(match, group)
+            if span is None:
+                continue
+            start, end = span
+            if start < last or self._protected(spans, start, end):
                 continue
             value = text[start:end]
             if PLACEHOLDER_RE.fullmatch(value):
@@ -292,13 +332,39 @@ def _longest_valid_iban(value):
     return None
 
 
+# Hard cap on the raw input of one scrub, applied *before* any rule runs so
+# the work per item is bounded whatever a producer sends (a hostile commit
+# message, invite description or hook payload). Generous: every stored field
+# is capped far lower after scrubbing.
+MAX_SCRUB_INPUT = 64 * 1024
+# How far back from the cap a whitespace cut is looked for.
+_CUT_WINDOW = 1024
+
+
+def bound_input(text):
+    """Cut `text` to at most MAX_SCRUB_INPUT characters, at the last
+    whitespace before the cap when there is one nearby, so a token
+    straddling the cap is dropped whole rather than split into a fragment
+    a rule might no longer recognise."""
+    if len(text) <= MAX_SCRUB_INPUT:
+        return text
+    head = text[:MAX_SCRUB_INPUT]
+    for index in range(MAX_SCRUB_INPUT - 1, max(MAX_SCRUB_INPUT - _CUT_WINDOW, 0) - 1, -1):
+        if head[index].isspace():
+            return head[:index]
+    # No whitespace near the cap: one long token runs through it. Cut hard;
+    # the kept part is still scrubbed (a long run trips the entropy rule).
+    return head
+
+
 def scrub_text(text, *, terms=()):
     """Scrub one string. `terms` is an iterable of `(id, literal)` pairs (the
-    workspace's ScrubTerms). Returns a ScrubResult with counts only."""
+    workspace's ScrubTerms). Returns a ScrubResult with counts only. Input
+    longer than MAX_SCRUB_INPUT is cut first (see `bound_input`)."""
     if not text:
         return ScrubResult(text or "", {})
     scrubber = _Scrubber(terms)
-    return ScrubResult(scrubber.run(str(text)), dict(scrubber.counts))
+    return ScrubResult(scrubber.run(bound_input(str(text))), dict(scrubber.counts))
 
 
 def merge_reports(*reports):
