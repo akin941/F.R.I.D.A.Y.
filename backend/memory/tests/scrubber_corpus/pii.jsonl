@@ -1,0 +1,16 @@
+{"id": "email", "class": "pii", "type": "email", "text": "ping owner.name+friday@example.com.tr about it", "needles": ["owner.name+friday@example.com.tr"]}
+{"id": "email-upper", "class": "pii", "type": "email", "text": "From: Ayse.Yilmaz@Firma.COM", "needles": ["Ayse.Yilmaz@Firma.COM"]}
+{"id": "phone-tr-mobile", "class": "pii", "type": "phone", "text": "beni 0532 123 45 67 numarasından ara", "needles": ["0532 123 45 67", "532 123 45 67"]}
+{"id": "phone-tr-plus", "class": "pii", "type": "phone", "text": "WhatsApp: +90 (532) 765-43-21", "needles": ["765-43-21", "(532) 765"]}
+{"id": "phone-tr-compact", "class": "pii", "type": "phone", "text": "tel:05551234567", "needles": ["05551234567"]}
+{"id": "phone-tr-landline", "class": "pii", "type": "phone", "text": "ofis 0212 555 66 77", "needles": ["0212 555 66 77"]}
+{"id": "phone-e164", "class": "pii", "type": "phone", "text": "call +14155552671 tomorrow", "needles": ["+14155552671"]}
+{"id": "phone-e164-spaced", "class": "pii", "type": "phone", "text": "UK: +44 20 7946 0958", "needles": ["20 7946 0958"]}
+{"id": "tckn", "class": "pii", "type": "tckn", "text": "TC kimlik no 10000000146 olarak kayıtlı", "needles": ["10000000146"]}
+{"id": "tckn-2", "class": "pii", "type": "tckn", "text": "tckn=12345678950", "needles": ["12345678950"]}
+{"id": "iban-tr-spaced", "class": "pii", "type": "iban", "text": "IBAN: TR33 0006 1005 1978 6457 8413 26 ödeme", "needles": ["TR33 0006 1005 1978 6457 8413 26", "1978 6457"]}
+{"id": "iban-tr-compact", "class": "pii", "type": "iban", "text": "TR330006100519786457841326", "needles": ["TR330006100519786457841326"]}
+{"id": "iban-de", "class": "pii", "type": "iban", "text": "DE89 3704 0044 0532 0130 00 FOR rent", "needles": ["DE89 3704 0044 0532 0130 00"]}
+{"id": "card-visa", "class": "pii", "type": "card", "text": "kart 4111 1111 1111 1111 son kullanım 12/28", "needles": ["4111 1111 1111 1111"]}
+{"id": "card-compact", "class": "pii", "type": "card", "text": "card=5500005555555559", "needles": ["5500005555555559"]}
+{"id": "card-dashed", "class": "pii", "type": "card", "text": "amex 3782-822463-10005", "needles": ["3782-822463-10005"]}

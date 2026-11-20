@@ -18,6 +18,8 @@ import re
 
 from django.conf import settings
 from django.db import models
+from django.db.models.functions import Lower
+from django.utils import timezone
 from pgvector.django import VectorField
 
 from core.db import WorkspaceScopedModel, WorkspaceScopedQuerySet
@@ -126,6 +128,20 @@ class Memory(WorkspaceScopedModel, TimestampedModel):
     # into cloud_eligible(), undoing the privacy decision. Never cleared
     # once set; there is no path back from it.
     privacy_locked = models.BooleanField(default=False)
+    # Learned-memory provenance (Phase 8A, ADR-012). `ingestion_source` is
+    # how forget-source finds every memory derived from a source, even after
+    # its episodes have expired (TTL, d10) -- hence `source_episode_id` is a
+    # plain UUID, not a foreign key. `provenance_quote` is the verbatim
+    # owner-authored text the proposal was checked against (D9), bounded.
+    ingestion_source = models.ForeignKey(
+        "memory.IngestionSource",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="derived_memories",
+    )
+    source_episode_id = models.UUIDField(null=True, blank=True)
+    provenance_quote = models.CharField(max_length=300, blank=True, default="")
     # Semantic retrieval (Phase 1 branch p1-memory-embeddings). No fixed
     # `dimensions` kwarg (MVP 3 §1 vector dimension policy, mirrored from
     # `knowledge.KnowledgeChunk.embedding`) — comparison operators only
@@ -253,3 +269,228 @@ class MemoryExtractionJob(WorkspaceScopedModel, TimestampedModel):
 
     def __str__(self):
         return f"extraction job {self.id} ({self.status})"
+
+
+# --- Continuous-learning ingestion (Phase 8A branch 1, ADR-012) -------------
+
+
+def default_daily_token_budget():
+    return settings.MEMORY_INGESTION_DEFAULT_DAILY_TOKEN_BUDGET
+
+
+class IngestionSource(WorkspaceScopedModel, TimestampedModel):
+    """A registered ingestion source (ADR-012 decision 1, brief D2). Scoped
+    to the owner's personal workspace: one row per kind in 8A, created
+    disabled by `seed_ingestion_sources`; workspace mapping rules route its
+    items (D4). Nothing is ingested unless `enabled` and not paused."""
+
+    class Kind(models.TextChoices):
+        GIT = "git"
+        HARNESS = "harness"
+        CLAUDE_CODE_HOOKS = "claude_code_hooks"
+        CALENDAR = "calendar"
+
+    kind = models.CharField(max_length=40, choices=Kind.choices)
+    enabled = models.BooleanField(default=False)
+    paused_at = models.DateTimeField(null=True, blank=True)
+    daily_token_budget = models.PositiveIntegerField(default=default_daily_token_budget)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="+",
+    )
+    # The last forget-source operation (D11): set by `forget_source`,
+    # cleared by `restore_source`. Rows trashed by that operation carry the
+    # same id, so restore undoes exactly them.
+    forgotten_at = models.DateTimeField(null=True, blank=True)
+    forget_operation_id = models.UUIDField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["kind"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["workspace", "kind"], name="memory_ingestion_source_unique_kind"
+            )
+        ]
+
+    def __str__(self):
+        return f"{self.kind} ingestion source {self.id}"
+
+    @property
+    def is_accepting(self):
+        return self.enabled and self.paused_at is None
+
+    @property
+    def is_personal_class(self):
+        """Personal-class data (ADR-012 decision 11): extraction of its
+        episodes runs with `personal_data=True` (branch 5)."""
+        return self.kind == self.Kind.CALENDAR
+
+
+class WorkspaceMappingRule(WorkspaceScopedModel, TimestampedModel):
+    """Routes a source's items to exactly one workspace (ADR-012 decision 2,
+    brief D4). Lives in the source's (personal) workspace; its target must
+    be a workspace the owner owns (validated by the service and re-checked
+    at resolve time). No rule matches -> the item is dropped, never
+    defaulted."""
+
+    class RuleType(models.TextChoices):
+        REPO = "repo"  # exact HarnessRepo id string
+        PATH_PREFIX = "path_prefix"  # longest normalised prefix wins
+        CALENDAR_BINDING = "calendar_binding"  # exact binding id
+
+    source = models.ForeignKey(
+        IngestionSource, on_delete=models.CASCADE, related_name="mapping_rules"
+    )
+    rule_type = models.CharField(max_length=20, choices=RuleType.choices)
+    pattern = models.CharField(max_length=500)
+    target_workspace = models.ForeignKey(
+        "workspaces.Workspace", on_delete=models.CASCADE, related_name="+"
+    )
+    enabled = models.BooleanField(default=True)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="+",
+    )
+
+    class Meta:
+        ordering = ["rule_type", "pattern"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["source", "rule_type", "pattern"],
+                name="memory_mapping_rule_unique_pattern",
+            )
+        ]
+
+    def __str__(self):
+        return f"{self.rule_type} rule {self.id}"
+
+
+class EpisodeQuerySet(WorkspaceScopedQuerySet):
+    def live(self):
+        return self.filter(deleted_at__isnull=True, expires_at__gt=timezone.now())
+
+
+class LiveEpisodeManager(models.Manager.from_queryset(EpisodeQuerySet)):
+    """Default manager: hides trashed (ADR-009) and expired (TTL, d10)
+    episodes from every `for_actor()` consumer. The trash view, restore,
+    TTL purge and `purge_trash` use `all_objects`."""
+
+    def get_queryset(self):
+        return super().get_queryset().live()
+
+
+class AllEpisodesManager(models.Manager.from_queryset(EpisodeQuerySet)):
+    pass
+
+
+class Episode(WorkspaceScopedModel, TimestampedModel):
+    """One scrubbed, short-lived raw item (brief D2), in the **target**
+    workspace its mapping rule chose. Written only by
+    `memory.ingestion.ports.record_episode`. `owner_text` is the only field
+    extraction may quote (ADR-012 decision 7); `context_text` and `metadata`
+    are fenced context. Texts are stored scrubbed and bounded; `scrub_report`
+    holds counts per placeholder type, never the matched text."""
+
+    MAX_TEXT_CHARS = 4000
+
+    class Sensitivity(models.TextChoices):
+        NORMAL = "normal"
+        PRIVATE = "private"
+
+    source = models.ForeignKey(IngestionSource, on_delete=models.CASCADE, related_name="episodes")
+    kind = models.CharField(max_length=40)
+    external_id = models.CharField(max_length=255)
+    occurred_at = models.DateTimeField()
+    owner_text = models.TextField(blank=True, default="")
+    context_text = models.TextField(blank=True, default="")
+    metadata = models.JSONField(default=dict, blank=True)
+    sensitivity = models.CharField(
+        max_length=20, choices=Sensitivity.choices, default=Sensitivity.NORMAL
+    )
+    scrub_report = models.JSONField(default=dict, blank=True)
+    token_estimate = models.PositiveIntegerField(default=0)
+    expires_at = models.DateTimeField()
+    deleted_at = models.DateTimeField(null=True, blank=True)
+    forget_operation_id = models.UUIDField(null=True, blank=True)
+    extracted_at = models.DateTimeField(null=True, blank=True)
+
+    objects = LiveEpisodeManager()
+    all_objects = AllEpisodesManager()
+
+    class Meta:
+        ordering = ["-occurred_at", "-id"]
+        base_manager_name = "all_objects"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["source", "external_id"], name="memory_episode_unique_external_id"
+            )
+        ]
+        indexes = [
+            models.Index(fields=["workspace", "extracted_at"]),
+            models.Index(fields=["expires_at"]),
+            models.Index(fields=["source", "-occurred_at"]),
+        ]
+
+    def __str__(self):
+        return f"{self.kind} episode {self.id}"
+
+
+class ScrubTerm(WorkspaceScopedModel, TimestampedModel):
+    """An owner-maintained literal (customer name, project code name)
+    replaced with `[TERM:<id>]` before storage in this workspace (D3)."""
+
+    term = models.CharField(max_length=200)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="+",
+    )
+
+    class Meta:
+        ordering = ["term"]
+        constraints = [
+            models.UniqueConstraint(Lower("term"), "workspace", name="memory_scrub_term_unique_ci")
+        ]
+
+    def __str__(self):
+        return f"scrub term {self.id}"
+
+
+class IngestionCounter(WorkspaceScopedModel, TimestampedModel):
+    """Per source per day audit counters (D2, D11): counts, never content.
+    Kept in the source's (personal) workspace -- a dropped item has no
+    target workspace. `unmapped_keys` holds at most `UNMAPPED_KEYS_CAP`
+    entries of `{hash, short}` (a sha256 of the mapping key plus a scrubbed
+    short form), so the owner can add a rule."""
+
+    UNMAPPED_KEYS_CAP = 20
+
+    source = models.ForeignKey(IngestionSource, on_delete=models.CASCADE, related_name="counters")
+    day = models.DateField()
+    stored = models.PositiveIntegerField(default=0)
+    duplicate = models.PositiveIntegerField(default=0)
+    dropped_unmapped = models.PositiveIntegerField(default=0)
+    dropped_paused = models.PositiveIntegerField(default=0)
+    scrubber_hits = models.JSONField(default=dict, blank=True)
+    unmapped_keys = models.JSONField(default=list, blank=True)
+    tokens_spent = models.PositiveIntegerField(default=0)
+    proposals_created = models.PositiveIntegerField(default=0)
+    proposals_accepted = models.PositiveIntegerField(default=0)
+    proposals_rejected = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        ordering = ["-day"]
+        constraints = [
+            models.UniqueConstraint(fields=["source", "day"], name="memory_ingestion_counter_day")
+        ]
+
+    def __str__(self):
+        return f"counter {self.source_id} {self.day}"

@@ -108,3 +108,51 @@ Today memory comes only from chat (Phase 1 extraction, every candidate
   `WorkspaceScopedModel`s; the ingestion code is a `memory.ingestion`
   package with import-linter contracts (no `harness`, `connectors` or node
   imports; producers in those apps call a memory-owned port instead).
+
+## Implementation notes
+
+**Phase 8A branch 1, `feat/p8-ingestion-core` (2026-11-20).**
+
+- **Tables** (`backend/memory/models.py`, migration `memory/0006`):
+  `IngestionSource` (personal workspace, one row per kind: `git`,
+  `harness`, `claude_code_hooks`, `calendar`; `enabled`, `paused_at`,
+  `daily_token_budget`, `forgotten_at`/`forget_operation_id`),
+  `WorkspaceMappingRule` (`repo` / `path_prefix` / `calendar_binding` ->
+  `target_workspace`), `Episode` (target workspace; scrubbed `owner_text`
+  and `context_text` <= 4000 chars, bounded scrubbed `metadata`,
+  `scrub_report` counts only, `expires_at`, ADR-009 `deleted_at`; unique
+  `(source, external_id)`; the default manager hides trashed and expired
+  rows, `all_objects` sees all), `ScrubTerm` (case-insensitive unique per
+  workspace), `IngestionCounter` (per source per day, in the source's
+  workspace: stored / duplicate / dropped_unmapped / dropped_paused,
+  scrubber hits by type, at most 20 unmapped keys as `{hash, short}`,
+  tokens and proposal counters). `Memory` gains `ingestion_source`,
+  `source_episode_id` (plain UUID) and `provenance_quote` (<= 300).
+- **Port:** `memory.ingestion.ports.record_episode(...)` is the only writer
+  of `Episode`; it returns `stored | dropped_unmapped | dropped_paused |
+  duplicate`. `source` may be the row or its kind (the installation
+  owner's source of that kind). An external id outside a strict charset,
+  or one the scrubber would touch, is stored as its sha256.
+- **Scrubber:** `memory.ingestion.scrubber`, standard library only (branch
+  3 vendors it). Corpus gate: `memory/tests/scrubber_corpus/` +
+  `memory/tests/test_scrubber.py` (100% secrets recall; PII recall and
+  precision printed). 40/64-char lowercase hex runs are kept as git object
+  ids; every other long high-entropy run is a secret.
+- **Mapping:** `~` is kept as a literal home marker rather than resolved on
+  the server (the server cannot know the Mac's home): rules and keys use
+  the same form. Target ownership (`WorkspaceMember.Role.OWNER`) is checked
+  when a rule is written and again at resolve time.
+- **Retention and forget:** daily beat
+  `memory.ingestion.tasks.purge_expired_episodes_task` hard-deletes expired
+  episodes, trashed or not (`MEMORY_EPISODE_TTL_DAYS_PERSONAL`/`_FIRM`).
+  `forget_source` / `restore_source` (web channel, human owner, audited
+  with counts) cover episodes and the source pause; the memory and
+  proposal cascade and the `purge_trash` payload extension land in branch
+  5. Restore leaves the source paused.
+- **Owner API:** `/api/v1/memory/ingestion/{sources, sources/<id>,
+  sources/<id>/{forget,restore,rules}, rules/<id>, scrub-terms,
+  scrub-terms/<id>}`, `IsWebChannel` + `IsOwner`, default authentication
+  only (a PAT is 401 there).
+- **Contract:** "memory.ingestion may import only memory, workspaces,
+  audit, core, ai_core" in `backend/pyproject.toml`; `nodes` is added when
+  that app exists (import-linter refuses unknown module names).

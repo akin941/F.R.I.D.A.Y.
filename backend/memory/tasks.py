@@ -18,6 +18,7 @@ from ai_core.exceptions import GatewayError
 from ai_core.gateway import InferenceGateway
 from ai_core.models import PromptTemplate
 from memory.extraction import ExtractionParseError, parse_candidates
+from memory.ingestion import tasks as _ingestion_tasks  # noqa: F401 (Phase 8A beat tasks)
 from memory.jobs import (
     CLAIM_LEASE_SECONDS,
     EMBEDDING_CLAIM_LEASE_SECONDS,

@@ -387,6 +387,22 @@ FACADE_MAX_REQUEST_CHARS = env.int("FACADE_MAX_REQUEST_CHARS", default=32000)
 # the gate-class `purge_trash` tool.
 TRASH_RETENTION_DAYS = env.int("TRASH_RETENTION_DAYS", default=30)
 
+# --- Continuous-learning ingestion (Phase 8A, ADR-012) ---
+# Raw episodes expire this many days after ingestion (owner decision d10):
+# 30 in a personal workspace, 14 in a company workspace; a daily beat
+# hard-deletes expired rows. Each source gets a daily token budget for
+# extraction (D13; the gateway's purpose budgets are the hard stop).
+# MEMORY_OWNER_GIT_EMAILS: comma-separated author e-mails whose commits
+# (without an agent trailer) count as owner-authored text (D5, branch 4).
+MEMORY_EPISODE_TTL_DAYS_PERSONAL = env.int("MEMORY_EPISODE_TTL_DAYS_PERSONAL", default=30)
+MEMORY_EPISODE_TTL_DAYS_FIRM = env.int("MEMORY_EPISODE_TTL_DAYS_FIRM", default=14)
+MEMORY_INGESTION_DEFAULT_DAILY_TOKEN_BUDGET = env.int(
+    "MEMORY_INGESTION_DEFAULT_DAILY_TOKEN_BUDGET", default=40000
+)
+MEMORY_OWNER_GIT_EMAILS = [
+    e.strip().lower() for e in env.list("MEMORY_OWNER_GIT_EMAILS", default=[]) if e.strip()
+]
+
 CORS_ALLOWED_ORIGINS = [o for o in env.list("CORS_ALLOWED_ORIGINS", default=[]) if o] or [
     "http://localhost:3001"
 ]

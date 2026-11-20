@@ -87,6 +87,12 @@ _BEAT_SCHEDULE = {
         "task": "knowledge.tasks.purge_expired_trashed_documents_task",
         "schedule": 24 * 60 * 60.0,
     },
+    # Phase 8A (ADR-012 decision 4, d10): raw episodes past their TTL
+    # (30 days personal, 14 days firm) are hard-deleted daily.
+    "memory-episode-ttl-purge": {
+        "task": "memory.ingestion.tasks.purge_expired_episodes_task",
+        "schedule": 24 * 60 * 60.0,
+    },
     # Phase 6 A5: voice turn traces (timings only) live VOICE_TRACE_RETENTION_DAYS.
     "voice-turn-trace-prune": {
         "task": "voice.tasks.prune_voice_turn_traces_task",

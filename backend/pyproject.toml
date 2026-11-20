@@ -361,6 +361,17 @@ type = "forbidden"
 source_modules = ["memory"]
 forbidden_modules = ["harness"]
 
+# Phase 8A (brief D14, ADR-012): the ingestion package may import memory,
+# workspaces, audit, core and ai_core only. Producers in harness, connectors
+# and the hook endpoint call its port; data from the future node arrives the
+# same way. A `nodes` app does not exist yet; when it lands (Phase 9), add it
+# here (import-linter refuses unknown module names).
+[[tool.importlinter.contracts]]
+name = "memory.ingestion may import only memory, workspaces, audit, core, ai_core (Phase 8A D14)"
+type = "forbidden"
+source_modules = ["memory.ingestion"]
+forbidden_modules = ["config", "accounts", "assistant", "knowledge", "tasks", "approvals", "tools", "agents", "skills", "integrations", "harness", "connectors", "deploys", "ops", "voice", "hud"]
+
 # The remaining apps have no stated relationship with harness at all in
 # this phase (brief §"Boundary vs. existing systems": "nothing may import
 # harness"). One consolidated contract, mirroring how ai_core/audit's own
