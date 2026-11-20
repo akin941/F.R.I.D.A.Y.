@@ -737,6 +737,7 @@ approval (Phase 5).
 | 4 | Security baseline; UI renewal: shell/chat/harness console/approvals inbox redesign; device-trust identity replaces signup/login; OpenAI-compatible facade (chat-only, low-trust) | Professional, safely-exposable daily driver | **done 2026-09-27** (`docs/prompts/phase-4-identity-ui/brief.md`, "Closeout"); six branches, each Sonnet 5 APPROVE, merged to `main` via PR #27 |
 | 5 | Deploy gate + VPS deploy (allowlisted commands); MCP client framework: GitHub, mail/calendar, external-installation client (when one exposes MCP), Home Assistant bridge; tier routing + harness policy table | Request → code → live, end to end | brief approved 2026-09-27 (`docs/prompts/phase-5-deploy-mcp/brief.md`); starts after Phase 4 closeout |
 | 6 | Voice (ex-MVP 12): mic capture, faster-whisper STT, Piper TTS, local wake word, orb wired to real audio; then the animated visual identity layer | The real Jarvis experience | brief approved 2026-09-27 (`docs/prompts/phase-6-voice-identity/brief.md`); starts after Phase 5 closeout (foundation from MVP 12 shipped, dormant) |
+| 7 | Workshop (first module pack, `apps.modules.workshop`): sandboxed 3D stage, gateway-driven part-stream builder, change-never-restart conversation, teardown/labels/STL export, saved-build shelf, cost receipt, workshop drill; then picture-in (vision) and studio-photo finish (image capability) | "Jarvis, bana bir saat mekanizması tasarla" → live, editable 3D model | planned 2026-11-20 (`docs/prompts/phase-7-workshop/brief.md`, written at phase start); starts after Phase 6 closeout |
 
 Phase briefs live in `docs/prompts/phase-N-<topic>/brief.md`, same
 discipline as MVP briefs (branch tables, test strategy, closeout).
@@ -855,6 +856,52 @@ detail in `docs/prompts/phase-3-harness-v2/brief.md` branch table.
   (in-browser, audio never leaves the device before the wake word); voice
   is a web-session channel but approval decisions still need an explicit
   on-screen confirm; then the visual identity layer.
+
+### Roadmap update 2026-11-20 — lessons adopted from two external "Jarvis" prompt packs
+
+Two third-party prompt packs ("Give Your Jarvis a Workshop" and "Jarvis 3D
+Builds: Draft to Showpiece", Nov 2026) describe a single-file hobby Jarvis
+(Python server + browser viewer, direct Anthropic SDK calls, keys in a
+`config.json`). Their architecture is not adoptable — it bypasses the AI
+Gateway (ADR-003), keeps no ModelUsage (rule 3), and its browser Web Speech
+API sends audio to a cloud recognizer (contradicts Phase 6 D5). Their
+*operational lessons* are sound and are folded into the plan as follows:
+
+- **Preflight (Phase 5 closeout, then every phase):** `manage.py preflight`
+  — live end-to-end checks against the running stack, not mocks: web and
+  BFF up, Postgres/pgvector/Redis/Celery reachable, every seeded provider
+  answers one minimal gateway call (recorded as ModelUsage, purpose
+  `ops.preflight`), the configured model ids are reachable, MCP pins match,
+  served frontend build == built build, secrets not reachable from the
+  browser, a `?mute=1` voice tab is silent. One summary line `N pass / N
+  fail / N warn`, non-zero exit on failure. Each later phase adds its own
+  checks; "done" in a closeout means preflight passed.
+- **Voice (Phase 6 branch 3/4 additions):** an end-of-speech *finish
+  window* (`VOICE_FINISH_MS`, default 900 ms — a mid-sentence pause appends
+  instead of dispatching); short interrupt words ("dur", "bekle", "stop")
+  bypass the buffer; a mute flag checked inside the single speak function
+  (tests never hear audio); deterministic *voice routes* checked before the
+  brain (instant client-side commands — never approvals, D8 stands); "a yes
+  is not a done": a spoken confirmation only references an action whose
+  receipt (task id, approval id, execution status) exists; voice routes for
+  "hatırla ki …" (memory capture through the existing ADR-005 service) and
+  "bu ne kadar tuttu?" (ModelUsage receipt).
+- **Phase 7 — Workshop (new, first module pack):** generative 3D builds
+  as an optional `apps.modules.workshop` pack (ADR-002's first module
+  pack; kernel never imports it). Laws carried from the packs and mapped to
+  ours: model-written code runs only in a sandboxed, separate-origin
+  iframe (`sandbox="allow-scripts"`, strict CSP, `connect-src 'none'`,
+  postMessage only — an ADR records it, and a drill test fails loudly if
+  `allow-same-origin` ever appears); every build/change/classify call goes
+  through the gateway with its own purpose (`workshop.build`,
+  `workshop.change`, `workshop.classify`) and tier; text inside a picture
+  is data, never an instruction; a change re-sends only the changed parts,
+  never restarts the build; the stage's guard pass (NaN/overbright pixel
+  clamp) and label-on-real-vertex rules; saved builds replay without a
+  model call; a per-build cost receipt from ModelUsage. Later branches:
+  picture/floor-plan in (vision), studio photograph / miniature finish via
+  a new image capability behind the gateway. Webcam hand tracking stays
+  out of scope until the voice layer is in daily use.
 
 **Carried-forward items (not yet scheduled in a branch):** owner core
 memory block; memory consolidation/distillation (ADR-005, VISION R5);
