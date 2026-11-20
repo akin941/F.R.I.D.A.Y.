@@ -1437,7 +1437,8 @@ Apple frameworks unless one goes through the governance manifest
   - tool calls and results counted, never returned;
   - each text ≤ 2000 chars.
 - **`usage.ccusage`.** Run a pinned `ccusage` binary installed
-  separately (path in local policy, hash checked), with
+  separately (path in local policy, hash checked, with an entry in the
+  governance manifest per §c.8), with
   `--json --offline`. This is a fixed argv: no shell, no user-provided
   arguments. A missing binary makes availability `unsupported`.
 - **`git.status`.** Run `/usr/bin/git -C <repo> status --porcelain=v2
