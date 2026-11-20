@@ -1562,7 +1562,7 @@ node paired, the e2e test is green, and the go/no-go record is written.
 | # | Branch | Scope | Depends on | Status |
 |---|---|---|---|---|
 | brief | `docs/p9-brief` | This brief (full, from the stub), MASTER_PLAN §AA row 9 Brief/Status, regenerated `self_sources.json` | Phase 8A closeout | **implemented 2026-11-20** (docs only; review round 1 findings addressed 2026-11-20 — D7 terminal-status table and `refuse_read`, D8 deletion policy, vendored node scrubber + `scrub.json` parity, `cwd_prefixes`, per-owner kill-switch payload, per-socket result routing, `CONFORMANCE` build-only mode; review round 2 findings addressed 2026-11-20 — server-recomputed `usage.ccusage` aggregates with per-project tokens and the nested-rule test, authenticator wording, `NODE_SIGNING_KEY` in web/worker/gateway + preflight, ephemeral TTL-bound Redis result keys; awaits re-review) |
-| 1 | `feat/p9-node-pairing` | Spike S9.0: `TrustedDevice.kind=node`, node pairing codes, `jnd_` secrets, rotation with grace, age cap, revocation fan-out, kill switch, `CHANNEL_NODE`, URL walk, ADR-013 spike note | brief approved | not started |
+| 1 | `feat/p9-node-pairing` | Spike S9.0: `TrustedDevice.kind=node`, node pairing codes, `jnd_` secrets, rotation with grace, age cap, revocation fan-out, kill switch, `CHANNEL_NODE`, URL walk, ADR-013 spike note | brief approved | **implemented 2026-11-20** (spike S9.0 server half: passed, ADR-013 note; Keychain half pending owner evaluation, M1; known follow-up 4 resolved: `is_usable()` branches on `kind`; awaits independent Sonnet 5 review) |
 | 2 | `feat/p9-node-protocol` | `nodes` app + contracts, protocol v1 schemas, canonical JSON, Ed25519 envelopes, capability contracts, pairing endpoint, signing key config, hash-chained `NodeInvocation`, dependency manifest | 1 | not started |
 | 3 | `feat/p9-reference-node` | Python reference node, conformance cases + `--check`, hostile fake gateway, reference spool and Unix-socket relay | 2 | not started |
 | 4 | `feat/p9-node-gateway` | `asgi_nodes` + uvicorn/`wsproto`, `node-gateway` service, handshake, `hello`/snapshot, heartbeat/presence, invoke bus, revocation/kill-switch fan-out, limits, node APIs | 1, 2, 3 | not started |
@@ -2021,3 +2021,34 @@ one that touches it before its own review.
    Both are `WorkspaceScopedModel`s in the owner's personal workspace
    (CLAUDE.md rule 1). Extend the `for_actor()` isolation test and the
    node API 404 test to cover them, not only `NodeInvocation`.
+
+### Owner steps (pending) — `feat/p9-node-pairing`, recorded 2026-11-20
+
+1. Run the independent Sonnet 5 review of `feat/p9-node-pairing` and fix
+   findings until APPROVE (CLAUDE.md "Reviews").
+2. Run `make migrate` on the daily stack (migration
+   `accounts/0008_node_device_trust`; existing devices become
+   `kind=browser`, existing codes `device_kind=browser`).
+3. Optional: set `NODE_CREDENTIAL_MAX_AGE_DAYS`,
+   `NODE_CREDENTIAL_ROTATE_AFTER_DAYS`, `NODE_IDLE_EXPIRY_DAYS`,
+   `NODE_ROTATION_GRACE_SECONDS` and `NODE_ROTATE_RATE` only to change
+   the defaults (90 / 30 / 30 days, 600 s, 10 per hour).
+4. Spike S9.0 Keychain half (pending owner evaluation, Mac task M1): pair,
+   rotate and revoke from the real Mac app against these endpoints.
+
+Implementation notes (branch 1):
+- `enroll_node_device` is the service; the anonymous `POST
+  /api/v1/nodes/pair` endpoint that calls it is branch 2 (D4). It raises
+  `NodeKillSwitchEngaged` (distinct from `InvalidPairingCode`) so branch 2
+  decides how to answer it.
+- `node_device_refusal(device)` returns `revoked`, `kill_switch`,
+  `credential_expired`, `idle_expired` or `inactive_owner`, for the
+  gateway's heartbeat re-check and its `bye` reason (branch 4).
+  `core.revocation.parse_revocation` is the subscriber-side parser.
+- A web session's `POST /api/v1/auth/pairing-codes` with
+  `device_kind=node` answers 409 while the kill switch is engaged. The
+  kill-switch toggle and the node pairing button on `/devices` are
+  branch 7; branch 1 ships the "Mac düğümü" badge and node revoke wording.
+- Residual (recorded in ADR-013): a lost rotate response leaves the node
+  only the grace window on its old secret, then re-pairing. M1 must
+  persist the new secret before finishing the rotate call.
