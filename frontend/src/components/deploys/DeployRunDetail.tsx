@@ -78,7 +78,10 @@ export function DeployRunDetail({ runId, workspaceId }: { runId: string; workspa
   async function cancel() {
     const updated = await apiPostJson<ApiDeployRunDetail>(`/api/deploys/runs/${runId}/cancel`);
     queryClient.setQueryData(key, updated);
-    void queryClient.invalidateQueries({ queryKey: queryKeys.deployRuns(workspaceId) });
+    void queryClient.invalidateQueries({
+      queryKey: queryKeys.deployRuns(workspaceId),
+      exact: true,
+    });
     void queryClient.invalidateQueries({ queryKey: queryKeys.deployTargets(workspaceId) });
   }
 
