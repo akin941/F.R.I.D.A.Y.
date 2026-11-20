@@ -922,3 +922,25 @@ model call without a `ModelUsage` row; an episode surviving past its TTL.
   D4 mapping alone decides the target workspace; add a test that a hook token
   bound to personal lands a mapped firm `cwd` only in the firm workspace, and
   only when the owner owns that workspace.
+
+### Branch 2 (`feat/p8-core-blocks`) — known follow-ups (from review, unresolved at merge)
+
+- **LOW — stale Tests line (PAT status code).** The brief's Tests list says an
+  owner cli/openai PAT gets 403 on the core-block routes. The implementation
+  and tests return 401, because the routes are not on the PAT allowlist. The
+  deviation is recorded in the branch 2 implementation notes, and 401 matches
+  other web-only surfaces. Fix: amend the spec line to say 401 (PAT refused by
+  authentication), or add the routes to the PAT-refusal 403 path. No code
+  change needed.
+- **LOW — render budget applied before sanitisation**
+  (`backend/memory/core_blocks.py`). `_bounded()` truncates content before
+  `render_core_blocks` runs `neutralize_fence` and the invisible-character
+  strip. Neutralisation can lengthen a block slightly, so the 5100-char total
+  is not strictly guaranteed on the rendered text. Raw content is already
+  capped by the service budgets, so the practical risk is negligible. Fix:
+  optionally apply the budget after sanitisation in `render_core_blocks`.
+- **LOW — personal-block injection predicate** (`backend/memory/core_blocks.py`).
+  `_personal_blocks_allowed` checks `workspace.owner_id == actor.id` but not
+  `actor.is_owner`. Only the installation owner can write personal blocks, so
+  nothing leaks today. Fix: add an `is_owner` check to the injection predicate
+  as defence in depth.
