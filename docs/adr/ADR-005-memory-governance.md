@@ -21,6 +21,12 @@ edit, forget and export everything; every memory access is auditable.
 > (audited and deletable); every other AI-suggested memory still starts
 > `pending_approval`, and the `private` negative contract is unchanged.
 
+> Note (2026-11-20): extended by ADR-012 — continuous-learning ingestion
+> runs behind a privacy pipeline (source registry, workspace mapping,
+> scrubber, raw-episode TTL, audit view, forget-source); extraction sees
+> only owner-authored text; learned proposals are capped and
+> owner-approved. Nothing in this ADR is relaxed.
+
 ## Consequences
 Memory quality stays curatable; a distillation + consolidation pipeline is needed
 (MVP 2+). Vault sync is deliberately one-way per file class to avoid conflict

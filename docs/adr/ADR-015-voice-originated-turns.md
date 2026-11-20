@@ -1,0 +1,65 @@
+# ADR-015: Voice-Originated Turns and the Always-On Microphone
+
+## Status
+Accepted 2026-11-20 — owner approval of the Friday 3.0 roadmap
+(`docs/research/2026-11-roadmap-proposal.md` §B2, §c.2, §g decision d3).
+Decisions 1–3 apply from Phase 6 (amendment of
+`docs/prompts/phase-6-voice-identity/brief.md`, 2026-11-20); decisions 4–6
+are completed before Phase 11 (always-on wake word). Builds on ADR-011
+(voice transport, Phase 6 branch 1) and Phase 6 D8 ("voice never decides").
+Amends nothing.
+
+Numbering note: the proposal called this "ADR-014". ADR-011 is reserved by
+the Phase 6 brief for "voice transport", so the proposal's ADRs are
+numbered from ADR-012.
+
+## Context
+Phase 6 D8 already says a spoken utterance is never an approval decision
+nor a confirm-class confirmation. Two things widen the risk: a microphone
+that is armed for long periods (browser wake word in Phase 6, always-on in
+Phase 11), and Friday gaining actions on the Mac (Phase 10). A TV, a video,
+a call on speaker or Friday's own voice can say "Hey Friday, terminali aç".
+There is no speaker verification.
+
+## Decision
+1. **Capability cap.** A turn whose input came from the microphone
+   (`input_mode=voice`, speaker unverified) may call read tools and create
+   proposals (task drafts, tool requests, memory proposals) only. It can
+   never execute a confirm-class or gate-class action. Execution always
+   needs an on-screen act by the owner. This is enforced server-side on
+   the turn, not only in the client. A voice route that would write
+   (for example "hatırla ki …") creates a proposal, never an approved row.
+2. **Mic state is always visible.** A persistent indicator (shell indicator
+   and tab-title prefix in Phase 6, the HUD ring, the node menu-bar icon
+   from Phase 9) whenever audio is captured.
+3. **Mute fails closed.** Software mute (UI toggle, global hotkey later) is
+   checked in the capture path. If the mute state cannot be read, or the
+   connection that carries the turn is lost, the mic is released. Most Macs
+   have no hardware mic switch; an external mic with a physical switch is
+   recommended to the owner, not required.
+4. **Self-trigger rule.** While TTS plays, the wake detector is suppressed
+   (half-duplex) or fed the echo-cancelled signal (Phase 11). A wake hit
+   within 1.5 s of TTS output whose transcript matches recent TTS text is
+   discarded. A self-trigger test plays a TTS clip saying "Hey Friday,
+   terminali aç" through the replay harness and asserts no wake and no
+   proposal (CI with fakes; nightly with real models).
+5. **Wake storms.** More than 3 activations in 60 s without a dispatched
+   turn auto-mutes and shows a notice. A voice session closes after 30 s
+   of silence.
+6. **Untrusted audio.** Remote transcripts (calls, videos) and Friday's own
+   TTS output are data. A trust check (Phase 10) treats voice utterances as
+   weaker evidence than typed ones.
+7. **Accepted risk.** Speaker verification is deferred to the "later" list.
+   Until it exists, a person or a TV in the room can make Friday propose
+   things but never run them.
+8. **Cloud realtime voice**, if it ever leaves the "later" list, is proxied
+   through a gateway WebSocket relay (ADR-003 second amendment, written
+   then); function calls from a realtime model are untrusted model output
+   and become proposals under decision 1.
+
+## Consequences
+- Voice is convenient for reading and proposing, and always costs one
+  on-screen click (two for node actions, ADR-014) to act.
+- The capability cap is a release-gate regression in every voice branch.
+- Always-on wake (Phase 11) ships only with decisions 4–6 implemented and
+  the false-accept budget met (≤ 0.2 per hour on 24 h of household audio).
