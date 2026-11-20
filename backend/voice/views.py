@@ -28,7 +28,11 @@ from core.permissions import IsOwner, IsWebChannel
 from core.throttling import ScopedRateThrottle
 from core.tracing import request_trace_id
 from core.uploads import MaxSizeUploadHandler
-from voice.serializers import SpeechCreateSerializer, TranscriptionCreateSerializer
+from voice.serializers import (
+    ReceiptQuerySerializer,
+    SpeechCreateSerializer,
+    TranscriptionCreateSerializer,
+)
 from voice.services import (
     UploadTooLarge,
     VoiceServiceError,
@@ -36,6 +40,7 @@ from voice.services import (
     max_upload_bytes,
     synthesize_sentence,
     transcribe_utterance,
+    usage_receipt,
 )
 
 
@@ -132,4 +137,27 @@ class SpeechCreateView(_VoiceView):
         response = HttpResponse(wav, content_type="audio/wav")
         response["Cache-Control"] = "no-store"
         response["Content-Length"] = str(len(wav))
+        return response
+
+
+class UsageReceiptView(_VoiceView):
+    """`GET /api/v1/voice/receipt?conversation=<id>&trace=<uuid>` (Phase 6
+    A7): the "bu ne kadar tuttu?" voice route's receipt -- a read of the
+    turn's `ModelUsage` rows (by trace id) and today's workspace total.
+    Same principal rules as the other voice endpoints; another workspace's
+    conversation is a 404. Reads only: no model call, no write."""
+
+    throttle_scope = "voice_receipt"
+
+    def get(self, request):
+        serializer = ReceiptQuerySerializer(data=request.query_params)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+        conversation = _conversation(request, data["conversation"])
+        if conversation is None:
+            return Response(status=status.HTTP_404_NOT_FOUND)
+        trace = data.get("trace")
+        body = usage_receipt(conversation=conversation, trace_id=str(trace) if trace else "")
+        response = Response(body, status=status.HTTP_200_OK)
+        response["Cache-Control"] = "no-store"
         return response

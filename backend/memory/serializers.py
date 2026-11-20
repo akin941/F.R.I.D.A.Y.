@@ -34,6 +34,9 @@ class MemoryCreateSerializer(serializers.Serializer):
     sensitivity = serializers.ChoiceField(
         choices=Memory.Sensitivity.choices, default=Memory.Sensitivity.NORMAL
     )
+    # Phase 6 A6: "hatırla ki …" said by voice -> a `pending_approval`
+    # proposal instead of an approved row. Can only weaken the row.
+    proposal = serializers.BooleanField(default=False)
 
     def validate_content(self, value):
         if not value.strip():

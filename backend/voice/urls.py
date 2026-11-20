@@ -5,7 +5,7 @@ reach the views to be refused with a 403 (see `voice/views.py`)."""
 
 from django.urls import path
 
-from voice.views import SpeechCreateView, TranscriptionCreateView
+from voice.views import SpeechCreateView, TranscriptionCreateView, UsageReceiptView
 
 
 def build_urlpatterns(*, authentication_classes):
@@ -17,4 +17,5 @@ def build_urlpatterns(*, authentication_classes):
             name="voice-transcription-create",
         ),
         path("voice/speech", SpeechCreateView.as_view(**auth), name="voice-speech-create"),
+        path("voice/receipt", UsageReceiptView.as_view(**auth), name="voice-usage-receipt"),
     ]

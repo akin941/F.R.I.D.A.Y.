@@ -187,11 +187,21 @@ def _apply_curated_fields(memory, actor, fields):
 
 
 @transaction.atomic
-def create_memory(*, workspace, actor, title, content, memory_type, sensitivity):
+def create_memory(*, workspace, actor, title, content, memory_type, sensitivity, proposal=False):
     """User-authored memory: born approved (the user IS the curator of their
     own statement). `status`, `source`, `created_by` and provenance are
     server-controlled — serializers never accept them; `workspace` is
     resolved through `for_actor()` before this service runs.
+
+    `proposal=True` (Phase 6 branch 3, ADR-015 / brief A6) births the same
+    `user_created` row as `pending_approval` instead: the voice route
+    "hatırla ki …" files what the microphone heard as a proposal the owner
+    approves by click on the memory card, never as an approved row (a
+    recognised utterance is not the owner's explicit statement — STT errors,
+    a TV or a guest can produce it). A proposal is never embedded or used as
+    context until it is approved (`_reconcile_embedding` /
+    `memory.context` both require `approved`). The flag can only make a row
+    weaker, never stronger: there is no way to request any other status.
     """
     _require(get_role(actor, workspace) in _WRITER_ROLES, "creating memories")
     if memory_type == Memory.Type.WORK_LOG:
@@ -211,7 +221,7 @@ def create_memory(*, workspace, actor, title, content, memory_type, sensitivity)
             workspace=workspace,
             memory_type=memory_type,
             sensitivity=sensitivity,
-            status=Memory.Status.APPROVED,
+            status=Memory.Status.PENDING_APPROVAL if proposal else Memory.Status.APPROVED,
             source=Memory.Source.USER_CREATED,
             title=title,
             content=content,
@@ -222,7 +232,7 @@ def create_memory(*, workspace, actor, title, content, memory_type, sensitivity)
         # Constraint backstop for a concurrent create that won the race
         # between the pre-check above and this insert.
         raise DuplicateMemory("An equivalent memory already exists in this workspace.") from None
-    _record(memory, "memory.created", actor)
+    _record(memory, "memory.created", actor, **({"proposal": True} if proposal else {}))
     _reconcile_embedding(memory)
     return memory
 
