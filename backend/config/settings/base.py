@@ -516,6 +516,13 @@ PREFLIGHT_BFF_URL = env("PREFLIGHT_BFF_URL", default="")
 # The built frontend's `.next/BUILD_ID`, compared with the served build.
 PREFLIGHT_FRONTEND_BUILD_ID_FILE = env("PREFLIGHT_FRONTEND_BUILD_ID_FILE", default="")
 PREFLIGHT_TIMEOUT_SECONDS = env.int("PREFLIGHT_TIMEOUT_SECONDS", default=10)
+# Phase 6 closeout (brief A7): "a `?mute=1` voice tab is silent" is browser
+# behaviour, so the `voice_mute` check runs a real browser -- normally
+#   npm --prefix ../frontend run test:e2e -- e2e/voice-mute.e2e.ts
+# against the running BFF (split with shlex, run without a shell, output
+# dropped). Empty = the check is a warning.
+PREFLIGHT_VOICE_MUTE_CMD = env("PREFLIGHT_VOICE_MUTE_CMD", default="")
+PREFLIGHT_VOICE_MUTE_TIMEOUT_SECONDS = env.int("PREFLIGHT_VOICE_MUTE_TIMEOUT_SECONDS", default=180)
 
 # --- Knowledge/RAG (MVP 3) ---
 

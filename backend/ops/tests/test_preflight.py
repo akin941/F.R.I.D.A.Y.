@@ -13,7 +13,14 @@ import pytest
 from django.core.management import call_command
 
 from accounts.services import register_user
-from ai_core.adapters.base import AdapterError, AdapterResult, EmbedAdapterResult
+from ai_core.adapters.base import (
+    AdapterError,
+    AdapterResult,
+    EmbedAdapterResult,
+    SynthesizeAdapterResult,
+    TranscribeAdapterResult,
+)
+from ai_core.audio import parse_stt_input, silent_wav
 from ai_core.models import ModelProvider, ModelUsage
 from connectors.mcp_client import ConnectorError
 from connectors.models import ConnectorBinding
@@ -37,6 +44,7 @@ def quiet(settings):
     settings.PREFLIGHT_FRONTEND_BUILD_ID_FILE = ""
     settings.PREFLIGHT_TIMEOUT_SECONDS = 1
     settings.AI_RETRY_BACKOFF_SECONDS = 0
+    settings.PREFLIGHT_VOICE_MUTE_CMD = ""
 
 
 @pytest.fixture
@@ -276,20 +284,148 @@ def test_fake_provider_answers_through_the_real_gateway(settings):
     assert set(ModelUsage.objects.values_list("purpose", flat=True)) == {"ops.preflight"}
 
 
-def test_audio_provider_rows_warn_and_are_never_called(settings, monkeypatch, adapters):
-    calls, _ = adapters
+@pytest.fixture
+def speech_adapters(monkeypatch):
+    """Recording speech adapters behind the real gateway. `failing` names
+    raise; `bad_audio` names return bytes that are not a WAV."""
+    calls = []
+    failing = set()
+    bad_audio = set()
+
+    class Speech:
+        def __init__(self, provider):
+            self.provider = provider
+
+        def transcribe(self, audio, *, content_type="", params=None, purpose=""):
+            calls.append((self.provider.name, purpose, audio, params))
+            if self.provider.name in failing:
+                raise AdapterError("provider_error", retryable=False)
+            return TranscribeAdapterResult(text="(tone)", audio_seconds=1.0)
+
+        def synthesize(self, text, *, params=None, purpose=""):
+            calls.append((self.provider.name, purpose, text, params))
+            if self.provider.name in failing:
+                raise AdapterError("provider_error", retryable=False)
+            if self.provider.name in bad_audio:
+                return SynthesizeAdapterResult(audio=b"not a wav", audio_seconds=0.0)
+            return SynthesizeAdapterResult(
+                audio=silent_wav(0.5, sample_rate=22050), audio_seconds=0.5
+            )
+
+    monkeypatch.setattr("ai_core.gateway.get_adapter", lambda p, **kw: Speech(p))
+    return calls, failing, bad_audio
+
+
+def test_preflight_wav_is_d3s_upload_shape():
+    info = parse_stt_input(preflight.preflight_wav(), max_seconds=30)
+    assert (info.sample_rate, info.channels, info.seconds) == (16000, 1, 1.0)
+    # A tone, not digital silence: a server that drops silent input still
+    # receives something to transcribe.
+    assert preflight.preflight_wav() == preflight.preflight_wav()
+    assert any(preflight.preflight_wav()[44:200])
+
+
+def test_speech_rows_get_one_pinned_round_trip_each(settings, monkeypatch, speech_adapters):
+    calls, _, _ = speech_adapters
     settings.AI_FAKE_PROVIDER = False
+    settings.VOICE_STT_LANGUAGE = "tr"
+    settings.VOICE_TTS_ROUTES = {"tr": {"provider": "tts-b", "voice": "tr-voice"}}
+    settings.VOICE_TTS_PROVIDER_PARAMS = {}
     monkeypatch.setenv("PREFLIGHT_TEST_KEY", "k" * 20)
-    _provider("stt-a", capability=ModelProvider.Capability.STT)
-    _provider("tts-a", capability=ModelProvider.Capability.TTS)
+    _provider("stt-a", capability=ModelProvider.Capability.STT, personal_data_allowed=True)
+    _provider("tts-a", capability=ModelProvider.Capability.TTS, personal_data_allowed=True)
+    _provider("tts-b", capability=ModelProvider.Capability.TTS, personal_data_allowed=True)
+
     results = {r.name: r for r in preflight.check_providers()}
     assert {n: r.status for n, r in results.items()} == {
-        "provider:stt-a": WARN,
-        "provider:tts-a": WARN,
+        "provider:stt-a": PASS,
+        "provider:tts-a": PASS,
+        "provider:tts-b": PASS,
     }
-    assert results["provider:tts-a"].detail == "audio provider: not checked yet"
+    assert results["provider:stt-a"].detail == "model stt-a-model transcribed the fixture WAV"
+    assert results["provider:tts-b"].detail == (
+        "model tts-b-model synthesized 0.5s at 22050 Hz (route tr)"
+    )
+    by_name = {c[0]: c for c in calls}
+    assert by_name["stt-a"][2] == preflight.preflight_wav()
+    assert by_name["stt-a"][3]["language"] == "tr"
+    assert by_name["tts-a"][2] == preflight.PREFLIGHT_TTS_TEXT
+    # The routed row is called with its route's voice; the other is not.
+    assert by_name["tts-b"][3]["voice"] == "tr-voice"
+    assert by_name["tts-a"][3]["voice"] != "tr-voice"
+    rows = ModelUsage.objects.order_by("provider__name")
+    assert [(u.provider.name, u.purpose, u.routing_reason, u.success) for u in rows] == [
+        ("stt-a", "ops.preflight", "pinned", True),
+        ("tts-a", "ops.preflight", "pinned", True),
+        ("tts-b", "ops.preflight", "pinned", True),
+    ]
+    # Audio calls are personal data (D5) even for the preflight fixture.
+    assert all(u.context_report["personal_data"] for u in rows)
+
+
+def test_speech_rows_the_gateway_would_refuse_warn_and_are_never_called(
+    settings, monkeypatch, speech_adapters
+):
+    calls, _, _ = speech_adapters
+    settings.AI_FAKE_PROVIDER = False
+    monkeypatch.setenv("PREFLIGHT_TEST_KEY", "k" * 20)
+    _provider("stt-cloud", capability=ModelProvider.Capability.STT)  # d2 toggle off
+    _provider(
+        "tts-off",
+        capability=ModelProvider.Capability.TTS,
+        is_active=False,
+        personal_data_allowed=True,
+    )
+    results = {r.name: r for r in preflight.check_providers()}
+    assert results["provider:stt-cloud"].status == WARN
+    assert results["provider:stt-cloud"].detail == (
+        "not configured: not personal_data_allowed (d2)"
+    )
+    assert results["provider:tts-off"].detail == "not configured: disabled"
     assert calls == []
     assert not ModelUsage.objects.exists()
+
+
+def test_a_broken_speech_row_fails(settings, monkeypatch, speech_adapters):
+    _, failing, bad_audio = speech_adapters
+    settings.AI_FAKE_PROVIDER = False
+    settings.VOICE_TTS_ROUTES = {}
+    monkeypatch.setenv("PREFLIGHT_TEST_KEY", "k" * 20)
+    _provider("stt-a", capability=ModelProvider.Capability.STT, personal_data_allowed=True)
+    _provider("tts-a", capability=ModelProvider.Capability.TTS, personal_data_allowed=True)
+    _provider("tts-b", capability=ModelProvider.Capability.TTS, personal_data_allowed=True)
+    failing.update({"stt-a", "tts-a"})
+    bad_audio.add("tts-b")
+    results = {r.name: r for r in preflight.check_providers()}
+    assert results["provider:stt-a"].status == FAIL
+    assert results["provider:stt-a"].detail == "model stt-a-model: GatewayError (provider_error)"
+    assert results["provider:tts-a"].status == FAIL
+    assert results["provider:tts-b"].status == FAIL
+    assert results["provider:tts-b"].detail == "model tts-b-model: unusable audio (not_wav)"
+
+
+def test_speech_rows_skipped_without_model_calls(settings, monkeypatch, speech_adapters):
+    calls, _, _ = speech_adapters
+    settings.AI_FAKE_PROVIDER = False
+    monkeypatch.setenv("PREFLIGHT_TEST_KEY", "k" * 20)
+    _provider("stt-a", capability=ModelProvider.Capability.STT, personal_data_allowed=True)
+    results = preflight.check_providers(model_calls=False)
+    assert results == [CheckResult("provider:stt-a", WARN, "skipped (--no-model-calls)")]
+    assert calls == []
+
+
+def test_seeded_fake_speech_rows_round_trip_through_the_real_gateway(settings):
+    settings.AI_FAKE_PROVIDER = True
+    call_command("seed_ai_defaults", stdout=StringIO())
+    results = {r.name: r for r in preflight.check_providers()}
+    assert results["provider:fake-stt-local"].status == PASS
+    assert results["provider:fake-tts-local"].status == PASS
+    # Seeded disabled and disallowed (A1/d2): never called.
+    assert results["provider:openrouter-stt"].status == WARN
+    assert results["provider:openrouter-tts"].status == WARN
+    called = set(ModelUsage.objects.values_list("provider__name", flat=True))
+    assert {"fake-stt-local", "fake-tts-local"} <= called
+    assert not called & {"openrouter-stt", "openrouter-tts"}
 
 
 def test_seeded_stack_has_no_failing_provider_rows(settings):
@@ -440,10 +576,178 @@ def test_browser_secrets_warn_without_secrets(settings, pages, monkeypatch):
     assert preflight.check_browser_secrets()[0].status == WARN
 
 
-def test_voice_mute_is_a_standing_warning():
+# --- Phase 6 closeout: voice configuration and the muted-tab browser run ---
+
+
+def _voice_config():
+    return {r.name: r for r in preflight.check_voice_config()}
+
+
+def test_voice_config_on_a_seeded_fake_stack(settings):
+    settings.AI_FAKE_PROVIDER = True
+    settings.VOICE_TTS_ROUTES = {"tr": {"provider": "fake-tts-local", "voice": "v"}}
+    call_command("seed_ai_defaults", stdout=StringIO())
+    results = _voice_config()
+    assert results["voice_providers"] == CheckResult(
+        "voice_providers", PASS, "stt: fake-stt-local; tts: fake-tts-local"
+    )
+    assert results["voice_routes"] == CheckResult("voice_routes", PASS, "tr -> fake-tts-local")
+    assert results["voice_budget"] == CheckResult(
+        "voice_budget", PASS, "audio: monthly 20 USD, session 1 USD"
+    )
+    # Configuration only: no gateway call.
+    assert not ModelUsage.objects.exists()
+
+
+def test_voice_config_without_speech_rows_fails():
+    results = _voice_config()
+    assert results["voice_providers"].status == FAIL
+    assert results["voice_providers"].detail == ("no STT/TTS provider rows: run seed_ai_defaults")
+    assert results["voice_budget"].status == FAIL
+    assert results["voice_budget"].detail == (
+        "no active budget covers voice.stt, voice.tts: run seed_ai_defaults"
+    )
+
+
+def test_voice_config_warns_when_no_speech_row_is_eligible(settings):
+    # The stack as seeded without AI_FAKE_PROVIDER or VOICE_API_KEY: the
+    # fake rows are filtered, OpenRouter's are disabled -- voice is simply
+    # not configured here, which is a warning, not a failure.
+    settings.AI_FAKE_PROVIDER = False
+    call_command("seed_ai_defaults", stdout=StringIO())
+    settings.VOICE_TTS_ROUTES = {"tr": {"provider": "openrouter-tts"}}
+    results = _voice_config()
+    assert results["voice_providers"].status == WARN
+    assert results["voice_providers"].detail.startswith("no eligible STT/TTS provider")
+    assert results["voice_routes"] == CheckResult(
+        "voice_routes",
+        WARN,
+        "routed row not eligible: tr -> openrouter-tts (disabled) (priority fallback)",
+    )
+
+
+def test_voice_config_names_an_enabled_cloud_audio_row(settings, monkeypatch):
+    settings.AI_FAKE_PROVIDER = True
+    call_command("seed_ai_defaults", stdout=StringIO())
+    monkeypatch.setenv("OPENROUTER_API_KEY", "k" * 20)
+    # The owner's deliberate d2 toggle.
+    ModelProvider.objects.filter(name="openrouter-tts").update(
+        is_active=True, personal_data_allowed=True
+    )
+    detail = _voice_config()["voice_providers"].detail
+    assert detail.endswith("; cloud audio enabled: openrouter-tts")
+
+
+def test_voice_routes_naming_a_missing_row_warn(settings):
+    settings.AI_FAKE_PROVIDER = True
+    call_command("seed_ai_defaults", stdout=StringIO())
+    settings.VOICE_TTS_ROUTES = {
+        "en": {"provider": "fake-tts-local"},
+        "tr": {"provider": "typo-tts"},
+        "de": {},
+    }
+    assert _voice_config()["voice_routes"] == CheckResult(
+        "voice_routes",
+        WARN,
+        "no TTS row for route: de -> (none), tr -> typo-tts (priority fallback)",
+    )
+    settings.VOICE_TTS_ROUTES = {}
+    assert _voice_config()["voice_routes"].status == WARN
+
+
+def test_voice_budget_states(settings):
+    from ai_core.models import AIBudget
+
+    settings.AI_FAKE_PROVIDER = True
+    call_command("seed_ai_defaults", stdout=StringIO())
+    AIBudget.objects.filter(name="audio").update(monthly_limit_usd=None)
+    result = _voice_config()["voice_budget"]
+    assert result.status == WARN
+    assert result.detail == "no monthly cap on voice.stt, voice.tts: audio: session 1 USD"
+    # A budget covering only one purpose leaves the other uncovered.
+    AIBudget.objects.filter(name="audio").update(purposes=["voice.stt"], monthly_limit_usd=5)
+    result = _voice_config()["voice_budget"]
+    assert (result.status, result.detail) == (
+        FAIL,
+        "no active budget covers voice.tts: run seed_ai_defaults",
+    )
+    AIBudget.objects.filter(name="audio").update(
+        purposes=["voice.stt", "voice.tts"], is_active=False
+    )
+    assert _voice_config()["voice_budget"].status == FAIL
+
+
+@pytest.fixture
+def browser_run(monkeypatch):
+    runs = []
+    outcome = {"code": 0, "raise": None}
+
+    def fake_run(argv, *, timeout):
+        runs.append((argv, timeout))
+        if outcome["raise"] is not None:
+            raise outcome["raise"]
+        return outcome["code"]
+
+    monkeypatch.setattr(preflight, "run_command", fake_run)
+    return runs, outcome
+
+
+def test_voice_mute_warns_when_not_configured(settings, browser_run):
+    runs, _ = browser_run
+    settings.PREFLIGHT_VOICE_MUTE_CMD = ""
     assert preflight.check_voice_mute() == [
-        CheckResult("voice_mute", WARN, "voice layer not built yet (Phase 6)")
+        CheckResult("voice_mute", WARN, "PREFLIGHT_VOICE_MUTE_CMD not set")
     ]
+    assert runs == []
+
+
+def test_voice_mute_runs_the_browser_spec_without_a_shell(settings, browser_run):
+    runs, outcome = browser_run
+    settings.PREFLIGHT_VOICE_MUTE_CMD = (
+        "npm --prefix ../frontend run test:e2e -- 'e2e/voice-mute.e2e.ts'"
+    )
+    settings.PREFLIGHT_VOICE_MUTE_TIMEOUT_SECONDS = 99
+    assert preflight.check_voice_mute()[0].status == PASS
+    assert runs == [
+        (
+            ["npm", "--prefix", "../frontend", "run", "test:e2e", "--", "e2e/voice-mute.e2e.ts"],
+            99,
+        )
+    ]
+    outcome["code"] = 1
+    assert preflight.check_voice_mute() == [
+        CheckResult("voice_mute", FAIL, "browser run exited 1: muted tab not silent")
+    ]
+
+
+def test_voice_mute_timeout_and_missing_binary_fail(settings, browser_run):
+    import subprocess
+
+    _, outcome = browser_run
+    settings.PREFLIGHT_VOICE_MUTE_CMD = "npx playwright test"
+    settings.PREFLIGHT_VOICE_MUTE_TIMEOUT_SECONDS = 5
+    outcome["raise"] = subprocess.TimeoutExpired(["npx"], 5)
+    assert preflight.check_voice_mute()[0].detail == "browser run timed out after 5s"
+    outcome["raise"] = FileNotFoundError("npx: /secret/path")
+    result = preflight.check_voice_mute()[0]
+    assert (result.status, result.detail) == (FAIL, "browser run failed: FileNotFoundError")
+
+
+def test_voice_mute_unparsable_command_fails(settings, browser_run):
+    runs, _ = browser_run
+    settings.PREFLIGHT_VOICE_MUTE_CMD = "npx 'unterminated"
+    assert preflight.check_voice_mute()[0].status == FAIL
+    assert runs == []
+
+
+def test_run_command_drops_the_output(capfd):
+    import sys
+
+    code = preflight.run_command(
+        [sys.executable, "-c", "print('cookie=SECRET'); raise SystemExit(3)"], timeout=30
+    )
+    assert code == 3
+    assert "SECRET" not in capfd.readouterr().out
 
 
 # --- runner and command ------------------------------------------------------
@@ -457,6 +761,11 @@ def test_a_crashing_check_becomes_one_fail_row():
         checks=(("crashy", crash), ("voice_mute", preflight.check_voice_mute))
     )
     assert [(r.name, r.status) for r in results] == [("crashy", FAIL), ("voice_mute", WARN)]
+
+
+def test_the_voice_checks_are_registered():
+    names = [name for name, _ in preflight.CHECKS]
+    assert names[-2:] == ["voice_config", "voice_mute"]
 
 
 def test_summarize():
@@ -479,7 +788,9 @@ def test_command_all_green_exits_zero(settings, monkeypatch):
     call_command("preflight", stdout=out)
     lines = out.getvalue().strip().splitlines()
     assert "PASS  postgres  SELECT 1" in lines
-    assert "WARN  voice_mute  voice layer not built yet (Phase 6)" in lines
+    assert "WARN  voice_mute  PREFLIGHT_VOICE_MUTE_CMD not set" in lines
+    assert "PASS  voice_budget  audio: monthly 20 USD, session 1 USD" in lines
+    assert "PASS  provider:fake-stt-local  model fake-stt-1 transcribed the fixture WAV" in lines
     assert re.fullmatch(r"\d+ pass / 0 fail / \d+ warn", lines[-1])
 
 
