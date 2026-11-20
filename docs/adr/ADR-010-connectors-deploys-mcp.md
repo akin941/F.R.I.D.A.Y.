@@ -10,7 +10,7 @@ below); amends nothing else.
 Phase 5 closes the loop `docs/VISION_JARVIS_2.md` §4 promised — request →
 briefing → Gate A → code → review → Gate B → PR → merge → **deploy gate** →
 live — and gives Jarvis its first reach into outside systems: GitHub, Home
-Assistant, Google mail/calendar, and (blocked, O-5) the external installation. Every
+Assistant, Google mail/calendar, and (blocked, O-5) an external installation. Every
 one of those is gate-class under ADR-008 decision 3 (deploy, external send,
 git push/merge). Four things in the kernel as it stood did not fit:
 
@@ -200,5 +200,5 @@ git push/merge). Four things in the kernel as it stood did not fit:
   the exact payload.
 - The deploy key, like the harness push key, lives only on the runner
   host; deploys wait while the runner is offline.
-- The external connector ships as a `blocked` manifest that can never bind
-  (O-5 unchanged, ADR-006: Jarvis is only an MCP client of the panel).
+- The external-installation connector ships as a `blocked` manifest that can never bind
+  (O-5 unchanged, ADR-006: Jarvis is only an MCP client of the installation).

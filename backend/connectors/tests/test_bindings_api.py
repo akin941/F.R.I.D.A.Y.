@@ -81,7 +81,7 @@ def test_owner_lists_and_toggles(fake_manifest, owner, workspace, web_client, se
         "fake_search": "unchecked",
         "fake_create_note": "unchecked",
     }
-    # The external placeholder is for company workspaces only.
+    # The external-installation placeholder is for company workspaces only.
     assert "external_installation" not in [row["connector"] for row in rows]
     with committed():
         body = client.put(
@@ -108,8 +108,8 @@ def test_owner_lists_and_toggles(fake_manifest, owner, workspace, web_client, se
 def test_blocked_external_installation_is_listed_but_unbindable(owner, firm, web_client):
     client = web_client(owner)
     rows = client.get(LIST, {"workspace": str(firm.id)}).json()
-    external_installation = next(row for row in rows if row["connector"] == "external_installation")
-    assert external_installation["status"] == "blocked" and external_installation["bindable"] is False
+    ext = next(row for row in rows if row["connector"] == "external_installation")
+    assert ext["status"] == "blocked" and ext["bindable"] is False
     response = client.put(
         f"{LIST}/external_installation", {"workspace": str(firm.id), "enabled": True}, format="json"
     )

@@ -58,7 +58,7 @@ governed by code, not by configuration:
 4. **Bindings are per workspace and off by default.** `ConnectorBinding`
    (`enabled=False`), switched on only by the owner over the web
    (`/api/v1/connectors/bindings`, audited). `personal`-class connectors bind
-   only to personal workspaces; a `blocked` manifest (external, D14) can never
+   only to personal workspaces; a `blocked` manifest (external installation, D14) can never
    bind.
 5. **Transport and isolation (D1).** Streamable HTTP only, to the URL in the
    env var the manifest names, no redirects, no proxies, no client

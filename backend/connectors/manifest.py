@@ -39,7 +39,7 @@ from tools.registry import DATA_CLASSES, READ_CHANNELS
 KIND_MCP = "mcp"
 KIND_NATIVE = "native"
 STATUS_ACTIVE = "active"
-# A blocked manifest (D14: the external placeholder) documents a connector that
+# A blocked manifest (D14: the external-installation placeholder) documents a connector that
 # can never bind: no binding row can be created for it and none of its tools
 # is ever registered.
 STATUS_BLOCKED = "blocked"

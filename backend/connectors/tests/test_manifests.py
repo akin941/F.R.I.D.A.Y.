@@ -35,13 +35,13 @@ def test_template_exists():
 
 
 def test_external_installation_is_a_blocked_read_only_firm_placeholder():
-    external_installation = get_manifest("external_installation")
-    assert external_installation.status == STATUS_BLOCKED
-    assert external_installation.data_class == "firm"
-    assert external_installation.workspace_types == frozenset({"company"})
-    assert external_installation.writes == ()
+    ext = get_manifest("external_installation")
+    assert ext.status == STATUS_BLOCKED
+    assert ext.data_class == "firm"
+    assert ext.workspace_types == frozenset({"company"})
+    assert ext.writes == ()
     assert not [m for m in list_manifests() if m.blocked and (m.reads or m.writes)] or all(
-        get_read_tool(p.name) is None and get_tool(external_installation.gate_name(p)) is None
+        get_read_tool(p.name) is None and get_tool(ext.gate_name(p)) is None
         for m in list_manifests()
         if m.blocked
         for p in m.tools

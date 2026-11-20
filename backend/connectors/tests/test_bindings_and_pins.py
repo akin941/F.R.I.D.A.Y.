@@ -116,7 +116,11 @@ def test_the_pin_beat_checks_every_enabled_binding(fake_manifest, workspace, ena
 def test_blocked_manifest_can_never_bind(owner, firm):
     with pytest.raises(ConnectorInvalidTransition):
         set_binding_enabled(
-            workspace=firm, actor=owner, connector="external_installation", enabled=True, channel=CHANNEL_WEB
+            workspace=firm,
+            actor=owner,
+            connector="external_installation",
+            enabled=True,
+            channel=CHANNEL_WEB,
         )
     assert not ConnectorBinding.objects.filter(connector="external_installation").exists()
 
