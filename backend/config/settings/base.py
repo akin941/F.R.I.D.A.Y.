@@ -101,6 +101,8 @@ INSTALLED_APPS = [
     # Phase 5 closeout: operations tooling (`manage.py preflight`). A leaf:
     # no app imports it (import-linter).
     "ops",
+    # Phase 6 branch 2 (ADR-011 decision 6): the voice transport, a leaf app.
+    "voice",
 ]
 
 AUTH_USER_MODEL = "accounts.User"
@@ -263,10 +265,14 @@ REST_FRAMEWORK = {
     #   (synchronous planner LLM call), harness discovery/implementation
     #   jobs (each up to HARNESS_MAX_JOB_COST) and knowledge documents
     #   (embeddings). One shared per-user budget across all of them.
+    # - "voice_stt" / "voice_tts" (Phase 6 D9): the two voice endpoints,
+    #   per user; TTS is per sentence, hence the higher rate.
     "DEFAULT_THROTTLE_RATES": {
         "chat": "30/min",
         "refresh": "30/min",
         "cost": "60/hour",
+        "voice_stt": env("VOICE_STT_RATE", default="20/min"),
+        "voice_tts": env("VOICE_TTS_RATE", default="120/min"),
     },
 }
 
@@ -485,6 +491,13 @@ VOICE_TTS_PROVIDER_PARAMS = {
         "response_format": "pcm",
     },
 }
+# A5: `voice.VoiceTurnTrace` rows (stage timings only) are pruned daily
+# after this many days (config/celery.py).
+VOICE_TRACE_RETENTION_DAYS = env.int("VOICE_TRACE_RETENTION_DAYS", default=30)
+# The voice upload cap (VOICE_MAX_UTTERANCE_SECONDS, 960 KB at 30 s) must
+# stay below FILE_UPLOAD_MAX_MEMORY_SIZE (Django default 2.5 MB, unset
+# here): the transcription view installs only the in-memory upload handler,
+# so audio never touches disk (D2).
 
 # --- Preflight (Phase 5 closeout, `manage.py preflight`) ---
 # Live checks of the running stack. Each URL left empty makes its check a

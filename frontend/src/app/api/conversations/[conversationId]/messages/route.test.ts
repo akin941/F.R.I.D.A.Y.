@@ -119,4 +119,25 @@ describe("POST /api/conversations/[conversationId]/messages", () => {
     expect(response.status).toBe(429);
     expect(response.headers.get("Retry-After")).toBe("12");
   });
+
+  it("forwards a valid X-Friday-Trace (Phase 6 A5) and drops a malformed one", async () => {
+    cookiesMock.mockResolvedValue(cookieStore("token"));
+    const fetchMock = vi.fn<(input: string, init: RequestInit) => Promise<Response>>(
+      async () => new Response("data: {}\n\n", { status: 200 }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const trace = "6f1c2d3e-4b5a-4c6d-8e7f-0123456789ab";
+
+    const { POST } = await import("@/app/api/conversations/[conversationId]/messages/route");
+    await POST(postRequest({ content: "hi", input_mode: "voice" }, { "x-friday-trace": trace }), {
+      params: params(),
+    });
+    await POST(postRequest({ content: "hi" }, { "x-friday-trace": "nope" }), { params: params() });
+
+    const [, first] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const [, second] = fetchMock.mock.calls[1] as [string, RequestInit];
+    expect((first.headers as Record<string, string>)["X-Friday-Trace"]).toBe(trace);
+    expect(JSON.parse(first.body as string)).toEqual({ content: "hi", input_mode: "voice" });
+    expect((second.headers as Record<string, string>)["X-Friday-Trace"]).toBeUndefined();
+  });
 });

@@ -1,7 +1,6 @@
 import uuid
 
 from django.conf import settings
-from django.core.files.uploadhandler import FileUploadHandler, StopUpload
 from rest_framework import status
 from rest_framework.parsers import MultiPartParser
 from rest_framework.permissions import IsAuthenticated
@@ -12,6 +11,7 @@ from core.api_errors import service_error_response
 from core.channels import request_channel
 from core.permissions import IsWebChannel
 from core.throttling import CreateScopedRateThrottle
+from core.uploads import MaxSizeUploadHandler
 from knowledge.models import KnowledgeDocument
 from knowledge.serializers import (
     FileUploadCreateSerializer,
@@ -160,37 +160,6 @@ class KnowledgeUrlCreateView(APIView):
         return Response(KnowledgeDocumentSerializer(document).data, status=status.HTTP_201_CREATED)
 
 
-class _MaxSizeUploadHandler(FileUploadHandler):
-    """Aborts multipart parsing mid-stream once `max_size` bytes have been
-    received, instead of relying on a Content-Length header (round-4 Codex
-    review finding: a chunked-transfer-encoded request has no Content-Length,
-    so the round-3 pre-parse check is a no-op for it, and the request would
-    otherwise be fully parsed/spooled to temp disk before any check ran).
-
-    Placed first in `request.upload_handlers`: it only counts bytes and
-    passes each chunk through unmodified, so the real handler behind it
-    (memory/temp-file) still materializes the file when the cap isn't hit.
-    `file_complete` always returns `None` — this handler never produces a
-    file itself, it only gates the ones that do.
-    """
-
-    def __init__(self, request, *, max_size):
-        super().__init__(request)
-        self.max_size = max_size
-        self.received_bytes = 0
-        self.aborted = False
-
-    def receive_data_chunk(self, raw_data, start):
-        self.received_bytes += len(raw_data)
-        if self.received_bytes > self.max_size:
-            self.aborted = True
-            raise StopUpload(connection_reset=True)
-        return raw_data
-
-    def file_complete(self, file_size):
-        return None
-
-
 class KnowledgeFileUploadCreateView(APIView):
     permission_classes = [IsAuthenticated]
     # Ingestion embeds every chunk (cost-bearing).
@@ -199,7 +168,7 @@ class KnowledgeFileUploadCreateView(APIView):
     parser_classes = [MultiPartParser]
 
     def post(self, request):
-        size_guard = _MaxSizeUploadHandler(request, max_size=settings.KNOWLEDGE_MAX_UPLOAD_BYTES)
+        size_guard = MaxSizeUploadHandler(request, max_size=settings.KNOWLEDGE_MAX_UPLOAD_BYTES)
         request.upload_handlers = [size_guard, *request.upload_handlers]
 
         serializer = FileUploadCreateSerializer(data=request.data)

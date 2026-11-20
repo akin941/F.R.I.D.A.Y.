@@ -87,6 +87,11 @@ _BEAT_SCHEDULE = {
         "task": "knowledge.tasks.purge_expired_trashed_documents_task",
         "schedule": 24 * 60 * 60.0,
     },
+    # Phase 6 A5: voice turn traces (timings only) live VOICE_TRACE_RETENTION_DAYS.
+    "voice-turn-trace-prune": {
+        "task": "voice.tasks.prune_voice_turn_traces_task",
+        "schedule": 24 * 60 * 60.0,
+    },
 }
 
 # Harness recovery scans (Phase 3 branch 8, review P1): the scans tear down

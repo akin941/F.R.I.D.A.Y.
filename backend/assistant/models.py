@@ -97,6 +97,12 @@ class Message(WorkspaceScopedModel, TimestampedModel):
         # The OpenAI-compatible facade (Phase 4 branch 6).
         OPENAI = "openai"
 
+    class InputMode(models.TextChoices):
+        # Phase 6 D9: how the owner produced this turn's text -- typed, or
+        # spoken and transcribed (`POST /api/v1/voice/transcriptions`).
+        TEXT = "text"
+        VOICE = "voice"
+
     conversation = models.ForeignKey(
         Conversation, on_delete=models.CASCADE, related_name="messages"
     )
@@ -162,6 +168,13 @@ class Message(WorkspaceScopedModel, TimestampedModel):
     # "truncated"}]` -- bookkeeping only, never the content. Same contract
     # as `memories_used`/`chunks_used`: "context supplied", not proof of use.
     connector_reads = models.JSONField(default=list, blank=True)
+    # Provenance, not trust (Phase 6 D9, ADR-011/ADR-015): `voice` when the
+    # user message's text came from the microphone. Client-asserted, so it
+    # never widens anything -- it only ever NARROWS a turn (the ADR-015
+    # capability cap, `assistant.services.apply_voice_capability_cap`) and
+    # drives the mic badge. Forced to `text` for every non-web channel.
+    # Stamped on the USER row only (the reply is never "spoken input").
+    input_mode = models.CharField(max_length=10, choices=InputMode.choices, default=InputMode.TEXT)
 
     class Meta:
         ordering = ["created_at"]

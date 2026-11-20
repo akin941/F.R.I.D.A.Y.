@@ -86,6 +86,7 @@ class MessageSerializer(serializers.ModelSerializer):
             "intent_payload",
             "channel",
             "connector_reads",
+            "input_mode",
             "confirmed_task",
         ]
         read_only_fields = fields
@@ -117,6 +118,12 @@ class MessageCreateSerializer(serializers.Serializer):
     # never has to have. See assistant.task_draft for how this is consumed.
     client_local_date = serializers.CharField(
         required=False, allow_null=True, allow_blank=True, default=None
+    )
+    # Phase 6 D9: `voice` when the text is a transcript. Client-asserted and
+    # never trust-bearing; the view forces `text` for every non-web channel
+    # and applies the ADR-015 capability cap to a `voice` turn.
+    input_mode = serializers.ChoiceField(
+        choices=Message.InputMode.choices, required=False, default=Message.InputMode.TEXT
     )
 
     def validate_content(self, value):

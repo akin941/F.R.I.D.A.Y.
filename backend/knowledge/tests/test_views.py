@@ -6,9 +6,9 @@ from rest_framework.test import APIClient
 
 from accounts.services import register_user
 from audit.models import AuditLog
+from core.uploads import MaxSizeUploadHandler
 from knowledge.models import KnowledgeChunk, KnowledgeDocument
 from knowledge.services import InvalidUpload, create_file_upload_document
-from knowledge.views import _MaxSizeUploadHandler
 from workspaces.models import Workspace, WorkspaceMember
 
 pytestmark = pytest.mark.django_db
@@ -355,7 +355,7 @@ class TestMaxSizeUploadHandler:
     not from a declared (and possibly absent) length."""
 
     def test_aborts_once_cumulative_bytes_exceed_max_size(self):
-        handler = _MaxSizeUploadHandler(request=None, max_size=10)
+        handler = MaxSizeUploadHandler(request=None, max_size=10)
         handler.receive_data_chunk(b"12345", 0)  # 5 bytes, under the cap
         assert handler.aborted is False
         with pytest.raises(StopUpload):
@@ -363,7 +363,7 @@ class TestMaxSizeUploadHandler:
         assert handler.aborted is True
 
     def test_does_not_abort_at_or_under_max_size(self):
-        handler = _MaxSizeUploadHandler(request=None, max_size=10)
+        handler = MaxSizeUploadHandler(request=None, max_size=10)
         handler.receive_data_chunk(b"1234567890", 0)  # exactly the cap
         assert handler.aborted is False
 

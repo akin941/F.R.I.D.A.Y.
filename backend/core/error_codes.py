@@ -77,6 +77,13 @@ DOMAIN_ERROR_CODES = frozenset(
         "task.permission_denied",
         "task.invalid_transition",
         "task.draft_already_confirmed",
+        # The voice endpoints (Phase 6 branch 2, `voice.services`).
+        "voice.unsupported_audio",
+        "voice.upload_too_large",
+        "voice.no_local_provider",
+        "voice.stt_failed",
+        "voice.tts_failed",
+        "voice.budget_exceeded",
         "workspace.permission_denied",
     }
 )

@@ -765,6 +765,71 @@ execute path (registry scan + an end-to-end turn with a write-capable
 intent yields only a draft); a malformed trace header is ignored, not
 stored.
 
+**Branch 2 — implementation notes (2026-11-20).**
+- `voice` app (`backend/voice/`): `TranscriptionCreateView` /
+  `SpeechCreateView` (`IsAuthenticated` + `IsWebChannel` + `IsOwner`).
+  Authentication classes are injected by `config/urls.py`
+  (`voice.urls.build_urlpatterns`, the deploys pattern) so a `cli` PAT gets
+  403 `channel_forbidden` and an `openai` PAT 403 `token_kind_forbidden`
+  without `voice` importing `accounts` (D11).
+- Upload (D2): a pre-parse `Content-Length` check, then only
+  `core.uploads.MaxSizeUploadHandler` + `MemoryFileUploadHandler` are
+  installed — `TemporaryFileUploadHandler` is never instantiated (tested).
+  Cap = `VOICE_MAX_UTTERANCE_SECONDS` × 32 000 B + 1 KiB header allowance.
+  The size guard moved from `knowledge/views.py` to `core/uploads.py`; the
+  knowledge suite is unchanged apart from the import.
+- WAV validation reuses branch 1's `ai_core.audio.parse_stt_input`
+  (`too_long` → 413, every other reason → 415); TTS output is re-checked with
+  `normalize_tts_wav` (invalid → 502 `voice.tts_failed`). `audio_seconds` in
+  the response is the received audio's duration.
+- Error codes `voice.{unsupported_audio,upload_too_large,no_local_provider,
+  stt_failed,tts_failed,budget_exceeded}` in `core/error_codes.py` + Turkish
+  catalog. `BudgetExceeded` → 429 is checked before `NoProviderAvailable` →
+  503; any other `GatewayError` → 502.
+- **Budget session (branch-1 follow-up, resolved):** `budget_session` is
+  `voice:<conversation id>`, derived server-side; a request field of that
+  name is ignored (tested). Consequence: the 1 USD "per voice session" cap is
+  per conversation until branch 3 introduces a server-held voice session id.
+- `Message.input_mode` (`text`|`voice`, migration `assistant/0011`), on the
+  user row only; `MessageCreateSerializer.input_mode`; forced `text` for any
+  non-web channel; exposed by `MessageSerializer`.
+- ADR-015 cap (A6): `assistant.services.apply_voice_capability_cap` runs right
+  after `classify_intent` for a voice turn. `INTENT_EFFECTS` maps every
+  `Message.Intent` to `read` or `proposal` (a coverage test requires every
+  intent to be listed); anything else degrades to chat, and a
+  `connector_read` must name a registered `ReadToolSpec`. Registry scan test:
+  every proposable `ToolSpec` proposed from a voice turn yields only a `draft`
+  event — `create_execution`/`dispatch` never called, no `ApprovalRequest`.
+- Trace (A5): `core.tracing.request_trace_id` (UUID only, else ignored) on the
+  messages, transcription and speech requests; `trace_id` + `input_mode` go
+  into the `context_report` of the turn's `router.intent`,
+  `router.task_draft`, `router.connector_args`, `chat`, `voice.stt` and
+  `voice.tts` rows. `voice.VoiceTurnTrace` holds integer stage timings only
+  (`stt_ms`, `tts_first_ms` server-side; `end_of_turn_ms`,
+  `llm_first_sentence_ms`, `playback_start_ms`, `total_ms` from the speech
+  request's `timings`), unique per workspace + trace id; field allow-list
+  test; daily prune beat `voice.tasks.prune_voice_turn_traces_task`
+  (`VOICE_TRACE_RETENTION_DAYS`, 30).
+- Throttles `voice_stt` 20/min, `voice_tts` 120/min (env-overridable),
+  fail-closed 503 on a cache outage (tested).
+- BFF: `app/api/voice/{transcriptions,speech}/route.ts` (origin + content-type
+  checks, a 2.5 MB byte cap before `formData()`, the WAV streamed back
+  unmodified, a non-WAV 200 never passed on as audio); `X-Friday-Trace`
+  forwarded (UUID only) by these and the messages route.
+- Import-linter: `voice` may import only `core`, `workspaces`, `ai_core`,
+  `assistant` (direct imports; `allow_indirect_imports`), nothing imports
+  `voice`; `voice` added to the `core`, `ai_core`, `audit`, config, harness
+  and MCP contracts. `audit` is not in voice's forbidden list (D11) and is
+  not imported.
+
+**Owner steps (pending) — `feat/p6-voice-api`, recorded 2026-11-20.**
+1. On the Mac with the local speech server (branch-1 owner step 1): one real
+   transcription and one speech request through the BFF from the trusted
+   browser session (runbook §4), confirming 200s, one `ModelUsage` each with
+   workspace = the conversation's and cost 0.
+2. The Phase 4 R4b load check with voice STT/TTS mixed in stays branch 3's
+   done-when; the two blocking endpoints it exercises exist from this branch.
+
 ### 3. `feat/p6-push-to-talk` — the full loop, push-to-talk
 
 **Scope.** `lib/voice/`: `capture-worklet.ts` (16 kHz mono downsampling,
@@ -977,7 +1042,8 @@ slice.
 |---|---|
 | amendment (`docs/friday-3-roadmap`) | **implemented 2026-11-20** (docs only; awaiting Sonnet 5 plan review of the amendment) |
 | 1 `feat/p6-speech-gateway` | **implemented 2026-11-20** (cut from the local integration branch; spike results and owner steps under "Branch 1 — spike results and implementation notes"; awaiting the Sonnet 5 branch review) |
-| 2–6 | not started |
+| 2 `feat/p6-voice-api` | **implemented 2026-11-20** (cut from the local integration branch; notes and owner steps under "Branch 2 — implementation notes"; awaiting the Sonnet 5 branch review) |
+| 3–6 | not started |
 
 ## Out of scope (explicit)
 
