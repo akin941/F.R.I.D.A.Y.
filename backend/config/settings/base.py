@@ -402,6 +402,10 @@ MEMORY_INGESTION_DEFAULT_DAILY_TOKEN_BUDGET = env.int(
 MEMORY_OWNER_GIT_EMAILS = [
     e.strip().lower() for e in env.list("MEMORY_OWNER_GIT_EMAILS", default=[]) if e.strip()
 ]
+# Branch 4 (D5): the git producer's first run (no cursor yet) looks back
+# this many days; later runs start an hour before the cursor's committer
+# date. The calendar producer reads yesterday and today.
+MEMORY_GIT_INGEST_LOOKBACK_DAYS = env.int("MEMORY_GIT_INGEST_LOOKBACK_DAYS", default=2)
 
 CORS_ALLOWED_ORIGINS = [o for o in env.list("CORS_ALLOWED_ORIGINS", default=[]) if o] or [
     "http://localhost:3001"

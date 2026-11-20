@@ -11,7 +11,7 @@ from celery import shared_task
 from celery.exceptions import SoftTimeLimitExceeded
 from django.conf import settings
 
-from harness import execution, implementation_execution, review_execution
+from harness import execution, implementation_execution, ingestion, review_execution
 
 logger = logging.getLogger(__name__)
 
@@ -188,3 +188,12 @@ def recover_stale_harness_reviews():
     execution.recover_stale_harness_reviews`'s own docstring for the
     full case list."""
     return review_execution.recover_stale_harness_reviews()
+
+
+@shared_task
+def ingest_repo_commits():
+    """Phase 8A branch 4 (brief D5): the git-commit producer. Routed to the
+    harness queue and scheduled on the runner's own beat -- it clones with
+    the runner's credentials, like discovery jobs. See
+    `harness.ingestion.ingest_repo_commits`."""
+    return ingestion.ingest_repo_commits()

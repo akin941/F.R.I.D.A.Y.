@@ -58,6 +58,14 @@ class HarnessRepo(WorkspaceScopedModel, TimestampedModel):
     # verification and proceeds anyway"). Discovery (`HarnessJob`) never
     # reads this field -- it doesn't run tests.
     test_command = models.TextField(blank=True, default="")
+    # Phase 8A branch 4 (brief D5): the git-commit ingestion cursor. The
+    # newest commit already handed to `memory.ingestion.ports.
+    # record_episode` and its committer date (the next run's
+    # `--shallow-since` window starts a little before it). Bookkeeping
+    # only, written by `harness.ingestion.ingest_repo_commits`; the port's
+    # `(source, external_id)` dedupe keeps a re-run idempotent anyway.
+    last_ingested_sha = models.CharField(max_length=64, blank=True, default="")
+    last_ingested_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         ordering = ["-created_at"]

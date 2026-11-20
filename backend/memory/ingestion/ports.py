@@ -82,6 +82,15 @@ def _resolve_source(source):
     return None
 
 
+def source_accepting(source) -> bool:
+    """Whether `source` (an IngestionSource or a kind string) is registered,
+    enabled and not paused. Producers ask before doing expensive work (a
+    clone, a calendar read) so a paused source costs nothing; the port
+    re-checks on every item anyway."""
+    resolved = _resolve_source(source)
+    return bool(resolved and resolved.is_accepting)
+
+
 def _safe_external_id(external_id):
     """Producers pass ids like `commit:<sha>` or `harness:<uuid>`. A value
     outside the strict charset, or one the scrubber would touch, is stored as

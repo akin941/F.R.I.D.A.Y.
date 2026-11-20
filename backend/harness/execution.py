@@ -31,7 +31,7 @@ from ai_core.exceptions import GatewayError
 from ai_core.gateway import InferenceGateway, record_external_usage
 from ai_core.models import PromptTemplate
 from audit.services import record_audit
-from harness import container_lifecycle, runner
+from harness import container_lifecycle, ingestion, runner
 from harness.models import HarnessJob
 from harness.services import dispatch_harness_job
 from memory.context import neutralize_fence, strip_invisible_formatting
@@ -593,6 +593,11 @@ def _finalize(job, outcome, started_monotonic, removal_confirmed=True):
         except DuplicateMemory:
             pass
 
+    # Phase 8A branch 4 (brief D5): every terminal job -- succeeded, failed
+    # or cancelled -- becomes one `harness` episode. Best-effort: never
+    # raises into this state machine.
+    ingestion.record_discovery_outcome(job, cost=estimated_cost)
+
 
 def _claim_stale_job(job_id, threshold):
     """Fenced claim for the recovery scan (Codex code-review P2, branch 2
@@ -737,6 +742,7 @@ def recover_stale_harness_jobs():
             resource=job,
             metadata={"failure_reason": HarnessJob.FailureReason.TIMEOUT, "recovered": True},
         )
+        ingestion.record_discovery_outcome(job)
         recovered += 1
 
     # Second, distinct recovery case (Codex code-review P2, branch 2 round
@@ -832,3 +838,4 @@ def resolve_running_job_after_unexpected_error(job_id):
             resource=job,
             metadata={"failure_reason": HarnessJob.FailureReason.TIMEOUT, "unexpected_error": True},
         )
+        ingestion.record_discovery_outcome(job)

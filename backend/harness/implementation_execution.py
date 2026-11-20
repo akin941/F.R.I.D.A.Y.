@@ -45,7 +45,7 @@ from ai_core.exceptions import GatewayError
 from ai_core.gateway import InferenceGateway, record_external_usage
 from ai_core.models import PromptTemplate
 from audit.services import record_audit
-from harness import container_lifecycle, runner
+from harness import container_lifecycle, ingestion, runner
 from harness.execution import (
     _fence_and_bound_transcript,
     _parse_claude_code_output,
@@ -820,7 +820,12 @@ def record_implementation_work_log(job):
     firm" relies on. Content is Friday-authored bookkeeping (status,
     branch, owner-written goal, the gateway-produced diff summary), never
     a CLI transcript. Best-effort: a duplicate or any error never affects
-    the job itself."""
+    the job itself.
+
+    Phase 8A branch 4 (brief D5): the same hook also records the job's
+    `harness` ingestion episode (owner-typed goal as owner text, the
+    model-produced summaries as context) -- best-effort, never raises."""
+    ingestion.record_implementation_outcome(job)
     status_label = {
         HarnessImplementationJob.Status.SUCCEEDED: "pushed",
         HarnessImplementationJob.Status.FAILED: "failed",

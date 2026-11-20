@@ -27,7 +27,7 @@ from approvals.services import create_request, revoke_request
 from audit.services import record_audit
 from core.channels import CHANNEL_SYSTEM
 from core.repo_identity import is_self_repo
-from harness import policy
+from harness import ingestion, policy
 from harness.models import HarnessImplementationJob, HarnessJob, HarnessRepo, HarnessReview
 from memory.models import Memory
 from workspaces.models import WorkspaceMember
@@ -342,6 +342,9 @@ def cancel_harness_job(*, job, actor):
         locked.failure_reason = HarnessJob.FailureReason.KILLED
         locked.save(update_fields=["status", "failure_reason", "updated_at"])
         _record_job(locked, "harness.job_cancelled", actor)
+        # Phase 8A D5: a cancelled job is an outcome too (own savepoint,
+        # never raises into this transaction).
+        ingestion.record_discovery_outcome(locked)
     elif locked.status == HarnessJob.Status.RUNNING:
         locked.cancel_requested = True
         locked.save(update_fields=["cancel_requested", "updated_at"])
@@ -627,6 +630,7 @@ def cancel_harness_implementation_job(*, job, actor):
             locked.failure_reason = HarnessImplementationJob.FailureReason.KILLED
             locked.save(update_fields=["status", "failure_reason", "updated_at"])
             _record_implementation_job(locked, "harness.implementation_job_cancelled", actor)
+            ingestion.record_implementation_outcome(locked)
             gate_a_request = locked.gate_a_request
         elif locked.status in _IMPLEMENTATION_IDLE_WAIT_STATUSES:
             was_pending_gate_b = locked.status == HarnessImplementationJob.Status.PENDING_GATE_B
@@ -867,6 +871,9 @@ def fail_implementation_job_for_gate_a_decision(job_id, *, decision_status):
         )
         locked.save(update_fields=["status", "failure_reason", "updated_at"])
     _record_implementation_job(locked, "harness.implementation_job_failed", locked.created_by)
+    # Never ran, so no work_log -- but the outcome is still an episode
+    # (Phase 8A D5).
+    ingestion.record_implementation_outcome(locked)
 
 
 def fail_implementation_job_for_gate_b_decision(job_id, *, decision_status):
