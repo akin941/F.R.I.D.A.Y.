@@ -721,7 +721,8 @@ from yesterday".
 | # | Status |
 |---|---|
 | brief (`docs/friday-3-roadmap`) | **implemented 2026-11-20** (draft brief; awaits Sonnet 5 plan review) |
-| 1–7 | not started (precondition: Phase 6 closeout on `main`) |
+| 1 `feat/p8-ingestion-core` | **implemented 2026-11-20** (sources, mapping, scrubber + corpus gate, episodes, port, TTL beat, forget/restore (episodes), counters, owner API, contract, ADR-012 note; awaits Sonnet 5 review) |
+| 2–7 | not started |
 
 ## Out of scope (explicit)
 
@@ -827,6 +828,26 @@ model call without a `ModelUsage` row; an episode surviving past its TTL.
 4. Enable the four sources (d5) once branches 1–5 are merged.
 5. Use the morning card for two weeks and record the acceptance rate for
    the go/no-go (closeout).
+
+### Owner steps (pending) — `feat/p8-ingestion-core`, recorded 2026-11-20
+
+1. On the deployed stack run `manage.py migrate` and `manage.py
+   seed_ingestion_sources` (creates the four sources, disabled).
+2. Set `MEMORY_OWNER_GIT_EMAILS` (and, if wanted, the TTL / daily budget
+   overrides) in the server env — names are in `.env.example`.
+3. Add the real mapping rules (repo ids, `~/…` or absolute path prefixes,
+   calendar bindings) and any scrub terms (customer names, code names) from
+   the web, then enable sources once their producers (branches 3–4) land.
+4. Independent Sonnet 5 review of this branch before merge.
+
+Implementation notes for later branches (branch 1, 2026-11-20): the owner
+APIs are default-authentication only, so an owner `cli`/`openai` PAT gets
+**401** (not 403) — the established connectors-bindings matrix; branch 3's
+hook token must likewise be refused there. Domain errors reuse the
+`memory.permission_denied` / `memory.invalid_transition` codes (no new
+frontend strings). `~` in path rules is a literal home marker (not resolved
+server-side); producers must send `path:~/…` or the absolute form matching
+the rule.
 
 ## Known follow-ups (from review, unresolved at merge)
 
