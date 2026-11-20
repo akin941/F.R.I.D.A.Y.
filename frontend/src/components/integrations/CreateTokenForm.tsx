@@ -18,7 +18,7 @@ import { useWorkspace } from "@/contexts/workspace-context";
 import { tr } from "@/lib/i18n/tr";
 import type { ApiPersonalAccessTokenCreated, PatKind } from "@/types/api";
 
-const KINDS: PatKind[] = ["cli", "openai"];
+const KINDS: PatKind[] = ["cli", "openai", "hook"];
 
 // Lifetimes offered at mint (days). The backend default is 90 and its cap
 // 365 (PAT_DEFAULT_TTL_DAYS / PAT_MAX_TTL_DAYS).

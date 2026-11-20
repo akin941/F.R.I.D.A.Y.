@@ -1179,11 +1179,13 @@ export const tr = {
     kind: {
       cli: "CLI",
       openai: "OpenAI uyumlu istemci",
+      hook: "Claude Code kancası",
     } satisfies Record<PatKind, string>,
     kindHint: {
       cli: "Friday komut satırı (friday CLI) için.",
       openai:
         "Open WebUI gibi OpenAI uyumlu istemciler için: yalnızca sohbet, araç ve onay yok. CLI uç noktalarında çalışmaz.",
+      hook: "friday-hook için (Claude Code oturum olayları): yalnızca olay gönderir, hiçbir şey okuyamaz. Yalnızca kişisel çalışma alanına bağlanır; token'ı macOS Anahtar Zinciri'ne kaydet.",
     } satisfies Record<PatKind, string>,
   },
   // Settings → "Bağlantılar" (Phase 5 branch 9).
