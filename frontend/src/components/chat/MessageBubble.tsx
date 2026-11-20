@@ -3,7 +3,7 @@
 import { RotateCcw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { CopyButton, Markdown } from "@/components/ui/markdown";
-import { ChannelBadge } from "@/components/chat/badges";
+import { ChannelBadge, SourceBadges } from "@/components/chat/badges";
 import { SourcesList } from "@/components/chat/SourcesList";
 import type { ChatMessageView } from "@/components/chat/types";
 import { tr } from "@/lib/i18n/tr";
@@ -87,6 +87,7 @@ export function MessageBubble({
           </span>
         ) : null}
         <ChannelBadge channel={message.channel} className="mt-0.5" />
+        <SourceBadges reads={message.connectorReads} className="mt-0.5" />
         <div className="min-w-0 flex-1 pt-1">
           <SourcesList
             workspaceId={workspaceId}

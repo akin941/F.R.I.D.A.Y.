@@ -95,6 +95,39 @@ def list_bindings(*, workspace, actor):
     ]
 
 
+# The "recent reads" panel (Phase 5 branch 9): bookkeeping only, straight
+# from the `connector.read` audit rows -- never arguments or content (the
+# audit row holds an args sha256, which is not shown either).
+RECENT_READS_LIMIT = 50
+_RECENT_READ_FIELDS = ("connector", "tool", "outcome", "channel", "data_class")
+
+
+def list_recent_reads(*, workspace, actor, connector=None, limit=RECENT_READS_LIMIT):
+    """The latest `connector.read` audit rows of `workspace` (newest first),
+    reduced to a closed set of bookkeeping fields. Curator-only, like the
+    binding list."""
+    _require_curator(actor, workspace, "viewing connector reads")
+    rows = AuditLog.objects.filter(workspace=workspace, action="connector.read")
+    if connector:
+        rows = rows.filter(metadata__connector=connector)
+    result = []
+    for row in rows.order_by("-created_at")[: max(1, min(limit, RECENT_READS_LIMIT))]:
+        metadata = row.metadata if isinstance(row.metadata, dict) else {}
+        entry = {"id": str(row.id), "created_at": row.created_at.isoformat()}
+        for key in _RECENT_READ_FIELDS:
+            value = metadata.get(key, "")
+            entry[key] = value if isinstance(value, str) else ""
+        size = metadata.get("size")
+        duration = metadata.get("duration_ms")
+        entry["size"] = size if isinstance(size, int) and not isinstance(size, bool) else 0
+        entry["duration_ms"] = (
+            duration if isinstance(duration, int) and not isinstance(duration, bool) else None
+        )
+        entry["truncated"] = metadata.get("truncated") is True
+        result.append(entry)
+    return result
+
+
 def set_binding_enabled(*, workspace, actor, connector, enabled, channel):
     """Switch a connector on or off for one workspace (audited, idempotent:
     no change -> no audit row). Web channel and a human curator only;

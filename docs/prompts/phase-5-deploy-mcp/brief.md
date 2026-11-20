@@ -720,6 +720,82 @@ workspace isolation.
 **Done when:** every new gate renders its full snapshot; deploy and PR
 flows work at phone width.
 
+**Status: implemented 2026-11-20.** Built on the integration branch with
+branches 4–8 merged, so all five renderers landed at once.
+- **Backend (two small read endpoints the UI needed, owner + web only,
+  role × endpoint tests against the five principals):**
+  `GET /api/v1/connectors/reads?workspace=[&connector=]`
+  (`connectors.services.list_recent_reads`: the latest 50 `connector.read`
+  audit rows as a closed set of bookkeeping fields: tool, outcome, size,
+  truncation, duration, channel, data class. Never the args hash or
+  content) and `GET /api/v1/deploys/targets/<id>/head`
+  (`deploys.services.resolve_branch_head`: the tracked branch's head SHA,
+  cleaned commit title and CI state, from the same audited `github_*`
+  reads as the deploy snapshot; manual path = empty `sha`, CI `unknown`).
+  The head is only a suggestion. `request_deploy` re-resolves the snapshot
+  for whatever SHA is requested. Tests: `connectors/tests/test_recent_reads.py`,
+  `deploys/tests/test_branch_head.py`.
+- **Frontend.** BFF routes under `app/api/{connectors,deploys}/…` and
+  `harness/implementation-jobs/[jobId]/pull-request` on a shared
+  `lib/bff-proxy.ts` (UUID and connector-name segment checks before
+  interpolation; Origin/Content-Type before cookies on mutations).
+  `/connectors` (Ayarlar → Bağlantılar: bindings, per-tool pin status,
+  health, recent reads; it polls while pins are `unchecked`) and `/deploys`
+  (Firma → Deploy hedefleri: targets, live SHA, status refresh, enable
+  toggle, the last runs, the "Deploy" dialog) plus `/deploys/runs/[runId]`
+  (SHAs, health checks, closed-vocabulary reason, remote output only via
+  `LowTrustTranscript`). `DeployRunBanner` has one wording and tone per
+  state: degraded is `warning` and never reuses the success text;
+  `rollback_failed`/`health_failed`/`unknown_outcome` are `danger`. The
+  "Deploy" dialog prefills the SHA from `/head`, shows CI and the commit
+  title (labelled repo text), validates the SHA (format, not already
+  live) and asks for a separate confirmation before it mints the gate.
+  `PullRequestPanel` sits on the implementation detail for succeeded
+  jobs: "PR aç" with an editable title behind a confirmation, the
+  request/execution state, the PR link (github.com only) and CI runs.
+  Renderers: `deploy` (the whole plan: full SHAs, SSH destination, app,
+  repo, branch, CI, health plan, rollback SHA or "nothing rolled back",
+  verbs) and connector writes (`github_open_pr`, `ha_call_service`,
+  `mail_send`, `calendar_create_event`, plus any `mcp_<connector>_<tool>`
+  through the prefix fallback). They show every snapshot row in full, the
+  context rows, and the exact `arguments_json` with its sha256, and they
+  flag `unknown_outcome` as never re-sent. Chat: "Kaynak: GitHub/Posta/
+  Takvim/Ev" badges from `Message.connector_reads`, a "Kişisel veri"
+  header badge and notice for `Conversation.personal_data` (the
+  conversation list is refetched after a personal read). Catalog: tool
+  titles and consequences, deploy/connector-write/CI/pin statuses, deploy
+  error codes and write error types. `lib/i18n/phase5-catalog.test.ts`
+  parses the backend `TextChoices`, so a new value without a label fails
+  CI. Nav: Firma → Deploy hedefleri, Ayarlar → Bağlantılar.
+- **Tests.** `phase5-renderers.test.tsx` (selection, full snapshots,
+  consequences, execution states), `DeployRunBanner.test.tsx` (one test
+  per attention state), `DeployTargetsView.test.tsx` /
+  `DeployRunDetail.test.tsx` / `PullRequestPanel.test.tsx` /
+  `ConnectorsView.test.tsx` (each external-effect dialog sends nothing
+  until confirmed and nothing when backed out; workspace switch never
+  shows the previous workspace's rows), `chat/badges.test.tsx`,
+  `lib/bff-proxy.test.ts`. The query-key isolation test also covers the
+  new keys, which all start with the workspace id.
+
+**Owner steps (pending, recorded 2026-11-20).** These cannot run in a
+cloud session (no running stack, browser or real services):
+1. Phone-width check (e.g. 390 px) on the real stack of `/deploys`, the
+   "Deploy" dialog and its confirmation, `/deploys/runs/<id>`, and the
+   harness implementation detail's PR panel ("PR aç" dialog). The layouts
+   are single-column below `sm`, but no browser run was possible here.
+2. With a real GitHub binding (branch 5 owner steps), open "Deploy" on a
+   staging target and confirm the SHA prefill, CI pill and commit title
+   match GitHub; then approve on Onaylar and watch the run banner reach
+   its terminal state.
+3. Force one attention state on the smoke target (`make deploy-smoke`
+   with a failing health check) and confirm the run page shows the
+   matching banner (`rolled_back`, or `health_failed` with
+   `auto_rollback` off).
+4. Enable/disable a binding on Ayarlar → Bağlantılar and confirm the pin
+   statuses go from "Henüz kontrol edilmedi" to "Doğrulandı" and the
+   recent-reads list fills after a chat read.
+5. Sonnet 5 review of this branch (CLAUDE.md review rule).
+
 ### 10. closeout
 
 MASTER_PLAN §AA row 5 → done and §O (HA, external-installation bridge) updated; ADR-008
@@ -742,7 +818,7 @@ cookie-based), browser/Playwright MCP stays rejected; e2e: harness job
 | 6 | `feat/p5-deploy` | `deploys`, deploy gate, SSH runner, remote script, health/rollback, smoke, runbook | 1 (GitHub title/CI snapshot wired by whichever of 5/6 lands second) |
 | 7 | `feat/p5-home-assistant` | Native HA bridge, allowlists, gated service calls — **implemented 2026-11-20** (reconciled with 5/8; owner steps pending, see §7) | 4 |
 | 8 | `feat/p5-mail-calendar` | Google bridge, host OAuth, reads, gated send/invite | 4 |
-| 9 | `feat/p5-connectors-ui` | Settings, deploy targets, PR panel, renderers, chat badges | 5, 6 (7, 8 renderers as they land) |
+| 9 | `feat/p5-connectors-ui` | Settings, deploy targets, PR panel, renderers, chat badges — **implemented 2026-11-20** (all five renderers; owner steps pending, see §9) | 5, 6 (7, 8 renderers as they land) |
 | 10 | closeout | Docs, governance pass, end-to-end | 1–9 |
 
 Minimum usable cut if the phase runs long: 1, 2, 4, 5, 6, 9 deliver

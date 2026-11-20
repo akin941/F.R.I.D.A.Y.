@@ -1,3 +1,12 @@
+import {
+  GENERIC_CONNECTOR_WRITE_PREFIX,
+  calendarCreateEventRenderer,
+  genericConnectorWriteRenderer,
+  githubOpenPrRenderer,
+  haCallServiceRenderer,
+  mailSendRenderer,
+} from "@/components/approvals/renderers/connector-write";
+import { deployRenderer } from "@/components/approvals/renderers/deploy";
 import { genericRenderer } from "@/components/approvals/renderers/generic";
 import {
   harnessImplementRenderer,
@@ -10,14 +19,30 @@ import { vaultExportRenderer } from "@/components/approvals/renderers/vault-expo
 export type { ApprovalRenderer, Decision } from "@/components/approvals/renderers/types";
 
 const RENDERERS: Record<string, ApprovalRenderer> = Object.fromEntries(
-  [vaultExportRenderer, harnessImplementRenderer, harnessPushRenderer, purgeTrashRenderer].map(
-    (renderer) => [renderer.toolName, renderer],
-  ),
+  [
+    vaultExportRenderer,
+    harnessImplementRenderer,
+    harnessPushRenderer,
+    purgeTrashRenderer,
+    deployRenderer,
+    githubOpenPrRenderer,
+    haCallServiceRenderer,
+    mailSendRenderer,
+    calendarCreateEventRenderer,
+  ].map((renderer) => [renderer.toolName, renderer]),
 );
 
-/** The renderer for `toolName`, or the generic fallback for any other tool. */
+/**
+ * The renderer for `toolName`: its dedicated one; the generic connector
+ * write renderer for any other `mcp_<connector>_<tool>` gate (Phase 5,
+ * brief D6); else the generic fallback.
+ */
 export function rendererFor(toolName: string): ApprovalRenderer {
-  return Object.hasOwn(RENDERERS, toolName) ? RENDERERS[toolName]! : genericRenderer;
+  if (Object.hasOwn(RENDERERS, toolName)) return RENDERERS[toolName]!;
+  if (toolName.startsWith(GENERIC_CONNECTOR_WRITE_PREFIX) && toolName.length > 4) {
+    return genericConnectorWriteRenderer;
+  }
+  return genericRenderer;
 }
 
 /** Tools with a dedicated renderer -- the inbox's tool filter options. */

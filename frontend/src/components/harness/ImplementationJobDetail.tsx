@@ -10,6 +10,7 @@ import { StatusPill } from "@/components/ui/status-pill";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { approvalHref } from "@/components/approvals/links";
 import { LowTrustTranscript } from "@/components/harness/LowTrustTranscript";
+import { PullRequestPanel } from "@/components/harness/PullRequestPanel";
 import { TechnicalDetail } from "@/components/harness/TechnicalDetail";
 import {
   GATE_STATUS_LABELS,
@@ -279,6 +280,11 @@ export function ImplementationJobDetail({
                   <GateChip label="Kapı B — gönderim onayı" gate={job.gate_b} />
                 </div>
               </section>
+
+              {/* Phase 5: a pushed job can get a PR (its own gate, github_open_pr). */}
+              {job.status === "succeeded" ? (
+                <PullRequestPanel jobId={job.id} workspaceId={workspaceId} />
+              ) : null}
 
               <section className="flex flex-col gap-1 text-sm">
                 <h2 className="text-sm font-medium tracking-tight text-muted-foreground">Dal</h2>

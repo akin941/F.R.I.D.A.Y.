@@ -379,6 +379,8 @@ export type ApiDisplaySummary =
   | ApiHarnessImplementDisplaySummary
   | ApiHarnessPushDisplaySummary
   | ApiPurgeTrashDisplaySummary
+  | ApiDeployDisplaySummary
+  | ApiConnectorWriteDisplaySummary
   | null;
 
 export type ApprovalOrigin = "human" | "agent" | "harness";
@@ -410,6 +412,8 @@ export interface ApiApprovalRequest {
     | ApiVaultExportExecution
     | ApiHarnessImplementExecution
     | ApiHarnessPushExecution
+    | ApiDeployExecution
+    | ApiConnectorWriteExecution
     | null;
   // Optional: absent on responses from a backend predating this field.
   display_summary?: ApiDisplaySummary;
@@ -700,4 +704,251 @@ export interface ApiActivityWorkspace {
 export interface ApiActivitySummary {
   workspaces: ApiActivityWorkspace[];
   totals: Omit<ApiActivityWorkspace, "workspace">;
+}
+
+// --- Connectors (Phase 5 branches 4-9) ---
+
+export type ConnectorKind = "mcp" | "native";
+export type ConnectorDataClass = "firm" | "personal";
+// Pin check per tool (connectors.services): `unchecked` until the first
+// check after enabling; `mismatch`/`missing` disable the tool until a
+// reviewed manifest commit.
+export type ConnectorPinStatus = "ok" | "mismatch" | "missing" | "unchecked";
+
+export interface ApiConnectorTool {
+  name: string;
+  kind: "read" | "write";
+  // Friday-authored (manifest) -- never the server's own description.
+  description: string;
+  pin_status: string;
+}
+
+export interface ApiConnectorBinding {
+  connector: string;
+  display_name: string;
+  kind: ConnectorKind;
+  status: "active" | "blocked";
+  data_class: ConnectorDataClass;
+  manifest_version: number;
+  bindable: boolean;
+  workspace: string;
+  enabled: boolean;
+  tools: ApiConnectorTool[];
+  health: {
+    checked_at: string | null;
+    error: string;
+    server_name: string;
+    server_version: string;
+    protocol_version: string;
+  };
+  updated_at: string | null;
+}
+
+// One `connector.read` audit row, bookkeeping only (never args/content).
+export interface ApiConnectorRecentRead {
+  id: string;
+  created_at: string;
+  connector: string;
+  tool: string;
+  outcome: string;
+  channel: string;
+  data_class: string;
+  size: number;
+  duration_ms: number | null;
+  truncated: boolean;
+}
+
+export type ConnectorWriteStatus =
+  | "pending"
+  | "running"
+  | "succeeded"
+  | "failed"
+  | "unknown_outcome";
+
+// connectors.writes.describe_write_execution
+export interface ApiConnectorWriteExecution {
+  status: ConnectorWriteStatus;
+  error_type: string;
+  started_at: string | null;
+  finished_at: string | null;
+}
+
+// connectors.writes.describe_write_request: built from the snapshot only.
+// `rows` are the tool renderer's rows (or every argument in full);
+// `arguments_json` is the exact canonical JSON that will be sent.
+export interface ApiConnectorWriteDisplaySummary {
+  kind: "connector_write";
+  connector: string;
+  connector_name: string;
+  tool: string;
+  tool_description: string;
+  data_class: string;
+  manifest_version: number | null;
+  rows: { label: string; value: string }[];
+  context_rows: { label: string; value: string }[];
+  arguments_json: string;
+  arguments_sha256: string;
+}
+
+// --- Deploys (Phase 5 branch 6) ---
+
+export type DeployRunStatus =
+  | "pending"
+  | "checking"
+  | "deploying"
+  | "health_checking"
+  | "rolling_back"
+  | "succeeded"
+  | "succeeded_degraded"
+  | "rolled_back"
+  | "rollback_failed"
+  | "health_failed"
+  | "unknown_outcome"
+  | "refused"
+  | "failed"
+  | "cancelled";
+
+export type CiConclusion = "success" | "failure" | "pending" | "unknown";
+
+export interface ApiDeployTarget {
+  id: string;
+  workspace: string;
+  name: string;
+  environment: string;
+  ssh_host: string;
+  ssh_port: number;
+  ssh_user: string;
+  ssh_destination: string;
+  host_public_key: string;
+  remote_app: string;
+  repo_git_url: string;
+  tracked_branch: string;
+  health_url: string;
+  health_timeout_seconds: number;
+  require_ci_success: boolean;
+  auto_rollback: boolean;
+  enabled: boolean;
+  current_sha: string;
+  last_status_at: string | null;
+  last_status_error: string;
+  config_hash: string;
+  active_run: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ApiDeployRun {
+  id: string;
+  workspace: string;
+  target: string;
+  target_name: string;
+  environment: string;
+  approval_request: string;
+  sha: string;
+  expected_current_sha: string;
+  rollback_sha: string;
+  status: DeployRunStatus;
+  error_code: string;
+  needs_attention: boolean;
+  deploy_started_at: string | null;
+  rollback_started_at: string | null;
+  finished_at: string | null;
+  health_checks_total: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ApiDeployRunDetail extends ApiDeployRun {
+  health_checks: unknown[];
+  auto_rollback: boolean;
+  health_plan: {
+    window_seconds: number | null;
+    checks: number | null;
+    interval_seconds: number | null;
+    pass_threshold: number | null;
+    fail_threshold: number | null;
+    health_url: string | null;
+  };
+  // Bounded, redacted remote output: low-trust text, shown as data only.
+  output: string;
+  output_trust: "low";
+}
+
+// GET /deploys/targets/<id>/head -- the "Deploy" dialog prefill.
+export interface ApiDeployBranchHead {
+  tracked_branch: string;
+  current_sha: string;
+  sha: string;
+  title: string;
+  title_trust: "repo_text";
+  ci_conclusion: CiConclusion;
+  source: "github" | "manual";
+  require_ci_success: boolean;
+}
+
+// deploys.tool.describe_deploy_request: the whole decided plan.
+export interface ApiDeployDisplaySummary {
+  kind: "deploy";
+  text: string;
+  target_id: string;
+  target_name: string;
+  environment: string;
+  ssh_destination: string;
+  ssh_port: number;
+  remote_app: string;
+  repo_git_url: string;
+  tracked_branch: string;
+  sha: string;
+  current_sha: string;
+  rollback_sha: string;
+  auto_rollback: boolean;
+  // Repo text (low-trust), labelled as such.
+  commit_title: string;
+  commit_title_trust: "repo_text";
+  ci_conclusion: string;
+  commit_source: string;
+  require_ci_success: boolean;
+  health: {
+    window_seconds: number | null;
+    checks: number | null;
+    interval_seconds: number | null;
+    pass_threshold: number | null;
+    fail_threshold: number | null;
+    health_url: string;
+  };
+  verbs: string[];
+}
+
+// deploys.tool.describe_deploy_execution (closed vocabulary only).
+export interface ApiDeployExecution {
+  run_id: string;
+  status: DeployRunStatus;
+  error_code: string;
+  active: boolean;
+  needs_attention: boolean;
+  deploy_started: boolean;
+  rollback_attempted: boolean;
+  health_checks: number;
+  finished_at: string | null;
+}
+
+// --- Harness PR panel (Phase 5 branch 5) ---
+
+export interface ApiCiRun {
+  name: string;
+  status: string;
+  conclusion: string;
+  url: string;
+}
+
+export interface ApiPullRequestState {
+  job_status: ImplStatus;
+  head: string;
+  base: string;
+  head_sha: string;
+  can_request: boolean;
+  request: { id: string; status: ApprovalStatus; created_at: string } | null;
+  execution: { status: ConnectorWriteStatus; error_type: string; finished_at: string | null } | null;
+  pull_request: { number: number | null; url: string } | null;
+  ci: { state: CiConclusion; runs: ApiCiRun[]; error?: string } | null;
 }

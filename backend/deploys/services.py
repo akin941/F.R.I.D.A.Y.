@@ -278,6 +278,66 @@ def resolve_commit_snapshot(target, sha, *, actor=None, channel=CHANNEL_WEB):
     )
 
 
+def resolve_branch_head(*, target, actor, channel):
+    """The "Deploy" dialog's prefill (Phase 5 branch 9): the head of the
+    target's tracked branch with its commit title and CI conclusion, from
+    the same audited GitHub reads as `resolve_commit_snapshot`. Only a
+    suggestion -- the owner may type another SHA, and `request_deploy`
+    re-resolves the snapshot for whatever SHA is requested. Web and owner
+    only. Without an enabled GitHub binding, an in-scope github.com repo, or
+    on any read failure, `sha` is empty (`source: manual`): the owner types
+    it, and CI is `unknown`."""
+    _require_web(channel, "Reading a deploy target's branch head")
+    _require_owner(actor, target.workspace, "reading a deploy target's branch head")
+    result = {
+        "tracked_branch": target.tracked_branch,
+        "current_sha": target.current_sha,
+        "sha": "",
+        "title": "",
+        "title_trust": "repo_text",
+        "ci_conclusion": CI_UNKNOWN,
+        "source": COMMIT_SOURCE_MANUAL,
+        "require_ci_success": target.require_ci_success,
+    }
+    remote = github.split_github_remote(target.repo_git_url)
+    if remote is None or not github.workspace_has_github(target.workspace):
+        return result
+    owner, repo = remote
+    try:
+        commit = github.read_commit(
+            workspace=target.workspace,
+            actor=actor,
+            owner=owner,
+            repo=repo,
+            ref=target.tracked_branch,
+            channel=channel,
+        )
+        try:
+            sha = normalize_sha(github.commit_sha(commit))
+        except TargetFieldError:
+            return result
+        ci = github.read_ci(
+            workspace=target.workspace,
+            actor=actor,
+            owner=owner,
+            repo=repo,
+            head_sha=sha,
+            branch=target.tracked_branch,
+            channel=channel,
+        )
+    except ReadToolError:
+        return result
+    result.update(
+        {
+            "sha": sha,
+            "title": _clean_title(github.commit_title(commit)),
+            "ci_conclusion": ci["state"] if ci["state"] in CI_CONCLUSIONS else CI_UNKNOWN,
+            "source": COMMIT_SOURCE_GITHUB,
+        }
+    )
+    return result
+
+
 _TITLE_STRIP_RE = re.compile(r"[\x00-\x1f\x7f]+")
 
 

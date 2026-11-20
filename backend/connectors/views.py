@@ -13,12 +13,14 @@ from connectors.models import ConnectorBinding
 from connectors.serializers import (
     BindingQuerySerializer,
     BindingUpdateSerializer,
+    RecentReadsQuerySerializer,
     serialize_binding,
 )
 from connectors.services import (
     ConnectorInvalidTransition,
     ConnectorPermissionDenied,
     list_bindings,
+    list_recent_reads,
     set_binding_enabled,
 )
 from core.api_errors import service_error_response
@@ -77,3 +79,28 @@ class ConnectorBindingDetailView(APIView):
             return _service_error_response(exc)
         binding = ConnectorBinding.objects.get(workspace=workspace, connector=connector)
         return Response(serialize_binding(manifest, binding, workspace))
+
+
+class ConnectorRecentReadsView(APIView):
+    """`GET /connectors/reads?workspace=<id>[&connector=<name>]` -- the
+    Settings "Bağlantılar" page's recent-reads list (Phase 5 branch 9):
+    bookkeeping from the `connector.read` audit rows only (tool, outcome,
+    size, duration, channel, data class), never arguments or content."""
+
+    permission_classes = [IsAuthenticated, IsWebChannel, IsOwner]
+
+    def get(self, request):
+        query = RecentReadsQuerySerializer(data=request.query_params)
+        query.is_valid(raise_exception=True)
+        workspace = _workspace(request, query.validated_data["workspace"])
+        if workspace is None:
+            return Response(status=status.HTTP_404_NOT_FOUND)
+        try:
+            rows = list_recent_reads(
+                workspace=workspace,
+                actor=request.user,
+                connector=query.validated_data.get("connector"),
+            )
+        except ConnectorPermissionDenied as exc:
+            return _service_error_response(exc)
+        return Response(rows)
