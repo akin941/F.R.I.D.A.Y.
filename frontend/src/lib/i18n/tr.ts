@@ -95,16 +95,52 @@ export const ERROR_MESSAGES = {
     specific: true,
   },
   "approval.expired": { message: "Bu onay isteğinin süresi doldu.", specific: true },
+  // Connectors
+  "connector.permission_denied": {
+    message: "Bağlantıları yalnızca kurulum sahibi web uygulamasından yönetebilir.",
+    specific: true,
+  },
+  "connector.invalid_transition": {
+    message: "Bu bağlantı bu çalışma alanında açılamaz (engelli ya da bu alan türüne uygun değil).",
+    specific: true,
+  },
   // Agents
   "agent.permission_denied": { message: "Rolün bu ajan işlemine yetmiyor.", specific: true },
   "agent.invalid_transition": {
     message: "Ajan ya da adım artık bu işleme uygun değil.",
     specific: true,
   },
+  // Deploys
+  "deploy.permission_denied": {
+    message: "Dağıtım işlemlerini yalnızca kurulum sahibi yapabilir.",
+    specific: true,
+  },
+  "deploy.invalid_transition": {
+    message: "Bu dağıtım hedefi ya da çalıştırması artık bu işleme uygun değil.",
+    specific: true,
+  },
+  "deploy.ci_required": {
+    message:
+      "Bu hedef, commit için başarılı bir CI sonucu istiyor; CI durumu başarılı değil ya da bilinmiyor.",
+    specific: true,
+  },
   // Harness
   "harness.permission_denied": { message: "Rolün bu harness işlemine yetmiyor.", specific: true },
   "harness.invalid_transition": {
     message: "Bu harness işi, deposu ya da ajanı artık bu işleme uygun değil.",
+    specific: true,
+  },
+  "harness.pull_request_not_ready": {
+    message: "Bu iş için PR açılamaz: yalnızca başarıyla tamamlanıp dalı gönderilmiş işler PR alabilir.",
+    specific: true,
+  },
+  "harness.pull_request_exists": {
+    message: "Bu iş için zaten bekleyen ya da açılmış bir PR isteği var.",
+    specific: true,
+  },
+  "harness.github_unavailable": {
+    message:
+      "GitHub bu çalışma alanında kullanılamıyor: bağlantı kapalı, araç doğrulanmamış ya da depo GitHub'da kayıtlı değil.",
     specific: true,
   },
   // Knowledge
@@ -243,6 +279,13 @@ export const tr = {
       no_provider:
         "Şu anda yapılandırılmış bir yapay zeka sağlayıcısı yok. Lütfen daha sonra tekrar deneyin.",
       client_disconnect: "Bağlantı kesildi.",
+      connector_local_model_required:
+        "Bu kaynak kişisel veri içeriyor; okumak için kişisel veriye izinli yerel bir model gerekiyor. Hiçbir şey okunmadı.",
+      connector_invalid_arguments:
+        "İstek bu kaynak için anlaşılamadı ya da bu çalışma alanının dışında kalıyor. Hiçbir şey okunmadı.",
+      connector_read_failed: "Kaynak şu anda okunamadı. Biraz sonra tekrar dene.",
+      connector_reconnect_required:
+        "Google bağlantısının yetkisi düşmüş. Sunucuda `manage.py connect_google` ile yeniden bağlan. Hiçbir şey okunmadı.",
     } as Record<string, string>,
     streamFailed: "Asistan beklenmedik bir hatayla karşılaştı. Lütfen tekrar deneyin.",
     private: "Özel",

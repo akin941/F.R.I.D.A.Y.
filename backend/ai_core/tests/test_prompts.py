@@ -44,6 +44,17 @@ def test_seed_creates_router_intent_prompt():
     assert "JSON" in template.active_version.content
 
 
+def test_seed_creates_router_connector_args_prompt():
+    """Phase 5 branch 4 (brief D4): the argument-extraction prompt."""
+    call_command("seed_ai_defaults")
+    call_command("seed_ai_defaults")
+    template = PromptTemplate.objects.get(name="jarvis_router_connector_args")
+    assert template.purpose == "router.connector_args"
+    assert template.active_version.version == 1
+    assert "JSON" in template.active_version.content
+    assert PromptVersion.objects.filter(template=template).count() == 1
+
+
 def test_seed_creates_agent_plan_prompt():
     call_command("seed_ai_defaults")
     template = PromptTemplate.objects.get(name="jarvis_agent_plan")
@@ -61,15 +72,19 @@ def test_seed_creates_agent_read_step_prompt():
     assert template.active_version.version == 1
 
 
-def test_seed_creates_harness_review_prompt():
+def test_seed_creates_harness_review_summary_prompt():
     """Codex code-review P1, harness Phase 3 branch 3: without this, a
-    fresh deployment has no `jarvis_harness_review` row at all, and every
-    otherwise-successful review fails closed as `review_unavailable`."""
+    fresh deployment has no review prompt row at all, and every
+    otherwise-successful review fails closed as `review_unavailable`.
+    Phase 5 D11: the summary has its own purpose and template; the Phase 3
+    `jarvis_harness_review` row is no longer seeded."""
     call_command("seed_ai_defaults")
-    template = PromptTemplate.objects.get(name="jarvis_harness_review")
-    assert template.purpose == "harness.review"
+    template = PromptTemplate.objects.get(name="jarvis_harness_review_summary")
+    assert template.purpose == "harness.review_summary"
     assert template.active_version is not None
     assert template.active_version.version == 1
+    assert '"verdict"' in template.active_version.content
+    assert not PromptTemplate.objects.filter(name="jarvis_harness_review").exists()
 
 
 def test_seed_is_idempotent():

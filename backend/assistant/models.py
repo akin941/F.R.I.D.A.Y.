@@ -50,6 +50,15 @@ class Conversation(WorkspaceScopedModel, TimestampedModel):
     # would let the next job's range re-cross the interval that was skipped
     # while private.
     private = models.BooleanField(default=False)
+    # Phase 5 branch 4 (ADR-010 decision 5, brief D5): personal-class
+    # connector data (mail, calendar, home, a sensitive repo) entered this
+    # conversation. One-way, set only by `assistant.services.
+    # mark_conversation_personal_data` -- which also marks it `private` --
+    # in the turn of the read, before the completion that consumes it. From
+    # then on every gateway call of this conversation is made with
+    # `personal_data=True` (read fresh off this row before each call), so
+    # only providers with `personal_data_allowed` can ever see it.
+    personal_data = models.BooleanField(default=False)
 
     class Meta:
         ordering = ["-created_at"]
@@ -78,6 +87,8 @@ class Message(WorkspaceScopedModel, TimestampedModel):
         KNOWLEDGE_QUERY = "knowledge_query"
         TASK_DRAFT = "task_draft"
         TOOL_REQUEST = "tool_request"
+        # Phase 5 branch 4 (brief D4): one connector read this turn.
+        CONNECTOR_READ = "connector_read"
 
     class Channel(models.TextChoices):
         WEB = "web"
@@ -146,6 +157,11 @@ class Message(WorkspaceScopedModel, TimestampedModel):
     # default for every pre-MVP-9 row reads as "web" via the field default,
     # not a distinct unknown value.
     channel = models.CharField(max_length=20, choices=Channel.choices, default=Channel.WEB)
+    # Connector reads supplied as context for this assistant reply (Phase 5
+    # branch 4, brief D4): `[{"tool", "source", "data_class", "size",
+    # "truncated"}]` -- bookkeeping only, never the content. Same contract
+    # as `memories_used`/`chunks_used`: "context supplied", not proof of use.
+    connector_reads = models.JSONField(default=list, blank=True)
 
     class Meta:
         ordering = ["created_at"]

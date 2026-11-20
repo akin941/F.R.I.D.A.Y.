@@ -196,8 +196,14 @@ def _handle_relay(chat_id, text):
     # per-request browser context), so relative due dates simply don't
     # resolve here -- the same graceful degradation an omitted value
     # already gets on the web endpoint.
+    # `channel` lists no connector read: none is ever allowed over Telegram
+    # (ADR-010 decision 4, enforced when a read tool is registered).
     classification = classify_intent(
-        conversation, actor=linked.user, content=text, client_local_date=None
+        conversation,
+        actor=linked.user,
+        content=text,
+        client_local_date=None,
+        channel=Message.Channel.TELEGRAM,
     )
     gateway_stream, usage_holder, memory_ids, chunk_ids, _overlay_source_workspaces = (
         build_gateway_stream(

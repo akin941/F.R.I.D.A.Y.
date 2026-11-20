@@ -3,15 +3,16 @@ single door for LLM traffic; this module never talks to a provider SDK)."""
 
 import json
 import uuid
+from dataclasses import dataclass, field
 from datetime import date
 
 from django.core.exceptions import ImproperlyConfigured
 from django.db import transaction
 
-from ai_core.exceptions import GatewayError
+from ai_core.exceptions import GatewayError, NoProviderAvailable
 from ai_core.gateway import InferenceGateway
 from ai_core.models import PromptTemplate
-from assistant.context import build_context
+from assistant.context import build_context, render_connector_block
 from assistant.intent import IntentParseError, parse_intent
 from assistant.models import Conversation, Message
 from assistant.task_draft import TaskDraftParseError, parse_task_draft
@@ -22,6 +23,7 @@ from memory.services import privatize_conversation_memories
 
 _ROUTER_INTENT_PROMPT_NAME = "jarvis_router_intent"
 _TASK_DRAFT_PROMPT_NAME = "jarvis_router_task_draft"
+_CONNECTOR_ARGS_PROMPT_NAME = "jarvis_router_connector_args"
 
 # Router-local tool vocabulary (MVP 6 §4) -- NOT on `ToolSpec` itself:
 # `tools/registry.py`'s own module docstring already rules out adding a
@@ -53,6 +55,23 @@ def _tool_vocabulary_line():
     )
 
 
+def _read_vocabulary_line(read_specs):
+    """The connector reads available this turn (Phase 5 branch 4, brief D4):
+    Jarvis-authored names and descriptions only -- never a server's own
+    tool description. Empty when nothing is available, so the router never
+    hears of `connector_read` for a workspace/channel without a read."""
+    if not read_specs:
+        return ""
+    described = [f"{spec.name} ({spec.description})" for spec in read_specs]
+    return (
+        "\n\nConnector read tools available for this message: "
+        + ", ".join(described)
+        + ". When the latest message asks for information one of these tools reads, answer "
+        '{"intent": "connector_read", "tool_name": "<exact tool name>"} instead; '
+        "connector_read is valid only with one of these names."
+    )
+
+
 def _router_intent_prompt_version():
     try:
         template = PromptTemplate.objects.get(name=_ROUTER_INTENT_PROMPT_NAME)
@@ -81,6 +100,32 @@ def _task_draft_prompt_version():
     return template.active_version
 
 
+def _connector_args_prompt_version():
+    try:
+        template = PromptTemplate.objects.get(name=_CONNECTOR_ARGS_PROMPT_NAME)
+    except PromptTemplate.DoesNotExist as exc:
+        raise ImproperlyConfigured(
+            f"{_CONNECTOR_ARGS_PROMPT_NAME} prompt template is not configured"
+        ) from exc
+    if template.active_version_id is None:
+        raise ImproperlyConfigured(
+            f"{_CONNECTOR_ARGS_PROMPT_NAME} prompt template has no active version"
+        )
+    return template.active_version
+
+
+def conversation_has_personal_data(conversation):
+    """`Conversation.personal_data`, read fresh from the database (D5): the
+    flag can be set mid-turn by a personal read, so a cached instance is
+    never trusted. Every gateway call of a conversation passes this as
+    `personal_data=`."""
+    return bool(
+        Conversation.objects.filter(pk=conversation.pk)
+        .values_list("personal_data", flat=True)
+        .first()
+    )
+
+
 def _parse_client_local_date(raw):
     """Lenient parse: missing OR malformed both resolve to `None` (MVP 6 §3)
     — `client_local_date` is a diagnostic-only field that must never 400 the
@@ -94,7 +139,15 @@ def _parse_client_local_date(raw):
         return None
 
 
-def _extract_task_draft(conversation, *, actor, content, client_local_date, context_report=None):
+def _extract_task_draft(
+    conversation,
+    *,
+    actor,
+    content,
+    client_local_date,
+    context_report=None,
+    personal_data=False,
+):
     """Second, focused extraction call for a `task_draft`-classified message
     (MVP 6 §3) — decides *what* the task should contain (title, optional due
     date), mirroring `memory.extraction`'s own "classify, then extract"
@@ -132,6 +185,7 @@ def _extract_task_draft(conversation, *, actor, content, client_local_date, cont
             prompt_version=prompt_version,
             stream=False,
             context_report=context_report,
+            personal_data=personal_data,
         )
     except GatewayError:
         return None
@@ -163,6 +217,7 @@ def classify_intent(
     client_local_date=None,
     allowed_intents=None,
     context_report=None,
+    channel=None,
 ):
     """Classify a user's chat message into a router intent (MVP 6 §1).
 
@@ -209,17 +264,36 @@ def classify_intent(
     `context_report` (optional) is recorded on this call's ModelUsage row
     (and the task-draft call's), e.g. the facade's channel and model alias.
 
+    `channel` (Phase 5 branch 4, brief D4) is the request's channel. Only
+    with one does the router see the connector-read vocabulary: the read
+    tools allowed over that channel whose connector has an enabled binding
+    in this workspace (`tools.registry.list_read_tools`). A `connector_read`
+    naming anything else degrades to chat. `connector_read` also obeys
+    `allowed_intents` -- the facade never allows it. The router sees only
+    this message, never history, so connector text can never reach it.
+
+    Every call is made with `personal_data` read fresh off the conversation
+    (D5): a conversation that already carries personal-class data routes
+    even its router calls to allowed providers only. The router call that
+    precedes a first personal read runs without it -- it carries only the
+    owner's message and tool names, never connector content.
+
     Returns `{"intent": Message.Intent, "intent_payload": dict}`.
     """
-    from tools.registry import list_tool_names
+    from tools.registry import list_read_tools, list_tool_names
 
     allowed = None
     if allowed_intents is not None:
         allowed = frozenset(allowed_intents) | {Message.Intent.CHAT}
+    read_specs = []
+    if channel and (allowed is None or Message.Intent.CONNECTOR_READ in allowed):
+        read_specs = list_read_tools(workspace=conversation.workspace, channel=channel)
+    personal_data = conversation_has_personal_data(conversation)
     prompt_version = _router_intent_prompt_version()
     system_prompt = prompt_version.content
     if allowed is None or Message.Intent.TOOL_REQUEST in allowed:
         system_prompt += _tool_vocabulary_line()
+    system_prompt += _read_vocabulary_line(read_specs)
     if allowed is not None:
         system_prompt += _allowed_intents_line(allowed)
     messages = [
@@ -236,6 +310,7 @@ def classify_intent(
             prompt_version=prompt_version,
             stream=False,
             context_report=context_report,
+            personal_data=personal_data,
         )
     except GatewayError:
         return {"intent": Message.Intent.CHAT, "intent_payload": {}}
@@ -247,6 +322,14 @@ def classify_intent(
 
     if allowed is not None and parsed["intent"] not in allowed:
         return {"intent": Message.Intent.CHAT, "intent_payload": {}}
+
+    if parsed["intent"] == Message.Intent.CONNECTOR_READ:
+        if parsed["tool_name"] not in {spec.name for spec in read_specs}:
+            return {"intent": Message.Intent.CHAT, "intent_payload": {}}
+        return {
+            "intent": Message.Intent.CONNECTOR_READ,
+            "intent_payload": {"tool_name": parsed["tool_name"]},
+        }
 
     if parsed["intent"] == Message.Intent.TOOL_REQUEST:
         if parsed["tool_name"] not in list_tool_names():
@@ -263,12 +346,208 @@ def classify_intent(
             content=content,
             client_local_date=client_local_date,
             context_report=context_report,
+            personal_data=personal_data,
         )
         if draft is None:
             return {"intent": Message.Intent.CHAT, "intent_payload": {}}
         return {"intent": Message.Intent.TASK_DRAFT, "intent_payload": draft}
 
     return {"intent": parsed["intent"], "intent_payload": {}}
+
+
+# --- Connector reads (Phase 5 branch 4, ADR-010 decisions 4-5, brief D4/D5) ---
+
+# SSE `error` event types a connector turn can end with instead of a reply
+# (no chat completion runs): the frontend catalog has a Turkish message for
+# each.
+CONNECTOR_ERROR_LOCAL_MODEL_REQUIRED = "connector_local_model_required"
+CONNECTOR_ERROR_INVALID_ARGUMENTS = "connector_invalid_arguments"
+CONNECTOR_ERROR_READ_FAILED = "connector_read_failed"
+# A native bridge's credential was rejected (Google `invalid_grant`): the
+# owner reconnects on the host (`manage.py connect_google`, brief D9/R4).
+CONNECTOR_ERROR_RECONNECT_REQUIRED = "connector_reconnect_required"
+_INVALID_ARGUMENT_CODES = frozenset({"invalid_arguments", "out_of_scope"})
+# Bound on the router's argument object (keys), before the serializer runs.
+_MAX_CONNECTOR_ARGS = 20
+
+
+class ConnectorArgsParseError(Exception):
+    """`router.connector_args` output was not one JSON object."""
+
+
+def parse_connector_args(raw_text):
+    """Strict parse of the argument-extraction output: exactly one JSON
+    object of at most `_MAX_CONNECTOR_ARGS` keys. What the values may be is
+    the read tool's serializer's business, not this parser's."""
+    try:
+        payload = json.loads(raw_text)
+    except (json.JSONDecodeError, TypeError) as exc:
+        raise ConnectorArgsParseError(f"invalid JSON: {exc}") from exc
+    if not isinstance(payload, dict) or len(payload) > _MAX_CONNECTOR_ARGS:
+        raise ConnectorArgsParseError("arguments must be one small JSON object")
+    return payload
+
+
+def _describe_arguments(serializer_class):
+    """The argument schema shown to `router.connector_args`: field names,
+    types and requiredness from the Jarvis-side serializer (never a server
+    `inputSchema` or description)."""
+    lines = []
+    for name, field_obj in serializer_class().fields.items():
+        parts = [type(field_obj).__name__.replace("Field", "").lower() or "value"]
+        parts.append("required" if field_obj.required else "optional")
+        choices = getattr(field_obj, "choices", None)
+        if choices:
+            parts.append("one of: " + ", ".join(str(c) for c in list(choices)[:20]))
+        help_text = getattr(field_obj, "help_text", None)
+        line = f"- {name} ({'; '.join(parts)})"
+        if help_text:
+            line += f": {help_text}"
+        lines.append(line)
+    return "\n".join(lines) or "- (no arguments)"
+
+
+def _extract_connector_args(conversation, *, actor, content, spec, personal_data):
+    """`router.connector_args` (D4): the read tool is already named, so its
+    data class is known -- a `personal` tool's call carries
+    `personal_data=True` (D5). Sees only the owner's message and the
+    argument schema, never connector content. Returns the argument dict, or
+    raises `GatewayError` / `ConnectorArgsParseError`."""
+    prompt_version = _connector_args_prompt_version()
+    system_prompt = (
+        prompt_version.content
+        + f"\n\nTool: {spec.name} ({spec.description})\nArguments:\n"
+        + _describe_arguments(spec.argument_serializer)
+    )
+    result = InferenceGateway().complete(
+        purpose="router.connector_args",
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": content},
+        ],
+        actor=actor,
+        workspace=conversation.workspace,
+        prompt_version=prompt_version,
+        stream=False,
+        context_report={"connector_tool": spec.name},
+        personal_data=personal_data,
+    )
+    return parse_connector_args(result.text)
+
+
+@dataclass
+class ConnectorTurn:
+    """The outcome of one turn's connector read. With `error_type` set, the
+    turn ends with that SSE error instead of a reply (no chat completion);
+    otherwise `block` is the fenced result for `build_context` and `reads`
+    its bookkeeping for `Message.connector_reads`."""
+
+    tool_name: str
+    outcome: str
+    error_type: str = ""
+    block: str = ""
+    reads: list = field(default_factory=list)
+
+
+def prepare_connector_read(conversation, *, actor, content, channel, tool_name):
+    """Run the one connector read of a `connector_read` turn (D4/D5), in
+    this order:
+
+    1. re-resolve the tool against this workspace and channel (the router's
+       answer is never trusted on its own);
+    2. **pre-flight** for a `personal` tool: with no provider allowed to see
+       personal data for the chat completion, nothing is read, the flag is
+       not set and the turn ends `connector_local_model_required`;
+    3. `router.connector_args` (with `personal_data` for a personal tool or
+       an already-personal conversation; its own `NoProviderAvailable` maps
+       to the same local-model outcome);
+    4. the read itself (`ReadToolSpec.execute`: serializer, scope check,
+       pin, audit) -- a refusal ends the turn with a plain error, no reply;
+    5. for a `personal` read, `mark_conversation_personal_data` commits the
+       `private` cascade and the one-way `personal_data` flag BEFORE the
+       chat completion that consumes the result is even started -- that
+       completion reads the flag fresh and passes `personal_data=True`.
+
+    The result is fenced here (`render_connector_block`) and never stored:
+    `Message.connector_reads` keeps bookkeeping only."""
+    from tools.registry import DATA_CLASS_PERSONAL, ReadToolError, list_read_tools
+
+    spec = next(
+        (
+            candidate
+            for candidate in list_read_tools(workspace=conversation.workspace, channel=channel)
+            if candidate.name == tool_name
+        ),
+        None,
+    )
+    if spec is None:
+        return ConnectorTurn(
+            tool_name=tool_name, outcome="not_available", error_type=CONNECTOR_ERROR_READ_FAILED
+        )
+    personal = spec.data_class == DATA_CLASS_PERSONAL
+    personal_context = personal or conversation_has_personal_data(conversation)
+    gateway = InferenceGateway()
+    if personal_context and not gateway.has_eligible_provider(purpose="chat", personal_data=True):
+        return ConnectorTurn(
+            tool_name=tool_name,
+            outcome="local_model_required",
+            error_type=CONNECTOR_ERROR_LOCAL_MODEL_REQUIRED,
+        )
+    try:
+        arguments = _extract_connector_args(
+            conversation,
+            actor=actor,
+            content=content,
+            spec=spec,
+            personal_data=personal_context,
+        )
+    except NoProviderAvailable as exc:
+        if personal_context:
+            return ConnectorTurn(
+                tool_name=tool_name,
+                outcome="local_model_required",
+                error_type=CONNECTOR_ERROR_LOCAL_MODEL_REQUIRED,
+            )
+        return ConnectorTurn(tool_name=tool_name, outcome=exc.error_type, error_type=exc.error_type)
+    except GatewayError as exc:
+        # A provider failure (timeout, rate limit, ...) is not the owner's
+        # wording: surface the gateway's own error type, like a chat turn.
+        return ConnectorTurn(tool_name=tool_name, outcome=exc.error_type, error_type=exc.error_type)
+    except ConnectorArgsParseError:
+        return ConnectorTurn(
+            tool_name=tool_name,
+            outcome="invalid_arguments",
+            error_type=CONNECTOR_ERROR_INVALID_ARGUMENTS,
+        )
+    try:
+        result = spec.execute(
+            workspace=conversation.workspace, actor=actor, args=arguments, channel=channel
+        )
+    except ReadToolError as exc:
+        if exc.code in _INVALID_ARGUMENT_CODES:
+            error_type = CONNECTOR_ERROR_INVALID_ARGUMENTS
+        elif exc.code == "reconnect_required":
+            error_type = CONNECTOR_ERROR_RECONNECT_REQUIRED
+        else:
+            error_type = CONNECTOR_ERROR_READ_FAILED
+        return ConnectorTurn(tool_name=tool_name, outcome=exc.code, error_type=error_type)
+    # Phase 5 branch 5: one call can be stricter than its spec (a GitHub
+    # read of a `sensitive` repo is `personal` on a `firm` connector). Such
+    # a result is only kept if a personal-data provider can consume it --
+    # otherwise it is dropped here, unflagged, like the pre-flight refusal.
+    if not personal and getattr(result, "data_class", "") == DATA_CLASS_PERSONAL:
+        personal = True
+        if not gateway.has_eligible_provider(purpose="chat", personal_data=True):
+            return ConnectorTurn(
+                tool_name=tool_name,
+                outcome="local_model_required",
+                error_type=CONNECTOR_ERROR_LOCAL_MODEL_REQUIRED,
+            )
+    block, report = render_connector_block(result, tool=spec.name, source=spec.source)
+    report["data_class"] = DATA_CLASS_PERSONAL if personal else spec.data_class
+    if personal:
+        mark_conversation_personal_data(conversation=conversation, actor=actor)
+    return ConnectorTurn(tool_name=tool_name, outcome="ok", block=block, reads=[report])
 
 
 @transaction.atomic
@@ -371,6 +650,11 @@ def fork_conversation(*, source, actor, cut_before_id=None, channel=""):
     if copies:
         conversation.last_extracted_message = copies[-1]
         conversation.save(update_fields=["last_extracted_message", "updated_at"])
+    if source.personal_data:
+        # D5: the copies may carry personal-class content (replies built on
+        # a personal read); the fork inherits the restriction with them.
+        conversation.personal_data = True
+        conversation.save(update_fields=["personal_data", "updated_at"])
     record_audit(
         action="assistant.conversation.forked",
         actor=actor,
@@ -440,6 +724,28 @@ def mark_conversation_private(*, conversation, actor):
     return locked
 
 
+@transaction.atomic
+def mark_conversation_personal_data(*, conversation, actor):
+    """One-way, like `mark_conversation_private` (no value parameter):
+    personal-class connector data entered this conversation (D5). Marks it
+    `private` first -- the existing cascade: no extraction, memories born
+    from it rejected/archived -- then sets `personal_data`, both in one
+    transaction. Idempotent: no second audit row."""
+    mark_conversation_private(conversation=conversation, actor=actor)
+    locked = Conversation.objects.select_for_update().get(pk=conversation.pk)
+    if locked.personal_data:
+        return locked
+    locked.personal_data = True
+    locked.save(update_fields=["personal_data"])
+    record_audit(
+        action="assistant.conversation.marked_personal_data",
+        actor=actor,
+        workspace=locked.workspace,
+        resource=locked,
+    )
+    return locked
+
+
 def build_gateway_stream(
     conversation,
     *,
@@ -448,6 +754,7 @@ def build_gateway_stream(
     channel,
     intent=Message.Intent.CHAT,
     report_extra=None,
+    connector_turn=None,
 ):
     """Start the gateway call and return (generator, usage_holder, memory_ids,
     chunk_ids, overlay_source_workspaces).
@@ -477,7 +784,17 @@ def build_gateway_stream(
 
     `report_extra` (optional, Phase 4 branch 6) is merged into the chat
     call's `context_report` -- e.g. the facade's model alias.
+
+    `connector_turn` (optional, Phase 5 branch 4) is this turn's
+    `prepare_connector_read` outcome: an error ends the turn with that SSE
+    error and no gateway call at all; otherwise its fenced block joins the
+    context. The chat call passes `personal_data` read fresh off the
+    conversation (D5) -- a personal read of this very turn has already set
+    it, so the completion that first sees personal content is already
+    restricted to allowed providers.
     """
+    if connector_turn is not None and connector_turn.error_type:
+        return _eager_error_stream(GatewayError(connector_turn.error_type)), {}, [], [], {}
     gateway = InferenceGateway()
     messages, context_report, prompt_version, memory_ids, chunk_ids, overlay_source_workspaces = (
         build_context(
@@ -486,6 +803,8 @@ def build_gateway_stream(
             new_user_content=content,
             channel=channel,
             intent=intent,
+            connector_block=connector_turn.block if connector_turn else "",
+            connector_reads=connector_turn.reads if connector_turn else None,
         )
     )
     if report_extra:
@@ -501,6 +820,7 @@ def build_gateway_stream(
             stream=True,
             context_report=context_report,
             on_usage=lambda usage: usage_holder.__setitem__("usage", usage),
+            personal_data=conversation_has_personal_data(conversation),
         )
     except GatewayError as exc:
         gateway_stream = _eager_error_stream(exc)
@@ -524,6 +844,7 @@ def iter_assistant_reply_events(
     overlay_source_workspaces=None,
     draft_event=None,
     channel=Message.Channel.WEB,
+    connector_reads=None,
 ):
     """The assistant reply as structured events (Phase 4 branch 6): zero or
     more `{"type": "chunk", "text"}`, then -- only on success -- the
@@ -562,6 +883,10 @@ def iter_assistant_reply_events(
     core.channels.request_channel) -- threaded through to
     _persist_assistant_message so the reply carries the identical value,
     never independently re-derived.
+
+    `connector_reads` (Phase 5 branch 4) is this turn's connector-read
+    bookkeeping, persisted on `Message.connector_reads` and included in
+    `done` -- never content.
     """
     token = request_id_var.set(request_id)
     try:
@@ -575,6 +900,7 @@ def iter_assistant_reply_events(
             overlay_source_workspaces or {},
             draft_event,
             channel,
+            connector_reads or [],
         )
     finally:
         request_id_var.reset(token)
@@ -610,6 +936,7 @@ def _assistant_reply_events(
     overlay_source_workspaces,
     draft_event=None,
     channel=Message.Channel.WEB,
+    connector_reads=(),
 ):
     accumulated = []
     status = Message.Status.FAILED  # defined even if no branch below runs
@@ -640,6 +967,7 @@ def _assistant_reply_events(
             "memories_used": memory_ids,
             "chunks_used": chunk_ids,
             "overlay_source_workspaces": overlay_source_workspaces,
+            "connector_reads": list(connector_reads),
         }
     finally:
         # Single Message write — id is fixed up front, and (per review) the
@@ -655,6 +983,7 @@ def _assistant_reply_events(
             chunk_ids=chunk_ids,
             overlay_source_workspaces=overlay_source_workspaces,
             channel=channel,
+            connector_reads=list(connector_reads),
         )
 
     if draft_event is not None and terminal_event["type"] == "done":
@@ -674,6 +1003,7 @@ def _persist_assistant_message(
     chunk_ids,
     overlay_source_workspaces=None,
     channel=Message.Channel.WEB,
+    connector_reads=None,
 ):
     """The single write site for the assistant `Message` row.
 
@@ -703,6 +1033,7 @@ def _persist_assistant_message(
         chunks_used=chunk_ids,
         overlay_source_workspaces=overlay_source_workspaces or {},
         channel=channel,
+        connector_reads=connector_reads or [],
     )
     if status == Message.Status.COMPLETE and not locked_conversation.private:
         create_extraction_job(conversation=locked_conversation, through_message=message)

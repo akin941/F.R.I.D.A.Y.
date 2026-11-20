@@ -310,6 +310,29 @@ class TestRunHarnessJobSuccess:
         assert usage.estimated_cost == Decimal("0.010000")
         assert usage.workspace == workspace
 
+    def test_usage_row_carries_the_agent_routing_reason(self, workspace, repo, monkeypatch):
+        # Phase 5 D11: the external row explains itself like in-process ones.
+        job = make_job(workspace, repo, agent_routing_reason="owner_selected")
+        monkeypatch.setattr(execution.runner, "clone_repo", mock.Mock(return_value="/tmp/clone"))
+        monkeypatch.setattr(execution.runner, "cleanup_directory", mock.Mock())
+        monkeypatch.setattr(execution.runner, "image_for_agent", mock.Mock(return_value="img:1"))
+        monkeypatch.setattr(
+            execution.runner, "launch_container", mock.Mock(return_value="container-1")
+        )
+        monkeypatch.setattr(execution.runner, "remove_container", mock.Mock())
+        monkeypatch.setattr(
+            execution.runner, "container_is_running", mock.Mock(side_effect=[False])
+        )
+        monkeypatch.setattr(execution.runner, "container_exit_code", mock.Mock(return_value=0))
+        monkeypatch.setattr(
+            execution.runner, "capture_logs", mock.Mock(return_value=_claude_json(cost="0.01"))
+        )
+
+        execution.run_harness_job(job.pk)
+
+        usage = ModelUsage.objects.get(purpose="harness.discovery")
+        assert usage.routing_reason == "owner_selected"
+
     def test_container_id_preserved_when_removal_genuinely_fails(
         self, workspace, repo, monkeypatch
     ):

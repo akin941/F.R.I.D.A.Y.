@@ -35,6 +35,7 @@ export function implJob(overrides: Partial<ApiImplementationJob> = {}): ApiImple
     discovery_job: null,
     goal: "Add a health endpoint",
     agent: "claude_code",
+    agent_routing_reason: "policy:default",
     reviewer_agent: "codex_cli",
     status: "pending_gate_a",
     failure_reason: "",
@@ -55,6 +56,7 @@ export function review(overrides: Partial<ApiImplementationReview> = {}): ApiImp
   return {
     id: "rv1",
     agent: "codex_cli",
+    agent_routing_reason: "policy:cross_vendor",
     status: "succeeded",
     verdict: "approved",
     summary: "Looks correct.",

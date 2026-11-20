@@ -296,7 +296,9 @@ def _record(approval_request, action, actor, channel, **metadata):
 
 
 @transaction.atomic
-def create_request(*, workspace, actor, tool_name, payload=None, origin, channel):
+def create_request(
+    *, workspace, actor, tool_name, payload=None, origin, channel, system_created=False
+):
     """`origin` is required, never defaulted (Codex phase-0 code-review
     P2, mirroring `channel` on the decision services): the human/machine
     provenance split is a security invariant, and a future machine caller
@@ -309,18 +311,34 @@ def create_request(*, workspace, actor, tool_name, payload=None, origin, channel
     recorded in the audit trail. The HTTP view passes the request's real
     channel (`web` or `cli` -- a CLI request stays origin=human, a person
     typed it); machine callers (agent engine, harness gates) pass
-    `CHANNEL_SYSTEM`."""
+    `CHANNEL_SYSTEM`.
+
+    `system_created` (Phase 5 branch 1, ADR-010) is the ONLY thing that
+    lets a system-only gate (`ToolSpec.user_invocable=False`) be minted.
+    Keyword-only, default False; passed as True exclusively by the owning
+    service of such a gate (the harness for Gates A/B; later
+    `github_open_pr` and `deploys.services.request_deploy`) -- never by a
+    view or serializer (`approvals/tests/test_system_created.py` scans
+    for that). It replaces the Phase 3 check `origin != HARNESS`, because
+    `origin` answers a different question -- who produced the request --
+    and the two diverge from Phase 5 on: the owner clicking "Deploy" is a
+    HUMAN-origin request for a system-created gate. The HTTP view passes
+    False unconditionally; nothing in a request body, header or origin
+    value can reach this flag."""
     if channel not in ApprovalRequest.RequestedChannel.values:
         raise InvalidTransition(f"Unknown request channel {channel!r}.")
     _require(get_role(actor, workspace) in _WRITER_ROLES, "requesting a gated action")
     tool = _resolve_tool(tool_name)
     if tool is None or not tool.gated:
         raise InvalidTransition(f"{tool_name!r} is not a valid gated tool.")
-    # Phase 3 branch 6 (plan-review round 9 item 3): system-only gates
-    # (e.g. the harness's own Gate A/B) can only be minted by their owning
-    # component, never by a human/agent request. getattr for the same
-    # SimpleNamespace test stubs as below.
-    if not getattr(tool, "user_invocable", True) and origin != ApprovalRequest.Origin.HARNESS:
+    # System-only gates (Phase 3 branch 6, plan-review round 9 item 3;
+    # keyed on `system_created` since Phase 5 branch 1, ADR-010): the
+    # harness's own Gate A/B (and later `github_open_pr`, `deploy`) can
+    # only be minted by their owning service, never by a request whose
+    # caller did not explicitly say so -- whatever its origin. `is not
+    # True`, not falsiness: only the literal True opens it. getattr for
+    # the same SimpleNamespace test stubs as below.
+    if not getattr(tool, "user_invocable", True) and system_created is not True:
         raise InvalidTransition(f"{tool_name!r} can only be requested by the system.")
     # Phase 4 branch 2 (ADR-009): human-only tools (`purge_trash`) are never
     # requested by a machine.
@@ -334,6 +352,14 @@ def create_request(*, workspace, actor, tool_name, payload=None, origin, channel
             validate_request(workspace, payload or {})
         except ToolValidationError as exc:
             raise InvalidTransition(str(exc)) from exc
+    # Phase 5 branch 4 (brief D6): a tool that snapshots its request builds
+    # the stored payload itself; the caller's payload is only its input.
+    prepare_payload = getattr(tool, "prepare_payload", None)
+    if prepare_payload is not None:
+        try:
+            payload = prepare_payload(workspace, payload or {})
+        except ToolValidationError as exc:
+            raise InvalidTransition(str(exc)) from exc
     approval_request = ApprovalRequest.objects.create(
         workspace=workspace,
         tool_name=tool_name,
@@ -343,7 +369,14 @@ def create_request(*, workspace, actor, tool_name, payload=None, origin, channel
         origin=origin,
         requested_channel=channel,
     )
-    _record(approval_request, "approval.requested", actor, channel, origin=str(origin))
+    _record(
+        approval_request,
+        "approval.requested",
+        actor,
+        channel,
+        origin=str(origin),
+        system_created=system_created is True,
+    )
     return approval_request
 
 

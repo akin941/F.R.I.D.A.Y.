@@ -19,6 +19,15 @@ from core.models import TimestampedModel
 from memory.models import Memory
 
 
+class AgentRoutingReason(models.TextChoices):
+    """Why a job row got its agent (Phase 5 D11, `harness.policy`). Empty
+    on rows that predate the field."""
+
+    POLICY_DEFAULT = "policy:default"
+    OWNER_SELECTED = "owner_selected"
+    POLICY_CROSS_VENDOR = "policy:cross_vendor"
+
+
 class HarnessRepo(WorkspaceScopedModel, TimestampedModel):
     class Runner(models.TextChoices):
         # "First runner is the Mac" (ADR-008 decision 7): the owner's Mac
@@ -91,6 +100,9 @@ class HarnessJob(WorkspaceScopedModel, TimestampedModel):
     repo = models.ForeignKey(HarnessRepo, on_delete=models.PROTECT, related_name="jobs")
     goal = models.TextField()
     agent = models.CharField(max_length=20, choices=Agent.choices, default=Agent.CLAUDE_CODE)
+    agent_routing_reason = models.CharField(
+        max_length=30, choices=AgentRoutingReason.choices, blank=True, default=""
+    )
     # Snapshotted from `repo.sensitive` at creation time via a fixed
     # mapping (branch 3: True -> private, False -> normal) and never
     # re-derived afterward -- a job carries the sensitivity that was true
@@ -239,6 +251,9 @@ class HarnessImplementationJob(WorkspaceScopedModel, TimestampedModel):
     )
     goal = models.TextField()
     agent = models.CharField(max_length=20, choices=Agent.choices, default=Agent.CLAUDE_CODE)
+    agent_routing_reason = models.CharField(
+        max_length=30, choices=AgentRoutingReason.choices, blank=True, default=""
+    )
     # Same snapshot-at-creation discipline as `HarnessJob.sensitivity`.
     sensitivity = models.CharField(
         max_length=20, choices=Memory.Sensitivity.choices, default=Memory.Sensitivity.NORMAL
@@ -279,6 +294,17 @@ class HarnessImplementationJob(WorkspaceScopedModel, TimestampedModel):
         blank=True,
         on_delete=models.SET_NULL,
         related_name="harness_implementation_job_gate_b",
+    )
+    # Phase 5 branch 5 (brief D7): the latest `github_open_pr` request for
+    # this job's pushed branch -- system-created by `harness.pull_requests`
+    # only from a `succeeded` job. The connectors execution links back only
+    # through the payload's opaque `origin_ref` (ADR-010).
+    pull_request_request = models.OneToOneField(
+        "approvals.ApprovalRequest",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="harness_implementation_job_pull_request",
     )
     # Snapshotted from `repo.git_url`/`repo.default_branch` at creation
     # time, in `save()` -- NEVER re-read live from `self.repo.git_url`
@@ -421,6 +447,9 @@ class HarnessReview(WorkspaceScopedModel, TimestampedModel):
         HarnessImplementationJob, on_delete=models.CASCADE, related_name="reviews"
     )
     agent = models.CharField(max_length=20, choices=Agent.choices)
+    agent_routing_reason = models.CharField(
+        max_length=30, choices=AgentRoutingReason.choices, blank=True, default=""
+    )
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDING)
     verdict = models.CharField(max_length=20, choices=Verdict.choices, blank=True, default="")
     # Same fencing/gateway-summarization discipline as `HarnessJob.briefing`

@@ -6,9 +6,10 @@ Deliberately NOT sharing a common engine with `harness.execution.
 run_harness_job` (brief §boundary, round-1 MEDIUM finding, accepted): this
 job type's lifecycle (writable worktree, wrapper-owned test result,
 cross-vendor review, two approval gates, a host-side push) is materially
-different from discovery's single read-only container, and extraction is
-deferred to whichever later phase has three real call sites to generalize
-from correctly.
+different from discovery's single read-only container. Phase 5 D12, with
+three real call sites, extracted only the shared leaf layer (teardown,
+removal, directory cleanup, the wait loop) into
+`harness.container_lifecycle`; claim/finalize/recovery stay here.
 
 Two Celery-task-backing entry points:
 
@@ -30,7 +31,6 @@ Two Celery-task-backing entry points:
 import base64
 import binascii
 import logging
-import os
 import tempfile
 import time
 from datetime import timedelta
@@ -45,7 +45,7 @@ from ai_core.exceptions import GatewayError
 from ai_core.gateway import InferenceGateway, record_external_usage
 from ai_core.models import PromptTemplate
 from audit.services import record_audit
-from harness import runner
+from harness import container_lifecycle, runner
 from harness.execution import (
     _fence_and_bound_transcript,
     _parse_claude_code_output,
@@ -134,25 +134,18 @@ def _claim_implementation_job(job_id):
 
 
 def _teardown_container(container_id):
-    """Mirrors `harness.execution._teardown_container` exactly."""
-    try:
-        runner.stop_container(container_id, grace_seconds=settings.HARNESS_KILL_GRACE_SECONDS)
-        if runner.container_is_running(container_id):
-            runner.kill_container(container_id)
-    except Exception:
-        logger.exception("Failed to stop/kill harness implementation container %s", container_id)
+    """`container_lifecycle.teardown_container` -- the same best-effort
+    stop/kill `harness.execution._teardown_container` uses."""
+    container_lifecycle.teardown_container(container_id, label="harness implementation container")
 
 
 def _safe_remove_container(container_name):
-    """Mirrors `harness.execution._safe_remove_container` exactly."""
-    try:
-        runner.remove_container(container_name)
-        return True
-    except Exception:
-        logger.exception(
-            "Failed to remove harness implementation container %s (leaked on host)", container_name
-        )
-        return False
+    """`container_lifecycle.safe_remove_container` -- the same
+    confirmed-removal contract `harness.execution._safe_remove_container`
+    has."""
+    return container_lifecycle.safe_remove_container(
+        container_name, label="harness implementation container"
+    )
 
 
 def _safe_cleanup_directory(path):
@@ -164,43 +157,50 @@ def _safe_cleanup_directory(path):
     confirmed-before-clearing discipline). Callers must not clear a
     persisted path/handle on a `False` return.
 
-    Checks `os.path.exists(path)` AFTER calling `runner.cleanup_directory`,
-    rather than trusting that call not raising (Codex code-review P1,
-    branch 2 round 5): `runner.cleanup_directory` is `shutil.rmtree(path,
-    ignore_errors=True)` -- it NEVER raises, by design, so the earlier
-    round-4 fix's own `try/except` was dead code that always returned
-    `True` regardless of whether the directory was actually removed.
-    `ignore_errors=True` is Phase 3 branch 1's own established behavior
-    (not something this branch introduced or should silently change),
-    so confirmation has to come from checking the filesystem afterward,
-    not from the call's own (silent) outcome."""
-    runner.cleanup_directory(path)
-    if os.path.exists(path):
-        logger.error("Failed to fully clean up harness directory %s (still present on disk)", path)
-        return False
-    return True
+    Confirmed via `os.path.exists(path)` AFTER calling
+    `runner.cleanup_directory`, rather than trusting that call not
+    raising (Codex code-review P1, branch 2 round 5) -- see
+    `container_lifecycle.cleanup_directory(confirm=True)`."""
+    return container_lifecycle.cleanup_directory(path, confirm=True, label="harness directory")
+
+
+# `container_lifecycle.wait_for_container` outcome -> this job's own
+# `(status, failure_reason)` -- unchanged from the pre-extraction loop.
+_WAIT_OUTCOME_STATUS = {
+    container_lifecycle.WaitResult.TIMED_OUT: (
+        "failed",
+        HarnessImplementationJob.FailureReason.TIMEOUT,
+    ),
+    container_lifecycle.WaitResult.STOPPED: (
+        "cancelled",
+        HarnessImplementationJob.FailureReason.KILLED,
+    ),
+    container_lifecycle.WaitResult.EXITED_WITH_ERROR: (
+        "failed",
+        HarnessImplementationJob.FailureReason.RUNNER_ERROR,
+    ),
+    container_lifecycle.WaitResult.EXITED_CLEANLY: ("succeeded", ""),
+}
 
 
 def _wait_for_implementation_container(job_id, container_name, started_monotonic):
-    """Mirrors `harness.execution._wait_for_container`'s brake shape
-    (timeout, cancel-poll, confirmed exit code) exactly -- the result
-    itself is read separately, from the wrapper's own file, by the caller,
-    never from container stdout/stderr (brief §boundary)."""
-    while runner.container_is_running(container_name):
-        elapsed = time.monotonic() - started_monotonic
-        if elapsed >= settings.HARNESS_MAX_JOB_SECONDS:
-            _teardown_container(container_name)
-            return "failed", HarnessImplementationJob.FailureReason.TIMEOUT
-        if HarnessImplementationJob.objects.filter(pk=job_id, cancel_requested=True).exists():
-            _teardown_container(container_name)
-            return "cancelled", HarnessImplementationJob.FailureReason.KILLED
-        time.sleep(settings.HARNESS_CANCEL_POLL_SECONDS)
-    if HarnessImplementationJob.objects.filter(pk=job_id, cancel_requested=True).exists():
-        return "cancelled", HarnessImplementationJob.FailureReason.KILLED
-    exit_code = runner.container_exit_code(container_name)
-    if exit_code != 0:
-        return "failed", HarnessImplementationJob.FailureReason.RUNNER_ERROR
-    return "succeeded", ""
+    """The same brake shape as `harness.execution._wait_for_container`
+    (timeout, cancel-poll, post-exit cancel re-check, confirmed exit code;
+    `container_lifecycle.wait_for_container`, Phase 5 D12) -- without
+    transcript capture: the caller captures the logs itself, and the
+    result is read separately, from the wrapper's own file, never from
+    container stdout/stderr (brief §boundary)."""
+    outcome = container_lifecycle.wait_for_container(
+        container_name,
+        started_monotonic=started_monotonic,
+        teardown=_teardown_container,
+        should_stop=lambda: HarnessImplementationJob.objects.filter(
+            pk=job_id, cancel_requested=True
+        ).exists(),
+        recheck_stop_after_exit=True,
+        capture_transcript=False,
+    )
+    return _WAIT_OUTCOME_STATUS[outcome.result]
 
 
 def _fail_and_cleanup(
@@ -286,6 +286,7 @@ def _fail_and_cleanup(
             workspace=locked.workspace,
             purpose="harness.implementation",
             backend=f"harness_cli:{locked.agent}",
+            routing_reason=locked.agent_routing_reason,
             input_tokens=input_tokens,
             output_tokens=output_tokens,
             estimated_cost=estimated_cost if estimated_cost is not None else Decimal("0"),
@@ -690,6 +691,7 @@ def run_harness_implementation_job(job_id):
                 workspace=locked.workspace,
                 purpose="harness.implementation",
                 backend=f"harness_cli:{locked.agent}",
+                routing_reason=locked.agent_routing_reason,
                 input_tokens=input_tokens,
                 output_tokens=output_tokens,
                 estimated_cost=estimated_cost,
@@ -1331,6 +1333,7 @@ def _recover_stale_implementing_job(job_id, threshold):
         workspace=job.workspace,
         purpose="harness.implementation",
         backend=f"harness_cli:{job.agent}",
+        routing_reason=job.agent_routing_reason,
         input_tokens=0,
         output_tokens=0,
         estimated_cost=Decimal("0"),

@@ -2,6 +2,7 @@ import pytest
 from django.core.exceptions import ImproperlyConfigured
 
 from accounts.services import register_user
+from ai_core.exceptions import NoProviderAvailable
 from ai_core.gateway import InferenceGateway
 from ai_core.models import PromptTemplate, PromptVersion
 from assistant.context import build_context
@@ -886,3 +887,32 @@ def test_release_gate_shared_personal_workspace_never_gets_the_overlay(
     assert "shipped the migration" not in messages[0]["content"]
     assert memory_ids == []
     assert overlay_source_workspaces == {}
+
+
+@pytest.mark.parametrize("flag", [False, True])
+def test_retrieval_embeddings_follow_the_conversations_personal_data(
+    conversation, alice, system_prompt, monkeypatch, flag
+):
+    """Phase 5 D5: the owner's message is embedded for memory and knowledge
+    retrieval, so in a conversation holding personal-class data those
+    embeddings go only to an allowed provider -- the flag is read fresh
+    from the database, not from the passed instance."""
+    Conversation.objects.filter(pk=conversation.pk).update(personal_data=flag)
+    seen = []
+
+    def spy_embed(self, purpose, texts, **kwargs):
+        seen.append((purpose, kwargs.get("personal_data")))
+        raise NoProviderAvailable("spy")
+
+    monkeypatch.setattr(InferenceGateway, "embed", spy_embed)
+    for intent in (Message.Intent.CHAT, Message.Intent.KNOWLEDGE_QUERY):
+        build_context(
+            conversation,
+            actor=alice,
+            new_user_content="takvimde ne var",
+            channel=CHANNEL_WEB,
+            intent=intent,
+        )
+
+    assert {purpose for purpose, _ in seen} == {"memory.retrieval", "knowledge.retrieval"}
+    assert all(personal is flag for _, personal in seen)

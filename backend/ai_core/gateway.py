@@ -52,6 +52,7 @@ def record_external_usage(
     actor=None,
     error_type="",
     context_report=None,
+    routing_reason="",
 ):
     """Record one `ModelUsage` row for a call that ran entirely out of
     process (no `ModelProvider`, no adapter, no gateway retry/fallback
@@ -65,8 +66,12 @@ def record_external_usage(
     external CLI's own reported cost), taken as given, not derived from a
     `ModelProvider`'s per-token pricing. `request_id` is read from the
     active request the same way `_finalize` already does, so external and
-    in-process rows correlate the same way; `routing_reason` is always
-    empty (there is no provider to have routed to)."""
+    in-process rows correlate the same way. There is no provider to have
+    routed to, so `routing_reason` (Phase 5 D11) is the caller's own reason
+    for picking the external agent -- e.g. the harness job's
+    `agent_routing_reason` ("policy:default" | "owner_selected" |
+    "policy:cross_vendor") -- so external rows explain themselves the way
+    in-process rows do; empty when the caller has none."""
     user = actor if getattr(actor, "is_authenticated", False) else None
     return ModelUsage.objects.create(
         workspace=workspace,
@@ -81,7 +86,7 @@ def record_external_usage(
         latency_ms=latency_ms,
         success=success,
         error_type=error_type or "",
-        routing_reason="",
+        routing_reason=routing_reason or "",
         estimated_cost=estimated_cost,
         context_report=dict(context_report or {}),
     )
@@ -138,31 +143,40 @@ class InferenceGateway:
         params=None,
         context_report=None,
         on_usage=None,
+        personal_data=False,
     ):
+        """One chat completion (or, with `stream=True`, a generator of
+        chunks). Provider selection -- including the `personal_data` filter
+        -- runs eagerly here, before any generator exists, so the streaming
+        path can never reach a provider the synchronous path would refuse.
+
+        `personal_data=True` (D5, ADR-010 decision 5): the messages carry
+        personal-class data, so only providers with
+        `personal_data_allowed=True` are eligible -- primary AND fallback.
+        With none, the call fails closed (`NoProviderAvailable`, one
+        `ModelUsage` row, `routing_reason="personal_data_required"`); there
+        is never a silent fallback to a cloud provider."""
         started = time.monotonic()
         merged_params = dict(prompt_version.model_params) if prompt_version else {}
         merged_params.update(params or {})
-        base_report = dict(context_report or {})
+        base_report = self._base_report(context_report, personal_data)
 
         providers = self._select_providers(
-            capability=ModelProvider.Capability.CHAT, purpose=purpose
+            capability=ModelProvider.Capability.CHAT,
+            purpose=purpose,
+            personal_data=personal_data,
         )
         if not providers:
-            self._record(
+            raise self._no_provider_error(
                 purpose=purpose,
                 actor=actor,
                 workspace=workspace,
                 prompt_version=prompt_version,
-                provider=None,
-                result=None,
-                success=False,
-                error_type="no_provider",
                 started=started,
                 report=base_report,
-                attempts=[],
+                personal_data=personal_data,
                 on_usage=on_usage,
             )
-            raise NoProviderAvailable()
 
         if stream:
             return self._stream_generator(
@@ -200,33 +214,33 @@ class InferenceGateway:
         prompt_version=None,
         context_report=None,
         on_usage=None,
+        personal_data=False,
     ):
         """Embed a batch of texts. Same retry/fallback/accounting contract as
         `complete()` (ADR-003: embeddings are a gateway call like any other,
-        exactly one ModelUsage row). No streaming variant."""
+        exactly one ModelUsage row) -- including `personal_data`'s
+        allowed-providers-only, fail-closed selection. No streaming
+        variant."""
         started = time.monotonic()
-        base_report = dict(context_report or {})
+        base_report = self._base_report(context_report, personal_data)
         base_report["item_count"] = len(texts)
 
         providers = self._select_providers(
-            capability=ModelProvider.Capability.EMBEDDING, purpose=purpose
+            capability=ModelProvider.Capability.EMBEDDING,
+            purpose=purpose,
+            personal_data=personal_data,
         )
         if not providers:
-            self._record(
+            raise self._no_provider_error(
                 purpose=purpose,
                 actor=actor,
                 workspace=workspace,
                 prompt_version=prompt_version,
-                provider=None,
-                result=None,
-                success=False,
-                error_type="no_provider",
                 started=started,
                 report=base_report,
-                attempts=[],
+                personal_data=personal_data,
                 on_usage=on_usage,
             )
-            raise NoProviderAvailable()
 
         attempts = []
         last_error = None
@@ -295,13 +309,14 @@ class InferenceGateway:
         prompt_version=None,
         context_report=None,
         on_usage=None,
+        personal_data=False,
     ):
         """Speech-to-text (MVP 12). Same single-door/one-ModelUsage-row/
-        retry/fallback contract as `embed()` (ADR-003) — STT is a gateway
-        call like any other. `audio` is raw bytes; returns the transcript.
-        No streaming variant."""
+        retry/fallback/`personal_data` contract as `embed()` (ADR-003) — STT
+        is a gateway call like any other. `audio` is raw bytes; returns the
+        transcript. No streaming variant."""
         started = time.monotonic()
-        base_report = dict(context_report or {})
+        base_report = self._base_report(context_report, personal_data)
 
         result, usage = self._run_audio(
             purpose=purpose,
@@ -315,6 +330,7 @@ class InferenceGateway:
             base_report=base_report,
             started=started,
             on_usage=on_usage,
+            personal_data=personal_data,
         )
         return TranscribeGatewayResult(
             text=result.text, usage=usage, audio_seconds=result.audio_seconds
@@ -331,11 +347,12 @@ class InferenceGateway:
         prompt_version=None,
         context_report=None,
         on_usage=None,
+        personal_data=False,
     ):
         """Text-to-speech (MVP 12). Same contract as `transcribe()`. `text`
         in, synthesized audio bytes out. No streaming variant."""
         started = time.monotonic()
-        base_report = dict(context_report or {})
+        base_report = self._base_report(context_report, personal_data)
 
         result, usage = self._run_audio(
             purpose=purpose,
@@ -347,6 +364,7 @@ class InferenceGateway:
             base_report=base_report,
             started=started,
             on_usage=on_usage,
+            personal_data=personal_data,
         )
         return SynthesizeGatewayResult(
             audio=result.audio,
@@ -367,6 +385,7 @@ class InferenceGateway:
         base_report,
         started,
         on_usage,
+        personal_data=False,
     ):
         """Shared STT/TTS execution: provider selection + retry/fallback +
         exactly one ModelUsage row, mirroring `embed()`'s non-streaming
@@ -374,23 +393,20 @@ class InferenceGateway:
         returns a Transcribe/Synthesize AdapterResult carrying `audio_seconds`
         (recorded in context_report — the real STT/TTS cost signal, since
         this class of provider is priced by duration, not tokens)."""
-        providers = self._select_providers(capability=capability, purpose=purpose)
+        providers = self._select_providers(
+            capability=capability, purpose=purpose, personal_data=personal_data
+        )
         if not providers:
-            self._record(
+            raise self._no_provider_error(
                 purpose=purpose,
                 actor=actor,
                 workspace=workspace,
                 prompt_version=prompt_version,
-                provider=None,
-                result=None,
-                success=False,
-                error_type="no_provider",
                 started=started,
                 report=base_report,
-                attempts=[],
+                personal_data=personal_data,
                 on_usage=on_usage,
             )
-            raise NoProviderAvailable()
 
         attempts = []
         last_error = None
@@ -450,12 +466,37 @@ class InferenceGateway:
             retryable=last_error.retryable if last_error else False,
         )
 
+    def has_eligible_provider(
+        self, *, purpose, personal_data=False, capability=ModelProvider.Capability.CHAT
+    ):
+        """Pre-flight (D5, Phase 5 branch 4): would a call with these
+        arguments find a provider? The same selection `complete()` runs --
+        including the `personal_data` filter -- but no LLM call is made and
+        no `ModelUsage` row is written (nothing was attempted). A connector
+        read that must not happen without an allowed provider asks this
+        first."""
+        return bool(
+            self._select_providers(
+                capability=capability, purpose=purpose, personal_data=personal_data
+            )
+        )
+
     # --- provider selection ---
 
-    def _select_providers(self, *, capability=ModelProvider.Capability.CHAT, purpose=""):
+    def _select_providers(
+        self, *, capability=ModelProvider.Capability.CHAT, purpose="", personal_data=False
+    ):
         """Active providers of the given capability, by priority; fake only
         behind the flag, real ones only when their key env var is actually
         set. Primary + one fallback.
+
+        `personal_data=True` (D5) drops every provider without
+        `personal_data_allowed` BEFORE tier ordering and the primary +
+        fallback cut, so neither the primary nor the fallback can be a
+        non-allowed provider; an empty result is the caller's fail-closed
+        `NoProviderAvailable`. The flag is read from the rows fetched here,
+        on every call -- a provider flipped off takes effect on the very
+        next call, no cache.
 
         Tier routing skeleton (phase 0, §J): if `purpose` maps to a tier in
         `settings.AI_PURPOSE_TIERS` and that tier has eligible providers
@@ -473,6 +514,8 @@ class InferenceGateway:
                     eligible.append(provider)
             elif os.environ.get(provider.api_key_env_var or "", ""):
                 eligible.append(provider)
+        if personal_data:
+            eligible = [p for p in eligible if p.personal_data_allowed]
 
         tier_name = (getattr(settings, "AI_PURPOSE_TIERS", None) or {}).get(purpose, "")
         primary_reason = "priority"
@@ -710,6 +753,48 @@ class InferenceGateway:
 
     # --- accounting ---
 
+    @staticmethod
+    def _base_report(context_report, personal_data):
+        report = dict(context_report or {})
+        if personal_data:
+            # The row explains why only allowed providers were eligible.
+            report["personal_data"] = True
+        return report
+
+    def _no_provider_error(
+        self,
+        *,
+        purpose,
+        actor,
+        workspace,
+        prompt_version,
+        started,
+        report,
+        personal_data,
+        on_usage,
+    ):
+        """The one no-provider exit of every entry point: records exactly one
+        `ModelUsage` row (`error_type="no_provider"`) and returns the
+        `NoProviderAvailable` the caller raises. With `personal_data` the row
+        says why the eligible set was empty:
+        `routing_reason="personal_data_required"`."""
+        self._record(
+            purpose=purpose,
+            actor=actor,
+            workspace=workspace,
+            prompt_version=prompt_version,
+            provider=None,
+            result=None,
+            success=False,
+            error_type="no_provider",
+            started=started,
+            report=report,
+            attempts=[],
+            on_usage=on_usage,
+            routing_reason="personal_data_required" if personal_data else "",
+        )
+        return NoProviderAvailable()
+
     def _adapter(self, provider):
         return get_adapter(
             provider,
@@ -741,6 +826,7 @@ class InferenceGateway:
         attempts,
         fallback_output_chars=0,
         on_usage=None,
+        routing_reason="",
     ):
         latency_ms = int((time.monotonic() - started) * 1000)
         input_tokens = result.input_tokens if result else 0
@@ -766,7 +852,9 @@ class InferenceGateway:
             latency_ms=latency_ms,
             success=success,
             error_type=error_type or "",
-            routing_reason=getattr(provider, "_routing_reason", "") if provider else "",
+            routing_reason=(
+                getattr(provider, "_routing_reason", "") if provider else routing_reason
+            ),
             estimated_cost=self._estimate_cost(provider, input_tokens, output_tokens),
             context_report=context_report,
         )

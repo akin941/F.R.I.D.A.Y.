@@ -23,6 +23,7 @@ function job(overrides: Partial<ApiHarnessJob> = {}): ApiHarnessJob {
     repo: "r1",
     goal: "Find the bug",
     agent: "claude_code",
+    agent_routing_reason: "policy:default",
     sensitivity: "normal",
     status: "succeeded",
     failure_reason: "",

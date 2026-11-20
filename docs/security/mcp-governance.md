@@ -28,8 +28,96 @@ GitHub powers; treat every installation as a security decision.
 4. Every MCP call is logged; unmaintained tools get removed at the periodic
    re-review (first pass scheduled with the Phase 4 security baseline).
 
-> Note (2026-09-27): there is no `ToolCall` model in the codebase. MCP calls
-> will be logged through the `audit` app, plus `ModelUsage` where an LLM call
-> is involved; the concrete logging design belongs to the Phase 5 brief (MCP
-> client work, MASTER_PLAN §AA). The earlier MVP numbering in this document
-> was replaced by Jarvis 2.0 phase references (ADR-008).
+## Runtime connectors: code manifests (Phase 5, ADR-010)
+
+A connector Jarvis *calls at runtime* (an MCP server or a native bridge) is
+governed by code, not by configuration:
+
+1. **Three artifacts, one reviewed commit.** A connector exists only as
+   `backend/connectors/manifests/<name>.py` (a `ConnectorManifest`, listed in
+   `BUILTIN`), its governance twin `docs/mcp/<name>.md` (from
+   `docs/mcp/_template.md`) and a `` `<name>` connector `` row in
+   `docs/mcp/allowlist.md`. `connectors/tests/test_manifests.py` fails if any
+   of them is missing. Widening a connector -- a new tool, channel, scope or
+   pin -- is a new reviewed commit, never a database write (ADR-004).
+2. **The manifest is the tool ceiling.** Only tools the manifest lists are
+   ever registered, offered to the chat router or callable; anything else a
+   server offers is unreachable. Each listed tool carries a Jarvis-authored
+   name and description (server descriptions and instructions never reach an
+   LLM prompt), a strict DRF argument serializer, an optional scope check,
+   and -- for writes -- a gate name, renderer and `records_work_log`.
+3. **Schema pins.** Each tool pins the sha256 of the server's `inputSchema`
+   (canonical JSON). The pin is compared on enable, on the 15-minute pin beat
+   (`connectors.tasks.check_connector_pins`) and in the same MCP session
+   before every read and write. A changed or missing schema disables that tool
+   (`connector.pin_mismatch` audit) and the disable is sticky for that
+   manifest version: a server flipping back, or the owner toggling the
+   binding, does not re-enable it -- only a commit that bumps the manifest
+   version (with the new pin, after review) does. To update a pin: review the
+   new schema, update `schema_sha256` and bump `version` in the same commit.
+4. **Bindings are per workspace and off by default.** `ConnectorBinding`
+   (`enabled=False`), switched on only by the owner over the web
+   (`/api/v1/connectors/bindings`, audited). `personal`-class connectors bind
+   only to personal workspaces; a `blocked` manifest (external, D14) can never
+   bind.
+5. **Transport and isolation (D1).** Streamable HTTP only, to the URL in the
+   env var the manifest names, no redirects, no proxies, no client
+   capabilities (no sampling, elicitation or roots). Each server runs as its
+   own hardened compose sidecar (`connectors` profile: digest-pinned image,
+   read-only, `cap_drop: ALL`, no-new-privileges, no published ports,
+   internal `connectors` network, egress only where needed) holding only its
+   own credential. A stdio-only server runs behind
+   `backend/connectors/docker/stdio_bridge.py` inside its sidecar, with a
+   second, sidecar-side tool allowlist.
+6. **Reads are ungated, writes are gated (ADR-010 decisions 4 and 6).**
+   Reads: at most one per chat turn, `firm` over web + CLI, `personal` over
+   web only, never Telegram or the facade; results are fenced as
+   `<connector_result>` data and never become memories. Writes: one gated
+   `ToolSpec` per tool, decided over the web only, snapshot-backed, sent at
+   most once, never retried (`unknown_outcome` instead).
+7. **Native bridges (D8, D9).** A `native` manifest has no MCP server: its
+   module exports a `BRIDGE` (`backend/connectors/bridges/`) that calls the
+   vendor's REST API itself; the read/write paths, snapshot, gate and audit
+   are the same (`connectors.bridges.call_tool` dispatches by kind). The
+   bridge's pins hash its own request shapes (a bridge change that alters
+   one ships with a pin update). Availability comes from the bridge's health
+   check on enable and on the pin beat -- e.g. Google's granted OAuth scopes:
+   a tool whose scope is not granted is `scope_missing`, a grant wider than
+   the manifest maximum makes every tool `scope_extra`, a rejected refresh
+   token makes every tool `reconnect_required`. These statuses follow the
+   credential and are not sticky (a re-consent re-enables at the next
+   check); scopes are re-checked inside every call before any API request.
+   Credentials are env-only, read at call time; access tokens live in
+   process memory only.
+
+### Logging and audit design (replaces the 2026-09-27 note)
+
+There is no `ToolCall` model and none is needed: every connector event is an
+`audit` row written by the `connectors` app (plus `ModelUsage` for the LLM
+calls around a read), and none of them carries content or credentials.
+
+| Event | Audit action | Metadata (never content) |
+|---|---|---|
+| Binding switched on/off | `connector.binding.enabled` / `.disabled` | connector, manifest version, channel |
+| Pin drift detected | `connector.pin_mismatch` (system) | connector, tool, status, expected/actual sha256, manifest version |
+| Every read attempt (ok, refused, failed) | `connector.read` | binding, connector, tool, sha256 of canonical arguments, size, truncated, duration_ms, outcome, channel |
+| Write requested / decided | `approval.requested` / `.approved` / `.rejected` | the approvals app's usual rows |
+| Write terminal state | `connector.write.succeeded` / `.failed` / `.unknown_outcome` (system) | connector, tool, binding, approval request, arguments sha256, closed-vocabulary error type |
+| Native grant wider than the manifest | `connector.scope_mismatch` (system) | connector, tools disabled, extra scope names, manifest version |
+| Native credential rejected / missing | `connector.reconnect_required` (system) | connector, closed error code (`reconnect_required` / `not_configured`) |
+| Personal data entered a conversation | `assistant.conversation.marked_personal_data` | -- |
+
+The chat completion that consumed a read records the read's bookkeeping in
+`ModelUsage.context_report["connector_reads"]` and on
+`Message.connector_reads` (tool, source, data class, size, truncation).
+Every terminal write also leaves a Jarvis-authored `work_log` memory
+(`tools.work_log`; private for personal-class connectors). Log lines name the
+connector, operation, closed error code and exception class -- never
+exception text, arguments, results, URLs with credentials or tokens.
+Credentials are env-only: MCP credentials live only in the sidecar; a native
+bridge reads its own from the environment at call time. A test
+(`connectors/tests/test_chat_reads.py::test_no_credential_value_anywhere`)
+asserts a credential value appears in no DB row, audit row or log line.
+
+> Note (2026-09-27): the earlier MVP numbering in this document was replaced
+> by Jarvis 2.0 phase references (ADR-008).

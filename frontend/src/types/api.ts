@@ -116,7 +116,19 @@ export type MessageIntent =
   | "memory_query"
   | "knowledge_query"
   | "task_draft"
-  | "tool_request";
+  | "tool_request"
+  // Phase 5 branch 4: one connector read this turn.
+  | "connector_read";
+
+// Bookkeeping of one connector read supplied as context for a reply
+// (Phase 5 branch 4) -- never the content itself.
+export interface ApiConnectorRead {
+  tool: string;
+  source: string;
+  data_class: "firm" | "personal";
+  size: number;
+  truncated: boolean;
+}
 
 export interface ApiConversation {
   id: string;
@@ -126,6 +138,9 @@ export interface ApiConversation {
   created_at: string;
   // One-way (false -> true only): a private conversation feeds no memory.
   private: boolean;
+  // One-way (Phase 5 branch 4): personal-class connector data entered this
+  // conversation, so it only ever runs on providers allowed personal data.
+  personal_data?: boolean;
   // The first message's channel (Phase 4 branch 4 channel badge); null
   // until the conversation has a message.
   origin_channel: MessageChannel | null;
@@ -161,6 +176,8 @@ export interface ApiMessage {
   intent: MessageIntent;
   intent_payload: Record<string, unknown>;
   channel: MessageChannel;
+  // Connector reads supplied as context for this reply (Phase 5 branch 4).
+  connector_reads?: ApiConnectorRead[];
   // The task confirmed from this task-draft message (Task.source_message),
   // or null -- how a reloaded chat knows a draft was already confirmed.
   confirmed_task: string | null;
@@ -178,6 +195,7 @@ export type ChatStreamEvent =
       memories_used: string[];
       chunks_used: string[];
       overlay_source_workspaces: Record<string, string>;
+      connector_reads?: ApiConnectorRead[];
     }
   | { type: "error"; error_type: string }
   // Non-terminal, optional, emitted once (only for a task_draft/tool_request
@@ -499,12 +517,21 @@ export type HarnessJobFailureReason = "" | "timeout" | "runner_error" | "budget_
 
 export type HarnessAgent = "claude_code" | "codex_cli";
 
+// Why a harness job row got its agent (Phase 5 D11, HARNESS_AGENT_POLICY);
+// "" on rows that predate the field.
+export type HarnessAgentRoutingReason =
+  | ""
+  | "policy:default"
+  | "owner_selected"
+  | "policy:cross_vendor";
+
 export interface ApiHarnessJob {
   id: string;
   workspace: string;
   repo: string;
   goal: string;
   agent: HarnessAgent;
+  agent_routing_reason: HarnessAgentRoutingReason;
   sensitivity: string;
   status: HarnessJobStatus;
   failure_reason: HarnessJobFailureReason;
@@ -601,6 +628,7 @@ export interface ApiImplementationJob {
   discovery_job: string | null;
   goal: string;
   agent: "claude_code";
+  agent_routing_reason: HarnessAgentRoutingReason;
   // "" when no cross-vendor reviewer was selectable.
   reviewer_agent: "codex_cli" | "";
   status: ImplStatus;
@@ -619,6 +647,7 @@ export interface ApiImplementationJob {
 export interface ApiImplementationReview {
   id: string;
   agent: "codex_cli";
+  agent_routing_reason: HarnessAgentRoutingReason;
   status: "pending" | "running" | "succeeded" | "failed";
   verdict: "" | "approved" | "changes_requested";
   // Gateway-produced -- Jarvis's own summarization, trusted-ish.

@@ -11,7 +11,7 @@ DEV_SETTINGS := DJANGO_SETTINGS_MODULE=$${DJANGO_SETTINGS_MODULE:-config.setting
 FRONTEND := cd frontend &&
 
 .PHONY: up up-daily down logs secrets test lint fmt shell migrate makemigrations \
-	harness-images harness-smoke harness-runner \
+	harness-images harness-smoke harness-runner deploy-smoke \
 	test-backend test-frontend test-e2e lint-backend lint-frontend \
 	frontend-install frontend-dev frontend-build e2e-install
 
@@ -96,9 +96,18 @@ harness-smoke:
 	cd backend/harness/docker/smoke && docker build --build-arg BASE_IMAGE=$(HARNESS_IMAGE_CLAUDE_CODE) -f smoke.Dockerfile -t jarvis-harness-smoke:local .
 	$(BACKEND) HARNESS_DOCKER_SMOKE_IMAGE=jarvis-harness-smoke:local uv run pytest harness/tests/test_docker_smoke.py -q
 
-# The runner worker: consumes ONLY the harness queue, on this host (it needs
-# Docker and the images), and runs its own embedded beat that schedules ONLY
-# the harness recovery scans (the compose beat never does). One runner at a
-# time: a second `-B` runner would double-schedule the scans.
+# The runner worker: consumes ONLY the harness and deploy queues, on this
+# host (it needs Docker and the images for harness jobs, and holds
+# DEPLOY_SSH_KEY_PATH for deploys), and runs its own embedded beat that
+# schedules ONLY the harness and deploy recovery scans (the compose beat
+# never does). One runner at a time: a second `-B` runner would
+# double-schedule the scans.
 harness-runner:
-	$(BACKEND) $(DEV_SETTINGS) HARNESS_RUNNER_BEAT=true uv run celery -A config worker -B -s /tmp/jarvis-harness-beat-schedule -Q $${HARNESS_CELERY_QUEUE:-harness} -l info -n harness-runner@%h
+	$(BACKEND) $(DEV_SETTINGS) HARNESS_RUNNER_BEAT=true uv run celery -A config worker -B -s /tmp/jarvis-harness-beat-schedule -Q $${HARNESS_CELERY_QUEUE:-harness},$${DEPLOY_CELERY_QUEUE:-deploy} -l info -n harness-runner@%h
+
+# Real-SSH deploy smoke (Phase 5 branch 6; manual/nightly): an sshd container
+# running the real deploy/remote/jarvis-deploy.sh as a forced command against
+# a dummy compose app -- status, deploy, forced health failure, rollback,
+# refused non-merged SHA. Needs Docker and a test database (DATABASE_URL).
+deploy-smoke:
+	./deploy/remote/smoke/run-smoke.sh

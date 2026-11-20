@@ -31,3 +31,16 @@ no LLM call is made.
 > ADR-008 and were replaced with Jarvis 2.0 phase references (MASTER_PLAN
 > §AA). Only the tier-routing map is currently scheduled (Phase 5); caches,
 > evals and the Token Optimizer Agent are unscheduled.
+
+> Note (2026-09-27, Phase 5 branch 2 — D11 purpose split): the review
+> pipeline's `harness.review` purpose used to cover two different costs —
+> the external review CLI's own usage rows *and* Jarvis's in-process gateway
+> summary of that review. From Phase 5 branch 2 on, `harness.review` means
+> **external-CLI cost only** (untiered, `record_external_usage`), and the
+> gateway summary is `harness.review_summary` (cheap tier, prompt
+> `jarvis_harness_review_summary`). Historical rows keep `harness.review`
+> for both, so a pre/post comparison must **sum `harness.review` and
+> `harness.review_summary`** after the split. The full tier map
+> (`AI_PURPOSE_TIERS`) and its explicit exceptions (`AI_UNTIERED_PURPOSES`:
+> embeddings, external usage) live in `backend/config/settings/base.py`; a
+> CI test fails on any production purpose that is in neither.

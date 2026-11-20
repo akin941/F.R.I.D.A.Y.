@@ -6,11 +6,21 @@ dynamic registry, a DB-backed `ToolDefinition` model would be exactly the
 kind of speculative generality CLAUDE.md's simplicity rule warns against.
 Extract one once a second tool, or agent-driven tool selection, actually
 needs it (MVP 7).
+
+Two registries live here (Phase 5 branch 1, ADR-010):
+
+- `ToolSpec` -- gated writes, decided through `approvals` (ADR-004).
+- `ReadToolSpec` -- ungated, audited connector reads the chat router may
+  pick (brief D4). `connectors` registers them; `assistant` discovers them
+  only through `list_read_tools()`, so it never imports `connectors`
+  (import-linter contract). A name belongs to exactly one registry.
 """
 
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
+
+from core.channels import CHANNEL_CLI, CHANNEL_WEB
 
 
 class ToolValidationError(Exception):
@@ -66,11 +76,13 @@ class ToolSpec:
 
     `user_invocable` (Phase 3 branch 6, plan-review round 9 item 3): `False`
     for tools only a system component may request -- the harness gates
-    (`harness_implement`/`harness_push`) are created by the harness itself
-    with `origin=HARNESS`. Such tools are left out of `list_tool_names()`
-    (so the chat router and the agent planner never propose them) AND
-    `approvals.services.create_request` refuses them for human/agent
-    origins, so a direct `POST /approvals` can't mint one either.
+    (`harness_implement`/`harness_push`) are created by the harness itself.
+    Such tools are left out of `list_tool_names()` (so the chat router and
+    the agent planner never propose them) AND
+    `approvals.services.create_request` refuses them unless its owning
+    service passes `system_created=True` (ADR-010; the HTTP view never
+    does), so a direct `POST /approvals` can't mint one either, whatever
+    origin it claims.
 
     `proposable` (Phase 4 branch 2, ADR-009): `False` for a tool only a
     person may request directly (the trash view's "Kalıcı olarak sil" ->
@@ -84,6 +96,22 @@ class ToolSpec:
     -- built only from the request's own snapshotted payload and immutable
     snapshots, never the raw `payload` itself (which the serializer still
     never exposes). Optional.
+
+    `prepare_payload(workspace, payload) -> dict` (Phase 5 branch 4, brief
+    D6): tier-1, no-network validation that also RETURNS the payload to
+    store -- the request's snapshot. Called by `approvals.services.
+    create_request` after `validate_request`; its return value replaces the
+    caller-supplied payload wholesale, so a client can never smuggle a field
+    the tool did not put there itself (a connector write snapshots its
+    normalized arguments, binding, manifest version and schema pin here).
+    Raise `ToolValidationError` to refuse. Optional.
+
+    `records_work_log` (Phase 5 branch 1, brief D13): whether a terminal
+    execution of this tool leaves a Jarvis-authored `work_log` memory
+    (`tools.work_log.record_tool_outcome`, ADR-008 decision 4). Default
+    True; a tool whose outcomes are audit-worthy but not memory-worthy
+    (e.g. a Home Assistant light toggle, VISION R5) sets False. Audit rows
+    are unaffected either way.
     """
 
     name: str
@@ -95,12 +123,16 @@ class ToolSpec:
     user_invocable: bool = True
     describe_request: Callable[[Any], dict | None] | None = None
     proposable: bool = True
+    records_work_log: bool = True
+    prepare_payload: Callable[[Any, dict], dict] | None = None
 
 
 _REGISTRY: dict[str, ToolSpec] = {}
 
 
 def register_tool(spec: ToolSpec) -> None:
+    if spec.name in _READ_REGISTRY:
+        raise ValueError(f"{spec.name!r} is already registered as a read tool.")
     _REGISTRY[spec.name] = spec
 
 
@@ -127,3 +159,139 @@ def list_tool_names() -> list[str]:
     return sorted(
         name for name, spec in _REGISTRY.items() if spec.user_invocable and spec.proposable
     )
+
+
+# --- Read tools (Phase 5 branch 1, ADR-010, brief D4) ---
+
+DATA_CLASS_FIRM = "firm"
+DATA_CLASS_PERSONAL = "personal"
+DATA_CLASSES = frozenset({DATA_CLASS_FIRM, DATA_CLASS_PERSONAL})
+
+# Channels a read may ever run over (brief Q8): `firm` reads web + CLI,
+# `personal` reads web only; Telegram and the OpenAI-compatible facade never.
+# Checked at registration, so a manifest cannot widen it -- only a change
+# here (and to ADR-010) can.
+READ_CHANNELS = {
+    DATA_CLASS_FIRM: frozenset({CHANNEL_WEB, CHANNEL_CLI}),
+    DATA_CLASS_PERSONAL: frozenset({CHANNEL_WEB}),
+}
+
+
+class ReadToolError(Exception):
+    """Raised by `ReadToolSpec.execute` when a read is refused or fails.
+    `code` is a closed-vocabulary token (e.g. `invalid_arguments`,
+    `out_of_scope`, `not_available`, `timeout`, `tool_error`) -- never
+    server or exception text. A tools-local type, like `ToolValidationError`,
+    so `assistant` can handle it without importing `connectors`."""
+
+    def __init__(self, code):
+        self.code = code
+        super().__init__(code)
+
+
+@dataclass(frozen=True)
+class ReadResult:
+    """What a read hands back to the caller: text and, optionally, the
+    server's `structuredContent`. Everything else an MCP result may carry
+    (images, resources, links) is dropped before this object exists. Still
+    low-trust data: the caller strips and fences it (brief D4) before it
+    gets anywhere near a prompt.
+
+    The connectors framework serializes `structuredContent` into `text`
+    itself, so one size bound covers both: `text` is already bounded to
+    `CONNECTOR_RESULT_MAX_CHARS`, `size` is its length before bounding and
+    `truncated` says whether anything was cut (Phase 5 branch 4).
+
+    `data_class` (Phase 5 branch 5) is set when this one call's data is of
+    a stricter class than the spec's own -- a GitHub read of a `sensitive`
+    `HarnessRepo` is `personal` although the connector is `firm` (brief
+    D7/D5). Empty means "the spec's `data_class`"; a caller treats the
+    stricter of the two as the call's class."""
+
+    text: str
+    structured: Any = None
+    size: int = 0
+    truncated: bool = False
+    data_class: str = ""
+
+
+@dataclass(frozen=True)
+class ReadToolSpec:
+    """An ungated connector read the chat router may pick (brief D4).
+
+    - `name`/`description`: Jarvis-authored, never the server's own text
+      (server descriptions never reach an LLM prompt, brief D3).
+    - `argument_serializer`: a strict DRF serializer class validating the
+      router-extracted arguments; invalid -> a plain refusal, no read.
+    - `data_class`: `firm` or `personal`; a `personal` read marks the
+      conversation private and routes to personal-data providers only
+      (brief D5).
+    - `channels`: the request channels the read may run over, a subset of
+      `READ_CHANNELS[data_class]`.
+    - `execute(*, workspace, actor, args, channel) -> ReadResult`: validates
+      the arguments (serializer, scope check), performs the read and audits
+      it (`connector.read`, every outcome); raises `ReadToolError` on any
+      refusal or failure.
+    - `is_available(workspace) -> bool`: whether the workspace has an
+      enabled binding for the read's connector. A callback rather than a
+      query here because `tools` must never import `connectors`
+      (ADR-010). Required: no read is available by default.
+    - `source`: a short, code-defined label of the system read (e.g.
+      `github`), shown in the fence (`<connector_result source=...>`) and
+      the chat's source badge. Never server-supplied text.
+    """
+
+    name: str
+    description: str
+    argument_serializer: Any
+    data_class: str
+    channels: frozenset
+    execute: Callable[..., ReadResult]
+    is_available: Callable[[Any], bool]
+    source: str = ""
+
+
+_READ_REGISTRY: dict[str, ReadToolSpec] = {}
+
+
+def register_read_tool(spec: ReadToolSpec) -> None:
+    """Validates the spec's data class and channels and registers it.
+    Raises `ValueError` -- a boot-time programming error, never a runtime
+    refusal -- for an unknown data class, an empty channel set, a channel
+    outside `READ_CHANNELS[data_class]`, or a name already used by a
+    gated tool."""
+    if spec.data_class not in DATA_CLASSES:
+        raise ValueError(f"{spec.name!r}: unknown data class {spec.data_class!r}.")
+    channels = frozenset(spec.channels)
+    if not channels:
+        raise ValueError(f"{spec.name!r}: a read tool needs at least one channel.")
+    widened = channels - READ_CHANNELS[spec.data_class]
+    if widened:
+        raise ValueError(
+            f"{spec.name!r}: channels {sorted(widened)} are not allowed for "
+            f"{spec.data_class!r} reads."
+        )
+    if spec.name in _REGISTRY:
+        raise ValueError(f"{spec.name!r} is already registered as a gated tool.")
+    _READ_REGISTRY[spec.name] = spec
+
+
+def unregister_read_tool(name: str) -> None:
+    """Test-only, like `unregister_tool`."""
+    _READ_REGISTRY.pop(name, None)
+
+
+def get_read_tool(name: str) -> ReadToolSpec | None:
+    return _READ_REGISTRY.get(name)
+
+
+def list_read_tools(*, workspace, channel) -> list[ReadToolSpec]:
+    """The read tools the router may offer for one turn: those allowed over
+    `channel` whose connector has an enabled binding in `workspace`. Both
+    arguments are required -- there is no "any channel" or "any workspace"
+    listing. Sorted by name for a deterministic prompt/test ordering."""
+    return [
+        spec
+        for name, spec in sorted(_READ_REGISTRY.items())
+        if channel in spec.channels and spec.is_available(workspace)
+    ]

@@ -28,6 +28,7 @@ from accounts.services import register_user
 from agents.execution import AgentServiceError
 from approvals.models import ApprovalRequest
 from approvals.services import ApprovalServiceError
+from connectors.services import ConnectorServiceError
 from core.api_errors import (
     STATUS_FALLBACK_CODES,
     CodedJSONRenderer,
@@ -36,6 +37,7 @@ from core.api_errors import (
 )
 from core.error_codes import DOMAIN_ERROR_CODES, ERROR_CODES, GENERIC_ERROR_CODES
 from core.throttling import ThrottleBackendUnavailable
+from deploys.services import DeployServiceError
 from harness.services import HarnessServiceError
 from knowledge.services import KnowledgeServiceError
 from memory.services import MemoryServiceError
@@ -48,6 +50,8 @@ PASSWORD = "Str0ngDevPass!42"
 _DOMAIN_BASES = [
     AgentServiceError,
     ApprovalServiceError,
+    ConnectorServiceError,
+    DeployServiceError,
     HarnessServiceError,
     KnowledgeServiceError,
     MemoryServiceError,

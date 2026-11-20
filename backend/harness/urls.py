@@ -4,6 +4,7 @@ from harness.views import (
     HarnessImplementationJobCancelView,
     HarnessImplementationJobDetailView,
     HarnessImplementationJobListCreateView,
+    HarnessImplementationJobPullRequestView,
     HarnessJobCancelView,
     HarnessJobDetailView,
     HarnessJobListCreateView,
@@ -43,5 +44,10 @@ urlpatterns = [
         "harness/implementation-jobs/<uuid:job_id>/cancel",
         HarnessImplementationJobCancelView.as_view(),
         name="harness-implementation-job-cancel",
+    ),
+    path(
+        "harness/implementation-jobs/<uuid:job_id>/pull-request",
+        HarnessImplementationJobPullRequestView.as_view(),
+        name="harness-implementation-job-pull-request",
     ),
 ]

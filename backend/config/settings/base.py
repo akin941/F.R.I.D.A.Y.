@@ -92,6 +92,10 @@ INSTALLED_APPS = [
     "agents",
     "integrations",
     "harness",
+    # Phase 5 (ADR-010): outside-world bridges and deploys. Kernel apps,
+    # registered empty in branch 1 so their import contracts bite first.
+    "connectors",
+    "deploys",
 ]
 
 AUTH_USER_MODEL = "accounts.User"
@@ -183,7 +187,17 @@ CELERY_TASK_EAGER_PROPAGATES = env.bool("CELERY_TASK_EAGER_PROPAGATES", default=
 # only the default queue, so it can never pick up a harness task and fail
 # it. With no runner running, harness jobs simply wait `pending`.
 HARNESS_CELERY_QUEUE = env("HARNESS_CELERY_QUEUE", default="harness")
-CELERY_TASK_ROUTES = {"harness.tasks.*": {"queue": HARNESS_CELERY_QUEUE}}
+# Deploy runner queue (Phase 5 branch 6, brief D10): every `deploys.tasks.*`
+# task -- the SSH deploy run, the target `status` refresh and the recovery
+# scan -- goes to its own queue, consumed by the same runner process as the
+# harness queue (`make harness-runner`, `-Q harness,deploy`), so the deploy
+# SSH key lives only on the runner host, like HARNESS_GIT_SSH_KEY_PATH.
+# With no runner up, deploys wait `pending`.
+DEPLOY_CELERY_QUEUE = env("DEPLOY_CELERY_QUEUE", default="deploy")
+CELERY_TASK_ROUTES = {
+    "harness.tasks.*": {"queue": HARNESS_CELERY_QUEUE},
+    "deploys.tasks.*": {"queue": DEPLOY_CELERY_QUEUE},
+}
 
 
 def redis_cache_location(redis_url):
@@ -365,11 +379,49 @@ AI_TIMEOUT_CONNECT = env.int("AI_TIMEOUT_CONNECT", default=10)
 AI_TIMEOUT_READ = env.int("AI_TIMEOUT_READ", default=60)
 AI_MAX_RETRIES = env.int("AI_MAX_RETRIES", default=2)
 AI_RETRY_BACKOFF_SECONDS = env.float("AI_RETRY_BACKOFF_SECONDS", default=0.5)
-# Tier routing skeleton (phase 0, MASTER_PLAN §J): purpose -> tier name
-# ("cheap"/"mid"/"strong", ai_core.ModelTier). Empty = pure priority order,
-# byte-for-byte the pre-phase-0 gateway behavior. Deliberately a settings
-# dict, not env/DB, until it needs runtime editing (phase-0 brief §4).
-AI_PURPOSE_TIERS = {}
+# Tier routing map (phase 0 skeleton, MASTER_PLAN §J; full map Phase 5 D11,
+# docs/cost/token-optimization.md layer 4): purpose -> tier name
+# ("cheap"/"mid"/"strong", ai_core.ModelTier). A purpose's tier only
+# REORDERS eligible providers (tier members first, then priority); with no
+# ModelTier rows for that tier the gateway keeps plain priority order, so
+# the map is inert until `seed_ai_defaults` (or the admin) adds tier rows.
+# Deliberately a settings dict, not env/DB, until it needs runtime editing
+# (phase-0 brief §4). Every `purpose=` literal in production code must be
+# either mapped here or listed in AI_UNTIERED_PURPOSES below -- a CI test
+# (ai_core/tests/test_purpose_coverage.py) fails otherwise.
+AI_PURPOSE_TIERS = {
+    # cheap: classification, argument extraction, short structured summaries
+    "router.intent": "cheap",
+    "router.task_draft": "cheap",
+    "router.connector_args": "cheap",  # Phase 5 branch 4 (D4)
+    "agent.skill_match": "cheap",
+    "harness.briefing": "cheap",
+    "harness.diff_summary": "cheap",
+    "harness.review_summary": "cheap",
+    "facade.ephemeral": "cheap",
+    # mid: conversation, extraction, retrieval-grounded steps
+    "chat": "mid",
+    "memory.extraction": "mid",
+    "agent.read_step": "mid",
+    # strong: planning
+    "agent.plan": "strong",
+}
+# The brief's `UNTIERED_PURPOSES` (D11): purposes that deliberately have no
+# tier. Embeddings are pinned by their stored vector dimension (a tier swap
+# would silently orphan every stored vector), and external-CLI usage rows
+# (`record_external_usage`) have no provider for the gateway to route.
+AI_UNTIERED_PURPOSES = frozenset(
+    {
+        # embeddings
+        "memory.retrieval",
+        "knowledge.embedding",
+        "knowledge.retrieval",
+        # external CLI usage (harness containers, ADR-008 decision 1)
+        "harness.discovery",
+        "harness.implementation",
+        "harness.review",
+    }
+)
 
 # --- Knowledge/RAG (MVP 3) ---
 
@@ -412,6 +464,35 @@ OBSIDIAN_VAULT_PATH = env("OBSIDIAN_VAULT_PATH", default="")
 # backstop, by the decision endpoints themselves regardless of the sweep's
 # timing.
 APPROVAL_REQUEST_TTL_HOURS = env.int("APPROVAL_REQUEST_TTL_HOURS", default=24)
+
+# --- Connectors (Phase 5 branch 4, ADR-010, brief D1-D6) ---
+
+# Manifests are code (`connectors/manifests/`); these are only the runtime
+# bounds. Server URLs and credentials are never settings: each manifest names
+# its own env vars (URL on the Jarvis side, credential in the sidecar only).
+# A read runs in the chat request thread, bounded by this timeout (D4).
+CONNECTOR_READ_TIMEOUT_SECONDS = env.int("CONNECTOR_READ_TIMEOUT_SECONDS", default=10)
+# What survives of a read (text + structuredContent), in characters -- the
+# harness transcript cap. Anything longer is truncated and flagged (D4).
+CONNECTOR_RESULT_MAX_CHARS = env.int("CONNECTOR_RESULT_MAX_CHARS", default=8000)
+# Hard cap on the bytes of any single MCP HTTP response body, enforced while
+# it streams in -- before parsing -- so a runaway server cannot exhaust the
+# web or worker process within the timeout (D4). Over it: protocol_error.
+CONNECTOR_RESPONSE_MAX_BYTES = env.int("CONNECTOR_RESPONSE_MAX_BYTES", default=1_048_576)
+# A gated write's single send (D6), and the pin/health check before it.
+CONNECTOR_WRITE_TIMEOUT_SECONDS = env.int("CONNECTOR_WRITE_TIMEOUT_SECONDS", default=30)
+CONNECTOR_HEALTH_TIMEOUT_SECONDS = env.int("CONNECTOR_HEALTH_TIMEOUT_SECONDS", default=10)
+# A write's claim lease: longer than the send timeout plus the pin check, so
+# a live worker never loses its lease mid-call. A lease that expires anyway
+# means the worker was lost -> `unknown_outcome`, never a re-send (D6).
+CONNECTOR_WRITE_LEASE_SECONDS = env.int("CONNECTOR_WRITE_LEASE_SECONDS", default=120)
+# Google bridge (Phase 5 branch 8, brief D9). Credentials are NOT settings:
+# `GOOGLE_OAUTH_CLIENT_ID` / `_CLIENT_SECRET` / `_REFRESH_TOKEN` are read from
+# the environment at call time by `connectors.bridges.google` only (never
+# stored, cached, audited or logged). The one tunable: how much of a mail's
+# text body `mail_read` keeps (the whole read is still bounded by
+# CONNECTOR_RESULT_MAX_CHARS).
+GOOGLE_MAIL_BODY_MAX_CHARS = env.int("GOOGLE_MAIL_BODY_MAX_CHARS", default=6000)
 
 # --- Agent runtime (MVP 7) ---
 
@@ -594,7 +675,7 @@ HARNESS_GIT_SSH_KEY_PATH = env("HARNESS_GIT_SSH_KEY_PATH", default="")
 
 # Self-modification hard-block (ADR-004: "agents can never modify their own
 # definitions or permissions"): remote URLs recognized as "this Jarvis
-# installation itself", compared via harness.repo_identity's canonical
+# installation itself", compared via core.repo_identity's canonical
 # normalizer, not exact string match -- so the https/ssh/scp-like forms of
 # the same remote are all correctly recognized. Empty by default -- and since
 # Phase 3 branch 5 an empty list REFUSES every implementation job (fail
@@ -606,6 +687,31 @@ HARNESS_SELF_REPO_IDENTIFIERS = [
     if value.strip()
 ]
 
+# Harness job-distribution policy (Phase 5 D11; replaces the Phase 3
+# `_SELECTABLE_*_AGENTS` sets in harness/services.py). Per job kind: the
+# `default` agent used when the owner names none (agent_routing_reason
+# "policy:default"), the owner-`selectable` agents ("owner_selected"), and
+# for implementation the cross-vendor `reviewers` pairing implementer ->
+# reviewer (review rows record "policy:cross_vendor"). The `codex_cli`
+# implementation slot exists (its image and write-mode wrapper ship) but
+# stays off until its write-mode vendor terms are verified -- add it to
+# `selectable` AND give it a reviewer to turn it on. ADR-008 decision 3:
+# a Django system check (harness.checks, `harness.E001`...) refuses to boot
+# on any self-pairing, a selectable implementer without a reviewer, or an
+# unknown agent. Not env-configurable: this is policy, changed in code
+# review, not per deployment.
+HARNESS_AGENT_POLICY = {
+    "discovery": {
+        "default": "claude_code",
+        "selectable": ["claude_code"],
+    },
+    "implementation": {
+        "default": "claude_code",
+        "selectable": ["claude_code"],  # "codex_cli" slot: off
+        "reviewers": {"claude_code": "codex_cli"},
+    },
+}
+
 # How long a finished-but-undecided implementation worktree is kept on disk
 # waiting for a Gate B (push approval) decision, across however long the
 # owner takes and across a possible worker restart (brief §boundary,
@@ -614,6 +720,34 @@ HARNESS_SELF_REPO_IDENTIFIERS = [
 # reached a terminal state -- a backstop, not the primary cleanup path
 # (every terminal transition cleans up its own worktree immediately).
 HARNESS_WORKTREE_RETENTION_HOURS = env.int("HARNESS_WORKTREE_RETENTION_HOURS", default=72)
+
+# --- Deploys (Phase 5 branch 6, ADR-010 decision 7, brief D10) ---
+
+# The private key the runner uses for the forced-command deploy account on
+# every DeployTarget, resolved from env only (never on a row, a payload or a
+# log). Empty by default: with no key configured every deploy run and status
+# refresh fails closed (`ssh_key_missing`) -- there is no ambient fallback
+# (no SSH agent, no ~/.ssh default key; see deploys/ssh.py).
+DEPLOY_SSH_KEY_PATH = env("DEPLOY_SSH_KEY_PATH", default="")
+# Per-invocation timeouts of the system `ssh` client. The deploy/rollback
+# verbs run the target's own build + restart commands, hence the long one.
+DEPLOY_SSH_CONNECT_TIMEOUT_SECONDS = env.int("DEPLOY_SSH_CONNECT_TIMEOUT_SECONDS", default=10)
+DEPLOY_SSH_STATUS_TIMEOUT_SECONDS = env.int("DEPLOY_SSH_STATUS_TIMEOUT_SECONDS", default=60)
+DEPLOY_SSH_HEALTH_TIMEOUT_SECONDS = env.int("DEPLOY_SSH_HEALTH_TIMEOUT_SECONDS", default=30)
+DEPLOY_SSH_DEPLOY_TIMEOUT_SECONDS = env.int("DEPLOY_SSH_DEPLOY_TIMEOUT_SECONDS", default=900)
+# The optional `health_url` GET (no redirects, no proxies from env).
+DEPLOY_HEALTH_URL_TIMEOUT_SECONDS = env.int("DEPLOY_HEALTH_URL_TIMEOUT_SECONDS", default=10)
+# Health checks are spaced evenly across a target's health window: window /
+# this many. At least 3, so three consecutive failures always span most of
+# the window (ADR-010: one blip never rolls back).
+DEPLOY_HEALTH_CHECKS_PER_WINDOW = env.int("DEPLOY_HEALTH_CHECKS_PER_WINDOW", default=4)
+# A claimed run's lease, renewed at every step. Must exceed the longest
+# single step (the deploy verb's timeout) with room to spare, or the
+# recovery scan could declare a live run lost (asserted in deploys.tasks).
+DEPLOY_RUN_LEASE_SECONDS = env.int("DEPLOY_RUN_LEASE_SECONDS", default=1200)
+# A `pending` run still unclaimed this long after its last update is
+# re-dispatched by the recovery scan (its on_commit publish was lost).
+DEPLOY_PENDING_RECOVERY_GRACE_SECONDS = env.int("DEPLOY_PENDING_RECOVERY_GRACE_SECONDS", default=60)
 
 # --- Telegram bot (MVP 9 §4) ---
 
@@ -643,4 +777,11 @@ LOGGING = {
     "disable_existing_loggers": False,
     "handlers": {"console": {"class": "logging.StreamHandler"}},
     "root": {"handlers": ["console"], "level": "INFO"},
+    # httpx logs every request URL at INFO -- for the Google bridge that is
+    # the owner's mail search query, message ids and calendar windows
+    # (Phase 5 branch 8). Warnings and errors only.
+    "loggers": {
+        "httpx": {"level": "WARNING"},
+        "httpcore": {"level": "WARNING"},
+    },
 }

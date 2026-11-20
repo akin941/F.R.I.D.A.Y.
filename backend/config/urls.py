@@ -2,8 +2,11 @@ from django.conf import settings
 from django.contrib import admin
 from django.http import JsonResponse
 from django.urls import include, path
+from rest_framework.settings import api_settings
 
+from accounts.authentication import PersonalAccessTokenAuthentication
 from config.activity import ActivitySummaryView
+from deploys.urls import build_urlpatterns as deploy_urlpatterns
 
 
 def healthz(request):
@@ -30,6 +33,21 @@ urlpatterns = [
     path("api/v1/", include("agents.urls")),
     path("api/v1/", include("integrations.urls")),
     path("api/v1/", include("harness.urls")),
+    path("api/v1/", include("connectors.urls")),
+    # Phase 5 branch 6: `deploys` may not import `accounts` (ADR-010), so the
+    # PAT authenticator (which must precede the device session, see
+    # accounts/authentication.py) is injected here, in the composition root.
+    path(
+        "api/v1/",
+        include(
+            deploy_urlpatterns(
+                authentication_classes=[
+                    PersonalAccessTokenAuthentication,
+                    *api_settings.DEFAULT_AUTHENTICATION_CLASSES,
+                ]
+            )
+        ),
+    ),
     # Cross-app read-only aggregate for the shell's badges (Phase 4
     # branch 3); lives in the composition root, see config/activity.py.
     path("api/v1/activity/summary", ActivitySummaryView.as_view(), name="activity-summary"),
