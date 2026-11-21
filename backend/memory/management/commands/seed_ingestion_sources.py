@@ -1,5 +1,6 @@
-"""`manage.py seed_ingestion_sources` (Phase 8A brief D2): create the four
-default ingestion sources (git, harness, claude_code_hooks, calendar) in the
+"""`manage.py seed_ingestion_sources` (Phase 8A brief D2): create the
+default ingestion sources (git, harness, claude_code_hooks, calendar and,
+since Phase 8B branch 7, obsidian_inbox) in the
 installation owner's personal workspace, **disabled**. Idempotent: existing
 rows are never enabled, paused or otherwise changed. The owner enables each
 source from the web (d5)."""
