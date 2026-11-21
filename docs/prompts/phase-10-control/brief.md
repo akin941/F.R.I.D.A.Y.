@@ -2425,3 +2425,10 @@ paired node is plain chat), `ai_core/tests/test_speech_gateway.py` (the
    `awaiting-approval` state (D13).
 6. Phase 6 branch 3a: move the self-trigger regression onto the recorded
    replay harness clip when it merges.
+7. Pre-existing, not this branch (recorded 2026-11-21): the full suite ran
+   8151 passed, 9 skipped, 3 failed. All three failures are
+   `memory/tests/test_fact_learning.py::test_valid_from_outside_one_day_is_clamped_and_counted`
+   (offsets 1, 2, -30), and they fail only between 21:00 and 24:00 UTC. In
+   that window the test's `today()` (UTC) and `TIME_ZONE = Europe/Istanbul`
+   fall on different dates. This branch changes nothing under `memory/`.
+   Fix in a memory branch: compute the expected date in the local timezone.
