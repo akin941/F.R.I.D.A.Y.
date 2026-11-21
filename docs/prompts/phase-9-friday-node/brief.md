@@ -1594,7 +1594,7 @@ node paired, the e2e test is green, and the go/no-go record is written.
 |---|---|---|---|---|
 | brief | `docs/p9-brief` | This brief (full, from the stub), MASTER_PLAN §AA row 9 Brief/Status, regenerated `self_sources.json` | Phase 8A closeout | **implemented 2026-11-20** (docs only; review round 1 findings addressed 2026-11-20 — D7 terminal-status table and `refuse_read`, D8 deletion policy, vendored node scrubber + `scrub.json` parity, `cwd_prefixes`, per-owner kill-switch payload, per-socket result routing, `CONFORMANCE` build-only mode; review round 2 findings addressed 2026-11-20 — server-recomputed `usage.ccusage` aggregates with per-project tokens and the nested-rule test, authenticator wording, `NODE_SIGNING_KEY` in web/worker/gateway + preflight, ephemeral TTL-bound Redis result keys; awaits re-review) |
 | 1 | `feat/p9-node-pairing` | Spike S9.0: `TrustedDevice.kind=node`, node pairing codes, `jnd_` secrets, rotation with grace, age cap, revocation fan-out, kill switch, `CHANNEL_NODE`, URL walk, ADR-013 spike note | brief approved | **implemented 2026-11-20** (spike S9.0 server half: passed, ADR-013 note; Keychain half pending owner evaluation, M1; known follow-up 4 resolved: `is_usable()` branches on `kind`; awaits independent Sonnet 5 review) |
-| 2 | `feat/p9-node-protocol` | `nodes` app + contracts, protocol v1 schemas, canonical JSON, Ed25519 envelopes, capability contracts, pairing endpoint, signing key config, hash-chained `NodeInvocation`, dependency manifest | 1 | not started |
+| 2 | `feat/p9-node-protocol` | `nodes` app + contracts, protocol v1 schemas, canonical JSON, Ed25519 envelopes, capability contracts, pairing endpoint, signing key config, hash-chained `NodeInvocation`, dependency manifest | 1 | **implemented 2026-11-20** (done criterion met: `test_the_done_criterion_signed_invoke_verifies_only_with_the_returned_key`; known follow-ups 1, 2 and 5 resolved; ADR-013 contract note; awaits independent Sonnet 5 review) |
 | 3 | `feat/p9-reference-node` | Python reference node, conformance cases + `--check`, hostile fake gateway, reference spool and Unix-socket relay | 2 | not started |
 | 4 | `feat/p9-node-gateway` | `asgi_nodes` + uvicorn/`wsproto`, `node-gateway` service, handshake, `hello`/snapshot, heartbeat/presence, invoke bus, revocation/kill-switch fan-out, limits, node APIs | 1, 2, 3 | not started |
 | 5 | `feat/p9-node-reads` | `invoke_read` end to end, five read tools, path → workspace resolution, second scrub, fencing, chain + audit rows, invocations API | 4 | not started |
@@ -2099,3 +2099,59 @@ Implementation notes (branch 1):
    race-safe (the rotation re-checks under the row lock). Optionally pass
    the already-authenticated credential into the rotate service to avoid
    the second lookup.
+
+### Owner steps (pending) — `feat/p9-node-protocol`, recorded 2026-11-20
+
+1. Run the independent Sonnet 5 review of `feat/p9-node-protocol` and fix
+   findings until APPROVE (CLAUDE.md "Reviews").
+2. Run `make migrate` on the daily stack (migrations `nodes/0001_initial`
+   and `nodes/0002_append_only_chain`: the node tables, the append-only
+   trigger on `nodes_nodeinvocation` and the seeded chain head).
+3. Run `make secrets` (or `deploy/docker/gen-secrets.sh`) on the stack host
+   to write `NODE_SIGNING_KEY` into `deploy/docker/.env`. Keep it out of
+   every other file. Until branch 4 passes it to web, worker and
+   `node-gateway`, set it in the web service's environment to pair. Rolling
+   it later means re-pairing every node (Q3).
+4. Run `uv sync --frozen` wherever the backend is installed outside Docker:
+   `cryptography` and `jsonschema` are now direct, exact-pinned dependencies
+   (same versions as before, `docs/mcp/dependencies/node-gateway.md`).
+5. Mac session M1 (deferred): the Swift test target must load
+   `backend/nodes/protocol/vectors/canonical.json` and `signing.json` and
+   reproduce them byte for byte, decode `backend/nodes/protocol/schemas/v1/`
+   strictly (unknown keys refused, full-match patterns, integers only) and
+   pin `server_signing_keys` from the `POST /api/v1/nodes/pair` response.
+
+Implementation notes (branch 2):
+- **Follow-up 1 resolved.** `usage.ccusage` amounts are integer micro-USD
+  (`total_usd_micros`, `usd_micros`); `output_sha256` is sha256 of the
+  canonical JSON of `output`. Every v1 time field is integer Unix seconds.
+- **Follow-up 2 resolved.** `nodes` imports no `approvals` code; the
+  `nodes` contract still allows the edge (ADR-013 decision 9), and the app
+  docstring and the contract comment say why it stays unused in Phase 9.
+- **Follow-up 5 resolved.** `Node` and `CapabilitySnapshot` are
+  `WorkspaceScopedModel`s in the owner's personal workspace;
+  `nodes/tests/test_scoping.py` covers all three tables with `for_actor()`.
+  (The node API 404 test belongs to the APIs, branch 4.)
+- `node_id` is the node's `TrustedDevice` id (`Node.pk == Node.device_id`),
+  matching the branch-1 rotate response.
+- The schemas allow `class` ∈ {read, confirm, gate} and `grant` null or an
+  object, so a hostile `class`/`grant` reaches the node's own check 13
+  (`class_not_allowed`) instead of the generic `schema` refusal; the policy
+  guard pins `invoke.grant` as its only reserved exception. The guard regex
+  is widened from `catalogue_set` to `catalogue[._]set`.
+- A node frame-error report (checks 1–4) is a `result` with
+  `status=error`, the check's code and `invocation_id` null when the frame
+  named none (no new message type).
+- Pairing refusals: invalid/browser/used code or no owner → 400
+  `invalid_code`; PIN off-LAN → 403 `pin_network_refused`; kill switch →
+  409 `kill_switch_engaged`; no common protocol version → 400
+  `unsupported_protocol_version`; signing key missing/invalid/test key →
+  503 `signing_unavailable` (nothing consumed); Redis down → 503
+  `throttle_backend_unavailable`.
+- `NodeInvocation` also hashes `dropped_unmapped` (Q5) so branch 5 does not
+  need a hash-format change. `nodes.audit_chain.append` refuses any
+  `(status, refusal_code)` pair outside the D7 table and any nonce or
+  output on a not-sent status.
+- `published_test_key_ids()` (in `nodes/keys.py`) is where branch 3 adds the
+  conformance key pair.
+

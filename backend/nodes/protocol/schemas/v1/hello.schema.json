@@ -1,0 +1,107 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "node -> server: first frame of a session",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "catalogue",
+    "catalogue_sha256",
+    "id",
+    "node_version",
+    "os_version",
+    "type",
+    "v"
+  ],
+  "properties": {
+    "v": {
+      "type": "integer",
+      "const": 1
+    },
+    "type": {
+      "type": "string",
+      "const": "hello",
+      "maxLength": 32
+    },
+    "id": {
+      "type": "string",
+      "minLength": 36,
+      "maxLength": 36,
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "node_version": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9 ._+()-]{0,63}$"
+    },
+    "os_version": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9 ._+()-]{0,63}$"
+    },
+    "catalogue": {
+      "type": "array",
+      "maxItems": 64,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "args_schema",
+          "availability",
+          "class",
+          "name",
+          "result_schema",
+          "version"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 64,
+            "pattern": "^[a-z][a-z0-9_]{0,31}(\\.[a-z][a-z0-9_]{0,31}){1,3}$"
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000
+          },
+          "class": {
+            "type": "string",
+            "enum": [
+              "read",
+              "confirm",
+              "gate"
+            ],
+            "maxLength": 16
+          },
+          "args_schema": {
+            "type": "object",
+            "x-friday-opaque": "a JSON Schema; the server compares its canonical sha256 with its own contract",
+            "maxProperties": 32
+          },
+          "result_schema": {
+            "type": "object",
+            "x-friday-opaque": "a JSON Schema; the server compares its canonical sha256 with its own contract",
+            "maxProperties": 32
+          },
+          "availability": {
+            "type": "string",
+            "enum": [
+              "granted",
+              "not_granted",
+              "unsupported"
+            ],
+            "maxLength": 16
+          }
+        }
+      }
+    },
+    "catalogue_sha256": {
+      "type": "string",
+      "minLength": 64,
+      "maxLength": 64,
+      "pattern": "^[0-9a-f]{64}$"
+    }
+  }
+}

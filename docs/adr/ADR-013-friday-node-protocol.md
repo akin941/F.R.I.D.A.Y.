@@ -189,3 +189,66 @@ readers, fixtures and conformance cases in `backend/integrations/
 node_reference/` and reaches the node through a `NodeReadPort` seam in
 `tools/transcript_ingest.py`; the move into `nodes/capabilities/v1/` and the
 `invoke_read` amendment are recorded as owner steps in the 8B brief.
+
+## Implementation notes — contracts, protocol v1, audit chain (Phase 9 branch 2, 2026-11-20)
+
+**Import contracts (decision 9, brief D2), in `backend/pyproject.toml`:**
+- "nodes may import only approvals, audit, workspaces, accounts, core":
+  forbids `config`, `ai_core`, `memory`, `knowledge`, `harness`,
+  `assistant`, `tools`, `agents`, `skills`, `integrations`, `connectors`,
+  `deploys`, `voice`, `hud`, `ops` and `tasks`. Phase 9 `nodes` does not
+  use its `approvals` edge (a `nodes` -> `approvals` import would break
+  "tools must not import approvals" once `tools` reads `nodes`).
+- "only tools, hud, ops may import nodes": every other kernel app is a
+  source; `config` is the composition root. `memory.ingestion`'s own
+  contract now lists `nodes` too, closing the Phase 8A placeholder.
+- `nodes.protocol` and `nodes.capabilities` import no project package and
+  no other part of `nodes`; `nodes/tests/test_protocol_purity.py` imports
+  them in a clean subprocess and asserts Django never loads.
+- `nodes` joined the blanket contracts: core independence, kernel apps ↛
+  config, ai_core ↛ business, audit ↛ business, no app ↛
+  harness/ops/voice/hud, kernel apps ↛ connectors/deploys, MCP client-only.
+
+**Dependencies (brief D3):** `cryptography==50.0.1` and `jsonschema==4.26.0`
+promoted from transitive to direct exact pins, recorded in
+`docs/mcp/dependencies/node-gateway.md`.
+
+**Protocol v1 (decision 3/4/5, brief D5)** lives in `backend/nodes/protocol/`:
+- `schemas/v1/<type>.schema.json` — the closed set of nine message types;
+  server → node is exactly `hello.ack`, `heartbeat.ack`, `invoke`,
+  `event.ack`, `bye` (`test_the_server_to_node_set_is_exactly_the_five_types`).
+  No type name or schema property matches the policy regex; the single
+  reserved exception is `invoke.grant` (null in v1, refused non-null by a v1
+  node: `test_no_schema_property_is_policy_shaped`). The regex is widened
+  from `catalogue_set` to `catalogue[._]set` so the dotted type
+  `catalogue.set` is caught.
+- Stricter-than-JSON-Schema semantics the Swift port must mirror: `pattern`
+  is a full match, and numbers must be integers (a float is refused even
+  where JSON Schema calls `1.0` an integer). Sub-schemas marked
+  `x-friday-opaque` are typed holes validated elsewhere (capability
+  schemas, event sinks).
+- Times are integer Unix seconds. Signatures and nonces are base64url
+  without padding; `key_id` is inside the signed body.
+- Shared vectors: `vectors/canonical.json` (incl. the RFC 8785 UTF-16 key
+  order example and the refusals) and `vectors/signing.json` (a published
+  TEST key; every server refuses it as `NODE_SIGNING_KEY`).
+
+**Capability contracts (brief D7)** in `backend/nodes/capabilities/v1/`: the
+eight read capabilities. Amounts are integer micro-USD (`usd_micros`,
+`total_usd_micros`); `output_sha256` is sha256 of the canonical JSON of
+`output` (brief follow-up 1). A catalogue entry is invocable only on equal
+name, version and sha256 of both schemas.
+
+**Pairing (brief D4):** `POST /api/v1/nodes/pair` (anonymous, throttle
+`node_pair`, fail-closed). `node_id` is the node's `TrustedDevice` id, so it
+is the same id in the pairing and rotate responses and every envelope. The
+response names the active signing key only (a retired key verifies but is
+never pinned by a new node). The signing key and protocol version are
+checked before any code is consumed.
+
+**Audit chain (decision 10, brief D8):** `NodeInvocation` rows are written
+only by `nodes.audit_chain.append` under `select_for_update` on the single
+`NodeAuditHead`, append-only by trigger (`nodes/0002_append_only_chain`),
+every FK `PROTECT`; `manage.py verify_node_audit_chain` reports the first
+break by `seq`. `row_hash` covers every column but itself (pinned by
+`test_the_hash_covers_every_field_and_fks_as_ids`).
