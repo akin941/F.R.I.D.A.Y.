@@ -305,9 +305,7 @@ def _approved(world, capture):
 
 
 @pytest.mark.django_db
-def test_a_tampered_stored_payload_is_args_changed(
-    node_world, django_capture_on_commit_callbacks
-):
+def test_a_tampered_stored_payload_is_args_changed(node_world, django_capture_on_commit_callbacks):
     approval, execution = _approved(node_world, django_capture_on_commit_callbacks)
     payload = dict(approval.payload)
     payload["args"] = {"repo_path": "~/work/acme", "command_kind": "build"}
@@ -475,9 +473,7 @@ def test_every_execution_writes_exactly_one_chain_and_audit_row(
 
 
 @pytest.mark.django_db
-def test_tail_retention_clears_old_tails(
-    node_world, make_link, django_capture_on_commit_callbacks
-):
+def test_tail_retention_clears_old_tails(node_world, make_link, django_capture_on_commit_callbacks):
     link = make_link()
     execution = approve(node_world, request(node_world), django_capture_on_commit_callbacks)
     link.pump()
