@@ -1,0 +1,45 @@
+{
+  "check": 15,
+  "description": "Args outside the node's own schema (rtl_override).",
+  "expect": {
+    "frames": [
+      {
+        "refusal_code": "args_schema",
+        "status": "refused",
+        "type": "result"
+      }
+    ]
+  },
+  "name": "v1_args_rtl_override",
+  "setup": {
+    "now": 1796000005
+  },
+  "steps": [
+    {
+      "frame": {
+        "args": {
+          "repo_path": "~/work/\u202eemca"
+        },
+        "args_sha256": "7df16ef72c32634777c7bc17d33c3863576ca69703550e9441a6460fdbb86fef",
+        "capability": "git.status",
+        "capability_version": 1,
+        "class": "read",
+        "expires_at": 1796000030,
+        "grant": null,
+        "id": "248a51ce-c085-4c4f-adca-37ff4a040c04",
+        "invocation_id": "895d023d-8b04-428d-89cc-a2f8c888ccc0",
+        "issued_at": 1796000000,
+        "key_id": "03396219237f75a6",
+        "node_id": "6f1e2d3c-4b5a-4987-8a6b-5c4d3e2f1a0b",
+        "nonce": "KDFgEvTlZ54klLCP44fFgdMjDTp0JseU9D-G2yPaE4o",
+        "sig": "FqoT8GdLI_wW-osAzNhfmT_OnzMdJCZCD1JsW3ZNNdpFw-c9e7t5Or9IBl-BH2r00AbLcQxUDC-iXKmpMhFqCw",
+        "trace_id": "conformance-v1-args-rtl_override",
+        "type": "invoke",
+        "v": 1,
+        "workspace_id": "2a3b4c5d-6e7f-4a8b-9c0d-1e2f3a4b5c6d"
+      },
+      "op": "send"
+    }
+  ],
+  "version": 1
+}

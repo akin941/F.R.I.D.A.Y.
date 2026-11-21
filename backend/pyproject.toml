@@ -27,6 +27,10 @@ dependencies = [
     # signing of node `invoke` envelopes, and protocol schema validation.
     "cryptography==50.0.1",
     "jsonschema==4.26.0",
+    # Phase 10 branch 2 (docs/mcp/dependencies/node-gateway.md): the
+    # reference node's localhost WebSocket transport and the hostile fake
+    # gateway (`node_conformance_server`); the Phase 9 gateway reuses it.
+    "wsproto==1.3.2",
 ]
 
 [dependency-groups]
@@ -52,6 +56,11 @@ select = ["E", "F", "I", "B", "UP", "DJ"]
 
 [tool.pytest.ini_options]
 DJANGO_SETTINGS_MODULE = "config.settings.test"
+# Phase 10 branch 2: `-m srt` runs the escape suite under the real `srt`
+# sandbox on Linux (skipped when srt is absent); local evidence only.
+markers = [
+    "srt: runs commands under the real srt sandbox (opt-in, skipped without srt)",
+]
 python_files = ["test_*.py"]
 testpaths = [
     "core",
@@ -636,6 +645,24 @@ name = "nodes.protocol and nodes.capabilities import no project package (Phase 9
 type = "forbidden"
 source_modules = ["nodes.protocol", "nodes.capabilities"]
 forbidden_modules = ["config", "core", "accounts", "workspaces", "audit", "ai_core", "assistant", "memory", "knowledge", "tasks", "approvals", "tools", "agents", "skills", "integrations", "harness", "connectors", "deploys", "ops", "voice", "hud", "mcp", "nodes.models", "nodes.services", "nodes.audit_chain", "nodes.keys", "nodes.views", "nodes.urls", "nodes.serializers", "nodes.admin", "nodes.apps", "nodes.management", "nodes.migrations", "nodes.tests"]
+
+# Phase 10 branch 2: the reference node and the conformance suite are the
+# executable spec of the node side (the Swift app mirrors them), so they
+# import no project package and no Django-side part of `nodes`, only
+# `nodes.protocol` and `nodes.capabilities` (and each other: the suite
+# drives the reference node). Django's absence is asserted in a subprocess
+# by nodes/tests/test_reference_purity.py.
+[[tool.importlinter.contracts]]
+name = "nodes.reference and nodes.conformance import no project package (Phase 10 D4)"
+type = "forbidden"
+source_modules = ["nodes.reference", "nodes.conformance"]
+forbidden_modules = ["config", "core", "accounts", "workspaces", "audit", "ai_core", "assistant", "memory", "knowledge", "tasks", "approvals", "tools", "agents", "skills", "integrations", "harness", "connectors", "deploys", "ops", "voice", "hud", "mcp", "nodes.models", "nodes.services", "nodes.audit_chain", "nodes.keys", "nodes.views", "nodes.urls", "nodes.serializers", "nodes.admin", "nodes.apps", "nodes.management", "nodes.migrations", "nodes.tests"]
+
+[[tool.importlinter.contracts]]
+name = "the reference node does not import the conformance suite (the node is the lower layer)"
+type = "forbidden"
+source_modules = ["nodes.reference"]
+forbidden_modules = ["nodes.conformance"]
 
 [[tool.importlinter.contracts]]
 name = "nodes.protocol does not import nodes.capabilities (the protocol is the lower layer)"

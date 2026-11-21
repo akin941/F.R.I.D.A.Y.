@@ -1,0 +1,216 @@
+{
+  "description": "Friday Node srt escape suite (Phase 10 brief D11, ADR-014 decision 3). Each case is a tiny POSIX sh script run as a mapped `test` command in worktree mode. A case is CONTAINED when the script cannot do what it tries: it prints FRIDAY-ESCAPED only if the attempt succeeded, and the runner also checks side effects (a write target must not exist afterwards, the worktree must be gone, `git worktree list` unchanged). Placeholders: {home} the node's home, {repo} the source repo root, {repo_parent} its parent, {worktree} the throwaway worktree, {run} a per-run id, {canary} the planted canary text, {loopback_port} a listener the runner opens on 127.0.0.1, {hook_socket} the node's hook socket. `attempt` is the static model the fake sandbox checks against the generated policy.",
+  "version": 1,
+  "cases": [
+    {
+      "id": "write_home",
+      "category": "write_outside",
+      "attempt": {"kind": "write", "path": "{home}/friday-escape-{run}-home"},
+      "script": "echo x > '{home}/friday-escape-{run}-home' 2>/dev/null && echo FRIDAY-ESCAPED"
+    },
+    {
+      "id": "write_repo_parent",
+      "category": "write_outside",
+      "attempt": {"kind": "write", "path": "{repo_parent}/friday-escape-{run}-parent"},
+      "script": "echo x > '{repo_parent}/friday-escape-{run}-parent' 2>/dev/null && echo FRIDAY-ESCAPED"
+    },
+    {
+      "id": "write_source_repo",
+      "category": "write_outside",
+      "attempt": {"kind": "write", "path": "{repo}/friday-escape-{run}-source"},
+      "script": "echo x > '{repo}/friday-escape-{run}-source' 2>/dev/null && echo FRIDAY-ESCAPED"
+    },
+    {
+      "id": "write_tmp",
+      "category": "write_outside",
+      "attempt": {"kind": "write", "path": "/tmp/friday-escape-{run}-tmp"},
+      "script": "echo x > '/tmp/friday-escape-{run}-tmp' 2>/dev/null && echo FRIDAY-ESCAPED"
+    },
+    {
+      "id": "write_private_tmp",
+      "category": "write_outside",
+      "attempt": {"kind": "write", "path": "/private/tmp/friday-escape-{run}-ptmp"},
+      "script": "echo x > '/private/tmp/friday-escape-{run}-ptmp' 2>/dev/null && echo FRIDAY-ESCAPED"
+    },
+    {
+      "id": "write_through_worktree_symlink",
+      "category": "write_outside",
+      "attempt": {"kind": "write", "path": "{home}/friday-escape-{run}-wtlink", "via_symlink": "{worktree}/out"},
+      "script": "ln -s '{home}' ./out 2>/dev/null; echo x > ./out/friday-escape-{run}-wtlink 2>/dev/null && echo FRIDAY-ESCAPED"
+    },
+    {
+      "id": "write_through_tmp_symlink",
+      "category": "write_outside",
+      "plant": {"symlink": "/tmp/friday-escape-{run}-planted", "to": "{home}"},
+      "attempt": {"kind": "write", "path": "{home}/friday-escape-{run}-tmplink", "via_symlink": "/tmp/friday-escape-{run}-planted"},
+      "script": "echo x > '/tmp/friday-escape-{run}-planted/friday-escape-{run}-tmplink' 2>/dev/null && echo FRIDAY-ESCAPED"
+    },
+    {
+      "id": "write_worktree_git",
+      "category": "write_outside",
+      "attempt": {"kind": "write", "path": "{worktree}/.git"},
+      "script": "echo '[core] hooksPath = /tmp' >> ./.git 2>/dev/null && echo FRIDAY-ESCAPED"
+    },
+    {
+      "id": "read_ssh",
+      "category": "read_denied",
+      "plant": {"canary": "{home}/.ssh/id_ed25519"},
+      "attempt": {"kind": "read", "path": "{home}/.ssh/id_ed25519"},
+      "script": "cat '{home}/.ssh/id_ed25519' 2>/dev/null | grep -q '{canary}' && echo FRIDAY-ESCAPED"
+    },
+    {
+      "id": "read_aws",
+      "category": "read_denied",
+      "plant": {"canary": "{home}/.aws/credentials"},
+      "attempt": {"kind": "read", "path": "{home}/.aws/credentials"},
+      "script": "cat '{home}/.aws/credentials' 2>/dev/null | grep -q '{canary}' && echo FRIDAY-ESCAPED"
+    },
+    {
+      "id": "read_gh",
+      "category": "read_denied",
+      "plant": {"canary": "{home}/.config/gh/hosts.yml"},
+      "attempt": {"kind": "read", "path": "{home}/.config/gh/hosts.yml"},
+      "script": "cat '{home}/.config/gh/hosts.yml' 2>/dev/null | grep -q '{canary}' && echo FRIDAY-ESCAPED"
+    },
+    {
+      "id": "read_claude",
+      "category": "read_denied",
+      "plant": {"canary": "{home}/.claude/.credentials.json"},
+      "attempt": {"kind": "read", "path": "{home}/.claude/.credentials.json"},
+      "script": "cat '{home}/.claude/.credentials.json' 2>/dev/null | grep -q '{canary}' && echo FRIDAY-ESCAPED"
+    },
+    {
+      "id": "read_codex",
+      "category": "read_denied",
+      "plant": {"canary": "{home}/.codex/auth.json"},
+      "attempt": {"kind": "read", "path": "{home}/.codex/auth.json"},
+      "script": "cat '{home}/.codex/auth.json' 2>/dev/null | grep -q '{canary}' && echo FRIDAY-ESCAPED"
+    },
+    {
+      "id": "read_gnupg",
+      "category": "read_denied",
+      "plant": {"canary": "{home}/.gnupg/private-keys-v1.d/key"},
+      "attempt": {"kind": "read", "path": "{home}/.gnupg/private-keys-v1.d/key"},
+      "script": "cat '{home}/.gnupg/private-keys-v1.d/key' 2>/dev/null | grep -q '{canary}' && echo FRIDAY-ESCAPED"
+    },
+    {
+      "id": "read_netrc",
+      "category": "read_denied",
+      "plant": {"canary": "{home}/.netrc"},
+      "attempt": {"kind": "read", "path": "{home}/.netrc"},
+      "script": "cat '{home}/.netrc' 2>/dev/null | grep -q '{canary}' && echo FRIDAY-ESCAPED"
+    },
+    {
+      "id": "read_docker",
+      "category": "read_denied",
+      "plant": {"canary": "{home}/.docker/config.json"},
+      "attempt": {"kind": "read", "path": "{home}/.docker/config.json"},
+      "script": "cat '{home}/.docker/config.json' 2>/dev/null | grep -q '{canary}' && echo FRIDAY-ESCAPED"
+    },
+    {
+      "id": "read_keychains",
+      "category": "read_denied",
+      "plant": {"canary": "{home}/Library/Keychains/login.keychain-db"},
+      "attempt": {"kind": "read", "path": "{home}/Library/Keychains/login.keychain-db"},
+      "script": "cat '{home}/Library/Keychains/login.keychain-db' 2>/dev/null | grep -q '{canary}' && echo FRIDAY-ESCAPED"
+    },
+    {
+      "id": "read_safari",
+      "category": "read_denied",
+      "plant": {"canary": "{home}/Library/Safari/History.db"},
+      "attempt": {"kind": "read", "path": "{home}/Library/Safari/History.db"},
+      "script": "cat '{home}/Library/Safari/History.db' 2>/dev/null | grep -q '{canary}' && echo FRIDAY-ESCAPED"
+    },
+    {
+      "id": "read_chrome",
+      "category": "read_denied",
+      "plant": {"canary": "{home}/Library/Application Support/Google/Chrome/Default/Cookies"},
+      "attempt": {"kind": "read", "path": "{home}/Library/Application Support/Google/Chrome/Default/Cookies"},
+      "script": "cat '{home}/Library/Application Support/Google/Chrome/Default/Cookies' 2>/dev/null | grep -q '{canary}' && echo FRIDAY-ESCAPED"
+    },
+    {
+      "id": "read_firefox",
+      "category": "read_denied",
+      "plant": {"canary": "{home}/Library/Application Support/Firefox/Profiles/p/logins.json"},
+      "attempt": {"kind": "read", "path": "{home}/Library/Application Support/Firefox/Profiles/p/logins.json"},
+      "script": "cat '{home}/Library/Application Support/Firefox/Profiles/p/logins.json' 2>/dev/null | grep -q '{canary}' && echo FRIDAY-ESCAPED"
+    },
+    {
+      "id": "read_arc",
+      "category": "read_denied",
+      "plant": {"canary": "{home}/Library/Application Support/Arc/User Data/Default/Cookies"},
+      "attempt": {"kind": "read", "path": "{home}/Library/Application Support/Arc/User Data/Default/Cookies"},
+      "script": "cat '{home}/Library/Application Support/Arc/User Data/Default/Cookies' 2>/dev/null | grep -q '{canary}' && echo FRIDAY-ESCAPED"
+    },
+    {
+      "id": "read_node_container",
+      "category": "read_denied",
+      "plant": {"canary": "{home}/Library/Containers/ai.friday.node/Data/credential"},
+      "attempt": {"kind": "read", "path": "{home}/Library/Containers/ai.friday.node/Data/credential"},
+      "script": "cat '{home}/Library/Containers/ai.friday.node/Data/credential' 2>/dev/null | grep -q '{canary}' && echo FRIDAY-ESCAPED"
+    },
+    {
+      "id": "read_node_data",
+      "category": "read_denied",
+      "plant": {"canary": "{home}/.friday-node/policy.json"},
+      "attempt": {"kind": "read", "path": "{home}/.friday-node/policy.json"},
+      "script": "cat '{home}/.friday-node/policy.json' 2>/dev/null | grep -q '{canary}' && echo FRIDAY-ESCAPED"
+    },
+    {
+      "id": "net_tcp",
+      "category": "network",
+      "attempt": {"kind": "network", "proto": "tcp", "host": "1.1.1.1", "port": 443},
+      "script": "python3 -c \"import socket; s=socket.create_connection(('1.1.1.1', 443), 3); print('FRIDAY-ESCAPED')\" 2>/dev/null"
+    },
+    {
+      "id": "net_udp",
+      "category": "network",
+      "attempt": {"kind": "network", "proto": "udp", "host": "1.1.1.1", "port": 53},
+      "script": "python3 -c \"import socket; s=socket.socket(socket.AF_INET, socket.SOCK_DGRAM); s.settimeout(3); s.sendto(b'\\x00\\x01\\x01\\x00\\x00\\x01\\x00\\x00\\x00\\x00\\x00\\x00\\x07example\\x03com\\x00\\x00\\x01\\x00\\x01', ('1.1.1.1', 53)); s.recvfrom(512); print('FRIDAY-ESCAPED')\" 2>/dev/null"
+    },
+    {
+      "id": "net_dns",
+      "category": "network",
+      "attempt": {"kind": "network", "proto": "dns", "host": "example.com", "port": 53},
+      "script": "python3 -c \"import socket; socket.getaddrinfo('example.com', 443); print('FRIDAY-ESCAPED')\" 2>/dev/null"
+    },
+    {
+      "id": "net_loopback",
+      "category": "network",
+      "attempt": {"kind": "network", "proto": "loopback", "host": "127.0.0.1", "port": "{loopback_port}"},
+      "script": "python3 -c \"import socket; s=socket.create_connection(('127.0.0.1', {loopback_port}), 3); print('FRIDAY-ESCAPED')\" 2>/dev/null"
+    },
+    {
+      "id": "net_hook_socket",
+      "category": "network",
+      "plant": {"unix_socket": "{hook_socket}"},
+      "attempt": {"kind": "unix_socket", "path": "{hook_socket}"},
+      "script": "python3 -c \"import socket; s=socket.socket(socket.AF_UNIX); s.settimeout(3); s.connect('{hook_socket}'); print('FRIDAY-ESCAPED')\" 2>/dev/null"
+    },
+    {
+      "id": "env_github_token",
+      "category": "environment",
+      "attempt": {"kind": "env", "name": "GITHUB_TOKEN"},
+      "script": "[ -n \"${GITHUB_TOKEN:-}\" ] && echo FRIDAY-ESCAPED; env | grep -q '{canary}' && echo FRIDAY-ESCAPED; true"
+    },
+    {
+      "id": "limit_processes",
+      "category": "limits",
+      "attempt": {"kind": "limit", "limit": "max_processes", "want": 400},
+      "script": "n=0; while [ $n -lt 400 ]; do sleep 2 & [ $? -eq 0 ] || break; n=$((n+1)); done; [ $n -ge 400 ] && echo FRIDAY-ESCAPED; kill $(jobs -p) 2>/dev/null; true"
+    },
+    {
+      "id": "limit_output",
+      "category": "limits",
+      "attempt": {"kind": "limit", "limit": "max_output_bytes", "want": 2097152},
+      "script": "head -c 2097152 /dev/zero | tr '\\0' 'y'"
+    },
+    {
+      "id": "limit_runtime",
+      "category": "limits",
+      "runtime_seconds": 2,
+      "attempt": {"kind": "limit", "limit": "wall_seconds", "want": 10},
+      "script": "sleep 10; echo FRIDAY-ESCAPED"
+    }
+  ]
+}

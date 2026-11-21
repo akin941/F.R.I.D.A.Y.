@@ -1,0 +1,43 @@
+{
+  "check": 12,
+  "description": "A known capability at another version.",
+  "expect": {
+    "frames": [
+      {
+        "refusal_code": "unknown_capability",
+        "status": "refused",
+        "type": "result"
+      }
+    ]
+  },
+  "name": "v2_unknown_capability_version",
+  "setup": {
+    "now": 1796000005
+  },
+  "steps": [
+    {
+      "frame": {
+        "args": {},
+        "args_sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+        "capability": "apps.frontmost",
+        "capability_version": 2,
+        "class": "read",
+        "expires_at": 1796000030,
+        "grant": null,
+        "id": "99b97911-6311-44cc-9462-a199d8711b2f",
+        "invocation_id": "0208bfca-046a-4f7f-a69c-7126a478764a",
+        "issued_at": 1796000000,
+        "key_id": "03396219237f75a6",
+        "node_id": "6f1e2d3c-4b5a-4987-8a6b-5c4d3e2f1a0b",
+        "nonce": "GN0BxvT525M8wxjiR4Copx_DiUbKZGYnZxqP870ykU0",
+        "sig": "T5ArKSeieDCbmQICelm5_Q_rIuPL10aApSJaJoZqTzMJ-ARtEXvaNJK_CBytws5fro_1xLxAuonVzigCcSLwDw",
+        "trace_id": "conformance-v2-ver",
+        "type": "invoke",
+        "v": 2,
+        "workspace_id": "2a3b4c5d-6e7f-4a8b-9c0d-1e2f3a4b5c6d"
+      },
+      "op": "send"
+    }
+  ],
+  "version": 2
+}

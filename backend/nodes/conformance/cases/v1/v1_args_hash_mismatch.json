@@ -1,0 +1,45 @@
+{
+  "check": 14,
+  "description": "Args changed, hash kept, envelope re-signed.",
+  "expect": {
+    "frames": [
+      {
+        "refusal_code": "args_hash_mismatch",
+        "status": "refused",
+        "type": "result"
+      }
+    ]
+  },
+  "name": "v1_args_hash_mismatch",
+  "setup": {
+    "now": 1796000005
+  },
+  "steps": [
+    {
+      "frame": {
+        "args": {
+          "repo_path": "~/work/other"
+        },
+        "args_sha256": "0128da9492974695f0291be1c7dd637e7a6186db6ac98d8e9da57638d54939b4",
+        "capability": "git.status",
+        "capability_version": 1,
+        "class": "read",
+        "expires_at": 1796000030,
+        "grant": null,
+        "id": "edee344c-faa3-466a-9873-15064d3290f6",
+        "invocation_id": "3c6541f1-675d-4820-99a0-30aad8c6b618",
+        "issued_at": 1796000000,
+        "key_id": "03396219237f75a6",
+        "node_id": "6f1e2d3c-4b5a-4987-8a6b-5c4d3e2f1a0b",
+        "nonce": "RyDd9bzXGwaI2QyrNJ1N9uuVkenzAXbATer8hgbDLfM",
+        "sig": "gHmU_zAYOI1TzJkdN8WmzDxUf4tHa9k6w1vkASe3WegrBLYWQN0iDKjtsqJAEwPf-PPo1pZfbo0-_v-SJzfxBA",
+        "trace_id": "conformance-v1-hash",
+        "type": "invoke",
+        "v": 1,
+        "workspace_id": "2a3b4c5d-6e7f-4a8b-9c0d-1e2f3a4b5c6d"
+      },
+      "op": "send"
+    }
+  ],
+  "version": 1
+}

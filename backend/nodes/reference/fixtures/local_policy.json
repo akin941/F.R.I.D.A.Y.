@@ -1,0 +1,40 @@
+{
+  "repos": [
+    {
+      "name": "acme",
+      "root": "~/work/acme",
+      "commands": [
+        {
+          "kind": "test",
+          "argv": ["python3", "-c", "print('acme tests ok')"],
+          "path": "/usr/local/bin:/usr/bin:/bin",
+          "env_names": ["PYTHONHASHSEED"],
+          "max_runtime_seconds": 300,
+          "mode": "in_place"
+        },
+        {
+          "kind": "lint",
+          "argv": ["python3", "-c", "print('acme lint ok')"],
+          "max_runtime_seconds": 120,
+          "mode": "worktree"
+        }
+      ]
+    },
+    {
+      "name": "friday",
+      "root": "~/code/friday",
+      "commands": [
+        {
+          "kind": "test",
+          "argv": ["uv", "run", "pytest", "-q"],
+          "path": "/opt/homebrew/bin:/usr/bin:/bin",
+          "network_domains": ["pypi.org", "files.pythonhosted.org"],
+          "max_runtime_seconds": 900,
+          "mode": "worktree"
+        }
+      ]
+    }
+  ],
+  "recipes_enabled": ["music.play_pause", "system.volume_set", "finder.reveal_repo"],
+  "bundle_ids": ["com.apple.Terminal", "com.apple.Music", "com.apple.TextEdit"]
+}

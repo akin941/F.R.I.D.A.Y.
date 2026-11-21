@@ -1,0 +1,95 @@
+{
+  "check": null,
+  "description": "The socket drops while a command runs: it is killed, no late result.",
+  "expect": {
+    "executor_calls": 1,
+    "executor_terminated": 1,
+    "frames": [
+      {
+        "state": "shown",
+        "type": "confirmation"
+      },
+      {
+        "state": "approved",
+        "type": "confirmation"
+      },
+      {
+        "data": "started\n",
+        "type": "output"
+      }
+    ]
+  },
+  "name": "v2_socket_dropped_while_running",
+  "setup": {
+    "executor": [
+      {
+        "chunks": [
+          [
+            "stdout",
+            "started\n",
+            0
+          ]
+        ],
+        "hang": true
+      }
+    ],
+    "now": 1796000005,
+    "window": [
+      {
+        "action": "approve",
+        "after": 0
+      }
+    ]
+  },
+  "steps": [
+    {
+      "frame": {
+        "args": {
+          "command_kind": "test",
+          "repo_path": "~/work/acme"
+        },
+        "args_sha256": "a1075b636d8f7d76b64e6dddaf0789d5915c4cc65cdc2d4a04ade9dbd96d2f85",
+        "capability": "repo.command.run",
+        "capability_version": 1,
+        "class": "gate",
+        "expires_at": 1796000090,
+        "grant": {
+          "approval_id": "8d7c6b5a-4e3f-4d2c-8b1a-0f9e8d7c6b5a",
+          "args_sha256": "a1075b636d8f7d76b64e6dddaf0789d5915c4cc65cdc2d4a04ade9dbd96d2f85",
+          "capability": "repo.command.run",
+          "capability_version": 1,
+          "class": "gate",
+          "expires_at": 1796000090,
+          "grant_id": "108d1e51-3ddd-42f7-8286-22dc16eb2daa",
+          "issued_at": 1796000000,
+          "key_id": "03396219237f75a6",
+          "node_id": "6f1e2d3c-4b5a-4987-8a6b-5c4d3e2f1a0b",
+          "nonce": "VeJ8to5u0xxh971nbv-FUnp6za3fOp9p1T4iD3ZUa7U",
+          "sig": "FVhPZVHeKI6eCj94Zj1v2cloz3e6wddmT9c786S25EI6oDyEVKGwyFkFq034MxhlANszIDM0_bBmRXsXlFg5BA",
+          "v": 2,
+          "workspace_id": "2a3b4c5d-6e7f-4a8b-9c0d-1e2f3a4b5c6d"
+        },
+        "id": "11afa277-e725-4096-9634-a6f090f10651",
+        "invocation_id": "96c676cf-c359-49b9-b14b-f2833d34ebe4",
+        "issued_at": 1796000000,
+        "key_id": "03396219237f75a6",
+        "node_id": "6f1e2d3c-4b5a-4987-8a6b-5c4d3e2f1a0b",
+        "nonce": "VeJ8to5u0xxh971nbv-FUnp6za3fOp9p1T4iD3ZUa7U",
+        "sig": "ibWu3CMd9U9esTKDpIABsUNKa-BGLrB0I4ZUUG4od9SJ861g0w5ImzEdmIy2-pt8VEA7mgNDg52jeLLIWvcxCg",
+        "trace_id": "conformance-v2-drop-run",
+        "type": "invoke",
+        "v": 2,
+        "workspace_id": "2a3b4c5d-6e7f-4a8b-9c0d-1e2f3a4b5c6d"
+      },
+      "op": "send"
+    },
+    {
+      "op": "disconnect"
+    },
+    {
+      "op": "advance",
+      "seconds": 10
+    }
+  ],
+  "version": 2
+}

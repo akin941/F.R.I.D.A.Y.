@@ -1,0 +1,32 @@
+{
+  "check": 3,
+  "description": "A policy-mutation-shaped type (policy.set) is unknown_type.",
+  "expect": {
+    "frames": [
+      {
+        "invocation_id": null,
+        "refusal_code": "unknown_type",
+        "status": "error",
+        "type": "result"
+      }
+    ]
+  },
+  "name": "v1_policy_shaped_policy_set",
+  "setup": {
+    "now": 1796000005
+  },
+  "steps": [
+    {
+      "frame": {
+        "id": "63ac1b4a-ca38-49ca-b815-f974b2a1df10",
+        "policy": {
+          "allow": "*"
+        },
+        "type": "policy.set",
+        "v": 1
+      },
+      "op": "send"
+    }
+  ],
+  "version": 1
+}

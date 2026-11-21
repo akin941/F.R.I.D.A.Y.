@@ -1,0 +1,29 @@
+{
+  "check": 3,
+  "description": "A server -> node type outside the frozen set is unknown_type.",
+  "expect": {
+    "frames": [
+      {
+        "invocation_id": null,
+        "refusal_code": "unknown_type",
+        "status": "error",
+        "type": "result"
+      }
+    ]
+  },
+  "name": "v2_unknown_type",
+  "setup": {
+    "now": 1796000005
+  },
+  "steps": [
+    {
+      "frame": {
+        "id": "2374d917-94b7-4f4f-b4ec-9587d2cf00ae",
+        "type": "cancel",
+        "v": 2
+      },
+      "op": "send"
+    }
+  ],
+  "version": 2
+}

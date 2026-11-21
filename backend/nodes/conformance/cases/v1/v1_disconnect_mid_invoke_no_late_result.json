@@ -1,0 +1,45 @@
+{
+  "check": null,
+  "description": "A read in flight when the socket drops never answers.",
+  "expect": {
+    "frames": []
+  },
+  "name": "v1_disconnect_mid_invoke_no_late_result",
+  "setup": {
+    "now": 1796000005,
+    "read_delay": 5
+  },
+  "steps": [
+    {
+      "frame": {
+        "args": {},
+        "args_sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+        "capability": "apps.frontmost",
+        "capability_version": 1,
+        "class": "read",
+        "expires_at": 1796000030,
+        "grant": null,
+        "id": "4f5b027e-07eb-4be5-a70e-d157c4bb21de",
+        "invocation_id": "d9426746-a50b-4e7f-8f39-150d02c0c8d7",
+        "issued_at": 1796000000,
+        "key_id": "03396219237f75a6",
+        "node_id": "6f1e2d3c-4b5a-4987-8a6b-5c4d3e2f1a0b",
+        "nonce": "fsCBbs_g-_AY6EWtzsd4OwliyKKYwIdwAe68dKMApFw",
+        "sig": "hyFBv8faGKU0EtkDCEdNQ7E8vNcL86XShv5P0zeGhtU-LHSZCwdS3x4kg_A2Y7p2dn-IVJmWED7vtvXY0q4VAA",
+        "trace_id": "conformance-v1-read-ok",
+        "type": "invoke",
+        "v": 1,
+        "workspace_id": "2a3b4c5d-6e7f-4a8b-9c0d-1e2f3a4b5c6d"
+      },
+      "op": "send"
+    },
+    {
+      "op": "disconnect"
+    },
+    {
+      "op": "advance",
+      "seconds": 10
+    }
+  ],
+  "version": 1
+}

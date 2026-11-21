@@ -1,0 +1,45 @@
+{
+  "check": 20,
+  "description": "Args outside the node's own schema (traversal).",
+  "expect": {
+    "frames": [
+      {
+        "refusal_code": "args_schema",
+        "status": "refused",
+        "type": "result"
+      }
+    ]
+  },
+  "name": "v2_args_traversal",
+  "setup": {
+    "now": 1796000005
+  },
+  "steps": [
+    {
+      "frame": {
+        "args": {
+          "repo_path": "~/work/../.ssh"
+        },
+        "args_sha256": "a068a86098bdfda57254de529bb3150082fa151829ff0dc946b88b8531eb65fb",
+        "capability": "git.status",
+        "capability_version": 1,
+        "class": "read",
+        "expires_at": 1796000030,
+        "grant": null,
+        "id": "0799b36a-7b07-49ea-ba47-35e8d8a068d9",
+        "invocation_id": "c71840d1-f37d-4425-af31-5cc4aca2e839",
+        "issued_at": 1796000000,
+        "key_id": "03396219237f75a6",
+        "node_id": "6f1e2d3c-4b5a-4987-8a6b-5c4d3e2f1a0b",
+        "nonce": "xKbo_kzKU82Gvw5J3aV_4kiRC7B-IWPEm0WNopLEGe8",
+        "sig": "z3MHgD3SBv8GWrRRpP7tYt55uk81ZT-Z6Ap6l3eh1i4did8suZDTfBTbC67atCizvrjg93HtW_EExU2m9stICQ",
+        "trace_id": "conformance-v2-args-traversal",
+        "type": "invoke",
+        "v": 2,
+        "workspace_id": "2a3b4c5d-6e7f-4a8b-9c0d-1e2f3a4b5c6d"
+      },
+      "op": "send"
+    }
+  ],
+  "version": 2
+}

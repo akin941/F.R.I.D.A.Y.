@@ -1,0 +1,32 @@
+{
+  "check": 3,
+  "description": "A policy-mutation-shaped type (allowlist.add) is unknown_type.",
+  "expect": {
+    "frames": [
+      {
+        "invocation_id": null,
+        "refusal_code": "unknown_type",
+        "status": "error",
+        "type": "result"
+      }
+    ]
+  },
+  "name": "v2_policy_shaped_allowlist_add",
+  "setup": {
+    "now": 1796000005
+  },
+  "steps": [
+    {
+      "frame": {
+        "id": "66f568b6-b708-459e-8287-182c6346961b",
+        "policy": {
+          "allow": "*"
+        },
+        "type": "allowlist.add",
+        "v": 2
+      },
+      "op": "send"
+    }
+  ],
+  "version": 2
+}

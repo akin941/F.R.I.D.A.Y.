@@ -1,0 +1,76 @@
+{
+  "check": null,
+  "description": "An enabled recipe runs after the click.",
+  "expect": {
+    "executor_calls": 1,
+    "frames": [
+      {
+        "state": "shown",
+        "type": "confirmation"
+      },
+      {
+        "state": "approved",
+        "type": "confirmation"
+      },
+      {
+        "confirm_state": "approved",
+        "status": "ok",
+        "type": "result"
+      }
+    ]
+  },
+  "name": "v2_gate_recipe_after_click",
+  "setup": {
+    "now": 1796000005,
+    "window": [
+      {
+        "action": "approve",
+        "after": 0
+      }
+    ]
+  },
+  "steps": [
+    {
+      "frame": {
+        "args": {
+          "params": {},
+          "recipe": "music.play_pause"
+        },
+        "args_sha256": "80f88ab7aaff7bb167385cd7a5f8d7388a8855defbff73c287f16d1afc6bd920",
+        "capability": "applescript.recipe.run",
+        "capability_version": 1,
+        "class": "gate",
+        "expires_at": 1796000090,
+        "grant": {
+          "approval_id": "8d7c6b5a-4e3f-4d2c-8b1a-0f9e8d7c6b5a",
+          "args_sha256": "80f88ab7aaff7bb167385cd7a5f8d7388a8855defbff73c287f16d1afc6bd920",
+          "capability": "applescript.recipe.run",
+          "capability_version": 1,
+          "class": "gate",
+          "expires_at": 1796000090,
+          "grant_id": "9e4f9d0b-d2ca-4ee4-9cfb-20aca527fd7f",
+          "issued_at": 1796000000,
+          "key_id": "03396219237f75a6",
+          "node_id": "6f1e2d3c-4b5a-4987-8a6b-5c4d3e2f1a0b",
+          "nonce": "6acBaR7aKQNB0Kpg1su1NWDKmMNlzOlVS9UdVN0NDLk",
+          "sig": "VZ2P_WabYLbEu7vAYiXMR4dycU-5UmUUSBE8piGOcLMRNqump5fvX9qHe5K5DX-vK8QldPHEw-NmEwTxg4zmBA",
+          "v": 2,
+          "workspace_id": "2a3b4c5d-6e7f-4a8b-9c0d-1e2f3a4b5c6d"
+        },
+        "id": "b7701054-90a9-49bd-90aa-2baf6ed782f8",
+        "invocation_id": "1aec4975-4b47-46f8-aec6-8ecd12771845",
+        "issued_at": 1796000000,
+        "key_id": "03396219237f75a6",
+        "node_id": "6f1e2d3c-4b5a-4987-8a6b-5c4d3e2f1a0b",
+        "nonce": "6acBaR7aKQNB0Kpg1su1NWDKmMNlzOlVS9UdVN0NDLk",
+        "sig": "1gtN0at_SVjShGQMdJFQ8e3yO3OsH2pBbp3L9KOccLkVgk6aff2T-YHRBUHcvgJOtyHWmyyDAeYEed2EWL2sCA",
+        "trace_id": "conformance-v2-recipe",
+        "type": "invoke",
+        "v": 2,
+        "workspace_id": "2a3b4c5d-6e7f-4a8b-9c0d-1e2f3a4b5c6d"
+      },
+      "op": "send"
+    }
+  ],
+  "version": 2
+}

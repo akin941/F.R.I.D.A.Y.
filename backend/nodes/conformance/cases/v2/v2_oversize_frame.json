@@ -1,0 +1,26 @@
+{
+  "check": 1,
+  "description": "A frame over 256 KiB is a frame error (too_large).",
+  "expect": {
+    "frames": [
+      {
+        "invocation_id": null,
+        "refusal_code": "too_large",
+        "status": "error",
+        "type": "result"
+      }
+    ]
+  },
+  "name": "v2_oversize_frame",
+  "setup": {
+    "now": 1796000005
+  },
+  "steps": [
+    {
+      "data": "x",
+      "op": "send_raw",
+      "repeat": 262145
+    }
+  ],
+  "version": 2
+}

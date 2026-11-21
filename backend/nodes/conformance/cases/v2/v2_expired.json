@@ -1,0 +1,43 @@
+{
+  "check": 9,
+  "description": "expires_at in the past.",
+  "expect": {
+    "frames": [
+      {
+        "refusal_code": "expired",
+        "status": "refused",
+        "type": "result"
+      }
+    ]
+  },
+  "name": "v2_expired",
+  "setup": {
+    "now": 1796000005
+  },
+  "steps": [
+    {
+      "frame": {
+        "args": {},
+        "args_sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+        "capability": "apps.frontmost",
+        "capability_version": 1,
+        "class": "read",
+        "expires_at": 1795999970,
+        "grant": null,
+        "id": "3d0946c5-b162-4e46-bbad-dcc75bb92a86",
+        "invocation_id": "db114f8b-8fa7-4449-b640-0d2b519246d1",
+        "issued_at": 1795999940,
+        "key_id": "03396219237f75a6",
+        "node_id": "6f1e2d3c-4b5a-4987-8a6b-5c4d3e2f1a0b",
+        "nonce": "xeQyhyjeucgbt2XthKXwsovAcxFeE6j7zv0xLA7u_sM",
+        "sig": "TiPzRxyhwI2jKbwjpw0C7NhRL3iWBlcHZqkw5e3gCLiA20XyFwrU-I4MrUkHnm6E1GMtJ_xO_tUj5Y53dsXzDg",
+        "trace_id": "conformance-v2-expired",
+        "type": "invoke",
+        "v": 2,
+        "workspace_id": "2a3b4c5d-6e7f-4a8b-9c0d-1e2f3a4b5c6d"
+      },
+      "op": "send"
+    }
+  ],
+  "version": 2
+}

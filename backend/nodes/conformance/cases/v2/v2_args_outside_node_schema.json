@@ -1,0 +1,63 @@
+{
+  "check": 20,
+  "description": "Args valid for the server contract but outside the node's own schema.",
+  "expect": {
+    "executor_calls": 0,
+    "frames": [
+      {
+        "refusal_code": "args_schema",
+        "status": "refused",
+        "type": "result"
+      }
+    ]
+  },
+  "name": "v2_args_outside_node_schema",
+  "setup": {
+    "catalogue": "narrow",
+    "now": 1796000005
+  },
+  "steps": [
+    {
+      "frame": {
+        "args": {
+          "command_kind": "build",
+          "repo_path": "~/work/acme"
+        },
+        "args_sha256": "66a58ed72bca68ab727a564bade752f318e950bf5af7560f4304209cb08778d3",
+        "capability": "repo.command.run",
+        "capability_version": 1,
+        "class": "gate",
+        "expires_at": 1796000090,
+        "grant": {
+          "approval_id": "8d7c6b5a-4e3f-4d2c-8b1a-0f9e8d7c6b5a",
+          "args_sha256": "66a58ed72bca68ab727a564bade752f318e950bf5af7560f4304209cb08778d3",
+          "capability": "repo.command.run",
+          "capability_version": 1,
+          "class": "gate",
+          "expires_at": 1796000090,
+          "grant_id": "01cd6184-f183-49a8-aa5f-89e997537396",
+          "issued_at": 1796000000,
+          "key_id": "03396219237f75a6",
+          "node_id": "6f1e2d3c-4b5a-4987-8a6b-5c4d3e2f1a0b",
+          "nonce": "WDqi_QGbqml3dYjVb5YZ7VoJVHG6MemuY5oXB-CbOqM",
+          "sig": "GAacI62NJ1Fwn47S-3oT4DseOJab4yh5XYxeW4Uzw1YTK_3CtL1SA7m6LYjfEJe6K38C4sFixbAGVNB0BHo5Dg",
+          "v": 2,
+          "workspace_id": "2a3b4c5d-6e7f-4a8b-9c0d-1e2f3a4b5c6d"
+        },
+        "id": "4abc276a-856d-4f75-8833-b1ccc05cf4d7",
+        "invocation_id": "7fbbe4fe-f3da-43d0-8686-db0f6412e3ee",
+        "issued_at": 1796000000,
+        "key_id": "03396219237f75a6",
+        "node_id": "6f1e2d3c-4b5a-4987-8a6b-5c4d3e2f1a0b",
+        "nonce": "WDqi_QGbqml3dYjVb5YZ7VoJVHG6MemuY5oXB-CbOqM",
+        "sig": "9plMeEydxw_8yb88rJNjuIPa4KeEZkwO-DXhYKxFGCHPcvjY9fsv-S11-j3qGjhA2nc5CvxKdYJvOPExJYH6Aw",
+        "trace_id": "conformance-v2-narrow",
+        "type": "invoke",
+        "v": 2,
+        "workspace_id": "2a3b4c5d-6e7f-4a8b-9c0d-1e2f3a4b5c6d"
+      },
+      "op": "send"
+    }
+  ],
+  "version": 2
+}

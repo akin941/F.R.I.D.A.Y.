@@ -1,0 +1,62 @@
+{
+  "check": 13,
+  "description": "Class upgrade: a gate envelope for a confirm entry.",
+  "expect": {
+    "executor_calls": 0,
+    "frames": [
+      {
+        "refusal_code": "class_mismatch",
+        "status": "refused",
+        "type": "result"
+      }
+    ],
+    "windows_shown": 0
+  },
+  "name": "v2_class_gate_for_confirm_entry",
+  "setup": {
+    "now": 1796000005
+  },
+  "steps": [
+    {
+      "frame": {
+        "args": {
+          "bundle_id": "com.apple.Terminal"
+        },
+        "args_sha256": "0721584e95f3607ad9ede76d6c5fe680dc92fb624b282ccb2bda65b9ea234df5",
+        "capability": "apps.open",
+        "capability_version": 1,
+        "class": "gate",
+        "expires_at": 1796000090,
+        "grant": {
+          "approval_id": "8d7c6b5a-4e3f-4d2c-8b1a-0f9e8d7c6b5a",
+          "args_sha256": "0721584e95f3607ad9ede76d6c5fe680dc92fb624b282ccb2bda65b9ea234df5",
+          "capability": "apps.open",
+          "capability_version": 1,
+          "class": "gate",
+          "expires_at": 1796000090,
+          "grant_id": "66f5f5b8-65a2-4f2a-8941-4b126559891c",
+          "issued_at": 1796000000,
+          "key_id": "03396219237f75a6",
+          "node_id": "6f1e2d3c-4b5a-4987-8a6b-5c4d3e2f1a0b",
+          "nonce": "Lse3U8nCt17oygSMP9fWi3aiTThIz6pOWs9ICKEWhIg",
+          "sig": "UKKvwSCFjvQXVXgA0pFCSuOBFRfJHPcRbmbEg6MD_g3gVVYW-u18roPhuf-ixG1Uh681zsnIXJY-Sm13t3l0CQ",
+          "v": 2,
+          "workspace_id": "2a3b4c5d-6e7f-4a8b-9c0d-1e2f3a4b5c6d"
+        },
+        "id": "b4f8fea6-c857-4668-b5fd-a3f5a7564615",
+        "invocation_id": "bb0d80cd-e219-4315-b72a-0958d634faef",
+        "issued_at": 1796000000,
+        "key_id": "03396219237f75a6",
+        "node_id": "6f1e2d3c-4b5a-4987-8a6b-5c4d3e2f1a0b",
+        "nonce": "Lse3U8nCt17oygSMP9fWi3aiTThIz6pOWs9ICKEWhIg",
+        "sig": "Ou9WjpGrFtIzzVIb_ZrTJhJYF_1ruMm3JJ27VoyCBbPRds3K-g8lpYHs5h4Md0fPvVXkLoJLop74Hx5AkVG5Dw",
+        "trace_id": "conformance-v2-downgrade",
+        "type": "invoke",
+        "v": 2,
+        "workspace_id": "2a3b4c5d-6e7f-4a8b-9c0d-1e2f3a4b5c6d"
+      },
+      "op": "send"
+    }
+  ],
+  "version": 2
+}

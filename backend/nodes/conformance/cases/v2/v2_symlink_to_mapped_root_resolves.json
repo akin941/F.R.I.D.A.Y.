@@ -1,0 +1,76 @@
+{
+  "check": 23,
+  "description": "A symlink that resolves to a mapped root reaches the window.",
+  "expect": {
+    "executor_calls": 0,
+    "frames": [
+      {
+        "state": "shown",
+        "type": "confirmation"
+      },
+      {
+        "state": "denied",
+        "type": "confirmation"
+      },
+      {
+        "refusal_code": "owner_denied",
+        "status": "refused",
+        "type": "result"
+      }
+    ]
+  },
+  "name": "v2_symlink_to_mapped_root_resolves",
+  "setup": {
+    "now": 1796000005,
+    "window": [
+      {
+        "action": "deny",
+        "after": 0
+      }
+    ]
+  },
+  "steps": [
+    {
+      "frame": {
+        "args": {
+          "command_kind": "test",
+          "repo_path": "~/work/acme-link"
+        },
+        "args_sha256": "18641fab2faae4f2282c7ff195aebee8a5060effdea9fda1395ec437ab597c5c",
+        "capability": "repo.command.run",
+        "capability_version": 1,
+        "class": "gate",
+        "expires_at": 1796000090,
+        "grant": {
+          "approval_id": "8d7c6b5a-4e3f-4d2c-8b1a-0f9e8d7c6b5a",
+          "args_sha256": "18641fab2faae4f2282c7ff195aebee8a5060effdea9fda1395ec437ab597c5c",
+          "capability": "repo.command.run",
+          "capability_version": 1,
+          "class": "gate",
+          "expires_at": 1796000090,
+          "grant_id": "65ec6c1d-b625-4893-9cd9-09be413d7f82",
+          "issued_at": 1796000000,
+          "key_id": "03396219237f75a6",
+          "node_id": "6f1e2d3c-4b5a-4987-8a6b-5c4d3e2f1a0b",
+          "nonce": "g_w1dE7CXqXmNnMUh4hcn2uuvCE-ASmUUQQRSwg-mNA",
+          "sig": "kwZ4n1xC6LtL2bmy0mjrXFF4GSqn_tqYrke1H8Pynwgd1RCo-fPO_aUe01Y_E6-p1Kq52zLAs5LLM0TYFFHoAw",
+          "v": 2,
+          "workspace_id": "2a3b4c5d-6e7f-4a8b-9c0d-1e2f3a4b5c6d"
+        },
+        "id": "f964e6c0-2de4-4e70-9679-4e5d19105db9",
+        "invocation_id": "ba46ceb8-bcc9-4249-b017-8502e774ac36",
+        "issued_at": 1796000000,
+        "key_id": "03396219237f75a6",
+        "node_id": "6f1e2d3c-4b5a-4987-8a6b-5c4d3e2f1a0b",
+        "nonce": "g_w1dE7CXqXmNnMUh4hcn2uuvCE-ASmUUQQRSwg-mNA",
+        "sig": "NVUl4nkHkHt-Df2SMrBvtIN4E7NumtX8RUiHNTmc1qjgy_DGrekCian09fE19id70uWq4ggNpLMUJv5LKr6CBA",
+        "trace_id": "conformance-v2-link-ok",
+        "type": "invoke",
+        "v": 2,
+        "workspace_id": "2a3b4c5d-6e7f-4a8b-9c0d-1e2f3a4b5c6d"
+      },
+      "op": "send"
+    }
+  ],
+  "version": 2
+}

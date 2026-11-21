@@ -1,0 +1,93 @@
+{
+  "check": null,
+  "description": "worktree mode: a throwaway worktree, deleted afterwards.",
+  "expect": {
+    "executor_calls": 1,
+    "frames": [
+      {
+        "state": "shown",
+        "type": "confirmation"
+      },
+      {
+        "state": "approved",
+        "type": "confirmation"
+      },
+      {
+        "data": "lint ok\n",
+        "type": "output"
+      },
+      {
+        "exit_code": 0,
+        "status": "ok",
+        "type": "result"
+      }
+    ],
+    "worktrees_after": 1
+  },
+  "name": "v2_gate_command_worktree_mode",
+  "setup": {
+    "executor": [
+      {
+        "chunks": [
+          [
+            "stdout",
+            "lint ok\n",
+            0
+          ]
+        ],
+        "exit_code": 0
+      }
+    ],
+    "now": 1796000005,
+    "window": [
+      {
+        "action": "approve",
+        "after": 0
+      }
+    ]
+  },
+  "steps": [
+    {
+      "frame": {
+        "args": {
+          "command_kind": "lint",
+          "repo_path": "~/work/acme"
+        },
+        "args_sha256": "721685e9da99fa2267b6595d1b74ab468a4f640afe01da3b2b534718f116fb20",
+        "capability": "repo.command.run",
+        "capability_version": 1,
+        "class": "gate",
+        "expires_at": 1796000090,
+        "grant": {
+          "approval_id": "8d7c6b5a-4e3f-4d2c-8b1a-0f9e8d7c6b5a",
+          "args_sha256": "721685e9da99fa2267b6595d1b74ab468a4f640afe01da3b2b534718f116fb20",
+          "capability": "repo.command.run",
+          "capability_version": 1,
+          "class": "gate",
+          "expires_at": 1796000090,
+          "grant_id": "7f36ceff-8821-4c7b-8a94-7bdb664e5fa3",
+          "issued_at": 1796000000,
+          "key_id": "03396219237f75a6",
+          "node_id": "6f1e2d3c-4b5a-4987-8a6b-5c4d3e2f1a0b",
+          "nonce": "8o7GCOstZcmMb-U0Uc9FTfU5bgYrCzqfjc_Y9m1Xbw8",
+          "sig": "Y1ZzZR2fxrUzU3EMdEqhy6mPI_bPpagtL1Qk1Znuv8OM9PUqsuzw_YsQhdzt5OupLG2agViyPLp7_h-36n3lDw",
+          "v": 2,
+          "workspace_id": "2a3b4c5d-6e7f-4a8b-9c0d-1e2f3a4b5c6d"
+        },
+        "id": "a7e1e31c-255b-4f75-9581-79a6c56064f1",
+        "invocation_id": "caa85e78-e252-4ead-a263-69d7dc337bfb",
+        "issued_at": 1796000000,
+        "key_id": "03396219237f75a6",
+        "node_id": "6f1e2d3c-4b5a-4987-8a6b-5c4d3e2f1a0b",
+        "nonce": "8o7GCOstZcmMb-U0Uc9FTfU5bgYrCzqfjc_Y9m1Xbw8",
+        "sig": "X7kwdtDBtobj3SDrPM-TMBWvIb1Q3QF74GBVYVc8EhJL8dDqoVT1HaDAMFgan2MWTwNKWP62c9dC3kRqHcI0Aw",
+        "trace_id": "conformance-v2-wt",
+        "type": "invoke",
+        "v": 2,
+        "workspace_id": "2a3b4c5d-6e7f-4a8b-9c0d-1e2f3a4b5c6d"
+      },
+      "op": "send"
+    }
+  ],
+  "version": 2
+}

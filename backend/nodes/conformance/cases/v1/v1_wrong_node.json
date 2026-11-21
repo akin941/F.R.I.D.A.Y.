@@ -1,0 +1,43 @@
+{
+  "check": 7,
+  "description": "An envelope for another node.",
+  "expect": {
+    "frames": [
+      {
+        "refusal_code": "wrong_node",
+        "status": "refused",
+        "type": "result"
+      }
+    ]
+  },
+  "name": "v1_wrong_node",
+  "setup": {
+    "now": 1796000005
+  },
+  "steps": [
+    {
+      "frame": {
+        "args": {},
+        "args_sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+        "capability": "apps.frontmost",
+        "capability_version": 1,
+        "class": "read",
+        "expires_at": 1796000030,
+        "grant": null,
+        "id": "41e1d294-436d-4c5f-834f-73849a979159",
+        "invocation_id": "b052a4ac-44df-4324-9a31-1d63b0d5844d",
+        "issued_at": 1796000000,
+        "key_id": "03396219237f75a6",
+        "node_id": "6f1e2d3c-4b5a-4987-8a6b-5c4d3e2f1a0c",
+        "nonce": "v1wtZMqvo0UINvYOSkCIQX4X8hlEPCARhpYRBpOuDhw",
+        "sig": "42I3wJf19txYSO7OCNB9V7gRY3Y8etjdaNrgShym2jJjWDwkwNtvrQyjranPYwvrVAx26IYq6rkLbKM7gvKCBA",
+        "trace_id": "conformance-v1-wrong",
+        "type": "invoke",
+        "v": 1,
+        "workspace_id": "2a3b4c5d-6e7f-4a8b-9c0d-1e2f3a4b5c6d"
+      },
+      "op": "send"
+    }
+  ],
+  "version": 1
+}

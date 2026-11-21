@@ -1,0 +1,45 @@
+{
+  "check": 6,
+  "description": "Args changed after signing (not re-signed).",
+  "expect": {
+    "frames": [
+      {
+        "refusal_code": "bad_signature",
+        "status": "refused",
+        "type": "result"
+      }
+    ]
+  },
+  "name": "v2_args_changed_after_signing",
+  "setup": {
+    "now": 1796000005
+  },
+  "steps": [
+    {
+      "frame": {
+        "args": {
+          "repo_path": "~/work/other"
+        },
+        "args_sha256": "0128da9492974695f0291be1c7dd637e7a6186db6ac98d8e9da57638d54939b4",
+        "capability": "git.status",
+        "capability_version": 1,
+        "class": "read",
+        "expires_at": 1796000030,
+        "grant": null,
+        "id": "01bf9901-a950-40bb-873c-dd0318a0bc3e",
+        "invocation_id": "3e6a1211-f457-4350-870c-89a7d4728b15",
+        "issued_at": 1796000000,
+        "key_id": "03396219237f75a6",
+        "node_id": "6f1e2d3c-4b5a-4987-8a6b-5c4d3e2f1a0b",
+        "nonce": "kQrESeuIKbur8PXUxsRO2nK-PqKWGz3q9k32CvUtibU",
+        "sig": "akTOjx2SuV4Ke5cb0ZcgCOVdLj5T4gWFTqXTjccL59fxMJMqUdkg9qIrnKvqGIk7_XUA3InCMPQ4WiUfK9DQBA",
+        "trace_id": "conformance-v2-args-after",
+        "type": "invoke",
+        "v": 2,
+        "workspace_id": "2a3b4c5d-6e7f-4a8b-9c0d-1e2f3a4b5c6d"
+      },
+      "op": "send"
+    }
+  ],
+  "version": 2
+}

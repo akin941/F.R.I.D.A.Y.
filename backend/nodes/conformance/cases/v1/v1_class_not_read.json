@@ -1,0 +1,43 @@
+{
+  "check": 13,
+  "description": "A v1 session gets read invokes only.",
+  "expect": {
+    "frames": [
+      {
+        "refusal_code": "class_not_allowed",
+        "status": "refused",
+        "type": "result"
+      }
+    ]
+  },
+  "name": "v1_class_not_read",
+  "setup": {
+    "now": 1796000005
+  },
+  "steps": [
+    {
+      "frame": {
+        "args": {},
+        "args_sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+        "capability": "apps.frontmost",
+        "capability_version": 1,
+        "class": "gate",
+        "expires_at": 1796000030,
+        "grant": null,
+        "id": "147a3e86-3595-4460-a986-b9c47a7ac2fc",
+        "invocation_id": "21f588bc-4677-41e7-832a-939bca598883",
+        "issued_at": 1796000000,
+        "key_id": "03396219237f75a6",
+        "node_id": "6f1e2d3c-4b5a-4987-8a6b-5c4d3e2f1a0b",
+        "nonce": "sq5Hg0wvy4GDYldTzkCHcxG_mZfVno7Ma1DLVrbRfTc",
+        "sig": "a_pooEGBWjliuLx4lKVjpgZBW3lrd2h3lD249af4RpoCEEwsNlwJ9sHPEjbNLuX618O86UVXlCpezYYhv2AfAw",
+        "trace_id": "conformance-v1-gate",
+        "type": "invoke",
+        "v": 1,
+        "workspace_id": "2a3b4c5d-6e7f-4a8b-9c0d-1e2f3a4b5c6d"
+      },
+      "op": "send"
+    }
+  ],
+  "version": 1
+}

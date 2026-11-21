@@ -22,6 +22,9 @@ from django.conf import settings
 from nodes.protocol.signing import KeyRing, SignatureError, SigningKey, load_public_key_b64
 
 _VECTORS_DIR = Path(__file__).resolve().parent / "protocol" / "vectors"
+_CONFORMANCE_KEYS = (
+    Path(__file__).resolve().parent / "conformance" / "keys" / "conformance_keys.json"
+)
 
 
 class SigningKeyUnavailable(Exception):
@@ -49,6 +52,11 @@ def published_test_key_ids() -> frozenset:
             ids.add(document["key_id"])
             if document.get("unpinned_key_id"):
                 ids.add(document["unpinned_key_id"])
+    # The conformance key pair (Phase 10 branch 2): the hostile fake gateway
+    # signs every case with it, so it is public too.
+    if _CONFORMANCE_KEYS.exists():
+        document = json.loads(_CONFORMANCE_KEYS.read_text(encoding="utf-8"))
+        ids.update(entry["key_id"] for entry in document.values() if isinstance(entry, dict))
     return frozenset(ids)
 
 

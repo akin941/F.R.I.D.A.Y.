@@ -1,0 +1,45 @@
+{
+  "check": 15,
+  "description": "Args outside the node's own schema (wrong_type).",
+  "expect": {
+    "frames": [
+      {
+        "refusal_code": "args_schema",
+        "status": "refused",
+        "type": "result"
+      }
+    ]
+  },
+  "name": "v1_args_wrong_type",
+  "setup": {
+    "now": 1796000005
+  },
+  "steps": [
+    {
+      "frame": {
+        "args": {
+          "repo_path": 7
+        },
+        "args_sha256": "ee49b4595bc42dcfdfc81ca5258ae6604078efe406d807f65dc3b3ed52f4ed88",
+        "capability": "git.status",
+        "capability_version": 1,
+        "class": "read",
+        "expires_at": 1796000030,
+        "grant": null,
+        "id": "05042e66-bafd-4c36-bc98-090d2190d689",
+        "invocation_id": "903c1272-c598-4f8a-b31b-cbd49852f2b0",
+        "issued_at": 1796000000,
+        "key_id": "03396219237f75a6",
+        "node_id": "6f1e2d3c-4b5a-4987-8a6b-5c4d3e2f1a0b",
+        "nonce": "UQkRg8gteleHAlJjSZ9dW4XWeLz1oYHWJi-cG3L8rec",
+        "sig": "mbJjadvscOeXkkF0i6E6OCaKGpMyKiMi7SjirBUzQwqQ1TrvKmavL6f6NBueqnOzwmAaagmv40v-J7eOKrzWAA",
+        "trace_id": "conformance-v1-args-wrong_type",
+        "type": "invoke",
+        "v": 1,
+        "workspace_id": "2a3b4c5d-6e7f-4a8b-9c0d-1e2f3a4b5c6d"
+      },
+      "op": "send"
+    }
+  ],
+  "version": 1
+}

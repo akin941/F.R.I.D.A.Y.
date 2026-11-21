@@ -169,6 +169,8 @@ def verify_invoke(frame, *, version, state: NodeState, now: int) -> dict:
     else:
         max_ttl = MAX_INVOKE_TTL_SECONDS_V2[capability_class]
     _times(envelope, now, max_ttl)
+    # Check 11 before 12-21 on purpose (the D5 order, as in v1): a refused
+    # envelope still burns its nonce; a server retry uses a fresh one.
     state.nonce_cache.check_and_add(envelope["nonce"], envelope["expires_at"], now)
     entry = state.catalogue.get(envelope["capability"])
     if entry is None or entry.get("version") != envelope["capability_version"]:

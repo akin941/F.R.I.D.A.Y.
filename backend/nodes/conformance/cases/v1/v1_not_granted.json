@@ -1,0 +1,46 @@
+{
+  "check": 16,
+  "description": "A capability present but not granted on the node.",
+  "expect": {
+    "frames": [
+      {
+        "refusal_code": "not_granted",
+        "status": "refused",
+        "type": "result"
+      }
+    ]
+  },
+  "name": "v1_not_granted",
+  "setup": {
+    "availability": {
+      "apps.frontmost": "not_granted"
+    },
+    "now": 1796000005
+  },
+  "steps": [
+    {
+      "frame": {
+        "args": {},
+        "args_sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+        "capability": "apps.frontmost",
+        "capability_version": 1,
+        "class": "read",
+        "expires_at": 1796000030,
+        "grant": null,
+        "id": "6e8fbb27-5d9d-4fcc-9090-2573f67819d7",
+        "invocation_id": "ed3214e3-583b-4edf-8553-50d4b4a4cbc3",
+        "issued_at": 1796000000,
+        "key_id": "03396219237f75a6",
+        "node_id": "6f1e2d3c-4b5a-4987-8a6b-5c4d3e2f1a0b",
+        "nonce": "RM5YG_SxJ5To_GL0q_T--65VaMM0SQ8OMsY96u0UAUU",
+        "sig": "k2l9rS7_sT5RvFUWEh662AWO6WuFy8eOWmu1dWcBdWsxohLMFv9ufYw1OHI22yn58_Nu3YyqScrkvf-2wN6MCg",
+        "trace_id": "conformance-v1-grant",
+        "type": "invoke",
+        "v": 1,
+        "workspace_id": "2a3b4c5d-6e7f-4a8b-9c0d-1e2f3a4b5c6d"
+      },
+      "op": "send"
+    }
+  ],
+  "version": 1
+}

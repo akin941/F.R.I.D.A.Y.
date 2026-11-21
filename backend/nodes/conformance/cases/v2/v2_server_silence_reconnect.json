@@ -1,0 +1,22 @@
+{
+  "check": null,
+  "description": "Server silence beyond 45 s drops the socket; reconnect with backoff.",
+  "expect": {
+    "backoff_max_seconds": 1,
+    "closed_reason": "server_silent",
+    "frames": [],
+    "reconnect_allowed": true
+  },
+  "name": "v2_server_silence_reconnect",
+  "setup": {
+    "now": 1796000005,
+    "silent": true
+  },
+  "steps": [
+    {
+      "op": "advance",
+      "seconds": 46
+    }
+  ],
+  "version": 2
+}

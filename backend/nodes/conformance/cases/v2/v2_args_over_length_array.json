@@ -1,0 +1,88 @@
+{
+  "check": 20,
+  "description": "An over-length array argument.",
+  "expect": {
+    "frames": [
+      {
+        "refusal_code": "args_schema",
+        "status": "refused",
+        "type": "result"
+      }
+    ]
+  },
+  "name": "v2_args_over_length_array",
+  "setup": {
+    "now": 1796000005
+  },
+  "steps": [
+    {
+      "frame": {
+        "args": {
+          "cwd_prefixes": [
+            "~/w",
+            "~/w",
+            "~/w",
+            "~/w",
+            "~/w",
+            "~/w",
+            "~/w",
+            "~/w",
+            "~/w",
+            "~/w",
+            "~/w",
+            "~/w",
+            "~/w",
+            "~/w",
+            "~/w",
+            "~/w",
+            "~/w",
+            "~/w",
+            "~/w",
+            "~/w",
+            "~/w",
+            "~/w",
+            "~/w",
+            "~/w",
+            "~/w",
+            "~/w",
+            "~/w",
+            "~/w",
+            "~/w",
+            "~/w",
+            "~/w",
+            "~/w",
+            "~/w",
+            "~/w",
+            "~/w",
+            "~/w",
+            "~/w",
+            "~/w",
+            "~/w",
+            "~/w"
+          ],
+          "limit": 10,
+          "since_hours": 24
+        },
+        "args_sha256": "6e1d9df6f86848e55fd33363f84d1464a9322563e289af9b701ad5ae1f628787",
+        "capability": "claude.sessions.list",
+        "capability_version": 1,
+        "class": "read",
+        "expires_at": 1796000030,
+        "grant": null,
+        "id": "4cc14c3c-1dfd-4d7a-9cc8-a898042d722a",
+        "invocation_id": "cf0a6838-e088-4ba5-b8e5-1736da8b3412",
+        "issued_at": 1796000000,
+        "key_id": "03396219237f75a6",
+        "node_id": "6f1e2d3c-4b5a-4987-8a6b-5c4d3e2f1a0b",
+        "nonce": "92m8RebXiWUtY3UhBlf1fIiwaCxBlrHzc1l317UwMFY",
+        "sig": "WYvJxPJtyMF98jhFx2qYZ2GrRhh0eLIrGDo99fpvr-DgjsNYhTjbpKtR3JmMQ1--rQcKrw4f9030V3LJ_xs9AQ",
+        "trace_id": "conformance-v2-array",
+        "type": "invoke",
+        "v": 2,
+        "workspace_id": "2a3b4c5d-6e7f-4a8b-9c0d-1e2f3a4b5c6d"
+      },
+      "op": "send"
+    }
+  ],
+  "version": 2
+}

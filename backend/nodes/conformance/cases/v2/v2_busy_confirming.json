@@ -1,0 +1,108 @@
+{
+  "check": 23,
+  "description": "A second gated invoke while a window is open.",
+  "expect": {
+    "executor_calls": 0,
+    "frames": [
+      {
+        "state": "shown",
+        "type": "confirmation"
+      },
+      {
+        "refusal_code": "busy_confirming",
+        "status": "refused",
+        "type": "result"
+      }
+    ],
+    "windows_shown": 1
+  },
+  "name": "v2_busy_confirming",
+  "setup": {
+    "now": 1796000005
+  },
+  "steps": [
+    {
+      "frame": {
+        "args": {
+          "command_kind": "test",
+          "repo_path": "~/work/acme"
+        },
+        "args_sha256": "a1075b636d8f7d76b64e6dddaf0789d5915c4cc65cdc2d4a04ade9dbd96d2f85",
+        "capability": "repo.command.run",
+        "capability_version": 1,
+        "class": "gate",
+        "expires_at": 1796000090,
+        "grant": {
+          "approval_id": "8d7c6b5a-4e3f-4d2c-8b1a-0f9e8d7c6b5a",
+          "args_sha256": "a1075b636d8f7d76b64e6dddaf0789d5915c4cc65cdc2d4a04ade9dbd96d2f85",
+          "capability": "repo.command.run",
+          "capability_version": 1,
+          "class": "gate",
+          "expires_at": 1796000090,
+          "grant_id": "99abc01a-8938-44bf-bd5c-25b0137f56a0",
+          "issued_at": 1796000000,
+          "key_id": "03396219237f75a6",
+          "node_id": "6f1e2d3c-4b5a-4987-8a6b-5c4d3e2f1a0b",
+          "nonce": "fNWZCIYzwYx6PiQzbvnQHQEq30UeJt-WN3yyTdOvU-Q",
+          "sig": "S0EeY4eUg6I__rXd7UnFega8gGs1pY4sSnNVjFQusVpfbUHtHCOX1cVvhszh85IFDP_o4VtXVQtJBuYR-LtFAA",
+          "v": 2,
+          "workspace_id": "2a3b4c5d-6e7f-4a8b-9c0d-1e2f3a4b5c6d"
+        },
+        "id": "ab68334c-f0bf-41c8-bd24-77c21917108d",
+        "invocation_id": "96ec9b09-4b51-4907-ad16-374badb09ea5",
+        "issued_at": 1796000000,
+        "key_id": "03396219237f75a6",
+        "node_id": "6f1e2d3c-4b5a-4987-8a6b-5c4d3e2f1a0b",
+        "nonce": "fNWZCIYzwYx6PiQzbvnQHQEq30UeJt-WN3yyTdOvU-Q",
+        "sig": "ajKdELGA6Skx3OqNtF-e0507SWto-uIHnbeTj_KSaIeGT01NKeW4fEgEgjVD3iYmI8Wi48JvwmO22-74yXzXCg",
+        "trace_id": "conformance-v2-busy-a",
+        "type": "invoke",
+        "v": 2,
+        "workspace_id": "2a3b4c5d-6e7f-4a8b-9c0d-1e2f3a4b5c6d"
+      },
+      "op": "send"
+    },
+    {
+      "frame": {
+        "args": {
+          "command_kind": "test",
+          "repo_path": "~/work/acme"
+        },
+        "args_sha256": "a1075b636d8f7d76b64e6dddaf0789d5915c4cc65cdc2d4a04ade9dbd96d2f85",
+        "capability": "repo.command.run",
+        "capability_version": 1,
+        "class": "gate",
+        "expires_at": 1796000090,
+        "grant": {
+          "approval_id": "8d7c6b5a-4e3f-4d2c-8b1a-0f9e8d7c6b5a",
+          "args_sha256": "a1075b636d8f7d76b64e6dddaf0789d5915c4cc65cdc2d4a04ade9dbd96d2f85",
+          "capability": "repo.command.run",
+          "capability_version": 1,
+          "class": "gate",
+          "expires_at": 1796000090,
+          "grant_id": "6921ccc0-6388-45cb-bc2e-19c20c9634be",
+          "issued_at": 1796000000,
+          "key_id": "03396219237f75a6",
+          "node_id": "6f1e2d3c-4b5a-4987-8a6b-5c4d3e2f1a0b",
+          "nonce": "iWFyb0ZtXnwE3Y91wMa-w3bRMGQ9r9_c0BW7NY3vpUk",
+          "sig": "mvOrb3o_cyJgUholaUqSPH_iNvHF0-6TN-qRD_bugTH7Wze4viiZrPZCLno4_ZY1bXvEeqJ9sxeyBQdF9UhACA",
+          "v": 2,
+          "workspace_id": "2a3b4c5d-6e7f-4a8b-9c0d-1e2f3a4b5c6d"
+        },
+        "id": "608f578d-b534-47ed-b90d-a79539dd0c54",
+        "invocation_id": "b2904277-bb3d-4b42-bcce-ce14d726facc",
+        "issued_at": 1796000000,
+        "key_id": "03396219237f75a6",
+        "node_id": "6f1e2d3c-4b5a-4987-8a6b-5c4d3e2f1a0b",
+        "nonce": "iWFyb0ZtXnwE3Y91wMa-w3bRMGQ9r9_c0BW7NY3vpUk",
+        "sig": "mKOD445x-wWzgUbz84fe3sG4hYVrPLcLHPZicm0A7tK2sfnDBRQMJjJN_tPYjg8TKpxXEC_ZOyYcsABI1VHQCw",
+        "trace_id": "conformance-v2-busy-b",
+        "type": "invoke",
+        "v": 2,
+        "workspace_id": "2a3b4c5d-6e7f-4a8b-9c0d-1e2f3a4b5c6d"
+      },
+      "op": "send"
+    }
+  ],
+  "version": 2
+}
