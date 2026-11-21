@@ -3569,10 +3569,22 @@ eval status — at phone width too.
   web, `cli`/`openai`/`hook` PATs, admin, member, agent, anonymous;
   isolation; shape), `memory/tests/test_graph_ui_api.py`,
   `tools/tests/test_transcript_audit_constants.py`, the conflict-folder
-  cases in `tools/tests/test_vault_mirror.py`. Vitest: `EntityTimeline`,
+  cases in `tools/tests/test_vault_mirror.py` and
+  `tools/tests/test_export.py` (`TestDescribeExecution`: the exact summary
+  shape with `conflicts_private`/`conflicts_folders`, and the folder names
+  of a run with shared and private conflicts). Vitest: `EntityTimeline`,
   `GraphView`, `EvalRunsView`, the new `IngestionView` cases,
   `vault-export.test.tsx`, `graph-routes.test.ts`, nav and query-key
   isolation, and the token check.
+
+**Review round 1 (2026-11-20).** MEDIUM: the exact-dict assertion in
+`tools/tests/test_export.py::TestDescribeExecution` lacked the two new
+summary keys; fixed, plus two conflict-folder cases. LOW: the
+`harness/tests/test_commit_ingestion.py` KeyError did not reproduce
+(the file passes alone and in the full suite here; it is not touched by
+this branch), so it is treated as a concurrency flake of the shared git
+fixture. LOW: frontend `npm ci && npm run lint && npm run typecheck &&
+npm test` run green on the branch (156 files, 1454 tests).
 
 **Owner steps (pending) — `feat/p8-graph-ui`, recorded 2026-11-20.**
 1. Run the independent Sonnet 5 review of this branch and fix findings
