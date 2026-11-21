@@ -108,3 +108,42 @@ the authoritative description; the operator-facing consequences are:
 - Containers run with `--cap-drop ALL` and
   `--security-opt no-new-privileges` in addition to the existing
   network/resource limits.
+
+## Graphify image (Phase 8B branch 5, 2026-11-21)
+
+`graphify.Dockerfile` builds the Graphify AST-only code-graph image used by
+`harness.runner.launch_graphify_container` (governance:
+`docs/mcp/graphify.md`). Unlike the two agent images above, its pins are
+**real** values, verified 2026-11-21:
+
+- base `python:3.12-slim-bookworm` by its multi-arch index digest;
+- `graphifyy==0.9.103` by name, version and sha256, with every transitive
+  wheel hash-locked in `graphify.lock.txt` for CPython 3.12 on manylinux
+  x86_64 and aarch64; installed with `--require-hashes --no-deps
+  --only-binary=:all:` (wheels only, no install scripts).
+
+Build it on the runner host, from inside this directory (PyPI access is
+needed at build time only):
+
+```bash
+docker build -f graphify.Dockerfile -t friday-harness-graphify:0.9.103 .
+```
+
+and point `HARNESS_IMAGE_GRAPHIFY` at the tag if it differs. At run time the
+container gets `--network none`, `--read-only`, a size-capped noexec tmpfs
+`/work` (`HARNESS_GRAPHIFY_TMPFS_SIZE`), `/repo` read-only and `/out` as the
+only writable bind; no env file, no credentials. `graphify_run.sh` copies
+the clone without `.git`, runs `graphify update repo --no-cluster` and copies
+a regular `graph.json` of at most 20 MB to `/out`; the host re-checks it
+(`harness/safe_read.py`). An opt-in test builds and runs the real image over
+the fixture package:
+
+```bash
+HARNESS_GRAPHIFY_IMAGE_TEST=1 uv run pytest harness/tests/test_graphify.py -k real_image
+```
+
+Re-lock (a dedicated, reviewed upgrade branch only): pick the newest
+releases that are at least 14 days old, regenerate `graphify.lock.txt` with
+every wheel hash for both architectures, re-capture
+`harness/tests/fixtures/graphify/graph_<version>.json` with the new version
+over `fixtures/graphify/package_v1`, and update `docs/mcp/graphify.md`.
