@@ -561,6 +561,20 @@ AI_BUDGET_REFLECTION_WEEKLY_USD = env("AI_BUDGET_REFLECTION_WEEKLY_USD", default
 AI_LEARNING_EVAL_PURPOSES = ("memory.eval_answer",)
 AI_BUDGET_LEARNING_EVAL_MONTHLY_USD = env("AI_BUDGET_LEARNING_EVAL_MONTHLY_USD", default="5")
 
+# --- Pre-send compression stage (Phase 8B branch 6, brief D11) ---
+# `ai_core/compression.py`: shortens long prior assistant replies through
+# the `compressor` sidecar (Headroom, deploy/compressor/, internal network,
+# no egress). Off by default, per purpose, with a hard code-level bypass set
+# (`COMPRESSION_BYPASS`) that wins over this list. A purpose is added here
+# only with a recorded `memory_eval compare --compression <purpose>` result
+# that is not `inconclusive`, <= 1 point accuracy loss and zero extra leaks
+# (the brief's go/no-go table). `chat` is the only candidate today.
+AI_COMPRESSION_ENABLED = env.bool("AI_COMPRESSION_ENABLED", default=False)
+AI_COMPRESSION_PURPOSES = frozenset(env.list("AI_COMPRESSION_PURPOSES", default=[]))
+AI_COMPRESSION_URL = env("AI_COMPRESSION_URL", default="http://compressor:8080/compress")
+# On a timeout or error the original messages are sent (fail open).
+AI_COMPRESSION_TIMEOUT_MS = env.int("AI_COMPRESSION_TIMEOUT_MS", default=300)
+
 # --- Voice / speech gateway (Phase 6 branch 1, ADR-011) ---
 # Utterance cap (D2/D3): 30 s of 16 kHz mono PCM16 = 960 KB, below Django's
 # 2.5 MB in-memory upload threshold, so audio never touches disk.

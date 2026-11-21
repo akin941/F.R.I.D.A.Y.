@@ -9,6 +9,11 @@ brief D9; runbook `docs/runbooks/memory-eval.md`).
   against.
 - `compare --set public|private --retrieval-mode <candidate>`: arm A legacy,
   arm B the candidate (branch 4 registers `hybrid`); verdict on arm B.
+- `compare --set public|private --compression <purpose>` (branch 6, D11):
+  both arms answer under `<purpose>` (e.g. `chat`) with `legacy` retrieval,
+  arm A with compression off, arm B with it on for that purpose only. The
+  verdict is `inconclusive` when arm B compressed nothing, `fail` at more
+  than 1 point accuracy loss or any extra leak, else `pass`.
 
 These three run **only** under `DJANGO_SETTINGS_MODULE=config.settings.eval`
 (own database) and print a metrics table. Each writes a metrics-only result
@@ -45,6 +50,7 @@ from memory.evals.runner import (
     require_eval_settings,
     run_cases,
     run_compare,
+    run_compression_compare,
 )
 from memory.models import MemoryEvalRun
 from workspaces.models import Workspace
@@ -59,6 +65,8 @@ _TABLE_KEYS = (
     "leak_rate",
     "temporal_correctness",
     "answer_accuracy",
+    "pre_tokens",
+    "post_tokens",
     "verdict",
 )
 
@@ -70,6 +78,16 @@ def _dirs():
         "private": private / RESULTS_DIRNAME,
         "public": Path(private_dir(settings.MEMORY_EVAL_RESULTS_DIR)),
     }
+
+
+def _column(result):
+    if result.get("compression_purpose"):
+        label = f"{result['compression_purpose']} compression " + (
+            "on" if result["arm"] == "b" else "off"
+        )
+    else:
+        label = f"{result['retrieval_mode']}"
+    return label + (f" (arm {result['arm']})" if result["arm"] else "")
 
 
 class Command(BaseCommand):
@@ -88,7 +106,13 @@ class Command(BaseCommand):
             if name == "run":
                 sub.add_argument("--retrieval-mode", default=BASELINE_MODE)
             if name == "compare":
-                sub.add_argument("--retrieval-mode", required=True)
+                arm = sub.add_mutually_exclusive_group(required=True)
+                arm.add_argument("--retrieval-mode")
+                arm.add_argument(
+                    "--compression",
+                    metavar="PURPOSE",
+                    help="D11: both arms answer under PURPOSE, arm B with compression on.",
+                )
         record = actions.add_parser("record")
         record.add_argument("file")
         record.add_argument("--owner", required=True, help="The installation owner's e-mail.")
@@ -116,7 +140,20 @@ class Command(BaseCommand):
         dirs = _dirs()
         results_dir = dirs[options["set_name"]]
         spend_dirs = (dirs["private"], dirs["public"])
-        if action == "compare":
+        if action == "compare" and options.get("compression"):
+            if options["retrieval_only"]:
+                raise EvalRefused(
+                    "a compression compare needs the answer calls: drop --retrieval-only"
+                )
+            arms, paths = run_compression_compare(
+                cases,
+                set_name=options["set_name"],
+                purpose=options["compression"],
+                results_dir=results_dir,
+                spend_dirs=spend_dirs,
+            )
+            self._table(arms)
+        elif action == "compare":
             arms, paths = run_compare(
                 cases,
                 set_name=options["set_name"],
@@ -142,9 +179,7 @@ class Command(BaseCommand):
             self.stdout.write(f"Result file: {path}")
 
     def _table(self, results):
-        headers = ["metric"] + [
-            f"{r['retrieval_mode']}" + (f" (arm {r['arm']})" if r["arm"] else "") for r in results
-        ]
+        headers = ["metric"] + [_column(r) for r in results]
         first = results[0]
         self.stdout.write(
             f"memory_eval {first['kind']} --set {first['set']} (run {first['run_id']})"
