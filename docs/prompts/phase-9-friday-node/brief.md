@@ -2052,3 +2052,19 @@ Implementation notes (branch 1):
 - Residual (recorded in ADR-013): a lost rotate response leaves the node
   only the grace window on its old secret, then re-pairing. M1 must
   persist the new secret before finishing the rotate call.
+
+### Known follow-ups (LOW, from the `feat/p9-node-pairing` review)
+
+1. `backend/accounts/devices.py` — engaging an already-engaged kill switch
+   re-publishes but writes no audit row, and a node that fails
+   authentication with a rotated-out previous secret after its grace is
+   audited only through the flood-capped failure path. Acceptable; for
+   completeness, optionally record an audit entry (e.g.
+   `accounts.node.kill_switch.reengaged`) when engage is called while
+   already engaged.
+2. `backend/accounts/views.py` — `NodeCredentialRotateView` authenticates
+   the node secret twice (authenticator, then `rotate_node_secret`),
+   doubling a DB lookup and `last_seen` touch per request. Harmless and
+   race-safe (the rotation re-checks under the row lock). Optionally pass
+   the already-authenticated credential into the rotate service to avoid
+   the second lookup.
