@@ -701,12 +701,14 @@ LEARNING_BEAT_TASKS = {
         "memory.ingestion.tasks.purge_expired_episodes_task",
         "connectors.tasks.ingest_calendar_metadata",
         "assistant.tasks.assemble_self_block_task",
+        "tools.tasks.pull_transcripts_task",
     ),
     "runner": ("harness.tasks.ingest_repo_commits",),
 }
 # The corpus files and the marker that keeps provider prefixes split in the
 # committed files (see memory/tests/test_scrubber.py).
 SCRUBBER_CORPUS_FILES = {"secrets": "secrets.jsonl", "pii": "pii.jsonl", "benign": "benign.jsonl"}
+SCRUBBER_TRANSCRIPT_CORPUS = "transcripts.jsonl"
 _SCRUBBER_SPLIT_MARKER = "<<>>"
 
 
@@ -731,6 +733,7 @@ def _installation_owner_workspace():
 
 
 def _check_learning_sources():
+    from memory.ingestion.mapping import rule_source_for
     from memory.models import IngestionSource, WorkspaceMappingRule
 
     workspace = _installation_owner_workspace()
@@ -747,10 +750,13 @@ def _check_learning_sources():
     enabled = [s for s in sources.values() if s.enabled]
     if not enabled:
         return CheckResult("learning_sources", WARN, "all four sources are disabled")
+    # A shared-rules source (Phase 8B branch 8: the transcript sources) is
+    # mapped by the hooks source's rules.
+    rule_sources = {s.id: rule_source_for(s) for s in enabled}
     mapped = set(
-        WorkspaceMappingRule.objects.filter(source__in=enabled, enabled=True).values_list(
-            "source_id", flat=True
-        )
+        WorkspaceMappingRule.objects.filter(
+            source_id__in=[r.id for r in rule_sources.values() if r is not None], enabled=True
+        ).values_list("source_id", flat=True)
     )
     problems = []
     for source in sorted(enabled, key=lambda s: s.kind):
@@ -758,7 +764,8 @@ def _check_learning_sources():
             problems.append(f"{source.kind} forgotten")
         elif source.paused_at is not None:
             problems.append(f"{source.kind} paused")
-        if source.id not in mapped:
+        rule_source = rule_sources[source.id]
+        if rule_source is None or rule_source.id not in mapped:
             problems.append(f"{source.kind} has no mapping rule (every item is dropped)")
     git = sources[IngestionSource.Kind.GIT]
     if git.enabled and not getattr(settings, "MEMORY_OWNER_GIT_EMAILS", []):
@@ -800,23 +807,37 @@ def scrubber_corpus_dir():
     return Path(memory.__file__).resolve().parent / "tests" / "scrubber_corpus"
 
 
+def _corpus_rows(path):
+    rows = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if line.strip():
+            row = json.loads(line)
+            rows.append(
+                {
+                    "id": str(row["id"]),
+                    "class": row.get("class"),
+                    "text": row["text"].replace(_SCRUBBER_SPLIT_MARKER, ""),
+                    "needles": [
+                        n.replace(_SCRUBBER_SPLIT_MARKER, "") for n in row.get("needles", [])
+                    ],
+                }
+            )
+    return rows
+
+
 def _load_scrubber_corpus(directory):
     corpus = {}
     for name, filename in SCRUBBER_CORPUS_FILES.items():
-        rows = []
-        for line in (directory / filename).read_text(encoding="utf-8").splitlines():
-            if line.strip():
-                row = json.loads(line)
-                rows.append(
-                    {
-                        "id": str(row["id"]),
-                        "text": row["text"].replace(_SCRUBBER_SPLIT_MARKER, ""),
-                        "needles": [
-                            n.replace(_SCRUBBER_SPLIT_MARKER, "") for n in row.get("needles", [])
-                        ],
-                    }
-                )
-        corpus[name] = rows
+        corpus[name] = _corpus_rows(directory / filename)
+    # Phase 8B branch 8 (D14): the labelled transcript fragments join the
+    # secrets and PII classes (the same 100% secrets-recall gate).
+    transcripts = directory / SCRUBBER_TRANSCRIPT_CORPUS
+    if transcripts.is_file():
+        for row in _corpus_rows(transcripts):
+            if row["class"] == "secret":
+                corpus["secrets"].append(row)
+            elif row["class"] == "pii":
+                corpus["pii"].append(row)
     return corpus
 
 

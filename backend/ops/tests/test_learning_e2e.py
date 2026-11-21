@@ -117,7 +117,7 @@ def _setup_sources(web, personal, firm, repo, firm_repo):
     call_command("seed_ingestion_sources", stdout=StringIO())
     rows = web.get(f"{SOURCES}?workspace={personal.id}").json()
     by_kind = {row["kind"]: row["id"] for row in rows}
-    assert set(by_kind) == {Kind.GIT, Kind.HARNESS, Kind.CLAUDE_CODE_HOOKS, Kind.CALENDAR}
+    assert set(by_kind) == set(Kind.values)  # every kind, seeded disabled
     for kind in (Kind.GIT, Kind.CLAUDE_CODE_HOOKS):
         response = web.patch(f"{SOURCES}/{by_kind[kind]}", {"enabled": True}, format="json")
         assert response.status_code == 200, response.content

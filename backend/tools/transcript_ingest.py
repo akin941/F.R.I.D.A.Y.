@@ -71,12 +71,13 @@ CAPABILITIES = {
 }
 # The only capabilities a `CHANNEL_SYSTEM` read may name (D13 amendment).
 SYSTEM_READ_CAPABILITIES = frozenset(CAPABILITIES.values())
-# Personal-class capabilities: the actor check applies (D13 amendment).
+# The capabilities whose contract has `data_class: personal` (Phase 9 D7
+# plus the two owner-turn ones): the actor check applies (D13 amendment).
 PERSONAL_READ_CAPABILITIES = SYSTEM_READ_CAPABILITIES | {
-    "claude.sessions.list",
     "claude.sessions.read",
-    "codex.threads.list",
     "codex.threads.read",
+    "apps.frontmost",
+    "windows.list",
 }
 
 MAX_SINCE_AGE = timedelta(days=7)

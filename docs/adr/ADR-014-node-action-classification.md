@@ -51,3 +51,10 @@ amendment; review rejected that.
   local list), by this ADR, not by precedent.
 - A sandbox escape found later moves test/lint back to gate-class with no
   further decision needed.
+
+## Implementation note — Phase 8B branch 8 (2026-11-20)
+
+`claude.transcripts.owner_turns` and `codex.transcripts.owner_turns` (owner
+turns of Claude Code sessions and Codex threads) are session reads and are in
+the **read** class under this ADR's existing "session/thread lists and reads"
+entry. Nothing moves between classes.

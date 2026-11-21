@@ -850,6 +850,37 @@ every other kernel app as a source. `memory` and `memory.ingestion` gain
   the fenced results inside the normal `chat` call. Rule 3 is unchanged:
   one `ModelUsage` row for that call.
 
+> **Amendment to D7 and D9 (Phase 8B branch 8, recorded 2026-11-20).**
+> Phase 8B D13 adds a system-initiated read path (the transcript pull,
+> `tools/transcript_ingest.py`) that D7/D9 did not define:
+> - `invoke_read` and `refuse_read` gain a keyword `channel` (default
+>   `CHANNEL_WEB` for the chat tool path). The pull passes `actor=<the
+>   node's owner>` and `channel=CHANNEL_SYSTEM`; the chain row's `channel`
+>   and the `AuditLog` metadata record `system: true` and the job name
+>   `transcript_pull`. A null actor is never used.
+> - **Step 0, the actor check**, before anything is signed: for a
+>   capability whose contract has `data_class: personal`, the actor must be
+>   non-null, active, the node's owner and an owner of the target
+>   workspace; otherwise `server_refused:actor_not_owner` (nothing sent, one
+>   chain row and one `AuditLog` row). The D7 `(status, refusal_code)`
+>   vocabulary gains `server_refused` / `actor_not_owner`.
+> - `channel=CHANNEL_SYSTEM` is accepted only for `SYSTEM_READ_CAPABILITIES`
+>   (`claude.transcripts.owner_turns`, `codex.transcripts.owner_turns`);
+>   any other capability is `server_refused:not_invocable`. The capability
+>   allowlist limits capabilities, the import contract ("only tools, hud,
+>   ops may import nodes") plus a source test limits callers.
+> - The contract set gains the two owner-turn capabilities (8B D13), so
+>   the "eight v1 read capabilities" test becomes ten.
+>
+> **State on 2026-11-20:** Phase 9 branches 3–5 (`invoke_read` itself) had
+> not merged, so 8B branch 8 implements the same checks as
+> `tools.transcript_ingest.refusal_for` (with its tests) behind a
+> `NodeReadPort` seam and stages the two contracts in
+> `backend/integrations/node_reference/contracts/v1/`. Branch 5 (or a
+> follow-up once it merges) moves the checks into `nodes.services`, the
+> contracts into `nodes/capabilities/v1/`, and adds the `nodes`-backed port
+> (8B brief, "Owner steps (pending) — `feat/p8-transcript-ingestion`").
+
 ### D10 — Node events: the hook relay path into memory
 
 - **The `event` sink.** An `event` of kind `claude_code.hook` carries a

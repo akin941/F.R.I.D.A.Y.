@@ -548,7 +548,28 @@ def test_the_marker_recheck_counts_dropped_not_owner_per_marker(sources, persona
 # --- the actor check (the D13 amendment of Phase 9 D7/D9) ------------------------------
 
 
-PERSONAL_CAPABILITIES = [CLAUDE, CODEX, "claude.sessions.read", "codex.threads.list"]
+PERSONAL_CAPABILITIES = [
+    CLAUDE,
+    CODEX,
+    "claude.sessions.read",
+    "codex.threads.read",
+    "windows.list",
+]
+
+
+def test_the_actor_check_applies_only_to_personal_class_capabilities(personal):
+    # A firm-class list read on the web channel keeps the Phase 9 chat path
+    # (its owner/channel checks live in the tools registry), unchanged here.
+    assert (
+        refusal_for(
+            node=None,
+            capability="claude.sessions.list",
+            actor=None,
+            workspace=personal,
+            channel=CHANNEL_WEB,
+        )
+        is None
+    )
 
 
 @pytest.mark.parametrize("capability", PERSONAL_CAPABILITIES)

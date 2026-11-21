@@ -167,3 +167,25 @@ again (refused so rotation cannot chain); after the grace it must
 re-pair. The Mac app (M1) must therefore persist the new secret to the
 Keychain before it closes the rotate request, and rotate only while
 connected so a failure is noticed within the grace.
+
+## Implementation note — owner-turn capabilities (Phase 8B branch 8, 2026-11-20)
+
+Phase 8B (brief `docs/prompts/phase-8b-transcripts-graph/brief.md`, D13,
+D17) adds two server-known read capabilities, `claude.transcripts.owner_turns`
+and `codex.transcripts.owner_turns` (`class: read`, `data_class: personal`,
+`workspace_resolution: row_cwd`). They return only owner-typed turns, scrubbed
+on the node and re-checked for harness-injected markers on the server. The
+**cursor is server-owned** (`memory.TranscriptCursor`); the node keeps none,
+returns turns with `at >= since` oldest first, and caches nothing. Decision 11
+(the per-directory grant on `~/.claude/projects` / `~/.codex/sessions`) gates
+them on the Mac: without it the node answers `not_granted`.
+
+The pull is system-initiated: `actor` = the node's owner, `channel =
+system`, refused before signing as `server_refused:actor_not_owner` unless
+the actor is the active node owner and owns the target workspace; the system
+channel is accepted only for these two capabilities. Because Phase 9 branches
+3–5 had not merged on 2026-11-20, branch 8 stages the contracts, reference
+readers, fixtures and conformance cases in `backend/integrations/
+node_reference/` and reaches the node through a `NodeReadPort` seam in
+`tools/transcript_ingest.py`; the move into `nodes/capabilities/v1/` and the
+`invoke_read` amendment are recorded as owner steps in the 8B brief.
