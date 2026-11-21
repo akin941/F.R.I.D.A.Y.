@@ -315,7 +315,9 @@ def dispatch(execution_id):
     try:
         run_node_action.delay(str(execution_id))
     except Exception:
-        logger.warning("node action dispatch failed to publish execution=%s", execution_id)
+        logger.warning(
+            "node action dispatch failed to publish execution=%s", execution_id, exc_info=True
+        )
 
 
 def describe_execution(approval_request):

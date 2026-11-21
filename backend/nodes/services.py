@@ -485,7 +485,7 @@ def finish_execution(
 
 def _locked_execution(**filters):
     return (
-        NodeActionExecution.objects.select_for_update()
+        NodeActionExecution.objects.select_for_update(of=("self",))
         .select_related("workspace", "node", "actor")
         .filter(**filters)
         .first()
@@ -537,7 +537,7 @@ def dispatch_gated(execution_id, *, now=None, keyring=None):
     Status = NodeActionExecution.Status
     with transaction.atomic():
         execution = (
-            NodeActionExecution.objects.select_for_update()
+            NodeActionExecution.objects.select_for_update(of=("self",))
             .select_related("approval", "node", "node__owner", "node__device", "workspace")
             .filter(pk=execution_id)
             .first()
