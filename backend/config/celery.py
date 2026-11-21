@@ -28,6 +28,11 @@ _BEAT_SCHEDULE = {
         "task": "memory.tasks.recover_stale_memory_embeddings",
         "schedule": 60.0,
     },
+    # Phase 8B branch 4 (D8): retrievable facts only.
+    "memory-fact-embedding-recovery-scan": {
+        "task": "memory.tasks.recover_stale_fact_embeddings",
+        "schedule": 60.0,
+    },
     "knowledge-ingestion-recovery-scan": {
         "task": "knowledge.tasks.recover_stale_knowledge_documents",
         "schedule": 60.0,

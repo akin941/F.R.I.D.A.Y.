@@ -63,6 +63,7 @@ from memory.context import (
     strip_invisible_formatting,
 )
 from memory.core_blocks import select_core_blocks
+from memory.retrieval.hybrid import retrieve as hybrid_retrieve
 
 # Widened window for a `knowledge_query` turn only (MVP 6 §2) — same
 # selection/ranking logic as the default, just a bigger budget; see
@@ -360,12 +361,28 @@ def build_context(
         .values_list("personal_data", flat=True)
         .first()
     )
-    memories = select_context_memories(
-        actor=actor,
-        workspace=conversation.workspace,
-        query_text=new_user_content,
-        personal_data=personal_data,
-    )
+    # Phase 8B D8: `legacy` (default) is today's selector, byte for byte;
+    # `hybrid` adds full text, RRF, decay, hops and the fact block.
+    hybrid = settings.MEMORY_RETRIEVAL_MODE == "hybrid"
+    facts = []
+    retrieval_report = {}
+    if hybrid:
+        retrieved = hybrid_retrieve(
+            actor=actor,
+            workspace=conversation.workspace,
+            query_text=new_user_content,
+            personal_data=personal_data,
+        )
+        memories = retrieved.memories
+        facts = retrieved.facts
+        retrieval_report = retrieved.report
+    else:
+        memories = select_context_memories(
+            actor=actor,
+            workspace=conversation.workspace,
+            query_text=new_user_content,
+            personal_data=personal_data,
+        )
 
     overlay_entries = []
     if channel == CHANNEL_WEB:
@@ -379,7 +396,9 @@ def build_context(
     }
 
     all_memories = memories + overlay_memories
-    memory_block = render_memory_block(all_memories, overlay_source_names=overlay_source_names)
+    memory_block = render_memory_block(
+        all_memories, overlay_source_names=overlay_source_names, facts=facts
+    )
     memory_ids = [str(m.id) for m in all_memories]
 
     if intent == Message.Intent.KNOWLEDGE_QUERY:
@@ -390,6 +409,7 @@ def build_context(
             max_chunks=KNOWLEDGE_QUERY_MAX_CHUNKS,
             char_budget=KNOWLEDGE_QUERY_CHAR_BUDGET,
             personal_data=personal_data,
+            fused=hybrid,
         )
     else:
         chunks = select_context_chunks(
@@ -397,6 +417,7 @@ def build_context(
             workspace=conversation.workspace,
             query_text=new_user_content,
             personal_data=personal_data,
+            fused=hybrid,
         )
     knowledge_block = render_knowledge_block(chunks)
     chunk_ids = [str(c.id) for c in chunks]
@@ -469,6 +490,10 @@ def build_context(
         "core_block_labels": [b.label for b in core_blocks],
         "core_block_versions": {b.label: b.version for b in core_blocks},
         "core_block_chars": len(core_block_text),
+        # Phase 8B D8: retrieval mode, candidate counts per list, hops and
+        # fact count/ids -- never text.
+        "retrieval_mode": "hybrid" if hybrid else "legacy",
+        **retrieval_report,
     }
     return (
         messages,

@@ -9,13 +9,16 @@ eligibility rules (`cloud_eligible()`, `model_eligible()`) apply exactly.
 - `legacy` (today's default, `MEMORY_RETRIEVAL_MODE=legacy`):
   `memory.context.select_context_memories` and `render_memory_block`.
   Today's chat turn injects no facts and no episodes, so neither does this.
-- `hybrid` is registered by branch 4 (`register("hybrid", ...)`), which also
-  adds the `<memory_fact>` block.
+- `hybrid` (branch 4, `MEMORY_RETRIEVAL_MODE=hybrid`):
+  `memory.retrieval.hybrid.retrieve` -- full text plus vectors, RRF, decay
+  and hops -- rendered with the `<memory_fact>` block, exactly as
+  `assistant.context.build_context` does.
 """
 
 from dataclasses import dataclass, field
 
 from memory.context import render_memory_block, select_context_memories
+from memory.retrieval import hybrid as hybrid_retrieval
 
 BASELINE_MODE = "legacy"
 
@@ -39,7 +42,17 @@ def legacy(*, actor, workspace, query_text, personal_data):
     )
 
 
-RETRIEVERS = {BASELINE_MODE: legacy}
+def hybrid(*, actor, workspace, query_text, personal_data):
+    result = hybrid_retrieval.retrieve(
+        actor=actor, workspace=workspace, query_text=query_text, personal_data=personal_data
+    )
+    return Retrieved(
+        ranked_ids=result.ranked_ids,
+        context_text=render_memory_block(result.memories, facts=result.facts),
+    )
+
+
+RETRIEVERS = {BASELINE_MODE: legacy, hybrid_retrieval.MODE: hybrid}
 
 
 def register(mode, retriever):

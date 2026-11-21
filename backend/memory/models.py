@@ -933,11 +933,28 @@ class MemoryFactQuerySet(WorkspaceScopedQuerySet):
         """The only sanctioned path by which MemoryFact rows may enter a
         gateway payload (D2 "retrievable facts", D8; the
         `Memory.objects.cloud_eligible()` parity): current, `approved`,
-        `learned`, non-`private`. `system` (Graphify) facts never qualify."""
-        return self.current().filter(
+        `learned`, non-`private`. `system` (Graphify) facts never qualify:
+        the SQL names `approved` only (branch 4 asserts it never names
+        `system`)."""
+        return self.filter(
             status=MemoryFact.Status.APPROVED,
             origin=MemoryFact.Origin.LEARNED,
             sensitivity=MemoryFact.Sensitivity.NORMAL,
+            valid_to__isnull=True,
+            deleted_at__isnull=True,
+        )
+
+    def model_eligible_as_of(self, when):
+        """`model_eligible()` as of `when` (D2 "facts as of T"): approved,
+        learned, non-`private`, `valid_from <= when < coalesce(valid_to,
+        inf)`, not trashed. Superseded history is included."""
+        return self.filter(
+            models.Q(valid_to__isnull=True) | models.Q(valid_to__gt=when),
+            status=MemoryFact.Status.APPROVED,
+            origin=MemoryFact.Origin.LEARNED,
+            sensitivity=MemoryFact.Sensitivity.NORMAL,
+            valid_from__lte=when,
+            deleted_at__isnull=True,
         )
 
     def as_of(self, when):
@@ -1059,6 +1076,14 @@ class MemoryFact(WorkspaceScopedModel, TimestampedModel):
     embedding_provider = models.ForeignKey(
         "ai_core.ModelProvider", null=True, blank=True, on_delete=models.PROTECT, related_name="+"
     )
+    # The `Memory` embedding lease pattern (branch 4, `memory.jobs`): one
+    # attempt in flight per row, a bounded retry budget. The generated
+    # `search` tsvector column (D8) lives in the database only (migration
+    # 0014, raw SQL) and is read through `memory.retrieval`.
+    claim_token = models.UUIDField(null=True, blank=True)
+    lease_expires_at = models.DateTimeField(null=True, blank=True)
+    # `db_default` too: raw-SQL inserts (the trigger tests) name no lease field.
+    retry_count = models.PositiveIntegerField(default=0, db_default=0)
     # Provenance of an owner-UI write (the audit row names the writer too).
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,

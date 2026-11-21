@@ -813,7 +813,7 @@ def test_compare_refuses_an_unknown_mode_before_running(eval_mode, providers, pr
         run_compare(
             cases_of(make_case()),
             set_name="public",
-            candidate_mode="hybrid",
+            candidate_mode="no-such-mode",
             retrieval_only=False,
             results_dir=None,
         )

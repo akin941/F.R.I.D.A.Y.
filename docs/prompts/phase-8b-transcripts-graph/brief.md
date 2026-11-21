@@ -2347,6 +2347,156 @@ merge into the integration branch, 2026-11-21).**
 servise bağlı, ne zamandan beri?" is answered from a fenced fact with its
 window, and the public eval set reports hybrid and legacy side by side.
 
+**Implementation record (2026-11-20).** Status: implemented on
+`feat/p8-hybrid-retrieval`, awaiting the independent Sonnet 5 review.
+
+What was built:
+- **Full text** (migrations `memory/0015_hybrid_retrieval`,
+  `knowledge/0004_chunk_search`, raw SQL, reversible): the generated
+  `search` `tsvector` columns with the D8 expression per table and a GIN
+  index each (`memory_memory_search_gin`, `memory_memoryfact_search_gin`,
+  `knowledge_knowledgechunk_search_gin`). The columns stay out of the
+  model state; `memory.retrieval.search` reads them through `RawSQL`.
+- **HNSW** (`memory/retrieval/indexes.py`,
+  `manage.py build_vector_indexes [--check]`, a `post_migrate` hook in
+  `memory/apps.py`): one partial expression index per active embedding
+  provider and table, `<table>_hnsw_<provider8>`, `CONCURRENTLY` outside
+  a transaction; idempotent; a changed dimension rebuilds it; a provider
+  above 2000 dimensions is `skipped_dimension` (a warning, exact scan).
+- **Fact embedding job** (`memory/jobs.py`, `memory/tasks.py`,
+  migration 0014's `claim_token`/`lease_expires_at`/`retry_count` on
+  `MemoryFact`): the `Memory` lease pattern; `embed_fact` claims only
+  retrievable facts (current, `approved`, `learned`, non-`private`);
+  `recover_stale_fact_embeddings` (beat, 60 s) backfills and clears the
+  vectors of facts that stopped being retrievable; `approve_fact`,
+  `create_fact`/`edit_fact` (via `_new_owner_fact`) and `restore_fact`
+  dispatch on commit; `supersede` drops the old row's vector.
+- **Retriever** `memory/retrieval/hybrid.py` (`retrieve()`), the shared
+  SQL in `memory/retrieval/search.py`, and `core/ranking.py` (`rrf`).
+- **Switch:** `MEMORY_RETRIEVAL_MODE` (`legacy` default, `hybrid`),
+  `MEMORY_RETRIEVAL_HALF_LIFE_DAYS` (45), `MEMORY_RETRIEVAL_HOPS` (1;
+  0–2) in `config/settings/base.py` and `.env.example`;
+  `assistant/context.py` calls the hybrid retriever and passes
+  `fused=True` to `knowledge.context.select_context_chunks`
+  (`select_fused_chunks`: vector + full text, RRF, own budget).
+- **`<memory_fact>` block** (`memory.context.render_fact_line`, inside
+  `render_memory_block`): `statement (valid_from–valid_to)`, an empty end
+  for "still valid", normalized then `neutralize_fence` last; a
+  `private`, unapproved or Graphify fact is never rendered even if handed
+  in.
+- **Read tool** `tools/memory_graph.py` (`memory_graph_lookup`,
+  `data_class=firm`, web only, `memory.graph.read` audit, ids only).
+- **Context report:** `retrieval_mode` (both modes),
+  `retrieval_candidates` (four list counts), `retrieval_hops`,
+  `retrieval_hop_facts`, `retrieval_embed_degraded`, `fact_count`,
+  `fact_ids`; the `memory.context_accessed` audit row gains `fact_ids`.
+- **Eval:** `hybrid` registered in `memory/evals/retrieval.py`;
+  `memory_eval compare --retrieval hybrid` (an alias of
+  `--retrieval-mode`); the eval world embeds setup facts through
+  `embed_fact`. Public seed, FakeAdapter, `--retrieval-only`:
+
+  | metric | legacy (arm A) | hybrid (arm B) |
+  |---|---|---|
+  | recall@10 | 0.5714 | 0.875 |
+  | leak rate | 0.0 | 0.0 |
+  | temporal correctness | 0.0 | 0.6667 |
+  | verdict | – | pass |
+
+  This is the CI seed on fake embeddings, not the D9 gate: the default
+  flip still waits for the private set (M2).
+- **Tests:** `memory/tests/test_hybrid_retrieval.py`,
+  `memory/tests/test_fact_embedding.py`,
+  `memory/tests/test_evals_hybrid.py`, `core/tests/test_ranking.py`,
+  `knowledge/tests/test_fused_context.py`,
+  `tools/tests/test_memory_graph_read.py`,
+  `assistant/tests/test_hybrid_context.py` (golden legacy prompt, the
+  done-when chat turn and the lookup read inside a chat turn).
+
+Decisions made while implementing, to confirm in review:
+- **`for_actor(actor, workspace=W)` no longer joins.** With a named
+  workspace it filters `workspace = W` plus an uncorrelated `EXISTS`
+  membership check, without `DISTINCT` (`core/db.py`). The rows are the
+  same as the join form (one workspace, `unique_workspace_member`); the
+  join plus `DISTINCT` would have stopped the planner from ever using an
+  ordered HNSW scan. `core` still imports no kernel app (the member model
+  is reached through the model's own `workspace` FK). Without a workspace
+  the join form is unchanged.
+- **Natural-language full text.** `websearch_to_tsquery` ANDs every word,
+  so a chat question matches nothing. A query without search syntax (no
+  double quote, no `-word`, no `or`) keeps the parser's lexemes but joins
+  them with `|`, ranked by `ts_rank_cd`; a query with search syntax is
+  used as written (the quotes-and-minus test).
+- **The HNSW partial predicate also names the width:**
+  `WHERE embedding_provider_id = '<uuid>' AND vector_dims(embedding) =
+  <dim>`, so a stray wrong-width row under a provider can never break the
+  cast or the index build; the query emits the same two predicates. The
+  vector list orders by distance only (a second key would forbid the
+  ordered index scan). The dimension is the provider's configured one,
+  else the most common stored width; with neither, the provider is
+  `skipped_no_dimension`.
+- **RRF ranks start at 1** and fuse all four lists (memory/fact x
+  vector/full text) into one ranking; ties keep the fused order. Hop
+  facts score `seed score x 0.5^hop` from the best seed and are not
+  decayed again. Decay is measured against `as_of` when given.
+- **`model_eligible()` now names only `approved`** (no `current()`
+  `IN ('approved', 'system')` term), and `model_eligible_as_of(T)` is its
+  as-of form; same rows, so the candidate SQL never names `system`.
+- **Budget:** memories cost `title + min(content, 600)` and facts the
+  rendered line; memories keep `MAX_CONTEXT_MEMORIES` (20) and facts have
+  `MAX_CONTEXT_FACTS` (20).
+- **Lookup tool:** `as_of` is a date, read as the end of that day (local
+  time); an entity matches by normalised name or alias; Graphify lines
+  carry a `[code]` marker; a missing, private or fact-less entity answers
+  the same "not found" text. Knowledge fusion runs only in `hybrid`
+  mode, so `legacy` stays byte-identical.
+- **Preflight `retrieval_indexes`** is left to the closeout (branch 10,
+  "Preflight checks"); `memory.retrieval.indexes.index_status()` is the
+  function it calls.
+
+**Owner steps (pending) — `feat/p8-hybrid-retrieval`, recorded 2026-11-20.**
+1. Run the independent Sonnet 5 review of this branch and fix findings
+   until APPROVE (CLAUDE.md "Reviews").
+2. Confirm the decisions above, in particular the `for_actor()` change
+   and the natural-language full-text rule.
+3. On the owner's stack: run `migrate` (the `post_migrate` hook builds
+   the indexes) or `manage.py build_vector_indexes`, then
+   `build_vector_indexes --check`; real providers (1536 / 1024
+   dimensions) cannot be exercised here.
+4. Pending owner evaluation (M2): `memory_eval compare --set private
+   --retrieval hybrid` against the recorded private baseline; the
+   closeout flips `MEMORY_RETRIEVAL_MODE` only on hybrid ≥ legacy on
+   recall@10 and answer accuracy.
+5. Try `MEMORY_RETRIEVAL_MODE=hybrid` in real chat and check latency of
+   the extra full-text queries and hop walks on the real data volume.
+
+**Known follow-ups — `feat/p8-hybrid-retrieval` (review, LOW, unresolved
+at merge into the integration branch, 2026-11-21).** At the merge the
+migration was renumbered `memory/0015_hybrid_retrieval` (after
+`0014_transcript_ingestion`).
+1. **Fact embedding skips the personal-data gate**
+   (`backend/memory/tasks.py`). `_process_claimed_fact` calls
+   `InferenceGateway().embed` without an actor or `personal_data`. This
+   mirrors the existing Memory embedding job, so it is consistent, but a
+   personal-workspace fact statement is embedded by whichever provider the
+   gateway picks, without the `personal_data` gating the query embed
+   applies. Fix (optional): pass `personal_data` from the workspace kind in
+   both the memory and the fact embedding jobs.
+2. **Hybrid mode drops the legacy deterministic fallback**
+   (`backend/memory/retrieval/hybrid.py`). Legacy mode, when the embed fails
+   or finds nothing, still injects preference, semantic and procedural
+   memories by priority and recency. Hybrid injects only memories that match
+   on full text or vector, so an always-relevant preference with no lexical
+   or vector hit is not injected. The D8 RRF design implies this, and the
+   default stays `legacy` until the eval closeout. Fix: record the
+   behavioural difference in the closeout eval notes; optionally backfill
+   preference and procedural memories by priority when fewer than N
+   candidates are found.
+3. **`private_entity_ids` in `expand_hops` is redundant**
+   (`backend/memory/retrieval/hybrid.py`). A reached fact is approved,
+   normal and current, so by D4 both endpoint entities are already
+   non-private. Harmless defense in depth costing one extra query. No fix
+   required.
+
 ### 5. `feat/p8-graphify-job` — image, network-denied runner, importer, `self` line
 
 **Scope.**
@@ -3411,7 +3561,7 @@ Mac and private-data rows pending owner evaluation.
 | 1 | `feat/p8-temporal-facts` | `MemoryEntity`/`MemoryFact`, validity windows, supersede, recursive-CTE traversal, owner API, forget/trash/purge cascade, `memory.graph` contract | brief approved | **implemented 2026-11-20** (awaits the Sonnet 5 review; see "Implementation record" under branch 1) |
 | 2 | `feat/p8-fact-learning` | Episode extraction schema v1 → v2 with facts (chat extraction unchanged at v2), inherited fact sensitivity, entity-in-quote rule, reconciliation, weekly reflection, caps, digest fact items | 1 | **implemented 2026-11-20** (awaits the Sonnet 5 review; see "Implementation record" under branch 2) |
 | 3 | `feat/p8-eval-set` | Eval harness, public seed, private loader, `memory_eval`, `memory.eval_answer` purpose, CI public run | 1 (parallel with 2) | **implemented 2026-11-20** (awaits the Sonnet 5 review; see "Implementation record" under branch 3; the private baseline is pending owner evaluation, M2) |
-| 4 | `feat/p8-hybrid-retrieval` | `tsvector` + GIN, per-provider HNSW expression indexes, RRF + decay + hops, flag, `<memory_fact>` block, `memory_graph_lookup` | 1, 3 | not started |
+| 4 | `feat/p8-hybrid-retrieval` | `tsvector` + GIN, per-provider HNSW expression indexes, RRF + decay + hops, flag, `<memory_fact>` block, `memory_graph_lookup` | 1, 3 | **implemented 2026-11-20** (awaits the Sonnet 5 review; see "Implementation record" under branch 4; the private-set compare and the default flip are pending owner evaluation, M2) |
 | 5 | `feat/p8-graphify-job` | Hash-pinned image, `--network none` runner primitive, trigger, importer + temporal replace, `self` codebase line, manifest | 1 (parallel with 2–4) | **implemented 2026-11-20** (awaits the Sonnet 5 review; see "Implementation record" under branch 5; the real image build and the owner's switch are owner steps) |
 | 6 | `feat/p8-headroom-stage` | `compressor` sidecar (no `litellm`, no egress, telemetry off), gateway stage, bypass set, context report, eval arm, manifest | 3 | not started |
 | 7 | `feat/p8-obsidian-mirror` | Format v2, entity notes, `_conflicts/<date>/`, `00_Inbox` import-once inside the approved run | 1 | **implemented 2026-11-20** (awaits the Sonnet 5 review; see "Implementation record" under branch 7; real-vault check pending owner evaluation) |
