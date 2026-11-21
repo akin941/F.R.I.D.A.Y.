@@ -125,7 +125,7 @@ def test_a_disabled_rule_does_not_count_as_mapped(settings, sources, personal):
 def test_beat_passes_on_the_real_schedule():
     result = _learning()["learning_beat"]
     assert result.status == PASS, result.detail
-    assert "5 worker-beat and 1 runner-beat" in result.detail
+    assert "6 worker-beat and 1 runner-beat" in result.detail
 
 
 def test_beat_fails_when_a_task_is_on_the_wrong_beat(monkeypatch):

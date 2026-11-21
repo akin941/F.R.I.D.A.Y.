@@ -81,11 +81,15 @@ def week_window(now=None):
 
 
 def approved_items_count(workspace, start, end):
+    """Approved items this week. `Memory` has no decision timestamp, so an
+    approved memory counts by its `updated_at` (set by the approval; a
+    later owner edit in the same week also counts it, which is harmless for
+    a threshold). Facts count by `decided_at`."""
     memories = Memory.objects.filter(
         workspace=workspace,
         status=Memory.Status.APPROVED,
-        decided_at__gte=start,
-        decided_at__lt=end,
+        updated_at__gte=start,
+        updated_at__lt=end,
     ).count()
     facts = MemoryFact.objects.filter(
         workspace=workspace,
@@ -139,9 +143,9 @@ def _context_lines(workspace, start, end):
     # `cloud_eligible()` / `model_eligible()` only (ADR-005): nothing
     # private reaches this payload.
     for memory in (
-        Memory.objects.filter(workspace=workspace, decided_at__gte=start, decided_at__lt=end)
+        Memory.objects.filter(workspace=workspace, updated_at__gte=start, updated_at__lt=end)
         .cloud_eligible()
-        .order_by("-decided_at")[:MAX_CONTEXT_ITEMS]
+        .order_by("-updated_at")[:MAX_CONTEXT_ITEMS]
     ):
         body = _fence(memory.content[:MAX_CONTEXT_CHARS])
         lines.append(f'<approved_item kind="memory">{_fence(memory.title)}: {body}</approved_item>')
@@ -255,7 +259,7 @@ def run_weekly_reflection(now=None):
     start, end = week_window(now)
     workspace_ids = set(
         Memory.objects.filter(
-            status=Memory.Status.APPROVED, decided_at__gte=start, decided_at__lt=end
+            status=Memory.Status.APPROVED, updated_at__gte=start, updated_at__lt=end
         ).values_list("workspace_id", flat=True)
     ) | set(
         MemoryFact.objects.filter(
