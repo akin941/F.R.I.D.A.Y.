@@ -83,18 +83,25 @@ class PairingCodeCreateSerializer(serializers.Serializer):
     kind = serializers.ChoiceField(
         choices=DevicePairingCode.Kind.choices, default=DevicePairingCode.Kind.PIN
     )
+    # Phase 9 D1: a code for a Friday Node ("Mac düğümü eşleştir").
+    device_kind = serializers.ChoiceField(
+        choices=TrustedDevice.Kind.choices, default=TrustedDevice.Kind.BROWSER
+    )
 
 
 class TrustedDeviceSerializer(serializers.ModelSerializer):
-    # Never includes the secret hash.
+    # Never includes the secret hash (current or previous).
     is_current = serializers.SerializerMethodField()
     idle_expires_at = serializers.SerializerMethodField()
+    # Phase 9 D1: a node's hard age cap (null for a browser).
+    credential_expires_at = serializers.SerializerMethodField()
 
     class Meta:
         model = TrustedDevice
         fields = [
             "id",
             "name",
+            "kind",
             "enrolled_via",
             "enrolled_ip",
             "user_agent",
@@ -104,6 +111,8 @@ class TrustedDeviceSerializer(serializers.ModelSerializer):
             "revoked_at",
             "revoke_reason",
             "idle_expires_at",
+            "credential_expires_at",
+            "secret_issued_at",
             "is_current",
         ]
         read_only_fields = fields
@@ -113,6 +122,9 @@ class TrustedDeviceSerializer(serializers.ModelSerializer):
 
     def get_idle_expires_at(self, device):
         return device.idle_expires_at()
+
+    def get_credential_expires_at(self, device):
+        return device.credential_expires_at()
 
 
 class DeviceRefreshSerializer(TokenRefreshSerializer):

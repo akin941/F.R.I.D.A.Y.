@@ -96,3 +96,74 @@ cookie, idle expiry).
 - A compromised-server test suite (unknown capability, out-of-schema args,
   reused or expired nonce, bad signature, policy-mutation message) is a
   release gate for every node branch.
+
+## Implementation notes — spike S9.0 (Phase 9 branch 1, 2026-11-20)
+
+**Result: spike S9.0 server half: passed.** Decision 2 holds without a
+browser-shaped compromise: a node is a `TrustedDevice` of `kind=node`
+(`accounts/models.py`), with no idle expiry of the browser kind, no
+cookie and no JWT. The Keychain half (storing, reading and rotating the
+secret from Swift) is pending owner evaluation (Mac task M1).
+
+What landed in `accounts` / `core`:
+- `TrustedDevice.kind` (`browser`/`node`), `DevicePairingCode.device_kind`,
+  `jnd_` node secrets (256-bit, sha256-hashed), `secret_issued_at`,
+  `previous_secret_hash` / `previous_secret_valid_until`, and the per-owner
+  `NodeKillSwitch` (migration `accounts/0008_node_device_trust`).
+- Services in `accounts/devices.py`: `enroll_node_device`,
+  `authenticate_node_secret`, `node_device_refusal` (the gateway's
+  per-heartbeat re-check), `rotate_node_secret`,
+  `engage_node_kill_switch` / `release_node_kill_switch`.
+- `NodeCredentialAuthentication` → `CHANNEL_NODE` (`core/channels.py`),
+  `IsNodeChannel`; `core/revocation.py` (`publish_device_revoked`,
+  `publish_kill_switch_engaged`, `parse_revocation`) on
+  `friday:device-revoked`, published after commit, never raising.
+- Endpoints: `POST /api/v1/auth/nodes/credential/rotate` (node secret
+  only), `GET/POST/DELETE /api/v1/auth/nodes/kill-switch` (owner web
+  session only), `POST /api/v1/auth/pairing-codes` with `device_kind=node`;
+  commands `issue_pairing_code --node [--strong]` and
+  `node_kill_switch on|off|status`.
+
+Pass criteria and their tests (`backend/accounts/tests/test_node_credentials.py`
+unless noted):
+1. Pair with both code kinds, cross-kind refusals:
+   `test_a_node_code_pairs_a_node[pin|strong]`,
+   `test_a_browser_code_is_refused_for_a_node_and_is_not_consumed`,
+   `test_a_node_code_is_refused_for_a_browser`,
+   `test_the_remote_key_never_pairs_a_node`,
+   `test_node_pin_lan_gating_is_unchanged`,
+   `test_node_pin_attempts_burn_as_before`,
+   `test_a_node_code_is_single_use_under_concurrency`.
+2. Rotation without re-pairing: `test_rotation_returns_a_new_secret_once_and_is_audited`,
+   `test_old_secret_valid_within_the_grace`,
+   `test_old_secret_invalid_after_the_grace`,
+   `test_old_secret_invalid_after_first_use_of_the_new_one`,
+   `test_rotation_with_the_previous_secret_is_refused`,
+   `test_concurrent_rotations_yield_one_successor`,
+   `test_rotate_endpoint_returns_the_secret_once`; age cap and idle window:
+   `test_the_age_cap_refuses_an_unrotated_node`,
+   `test_the_age_cap_counts_from_the_last_rotation`,
+   `test_node_idle_expiry_uses_the_node_window`.
+3. Revocation: `test_revoking_one_node_fails_its_next_authentication`,
+   `test_revoke_all_devices_covers_nodes`,
+   `test_revocation_is_published_once_per_device_after_commit`,
+   `test_a_redis_error_never_fails_the_revoke`.
+4. Kill switch: `test_kill_switch_on_then_off`,
+   `test_one_owners_kill_switch_leaves_another_owners_node_alone`,
+   `test_kill_switch_endpoints`, `test_kill_switch_command_prints_the_state`.
+5. A node secret is refused by every other surface:
+   `backend/config/tests/test_node_credential_surfaces.py`
+   (URL walk), `test_a_node_secret_is_refused_by_start_device_session`,
+   `test_a_forged_jwt_naming_a_node_device_is_refused`.
+6. A browser device or PAT is refused by the node surfaces:
+   `test_rotate_accepts_only_a_node_secret[*]` and
+   `test_kill_switch_accepts_only_the_owner_web_session[*]` (owner web
+   session, real browser JWT, `cli`/`openai`/`hook` PATs, a browser
+   `jdv_` secret, a node secret, non-owner, agent, anonymous).
+
+Noted residual: a node whose rotate *response* is lost still holds only
+its previous secret, which works for the grace (600 s) but cannot rotate
+again (refused so rotation cannot chain); after the grace it must
+re-pair. The Mac app (M1) must therefore persist the new secret to the
+Keychain before it closes the rotate request, and rotate only while
+connected so a failure is noticed within the grace.

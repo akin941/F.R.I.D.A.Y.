@@ -715,6 +715,12 @@ export const tr = {
       revokeConfirm: "Evet, iptal et",
       revoking: "İptal ediliyor…",
       revokeFailed: "Cihaz iptal edilemedi.",
+      // Phase 9 D1: revoking a Friday Node (the Mac app).
+      revokeNodeTitle: "Bu Mac düğümü iptal edilsin mi?",
+      revokeNode: (name: string) =>
+        `“${name}” düğümünün bağlantısı hemen kesilir ve kimlik bilgisi bir daha kabul edilmez. Yeniden kullanmak için Mac uygulamasını yeniden eşleştirmen gerekir; bu işlem geri alınamaz.`,
+      revokeNodeConfirm: "Evet, düğümü iptal et",
+      nodeBadge: "Mac düğümü",
       forgetTitle: "Bu cihaz unutulsun mu?",
       forget:
         "Bu tarayıcı artık güvenilen bir cihaz olmaz ve oturumun kapanır. Tekrar kullanmak için yeni bir eşleştirme kodu gerekir.",

@@ -78,9 +78,13 @@ export interface SessionResponse {
 
 export type ApiDeviceEnrolledVia = "pin" | "strong_code" | "remote_key";
 
+/** Phase 9 D1: a browser, or a Friday Node (the Mac app, `kind=node`). */
+export type ApiDeviceKind = "browser" | "node";
+
 export interface ApiTrustedDevice {
   id: string;
   name: string;
+  kind: ApiDeviceKind;
   enrolled_via: ApiDeviceEnrolledVia;
   enrolled_ip: string | null;
   user_agent: string;
@@ -90,12 +94,16 @@ export interface ApiTrustedDevice {
   revoked_at: string | null;
   revoke_reason: string;
   idle_expires_at: string;
+  /** A node's hard age cap (null for a browser). */
+  credential_expires_at: string | null;
+  secret_issued_at: string | null;
   is_current: boolean;
 }
 
 export interface ApiPairingCode {
   code: string;
   kind: "pin" | "strong";
+  device_kind?: ApiDeviceKind;
   expires_at: string;
 }
 
