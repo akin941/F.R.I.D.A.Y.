@@ -1,0 +1,72 @@
+"""The reference node's verification order up to check 22 (Phase 10 brief
+D5; Phase 9 D5 for v1).
+
+Checks 1-21 are the protocol-level `nodes.protocol.verify.verify_invoke`
+(shared with the conformance vectors). Check 22 is the node-local policy:
+for a confirm- or gate-class invoke the intent must resolve through
+`LocalPolicy.resolve` (repo + kind mapped, recipe enabled, bundle id on the
+local list, `repo_path` realpath equal to a registered root), else
+`not_configured`. Checks 23 (the confirmation window, `busy_confirming`)
+and 24 (after the click) need the window and the session; they are in
+`nodes.reference.node`.
+
+The first failing check wins; nothing after it runs, and nothing is shown
+or executed for a refusal at 1-22.
+"""
+
+from dataclasses import dataclass
+
+from nodes.capabilities import load_recipes
+from nodes.protocol.messages import ProtocolError, validate_instance
+from nodes.protocol.verify import NodeState, NonceCache, Refusal, verify_invoke
+from nodes.reference.local_policy import LocalPolicy, NotConfigured, Resolved
+
+LOCAL_POLICY_CHECK = 22
+
+
+@dataclass(frozen=True)
+class Verified:
+    envelope: dict
+    resolved: Resolved | None
+
+
+def recipe_params_check(recipes=None):
+    """The node's **own** recipe params check (check 20's extra check for
+    `applescript.recipe.run`): params valid against the named recipe's own
+    `params_schema` from the node's recipe catalogue."""
+    recipes = load_recipes() if recipes is None else recipes
+
+    def check(args):
+        recipe = recipes.get(args.get("recipe"))
+        if recipe is None:
+            raise ProtocolError("args_schema", "unknown recipe")
+        validate_instance(recipe.params_schema, args.get("params"), code="args_schema")
+
+    return check
+
+
+def node_state(*, node_id, pinned, catalogue, nonce_cache=None, recipes=None) -> NodeState:
+    """A NodeState over the node's own catalogue (`{name: entry}`)."""
+    return NodeState(
+        node_id=node_id,
+        pinned=dict(pinned),
+        catalogue=dict(catalogue),
+        nonce_cache=nonce_cache if nonce_cache is not None else NonceCache(),
+        extra_args_checks={"applescript.recipe.run": recipe_params_check(recipes)},
+    )
+
+
+def verify(frame, *, version, state: NodeState, policy: LocalPolicy, now: int) -> Verified:
+    """Checks 1-22 for one server -> node frame. Returns `Verified` (for a
+    non-invoke frame `resolved` is None and the envelope is the frame);
+    raises `Refusal`."""
+    envelope = verify_invoke(frame, version=version, state=state, now=now)
+    if envelope.get("type") != "invoke":
+        return Verified(envelope, None)
+    if envelope["class"] == "read":
+        return Verified(envelope, None)
+    try:
+        resolved = policy.resolve(envelope["capability"], envelope["args"])
+    except NotConfigured as exc:
+        raise Refusal("not_configured", LOCAL_POLICY_CHECK) from exc
+    return Verified(envelope, resolved)

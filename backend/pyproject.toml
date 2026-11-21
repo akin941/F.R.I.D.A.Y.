@@ -27,6 +27,10 @@ dependencies = [
     # signing of node `invoke` envelopes, and protocol schema validation.
     "cryptography==50.0.1",
     "jsonschema==4.26.0",
+    # Phase 10 branch 2 (docs/mcp/dependencies/node-gateway.md): the
+    # reference node's localhost WebSocket transport and the hostile fake
+    # gateway (`node_conformance_server`); the Phase 9 gateway reuses it.
+    "wsproto==1.3.2",
 ]
 
 [dependency-groups]
