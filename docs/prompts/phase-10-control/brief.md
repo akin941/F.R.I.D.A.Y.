@@ -417,7 +417,7 @@ v2 reads:
 | 21 | Availability `granted` (TCC grant present) | `not_granted` |
 | 22 | Local policy resolves (repo + kind mapped, recipe enabled, bundle id on the local list; `repo_path` realpath equals a registered repo root, so a symlink cannot redirect it) | `not_configured` |
 | 23 | Confirmation window (confirm and gate only): rendered by the node from the validated args, shows the approval id's first 8 characters for gate-class, 60 s timeout | `owner_denied` / `confirm_timeout` |
-| 24 | After the click: grant still unexpired, socket still up, kill switch not engaged | `expired_after_confirm` / (socket lost: nothing runs, no result) |
+| 24 | After the click: envelope/grant `expires_at` still in the future (a confirm-class envelope carries no grant, so its own `expires_at` applies), socket still up, kill switch not engaged | `expired_after_confirm` / (socket lost: nothing runs, no result) |
 
 - A refusal at 13–22 produces `result{status: refused}` and nothing is
   shown or run. At 23 the node first sends `confirmation{shown}`, then
@@ -1334,7 +1334,7 @@ with the Mac rows pending owner evaluation.
 |---|---|---|---|---|
 | brief | `docs/p10-brief` | This brief (full, from the stub; stub goal, scope, checkpoint and owner step d4 kept), MASTER_PLAN §AA row 10 Brief/Status | Phase 8B brief; Phase 9 brief | **implemented 2026-11-20**; review round 1 and round 2 findings fixed 2026-11-21 (docs only; awaits Sonnet 5 re-review) |
 | 1 | `feat/p10-protocol-v2` | Protocol v2 schemas, grant format and domain-separated signing, version negotiation, capability contracts v2 + recipe catalogue, argument-schema fuzz families, snapshot classes, ADR notes | Phase 9 branches 2–3 merged; brief approved | **implemented 2026-11-20** on its branch (merges `feat/p9-node-protocol` as its base); review round 1 findings (1 MEDIUM, 2 LOW) fixed 2026-11-21, awaits Sonnet 5 re-review; see "Implementation record — `feat/p10-protocol-v2`" |
-| 2 | `feat/p10-reference-executor` | Reference node v2 (verifier 13–24, confirmation double, executor port, runtime cap), `srt` policy generator + vectors, conformance cases v2, escape suite + runner | 1 | not started |
+| 2 | `feat/p10-reference-executor` | Reference node v2 (verifier 13–24, confirmation double, executor port, runtime cap), `srt` policy generator + vectors, conformance cases v2, escape suite + runner | 1 | **implemented 2026-11-20** on its branch (based on the integration branch with branch 1 merged; Phase 9 branch 3 not merged, so the reference node v1 session half and the v1 protocol cases are built here too); awaits independent Sonnet 5 review; see "Implementation record — `feat/p10-reference-executor`" |
 | 3 | `feat/p10-invocation-grants` | Per-tool approval TTL + pre-transaction hook (`create_request` split) + approver hook, `node_action` tool with actor/approver checks, registered trust-check stub, `NodeActionExecution`, grant issuance, gated/confirm invocation, gateway v2 frames + watchdog, output scrubber port + `StreamScrubber` (tail re-scrub, fail closed), chain row v2, actions endpoints | 1, 2; Phase 9 branches 4–5 merged | not started |
 | 4 | `feat/p10-trust-check` | Trust check (rules + `control.trust_check`), evidence port, router `node_action` proposals, injection corpus, voice cap regressions | 3 | not started |
 | 5 | `feat/p10-hud-terminal` | Redis output stream (fed by the branch-3 scrubber), HUD `terminal` section + stream endpoint, terminal panel, draft/approval cards, `node_action_result` read tool | 3 (parallel with 4) | not started |
@@ -1409,12 +1409,14 @@ codes), D1 (no new server→node type handled), ADR-013 decision 6.
    `ConformanceTests.swift` with the reference node's verdicts and codes,
    no case skipped.
 2. Live conformance: `uv run python manage.py node_conformance_server
-   --port 8765 --tls-self-signed --protocol 2` against the separate
-   `Conformance` build (Phase 9 M1 rules: unsigned, never notarized, no
-   runtime switch in the release build) prints all-pass, including the
-   window cases driven by the server's scripted owner (the conformance
-   build exposes the window's decision to a test hook compiled only
-   under `#if CONFORMANCE`).
+   --external --port 8765 --tls-self-signed --protocol 2 --hook-socket
+   <path>` (and `--protocol 1`) against the separate `Conformance` build
+   (Phase 9 M1 rules: unsigned, never notarized, no runtime switch in the
+   release build) prints all-pass, including the window cases driven by
+   the server's scripted owner (the conformance build exposes the window's
+   decision, its clock and the kill switch to the JSON-lines test hook of
+   `backend/nodes/conformance/gateway.py`, compiled only under
+   `#if CONFORMANCE`; branch 2 record, owner step 5).
 3. Real stack: a typed "testleri çalıştır" in a repo mapped locally,
    approved on `/approvals`, shows the window with the same approval id
    prefix; deny → `denied` on `/approvals` and the HUD; allow → output in
@@ -1882,3 +1884,170 @@ every property of every argument and recipe-params schema),
    (`feat/p10-invocation-grants`) lands, add a test that
    `nodes.grants.issue` calls `check_gate_request` before
    `build_gated_invoke`.
+
+## Implementation record — `feat/p10-reference-executor` (branch 2, implemented 2026-11-20)
+
+**Base.** Cut from the integration branch with branch 1 (`feat/p10-protocol-v2`)
+merged. Phase 9 branch 3 (`feat/p9-reference-node`) has not merged, so this
+branch builds the reference node's **session half** too (v1 and v2 sessions,
+the `wsproto` transport, the hostile fake gateway, the v1 protocol-level
+conformance cases). Phase 9 branch 3 keeps the readers, the spool, the
+Unix-socket hook relay and `vectors/scrub.json`; it extends `cases.py`,
+`runner.py`, `node.py` and the vendored scrubber that now exist instead of
+creating them (the file names are the ones its brief lists).
+
+**Delivered (D4, D5 checks 22–24, D11, D12 node side).**
+- `backend/nodes/reference/`: `local_policy.py` (frozen node-local policy:
+  repo + `command_kind` mappings, enabled recipes, bundle list; realpath
+  equality for `repo_path`, so a symlink cannot redirect; secret-shaped env
+  names refused at load; a fingerprint the suite pins), `verifier_v2.py`
+  (checks 1–21 from `nodes.protocol.verify`, 22 local policy, the node's own
+  recipe params check), `confirm.py` (window double: scripted owner, 60 s
+  timeout on a fake clock, one window at a time, forced close on disconnect
+  or kill switch; text rendered by the node from its own args: template,
+  repo local name, exact argv, network setting, approval id prefix),
+  `executor.py` (`FakeExecutor` recording argv/env/settings/limits/mode and
+  playing scripted output; opt-in Linux `SrtExecutor` with streamed pipes,
+  RLIMIT_CPU/NPROC, process-group SIGTERM then SIGKILL after 5 s),
+  `worktree.py` (detached throwaway worktree, hooks disabled, removed and
+  pruned), `sandbox.py` (the `srt` settings document + process spec +
+  limits, D4), `stream_scrub.py` (D12 carry-over scrub and the output
+  pipeline: incremental UTF-8, 8 KiB pieces, shared `seq`, 1 MiB cap, 4 KiB
+  scrubbed tail), `node.py` (`ReferenceNode`: checks 23–24, execution, fail
+  closed, frame-error close, `bye`, silence + backoff, heartbeats, every
+  sent frame schema-validated), `transport.py` (`wsproto` client offering
+  `friday-node.v2, friday-node.v1`), `vendor_scrubber.py` +
+  `_scrubber_vendored.py`, `fixtures/` (local policy, fixture home factory).
+- `backend/nodes/conformance/`: `cases.py` (36 v1 + 91 v2 cases, every frame
+  signed with the conformance key, fixed ids/nonces/times), `runner.py`
+  (in-process driver, matcher check, gateway-side `GatewayChecker` counting
+  stray `output`/`confirmation`/`result` frames as frame errors),
+  `gateway.py` (hostile fake gateway over localhost `wsproto`, optional
+  self-signed TLS, the in-process and the external JSON-lines conformance
+  hook), `build.py`, `cases/v1/`, `cases/v2/`, `vectors/sandbox.json`
+  (6 vectors), `vectors/scrub_stream.json` (75 text + 3 pipeline cases;
+  inputs base64 so no raw fake secret is committed),
+  `keys/conformance_keys.json` (refused as `NODE_SIGNING_KEY` by
+  `nodes.keys`), `escape/` (32 cases as data, the static check, the fake
+  sandbox, the runner).
+- Commands: `build_node_conformance [--check]` (cases, both vectors, the
+  vendored scrubber), `node_conformance_server [--protocol] [--case]
+  [--port] [--tls-self-signed] [--external --hook-socket]`,
+  `node_escape_suite [--executor fake|srt] [--check-policy] [--export-policy]`.
+- `pyproject.toml`: `wsproto==1.3.2` (direct, exact; manifest entry in
+  `docs/mcp/dependencies/node-gateway.md` together with the `srt` node-side
+  tool entry), the `srt` pytest marker, two import contracts (reference and
+  conformance import no project package; the reference node does not import
+  the suite). CI runs `build_node_conformance --check` and
+  `node_escape_suite --executor fake`.
+
+**Tests.** `nodes/tests/test_conformance_suite.py` (every v1 and v2 case in
+process; all of them over a localhost `wsproto` socket; three over pinned
+self-signed TLS; three through the external hook; a failing node is
+reported; checks 1–24 except 18 pinned; the brief's case list and every
+shared-field case present; stray frames counted; files current and drift
+detected; the case files equal the definitions; conformance keys refused;
+the command prints ALL PASS), `test_reference_node.py` (the executor is never
+called on any refusal path — every refusal case — and every sent frame is
+schema-valid; a v1 hello advertises reads only; disconnect closes the window
+and sends nothing late; disconnect while running terminates with no late
+result; the kill switch; the 1 MiB cap; actions get the resolved intent; the
+executor gets the generated sandbox; worktree mode created and removed;
+heartbeats; start failure; a real process through `SrtExecutor`'s plumbing
+without `srt`; a real SIGTERM-ignoring process killed by SIGKILL within the
+grace; an opt-in `-m srt` run), `test_reference_sandbox.py` (env allowlist
+with planted `*_TOKEN`/`*_KEY`/`*_PASSWORD`, every `denyRead` path, write
+root + temp only, `/tmp` never writable, network empty by default, limits,
+unsafe inputs refused, canonical bytes, vectors current, check 22 including
+both symlink cases, read-only policy, malformed policy documents),
+`test_reference_scrub.py` (vendored copy identical, 100 % secret recall,
+every corpus secret split at every byte offset absent from the output and
+the tail, three-chunk splits, carry bound, UTF-8 safety, 1 MiB cap and
+`seq`, tail, vectors current and free of raw secrets),
+`test_reference_confirm.py` (60 s timeout with a frozen clock, delayed
+decisions, late decisions never count, one window, forced close,
+node-rendered text), `test_escape_suite.py` (every D11 family present, the
+fake run contains all 32, the static check flags each kind of leaky policy,
+`--check-policy` round trip and failure, the verdict logic on scripted
+executor results, an unsandboxed run proving the scripts really escape
+without a sandbox, the commands, an opt-in `-m srt` run),
+`test_reference_purity.py` (reference node and suite import without Django).
+
+**Done when — met.** `node_conformance_server` prints all-pass for v1
+(36/36) and v2 (91/91) against the reference node over a localhost socket
+(`test_every_case_passes_over_a_localhost_wsproto_socket`);
+`node_escape_suite --executor fake` contains 32/32; the case and vector
+files are generated, `--check`ed in CI and are what the Swift test target
+loads.
+
+**Deviations, recorded.**
+- The kill switch while a window is open reports `confirmation{closed}` and
+  then a refused result `owner_denied` with `confirm_state: closed` (the v2
+  enum has no dedicated code; the window closed without a click).
+- Frame errors (checks 1–4) answer `result{status: error, refusal_code,
+  invocation_id: null}` (Phase 9 D5 says "an `error` frame"; neither version
+  has an `error` type, so the result type carries it).
+- A command that ran to completion is `status: ok` whatever its exit code
+  (`exit_code` carries pass/fail); `timeout` at the runtime cap; `error` for
+  a start failure or the kill switch while running.
+- `busy_confirming` applies while a window is open; a running command does
+  not block the next window.
+- The D12 algorithm is made exact for parity: a cut must be *scrub-neutral*
+  (`scrub(head) + scrub(rest) == scrub(buffer)`) **and** the scrubbed head
+  must not end in a placeholder (a match touching the cut may still grow,
+  such as the next PEM line); the candidates are the line end, then up to 63
+  earlier whitespace boundaries inside the carry bound, then 0. Branch 3's
+  server `StreamScrubber` must reproduce `vectors/scrub_stream.json`.
+- The live socket run drives the clock, the scripted owner and the kill
+  switch through a **conformance hook** (in process, or JSON lines over a
+  0600 Unix socket for an external node), never through the protocol; the
+  fake gateway answers heartbeats and advances the clock in steps of at most
+  5 s.
+- `RLIMIT_NPROC` is per user on Linux, so the `srt` run's process limit is
+  best effort there; Seatbelt is the evidence (M3).
+- Read invokes are answered by a fixed fake reader (`apps.frontmost`); the
+  real readers are Phase 9 branch 3.
+
+**Follow-ups resolved here.** Brief known follow-up 2 (check 24 wording):
+D5 row 24 now reads "envelope/grant `expires_at`", and
+`v2_confirm_expired_after_confirm` covers a confirm-class envelope expiring
+inside the window. Branch 1 known follow-up 1: `verify_invoke` records the
+check-11-first order as intentional.
+
+### Owner steps (pending) — `feat/p10-reference-executor`, recorded 2026-11-20
+
+1. Run the independent Sonnet 5 review of this branch (CLAUDE.md "Reviews")
+   and fix findings until APPROVE.
+2. Merge order: this branch needs only branch 1. When Phase 9 branch 3
+   (`feat/p9-reference-node`) lands later, it must extend the files this
+   branch created (`nodes/reference/{node,transport,vendor_scrubber,
+   _scrubber_vendored}.py`, `nodes/conformance/{cases,runner}.py`,
+   `cases/v1/`) rather than add parallel ones, keep `wsproto==1.3.2`, and
+   regenerate with `manage.py build_node_conformance`.
+3. `srt` on the Mac (brief owner step 4): install the exact version, record
+   it in `docs/mcp/dependencies/node-gateway.md`, and confirm its CLI flags
+   match `SRT_ARGV_TEMPLATE` (`srt --settings <file> -- <argv...>`) and the
+   settings keys of `vectors/sandbox.json` (`network.allowedDomains`,
+   `deniedDomains`, `allowUnixSockets`, `allowLocalBinding`,
+   `filesystem.denyRead`, `allowWrite`, `denyWrite`); if the pinned version
+   differs, change the generator and regenerate the vectors in a dedicated
+   branch before M2. (deferred: Mac session)
+4. Optional local evidence on a Linux box with `srt` and bubblewrap:
+   `uv run pytest -m srt nodes/tests` and `manage.py node_escape_suite
+   --executor srt`. Not the ADR-014 evidence. (pending owner evaluation)
+5. Mac session M1 (deferred: Mac session): the `Conformance` build implements
+   the external hook (`backend/nodes/conformance/gateway.py` module
+   docstring: ops `prepare`, `advance`, `tick`, `kill_switch`, `report`,
+   `wait_disconnected` as JSON lines over the `--hook-socket` path, compiled
+   only under `#if CONFORMANCE`) and passes `manage.py node_conformance_server
+   --external --tls-self-signed --protocol 2 --hook-socket <path>` (and
+   `--protocol 1`); its `OutputStreamer` reproduces
+   `vectors/scrub_stream.json` piece for piece.
+6. Mac session M2 (deferred: Mac session): `SandboxPolicyTests.swift`
+   reproduces every `vectors/sandbox.json` vector byte for byte
+   (`settings_canonical`); the test target exports its escape-case documents
+   in the `node_escape_suite --export-policy` format and `node_escape_suite
+   --check-policy <file>` reports 32/32 covered.
+7. Mac session M3 (deferred: Mac session, pending owner evaluation): run the
+   32 cases of `backend/nodes/conformance/escape/cases.json` through the
+   Swift `SrtExecutor` in worktree mode and record the result in ADR-014.
