@@ -14,6 +14,7 @@ from core.channels import CHANNEL_WEB
 from memory.models import Memory
 from tools import export
 from tools.models import VaultExportRun
+from tools.tests.vault_helpers import claimed_run, export_in_run
 from tools.vault_paths import VaultPathEscapeError
 from workspaces.models import Workspace
 
@@ -89,6 +90,11 @@ class TestDescribeExecution:
             "updated_count": 0,
             "removed_count": 0,
             "retry_count": 0,
+            "conflicts_saved": 0,
+            "entity_notes_count": 0,
+            "inbox_imported_count": 0,
+            "inbox_unmapped_count": 0,
+            "inbox_skipped_count": 0,
         }
 
     def test_reflects_a_succeeded_runs_counts(self, workspace, owner, tmp_path, settings):
@@ -130,24 +136,24 @@ class TestReconciliation:
     def test_approved_memory_gets_a_file(self, workspace, tmp_path):
         memory = make_memory(workspace)
         vault_root_real = export.validate_vault_root_exists(str(tmp_path))
-        written, updated, removed = export.export_workspace_memories(vault_root_real, workspace)
+        written, updated, removed = export_in_run(vault_root_real, workspace)
         assert (written, updated, removed) == (1, 0, 0)
         assert memory_path(tmp_path, workspace, memory).exists()
 
     def test_second_run_counts_as_updated_not_written(self, workspace, tmp_path):
         make_memory(workspace)
         vault_root_real = export.validate_vault_root_exists(str(tmp_path))
-        export.export_workspace_memories(vault_root_real, workspace)
-        written, updated, removed = export.export_workspace_memories(vault_root_real, workspace)
+        export_in_run(vault_root_real, workspace)
+        written, updated, removed = export_in_run(vault_root_real, workspace)
         assert (written, updated, removed) == (0, 1, 0)
 
     def test_editing_content_regenerates_the_file(self, workspace, tmp_path):
         memory = make_memory(workspace, content="Original content.")
         vault_root_real = export.validate_vault_root_exists(str(tmp_path))
-        export.export_workspace_memories(vault_root_real, workspace)
+        export_in_run(vault_root_real, workspace)
         memory.content = "Edited content."
         memory.save(update_fields=["content"])
-        export.export_workspace_memories(vault_root_real, workspace)
+        export_in_run(vault_root_real, workspace)
         text = memory_path(tmp_path, workspace, memory).read_text()
         assert "Edited content." in text
         assert "Original content." not in text
@@ -155,20 +161,20 @@ class TestReconciliation:
     def test_forgetting_a_memory_removes_its_file(self, workspace, tmp_path):
         memory = make_memory(workspace)
         vault_root_real = export.validate_vault_root_exists(str(tmp_path))
-        export.export_workspace_memories(vault_root_real, workspace)
+        export_in_run(vault_root_real, workspace)
         memory.status = Memory.Status.ARCHIVED
         memory.save(update_fields=["status"])
-        written, updated, removed = export.export_workspace_memories(vault_root_real, workspace)
+        written, updated, removed = export_in_run(vault_root_real, workspace)
         assert removed == 1
         assert not memory_path(tmp_path, workspace, memory).exists()
 
     def test_hard_deleting_a_memory_removes_its_file(self, workspace, tmp_path):
         memory = make_memory(workspace)
         vault_root_real = export.validate_vault_root_exists(str(tmp_path))
-        export.export_workspace_memories(vault_root_real, workspace)
+        export_in_run(vault_root_real, workspace)
         path = memory_path(tmp_path, workspace, memory)
         memory.delete()
-        written, updated, removed = export.export_workspace_memories(vault_root_real, workspace)
+        written, updated, removed = export_in_run(vault_root_real, workspace)
         assert removed == 1
         assert not path.exists()
 
@@ -176,13 +182,13 @@ class TestReconciliation:
         make_memory(workspace, status=Memory.Status.PENDING_APPROVAL, fingerprint="p")
         make_memory(workspace, status=Memory.Status.REJECTED, fingerprint="r")
         vault_root_real = export.validate_vault_root_exists(str(tmp_path))
-        written, updated, removed = export.export_workspace_memories(vault_root_real, workspace)
+        written, updated, removed = export_in_run(vault_root_real, workspace)
         assert (written, updated, removed) == (0, 0, 0)
 
     def test_path_like_characters_in_title_never_affect_file_location(self, workspace, tmp_path):
         memory = make_memory(workspace, title="../../etc/passwd", content="../not/a/path")
         vault_root_real = export.validate_vault_root_exists(str(tmp_path))
-        export.export_workspace_memories(vault_root_real, workspace)
+        export_in_run(vault_root_real, workspace)
         # The file lives exactly where memory.id dictates -- nowhere else.
         assert memory_path(tmp_path, workspace, memory).exists()
         all_md_files = list(tmp_path.rglob("*.md"))
@@ -202,7 +208,7 @@ class TestPrivateMemories:
         private = make_memory(workspace, sensitivity=Memory.Sensitivity.PRIVATE, fingerprint="p")
         normal = make_memory(workspace, fingerprint="n")
         vault_root_real = export.validate_vault_root_exists(str(tmp_path))
-        written, updated, removed = export.export_workspace_memories(vault_root_real, workspace)
+        written, updated, removed = export_in_run(vault_root_real, workspace)
 
         assert (written, updated, removed) == (2, 0, 0)
         assert private_memory_path(tmp_path, workspace, private).exists()
@@ -218,12 +224,12 @@ class TestPrivateMemories:
         main tree; the next run moves it."""
         memory = make_memory(workspace, sensitivity=Memory.Sensitivity.PRIVATE)
         vault_root_real = export.validate_vault_root_exists(str(tmp_path))
-        export.export_workspace_memories(vault_root_real, workspace)
+        export_in_run(vault_root_real, workspace)
         # Recreate the pre-change layout: the file in the main tree.
         legacy = memory_path(tmp_path, workspace, memory)
         legacy.write_text(private_memory_path(tmp_path, workspace, memory).read_text())
 
-        written, updated, removed = export.export_workspace_memories(vault_root_real, workspace)
+        written, updated, removed = export_in_run(vault_root_real, workspace)
         assert (written, updated, removed) == (0, 1, 1)
         assert not legacy.exists()
         assert private_memory_path(tmp_path, workspace, memory).exists()
@@ -231,25 +237,25 @@ class TestPrivateMemories:
     def test_memory_moving_between_trees_follows_its_sensitivity(self, workspace, tmp_path):
         memory = make_memory(workspace)
         vault_root_real = export.validate_vault_root_exists(str(tmp_path))
-        export.export_workspace_memories(vault_root_real, workspace)
+        export_in_run(vault_root_real, workspace)
         memory.sensitivity = Memory.Sensitivity.PRIVATE
         memory.save(update_fields=["sensitivity"])
-        export.export_workspace_memories(vault_root_real, workspace)
+        export_in_run(vault_root_real, workspace)
         assert private_memory_path(tmp_path, workspace, memory).exists()
         assert not memory_path(tmp_path, workspace, memory).exists()
 
         memory.sensitivity = Memory.Sensitivity.NORMAL
         memory.save(update_fields=["sensitivity"])
-        export.export_workspace_memories(vault_root_real, workspace)
+        export_in_run(vault_root_real, workspace)
         assert memory_path(tmp_path, workspace, memory).exists()
         assert not private_memory_path(tmp_path, workspace, memory).exists()
 
     def test_human_note_in_the_private_tree_is_never_pruned(self, workspace, tmp_path):
         vault_root_real = export.validate_vault_root_exists(str(tmp_path))
-        export.export_workspace_memories(vault_root_real, workspace)
+        export_in_run(vault_root_real, workspace)
         note = tmp_path / "_private" / str(workspace.id) / "Memory" / "diary.md"
         note.write_text("my own words")
-        written, updated, removed = export.export_workspace_memories(vault_root_real, workspace)
+        written, updated, removed = export_in_run(vault_root_real, workspace)
         assert removed == 0
         assert note.read_text() == "my own words"
 
@@ -260,14 +266,14 @@ class TestConservativePrune:
 
     def _plant(self, workspace, tmp_path, filename, text):
         vault_root_real = export.validate_vault_root_exists(str(tmp_path))
-        export.export_workspace_memories(vault_root_real, workspace)  # creates the dir chain
+        export_in_run(vault_root_real, workspace)  # creates the dir chain
         directory = self._memory_dir(workspace, tmp_path)
         (directory / filename).write_text(text)
         return vault_root_real
 
     def test_malformed_frontmatter_is_skipped_not_deleted(self, workspace, tmp_path):
         vault_root_real = self._plant(workspace, tmp_path, "stray.md", "not frontmatter at all")
-        export.export_workspace_memories(vault_root_real, workspace)
+        export_in_run(vault_root_real, workspace)
         assert (self._memory_dir(workspace, tmp_path) / "stray.md").exists()
 
     def test_wrong_source_is_skipped_not_deleted(self, workspace, tmp_path):
@@ -279,7 +285,7 @@ class TestConservativePrune:
             + "\nsource: human\n---\nbody\n"
         )
         vault_root_real = self._plant(workspace, tmp_path, "human-note.md", text)
-        export.export_workspace_memories(vault_root_real, workspace)
+        export_in_run(vault_root_real, workspace)
         assert (self._memory_dir(workspace, tmp_path) / "human-note.md").exists()
 
     def test_mismatched_workspace_is_skipped_not_deleted(self, workspace, tmp_path):
@@ -292,7 +298,7 @@ class TestConservativePrune:
             + "\nsource: friday_export\n---\nbody\n"
         )
         vault_root_real = self._plant(workspace, tmp_path, "foreign.md", text)
-        export.export_workspace_memories(vault_root_real, workspace)
+        export_in_run(vault_root_real, workspace)
         assert (self._memory_dir(workspace, tmp_path) / "foreign.md").exists()
 
     def test_non_uuid_friday_id_is_skipped_not_deleted(self, workspace, tmp_path):
@@ -302,7 +308,7 @@ class TestConservativePrune:
             + "\nsource: friday_export\n---\nbody\n"
         )
         vault_root_real = self._plant(workspace, tmp_path, "bad-id.md", text)
-        export.export_workspace_memories(vault_root_real, workspace)
+        export_in_run(vault_root_real, workspace)
         assert (self._memory_dir(workspace, tmp_path) / "bad-id.md").exists()
 
     def test_valid_own_export_no_longer_approved_is_pruned(self, workspace, tmp_path):
@@ -315,7 +321,7 @@ class TestConservativePrune:
             + "\nsource: friday_export\n---\nbody\n"
         )
         vault_root_real = self._plant(workspace, tmp_path, f"{stale_id}.md", text)
-        written, updated, removed = export.export_workspace_memories(vault_root_real, workspace)
+        written, updated, removed = export_in_run(vault_root_real, workspace)
         assert removed == 1
         assert not (self._memory_dir(workspace, tmp_path) / f"{stale_id}.md").exists()
 
@@ -331,7 +337,7 @@ class TestConservativePrune:
             + "\nsource: jarvis_export\n---\nbody\n"
         )
         vault_root_real = self._plant(workspace, tmp_path, f"{stale_id}.md", text)
-        _, _, removed = export.export_workspace_memories(vault_root_real, workspace)
+        _, _, removed = export_in_run(vault_root_real, workspace)
         assert removed == 1
         assert not (self._memory_dir(workspace, tmp_path) / f"{stale_id}.md").exists()
 
@@ -346,7 +352,7 @@ class TestConservativePrune:
             + "\nsource: jarvis_export\n---\nbody\n"
         )
         vault_root_real = self._plant(workspace, tmp_path, "mixed.md", text)
-        export.export_workspace_memories(vault_root_real, workspace)
+        export_in_run(vault_root_real, workspace)
         assert (self._memory_dir(workspace, tmp_path) / "mixed.md").exists()
 
     def test_pre_rename_export_of_an_approved_memory_is_rewritten(self, workspace, tmp_path):
@@ -359,7 +365,7 @@ class TestConservativePrune:
             + "\nsource: jarvis_export\n---\nold body\n"
         )
         vault_root_real = self._plant(workspace, tmp_path, f"{memory.id}.md", legacy)
-        export.export_workspace_memories(vault_root_real, workspace)
+        export_in_run(vault_root_real, workspace)
         rewritten = (self._memory_dir(workspace, tmp_path) / f"{memory.id}.md").read_text()
         assert "source: friday_export" in rewritten
         assert f"friday_id: {memory.id}" in rewritten
@@ -370,11 +376,11 @@ class TestConservativePrune:
         prune loop must catch that too, or the whole export fails/retries
         instead of just skipping the one unrecognized file."""
         vault_root_real = export.validate_vault_root_exists(str(tmp_path))
-        export.export_workspace_memories(vault_root_real, workspace)  # creates the dir chain
+        export_in_run(vault_root_real, workspace)  # creates the dir chain
         bad_file = self._memory_dir(workspace, tmp_path) / "not-utf8.md"
         bad_file.write_bytes(b"\xff\xfe\x00\xff not valid utf-8")
 
-        written, updated, removed = export.export_workspace_memories(vault_root_real, workspace)
+        written, updated, removed = export_in_run(vault_root_real, workspace)
 
         assert removed == 0
         assert bad_file.exists()
@@ -454,7 +460,7 @@ class TestAtomicWrite:
         vault_root_real = export.validate_vault_root_exists(str(tmp_path))
         with mock.patch("os.rename", side_effect=OSError("simulated failure during rename")):
             with pytest.raises(OSError, match="simulated failure"):
-                export.export_workspace_memories(vault_root_real, workspace)
+                export_in_run(vault_root_real, workspace)
         memory_dir = tmp_path / "03_Workspaces" / str(workspace.id) / "Memory"
         # No `.md` file was ever created at the final path -- only a
         # temp file (if anything) could have been left, never a partial
@@ -471,7 +477,7 @@ class TestSymlinkSwapRace:
         make_memory(workspace)
         vault_root_real = export.validate_vault_root_exists(str(tmp_path))
         # Prime the directory chain first.
-        export.export_workspace_memories(vault_root_real, workspace)
+        export_in_run(vault_root_real, workspace)
 
         memory_dir = tmp_path / "03_Workspaces" / str(workspace.id) / "Memory"
         outside = tmp_path.parent / f"outside-{uuid.uuid4()}"
@@ -481,12 +487,12 @@ class TestSymlinkSwapRace:
         memory_dir.symlink_to(outside)
 
         with pytest.raises(VaultPathEscapeError):
-            export.export_workspace_memories(vault_root_real, workspace)
+            export_in_run(vault_root_real, workspace)
 
     def test_read_path_prune_scan_detects_a_swapped_memory_directory(self, workspace, tmp_path):
         make_memory(workspace)
         vault_root_real = export.validate_vault_root_exists(str(tmp_path))
-        export.export_workspace_memories(vault_root_real, workspace)
+        export_in_run(vault_root_real, workspace)
 
         memory_dir = tmp_path / "03_Workspaces" / str(workspace.id) / "Memory"
         outside = tmp_path.parent / f"outside-{uuid.uuid4()}"
@@ -496,7 +502,7 @@ class TestSymlinkSwapRace:
         memory_dir.symlink_to(outside)
 
         with pytest.raises(VaultPathEscapeError):
-            export.export_workspace_memories(vault_root_real, workspace)
+            export_in_run(vault_root_real, workspace)
 
 
 class TestValidateRequestWiring:
@@ -617,6 +623,7 @@ def test_concurrent_exports_for_the_same_workspace_are_serialized(tmp_path, sett
     owner = register_user(email="serialize-owner@test.dev", password=PASSWORD, name="Owner")
     workspace = Workspace.objects.get(owner=owner)
     vault_root_real = export.validate_vault_root_exists(str(tmp_path))
+    run, token = claimed_run(workspace, owner)
 
     lock_held = threading.Event()
     release_lock = threading.Event()
@@ -637,7 +644,8 @@ def test_concurrent_exports_for_the_same_workspace_are_serialized(tmp_path, sett
     def racer():
         try:
             assert lock_held.wait(timeout=5)
-            export.export_workspace_memories(vault_root_real, workspace)
+            with export.claimed_run_scope(run.id, token):
+                export.export_workspace_memories(vault_root_real, workspace)
             racer_result["completed_after_release"] = release_lock.is_set()
         except Exception as exc:  # pragma: no cover - surfaced via `errors`
             errors.append(exc)

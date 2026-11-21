@@ -1294,7 +1294,7 @@ episodes.
       if the move fails).
   - Inbox notes are owner-authored by definition (the owner wrote them
     in their own vault), so they are quotable provenance. Pasted
-    third-party text in a note is the owner's choice. R3 covers it.
+    third-party text in a note is the owner's choice. R2 covers it.
 - Justification: one approval per vault sync keeps rule 4 without a new
   gate class. The import is opt-in. Conflict copies preserve the owner's
   text instead of silently destroying it, which is today's behaviour.
@@ -2488,6 +2488,127 @@ export tests use).
 and entity notes, saves an owner-edited note to `_conflicts/`, imports and
 moves one mapped inbox note, and leaves an unmapped one in place.
 
+**Implementation record (2026-11-20).** Status: implemented on
+`feat/p8-obsidian-mirror`, awaiting the independent Sonnet 5 review.
+- Migrations: `memory/0011_obsidian_inbox` (the `obsidian_inbox` kind and
+  the `vault_prefix` rule type, choices only) and
+  `tools/0002_vault_format_v2` (`VaultExportRun.conflicts_saved`,
+  `entity_notes_count`, `inbox_imported_count`, `inbox_unmapped_count`,
+  `inbox_skipped_count`).
+- Code: `tools/vault_frontmatter.py` (v2 `render_note`, `body_sha256`,
+  `split_frontmatter`, `is_owner_edited`), `tools/vault_entities.py`
+  (entity-note planning and rendering), `tools/vault_inbox.py` (the scan,
+  import and move), `tools/vault_paths.py` (`rename_validated`,
+  `read_validated_bytes`, `write_new_validated`, `open_existing_subdir`,
+  `entry_kind`), `tools/export.py` (the run gate, the plan, the conflict
+  sink, the dry pass, `describe_request`), and
+  `memory/ingestion/{mapping,serializers,services,views}.py` (the `vault:`
+  key, `normalise_vault_path`, `allowed_rule_types` checked in the
+  serializer and again in the service).
+- Decisions made while implementing, to confirm in review:
+  - **The gate is a claim check, not a convention.**
+    `export_workspace_memories` and `import_inbox` refuse
+    (`VaultRunNotClaimed`) unless called inside
+    `claimed_run_scope(run_id, claim_token)`, which verifies a `running`
+    run holding that token for an `approved` `vault_export` request of
+    the same workspace. A run whose approval is no longer `approved`
+    writes nothing and is left `running` for the lease sweep.
+  - **The inbox is read only by the personal workspace's run.** The
+    `obsidian_inbox` source lives in the owner's personal workspace
+    (seed); a firm workspace's approved run never reads `00_Inbox/`, even
+    though a `vault_prefix` rule may route notes to the firm workspace.
+  - **The import runs before the export's lock transaction, with no
+    transaction open,** so each episode commits (in `record_episode`'s own
+    transaction) before its note is moved; a later failure of the export
+    pass cannot roll back an episode whose note is already in
+    `_imported/`.
+  - **Conflict copies also cover prunes.** An owner-edited export file
+    that is about to be pruned (its memory archived, its entity trashed or
+    moved to `_private/`) is copied first, like an overwrite.
+  - **An unparseable export file at an export path counts as edited**
+    (copied), and a non-UTF-8 one is copied as raw bytes. A symlink or
+    special file at an export path is not copied (the atomic rename
+    replaces the link itself, never its target). A second copy of the same
+    file on the same day gets `<id>.<n>.md` (`O_EXCL`, never replaced).
+  - **Line endings are normalised** before `content_sha256` (a sync
+    client's `\r\n` is not an edit); a frontmatter-only edit is not a
+    conflict (the hash covers the body, as D12 says).
+  - **Entity notes, open-tree rule.** An open note holds a fact only if
+    the fact is non-`private` AND its other endpoint is not a private
+    entity. A fact touching a private entity (for example superseded
+    history pointing at an entity that has no live normal fact left) goes
+    to the `_private/` companion, so neither the private entity's name
+    (in a statement or a link) nor its id reaches the open tree. Only
+    `approved` and `system` facts are mirrored; an entity with none gets
+    no note. Wiki-links are `[[<entity-id>|<name>]]`.
+  - **Inbox frontmatter** is parsed leniently (top-level `key: value`
+    lines only; Obsidian YAML lists are ignored). A note with an opening
+    `---` and no closing one is skipped and left in place (reading it as
+    all-body could miss `sensitivity: private`). Any `sensitivity` value
+    other than empty or `normal` makes the episode `private` (fail
+    closed). Empty bodies, hidden folders, symlinks and anything deeper
+    than one subfolder are skipped. Notes over the 200-per-run cap are
+    left for the next run (`deferred`, audit metadata only).
+  - **A re-dropped identical note** (same path, same content) is a
+    `duplicate` and is moved again, to `<name>.<n>.md` if the day's
+    `_imported/` folder already holds that name.
+  - **The approval description** is `ToolSpec.describe_request`
+    (`display_summary`, curator over web only), not `describe_execution`:
+    a pending request has no run yet. It carries the DB counts (memories,
+    private memories, entity notes, private entity notes, inbox enabled)
+    and, while the request is pending and the vault is reachable from the
+    rendering process, a read-only dry pass (`conflicts_detected`,
+    `inbox_waiting`, `inbox_unmapped`; it creates no directory and writes
+    nothing). In the web container (no vault mount) those read `null`
+    with `dry_pass: "vault_unavailable"`. The routing note (Turkish) tells
+    the owner to flag sensitive Inbox notes `sensitivity: private`.
+    `describe_execution` gains the run's new counts, so the conflict count
+    is on the approval detail. The summary depends only on the workspace
+    and pending-ness, so a new `ToolSpec.describe_request_per_workspace`
+    flag lets `ApprovalRequestSerializer` compute it once per workspace per
+    serialization (the approvals list keeps its constant query count).
+  - **The work_log notice** is its own `work_log` row (outcome
+    `conflicts_saved`), next to the run's `succeeded` row; it names
+    `_private/_conflicts/<date>/` too when private copies were saved.
+    Counts and folder names only.
+  - **Frontend.** No approval-card renderer for the `vault_export`
+    summary in this branch (the brief lists no frontend files here; the
+    conflict view is branch 9). The summary is served now. The sources
+    screen (`IngestionView`) gains the `obsidian_inbox` label and offers
+    only `vault_prefix` rules on it (and never elsewhere), so owner step
+    8 can be done from the web.
+- Tests: `tools/tests/test_vault_mirror.py` (format, conflicts, entity
+  notes, the gate, the dry pass, `display_summary` over the API),
+  `tools/tests/test_vault_inbox.py` (the inbox list above, provider class,
+  the "done when" run), `tools/tests/test_vault_frontmatter.py` (v2),
+  `memory/tests/test_ingestion.py` and `test_ingestion_api.py` (vault
+  mapping, rule-type checks, 400s). The existing export tests now run
+  inside a claimed run (`tools/tests/vault_helpers.py`).
+
+**Owner steps (pending) — `feat/p8-obsidian-mirror`, recorded 2026-11-20.**
+1. Run the independent Sonnet 5 review of this branch and fix findings
+   until APPROVE (CLAUDE.md "Reviews").
+2. Confirm the implementation decisions listed above, in particular the
+   prune-also-copies rule, the open-tree rule for facts touching a
+   private entity and the fail-closed `sensitivity` parsing.
+3. After deploy, run `manage.py seed_ingestion_sources` once so the
+   `obsidian_inbox` source exists (preflight's `learning_sources` check
+   fails until it does).
+4. The first v2 run rewrites every v1 file without a conflict. Before that
+   run, move any note you edited by hand in the mirror elsewhere: v1 files
+   carry no hash, so their edits cannot be detected.
+5. Opt in (global owner step 8): enable `obsidian_inbox` and add
+   `vault_prefix` rules (`00_Inbox/<folder>`); flag sensitive notes
+   `sensitivity: private`.
+6. Real-vault check (needs the owner's Mac and Obsidian, not possible
+   here): approve one `vault_export` run against the real vault, open the
+   graph view, edit one mirrored note and confirm the copy lands in
+   `_conflicts/<date>/` on the next run. Record the result in the
+   go/no-go record (pending owner evaluation; does not block branch 9).
+
+Nothing else in this branch needs the Mac, real credentials, paid calls
+or real hardware; the tests use a temporary vault under `tmp_path`.
+
 ### 8. `feat/p8-transcript-ingestion` — owner-turn capabilities, reference readers, pull job
 
 **Precondition:** Phase 9 branches 2–5 merged on the integration branch.
@@ -2750,7 +2871,7 @@ Mac and private-data rows pending owner evaluation.
 | 4 | `feat/p8-hybrid-retrieval` | `tsvector` + GIN, per-provider HNSW expression indexes, RRF + decay + hops, flag, `<memory_fact>` block, `memory_graph_lookup` | 1, 3 | not started |
 | 5 | `feat/p8-graphify-job` | Hash-pinned image, `--network none` runner primitive, trigger, importer + temporal replace, `self` codebase line, manifest | 1 (parallel with 2–4) | not started |
 | 6 | `feat/p8-headroom-stage` | `compressor` sidecar (no `litellm`, no egress, telemetry off), gateway stage, bypass set, context report, eval arm, manifest | 3 | not started |
-| 7 | `feat/p8-obsidian-mirror` | Format v2, entity notes, `_conflicts/<date>/`, `00_Inbox` import-once inside the approved run | 1 | not started |
+| 7 | `feat/p8-obsidian-mirror` | Format v2, entity notes, `_conflicts/<date>/`, `00_Inbox` import-once inside the approved run | 1 | **implemented 2026-11-20** (awaits the Sonnet 5 review; see "Implementation record" under branch 7; real-vault check pending owner evaluation) |
 | 8 | `feat/p8-transcript-ingestion` | Owner-turn capabilities, reference readers + conformance, pull job in `tools`, port, cursor, personal-class sources, transcript corpus | 2; **Phase 9 branches 2–5 merged** | not started |
 | 9 | `feat/p8-graph-ui` | `/memory/graph`, timeline, sources/Graphify/conflict/eval views | 2, 4 (5, 7, 8 for their panels) | not started |
 | 10 | `chore/p8b-closeout` | Preflight checks, e2e, retrieval default decision, runbooks, ADR notes, MASTER_PLAN row, go/no-go record | 1–9 | not started |
@@ -3157,7 +3278,7 @@ the next brief edit.
 
 1. **D12 cross-reference.** The Inbox section of D12 says pasted
    third-party text in a note is covered by "R3", but R3 is Graph
-   pollution. Fix: change the cross-reference from R3 to R2.
+   pollution. Fix: change the cross-reference from R3 to R2. **Fixed 2026-11-20 on `feat/p8-obsidian-mirror`.**
 2. **D13 caller restriction wording.** D13 limits `channel=CHANNEL_SYSTEM`
    to "only from `tools.transcript_ingest`" via the
    `SYSTEM_READ_CAPABILITIES` constant. That constant limits

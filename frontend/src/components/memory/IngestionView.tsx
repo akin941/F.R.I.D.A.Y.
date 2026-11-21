@@ -39,6 +39,20 @@ export const NATIVE_SELECT =
 
 const RULE_TYPES: MappingRuleType[] = ["repo", "path_prefix", "calendar_binding"];
 
+/** The rule types a source accepts (Phase 8B branch 7, D12): the Obsidian
+ * inbox takes `vault_prefix` only, and no other source takes it -- the
+ * backend refuses any other pairing with a 400. */
+export function ruleTypesFor(kind: ApiIngestionSource["kind"]): MappingRuleType[] {
+  return kind === "obsidian_inbox" ? ["vault_prefix"] : RULE_TYPES;
+}
+
+function defaultRuleType(kind: ApiIngestionSource["kind"]): MappingRuleType {
+  if (kind === "obsidian_inbox") return "vault_prefix";
+  if (kind === "calendar") return "calendar_binding";
+  if (kind === "claude_code_hooks") return "path_prefix";
+  return "repo";
+}
+
 export function sourceName(source: Pick<ApiIngestionSource, "kind">): string {
   return tr.learning.sourceKind[source.kind] ?? source.kind;
 }
@@ -119,9 +133,7 @@ function RulesSection({ source, personalId }: { source: ApiIngestionSource; pers
     queryKey: queryKeys.mappingRules(personalId, source.id),
     queryFn: () => apiGetJson<ApiMappingRule[]>(`/api/memory/ingestion/sources/${source.id}/rules`),
   });
-  const [ruleType, setRuleType] = useState<MappingRuleType>(
-    source.kind === "calendar" ? "calendar_binding" : source.kind === "claude_code_hooks" ? "path_prefix" : "repo",
-  );
+  const [ruleType, setRuleType] = useState<MappingRuleType>(defaultRuleType(source.kind));
   const [pattern, setPattern] = useState("");
   const [target, setTarget] = useState(personalId);
   const [error, setError] = useState<string | null>(null);
@@ -194,7 +206,7 @@ function RulesSection({ source, personalId }: { source: ApiIngestionSource; pers
             value={ruleType}
             onChange={(e) => setRuleType(e.target.value as MappingRuleType)}
           >
-            {RULE_TYPES.map((type) => (
+            {ruleTypesFor(source.kind).map((type) => (
               <option key={type} value={type}>
                 {copy.ruleType[type]}
               </option>

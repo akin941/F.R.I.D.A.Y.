@@ -242,3 +242,29 @@ implementation notes; the decision-relevant facts:
   and by the `memory_memoryfact_same_workspace` trigger.
 - **Import contract.** `memory.graph` may import only `memory`,
   `workspaces`, `audit`, `core` and `ai_core`, like `memory.ingestion`.
+
+**Phase 8B branch 7, `feat/p8-obsidian-mirror` (2026-11-20).** Details in
+`docs/prompts/phase-8b-transcripts-graph/brief.md` D12.
+
+- **`Inbox/` is `00_Inbox/`.** Decision 12's `Inbox/` is the vault layout's
+  documented `00_Inbox/` folder (`docs/memory/obsidian-vault-strategy.md`),
+  and `Inbox/_imported/` is `00_Inbox/_imported/<YYYY-MM-DD>/`. No change
+  to the decision text.
+- **The opt-in source.** `IngestionSource.Kind.OBSIDIAN_INBOX`
+  (`obsidian_inbox`, migration `memory/0011`), seeded disabled. It is not
+  personal-class (decision 11 lists calendar, mail and transcripts only):
+  a normal note is extracted like a git commit; only a note with
+  `sensitivity: private` frontmatter (any value other than `normal`, fail
+  closed) becomes a `private` episode routed to local providers.
+- **Mapping.** A new `vault:` key prefix and `vault_prefix` rule type
+  (longest segment-boundary prefix, like `path_prefix`), valid only on the
+  `obsidian_inbox` source; `normalise_vault_path` refuses absolute, `~`
+  and escaping (`..`) paths and anything not under `00_Inbox`. Unmapped
+  notes are dropped, counted and left in place (decision 2).
+- **Inside an approved run only.** The import runs inside a claimed,
+  approved `vault_export` run (`tools.export.claimed_run_scope`), in the
+  owner's personal workspace's run only. Each episode commits before its
+  note is moved; dedupe on the episode's `external_id` (sha256 of the path
+  plus the content) means a failed move never duplicates. The vault still
+  never changes Postgres except by creating episodes, and conflict copies
+  (owner-edited mirror files) are never read back.

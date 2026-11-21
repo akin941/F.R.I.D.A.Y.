@@ -21,6 +21,7 @@ from core.channels import CHANNEL_WEB
 from memory.graph import services as graph_services
 from memory.ingestion.mapping import (
     InvalidMappingKey,
+    allowed_rule_types,
     normalise_pattern,
     owner_owns,
 )
@@ -477,6 +478,8 @@ def create_mapping_rule(source, *, actor, channel, rule_type, pattern, target_wo
     _validate_target(actor, source, target_workspace)
     if rule_type not in WorkspaceMappingRule.RuleType.values:
         raise IngestionInvalid("Unknown rule type.")
+    if rule_type not in allowed_rule_types(source.kind):
+        raise IngestionInvalid("This rule type is not valid on this source.")
     try:
         pattern = normalise_pattern(rule_type, pattern)
     except InvalidMappingKey as exc:

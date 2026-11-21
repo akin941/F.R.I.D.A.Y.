@@ -125,6 +125,11 @@ class ToolSpec:
     proposable: bool = True
     records_work_log: bool = True
     prepare_payload: Callable[[Any, dict], dict] | None = None
+    # Phase 8B branch 7: `describe_request` depends only on the request's
+    # workspace and whether it is still pending (the vault export's counts
+    # and dry pass), so one serialization computes it once per workspace
+    # rather than once per row (no N+1 on the approvals list).
+    describe_request_per_workspace: bool = False
 
 
 _REGISTRY: dict[str, ToolSpec] = {}

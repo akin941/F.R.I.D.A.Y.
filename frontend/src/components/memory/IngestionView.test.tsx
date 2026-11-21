@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { IngestionView } from "@/components/memory/IngestionView";
+import { IngestionView, ruleTypesFor, sourceName } from "@/components/memory/IngestionView";
 import { calledWith, cancelDialog, confirmInDialog, findConfirmDialog } from "@/test/confirm";
 import { renderWithClient } from "@/test/render";
 import type { ApiIngestionAudit, ApiIngestionSource } from "@/types/api";
@@ -214,5 +214,18 @@ describe("IngestionView", () => {
     await waitFor(() => expect(calledWith(fetchMock, "POST", "/api/memory/ingestion/scrub-terms")).toBe(true));
     const call = fetchMock.mock.calls.find(([url, init]) => url === "/api/memory/ingestion/scrub-terms" && init?.method === "POST")!;
     expect(JSON.parse(call[1]!.body as string)).toEqual({ workspace: PERSONAL, term: "Project Falcon" });
+  });
+});
+
+describe("Obsidian inbox source (Phase 8B branch 7)", () => {
+  it("offers only vault_prefix rules on the inbox source and never elsewhere", () => {
+    expect(ruleTypesFor("obsidian_inbox")).toEqual(["vault_prefix"]);
+    for (const kind of ["git", "harness", "claude_code_hooks", "calendar"] as const) {
+      expect(ruleTypesFor(kind)).not.toContain("vault_prefix");
+    }
+  });
+
+  it("names the inbox source in Turkish", () => {
+    expect(sourceName({ kind: "obsidian_inbox" })).toBe("Obsidian 00_Inbox notları");
   });
 });

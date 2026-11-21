@@ -292,3 +292,41 @@ def test_a_workspace_admin_who_is_not_owner_is_refused(owner, personal, hooks, s
     response = client.get(f"{BASE}/sources/{hooks.id}")
     assert response.status_code == 403
     assert response.json()["code"] == "memory.permission_denied"
+
+
+# --- Phase 8B branch 7 (brief D12): vault_prefix rules over the API ----------
+
+
+def test_vault_prefix_rule_types_are_checked_per_source(owner, personal, hooks, web_client):
+    inbox = IngestionSource.objects.get(
+        workspace=personal, kind=IngestionSource.Kind.OBSIDIAN_INBOX
+    )
+    client = web_client(owner)
+    target = str(personal.id)
+    on_hooks = client.post(
+        f"{BASE}/sources/{hooks.id}/rules",
+        {"rule_type": "vault_prefix", "pattern": "00_Inbox/work", "target_workspace": target},
+        format="json",
+    )
+    assert on_hooks.status_code == 400
+    path_on_inbox = client.post(
+        f"{BASE}/sources/{inbox.id}/rules",
+        {"rule_type": "path_prefix", "pattern": "/Users/o", "target_workspace": target},
+        format="json",
+    )
+    assert path_on_inbox.status_code == 400
+    for pattern in ("00_Inbox/../03_Workspaces", "00_Inbox/a/../../x", "/abs/00_Inbox"):
+        escaping = client.post(
+            f"{BASE}/sources/{inbox.id}/rules",
+            {"rule_type": "vault_prefix", "pattern": pattern, "target_workspace": target},
+            format="json",
+        )
+        assert escaping.status_code == 400
+    created = client.post(
+        f"{BASE}/sources/{inbox.id}/rules",
+        {"rule_type": "vault_prefix", "pattern": "00_Inbox/work/", "target_workspace": target},
+        format="json",
+    )
+    assert created.status_code == 201 and created.json()["pattern"] == "00_Inbox/work"
+    assert WorkspaceMappingRule.objects.filter(source=inbox).count() == 1
+    assert not WorkspaceMappingRule.objects.filter(source=hooks, rule_type="vault_prefix").exists()

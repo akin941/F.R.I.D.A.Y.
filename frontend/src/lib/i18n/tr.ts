@@ -1215,6 +1215,7 @@ export const tr = {
       harness: "Harness işleri",
       claude_code_hooks: "Claude Code kancaları",
       calendar: "Takvim",
+      obsidian_inbox: "Obsidian 00_Inbox notları",
     } satisfies Record<IngestionSourceKind, string>,
     subnav: {
       label: "Öğrenen hafıza",
@@ -1321,6 +1322,7 @@ export const tr = {
         repo: "Depo kimliği",
         path_prefix: "Yol öneki",
         calendar_binding: "Takvim bağlantısı",
+        vault_prefix: "Kasa klasörü (00_Inbox/...)",
       } satisfies Record<MappingRuleType, string>,
       ruleTypeLabel: "Kural türü",
       rulePattern: "Desen",
