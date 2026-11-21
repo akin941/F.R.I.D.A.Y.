@@ -4,7 +4,7 @@ autodiscovery (`memory.tasks`) finds them."""
 
 from celery import shared_task
 
-from memory.ingestion import consolidation, extraction
+from memory.ingestion import consolidation, extraction, reflection
 from memory.ingestion.hooks import purge_idle_coding_sessions
 from memory.ingestion.services import purge_expired_episodes, purge_stale_extraction_jobs
 
@@ -59,3 +59,15 @@ def run_learning_night_task():
     consolidated = consolidation.consolidate_waiting()
     planned = extraction.plan_nightly_extraction()
     return {"consolidated": consolidated, "jobs_planned": len(planned)}
+
+
+@shared_task(
+    name="memory.ingestion.tasks.run_weekly_reflection_task",
+    soft_time_limit=_SOFT_TIME_LIMIT,
+    time_limit=_TIME_LIMIT,
+)
+def run_weekly_reflection_task():
+    """Sunday 03:30 Europe/Istanbul beat (Phase 8B D5): one capped,
+    proposal-only reflection per workspace with enough approved items this
+    week; at most one run per workspace per ISO week."""
+    return reflection.run_weekly_reflection()

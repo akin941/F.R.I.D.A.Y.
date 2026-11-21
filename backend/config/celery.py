@@ -1,6 +1,7 @@
 import os
 
 from celery import Celery
+from celery.schedules import crontab
 
 # Production by default (Phase 4 branch 1): a server started without an
 # explicit DJANGO_SETTINGS_MODULE fails hard on a missing environment
@@ -114,6 +115,12 @@ _BEAT_SCHEDULE = {
     "memory-learning-nightly": {
         "task": "memory.ingestion.tasks.run_learning_night_task",
         "schedule": 24 * 60 * 60.0,
+    },
+    # Phase 8B D5: the weekly reflection, Sunday 03:30 in the app timezone
+    # (Celery's Django fixup takes TIME_ZONE, Europe/Istanbul).
+    "memory-learning-weekly-reflection": {
+        "task": "memory.ingestion.tasks.run_weekly_reflection_task",
+        "schedule": crontab(minute=30, hour=3, day_of_week=0),
     },
     "memory-episode-extraction-recovery-scan": {
         "task": "memory.ingestion.tasks.recover_stale_episode_extraction_jobs",

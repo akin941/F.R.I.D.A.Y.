@@ -34,7 +34,12 @@ def test_learning_purposes_are_tiered(settings):
 def test_seed_creates_the_learning_budgets_once(settings):
     call_command("seed_ai_defaults")
     learning = AIBudget.objects.get(name="learning")
-    assert set(learning.purposes) == {"memory.episode_extraction", "memory.consolidation"}
+    assert set(learning.purposes) == {
+        "memory.episode_extraction",
+        "memory.consolidation",
+        "memory.fact_reconciliation",
+        "memory.reflection",
+    }
     assert learning.monthly_limit_usd == Decimal("20")
     assert AIBudget.objects.get(name="learning_extraction_daily").daily_limit_usd == Decimal("1")
     AIBudget.objects.filter(name="learning").update(monthly_limit_usd=Decimal("5"))

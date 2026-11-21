@@ -26,7 +26,7 @@ import json
 import logging
 import uuid
 from collections import Counter, defaultdict
-from datetime import timedelta
+from datetime import date, timedelta
 
 from django.db import IntegrityError, transaction
 from django.db.models import Q
@@ -39,8 +39,18 @@ from audit.models import AuditLog
 from audit.services import record_audit
 from memory.context import neutralize_fence, strip_invisible_formatting
 from memory.core_blocks import CORE_BLOCK_CHAR_BUDGETS
-from memory.ingestion import services
+from memory.graph import ports as graph_ports
+from memory.graph.candidates import EntityRef, normalise_name
+from memory.graph.services import (
+    GraphError,
+    GraphInvalid,
+    SupersedeOrder,
+    SupersedeTargetChanged,
+    find_entity,
+)
+from memory.ingestion import reconciliation, services
 from memory.ingestion.extraction import (
+    FACT_TARGET,
     MEMORY_TARGET,
     drop_inactive_source_candidates,
     inactive_source_reason,
@@ -52,6 +62,8 @@ from memory.models import (
     EpisodeExtractionJob,
     IngestionSource,
     Memory,
+    MemoryEntity,
+    MemoryFact,
     compute_fingerprint,
 )
 from memory.provenance import normalise
@@ -69,6 +81,11 @@ SCHEMA_VERSION = 1
 # d6: per owner per night, across all workspaces -- enforced here, not in a
 # prompt.
 MAX_PROPOSALS_PER_NIGHT = 10
+# Phase 8B D6: at most this many of the 10 are fact proposals (facts cannot
+# crowd out memories), and at most this many new entities per workspace per
+# night; an entity beyond it drops its fact (`entity_cap`).
+MAX_FACT_PROPOSALS_PER_NIGHT = 6
+MAX_NEW_ENTITIES_PER_NIGHT = 20
 # Cosine distance under which a candidate counts as a near-duplicate of an
 # approved memory (similarity >= 0.92).
 SIMILARITY_DISTANCE = 0.08
@@ -149,7 +166,37 @@ def learned_proposals_tonight(owner_id, now=None):
     blocks = CoreBlockProposal.objects.filter(
         window, workspace__owner_id=owner_id, ingestion_source__isnull=False
     ).count()
-    return memories + blocks
+    return memories + blocks + learned_facts_tonight(owner_id, now)
+
+
+def learned_facts_tonight(owner_id, now=None):
+    """Fact proposals the learning jobs made tonight (Phase 8B D6)."""
+    start, end = night_window(now)
+    return MemoryFact.all_objects.filter(
+        created_at__gte=start,
+        created_at__lt=end,
+        workspace__owner_id=owner_id,
+        ingestion_source__isnull=False,
+        origin=MemoryFact.Origin.LEARNED,
+    ).count()
+
+
+def learned_entities_tonight(workspace, now=None):
+    """Learned entities created tonight in `workspace` other than through
+    an owner-typed fact (D6 entity cap)."""
+    start, end = night_window(now)
+    return (
+        MemoryEntity.all_objects.filter(
+            workspace=workspace,
+            origin=MemoryEntity.Origin.LEARNED,
+            created_at__gte=start,
+            created_at__lt=end,
+        )
+        .exclude(facts_as_subject__created_by__isnull=False)
+        .exclude(facts_as_object__created_by__isnull=False)
+        .distinct()
+        .count()
+    )
 
 
 # --- claim / release ---------------------------------------------------------
@@ -339,7 +386,7 @@ def build_consolidation_messages(prompt_content, workspace, candidates):
     ]
 
 
-def _record_drops(drops):
+def record_drops(drops):
     for source_id, reasons in drops.items():
         source = IngestionSource.objects.filter(pk=source_id).first()
         if source is not None:
@@ -371,10 +418,15 @@ def _consolidate_claimed(workspace_id, personal_data, token, candidates, now):
     # No model spend on a source that stopped accepting since extraction;
     # `_finish` re-checks under the job lock for the race with forget.
     candidates, inactive = drop_inactive_source_candidates(candidates)
+    # Phase 8B D4: fact candidates skip the memory consolidation call; they
+    # get their own dedupe and the reconciliation pass instead.
+    fact_candidates = [c for c in candidates if c["target"] == FACT_TARGET]
+    candidates = [c for c in candidates if c["target"] != FACT_TARGET]
     kept, drops = dedupe(workspace, candidates, personal_data)
     for source_id, reasons in inactive.items():
         drops[source_id].update(reasons)
     ranked = []
+    discard, discard_reason = (), ""
     if kept:
         version = prompt_version(PROMPT_NAME)
         sources = IngestionSource.objects.filter(pk__in={c["source_id"] for c in kept})
@@ -399,81 +451,213 @@ def _consolidate_claimed(workspace_id, personal_data, token, candidates, now):
             if exc.retryable:
                 _release(token)
                 return 0
-            return _finish(token, [], drops, discard=kept, reason="consolidation_failed", now=now)
-        try:
-            proposals = parse_consolidation(result.text, len(kept))
-        except ConsolidationParseError:
-            return _finish(
-                token, [], drops, discard=kept, reason="consolidation_schema_invalid", now=now
-            )
-        chosen = set()
-        for item in proposals:
-            candidate = dict(kept[item["index"]])
-            chosen.add(item["index"])
-            if item["title"]:
-                candidate["title"] = item["title"].strip()
-            if item["content"]:
-                candidate["content"] = item["content"].strip()
-            ranked.append(candidate)
-        for index, candidate in enumerate(kept):
-            if index not in chosen:
-                drops[candidate["source_id"]]["merged"] += 1
-    return _finish(token, ranked, drops, now=now)
+            discard, discard_reason = kept, "consolidation_failed"
+            result = None
+        if result is not None:
+            try:
+                proposals = parse_consolidation(result.text, len(kept))
+            except ConsolidationParseError:
+                discard, discard_reason = kept, "consolidation_schema_invalid"
+                proposals = []
+            chosen = set()
+            for item in proposals:
+                candidate = dict(kept[item["index"]])
+                chosen.add(item["index"])
+                if item["title"]:
+                    candidate["title"] = item["title"].strip()
+                if item["content"]:
+                    candidate["content"] = item["content"].strip()
+                ranked.append(candidate)
+            if not discard:
+                for index, candidate in enumerate(kept):
+                    if index not in chosen:
+                        drops[candidate["source_id"]]["merged"] += 1
+    fact_decisions, fact_drops = reconciliation.reconcile(workspace, fact_candidates, personal_data)
+    for source_id, reasons in fact_drops.items():
+        drops[source_id].update(reasons)
+    return _finish(
+        token,
+        ranked,
+        drops,
+        facts=fact_decisions,
+        discard=discard,
+        reason=discard_reason,
+        now=now,
+    )
 
 
-def _finish(token, ranked, drops, *, discard=(), reason="", now=None):
+def create_capped_proposals(workspace, ranked, drops, *, facts=(), now=None):
+    """Turn checked candidates into proposals under the caps (d6, D6). The
+    caller holds the transaction and the owner's workspace locks.
+
+    - `ranked`: memory and core-block candidates, in rank order;
+    - `facts`: `(candidate, supersedes_fact_id_or_None)` from
+      reconciliation, after them -- so facts never crowd out memories.
+
+    Every proposal counts toward `MAX_PROPOSALS_PER_NIGHT` per owner; facts
+    also toward `MAX_FACT_PROPOSALS_PER_NIGHT` and their new entities
+    toward `MAX_NEW_ENTITIES_PER_NIGHT` per workspace. Returns the number
+    created; drops are counted into `drops`."""
+    owner_id = workspace.owner_id
+    used = learned_proposals_tonight(owner_id, now)
+    facts_used = learned_facts_tonight(owner_id, now)
+    entities_used = learned_entities_tonight(workspace, now)
+    sources = {
+        str(s.id): s
+        for s in IngestionSource.objects.filter(
+            pk__in={c["source_id"] for c in ranked} | {c["source_id"] for c, _ in facts}
+        )
+    }
+    created = 0
+    terms = services.scrub_terms_for(workspace)
+    for candidate, supersedes_id in [(c, None) for c in ranked] + list(facts):
+        source = sources.get(candidate["source_id"])
+        # Re-checked under the job lock: a source forgotten, paused or
+        # disabled after the claim yields no proposals (its forget
+        # cascade ran earlier and would not see them).
+        reason = "source_forgotten" if source is None else inactive_source_reason(source)
+        if reason:
+            drops[candidate["source_id"]][reason] += 1
+            continue
+        if used >= MAX_PROPOSALS_PER_NIGHT:
+            drops[candidate["source_id"]]["nightly_cap"] += 1
+            continue
+        if candidate["target"] == FACT_TARGET:
+            if facts_used >= MAX_FACT_PROPOSALS_PER_NIGHT:
+                drops[candidate["source_id"]]["fact_cap"] += 1
+                continue
+            new_entities = _new_entity_count(workspace, candidate, terms)
+            if entities_used + new_entities > MAX_NEW_ENTITIES_PER_NIGHT:
+                drops[candidate["source_id"]]["entity_cap"] += 1
+                continue
+            outcome = _create_fact_proposal(workspace, source, candidate, supersedes_id, drops)
+            if outcome == "created":
+                facts_used += 1
+                entities_used += new_entities
+        else:
+            outcome = _create_proposal(workspace, source, candidate)
+        if outcome == "created":
+            used += 1
+            created += 1
+            services.bump_counter(source, "proposals_created")
+        else:
+            drops[candidate["source_id"]][outcome] += 1
+    return created
+
+
+def _finish(token, ranked, drops, *, facts=(), discard=(), reason="", now=None):
     for candidate in discard:
         drops[candidate["source_id"]][reason] += 1
-    created = 0
     with transaction.atomic():
         jobs = _fenced_jobs(token)
         if not jobs:
             return 0  # fenced out: another consolidation took over
         workspace = jobs[0].workspace
-        owner_id = workspace.owner_id
         # Serialize per owner so two workspaces' consolidations share the
         # nightly cap exactly.
-        list(Workspace.objects.select_for_update().filter(owner_id=owner_id))
-        used = learned_proposals_tonight(owner_id, now)
-        sources = {
-            str(s.id): s
-            for s in IngestionSource.objects.filter(pk__in={c["source_id"] for c in ranked})
-        }
-        for candidate in ranked:
-            source = sources.get(candidate["source_id"])
-            # Re-checked under the job lock: a source forgotten, paused or
-            # disabled after the claim yields no proposals (its forget
-            # cascade ran earlier and would not see them).
-            reason = "source_forgotten" if source is None else inactive_source_reason(source)
-            if reason:
-                drops[candidate["source_id"]][reason] += 1
-                continue
-            if used >= MAX_PROPOSALS_PER_NIGHT:
-                drops[candidate["source_id"]]["nightly_cap"] += 1
-                continue
-            outcome = _create_proposal(workspace, source, candidate)
-            if outcome == "created":
-                used += 1
-                created += 1
-                services.bump_counter(source, "proposals_created")
-            else:
-                drops[candidate["source_id"]][outcome] += 1
+        lock_owner(workspace.owner_id)
+        created = create_capped_proposals(workspace, ranked, drops, facts=facts, now=now)
         _close_jobs(jobs)
-        _record_drops(drops)
+        record_drops(drops)
         record_audit(
             action="memory.learning.consolidated",
             actor_type=AuditLog.ActorType.SYSTEM,
             workspace=workspace,
             metadata={
                 "proposals_created": created,
-                "candidates": len(ranked) + len(discard),
-                "drops": {
-                    reason: sum(c[reason] for c in drops.values())
-                    for reason in {r for c in drops.values() for r in c}
-                },
+                "candidates": len(ranked) + len(discard) + len(facts),
+                "drops": summarise_drops(drops),
             },
         )
     return created
+
+
+def lock_owner(owner_id):
+    list(Workspace.objects.select_for_update().filter(owner_id=owner_id))
+
+
+def summarise_drops(drops):
+    return {
+        reason: sum(c[reason] for c in drops.values())
+        for reason in {r for c in drops.values() for r in c}
+    }
+
+
+def _entity_refs(candidate):
+    fact = candidate["fact"]
+    refs = [fact["subject"]]
+    if "name" in fact["object"]:
+        refs.append(fact["object"])
+    return refs
+
+
+def _new_entity_count(workspace, candidate, terms):
+    """How many entities proposing this fact would create (D6 entity cap)."""
+    seen, count = set(), 0
+    for ref in _entity_refs(candidate):
+        key = (ref["kind"], normalise_name(ref["name"]))
+        if key in seen:
+            continue
+        seen.add(key)
+        if (
+            find_entity(workspace=workspace, kind=ref["kind"], name=ref["name"], terms=terms)
+            is None
+        ):
+            count += 1
+    return count
+
+
+def _create_fact_proposal(workspace, source, candidate, supersedes_id, drops):
+    """One `pending_approval` fact through the graph port (D3). A
+    `supersedes` target that changed since reconciliation (trashed,
+    superseded, archived, or now later than the candidate) leaves the
+    proposal standing as `new`, counted."""
+    fact = candidate["fact"]
+    obj = fact["object"]
+    kwargs = {
+        "workspace": workspace,
+        "subject": EntityRef(kind=fact["subject"]["kind"], name=fact["subject"]["name"]),
+        "predicate": fact["predicate"],
+        "valid_from": date.fromisoformat(fact["valid_from"]),
+        "provenance_quote": candidate["quote"],
+        "object_entity": (EntityRef(kind=obj["kind"], name=obj["name"]) if "name" in obj else None),
+        "object_text": obj.get("text", ""),
+        "statement": candidate["content"],
+        "ingestion_source": source,
+        "source_episode_id": candidate.get("episode_id") or None,
+        # Inherited from the cited episode at verification (D4).
+        "sensitivity": (
+            MemoryFact.Sensitivity.PRIVATE
+            if candidate.get("sensitivity") == MemoryFact.Sensitivity.PRIVATE
+            else MemoryFact.Sensitivity.NORMAL
+        ),
+    }
+    target = None
+    if supersedes_id:
+        target = MemoryFact.objects.filter(pk=supersedes_id, workspace=workspace).first()
+        if target is None:
+            drops[candidate["source_id"]]["supersede_target_changed"] += 1
+    try:
+        if target is not None:
+            try:
+                with transaction.atomic():
+                    row = graph_ports.propose_fact(**kwargs, supersedes=target)
+            except (SupersedeTargetChanged, SupersedeOrder, GraphInvalid):
+                drops[candidate["source_id"]]["supersede_target_changed"] += 1
+                target = None
+        if target is None:
+            with transaction.atomic():
+                row = graph_ports.propose_fact(**kwargs)
+    except GraphError:
+        return "fact_invalid"
+    record_audit(
+        action="memory.learning.proposed",
+        actor_type=AuditLog.ActorType.SYSTEM,
+        workspace=workspace,
+        resource=row,
+        metadata={"source_kind": source.kind, "target": FACT_TARGET},
+    )
+    return "created"
 
 
 def _create_proposal(workspace, source, candidate):
