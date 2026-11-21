@@ -214,3 +214,31 @@ implementation notes; the decision-relevant facts:
 - **Go/no-go** (owner, after two weeks of real use): scrubber corpus 100%
   secrets recall, zero cross-workspace leaks in tests (both met in CI),
   ≥ 60% of proposals accepted (pending, recorded in the brief).
+
+**Phase 8B branch 1, `feat/p8-temporal-facts` (2026-11-20; part 1 of the
+8B note, the closeout extends it).** Details in
+`docs/prompts/phase-8b-transcripts-graph/brief.md` D2, D3, D7.
+
+- **Temporal facts are learned data under this ADR.** `memory.MemoryEntity`
+  and `memory.MemoryFact` (migration `0010`) live in the `memory` app.
+  Owner-text facts are born `pending_approval` through
+  `memory.graph.ports.propose_fact` only (confidence capped at 90, a
+  verbatim provenance quote required), and are approved per item by the
+  owner, a human over the web channel. Owner-typed facts are born
+  `approved`, with the owner's words as the quote.
+- **Graphify rows are not owner data.** `origin=graphify` ⇔
+  `status=system` (a DB check). They are never approvable, editable or
+  trashable through the owner API (405). The importer
+  (`ports.import_code_graph`) is a stub until branch 5.
+- **Facts are in the forget cascade (decision 6).** `forget_source` archives
+  the source's approved learned facts and rejects its pending proposals
+  (clearing their `supersedes` link) under the same operation id. It also
+  trashes entities left with no live fact. `restore_source` brings back
+  exactly those rows; a restored proposal returns without its link.
+  `purge_trash` gains `fact_ids` and `entity_ids` and stays gate-class.
+  Purging a fact first rejects any pending proposal that supersedes it.
+- **Workspace axis.** A fact's subject, object entity and `supersedes`
+  target are in the fact's own workspace: checked in `MemoryFact.save()`
+  and by the `memory_memoryfact_same_workspace` trigger.
+- **Import contract.** `memory.graph` may import only `memory`,
+  `workspaces`, `audit`, `core` and `ai_core`, like `memory.ingestion`.

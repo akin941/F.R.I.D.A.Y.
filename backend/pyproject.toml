@@ -372,6 +372,16 @@ type = "forbidden"
 source_modules = ["memory.ingestion"]
 forbidden_modules = ["config", "accounts", "assistant", "knowledge", "tasks", "approvals", "tools", "agents", "skills", "integrations", "harness", "connectors", "deploys", "ops", "voice", "hud"]
 
+# Phase 8B branch 1 (brief Boundary, D3): the temporal graph package has the
+# same reach as `memory.ingestion`. Producers outside memory (the Graphify
+# importer in harness, the transcript pull and the Inbox import in tools)
+# call `memory.graph.ports`; memory never imports them.
+[[tool.importlinter.contracts]]
+name = "memory.graph may import only memory, workspaces, audit, core, ai_core (Phase 8B)"
+type = "forbidden"
+source_modules = ["memory.graph"]
+forbidden_modules = ["config", "accounts", "assistant", "knowledge", "tasks", "approvals", "tools", "agents", "skills", "integrations", "harness", "connectors", "deploys", "ops", "voice", "hud"]
+
 # Phase 8A branch 3 (brief D6/D14): `friday-hook` runs on the owner's Mac
 # outside the Django project, so it and its vendored scrubber import nothing
 # of ours (the stdlib-only half is asserted by integrations/tests/

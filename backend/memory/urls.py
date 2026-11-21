@@ -1,5 +1,6 @@
 from django.urls import path
 
+from memory.graph.urls import urlpatterns as graph_urlpatterns
 from memory.ingestion.views import (
     CodingSessionListView,
     HookEventIngestView,
@@ -104,6 +105,8 @@ urlpatterns = [
         LearningItemActionView.as_view(),
         name="memory-learning-item-action",
     ),
+    # Phase 8B branch 1 (D3): the owner graph API. Owner, web.
+    *graph_urlpatterns,
 ]
 
 

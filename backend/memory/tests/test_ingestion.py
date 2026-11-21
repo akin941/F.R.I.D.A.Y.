@@ -447,6 +447,9 @@ def test_forget_pauses_trashes_and_is_audited_with_counts_only(owner, hooks, per
         "memories_rejected": 0,
         "core_block_proposals": 0,
         "candidates_discarded": 0,
+        "facts_archived": 0,
+        "facts_rejected": 0,
+        "entities_trashed": 0,
     }
     # Paused: new items are dropped.
     assert _record(hooks, mapping_key="path:/p/1", external_id="d").status == ports.DROPPED_PAUSED

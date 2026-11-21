@@ -79,6 +79,12 @@ DOMAIN_ERROR_CODES = frozenset(
         "memory.core_block.invalid",
         "memory.core_block.stale_version",
         "memory.core_block.weekly_cap",
+        # The temporal graph (Phase 8B branch 1, D2/D3).
+        "memory.graph.invalid",
+        "memory.graph.permission_denied",
+        "memory.graph.supersede_order",
+        "memory.graph.supersede_target_changed",
+        "memory.graph.system_row",
         "task.permission_denied",
         "task.invalid_transition",
         "task.draft_already_confirmed",
