@@ -1016,7 +1016,14 @@ export interface ApiSelfSources {
   anchors: ApiSelfAnchor[];
 }
 
-export type IngestionSourceKind = "git" | "harness" | "claude_code_hooks" | "calendar" | "obsidian_inbox";
+export type IngestionSourceKind =
+  | "git"
+  | "harness"
+  | "claude_code_hooks"
+  | "calendar"
+  | "obsidian_inbox"
+  | "claude_code_transcripts"
+  | "codex_transcripts";
 export type MappingRuleType = "repo" | "path_prefix" | "calendar_binding" | "vault_prefix";
 
 export interface ApiIngestionCounter {
@@ -1025,6 +1032,9 @@ export interface ApiIngestionCounter {
   duplicate: number;
   dropped_unmapped: number;
   dropped_paused: number;
+  /** Phase 8B branch 8: transcript turns refused before storage. */
+  dropped_not_owner?: number;
+  dropped_foreign?: number;
   scrubber_hits: Record<string, number>;
   tokens_spent: number;
   proposals_created: number;
@@ -1042,6 +1052,10 @@ export interface ApiIngestionSource {
   daily_token_budget: number;
   forgotten_at: string | null;
   restorable: boolean;
+  /** Phase 8B branch 8: when the owner last enabled the source. */
+  enabled_at?: string | null;
+  /** Phase 8B branch 8 (D13): the source whose path rules this one uses. */
+  rules_shared_with?: IngestionSourceKind | null;
   today: ApiIngestionCounter | null;
 }
 
