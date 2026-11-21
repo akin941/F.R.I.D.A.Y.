@@ -826,5 +826,6 @@ def _register():
             validate_request=validate_vault_export_request,
             describe_execution=describe_vault_export_execution,
             describe_request=describe_vault_export_request,
+            describe_request_per_workspace=True,
         )
     )

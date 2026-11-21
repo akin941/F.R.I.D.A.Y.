@@ -2433,7 +2433,10 @@ moves one mapped inbox note, and leaves an unmapped one in place.
     with `dry_pass: "vault_unavailable"`. The routing note (Turkish) tells
     the owner to flag sensitive Inbox notes `sensitivity: private`.
     `describe_execution` gains the run's new counts, so the conflict count
-    is on the approval detail.
+    is on the approval detail. The summary depends only on the workspace
+    and pending-ness, so a new `ToolSpec.describe_request_per_workspace`
+    flag lets `ApprovalRequestSerializer` compute it once per workspace per
+    serialization (the approvals list keeps its constant query count).
   - **The work_log notice** is its own `work_log` row (outcome
     `conflicts_saved`), next to the run's `succeeded` row; it names
     `_private/_conflicts/<date>/` too when private copies were saved.

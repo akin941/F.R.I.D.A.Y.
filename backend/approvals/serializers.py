@@ -100,7 +100,15 @@ class ApprovalRequestSerializer(serializers.ModelSerializer):
             return None
         tool = _resolve_tool(obj.tool_name)
         describe = getattr(tool, "describe_request", None) if tool is not None else None
-        return describe(obj) if describe is not None else None
+        if describe is None:
+            return None
+        if getattr(tool, "describe_request_per_workspace", False):
+            memo = self.context.setdefault("_display_summary_by_workspace", {})
+            key = (obj.tool_name, obj.workspace_id, obj.status == ApprovalRequest.Status.PENDING)
+            if key not in memo:
+                memo[key] = describe(obj)
+            return memo[key]
+        return describe(obj)
 
 
 class ApprovalRequestCreateSerializer(serializers.Serializer):
