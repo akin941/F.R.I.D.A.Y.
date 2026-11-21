@@ -177,9 +177,16 @@ def test_propose_with_supersedes_checks_target(personal, api, hetzner):
         )
 
 
-def test_import_code_graph_is_a_stub_until_branch_5(personal):
-    with pytest.raises(NotImplementedError):
-        ports.import_code_graph(workspace=personal, repo_ref="r", snapshot={})
+def test_import_code_graph_port_refuses_a_malformed_snapshot(personal):
+    # Implemented in branch 5 (memory/tests/test_code_graph.py covers it).
+    with pytest.raises(ports.CodeGraphInvalid):
+        ports.import_code_graph(
+            workspace=personal,
+            repo_ref="r",
+            commit_sha="a" * 40,
+            committed_at=T0,
+            graph={},
+        )
 
 
 # --- approve / reject -------------------------------------------------------------
