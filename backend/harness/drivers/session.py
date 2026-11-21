@@ -109,7 +109,8 @@ class DriverSession:
 
     @property
     def backend(self):
-        return f"harness_driver:{self.driver.agent}:{self.driver.name}"
+        # <= 30 characters (`ModelUsage.backend`), e.g. "harness_app_server:codex_cli".
+        return f"harness_{self.driver.name}:{self.driver.agent}"
 
     def run(self, container, goal):
         report = self.report
