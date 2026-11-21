@@ -1718,3 +1718,29 @@ The first one is from the stub and is kept.
    row 6 record round 2 as fixed. On the reviewer's APPROVE they change
    to "review round 2 approved" (that edit follows the verdict; it is
    not made before it).
+
+### Known follow-ups — unresolved LOW review notes (recorded at merge, 2026-11-21)
+
+These came out of the round 3 review and were not fixed before the brief
+merged. Fix them in the brief (or in the named branch) before that branch
+starts.
+
+1. LOW, tail retention job: D7 and R7 promise that
+   `NodeActionExecution.tail` is cleared after
+   `NODE_ACTION_TAIL_RETENTION_DAYS` (default 14), but no branch lists a
+   task or beat entry that does it and no test covers it; the setting
+   only appears in the branch 3 settings list. Fix: add to branch 3
+   (scope, files, tests) a daily beat task such as
+   `nodes.tasks.clear_expired_action_tails` in `nodes/tasks.py` and
+   `config/celery.py`, with a frozen-clock test that a tail older than
+   14 days is nulled and a newer one is kept.
+2. LOW, D5 check 24 wording: it says "grant still unexpired" after the
+   click, but confirm-class invokes carry no grant (`grant: null`), so
+   the post-click expiry rule for them is not stated. Fix: reword check
+   24 to "envelope/grant `expires_at` still in the future" and add a
+   conformance case for a confirm-class envelope that expires inside the
+   confirmation window.
+3. LOW, status lines: the header, the branch-table `brief` row and
+   MASTER_PLAN row 6 say "awaits re-review" and are labelled round 2.
+   Fix: after the verdict, edit the three status lines to "review round 3
+   approved".
