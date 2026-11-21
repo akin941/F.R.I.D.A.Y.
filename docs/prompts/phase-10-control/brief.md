@@ -2051,3 +2051,34 @@ check-11-first order as intentional.
 7. Mac session M3 (deferred: Mac session, pending owner evaluation): run the
    32 cases of `backend/nodes/conformance/escape/cases.json` through the
    Swift `SrtExecutor` in worktree mode and record the result in ADR-014.
+
+### Known follow-ups — `feat/p10-reference-executor`, unresolved LOW review notes (recorded at merge, 2026-11-21)
+
+1. LOW, `backend/nodes/reference/node.py`: the kill switch is enforced only
+   at check 24 (after the click) and in `engage_kill_switch`. A new gated
+   invoke that arrives while the switch is engaged still opens a
+   confirmation window and is refused only after the click, as
+   `expired_after_confirm`. This matches the brief's check 24 wording, so it
+   is not a defect. Fix (optional): refuse at check 23 while `kill_switch` is
+   set, so the owner is never shown a window that cannot run, and add a
+   conformance case for it.
+2. LOW, `backend/nodes/reference/worktree.py`: git runs outside the sandbox
+   when it creates and removes the worktree. Hooks are disabled with
+   `core.hooksPath`, but repo-local config such as filter drivers or
+   `core.fsmonitor` could still execute; `HOME` is set to the repo's parent
+   directory. The risk is limited to repos the owner has mapped, and the
+   sandbox denies writes to `.git`. Fix: pass `-c core.fsmonitor=false`, and
+   either disable filters or run git with `GIT_CONFIG_GLOBAL=/dev/null`; note
+   the residual risk in the Mac session's worktree implementation.
+3. LOW, `backend/nodes/reference/sandbox.py`: `DENY_READ_HOME` follows the
+   brief's D4 list and omits other common credential locations (for example
+   `~/.kube`, `~/.config/gcloud`, `~/.git-credentials`, `~/.npmrc`,
+   `~/.config/op`). It matches the brief, so it is not a spec deviation. Fix:
+   consider extending the list in a later brief or in the Mac session, and
+   regenerate `vectors/sandbox.json` and the escape cases when you do.
+4. LOW, `backend/nodes/reference/node.py`: TOCTOU gap between check 22
+   (repo resolution) and execution up to 60 s later; the node reuses the
+   realpath recorded at policy load (`repo.real_root`) and does not
+   re-resolve it at run time. Exploiting it needs local write access to the
+   owner's repo path. Fix: re-realpath the repo root after the click and
+   refuse with `not_configured` if it changed.
