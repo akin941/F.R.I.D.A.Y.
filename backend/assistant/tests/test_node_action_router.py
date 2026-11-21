@@ -163,9 +163,7 @@ def test_a_typed_request_yields_a_node_action_draft_payload(conversation, router
     assert ModelUsage.objects.count() == 2
 
 
-def test_the_argument_step_sees_the_owner_message_and_the_targets_only(
-    conversation, router, ports
-):
+def test_the_argument_step_sees_the_owner_message_and_the_targets_only(conversation, router, ports):
     classify(conversation)
     _, messages = router["calls"][1]
     assert [m["role"] for m in messages] == ["system", "user"]

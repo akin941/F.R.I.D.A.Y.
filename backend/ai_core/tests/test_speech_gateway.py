@@ -425,7 +425,8 @@ def test_under_cap_call_proceeds_and_is_priced(user, workspace, calls):
     assert usage.estimated_cost == Decimal("0.015000")
     assert usage.context_report["budget_session"] == "s-1"
     assert usage.context_report["cost_source"] == "configured_price"
-    assert budgets.spent(AIBudget.objects.get(name="audio"), "session", session="s-1") == Decimal("0.015")
+    audio = AIBudget.objects.get(name="audio")
+    assert budgets.spent(audio, "session", session="s-1") == Decimal("0.015")
 
 
 def test_stt_cost_from_configured_per_second_price(user, workspace):

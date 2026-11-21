@@ -285,7 +285,10 @@ def test_a_voice_turn_without_the_repo_names_voice_first(workspace, owner, conve
     ("answer", "expected"),
     [
         (CONSISTENT, ("ok", "consistent")),
-        ('{"verdict": "unclear", "reason_code": "ambiguous_request"}', ("warn", "ambiguous_request")),
+        (
+            '{"verdict": "unclear", "reason_code": "ambiguous_request"}',
+            ("warn", "ambiguous_request"),
+        ),
         ('{"verdict": "unclear", "reason_code": "different_target"}', ("warn", "different_target")),
         (
             '{"verdict": "inconsistent", "reason_code": "different_action"}',
