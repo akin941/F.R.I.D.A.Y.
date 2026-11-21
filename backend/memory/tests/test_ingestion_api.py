@@ -330,3 +330,58 @@ def test_vault_prefix_rule_types_are_checked_per_source(owner, personal, hooks, 
     assert created.status_code == 201 and created.json()["pattern"] == "00_Inbox/work"
     assert WorkspaceMappingRule.objects.filter(source=inbox).count() == 1
     assert not WorkspaceMappingRule.objects.filter(source=hooks, rule_type="vault_prefix").exists()
+
+
+# --- Phase 8B branch 8 (brief D13): the transcript sources over the API -------
+
+
+def _transcript_endpoints(source, firm):
+    src = f"{BASE}/sources/{source.id}"
+    return [
+        ("get", src, None, 200),
+        ("patch", src, {"enabled": True}, 200),
+        ("get", f"{src}/rules", None, 200),
+        (
+            "post",
+            f"{src}/rules",
+            {"rule_type": "path_prefix", "pattern": "/w", "target_workspace": str(firm.id)},
+            400,  # the rules are the hooks source's: refused even for the owner
+        ),
+    ]
+
+
+TRANSCRIPT_ENDPOINT_IDS = ["audit", "enable", "list-rules", "create-rule"]
+
+
+@pytest.mark.parametrize("kind", ["claude_code_transcripts", "codex_transcripts"])
+@pytest.mark.parametrize("index", range(4), ids=TRANSCRIPT_ENDPOINT_IDS)
+@pytest.mark.parametrize("principal, expected", PRINCIPALS)
+def test_transcript_source_role_matrix(
+    owner, personal, firm, sources, web_client, principal, expected, index, kind
+):
+    source = sources[kind]
+    method, url, body, success = _transcript_endpoints(source, firm)[index]
+    client = _client(principal, owner, personal, web_client)
+    response = getattr(client, method)(url, body, format="json")
+    assert response.status_code == (success if expected == "ok" else expected)
+    source.refresh_from_db()
+    assert not WorkspaceMappingRule.objects.filter(source=source).exists()
+    if expected != "ok":
+        assert source.enabled is False and source.enabled_at is None
+
+
+def test_enabling_a_transcript_source_over_the_api_records_enabled_at(
+    owner, personal, sources, web_client
+):
+    source = sources["claude_code_transcripts"]
+    client = web_client(owner)
+    response = client.patch(f"{BASE}/sources/{source.id}", {"enabled": True}, format="json")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["enabled"] is True and body["enabled_at"] is not None
+    assert body["rules_shared_with"] == "claude_code_hooks"
+    services.bump_counter(source, "dropped_not_owner")
+    audit = client.get(f"{BASE}/sources/{source.id}").json()
+    assert audit["rules_shared_with"] == "claude_code_hooks"
+    assert audit["counters"][0]["dropped_not_owner"] == 1
+    assert audit["counters"][0]["dropped_foreign"] == 0
