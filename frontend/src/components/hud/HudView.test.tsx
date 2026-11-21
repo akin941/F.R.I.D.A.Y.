@@ -289,6 +289,64 @@ describe("HudView (A8)", () => {
     expect(screen.getByTestId("hud-state-label")).toHaveTextContent(tr.hud.states.speaking);
   });
 
+  it("a node action running on the Mac is tool-running, also under reduced motion (Phase 10 D12)", () => {
+    vi.spyOn(window, "matchMedia").mockImplementation(
+      (query: string) =>
+        ({
+          matches: query.includes("prefers-reduced-motion"),
+          media: query,
+          addEventListener: () => undefined,
+          removeEventListener: () => undefined,
+        }) as unknown as MediaQueryList,
+    );
+    let callbacks: HudStreamCallbacks | null = null;
+    const terminalStreamFactory = vi.fn(() => ({ start: vi.fn(), stop: vi.fn() }));
+    render(
+      <HudView
+        streamFactory={(_url, cb) => {
+          callbacks = cb;
+          return { start: vi.fn(), stop: vi.fn() };
+        }}
+        terminalStreamFactory={terminalStreamFactory}
+        webglAvailable={() => false}
+      />,
+    );
+    act(() => {
+      callbacks!.onStatus("open");
+      callbacks!.onData(
+        data({
+          terminal: {
+            running_count: 1,
+            items: [
+              {
+                id: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+                capability: "repo.command.run",
+                label: "Repoda komut çalıştır",
+                class: "gate",
+                repo_name: "acme",
+                status: "running",
+                running: true,
+                terminal: false,
+                exit_code: null,
+                duration_ms: 1000,
+                created_at: null,
+                finished_at: null,
+              },
+            ],
+          },
+        }),
+      );
+    });
+    expect(stateOf()).toBe("tool-running");
+    expect(screen.getByTestId("hud")).toHaveAttribute("data-fps", "0");
+    expect(screen.getByTestId("hud-state-label")).toHaveTextContent(tr.hud.states["tool-running"]);
+    expect(screen.getByTestId("hud-terminal")).toBeInTheDocument();
+    expect(terminalStreamFactory).toHaveBeenCalledWith(
+      "/api/hud/terminal/dddddddd-dddd-4ddd-8ddd-dddddddddddd/stream",
+      expect.anything(),
+    );
+  });
+
   it("frame caps: 30 fps while active, 5 at rest", () => {
     setup();
     expect(screen.getByTestId("hud")).toHaveAttribute("data-fps", "5");
