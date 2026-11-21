@@ -342,6 +342,10 @@ export interface ApiVaultExportExecution {
   updated_count: number;
   removed_count: number;
   retry_count: number;
+  // Phase 8B branches 7 and 9 (D12): owner-edited notes saved before overwrite.
+  conflicts_saved?: number;
+  conflicts_private?: number;
+  conflicts_folders?: string[];
 }
 
 // harness_implement (Gate A) execution shape -- its `status` is the
@@ -1089,6 +1093,20 @@ export interface ApiIngestionAudit extends ApiIngestionSource {
   tokens_spent_today: number;
   acceptance: { created: number; accepted: number; rejected: number; rate: number | null };
   forget_preview: ApiForgetPreview;
+  /** Phase 8B branch 9 (D13): one entry per cursor of a transcript source. */
+  transcript_cursors?: ApiTranscriptCursor[];
+}
+
+export interface ApiTranscriptCursor {
+  target_workspace: string;
+  target_workspace_name: string;
+  node_ref: string;
+  since: string;
+  since_clamped: number;
+  last_clamped_at: string | null;
+  /** The window the 7-day contract bound skipped (lost by design). */
+  last_skipped_window: { from: string; to: string } | null;
+  tie_overflow: number;
 }
 
 export interface ApiForgetResult {
@@ -1206,4 +1224,135 @@ export interface ApiLearningDigest {
     workspace: { id: string; name: string; type: "personal" | "company" };
     items: ApiLearningItem[];
   }[];
+}
+
+// --- The temporal graph (Phase 8B D2, branch 9: /memory/graph) ---
+
+export type GraphEntityKind =
+  | "repo"
+  | "service"
+  | "firm"
+  | "person_role"
+  | "project"
+  | "tool"
+  | "concept"
+  | "code_module"
+  | "code_class"
+  | "code_function";
+
+/** The kinds an owner (or a learned proposal) may name; `code_*` come only from Graphify. */
+export type LearnedEntityKind = Exclude<GraphEntityKind, "code_module" | "code_class" | "code_function">;
+
+export type GraphFactPredicate = LearnedFactPredicate | "contains" | "imports" | "calls" | "inherits";
+export type GraphFactStatus = "pending_approval" | "approved" | "rejected" | "archived" | "system";
+export type GraphOrigin = "learned" | "graphify";
+
+export interface ApiGraphEntityRef {
+  id: string;
+  kind: GraphEntityKind;
+  name: string;
+}
+
+export interface ApiGraphEntity {
+  id: string;
+  workspace: string;
+  kind: GraphEntityKind;
+  name: string;
+  aliases: string[];
+  origin: GraphOrigin;
+  is_private: boolean | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ApiGraphFact {
+  id: string;
+  workspace: string;
+  subject: ApiGraphEntityRef;
+  predicate: GraphFactPredicate;
+  object_entity: ApiGraphEntityRef | null;
+  object_text: string;
+  statement: string;
+  valid_from: string;
+  valid_to: string | null;
+  superseded_by: string | null;
+  supersedes: string | null;
+  confidence: number;
+  status: GraphFactStatus;
+  origin: GraphOrigin;
+  sensitivity: MemorySensitivity;
+  provenance_quote: string;
+  source_episode_id: string | null;
+  ingestion_source: string | null;
+  in_trash: boolean;
+  created_at: string;
+  updated_at: string;
+  hop?: number;
+}
+
+/** A Graphify snapshot (`CodeGraphImport`): sha, times and counts only. */
+export interface ApiCodeGraphSnapshot {
+  commit_sha: string;
+  committed_at: string | null;
+  imported_at: string | null;
+  entity_count: number;
+  fact_count: number;
+  retired_at: string | null;
+}
+
+export interface ApiGraphEntityDetail {
+  entity: ApiGraphEntity;
+  edges: ApiGraphFact[];
+  /** The live learned facts an owner trash moves with the entity. */
+  fact_count: number;
+  code_graph: ApiCodeGraphSnapshot | null;
+}
+
+export type GraphifyRunStatus = "pending" | "running" | "succeeded" | "failed";
+
+export interface ApiGraphifyRun {
+  id: string;
+  workspace: string;
+  repo: { id: string; name: string };
+  status: GraphifyRunStatus;
+  requested_sha: string;
+  commit_sha: string;
+  committed_at: string | null;
+  attempts: number;
+  started_at: string | null;
+  finished_at: string | null;
+  error_type: string;
+  counts: Record<string, number>;
+  created_at: string;
+}
+
+// --- Eval runs (Phase 8B D9): metrics only, never case text ---
+
+export type EvalSet = "public" | "private";
+export type EvalKind = "run" | "baseline" | "compare";
+export type EvalVerdict = "pass" | "fail" | "inconclusive";
+
+export interface ApiEvalRun {
+  id: string;
+  run_id: string;
+  set: EvalSet;
+  kind: EvalKind;
+  retrieval_mode: string;
+  compression_purpose: string | null;
+  arm: "a" | "b" | null;
+  started_at: string;
+  finished_at: string;
+  total: number;
+  answered: number;
+  no_provider: number;
+  budget_stopped: number;
+  /** A decimal as text (`Decimal` serialised by the backend). */
+  spend_usd: string;
+  recall_at_10: number | null;
+  leak_rate: number | null;
+  temporal_correctness: number | null;
+  answer_accuracy: number | null;
+  pre_tokens: number | null;
+  post_tokens: number | null;
+  verdict: EvalVerdict | null;
 }

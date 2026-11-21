@@ -9,6 +9,7 @@ import {
   ListTodo,
   MonitorSmartphone,
   MessageSquare,
+  Network,
   Mic,
   Plug,
   Rocket,
@@ -62,6 +63,7 @@ export const NAV_GROUPS: NavGroup[] = [
     items: [
       { href: "/memory", label: items.memory, icon: Brain },
       { href: "/memory/learning", label: items.learning, icon: Sunrise },
+      { href: "/memory/graph", label: items.graph, icon: Network },
       { href: "/knowledge", label: items.knowledge, icon: BookOpen },
       { href: "/tasks", label: items.tasks, icon: ListTodo },
       { href: "/today", label: items.today, icon: CalendarCheck },

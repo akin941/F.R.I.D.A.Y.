@@ -19,7 +19,21 @@ function VaultExportExecutionLine({ execution }: { execution: ApiVaultExportExec
       {execution.status === "succeeded" && hasCounters
         ? ` (${execution.written_count} yazıldı, ${execution.updated_count} güncellendi, ${execution.removed_count} silindi)`
         : null}
+      {execution.status === "succeeded" ? <ConflictLine execution={execution} /> : null}
     </p>
+  );
+}
+
+/** Phase 8B branch 9 (D12): how many owner-edited notes the run saved and where. */
+export function ConflictLine({ execution }: { execution: ApiVaultExportExecution }) {
+  const count = execution.conflicts_saved;
+  if (typeof count !== "number") return null;
+  const copy = tr.approvals.vaultExport;
+  const folders = (execution.conflicts_folders ?? []).map((f) => `\`${f}\``).join(" ve ");
+  return (
+    <span className="block text-xs text-muted-foreground" data-testid="vault-conflicts">
+      {count === 0 ? copy.noConflicts : folders ? copy.conflicts(count, folders) : copy.conflictsNoFolder(count)}
+    </span>
   );
 }
 

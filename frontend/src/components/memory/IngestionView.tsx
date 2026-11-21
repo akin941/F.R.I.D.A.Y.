@@ -25,6 +25,8 @@ import { TONE_PILL_CLASSES } from "@/lib/theme/status";
 import { cn } from "@/lib/utils";
 import type {
   ApiForgetResult,
+  ApiGraphifyRun,
+  ApiTranscriptCursor,
   ApiIngestionAudit,
   ApiIngestionSource,
   ApiMappingRule,
@@ -110,6 +112,9 @@ function SourceStatus({ source }: { source: ApiIngestionSource }) {
 
 function CountersTable({ audit }: { audit: ApiIngestionAudit }) {
   const h = copy.counterHeaders;
+  // Phase 8B branch 9 (D13): the transcript sources also count the turns
+  // refused before storage (not the owner's, another workspace's).
+  const transcript = SHARED_RULE_KINDS.has(audit.kind);
   if (audit.counters.length === 0) return <p className="text-sm text-muted-foreground">{copy.noCounters}</p>;
   return (
     <div className="overflow-x-auto rounded-md border">
@@ -120,6 +125,8 @@ function CountersTable({ audit }: { audit: ApiIngestionAudit }) {
             <th className="px-2 py-1 font-medium">{h.stored}</th>
             <th className="px-2 py-1 font-medium">{h.duplicate}</th>
             <th className="px-2 py-1 font-medium">{h.dropped}</th>
+            {transcript ? <th className="px-2 py-1 font-medium">{copy.droppedNotOwner}</th> : null}
+            {transcript ? <th className="px-2 py-1 font-medium">{copy.droppedForeign}</th> : null}
             <th className="px-2 py-1 font-medium">{h.tokens}</th>
             <th className="px-2 py-1 font-medium">{h.proposals}</th>
           </tr>
@@ -133,6 +140,8 @@ function CountersTable({ audit }: { audit: ApiIngestionAudit }) {
               <td className="px-2 py-1">
                 {c.dropped_unmapped} / {c.dropped_paused}
               </td>
+              {transcript ? <td className="px-2 py-1">{c.dropped_not_owner ?? 0}</td> : null}
+              {transcript ? <td className="px-2 py-1">{c.dropped_foreign ?? 0}</td> : null}
               <td className="px-2 py-1">{c.tokens_spent}</td>
               <td className="px-2 py-1">
                 {c.proposals_created} / {c.proposals_accepted} / {c.proposals_rejected}
@@ -142,6 +151,44 @@ function CountersTable({ audit }: { audit: ApiIngestionAudit }) {
         </tbody>
       </table>
     </div>
+  );
+}
+
+/** Phase 8B branch 9 (D13): per transcript cursor, the 7-day clamp count,
+ * the last window it skipped (lost by design) and the tie overflow count. */
+export function TranscriptCursors({ cursors }: { cursors: ApiTranscriptCursor[] }) {
+  return (
+    <section className="flex flex-col gap-1" data-testid="transcript-cursors">
+      <h4 className="text-sm font-medium">{copy.transcriptHeading}</h4>
+      <p className="text-xs text-muted-foreground">{copy.transcriptHint}</p>
+      {cursors.length === 0 ? (
+        <p className="text-xs text-muted-foreground">{copy.noCursors}</p>
+      ) : (
+        <ul className="flex flex-col gap-1.5">
+          {cursors.map((cursor) => (
+            <li
+              key={`${cursor.target_workspace}-${cursor.node_ref}`}
+              className="flex flex-col gap-0.5 rounded-md border px-2 py-1.5 text-xs"
+            >
+              <span className="font-medium break-words">
+                {copy.cursorTarget(cursor.target_workspace_name, cursor.node_ref)}
+              </span>
+              <span className="text-muted-foreground">{copy.cursorSince(formatDateTime(cursor.since))}</span>
+              <span>{copy.sinceClamped(cursor.since_clamped)}</span>
+              <span>
+                {cursor.last_skipped_window
+                  ? copy.lastSkipped(
+                      formatDateTime(cursor.last_skipped_window.from) || cursor.last_skipped_window.from,
+                      formatDateTime(cursor.last_skipped_window.to) || cursor.last_skipped_window.to,
+                    )
+                  : copy.noSkipped}
+              </span>
+              <span>{copy.tieOverflow(cursor.tie_overflow)}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
   );
 }
 
@@ -383,6 +430,8 @@ function SourceDetail({ source, personalId }: { source: ApiIngestionSource; pers
         )}
       </section>
 
+      {SHARED_RULE_KINDS.has(source.kind) ? <TranscriptCursors cursors={data.transcript_cursors ?? []} /> : null}
+
       {source.rules_shared_with ? (
         <SharedRulesNote source={source} />
       ) : (
@@ -604,6 +653,74 @@ function ScrubTerms() {
   );
 }
 
+const GRAPHIFY_TONES: Record<ApiGraphifyRun["status"], keyof typeof TONE_PILL_CLASSES> = {
+  pending: "neutral",
+  running: "info",
+  succeeded: "success",
+  failed: "danger",
+};
+
+/** Phase 8B branch 9 (D10): the Graphify runs of one owned workspace --
+ * status, sha and counts only (never a label or container output). */
+export function GraphifyRuns() {
+  const owned = useOwnedWorkspaces();
+  const [workspaceId, setWorkspaceId] = useState(owned[0]?.id ?? "");
+  const runs = useQuery({
+    queryKey: queryKeys.graphifyRuns(workspaceId),
+    queryFn: () =>
+      apiGetJson<ApiGraphifyRun[]>(`/api/memory/graph/graphify-runs?workspace=${encodeURIComponent(workspaceId)}`),
+    enabled: Boolean(workspaceId),
+  });
+  return (
+    <section className="flex flex-col gap-2" aria-labelledby="graphify-runs" data-testid="graphify-runs">
+      <h2 id="graphify-runs" className="text-lg font-semibold tracking-tight">
+        {copy.graphifyHeading}
+      </h2>
+      <p className="text-sm text-muted-foreground">{copy.graphifyHint}</p>
+      <select
+        aria-label={copy.graphifyWorkspace}
+        className={cn(NATIVE_SELECT, "sm:w-64")}
+        value={workspaceId}
+        onChange={(e) => setWorkspaceId(e.target.value)}
+      >
+        {owned.map((w) => (
+          <option key={w.id} value={w.id}>
+            {w.name}
+          </option>
+        ))}
+      </select>
+      {!workspaceId ? null : runs.isPending ? (
+        <Skeleton className="h-8 w-full" />
+      ) : runs.isError ? (
+        <ErrorState error={runs.error} title={copy.graphifyFailed} onRetry={() => void runs.refetch()} />
+      ) : runs.data.length === 0 ? (
+        <p className="text-xs text-muted-foreground">{copy.graphifyEmpty}</p>
+      ) : (
+        <ul className="flex flex-col gap-1.5">
+          {runs.data.map((run) => (
+            <li key={run.id} className="flex flex-col gap-0.5 rounded-md border px-2 py-1.5 text-xs">
+              <span className="flex flex-wrap items-center gap-2">
+                <span className="font-medium break-words">{run.repo.name}</span>
+                <Badge variant="outline" className={TONE_PILL_CLASSES[GRAPHIFY_TONES[run.status] ?? "neutral"]}>
+                  {copy.graphifyStatus[run.status] ?? run.status}
+                </Badge>
+                <code className="font-mono">{(run.commit_sha || run.requested_sha).slice(0, 12)}</code>
+              </span>
+              <span className="text-muted-foreground">
+                {formatDateTime(run.finished_at ?? run.created_at)} · {copy.graphifyAttempts(run.attempts)}
+              </span>
+              {typeof run.counts.entities === "number" ? (
+                <span>{copy.graphifyCounts(run.counts.entities, run.counts.facts ?? 0)}</span>
+              ) : null}
+              {run.error_type ? <span className="text-danger">{copy.graphifyError(run.error_type)}</span> : null}
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
 function SourcesForWorkspace({ personalId }: { personalId: string }) {
   const sources = useQuery({
     queryKey: queryKeys.ingestionSources(personalId),
@@ -647,6 +764,7 @@ export function IngestionView() {
         <>
           <SourcesForWorkspace key={personal.id} personalId={personal.id} />
           <ScrubTerms />
+          <GraphifyRuns />
         </>
       ) : (
         <p className="text-sm text-muted-foreground">{copy.noPersonal}</p>
