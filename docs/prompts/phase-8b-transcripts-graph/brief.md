@@ -2938,3 +2938,27 @@ the Phase 8A go/no-go") is restated here as steps:
    - the hostile-`/out` read (`O_NOFOLLOW`, regular file, size before
      read) and the persistent eval DB plus result-file spend sum for the
      `learning_eval` cap (D9, D10).
+
+## Known follow-ups (review round 4, LOW, unresolved at merge)
+
+Recorded at merge into the integration branch (2026-11-21). Fix them in
+the next brief edit.
+
+1. **D12 cross-reference.** The Inbox section of D12 says pasted
+   third-party text in a note is covered by "R3", but R3 is Graph
+   pollution. Fix: change the cross-reference from R3 to R2.
+2. **D13 caller restriction wording.** D13 limits `channel=CHANNEL_SYSTEM`
+   to "only from `tools.transcript_ingest`" via the
+   `SYSTEM_READ_CAPABILITIES` constant. That constant limits
+   capabilities, not callers, so it cannot enforce the caller
+   restriction; the import-linter rule (only `tools`, `hud`, `ops` may
+   import `nodes`) is the actual guard. Fix: reword as "capability
+   allowlist plus the import contract", or add a test that fails if any
+   module other than `tools.transcript_ingest` passes `CHANNEL_SYSTEM`
+   to `invoke_read`.
+3. **Status line after approval.** The branch table has 10 server-side
+   rows against the 4-8 target; this is a deliberate deviation (see the
+   "Branch count" paragraph and the minimum usable cut). The status line
+   still says the brief awaits the Sonnet 5 re-review, which round 4
+   supersedes. Fix: after APPROVE, update the status line and
+   MASTER_PLAN row 8B to record "review round 4 approved".
