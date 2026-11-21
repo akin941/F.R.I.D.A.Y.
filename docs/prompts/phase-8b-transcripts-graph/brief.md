@@ -1727,6 +1727,59 @@ No new ADR.
 queried as of a date and two hops out, and forgotten and restored, in
 one workspace, with no cross-workspace edge possible.
 
+**Implementation record (2026-11-20).** Status: implemented on
+`feat/p8-temporal-facts`, awaiting the independent Sonnet 5 review.
+- Models and migration `memory/0010_temporal_graph`: the D2 checks
+  (window, `system` ⇔ `graphify`, learned quote, exactly one object,
+  `supersedes` only on pending rows, confidence ≤ 100, Graphify-only
+  predicates and `code_*` kinds), plus the `memory_memoryfact_same_workspace`
+  trigger for subject, object entity and `supersedes` target.
+- `memory/graph/`: `candidates.py`, `selectors.py`, `services.py`,
+  `ports.py` and the owner API (`views.py`, `urls.py`, `serializers.py`).
+  Owner trash and restore of single facts and entities are reachable as
+  `facts/<id>/restore` and `entities/<id>/restore` (ADR-009
+  reversibility); `DELETE` on `facts/<id>` and `entities/<id>` is the
+  trash move.
+- Decisions made while implementing, to confirm in review:
+  - A `date` `valid_from` (the v2 candidate shape) becomes local
+    midnight (`TIME_ZONE`) via `services.as_instant`.
+  - An edit of a **pending** proposal is applied at once (D2): the
+    proposal is rejected and the owner's version is approved. If the
+    proposal carried `supersedes`, the version supersedes the current
+    head of that target's `superseded_by` chain. A target trashed or
+    archived meanwhile leaves the version standing as new.
+  - A superseded (closed-window) approved version cannot be trashed
+    singly (409). History stays readable, and the "approve vs trash the
+    target" race then always ends with exactly one outcome and never a
+    closed window on a trashed row. Trashing the entity still moves the
+    whole history to the trash.
+  - Trashing an entity marks its learned facts with the entity's
+    `deleted_at` instant, not a new `forget_operation_id`. That id
+    belongs to forget-source, and overwriting it would break
+    `restore_source`.
+  - Entity resolution revives a trashed entity of the same name and kind
+    when a writer names it again. A pending `purge_trash` of that entity
+    then leaves it alone.
+  - New stable error codes: `memory.graph.invalid`,
+    `memory.graph.permission_denied`, `memory.graph.supersede_order`,
+    `memory.graph.supersede_target_changed` and `memory.graph.system_row`,
+    each with a Turkish message in `frontend/src/lib/i18n/tr.ts`.
+  - Embedding columns exist on `MemoryFact`, but nothing embeds facts
+    yet. The `search` `tsvector` and the fact embedding job are branch 4.
+    The `graphify_repo_ids` purge key and the retire path are branch 5.
+- Tests: `memory/tests/test_graph_{models,services,selectors,api}.py`
+  and `tools/tests/test_graph_forget.py`.
+
+**Owner steps (pending) — `feat/p8-temporal-facts`, recorded 2026-11-20.**
+1. Run the independent Sonnet 5 review of this branch and fix findings
+   until APPROVE (CLAUDE.md "Reviews").
+2. Confirm the implementation decisions listed above, in particular the
+   pending-edit semantics and the refusal to trash a superseded version
+   singly.
+
+Nothing in this branch needs the Mac, real credentials, paid calls or
+real hardware.
+
 ### 2. `feat/p8-fact-learning` — episode extraction v2, reconciliation, reflection, caps
 
 **Scope.**
@@ -2533,7 +2586,7 @@ Mac and private-data rows pending owner evaluation.
 | # | Branch | Scope | Depends on | Status |
 |---|---|---|---|---|
 | brief | `docs/p8b-brief` | This brief (full, from the stub), MASTER_PLAN §AA row 8B Brief/Status | Phase 8A closeout; Phase 9 brief | **implemented 2026-11-20** (docs only; pins verified 2026-11-21 against PyPI and the official repos; review round 1 findings fixed 2026-11-21; review round 2 findings fixed 2026-11-21; review round 3 findings fixed 2026-11-21; awaits the Sonnet 5 re-review) |
-| 1 | `feat/p8-temporal-facts` | `MemoryEntity`/`MemoryFact`, validity windows, supersede, recursive-CTE traversal, owner API, forget/trash/purge cascade, `memory.graph` contract | brief approved | not started |
+| 1 | `feat/p8-temporal-facts` | `MemoryEntity`/`MemoryFact`, validity windows, supersede, recursive-CTE traversal, owner API, forget/trash/purge cascade, `memory.graph` contract | brief approved | **implemented 2026-11-20** (awaits the Sonnet 5 review; see "Implementation record" under branch 1) |
 | 2 | `feat/p8-fact-learning` | Episode extraction schema v1 → v2 with facts (chat extraction unchanged at v2), inherited fact sensitivity, entity-in-quote rule, reconciliation, weekly reflection, caps, digest fact items | 1 | not started |
 | 3 | `feat/p8-eval-set` | Eval harness, public seed, private loader, `memory_eval`, `memory.eval_answer` purpose, CI public run | 1 (parallel with 2) | not started |
 | 4 | `feat/p8-hybrid-retrieval` | `tsvector` + GIN, per-provider HNSW expression indexes, RRF + decay + hops, flag, `<memory_fact>` block, `memory_graph_lookup` | 1, 3 | not started |

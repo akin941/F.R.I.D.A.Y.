@@ -166,6 +166,10 @@ def test_forget_archives_exactly_the_sources_memories_and_rejects_its_proposals(
         "memories_rejected",
         "core_block_proposals",
         "candidates_discarded",
+        # Phase 8B branch 1 (D7): the fact cascade's counts.
+        "facts_archived",
+        "facts_rejected",
+        "entities_trashed",
     }
 
 
@@ -214,6 +218,7 @@ def test_forget_preview_names_the_cascade_counts(world):
         "episodes": 2,
         "memories": 3,
         "core_block_proposals": 1,
+        "facts": 0,
     }
 
 

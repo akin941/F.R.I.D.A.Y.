@@ -219,7 +219,12 @@ def test_list_and_audit_view(owner, personal, firm, hooks, setup, web_client):
     assert body["episodes"][0]["workspace_name"] == personal.name
     assert body["unmapped_keys"][0]["short"] == "path:/nowhere"
     assert body["counters"][-1]["dropped_unmapped"] == 1
-    assert body["forget_preview"] == {"episodes": 1, "memories": 0, "core_block_proposals": 0}
+    assert body["forget_preview"] == {
+        "episodes": 1,
+        "memories": 0,
+        "core_block_proposals": 0,
+        "facts": 0,
+    }
     assert body["acceptance"]["rate"] is None
     assert body["daily_token_budget"] == 40000 and body["tokens_spent_today"] == 0
     viewed = AuditLog.objects.filter(action="memory.ingestion.viewed")
