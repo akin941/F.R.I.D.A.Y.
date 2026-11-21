@@ -485,3 +485,15 @@ def test_tail_retention_clears_old_tails(node_world, make_link, django_capture_o
     execution.refresh_from_db()
     assert execution.tail == ""
     assert verify_chain().ok  # the chain row is untouched by the update
+
+
+@pytest.mark.django_db
+def test_hello_marks_the_node_present_and_classifies_v2(node_world, make_link):
+    bus.clear_presence(node_world.node.pk)
+    link = make_link()
+    assert bus.is_present(node_world.node.pk)
+    snapshot = services.latest_snapshot(node_world.node)
+    entry = next(e for e in snapshot.entries if e["name"] == "repo.command.run")
+    assert entry["invocable"] and entry["protocol_version"] == 2
+    assert link.session.receive({"type": "result", "v": 2}) == "frame_error"
+    assert link.session.frame_errors == 1
