@@ -189,6 +189,26 @@ export const ERROR_MESSAGES = {
     message: "Bu hafta için çekirdek blok önerisi sınırına ulaşıldı.",
     specific: true,
   },
+  "memory.graph.invalid": {
+    message: "Bu bilgi grafiği değişikliği geçersiz (varlık, yüklem ya da nesne uygun değil).",
+    specific: true,
+  },
+  "memory.graph.permission_denied": {
+    message: "Bilgi grafiğini yalnızca sahip, web oturumundan değiştirebilir.",
+    specific: true,
+  },
+  "memory.graph.supersede_order": {
+    message: "Yeni bilgi, yerini aldığı bilgiden daha önce başlayamaz; tarihi düzelt.",
+    specific: true,
+  },
+  "memory.graph.supersede_target_changed": {
+    message: "Bu önerinin yerini alacağı bilgi değişti; öneriyi reddet ya da düzenle.",
+    specific: true,
+  },
+  "memory.graph.system_row": {
+    message: "Kod grafiğinden gelen bilgiler düzenlenemez; bir sonraki içe aktarma onları yeniler.",
+    specific: true,
+  },
   // Tasks
   "task.permission_denied": { message: "Rolün bu görev işlemine yetmiyor.", specific: true },
   "task.invalid_transition": {

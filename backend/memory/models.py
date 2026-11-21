@@ -739,3 +739,392 @@ class EpisodeExtractionJob(WorkspaceScopedModel, TimestampedModel):
 
     def __str__(self):
         return f"episode extraction job {self.id} ({self.status})"
+
+
+# --- Temporal knowledge graph (Phase 8B branch 1, brief D2/D3/D7) ----------
+#
+# Entities and facts live in Postgres next to every other learned row; the
+# graph is walked with recursive CTEs (`memory.graph.selectors`), no graph
+# database. Every row is workspace-scoped and an edge never crosses
+# workspaces: a fact's subject, object entity and `supersedes` target are in
+# the fact's own workspace (checked in `save()` and by the
+# `memory_memoryfact_same_workspace` trigger, migration 0010).
+
+
+def live_normal_fact_q(prefix=""):
+    """A live (current or pending, not trashed or archived) non-`private`
+    fact (brief D4's entity-privacy rule). `prefix` lets a related lookup
+    reuse it."""
+    p = prefix
+    current = models.Q(**{f"{p}status__in": ["approved", "system"], f"{p}valid_to__isnull": True})
+    pending = models.Q(**{f"{p}status": "pending_approval"})
+    return (current | pending) & models.Q(
+        **{f"{p}deleted_at__isnull": True, f"{p}sensitivity": "normal"}
+    )
+
+
+class MemoryEntityQuerySet(WorkspaceScopedQuerySet):
+    def with_privacy(self):
+        """Annotate `is_private` (brief D4): an entity is private iff it has
+        no live (current or pending, not trashed or archived) non-`private`
+        fact as subject or object. The one queryset form of the rule;
+        `memory.graph.selectors.entity_is_private` uses the same predicate."""
+        live_normal = (
+            MemoryFact.all_objects.filter(live_normal_fact_q())
+            .filter(
+                models.Q(subject=models.OuterRef("pk"))
+                | models.Q(object_entity=models.OuterRef("pk"))
+            )
+            .values("pk")
+        )
+        return self.annotate(is_private=~models.Exists(live_normal))
+
+
+class LiveMemoryEntityManager(models.Manager.from_queryset(MemoryEntityQuerySet)):
+    """Default manager: hides trashed entities (ADR-009). Trash, restore
+    and purge use `all_objects`."""
+
+    def get_queryset(self):
+        return super().get_queryset().filter(deleted_at__isnull=True)
+
+
+class AllMemoryEntitiesManager(models.Manager.from_queryset(MemoryEntityQuerySet)):
+    pass
+
+
+class MemoryEntity(WorkspaceScopedModel, TimestampedModel):
+    """A node of the temporal graph (brief D2): a repo, service, firm, a
+    person by role, ... in one workspace. Learned entities are resolved in
+    code (`memory.graph.services.resolve_entity`), never by a model; the
+    `code_*` kinds come only from the Graphify import (branch 5). An entity
+    carries no sensitivity: privacy is derived from its facts
+    (`with_privacy()`)."""
+
+    MAX_NAME_CHARS = 200
+    MAX_ALIASES = 10
+
+    class Kind(models.TextChoices):
+        REPO = "repo"
+        SERVICE = "service"
+        FIRM = "firm"
+        PERSON_ROLE = "person_role"
+        PROJECT = "project"
+        TOOL = "tool"
+        CONCEPT = "concept"
+        CODE_MODULE = "code_module"
+        CODE_CLASS = "code_class"
+        CODE_FUNCTION = "code_function"
+
+    class Origin(models.TextChoices):
+        LEARNED = "learned"
+        GRAPHIFY = "graphify"
+
+    kind = models.CharField(max_length=20, choices=Kind.choices)
+    name = models.CharField(max_length=MAX_NAME_CHARS)
+    # Lowercased, NFKC, single spaces (`memory.graph.candidates.normalise_name`).
+    normalised_name = models.CharField(max_length=MAX_NAME_CHARS)
+    # Normalised alternative names, at most MAX_ALIASES.
+    aliases = models.JSONField(default=list, blank=True)
+    origin = models.CharField(max_length=20, choices=Origin.choices, default=Origin.LEARNED)
+    # Graphify: the node id plus the repo id (branch 5).
+    external_ref = models.CharField(max_length=255, blank=True, default="")
+    deleted_at = models.DateTimeField(null=True, blank=True)
+    forget_operation_id = models.UUIDField(null=True, blank=True)
+
+    objects = LiveMemoryEntityManager()
+    all_objects = AllMemoryEntitiesManager()
+
+    class Meta:
+        ordering = ["kind", "normalised_name"]
+        base_manager_name = "all_objects"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["workspace", "kind", "normalised_name", "origin"],
+                name="memory_entity_unique_name",
+            ),
+            models.CheckConstraint(
+                condition=~models.Q(kind__startswith="code_") | models.Q(origin="graphify"),
+                name="memory_entity_code_kinds_graphify_only",
+            ),
+        ]
+        indexes = [models.Index(fields=["workspace", "kind"])]
+        verbose_name_plural = "memory entities"
+
+    def __str__(self):
+        return f"{self.kind} entity {self.id}"
+
+
+class MemoryFactQuerySet(WorkspaceScopedQuerySet):
+    def current(self):
+        """Current facts (D2): `approved` or `system`, `valid_to IS NULL`,
+        not trashed."""
+        return self.filter(
+            status__in=[MemoryFact.Status.APPROVED, MemoryFact.Status.SYSTEM],
+            valid_to__isnull=True,
+            deleted_at__isnull=True,
+        )
+
+    def model_eligible(self):
+        """The only sanctioned path by which MemoryFact rows may enter a
+        gateway payload (D2 "retrievable facts", D8; the
+        `Memory.objects.cloud_eligible()` parity): current, `approved`,
+        `learned`, non-`private`. `system` (Graphify) facts never qualify."""
+        return self.current().filter(
+            status=MemoryFact.Status.APPROVED,
+            origin=MemoryFact.Origin.LEARNED,
+            sensitivity=MemoryFact.Sensitivity.NORMAL,
+        )
+
+    def as_of(self, when):
+        """Facts as of `when` (D2): `valid_from <= when < coalesce(valid_to,
+        inf)`, approved or system, not trashed. Superseded rows stay
+        `approved` with a closed window, so history reads back."""
+        return self.filter(
+            models.Q(valid_to__isnull=True) | models.Q(valid_to__gt=when),
+            status__in=[MemoryFact.Status.APPROVED, MemoryFact.Status.SYSTEM],
+            valid_from__lte=when,
+            deleted_at__isnull=True,
+        )
+
+
+class LiveMemoryFactManager(models.Manager.from_queryset(MemoryFactQuerySet)):
+    """Default manager: hides trashed facts (ADR-009)."""
+
+    def get_queryset(self):
+        return super().get_queryset().filter(deleted_at__isnull=True)
+
+
+class AllMemoryFactsManager(models.Manager.from_queryset(MemoryFactQuerySet)):
+    pass
+
+
+class MemoryFact(WorkspaceScopedModel, TimestampedModel):
+    """An edge of the temporal graph with a validity window (brief D2).
+
+    Writers (D3): `memory.graph.ports.propose_fact` (owner-text learning,
+    born `pending_approval`), the owner fact API (born `approved`, the
+    owner's own words) and `memory.graph.ports.import_code_graph` (Graphify,
+    `system`, branch 5). Approved facts are never edited in place: an edit
+    is a new version that supersedes the old one
+    (`memory.graph.services.edit_fact`)."""
+
+    MAX_STATEMENT_CHARS = 500
+    MAX_OBJECT_TEXT_CHARS = 500
+    MAX_PROPOSED_CONFIDENCE = 90
+
+    class Predicate(models.TextChoices):
+        # learned
+        DECIDED = "decided"
+        USES = "uses"
+        DEPENDS_ON = "depends_on"
+        DEPLOYED_TO = "deployed_to"
+        OWNED_BY = "owned_by"
+        WORKS_ON = "works_on"
+        PREFERS = "prefers"
+        BLOCKED_BY = "blocked_by"
+        REPLACED_BY = "replaced_by"
+        HAS_STATUS = "has_status"
+        # Graphify only
+        CONTAINS = "contains"
+        IMPORTS = "imports"
+        CALLS = "calls"
+        INHERITS = "inherits"
+
+    class Status(models.TextChoices):
+        PENDING_APPROVAL = "pending_approval"
+        APPROVED = "approved"
+        REJECTED = "rejected"
+        ARCHIVED = "archived"
+        SYSTEM = "system"
+
+    class Origin(models.TextChoices):
+        LEARNED = "learned"
+        GRAPHIFY = "graphify"
+
+    Sensitivity = Memory.Sensitivity
+
+    subject = models.ForeignKey(
+        MemoryEntity, on_delete=models.PROTECT, related_name="facts_as_subject"
+    )
+    predicate = models.CharField(max_length=20, choices=Predicate.choices)
+    object_entity = models.ForeignKey(
+        MemoryEntity,
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="facts_as_object",
+    )
+    object_text = models.CharField(max_length=MAX_OBJECT_TEXT_CHARS, blank=True, default="")
+    statement = models.CharField(max_length=MAX_STATEMENT_CHARS)
+    valid_from = models.DateTimeField()
+    valid_to = models.DateTimeField(null=True, blank=True)
+    # Set on the OLD row when a supersede is applied.
+    superseded_by = models.ForeignKey(
+        "self", null=True, blank=True, on_delete=models.SET_NULL, related_name="+"
+    )
+    # Set on a PENDING proposal only: the current fact it would replace if
+    # approved (reconciliation's `supersede`, D4). Cleared on approve (the
+    # link then lives in the old row's `superseded_by`), reject or forget.
+    supersedes = models.ForeignKey(
+        "self",
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="pending_supersessions",
+    )
+    confidence = models.PositiveSmallIntegerField(default=MAX_PROPOSED_CONFIDENCE)
+    status = models.CharField(max_length=20, choices=Status.choices)
+    origin = models.CharField(max_length=20, choices=Origin.choices, default=Origin.LEARNED)
+    ingestion_source = models.ForeignKey(
+        "memory.IngestionSource",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="derived_facts",
+    )
+    # Plain UUID: the episode expires (d10).
+    source_episode_id = models.UUIDField(null=True, blank=True)
+    provenance_quote = models.CharField(max_length=300, blank=True, default="")
+    sensitivity = models.CharField(
+        max_length=20, choices=Memory.Sensitivity.choices, default=Memory.Sensitivity.NORMAL
+    )
+    # Retrieval (branch 4 embeds only `model_eligible()` rows; a `system`
+    # fact keeps NULL for good). No fixed dimension (the MVP 3 policy).
+    embedding = VectorField(null=True, blank=True)
+    embedding_provider = models.ForeignKey(
+        "ai_core.ModelProvider", null=True, blank=True, on_delete=models.PROTECT, related_name="+"
+    )
+    # Provenance of an owner-UI write (the audit row names the writer too).
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="+",
+    )
+    decided_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="+",
+    )
+    decided_at = models.DateTimeField(null=True, blank=True)
+    forget_operation_id = models.UUIDField(null=True, blank=True)
+    forget_prior_status = models.CharField(max_length=20, blank=True, default="")
+    deleted_at = models.DateTimeField(null=True, blank=True)
+
+    objects = LiveMemoryFactManager()
+    all_objects = AllMemoryFactsManager()
+
+    def save(self, *args, **kwargs):
+        # Same-workspace edges are an invariant (the `Memory.save`
+        # precedent); the DB trigger is the backstop for raw SQL.
+        for label, entity_id in (
+            ("subject", self.subject_id),
+            ("object_entity", self.object_entity_id),
+        ):
+            if entity_id is None:
+                continue
+            workspace_ids = list(
+                MemoryEntity.all_objects.filter(pk=entity_id).values_list("workspace_id", flat=True)
+            )
+            if workspace_ids != [self.workspace_id]:
+                raise ValueError(f"{label} must belong to the fact's workspace.")
+        if self.supersedes_id is not None:
+            if self.pk is not None and self.supersedes_id == self.pk:
+                raise ValueError("A fact cannot supersede itself.")
+            target = (
+                MemoryFact.all_objects.filter(pk=self.supersedes_id)
+                .values_list("workspace_id", "subject_id", "predicate")
+                .first()
+            )
+            if target != (self.workspace_id, self.subject_id, self.predicate):
+                raise ValueError(
+                    "supersedes must name a fact of the same workspace, subject and predicate."
+                )
+        super().save(*args, **kwargs)
+
+    class Meta:
+        ordering = ["-valid_from", "-created_at"]
+        base_manager_name = "all_objects"
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(valid_to__isnull=True)
+                | models.Q(valid_to__gte=models.F("valid_from")),
+                name="memory_fact_valid_window",
+            ),
+            models.CheckConstraint(
+                condition=(models.Q(origin="graphify") & models.Q(status="system"))
+                | (~models.Q(origin="graphify") & ~models.Q(status="system")),
+                name="memory_fact_system_iff_graphify",
+            ),
+            models.CheckConstraint(
+                condition=~models.Q(origin="learned") | ~models.Q(provenance_quote=""),
+                name="memory_fact_learned_has_quote",
+            ),
+            models.CheckConstraint(
+                condition=(models.Q(object_entity__isnull=False) & models.Q(object_text=""))
+                | (models.Q(object_entity__isnull=True) & ~models.Q(object_text="")),
+                name="memory_fact_exactly_one_object",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(supersedes__isnull=True) | models.Q(status="pending_approval"),
+                name="memory_fact_supersedes_only_pending",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(confidence__lte=100),
+                name="memory_fact_confidence_range",
+            ),
+            models.CheckConstraint(
+                condition=~models.Q(origin="graphify")
+                | models.Q(predicate__in=["contains", "imports", "calls", "inherits"]),
+                name="memory_fact_graphify_predicates",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["workspace", "status"]),
+            models.Index(fields=["subject", "predicate"]),
+            models.Index(fields=["object_entity"]),
+            models.Index(fields=["ingestion_source"]),
+        ]
+
+    def __str__(self):
+        return f"{self.predicate} fact {self.id} ({self.status})"
+
+
+# The closed predicate split (D2): a model may propose only the learned set;
+# the Graphify set is written only by the code-graph import (branch 5).
+LEARNED_PREDICATES = frozenset(
+    {
+        MemoryFact.Predicate.DECIDED,
+        MemoryFact.Predicate.USES,
+        MemoryFact.Predicate.DEPENDS_ON,
+        MemoryFact.Predicate.DEPLOYED_TO,
+        MemoryFact.Predicate.OWNED_BY,
+        MemoryFact.Predicate.WORKS_ON,
+        MemoryFact.Predicate.PREFERS,
+        MemoryFact.Predicate.BLOCKED_BY,
+        MemoryFact.Predicate.REPLACED_BY,
+        MemoryFact.Predicate.HAS_STATUS,
+    }
+)
+GRAPHIFY_PREDICATES = frozenset(
+    {
+        MemoryFact.Predicate.CONTAINS,
+        MemoryFact.Predicate.IMPORTS,
+        MemoryFact.Predicate.CALLS,
+        MemoryFact.Predicate.INHERITS,
+    }
+)
+LEARNED_ENTITY_KINDS = frozenset(
+    {
+        MemoryEntity.Kind.REPO,
+        MemoryEntity.Kind.SERVICE,
+        MemoryEntity.Kind.FIRM,
+        MemoryEntity.Kind.PERSON_ROLE,
+        MemoryEntity.Kind.PROJECT,
+        MemoryEntity.Kind.TOOL,
+        MemoryEntity.Kind.CONCEPT,
+    }
+)

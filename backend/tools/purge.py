@@ -9,6 +9,10 @@ only the owner's separate, explicit decision over the web channel runs it.
 Phase 8A branch 5 (brief D11) adds two payload keys for forget-source:
 `episode_ids` (episodes a forget operation moved to the trash) and
 `forgotten_memory_ids` (memories a forget operation archived or rejected).
+Phase 8B branch 1 (brief D7) adds `fact_ids` (learned facts in the trash or
+archived/rejected by a forget operation; a pending proposal that supersedes
+one is rejected first, so the PROTECT link never blocks the purge) and
+`entity_ids` (trashed learned entities, with their non-live facts).
 Forget-source itself stays a reversible confirm-class move; only this
 approved request deletes them for good.
 
@@ -30,6 +34,12 @@ from django.db import transaction
 
 from knowledge.models import KnowledgeDocument
 from knowledge.services import purge_trashed_document
+from memory.graph.services import (
+    purge_entity,
+    purge_fact,
+    purgeable_entities,
+    purgeable_facts,
+)
 from memory.ingestion.services import (
     forgotten_memories,
     purge_forgotten_memory,
@@ -72,18 +82,32 @@ def _purge_memory(row, actor, request_id):
     return purge_forgotten_memory(row, actor=actor, approval_request_id=request_id)
 
 
+def _purge_fact(row, actor, request_id):
+    return purge_fact(row, actor=actor, approval_request_id=request_id)
+
+
+def _purge_entity(row, actor, request_id):
+    return purge_entity(row, actor=actor, approval_request_id=request_id)
+
+
 # key -> (purgeable queryset for a workspace, purge one row, display field)
 _KEYS = {
     "task_ids": (_trashed_tasks, _purge_task, "title"),
     "document_ids": (_trashed_documents, _purge_document, "title"),
     "episode_ids": (trashed_episodes, _purge_episode, "kind"),
     "forgotten_memory_ids": (forgotten_memories, _purge_memory, "title"),
+    # Facts before entities: purging an entity deletes its non-live facts,
+    # and a fact named in both keys is then already gone.
+    "fact_ids": (purgeable_facts, _purge_fact, "statement"),
+    "entity_ids": (purgeable_entities, _purge_entity, "name"),
 }
 _COUNT_NAMES = {
     "task_ids": "task_count",
     "document_ids": "document_count",
     "episode_ids": "episode_count",
     "forgotten_memory_ids": "forgotten_memory_count",
+    "fact_ids": "fact_count",
+    "entity_ids": "entity_count",
 }
 
 

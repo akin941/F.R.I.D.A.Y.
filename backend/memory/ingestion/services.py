@@ -18,6 +18,7 @@ from django.utils import timezone
 
 from audit.services import record_audit
 from core.channels import CHANNEL_WEB
+from memory.graph import services as graph_services
 from memory.ingestion.mapping import (
     InvalidMappingKey,
     normalise_pattern,
@@ -281,6 +282,10 @@ def forget_source(source, *, actor, channel):
         forget_prior_status=CoreBlockProposal.Status.PENDING,
     )
     candidates = _strip_waiting_candidates(source)
+    # Phase 8B branch 1 (D7): the source's learned facts -- approved ->
+    # archived, pending -> rejected (their `supersedes` cleared) -- and the
+    # entities left with no live fact, under the same operation id.
+    facts = graph_services.forget_source_facts(source, operation_id)
     source.paused_at = source.paused_at or now
     source.forgotten_at = now
     source.forget_operation_id = operation_id
@@ -291,6 +296,7 @@ def forget_source(source, *, actor, channel):
         "memories_rejected": rejected,
         "core_block_proposals": proposals,
         "candidates_discarded": candidates,
+        **facts,
     }
     record_audit(
         action="memory.source_forgotten",
@@ -341,10 +347,17 @@ def restore_source(source, *, actor, channel):
     proposals = CoreBlockProposal.objects.filter(
         ingestion_source=source, forget_operation_id=operation_id
     ).update(status=F("forget_prior_status"), forget_operation_id=None, forget_prior_status="")
+    facts = graph_services.restore_source_facts(source, operation_id)
     source.forgotten_at = None
     source.forget_operation_id = None
     source.save(update_fields=["forgotten_at", "forget_operation_id", "updated_at"])
-    counts = {"episodes": restored, "memories": memories, "core_block_proposals": proposals}
+    counts = {
+        "episodes": restored,
+        "memories": memories,
+        "core_block_proposals": proposals,
+        "facts": facts["facts"],
+        "entities": facts["entities"],
+    }
     record_audit(
         action="memory.source_restored",
         actor=actor,
@@ -443,6 +456,7 @@ def forget_preview(source):
         "core_block_proposals": CoreBlockProposal.objects.filter(
             ingestion_source=source, status=CoreBlockProposal.Status.PENDING
         ).count(),
+        "facts": graph_services.forget_preview_facts(source),
     }
 
 
