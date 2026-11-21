@@ -45,6 +45,29 @@ def entity_is_private(entity):
     )
 
 
+def entity_fact_count(entity):
+    """The live learned facts an owner trash of `entity` would move with it
+    (subject or object, not trashed): the number the `/memory/graph`
+    confirmation names (branch 9). Mirrors `services.trash_entity`."""
+    return MemoryFact.objects.filter(
+        Q(subject=entity) | Q(object_entity=entity), origin=MemoryFact.Origin.LEARNED
+    ).count()
+
+
+def code_graph_snapshot(entity):
+    """The Graphify snapshot a `graphify` entity belongs to (branch 9: the
+    read-only entity page shows the run's sha): its repo's
+    `CodeGraphImport`, found by the `<repo ref>:` prefix every Graphify
+    `external_ref` keeps (hashed refs included). `None` for a learned
+    entity or when the snapshot row is gone."""
+    if entity.origin != MemoryEntity.Origin.GRAPHIFY or ":" not in (entity.external_ref or ""):
+        return None
+    repo_ref = entity.external_ref.split(":", 1)[0]
+    return CodeGraphImport.objects.filter(
+        workspace_id=entity.workspace_id, repo_ref=repo_ref
+    ).first()
+
+
 def with_privacy(queryset):
     return queryset.with_privacy()
 

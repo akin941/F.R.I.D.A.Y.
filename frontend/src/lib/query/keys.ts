@@ -61,6 +61,17 @@ export const queryKeys = {
   mappingRules: (workspaceId: string, sourceId: string) =>
     [workspaceId, "memory", "ingestion", "sources", sourceId, "rules"] as const,
   scrubTerms: (workspaceId: string) => [workspaceId, "memory", "ingestion", "scrub-terms"] as const,
+  // Phase 8B branch 9: the temporal graph (per workspace) and the eval runs
+  // (they live in the owner's personal workspace; one cross-workspace list).
+  graph: (workspaceId: string) => [workspaceId, "memory", "graph"] as const,
+  graphEntities: (workspaceId: string, q: string, kind: string) =>
+    [workspaceId, "memory", "graph", "entities", { q, kind }] as const,
+  graphEntity: (workspaceId: string, entityId: string) =>
+    [workspaceId, "memory", "graph", "entity", entityId] as const,
+  graphEntityFacts: (workspaceId: string, entityId: string, asOf: string) =>
+    [workspaceId, "memory", "graph", "entity", entityId, "facts", asOf] as const,
+  graphifyRuns: (workspaceId: string) => [workspaceId, "harness", "graphify-runs"] as const,
+  evalRuns: () => [ALL_WORKSPACES, "memory", "evals", "runs"] as const,
   coreBlocks: (workspaceId: string) => [workspaceId, "memory", "core-blocks"] as const,
   coreBlockVersions: (workspaceId: string, label: string) =>
     [workspaceId, "memory", "core-blocks", label, "versions"] as const,

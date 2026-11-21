@@ -11,6 +11,8 @@ const LINKS = [
   { href: "/memory/learning", label: copy.learning },
   { href: "/memory/ingestion", label: copy.ingestion },
   { href: "/memory/core-blocks", label: copy.coreBlocks },
+  { href: "/memory/graph", label: copy.graph },
+  { href: "/memory/evals", label: copy.evals },
 ];
 
 /** The learning-memory pages' shared sub-navigation (wraps at phone width). */

@@ -53,6 +53,11 @@ class VaultExportRun(WorkspaceScopedModel, TimestampedModel):
     # `_conflicts/<date>/` (or `_private/_conflicts/<date>/`) before being
     # overwritten or pruned.
     conflicts_saved = models.PositiveIntegerField(default=0)
+    # Phase 8B branch 9: how many of them went to the private tree, and the
+    # local date of the `<date>` folder, so the run detail can name the
+    # folder(s) (counts and folder names only).
+    conflicts_private = models.PositiveIntegerField(default=0)
+    conflicts_day = models.DateField(null=True, blank=True)
     entity_notes_count = models.PositiveIntegerField(default=0)
     inbox_imported_count = models.PositiveIntegerField(default=0)
     inbox_unmapped_count = models.PositiveIntegerField(default=0)

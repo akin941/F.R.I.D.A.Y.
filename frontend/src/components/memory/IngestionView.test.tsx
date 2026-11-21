@@ -5,7 +5,7 @@ import { IngestionView, SharedRulesNote, ruleTypesFor, sourceName } from "@/comp
 import { calledWith, cancelDialog, confirmInDialog, findConfirmDialog } from "@/test/confirm";
 import { renderWithClient } from "@/test/render";
 import { render } from "@testing-library/react";
-import type { ApiIngestionAudit, ApiIngestionSource } from "@/types/api";
+import type { ApiGraphifyRun, ApiIngestionAudit, ApiIngestionSource, ApiTranscriptCursor } from "@/types/api";
 
 vi.mock("next/navigation", () => ({ usePathname: () => "/memory/ingestion" }));
 
@@ -42,9 +42,12 @@ function source(overrides: Partial<ApiIngestionSource> = {}): ApiIngestionSource
   };
 }
 
+let cursors: ApiTranscriptCursor[] | undefined;
+
 function audit(base: ApiIngestionSource): ApiIngestionAudit {
   return {
     ...base,
+    transcript_cursors: cursors,
     counters: [
       {
         day: "2026-11-20",
@@ -52,6 +55,8 @@ function audit(base: ApiIngestionSource): ApiIngestionAudit {
         duplicate: 1,
         dropped_unmapped: 2,
         dropped_paused: 0,
+        dropped_not_owner: 5,
+        dropped_foreign: 1,
         scrubber_hits: { SECRET: 1 },
         tokens_spent: 300,
         proposals_created: 3,
@@ -84,6 +89,8 @@ function audit(base: ApiIngestionSource): ApiIngestionAudit {
   };
 }
 
+let graphifyRuns: ApiGraphifyRun[] = [];
+
 function stub(initial: ApiIngestionSource) {
   let current = initial;
   const fetchMock = vi.fn<(input: string, init?: RequestInit) => Promise<Response>>(async (input, init) => {
@@ -93,6 +100,7 @@ function stub(initial: ApiIngestionSource) {
     if (input === `/api/memory/ingestion/sources/${SRC}` && method === "GET") return json(audit(current));
     if (input === `/api/memory/ingestion/sources/${SRC}/rules` && method === "GET") return json([]);
     if (input.startsWith("/api/memory/ingestion/scrub-terms?")) return json([]);
+    if (input.startsWith("/api/memory/graph/graphify-runs?")) return json(graphifyRuns);
     if (input.endsWith("/forget")) {
       current = { ...current, forgotten_at: "2026-11-20T09:00:00Z", paused: true, restorable: true };
       return json({ operation_id: "op", episodes: 7, core_block_proposals: 1, source: current });
@@ -116,6 +124,8 @@ async function openDetails() {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  graphifyRuns = [];
+  cursors = undefined;
 });
 
 describe("IngestionView", () => {
@@ -252,5 +262,118 @@ describe("transcript sources (Phase 8B branch 8)", () => {
     const note = screen.getByTestId("ingestion-rules-shared");
     expect(note.textContent).toContain("Claude Code kancaları");
     expect(within(note).queryByRole("button")).toBeNull();
+  });
+});
+
+describe("transcript audit view (Phase 8B branch 9)", () => {
+  const transcript = () =>
+    source({ kind: "claude_code_transcripts", rules_shared_with: "claude_code_hooks" });
+
+  async function openTranscriptDetails() {
+    const card = await screen.findByTestId("ingestion-source-claude_code_transcripts");
+    await userEvent.click(within(card).getByRole("button", { name: "Ayrıntılar" }));
+    return screen.findByTestId(`ingestion-detail-${SRC}`);
+  }
+
+  it("shows the shared-rules notice, the dropped-not-owner and unmapped counts", async () => {
+    cursors = [];
+    stub(transcript());
+    renderWithClient(<IngestionView />);
+    await openTranscriptDetails();
+    expect(screen.getByTestId("ingestion-rules-shared")).toHaveTextContent("Claude Code kancaları");
+    expect(screen.queryByTestId("ingestion-rules")).not.toBeInTheDocument();
+    const counters = screen.getByTestId("ingestion-counters");
+    expect(within(counters).getByText("Sahibin yazmadığı (düşen)")).toBeInTheDocument();
+    const cells = within(counters).getAllByRole("cell").map((c) => c.textContent);
+    expect(cells).toContain("5");
+    expect(screen.getByTestId("unmapped-keys")).toHaveTextContent("repo:9f…");
+    expect(screen.getByTestId("transcript-cursors")).toHaveTextContent("Henüz çekim yok");
+  });
+
+  it("per cursor: since_clamped, the last skipped window and tie_overflow", async () => {
+    cursors = [
+      {
+        target_workspace: FIRM,
+        target_workspace_name: "Acme",
+        node_ref: "node-1",
+        since: "2026-11-14T00:00:00Z",
+        since_clamped: 2,
+        last_clamped_at: "2026-11-20T09:00:00Z",
+        last_skipped_window: { from: "2026-11-02T00:00:00.000Z", to: "2026-11-13T09:05:00.000Z" },
+        tie_overflow: 3,
+      },
+    ];
+    stub(transcript());
+    renderWithClient(<IngestionView />);
+    await openTranscriptDetails();
+    const section = screen.getByTestId("transcript-cursors");
+    expect(section).toHaveTextContent("Acme · düğüm node-1");
+    expect(section).toHaveTextContent("7 gün sınırıyla ileri alınan başlangıç: 2");
+    expect(section).toHaveTextContent("Son atlanan pencere:");
+    expect(section).toHaveTextContent("(tie_overflow): 3");
+  });
+
+  it("a non-transcript source has no cursor panel and no not-owner column", async () => {
+    stub(source());
+    renderWithClient(<IngestionView />);
+    await openDetails();
+    expect(screen.queryByTestId("transcript-cursors")).not.toBeInTheDocument();
+    expect(screen.queryByText("Sahibin yazmadığı (düşen)")).not.toBeInTheDocument();
+  });
+});
+
+describe("Graphify runs (Phase 8B branch 9)", () => {
+  it("lists runs with status, sha and counts for the chosen owned workspace", async () => {
+    graphifyRuns = [
+      {
+        id: "g1",
+        workspace: PERSONAL,
+        repo: { id: "r1", name: "friday" },
+        status: "succeeded",
+        requested_sha: "a".repeat(40),
+        commit_sha: "abcdef0123456789".padEnd(40, "0"),
+        committed_at: "2026-11-01T12:00:00Z",
+        attempts: 1,
+        started_at: "2026-11-01T12:01:00Z",
+        finished_at: "2026-11-01T12:03:00Z",
+        error_type: "",
+        counts: { entities: 22, facts: 30 },
+        created_at: "2026-11-01T12:00:30Z",
+      },
+      {
+        id: "g2",
+        workspace: PERSONAL,
+        repo: { id: "r1", name: "friday" },
+        status: "failed",
+        requested_sha: "b".repeat(40),
+        commit_sha: "",
+        committed_at: null,
+        attempts: 3,
+        started_at: null,
+        finished_at: null,
+        error_type: "unsafe_output",
+        counts: {},
+        created_at: "2026-11-02T12:00:30Z",
+      },
+    ];
+    const fetchMock = stub(source());
+    renderWithClient(<IngestionView />);
+    const section = await screen.findByTestId("graphify-runs");
+    expect(await within(section).findByText("Tamamlandı")).toBeInTheDocument();
+    expect(section).toHaveTextContent("abcdef012345");
+    expect(section).toHaveTextContent("22 varlık · 30 ilişki");
+    expect(section).toHaveTextContent("Başarısız");
+    expect(section).toHaveTextContent("Hata kodu: unsafe_output");
+    expect(section).toHaveTextContent("bbbbbbbbbbbb");
+    await userEvent.selectOptions(within(section).getByLabelText("Çalışmaların çalışma alanı"), FIRM);
+    await waitFor(() =>
+      expect(calledWith(fetchMock, "GET", `/api/memory/graph/graphify-runs?workspace=${FIRM}`)).toBe(true),
+    );
+  });
+
+  it("says when there is no run", async () => {
+    stub(source());
+    renderWithClient(<IngestionView />);
+    expect(await screen.findByText(/Henüz Graphify çalışması yok/)).toBeInTheDocument();
   });
 });

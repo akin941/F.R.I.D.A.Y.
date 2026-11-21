@@ -58,16 +58,17 @@ from core.channels import CHANNEL_SYSTEM, CHANNEL_WEB
 from memory.ingestion import transcripts
 from memory.ingestion.mapping import owner_owns, prefixes_for_workspace
 from memory.ingestion.services import owner_workspaces
+from memory.ingestion.transcript_audit import CAPABILITY_BY_SOURCE_KIND, PULL_AUDIT_ACTION
 from memory.models import IngestionSource, TranscriptCursor
 from workspaces.models import Workspace
 
 logger = logging.getLogger(__name__)
 
 JOB_NAME = "transcript_pull"
-AUDIT_ACTION = "memory.transcript_pull.invoked"
+# Owned by memory (the audit view reads the same rows, branch 9).
+AUDIT_ACTION = PULL_AUDIT_ACTION
 CAPABILITIES = {
-    transcripts.TOOL_CLAUDE: "claude.transcripts.owner_turns",
-    transcripts.TOOL_CODEX: "codex.transcripts.owner_turns",
+    tool: CAPABILITY_BY_SOURCE_KIND[kind] for tool, kind in transcripts.SOURCE_KINDS.items()
 }
 # The only capabilities a `CHANNEL_SYSTEM` read may name (D13 amendment).
 SYSTEM_READ_CAPABILITIES = frozenset(CAPABILITIES.values())

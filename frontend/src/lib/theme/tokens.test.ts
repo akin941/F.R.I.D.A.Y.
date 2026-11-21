@@ -142,3 +142,14 @@ describe("status tone map", () => {
     expect(Object.keys(STATUS_TONES.implementation)).toHaveLength(8);
   });
 });
+
+describe("Phase 8B branch 9 surfaces", () => {
+  it("add no colour token: the graph, timeline and eval views use only checked theme tokens", () => {
+    const dir = path.resolve(__dirname, "../../components/memory");
+    for (const file of ["GraphView.tsx", "EntityTimeline.tsx", "EvalRunsView.tsx"]) {
+      const source = readFileSync(path.join(dir, file), "utf8");
+      expect(source).not.toMatch(/#[0-9a-fA-F]{6}\b|oklch\(/);
+      expect(source).not.toMatch(/\b(?:text|bg|border)-(?:red|green|blue|yellow|amber|emerald|slate|gray|zinc)-\d{2,3}\b/);
+    }
+  });
+});

@@ -112,6 +112,20 @@ def _iso(value):
     return value.isoformat() if value else None
 
 
+def serialize_code_graph(record):
+    """A Graphify snapshot (`CodeGraphImport`): sha, times and counts only."""
+    if record is None:
+        return None
+    return {
+        "commit_sha": record.commit_sha,
+        "committed_at": _iso(record.committed_at),
+        "imported_at": _iso(record.imported_at),
+        "entity_count": record.entity_count,
+        "fact_count": record.fact_count,
+        "retired_at": _iso(record.retired_at),
+    }
+
+
 def serialize_fact(fact):
     data = {
         "id": str(fact.id),

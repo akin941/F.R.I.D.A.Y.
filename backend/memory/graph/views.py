@@ -29,6 +29,7 @@ from memory.graph.serializers import (
     FactListQuerySerializer,
     FactSupersedeSerializer,
     NeighbourhoodQuerySerializer,
+    serialize_code_graph,
     serialize_entity,
     serialize_fact,
 )
@@ -139,6 +140,10 @@ class EntityDetailView(APIView):
             {
                 "entity": serialize_entity(entity, is_private=selectors.entity_is_private(entity)),
                 "edges": [serialize_fact(f) for f in edges],
+                # Branch 9: what the trash confirmation names, and the
+                # Graphify snapshot (sha) of a read-only code entity.
+                "fact_count": selectors.entity_fact_count(entity),
+                "code_graph": serialize_code_graph(selectors.code_graph_snapshot(entity)),
             }
         )
 

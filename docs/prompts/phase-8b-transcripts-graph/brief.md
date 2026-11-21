@@ -3505,6 +3505,103 @@ migration was renumbered `memory/0014_transcript_ingestion` (after
 correct one, see Graphify's code entities, and see transcript, inbox and
 eval status — at phone width too.
 
+**Implementation record (2026-11-20).** Status: implemented on
+`feat/p8-graph-ui`, awaiting the independent Sonnet 5 review.
+- **Frontend.**
+  - `/memory/graph` (`GraphView`, `EntityTimeline`): owned workspaces only
+    (a viewer or member workspace is never offered); entity search by name
+    part and kind; an accessible list (buttons with `aria-current`, no
+    canvas library). The entity page shows kind, aliases, the Graphify and
+    private badges, current facts, the superseded history (newest first,
+    closed windows, no controls) and pending proposals (with a link to the
+    morning card, where they are decided, D3). The "as of" date sends
+    `as_of=<day>T23:59:59` (the whole picked day) to the timeline endpoint.
+    The timeline lists are walkable with Arrow/Home/End.
+  - **Edit is a supersede.** "Düzelt" posts `facts/<id>/supersede` with the
+    statement, the new value (an object entity keeps its kind) and the new
+    version's start date; never an in-place PATCH. A 409
+    `supersede_order` shows the catalog message in the form.
+  - **Trash and restore.** A fact trash and an entity trash each confirm
+    first; the entity confirmation names the entity and `fact_count`, the
+    number `trash_entity` moves. After a trash the page offers "Geri
+    getir" (restore). The owner trash list for graph rows is not a
+    separate page (the general `/trash` page is unchanged).
+  - **Graphify entities** are read-only (no edit or trash control) and show
+    the snapshot's short sha and commit time.
+  - `/memory/evals` (`EvalRunsView`): one table of metric fields
+    (recall@10, leak rate, temporal correctness, answer accuracy, tokens
+    before and after, spend, verdict) from branch 3's endpoint. It renders an
+    explicit field list, so an unexpected case field would not show (a test
+    feeds one). Without a private baseline it says "pending owner
+    evaluation".
+  - `IngestionView`: on the transcript sources, the not-owner and foreign
+    drop columns and a per-cursor panel (`since_clamped`, the last skipped
+    window, `tie_overflow`), next to the existing shared-rules notice and
+    unmapped keys; a Graphify run list per owned workspace (status, sha,
+    attempts, entity and fact counts, the error code).
+  - The vault run detail (`vault-export` approval renderer) states the
+    conflict count and the folder(s).
+  - Navigation: a sidebar item and two `LearningSubnav` links; BFF routes
+    under `app/api/memory/graph/` and `app/api/memory/evals/runs`; strings
+    in `tr.ts`. No new colour token: the views reuse the checked pill
+    pairings (a token test fails on a raw palette colour in them).
+- **Backend (read additions only).**
+  - The entity detail adds `fact_count` and `code_graph` (the
+    `CodeGraphImport` of a Graphify entity, found by the `<repo ref>:`
+    prefix of its `external_ref`).
+  - `GET /api/v1/harness/graphify-runs?workspace=` (owner, web, an owner of
+    the workspace, `for_actor()`): status, shas, times, numeric counts and
+    `error_type` only, never `error_message`. **Deviation:** the brief
+    put this endpoint in `memory/graph/views.py`, but `GraphifyRun` lives in
+    `harness` and memory may not import harness (ADR-002), so it is a
+    harness view.
+  - The ingestion audit view adds `transcript_cursors` for the transcript
+    sources. The last skipped window is read from the newest clamped
+    `memory.transcript_pull.invoked` audit row of that cursor (same target
+    workspace, node and capability), so there is no second copy of it. The
+    constants moved to `memory/ingestion/transcript_audit.py`, and the pull
+    job imports them.
+  - `VaultExportRun.conflicts_private` and `conflicts_day` (migration
+    `tools/0003_vault_conflict_folders`). `describe_execution` adds
+    `conflicts_private` and `conflicts_folders` (`_conflicts/<date>/`,
+    `_private/_conflicts/<date>/`), names only.
+- Tests: `harness/tests/test_graphify_runs_api.py` (role × endpoint: owner
+  web, `cli`/`openai`/`hook` PATs, admin, member, agent, anonymous;
+  isolation; shape), `memory/tests/test_graph_ui_api.py`,
+  `tools/tests/test_transcript_audit_constants.py`, the conflict-folder
+  cases in `tools/tests/test_vault_mirror.py` and
+  `tools/tests/test_export.py` (`TestDescribeExecution`: the exact summary
+  shape with `conflicts_private`/`conflicts_folders`, and the folder names
+  of a run with shared and private conflicts). Vitest: `EntityTimeline`,
+  `GraphView`, `EvalRunsView`, the new `IngestionView` cases,
+  `vault-export.test.tsx`, `graph-routes.test.ts`, nav and query-key
+  isolation, and the token check.
+
+**Review round 1 (2026-11-20).** MEDIUM: the exact-dict assertion in
+`tools/tests/test_export.py::TestDescribeExecution` lacked the two new
+summary keys; fixed, plus two conflict-folder cases. LOW: the
+`harness/tests/test_commit_ingestion.py` KeyError did not reproduce
+(the file passes alone and in the full suite here; it is not touched by
+this branch), so it is treated as a concurrency flake of the shared git
+fixture. LOW: frontend `npm ci && npm run lint && npm run typecheck &&
+npm test` run green on the branch (156 files, 1454 tests).
+
+**Owner steps (pending) — `feat/p8-graph-ui`, recorded 2026-11-20.**
+1. Run the independent Sonnet 5 review of this branch and fix findings
+   until APPROVE (CLAUDE.md "Reviews").
+2. Check `/memory/graph`, `/memory/evals` and the sources page on a real
+   phone and with a screen reader (VoiceOver on the Mac). jsdom tests
+   cover only the structure (the list hidden while an entity is open
+   below `md`, the tables scrolling in their own box), not real rendering.
+   Pending owner evaluation; this does not block branch 10.
+3. Confirm the harness placement of the Graphify run endpoint (the
+   deviation above).
+4. Confirm the "as of" semantics: a picked day means the end of that day,
+   in the server's time zone.
+
+No step needs paid calls, real credentials or the Mac beyond step 2's
+manual check.
+
 ### 10. `chore/p8b-closeout` — preflight, e2e, docs, go/no-go record
 
 **Scope.**
@@ -3566,7 +3663,7 @@ Mac and private-data rows pending owner evaluation.
 | 6 | `feat/p8-headroom-stage` | `compressor` sidecar (no `litellm`, no egress, telemetry off), gateway stage, bypass set, context report, eval arm, manifest | 3 | not started |
 | 7 | `feat/p8-obsidian-mirror` | Format v2, entity notes, `_conflicts/<date>/`, `00_Inbox` import-once inside the approved run | 1 | **implemented 2026-11-20** (awaits the Sonnet 5 review; see "Implementation record" under branch 7; real-vault check pending owner evaluation) |
 | 8 | `feat/p8-transcript-ingestion` | Owner-turn capabilities, reference readers + conformance, pull job in `tools`, port, cursor, personal-class sources, transcript corpus | 2; **Phase 9 branches 2–5 merged** | **implemented 2026-11-20** (awaits the Sonnet 5 review; see "Implementation record" under branch 8). Phase 9 branches 2–5 were not merged, so the contracts, readers and conformance files are staged in `integrations/node_reference/` and the node is reached through a `NodeReadPort` seam. The `nodes` wiring is owner steps 3–5 of branch 8. Swift readers: deferred: Mac session (M1) |
-| 9 | `feat/p8-graph-ui` | `/memory/graph`, timeline, sources/Graphify/conflict/eval views | 2, 4 (5, 7, 8 for their panels) | not started |
+| 9 | `feat/p8-graph-ui` | `/memory/graph`, timeline, sources/Graphify/conflict/eval views | 2, 4 (5, 7, 8 for their panels) | **implemented 2026-11-20** (awaits the Sonnet 5 review; see "Implementation record" under branch 9; the real-phone and screen-reader check is pending owner evaluation) |
 | 10 | `chore/p8b-closeout` | Preflight checks, e2e, retrieval default decision, runbooks, ADR notes, MASTER_PLAN row, go/no-go record | 1–9 | not started |
 | M1 | `feat/p8-node-transcript-readers` | Swift readers for the two owner-turn capabilities, grant wiring, real-file rule verification, conformance pass | 8 merged; Phase 9 M2 | deferred: Mac session |
 | M2 | Mac and owner evaluation | Private eval baseline, Headroom compare, real transcript run, go/no-go measurements | 3, 4, 6, M1 | deferred: Mac session (pending owner evaluation) |

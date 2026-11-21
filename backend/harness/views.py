@@ -9,7 +9,7 @@ from core.api_errors import service_error_response
 from core.channels import request_channel
 from core.permissions import IsOwner, IsWebChannel
 from core.throttling import CreateScopedRateThrottle
-from harness.models import HarnessImplementationJob, HarnessJob, HarnessRepo
+from harness.models import GraphifyRun, HarnessImplementationJob, HarnessJob, HarnessRepo
 from harness.pull_requests import (
     HarnessGithubUnavailable,
     HarnessPullRequestExists,
@@ -46,7 +46,7 @@ from harness.services import (
     list_jobs,
     list_repos,
 )
-from workspaces.models import Workspace
+from workspaces.models import Workspace, WorkspaceMember
 
 
 def _service_error_response(exc):
@@ -404,3 +404,62 @@ class HarnessImplementationJobPullRequestView(APIView):
         state = pull_request_state(job=job, actor=request.user, channel=request_channel(request))
         state["request"]["id"] = str(approval_request.id)
         return Response(state, status=status.HTTP_201_CREATED)
+
+
+# --- Graphify runs (Phase 8B branch 9, brief D10) -----------------------------
+
+GRAPHIFY_RUN_LIST_CAP = 50
+
+
+def _serialize_graphify_run(run):
+    """Status, shas, times and the importer's counts only: never a label,
+    container output or the stored error message (`error_type` is a closed
+    code)."""
+    counts = run.counts if isinstance(run.counts, dict) else {}
+    return {
+        "id": str(run.id),
+        "workspace": str(run.workspace_id),
+        "repo": {"id": str(run.repo_id), "name": run.repo.name},
+        "status": run.status,
+        "requested_sha": run.requested_sha,
+        "commit_sha": run.commit_sha,
+        "committed_at": run.committed_at.isoformat() if run.committed_at else None,
+        "attempts": run.attempts,
+        "started_at": run.started_at.isoformat() if run.started_at else None,
+        "finished_at": run.finished_at.isoformat() if run.finished_at else None,
+        "error_type": run.error_type,
+        "counts": {
+            str(k): v
+            for k, v in counts.items()
+            if isinstance(v, int | float) and not isinstance(v, bool)
+        },
+        "created_at": run.created_at.isoformat(),
+    }
+
+
+class GraphifyRunListView(APIView):
+    """`GET /api/v1/harness/graphify-runs?workspace=<uuid>`: the ingestion
+    audit view's Graphify run list (Phase 8B branch 9). The installation
+    owner over the web who owns the workspace; rows through `for_actor()`,
+    so another workspace's runs never appear (its id is a 404). Read-only;
+    no audit row (status and counts only, the harness job list precedent)."""
+
+    permission_classes = [IsAuthenticated, IsWebChannel, IsOwner]
+
+    def get(self, request):
+        workspace, error = _resolve_workspace(request)
+        if error is not None:
+            return error
+        if not WorkspaceMember.objects.filter(
+            workspace=workspace, user=request.user, role=WorkspaceMember.Role.OWNER
+        ).exists():
+            return Response(
+                {"detail": "Only the workspace owner can read its Graphify runs."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        runs = (
+            GraphifyRun.objects.for_actor(request.user, workspace=workspace)
+            .select_related("repo")
+            .order_by("-created_at")[:GRAPHIFY_RUN_LIST_CAP]
+        )
+        return Response([_serialize_graphify_run(run) for run in runs])

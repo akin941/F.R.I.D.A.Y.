@@ -27,6 +27,7 @@ from memory.ingestion.mapping import (
     owner_owns,
 )
 from memory.ingestion.scrubber import merge_reports
+from memory.ingestion.transcript_audit import transcript_cursor_views
 from memory.models import (
     CoreBlockProposal,
     Episode,
@@ -646,6 +647,9 @@ def source_audit(source, *, actor, channel):
             "rate": (accepted / (accepted + rejected)) if (accepted + rejected) else None,
         },
         "forget_preview": forget_preview(source),
+        # Phase 8B branch 9 (D13): per transcript cursor, the clamp and tie
+        # counts and the last skipped window (empty for other sources).
+        "transcript_cursors": transcript_cursor_views(source),
     }
 
 

@@ -239,7 +239,35 @@ class TestConflicts:
         audit = AuditLog.objects.get(action="vault_export", resource_id=str(run.id))
         assert audit.metadata["conflicts_saved"] == 1
         fresh = ApprovalRequest.objects.get(pk=run.approval_request_id)
-        assert export.describe_vault_export_execution(fresh)["conflicts_saved"] == 1
+        described = export.describe_vault_export_execution(fresh)
+        assert described["conflicts_saved"] == 1
+        # Branch 9: the run detail names the folder (names only).
+        assert run.conflicts_private == 0 and run.conflicts_day.isoformat() == today()
+        assert described["conflicts_private"] == 0
+        assert described["conflicts_folders"] == [f"_conflicts/{today()}/"]
+
+    def test_private_conflicts_name_the_private_folder(self, owner, personal, vault, tmp_path):
+        shared = make_memory(personal)
+        private = make_memory(personal, sensitivity=Memory.Sensitivity.PRIVATE)
+        export_in_run(vault, personal)
+        edit_body(mem_path(tmp_path, personal, shared))
+        edit_body(mem_path(tmp_path, personal, private, tree="_private"))
+        run, token = claimed_run(personal, owner)
+        export.process_claimed_vault_export_run(run.id, token)
+        run.refresh_from_db()
+        assert (run.conflicts_saved, run.conflicts_private) == (2, 1)
+        assert export.conflict_folders(run) == [
+            f"_conflicts/{today()}/",
+            f"_private/_conflicts/{today()}/",
+        ]
+
+    def test_a_run_without_conflicts_names_no_folder(self, owner, personal, vault, tmp_path):
+        make_memory(personal)
+        run, token = claimed_run(personal, owner)
+        export.process_claimed_vault_export_run(run.id, token)
+        run.refresh_from_db()
+        assert run.conflicts_saved == 0 and run.conflicts_day is None
+        assert export.conflict_folders(run) == []
 
     def test_edited_text_never_reaches_postgres(self, owner, personal, vault, tmp_path):
         memory = make_memory(personal)
