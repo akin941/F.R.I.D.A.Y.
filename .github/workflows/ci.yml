@@ -55,6 +55,15 @@ jobs:
       - name: Self sources snapshot check
         run: uv run python manage.py build_self_sources --check
 
+      # Phase 10 branch 2: the node conformance cases (v1, v2), the sandbox
+      # and streaming-scrub vectors and the vendored node scrubber must match
+      # their definitions (the Swift node loads these files), and the escape
+      # suite must hold against the fake sandbox.
+      - name: Node conformance files check
+        run: uv run python manage.py build_node_conformance --check
+      - name: Node escape suite (fake sandbox)
+        run: uv run python manage.py node_escape_suite --executor fake
+
       # Production settings must import from a complete environment and
       # pass Django's deployment checklist (Phase 4 branch 1). Dummy values
       # only -- the secret key is generated per run, never committed.

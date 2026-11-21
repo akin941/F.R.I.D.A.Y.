@@ -75,8 +75,7 @@ def test_cases_over_tls_with_a_pinned_self_signed_certificate(home, worktrees):
 def test_the_external_hook_path(home, worktrees, tmp_path):
     gateway = ConformanceGateway()
     hook = ExternalHook(str(tmp_path / "hook.sock"))
-    client = HookClient(hook.path, gateway.host, gateway.port, home=home,
-                        worktree_base=worktrees)
+    client = HookClient(hook.path, gateway.host, gateway.port, home=home, worktree_base=worktrees)
     waiter = threading.Thread(target=hook.wait_for_node, daemon=True)
     waiter.start()
     client.start()
@@ -151,8 +150,16 @@ def test_the_brief_case_list_is_present():
         "v2_policy_shaped_grant_add",
     ):
         assert name in names
-    for field in ("node_id", "workspace_id", "capability", "capability_version", "args_sha256",
-                  "nonce", "issued_at", "expires_at"):
+    for field in (
+        "node_id",
+        "workspace_id",
+        "capability",
+        "capability_version",
+        "args_sha256",
+        "nonce",
+        "issued_at",
+        "expires_at",
+    ):
         assert f"v2_grant_{field}_differs_from_envelope" in names
         assert f"v2_envelope_{field}_differs_from_grant" in names
 
@@ -160,14 +167,40 @@ def test_the_brief_case_list_is_present():
 def test_the_gateway_counts_stray_output_and_confirmation_frames():
     checker = GatewayChecker(2)
     stray = C._uuid4("stray")
-    checker.node_sent({"v": 2, "type": "output", "id": C._uuid4("o"), "invocation_id": stray,
-                       "seq": 0, "stream": "stdout", "data": "x", "truncated": False})
-    checker.node_sent({"v": 2, "type": "confirmation", "id": C._uuid4("c"),
-                       "invocation_id": stray, "state": "shown", "at": 0})
+    checker.node_sent(
+        {
+            "v": 2,
+            "type": "output",
+            "id": C._uuid4("o"),
+            "invocation_id": stray,
+            "seq": 0,
+            "stream": "stdout",
+            "data": "x",
+            "truncated": False,
+        }
+    )
+    checker.node_sent(
+        {
+            "v": 2,
+            "type": "confirmation",
+            "id": C._uuid4("c"),
+            "invocation_id": stray,
+            "state": "shown",
+            "at": 0,
+        }
+    )
     assert checker.frame_errors == 2
     checker.server_sent({"type": "invoke", "invocation_id": stray})
-    checker.node_sent({"v": 2, "type": "confirmation", "id": C._uuid4("c2"),
-                       "invocation_id": stray, "state": "shown", "at": 0})
+    checker.node_sent(
+        {
+            "v": 2,
+            "type": "confirmation",
+            "id": C._uuid4("c2"),
+            "invocation_id": stray,
+            "state": "shown",
+            "at": 0,
+        }
+    )
     assert checker.frame_errors == 2
     checker.node_sent({"v": 2, "type": "nonsense"})
     assert checker.frame_errors == 3
@@ -209,8 +242,15 @@ def test_the_conformance_keys_are_refused_as_server_keys():
 
 
 def test_node_conformance_server_command_prints_all_pass(capsys):
-    call_command("node_conformance_server", "--protocol", "2", "--case", "v2_owner_denies",
-                 "--case", "v2_gate_command_runs_after_click")
+    call_command(
+        "node_conformance_server",
+        "--protocol",
+        "2",
+        "--case",
+        "v2_owner_denies",
+        "--case",
+        "v2_gate_command_runs_after_click",
+    )
     out = capsys.readouterr().out
     assert "ALL PASS" in out and "v2: 2/2 passed" in out
 

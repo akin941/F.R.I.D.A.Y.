@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from nodes.conformance import build
+from nodes.protocol.messages import MAX_OUTPUT_CHUNK_BYTES, MAX_TAIL_BYTES
 from nodes.reference import vendor_scrubber
 from nodes.reference._scrubber_vendored import scrub_text
 from nodes.reference.stream_scrub import (
@@ -17,7 +18,6 @@ from nodes.reference.stream_scrub import (
     split_utf8,
     utf8_len,
 )
-from nodes.protocol.messages import MAX_OUTPUT_CHUNK_BYTES, MAX_TAIL_BYTES
 
 CORPUS = Path(__file__).resolve().parents[2] / "memory" / "tests" / "scrubber_corpus"
 

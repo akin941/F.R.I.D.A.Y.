@@ -84,8 +84,18 @@ def test_every_deny_read_path_is_present():
     deny = _spec().settings["filesystem"]["denyRead"]
     for rel in DENY_READ_HOME + DEFAULT_NODE_DIRS:
         assert f"{HOME}/{rel}" in deny
-    for required in (".ssh", ".aws", ".config/gh", ".claude", ".codex", ".gnupg", ".netrc",
-                     ".docker", "Library/Keychains", "Library/Safari"):
+    for required in (
+        ".ssh",
+        ".aws",
+        ".config/gh",
+        ".claude",
+        ".codex",
+        ".gnupg",
+        ".netrc",
+        ".docker",
+        "Library/Keychains",
+        "Library/Safari",
+    ):
         assert f"{HOME}/{required}" in deny
 
 
@@ -122,9 +132,10 @@ def test_limits_follow_the_mapping_and_the_contract():
         "max_processes": 256,
         "kill_grace_seconds": 5,
     }
-    assert _spec(_mapping(max_runtime_seconds=900), contract_max_runtime=60).limits[
-        "wall_seconds"
-    ] == 60
+    assert (
+        _spec(_mapping(max_runtime_seconds=900), contract_max_runtime=60).limits["wall_seconds"]
+        == 60
+    )
 
 
 def test_argv_is_a_list_never_a_shell_line():
@@ -168,10 +179,15 @@ def test_sandbox_vectors_are_current():
         env = vector["expected"]["process"]["env"]
         assert "GITHUB_TOKEN" not in env and "AWS_SECRET_ACCESS_KEY" not in env
         assert "SSH_AUTH_SOCK" not in env
-        assert vector["settings_canonical"].encode() == json.dumps(
-            vector["expected"]["settings"], separators=(",", ":"), sort_keys=True,
-            ensure_ascii=False,
-        ).encode()
+        assert (
+            vector["settings_canonical"].encode()
+            == json.dumps(
+                vector["expected"]["settings"],
+                separators=(",", ":"),
+                sort_keys=True,
+                ensure_ascii=False,
+            ).encode()
+        )
 
 
 # --- the local policy (check 22) ----------------------------------------
@@ -184,7 +200,9 @@ def home(tmp_path):
 
 def test_resolve_maps_repo_and_kind(home):
     policy = fixture_policy(home)
-    resolved = policy.resolve("repo.command.run", {"repo_path": "~/work/acme", "command_kind": "test"})
+    resolved = policy.resolve(
+        "repo.command.run", {"repo_path": "~/work/acme", "command_kind": "test"}
+    )
     assert resolved.repo.name == "acme"
     assert resolved.command.argv == ("python3", "-c", "print('acme tests ok')")
 
@@ -197,8 +215,10 @@ def test_resolve_maps_repo_and_kind(home):
         ("repo.command.run", {"repo_path": "~/work/link", "command_kind": "test"}),
         ("repo.command.run", {"repo_path": "~/work/acme/", "command_kind": "nope"}),
         ("applescript.recipe.run", {"recipe": "music.next_track", "params": {}}),
-        ("applescript.recipe.run", {"recipe": "finder.reveal_repo",
-                                    "params": {"repo_path": "~/work/other"}}),
+        (
+            "applescript.recipe.run",
+            {"recipe": "finder.reveal_repo", "params": {"repo_path": "~/work/other"}},
+        ),
         ("apps.open", {"bundle_id": "com.example.Other"}),
         ("ax.press", {"bundle_id": "com.example.Other", "role": "button", "title": "OK"}),
         ("shell.exec", {}),

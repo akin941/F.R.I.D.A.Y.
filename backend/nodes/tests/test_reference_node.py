@@ -97,8 +97,9 @@ def test_disconnect_while_running_terminates_and_sends_no_late_result(home):
 
 
 def test_the_kill_switch_stops_a_running_command(home):
-    node = _node(home, window=[{"action": "approve", "after": 0}],
-                 executor=[{"chunks": [], "hang": True}])
+    node = _node(
+        home, window=[{"action": "approve", "after": 0}], executor=[{"chunks": [], "hang": True}]
+    )
     node.connect(2)
     _send(node, C.gated("node-kill-run"))
     frames = node.engage_kill_switch()
@@ -117,8 +118,11 @@ def test_the_kill_switch_stops_a_running_command(home):
 
 def test_output_over_one_mib_is_truncated_in_the_result(home):
     big = "y" * 65535 + "\n"
-    node = _node(home, window=[{"action": "approve", "after": 0}],
-                 executor=[{"chunks": [["stdout", big, 0]] * 32, "exit_code": 0}])
+    node = _node(
+        home,
+        window=[{"action": "approve", "after": 0}],
+        executor=[{"chunks": [["stdout", big, 0]] * 32, "exit_code": 0}],
+    )
     node.connect(2)
     frames = _send(node, C.gated("node-big"))
     result = frames[-1]
@@ -133,8 +137,14 @@ def test_actions_go_to_the_executor_with_the_resolved_intent(home):
     node = _node(home, window=[{"action": "approve", "after": 0}] * 2)
     node.connect(2)
     _send(node, C.plain("node-open", "apps.open", C.TERMINAL, cls="confirm"))
-    _send(node, C.gated("node-recipe", "applescript.recipe.run",
-                        {"recipe": "system.volume_set", "params": {"level": 20}}))
+    _send(
+        node,
+        C.gated(
+            "node-recipe",
+            "applescript.recipe.run",
+            {"recipe": "system.volume_set", "params": {"level": 20}},
+        ),
+    )
     calls = node.executor.calls
     assert calls[0]["kind"] == "action" and calls[0]["bundle_id"] == "com.apple.Terminal"
     assert calls[1]["recipe"] == "system.volume_set"
@@ -177,8 +187,11 @@ def test_heartbeats_every_15_seconds(home):
     for _ in range(6):
         node.clock.advance(5)
         beats += [f for f in node.tick() if f["type"] == "heartbeat"]
-        node.receive(json.dumps({"v": 2, "type": "heartbeat.ack", "id": C._uuid4("hb"),
-                                 "seq": 1, "server_time": 0}))
+        node.receive(
+            json.dumps(
+                {"v": 2, "type": "heartbeat.ack", "id": C._uuid4("hb"), "seq": 1, "server_time": 0}
+            )
+        )
     assert [b["seq"] for b in beats] == [1, 2]
 
 

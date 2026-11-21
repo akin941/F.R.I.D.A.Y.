@@ -24,8 +24,9 @@ def test_no_decision_times_out_after_exactly_60_seconds():
     assert not window.is_open
 
 
-@pytest.mark.parametrize(("action", "state"), [("approve", "approved"), ("deny", "denied"),
-                                               ("close", "closed")])
+@pytest.mark.parametrize(
+    ("action", "state"), [("approve", "approved"), ("deny", "denied"), ("close", "closed")]
+)
 def test_scripted_decisions_take_effect_after_their_delay(action, state):
     clock = FakeClock(0)
     window = ConfirmationWindowDouble(clock, [Decision(action, 10)])
