@@ -67,3 +67,14 @@ def recover_stale_vault_export_runs():
     for run_id in stale_ids:
         dispatch_vault_export_run(str(run_id))
     return len(stale_ids)
+
+
+@shared_task
+def pull_transcripts_task():
+    """Phase 8B branch 8 (brief D13): the transcript pull, on the worker
+    beat every MEMORY_TRANSCRIPT_PULL_MINUTES. A no-op while both transcript
+    sources are disabled or no node is reachable."""
+    from tools.transcript_ingest import pull_transcripts
+
+    report = pull_transcripts()
+    return {"invokes": report.invokes, "stored": report.stored, "failed": report.failed}

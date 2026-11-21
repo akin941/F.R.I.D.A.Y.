@@ -112,6 +112,37 @@ def test_sources_pass_when_enabled_and_mapped(settings, sources, personal):
     assert (result.status, result.detail) == (PASS, "enabled: claude_code_hooks, git")
 
 
+def test_transcript_sources_are_mapped_by_the_hooks_rules(settings, sources, personal):
+    """Phase 8B branch 8 (D13): a transcript source owns no rules; it is
+    mapped exactly when the hooks source has an enabled path rule."""
+    _enable(sources[Kind.CLAUDE_CODE_TRANSCRIPTS])
+    result = _learning()["learning_sources"]
+    assert "claude_code_transcripts has no mapping rule" in result.detail
+    add_rule(
+        sources[Kind.CLAUDE_CODE_HOOKS],
+        WorkspaceMappingRule.RuleType.PATH_PREFIX,
+        "/Users/o/code",
+        personal,
+    )
+    result = _learning()["learning_sources"]
+    assert (result.status, result.detail) == (PASS, "enabled: claude_code_transcripts")
+
+
+def test_the_scrubber_self_test_includes_the_transcript_corpus(settings, tmp_path):
+    novel = "zz-transcript-only-novel-format"
+    _write_corpus(
+        tmp_path,
+        secrets=[{"id": "s1", "text": "sk-ant-api03-abcdefghijklmnopqrstuvwx", "needles": []}],
+    )
+    (tmp_path / "transcripts.jsonl").write_text(
+        json.dumps({"id": "tx-1", "class": "secret", "text": novel, "needles": [novel]}) + "\n",
+        encoding="utf-8",
+    )
+    settings.PREFLIGHT_SCRUBBER_CORPUS_DIR = str(tmp_path)
+    result = _learning()["learning_scrubber"]
+    assert result.status == FAIL and "tx-1" in result.detail and novel not in result.detail
+
+
 def test_a_disabled_rule_does_not_count_as_mapped(settings, sources, personal):
     settings.MEMORY_OWNER_GIT_EMAILS = ["owner@test.dev"]
     _enable(sources[Kind.GIT])
@@ -125,7 +156,7 @@ def test_a_disabled_rule_does_not_count_as_mapped(settings, sources, personal):
 def test_beat_passes_on_the_real_schedule():
     result = _learning()["learning_beat"]
     assert result.status == PASS, result.detail
-    assert "6 worker-beat and 1 runner-beat" in result.detail
+    assert "7 worker-beat and 1 runner-beat" in result.detail
 
 
 def test_beat_fails_when_a_task_is_on_the_wrong_beat(monkeypatch):

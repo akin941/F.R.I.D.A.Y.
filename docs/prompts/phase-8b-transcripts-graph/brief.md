@@ -3067,6 +3067,242 @@ scrubbed owner-turn episodes in the right workspaces through signed,
 chain-audited invokes, and a nightly fake run turns one into a quoted fact
 proposal.
 
+**Implementation record (2026-11-20).** Status: implemented on
+`feat/p8-transcript-ingestion`, awaiting the independent Sonnet 5 review.
+
+**Precondition not met, recorded.** On 2026-11-20 the integration branch
+held only Phase 9 branch 1 (`feat/p9-node-pairing`). Branch 2
+(`feat/p9-node-protocol`) existed unmerged, and branches 3–5 (reference
+node, gateway, `invoke_read`) did not exist. There is no `nodes` app to
+amend. Branch 8 therefore builds everything that does not need the `nodes`
+app, puts the node-facing half behind a seam, and leaves the `nodes`
+wiring as owner steps 3–5 below. Two placements differ from the Files list
+because of this:
+- `nodes/capabilities/v1/` and `nodes/reference/` would collide with Phase
+  9 branches 2 and 3. Branch 2's capability test pins exactly eight
+  contract files, and branch 3 creates the reference node's
+  `readers.py`. The contracts, readers, fixtures and conformance cases
+  therefore live, **staged**, in `backend/integrations/node_reference/`
+  (stdlib only plus the vendored scrubber, under an import-linter
+  contract). They use the Phase 9 contract format exactly.
+- `nodes.services` (`channel`, step-0 actor check,
+  `SYSTEM_READ_CAPABILITIES`) does not exist yet. The same rules are
+  implemented as `tools.transcript_ingest.refusal_for`, which runs before
+  the port is called and is tested. The Phase 9 brief gets the dated
+  D7/D9 amendment note now.
+
+What was built:
+- Migration `memory/0014_transcript_ingestion` (renumbered from 0012 at the integration merge):
+  - the kinds `claude_code_transcripts` and `codex_transcripts`;
+  - `IngestionSource.enabled_at`, set by `update_source` each time
+    `enabled` turns true;
+  - `IngestionCounter.dropped_not_owner` and `dropped_foreign`;
+  - `TranscriptCursor` (`since`, `since_clamped`, `last_clamped_at`,
+    `tie_overflow`, unique per source, target workspace and node ref).
+- Both kinds are personal-class (`IngestionSource.PERSONAL_CLASS_KINDS`).
+  `seed_ingestion_sources` seeds them disabled.
+- `memory/ingestion/mapping.py`:
+  - `SHARED_RULE_SOURCES` and `rule_source_for`, used by
+    `resolve_workspace` (so also by `record_episode`). The ownership
+    re-check stays on the transcript source's owner, and unmapped counts
+    land on the transcript source.
+  - The Phase 9 D9 helpers `prefixes_for_workspace` and
+    `workspace_for_path`, landed here because Phase 9 branch 5 is
+    unmerged. Both read the hooks source.
+- Rule writes on a shared-rules source are refused (400, "Path rules are
+  shared with Claude Code hooks"), in the serializer and in the service.
+  The source API carries `rules_shared_with` and `enabled_at`.
+- `memory/ingestion/transcripts.py`: `ingest_owner_turns`, the server
+  marker re-check (`INJECTED_MARKERS`, the union of both readers'
+  markers), the hostile-node rule (`dropped_foreign`), and shape checks
+  (`invalid`).
+- `tools/transcript_ingest.py`, with `tools.tasks.pull_transcripts_task`
+  on the worker beat every `MEMORY_TRANSCRIPT_PULL_MINUTES` (15):
+  - one invoke per owned workspace with hooks rules, carrying exactly
+    that workspace's prefixes;
+  - the clamp, the first-run start at `enabled_at`, the commit-then-cursor
+    order, and the 1 ms tie step;
+  - one `memory.transcript_pull.invoked` `AuditLog` row per invoke
+    (`actor` = the owner, `actor_type=system`, `system: true`,
+    `job: transcript_pull`, counts only).
+- The node seam is `NodeReadPort`. Its default `UnavailableNodePort` has
+  no node, so the beat is a no-op in production until the `nodes`-backed
+  port exists.
+- `integrations/node_reference/`:
+  - `owner_turns.py`: the D13/D17 readers;
+  - `contracts/v1/{claude,codex}.transcripts.owner_turns.json`;
+  - `fixtures/{claude,codex}/`, synthetic JSONL with every excluded line
+    kind and marker;
+  - `fixtures/expected_owner_turns.json`, which M1's Swift tests compare
+    against;
+  - `conformance/owner_turns_cases.json`;
+  - `build_conformance.py` with `--check`, the staged stand-in for
+    `build_node_conformance`.
+- `memory/tests/scrubber_corpus/transcripts.jsonl`, the D14 corpus with
+  14 labelled items. It joins the 100% secrets-recall gate in
+  `test_scrubber.py`, the vendored-scrubber test and preflight's
+  `learning_scrubber`.
+- Preflight:
+  - `learning_sources` maps a transcript source through the hooks rules;
+  - `learning_beat` requires the pull task on the worker beat.
+- Frontend: the source labels, and a "rules are shared" note in place of
+  the rule form on the transcript sources (`IngestionView`).
+- ADR-013 and ADR-014 notes; the runbook `learning-memory.md` §2a.
+
+Decisions made while implementing, to confirm in review:
+- **The cursor is server-derived.** It advances to the latest returned
+  `at` that is `>= since` and not in the future, not to the node's
+  `next_since`, so a hostile `next_since` cannot skip ahead.
+- **Extra result keys are dropped.** Node aggregates and extra fields are
+  removed before the port sees anything, and their count is audited
+  (`extra_keys_dropped`).
+- **A clamp is counted when it is sent.** `since_clamped` goes up on every
+  invoke that sends a clamped `since`, even if the invoke then fails, and
+  the next beat re-applies the clamp. A first run that starts at the floor
+  is not counted as a clamp: there is no cursor, so no window is lost.
+- **Caps stop at the first turn that does not fit.** The reader stops at
+  the first turn a cap (`max_turns`, `max_sessions`, the 1 MiB result
+  budget) cannot take. It never skips a session and keeps reading, so
+  nothing older than `next_since` is skipped.
+- **`at` and `since` are RFC 3339 UTC strings with milliseconds**, as D13
+  says. The Phase 9 contracts use integer epoch seconds. Ties need
+  sub-second resolution, and the server's 1 ms step needs millisecond
+  precision.
+- **Cursor key and actor.** `node_ref` is the node's reference string
+  given by the port. The actor is the transcript source's owner, and a
+  port that returns another owner's node is refused (`actor_not_owner`).
+- **The personal-class list** for the actor check follows Phase 9 D7:
+  `claude.sessions.read`, `codex.threads.read`, `apps.frontmost`,
+  `windows.list` and the two owner-turn capabilities. The `*.list` reads
+  are firm-class and keep their tools-registry checks.
+- **Codex rollout format.** Only a `session_meta` first line names a
+  thread. `event_msg`/`user_message`, `turn_context`, reasoning, function
+  calls and outputs, and `developer` or `assistant` messages are never
+  turns. The Mac session re-verifies these against real files (M1).
+- **Claude Code `cwd` is checked per line.** A session that `cd`s
+  produces one result entry per `(session_id, cwd)`, and each row is
+  checked against the prefixes before its content is parsed.
+
+Tests:
+- `integrations/tests/test_owner_turn_readers.py`: readers, contracts,
+  every marker, prefixes, caps, `next_since` paging, ties inclusive of
+  `since`, the byte budget, the 7-day bound, every conformance case,
+  schema agreement, `--check`, the expected file, scrub of every corpus
+  secret in result frames, and the vendored scrubber's recall.
+- `memory/tests/test_transcript_ingestion.py`:
+  - the rule source and its regressions, the 400, the D9 helpers;
+  - the port: workspace, foreign, markers, dedupe, ScrubTerm second
+    scrub, invalid rows, paused;
+  - `personal_data=True` extraction and the cloud-only fail-closed
+    path;
+  - provenance: an owner-turn quote survives, an assistant quote is
+    dropped;
+  - forget and restore cascading to episodes, memories and facts;
+  - no `nodes`, `tools` or `integrations` import.
+- `memory/tests/test_ingestion_api.py`: the role × endpoint matrix of the
+  transcript sources (six principals × four endpoints × two kinds), and
+  `enabled_at` over the API.
+- `tools/tests/test_transcript_ingest.py`, through the reference node
+  double (`tools/tests/transcript_nodes.py`):
+  - the per-workspace prefixes, asserted on the received frame;
+  - one chain row and one `AuditLog` row per invoke, never with a null
+    actor;
+  - no invoke when the source is disabled or paused, the node is offline
+    or not granted, or the workspace has no rules; the default port is a
+    no-op;
+  - a failed invoke or a port exception keeps the cursor; an empty result
+    leaves it unchanged;
+  - the stale-cursor clamp and the next beat unclamped;
+  - the first run at 2 and at 30 days, and a null `enabled_at`;
+  - three beats with a two-week-old cursor;
+  - a tie group across the cap, and tie overflow plus 1 ms;
+  - the hostile node and per-marker drops;
+  - the actor check (null actor, firm member, inactive owner, foreign
+    workspace, foreign node, the system channel only for the two
+    capabilities);
+  - only the pull job passing `CHANNEL_SYSTEM` (known follow-up 2);
+  - "done when": fixture transcripts become an audited, quoted
+    `pending_approval` fact.
+- `config/tests/test_transcript_beat.py`; `ops/tests/
+  test_preflight_learning.py` (the shared mapping and the transcript
+  corpus); `IngestionView.test.tsx`.
+- `ops/tests/test_learning_e2e.py`'s seeded-kinds assertion now covers
+  every kind. It already failed on the integration branch after
+  `obsidian_inbox` was added.
+
+**Owner steps (pending) — `feat/p8-transcript-ingestion`, recorded 2026-11-20.**
+1. Run the independent Sonnet 5 review of this branch and fix findings
+   until APPROVE (CLAUDE.md "Reviews").
+2. Confirm the staging decision above (the contracts, readers and
+   conformance files in `integrations/node_reference/` until Phase 9
+   branch 3) and the implementation decisions, in particular the
+   server-derived cursor and the RFC 3339 millisecond `at`.
+3. **When Phase 9 branch 2 merges:** move
+   `integrations/node_reference/contracts/v1/*.json` into
+   `nodes/capabilities/v1/`, and update its eight-contract test to ten.
+4. **When Phase 9 branch 3 merges:**
+   - make the reference node's `readers.py` dispatch the two capabilities
+     to `owner_turns.read_owner_turns`, with the `~/.claude/projects` and
+     `~/.codex/sessions` grants;
+   - fold `owner_turns_cases.json` and the expected file into
+     `nodes/conformance/cases/v1/` and `build_node_conformance`;
+   - regenerate `scrub.json` with `transcripts.jsonl`;
+   - run the cases over the localhost socket too.
+5. **When Phase 9 branches 4–5 merge:**
+   - add the `channel` keyword, the step-0 actor check
+     (`actor_not_owner`, plus the vocabulary test) and
+     `SYSTEM_READ_CAPABILITIES` to `nodes.services.invoke_read` and
+     `refuse_read`, reusing `refusal_for`'s rules;
+   - add a `nodes`-backed `NodeReadPort` (signed, chain-audited) and
+     install it in `tools.transcript_ingest`;
+   - re-run `tools/tests/test_transcript_ingest.py` against the
+     in-process gateway transport instead of the double.
+
+   Until then the pull is a no-op.
+6. After deploy, run `manage.py migrate` and then `manage.py
+   seed_ingestion_sources` once, so both transcript sources exist.
+   Preflight's `learning_sources` fails until they do.
+7. Mac session M1, then the grant and enable (global owner step 4):
+   - grant `~/.claude/projects` and `~/.codex/sessions` with Touch ID;
+   - enable both sources;
+   - record M2 item 4 (pending owner evaluation).
+
+Nothing else in this branch needs the Mac, real credentials, paid calls
+or real hardware. The tests use synthetic JSONL fixtures, the Python
+reference readers and FakeAdapter.
+
+**Known follow-ups — `feat/p8-transcript-ingestion` (review, LOW, unresolved
+at merge into the integration branch, 2026-11-21).** At the merge the
+migration was renumbered `memory/0014_transcript_ingestion` (after
+`0012_code_graph_import` and `0013_memory_eval_run`).
+1. **The cursor can skip ahead of real turns**
+   (`backend/tools/transcript_ingest.py`). The cursor is derived from every
+   returned turn whose `at` is within now + 5 min, including turns later
+   dropped as foreign or marker turns. A hostile or buggy node can return
+   one turn timestamped up to 5 minutes ahead and move the cursor past real
+   turns in that window. Not a security breach, but a few minutes of turns
+   can be lost. Fix: derive the cursor only from turns that were stored or
+   deduped (or cap it at `now`, not now + skew), and have the port return
+   the accepted instants.
+2. **Nested path rules inflate `dropped_foreign`**
+   (`backend/memory/ingestion/transcripts.py`). With nested path rules
+   across workspaces (A: `/code`, B: `/code/acme`), A's invoke legitimately
+   receives B's rows. They are dropped and counted `dropped_foreign`, which
+   the audit view presents as a hostile-node signal; this inflates the
+   counter in normal use and can fill A's `max_turns` cap with rows that
+   are not A's (cursor progress is still made). Fix: have the pull job send
+   or compute exclusion prefixes for the longer nested rules of other
+   workspaces, or document that `dropped_foreign` can be non-zero for
+   nested rules; alternatively count "resolves to another owned workspace"
+   separately from rows outside every owned prefix.
+3. **The reference reader follows symlinks**
+   (`backend/integrations/node_reference/owner_turns.py`). `base.glob` and
+   `rglob` follow symlinked `.jsonl` files, so a symlink inside the granted
+   directory could point outside the grant. The reference reader is only a
+   spec and the Swift node must be stricter, but the conformance suite has
+   no symlink case. Fix: skip symlinks (`path.is_symlink()`, or a resolved
+   path not under the root) and add a conformance case for the Swift port.
+
 ### 9. `feat/p8-graph-ui` — `/memory/graph`, timeline, sources, conflicts, eval view
 
 **Scope.** The frontend for D2–D4, D8, D10, D12, D13:
@@ -3179,7 +3415,7 @@ Mac and private-data rows pending owner evaluation.
 | 5 | `feat/p8-graphify-job` | Hash-pinned image, `--network none` runner primitive, trigger, importer + temporal replace, `self` codebase line, manifest | 1 (parallel with 2–4) | **implemented 2026-11-20** (awaits the Sonnet 5 review; see "Implementation record" under branch 5; the real image build and the owner's switch are owner steps) |
 | 6 | `feat/p8-headroom-stage` | `compressor` sidecar (no `litellm`, no egress, telemetry off), gateway stage, bypass set, context report, eval arm, manifest | 3 | not started |
 | 7 | `feat/p8-obsidian-mirror` | Format v2, entity notes, `_conflicts/<date>/`, `00_Inbox` import-once inside the approved run | 1 | **implemented 2026-11-20** (awaits the Sonnet 5 review; see "Implementation record" under branch 7; real-vault check pending owner evaluation) |
-| 8 | `feat/p8-transcript-ingestion` | Owner-turn capabilities, reference readers + conformance, pull job in `tools`, port, cursor, personal-class sources, transcript corpus | 2; **Phase 9 branches 2–5 merged** | not started |
+| 8 | `feat/p8-transcript-ingestion` | Owner-turn capabilities, reference readers + conformance, pull job in `tools`, port, cursor, personal-class sources, transcript corpus | 2; **Phase 9 branches 2–5 merged** | **implemented 2026-11-20** (awaits the Sonnet 5 review; see "Implementation record" under branch 8). Phase 9 branches 2–5 were not merged, so the contracts, readers and conformance files are staged in `integrations/node_reference/` and the node is reached through a `NodeReadPort` seam. The `nodes` wiring is owner steps 3–5 of branch 8. Swift readers: deferred: Mac session (M1) |
 | 9 | `feat/p8-graph-ui` | `/memory/graph`, timeline, sources/Graphify/conflict/eval views | 2, 4 (5, 7, 8 for their panels) | not started |
 | 10 | `chore/p8b-closeout` | Preflight checks, e2e, retrieval default decision, runbooks, ADR notes, MASTER_PLAN row, go/no-go record | 1–9 | not started |
 | M1 | `feat/p8-node-transcript-readers` | Swift readers for the two owner-turn capabilities, grant wiring, real-file rule verification, conformance pass | 8 merged; Phase 9 M2 | deferred: Mac session |
@@ -3215,6 +3451,14 @@ they name.
 - a running Friday stack with the node paired.
 
 ### M1 — `feat/p8-node-transcript-readers`: Swift owner-turn readers
+
+> **Paths note (branch 8, 2026-11-20).** Until Phase 9 branch 3 merges and
+> branch 8's owner steps 3–4 move them, the contracts, fixtures, expected
+> output and conformance cases named below live in
+> `backend/integrations/node_reference/` (`contracts/v1/`, `fixtures/`,
+> `fixtures/expected_owner_turns.json`, `conformance/owner_turns_cases.json`),
+> with the Python reference readers in `owner_turns.py`. Use whichever
+> location the merged tree has.
 
 **Create:**
 - `node/friday-node/Sources/NodeCore/Readers/ClaudeOwnerTurns.swift`
@@ -3289,9 +3533,9 @@ session:
 |---|---|---|
 | Eval baseline recorded | M2 item 1 (private); branch 3 CI (public) | public, recorded 2026-11-20 (63 cases, `legacy`, FakeAdapter, `--retrieval-only`): recall@10 0.5714, leak rate 0.0, temporal correctness 0.0, answer accuracy n/a; private: pending owner evaluation |
 | Headroom stays off unless ≤ 1 point loss | M2 item 3; `compressor` preflight | pending owner evaluation (flag off by default) |
-| Scrubber corpus with transcript fragments at 100% secrets recall | Branch 8 corpus gate (server and vendored node scrubber); M1 parity | pending (branch 8); Swift parity: pending owner evaluation (Mac session) |
+| Scrubber corpus with transcript fragments at 100% secrets recall | Branch 8 corpus gate (server and vendored node scrubber); M1 parity | **met 2026-11-20 on branch 8** (`transcripts.jsonl`, 14 items, 100% secrets recall for the server and the vendored scrubber; preflight `learning_scrubber` includes it); `scrub.json` regeneration waits for Phase 9 branch 3; Swift parity: pending owner evaluation (Mac session) |
 | Zero cross-workspace leaks | Branches 1, 4, 8 isolation tests; eval leak rate | pending (branches 1, 4, 8) |
-| Owner turns only | Branch 8 hostile-node and marker tests; M1 real-file counts; M2 item 4 | pending (branch 8); real files: pending owner evaluation |
+| Owner turns only | Branch 8 hostile-node and marker tests; M1 real-file counts; M2 item 4 | **met 2026-11-20 on branch 8** for the fixtures and the hostile-node double; real files: pending owner evaluation |
 
 The Mac and private-data rows do not block Phase 10. Its server branches
 can start once branches 1–10 are green.

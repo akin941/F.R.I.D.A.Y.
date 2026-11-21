@@ -11,6 +11,10 @@ A producer hands the port a `mapping_key` naming *where the item came from*:
   `vault_prefix` rule wins, on the same segment boundary as `path_prefix`
   (Phase 8B branch 7, brief D12).
 
+A shared-rules source (Phase 8B branch 8, D13: the two transcript sources)
+owns no rules: `rule_source_for` resolves it through the same owner's
+`claude_code_hooks` source, the one path registry.
+
 `resolve_workspace` returns the target workspace of the winning enabled
 rule, or `None` -- and `None` means the item is dropped and counted by the
 port, never stored in some default workspace. A rule's target must be a
@@ -41,6 +45,14 @@ PREFIX_RULE_TYPES = frozenset(
 )
 MAX_KEY_CHARS = 1000
 UNMAPPED_SHORT_CHARS = 80
+# Phase 8B branch 8 (brief D13): the transcript sources own no rules of
+# their own -- they resolve through the same owner's `claude_code_hooks`
+# source, the one path registry (Phase 9 D9). Rule writes on them are
+# refused (`services.create_mapping_rule`), so no second registry appears.
+SHARED_RULE_SOURCES = {
+    IngestionSource.Kind.CLAUDE_CODE_TRANSCRIPTS: IngestionSource.Kind.CLAUDE_CODE_HOOKS,
+    IngestionSource.Kind.CODEX_TRANSCRIPTS: IngestionSource.Kind.CLAUDE_CODE_HOOKS,
+}
 
 
 class InvalidMappingKey(ValueError):
@@ -109,7 +121,10 @@ def normalise_pattern(rule_type, pattern):
 def allowed_rule_types(source_kind):
     """Which rule types a source of `source_kind` accepts (Phase 8B branch
     7, brief D12): an `obsidian_inbox` source takes `vault_prefix` only, and
-    `vault_prefix` is refused on every other source."""
+    `vault_prefix` is refused on every other source. A shared-rules source
+    (branch 8, D13) takes none: its rules are the hooks source's."""
+    if source_kind in SHARED_RULE_SOURCES:
+        return set()
     if source_kind == IngestionSource.Kind.OBSIDIAN_INBOX:
         return {WorkspaceMappingRule.RuleType.VAULT_PREFIX}
     return set(WorkspaceMappingRule.RuleType.values) - {WorkspaceMappingRule.RuleType.VAULT_PREFIX}
@@ -142,15 +157,33 @@ def owner_owns(user, workspace):
     ).exists()
 
 
+def rule_source_for(source: IngestionSource) -> IngestionSource | None:
+    """The source whose rules route `source`'s items (D13): the same
+    owner's `claude_code_hooks` source in the same (personal) workspace for
+    a shared-rules kind, `source` itself for every other kind. None (every
+    item unmapped) when a shared-rules source has no hooks source."""
+    shared_kind = SHARED_RULE_SOURCES.get(source.kind)
+    if shared_kind is None:
+        return source
+    return IngestionSource.objects.filter(
+        workspace_id=source.workspace_id, kind=shared_kind
+    ).first()
+
+
 def resolve_workspace(source: IngestionSource, mapping_key) -> Workspace | None:
     """The target workspace for `mapping_key`, or None (drop). Never raises
-    for an unknown or malformed key: that is simply unmapped."""
+    for an unknown or malformed key: that is simply unmapped. A shared-rules
+    source resolves through `rule_source_for`; the ownership re-check stays
+    on `source`'s own owner."""
     try:
         rule_type, value = parse_mapping_key(mapping_key)
     except InvalidMappingKey:
         return None
+    rule_source = rule_source_for(source)
+    if rule_source is None:
+        return None
     rules = WorkspaceMappingRule.objects.filter(
-        source=source, rule_type=rule_type, enabled=True
+        source=rule_source, rule_type=rule_type, enabled=True
     ).select_related("target_workspace")
     winner = None
     if rule_type in PREFIX_RULE_TYPES:
@@ -165,6 +198,46 @@ def resolve_workspace(source: IngestionSource, mapping_key) -> Workspace | None:
     if not owner_owns(owner_of(source), target):
         return None
     return target
+
+
+def _hooks_source(owner):
+    return (
+        IngestionSource.objects.filter(
+            kind=IngestionSource.Kind.CLAUDE_CODE_HOOKS,
+            workspace__owner=owner,
+            workspace__type=Workspace.Type.PERSONAL,
+        )
+        .order_by("created_at")
+        .first()
+    )
+
+
+def prefixes_for_workspace(owner, workspace) -> list[str]:
+    """The owner's enabled `path_prefix` rules (of the `claude_code_hooks`
+    source, the one path registry) that target `workspace`, sorted. The
+    transcript pull sends exactly these as `cwd_prefixes` (D13). Empty when
+    the owner does not own `workspace` (Phase 9 D9 helper; branch 8 lands it
+    here because Phase 9 branch 5 has not merged yet)."""
+    hooks = _hooks_source(owner)
+    if hooks is None or not owner_owns(owner, workspace):
+        return []
+    return sorted(
+        WorkspaceMappingRule.objects.filter(
+            source=hooks,
+            rule_type=WorkspaceMappingRule.RuleType.PATH_PREFIX,
+            target_workspace=workspace,
+            enabled=True,
+        ).values_list("pattern", flat=True)
+    )
+
+
+def workspace_for_path(owner, path) -> Workspace | None:
+    """The workspace the owner's hooks path rules route `path` to (longest
+    prefix wins), or None (Phase 9 D9 helper)."""
+    hooks = _hooks_source(owner)
+    if hooks is None:
+        return None
+    return resolve_workspace(hooks, f"path:{path}")
 
 
 def unmapped_entry(mapping_key):

@@ -1216,6 +1216,8 @@ export const tr = {
       claude_code_hooks: "Claude Code kancaları",
       calendar: "Takvim",
       obsidian_inbox: "Obsidian 00_Inbox notları",
+      claude_code_transcripts: "Claude Code konuşmaları (yalnız senin yazdıkların)",
+      codex_transcripts: "Codex konuşmaları (yalnız senin yazdıkların)",
     } satisfies Record<IngestionSourceKind, string>,
     subnav: {
       label: "Öğrenen hafıza",
@@ -1318,6 +1320,8 @@ export const tr = {
       noUnmapped: "Eşlenmemiş anahtar yok.",
       rules: "Eşleme kuralları",
       noRules: "Kural yok: bu kaynaktan gelen her şey düşer (asla kişisel alana varsayılmaz).",
+      rulesShared: (source: string) =>
+        `Yol kuralları "${source}" kaynağıyla ortak: bu kaynağın kendi kuralı olmaz. Kuralları orada düzenle.`,
       ruleType: {
         repo: "Depo kimliği",
         path_prefix: "Yol öneki",

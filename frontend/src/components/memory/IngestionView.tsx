@@ -43,7 +43,26 @@ const RULE_TYPES: MappingRuleType[] = ["repo", "path_prefix", "calendar_binding"
  * inbox takes `vault_prefix` only, and no other source takes it -- the
  * backend refuses any other pairing with a 400. */
 export function ruleTypesFor(kind: ApiIngestionSource["kind"]): MappingRuleType[] {
+  if (SHARED_RULE_KINDS.has(kind)) return [];
   return kind === "obsidian_inbox" ? ["vault_prefix"] : RULE_TYPES;
+}
+
+/** Phase 8B branch 8 (D13): the transcript sources own no rules; they use
+ * the Claude Code hooks source's path rules (the backend refuses a rule
+ * write on them with a 400). */
+const SHARED_RULE_KINDS = new Set<ApiIngestionSource["kind"]>([
+  "claude_code_transcripts",
+  "codex_transcripts",
+]);
+
+export function SharedRulesNote({ source }: { source: ApiIngestionSource }) {
+  const shared = source.rules_shared_with ?? "claude_code_hooks";
+  return (
+    <section className="flex flex-col gap-2" data-testid="ingestion-rules-shared">
+      <h4 className="text-sm font-medium">{copy.rules}</h4>
+      <p className="text-xs text-muted-foreground">{copy.rulesShared(sourceName({ kind: shared }))}</p>
+    </section>
+  );
 }
 
 function defaultRuleType(kind: ApiIngestionSource["kind"]): MappingRuleType {
@@ -364,7 +383,11 @@ function SourceDetail({ source, personalId }: { source: ApiIngestionSource; pers
         )}
       </section>
 
-      <RulesSection source={source} personalId={personalId} />
+      {source.rules_shared_with ? (
+        <SharedRulesNote source={source} />
+      ) : (
+        <RulesSection source={source} personalId={personalId} />
+      )}
 
       <form className="flex flex-wrap items-end gap-2" onSubmit={saveBudget}>
         <div className="flex flex-col gap-1">

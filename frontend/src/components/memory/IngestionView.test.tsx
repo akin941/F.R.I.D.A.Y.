@@ -1,9 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { IngestionView, ruleTypesFor, sourceName } from "@/components/memory/IngestionView";
+import { IngestionView, SharedRulesNote, ruleTypesFor, sourceName } from "@/components/memory/IngestionView";
 import { calledWith, cancelDialog, confirmInDialog, findConfirmDialog } from "@/test/confirm";
 import { renderWithClient } from "@/test/render";
+import { render } from "@testing-library/react";
 import type { ApiIngestionAudit, ApiIngestionSource } from "@/types/api";
 
 vi.mock("next/navigation", () => ({ usePathname: () => "/memory/ingestion" }));
@@ -227,5 +228,29 @@ describe("Obsidian inbox source (Phase 8B branch 7)", () => {
 
   it("names the inbox source in Turkish", () => {
     expect(sourceName({ kind: "obsidian_inbox" })).toBe("Obsidian 00_Inbox notları");
+  });
+});
+
+describe("transcript sources (Phase 8B branch 8)", () => {
+  it("offers no rule types: the rules are the hooks source's", () => {
+    expect(ruleTypesFor("claude_code_transcripts")).toEqual([]);
+    expect(ruleTypesFor("codex_transcripts")).toEqual([]);
+    expect(ruleTypesFor("claude_code_hooks")).toContain("path_prefix");
+  });
+
+  it("names both sources in Turkish", () => {
+    expect(sourceName({ kind: "claude_code_transcripts" })).toContain("Claude Code");
+    expect(sourceName({ kind: "codex_transcripts" })).toContain("Codex");
+  });
+
+  it("says the path rules are shared instead of showing a rule form", () => {
+    render(
+      <SharedRulesNote
+        source={source({ kind: "codex_transcripts", rules_shared_with: "claude_code_hooks" })}
+      />,
+    );
+    const note = screen.getByTestId("ingestion-rules-shared");
+    expect(note.textContent).toContain("Claude Code kancaları");
+    expect(within(note).queryByRole("button")).toBeNull();
   });
 });

@@ -434,6 +434,9 @@ MEMORY_GIT_INGEST_LOOKBACK_DAYS = env.int("MEMORY_GIT_INGEST_LOOKBACK_DAYS", def
 # in the last this-many days (the caps themselves are code constants in
 # memory.ingestion.consolidation, not settings).
 MEMORY_LEARNING_DIGEST_DAYS = env.int("MEMORY_LEARNING_DIGEST_DAYS", default=2)
+# Phase 8B branch 8 (D13): the transcript pull's beat interval (worker beat,
+# `tools.tasks.pull_transcripts_task`; config/celery.py reads the same env).
+MEMORY_TRANSCRIPT_PULL_MINUTES = env.int("MEMORY_TRANSCRIPT_PULL_MINUTES", default=15)
 
 # --- Memory eval set (Phase 8B branch 3, brief D9) ---
 # `memory_eval run|baseline|compare` run only under the eval settings module

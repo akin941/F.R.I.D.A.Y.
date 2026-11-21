@@ -79,6 +79,38 @@ replaced before storage: `POST /api/v1/memory/ingestion/scrub-terms
 For the hook source, follow `docs/runbooks/claude-code-hooks.md` (hook PAT,
 Keychain, `friday-hook`, `~/.claude/settings.json`).
 
+### 2a. Claude Code and Codex transcripts (Phase 8B branch 8)
+
+Two more sources, `claude_code_transcripts` and `codex_transcripts`, read
+**only the turns you typed** in Claude Code sessions and Codex threads —
+never assistant text, tool calls, tool results, file contents or
+harness-injected text (`<system-reminder>`, `<command-…>`,
+`<environment_context>`, …). They are **personal-class**: their episodes are
+extracted only by a `personal_data_allowed` (local) provider, like calendar.
+
+- **No rules of their own.** They route through the `claude_code_hooks`
+  source's `path_prefix` rules (one path registry); a rule write on a
+  transcript source is refused (400, "Path rules are shared with Claude Code
+  hooks"), and the audit view shows `rules_shared_with: claude_code_hooks`.
+  Without a hooks rule for a directory, its turns are never read.
+- **How it runs.** The worker beat pulls every
+  `MEMORY_TRANSCRIPT_PULL_MINUTES` (15): one read per workspace that has hooks
+  rules, sent to your Mac node with exactly that workspace's prefixes, as you
+  (`channel = system`). Each pull writes one `memory.transcript_pull.invoked`
+  audit row (counts only). The node scrubs every turn; the server scrubs it
+  again with the workspace's scrub terms and drops any turn that starts with
+  an injected marker (`dropped_not_owner`) or whose directory maps to another
+  workspace (`dropped_foreign`).
+- **The 7-day window.** The node refuses to read further back than 7 days.
+  The first pull starts at the time you enabled the source; a Mac that was
+  asleep, offline or ungranted for over a week loses the older turns (the
+  audit row and the cursor's `since_clamped` count say so).
+- **Enable** (owner steps, after Phase 9's node is paired): grant the
+  per-directory reads for `~/.claude/projects` and `~/.codex/sessions` with
+  Touch ID on the Mac, then `PATCH …/sources/<id> {"enabled": true}` for each
+  source. Until Phase 9 branches 3–5 merge, the server has no node layer and
+  the pull is a no-op even when enabled.
+
 ## 3. Check it with preflight
 
 ```bash

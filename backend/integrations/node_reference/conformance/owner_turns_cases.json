@@ -1,0 +1,639 @@
+{
+  "cases": [
+    {
+      "args": {
+        "cwd_prefixes": [
+          "/Users/owner/code",
+          "/Users/owner/work/acme"
+        ],
+        "max_sessions": 50,
+        "max_turns": 200,
+        "since": "2026-11-20T00:00:00.000Z"
+      },
+      "capability": "claude.transcripts.owner_turns",
+      "code": "not_granted",
+      "expect": "refused",
+      "granted": false,
+      "id": "claude.not_granted"
+    },
+    {
+      "args": {
+        "max_sessions": 50,
+        "max_turns": 200,
+        "since": "2026-11-20T00:00:00.000Z"
+      },
+      "capability": "claude.transcripts.owner_turns",
+      "code": "args_contract",
+      "expect": "refused",
+      "granted": true,
+      "id": "claude.cwd_prefixes_missing"
+    },
+    {
+      "args": {
+        "cwd_prefixes": [],
+        "max_sessions": 50,
+        "max_turns": 200,
+        "since": "2026-11-20T00:00:00.000Z"
+      },
+      "capability": "claude.transcripts.owner_turns",
+      "code": "args_contract",
+      "expect": "refused",
+      "granted": true,
+      "id": "claude.cwd_prefixes_empty"
+    },
+    {
+      "args": {
+        "cwd_prefixes": [
+          "/p/0",
+          "/p/1",
+          "/p/2",
+          "/p/3",
+          "/p/4",
+          "/p/5",
+          "/p/6",
+          "/p/7",
+          "/p/8",
+          "/p/9",
+          "/p/10",
+          "/p/11",
+          "/p/12",
+          "/p/13",
+          "/p/14",
+          "/p/15",
+          "/p/16",
+          "/p/17",
+          "/p/18",
+          "/p/19",
+          "/p/20"
+        ],
+        "max_sessions": 50,
+        "max_turns": 200,
+        "since": "2026-11-20T00:00:00.000Z"
+      },
+      "capability": "claude.transcripts.owner_turns",
+      "code": "args_contract",
+      "expect": "refused",
+      "granted": true,
+      "id": "claude.cwd_prefixes_too_many"
+    },
+    {
+      "args": {
+        "cwd_prefixes": [
+          "code/friday"
+        ],
+        "max_sessions": 50,
+        "max_turns": 200,
+        "since": "2026-11-20T00:00:00.000Z"
+      },
+      "capability": "claude.transcripts.owner_turns",
+      "code": "args_contract",
+      "expect": "refused",
+      "granted": true,
+      "id": "claude.cwd_prefix_relative"
+    },
+    {
+      "args": {
+        "cwd_prefixes": [
+          "/a",
+          "/a"
+        ],
+        "max_sessions": 50,
+        "max_turns": 200,
+        "since": "2026-11-20T00:00:00.000Z"
+      },
+      "capability": "claude.transcripts.owner_turns",
+      "code": "args_contract",
+      "expect": "refused",
+      "granted": true,
+      "id": "claude.cwd_prefix_duplicate"
+    },
+    {
+      "args": {
+        "cwd_prefixes": [
+          "/Users/owner/code",
+          "/Users/owner/work/acme"
+        ],
+        "max_sessions": 50,
+        "max_turns": 200,
+        "since": "2026-11-13T23:59:59.000Z"
+      },
+      "capability": "claude.transcripts.owner_turns",
+      "code": "args_contract",
+      "expect": "refused",
+      "granted": true,
+      "id": "claude.since_older_than_7_days"
+    },
+    {
+      "args": {
+        "cwd_prefixes": [
+          "/Users/owner/code",
+          "/Users/owner/work/acme"
+        ],
+        "max_sessions": 50,
+        "max_turns": 200,
+        "since": "yesterday"
+      },
+      "capability": "claude.transcripts.owner_turns",
+      "code": "args_contract",
+      "expect": "refused",
+      "granted": true,
+      "id": "claude.since_malformed"
+    },
+    {
+      "args": {
+        "cwd_prefixes": [
+          "/Users/owner/code",
+          "/Users/owner/work/acme"
+        ],
+        "max_sessions": 50,
+        "max_turns": 200
+      },
+      "capability": "claude.transcripts.owner_turns",
+      "code": "args_contract",
+      "expect": "refused",
+      "granted": true,
+      "id": "claude.since_missing"
+    },
+    {
+      "args": {
+        "cwd_prefixes": [
+          "/Users/owner/code",
+          "/Users/owner/work/acme"
+        ],
+        "max_sessions": 50,
+        "max_turns": 201,
+        "since": "2026-11-20T00:00:00.000Z"
+      },
+      "capability": "claude.transcripts.owner_turns",
+      "code": "args_contract",
+      "expect": "refused",
+      "granted": true,
+      "id": "claude.max_turns_oversize"
+    },
+    {
+      "args": {
+        "cwd_prefixes": [
+          "/Users/owner/code",
+          "/Users/owner/work/acme"
+        ],
+        "max_sessions": 50,
+        "max_turns": 0,
+        "since": "2026-11-20T00:00:00.000Z"
+      },
+      "capability": "claude.transcripts.owner_turns",
+      "code": "args_contract",
+      "expect": "refused",
+      "granted": true,
+      "id": "claude.max_turns_zero"
+    },
+    {
+      "args": {
+        "cwd_prefixes": [
+          "/Users/owner/code",
+          "/Users/owner/work/acme"
+        ],
+        "max_sessions": 50,
+        "max_turns": true,
+        "since": "2026-11-20T00:00:00.000Z"
+      },
+      "capability": "claude.transcripts.owner_turns",
+      "code": "args_contract",
+      "expect": "refused",
+      "granted": true,
+      "id": "claude.max_turns_bool"
+    },
+    {
+      "args": {
+        "cwd_prefixes": [
+          "/Users/owner/code",
+          "/Users/owner/work/acme"
+        ],
+        "max_sessions": 51,
+        "max_turns": 200,
+        "since": "2026-11-20T00:00:00.000Z"
+      },
+      "capability": "claude.transcripts.owner_turns",
+      "code": "args_contract",
+      "expect": "refused",
+      "granted": true,
+      "id": "claude.max_sessions_oversize"
+    },
+    {
+      "args": {
+        "cwd_prefixes": [
+          "/Users/owner/code",
+          "/Users/owner/work/acme"
+        ],
+        "include_assistant": true,
+        "max_sessions": 50,
+        "max_turns": 200,
+        "since": "2026-11-20T00:00:00.000Z"
+      },
+      "capability": "claude.transcripts.owner_turns",
+      "code": "args_contract",
+      "expect": "refused",
+      "granted": true,
+      "id": "claude.unknown_arg"
+    },
+    {
+      "args": {
+        "cwd_prefixes": [
+          "/Users/owner/code",
+          "/Users/owner/work/acme"
+        ],
+        "max_sessions": 50,
+        "max_turns": 200,
+        "since": "2026-11-14T00:00:00.000Z"
+      },
+      "capability": "claude.transcripts.owner_turns",
+      "expect": "ok",
+      "granted": true,
+      "id": "claude.since_exactly_7_days"
+    },
+    {
+      "args": {
+        "cwd_prefixes": [
+          "/Users/owner/code",
+          "/Users/owner/work/acme"
+        ],
+        "max_sessions": 50,
+        "max_turns": 200,
+        "since": "2026-11-20T00:00:00.000Z"
+      },
+      "capability": "claude.transcripts.owner_turns",
+      "expect": "ok",
+      "forbidden_phrases": [
+        "ASSISTANT-ONLY-PHRASE",
+        "TOOL-RESULT-PHRASE",
+        "TOOL-MIXED-PHRASE",
+        "META-PHRASE",
+        "MARKER-PHRASE",
+        "SIDECHAIN-PHRASE",
+        "COMPACT-PHRASE",
+        "SUMMARY-PHRASE",
+        "IMAGE-PHRASE",
+        "UNKNOWN-PHRASE",
+        "EVENT-MSG-PHRASE",
+        "DEVELOPER-PHRASE",
+        "SCRATCH-PHRASE",
+        "hunter2",
+        "abcDEF123456789xyzTOKENvalue0001",
+        "Zx81Kd02LmQpRt5UvWy7Ab9Cd3Ef4Gh"
+      ],
+      "granted": true,
+      "id": "claude.owner_turns_only"
+    },
+    {
+      "args": {
+        "cwd_prefixes": [
+          "/Users/owner/code",
+          "/Users/owner/work/acme"
+        ],
+        "max_sessions": 50,
+        "max_turns": 1,
+        "since": "2026-11-20T00:00:00.000Z"
+      },
+      "capability": "claude.transcripts.owner_turns",
+      "expect": "ok",
+      "granted": true,
+      "id": "claude.max_turns_truncates",
+      "truncated": true,
+      "turns": 1
+    },
+    {
+      "args": {
+        "cwd_prefixes": [
+          "/Users/owner/code",
+          "/Users/owner/work/acme"
+        ],
+        "max_sessions": 1,
+        "max_turns": 200,
+        "since": "2026-11-20T00:00:00.000Z"
+      },
+      "capability": "claude.transcripts.owner_turns",
+      "expect": "ok",
+      "granted": true,
+      "id": "claude.max_sessions_truncates",
+      "sessions": 1,
+      "truncated": true
+    },
+    {
+      "args": {
+        "cwd_prefixes": [
+          "/Users/owner/code",
+          "/Users/owner/work/acme"
+        ],
+        "max_sessions": 50,
+        "max_turns": 200,
+        "since": "2026-11-20T00:00:00.000Z"
+      },
+      "capability": "codex.transcripts.owner_turns",
+      "code": "not_granted",
+      "expect": "refused",
+      "granted": false,
+      "id": "codex.not_granted"
+    },
+    {
+      "args": {
+        "max_sessions": 50,
+        "max_turns": 200,
+        "since": "2026-11-20T00:00:00.000Z"
+      },
+      "capability": "codex.transcripts.owner_turns",
+      "code": "args_contract",
+      "expect": "refused",
+      "granted": true,
+      "id": "codex.cwd_prefixes_missing"
+    },
+    {
+      "args": {
+        "cwd_prefixes": [],
+        "max_sessions": 50,
+        "max_turns": 200,
+        "since": "2026-11-20T00:00:00.000Z"
+      },
+      "capability": "codex.transcripts.owner_turns",
+      "code": "args_contract",
+      "expect": "refused",
+      "granted": true,
+      "id": "codex.cwd_prefixes_empty"
+    },
+    {
+      "args": {
+        "cwd_prefixes": [
+          "/p/0",
+          "/p/1",
+          "/p/2",
+          "/p/3",
+          "/p/4",
+          "/p/5",
+          "/p/6",
+          "/p/7",
+          "/p/8",
+          "/p/9",
+          "/p/10",
+          "/p/11",
+          "/p/12",
+          "/p/13",
+          "/p/14",
+          "/p/15",
+          "/p/16",
+          "/p/17",
+          "/p/18",
+          "/p/19",
+          "/p/20"
+        ],
+        "max_sessions": 50,
+        "max_turns": 200,
+        "since": "2026-11-20T00:00:00.000Z"
+      },
+      "capability": "codex.transcripts.owner_turns",
+      "code": "args_contract",
+      "expect": "refused",
+      "granted": true,
+      "id": "codex.cwd_prefixes_too_many"
+    },
+    {
+      "args": {
+        "cwd_prefixes": [
+          "code/friday"
+        ],
+        "max_sessions": 50,
+        "max_turns": 200,
+        "since": "2026-11-20T00:00:00.000Z"
+      },
+      "capability": "codex.transcripts.owner_turns",
+      "code": "args_contract",
+      "expect": "refused",
+      "granted": true,
+      "id": "codex.cwd_prefix_relative"
+    },
+    {
+      "args": {
+        "cwd_prefixes": [
+          "/a",
+          "/a"
+        ],
+        "max_sessions": 50,
+        "max_turns": 200,
+        "since": "2026-11-20T00:00:00.000Z"
+      },
+      "capability": "codex.transcripts.owner_turns",
+      "code": "args_contract",
+      "expect": "refused",
+      "granted": true,
+      "id": "codex.cwd_prefix_duplicate"
+    },
+    {
+      "args": {
+        "cwd_prefixes": [
+          "/Users/owner/code",
+          "/Users/owner/work/acme"
+        ],
+        "max_sessions": 50,
+        "max_turns": 200,
+        "since": "2026-11-13T23:59:59.000Z"
+      },
+      "capability": "codex.transcripts.owner_turns",
+      "code": "args_contract",
+      "expect": "refused",
+      "granted": true,
+      "id": "codex.since_older_than_7_days"
+    },
+    {
+      "args": {
+        "cwd_prefixes": [
+          "/Users/owner/code",
+          "/Users/owner/work/acme"
+        ],
+        "max_sessions": 50,
+        "max_turns": 200,
+        "since": "yesterday"
+      },
+      "capability": "codex.transcripts.owner_turns",
+      "code": "args_contract",
+      "expect": "refused",
+      "granted": true,
+      "id": "codex.since_malformed"
+    },
+    {
+      "args": {
+        "cwd_prefixes": [
+          "/Users/owner/code",
+          "/Users/owner/work/acme"
+        ],
+        "max_sessions": 50,
+        "max_turns": 200
+      },
+      "capability": "codex.transcripts.owner_turns",
+      "code": "args_contract",
+      "expect": "refused",
+      "granted": true,
+      "id": "codex.since_missing"
+    },
+    {
+      "args": {
+        "cwd_prefixes": [
+          "/Users/owner/code",
+          "/Users/owner/work/acme"
+        ],
+        "max_sessions": 50,
+        "max_turns": 201,
+        "since": "2026-11-20T00:00:00.000Z"
+      },
+      "capability": "codex.transcripts.owner_turns",
+      "code": "args_contract",
+      "expect": "refused",
+      "granted": true,
+      "id": "codex.max_turns_oversize"
+    },
+    {
+      "args": {
+        "cwd_prefixes": [
+          "/Users/owner/code",
+          "/Users/owner/work/acme"
+        ],
+        "max_sessions": 50,
+        "max_turns": 0,
+        "since": "2026-11-20T00:00:00.000Z"
+      },
+      "capability": "codex.transcripts.owner_turns",
+      "code": "args_contract",
+      "expect": "refused",
+      "granted": true,
+      "id": "codex.max_turns_zero"
+    },
+    {
+      "args": {
+        "cwd_prefixes": [
+          "/Users/owner/code",
+          "/Users/owner/work/acme"
+        ],
+        "max_sessions": 50,
+        "max_turns": true,
+        "since": "2026-11-20T00:00:00.000Z"
+      },
+      "capability": "codex.transcripts.owner_turns",
+      "code": "args_contract",
+      "expect": "refused",
+      "granted": true,
+      "id": "codex.max_turns_bool"
+    },
+    {
+      "args": {
+        "cwd_prefixes": [
+          "/Users/owner/code",
+          "/Users/owner/work/acme"
+        ],
+        "max_sessions": 51,
+        "max_turns": 200,
+        "since": "2026-11-20T00:00:00.000Z"
+      },
+      "capability": "codex.transcripts.owner_turns",
+      "code": "args_contract",
+      "expect": "refused",
+      "granted": true,
+      "id": "codex.max_sessions_oversize"
+    },
+    {
+      "args": {
+        "cwd_prefixes": [
+          "/Users/owner/code",
+          "/Users/owner/work/acme"
+        ],
+        "include_assistant": true,
+        "max_sessions": 50,
+        "max_turns": 200,
+        "since": "2026-11-20T00:00:00.000Z"
+      },
+      "capability": "codex.transcripts.owner_turns",
+      "code": "args_contract",
+      "expect": "refused",
+      "granted": true,
+      "id": "codex.unknown_arg"
+    },
+    {
+      "args": {
+        "cwd_prefixes": [
+          "/Users/owner/code",
+          "/Users/owner/work/acme"
+        ],
+        "max_sessions": 50,
+        "max_turns": 200,
+        "since": "2026-11-14T00:00:00.000Z"
+      },
+      "capability": "codex.transcripts.owner_turns",
+      "expect": "ok",
+      "granted": true,
+      "id": "codex.since_exactly_7_days"
+    },
+    {
+      "args": {
+        "cwd_prefixes": [
+          "/Users/owner/code",
+          "/Users/owner/work/acme"
+        ],
+        "max_sessions": 50,
+        "max_turns": 200,
+        "since": "2026-11-20T00:00:00.000Z"
+      },
+      "capability": "codex.transcripts.owner_turns",
+      "expect": "ok",
+      "forbidden_phrases": [
+        "ASSISTANT-ONLY-PHRASE",
+        "TOOL-RESULT-PHRASE",
+        "TOOL-MIXED-PHRASE",
+        "META-PHRASE",
+        "MARKER-PHRASE",
+        "SIDECHAIN-PHRASE",
+        "COMPACT-PHRASE",
+        "SUMMARY-PHRASE",
+        "IMAGE-PHRASE",
+        "UNKNOWN-PHRASE",
+        "EVENT-MSG-PHRASE",
+        "DEVELOPER-PHRASE",
+        "SCRATCH-PHRASE",
+        "hunter2",
+        "abcDEF123456789xyzTOKENvalue0001",
+        "Zx81Kd02LmQpRt5UvWy7Ab9Cd3Ef4Gh"
+      ],
+      "granted": true,
+      "id": "codex.owner_turns_only"
+    },
+    {
+      "args": {
+        "cwd_prefixes": [
+          "/Users/owner/code",
+          "/Users/owner/work/acme"
+        ],
+        "max_sessions": 50,
+        "max_turns": 1,
+        "since": "2026-11-20T00:00:00.000Z"
+      },
+      "capability": "codex.transcripts.owner_turns",
+      "expect": "ok",
+      "granted": true,
+      "id": "codex.max_turns_truncates",
+      "truncated": true,
+      "turns": 1
+    },
+    {
+      "args": {
+        "cwd_prefixes": [
+          "/Users/owner/code",
+          "/Users/owner/work/acme"
+        ],
+        "max_sessions": 1,
+        "max_turns": 200,
+        "since": "2026-11-20T00:00:00.000Z"
+      },
+      "capability": "codex.transcripts.owner_turns",
+      "expect": "ok",
+      "granted": true,
+      "id": "codex.max_sessions_truncates",
+      "sessions": 1,
+      "truncated": true
+    }
+  ],
+  "now": "2026-11-21T00:00:00.000Z"
+}
