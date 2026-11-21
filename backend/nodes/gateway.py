@@ -21,14 +21,18 @@ and never retries.
   a frame for another socket's, an unknown or a finished invocation is
   discarded and counted (`discarded`), never applied. `confirmation` moves
   the status (`shown` -> confirming, `approved` -> running); `output` is
-  scrubbed through the invocation's `StreamScrubber` (carry-over, D12),
-  counted into `output_bytes` and then dropped until branch 5 adds the
-  Redis stream; `result` flushes the carry and ends the execution through
-  `nodes.services.record_gated_progress`, which re-scrubs the `tail`.
+  counted into `output_bytes` and handed to the invocation's
+  `nodes.output.OutputTransit`: sanitised and scrubbed through its
+  `StreamScrubber` (carry-over, D12), and only the emitted text is
+  appended to the Redis stream `nodes:output:<invocation_id>` (branch 5;
+  the raw carry never is); `result` flushes the carry and ends the
+  execution through `nodes.services.record_gated_progress`, which
+  re-scrubs the `tail`, then writes the stream's `end` entry.
 - `tick(now)`: one watchdog per invocation, deadline = `expires_at` + the
   contract's `max_runtime_seconds` + 30 s -> `timeout`.
 - `disconnect()`: every in-flight invocation ends `node_disconnected` (the
-  carry is scrubbed and flushed first), presence is cleared. Nothing is
+  carry is scrubbed and flushed to the stream first, then its `end`
+  entry), presence is cleared. Nothing is
   retried (ADR-013 decision 6).
 
 Frame bodies are never logged: ids, types, sizes and codes only.
@@ -39,8 +43,8 @@ import time
 from dataclasses import dataclass, field
 
 from nodes import bus, services
-from nodes.output import StreamScrubber, scrubber_for, utf8_len
-from nodes.protocol.messages import OUTPUT_STREAMS, ProtocolError, catalogue_sha256, validate
+from nodes.output import OutputStreamWriter, OutputTransit, scrubber_for, utf8_len
+from nodes.protocol.messages import ProtocolError, catalogue_sha256, validate
 
 logger = logging.getLogger(__name__)
 
@@ -52,11 +56,13 @@ class InFlight:
     invocation_id: str
     execution_id: object
     deadline: int | None
-    scrubbers: dict
+    transit: OutputTransit
     output_bytes: int = 0
-    # Scrubbed output emitted so far; dropped until branch 5 (`nodes:output`
-    # Redis stream). Kept only as a count here, never the text.
-    emitted_bytes: int = 0
+
+    @property
+    def emitted_bytes(self) -> int:
+        """Scrubbed bytes handed to the stream (a count, never the text)."""
+        return self.transit.emitted_bytes
 
 
 @dataclass
@@ -125,7 +131,7 @@ class NodeSession:
                 invocation_id=str(invocation_id),
                 execution_id=execution.pk,
                 deadline=services.watchdog_deadline(execution),
-                scrubbers={stream: StreamScrubber(scrub) for stream in OUTPUT_STREAMS},
+                transit=OutputTransit(scrub, OutputStreamWriter(str(invocation_id))),
             )
             forward.append(envelope)
         return forward
@@ -173,6 +179,7 @@ class NodeSession:
             result=frame,
             output_bytes=flight.output_bytes,
         )
+        flight.transit.end(finished)
         self._forget(flight)
         if finished is None:
             self.discarded += 1
@@ -182,16 +189,12 @@ class NodeSession:
     def _output(self, flight, frame):
         data = frame["data"]
         flight.output_bytes += utf8_len(data)
-        scrubber = flight.scrubbers[frame["stream"]]
-        emitted = scrubber.push(data)
-        # Branch 5 appends `emitted` to `nodes:output:<invocation_id>`; until
-        # then it is counted and dropped: nothing stored, nothing published.
-        flight.emitted_bytes += utf8_len(emitted)
+        # Only the scrubber's emitted text reaches `nodes:output:<id>`.
+        flight.transit.push(frame["stream"], data, truncated=frame.get("truncated"))
         return "applied"
 
     def _flush(self, flight):
-        for scrubber in flight.scrubbers.values():
-            flight.emitted_bytes += utf8_len(scrubber.flush())
+        flight.transit.flush()
 
     def _forget(self, flight):
         self.in_flight.pop(flight.invocation_id, None)
@@ -206,12 +209,13 @@ class NodeSession:
         for flight in list(self.in_flight.values()):
             if flight.deadline is not None and now > flight.deadline:
                 self._flush(flight)
-                services.record_gated_progress(
+                finished = services.record_gated_progress(
                     node_id=self.node_id,
                     invocation_id=flight.invocation_id,
                     terminal="timeout",
                     output_bytes=flight.output_bytes,
                 )
+                flight.transit.end(finished)
                 self._forget(flight)
                 timed_out.append(flight.invocation_id)
         return timed_out
@@ -224,12 +228,13 @@ class NodeSession:
         self.closed = True
         for flight in list(self.in_flight.values()):
             self._flush(flight)
-            services.record_gated_progress(
+            finished = services.record_gated_progress(
                 node_id=self.node_id,
                 invocation_id=flight.invocation_id,
                 terminal="node_disconnected",
                 output_bytes=flight.output_bytes,
             )
+            flight.transit.end(finished)
             self._forget(flight)
         try:
             bus.clear_presence(self.node_id)

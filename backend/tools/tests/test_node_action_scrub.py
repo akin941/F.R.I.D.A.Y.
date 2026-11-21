@@ -100,7 +100,11 @@ def test_a_compromised_node_cannot_store_a_secret(
     assert _leaks(caplog.text) == []
     client = redis.Redis.from_url(settings.REDIS_URL)
     try:
-        assert not list(client.scan_iter(match=f"nodes:output:{execution.invocation_id}*"))
+        # Branch 5: the output stream exists and holds scrubbed text only.
+        key = f"nodes:output:{execution.invocation_id}"
+        entries = client.xrange(key)
+        assert entries
+        assert _leaks(json.dumps([str(fields) for _id, fields in entries])) == []
         for key in client.scan_iter(match=f"nodes:*{node_world.node.pk}*"):
             if client.type(key) == b"list":
                 assert _leaks(b"".join(client.lrange(key, 0, -1)).decode()) == []

@@ -11,6 +11,7 @@ class ToolsConfig(AppConfig):
         from tools.coding_sessions import _register as _register_sessions_read
         from tools.export import _register
         from tools.memory_graph import _register as _register_graph_read
+        from tools.node_action_reads import _register as _register_node_action_read
         from tools.node_actions import _register as _register_node_action
         from tools.purge import _register as _register_purge
 
@@ -22,3 +23,5 @@ class ToolsConfig(AppConfig):
         _register_graph_read()
         # Phase 10 D6: the gated `node_action` tool (and its node ports).
         _register_node_action()
+        # Phase 10 D12: the ungated, web-only node action result read tool.
+        _register_node_action_read()
