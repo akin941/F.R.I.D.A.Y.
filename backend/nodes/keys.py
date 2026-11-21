@@ -40,9 +40,15 @@ def published_test_key_ids() -> frozenset:
     vectors; branch 3 adds the conformance key pair). A server refuses to
     sign with any of them."""
     ids = set()
-    signing_vectors = _VECTORS_DIR / "signing.json"
-    if signing_vectors.exists():
-        ids.add(json.loads(signing_vectors.read_text(encoding="utf-8"))["key_id"])
+    # v1 signing vectors (Phase 9) and the v2 signing / grant vectors
+    # (Phase 10 branch 1); every file names its test key's id.
+    for name in ("signing.json", "signing_v2.json", "grants.json"):
+        vectors = _VECTORS_DIR / name
+        if vectors.exists():
+            document = json.loads(vectors.read_text(encoding="utf-8"))
+            ids.add(document["key_id"])
+            if document.get("unpinned_key_id"):
+                ids.add(document["unpinned_key_id"])
     return frozenset(ids)
 
 

@@ -3,6 +3,11 @@
 Branch 2 holds pairing and envelope signing. `invoke_read` / `refuse_read`
 (the invoke bus and the per-call chain + AuditLog rows) arrive with the
 gateway (branch 4) and the read tools (branch 5).
+
+Phase 10 branch 1 adds snapshot classification by protocol version and
+class (`classify_catalogue`, `record_capability_snapshot`,
+`invocable_entry`): confirm- and gate-class entries are invocable only on a
+v2 session (D1, D3). Grant issuance and gated invocation are branch 3.
 """
 
 import time
@@ -13,13 +18,15 @@ from django.db import transaction
 
 from accounts.devices import DeviceTrustError, enroll_node_device
 from audit.services import record_audit
-from nodes.capabilities import get_contract
+from nodes.capabilities import check_catalogue_entry, get_contract
 from nodes.keys import signing_keyring
-from nodes.models import Node
+from nodes.models import CapabilitySnapshot, Node
+from nodes.protocol.canonical import CanonicalizationError, sha256_hex
 from nodes.protocol.messages import (
     GATEWAY_PATH,
     MAX_READ_INVOKE_TTL_SECONDS,
     PROTOCOL_VERSION,
+    PROTOCOL_VERSIONS,
 )
 from nodes.protocol.signing import KeyRing, build_invoke
 from workspaces.models import Workspace
@@ -134,3 +141,102 @@ def sign_read_invoke(*, node, workspace_id, capability, args, trace_id, keyring=
         ttl_seconds=read_invoke_ttl_seconds(),
     )
     return keyring.sign(envelope)
+
+
+# --- capability snapshots (Phase 9 D6; Phase 10 D1/D3 classes) ---
+
+
+def classify_catalogue(catalogue, *, protocol_version) -> list:
+    """The `CapabilitySnapshot.entries` for one (schema-valid) `hello`
+    catalogue on a session of `protocol_version`: per entry its name,
+    version, class, availability, the sha256 of both schemas, `invocable`,
+    `reason` (None or a `NOT_INVOCABLE_REASONS` code) and the session's
+    `protocol_version`. Never the schemas' content.
+
+    Confirm- and gate-class entries are invocable only on a v2 session
+    whose entry matches the server's contract on name, version, class and
+    both schema hashes; on a v1 session they are `not_invocable` with
+    reason `protocol_v1` (D1)."""
+    if protocol_version not in PROTOCOL_VERSIONS:
+        raise UnsupportedProtocolVersion()
+    entries = []
+    for entry in catalogue:
+        reason = check_catalogue_entry(entry, protocol_version=protocol_version)
+        entries.append(
+            {
+                "name": entry.get("name"),
+                "version": entry.get("version"),
+                "class": entry.get("class"),
+                "availability": entry.get("availability"),
+                "args_schema_sha256": _schema_sha256_or_none(entry.get("args_schema")),
+                "result_schema_sha256": _schema_sha256_or_none(entry.get("result_schema")),
+                "invocable": reason is None,
+                "reason": reason,
+                "protocol_version": protocol_version,
+            }
+        )
+    return entries
+
+
+def _schema_sha256_or_none(schema):
+    try:
+        return sha256_hex(schema)
+    except CanonicalizationError:
+        return None
+
+
+def snapshot_protocol_version(snapshot) -> int | None:
+    """The session version a snapshot was classified for (stored per
+    entry, so no column is needed); None for an empty catalogue."""
+    versions = {entry.get("protocol_version", 1) for entry in snapshot.entries or ()}
+    return versions.pop() if len(versions) == 1 else None
+
+
+def record_capability_snapshot(
+    *, node, catalogue, catalogue_sha256, protocol_version, node_version="", os_version=""
+):
+    """Write a `CapabilitySnapshot` when the catalogue hash **or** the
+    session's protocol version changed since the node's latest snapshot
+    (a node that reconnects on v2 with the same catalogue must not keep its
+    v1 `protocol_v1` verdicts, and the reverse). Returns the snapshot in
+    force. Called by the gateway on `hello` (Phase 9 branch 4)."""
+    entries = classify_catalogue(catalogue, protocol_version=protocol_version)
+    latest = CapabilitySnapshot.objects.filter(node=node).order_by("-created_at").first()
+    if (
+        latest is not None
+        and latest.catalogue_sha256 == catalogue_sha256
+        and snapshot_protocol_version(latest) in (protocol_version, None)
+    ):
+        return latest
+    return CapabilitySnapshot.objects.create(
+        workspace=node.workspace,
+        node=node,
+        catalogue_sha256=catalogue_sha256,
+        entries=entries,
+        node_version=node_version,
+        os_version=os_version,
+    )
+
+
+def invocable_entry(snapshot, contract):
+    """The snapshot entry that lets the server invoke `contract`, or None:
+    it must be `invocable` and equal the contract on name, version, class
+    and both schema hashes (Phase 10 D2 re-checks this before signing a
+    grant)."""
+    if snapshot is None:
+        return None
+    for entry in snapshot.entries or ():
+        if (
+            entry.get("invocable")
+            and entry.get("name") == contract.name
+            and entry.get("version") == contract.version
+            and entry.get("class") == contract.capability_class
+            and entry.get("args_schema_sha256") == contract.args_schema_sha256
+            and entry.get("result_schema_sha256") == contract.result_schema_sha256
+            and (
+                not contract.is_action
+                or entry.get("protocol_version", 1) >= contract.min_protocol_version
+            )
+        ):
+            return entry
+    return None

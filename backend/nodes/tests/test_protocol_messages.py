@@ -119,7 +119,9 @@ def test_the_server_to_node_set_is_exactly_the_five_types():
     assert isinstance(SERVER_TO_NODE, frozenset) and isinstance(NODE_TO_SERVER, frozenset)
     assert not NODE_TO_SERVER & SERVER_TO_NODE
     with pytest.raises(TypeError):
-        MESSAGE_TYPES["server_to_node"] = frozenset({"policy.set"})
+        MESSAGE_TYPES[1]["server_to_node"] = frozenset({"policy.set"})
+    with pytest.raises(TypeError):
+        MESSAGE_TYPES[3] = MESSAGE_TYPES[1]
 
 
 def test_one_schema_file_per_type_and_nothing_else():
@@ -167,7 +169,7 @@ def test_the_guard_regex_catches_policy_shaped_names():
     "message_type", ["policy.set", "allowlist.add", "catalogue.set", "config.update", "grant.add"]
 )
 def test_policy_shaped_types_are_unknown_in_both_directions(message_type):
-    for direction in MESSAGE_TYPES:
+    for direction in MESSAGE_TYPES[1]:
         with pytest.raises(ProtocolError) as exc:
             validate({"v": 1, "type": message_type, "id": _id()}, direction)
         assert exc.value.code == "unknown_type"
