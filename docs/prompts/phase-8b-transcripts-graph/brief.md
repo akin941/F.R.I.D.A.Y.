@@ -2031,6 +2031,29 @@ Nothing in this branch needs the Mac or real hardware; real model quality
 of fact extraction is only measurable with the owner's data (branch 3's
 private eval set, M2).
 
+**Known follow-ups — `feat/p8-fact-learning` (review, LOW, unresolved at
+merge into the integration branch, 2026-11-21).**
+1. **Reflection facts are not reconciled**
+   (`backend/memory/ingestion/reflection.py`). Reflection facts are always
+   created as new; a fact that supersedes an existing one can only be
+   handled by an owner edit. Decision for the owner to confirm. Fix
+   (optional, later branch): run `reconcile()` on reflection facts.
+2. **Reflection claim before the call**
+   (`backend/memory/ingestion/reflection.py`). The claim audit row is
+   written before the model call, so a crash between the claim and the
+   call consumes that ISO week with no retry. This matches the documented
+   no-retry-loop intent. Fix: none required; optionally document the
+   operator override.
+3. **Personal-class episode facts keep normal sensitivity**
+   (`backend/memory/ingestion/consolidation.py`). Facts from
+   personal-class episodes (transcript, calendar) have normal sensitivity,
+   so they can appear as `model_eligible` existing facts in cloud
+   reconciliation or reflection context when `personal_data=False`. This
+   follows D4 (sensitivity follows the episode; personal class only routes
+   extraction) and is not a deviation. Fix (optional): a later hardening
+   that marks facts from personal-class sources `private`, if the owner
+   wants it.
+
 ### 3. `feat/p8-eval-set` — harness, public seed, private loader, baseline
 
 **Scope.**
