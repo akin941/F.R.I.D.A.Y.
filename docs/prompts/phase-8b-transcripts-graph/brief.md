@@ -2077,6 +2077,12 @@ Decisions made while implementing, to confirm in review:
   that owner's personal workspace.
 - **Tests:** `memory/tests/test_evals.py`, plus the updated seed-budget
   assertion in `ai_core/tests/test_speech_gateway.py`.
+- **Result directories (review round 1):** the public results default is
+  `~/friday-evals-public-results`, outside the private directory (which
+  may hold only `*.jsonl` and `results/`), and `ensure_dir` creates every
+  missing ancestor with mode 0700, so a results file written first never
+  leaves `~/friday-evals` readable by others. A test runs a public
+  baseline and then a private baseline on the default paths.
 
 **Owner steps (pending) — `feat/p8-eval-set`, recorded 2026-11-20.**
 1. Run the independent Sonnet 5 review of this branch and fix findings

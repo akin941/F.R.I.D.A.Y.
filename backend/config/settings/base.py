@@ -444,7 +444,9 @@ MEMORY_EVAL_MODE = False
 # repo). Its results go to `<dir>/results/`.
 MEMORY_EVAL_PRIVATE_DIR = env("MEMORY_EVAL_PRIVATE_DIR", default="~/friday-evals")
 # Where public-set result files go (CI points it at a temporary directory).
-MEMORY_EVAL_RESULTS_DIR = env("MEMORY_EVAL_RESULTS_DIR", default="~/friday-evals/results-public")
+# Kept outside the private directory, which may hold only case files and
+# `results/` (`check_private_dir` refuses anything else).
+MEMORY_EVAL_RESULTS_DIR = env("MEMORY_EVAL_RESULTS_DIR", default="~/friday-evals-public-results")
 
 CORS_ALLOWED_ORIGINS = [o for o in env.list("CORS_ALLOWED_ORIGINS", default=[]) if o] or [
     "http://localhost:3001"

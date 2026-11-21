@@ -58,7 +58,29 @@ class ResultError(ValueError):
 
 
 def ensure_dir(directory):
+    """Create `directory` and every missing ancestor with mode 0700.
+
+    `Path.mkdir(parents=True)` gives only the leaf the requested mode (and
+    that one is still masked by the umask); ancestors get the umask default,
+    usually 0755. A results directory's freshly created parent must not be
+    readable by others (it may be the owner's private eval directory, which
+    `check_private_dir` refuses otherwise), so each directory this call
+    creates is chmod-ed to 0700. Existing directories are left as they are.
+    """
     directory = Path(directory)
+    missing = []
+    current = directory
+    while not current.exists() and not current.is_symlink():
+        missing.append(current)
+        if current.parent == current:
+            break
+        current = current.parent
+    for path in reversed(missing):
+        try:
+            path.mkdir(mode=0o700)
+        except FileExistsError:
+            continue
+        os.chmod(path, 0o700)
     directory.mkdir(mode=0o700, parents=True, exist_ok=True)
     return directory
 

@@ -19,7 +19,7 @@ The eval set measures retrieval and answers. It gates two later decisions:
 | Public seed (about 60 synthetic cases) | `backend/memory/evals/cases/public/*.jsonl` | yes |
 | **Private set** (about 100 real cases) | `MEMORY_EVAL_PRIVATE_DIR`, default `~/friday-evals/`, mode **0700** | **never** |
 | Private result files | `~/friday-evals/results/<run id>.json`, mode 0600 | never |
-| Public result files | `MEMORY_EVAL_RESULTS_DIR`, default `~/friday-evals/results-public/` | never |
+| Public result files | `MEMORY_EVAL_RESULTS_DIR`, default `~/friday-evals-public-results/` (outside the private directory, which may hold only case files and `results/`) | never |
 | Recorded metrics | `MemoryEvalRun` rows in the live database, in your personal workspace | n/a |
 
 Two guards keep private cases out of the repo:

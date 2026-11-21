@@ -46,7 +46,13 @@ from memory.evals.loader import (
     load_public_cases,
     stray_case_files,
 )
-from memory.evals.results import RESULT_KEYS, ResultError, validate_result, write_result
+from memory.evals.results import (
+    RESULT_KEYS,
+    ResultError,
+    ensure_dir,
+    validate_result,
+    write_result,
+)
 from memory.evals.runner import (
     ANSWER_PURPOSE,
     PROMPT_NAME,
@@ -838,6 +844,73 @@ def test_private_baseline_command_reads_the_private_dir(
     directory.chmod(0o755)
     with pytest.raises(CommandError, match="readable by others"):
         call_command("memory_eval", "baseline", "--set", "private")
+
+
+def _settings_default(name):
+    """The literal `default=` of `name = env(...)` in the base settings (the
+    test environment may override the variable itself)."""
+    source = (Path(__file__).resolve().parents[2] / "config" / "settings" / "base.py").read_text()
+    for node in ast.parse(source).body:
+        if isinstance(node, ast.Assign) and getattr(node.targets[0], "id", None) == name:
+            (default,) = [kw.value.value for kw in node.value.keywords if kw.arg == "default"]
+            return default
+    raise AssertionError(f"{name} not found in base settings")
+
+
+def test_default_dirs_allow_a_public_run_then_a_private_baseline(
+    eval_mode, providers, prompt, llm, tmp_path, monkeypatch
+):
+    """The owner step on default config: a public run, then a private
+    baseline. The public results dir must not land inside the private dir
+    (which may hold only case files and `results/`), and no directory the
+    runs create may be readable by others."""
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    eval_mode.MEMORY_EVAL_PRIVATE_DIR = _settings_default("MEMORY_EVAL_PRIVATE_DIR")
+    eval_mode.MEMORY_EVAL_RESULTS_DIR = _settings_default("MEMORY_EVAL_RESULTS_DIR")
+    private = Path(os.path.expanduser(eval_mode.MEMORY_EVAL_PRIVATE_DIR))
+    public = Path(os.path.expanduser(eval_mode.MEMORY_EVAL_RESULTS_DIR))
+    assert private.parent == home and not public.is_relative_to(private)
+
+    call_command("memory_eval", "baseline", "--set", "public", "--retrieval-only")
+    assert len(list(public.glob("*.json"))) == 1
+    assert public.stat().st_mode & 0o777 == 0o700
+
+    private.mkdir(mode=0o700)
+    (private / "work.jsonl").write_text(case_line() + "\n")
+    call_command("memory_eval", "baseline", "--set", "private", "--retrieval-only")
+    assert len(list((private / "results").glob("*.json"))) == 1
+
+
+def test_ensure_dir_creates_missing_ancestors_0700(tmp_path):
+    old_umask = os.umask(0o022)
+    try:
+        leaf = ensure_dir(tmp_path / "a" / "b" / "c")
+    finally:
+        os.umask(old_umask)
+    for path in (tmp_path / "a", tmp_path / "a" / "b", leaf):
+        assert path.stat().st_mode & 0o777 == 0o700, path
+    # An existing directory keeps its mode.
+    shared = tmp_path / "shared"
+    shared.mkdir(mode=0o755)
+    shared.chmod(0o755)
+    ensure_dir(shared / "results")
+    assert shared.stat().st_mode & 0o777 == 0o755
+    assert (shared / "results").stat().st_mode & 0o777 == 0o700
+
+
+def test_results_written_first_leave_the_private_dir_loadable(tmp_path):
+    """A private run whose results dir is created before the private dir
+    exists must not leave the private dir readable by others."""
+    private = tmp_path / "friday-evals"
+    old_umask = os.umask(0o022)
+    try:
+        write_result(private / "results", {**dict.fromkeys(RESULT_KEYS), "run_id": "r1"})
+    finally:
+        os.umask(old_umask)
+    (private / "work.jsonl").write_text(case_line() + "\n")
+    assert [c.id for c in load_private_cases(private)] == ["c1"]
 
 
 # --- MemoryEvalRun and record ------------------------------------------------------
