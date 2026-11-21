@@ -292,6 +292,8 @@ def test_health_counts_system_rows_but_ignores_stale_ones(stream, workspace, set
 
 
 def test_health_budget_exhausted(stream, workspace):
+    # Only this test's caps (the ai_core 0008 migration seeds `control`).
+    AIBudget.objects.all().delete()
     AIBudget.objects.create(name="chat-daily", purposes=["chat"], daily_limit_usd=Decimal("0.05"))
     AIBudget.objects.create(
         name="voice-monthly", purposes=["voice.tts"], monthly_limit_usd=Decimal("10")
