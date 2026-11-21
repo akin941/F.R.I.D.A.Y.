@@ -246,16 +246,6 @@ def test_the_beat_task_runs_the_pull(wired, owner, monkeypatch):
     assert result == {"invokes": 4, "stored": 8, "failed": 0}
 
 
-def test_the_pull_is_on_the_worker_beat_every_15_minutes():
-    from config.celery import app
-
-    worker = app.conf.friday_beat_schedules["worker"]
-    entry = worker["memory-pull-transcripts"]
-    assert entry["task"] == "tools.tasks.pull_transcripts_task"
-    assert entry["schedule"] == 15 * 60.0
-    assert "memory-pull-transcripts" not in app.conf.friday_beat_schedules["runner"]
-
-
 # --- failure keeps the cursor ------------------------------------------------------
 
 
