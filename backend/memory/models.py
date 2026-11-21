@@ -1128,3 +1128,84 @@ LEARNED_ENTITY_KINDS = frozenset(
         MemoryEntity.Kind.CONCEPT,
     }
 )
+
+
+# --- Eval runs (Phase 8B branch 3, brief D9) --------------------------------
+
+
+class MemoryEvalRun(WorkspaceScopedModel, TimestampedModel):
+    """One recorded eval run: **metrics only** (brief D9).
+
+    Written only by `manage.py memory_eval record <file> --owner <email>`
+    from a metrics-only result file, into the named owner's **personal**
+    workspace (rule 1: a firm-only member's `for_actor()` sees nothing, so
+    no installation-level exception is needed). It stores no case text,
+    case ids, `workspace_ref` values, tags, questions, answers, per-case
+    rows or per-workspace breakdown: every field below is a count, a
+    rate, an enum or a timestamp (`memory/tests/test_evals.py` scans the
+    fields). `run_id` is the run's random id (the result file's name), so
+    a re-record is idempotent and the two arms of a compare pair up."""
+
+    class Set(models.TextChoices):
+        PUBLIC = "public"
+        PRIVATE = "private"
+
+    class Kind(models.TextChoices):
+        RUN = "run"
+        BASELINE = "baseline"
+        COMPARE = "compare"
+
+    class Arm(models.TextChoices):
+        A = "a"
+        B = "b"
+
+    class Verdict(models.TextChoices):
+        PASS = "pass"
+        FAIL = "fail"
+        INCONCLUSIVE = "inconclusive"
+
+    MAX_MODE_CHARS = 20
+    MAX_PURPOSE_CHARS = 64
+
+    run_id = models.UUIDField()
+    set = models.CharField(max_length=10, choices=Set.choices)
+    kind = models.CharField(max_length=10, choices=Kind.choices)
+    retrieval_mode = models.CharField(max_length=MAX_MODE_CHARS)
+    # "" = none (a result file's null; Django stores no NULL strings).
+    compression_purpose = models.CharField(max_length=MAX_PURPOSE_CHARS, blank=True, default="")
+    arm = models.CharField(max_length=1, choices=Arm.choices, blank=True, default="")
+    started_at = models.DateTimeField()
+    finished_at = models.DateTimeField()
+    total = models.PositiveIntegerField(default=0)
+    answered = models.PositiveIntegerField(default=0)
+    no_provider = models.PositiveIntegerField(default=0)
+    budget_stopped = models.PositiveIntegerField(default=0)
+    spend_usd = models.DecimalField(max_digits=12, decimal_places=6, default=0)
+    recall_at_10 = models.FloatField(null=True, blank=True)
+    leak_rate = models.FloatField(null=True, blank=True)
+    temporal_correctness = models.FloatField(null=True, blank=True)
+    answer_accuracy = models.FloatField(null=True, blank=True)
+    pre_tokens = models.PositiveIntegerField(null=True, blank=True)
+    post_tokens = models.PositiveIntegerField(null=True, blank=True)
+    verdict = models.CharField(max_length=12, choices=Verdict.choices, blank=True, default="")
+
+    class Meta:
+        ordering = ["-started_at", "arm"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["run_id", "arm"],
+                name="memory_eval_run_unique_run_arm",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(finished_at__gte=models.F("started_at")),
+                name="memory_eval_run_window",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(arm="") | models.Q(kind="compare"),
+                name="memory_eval_run_arm_only_compare",
+            ),
+        ]
+        indexes = [models.Index(fields=["workspace", "-started_at"])]
+
+    def __str__(self):
+        return f"{self.set} {self.kind} eval run {self.run_id}"

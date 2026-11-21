@@ -382,6 +382,27 @@ type = "forbidden"
 source_modules = ["memory.graph"]
 forbidden_modules = ["config", "accounts", "assistant", "knowledge", "tasks", "approvals", "tools", "agents", "skills", "integrations", "harness", "connectors", "deploys", "ops", "voice", "hud"]
 
+# Phase 8B branch 3 (brief D9, D16): the eval set may import memory, ai_core,
+# workspaces and core directly. `memory` itself reaches `audit` (that is
+# memory's edge, not the eval set's), hence direct imports only.
+[[tool.importlinter.contracts]]
+name = "memory.evals may import only memory, ai_core, workspaces, core (Phase 8B D16)"
+type = "forbidden"
+source_modules = ["memory.evals"]
+forbidden_modules = ["config", "accounts", "audit", "assistant", "knowledge", "tasks", "approvals", "tools", "agents", "skills", "integrations", "harness", "connectors", "deploys", "ops", "voice", "hud"]
+allow_indirect_imports = true
+
+# ...and no production code imports it (D16): no other app may (`ops` may,
+# for the preflight read of the last run). Inside `memory`, only the URL
+# table and the `memory_eval` command import it; a test
+# (`memory/tests/test_evals.py`) checks that, since a package cannot be
+# forbidden to its own parent here. `config` mounts `memory.urls`.
+[[tool.importlinter.contracts]]
+name = "no app imports memory.evals (a measuring instrument, Phase 8B D16)"
+type = "forbidden"
+source_modules = ["core", "accounts", "workspaces", "audit", "ai_core", "assistant", "knowledge", "tasks", "approvals", "tools", "agents", "skills", "integrations", "harness", "connectors", "deploys", "voice", "hud"]
+forbidden_modules = ["memory.evals"]
+
 # Phase 8A branch 3 (brief D6/D14): `friday-hook` runs on the owner's Mac
 # outside the Django project, so it and its vendored scrubber import nothing
 # of ours (the stdlib-only half is asserted by integrations/tests/
