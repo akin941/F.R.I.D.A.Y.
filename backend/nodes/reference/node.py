@@ -52,7 +52,7 @@ from dataclasses import dataclass, field
 
 from nodes.capabilities import get_any_contract, load_action_contracts, load_contracts
 from nodes.protocol.canonical import sha256_hex
-from nodes.protocol.messages import catalogue_sha256, validate
+from nodes.protocol.messages import HEARTBEAT_SECONDS, catalogue_sha256, validate
 from nodes.protocol.verify import NonceCache, Refusal
 from nodes.reference.confirm import ConfirmationWindowDouble, WindowBusy, render_confirmation
 from nodes.reference.executor import ActionRequest
@@ -175,6 +175,7 @@ class ReferenceNode:
         self.closed_reason = None
         self.frame_error_times.clear()
         self.last_server_frame_at = self.clock.now()
+        self._last_heartbeat_at = self.clock.now()
         self.reconnect_attempts = 0
         self.next_reconnect_delay = None
         return self._send([self.hello()])
@@ -192,8 +193,9 @@ class ReferenceNode:
         }
 
     def heartbeat(self) -> list:
-        if not self.connected:
-            return []
+        return self._send(self._heartbeat_frames()) if self.connected else []
+
+    def _heartbeat_frames(self) -> list:
         self._heartbeat_seq += 1
         frame = {
             "v": self.version,
@@ -204,7 +206,7 @@ class ReferenceNode:
             "spool_count": 0,
             "spool_bytes": 0,
         }
-        return self._send([frame])
+        return [frame]
 
     def _send(self, frames) -> list:
         out = []
@@ -397,6 +399,9 @@ class ReferenceNode:
                 frames.append(self._read_result(read.envelope, read.received_at))
         for running in list(self._running):
             frames += self._pump_running(running)
+        if now - self._last_heartbeat_at >= HEARTBEAT_SECONDS:
+            self._last_heartbeat_at = now
+            frames += self._heartbeat_frames()
         frames = self._send(frames)
         if (
             self.last_server_frame_at is not None
