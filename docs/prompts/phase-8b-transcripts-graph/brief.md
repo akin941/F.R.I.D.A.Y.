@@ -2309,6 +2309,152 @@ window, and the public eval set reports hybrid and legacy side by side.
 second snapshot closes removed edges, `self` shows the codebase line, and
 the launch argv is network-denied.
 
+**Implementation record (2026-11-20).** Status: implemented on
+`feat/p8-graphify-job`, awaiting the independent Sonnet 5 review.
+- **Pins re-checked 2026-11-21.** `graphifyy==0.9.103` (sha256
+  `7948c030…bfe34`, re-verified by download) stays the newest release
+  ≥ 14 days old. Its transitive wheels are hash-locked in
+  `backend/harness/docker/graphify.lock.txt` for CPython 3.12 on manylinux
+  x86_64 **and** aarch64 (the first runner is the owner's Mac, whose Docker
+  runs arm64 Linux). Four dependencies were held back to their newest
+  release ≥ 14 days old: `numpy` 2.5.4, `pyyaml` 6.0.3,
+  `tree-sitter-c-sharp` 0.23.5, `tree-sitter-scala` 0.26.7. The base image
+  is `python:3.12-slim-bookworm` by its index digest. The lock was installed
+  with `--require-hashes --no-deps --only-binary=:all:` into a CPython 3.12
+  venv on this machine and run over `harness/tests/fixtures/graphify/
+  package_v1`: that run produced the committed fixtures
+  `graph_0.9.103.json` (22 entities, 30 facts after filtering) and
+  `graph_0.9.103_v2.json` (a second snapshot: 3 edges removed, 2 added).
+- **Observed shape** (0.9.103, `update --no-cluster` run from `/work` over
+  `repo/`): `source_file` is `repo/<path>`; file nodes have a
+  path-suffix label; classes carry `_callable_class`, functions
+  `_callable`; external packages are `external: true` nodes without
+  `_origin`; nodes and links carry further optional keys (`metadata`,
+  `node_kind`, `_py_fixture`, `confidence_score`, ...). The schema
+  (`harness/graphify_schema_v1.json`) therefore refuses an unknown or
+  missing **top-level** key and a missing required node or link field,
+  bounds every string and array, and lets the optional per-item keys
+  through without ever storing them. The backend has no direct
+  `jsonschema` dependency, so `harness/graphify.py` implements exactly
+  the keywords the file uses (a test cross-checks against `jsonschema`
+  when it is importable).
+- **Mapping decisions, to confirm in review:**
+  - `method` (class → method) maps to `contains`, like `contains`;
+    `imports_from` maps to `imports`. `references`, `uses`,
+    `rationale_for`, `indirect_call` and every other relation are dropped.
+  - Docstring (`rationale`), document, config-key and package-manifest
+    nodes are dropped; only file, class and callable code nodes are kept.
+  - A class or function entity is named `<label> (<repo-relative path>)`
+    (Graphify labels such as `.save()` are ambiguous alone). A `tool`
+    entity is named after the external node's label (0.9.103 writes
+    `django_contrib` for `django.contrib`).
+  - Graphify entities are keyed by `external_ref` = `<repo id>:<node id>`
+    (hashed when longer than 200), which is also their `normalised_name`:
+    unique per repo, so two repos in one workspace never collide.
+  - For a Graphify entity `deleted_at` means "not in the repo's current
+    snapshot, or retired". `restore_entity` now refuses Graphify rows
+    (405), like `trash_entity` already did.
+- **Memory side.** `memory.CodeGraphImport` (migration `memory/0012`) is
+  the per-repo snapshot row the importer serialises on (with a
+  transaction-scoped advisory lock): sha, `committed_at`, counts and
+  `retired_at`. `memory/graph/code_graph.py` holds the port's validation
+  (closed key sets, Graphify kinds and predicates, caps 20 000 / 60 000,
+  bounded strings), the temporal replace, retire and purge;
+  `ports.import_code_graph` / `ports.retire_code_graph` expose them and
+  `selectors.code_graph_summary` feeds `self`. An older snapshot than the
+  current one is refused (`stale_snapshot`). Labels are scrubbed with the
+  workspace's scrub terms, invisible format characters are dropped and
+  `<`/`>` become `‹`/`›`, so a fence-shaped label can never open or close
+  a block.
+- **Harness side.** `HarnessRepo.graphify_enabled` / `last_graphify_sha`
+  and `GraphifyRun` (migration `harness/0014`: lease-fenced, a partial
+  unique constraint for one in flight per repo, `MAX_ATTEMPTS = 3`).
+  `harness/graphify_execution.py` holds the trigger, the claim, the run and
+  the recovery; `harness/graphify.py` the schema validator and mapping;
+  `harness/safe_read.py` the hostile-`/out` read; `runner.
+  launch_graphify_container`, `runner.head_commit` and `runner.
+  remote_head` the new primitives. The run imports the head **it
+  cloned** (recorded as `commit_sha`, which may be newer than the
+  trigger's `requested_sha`); "one run per head" checks both. A failed
+  head is not retried; the next head starts a new run.
+- **Trigger detail.** `ingest_repo` hands the tip of its commit read to
+  the trigger. When the read returned nothing (a quiet window) or the git
+  source is paused, the head comes from `git ls-remote`: Graphify indexes
+  code, not owner text, so it does not wait for the git source. Repos
+  without the switch never reach the remote.
+- **Switch off / on.** `edit_repo` (PATCH `graphify_enabled`, curators
+  only, the existing role matrix) retires in the same transaction
+  (`harness.graphify_retired` and `memory.graph.code_graph_retired`
+  audits, counts only). Re-enabling imports on the next new head (the
+  same head already had its run). `purge_trash` gains
+  `graphify_repo_ids`: retired graphs only, deleted only when the
+  approved request is decided; a graph re-imported meanwhile is left
+  alone.
+- **`self`.** The `codebase` line sits right after the phase line, so the
+  1500-char budget drops ADR lines before it. Measured 2026-11-21 with a
+  20-app line: the block goes from 1477 to 1495 chars and loses the
+  ADR-002 and ADR-004 lines (the CLAUDE.md rule lines, including the
+  approval-gate rule, stay). A decision to confirm in review (owner step
+  5); the alternative, placing it last, would never show it at today's
+  block size. The block is re-assembled
+  by the existing daily beat and on deploy; a new import shows up there
+  within a day (harness may not import `assistant`).
+- **Size headroom.** The Friday repository's own `graph.json` was 17.5 MB
+  on 2026-11-21 (14 554 nodes, 45 708 links; 10 493 entities and 32 344
+  facts after filtering), close to the 20 MB cap. Raising the cap is a
+  reviewed change (owner step 4 below).
+- Tests: `harness/tests/test_graphify.py` (schema, mapping, hostile
+  `/out`, argv, image files, opt-in real image run),
+  `harness/tests/test_graphify_job.py` (trigger, eager runs with a faked
+  Docker, failures, recovery, `self`, retire, purge, role × endpoint),
+  `memory/tests/test_code_graph.py` (the port), the `codebase` cases in
+  `assistant/tests/test_self_block.py` and the beat case in
+  `config/tests/test_source_producers_beat.py`.
+
+**Owner steps (pending) — `feat/p8-graphify-job`, recorded 2026-11-20.**
+1. Run the independent Sonnet 5 review of this branch and fix findings
+   until APPROVE (CLAUDE.md "Reviews").
+2. Build the image on the runner host (`backend/harness/docker/README.md`,
+   "Graphify image"; PyPI access at build time only) and run the opt-in
+   test once: `HARNESS_GRAPHIFY_IMAGE_TEST=1 uv run pytest
+   harness/tests/test_graphify.py -k real_image` (it checks
+   `NetworkMode=none` and the fixture counts against the real container).
+3. Turn on `graphify_enabled` for the Friday repo
+   (`PATCH /api/v1/harness/repos/<id>`), then confirm the first run
+   succeeds and `self` shows the `codebase` line after the next daily
+   assembly.
+4. Watch the graph size: the Friday repo's graph was 17.5 MB of the 20 MB
+   cap on 2026-11-21. If a run fails with `unsafe_output: oversize`, decide
+   whether to raise the cap (a reviewed change of `MAX_GRAPH_BYTES`,
+   `graphify_run.sh` and `docs/mcp/graphify.md`) or to exclude paths.
+5. Confirm the mapping decisions above (`method` → `contains`, entity
+   naming, `deleted_at` as "not in the snapshot" for Graphify rows) and
+   the `self` placement of the `codebase` line (it displaces two ADR
+   lines within the 1500-char budget).
+
+No step needs paid calls or real credentials; steps 2–3 need the runner
+host's Docker.
+
+**Known follow-ups — `feat/p8-graphify-job` (review, LOW, unresolved at
+merge into the integration branch, 2026-11-21).** On merge, the memory
+migration was renumbered to `memory/0012_code_graph_import` (after
+`memory/0011_obsidian_inbox` from branch 7).
+1. **Failed runs are never retried for the same head**
+   (`backend/harness/graphify_execution.py`). `maybe_trigger_graphify`
+   skips any head that already has a run in any status, including failed
+   runs, so a transient failure (clone, timeout, container error) is not
+   retried until the next default-branch commit. A rebased head whose
+   committer date is older than the current snapshot also fails
+   permanently with `stale_snapshot`. Fix (optional): exclude failed runs
+   from the per-head dedupe (with a retry cap), or record this as an
+   accepted limitation in `docs/mcp/graphify.md`.
+2. **No clone credential** (`backend/harness/graphify_execution.py`).
+   `clone_repo` and `remote_head` are called with `clone_env={}`, so a
+   private repo needing a clone credential cannot be indexed. This matches
+   the existing 8A ingestion convention, so it is a documentation gap and
+   not a regression. Fix: state in `docs/mcp/graphify.md` that only repos
+   cloneable without a credential are supported.
+
 ### 6. `feat/p8-headroom-stage` — compressor sidecar, gateway stage, eval arm
 
 **Scope.**
@@ -2902,7 +3048,7 @@ Mac and private-data rows pending owner evaluation.
 | 2 | `feat/p8-fact-learning` | Episode extraction schema v1 → v2 with facts (chat extraction unchanged at v2), inherited fact sensitivity, entity-in-quote rule, reconciliation, weekly reflection, caps, digest fact items | 1 | **implemented 2026-11-20** (awaits the Sonnet 5 review; see "Implementation record" under branch 2) |
 | 3 | `feat/p8-eval-set` | Eval harness, public seed, private loader, `memory_eval`, `memory.eval_answer` purpose, CI public run | 1 (parallel with 2) | not started |
 | 4 | `feat/p8-hybrid-retrieval` | `tsvector` + GIN, per-provider HNSW expression indexes, RRF + decay + hops, flag, `<memory_fact>` block, `memory_graph_lookup` | 1, 3 | not started |
-| 5 | `feat/p8-graphify-job` | Hash-pinned image, `--network none` runner primitive, trigger, importer + temporal replace, `self` codebase line, manifest | 1 (parallel with 2–4) | not started |
+| 5 | `feat/p8-graphify-job` | Hash-pinned image, `--network none` runner primitive, trigger, importer + temporal replace, `self` codebase line, manifest | 1 (parallel with 2–4) | **implemented 2026-11-20** (awaits the Sonnet 5 review; see "Implementation record" under branch 5; the real image build and the owner's switch are owner steps) |
 | 6 | `feat/p8-headroom-stage` | `compressor` sidecar (no `litellm`, no egress, telemetry off), gateway stage, bypass set, context report, eval arm, manifest | 3 | not started |
 | 7 | `feat/p8-obsidian-mirror` | Format v2, entity notes, `_conflicts/<date>/`, `00_Inbox` import-once inside the approved run | 1 | **implemented 2026-11-20** (awaits the Sonnet 5 review; see "Implementation record" under branch 7; real-vault check pending owner evaluation) |
 | 8 | `feat/p8-transcript-ingestion` | Owner-turn capabilities, reference readers + conformance, pull job in `tools`, port, cursor, personal-class sources, transcript corpus | 2; **Phase 9 branches 2–5 merged** | not started |

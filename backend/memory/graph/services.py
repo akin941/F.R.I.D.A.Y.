@@ -801,6 +801,11 @@ def restore_entity(*, entity, actor, channel):
     trashed come back."""
     _require_owner_web(actor, entity.workspace, channel, "Restoring an entity")
     entity = MemoryEntity.all_objects.select_for_update().get(pk=entity.pk)
+    if entity.origin == MemoryEntity.Origin.GRAPHIFY:
+        # A hidden Graphify entity is out of its repo's current snapshot or
+        # retired (branch 5), never in the owner trash: only the next
+        # import brings it back.
+        raise SystemRowImmutable("Graphify entities are replaced by the next import.")
     if entity.deleted_at is None:
         raise GraphInvalidTransition("The entity is not in the trash.")
     facts = _entity_facts(entity).filter(deleted_at=entity.deleted_at)

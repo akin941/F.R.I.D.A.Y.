@@ -1138,3 +1138,47 @@ LEARNED_ENTITY_KINDS = frozenset(
         MemoryEntity.Kind.CONCEPT,
     }
 )
+# The entity kinds a Graphify import may write (D10): the code kinds, plus
+# `tool` for a module's top-level import of an external package.
+GRAPHIFY_ENTITY_KINDS = frozenset(
+    {
+        MemoryEntity.Kind.CODE_MODULE,
+        MemoryEntity.Kind.CODE_CLASS,
+        MemoryEntity.Kind.CODE_FUNCTION,
+        MemoryEntity.Kind.TOOL,
+    }
+)
+
+
+class CodeGraphImport(WorkspaceScopedModel, TimestampedModel):
+    """The current Graphify snapshot of one repo in one workspace (Phase 8B
+    branch 5, brief D10). Written only by `memory.graph.ports.
+    import_code_graph` / `retire_code_graph`, and the importer serialises on
+    this row. `repo_ref` is the producer's repo id (a `HarnessRepo` pk as
+    text: memory never imports harness, so it is an opaque reference); it
+    prefixes the `external_ref` of every entity of the repo's graph.
+
+    Counts only, never labels. `retired_at` is set when the repo's
+    `graphify_enabled` switch is turned off: every current `system` fact of
+    the repo is closed and its entities drop out of every read. Nothing is
+    deleted until a gate-class `purge_trash` names the repo in
+    `graphify_repo_ids` (ADR-009, D7)."""
+
+    repo_ref = models.CharField(max_length=64)
+    commit_sha = models.CharField(max_length=64)
+    committed_at = models.DateTimeField()
+    imported_at = models.DateTimeField()
+    entity_count = models.PositiveIntegerField(default=0)
+    fact_count = models.PositiveIntegerField(default=0)
+    retired_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-imported_at"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["workspace", "repo_ref"], name="memory_code_graph_import_unique_repo"
+            ),
+        ]
+
+    def __str__(self):
+        return f"code graph import {self.id} ({self.repo_ref})"

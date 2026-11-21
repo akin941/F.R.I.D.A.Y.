@@ -10,9 +10,11 @@ leave it (ADR-001). No graph database, no `networkx`.
 from django.db import connection
 from django.db.models import Q
 
-from memory.models import MemoryEntity, MemoryFact, live_normal_fact_q
+from memory.graph.code_graph import repo_prefix
+from memory.models import CodeGraphImport, MemoryEntity, MemoryFact, live_normal_fact_q
 
 MAX_EDGES = 200
+MAX_SUMMARY_APPS = 25
 ALLOWED_HOPS = (1, 2)
 
 
@@ -180,3 +182,38 @@ def neighbourhood(
             fact.hop = hop
             ordered.append(fact)
     return ordered
+
+
+def code_graph_summary(workspace):
+    """The `self` block's `codebase` line source (D10): the most recently
+    imported, not retired, Graphify snapshot of `workspace` -- the short
+    sha, the number of `code_module` entities in it and the packages that
+    hold a `models.py` (the parent directory's name, sorted, at most 25).
+    `None` without such a snapshot. Names were scrubbed and neutralised at
+    import; no model call."""
+    record = (
+        CodeGraphImport.objects.filter(workspace=workspace, retired_at__isnull=True)
+        .order_by("-imported_at")
+        .first()
+    )
+    if record is None:
+        return None
+    modules = list(
+        MemoryEntity.objects.filter(
+            workspace=workspace,
+            origin=MemoryEntity.Origin.GRAPHIFY,
+            kind=MemoryEntity.Kind.CODE_MODULE,
+            external_ref__startswith=repo_prefix(record.repo_ref),
+        ).values_list("name", flat=True)
+    )
+    apps = set()
+    for path in modules:
+        parts = path.split("/")
+        if len(parts) >= 2 and parts[-1] == "models.py" and parts[-2]:
+            apps.add(parts[-2])
+    return {
+        "repo_ref": record.repo_ref,
+        "sha7": record.commit_sha[:7],
+        "module_count": len(modules),
+        "apps": sorted(apps)[:MAX_SUMMARY_APPS],
+    }

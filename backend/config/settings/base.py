@@ -856,6 +856,11 @@ HARNESS_IMAGE_CLAUDE_CODE = env(
     "HARNESS_IMAGE_CLAUDE_CODE", default="friday-harness-claude-code:unbuilt"
 )
 HARNESS_IMAGE_CODEX_CLI = env("HARNESS_IMAGE_CODEX_CLI", default="friday-harness-codex-cli:unbuilt")
+# Phase 8B branch 5 (brief D10): the Graphify AST-only image
+# (harness/docker/graphify.Dockerfile, `graphifyy` hash-pinned). It runs
+# with `--network none`, a read-only root and a size-capped tmpfs `/work`.
+HARNESS_IMAGE_GRAPHIFY = env("HARNESS_IMAGE_GRAPHIFY", default="friday-harness-graphify:0.9.103")
+HARNESS_GRAPHIFY_TMPFS_SIZE = env("HARNESS_GRAPHIFY_TMPFS_SIZE", default="1g")
 
 # Docker network implementing the container policy's egress allowlist
 # (brief: "no general internet access... enforced via Docker network

@@ -126,6 +126,13 @@ _BEAT_SCHEDULE = {
         "task": "memory.ingestion.tasks.recover_stale_episode_extraction_jobs",
         "schedule": 60.0,
     },
+    # Phase 8B branch 5 (brief D10): lost or lease-expired Graphify runs.
+    # The runs themselves start from the git producer above (a new
+    # default-branch head); both live on the runner beat.
+    "harness-graphify-recovery-scan": {
+        "task": "harness.tasks.recover_stale_graphify_runs",
+        "schedule": 60.0,
+    },
     "memory-ingest-calendar-metadata": {
         "task": "connectors.tasks.ingest_calendar_metadata",
         "schedule": 6 * 60 * 60.0,

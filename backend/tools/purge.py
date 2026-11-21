@@ -14,7 +14,12 @@ archived/rejected by a forget operation; a pending proposal that supersedes
 one is rejected first, so the PROTECT link never blocks the purge) and
 `entity_ids` (trashed learned entities, with their non-live facts).
 Forget-source itself stays a reversible confirm-class move; only this
-approved request deletes them for good.
+approved request deletes them for good. Phase 8B branch 5 (brief D7, D10)
+adds `graphify_repo_ids`: harness repo ids whose Graphify code graph was
+retired (the repo's `graphify_enabled` switch turned off). Retiring only
+closes windows and hides rows; this approved request deletes the repo's
+`system` facts and entities for good. The ids are the repos' (an opaque
+`repo_ref` to memory, which never imports harness).
 
 The purge itself happens in `create_execution`, i.e. inside the approval
 decision's own transaction: a handful of row deletes needs no worker, and
@@ -34,6 +39,7 @@ from django.db import transaction
 
 from knowledge.models import KnowledgeDocument
 from knowledge.services import purge_trashed_document
+from memory.graph.code_graph import purge_code_graph, purgeable_code_graphs
 from memory.graph.services import (
     purge_entity,
     purge_fact,
@@ -90,7 +96,13 @@ def _purge_entity(row, actor, request_id):
     return purge_entity(row, actor=actor, approval_request_id=request_id)
 
 
-# key -> (purgeable queryset for a workspace, purge one row, display field)
+def _purge_code_graph(row, actor, request_id):
+    return purge_code_graph(row, actor=actor, approval_request_id=request_id)
+
+
+# key -> (purgeable queryset for a workspace, purge one row, display field);
+# a key whose ids are not the rows' primary keys names its id field in
+# `_ID_FIELDS`.
 _KEYS = {
     "task_ids": (_trashed_tasks, _purge_task, "title"),
     "document_ids": (_trashed_documents, _purge_document, "title"),
@@ -100,7 +112,9 @@ _KEYS = {
     # and a fact named in both keys is then already gone.
     "fact_ids": (purgeable_facts, _purge_fact, "statement"),
     "entity_ids": (purgeable_entities, _purge_entity, "name"),
+    "graphify_repo_ids": (purgeable_code_graphs, _purge_code_graph, "repo_ref"),
 }
+_ID_FIELDS = {"graphify_repo_ids": "repo_ref"}
 _COUNT_NAMES = {
     "task_ids": "task_count",
     "document_ids": "document_count",
@@ -108,7 +122,12 @@ _COUNT_NAMES = {
     "forgotten_memory_ids": "forgotten_memory_count",
     "fact_ids": "fact_count",
     "entity_ids": "entity_count",
+    "graphify_repo_ids": "graphify_repo_count",
 }
+
+
+def _in(key, ids):
+    return {f"{_ID_FIELDS.get(key, 'pk')}__in": ids}
 
 
 def _ids(payload, key):
@@ -132,7 +151,7 @@ def validate_purge_trash_request(workspace, payload):
     for key, (purgeable, _, _) in _KEYS.items():
         ids = _ids(payload, key)
         total += len(ids)
-        if purgeable(workspace).filter(pk__in=ids).count() != len(ids):
+        if purgeable(workspace).filter(**_in(key, ids)).count() != len(ids):
             raise ToolValidationError("Only items in this workspace's trash can be purged.")
     if not 0 < total <= MAX_ITEMS:
         raise ToolValidationError(f"Name between 1 and {MAX_ITEMS} trashed items.")
@@ -147,7 +166,7 @@ def create_purge_trash_execution(approval_request):
             rows = (
                 purgeable(approval_request.workspace)
                 .select_for_update(of=("self",))
-                .filter(pk__in=_ids(payload, key))
+                .filter(**_in(key, _ids(payload, key)))
                 .select_related("workspace")
             )
             for row in rows:
@@ -170,7 +189,7 @@ def describe_purge_trash_request(approval_request):
         titles.extend(
             str(value)[:_TITLE_MAX]
             for value in purgeable(approval_request.workspace)
-            .filter(pk__in=ids)
+            .filter(**_in(key, ids))
             .values_list(field, flat=True)
         )
     description["titles"] = titles[:_DISPLAY_TITLES_MAX]

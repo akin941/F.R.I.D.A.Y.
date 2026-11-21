@@ -40,7 +40,7 @@ from django.conf import settings
 from django.db import transaction
 from django.utils import timezone
 
-from harness import runner
+from harness import graphify_execution, runner
 from harness.models import HarnessImplementationJob, HarnessJob, HarnessRepo
 from memory.ingestion import ports
 from memory.models import IngestionSource, Memory
@@ -198,6 +198,15 @@ def ingest_repo(repo, *, now=None):
             last_ingested_sha=tip["sha"],
             last_ingested_at=_parse_when(tip.get("committed_at"), now),
         )
+    # Phase 8B branch 5 (brief D10): a new default-branch head starts one
+    # Graphify run (with no commit in the window the head comes from the
+    # remote). Never raises into this producer.
+    _safely(
+        f"graphify trigger of repo {repo.id}",
+        graphify_execution.poll_graphify,
+        repo,
+        head_sha=commits[0]["sha"] if commits else None,
+    )
     return results
 
 
@@ -211,6 +220,10 @@ def ingest_repo_commits(*, now=None):
     repos = HarnessRepo.objects.filter(enabled=True).order_by("created_at")
     if not ports.source_accepting(GIT):
         repos.update(last_ingested_at=now, last_ingested_sha="")
+        # Graphify indexes code, not owner text: its trigger does not
+        # depend on the git source (it asks the remote for the head).
+        for repo in repos.filter(graphify_enabled=True):
+            _safely(f"graphify trigger of repo {repo.id}", graphify_execution.poll_graphify, repo)
         return {"repos": 0, "failed": 0, "results": {}}
     totals, done, failed = {}, 0, 0
     for repo in repos:

@@ -229,7 +229,7 @@ implementation notes; the decision-relevant facts:
 - **Graphify rows are not owner data.** `origin=graphify` ⇔
   `status=system` (a DB check). They are never approvable, editable or
   trashable through the owner API (405). The importer
-  (`ports.import_code_graph`) is a stub until branch 5.
+  (`ports.import_code_graph`) landed in branch 5 (below).
 - **Facts are in the forget cascade (decision 6).** `forget_source` archives
   the source's approved learned facts and rejects its pending proposals
   (clearing their `supersedes` link) under the same operation id. It also
@@ -268,3 +268,29 @@ implementation notes; the decision-relevant facts:
   plus the content) means a failed move never duplicates. The vault still
   never changes Postgres except by creating episodes, and conflict copies
   (owner-edited mirror files) are never read back.
+
+**Phase 8B branch 5, `feat/p8-graphify-job` (2026-11-20; part 2 of the 8B
+note: Graphify as `system`).** Details in
+`docs/prompts/phase-8b-transcripts-graph/brief.md` D3, D7, D10 and
+`docs/mcp/graphify.md`.
+
+- **Graphify rows are `system`, not learned data.** They are a
+  deterministic, model-free AST index of a registered repository's own
+  code (`graphifyy==0.9.103`, `--network none` harness container), not text
+  the owner wrote, so this ADR's per-item approval does not apply: they
+  never reach the morning card, get no embedding, take no part in
+  retrieval and never enter the memory block. They are written only by
+  `memory.graph.ports.import_code_graph` (a temporal replace per repo head,
+  serialised on `memory.CodeGraphImport`, migration `0012`) and read only
+  by the deterministic `self` line `codebase`, the read tool and the
+  read-only graph view. Every label is scrubbed and fence-neutralised
+  before storage, so the scrubber guarantee still holds for them.
+- **Outside forget and the owner trash, inside the gate.** Turning a
+  repo's `graphify_enabled` switch off retires its rows (windows closed,
+  entities hidden, nothing deleted, audited with counts); a permanent
+  removal is only the gate-class `purge_trash` key `graphify_repo_ids`
+  (ADR-009). For a Graphify entity `deleted_at` means "not in the current
+  snapshot or retired"; the owner trash and restore refuse Graphify rows.
+- **Workspace axis.** Rows land in the repo's own workspace; the `self`
+  line reads only the owner's personal workspace, so a firm repo's graph
+  never reaches it.

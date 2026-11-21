@@ -66,6 +66,12 @@ class HarnessRepo(WorkspaceScopedModel, TimestampedModel):
     # `(source, external_id)` dedupe keeps a re-run idempotent anyway.
     last_ingested_sha = models.CharField(max_length=64, blank=True, default="")
     last_ingested_at = models.DateTimeField(null=True, blank=True)
+    # Phase 8B branch 5 (brief D10): the Graphify AST-only code-graph job.
+    # Off by default; the owner turns it on for the Friday repo. Turning it
+    # off retires the repo's `system` graph rows (D7). `last_graphify_sha`
+    # is the default-branch head whose graph was last imported.
+    graphify_enabled = models.BooleanField(default=False)
+    last_graphify_sha = models.CharField(max_length=64, blank=True, default="")
 
     class Meta:
         ordering = ["-created_at"]
@@ -75,6 +81,73 @@ class HarnessRepo(WorkspaceScopedModel, TimestampedModel):
 
     def __str__(self):
         return f"{self.name} ({self.workspace_id})"
+
+
+class GraphifyRun(WorkspaceScopedModel, TimestampedModel):
+    """One Graphify AST-only run over one default-branch head of a repo
+    (Phase 8B branch 5, brief D10), in the repo's workspace. Created by the
+    runner-beat git producer (`harness.graphify_execution.
+    maybe_trigger_graphify`) when the head differs from
+    `HarnessRepo.last_graphify_sha`: at most one run per head (the
+    requested and the actually cloned sha both count) and at most one in
+    flight per repo (a partial unique constraint).
+
+    Lease-fenced like `EpisodeExtractionJob`: a claim sets `claim_token`
+    and `lease_expires_at` beyond the Celery hard time limit; the recovery
+    beat re-dispatches a stale `pending` row or a `running` row whose lease
+    expired, and the claim tears down the old container first. The row
+    keeps counts only, never a label or any container output."""
+
+    class Status(models.TextChoices):
+        PENDING = "pending"
+        RUNNING = "running"
+        SUCCEEDED = "succeeded"
+        FAILED = "failed"
+
+    MAX_ATTEMPTS = 3
+
+    repo = models.ForeignKey(HarnessRepo, on_delete=models.PROTECT, related_name="graphify_runs")
+    # The head the trigger saw, and the head the run's clone actually had
+    # (a push between the two moves it on; the run imports what it cloned).
+    requested_sha = models.CharField(max_length=64)
+    commit_sha = models.CharField(max_length=64, blank=True, default="")
+    committed_at = models.DateTimeField(null=True, blank=True)
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDING)
+    attempts = models.PositiveSmallIntegerField(default=0)
+    claim_token = models.UUIDField(null=True, blank=True)
+    lease_expires_at = models.DateTimeField(null=True, blank=True)
+    # Deterministic per run (`friday-graphify-<id>`), persisted before the
+    # launch so a crashed worker still leaves the recovery a handle.
+    container_id = models.CharField(max_length=128, blank=True, default="")
+    started_at = models.DateTimeField(null=True, blank=True)
+    finished_at = models.DateTimeField(null=True, blank=True)
+    error_type = models.CharField(max_length=50, blank=True, default="")
+    error_message = models.CharField(max_length=300, blank=True, default="")
+    # The importer's counts (entities, facts, kept/added/closed, dropped).
+    counts = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["workspace", "status"]),
+            models.Index(fields=["repo", "requested_sha"]),
+        ]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["repo"],
+                condition=models.Q(status__in=["pending", "running"]),
+                name="harness_graphify_one_in_flight_per_repo",
+            ),
+        ]
+
+    def save(self, *args, **kwargs):
+        # Same-workspace invariant (the `HarnessJob.save` precedent).
+        if self.repo_id is not None and self.repo.workspace_id != self.workspace_id:
+            raise ValueError("GraphifyRun.repo must belong to the run's own workspace.")
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f"graphify run {self.id} ({self.status})"
 
 
 class HarnessJob(WorkspaceScopedModel, TimestampedModel):

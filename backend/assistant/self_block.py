@@ -6,7 +6,12 @@ A fixed Turkish template filled ONLY from:
   CLAUDE.md, the accepted ADRs and the MASTER_PLAN phases table);
 - the tool registries (`tools.registry.list_tool_names`,
   `list_read_tool_names`): names only;
-- the active `ModelProvider` names (never keys, never `base_url`s).
+- the active `ModelProvider` names (never keys, never `base_url`s);
+- the Graphify code-graph summary of the owner's personal workspace
+  (`memory.graph.selectors.code_graph_summary`, Phase 8B branch 5): the
+  short sha, the module count and the app packages of the last imported,
+  not retired snapshot. Only when such a snapshot exists; a firm
+  workspace's graph never reaches it.
 
 It makes NO model call: Friday never invents facts about itself. The block
 is written through `memory.services.set_assembled_self_block`, the only
@@ -25,6 +30,7 @@ import logging
 from ai_core.models import ModelProvider
 from assistant.self_sources import load_snapshot
 from memory.core_blocks import CORE_BLOCK_CHAR_BUDGETS, owner_personal_workspace
+from memory.graph.selectors import code_graph_summary
 from memory.models import CoreMemoryBlock
 from memory.services import set_assembled_self_block
 from tools.registry import list_read_tool_names, list_tool_names
@@ -38,6 +44,7 @@ SELF_BUDGET = CORE_BLOCK_CHAR_BUDGETS[CoreMemoryBlock.Label.SELF]
 TEMPLATES = {
     "identity": 'Ben Friday\'im. Kimliğim (CLAUDE.md): "{identity}"',
     "phase": 'Şu anki faz: {phase}. Hedef: "{outcome}"',
+    "codebase": "Kod tabanım ({sha7}): {module_count} modül; uygulamalar: {apps}.",
     "developer": (
         "Beni geliştiren kişi hakkında bildiklerim yalnızca developer bloğundadır; "
         "orada olmayan bir şeyi uydurmam."
@@ -63,8 +70,24 @@ def _provider_names():
     return sorted(ModelProvider.objects.filter(is_active=True).values_list("name", flat=True))
 
 
-def assemble_self_content(snapshot, *, tools, read_tools, providers):
-    """Pure: the `self` block text for this snapshot and registry state."""
+# Rendered when a snapshot has no `models.py` package at all.
+NO_APPS = "-"
+
+
+def codebase_line(summary):
+    """The `codebase` template line for a `code_graph_summary`, or `None`."""
+    if not summary:
+        return None
+    return TEMPLATES["codebase"].format(
+        sha7=summary["sha7"],
+        module_count=summary["module_count"],
+        apps=", ".join(summary["apps"]) or NO_APPS,
+    )
+
+
+def assemble_self_content(snapshot, *, tools, read_tools, providers, codebase=None):
+    """Pure: the `self` block text for this snapshot, registry state and
+    (optionally) code-graph summary."""
     candidates = []
     if snapshot:
         candidates.append(TEMPLATES["identity"].format(identity=snapshot["identity"]["text"]))
@@ -73,6 +96,9 @@ def assemble_self_content(snapshot, *, tools, read_tools, providers):
             candidates.append(
                 TEMPLATES["phase"].format(phase=phase["phase"], outcome=phase["outcome"])
             )
+    line = codebase_line(codebase)
+    if line:
+        candidates.append(line)
     candidates.append(TEMPLATES["developer"])
     if tools:
         candidates.append(TEMPLATES["tools"].format(tools=", ".join(tools)))
@@ -106,13 +132,18 @@ def assemble_self_content(snapshot, *, tools, read_tools, providers):
     return "\n".join(lines)
 
 
-def build_self_content(snapshot=None):
+def build_self_content(snapshot=None, *, workspace=None):
+    """`workspace` is the owner's personal workspace (looked up when not
+    given); its Graphify summary, and only its, feeds the `codebase`
+    line."""
     snapshot = snapshot if snapshot is not None else load_snapshot()
+    workspace = workspace if workspace is not None else owner_personal_workspace()
     return assemble_self_content(
         snapshot,
         tools=list_tool_names(),
         read_tools=list_read_tool_names(),
         providers=_provider_names(),
+        codebase=code_graph_summary(workspace) if workspace is not None else None,
     )
 
 
@@ -122,7 +153,9 @@ def refresh_self_block(snapshot=None):
     workspace = owner_personal_workspace()
     if workspace is None:
         return None, False
-    return set_assembled_self_block(workspace=workspace, content=build_self_content(snapshot))
+    return set_assembled_self_block(
+        workspace=workspace, content=build_self_content(snapshot, workspace=workspace)
+    )
 
 
 def strip_capability_lines(content):

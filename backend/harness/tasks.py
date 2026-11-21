@@ -11,7 +11,13 @@ from celery import shared_task
 from celery.exceptions import SoftTimeLimitExceeded
 from django.conf import settings
 
-from harness import execution, implementation_execution, ingestion, review_execution
+from harness import (
+    execution,
+    graphify_execution,
+    implementation_execution,
+    ingestion,
+    review_execution,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -197,3 +203,28 @@ def ingest_repo_commits():
     the runner's credentials, like discovery jobs. See
     `harness.ingestion.ingest_repo_commits`."""
     return ingestion.ingest_repo_commits()
+
+
+@shared_task(
+    soft_time_limit=settings.HARNESS_MAX_JOB_SECONDS
+    + settings.HARNESS_CELERY_FINALIZATION_BUFFER_SECONDS,
+    time_limit=settings.HARNESS_MAX_JOB_SECONDS
+    + settings.HARNESS_CELERY_FINALIZATION_BUFFER_SECONDS
+    + 10,
+)
+def run_graphify_run(run_id):
+    """Phase 8B branch 5 (brief D10): one Graphify AST-only run, on the
+    runner queue. See `harness.graphify_execution.run_graphify_run`; it
+    never raises, and a worker killed mid-run is reclaimed by the lease
+    recovery below."""
+    try:
+        return graphify_execution.run_graphify_run(run_id)
+    except SoftTimeLimitExceeded:
+        logger.exception("Graphify run %s hit its soft time limit", run_id)
+    return None
+
+
+@shared_task
+def recover_stale_graphify_runs():
+    """Runner beat: re-dispatch lost or lease-expired Graphify runs."""
+    return graphify_execution.recover_stale_graphify_runs()

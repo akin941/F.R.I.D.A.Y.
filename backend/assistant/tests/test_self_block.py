@@ -1,6 +1,7 @@
 """Deterministic `self` block (Phase 8A branch 2, D8): the source snapshot,
 `build_self_sources --check`, and the assembler (no model call, every line
-traceable to the template, the snapshot or the registries)."""
+traceable to the template, the snapshot, the registries or -- Phase 8B
+branch 5 -- the Graphify summary)."""
 
 import json
 import re
@@ -179,8 +180,12 @@ def _slot_regex(template):
     return re.compile(f"^{pattern}$")
 
 
-def _source_values(snapshot, tools, read_tools, providers):
+def _source_values(snapshot, tools, read_tools, providers, codebase=None):
+    codebase = codebase or {}
     return {
+        "sha7": {codebase.get("sha7")},
+        "module_count": {str(codebase.get("module_count"))},
+        "apps": {", ".join(codebase.get("apps") or []) or self_block.NO_APPS},
         "identity": {snapshot["identity"]["text"]},
         "phase": {snapshot["phase"]["phase"]},
         "outcome": {snapshot["phase"]["outcome"]},
@@ -194,8 +199,8 @@ def _source_values(snapshot, tools, read_tools, providers):
     }
 
 
-def assert_every_line_traces(content, snapshot, tools, read_tools, providers):
-    values = _source_values(snapshot, tools, read_tools, providers)
+def assert_every_line_traces(content, snapshot, tools, read_tools, providers, codebase=None):
+    values = _source_values(snapshot, tools, read_tools, providers, codebase)
     regexes = [_slot_regex(t) for t in TEMPLATES.values()]
     for line in content.split("\n"):
         traced = any(
@@ -349,3 +354,75 @@ def test_post_migrate_handler_is_connected_and_assembles_self(owner):
 def test_snapshot_file_is_valid_json_with_hash():
     data = json.loads(SNAPSHOT_PATH.read_text(encoding="utf-8"))
     assert data["version"] == 1 and len(data["content_hash"]) == 64
+
+
+# --- Phase 8B branch 5: the `codebase` line (Graphify summary) ---
+
+SUMMARY = {"repo_ref": "r", "sha7": "abc1234", "module_count": 7, "apps": ["billing", "core"]}
+
+
+def test_codebase_line_from_the_summary_traces(repo):
+    snapshot = build_snapshot(repo)
+    content = assemble_self_content(
+        snapshot, tools=["t"], read_tools=["r"], providers=["p"], codebase=SUMMARY
+    )
+    lines = content.split("\n")
+    assert "Kod tabanım (abc1234): 7 modül; uygulamalar: billing, core." in lines
+    # right after identity and phase: it survives the budget before rules/ADRs
+    assert lines.index("Kod tabanım (abc1234): 7 modül; uygulamalar: billing, core.") == 2
+    assert_every_line_traces(content, snapshot, ["t"], ["r"], ["p"], SUMMARY)
+
+
+def test_codebase_line_with_no_app_package(repo):
+    summary = {**SUMMARY, "apps": []}
+    content = assemble_self_content(
+        build_snapshot(repo), tools=[], read_tools=[], providers=[], codebase=summary
+    )
+    assert "Kod tabanım (abc1234): 7 modül; uygulamalar: -." in content.split("\n")
+
+
+def test_codebase_line_is_absent_without_a_summary(repo):
+    content = assemble_self_content(build_snapshot(repo), tools=[], read_tools=[], providers=[])
+    assert "Kod tabanım" not in content
+
+
+def test_a_fence_shaped_app_name_cannot_trace(repo):
+    # Names are neutralised at import (`memory.graph.code_graph.clean_name`);
+    # the template itself never adds a tag.
+    assert "<" not in TEMPLATES["codebase"] and ">" not in TEMPLATES["codebase"]
+
+
+def test_real_block_with_a_code_graph_import_traces_with_zero_model_calls(owner, gateway_spy):
+    from datetime import UTC, datetime
+
+    from memory.graph import ports
+    from memory.graph.selectors import code_graph_summary
+
+    workspace = Workspace.objects.get(owner=owner)
+    modules = ["backend/memory/models.py", "backend/harness/models.py", "backend/x/views.py"]
+    ports.import_code_graph(
+        workspace=workspace,
+        repo_ref="11111111-1111-1111-1111-111111111111",
+        commit_sha="f" * 40,
+        committed_at=datetime(2026, 11, 1, tzinfo=UTC),
+        graph={
+            "entities": [{"key": m, "kind": "code_module", "name": m} for m in modules],
+            "facts": [],
+        },
+    )
+    summary = code_graph_summary(workspace)
+    snapshot = load_snapshot()
+    content = build_self_content(snapshot)
+    assert "Kod tabanım (fffffff): 3 modül; uygulamalar: harness, memory." in content.split("\n")
+    assert len(content) <= 1500
+    assert_every_line_traces(
+        content,
+        snapshot,
+        list_tool_names(),
+        list_read_tool_names(),
+        self_block._provider_names(),
+        summary,
+    )
+    block, changed = refresh_self_block()
+    assert changed and "Kod tabanım (fffffff)" in block.content
+    assert gateway_spy == []
