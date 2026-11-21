@@ -32,6 +32,7 @@ from harness.drivers.base import (
 logger = logging.getLogger(__name__)
 
 PURPOSE = "harness.implementation"
+STOP_CHECK_SECONDS = 1.0
 
 OUTCOME_COMPLETED = "completed"
 OUTCOME_FAILED = "failed"
@@ -118,9 +119,19 @@ class DriverSession:
             self.driver.start(container)
             turn_id = self.driver.run_turn(goal)
             self._turn_started[turn_id] = self.clock()
+            last_stop_check = None
             for event in self.driver.events():
-                if self.should_stop():
-                    raise DriverError(CODE_STOPPED, "job cancelled")
+                # The cancel flag is a DB read: checked at most once per
+                # second while frames stream, and on every idle slice.
+                now = self.clock()
+                if (
+                    event.kind == "idle"
+                    or last_stop_check is None
+                    or now - last_stop_check >= STOP_CHECK_SECONDS
+                ):
+                    last_stop_check = now
+                    if self.should_stop():
+                        raise DriverError(CODE_STOPPED, "job cancelled")
                 if event.kind == "escalation":
                     self._escalate(event.payload)
                 elif event.kind == "turn_completed":

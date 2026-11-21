@@ -288,9 +288,15 @@ def _run_with_driver(
             report.code, HarnessImplementationJob.FailureReason.DRIVER_PROTOCOL_ERROR
         )
         return "failed", reason, report
-    status, failure_reason = _wait_for_implementation_container(
-        job.pk, container_name, started_monotonic
-    )
+    try:
+        status, failure_reason = _wait_for_implementation_container(
+            job.pk, container_name, started_monotonic
+        )
+    except runner.RunnerError:
+        # The report is returned either way, so the turns' own usage rows
+        # stay the run's only ModelUsage rows.
+        logger.exception("Harness implementation job %s wait failed", job.pk)
+        status, failure_reason = "failed", HarnessImplementationJob.FailureReason.RUNNER_ERROR
     if status != "succeeded":
         container.kill()
     else:
