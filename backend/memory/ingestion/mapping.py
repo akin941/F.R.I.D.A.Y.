@@ -11,6 +11,10 @@ A producer hands the port a `mapping_key` naming *where the item came from*:
   `vault_prefix` rule wins, on the same segment boundary as `path_prefix`
   (Phase 8B branch 7, brief D12).
 
+A shared-rules source (Phase 8B branch 8, D13: the two transcript sources)
+owns no rules: `rule_source_for` resolves it through the same owner's
+`claude_code_hooks` source, the one path registry.
+
 `resolve_workspace` returns the target workspace of the winning enabled
 rule, or `None` -- and `None` means the item is dropped and counted by the
 port, never stored in some default workspace. A rule's target must be a
