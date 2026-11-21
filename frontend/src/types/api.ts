@@ -1016,8 +1016,8 @@ export interface ApiSelfSources {
   anchors: ApiSelfAnchor[];
 }
 
-export type IngestionSourceKind = "git" | "harness" | "claude_code_hooks" | "calendar";
-export type MappingRuleType = "repo" | "path_prefix" | "calendar_binding";
+export type IngestionSourceKind = "git" | "harness" | "claude_code_hooks" | "calendar" | "obsidian_inbox";
+export type MappingRuleType = "repo" | "path_prefix" | "calendar_binding" | "vault_prefix";
 
 export interface ApiIngestionCounter {
   day: string;
