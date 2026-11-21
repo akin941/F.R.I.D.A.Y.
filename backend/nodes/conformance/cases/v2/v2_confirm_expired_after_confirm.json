@@ -1,0 +1,65 @@
+{
+  "check": 24,
+  "description": "A confirm envelope expiring inside the window is refused after the click.",
+  "expect": {
+    "executor_calls": 0,
+    "frames": [
+      {
+        "state": "shown",
+        "type": "confirmation"
+      },
+      {
+        "state": "approved",
+        "type": "confirmation"
+      },
+      {
+        "confirm_state": "approved",
+        "refusal_code": "expired_after_confirm",
+        "status": "refused",
+        "type": "result"
+      }
+    ]
+  },
+  "name": "v2_confirm_expired_after_confirm",
+  "setup": {
+    "now": 1796000040,
+    "window": [
+      {
+        "action": "approve",
+        "after": 55
+      }
+    ]
+  },
+  "steps": [
+    {
+      "frame": {
+        "args": {
+          "bundle_id": "com.apple.Terminal"
+        },
+        "args_sha256": "0721584e95f3607ad9ede76d6c5fe680dc92fb624b282ccb2bda65b9ea234df5",
+        "capability": "apps.open",
+        "capability_version": 1,
+        "class": "confirm",
+        "expires_at": 1796000090,
+        "grant": null,
+        "id": "66dbbc55-d34d-4807-a57e-e97235769a1c",
+        "invocation_id": "2084ac36-1006-4820-b003-11a792be359d",
+        "issued_at": 1796000000,
+        "key_id": "03396219237f75a6",
+        "node_id": "6f1e2d3c-4b5a-4987-8a6b-5c4d3e2f1a0b",
+        "nonce": "G_1wVrULmctkuyTPew5cD_OfBwlM331bC0ZpV27c-_A",
+        "sig": "s1IlXgISXd3ArNIEIoNvORJe-cqxQmhN3Yi6YcSbGJiCJx__Xp4Fsqzu5xJfpZPlgFLl7c7JjyBq-xIbBT9ACQ",
+        "trace_id": "conformance-v2-confirm-late",
+        "type": "invoke",
+        "v": 2,
+        "workspace_id": "2a3b4c5d-6e7f-4a8b-9c0d-1e2f3a4b5c6d"
+      },
+      "op": "send"
+    },
+    {
+      "op": "advance",
+      "seconds": 55
+    }
+  ],
+  "version": 2
+}

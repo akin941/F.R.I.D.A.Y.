@@ -1,0 +1,74 @@
+{
+  "check": null,
+  "description": "The local kill switch closes an open window; nothing runs.",
+  "expect": {
+    "executor_calls": 0,
+    "frames": [
+      {
+        "state": "shown",
+        "type": "confirmation"
+      },
+      {
+        "state": "closed",
+        "type": "confirmation"
+      },
+      {
+        "confirm_state": "closed",
+        "refusal_code": "owner_denied",
+        "status": "refused",
+        "type": "result"
+      }
+    ]
+  },
+  "name": "v2_kill_switch_closes_window",
+  "setup": {
+    "now": 1796000005
+  },
+  "steps": [
+    {
+      "frame": {
+        "args": {
+          "command_kind": "test",
+          "repo_path": "~/work/acme"
+        },
+        "args_sha256": "a1075b636d8f7d76b64e6dddaf0789d5915c4cc65cdc2d4a04ade9dbd96d2f85",
+        "capability": "repo.command.run",
+        "capability_version": 1,
+        "class": "gate",
+        "expires_at": 1796000090,
+        "grant": {
+          "approval_id": "8d7c6b5a-4e3f-4d2c-8b1a-0f9e8d7c6b5a",
+          "args_sha256": "a1075b636d8f7d76b64e6dddaf0789d5915c4cc65cdc2d4a04ade9dbd96d2f85",
+          "capability": "repo.command.run",
+          "capability_version": 1,
+          "class": "gate",
+          "expires_at": 1796000090,
+          "grant_id": "8c7a5f41-ed41-453b-b51b-61e9f8f9a15a",
+          "issued_at": 1796000000,
+          "key_id": "03396219237f75a6",
+          "node_id": "6f1e2d3c-4b5a-4987-8a6b-5c4d3e2f1a0b",
+          "nonce": "S185HFiJ4E4UFEH3BnaNwWNA5kDN9fWO-BQ_XT14DqI",
+          "sig": "nHpYEpT5552Pp3IR0K1UntFVZu8hT7yiahz0oz2hYzJqqQbrErlrXzWvj9ou4tmhiKlUmOFFzy2igRrLF4cHBA",
+          "v": 2,
+          "workspace_id": "2a3b4c5d-6e7f-4a8b-9c0d-1e2f3a4b5c6d"
+        },
+        "id": "677cafeb-52cd-41fe-98fe-44f6510fd4d7",
+        "invocation_id": "87b85885-4a46-4c94-ad67-3379ffa88219",
+        "issued_at": 1796000000,
+        "key_id": "03396219237f75a6",
+        "node_id": "6f1e2d3c-4b5a-4987-8a6b-5c4d3e2f1a0b",
+        "nonce": "S185HFiJ4E4UFEH3BnaNwWNA5kDN9fWO-BQ_XT14DqI",
+        "sig": "m0ni_Kt1OYwKCT3zHj7tzfYuGN1m2Flbu_DfscsvHeoh8QvHFBybB_2OjQ9PjlsywLP4N-M0W1Nxo7cAZVA0Ag",
+        "trace_id": "conformance-v2-kill",
+        "type": "invoke",
+        "v": 2,
+        "workspace_id": "2a3b4c5d-6e7f-4a8b-9c0d-1e2f3a4b5c6d"
+      },
+      "op": "send"
+    },
+    {
+      "op": "kill_switch"
+    }
+  ],
+  "version": 2
+}

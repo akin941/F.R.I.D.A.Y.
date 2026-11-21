@@ -1,0 +1,32 @@
+{
+  "check": 3,
+  "description": "A policy-mutation-shaped type (recipe.add) is unknown_type.",
+  "expect": {
+    "frames": [
+      {
+        "invocation_id": null,
+        "refusal_code": "unknown_type",
+        "status": "error",
+        "type": "result"
+      }
+    ]
+  },
+  "name": "v2_policy_shaped_recipe_add",
+  "setup": {
+    "now": 1796000005
+  },
+  "steps": [
+    {
+      "frame": {
+        "id": "162038ab-6946-4de2-a2f7-ea91e1e683b4",
+        "policy": {
+          "allow": "*"
+        },
+        "type": "recipe.add",
+        "v": 2
+      },
+      "op": "send"
+    }
+  ],
+  "version": 2
+}

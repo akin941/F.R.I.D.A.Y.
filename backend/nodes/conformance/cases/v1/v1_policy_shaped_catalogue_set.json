@@ -1,0 +1,32 @@
+{
+  "check": 3,
+  "description": "A policy-mutation-shaped type (catalogue.set) is unknown_type.",
+  "expect": {
+    "frames": [
+      {
+        "invocation_id": null,
+        "refusal_code": "unknown_type",
+        "status": "error",
+        "type": "result"
+      }
+    ]
+  },
+  "name": "v1_policy_shaped_catalogue_set",
+  "setup": {
+    "now": 1796000005
+  },
+  "steps": [
+    {
+      "frame": {
+        "id": "e93fb00d-410e-4ede-98be-bef27527af0b",
+        "policy": {
+          "allow": "*"
+        },
+        "type": "catalogue.set",
+        "v": 1
+      },
+      "op": "send"
+    }
+  ],
+  "version": 1
+}

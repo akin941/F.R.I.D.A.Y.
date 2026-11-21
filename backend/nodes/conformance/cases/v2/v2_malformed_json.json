@@ -1,0 +1,25 @@
+{
+  "check": 2,
+  "description": "Malformed JSON is a frame error.",
+  "expect": {
+    "frames": [
+      {
+        "invocation_id": null,
+        "refusal_code": "malformed",
+        "status": "error",
+        "type": "result"
+      }
+    ]
+  },
+  "name": "v2_malformed_json",
+  "setup": {
+    "now": 1796000005
+  },
+  "steps": [
+    {
+      "data": "{nope",
+      "op": "send_raw"
+    }
+  ],
+  "version": 2
+}

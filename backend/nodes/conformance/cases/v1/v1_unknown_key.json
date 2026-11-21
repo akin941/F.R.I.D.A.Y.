@@ -1,0 +1,43 @@
+{
+  "check": 5,
+  "description": "An envelope signed by an unpinned key.",
+  "expect": {
+    "frames": [
+      {
+        "refusal_code": "unknown_key",
+        "status": "refused",
+        "type": "result"
+      }
+    ]
+  },
+  "name": "v1_unknown_key",
+  "setup": {
+    "now": 1796000005
+  },
+  "steps": [
+    {
+      "frame": {
+        "args": {},
+        "args_sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+        "capability": "apps.frontmost",
+        "capability_version": 1,
+        "class": "read",
+        "expires_at": 1796000030,
+        "grant": null,
+        "id": "a4765442-890f-437d-a413-c8d9b7ecc9e6",
+        "invocation_id": "fa0b68e5-fba6-4609-a89e-6cddfb1e5066",
+        "issued_at": 1796000000,
+        "key_id": "68894d58f18f2c34",
+        "node_id": "6f1e2d3c-4b5a-4987-8a6b-5c4d3e2f1a0b",
+        "nonce": "pmYyRPK2g39lOwAYvsluCqISGEvZsXF-8kRIINbT7AM",
+        "sig": "MP38NuKpDmaXAL79wOMReZFnTFaPHpwk3pNkec-XKUcNZ-Xzdlf6wvHg-WURA2xNbva6ROLDZhVGoaQt-DdrBw",
+        "trace_id": "conformance-v1-unpinned",
+        "type": "invoke",
+        "v": 1,
+        "workspace_id": "2a3b4c5d-6e7f-4a8b-9c0d-1e2f3a4b5c6d"
+      },
+      "op": "send"
+    }
+  ],
+  "version": 1
+}

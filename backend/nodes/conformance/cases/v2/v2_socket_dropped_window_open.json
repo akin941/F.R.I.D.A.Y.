@@ -1,0 +1,75 @@
+{
+  "check": null,
+  "description": "The socket drops while the window is open: nothing runs, no result.",
+  "expect": {
+    "closed_reason": "socket_lost",
+    "executor_calls": 0,
+    "frames": [
+      {
+        "state": "shown",
+        "type": "confirmation"
+      }
+    ]
+  },
+  "name": "v2_socket_dropped_window_open",
+  "setup": {
+    "now": 1796000005,
+    "window": [
+      {
+        "action": "approve",
+        "after": 5
+      }
+    ]
+  },
+  "steps": [
+    {
+      "frame": {
+        "args": {
+          "command_kind": "test",
+          "repo_path": "~/work/acme"
+        },
+        "args_sha256": "a1075b636d8f7d76b64e6dddaf0789d5915c4cc65cdc2d4a04ade9dbd96d2f85",
+        "capability": "repo.command.run",
+        "capability_version": 1,
+        "class": "gate",
+        "expires_at": 1796000090,
+        "grant": {
+          "approval_id": "8d7c6b5a-4e3f-4d2c-8b1a-0f9e8d7c6b5a",
+          "args_sha256": "a1075b636d8f7d76b64e6dddaf0789d5915c4cc65cdc2d4a04ade9dbd96d2f85",
+          "capability": "repo.command.run",
+          "capability_version": 1,
+          "class": "gate",
+          "expires_at": 1796000090,
+          "grant_id": "753a9b18-94ec-455e-b927-9c1c00d8e95b",
+          "issued_at": 1796000000,
+          "key_id": "03396219237f75a6",
+          "node_id": "6f1e2d3c-4b5a-4987-8a6b-5c4d3e2f1a0b",
+          "nonce": "ZY3JOfOOSA_HlHxICfr6J2V3xm9TF8CTp1JdNYGKevU",
+          "sig": "WtTm5YZfInMXWONc6r6SUE4s9izcCmYZXAflF27L9fXmJOmcFslxU2ODl_9_AXyshcewwCahEE3di1ZSHjtkCQ",
+          "v": 2,
+          "workspace_id": "2a3b4c5d-6e7f-4a8b-9c0d-1e2f3a4b5c6d"
+        },
+        "id": "cff52a71-c1a7-4387-8932-398792402ecd",
+        "invocation_id": "c1d03da9-a8f5-48ae-81f7-6b60265416d9",
+        "issued_at": 1796000000,
+        "key_id": "03396219237f75a6",
+        "node_id": "6f1e2d3c-4b5a-4987-8a6b-5c4d3e2f1a0b",
+        "nonce": "ZY3JOfOOSA_HlHxICfr6J2V3xm9TF8CTp1JdNYGKevU",
+        "sig": "N0re-oGy2chQqK86dTfcH7FEtEBNcO1unevelpkTBAJ3COOiK6cUBUQEeMi4NpSgstjeIZNaqFH3oxTwrGaeBA",
+        "trace_id": "conformance-v2-drop-window",
+        "type": "invoke",
+        "v": 2,
+        "workspace_id": "2a3b4c5d-6e7f-4a8b-9c0d-1e2f3a4b5c6d"
+      },
+      "op": "send"
+    },
+    {
+      "op": "disconnect"
+    },
+    {
+      "op": "advance",
+      "seconds": 10
+    }
+  ],
+  "version": 2
+}

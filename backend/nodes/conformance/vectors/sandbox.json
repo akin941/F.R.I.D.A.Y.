@@ -1,0 +1,641 @@
+{
+  "description": "Friday Node srt sandbox vectors (Phase 10 brief D4). For each node-local mapping the reference generator (backend/nodes/reference/sandbox.py) produces `expected`; `settings_canonical` is the exact settings document written for srt (canonical JSON). The node environment (`vector_node_env`) carries secret-shaped names that must never reach a sandbox. TEST DATA ONLY: every value is fake.",
+  "vector_node_env": {
+    "AWS_SECRET_ACCESS_KEY": "FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF",
+    "GITHUB_TOKEN": "ghp_FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF",
+    "HOME": "/Users/owner",
+    "PATH": "/opt/homebrew/bin:/usr/bin:/bin",
+    "PYTHONHASHSEED": "0",
+    "SSH_AUTH_SOCK": "/private/tmp/agent.sock"
+  },
+  "vectors": [
+    {
+      "expected": {
+        "limits": {
+          "cpu_seconds": 120,
+          "kill_grace_seconds": 5,
+          "max_output_bytes": 1048576,
+          "max_processes": 256,
+          "wall_seconds": 120
+        },
+        "mode": "worktree",
+        "network_enabled": false,
+        "process": {
+          "argv": [
+            "python3",
+            "-c",
+            "print('acme lint ok')"
+          ],
+          "cwd": "/Users/owner/Library/Caches/ai.friday.node/worktrees/wt-0001",
+          "env": {
+            "CI": "1",
+            "HOME": "/Users/owner",
+            "LANG": "en_US.UTF-8",
+            "LC_ALL": "en_US.UTF-8",
+            "NO_COLOR": "1",
+            "PATH": "/usr/bin:/bin:/usr/sbin:/sbin",
+            "TERM": "dumb",
+            "TMPDIR": "/private/var/folders/fr/T/friday-run-0001"
+          }
+        },
+        "settings": {
+          "filesystem": {
+            "allowWrite": [
+              "/Users/owner/Library/Caches/ai.friday.node/worktrees/wt-0001",
+              "/private/var/folders/fr/T/friday-run-0001"
+            ],
+            "denyRead": [
+              "/Users/owner/.ssh",
+              "/Users/owner/.aws",
+              "/Users/owner/.config/gh",
+              "/Users/owner/.claude",
+              "/Users/owner/.codex",
+              "/Users/owner/.gnupg",
+              "/Users/owner/.netrc",
+              "/Users/owner/.docker",
+              "/Users/owner/Library/Keychains",
+              "/Users/owner/Library/Safari",
+              "/Users/owner/Library/Application Support/Google/Chrome",
+              "/Users/owner/Library/Application Support/Firefox",
+              "/Users/owner/Library/Application Support/Arc",
+              "/Users/owner/Library/Cookies",
+              "/Users/owner/.mozilla",
+              "/Users/owner/.config/google-chrome",
+              "/Users/owner/.config/chromium",
+              "/Users/owner/Library/Containers/ai.friday.node",
+              "/Users/owner/Library/Application Support/Friday Node",
+              "/Users/owner/.friday-node"
+            ],
+            "denyWrite": [
+              "/Users/owner/Library/Caches/ai.friday.node/worktrees/wt-0001/.git"
+            ]
+          },
+          "network": {
+            "allowLocalBinding": false,
+            "allowUnixSockets": [],
+            "allowedDomains": [],
+            "deniedDomains": []
+          }
+        },
+        "settings_sha256": "47b50bcda1123d3626ab77213a2d9e54c93a8a52e3562cd0464f3f6cec806e00"
+      },
+      "inputs": {
+        "contract_max_runtime": 900,
+        "home": "/Users/owner",
+        "mapping": {
+          "argv": [
+            "python3",
+            "-c",
+            "print('acme lint ok')"
+          ],
+          "env_names": [],
+          "kind": "lint",
+          "max_runtime_seconds": 120,
+          "mode": "worktree",
+          "network_domains": [],
+          "path": "/usr/bin:/bin:/usr/sbin:/sbin"
+        },
+        "node_env_names": [
+          "AWS_SECRET_ACCESS_KEY",
+          "GITHUB_TOKEN",
+          "HOME",
+          "PATH",
+          "PYTHONHASHSEED",
+          "SSH_AUTH_SOCK"
+        ],
+        "repo_root": "/Users/owner/work/acme",
+        "temp_dir": "/private/var/folders/fr/T/friday-run-0001",
+        "write_root": "/Users/owner/Library/Caches/ai.friday.node/worktrees/wt-0001"
+      },
+      "name": "acme.lint.contract_max_900",
+      "settings_canonical": "{\"filesystem\":{\"allowWrite\":[\"/Users/owner/Library/Caches/ai.friday.node/worktrees/wt-0001\",\"/private/var/folders/fr/T/friday-run-0001\"],\"denyRead\":[\"/Users/owner/.ssh\",\"/Users/owner/.aws\",\"/Users/owner/.config/gh\",\"/Users/owner/.claude\",\"/Users/owner/.codex\",\"/Users/owner/.gnupg\",\"/Users/owner/.netrc\",\"/Users/owner/.docker\",\"/Users/owner/Library/Keychains\",\"/Users/owner/Library/Safari\",\"/Users/owner/Library/Application Support/Google/Chrome\",\"/Users/owner/Library/Application Support/Firefox\",\"/Users/owner/Library/Application Support/Arc\",\"/Users/owner/Library/Cookies\",\"/Users/owner/.mozilla\",\"/Users/owner/.config/google-chrome\",\"/Users/owner/.config/chromium\",\"/Users/owner/Library/Containers/ai.friday.node\",\"/Users/owner/Library/Application Support/Friday Node\",\"/Users/owner/.friday-node\"],\"denyWrite\":[\"/Users/owner/Library/Caches/ai.friday.node/worktrees/wt-0001/.git\"]},\"network\":{\"allowLocalBinding\":false,\"allowUnixSockets\":[],\"allowedDomains\":[],\"deniedDomains\":[]}}"
+    },
+    {
+      "expected": {
+        "limits": {
+          "cpu_seconds": 60,
+          "kill_grace_seconds": 5,
+          "max_output_bytes": 1048576,
+          "max_processes": 256,
+          "wall_seconds": 60
+        },
+        "mode": "worktree",
+        "network_enabled": false,
+        "process": {
+          "argv": [
+            "python3",
+            "-c",
+            "print('acme lint ok')"
+          ],
+          "cwd": "/Users/owner/Library/Caches/ai.friday.node/worktrees/wt-0001",
+          "env": {
+            "CI": "1",
+            "HOME": "/Users/owner",
+            "LANG": "en_US.UTF-8",
+            "LC_ALL": "en_US.UTF-8",
+            "NO_COLOR": "1",
+            "PATH": "/usr/bin:/bin:/usr/sbin:/sbin",
+            "TERM": "dumb",
+            "TMPDIR": "/private/var/folders/fr/T/friday-run-0001"
+          }
+        },
+        "settings": {
+          "filesystem": {
+            "allowWrite": [
+              "/Users/owner/Library/Caches/ai.friday.node/worktrees/wt-0001",
+              "/private/var/folders/fr/T/friday-run-0001"
+            ],
+            "denyRead": [
+              "/Users/owner/.ssh",
+              "/Users/owner/.aws",
+              "/Users/owner/.config/gh",
+              "/Users/owner/.claude",
+              "/Users/owner/.codex",
+              "/Users/owner/.gnupg",
+              "/Users/owner/.netrc",
+              "/Users/owner/.docker",
+              "/Users/owner/Library/Keychains",
+              "/Users/owner/Library/Safari",
+              "/Users/owner/Library/Application Support/Google/Chrome",
+              "/Users/owner/Library/Application Support/Firefox",
+              "/Users/owner/Library/Application Support/Arc",
+              "/Users/owner/Library/Cookies",
+              "/Users/owner/.mozilla",
+              "/Users/owner/.config/google-chrome",
+              "/Users/owner/.config/chromium",
+              "/Users/owner/Library/Containers/ai.friday.node",
+              "/Users/owner/Library/Application Support/Friday Node",
+              "/Users/owner/.friday-node"
+            ],
+            "denyWrite": [
+              "/Users/owner/Library/Caches/ai.friday.node/worktrees/wt-0001/.git"
+            ]
+          },
+          "network": {
+            "allowLocalBinding": false,
+            "allowUnixSockets": [],
+            "allowedDomains": [],
+            "deniedDomains": []
+          }
+        },
+        "settings_sha256": "47b50bcda1123d3626ab77213a2d9e54c93a8a52e3562cd0464f3f6cec806e00"
+      },
+      "inputs": {
+        "contract_max_runtime": 60,
+        "home": "/Users/owner",
+        "mapping": {
+          "argv": [
+            "python3",
+            "-c",
+            "print('acme lint ok')"
+          ],
+          "env_names": [],
+          "kind": "lint",
+          "max_runtime_seconds": 120,
+          "mode": "worktree",
+          "network_domains": [],
+          "path": "/usr/bin:/bin:/usr/sbin:/sbin"
+        },
+        "node_env_names": [
+          "AWS_SECRET_ACCESS_KEY",
+          "GITHUB_TOKEN",
+          "HOME",
+          "PATH",
+          "PYTHONHASHSEED",
+          "SSH_AUTH_SOCK"
+        ],
+        "repo_root": "/Users/owner/work/acme",
+        "temp_dir": "/private/var/folders/fr/T/friday-run-0001",
+        "write_root": "/Users/owner/Library/Caches/ai.friday.node/worktrees/wt-0001"
+      },
+      "name": "acme.lint.contract_max_60",
+      "settings_canonical": "{\"filesystem\":{\"allowWrite\":[\"/Users/owner/Library/Caches/ai.friday.node/worktrees/wt-0001\",\"/private/var/folders/fr/T/friday-run-0001\"],\"denyRead\":[\"/Users/owner/.ssh\",\"/Users/owner/.aws\",\"/Users/owner/.config/gh\",\"/Users/owner/.claude\",\"/Users/owner/.codex\",\"/Users/owner/.gnupg\",\"/Users/owner/.netrc\",\"/Users/owner/.docker\",\"/Users/owner/Library/Keychains\",\"/Users/owner/Library/Safari\",\"/Users/owner/Library/Application Support/Google/Chrome\",\"/Users/owner/Library/Application Support/Firefox\",\"/Users/owner/Library/Application Support/Arc\",\"/Users/owner/Library/Cookies\",\"/Users/owner/.mozilla\",\"/Users/owner/.config/google-chrome\",\"/Users/owner/.config/chromium\",\"/Users/owner/Library/Containers/ai.friday.node\",\"/Users/owner/Library/Application Support/Friday Node\",\"/Users/owner/.friday-node\"],\"denyWrite\":[\"/Users/owner/Library/Caches/ai.friday.node/worktrees/wt-0001/.git\"]},\"network\":{\"allowLocalBinding\":false,\"allowUnixSockets\":[],\"allowedDomains\":[],\"deniedDomains\":[]}}"
+    },
+    {
+      "expected": {
+        "limits": {
+          "cpu_seconds": 300,
+          "kill_grace_seconds": 5,
+          "max_output_bytes": 1048576,
+          "max_processes": 256,
+          "wall_seconds": 300
+        },
+        "mode": "in_place",
+        "network_enabled": false,
+        "process": {
+          "argv": [
+            "python3",
+            "-c",
+            "print('acme tests ok')"
+          ],
+          "cwd": "/Users/owner/work/acme",
+          "env": {
+            "CI": "1",
+            "HOME": "/Users/owner",
+            "LANG": "en_US.UTF-8",
+            "LC_ALL": "en_US.UTF-8",
+            "NO_COLOR": "1",
+            "PATH": "/usr/local/bin:/usr/bin:/bin",
+            "PYTHONHASHSEED": "0",
+            "TERM": "dumb",
+            "TMPDIR": "/private/var/folders/fr/T/friday-run-0001"
+          }
+        },
+        "settings": {
+          "filesystem": {
+            "allowWrite": [
+              "/Users/owner/work/acme",
+              "/private/var/folders/fr/T/friday-run-0001"
+            ],
+            "denyRead": [
+              "/Users/owner/.ssh",
+              "/Users/owner/.aws",
+              "/Users/owner/.config/gh",
+              "/Users/owner/.claude",
+              "/Users/owner/.codex",
+              "/Users/owner/.gnupg",
+              "/Users/owner/.netrc",
+              "/Users/owner/.docker",
+              "/Users/owner/Library/Keychains",
+              "/Users/owner/Library/Safari",
+              "/Users/owner/Library/Application Support/Google/Chrome",
+              "/Users/owner/Library/Application Support/Firefox",
+              "/Users/owner/Library/Application Support/Arc",
+              "/Users/owner/Library/Cookies",
+              "/Users/owner/.mozilla",
+              "/Users/owner/.config/google-chrome",
+              "/Users/owner/.config/chromium",
+              "/Users/owner/Library/Containers/ai.friday.node",
+              "/Users/owner/Library/Application Support/Friday Node",
+              "/Users/owner/.friday-node"
+            ],
+            "denyWrite": [
+              "/Users/owner/work/acme/.git"
+            ]
+          },
+          "network": {
+            "allowLocalBinding": false,
+            "allowUnixSockets": [],
+            "allowedDomains": [],
+            "deniedDomains": []
+          }
+        },
+        "settings_sha256": "d7e40a33d35520fadca076b6981d28d1ef27dd81af5b2536f97e7db5f6cc75ab"
+      },
+      "inputs": {
+        "contract_max_runtime": 900,
+        "home": "/Users/owner",
+        "mapping": {
+          "argv": [
+            "python3",
+            "-c",
+            "print('acme tests ok')"
+          ],
+          "env_names": [
+            "PYTHONHASHSEED"
+          ],
+          "kind": "test",
+          "max_runtime_seconds": 300,
+          "mode": "in_place",
+          "network_domains": [],
+          "path": "/usr/local/bin:/usr/bin:/bin"
+        },
+        "node_env_names": [
+          "AWS_SECRET_ACCESS_KEY",
+          "GITHUB_TOKEN",
+          "HOME",
+          "PATH",
+          "PYTHONHASHSEED",
+          "SSH_AUTH_SOCK"
+        ],
+        "repo_root": "/Users/owner/work/acme",
+        "temp_dir": "/private/var/folders/fr/T/friday-run-0001",
+        "write_root": "/Users/owner/work/acme"
+      },
+      "name": "acme.test.contract_max_900",
+      "settings_canonical": "{\"filesystem\":{\"allowWrite\":[\"/Users/owner/work/acme\",\"/private/var/folders/fr/T/friday-run-0001\"],\"denyRead\":[\"/Users/owner/.ssh\",\"/Users/owner/.aws\",\"/Users/owner/.config/gh\",\"/Users/owner/.claude\",\"/Users/owner/.codex\",\"/Users/owner/.gnupg\",\"/Users/owner/.netrc\",\"/Users/owner/.docker\",\"/Users/owner/Library/Keychains\",\"/Users/owner/Library/Safari\",\"/Users/owner/Library/Application Support/Google/Chrome\",\"/Users/owner/Library/Application Support/Firefox\",\"/Users/owner/Library/Application Support/Arc\",\"/Users/owner/Library/Cookies\",\"/Users/owner/.mozilla\",\"/Users/owner/.config/google-chrome\",\"/Users/owner/.config/chromium\",\"/Users/owner/Library/Containers/ai.friday.node\",\"/Users/owner/Library/Application Support/Friday Node\",\"/Users/owner/.friday-node\"],\"denyWrite\":[\"/Users/owner/work/acme/.git\"]},\"network\":{\"allowLocalBinding\":false,\"allowUnixSockets\":[],\"allowedDomains\":[],\"deniedDomains\":[]}}"
+    },
+    {
+      "expected": {
+        "limits": {
+          "cpu_seconds": 60,
+          "kill_grace_seconds": 5,
+          "max_output_bytes": 1048576,
+          "max_processes": 256,
+          "wall_seconds": 60
+        },
+        "mode": "in_place",
+        "network_enabled": false,
+        "process": {
+          "argv": [
+            "python3",
+            "-c",
+            "print('acme tests ok')"
+          ],
+          "cwd": "/Users/owner/work/acme",
+          "env": {
+            "CI": "1",
+            "HOME": "/Users/owner",
+            "LANG": "en_US.UTF-8",
+            "LC_ALL": "en_US.UTF-8",
+            "NO_COLOR": "1",
+            "PATH": "/usr/local/bin:/usr/bin:/bin",
+            "PYTHONHASHSEED": "0",
+            "TERM": "dumb",
+            "TMPDIR": "/private/var/folders/fr/T/friday-run-0001"
+          }
+        },
+        "settings": {
+          "filesystem": {
+            "allowWrite": [
+              "/Users/owner/work/acme",
+              "/private/var/folders/fr/T/friday-run-0001"
+            ],
+            "denyRead": [
+              "/Users/owner/.ssh",
+              "/Users/owner/.aws",
+              "/Users/owner/.config/gh",
+              "/Users/owner/.claude",
+              "/Users/owner/.codex",
+              "/Users/owner/.gnupg",
+              "/Users/owner/.netrc",
+              "/Users/owner/.docker",
+              "/Users/owner/Library/Keychains",
+              "/Users/owner/Library/Safari",
+              "/Users/owner/Library/Application Support/Google/Chrome",
+              "/Users/owner/Library/Application Support/Firefox",
+              "/Users/owner/Library/Application Support/Arc",
+              "/Users/owner/Library/Cookies",
+              "/Users/owner/.mozilla",
+              "/Users/owner/.config/google-chrome",
+              "/Users/owner/.config/chromium",
+              "/Users/owner/Library/Containers/ai.friday.node",
+              "/Users/owner/Library/Application Support/Friday Node",
+              "/Users/owner/.friday-node"
+            ],
+            "denyWrite": [
+              "/Users/owner/work/acme/.git"
+            ]
+          },
+          "network": {
+            "allowLocalBinding": false,
+            "allowUnixSockets": [],
+            "allowedDomains": [],
+            "deniedDomains": []
+          }
+        },
+        "settings_sha256": "d7e40a33d35520fadca076b6981d28d1ef27dd81af5b2536f97e7db5f6cc75ab"
+      },
+      "inputs": {
+        "contract_max_runtime": 60,
+        "home": "/Users/owner",
+        "mapping": {
+          "argv": [
+            "python3",
+            "-c",
+            "print('acme tests ok')"
+          ],
+          "env_names": [
+            "PYTHONHASHSEED"
+          ],
+          "kind": "test",
+          "max_runtime_seconds": 300,
+          "mode": "in_place",
+          "network_domains": [],
+          "path": "/usr/local/bin:/usr/bin:/bin"
+        },
+        "node_env_names": [
+          "AWS_SECRET_ACCESS_KEY",
+          "GITHUB_TOKEN",
+          "HOME",
+          "PATH",
+          "PYTHONHASHSEED",
+          "SSH_AUTH_SOCK"
+        ],
+        "repo_root": "/Users/owner/work/acme",
+        "temp_dir": "/private/var/folders/fr/T/friday-run-0001",
+        "write_root": "/Users/owner/work/acme"
+      },
+      "name": "acme.test.contract_max_60",
+      "settings_canonical": "{\"filesystem\":{\"allowWrite\":[\"/Users/owner/work/acme\",\"/private/var/folders/fr/T/friday-run-0001\"],\"denyRead\":[\"/Users/owner/.ssh\",\"/Users/owner/.aws\",\"/Users/owner/.config/gh\",\"/Users/owner/.claude\",\"/Users/owner/.codex\",\"/Users/owner/.gnupg\",\"/Users/owner/.netrc\",\"/Users/owner/.docker\",\"/Users/owner/Library/Keychains\",\"/Users/owner/Library/Safari\",\"/Users/owner/Library/Application Support/Google/Chrome\",\"/Users/owner/Library/Application Support/Firefox\",\"/Users/owner/Library/Application Support/Arc\",\"/Users/owner/Library/Cookies\",\"/Users/owner/.mozilla\",\"/Users/owner/.config/google-chrome\",\"/Users/owner/.config/chromium\",\"/Users/owner/Library/Containers/ai.friday.node\",\"/Users/owner/Library/Application Support/Friday Node\",\"/Users/owner/.friday-node\"],\"denyWrite\":[\"/Users/owner/work/acme/.git\"]},\"network\":{\"allowLocalBinding\":false,\"allowUnixSockets\":[],\"allowedDomains\":[],\"deniedDomains\":[]}}"
+    },
+    {
+      "expected": {
+        "limits": {
+          "cpu_seconds": 900,
+          "kill_grace_seconds": 5,
+          "max_output_bytes": 1048576,
+          "max_processes": 256,
+          "wall_seconds": 900
+        },
+        "mode": "worktree",
+        "network_enabled": true,
+        "process": {
+          "argv": [
+            "uv",
+            "run",
+            "pytest",
+            "-q"
+          ],
+          "cwd": "/Users/owner/Library/Caches/ai.friday.node/worktrees/wt-0001",
+          "env": {
+            "CI": "1",
+            "HOME": "/Users/owner",
+            "LANG": "en_US.UTF-8",
+            "LC_ALL": "en_US.UTF-8",
+            "NO_COLOR": "1",
+            "PATH": "/opt/homebrew/bin:/usr/bin:/bin",
+            "TERM": "dumb",
+            "TMPDIR": "/private/var/folders/fr/T/friday-run-0001"
+          }
+        },
+        "settings": {
+          "filesystem": {
+            "allowWrite": [
+              "/Users/owner/Library/Caches/ai.friday.node/worktrees/wt-0001",
+              "/private/var/folders/fr/T/friday-run-0001"
+            ],
+            "denyRead": [
+              "/Users/owner/.ssh",
+              "/Users/owner/.aws",
+              "/Users/owner/.config/gh",
+              "/Users/owner/.claude",
+              "/Users/owner/.codex",
+              "/Users/owner/.gnupg",
+              "/Users/owner/.netrc",
+              "/Users/owner/.docker",
+              "/Users/owner/Library/Keychains",
+              "/Users/owner/Library/Safari",
+              "/Users/owner/Library/Application Support/Google/Chrome",
+              "/Users/owner/Library/Application Support/Firefox",
+              "/Users/owner/Library/Application Support/Arc",
+              "/Users/owner/Library/Cookies",
+              "/Users/owner/.mozilla",
+              "/Users/owner/.config/google-chrome",
+              "/Users/owner/.config/chromium",
+              "/Users/owner/Library/Containers/ai.friday.node",
+              "/Users/owner/Library/Application Support/Friday Node",
+              "/Users/owner/.friday-node"
+            ],
+            "denyWrite": [
+              "/Users/owner/Library/Caches/ai.friday.node/worktrees/wt-0001/.git"
+            ]
+          },
+          "network": {
+            "allowLocalBinding": false,
+            "allowUnixSockets": [],
+            "allowedDomains": [
+              "files.pythonhosted.org",
+              "pypi.org"
+            ],
+            "deniedDomains": []
+          }
+        },
+        "settings_sha256": "4b73bf4d34bafe4259ca926c8f7cf9147d8573dc070e215c0c05213710900d39"
+      },
+      "inputs": {
+        "contract_max_runtime": 900,
+        "home": "/Users/owner",
+        "mapping": {
+          "argv": [
+            "uv",
+            "run",
+            "pytest",
+            "-q"
+          ],
+          "env_names": [],
+          "kind": "test",
+          "max_runtime_seconds": 900,
+          "mode": "worktree",
+          "network_domains": [
+            "pypi.org",
+            "files.pythonhosted.org"
+          ],
+          "path": "/opt/homebrew/bin:/usr/bin:/bin"
+        },
+        "node_env_names": [
+          "AWS_SECRET_ACCESS_KEY",
+          "GITHUB_TOKEN",
+          "HOME",
+          "PATH",
+          "PYTHONHASHSEED",
+          "SSH_AUTH_SOCK"
+        ],
+        "repo_root": "/Users/owner/code/friday",
+        "temp_dir": "/private/var/folders/fr/T/friday-run-0001",
+        "write_root": "/Users/owner/Library/Caches/ai.friday.node/worktrees/wt-0001"
+      },
+      "name": "friday.test.contract_max_900",
+      "settings_canonical": "{\"filesystem\":{\"allowWrite\":[\"/Users/owner/Library/Caches/ai.friday.node/worktrees/wt-0001\",\"/private/var/folders/fr/T/friday-run-0001\"],\"denyRead\":[\"/Users/owner/.ssh\",\"/Users/owner/.aws\",\"/Users/owner/.config/gh\",\"/Users/owner/.claude\",\"/Users/owner/.codex\",\"/Users/owner/.gnupg\",\"/Users/owner/.netrc\",\"/Users/owner/.docker\",\"/Users/owner/Library/Keychains\",\"/Users/owner/Library/Safari\",\"/Users/owner/Library/Application Support/Google/Chrome\",\"/Users/owner/Library/Application Support/Firefox\",\"/Users/owner/Library/Application Support/Arc\",\"/Users/owner/Library/Cookies\",\"/Users/owner/.mozilla\",\"/Users/owner/.config/google-chrome\",\"/Users/owner/.config/chromium\",\"/Users/owner/Library/Containers/ai.friday.node\",\"/Users/owner/Library/Application Support/Friday Node\",\"/Users/owner/.friday-node\"],\"denyWrite\":[\"/Users/owner/Library/Caches/ai.friday.node/worktrees/wt-0001/.git\"]},\"network\":{\"allowLocalBinding\":false,\"allowUnixSockets\":[],\"allowedDomains\":[\"files.pythonhosted.org\",\"pypi.org\"],\"deniedDomains\":[]}}"
+    },
+    {
+      "expected": {
+        "limits": {
+          "cpu_seconds": 60,
+          "kill_grace_seconds": 5,
+          "max_output_bytes": 1048576,
+          "max_processes": 256,
+          "wall_seconds": 60
+        },
+        "mode": "worktree",
+        "network_enabled": true,
+        "process": {
+          "argv": [
+            "uv",
+            "run",
+            "pytest",
+            "-q"
+          ],
+          "cwd": "/Users/owner/Library/Caches/ai.friday.node/worktrees/wt-0001",
+          "env": {
+            "CI": "1",
+            "HOME": "/Users/owner",
+            "LANG": "en_US.UTF-8",
+            "LC_ALL": "en_US.UTF-8",
+            "NO_COLOR": "1",
+            "PATH": "/opt/homebrew/bin:/usr/bin:/bin",
+            "TERM": "dumb",
+            "TMPDIR": "/private/var/folders/fr/T/friday-run-0001"
+          }
+        },
+        "settings": {
+          "filesystem": {
+            "allowWrite": [
+              "/Users/owner/Library/Caches/ai.friday.node/worktrees/wt-0001",
+              "/private/var/folders/fr/T/friday-run-0001"
+            ],
+            "denyRead": [
+              "/Users/owner/.ssh",
+              "/Users/owner/.aws",
+              "/Users/owner/.config/gh",
+              "/Users/owner/.claude",
+              "/Users/owner/.codex",
+              "/Users/owner/.gnupg",
+              "/Users/owner/.netrc",
+              "/Users/owner/.docker",
+              "/Users/owner/Library/Keychains",
+              "/Users/owner/Library/Safari",
+              "/Users/owner/Library/Application Support/Google/Chrome",
+              "/Users/owner/Library/Application Support/Firefox",
+              "/Users/owner/Library/Application Support/Arc",
+              "/Users/owner/Library/Cookies",
+              "/Users/owner/.mozilla",
+              "/Users/owner/.config/google-chrome",
+              "/Users/owner/.config/chromium",
+              "/Users/owner/Library/Containers/ai.friday.node",
+              "/Users/owner/Library/Application Support/Friday Node",
+              "/Users/owner/.friday-node"
+            ],
+            "denyWrite": [
+              "/Users/owner/Library/Caches/ai.friday.node/worktrees/wt-0001/.git"
+            ]
+          },
+          "network": {
+            "allowLocalBinding": false,
+            "allowUnixSockets": [],
+            "allowedDomains": [
+              "files.pythonhosted.org",
+              "pypi.org"
+            ],
+            "deniedDomains": []
+          }
+        },
+        "settings_sha256": "4b73bf4d34bafe4259ca926c8f7cf9147d8573dc070e215c0c05213710900d39"
+      },
+      "inputs": {
+        "contract_max_runtime": 60,
+        "home": "/Users/owner",
+        "mapping": {
+          "argv": [
+            "uv",
+            "run",
+            "pytest",
+            "-q"
+          ],
+          "env_names": [],
+          "kind": "test",
+          "max_runtime_seconds": 900,
+          "mode": "worktree",
+          "network_domains": [
+            "pypi.org",
+            "files.pythonhosted.org"
+          ],
+          "path": "/opt/homebrew/bin:/usr/bin:/bin"
+        },
+        "node_env_names": [
+          "AWS_SECRET_ACCESS_KEY",
+          "GITHUB_TOKEN",
+          "HOME",
+          "PATH",
+          "PYTHONHASHSEED",
+          "SSH_AUTH_SOCK"
+        ],
+        "repo_root": "/Users/owner/code/friday",
+        "temp_dir": "/private/var/folders/fr/T/friday-run-0001",
+        "write_root": "/Users/owner/Library/Caches/ai.friday.node/worktrees/wt-0001"
+      },
+      "name": "friday.test.contract_max_60",
+      "settings_canonical": "{\"filesystem\":{\"allowWrite\":[\"/Users/owner/Library/Caches/ai.friday.node/worktrees/wt-0001\",\"/private/var/folders/fr/T/friday-run-0001\"],\"denyRead\":[\"/Users/owner/.ssh\",\"/Users/owner/.aws\",\"/Users/owner/.config/gh\",\"/Users/owner/.claude\",\"/Users/owner/.codex\",\"/Users/owner/.gnupg\",\"/Users/owner/.netrc\",\"/Users/owner/.docker\",\"/Users/owner/Library/Keychains\",\"/Users/owner/Library/Safari\",\"/Users/owner/Library/Application Support/Google/Chrome\",\"/Users/owner/Library/Application Support/Firefox\",\"/Users/owner/Library/Application Support/Arc\",\"/Users/owner/Library/Cookies\",\"/Users/owner/.mozilla\",\"/Users/owner/.config/google-chrome\",\"/Users/owner/.config/chromium\",\"/Users/owner/Library/Containers/ai.friday.node\",\"/Users/owner/Library/Application Support/Friday Node\",\"/Users/owner/.friday-node\"],\"denyWrite\":[\"/Users/owner/Library/Caches/ai.friday.node/worktrees/wt-0001/.git\"]},\"network\":{\"allowLocalBinding\":false,\"allowUnixSockets\":[],\"allowedDomains\":[\"files.pythonhosted.org\",\"pypi.org\"],\"deniedDomains\":[]}}"
+    }
+  ]
+}

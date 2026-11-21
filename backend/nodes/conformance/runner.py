@@ -17,6 +17,7 @@ is counted as a frame error. Heartbeats are answered with `heartbeat.ack`
 (unless the case is `silent`) and are not part of a case's expected frames.
 """
 
+import base64
 import json
 from dataclasses import dataclass, field
 
@@ -245,8 +246,8 @@ def check(case, frames, report, checker, *, policy_fingerprint, home=None) -> li
     if checker.frame_errors:
         failures.append(f"gateway frame errors: {checker.errors}")
     text = json.dumps(frames, ensure_ascii=False)
-    for needle in expect.get("absent", ()):
-        if needle in text:
+    for encoded in expect.get("absent_b64", ()):
+        if base64.b64decode(encoded).decode("utf-8") in text:
             failures.append("a raw secret reached a frame")
     if "worktrees_after" in expect and home is not None:
         count = len(list_worktrees(str(home / "work" / "acme")))

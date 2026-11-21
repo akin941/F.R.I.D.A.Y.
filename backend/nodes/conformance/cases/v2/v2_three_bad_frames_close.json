@@ -1,0 +1,46 @@
+{
+  "check": 2,
+  "description": "Three frame errors within 60 s close the session.",
+  "expect": {
+    "closed_reason": "protocol_error",
+    "frames": [
+      {
+        "invocation_id": null,
+        "refusal_code": "malformed",
+        "status": "error",
+        "type": "result"
+      },
+      {
+        "invocation_id": null,
+        "refusal_code": "malformed",
+        "status": "error",
+        "type": "result"
+      },
+      {
+        "invocation_id": null,
+        "refusal_code": "malformed",
+        "status": "error",
+        "type": "result"
+      }
+    ]
+  },
+  "name": "v2_three_bad_frames_close",
+  "setup": {
+    "now": 1796000005
+  },
+  "steps": [
+    {
+      "data": "{nope",
+      "op": "send_raw"
+    },
+    {
+      "data": "{nope",
+      "op": "send_raw"
+    },
+    {
+      "data": "{nope",
+      "op": "send_raw"
+    }
+  ],
+  "version": 2
+}

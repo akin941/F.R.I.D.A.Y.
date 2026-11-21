@@ -1,0 +1,43 @@
+{
+  "check": 8,
+  "description": "issued_at beyond the 5 s skew.",
+  "expect": {
+    "frames": [
+      {
+        "refusal_code": "not_yet_valid",
+        "status": "refused",
+        "type": "result"
+      }
+    ]
+  },
+  "name": "v1_not_yet_valid",
+  "setup": {
+    "now": 1796000005
+  },
+  "steps": [
+    {
+      "frame": {
+        "args": {},
+        "args_sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+        "capability": "apps.frontmost",
+        "capability_version": 1,
+        "class": "read",
+        "expires_at": 1796000041,
+        "grant": null,
+        "id": "f8c0eba6-8110-4a79-9079-54f5907ec722",
+        "invocation_id": "3b557633-36a0-4721-94b7-c14ad2edec86",
+        "issued_at": 1796000011,
+        "key_id": "03396219237f75a6",
+        "node_id": "6f1e2d3c-4b5a-4987-8a6b-5c4d3e2f1a0b",
+        "nonce": "7sBdmKMeFHwucnyG6_alLY28xb7PkB4J3k8bH0Hpgy4",
+        "sig": "wk_l212yT1IjGR6xbhY_GfNx995qN-stdLNc5dm7NDkErJ9pDbLM-Q26vA05I3qHTIwRRiRiERBeg56MHMQCCw",
+        "trace_id": "conformance-v1-future",
+        "type": "invoke",
+        "v": 1,
+        "workspace_id": "2a3b4c5d-6e7f-4a8b-9c0d-1e2f3a4b5c6d"
+      },
+      "op": "send"
+    }
+  ],
+  "version": 1
+}

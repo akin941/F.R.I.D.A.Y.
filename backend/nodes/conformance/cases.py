@@ -23,8 +23,10 @@ A case document:
 A matcher is a subset of one node frame's fields, in order; the node must
 send exactly as many frames as there are matchers. `expect` may also pin
 `executor_calls`, `executor_terminated`, `windows_shown`,
-`closed_reason`, `reconnect_allowed`, `absent` (strings no frame may
-contain) and `worktrees_after` (the source repo's worktree count).
+`closed_reason`, `reconnect_allowed`, `absent_b64` (base64 of strings no
+frame may contain: the case files never carry a raw fake secret; executor
+chunks may be `{"b64": ...}` for the same reason), `backoff_max_seconds`
+and `worktrees_after` (the source repo's worktree count).
 Unspecified keys are not checked. Every case also checks that the node's
 local policy fingerprint is unchanged and that the gateway counted no
 frame errors.
@@ -892,8 +894,8 @@ def _window_cases():
                 "executor": [
                     {
                         "chunks": [
-                            ["stdout", "export OPENAI_API_KEY=" + secret[:9], 0],
-                            ["stdout", secret[9:] + "\ndone\n", 1],
+                            ["stdout", b64(("export OPENAI_API_KEY=" + secret[:9]).encode()), 0],
+                            ["stdout", b64((secret[9:] + "\ndone\n").encode()), 1],
                         ],
                         "duration": 1,
                         "exit_code": 0,
@@ -907,7 +909,9 @@ def _window_cases():
                 {"type": "output", "stream": "stdout"},
                 {"type": "result", "status": "ok", "exit_code": 0},
             ],
-            absent=[secret, SECRET_TAIL[:20], SECRET_TAIL[-20:]],
+            absent_b64=[
+                b64(n.encode())["b64"] for n in (secret, SECRET_TAIL[:20], SECRET_TAIL[-20:])
+            ],
         )
     )
     cases.append(

@@ -1,0 +1,45 @@
+{
+  "check": 4,
+  "description": "An envelope with an extra property fails the schema.",
+  "expect": {
+    "frames": [
+      {
+        "invocation_id": null,
+        "refusal_code": "schema",
+        "status": "error",
+        "type": "result"
+      }
+    ]
+  },
+  "name": "v2_schema_extra_key",
+  "setup": {
+    "now": 1796000005
+  },
+  "steps": [
+    {
+      "frame": {
+        "args": {},
+        "args_sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+        "capability": "apps.frontmost",
+        "capability_version": 1,
+        "class": "read",
+        "expires_at": 1796000030,
+        "extra": 1,
+        "grant": null,
+        "id": "1d1170d2-96e0-48dc-9592-fd19e8f17797",
+        "invocation_id": "803fed22-6cb8-4554-9b23-72b1d17aeb81",
+        "issued_at": 1796000000,
+        "key_id": "03396219237f75a6",
+        "node_id": "6f1e2d3c-4b5a-4987-8a6b-5c4d3e2f1a0b",
+        "nonce": "Fnw698c63mFg-tJrkhTNr9qzC5MUkazXoUxnfwJ7Wo4",
+        "sig": "ARJvymZG69j4Bhbe00ebzWClc-1TG3UNC9JnciNklYIFhJ-dpd6pim2YII93cHOaW3BgOG58rjy2biUaALf-AA",
+        "trace_id": "conformance-v2-read-ok",
+        "type": "invoke",
+        "v": 2,
+        "workspace_id": "2a3b4c5d-6e7f-4a8b-9c0d-1e2f3a4b5c6d"
+      },
+      "op": "send"
+    }
+  ],
+  "version": 2
+}

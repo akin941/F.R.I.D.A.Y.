@@ -1,0 +1,122 @@
+{
+  "check": 11,
+  "description": "The same grant on a new envelope (same nonce): a replay.",
+  "expect": {
+    "executor_calls": 0,
+    "frames": [
+      {
+        "state": "shown",
+        "type": "confirmation"
+      },
+      {
+        "state": "denied",
+        "type": "confirmation"
+      },
+      {
+        "refusal_code": "owner_denied",
+        "status": "refused",
+        "type": "result"
+      },
+      {
+        "refusal_code": "replay",
+        "status": "refused",
+        "type": "result"
+      }
+    ]
+  },
+  "name": "v2_replay_grant_on_new_envelope",
+  "setup": {
+    "now": 1796000005,
+    "window": [
+      {
+        "action": "deny",
+        "after": 0
+      }
+    ]
+  },
+  "steps": [
+    {
+      "frame": {
+        "args": {
+          "command_kind": "test",
+          "repo_path": "~/work/acme"
+        },
+        "args_sha256": "a1075b636d8f7d76b64e6dddaf0789d5915c4cc65cdc2d4a04ade9dbd96d2f85",
+        "capability": "repo.command.run",
+        "capability_version": 1,
+        "class": "gate",
+        "expires_at": 1796000090,
+        "grant": {
+          "approval_id": "8d7c6b5a-4e3f-4d2c-8b1a-0f9e8d7c6b5a",
+          "args_sha256": "a1075b636d8f7d76b64e6dddaf0789d5915c4cc65cdc2d4a04ade9dbd96d2f85",
+          "capability": "repo.command.run",
+          "capability_version": 1,
+          "class": "gate",
+          "expires_at": 1796000090,
+          "grant_id": "567223f7-3598-4f04-9cb6-f41dfcd7f9a1",
+          "issued_at": 1796000000,
+          "key_id": "03396219237f75a6",
+          "node_id": "6f1e2d3c-4b5a-4987-8a6b-5c4d3e2f1a0b",
+          "nonce": "ZNPte_vUBqublzo-24ZH1m3LpIuM9WpkVK7_3OMQCtM",
+          "sig": "3Xete7QNSYDn9OVtP53LoMHsx9J7s_DTE-C2g4DN5gCvo1_f--7AfvO5qwJSkmC-Vir8mfSxHqjacDgDoZoUCg",
+          "v": 2,
+          "workspace_id": "2a3b4c5d-6e7f-4a8b-9c0d-1e2f3a4b5c6d"
+        },
+        "id": "169e8fd6-5ceb-4426-b2de-0947b7fd1061",
+        "invocation_id": "62b2d347-6c7b-499a-91a1-64a6bfe245be",
+        "issued_at": 1796000000,
+        "key_id": "03396219237f75a6",
+        "node_id": "6f1e2d3c-4b5a-4987-8a6b-5c4d3e2f1a0b",
+        "nonce": "ZNPte_vUBqublzo-24ZH1m3LpIuM9WpkVK7_3OMQCtM",
+        "sig": "YizX09fuOQVYjR5M-AdpOIe-UOE45rOfDkURSjrj_sQ3I__ZaOBNdkTNHcdpaje9VUSJwESfWQ8B0Kp7nCY0DA",
+        "trace_id": "conformance-v2-grant-base",
+        "type": "invoke",
+        "v": 2,
+        "workspace_id": "2a3b4c5d-6e7f-4a8b-9c0d-1e2f3a4b5c6d"
+      },
+      "op": "send"
+    },
+    {
+      "frame": {
+        "args": {
+          "command_kind": "test",
+          "repo_path": "~/work/acme"
+        },
+        "args_sha256": "a1075b636d8f7d76b64e6dddaf0789d5915c4cc65cdc2d4a04ade9dbd96d2f85",
+        "capability": "repo.command.run",
+        "capability_version": 1,
+        "class": "gate",
+        "expires_at": 1796000090,
+        "grant": {
+          "approval_id": "8d7c6b5a-4e3f-4d2c-8b1a-0f9e8d7c6b5a",
+          "args_sha256": "a1075b636d8f7d76b64e6dddaf0789d5915c4cc65cdc2d4a04ade9dbd96d2f85",
+          "capability": "repo.command.run",
+          "capability_version": 1,
+          "class": "gate",
+          "expires_at": 1796000090,
+          "grant_id": "567223f7-3598-4f04-9cb6-f41dfcd7f9a1",
+          "issued_at": 1796000000,
+          "key_id": "03396219237f75a6",
+          "node_id": "6f1e2d3c-4b5a-4987-8a6b-5c4d3e2f1a0b",
+          "nonce": "ZNPte_vUBqublzo-24ZH1m3LpIuM9WpkVK7_3OMQCtM",
+          "sig": "3Xete7QNSYDn9OVtP53LoMHsx9J7s_DTE-C2g4DN5gCvo1_f--7AfvO5qwJSkmC-Vir8mfSxHqjacDgDoZoUCg",
+          "v": 2,
+          "workspace_id": "2a3b4c5d-6e7f-4a8b-9c0d-1e2f3a4b5c6d"
+        },
+        "id": "e8cc6367-6a90-4ecf-819d-86a3adafd055",
+        "invocation_id": "fc6d6f6d-a277-48f4-9c25-bac5a7551535",
+        "issued_at": 1796000000,
+        "key_id": "03396219237f75a6",
+        "node_id": "6f1e2d3c-4b5a-4987-8a6b-5c4d3e2f1a0b",
+        "nonce": "ZNPte_vUBqublzo-24ZH1m3LpIuM9WpkVK7_3OMQCtM",
+        "sig": "CwrnJ6kdUlPAPGAQrPBceoEIDQVVoxEFFQjuZvQgK3P3aYg3FMh-NneB74Vcg51w-fOH6xZsSuwG3tqDOHREAA",
+        "trace_id": "conformance-v2-grant-base",
+        "type": "invoke",
+        "v": 2,
+        "workspace_id": "2a3b4c5d-6e7f-4a8b-9c0d-1e2f3a4b5c6d"
+      },
+      "op": "send"
+    }
+  ],
+  "version": 2
+}

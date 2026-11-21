@@ -1,0 +1,43 @@
+{
+  "check": 10,
+  "description": "A read TTL of 31 s.",
+  "expect": {
+    "frames": [
+      {
+        "refusal_code": "ttl_too_long",
+        "status": "refused",
+        "type": "result"
+      }
+    ]
+  },
+  "name": "v2_ttl_too_long",
+  "setup": {
+    "now": 1796000005
+  },
+  "steps": [
+    {
+      "frame": {
+        "args": {},
+        "args_sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+        "capability": "apps.frontmost",
+        "capability_version": 1,
+        "class": "read",
+        "expires_at": 1796000031,
+        "grant": null,
+        "id": "fa07f5e2-cff8-411c-a792-9c10357d6b61",
+        "invocation_id": "1b6b7e5b-38a2-4b42-b8fb-66c4acd38fd9",
+        "issued_at": 1796000000,
+        "key_id": "03396219237f75a6",
+        "node_id": "6f1e2d3c-4b5a-4987-8a6b-5c4d3e2f1a0b",
+        "nonce": "IB6l7WD5Q9iZXlCWwQxhQ07OwUX7o2IqjWJh_SXCcfg",
+        "sig": "H3pxQF-7jeb0zI1SOOwvd-vXbgmid_QZ98OEZzKIlGFalO_yJzDKDhz2FXI9PkmWQPlhapnJoy1Dq7gSAG6cDw",
+        "trace_id": "conformance-v2-ttl",
+        "type": "invoke",
+        "v": 2,
+        "workspace_id": "2a3b4c5d-6e7f-4a8b-9c0d-1e2f3a4b5c6d"
+      },
+      "op": "send"
+    }
+  ],
+  "version": 2
+}

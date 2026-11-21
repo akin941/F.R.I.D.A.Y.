@@ -1,0 +1,46 @@
+{
+  "check": 15,
+  "description": "Args outside the node's own schema (extra_key).",
+  "expect": {
+    "frames": [
+      {
+        "refusal_code": "args_schema",
+        "status": "refused",
+        "type": "result"
+      }
+    ]
+  },
+  "name": "v1_args_extra_key",
+  "setup": {
+    "now": 1796000005
+  },
+  "steps": [
+    {
+      "frame": {
+        "args": {
+          "extra": 1,
+          "repo_path": "~/work/acme"
+        },
+        "args_sha256": "d20e7a3d06cc544c3a408673222ab06e09dfbd9aae12c1ccc548952905e5c3a8",
+        "capability": "git.status",
+        "capability_version": 1,
+        "class": "read",
+        "expires_at": 1796000030,
+        "grant": null,
+        "id": "236b95ce-e232-4c96-a60f-a115a2a57210",
+        "invocation_id": "60a2d9e6-59aa-4253-aeed-bb05327fb108",
+        "issued_at": 1796000000,
+        "key_id": "03396219237f75a6",
+        "node_id": "6f1e2d3c-4b5a-4987-8a6b-5c4d3e2f1a0b",
+        "nonce": "fgR6IqDsCOWVDsNmv1ZFMYng-kt2Ccd0gfyyVBt3vM0",
+        "sig": "CABVjOzK0ckjOeCl6rPbHrQHmtOC331Jno1Vo5QzJU05YmRQJZrJ8SSxp-8MKpM5MqDv9GkvW7qJpSiN9uPlBA",
+        "trace_id": "conformance-v1-args-extra_key",
+        "type": "invoke",
+        "v": 1,
+        "workspace_id": "2a3b4c5d-6e7f-4a8b-9c0d-1e2f3a4b5c6d"
+      },
+      "op": "send"
+    }
+  ],
+  "version": 1
+}

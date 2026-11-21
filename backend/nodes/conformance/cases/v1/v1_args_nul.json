@@ -1,0 +1,45 @@
+{
+  "check": 15,
+  "description": "Args outside the node's own schema (nul).",
+  "expect": {
+    "frames": [
+      {
+        "refusal_code": "args_schema",
+        "status": "refused",
+        "type": "result"
+      }
+    ]
+  },
+  "name": "v1_args_nul",
+  "setup": {
+    "now": 1796000005
+  },
+  "steps": [
+    {
+      "frame": {
+        "args": {
+          "repo_path": "~/work/ac\u0000me"
+        },
+        "args_sha256": "bfd49ac69243b4723f09d02394e6fe18651407f43f685ebcf58878e42f49bb57",
+        "capability": "git.status",
+        "capability_version": 1,
+        "class": "read",
+        "expires_at": 1796000030,
+        "grant": null,
+        "id": "7accd9ed-fba2-468a-a34e-fbe9f78ac8d5",
+        "invocation_id": "ce71349d-7bc1-4547-88fd-7d67deb632e8",
+        "issued_at": 1796000000,
+        "key_id": "03396219237f75a6",
+        "node_id": "6f1e2d3c-4b5a-4987-8a6b-5c4d3e2f1a0b",
+        "nonce": "Gn73vhgslRlHXlrute1KqGbqAdnfArthvN-FMrz5rX0",
+        "sig": "4rPtyfsOgJheWcyDxioMraleo9KmtRabOWkIDsVXln4gPdnvQ4_HT_OUOlo-3SIDYvhRZDfnp7NF9BUx923OBQ",
+        "trace_id": "conformance-v1-args-nul",
+        "type": "invoke",
+        "v": 1,
+        "workspace_id": "2a3b4c5d-6e7f-4a8b-9c0d-1e2f3a4b5c6d"
+      },
+      "op": "send"
+    }
+  ],
+  "version": 1
+}

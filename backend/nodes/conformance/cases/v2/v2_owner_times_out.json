@@ -1,0 +1,79 @@
+{
+  "check": 23,
+  "description": "No click within 60 s: confirm_timeout (nothing at 59 s).",
+  "expect": {
+    "executor_calls": 0,
+    "frames": [
+      {
+        "state": "shown",
+        "type": "confirmation"
+      },
+      {
+        "state": "timed_out",
+        "type": "confirmation"
+      },
+      {
+        "confirm_state": "timed_out",
+        "refusal_code": "confirm_timeout",
+        "status": "refused",
+        "type": "result"
+      }
+    ]
+  },
+  "name": "v2_owner_times_out",
+  "setup": {
+    "now": 1796000005
+  },
+  "steps": [
+    {
+      "frame": {
+        "args": {
+          "command_kind": "test",
+          "repo_path": "~/work/acme"
+        },
+        "args_sha256": "a1075b636d8f7d76b64e6dddaf0789d5915c4cc65cdc2d4a04ade9dbd96d2f85",
+        "capability": "repo.command.run",
+        "capability_version": 1,
+        "class": "gate",
+        "expires_at": 1796000090,
+        "grant": {
+          "approval_id": "8d7c6b5a-4e3f-4d2c-8b1a-0f9e8d7c6b5a",
+          "args_sha256": "a1075b636d8f7d76b64e6dddaf0789d5915c4cc65cdc2d4a04ade9dbd96d2f85",
+          "capability": "repo.command.run",
+          "capability_version": 1,
+          "class": "gate",
+          "expires_at": 1796000090,
+          "grant_id": "c2bb66f1-0ae4-422e-8745-5778a00d3384",
+          "issued_at": 1796000000,
+          "key_id": "03396219237f75a6",
+          "node_id": "6f1e2d3c-4b5a-4987-8a6b-5c4d3e2f1a0b",
+          "nonce": "zRGzVnHH0aoXX2rJMRRl5JDs2T3KUSnU5yGgGsFc0Bo",
+          "sig": "kFRldGb6ydqGVsYwbGAwOJ3QMHqxCWTEvsdoPPp1CGBeXGcDFX7_n6V5JadAlway11KWDZVVK3yUky5vYT7ZCg",
+          "v": 2,
+          "workspace_id": "2a3b4c5d-6e7f-4a8b-9c0d-1e2f3a4b5c6d"
+        },
+        "id": "7cfc1119-3a64-4b04-aceb-a615fc349c54",
+        "invocation_id": "a40707fd-31c3-4c94-a66a-69399eef90aa",
+        "issued_at": 1796000000,
+        "key_id": "03396219237f75a6",
+        "node_id": "6f1e2d3c-4b5a-4987-8a6b-5c4d3e2f1a0b",
+        "nonce": "zRGzVnHH0aoXX2rJMRRl5JDs2T3KUSnU5yGgGsFc0Bo",
+        "sig": "RZpfU_mTscBNbRWCp9NNy5XoqAcoGFWeuLXoLeNVdML_6QiSALPt6wWwAWvE6-rCbdri8vZiNeBytekJKLCTDg",
+        "trace_id": "conformance-v2-timeout",
+        "type": "invoke",
+        "v": 2,
+        "workspace_id": "2a3b4c5d-6e7f-4a8b-9c0d-1e2f3a4b5c6d"
+      },
+      "op": "send"
+    },
+    {
+      "op": "advance",
+      "seconds": 59
+    },
+    {
+      "op": "advance",
+      "seconds": 1
+    }
+  ],
+  "version": 2
+}

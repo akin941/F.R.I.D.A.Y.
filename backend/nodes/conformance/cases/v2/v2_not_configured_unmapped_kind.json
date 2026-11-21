@@ -1,0 +1,63 @@
+{
+  "check": 22,
+  "description": "A command kind not mapped for the repo.",
+  "expect": {
+    "executor_calls": 0,
+    "frames": [
+      {
+        "refusal_code": "not_configured",
+        "status": "refused",
+        "type": "result"
+      }
+    ],
+    "windows_shown": 0
+  },
+  "name": "v2_not_configured_unmapped_kind",
+  "setup": {
+    "now": 1796000005
+  },
+  "steps": [
+    {
+      "frame": {
+        "args": {
+          "command_kind": "typecheck",
+          "repo_path": "~/work/acme"
+        },
+        "args_sha256": "bcd4df60c3fb9e9515895c41e6e974f786a482283b71bff8240bc04a45f4dee7",
+        "capability": "repo.command.run",
+        "capability_version": 1,
+        "class": "gate",
+        "expires_at": 1796000090,
+        "grant": {
+          "approval_id": "8d7c6b5a-4e3f-4d2c-8b1a-0f9e8d7c6b5a",
+          "args_sha256": "bcd4df60c3fb9e9515895c41e6e974f786a482283b71bff8240bc04a45f4dee7",
+          "capability": "repo.command.run",
+          "capability_version": 1,
+          "class": "gate",
+          "expires_at": 1796000090,
+          "grant_id": "087ff946-8f34-4071-9552-0799b6dbbf8b",
+          "issued_at": 1796000000,
+          "key_id": "03396219237f75a6",
+          "node_id": "6f1e2d3c-4b5a-4987-8a6b-5c4d3e2f1a0b",
+          "nonce": "7S8QNtDDp8hknO3WZoMqUpwOyueg40AkSTHkvwfCW4o",
+          "sig": "iRRt2BD4kQodjkH8r39nBEADPmzhis3VIscHS1aPsyK7xhMcaRHl3AJc4L-LOnVj53Nc2hc397-SEdKjOPinAg",
+          "v": 2,
+          "workspace_id": "2a3b4c5d-6e7f-4a8b-9c0d-1e2f3a4b5c6d"
+        },
+        "id": "cc12bb80-70fb-4e5a-8b38-9f677d6372a8",
+        "invocation_id": "c8eff10c-0326-4bd0-b177-d74db097d77f",
+        "issued_at": 1796000000,
+        "key_id": "03396219237f75a6",
+        "node_id": "6f1e2d3c-4b5a-4987-8a6b-5c4d3e2f1a0b",
+        "nonce": "7S8QNtDDp8hknO3WZoMqUpwOyueg40AkSTHkvwfCW4o",
+        "sig": "NmJ-Uu-Al8ErNzhBGPgYoeQXO5L9w4Xos4Cw5W4cfiNSCcn0TxoTHTxLzvcLKX_04AKVBeJBcLhqxCsO5J-eAA",
+        "trace_id": "conformance-v2-nc-kind",
+        "type": "invoke",
+        "v": 2,
+        "workspace_id": "2a3b4c5d-6e7f-4a8b-9c0d-1e2f3a4b5c6d"
+      },
+      "op": "send"
+    }
+  ],
+  "version": 2
+}

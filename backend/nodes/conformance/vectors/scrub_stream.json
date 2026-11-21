@@ -1,0 +1,1012 @@
+{
+  "carry_bytes": 1024,
+  "description": "Friday Node streaming scrub vectors (Phase 10 brief D12). `text` cases: each base64 chunk is pushed (decoded as UTF-8) through one StreamScrubber (SCRUB_CARRY_BYTES=1024, 8 KiB chunks, at most 64 cut candidates); `emitted[i]` is what push i returns and `flush` what the final flush returns. `pipeline` cases: raw bytes per stream through the OutputPipeline (incremental UTF-8 decoding with replacement, per-stream carry, shared seq, 8 KiB pieces, 1 MiB cap, 4 KiB tail). The scrubber is backend/memory/ingestion/scrubber.py (vendored in nodes/reference/_scrubber_vendored.py) with no workspace terms.",
+  "max_chunk_bytes": 8192,
+  "max_cut_candidates": 64,
+  "pipeline": [
+    {
+      "chunks": [
+        {
+          "data_b64": "VGVzdGxlciBnZcOndGk6IMM=",
+          "stream": "stdout"
+        },
+        {
+          "data_b64": "p8SfxLHDtsWfw7wg4pyTCg==",
+          "stream": "stdout"
+        }
+      ],
+      "name": "utf8_split_mid_sequence",
+      "output_bytes": 33,
+      "pieces": [
+        {
+          "data": "Testler geçti: çğıöşü ✓\n",
+          "seq": 0,
+          "stream": "stdout",
+          "truncated": false
+        }
+      ],
+      "tail": "Testler geçti: çğıöşü ✓\n",
+      "truncated": false
+    },
+    {
+      "chunks": [
+        {
+          "data_b64": "b2sgMQo=",
+          "stream": "stdout"
+        },
+        {
+          "data_b64": "d2FybjogeAo=",
+          "stream": "stderr"
+        },
+        {
+          "data_b64": "b2sgMgo=",
+          "stream": "stdout"
+        }
+      ],
+      "name": "stdout_stderr_interleaved",
+      "output_bytes": 18,
+      "pieces": [
+        {
+          "data": "ok 1\n",
+          "seq": 0,
+          "stream": "stdout",
+          "truncated": false
+        },
+        {
+          "data": "warn: x\n",
+          "seq": 1,
+          "stream": "stderr",
+          "truncated": false
+        },
+        {
+          "data": "ok 2\n",
+          "seq": 2,
+          "stream": "stdout",
+          "truncated": false
+        }
+      ],
+      "tail": "ok 1\nwarn: x\nok 2\n",
+      "truncated": false
+    },
+    {
+      "chunks": [
+        {
+          "data_b64": "YWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhCg==",
+          "stream": "stdout"
+        }
+      ],
+      "name": "over_8k_line",
+      "output_bytes": 9001,
+      "pieces": [
+        {
+          "data": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "seq": 0,
+          "stream": "stdout",
+          "truncated": false
+        },
+        {
+          "data": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n",
+          "seq": 1,
+          "stream": "stdout",
+          "truncated": false
+        }
+      ],
+      "tail": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n",
+      "truncated": false
+    }
+  ],
+  "text": [
+    {
+      "chunks_b64": [
+        "cHJlZml4IGxpbmUKZXhwb3J0IE9QRU5BSV9BUElf",
+        "S0VZPXNrLXByb2otQWIzZEVmNmhJajlrTG0ybk9wNXFSczh0VXYxd1h5NHpBQjdDRDAgdHJhaWxpbmcK"
+      ],
+      "emitted": [
+        "prefix line\n",
+        "export OPENAI_API_KEY=[SECRET:openai_key] trailing\n"
+      ],
+      "flush": "",
+      "name": "openai-env.split_1_3"
+    },
+    {
+      "chunks_b64": [
+        "cHJlZml4IGxpbmUKZXhwb3J0IE9QRU5BSV9BUElfS0VZPXNrLXByb2otQWIz",
+        "ZEVmNmhJajlrTG0ybk9wNXFSczh0VXYxd1h5NHpBQjdDRDAgdHJhaWxpbmcK"
+      ],
+      "emitted": [
+        "prefix line\n",
+        "export OPENAI_API_KEY=[SECRET:openai_key] trailing\n"
+      ],
+      "flush": "",
+      "name": "openai-env.split_1_2"
+    },
+    {
+      "chunks_b64": [
+        "cHJlZml4IGxpbmUKdXNlZCBrZXkgc2stWng=",
+        "ODFLZDAyTG1RcFJ0NVV2V3k3QWI5Q2QzRWY0R2ggaW4gdGhlIHNjcmlwdCB0cmFpbGluZwo="
+      ],
+      "emitted": [
+        "prefix line\n",
+        "used key [SECRET:openai_key] in the script trailing\n"
+      ],
+      "flush": "",
+      "name": "openai-inline.split_1_3"
+    },
+    {
+      "chunks_b64": [
+        "cHJlZml4IGxpbmUKdXNlZCBrZXkgc2stWng4MUtkMDJMbVFwUnQ1",
+        "VXZXeTdBYjlDZDNFZjRHaCBpbiB0aGUgc2NyaXB0IHRyYWlsaW5nCg=="
+      ],
+      "emitted": [
+        "prefix line\n",
+        "used key [SECRET:openai_key] in the script trailing\n"
+      ],
+      "flush": "",
+      "name": "openai-inline.split_1_2"
+    },
+    {
+      "chunks_b64": [
+        "cHJlZml4IGxpbmUKQU5USFJPUElDX0FQSV9LRVk9InM=",
+        "ay1hbnQtYXBpMDMtRkFLRWZha2UwMTIzNDU2Nzg5YWJjZGVmR0hJSktMbW5vcC1RUlNUdXYiIHRyYWlsaW5nCg=="
+      ],
+      "emitted": [
+        "prefix line\n",
+        "ANTHROPIC_API_KEY=\"[SECRET:anthropic_key]\" trailing\n"
+      ],
+      "flush": "",
+      "name": "anthropic.split_1_3"
+    },
+    {
+      "chunks_b64": [
+        "cHJlZml4IGxpbmUKQU5USFJPUElDX0FQSV9LRVk9InNrLWFudC1hcGkwMy1GQUtF",
+        "ZmFrZTAxMjM0NTY3ODlhYmNkZWZHSElKS0xtbm9wLVFSU1R1diIgdHJhaWxpbmcK"
+      ],
+      "emitted": [
+        "prefix line\n",
+        "ANTHROPIC_API_KEY=\"[SECRET:anthropic_key]\" trailing\n"
+      ],
+      "flush": "",
+      "name": "anthropic.split_1_2"
+    },
+    {
+      "chunks_b64": [
+        "cHJlZml4IGxpbmUKZml4OiByb3RhdGUgc2stYW4=",
+        "dC1hZG1pbjAxLXhZN3pXM3ZVMnRTMXJRMHBPOW5NOGxLN2pJNmggYWZ0ZXIgbGVhayB0cmFpbGluZwo="
+      ],
+      "emitted": [
+        "prefix line\n",
+        "fix: rotate [SECRET:anthropic_key] after leak trailing\n"
+      ],
+      "flush": "",
+      "name": "anthropic-prose.split_1_3"
+    },
+    {
+      "chunks_b64": [
+        "cHJlZml4IGxpbmUKZml4OiByb3RhdGUgc2stYW50LWFkbWluMDEteFk3elc=",
+        "M3ZVMnRTMXJRMHBPOW5NOGxLN2pJNmggYWZ0ZXIgbGVhayB0cmFpbGluZwo="
+      ],
+      "emitted": [
+        "prefix line\n",
+        "fix: rotate [SECRET:anthropic_key] after leak trailing\n"
+      ],
+      "flush": "",
+      "name": "anthropic-prose.split_1_2"
+    },
+    {
+      "chunks_b64": [
+        "cHJlZml4IGxpbmUKZ2l0IHJlbW90ZSBzZXQtdXJsIG9yaWdpbiA=",
+        "aHR0cHM6Ly9naHBfRkFLRTAxMjM0NTY3ODlhYmNkZWZBQkNERUYwMTIzNDU2Nzg5QGdpdGh1Yi5jb20vby9yLmdpdCB0cmFpbGluZwo="
+      ],
+      "emitted": [
+        "prefix line\n",
+        "git remote set-url origin https://[SECRET:github_token]@github.com/o/r.git trailing\n"
+      ],
+      "flush": "",
+      "name": "ghp-url.split_1_3"
+    },
+    {
+      "chunks_b64": [
+        "cHJlZml4IGxpbmUKZ2l0IHJlbW90ZSBzZXQtdXJsIG9yaWdpbiBodHRwczovL2docF9GQUtFMDEy",
+        "MzQ1Njc4OWFiY2RlZkFCQ0RFRjAxMjM0NTY3ODlAZ2l0aHViLmNvbS9vL3IuZ2l0IHRyYWlsaW5nCg=="
+      ],
+      "emitted": [
+        "prefix line\n",
+        "git remote set-url origin https://[SECRET:github_token]@github.com/o/r.git trailing\n"
+      ],
+      "flush": "",
+      "name": "ghp-url.split_1_2"
+    },
+    {
+      "chunks_b64": [
+        "cHJlZml4IGxpbmUKb2F1dGggZ2hvX2FC",
+        "Y0RlRmdIaUprTG1Ob1BxUnNUdVZ3WHlaMDEyMzQ1IHJlZnJlc2hlZCB0cmFpbGluZwo="
+      ],
+      "emitted": [
+        "prefix line\n",
+        "oauth [SECRET:github_token] refreshed trailing\n"
+      ],
+      "flush": "",
+      "name": "gho.split_1_3"
+    },
+    {
+      "chunks_b64": [
+        "cHJlZml4IGxpbmUKb2F1dGggZ2hvX2FCY0RlRmdIaUprTG1Obw==",
+        "UHFSc1R1VndYeVowMTIzNDUgcmVmcmVzaGVkIHRyYWlsaW5nCg=="
+      ],
+      "emitted": [
+        "prefix line\n",
+        "oauth [SECRET:github_token] refreshed trailing\n"
+      ],
+      "flush": "",
+      "name": "gho.split_1_2"
+    },
+    {
+      "chunks_b64": [
+        "cHJlZml4IGxpbmUKR0hfVE9LRU46IGdpdGh1Yl9wYQ==",
+        "dF8xMUZBS0VGQUtFMF9hYmNkZWZnaGlqa2xtbm9wcXJzdHV2d3h5ejAxMjM0NTY3ODlBQkNEIHRyYWlsaW5nCg=="
+      ],
+      "emitted": [
+        "prefix line\n",
+        "GH_TOKEN: [SECRET:github_pat] trailing\n"
+      ],
+      "flush": "",
+      "name": "github-pat.split_1_3"
+    },
+    {
+      "chunks_b64": [
+        "cHJlZml4IGxpbmUKR0hfVE9LRU46IGdpdGh1Yl9wYXRfMTFGQUtFRkFLRTBfYWI=",
+        "Y2RlZmdoaWprbG1ub3BxcnN0dXZ3eHl6MDEyMzQ1Njc4OUFCQ0QgdHJhaWxpbmcK"
+      ],
+      "emitted": [
+        "prefix line\n",
+        "GH_TOKEN: [SECRET:github_pat] trailing\n"
+      ],
+      "flush": "",
+      "name": "github-pat.split_1_2"
+    },
+    {
+      "chunks_b64": [
+        "cHJlZml4IGxpbmUKU0xBQ0tfQk9UPXhveGI=",
+        "LTAwMDAwMDAwMDAwMC0wMDAwMDAwMDAwMDAwLUZBS0VmYWtlRkFLRWZha2UgdHJhaWxpbmcK"
+      ],
+      "emitted": [
+        "prefix line\n",
+        "SLACK_BOT=[SECRET:slack_token] trailing\n"
+      ],
+      "flush": "",
+      "name": "slack-bot.split_1_3"
+    },
+    {
+      "chunks_b64": [
+        "cHJlZml4IGxpbmUKU0xBQ0tfQk9UPXhveGItMDAwMDAwMDAwMDAwLQ==",
+        "MDAwMDAwMDAwMDAwMC1GQUtFZmFrZUZBS0VmYWtlIHRyYWlsaW5nCg=="
+      ],
+      "emitted": [
+        "prefix line\n",
+        "SLACK_BOT=[SECRET:slack_token] trailing\n"
+      ],
+      "flush": "",
+      "name": "slack-bot.split_1_2"
+    },
+    {
+      "chunks_b64": [
+        "cHJlZml4IGxpbmUKcG9zdGVkIHdpdGggeA==",
+        "b3hwLTExMTEtMjIyMi0zMzMzLUZBS0VGQUtFZmFrZSBpbiBhIGN1cmwgdHJhaWxpbmcK"
+      ],
+      "emitted": [
+        "prefix line\n",
+        "posted with [SECRET:slack_token] in a curl trailing\n"
+      ],
+      "flush": "",
+      "name": "slack-user.split_1_3"
+    },
+    {
+      "chunks_b64": [
+        "cHJlZml4IGxpbmUKcG9zdGVkIHdpdGggeG94cC0xMTExLTIyMjI=",
+        "LTMzMzMtRkFLRUZBS0VmYWtlIGluIGEgY3VybCB0cmFpbGluZwo="
+      ],
+      "emitted": [
+        "prefix line\n",
+        "posted with [SECRET:slack_token] in a curl trailing\n"
+      ],
+      "flush": "",
+      "name": "slack-user.split_1_2"
+    },
+    {
+      "chunks_b64": [
+        "cHJlZml4IGxpbmUKYXdzX2FjY2U=",
+        "c3Nfa2V5X2lkID0gQUtJQUlPU0ZPRE5ON0VYQU1QTEUgdHJhaWxpbmcK"
+      ],
+      "emitted": [
+        "prefix line\n",
+        "aws_access_key_id = [SECRET:aws_key] trailing\n"
+      ],
+      "flush": "",
+      "name": "aws-access.split_1_3"
+    },
+    {
+      "chunks_b64": [
+        "cHJlZml4IGxpbmUKYXdzX2FjY2Vzc19rZXlfaWQgPQ==",
+        "IEFLSUFJT1NGT0ROTjdFWEFNUExFIHRyYWlsaW5nCg=="
+      ],
+      "emitted": [
+        "prefix line\n",
+        "aws_access_key_id = [SECRET:aws_key] trailing\n"
+      ],
+      "flush": "",
+      "name": "aws-access.split_1_2"
+    },
+    {
+      "chunks_b64": [
+        "cHJlZml4IGxpbmUKYXdzX3NlY3JldF9hY2Nlcw==",
+        "c19rZXkgPSB3SmFsclhVdG5GRU1JL0s3TURFTkcvYlB4UmZpQ1lFWEFNUExFS0VZIHRyYWlsaW5nCg=="
+      ],
+      "emitted": [
+        "prefix line\n",
+        "aws_secret_access_key = [SECRET:assignment] trailing\n"
+      ],
+      "flush": "",
+      "name": "aws-secret.split_1_3"
+    },
+    {
+      "chunks_b64": [
+        "cHJlZml4IGxpbmUKYXdzX3NlY3JldF9hY2Nlc3Nfa2V5ID0gd0phbHJYVQ==",
+        "dG5GRU1JL0s3TURFTkcvYlB4UmZpQ1lFWEFNUExFS0VZIHRyYWlsaW5nCg=="
+      ],
+      "emitted": [
+        "prefix line\n",
+        "aws_secret_access_key = [SECRET:assignment] trailing\n"
+      ],
+      "flush": "",
+      "name": "aws-secret.split_1_2"
+    },
+    {
+      "chunks_b64": [
+        "cHJlZml4IGxpbmUKdGVtcG9yYXJ5IA==",
+        "Y3JlZHMgQVNJQVkzNEZaS0JPS01VVFZWN0EgZXhwaXJlZCB0cmFpbGluZwo="
+      ],
+      "emitted": [
+        "prefix line\n",
+        "temporary creds [SECRET:aws_key] expired trailing\n"
+      ],
+      "flush": "",
+      "name": "aws-temp-prose.split_1_3"
+    },
+    {
+      "chunks_b64": [
+        "cHJlZml4IGxpbmUKdGVtcG9yYXJ5IGNyZWRzIEFTSUFZ",
+        "MzRGWktCT0tNVVRWVjdBIGV4cGlyZWQgdHJhaWxpbmcK"
+      ],
+      "emitted": [
+        "prefix line\n",
+        "temporary creds [SECRET:aws_key] expired trailing\n"
+      ],
+      "flush": "",
+      "name": "aws-temp-prose.split_1_2"
+    },
+    {
+      "chunks_b64": [
+        "cHJlZml4IGxpbmUKbWFwcyBrZXkgQUl6YVN5",
+        "RkFLRS1mYWtlXzAxMjM0NTY3ODlhYmNkZWZnaGlqa2xtbm8gaW4gY29uZmlnIHRyYWlsaW5nCg=="
+      ],
+      "emitted": [
+        "prefix line\n",
+        "maps key [SECRET:google_api_key] in config trailing\n"
+      ],
+      "flush": "",
+      "name": "google.split_1_3"
+    },
+    {
+      "chunks_b64": [
+        "cHJlZml4IGxpbmUKbWFwcyBrZXkgQUl6YVN5RkFLRS1mYWtlXzAxMjM=",
+        "NDU2Nzg5YWJjZGVmZ2hpamtsbW5vIGluIGNvbmZpZyB0cmFpbGluZwo="
+      ],
+      "emitted": [
+        "prefix line\n",
+        "maps key [SECRET:google_api_key] in config trailing\n"
+      ],
+      "flush": "",
+      "name": "google.split_1_2"
+    },
+    {
+      "chunks_b64": [
+        "cHJlZml4IGxpbmUKU1RSSVBFPXNr",
+        "X3Rlc3RfRkFLRTRlQzM5SHFMeWpXRGFyanRUMXpkcDdkYyB0cmFpbGluZwo="
+      ],
+      "emitted": [
+        "prefix line\n",
+        "STRIPE=[SECRET:stripe_key] trailing\n"
+      ],
+      "flush": "",
+      "name": "stripe.split_1_3"
+    },
+    {
+      "chunks_b64": [
+        "cHJlZml4IGxpbmUKU1RSSVBFPXNrX3Rlc3RfRkFLRTQ=",
+        "ZUMzOUhxTHlqV0Rhcmp0VDF6ZHA3ZGMgdHJhaWxpbmcK"
+      ],
+      "emitted": [
+        "prefix line\n",
+        "STRIPE=[SECRET:stripe_key] trailing\n"
+      ],
+      "flush": "",
+      "name": "stripe.split_1_2"
+    },
+    {
+      "chunks_b64": [
+        "cHJlZml4IGxpbmUKQ29va2llOiBzZXNzaW9uPWV5SmhiR2NpT2lKSVV6SQ==",
+        "MU5pSjkuZXlKemRXSWlPaUp2ZDI1bGNpSXNJbWxoZENJNk1UY3dNREF3TURBd01IMC5jMmxuYm1GMGRYSmxYMlpoYTJWZlptRnJaUSB0cmFpbGluZwo="
+      ],
+      "emitted": [
+        "prefix line\n",
+        "Cookie: session=[SECRET:jwt] trailing\n"
+      ],
+      "flush": "",
+      "name": "jwt.split_1_3"
+    },
+    {
+      "chunks_b64": [
+        "cHJlZml4IGxpbmUKQ29va2llOiBzZXNzaW9uPWV5SmhiR2NpT2lKSVV6STFOaUo5LmV5SnpkV0lpT2lKdmQyNQ==",
+        "bGNpSXNJbWxoZENJNk1UY3dNREF3TURBd01IMC5jMmxuYm1GMGRYSmxYMlpoYTJWZlptRnJaUSB0cmFpbGluZwo="
+      ],
+      "emitted": [
+        "prefix line\n",
+        "Cookie: session=[SECRET:jwt] trailing\n"
+      ],
+      "flush": "",
+      "name": "jwt.split_1_2"
+    },
+    {
+      "chunks_b64": [
+        "cHJlZml4IGxpbmUKLS0tLS1CRUdJTiBSU0EgUFJJVkFURSBLRVktLS0tLQpNSQ==",
+        "SUVvd0lCQUFLQ0FRRUFmYWtlZmFrZWZha2UwMTIzNDU2Nzg5CmFiY2RlZkZBS0VGQUtFPT0KLS0tLS1FTkQgUlNBIFBSSVZBVEUgS0VZLS0tLS0KIHRyYWlsaW5nCg=="
+      ],
+      "emitted": [
+        "prefix line\n",
+        "[SECRET:pem_private_key]\n trailing\n"
+      ],
+      "flush": "",
+      "name": "pem-rsa.split_1_3"
+    },
+    {
+      "chunks_b64": [
+        "cHJlZml4IGxpbmUKLS0tLS1CRUdJTiBSU0EgUFJJVkFURSBLRVktLS0tLQpNSUlFb3dJQkFBS0NBUUVBZmFrZWZha2VmYQ==",
+        "a2UwMTIzNDU2Nzg5CmFiY2RlZkZBS0VGQUtFPT0KLS0tLS1FTkQgUlNBIFBSSVZBVEUgS0VZLS0tLS0KIHRyYWlsaW5nCg=="
+      ],
+      "emitted": [
+        "prefix line\n",
+        "[SECRET:pem_private_key]\n trailing\n"
+      ],
+      "flush": "",
+      "name": "pem-rsa.split_1_2"
+    },
+    {
+      "chunks_b64": [
+        "cHJlZml4IGxpbmUKY2F0IGlkX2VkMjU1MTkKLS0tLS1CRUdJTiBPUEVOU1NIIFA=",
+        "UklWQVRFIEtFWS0tLS0tCmIzQmxibk56YUMxclpYa3RkakVBQUFBQUJHNXZibVVBQUFBRWJtOXVaUQpBQUFBTXdBQUFBdHpjMmd0WldReU5UVXhPUSB0cmFpbGluZwo="
+      ],
+      "emitted": [
+        "prefix line\ncat id_ed25519\n",
+        ""
+      ],
+      "flush": "[SECRET:pem_private_key]",
+      "name": "pem-openssh-truncated.split_1_3"
+    },
+    {
+      "chunks_b64": [
+        "cHJlZml4IGxpbmUKY2F0IGlkX2VkMjU1MTkKLS0tLS1CRUdJTiBPUEVOU1NIIFBSSVZBVEUgS0VZLS0tLS0KYjNCbGJuTno=",
+        "YUMxclpYa3RkakVBQUFBQUJHNXZibVVBQUFBRWJtOXVaUQpBQUFBTXdBQUFBdHpjMmd0WldReU5UVXhPUSB0cmFpbGluZwo="
+      ],
+      "emitted": [
+        "prefix line\ncat id_ed25519\n",
+        ""
+      ],
+      "flush": "[SECRET:pem_private_key]",
+      "name": "pem-openssh-truncated.split_1_2"
+    },
+    {
+      "chunks_b64": [
+        "cHJlZml4IGxpbmUKREFUQUJBU0VfUEFTU1dPUkQ9aHVudGVyMi1idXQtbG9uZ2Vy",
+        "CkRKQU5HT19TRUNSRVRfS0VZPWRqYW5nby1pbnNlY3VyZS03YyR4IXE5I2sKSldUX1NJR05JTkdfS0VZX1BBU1NXRD1wYTU1dzByZApERUJVRz10cnVlIHRyYWlsaW5nCg=="
+      ],
+      "emitted": [
+        "prefix line\n",
+        "DATABASE_PASSWORD=[SECRET:assignment]\nDJANGO_SECRET_KEY=[SECRET:assignment]\nJWT_SIGNING_KEY_PASSWD=[SECRET:assignment]\nDEBUG=true trailing\n"
+      ],
+      "flush": "",
+      "name": "dotenv-dump.split_1_3"
+    },
+    {
+      "chunks_b64": [
+        "cHJlZml4IGxpbmUKREFUQUJBU0VfUEFTU1dPUkQ9aHVudGVyMi1idXQtbG9uZ2VyCkRKQU5HT19TRUNSRVRfS0VZPWRqYW5n",
+        "by1pbnNlY3VyZS03YyR4IXE5I2sKSldUX1NJR05JTkdfS0VZX1BBU1NXRD1wYTU1dzByZApERUJVRz10cnVlIHRyYWlsaW5nCg=="
+      ],
+      "emitted": [
+        "prefix line\n",
+        "DATABASE_PASSWORD=[SECRET:assignment]\nDJANGO_SECRET_KEY=[SECRET:assignment]\nJWT_SIGNING_KEY_PASSWD=[SECRET:assignment]\nDEBUG=true trailing\n"
+      ],
+      "flush": "",
+      "name": "dotenv-dump.split_1_2"
+    },
+    {
+      "chunks_b64": [
+        "cHJlZml4IGxpbmUKeyJhcGlfa2V5Ijo=",
+        "ICJhYmMxMjNkZWY0NTZnaGk3ODkiLCAibmFtZSI6ICJzdmMifSB0cmFpbGluZwo="
+      ],
+      "emitted": [
+        "prefix line\n",
+        "{\"api_key\": \"[SECRET:assignment]\", \"name\": \"svc\"} trailing\n"
+      ],
+      "flush": "",
+      "name": "json-config.split_1_3"
+    },
+    {
+      "chunks_b64": [
+        "cHJlZml4IGxpbmUKeyJhcGlfa2V5IjogImFiYzEyM2RlZjQ=",
+        "NTZnaGk3ODkiLCAibmFtZSI6ICJzdmMifSB0cmFpbGluZwo="
+      ],
+      "emitted": [
+        "prefix line\n",
+        "{\"api_key\": \"[SECRET:assignment]\", \"name\": \"svc\"} trailing\n"
+      ],
+      "flush": "",
+      "name": "json-config.split_1_2"
+    },
+    {
+      "chunks_b64": [
+        "cHJlZml4IGxpbmUKZGI6CiAgcGFzcw==",
+        "d29yZDogVHIwdWI0ZG9yJjMKICBob3N0OiBsb2NhbGhvc3QgdHJhaWxpbmcK"
+      ],
+      "emitted": [
+        "prefix line\ndb:\n",
+        "  password: [SECRET:assignment]\n  host: localhost trailing\n"
+      ],
+      "flush": "",
+      "name": "yaml-config.split_1_3"
+    },
+    {
+      "chunks_b64": [
+        "cHJlZml4IGxpbmUKZGI6CiAgcGFzc3dvcmQ6IFRyMHVi",
+        "NGRvciYzCiAgaG9zdDogbG9jYWxob3N0IHRyYWlsaW5nCg=="
+      ],
+      "emitted": [
+        "prefix line\ndb:\n",
+        "  password: [SECRET:assignment]\n  host: localhost trailing\n"
+      ],
+      "flush": "",
+      "name": "yaml-config.split_1_2"
+    },
+    {
+      "chunks_b64": [
+        "cHJlZml4IGxpbmUKUFJJVkFU",
+        "RV9LRVk9MHhkZWFkYmVlZmNhZmViYWJlMDEyMyB0cmFpbGluZwo="
+      ],
+      "emitted": [
+        "prefix line\n",
+        "PRIVATE_KEY=[SECRET:assignment] trailing\n"
+      ],
+      "flush": "",
+      "name": "private-key-var.split_1_3"
+    },
+    {
+      "chunks_b64": [
+        "cHJlZml4IGxpbmUKUFJJVkFURV9LRVk9MHhkZQ==",
+        "YWRiZWVmY2FmZWJhYmUwMTIzIHRyYWlsaW5nCg=="
+      ],
+      "emitted": [
+        "prefix line\n",
+        "PRIVATE_KEY=[SECRET:assignment] trailing\n"
+      ],
+      "flush": "",
+      "name": "private-key-var.split_1_2"
+    },
+    {
+      "chunks_b64": [
+        "cHJlZml4IGxpbmUKREFUQUJBU0VfVVJMPXBvcw==",
+        "dGdyZXM6Ly9mcmlkYXk6UzNjcjN0UHdAZGIuaW50ZXJuYWw6NTQzMi9mcmlkYXkgdHJhaWxpbmcK"
+      ],
+      "emitted": [
+        "prefix line\n",
+        "DATABASE_URL=postgres://[SECRET:url_credentials]@db.internal:5432/friday trailing\n"
+      ],
+      "flush": "",
+      "name": "url-creds.split_1_3"
+    },
+    {
+      "chunks_b64": [
+        "cHJlZml4IGxpbmUKREFUQUJBU0VfVVJMPXBvc3RncmVzOi8vZnJpZGF5",
+        "OlMzY3IzdFB3QGRiLmludGVybmFsOjU0MzIvZnJpZGF5IHRyYWlsaW5nCg=="
+      ],
+      "emitted": [
+        "prefix line\n",
+        "DATABASE_URL=postgres://[SECRET:url_credentials]@db.internal:5432/friday trailing\n"
+      ],
+      "flush": "",
+      "name": "url-creds.split_1_2"
+    },
+    {
+      "chunks_b64": [
+        "cHJlZml4IGxpbmUKY29ubmVjdGluZyB0byByZQ==",
+        "ZGlzOi8vZGVmYXVsdDpyRWQxc1Bhc3NXMHJkQGNhY2hlOjYzNzkvMCBmYWlsZWQgdHJhaWxpbmcK"
+      ],
+      "emitted": [
+        "prefix line\n",
+        "connecting to redis://[SECRET:url_credentials]@cache:6379/0 failed trailing\n"
+      ],
+      "flush": "",
+      "name": "url-creds-redis.split_1_3"
+    },
+    {
+      "chunks_b64": [
+        "cHJlZml4IGxpbmUKY29ubmVjdGluZyB0byByZWRpczovL2RlZmF1bHQ6",
+        "ckVkMXNQYXNzVzByZEBjYWNoZTo2Mzc5LzAgZmFpbGVkIHRyYWlsaW5nCg=="
+      ],
+      "emitted": [
+        "prefix line\n",
+        "connecting to redis://[SECRET:url_credentials]@cache:6379/0 failed trailing\n"
+      ],
+      "flush": "",
+      "name": "url-creds-redis.split_1_2"
+    },
+    {
+      "chunks_b64": [
+        "cHJlZml4IGxpbmUKY3VybCAtSCAnQXV0aG9yaXphdGlvbjogQg==",
+        "ZWFyZXIgZmpwXzlhWjNrTG1RODF4WXZCMm5DN2RFNGZHNmhKMCcgaHR0cDovL2xvY2FsaG9zdDo4MDAxL2FwaSB0cmFpbGluZwo="
+      ],
+      "emitted": [
+        "prefix line\n",
+        "curl -H 'Authorization: Bearer [SECRET:bearer_token]' http://localhost:8001/api trailing\n"
+      ],
+      "flush": "",
+      "name": "bearer-header.split_1_3"
+    },
+    {
+      "chunks_b64": [
+        "cHJlZml4IGxpbmUKY3VybCAtSCAnQXV0aG9yaXphdGlvbjogQmVhcmVyIGZqcF85YVoza0xtUQ==",
+        "ODF4WXZCMm5DN2RFNGZHNmhKMCcgaHR0cDovL2xvY2FsaG9zdDo4MDAxL2FwaSB0cmFpbGluZwo="
+      ],
+      "emitted": [
+        "prefix line\n",
+        "curl -H 'Authorization: Bearer [SECRET:bearer_token]' http://localhost:8001/api trailing\n"
+      ],
+      "flush": "",
+      "name": "bearer-header.split_1_2"
+    },
+    {
+      "chunks_b64": [
+        "cHJlZml4IGxpbmUKeyJob29rX2V2ZW50X25hbWUiOiJOb3RpZmljYXRpb24iLCJtZXNz",
+        "YWdlIjoiQ2xhdWRlIG5lZWRzIHBlcm1pc3Npb24gdG8gcnVuOiBPUEVOQUlfS0VZPXNrLWxpdmUwMTIzNDU2Nzg5YWJjZGVmQUJDREVGIHB5dGhvbiB4LnB5In0gdHJhaWxpbmcK"
+      ],
+      "emitted": [
+        "prefix line\n",
+        "{\"hook_event_name\":\"Notification\",\"message\":\"Claude needs permission to run: OPENAI_KEY=[SECRET:openai_key] python x.py\"} trailing\n"
+      ],
+      "flush": "",
+      "name": "hook-notification.split_1_3"
+    },
+    {
+      "chunks_b64": [
+        "cHJlZml4IGxpbmUKeyJob29rX2V2ZW50X25hbWUiOiJOb3RpZmljYXRpb24iLCJtZXNzYWdlIjoiQ2xhdWRlIG5lZWRzIHBlcm1pcw==",
+        "c2lvbiB0byBydW46IE9QRU5BSV9LRVk9c2stbGl2ZTAxMjM0NTY3ODlhYmNkZWZBQkNERUYgcHl0aG9uIHgucHkifSB0cmFpbGluZwo="
+      ],
+      "emitted": [
+        "prefix line\n",
+        "{\"hook_event_name\":\"Notification\",\"message\":\"Claude needs permission to run: OPENAI_KEY=[SECRET:openai_key] python x.py\"} trailing\n"
+      ],
+      "flush": "",
+      "name": "hook-notification.split_1_2"
+    },
+    {
+      "chunks_b64": [
+        "cHJlZml4IGxpbmUKeyJ0b29sX2lucHV0Ijp7ImNvbW1hbmQiOiJnaA==",
+        "IGF1dGggbG9naW4gLS13aXRoLXRva2VuIDw8PCBnaHBfWllYV1ZVVFNSUVBPTk1MS0pJSEdGRURDQkE5ODc2NTQzMjEwIn19IHRyYWlsaW5nCg=="
+      ],
+      "emitted": [
+        "prefix line\n",
+        "{\"tool_input\":{\"command\":\"gh auth login --with-token <<< [SECRET:github_token]\"}} trailing\n"
+      ],
+      "flush": "",
+      "name": "hook-tool-input.split_1_3"
+    },
+    {
+      "chunks_b64": [
+        "cHJlZml4IGxpbmUKeyJ0b29sX2lucHV0Ijp7ImNvbW1hbmQiOiJnaCBhdXRoIGxvZ2luIC0td2l0aC10bw==",
+        "a2VuIDw8PCBnaHBfWllYV1ZVVFNSUVBPTk1MS0pJSEdGRURDQkE5ODc2NTQzMjEwIn19IHRyYWlsaW5nCg=="
+      ],
+      "emitted": [
+        "prefix line\n",
+        "{\"tool_input\":{\"command\":\"gh auth login --with-token <<< [SECRET:github_token]\"}} trailing\n"
+      ],
+      "flush": "",
+      "name": "hook-tool-input.split_1_2"
+    },
+    {
+      "chunks_b64": [
+        "cHJlZml4IGxpbmUKZml4OiB0ZW1wb3Jhcnkga2V5IGZv",
+        "ciB0ZXN0aW5nCgpzay1hbnQtYXBpMDMtQ09NTUlUVEVEYnlNSVNUQUtFMDEyMzQ1Njc4OWFiY2RlZiB0cmFpbGluZwo="
+      ],
+      "emitted": [
+        "prefix line\n",
+        "fix: temporary key for testing\n\n[SECRET:anthropic_key] trailing\n"
+      ],
+      "flush": "",
+      "name": "commit-pasted.split_1_3"
+    },
+    {
+      "chunks_b64": [
+        "cHJlZml4IGxpbmUKZml4OiB0ZW1wb3Jhcnkga2V5IGZvciB0ZXN0aW5nCgpzay1hbnQ=",
+        "LWFwaTAzLUNPTU1JVFRFRGJ5TUlTVEFLRTAxMjM0NTY3ODlhYmNkZWYgdHJhaWxpbmcK"
+      ],
+      "emitted": [
+        "prefix line\nfix: temporary key for testing\n\n",
+        "[SECRET:anthropic_key] trailing\n"
+      ],
+      "flush": "",
+      "name": "commit-pasted.split_1_2"
+    },
+    {
+      "chunks_b64": [
+        "cHJlZml4IGxpbmUKICA1MTIgIGV4cG9ydCBIRl9UT0tF",
+        "Tj1oZl9GQUtFYUJjRGVGZ0hpSmtMbU5vUHFSc1R1VndYeVoKICA1MTMgIHB5dGhvbiB0cmFpbi5weSB0cmFpbGluZwo="
+      ],
+      "emitted": [
+        "prefix line\n",
+        "  512  export HF_TOKEN=[SECRET:assignment]\n  513  python train.py trailing\n"
+      ],
+      "flush": "",
+      "name": "shell-history.split_1_3"
+    },
+    {
+      "chunks_b64": [
+        "cHJlZml4IGxpbmUKICA1MTIgIGV4cG9ydCBIRl9UT0tFTj1oZl9GQUtFYUJjRGVGZ0g=",
+        "aUprTG1Ob1BxUnNUdVZ3WHlaCiAgNTEzICBweXRob24gdHJhaW4ucHkgdHJhaWxpbmcK"
+      ],
+      "emitted": [
+        "prefix line\n",
+        "  512  export HF_TOKEN=[SECRET:assignment]\n  513  python train.py trailing\n"
+      ],
+      "flush": "",
+      "name": "shell-history.split_1_2"
+    },
+    {
+      "chunks_b64": [
+        "cHJlZml4IGxpbmUKbXlzcWwgLXUg",
+        "cm9vdCAtLXBhc3N3b3JkPXJvb3RQdyEyMDI2IGZyaWRheSB0cmFpbGluZwo="
+      ],
+      "emitted": [
+        "prefix line\n",
+        "mysql -u root --password=[SECRET:assignment] friday trailing\n"
+      ],
+      "flush": "",
+      "name": "shell-mysql.split_1_3"
+    },
+    {
+      "chunks_b64": [
+        "cHJlZml4IGxpbmUKbXlzcWwgLXUgcm9vdCAtLXBhc3M=",
+        "d29yZD1yb290UHchMjAyNiBmcmlkYXkgdHJhaWxpbmcK"
+      ],
+      "emitted": [
+        "prefix line\n",
+        "mysql -u root --password=[SECRET:assignment] friday trailing\n"
+      ],
+      "flush": "",
+      "name": "shell-mysql.split_1_2"
+    },
+    {
+      "chunks_b64": [
+        "cHJlZml4IGxpbmUKdGhlIGJsb2Igd2FzIFptOXZZbQ==",
+        "RnlRbUY2VVhWNE1USXpORFUyTnpnNU1FRkNRMFJGUmtkSVNVcExURTFPIGluIHRoZSBsb2cgdHJhaWxpbmcK"
+      ],
+      "emitted": [
+        "prefix line\n",
+        "the blob was [SECRET:high_entropy] in the log trailing\n"
+      ],
+      "flush": "",
+      "name": "entropy-b64.split_1_3"
+    },
+    {
+      "chunks_b64": [
+        "cHJlZml4IGxpbmUKdGhlIGJsb2Igd2FzIFptOXZZbUZ5UW1GNlVYVjRNVEl6TkQ=",
+        "VTJOemc1TUVGQ1EwUkZSa2RJU1VwTFRFMU8gaW4gdGhlIGxvZyB0cmFpbGluZwo="
+      ],
+      "emitted": [
+        "prefix line\n",
+        "the blob was [SECRET:high_entropy] in the log trailing\n"
+      ],
+      "flush": "",
+      "name": "entropy-b64.split_1_2"
+    },
+    {
+      "chunks_b64": [
+        "cHJlZml4IGxpbmUKd2ViaG9vayBzaWduaW5n",
+        "IHZhbHVlIDhmM2E5YzFlN2IyZDRmNmEwZTVjOWI4ZDdhNmY0ZTNjIGluIGVudiB0cmFpbGluZwo="
+      ],
+      "emitted": [
+        "prefix line\n",
+        "webhook signing value [SECRET:high_entropy] in env trailing\n"
+      ],
+      "flush": "",
+      "name": "entropy-hex.split_1_3"
+    },
+    {
+      "chunks_b64": [
+        "cHJlZml4IGxpbmUKd2ViaG9vayBzaWduaW5nIHZhbHVlIDhmM2E5YzE=",
+        "ZTdiMmQ0ZjZhMGU1YzliOGQ3YTZmNGUzYyBpbiBlbnYgdHJhaWxpbmcK"
+      ],
+      "emitted": [
+        "prefix line\n",
+        "webhook signing value [SECRET:high_entropy] in env trailing\n"
+      ],
+      "flush": "",
+      "name": "entropy-hex.split_1_2"
+    },
+    {
+      "chunks_b64": [
+        "cHJlZml4IGxpbmUKeC1hbXotc2VjdXJpdHk6IA==",
+        "UTJ4aGRXUmxRMjlrWlRrNU9GTkZRMUpGVkhNd01USXpORFUyTnpnNVlXSmpaR1ZtIHRyYWlsaW5nCg=="
+      ],
+      "emitted": [
+        "prefix line\n",
+        "x-amz-security: [SECRET:high_entropy] trailing\n"
+      ],
+      "flush": "",
+      "name": "entropy-mixed.split_1_3"
+    },
+    {
+      "chunks_b64": [
+        "cHJlZml4IGxpbmUKeC1hbXotc2VjdXJpdHk6IFEyeGhkV1JsUTI5a1pUaw==",
+        "NU9GTkZRMUpGVkhNd01USXpORFUyTnpnNVlXSmpaR1ZtIHRyYWlsaW5nCg=="
+      ],
+      "emitted": [
+        "prefix line\n",
+        "x-amz-security: [SECRET:high_entropy] trailing\n"
+      ],
+      "flush": "",
+      "name": "entropy-mixed.split_1_2"
+    },
+    {
+      "chunks_b64": [
+        "cHJlZml4IGxpbmUKYXV0aCBTS2ExQjJj",
+        "M0Q0ZTVGNmc3SDhpOUowazFMMm0zTjRvNVA2IGNvbmZpZ3VyZWQgdHJhaWxpbmcK"
+      ],
+      "emitted": [
+        "prefix line\n",
+        "auth [SECRET:high_entropy] configured trailing\n"
+      ],
+      "flush": "",
+      "name": "twilio-like.split_1_3"
+    },
+    {
+      "chunks_b64": [
+        "cHJlZml4IGxpbmUKYXV0aCBTS2ExQjJjM0Q0ZTVGNmc3SDhp",
+        "OUowazFMMm0zTjRvNVA2IGNvbmZpZ3VyZWQgdHJhaWxpbmcK"
+      ],
+      "emitted": [
+        "prefix line\n",
+        "auth [SECRET:high_entropy] configured trailing\n"
+      ],
+      "flush": "",
+      "name": "twilio-like.split_1_2"
+    },
+    {
+      "chunks_b64": [
+        "cHJlZml4IGxpbmUKeyJwYXNzd29yZCI=",
+        "OiAiaHVudGVyIHR3byB0aHJlZSIsICJ1c2VyIjogInN2YyJ9IHRyYWlsaW5nCg=="
+      ],
+      "emitted": [
+        "prefix line\n",
+        "{\"password\": \"[SECRET:assignment]\", \"user\": \"svc\"} trailing\n"
+      ],
+      "flush": "",
+      "name": "json-quoted-passphrase.split_1_3"
+    },
+    {
+      "chunks_b64": [
+        "cHJlZml4IGxpbmUKeyJwYXNzd29yZCI6ICJodW50ZXIgdA==",
+        "d28gdGhyZWUiLCAidXNlciI6ICJzdmMifSB0cmFpbGluZwo="
+      ],
+      "emitted": [
+        "prefix line\n",
+        "{\"password\": \"[SECRET:assignment]\", \"user\": \"svc\"} trailing\n"
+      ],
+      "flush": "",
+      "name": "json-quoted-passphrase.split_1_2"
+    },
+    {
+      "chunks_b64": [
+        "cHJlZml4IGxpbmUKcHdkOg==",
+        "ICJteSBsb25nIHBhc3MiCmhvc3Q6IGRiIHRyYWlsaW5nCg=="
+      ],
+      "emitted": [
+        "prefix line\n",
+        "pwd: \"[SECRET:assignment]\"\nhost: db trailing\n"
+      ],
+      "flush": "",
+      "name": "yaml-quoted-passphrase.split_1_3"
+    },
+    {
+      "chunks_b64": [
+        "cHJlZml4IGxpbmUKcHdkOiAibXkgbG9uZw==",
+        "IHBhc3MiCmhvc3Q6IGRiIHRyYWlsaW5nCg=="
+      ],
+      "emitted": [
+        "prefix line\n",
+        "pwd: \"[SECRET:assignment]\"\nhost: db trailing\n"
+      ],
+      "flush": "",
+      "name": "yaml-quoted-passphrase.split_1_2"
+    },
+    {
+      "chunks_b64": [
+        "cHJlZml4IGxpbmUKREJfU0VDUkVUPSc=",
+        "Y29ycmVjdCBob3JzZSBiYXR0ZXJ5IHN0YXBsZScgLi9ydW4uc2ggdHJhaWxpbmcK"
+      ],
+      "emitted": [
+        "prefix line\n",
+        "DB_SECRET='[SECRET:assignment]' ./run.sh trailing\n"
+      ],
+      "flush": "",
+      "name": "single-quoted-passphrase.split_1_3"
+    },
+    {
+      "chunks_b64": [
+        "cHJlZml4IGxpbmUKREJfU0VDUkVUPSdjb3JyZWN0IGhvcnM=",
+        "ZSBiYXR0ZXJ5IHN0YXBsZScgLi9ydW4uc2ggdHJhaWxpbmcK"
+      ],
+      "emitted": [
+        "prefix line\n",
+        "DB_SECRET='[SECRET:assignment]' ./run.sh trailing\n"
+      ],
+      "flush": "",
+      "name": "single-quoted-passphrase.split_1_2"
+    },
+    {
+      "chunks_b64": [
+        "d29yZDAgd29yZDEgd29yZDIgd29yZDMgd29yZDQgd29yZDUgd29yZDYgd29yZDcgd29yZDggd29yZDkgd29yZDEwIHdvcmQxMSB3b3JkMTIgd29yZDEzIHdvcmQxNCB3b3JkMTUgd29yZDE2IHdvcmQxNyB3b3JkMTggd29yZDE5IHdvcmQyMCB3b3JkMjEgd29yZDIyIHdvcmQyMyB3b3JkMjQgd29yZDI1IHdvcmQyNiB3b3JkMjcgd29yZDI4IHdvcmQyOSB3b3JkMzAgd29yZDMxIHdvcmQzMiB3b3JkMzMgd29yZDM0IHdvcmQzNSB3b3JkMzYgd29yZDM3IHdvcmQzOCB3b3JkMzkgd29yZDQwIHdvcmQ0MSB3b3JkNDIgd29yZDQzIHdvcmQ0NCB3b3JkNDUgd29yZDQ2IHdvcmQ0NyB3b3JkNDggd29yZDQ5IHdvcmQ1MCB3b3JkNTEgd29yZDUyIHdvcmQ1MyB3b3JkNTQgd29yZDU1IHdvcmQ1NiB3b3JkNTcgd29yZDU4IHdvcmQ1OSB3b3JkNjAgd29yZDYxIHdvcmQ2MiB3b3JkNjMgd29yZDY0IHdvcmQ2NSB3b3JkNjYgd29yZDY3IHdvcmQ2OCB3b3JkNjkgd29yZDcwIHdvcmQ3MSB3b3JkNzIgd29yZDczIHdvcmQ3NCB3b3JkNzUgd29yZDc2IHdvcmQ3NyB3b3JkNzggd29yZDc5IHdvcmQ4MCB3b3JkODEgd29yZDgyIHdvcmQ4MyB3b3JkODQgd29yZDg1IHdvcmQ4NiB3b3JkODcgd29yZDg4IHdvcmQ4OSB3b3JkOTAgd29yZDkxIHdvcmQ5MiB3b3JkOTMgd29yZDk0IHdvcmQ5NSB3b3JkOTYgd29yZDk3IHdvcmQ5OCB3b3JkOTkgd29yZDEwMCB3b3JkMTAxIHdvcmQxMDIgd29yZDEwMyB3b3JkMTA0IHdvcmQxMDUgd29yZDEwNiB3b3JkMTA3IHdvcmQxMDggd29yZDEwOSB3b3JkMTEwIHdvcmQxMTEgd29yZDExMiB3b3JkMTEzIHdvcmQxMTQgd29yZDExNSB3b3JkMTE2IHdvcmQxMTcgd29yZDExOCB3b3JkMTE5IHdvcmQxMjAgd29yZDEyMSB3b3JkMTIyIHdvcmQxMjMgd29yZDEyNCB3b3JkMTI1IHdvcmQxMjYgd29yZDEyNyB3b3JkMTI4IHdvcmQxMjkgd29yZDEzMCB3b3JkMTMxIHdvcmQxMzIgd29yZDEzMyB3b3JkMTM0IHdvcmQxMzUgd29yZDEzNiB3b3JkMTM3IHdvcmQxMzggd29yZDEzOSB3b3JkMTQwIHdvcmQxNDEgd29yZDE0MiB3b3JkMTQzIHdvcmQxNDQgd29yZDE0NSB3b3JkMTQ2IHdvcmQxNDcgd29yZDE0OCB3b3JkMTQ5IHdvcmQxNTAgd29yZDE1MSB3b3JkMTUyIHdvcmQxNTMgd29yZDE1NCB3b3JkMTU1IHdvcmQxNTYgd29yZDE1NyB3b3JkMTU4IHdvcmQxNTkgd29yZDE2MCB3b3JkMTYxIHdvcmQxNjIgd29yZDE2MyB3b3JkMTY0IHdvcmQxNjUgd29yZDE2NiB3b3JkMTY3IHdvcmQxNjggd29yZDE2OSB3b3JkMTcwIHdvcmQxNzEgd29yZDE3MiB3b3JkMTczIHdvcmQxNzQgd29yZDE3NSB3b3JkMTc2IHdvcmQxNzcgd29yZDE3OCB3b3JkMTc5IHdvcmQxODAgd29yZDE4MSB3b3JkMTgyIHdvcmQxODMgd29yZDE4NCB3b3JkMTg1IHdvcmQxODYgd29yZDE4NyB3b3JkMTg4IHdvcmQxODkgd29yZDE5MCB3b3JkMTkxIHdvcmQxOTIgd29yZDE5MyB3b3JkMTk0IHdvcmQxOTUgd29yZDE5NiB3b3JkMTk3IHdvcmQxOTggd29yZDE5OSB3b3JkMjAwIHdv",
+        "cmQyMDEgd29yZDIwMiB3b3JkMjAzIHdvcmQyMDQgd29yZDIwNSB3b3JkMjA2IHdvcmQyMDcgd29yZDIwOCB3b3JkMjA5IHdvcmQyMTAgd29yZDIxMSB3b3JkMjEyIHdvcmQyMTMgd29yZDIxNCB3b3JkMjE1IHdvcmQyMTYgd29yZDIxNyB3b3JkMjE4IHdvcmQyMTkgd29yZDIyMCB3b3JkMjIxIHdvcmQyMjIgd29yZDIyMyB3b3JkMjI0IHdvcmQyMjUgd29yZDIyNiB3b3JkMjI3IHdvcmQyMjggd29yZDIyOSB3b3JkMjMwIHdvcmQyMzEgd29yZDIzMiB3b3JkMjMzIHdvcmQyMzQgd29yZDIzNSB3b3JkMjM2IHdvcmQyMzcgd29yZDIzOCB3b3JkMjM5IHdvcmQyNDAgd29yZDI0MSB3b3JkMjQyIHdvcmQyNDMgd29yZDI0NCB3b3JkMjQ1IHdvcmQyNDYgd29yZDI0NyB3b3JkMjQ4IHdvcmQyNDkgd29yZDI1MCB3b3JkMjUxIHdvcmQyNTIgd29yZDI1MyB3b3JkMjU0IHdvcmQyNTUgd29yZDI1NiB3b3JkMjU3IHdvcmQyNTggd29yZDI1OSB3b3JkMjYwIHdvcmQyNjEgd29yZDI2MiB3b3JkMjYzIHdvcmQyNjQgd29yZDI2NSB3b3JkMjY2IHdvcmQyNjcgd29yZDI2OCB3b3JkMjY5IHdvcmQyNzAgd29yZDI3MSB3b3JkMjcyIHdvcmQyNzMgd29yZDI3NCB3b3JkMjc1IHdvcmQyNzYgd29yZDI3NyB3b3JkMjc4IHdvcmQyNzkgd29yZDI4MCB3b3JkMjgxIHdvcmQyODIgd29yZDI4MyB3b3JkMjg0IHdvcmQyODUgd29yZDI4NiB3b3JkMjg3IHdvcmQyODggd29yZDI4OSB3b3JkMjkwIHdvcmQyOTEgd29yZDI5MiB3b3JkMjkzIHdvcmQyOTQgd29yZDI5NSB3b3JkMjk2IHdvcmQyOTcgd29yZDI5OCB3b3JkMjk5IHdvcmQzMDAgd29yZDMwMSB3b3JkMzAyIHdvcmQzMDMgd29yZDMwNCB3b3JkMzA1IHdvcmQzMDYgd29yZDMwNyB3b3JkMzA4IHdvcmQzMDkgd29yZDMxMCB3b3JkMzExIHdvcmQzMTIgd29yZDMxMyB3b3JkMzE0IHdvcmQzMTUgd29yZDMxNiB3b3JkMzE3IHdvcmQzMTggd29yZDMxOSB3b3JkMzIwIHdvcmQzMjEgd29yZDMyMiB3b3JkMzIzIHdvcmQzMjQgd29yZDMyNSB3b3JkMzI2IHdvcmQzMjcgd29yZDMyOCB3b3JkMzI5IHdvcmQzMzAgd29yZDMzMSB3b3JkMzMyIHdvcmQzMzMgd29yZDMzNCB3b3JkMzM1IHdvcmQzMzYgd29yZDMzNyB3b3JkMzM4IHdvcmQzMzkgd29yZDM0MCB3b3JkMzQxIHdvcmQzNDIgd29yZDM0MyB3b3JkMzQ0IHdvcmQzNDUgd29yZDM0NiB3b3JkMzQ3IHdvcmQzNDggd29yZDM0OSB3b3JkMzUwIHdvcmQzNTEgd29yZDM1MiB3b3JkMzUzIHdvcmQzNTQgd29yZDM1NSB3b3JkMzU2IHdvcmQzNTcgd29yZDM1OCB3b3JkMzU5IHdvcmQzNjAgd29yZDM2MSB3b3JkMzYyIHdvcmQzNjMgd29yZDM2NCB3b3JkMzY1IHdvcmQzNjYgd29yZDM2NyB3b3JkMzY4IHdvcmQzNjkgd29yZDM3MCB3b3JkMzcxIHdvcmQzNzIgd29yZDM3MyB3b3JkMzc0IHdvcmQzNzUgd29yZDM3NiB3b3JkMzc3IHdvcmQzNzggd29yZDM3OSB3b3JkMzgwIHdvcmQzODEgd29yZDM4MiB3b3JkMzgzIHdvcmQzODQgd29yZDM4NSB3b3JkMzg2IHdvcmQzODcgd29yZDM4OCB3b3JkMzg5IHdvcmQzOTAgd29yZDM5MSB3b3JkMzkyIHdvcmQzOTMgd29yZDM5NCB3b3JkMzk1IHdvcmQzOTYgd29yZDM5NyB3b3JkMzk4IHdvcmQzOTkgd29yZDQwMCB3b3JkNDAxIHdvcmQ0MDIgd29yZDQwMyB3b3JkNDA0IHdvcmQ0MDUgd29yZDQwNiB3b3JkNDA3IHdvcmQ0MDggd29yZDQwOSB3b3JkNDEwIHdvcmQ0MTEgd29yZDQxMiB3b3JkNDEzIHdvcmQ0MTQgd29yZDQxNSB3b3JkNDE2IHdvcmQ0MTcgd29yZDQxOCB3b3JkNDE5IHdvcmQ0MjAgd29yZDQyMSB3b3JkNDIyIHdvcmQ0MjMgd29yZDQyNCB3b3JkNDI1IHdvcmQ0MjYgd29yZDQyNyB3b3JkNDI4IHdvcmQ0Mjkgd29yZDQzMCB3b3JkNDMxIHdvcmQ0MzIgd29yZDQzMyB3b3JkNDM0IHdvcmQ0MzUgd29yZDQzNiB3b3JkNDM3IHdvcmQ0Mzggd29yZDQzOSB3b3JkNDQwIHdvcmQ0NDEgd29yZDQ0MiB3b3JkNDQzIHdvcmQ0NDQgd29yZDQ0NSB3b3JkNDQ2IHdvcmQ0NDcgd29yZDQ0OCB3b3JkNDQ5IHdvcmQ0NTAgd29yZDQ1MSB3b3JkNDUyIHdvcmQ0NTMgd29yZDQ1NCB3b3JkNDU1IHdvcmQ0NTYgd29yZDQ1NyB3b3JkNDU4IHdvcmQ0NTkgd29yZDQ2MCB3b3JkNDYxIHdvcmQ0NjIgd29yZDQ2MyB3b3JkNDY0IHdvcmQ0NjUgd29yZDQ2NiB3b3JkNDY3IHdvcmQ0Njggd29yZDQ2OSB3b3JkNDcwIHdvcmQ0NzEgd29yZDQ3MiB3b3JkNDczIHdvcmQ0NzQgd29yZDQ3NSB3b3JkNDc2IHdvcmQ0Nzcgd29yZDQ3OCB3b3JkNDc5IHdvcmQ0ODAgd29yZDQ4MSB3b3JkNDgyIHdvcmQ0ODMgd29yZDQ4NCB3b3JkNDg1IHdvcmQ0ODYgd29yZDQ4NyB3b3JkNDg4IHdvcmQ0ODkgd29yZDQ5MCB3b3JkNDkxIHdvcmQ0OTIgd29yZDQ5MyB3b3JkNDk0IHdvcmQ0OTUgd29yZDQ5NiB3b3JkNDk3IHdvcmQ0OTggd29yZDQ5OSB3b3JkNTAwIHdvcmQ1MDEgd29yZDUwMiB3b3JkNTAzIHdvcmQ1MDQgd29yZDUwNSB3b3JkNTA2IHdvcmQ1MDcgd29yZDUwOCB3b3JkNTA5IHdvcmQ1MTAgd29yZDUxMSB3b3JkNTEyIHdvcmQ1MTMgd29yZDUxNCB3b3JkNTE1IHdvcmQ1MTYgd29yZDUxNyB3b3JkNTE4IHdvcmQ1MTkgd29yZDUyMCB3b3JkNTIxIHdvcmQ1MjIgd29yZDUyMyB3b3JkNTI0IHdvcmQ1MjUgd29yZDUyNiB3b3JkNTI3IHdvcmQ1Mjggd29yZDUyOSB3b3JkNTMwIHdvcmQ1MzEgd29yZDUzMiB3b3JkNTMzIHdvcmQ1MzQgd29yZDUzNSB3b3JkNTM2IHdvcmQ1Mzcgd29yZDUzOCB3b3JkNTM5IHdvcmQ1NDAgd29yZDU0MSB3b3JkNTQyIHdvcmQ1NDMgd29yZDU0NCB3b3JkNTQ1IHdvcmQ1NDYgd29yZDU0NyB3b3JkNTQ4IHdvcmQ1NDkgd29yZDU1MCB3b3JkNTUxIHdvcmQ1NTIgd29yZDU1MyB3b3JkNTU0IHdvcmQ1NTUgd29yZDU1NiB3b3JkNTU3IHdvcmQ1NTggd29yZDU1OSB3b3JkNTYwIHdvcmQ1NjEgd29yZDU2MiB3b3JkNTYzIHdvcmQ1NjQgd29yZDU2NSB3b3JkNTY2IHdvcmQ1Njcgd29yZDU2OCB3b3JkNTY5IHdvcmQ1NzAgd29yZDU3MSB3b3JkNTcyIHdvcmQ1NzMgd29yZDU3NCB3b3JkNTc1IHdvcmQ1NzYgd29yZDU3NyB3b3JkNTc4IHdvcmQ1Nzkgd29yZDU4MCB3b3JkNTgxIHdvcmQ1ODIgd29yZDU4MyB3b3JkNTg0IHdvcmQ1ODUgd29yZDU4NiB3b3JkNTg3IHdvcmQ1ODggd29yZDU4OSB3b3JkNTkwIHdvcmQ1OTEgd29yZDU5MiB3b3JkNTkzIHdvcmQ1OTQgd29yZDU5NSB3b3JkNTk2IHdvcmQ1OTcgd29yZDU5OCB3b3JkNTk5"
+      ],
+      "emitted": [
+        "word0 word1 word2 word3 word4 word5 word6 word7 word8 word9 word10 word11 word12 word13 word14 word15 word16 word17 word18 word19 word20 word21 word22 word23 word24 word25 word26 word27 word28 word29 word30 word31 word32 word33 word34 word35 word36 word37 word38 word39 word40 word41 word42 word43 word44 word45 word46 word47 word48 word49 word50 word51 word52 word53 word54 word55 word56 word57 word58 word59 word60 word61 word62 word63 word64 word65 word66 word67 word68 wor",
+        "d69 word70 word71 word72 word73 word74 word75 word76 word77 word78 word79 word80 word81 word82 word83 word84 word85 word86 word87 word88 word89 word90 word91 word92 word93 word94 word95 word96 word97 word98 word99 word100 word101 word102 word103 word104 word105 word106 word107 word108 word109 word110 word111 word112 word113 word114 word115 word116 word117 word118 word119 word120 word121 word122 word123 word124 word125 word126 word127 word128 word129 word130 word131 word132 word133 word134 word135 word136 word137 word138 word139 word140 word141 word142 word143 word144 word145 word146 word147 word148 word149 word150 word151 word152 word153 word154 word155 word156 word157 word158 word159 word160 word161 word162 word163 word164 word165 word166 word167 word168 word169 word170 word171 word172 word173 word174 word175 word176 word177 word178 word179 word180 word181 word182 word183 word184 word185 word186 word187 word188 word189 word190 word191 word192 word193 word194 word195 word196 word197 word198 word199 word200 word201 word202 word203 word204 word205 word206 word207 word208 word209 word210 word211 word212 word213 word214 word215 word216 word217 word218 word219 word220 word221 word222 word223 word224 word225 word226 word227 word228 word229 word230 word231 word232 word233 word234 word235 word236 word237 word238 word239 word240 word241 word242 word243 word244 word245 word246 word247 word248 word249 word250 word251 word252 word253 word254 word255 word256 word257 word258 word259 word260 word261 word262 word263 word264 word265 word266 word267 word268 word269 word270 word271 word272 word273 word274 word275 word276 word277 word278 word279 word280 word281 word282 word283 word284 word285 word286 word287 word288 word289 word290 word291 word292 word293 word294 word295 word296 word297 word298 word299 word300 word301 word302 word303 word304 word305 word306 word307 word308 word309 word310 word311 word312 word313 word314 word315 word316 word317 word318 word319 word320 word321 word322 word323 word324 word325 word326 word327 word328 word329 word330 word331 word332 word333 word334 word335 word336 word337 word338 word339 word340 word341 word342 word343 word344 word345 word346 word347 word348 word349 word350 word351 word352 word353 word354 word355 word356 word357 word358 word359 word360 word361 word362 word363 word364 word365 word366 word367 word368 word369 word370 word371 word372 word373 word374 word375 word376 word377 word378 word379 word380 word381 word382 word383 word384 word385 word386 word387 word388 word389 word390 word391 word392 word393 word394 word395 word396 word397 word398 word399 word400 word401 word402 word403 word404 word405 word406 word407 word408 word409 word410 word411 word412 word413 word414 word415 word416 word417 word418 word419 word420 word421 word422 word423 word424 word425 word426 word427 word428 word429 word430 word431 word432 word433 word434 word435 word436 word437 word438 word439 word440 word441 word442 word443 word444 word445 word446 word447 word448 word449 word450 word451 word452 word453 word454 word455 word456 word457 word458 word459 word460 word461 word462 word463 word464 word465 word466 word467 word468 word469 word470 word471"
+      ],
+      "flush": " word472 word473 word474 word475 word476 word477 word478 word479 word480 word481 word482 word483 word484 word485 word486 word487 word488 word489 word490 word491 word492 word493 word494 word495 word496 word497 word498 word499 word500 word501 word502 word503 word504 word505 word506 word507 word508 word509 word510 word511 word512 word513 word514 word515 word516 word517 word518 word519 word520 word521 word522 word523 word524 word525 word526 word527 word528 word529 word530 word531 word532 word533 word534 word535 word536 word537 word538 word539 word540 word541 word542 word543 word544 word545 word546 word547 word548 word549 word550 word551 word552 word553 word554 word555 word556 word557 word558 word559 word560 word561 word562 word563 word564 word565 word566 word567 word568 word569 word570 word571 word572 word573 word574 word575 word576 word577 word578 word579 word580 word581 word582 word583 word584 word585 word586 word587 word588 word589 word590 word591 word592 word593 word594 word595 word596 word597 word598 word599",
+      "name": "long_line_no_newline"
+    },
+    {
+      "chunks_b64": [
+        "bGluZSAwCg==",
+        "bGluZSAxCg==",
+        "bGluZSAyCg==",
+        "bGluZSAzCg==",
+        "bGluZSA0Cg==",
+        "cGFydGlhbA==",
+        "IGVuZAo="
+      ],
+      "emitted": [
+        "line 0\n",
+        "line 1\n",
+        "line 2\n",
+        "line 3\n",
+        "line 4\n",
+        "",
+        "partial end\n"
+      ],
+      "flush": "",
+      "name": "many_lines"
+    },
+    {
+      "chunks_b64": [
+        "LS0tLS1CRUdJTiBSU0EgUFJJVkFURSBLRVktLS0t",
+        "LQpNSUlFb3dJQkFBS0NBUUVBSUJBQUtDQVFFQUlCQUFLQ0FRRUFJQkFBS0NBUUVBSUI=",
+        "QUFLQ0FRRUFJQkFBS0NBUUVBCmFiY2RlZkZBS0VGQUtFPT0KLS0tLS1FTkQgUlNBIFBSSVZBVEUgS0VZLS0tLS0K"
+      ],
+      "emitted": [
+        "",
+        "",
+        ""
+      ],
+      "flush": "[SECRET:pem_private_key]\n",
+      "name": "pem_in_three_chunks"
+    }
+  ]
+}

@@ -1,0 +1,47 @@
+{
+  "check": 22,
+  "description": "A bundle id not on the local list.",
+  "expect": {
+    "executor_calls": 0,
+    "frames": [
+      {
+        "refusal_code": "not_configured",
+        "status": "refused",
+        "type": "result"
+      }
+    ],
+    "windows_shown": 0
+  },
+  "name": "v2_not_configured_bundle_id",
+  "setup": {
+    "now": 1796000005
+  },
+  "steps": [
+    {
+      "frame": {
+        "args": {
+          "bundle_id": "com.example.Other"
+        },
+        "args_sha256": "fd20a7e5a140ebf152b74d40816b7550d685097cd29a3b00a885d25017dd3bec",
+        "capability": "apps.open",
+        "capability_version": 1,
+        "class": "confirm",
+        "expires_at": 1796000090,
+        "grant": null,
+        "id": "fa790ed3-dbf2-494c-a782-de20bb58b8e2",
+        "invocation_id": "e16712bf-bad0-4b89-b0b3-7c8ea4c8b018",
+        "issued_at": 1796000000,
+        "key_id": "03396219237f75a6",
+        "node_id": "6f1e2d3c-4b5a-4987-8a6b-5c4d3e2f1a0b",
+        "nonce": "GyJRr6_D_gkQ9Ui-zg9BkjTkQspLjRTMV2EZZRbEjMk",
+        "sig": "Xz7563JfAYtOYwt_07CogDR-bhwE0CyVof4jez8oWSiWbZIM06nKP_QN813ELFD2uBOMeYCdYDYpEEarwgc8CA",
+        "trace_id": "conformance-v2-nc-bundle",
+        "type": "invoke",
+        "v": 2,
+        "workspace_id": "2a3b4c5d-6e7f-4a8b-9c0d-1e2f3a4b5c6d"
+      },
+      "op": "send"
+    }
+  ],
+  "version": 2
+}

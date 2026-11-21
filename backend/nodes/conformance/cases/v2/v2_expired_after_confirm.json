@@ -1,0 +1,81 @@
+{
+  "check": 24,
+  "description": "The grant expires while the window is open (clicked at 95 s).",
+  "expect": {
+    "executor_calls": 0,
+    "frames": [
+      {
+        "state": "shown",
+        "type": "confirmation"
+      },
+      {
+        "state": "approved",
+        "type": "confirmation"
+      },
+      {
+        "confirm_state": "approved",
+        "refusal_code": "expired_after_confirm",
+        "status": "refused",
+        "type": "result"
+      }
+    ]
+  },
+  "name": "v2_expired_after_confirm",
+  "setup": {
+    "now": 1796000040,
+    "window": [
+      {
+        "action": "approve",
+        "after": 55
+      }
+    ]
+  },
+  "steps": [
+    {
+      "frame": {
+        "args": {
+          "command_kind": "test",
+          "repo_path": "~/work/acme"
+        },
+        "args_sha256": "a1075b636d8f7d76b64e6dddaf0789d5915c4cc65cdc2d4a04ade9dbd96d2f85",
+        "capability": "repo.command.run",
+        "capability_version": 1,
+        "class": "gate",
+        "expires_at": 1796000090,
+        "grant": {
+          "approval_id": "8d7c6b5a-4e3f-4d2c-8b1a-0f9e8d7c6b5a",
+          "args_sha256": "a1075b636d8f7d76b64e6dddaf0789d5915c4cc65cdc2d4a04ade9dbd96d2f85",
+          "capability": "repo.command.run",
+          "capability_version": 1,
+          "class": "gate",
+          "expires_at": 1796000090,
+          "grant_id": "8dcb2437-f6d4-4843-a7a9-e742fc4d1877",
+          "issued_at": 1796000000,
+          "key_id": "03396219237f75a6",
+          "node_id": "6f1e2d3c-4b5a-4987-8a6b-5c4d3e2f1a0b",
+          "nonce": "xd6x91haj-I_aV-uRpi-zjsi-noDjHMd45GcPxi5EYA",
+          "sig": "vyDNFWf4GYhLFLTXkwH6i2A7XRYTtjRkMsDQceuA48JnWhXlhvguWsXQL7aTxGnXLJzL2vfoAVmQeFghneo4CQ",
+          "v": 2,
+          "workspace_id": "2a3b4c5d-6e7f-4a8b-9c0d-1e2f3a4b5c6d"
+        },
+        "id": "64357fbb-25e2-467e-a3eb-b921ff1c687e",
+        "invocation_id": "13c5c07e-4f6e-4da0-b8b7-6ed927cf7ab8",
+        "issued_at": 1796000000,
+        "key_id": "03396219237f75a6",
+        "node_id": "6f1e2d3c-4b5a-4987-8a6b-5c4d3e2f1a0b",
+        "nonce": "xd6x91haj-I_aV-uRpi-zjsi-noDjHMd45GcPxi5EYA",
+        "sig": "55rHyvby8zkiRkxbWUyhcp0Jl8wtlt64utZT6ekBYqwbwWcyXqv2P2tfNto1FXKuU6aiTu_hqd6fbAqHtBKDBg",
+        "trace_id": "conformance-v2-late",
+        "type": "invoke",
+        "v": 2,
+        "workspace_id": "2a3b4c5d-6e7f-4a8b-9c0d-1e2f3a4b5c6d"
+      },
+      "op": "send"
+    },
+    {
+      "op": "advance",
+      "seconds": 55
+    }
+  ],
+  "version": 2
+}

@@ -1,0 +1,103 @@
+{
+  "check": null,
+  "description": "Approved on the Mac: the mapped command runs, output streams, result.",
+  "expect": {
+    "executor_calls": 1,
+    "frames": [
+      {
+        "state": "shown",
+        "type": "confirmation"
+      },
+      {
+        "state": "approved",
+        "type": "confirmation"
+      },
+      {
+        "data": "acme tests ok\n",
+        "seq": 0,
+        "stream": "stdout",
+        "type": "output"
+      },
+      {
+        "confirm_state": "approved",
+        "exit_code": 0,
+        "output_bytes": 14,
+        "sandbox_violation": false,
+        "status": "ok",
+        "tail": "acme tests ok\n",
+        "type": "result"
+      }
+    ],
+    "windows_shown": 1
+  },
+  "name": "v2_gate_command_runs_after_click",
+  "setup": {
+    "executor": [
+      {
+        "chunks": [
+          [
+            "stdout",
+            "acme tests ok\n",
+            0
+          ]
+        ],
+        "exit_code": 0
+      }
+    ],
+    "now": 1796000005,
+    "window": [
+      {
+        "action": "approve",
+        "after": 2
+      }
+    ]
+  },
+  "steps": [
+    {
+      "frame": {
+        "args": {
+          "command_kind": "test",
+          "repo_path": "~/work/acme"
+        },
+        "args_sha256": "a1075b636d8f7d76b64e6dddaf0789d5915c4cc65cdc2d4a04ade9dbd96d2f85",
+        "capability": "repo.command.run",
+        "capability_version": 1,
+        "class": "gate",
+        "expires_at": 1796000090,
+        "grant": {
+          "approval_id": "8d7c6b5a-4e3f-4d2c-8b1a-0f9e8d7c6b5a",
+          "args_sha256": "a1075b636d8f7d76b64e6dddaf0789d5915c4cc65cdc2d4a04ade9dbd96d2f85",
+          "capability": "repo.command.run",
+          "capability_version": 1,
+          "class": "gate",
+          "expires_at": 1796000090,
+          "grant_id": "39b0d1b5-c31d-4a92-af4a-35522ad5fa9b",
+          "issued_at": 1796000000,
+          "key_id": "03396219237f75a6",
+          "node_id": "6f1e2d3c-4b5a-4987-8a6b-5c4d3e2f1a0b",
+          "nonce": "vs336KBk4x9NaPSOkGbVlHs4nC5SXfHcp1i8iHwGemg",
+          "sig": "qEV_bT1at7wNpIqYNTSv_eLL7A-7x6PSBal3By0afkDsfRThsRT1M6ty3MOVs60wZg3n9tlF5menMq6GSjlFCA",
+          "v": 2,
+          "workspace_id": "2a3b4c5d-6e7f-4a8b-9c0d-1e2f3a4b5c6d"
+        },
+        "id": "2b9c4aac-6fb2-4a4c-b7ce-6e18e5653f83",
+        "invocation_id": "702da844-464f-4850-bf1c-fe8f4284a672",
+        "issued_at": 1796000000,
+        "key_id": "03396219237f75a6",
+        "node_id": "6f1e2d3c-4b5a-4987-8a6b-5c4d3e2f1a0b",
+        "nonce": "vs336KBk4x9NaPSOkGbVlHs4nC5SXfHcp1i8iHwGemg",
+        "sig": "St6rDbequmCKIc6hJNcQzgiJlKfQHNTrpitQI4H8xNB6TqCmi3xyEncPVkL1WF6enJfftbrY7T40p2jJYEMFDQ",
+        "trace_id": "conformance-v2-run",
+        "type": "invoke",
+        "v": 2,
+        "workspace_id": "2a3b4c5d-6e7f-4a8b-9c0d-1e2f3a4b5c6d"
+      },
+      "op": "send"
+    },
+    {
+      "op": "advance",
+      "seconds": 2
+    }
+  ],
+  "version": 2
+}

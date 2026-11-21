@@ -1,0 +1,32 @@
+{
+  "check": 3,
+  "description": "A policy-mutation-shaped type (config.update) is unknown_type.",
+  "expect": {
+    "frames": [
+      {
+        "invocation_id": null,
+        "refusal_code": "unknown_type",
+        "status": "error",
+        "type": "result"
+      }
+    ]
+  },
+  "name": "v1_policy_shaped_config_update",
+  "setup": {
+    "now": 1796000005
+  },
+  "steps": [
+    {
+      "frame": {
+        "id": "ccc8e837-20b3-4d0f-9b32-7e5e545b9160",
+        "policy": {
+          "allow": "*"
+        },
+        "type": "config.update",
+        "v": 1
+      },
+      "op": "send"
+    }
+  ],
+  "version": 1
+}

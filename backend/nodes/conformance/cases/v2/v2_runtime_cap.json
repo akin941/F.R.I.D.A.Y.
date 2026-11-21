@@ -1,0 +1,91 @@
+{
+  "check": null,
+  "description": "A command past its runtime cap is stopped (timeout).",
+  "expect": {
+    "executor_calls": 1,
+    "executor_terminated": 1,
+    "frames": [
+      {
+        "state": "shown",
+        "type": "confirmation"
+      },
+      {
+        "state": "approved",
+        "type": "confirmation"
+      },
+      {
+        "exit_code": null,
+        "status": "timeout",
+        "type": "result"
+      }
+    ]
+  },
+  "name": "v2_runtime_cap",
+  "setup": {
+    "executor": [
+      {
+        "chunks": [],
+        "hang": true
+      }
+    ],
+    "now": 1796000005,
+    "window": [
+      {
+        "action": "approve",
+        "after": 0
+      }
+    ]
+  },
+  "steps": [
+    {
+      "frame": {
+        "args": {
+          "command_kind": "test",
+          "repo_path": "~/work/acme"
+        },
+        "args_sha256": "a1075b636d8f7d76b64e6dddaf0789d5915c4cc65cdc2d4a04ade9dbd96d2f85",
+        "capability": "repo.command.run",
+        "capability_version": 1,
+        "class": "gate",
+        "expires_at": 1796000090,
+        "grant": {
+          "approval_id": "8d7c6b5a-4e3f-4d2c-8b1a-0f9e8d7c6b5a",
+          "args_sha256": "a1075b636d8f7d76b64e6dddaf0789d5915c4cc65cdc2d4a04ade9dbd96d2f85",
+          "capability": "repo.command.run",
+          "capability_version": 1,
+          "class": "gate",
+          "expires_at": 1796000090,
+          "grant_id": "b563b4a1-e76b-456b-88c5-1640e908cefa",
+          "issued_at": 1796000000,
+          "key_id": "03396219237f75a6",
+          "node_id": "6f1e2d3c-4b5a-4987-8a6b-5c4d3e2f1a0b",
+          "nonce": "lQz6EBJ4jfAwz3zPKnLTpxHTgFsncQfMdWJJ-pWbbDA",
+          "sig": "Wd8R_sJ42JMW5442zHzN_bmoPZZpLXaAh-sUIRfnF0ygGych0GX_qDedb7HStlxHcoqcvX1_YDNWLTXVZ1dtCg",
+          "v": 2,
+          "workspace_id": "2a3b4c5d-6e7f-4a8b-9c0d-1e2f3a4b5c6d"
+        },
+        "id": "408aee05-b6ae-4e65-b13e-0379522c1d88",
+        "invocation_id": "88086e95-60da-4ad0-be89-bc2ab6d2efde",
+        "issued_at": 1796000000,
+        "key_id": "03396219237f75a6",
+        "node_id": "6f1e2d3c-4b5a-4987-8a6b-5c4d3e2f1a0b",
+        "nonce": "lQz6EBJ4jfAwz3zPKnLTpxHTgFsncQfMdWJJ-pWbbDA",
+        "sig": "8IWShkBwIK6Sa2QQeiH0S0Ce7A1rO_h-TX2YRXAB2sYSntO-qr3GDJWai_UfzvmUi6XbP08cRUBxq5UtHmz3Dw",
+        "trace_id": "conformance-v2-cap",
+        "type": "invoke",
+        "v": 2,
+        "workspace_id": "2a3b4c5d-6e7f-4a8b-9c0d-1e2f3a4b5c6d"
+      },
+      "op": "send"
+    },
+    {
+      "op": "advance",
+      "seconds": 299
+    },
+    {
+      "op": "advance",
+      "seconds": 1
+    }
+  ],
+  "version": 2
+}

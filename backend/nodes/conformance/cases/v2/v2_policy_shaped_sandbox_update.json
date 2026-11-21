@@ -1,0 +1,32 @@
+{
+  "check": 3,
+  "description": "A policy-mutation-shaped type (sandbox.update) is unknown_type.",
+  "expect": {
+    "frames": [
+      {
+        "invocation_id": null,
+        "refusal_code": "unknown_type",
+        "status": "error",
+        "type": "result"
+      }
+    ]
+  },
+  "name": "v2_policy_shaped_sandbox_update",
+  "setup": {
+    "now": 1796000005
+  },
+  "steps": [
+    {
+      "frame": {
+        "id": "876badbe-a72e-4e8f-ac2c-dca16ac0da5c",
+        "policy": {
+          "allow": "*"
+        },
+        "type": "sandbox.update",
+        "v": 2
+      },
+      "op": "send"
+    }
+  ],
+  "version": 2
+}

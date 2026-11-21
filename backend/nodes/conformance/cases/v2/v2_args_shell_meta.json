@@ -1,0 +1,45 @@
+{
+  "check": 20,
+  "description": "Args outside the node's own schema (shell_meta).",
+  "expect": {
+    "frames": [
+      {
+        "refusal_code": "args_schema",
+        "status": "refused",
+        "type": "result"
+      }
+    ]
+  },
+  "name": "v2_args_shell_meta",
+  "setup": {
+    "now": 1796000005
+  },
+  "steps": [
+    {
+      "frame": {
+        "args": {
+          "repo_path": "~/work/acme;rm -rf ~"
+        },
+        "args_sha256": "f1bd90e513d936ea69e7e69fdfafa4af7aa690db995186c3cd3febc18ce09a65",
+        "capability": "git.status",
+        "capability_version": 1,
+        "class": "read",
+        "expires_at": 1796000030,
+        "grant": null,
+        "id": "ccd77ea4-7a03-4d23-92f5-e26b7db23c8f",
+        "invocation_id": "2b4a9745-dd23-4893-b7c0-02219ad2ddc6",
+        "issued_at": 1796000000,
+        "key_id": "03396219237f75a6",
+        "node_id": "6f1e2d3c-4b5a-4987-8a6b-5c4d3e2f1a0b",
+        "nonce": "vmXsy442gXZLOTlvLFmFnHr_DB3PwnBOdhGEvmK2oe0",
+        "sig": "RL7abxWjFqe6xlA5_Aoig-NxH7cgTwaHuQ7NreAFZZgL4fZ9-iFT3g2bDs1uTcwv5IOQ808TKgTMECRxBMXSDw",
+        "trace_id": "conformance-v2-args-shell_meta",
+        "type": "invoke",
+        "v": 2,
+        "workspace_id": "2a3b4c5d-6e7f-4a8b-9c0d-1e2f3a4b5c6d"
+      },
+      "op": "send"
+    }
+  ],
+  "version": 2
+}

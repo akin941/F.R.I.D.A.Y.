@@ -1,0 +1,25 @@
+{
+  "check": null,
+  "description": "bye{revoked} closes the session and stops reconnecting.",
+  "expect": {
+    "closed_reason": "bye:revoked",
+    "frames": [],
+    "reconnect_allowed": false
+  },
+  "name": "v1_bye_revoked_no_reconnect",
+  "setup": {
+    "now": 1796000005
+  },
+  "steps": [
+    {
+      "frame": {
+        "id": "d828103b-d474-4f22-9827-94b6bd394839",
+        "reason": "revoked",
+        "type": "bye",
+        "v": 1
+      },
+      "op": "send"
+    }
+  ],
+  "version": 1
+}

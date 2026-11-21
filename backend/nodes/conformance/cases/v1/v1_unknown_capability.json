@@ -1,0 +1,45 @@
+{
+  "check": 12,
+  "description": "A capability the node does not have.",
+  "expect": {
+    "frames": [
+      {
+        "refusal_code": "unknown_capability",
+        "status": "refused",
+        "type": "result"
+      }
+    ]
+  },
+  "name": "v1_unknown_capability",
+  "setup": {
+    "now": 1796000005
+  },
+  "steps": [
+    {
+      "frame": {
+        "args": {
+          "cmd": "id"
+        },
+        "args_sha256": "33a745f9374f1bb4c60e0a67c0889b376e485a52102b935f943e15d9f4853352",
+        "capability": "shell.exec",
+        "capability_version": 1,
+        "class": "read",
+        "expires_at": 1796000030,
+        "grant": null,
+        "id": "358f5502-ca5f-44f8-8e30-1f28278a8694",
+        "invocation_id": "16d25ad2-9b3f-40ff-a0fc-e9aba23584d7",
+        "issued_at": 1796000000,
+        "key_id": "03396219237f75a6",
+        "node_id": "6f1e2d3c-4b5a-4987-8a6b-5c4d3e2f1a0b",
+        "nonce": "8xlUOusa4mRLti4gotd9ZLMQrNvdbeIT-JLAgkyufsM",
+        "sig": "MFjDYIiNd81gmz_q6_uE3IuKf9XZS8_nLrdFxQSXFcEp621vGiJzO9WX724_AV_NHC5BeCaSSN4vrK1S9bPyAw",
+        "trace_id": "conformance-v1-unknown",
+        "type": "invoke",
+        "v": 1,
+        "workspace_id": "2a3b4c5d-6e7f-4a8b-9c0d-1e2f3a4b5c6d"
+      },
+      "op": "send"
+    }
+  ],
+  "version": 1
+}
