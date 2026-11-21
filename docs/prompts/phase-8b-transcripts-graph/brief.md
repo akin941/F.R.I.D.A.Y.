@@ -1780,6 +1780,34 @@ one workspace, with no cross-workspace edge possible.
 Nothing in this branch needs the Mac, real credentials, paid calls or
 real hardware.
 
+**Known follow-ups — `feat/p8-temporal-facts` (review, LOW, unresolved
+at merge 2026-11-21).**
+1. **`forget_source_facts` leaves no current fact.** Forgetting a source
+   archives an approved fact A that had superseded fact B, where B came
+   from another source. B keeps its closed `valid_to` and its
+   `superseded_by`, and A is archived. The subject/predicate pair then
+   has no current fact until the source is restored. This matches the
+   literal D7 text, but no test covers it and nothing documents it.
+   Fix: record it as accepted in ADR-012, or add a test that pins the
+   behaviour. A later branch may reopen B's window.
+2. **`resolve_entity` revives trashed entities.** When a learning
+   proposal names a trashed entity again, the entity is revived without
+   notice. An entity the owner deleted can therefore come back in the
+   entity list with no facts. Fix: revive only for owner-authored
+   writes, or leave the entity trashed unless an approved fact
+   references it.
+3. **`supersede_fact` check order.** The system-row and status checks run
+   before the owner/web permission check, so its errors come in a
+   different order from the other services. The `IsOwner` permission
+   class already blocks non-owners at the view, so this cannot be
+   exploited. Fix: call `_require_owner_web` first in `supersede_fact`.
+4. **`purge_entity` preview omits referenced facts.** Purging an entity
+   deletes every non-live fact that references it. That includes facts
+   archived by a forget whose source could still be restored. The purge
+   is gate-approved and the docstring says so, but the approval preview
+   may not show these facts. Fix: include the count of referenced
+   non-live facts in the `purge_trash` preview.
+
 ### 2. `feat/p8-fact-learning` — episode extraction v2, reconciliation, reflection, caps
 
 **Scope.**
