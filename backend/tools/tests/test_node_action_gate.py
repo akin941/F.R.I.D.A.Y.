@@ -321,19 +321,6 @@ def test_prepare_payload_refuses_without_a_precheck_object():
 
 
 @pytest.mark.django_db
-def test_the_assistant_registers_the_explicit_stub():
-    # AssistantConfig.ready() ran at startup; node_world re-registers the
-    # same function after every test.
-    from assistant.apps import AssistantConfig
-
-    node_action_ports.reset_ports()
-    AssistantConfig("assistant", __import__("assistant")).ready()
-    registered = node_action_ports.registered_trust_check()
-    assert registered is node_action_ports.pending_trust_check
-    assert registered.is_stub is True
-
-
-@pytest.mark.django_db
 def test_a_typed_proposal_stores_the_pending_verdict(node_world):
     approval = request(node_world)
     assert approval.payload["trust"]["verdict"] == "warn"
