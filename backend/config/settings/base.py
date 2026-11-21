@@ -105,6 +105,9 @@ INSTALLED_APPS = [
     "voice",
     # Phase 6 branch 5 (brief A8): the HUD's read-only event stream, a leaf.
     "hud",
+    # Phase 9 (ADR-013, brief D2): the Friday Node server side. Only tools,
+    # hud, ops and config may import it (import-linter).
+    "nodes",
 ]
 
 AUTH_USER_MODEL = "accounts.User"
@@ -287,6 +290,11 @@ REST_FRAMEWORK = {
         # rotates every NODE_CREDENTIAL_ROTATE_AFTER_DAYS; this only bounds
         # a stolen secret hammering the endpoint).
         "node_rotate": env("NODE_ROTATE_RATE", default="10/hour"),
+        # Phase 9 branch 2 (D4): anonymous node pairing (`POST
+        # /api/v1/nodes/pair`). Like "refresh" this is effectively global
+        # (one owner, one or two Macs); it bounds code guessing on top of
+        # the per-code PIN attempt burn. Fails closed when Redis is down.
+        "node_pair": env("NODE_PAIR_RATE", default="10/hour"),
     },
 }
 
@@ -342,6 +350,21 @@ NODE_IDLE_EXPIRY_DAYS = env.int("NODE_IDLE_EXPIRY_DAYS", default=30)
 # - after a rotation the previous secret stays valid this long, or until the
 #   new secret is first used, whichever comes first.
 NODE_ROTATION_GRACE_SECONDS = env.int("NODE_ROTATION_GRACE_SECONDS", default=600)
+
+# Friday Node protocol signing (Phase 9 brief D4). NODE_SIGNING_KEY is an
+# Ed25519 private key, base64 of its raw 32 bytes, from the environment only
+# (`deploy/docker/gen-secrets.sh` writes one); its key id is derived (first
+# 16 hex of sha256 of the public key). NODE_SIGNING_KEYS_RETIRED lists
+# base64 raw PUBLIC keys that still verify but never sign (rollover is
+# re-pairing in Phase 9). A missing or malformed key refuses node pairing
+# and invokes (and fails preflight); nothing else is affected.
+NODE_SIGNING_KEY = env("NODE_SIGNING_KEY", default="")
+NODE_SIGNING_KEYS_RETIRED = env.list("NODE_SIGNING_KEYS_RETIRED", default=[])
+# A read `invoke` envelope's lifetime (expires_at - issued_at), at most the
+# protocol's 30 s ceiling (nodes.protocol.messages).
+NODE_READ_INVOKE_TTL_SECONDS = env.int("NODE_READ_INVOKE_TTL_SECONDS", default=30)
+# The largest canonical `result.output` a node may return (64 KiB, D5).
+NODE_MAX_RESULT_BYTES = env.int("NODE_MAX_RESULT_BYTES", default=64 * 1024)
 # PIN pairing codes are accepted only from these networks (LAN gating):
 # loopback, RFC 1918, IPv6 ULA and the CGNAT range Tailscale uses. Strong
 # codes and the remote key work from any network. Defense in depth, not the
