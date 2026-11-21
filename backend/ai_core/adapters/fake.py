@@ -117,7 +117,7 @@ FAKE_MEMORY_EXTRACTION_RESPONSE = fake_memory_extraction_response(
 
 # Purpose-aware fixtures for the Phase 8A learning loop (brief D9, D10),
 # hand-written mirrors of `memory.ingestion.extraction` / `.consolidation`'s
-# v1 schemas (ai_core must not import memory). Episode extraction: one
+# schemas (ai_core must not import memory). Episode extraction (v2): one
 # `memory` candidate per `<owner_item>` of the payload, quoting the item's
 # first characters verbatim. Consolidation: keep every candidate, in order,
 # with its own title/content.

@@ -13,13 +13,24 @@ never mixed with cloud-eligible ones):
    select candidates by index and reword their title/content -- the quote,
    episode, source and target stay the code-held, verified ones.
 3. **Caps in code** (d6): at most `MAX_PROPOSALS_PER_NIGHT` new proposals per
-   owner per night across all workspaces (memory + core-block proposals; the
-   rest are discarded and counted, never queued) and the weekly core-block
-   cap (`memory.services.CORE_BLOCK_PROPOSALS_PER_WEEK`).
+   owner per night across all workspaces (memory + core-block + fact
+   proposals, the weekly reflection's included; the rest are discarded and
+   counted, never queued) and the weekly core-block cap
+   (`memory.services.CORE_BLOCK_PROPOSALS_PER_WEEK`).
+
+Phase 8B (brief D4, D6): `fact` candidates skip steps 1-2 and go through
+`memory.ingestion.reconciliation` instead; they are created after the
+memories and core-block proposals, at most `MAX_FACT_PROPOSALS_PER_NIGHT` of
+the 10 (`fact_cap`), and a fact whose new entities would pass
+`MAX_NEW_ENTITIES_PER_NIGHT` in its workspace is dropped (`entity_cap`).
+`create_capped_proposals` is the one place these caps live; the weekly
+reflection uses it too.
 
 It **never applies** anything: every output row is `pending_approval` /
-`pending`. A budget refusal or a transient gateway error leaves the
-candidates for the next night; a schema error discards them (terminal).
+`pending`. A budget refusal or a transient gateway error on the
+consolidation call leaves the candidates (facts included) for the next
+night; a consolidation schema error discards the memory candidates
+(terminal), while their facts still go on to reconciliation.
 """
 
 import json

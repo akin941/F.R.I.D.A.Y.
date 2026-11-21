@@ -1,6 +1,7 @@
 """Idempotent seed for AI defaults: friday_system, friday_memory_extraction
-(v1 and the Phase 8A v2), friday_episode_extraction,
-friday_memory_consolidation, the learning budgets,
+(v1 and the Phase 8A v2), friday_episode_extraction (v1, Phase 8B v2),
+friday_memory_consolidation, friday_fact_reconciliation,
+friday_memory_reflection, the learning budgets,
 friday_router_intent, friday_router_task_draft, friday_router_connector_args,
 friday_agent_plan and the
 other purpose prompts, providers, and (D11) default ModelTier rows.
