@@ -23,7 +23,7 @@ import { tr } from "@/lib/i18n/tr";
 import { queryKeys } from "@/lib/query/keys";
 import { TONE_PILL_CLASSES } from "@/lib/theme/status";
 import { cn } from "@/lib/utils";
-import type { ApiLearningDigest, ApiLearningItem } from "@/types/api";
+import type { ApiLearningDigest, ApiLearningFactItem, ApiLearningItem } from "@/types/api";
 
 const copy = tr.learning.card;
 
@@ -55,6 +55,35 @@ function Quote({ quote }: { quote: string }) {
   );
 }
 
+/** A fact proposal (Phase 8B D4): its validity window and, from the
+ * `supersedes` link, the current fact it would replace -- or that this fact
+ * has changed since, which leaves only edit and reject. */
+function FactDetails({ item }: { item: ApiLearningFactItem }) {
+  const from = formatDateTime(item.valid_from);
+  return (
+    <div className="flex flex-col gap-1" data-testid="fact-details">
+      <p className="text-xs text-muted-foreground" data-testid="fact-validity">
+        {item.valid_to ? copy.fact.validRange(from, formatDateTime(item.valid_to)) : copy.fact.validFrom(from)}
+      </p>
+      {item.supersedes ? (
+        item.supersedes.changed ? (
+          <p
+            className={cn("rounded-md border px-3 py-2 text-xs", TONE_PILL_CLASSES.warning)}
+            data-testid="fact-supersedes-changed"
+          >
+            {copy.fact.supersedesChanged}
+          </p>
+        ) : (
+          <p className="text-xs text-muted-foreground" data-testid="fact-supersedes">
+            {copy.fact.supersedes(item.supersedes.statement, formatDateTime(item.supersedes.valid_from))}
+          </p>
+        )
+      ) : null}
+      <p className="text-xs text-muted-foreground">{copy.fact.perItem}</p>
+    </div>
+  );
+}
+
 function useRemoveItems() {
   const queryClient = useQueryClient();
   return (ids: string[]) => {
@@ -78,16 +107,22 @@ export function LearningItemCard({ item }: { item: ApiLearningItem }) {
   const [editing, setEditing] = useState(false);
   const [title, setTitle] = useState(item.title);
   const [content, setContent] = useState(item.content);
+  const [statement, setStatement] = useState(item.kind === "fact" ? item.statement : "");
 
   async function decide(action: "approve" | "reject" | "edit", body?: Record<string, string>) {
     setBusy(true);
     setError(null);
     try {
-      // Memory approve/edit carry (optional) curated fields; core-block
-      // actions carry no body.
-      const payload = item.kind === "memory" && action !== "reject" ? (body ?? {}) : undefined;
+      // Memory approve/edit carry (optional) curated fields; a fact edit
+      // carries the owner's statement; every other action carries no body.
+      const payload =
+        (item.kind === "memory" && action !== "reject") || (item.kind === "fact" && action === "edit")
+          ? (body ?? {})
+          : undefined;
       await apiPostJson(proposalPath(item, action), payload);
-      if (action === "edit") {
+      // A fact edit is applied at once as the owner's own approved version
+      // (D2), so the proposal leaves the card like an approval.
+      if (action === "edit" && item.kind === "memory") {
         setEditing(false);
         queryClient.setQueryData<ApiLearningDigest>(queryKeys.learningDigest(), (prev) =>
           prev
@@ -112,7 +147,13 @@ export function LearningItemCard({ item }: { item: ApiLearningItem }) {
   }
 
   const isCoreBlock = item.kind === "core-block";
-  const heading = isCoreBlock ? copy.coreBlock(tr.learning.coreBlocks.label[item.label]) : item.title;
+  const heading = isCoreBlock
+    ? copy.coreBlock(tr.learning.coreBlocks.label[item.label])
+    : item.kind === "fact"
+      ? item.statement
+      : item.title;
+  const canApprove = (item.actions as string[]).includes("approve");
+  const canEdit = item.kind !== "core-block" && (item.actions as string[]).includes("edit");
 
   return (
     <Card data-testid={`learning-item-${item.id}`} data-kind={item.kind}>
@@ -122,7 +163,8 @@ export function LearningItemCard({ item }: { item: ApiLearningItem }) {
           {item.kind === "memory" ? (
             <Badge variant="outline">{tr.memory.type[item.memory_type]}</Badge>
           ) : null}
-          {item.kind === "memory" && item.sensitivity === "private" ? (
+          {item.kind === "fact" ? <Badge variant="outline">{copy.fact.badge}</Badge> : null}
+          {item.kind !== "core-block" && item.sensitivity === "private" ? (
             <Badge variant="outline" className={TONE_PILL_CLASSES.warning}>
               {tr.memory.sensitivity.private}
             </Badge>
@@ -132,7 +174,33 @@ export function LearningItemCard({ item }: { item: ApiLearningItem }) {
         <p className="text-xs text-muted-foreground">{sourceLine(item)}</p>
       </CardHeader>
       <CardContent className="flex flex-col gap-3">
-        {editing && item.kind === "memory" ? (
+        {editing && item.kind === "fact" ? (
+          <form
+            className="flex flex-col gap-2"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void decide("edit", { statement }).catch(() => undefined);
+            }}
+          >
+            <Label htmlFor={`statement-${item.id}`}>{copy.fact.statementLabel}</Label>
+            <Textarea
+              id={`statement-${item.id}`}
+              value={statement}
+              onChange={(e) => setStatement(e.target.value)}
+              rows={3}
+            />
+            <div className="flex flex-wrap gap-2">
+              <Button type="submit" size="sm" disabled={busy || !statement.trim()}>
+                {busy ? copy.busy : copy.save}
+              </Button>
+              <Button type="button" size="sm" variant="outline" onClick={() => setEditing(false)}>
+                {tr.common.cancel}
+              </Button>
+            </div>
+          </form>
+        ) : item.kind === "fact" ? (
+          <FactDetails item={item} />
+        ) : editing && item.kind === "memory" ? (
           <form
             className="flex flex-col gap-2"
             onSubmit={(event) => {
@@ -180,14 +248,16 @@ export function LearningItemCard({ item }: { item: ApiLearningItem }) {
 
         {!editing ? (
           <div className="flex flex-wrap gap-2">
-            <Button
-              size="sm"
-              disabled={busy}
-              onClick={() => void decide("approve").catch(() => undefined)}
-            >
-              {busy ? copy.busy : copy.approve}
-            </Button>
-            {item.kind === "memory" ? (
+            {canApprove ? (
+              <Button
+                size="sm"
+                disabled={busy}
+                onClick={() => void decide("approve").catch(() => undefined)}
+              >
+                {busy ? copy.busy : copy.approve}
+              </Button>
+            ) : null}
+            {canEdit ? (
               <Button size="sm" variant="outline" disabled={busy} onClick={() => setEditing(true)}>
                 {copy.edit}
               </Button>

@@ -1257,6 +1257,16 @@ export const tr = {
       bulkFailed: "Toplu onay yapılamadı.",
       rejectTitle: "Öneri reddedilsin mi?",
       rejectDescription: (title: string) => `“${title}” hafızaya eklenmeyecek.`,
+      fact: {
+        badge: "Bilgi önerisi",
+        validFrom: (date: string) => `Geçerli: ${date} tarihinden beri`,
+        validRange: (from: string, to: string) => `Geçerli: ${from} – ${to}`,
+        supersedes: (statement: string, date: string) => `Yerine geçeceği bilgi: “${statement}” (${date} tarihinden beri)`,
+        supersedesChanged:
+          "Yerine geçeceği bilgi değişti (silindi ya da başka bir bilgiyle değiştirildi). Bu öneri artık onaylanamaz; düzenleyerek yeni bir sürüm oluşturabilir ya da reddedebilirsin.",
+        statementLabel: "Bilgi cümlesi",
+        perItem: "Bilgi önerileri tek tek onaylanır.",
+      },
     },
     ingestion: {
       title: "Öğrenme kaynakları",
