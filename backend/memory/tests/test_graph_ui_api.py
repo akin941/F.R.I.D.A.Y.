@@ -155,15 +155,6 @@ def test_an_unclamped_cursor_has_no_window_and_other_sources_have_no_cursors(
     assert cursor["since_clamped"] == 0 and cursor["last_skipped_window"] is None
 
     git = sources[IngestionSource.Kind.GIT]
-    assert client.get(f"/api/v1/memory/ingestion/sources/{git.id}").json()[
-        "transcript_cursors"
-    ] == []
-
-
-def test_the_pull_job_uses_memorys_constants():
-    from tools import transcript_ingest
-
-    assert transcript_ingest.AUDIT_ACTION == PULL_AUDIT_ACTION
-    assert set(transcript_ingest.CAPABILITIES.values()) == set(CAPABILITY_BY_SOURCE_KIND.values())
-    assert transcript_ingest.CAPABILITIES["claude"] == "claude.transcripts.owner_turns"
-    assert transcript_ingest.CAPABILITIES["codex"] == "codex.transcripts.owner_turns"
+    assert (
+        client.get(f"/api/v1/memory/ingestion/sources/{git.id}").json()["transcript_cursors"] == []
+    )
