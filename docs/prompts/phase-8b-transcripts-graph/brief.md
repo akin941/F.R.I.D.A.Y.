@@ -511,8 +511,13 @@ Bulk approve stays `work_log`-only. Every fact is approved per item.
   trashes its learned facts, with the same id.
 - `purge_trash` gains the keys `fact_ids` and `entity_ids`. It stays
   gate-class, decided on `/approvals`.
-- Graphify rows are outside forget and trash (D3, D10). The repo's
-  `graphify_enabled` switch removes them (D10).
+- Graphify rows are outside forget and trash (D3, D10). Turning the
+  repo's `graphify_enabled` switch off **retires** them: every current
+  `system` fact of that repo gets `valid_to = now`, and its entities
+  drop out of every read. Nothing is deleted, and re-enabling re-imports
+  on the next head. Permanent removal is the gate-class `purge_trash`
+  with a new key `graphify_repo_ids`, so no delete skips the gate
+  (rule 4, ADR-009).
 - The vault mirror prunes entity notes of trashed or archived rows on
   its next run (D12).
 
@@ -567,8 +572,14 @@ Bulk approve stays `work_log`-only. Every fact is approved per item.
   5. **Hop expansion:** the entities of the top-10 facts seed
      `neighbourhood(hops=MEMORY_RETRIEVAL_HOPS, default 1, max 2)`.
      Expanded facts enter at `score × 0.5` per hop.
-  6. The result is cut to the existing budgets: memories and facts share
-     `MEMORY_CHAR_BUDGET` (4000), chunks keep theirs.
+  6. The result is cut to the existing budget: memories and facts share
+     `MEMORY_CHAR_BUDGET` (4000).
+
+  Knowledge chunks keep their own selector and budget.
+  `knowledge.context.select_context_chunks` gains the same vector plus
+  full-text fusion inside `knowledge`, using a pure helper
+  `core.ranking.rrf(lists, k=60)`, so `memory` never imports
+  `knowledge` for retrieval.
 
   A `GatewayError` on the embed degrades to full text only, never to a
   failed turn, like the existing ranker.
@@ -1083,8 +1094,8 @@ episodes.
   `workspaces`, `audit`, `core` and `ai_core` (embeddings only). It is
   added to the existing `memory.ingestion` contract's sibling list,
   with the same forbidden set plus `nodes`.
-- `memory.evals` may import `memory`, `knowledge`, `ai_core` and
-  `workspaces`. It is never imported by production code (a contract:
+- `memory.evals` may import `memory`, `ai_core`, `workspaces` and
+  `core`. It is never imported by production code (a contract:
   no app imports `memory.evals`; `ops` may, for the preflight read of
   the last run).
 - `ai_core.compression` imports only the standard library and Django
@@ -1350,7 +1361,8 @@ in CI, and the same command with `--set private` is ready for the owner.
 - the `memory_eval compare --retrieval hybrid` arm.
 
 **Files.**
-- `backend/memory/migrations/`, `backend/knowledge/migrations/`;
+- `backend/memory/migrations/`, `backend/knowledge/migrations/`,
+  `backend/knowledge/context.py`, `backend/core/ranking.py`;
 - `backend/memory/retrieval/{__init__,hybrid}.py`,
   `backend/memory/context.py`, `backend/memory/jobs.py`,
   `backend/memory/tasks.py`;
@@ -1417,15 +1429,16 @@ window, and the public eval set reports hybrid and legacy side by side.
   - `memory.graph.ports.import_code_graph`, the temporal replace;
   - `code_graph_summary`;
   - the `self` template line `codebase`;
-  - removal of a repo's Graphify rows when `graphify_enabled` is turned
-    off (a hard delete of `system` rows, which are not owner data,
-    audited with counts);
+  - retiring a repo's Graphify rows when `graphify_enabled` is turned
+    off (D7: windows closed, rows hidden, nothing deleted, audited with
+    counts), and the gate-class `purge_trash` key `graphify_repo_ids`;
   - the manifest and allowlist rows;
   - the ADR-012 note (part 2, Graphify as `system`).
 
 **Files.**
 - `backend/harness/{models,ingestion,runner,tasks,graphify}.py` plus a
   migration, `backend/harness/graphify_schema_v1.json`;
+- `backend/tools/purge.py` (the `graphify_repo_ids` key);
 - `backend/harness/docker/{graphify.Dockerfile,graphify_run.sh,
   graphify.lock.txt}`, `backend/harness/docker/README.md`;
 - `backend/harness/tests/` (with
@@ -1473,8 +1486,9 @@ window, and the public eval set reports hybrid and legacy side by side.
   - the line is absent without a run.
 - **Isolation:** rows land in the repo's workspace only. A firm repo's
   graph never reaches the personal `self`.
-- **Disable:** turning the flag off removes exactly that repo's
-  `system` rows.
+- **Disable:** turning the flag off retires exactly that repo's
+  `system` rows (windows closed, hidden from reads, none deleted);
+  purging them needs an approved `purge_trash` request.
 - No real Graphify run in CI. A separate opt-in test
   (`HARNESS_GRAPHIFY_IMAGE_TEST=1`, nightly or owner-run) builds the
   image and runs it over the fixture package with `--network none`.
