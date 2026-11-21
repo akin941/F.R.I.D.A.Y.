@@ -2262,3 +2262,24 @@ or `memory`.
 7. Deployment: the `node-gateway` compose service (Phase 9 branch 4) is
    what serves `config.asgi_nodes`; the three new settings have safe
    defaults and need no `.env` value.
+
+### Known follow-ups — `feat/p10-invocation-grants`, unresolved LOW review notes (recorded at merge, 2026-11-21)
+
+1. LOW, `backend/nodes/services.py`: `record_gated_progress` lets a
+   `confirmation` frame regress status (`running` -> `confirming` on a late
+   or replayed `shown`). A compromised or buggy node can only affect its own
+   execution's display status, and the terminal result is unaffected. Fix:
+   only apply `shown` while status is in (`granted`, `sent`), and `approved`
+   while status is in (`granted`, `sent`, `confirming`).
+2. LOW, `backend/nodes/services.py`: `dispatch_gated` commits status
+   `granted` before the bus push. If the worker dies between the commit and
+   the push, the row stays in flight until `sweep_node_actions` finishes it
+   as `timeout` (watchdog deadline plus 60 s grace). This is bounded and
+   fails closed, but the terminal status is `timeout` rather than a more
+   specific code. Fix (optional): record the push outcome in the same step,
+   or document the behaviour. No change needed to merge.
+3. LOW, `backend/tools/node_actions.py`: `describe_request` puts
+   `ax.type_text` `text` and app args into the approval summary. In a
+   personal workspace this is visible only to the owner, so it is
+   acceptable, but the field is typed text. Fix (optional): truncate `text`
+   in the summary to a bounded length.
