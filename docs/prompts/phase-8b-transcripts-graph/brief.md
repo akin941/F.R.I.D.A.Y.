@@ -2609,6 +2609,39 @@ moves one mapped inbox note, and leaves an unmapped one in place.
 Nothing else in this branch needs the Mac, real credentials, paid calls
 or real hardware; the tests use a temporary vault under `tmp_path`.
 
+**Known follow-ups — `feat/p8-obsidian-mirror` (review, LOW, unresolved at
+merge into the integration branch, 2026-11-21).**
+1. **Inbox path-escape errors fail the whole run**
+   (`backend/tools/vault_inbox.py`). `VaultPathEscapeError` (a
+   `VaultPathError`, not an `OSError`) raised from `read_validated_bytes`
+   in `_import_one`, or from `_ImportedFolder.ensure()` in `_move`, is not
+   caught by the per-note handlers, which only catch `OSError`. A planted
+   symlink at `00_Inbox/_imported` (or a mid-run swap) fails the run as
+   `PATH_VALIDATION_FAILED`; because the inbox import runs before the
+   export pass, the memory and entity mirror is blocked until the symlink
+   is removed. Committed episodes are not duplicated on retry, so this is
+   availability only. Fix: catch `VaultPathError` next to `OSError` in
+   `_import_one` and `_move`, count it as skipped or `move_failed` and
+   continue.
+2. **Conflict-check reads are unbounded** (`backend/tools/export.py`).
+   `_read_existing` calls `read_validated_bytes` with no `max_bytes`, so
+   the dry pass (which can run in an approvals request path) and the run
+   read every existing export-path file in full. Fix: pass a generous
+   `max_bytes` (e.g. 1 MB); over the cap, treat the file as edited and
+   copy it, or skip conservatively.
+3. **`rename_validated` no-clobber is best-effort**
+   (`backend/tools/vault_paths.py`). The destination-absent check and
+   `os.rename` are separate steps, so a racing local process could create
+   the destination and POSIX rename would replace it (tiny window). Fix:
+   use `renameat2` with `RENAME_NOREPLACE` where available, or `os.link` +
+   `os.unlink` via `dir_fd`.
+4. **`entity_kind` written unescaped** (`backend/tools/vault_entities.py`).
+   `entity.kind` goes into the frontmatter line `entity_kind: ...` without
+   sanitising; a newline would corrupt the frontmatter, so the note would
+   parse as not recognised, never be pruned, and be treated as edited and
+   copied. Kinds are closed-vocabulary, so not currently exploitable. Fix:
+   pass `entity.kind` through the same one-line sanitiser used for names.
+
 ### 8. `feat/p8-transcript-ingestion` — owner-turn capabilities, reference readers, pull job
 
 **Precondition:** Phase 9 branches 2–5 merged on the integration branch.
