@@ -343,7 +343,14 @@ taken after transcripts arrive could not tell what they changed.
   - `statement` (≤ 500, the rendered Turkish sentence shown to the
     owner);
   - `valid_from` (required) and `valid_to` (null means "still valid");
-  - `superseded_by` (FK self, null);
+  - `superseded_by` (FK self, null), set on the **old** row only when a
+    supersede is applied;
+  - `supersedes` (FK self, null, `PROTECT`), set on a **pending**
+    proposal only: the current fact it would replace if approved
+    (reconciliation's `supersede` decision, D4; an owner edit is applied
+    at once and never stays pending). It is cleared when the proposal is
+    approved (the link then lives in the old row's `superseded_by`),
+    rejected or forgotten;
   - `confidence` (integer 0–100; model-proposed facts are capped at 90
     until approved, Graphify `EXTRACTED` edges are 100);
   - `status`: `pending_approval`, `approved`, `rejected`, `archived`
@@ -362,7 +369,11 @@ taken after transcripts arrive could not tell what they changed.
   - `origin='graphify'` ⇔ `status='system'`;
   - a `learned` fact has a non-empty quote;
   - `object_entity` is in the same workspace as the fact (enforced in
-    `save()` and in a DB trigger, the `Memory.save` precedent).
+    `save()` and in a DB trigger, the `Memory.save` precedent);
+  - `supersedes IS NULL OR status = 'pending_approval'` (a DB check);
+  - the `supersedes` target has the same workspace, subject and
+    predicate as the proposal and is not the proposal itself (enforced
+    in `save()` and in the same DB trigger).
 - **Predicate vocabulary v1** (a closed `TextChoices`, extended only by
   a reviewed commit):
   - learned: `decided`, `uses`, `depends_on`, `deployed_to`, `owned_by`,
@@ -375,6 +386,20 @@ taken after transcripts arrive could not tell what they changed.
     `old.superseded_by = new` in one transaction under
     `select_for_update` of both rows. It is allowed only when both have
     the same subject and predicate and the same workspace.
+  - **`approve_fact(proposal)`** of a proposal with `supersedes` set runs
+    in one transaction: it locks the proposal and its target
+    (`select_for_update`, in primary-key order), re-checks that the
+    target is still a **current** fact (approved, `valid_to IS NULL`,
+    not trashed or archived), sets the proposal `approved`, clears
+    `supersedes`, and calls `supersede(old=target, new=proposal)`. If
+    the target is no longer current (superseded by another fact,
+    trashed, archived by a forget), nothing changes: the call returns
+    409 `supersede_target_changed`, the proposal stays pending, and the
+    digest shows it as "the fact it replaces has changed" with reject or
+    edit as its actions (an edit creates a fresh proposal against the
+    now-current fact).
+  - **`reject_fact`** of such a proposal clears `supersedes` and leaves
+    the target untouched.
   - **"Current facts"** are `approved` or `system`, with
     `valid_to IS NULL`, not trashed.
   - **"Facts as of T"** are `valid_from <= T < coalesce(valid_to, ∞)`.
@@ -452,9 +477,12 @@ taken after transcripts arrive could not tell what they changed.
   - The code checks that a `supersede` names a current fact with the
     same subject, predicate and workspace. Otherwise the decision falls
     back to `new` and is counted.
-  - A `supersede` decision becomes a proposal that, **when approved**,
-    calls `supersede()`. Nothing is applied by the model. This is
-    ADR-012's "never applies".
+  - A `supersede` decision becomes a `pending_approval` fact whose
+    `supersedes` FK (D2) names the validated target. **When approved**,
+    `approve_fact` calls `supersede(old=supersedes, new=proposal)`
+    atomically (D2). Nothing is applied by the model. This is ADR-012's
+    "never applies". The digest's "supersedes" line is rendered from
+    that FK.
 - **Chat extraction v2 (8A)** may also emit `fact` candidates, quoted
   from `user` turns only, through the same parser.
 - Justification: facts are short and structured, so the cheap tier
@@ -506,6 +534,17 @@ Bulk approve stays `work_log`-only. Every fact is approved per item.
   rejects its pending fact proposals, under the same operation id.
   `restore_source` brings back exactly those rows. An entity left with
   no live fact is trashed with the same id.
+  - A rejected pending proposal has its `supersedes` cleared (the D2
+    check); the proposal's forget never touches its target.
+    `restore_source` returns it to `pending_approval` **without** the
+    link (the target may have changed meanwhile), so it comes back as a
+    plain `new` proposal.
+  - When the forgotten source owns the **target** of another source's
+    pending proposal, the target is archived as usual and the proposal's
+    later approval is refused with `supersede_target_changed` (D2).
+  - `purge_trash` of a fact first rejects any pending proposal whose
+    `supersedes` names it (clearing the link), so the `PROTECT` FK never
+    blocks a gated purge.
 - Owner delete of one fact or entity is a reversible trash move
   (ADR-009, a required `channel`, `CHANNEL_WEB`). Trashing an entity
   trashes its learned facts, with the same id.
@@ -626,7 +665,7 @@ Bulk approve stays `work_log`-only. Every fact is approved per item.
 
 - **Harness** in the `memory/evals/` package:
   - `schema.py` holds the case format v1:
-    `{id, workspace_ref, tags:[...], setup:{memories, facts, episodes},
+    `{id, workspace_ref, sensitivity, tags:[...], setup:{memories, facts, episodes},
     history:[{role, content}], question, expected:{must_contain:[...],
     must_not_contain:[...], relevant_ids:[...]}}`. `history` is
     optional (prior `user`/`assistant` turns, D11 "Enabling per
@@ -662,11 +701,49 @@ Bulk approve stays `work_log`-only. Every fact is approved per item.
   the candidate purpose instead, in both arms, under the same eval-only
   budget.
 - **Isolation.** The set runs against a throwaway database: the
-  `memory_eval` command refuses to run unless `DJANGO_SETTINGS_MODULE`
-  points at the eval settings, which use their own DB name. It never
-  writes cases into the owner's live workspaces.
-- **Results** go to `MemoryEvalRun` (workspace-agnostic, metrics only,
-  never case text) and to this brief's "Go/no-go record" as numbers.
+  `memory_eval run|baseline|compare` subcommands refuse to run unless
+  `DJANGO_SETTINGS_MODULE` points at the eval settings, which use their
+  own DB name. They never write cases into the owner's live workspaces.
+- **Eligibility applies to eval setup rows.** A case's `setup` memories,
+  facts and episodes are loaded as ordinary rows of the throwaway
+  database, so retrieval and the answer call apply exactly the chat
+  rules: `cloud_eligible()` for memories, the `private` fact rule (D8),
+  and `needs_personal_data` for episodes. A case may also carry
+  `sensitivity: private` (case format v1, default `normal`): every setup
+  row of such a case is stored `private`, and its answer call (and both
+  D11 compare arms) runs with `personal_data=True`, so it goes only to a
+  local provider. With a cloud-only provider set such a case is counted
+  `no_provider` (no call, no answer metric) rather than sent. The
+  runbook tells the owner to flag every case built from firm or personal
+  work data `private`.
+- **Results.** The eval run writes a metrics-only result file
+  (`<MEMORY_EVAL_PRIVATE_DIR>/results/<run id>.json`, mode 0600; for the
+  public set under `MEMORY_EVAL_RESULTS_DIR`). It is recorded in the live
+  database by `memory_eval record <file>`, which runs under the normal
+  settings and refuses the eval settings. `MemoryEvalRun` is a
+  **`WorkspaceScopedModel`** anchored to the **owner's personal
+  workspace** (the command takes `--owner <username>` and resolves that
+  user's personal workspace; any other workspace is refused). Its
+  fields:
+  - `set` (`public` or `private`), `kind` (`run`, `baseline` or
+    `compare`), `retrieval_mode`, `compression_purpose` (null or a
+    purpose name), `arm` (null, `a` or `b`), `started_at` and
+    `finished_at`;
+  - case counts (`total`, `answered`, `no_provider`, `budget_stopped`);
+  - the aggregate metrics (recall@10, leak rate, temporal correctness,
+    answer accuracy, `pre_tokens`/`post_tokens` for compares) and a
+    `verdict` (`pass`, `fail`, `inconclusive` or null).
+
+  It stores **no** case text, case ids, `workspace_ref` values, tags,
+  questions, answers or per-case rows, and **no per-workspace
+  breakdown**. `record` refuses a result file with any key outside this
+  list (unknown keys terminal). The numbers also go to this brief's
+  "Go/no-go record".
+- **Read access.** `GET /api/v1/memory/evals/runs` (branch 3) lists the
+  rows through `MemoryEvalRun.objects.for_actor(request.user)`: web
+  channel, `IsOwner`, human, default authentication only. Because the
+  rows live in the owner's personal workspace, a firm-only member sees
+  nothing, and no installation-level exception to rule 1 is needed.
 - **Baseline.** `memory_eval baseline --set private` on the owner's
   stack with `legacy` retrieval and no compression is **the** recorded
   baseline. Hybrid retrieval and each Headroom purpose are compared
@@ -992,9 +1069,19 @@ episodes.
   - Before overwriting an existing export-owned file, the run reads it.
     If its body's sha256 differs from its own `content_sha256`, the
     owner edited it.
-  - The run then writes the current file text to
-    `_conflicts/<YYYY-MM-DD>/<workspace-id>/<file name>` (validated
-    descriptors, no follow) before overwriting, and counts it.
+  - The run then writes the current file text to a conflict copy
+    (validated descriptors, no follow) before overwriting, and counts
+    it. **The copy keeps the file's tier:**
+    - a file from the open tree goes to
+      `_conflicts/<YYYY-MM-DD>/<workspace-id>/<file name>`;
+    - a file from `_private/<workspace-id>/...` (a `private` memory or
+      entity note) goes to
+      `_private/_conflicts/<YYYY-MM-DD>/<workspace-id>/<file name>`,
+      so private text is never written outside `_private/`.
+
+    The tier is taken from the path being overwritten, not from the
+    edited frontmatter (an owner edit cannot move a note out of
+    `_private/`).
   - A v1 file without `content_sha256` is not a conflict. It is
     rewritten as v2.
   - The notice:
@@ -1113,7 +1200,8 @@ episodes.
     advertises the capability as invocable and `granted`.
   - For each workspace that has at least one `path_prefix` rule
     (`prefixes_for_workspace`), it makes one `invoke_read` per tool with
-    that workspace's prefixes and `since` = the cursor. The invoke is
+    that workspace's prefixes and `since` = the clamped cursor (below).
+    The invoke is
     signed and writes one chain row and one `AuditLog` row. Ingestion is
     therefore one workspace per invoke, the same rule as chat reads.
   - **Actor: the system-owner form, never `None`.** The Phase 9 brief
@@ -1168,9 +1256,39 @@ episodes.
       `cwd` in `normalise_path` form, absolute or `~/`).
   - `TranscriptCursor` (memory, the personal workspace; one row per
     source, workspace and node reference string) advances to
-    `next_since` only after the episodes commit.
+    `next_since` only after the episodes commit. An empty result (no
+    turns) leaves it unchanged.
+  - **The `since` clamp.** The contract refuses a `since` older than
+    now − 7 days, so the job never sends the raw cursor:
+    - `since = max(cursor, now − 7 days + 5 minutes)`. The 5-minute
+      margin absorbs clock skew between the server and the node, so a
+      clamped value is never refused as too old.
+    - **First run** (no cursor row for that source, workspace and node):
+      `since = max(source.enabled_at, now − 7 days + 5 minutes)`, where
+      `enabled_at` is the time the owner last enabled the source (a new
+      nullable `IngestionSource.enabled_at`, added by branch 8 and set by
+      the enable path each time `enabled` turns true; a null value falls
+      back to the 7-day bound). Turns older than the enable time are
+      never pulled.
+    - When the clamp moves `since` forward (a stale cursor after the Mac
+      slept, the grant was off or the node was offline for over a week),
+      the skipped window is lost by design. The job counts it:
+      `TranscriptCursor.since_clamped` (a counter) and
+      `last_clamped_at`, plus `since_clamped: true` and the skipped
+      window's bounds in the invoke's `AuditLog` metadata. The ingestion
+      audit view (branch 9) shows the count and the last skipped window
+      per source.
+    - So a stale cursor can never make every beat fail with the same
+      refusal.
   - A failed or refused invoke leaves the cursor unchanged. It is never
-    retried inside the same beat.
+    retried inside the same beat. The next beat re-applies the clamp.
+  - **Tied timestamps.** The node returns turns with `at >= since`
+    (D17 item 5), so turns that share the last returned `at` are
+    returned again on the next pull and dedupe on `external_id`. If a
+    truncated result's `next_since` equals the `since` it was called
+    with (one timestamp filled the whole `max_turns` cap), the cursor
+    moves forward by 1 ms and `tie_overflow` is counted and audited, so
+    the cursor can never stall.
 - **Sources.**
   - `IngestionSource.Kind.CLAUDE_CODE_TRANSCRIPTS` and
     `CODEX_TRANSCRIPTS`, seeded disabled. The owner enables them (d5:
@@ -1311,8 +1429,13 @@ implements it in Python, as the executable spec.
    byte parity against `backend/nodes/conformance/vectors/scrub.json`,
    which now includes the D14 transcript corpus.
 5. **`since` and `next_since`.**
-   - Turns are returned oldest first, with `at > since`.
-   - `next_since` is the `at` of the last returned turn.
+   - Turns are returned oldest first, ordered by `(at, turn_id)`, with
+     `at >= since` (inclusive). Turns at exactly `since` are returned
+     again; the server dedupes them on `external_id`, so a cap that cuts
+     a group of tied timestamps never skips the rest of the group.
+   - `next_since` is the `at` of the last returned turn (it equals
+     `since` only when one timestamp filled the cap; the server then
+     moves on by 1 ms, D13).
    - `truncated` is true when a cap cut the result.
    - The node keeps no cursor of its own: the server owns it.
 6. **No storage.** The node caches nothing it read beyond the call,
@@ -1378,6 +1501,22 @@ No new ADR.
     supersede of one fact by two threads leaves one winner);
   - an edit of an approved fact creates a version;
   - `facts_as_of` at boundary instants (half-open interval).
+- **`supersedes` link (D2):**
+  - the check refuses `supersedes` on an `approved`, `rejected`,
+    `archived` or `system` row (ORM and raw-SQL UPDATE);
+  - a target of another subject, predicate or workspace, or the row
+    itself, is refused in `save()` and by the trigger;
+  - approving a proposal with `supersedes` closes the target's window,
+    sets its `superseded_by`, approves the proposal and clears the link,
+    all in one transaction (a failure injected after the status write
+    leaves both rows unchanged);
+  - reject clears the link and leaves the target current;
+  - the target superseded by another fact, trashed, or archived by a
+    forget before approval → 409 `supersede_target_changed`, both rows
+    unchanged, the proposal still pending;
+  - a two-thread race (approve the proposal while the target is
+    trashed) ends with exactly one of the two outcomes, never a closed
+    window on a trashed target.
 - **CTE:**
   - 1 and 2 hops over a fixture graph give the expected edge set;
   - a cycle terminates;
@@ -1387,8 +1526,12 @@ No new ADR.
     collide.
 - **Cascade:**
   - forget archives exactly the source's learned facts and rejects its
-    pending ones;
-  - restore brings back exactly those;
+    pending ones, clearing their `supersedes` links and leaving the
+    targets current;
+  - restore brings back exactly those (a restored proposal has no
+    `supersedes`);
+  - purge of a fact that a pending proposal supersedes rejects the
+    proposal first and then purges (no `ProtectedError`);
   - Graphify rows are untouched;
   - purge of `fact_ids` is gate-class (no purge without an approved
     request).
@@ -1451,8 +1594,17 @@ one workspace, with no cross-workspace edge possible.
 - **Validity:** a `valid_from` outside ± 1 day is clamped and counted.
 - **Reconciliation:**
   - a `supersede` of another subject or workspace falls back to `new`;
-  - approval of a supersede proposal calls `supersede()`;
-  - a rejected one changes nothing;
+  - a validated `supersede` stores the target in the proposal's
+    `supersedes` FK, and the digest's "supersedes" line names it;
+  - approval of a supersede proposal through the digest action calls
+    `supersede(old=supersedes, new=proposal)` and closes the target's
+    window;
+  - a rejected one changes nothing on the target;
+  - the target trashed or superseded before approval → the digest
+    action returns 409 `supersede_target_changed` and the card shows the
+    "has changed" state;
+  - forgetting the candidate's source rejects the pending proposal and
+    leaves the target current;
   - one `ModelUsage` per call;
   - budget exceeded means no call, the candidates stay `new`, and one
     `budget_exceeded` row.
@@ -1482,7 +1634,9 @@ yields at most 5 quoted reflection proposals.
 **Scope.**
 - D9: `memory/evals/{schema,runner,metrics,loader}.py`;
 - `manage.py memory_eval run|baseline|compare`;
-- `MemoryEvalRun`;
+- `MemoryEvalRun` (`WorkspaceScopedModel`, the owner's personal
+  workspace), `memory_eval record`, and the read endpoint
+  `GET /api/v1/memory/evals/runs`;
 - the eval settings module (`config/settings/eval.py`, with its own DB
   name);
 - the public seed cases (about 60);
@@ -1498,6 +1652,8 @@ yields at most 5 quoted reflection proposals.
 - `backend/memory/evals/`, `backend/memory/evals/cases/public/`;
 - `backend/memory/models.py` plus a migration;
 - `backend/memory/management/commands/memory_eval.py`;
+- `backend/memory/evals/{serializers,views,urls}.py`,
+  `backend/memory/urls.py`;
 - `backend/config/settings/eval.py`;
 - `backend/memory/tests/test_evals.py`;
 - `.github/workflows/` (the public-set step);
@@ -1514,7 +1670,25 @@ yields at most 5 quoted reflection proposals.
   file.
 - The repo-scan test fails when a stray case file is added outside
   `public/` (a tmp test).
-- `MemoryEvalRun` stores metrics only (field scan for case text).
+- `MemoryEvalRun` stores metrics only (field scan for case text): it
+  is a `WorkspaceScopedModel`; `memory_eval record` writes it in the
+  named owner's personal workspace only and refuses another workspace,
+  a result file with an unknown key (for example `cases` or
+  `workspace_ref`), and the eval settings module.
+- **Eligibility of eval setup rows:**
+  - a `sensitivity: private` case stores its setup rows `private` and
+    sends its answer call with `personal_data=True` (captured on
+    FakeAdapter);
+  - the same case with a cloud-only provider set is counted
+    `no_provider`, with no provider called and no answer recorded;
+  - a non-`cloud_eligible` setup memory of a `normal` case is never in
+    the payload sent to a cloud provider (payload capture).
+- **Endpoint `GET /api/v1/memory/evals/runs`:** role × endpoint against
+  the five Phase 4 principals plus a `hook` PAT and a node secret (owner
+  web session 200; `cli`/`openai` PAT, `hook` PAT, node secret and
+  anonymous 401; non-owner and `is_agent` 403); a firm-only member's
+  `for_actor()` sees no rows; the response carries only the D9 metric
+  fields.
 - `memory.eval_answer` writes one `ModelUsage` per case answered, with
   `eval_run_id`.
 - Budget refusal stops the run cleanly and records a partial result.
@@ -1768,7 +1942,8 @@ pre/post counts in its single `ModelUsage` row while the system message
 - D12:
   - `render_frontmatter` v2 (`friday_format`, `content_sha256`);
   - entity notes and their prune;
-  - conflict detection and copy to `_conflicts/<date>/`;
+  - conflict detection and copy to `_conflicts/<date>/` (or
+    `_private/_conflicts/<date>/` for a private note);
   - `VaultExportRun.conflicts_saved` plus a migration;
   - the `work_log` notice;
   - the approval description with counts (a dry pass in
@@ -1798,6 +1973,11 @@ export tests use).
 - **Conflicts:**
   - an edited body gives a copy in `_conflicts/<date>/<ws>/` with the
     edited text, and the file is then overwritten;
+  - an edited **private** note (under `_private/<ws>/`) gives its copy
+    in `_private/_conflicts/<date>/<ws>/`, and a scan of every file
+    outside `_private/` finds none of its text (also when the owner
+    edited its frontmatter to `sensitivity: normal`);
+  - a symlinked `_private/_conflicts` is refused like `_conflicts`;
   - an unedited file gives no copy;
   - a symlinked `_conflicts` is refused (the `O_NOFOLLOW` path);
   - the `work_log` row and count are written;
@@ -1863,7 +2043,8 @@ moves one mapped inbox note, and leaves an unmapped one in place.
   - the Phase 9 amendment in `nodes/services.py`: the `channel`
     keyword, the `actor_not_owner` actor check, and
     `SYSTEM_READ_CAPABILITIES`;
-  - `TranscriptCursor` plus a migration;
+  - `TranscriptCursor` (with `since_clamped`, `last_clamped_at` and
+    `tie_overflow`) and `IngestionSource.enabled_at`, plus a migration;
   - the two sources (seeded disabled, personal-class);
   - `tools/transcript_ingest.py` and its beat;
   - the corpus file;
@@ -1904,6 +2085,9 @@ moves one mapped inbox note, and leaves an unmapped one in place.
   - `cwd_prefixes` honoured;
   - caps and `truncated`;
   - `next_since` monotonic;
+  - `at >= since`: turns tied with `since` are returned again, and with
+    a cap boundary inside a tie group the next pull returns the rest of
+    the group (no tied turn skipped);
   - every text scrubbed (no raw corpus secret in any `result` frame).
 - **Conformance:** all old and new cases pass in-process and over the
   localhost socket; `--check` is green.
@@ -1917,7 +2101,23 @@ moves one mapped inbox note, and leaves an unmapped one in place.
   - no invoke when a source is disabled, the node is offline, the
     capability is `not_granted`, or a workspace has no rules;
   - the cursor advances only after commit;
-  - a failed invoke keeps the cursor.
+  - a failed invoke keeps the cursor;
+  - **stale cursor:** a cursor 10 days old sends `since = now − 7 days +
+    5 minutes` (asserted on the received frame), the reference node
+    accepts it, `since_clamped` is incremented and `last_clamped_at`
+    set, the `AuditLog` metadata carries `since_clamped: true` and the
+    window bounds, and the next beat (cursor now recent) sends the plain
+    cursor with no clamp;
+  - **no cursor:** a first run sends `since = max(enabled_at, now − 7
+    days + 5 minutes)` for a source enabled 2 days ago and for one
+    enabled 30 days ago, and creates the cursor row only after commit;
+  - three beats with a two-week-old cursor give three accepted invokes,
+    never a repeated `since` refusal;
+  - **ties:** a fixture with 5 turns sharing one `at` across a
+    `max_turns` boundary yields every turn exactly once across two
+    pulls (dedupe on `external_id`); a fixture where one timestamp holds
+    more than `max_turns` turns moves the cursor by 1 ms and counts
+    `tie_overflow`.
 - **Hostile node:** it ignores `cwd_prefixes`, returns another
   workspace's session, returns an assistant-like turn with a
   `<system-reminder>` prefix, and returns aggregates. Each foreign row
@@ -1986,9 +2186,12 @@ proposal.
   - the transcript and inbox sources;
   - their "path rules shared with Claude Code hooks" notice;
   - the dropped-not-owner and unmapped counts;
+  - per transcript source, the `since_clamped` count, the last skipped
+    window and the `tie_overflow` count (D13);
   - the Graphify run list (status, sha, counts).
 - The vault run detail: the conflicts count and folder.
-- `/memory/evals`: the last runs' metrics, read-only.
+- `/memory/evals`: the last runs' metrics, read-only, from branch 3's
+  `GET /api/v1/memory/evals/runs` (owner only, `for_actor()`).
 - BFF routes and `tr.ts` strings.
 
 **Files.**
@@ -1997,8 +2200,9 @@ proposal.
   and tests, `IngestionView.tsx`;
 - `frontend/src/app/api/memory/{graph,evals}/`,
   `frontend/src/lib/i18n/tr.ts`;
-- `backend/memory/graph/views.py` (the Graphify run read and eval run
-  read endpoints, if not already in 1, 3 and 5).
+- `backend/memory/graph/views.py` (the Graphify run read endpoint, if
+  not already in 5). The eval run read endpoint is branch 3's
+  `GET /api/v1/memory/evals/runs`; branch 9 adds only the BFF route.
 
 **Tests.**
 - **Vitest:**
@@ -2070,7 +2274,7 @@ Mac and private-data rows pending owner evaluation.
 
 | # | Branch | Scope | Depends on | Status |
 |---|---|---|---|---|
-| brief | `docs/p8b-brief` | This brief (full, from the stub), MASTER_PLAN §AA row 8B Brief/Status | Phase 8A closeout; Phase 9 brief | **implemented 2026-11-20** (docs only; pins verified 2026-11-21 against PyPI and the official repos; review round 1 findings fixed 2026-11-21; awaits the Sonnet 5 re-review) |
+| brief | `docs/p8b-brief` | This brief (full, from the stub), MASTER_PLAN §AA row 8B Brief/Status | Phase 8A closeout; Phase 9 brief | **implemented 2026-11-20** (docs only; pins verified 2026-11-21 against PyPI and the official repos; review round 1 findings fixed 2026-11-21; review round 2 findings fixed 2026-11-21; awaits the Sonnet 5 re-review) |
 | 1 | `feat/p8-temporal-facts` | `MemoryEntity`/`MemoryFact`, validity windows, supersede, recursive-CTE traversal, owner API, forget/trash/purge cascade, `memory.graph` contract | brief approved | not started |
 | 2 | `feat/p8-fact-learning` | Extraction schema v2 with facts, entity-in-quote rule, reconciliation, weekly reflection, caps, digest fact items | 1 | not started |
 | 3 | `feat/p8-eval-set` | Eval harness, public seed, private loader, `memory_eval`, `memory.eval_answer` purpose, CI public run | 1 (parallel with 2) | not started |
@@ -2434,3 +2638,17 @@ the Phase 8A go/no-go") is restated here as steps:
    - D11 compresses only assistant history (tool outputs are in the
      system message and out of reach), and the compression eval runs
      both arms under the candidate purpose with `history` fixtures.
+6. Review round 2 fixes (2026-11-21), to confirm with the plan review:
+   - the D13 `since` clamp (`max(cursor, now − 7 days + 5 minutes)`, the
+     first-run start at the source's enable time, the `since_clamped`
+     counter) and D17's inclusive `at >= since` with `external_id`
+     dedupe: a Mac that sleeps for over a week loses the turns older
+     than 7 days by design;
+   - the `supersedes` FK on pending fact proposals (D2, D4, D7);
+   - `MemoryEvalRun` as a scoped row in the owner's personal workspace,
+     recorded from a metrics-only result file, with an owner-only read
+     endpoint (D9, branch 3);
+   - the tier-preserving `_private/_conflicts/` path (D12);
+   - eval setup rows under the chat eligibility rules, with the
+     `sensitivity: private` case flag (D9). The owner flags every
+     private case built from firm or personal data.
