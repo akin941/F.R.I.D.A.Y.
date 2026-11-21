@@ -33,7 +33,7 @@ import os
 import uuid
 from contextlib import contextmanager
 from dataclasses import dataclass, field
-from datetime import timedelta
+from datetime import date, timedelta
 
 from django.conf import settings
 from django.db import transaction
@@ -185,6 +185,8 @@ class ExportStats:
     entity_notes: int = 0
     conflicts_saved: int = 0
     conflicts_private: int = 0
+    # The `<date>` of the conflict folders (the sink's local date).
+    conflicts_day: date | None = None
     inbox: InboxStats = field(default_factory=InboxStats)
 
     def as_tuple(self):
@@ -196,6 +198,21 @@ def _as_stats(counts) -> ExportStats:
         return counts
     written, updated, removed = counts
     return ExportStats(written=written, updated=updated, removed=removed)
+
+
+def conflict_folders(run) -> list[str]:
+    """The vault folders a succeeded run saved conflict copies to (D12,
+    branch 9): `_conflicts/<date>/` and/or `_private/_conflicts/<date>/`.
+    Folder names only; empty without conflicts or a recorded day."""
+    if not run.conflicts_saved or run.conflicts_day is None:
+        return []
+    day = run.conflicts_day.isoformat()
+    folders = []
+    if run.conflicts_saved - run.conflicts_private:
+        folders.append(f"{CONFLICTS_DIR}/{day}/")
+    if run.conflicts_private:
+        folders.append(f"{PRIVATE_TREE}/{CONFLICTS_DIR}/{day}/")
+    return folders
 
 
 def conflict_notice(stats: ExportStats, day: str) -> str:
@@ -229,6 +246,8 @@ def finalize_vault_export_success(run_id, claim_token, counts):
     run.updated_count = updated
     run.removed_count = removed
     run.conflicts_saved = stats.conflicts_saved
+    run.conflicts_private = stats.conflicts_private
+    run.conflicts_day = stats.conflicts_day if stats.conflicts_saved else None
     run.entity_notes_count = stats.entity_notes
     run.inbox_imported_count = stats.inbox.imported
     run.inbox_unmapped_count = stats.inbox.unmapped
@@ -244,6 +263,8 @@ def finalize_vault_export_success(run_id, claim_token, counts):
             "updated_count",
             "removed_count",
             "conflicts_saved",
+            "conflicts_private",
+            "conflicts_day",
             "entity_notes_count",
             "inbox_imported_count",
             "inbox_unmapped_count",
@@ -475,6 +496,8 @@ class _ConflictSink:
 
     def save(self, filename, data: bytes):
         self.stats.conflicts_saved += 1
+        if self.stats.conflicts_day is None:
+            self.stats.conflicts_day = date.fromisoformat(self.day)
         if self.private:
             self.stats.conflicts_private += 1
         if self.dry_run:
@@ -758,8 +781,11 @@ def describe_vault_export_execution(approval_request):
         "updated_count": run.updated_count,
         "removed_count": run.removed_count,
         "retry_count": run.retry_count,
-        # Phase 8B branch 7 (D12): the conflict count on the approval detail.
+        # Phase 8B branch 7 (D12): the conflict count on the approval detail;
+        # branch 9: the folder(s) they were saved in (names only).
         "conflicts_saved": run.conflicts_saved,
+        "conflicts_private": run.conflicts_private,
+        "conflicts_folders": conflict_folders(run),
         "entity_notes_count": run.entity_notes_count,
         "inbox_imported_count": run.inbox_imported_count,
         "inbox_unmapped_count": run.inbox_unmapped_count,

@@ -93,6 +93,7 @@ def serialize_audit(view):
         "tokens_spent_today": view["tokens_spent_today"],
         "acceptance": view["acceptance"],
         "forget_preview": view["forget_preview"],
+        "transcript_cursors": view["transcript_cursors"],
     }
 
 

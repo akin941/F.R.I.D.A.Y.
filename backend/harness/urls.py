@@ -1,6 +1,7 @@
 from django.urls import path
 
 from harness.views import (
+    GraphifyRunListView,
     HarnessImplementationJobCancelView,
     HarnessImplementationJobDetailView,
     HarnessImplementationJobListCreateView,
@@ -13,6 +14,8 @@ from harness.views import (
 )
 
 urlpatterns = [
+    # Phase 8B branch 9: the Graphify run list of the ingestion audit view.
+    path("harness/graphify-runs", GraphifyRunListView.as_view(), name="harness-graphify-runs"),
     path("harness/repos", HarnessRepoListCreateView.as_view(), name="harness-repo-list"),
     path(
         "harness/repos/<uuid:repo_id>",
