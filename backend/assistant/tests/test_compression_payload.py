@@ -203,7 +203,14 @@ def test_the_sidecar_sees_exactly_the_assistant_history_in_order(
     [sent] = sidecar.requests
     assert sent == [{"role": "assistant", "content": c} for r, c in HISTORY if r == "assistant"]
     sent_text = "\n".join(m["content"] for m in sent)
-    for text in (SELF_TEXT, DEVELOPER_TEXT, MEMORY_TEXT, CONNECTOR_TEXT, NEW_USER, "You are Friday."):
+    for text in (
+        SELF_TEXT,
+        DEVELOPER_TEXT,
+        MEMORY_TEXT,
+        CONNECTOR_TEXT,
+        NEW_USER,
+        "You are Friday.",
+    ):
         assert text not in sent_text
     for _role, content in HISTORY[::2]:  # no user message
         assert content not in sent_text
@@ -215,7 +222,9 @@ def test_the_sidecar_sees_exactly_the_assistant_history_in_order(
         if message["role"] == "user":
             assert payload[index] == message
     assert payload[-1] == {"role": "user", "content": NEW_USER}
-    assert [payload[i]["content"] for i in (2, 4, 6)] == [c[:40] for r, c in HISTORY if r == "assistant"]
+    assert [payload[i]["content"] for i in (2, 4, 6)] == [
+        c[:40] for r, c in HISTORY if r == "assistant"
+    ]
     assert messages == original  # the caller's list is untouched
 
 

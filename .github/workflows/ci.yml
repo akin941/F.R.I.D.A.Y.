@@ -70,6 +70,13 @@ jobs:
       - name: Tests
         run: uv run pytest
 
+      # Phase 8B branch 6 (brief D11): the compressor sidecar's server
+      # refusals, stdlib only (a fake compress function; Headroom itself is
+      # tested in the image build by test_no_litellm.py).
+      - name: Compressor sidecar server tests (no Headroom)
+        working-directory: deploy/compressor
+        run: python3 test_server.py
+
       # Phase 8B branch 3 (brief D9): the public eval seed's retrieval
       # metrics on FakeAdapter, against the eval settings' own database
       # (`memory_eval` refuses the live settings). No answer call, no cost.

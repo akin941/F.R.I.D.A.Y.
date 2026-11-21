@@ -11,6 +11,7 @@ import json
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 
 import pytest
 from django.conf import settings as django_settings
@@ -94,7 +95,10 @@ class FakeCompressor:
                 "transforms_applied": ["router:noop"],
                 "lossless": True,
             }
-        out = [{"role": "assistant", "content": m["content"][: len(m["content"]) // 2]} for m in messages]
+        out = [
+            {"role": "assistant", "content": m["content"][: len(m["content"]) // 2]}
+            for m in messages
+        ]
         return {
             "messages": out,
             "tokens_before": sum(len(m["content"]) // 4 for m in messages),
@@ -125,10 +129,10 @@ def _complete(purpose="chat", messages=None, **kwargs):
 
 def test_default_settings_are_off():
     assert django_settings.AI_COMPRESSION_TIMEOUT_MS == 300
-    from config.settings import base
-
-    assert base.AI_COMPRESSION_ENABLED is False
-    assert base.AI_COMPRESSION_PURPOSES == frozenset()
+    # Read as source: kernel apps may not import the project config.
+    base = (Path(__file__).resolve().parents[2] / "config" / "settings" / "base.py").read_text()
+    assert 'AI_COMPRESSION_ENABLED = env.bool("AI_COMPRESSION_ENABLED", default=False)' in base
+    assert 'frozenset(env.list("AI_COMPRESSION_PURPOSES", default=[]))' in base
 
 
 def test_off_by_default_the_payload_is_byte_identical_and_no_sidecar_request(
@@ -232,7 +236,9 @@ def test_no_assistant_history_makes_no_sidecar_request(provider, sidecar, settin
     assert report["skipped"] == "no_assistant_history"
 
 
-def test_a_longer_answer_never_inflates_a_message(provider, adapter_payloads, monkeypatch, settings):
+def test_a_longer_answer_never_inflates_a_message(
+    provider, adapter_payloads, monkeypatch, settings
+):
     class Inflating(FakeCompressor):
         def compress(self, messages, *, model):
             return {
@@ -342,7 +348,9 @@ def test_the_stream_path_off_is_unchanged(provider, adapter_payloads, sidecar):
     assert "compression" not in ModelUsage.objects.get().context_report
 
 
-def test_personal_data_calls_are_compressed_and_flagged(provider, adapter_payloads, sidecar, settings):
+def test_personal_data_calls_are_compressed_and_flagged(
+    provider, adapter_payloads, sidecar, settings
+):
     _enable(settings, "chat")
     _complete(personal_data=True)
     assert len(sidecar.requests) == 1
@@ -413,7 +421,9 @@ def _client(httpd, timeout=2.0):
 
 
 def test_the_http_client_round_trip(stub_server):
-    answer = _client(stub_server).compress([{"role": "assistant", "content": "hello world"}], model="m")
+    answer = _client(stub_server).compress(
+        [{"role": "assistant", "content": "hello world"}], model="m"
+    )
     assert answer["messages"] == [{"role": "assistant", "content": "hello"}]
     path, body = _Stub.seen[0]
     assert path == "/compress" and body == {
@@ -425,7 +435,9 @@ def test_the_http_client_round_trip(stub_server):
 def test_the_http_client_maps_timeout_and_5xx(stub_server):
     _Stub.mode = "slow"
     with pytest.raises(compression.CompressorError) as exc:
-        _client(stub_server, timeout=0.1).compress([{"role": "assistant", "content": "x"}], model="m")
+        _client(stub_server, timeout=0.1).compress(
+            [{"role": "assistant", "content": "x"}], model="m"
+        )
     assert exc.value.code == "timeout"
     _Stub.mode = "500"
     with pytest.raises(compression.CompressorError) as exc:
@@ -440,7 +452,9 @@ def test_the_http_client_refuses_a_body_over_one_megabyte(stub_server):
     assert exc.value.code == "request_too_large" and _Stub.seen == []
 
 
-def test_an_unreachable_sidecar_fails_open_through_the_gateway(provider, adapter_payloads, settings):
+def test_an_unreachable_sidecar_fails_open_through_the_gateway(
+    provider, adapter_payloads, settings
+):
     _enable(settings, "chat")
     settings.AI_COMPRESSION_URL = "http://127.0.0.1:9/compress"  # discard port: refused
     settings.AI_COMPRESSION_TIMEOUT_MS = 200
