@@ -2440,7 +2440,10 @@ moves one mapped inbox note, and leaves an unmapped one in place.
     Counts and folder names only.
   - **Frontend.** No approval-card renderer for the `vault_export`
     summary in this branch (the brief lists no frontend files here; the
-    conflict view is branch 9). The summary is served now.
+    conflict view is branch 9). The summary is served now. The sources
+    screen (`IngestionView`) gains the `obsidian_inbox` label and offers
+    only `vault_prefix` rules on it (and never elsewhere), so owner step
+    8 can be done from the web.
 - Tests: `tools/tests/test_vault_mirror.py` (format, conflicts, entity
   notes, the gate, the dry pass, `display_summary` over the API),
   `tools/tests/test_vault_inbox.py` (the inbox list above, provider class,
