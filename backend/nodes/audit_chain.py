@@ -58,6 +58,20 @@ HASHED_FIELDS = (
     "channel",
     "prev_hash",
 )
+# Phase 10 D7: an action row (confirm / gate class) hashes its class, the
+# approval and grant ids, the exit code, the confirmation state and the hash
+# version itself. Phase 9 rows keep `hash_version` 1 and verify unchanged.
+HASHED_FIELDS_V2 = HASHED_FIELDS + (
+    "invocation_class",
+    "approval_id",
+    "grant_id",
+    "exit_code",
+    "confirm_state",
+    "hash_version",
+)
+HASHED_FIELDS_BY_VERSION = {1: HASHED_FIELDS, 2: HASHED_FIELDS_V2}
+ACTION_CLASSES = ("confirm", "gate")
+CONFIRM_STATES = ("", "approved", "denied", "timed_out", "closed", "not_required")
 
 _HEX64 = re.compile(r"[0-9a-f]{64}")
 
@@ -73,18 +87,24 @@ def _timestamp(value) -> str:
 def hash_payload(row) -> dict:
     """The dict whose canonical JSON is hashed into `row_hash`."""
     payload = {}
-    for name in HASHED_FIELDS:
+    fields = HASHED_FIELDS_BY_VERSION.get(row.hash_version)
+    if fields is None:
+        raise ChainWriteError("unknown hash version")
+    for name in fields:
         value = getattr(row, name)
         if name == "created_at":
             value = _timestamp(value)
-        elif name in ("id", "workspace_id", "node_id", "actor_id"):
+        elif name in ("id", "workspace_id", "node_id", "actor_id", "approval_id", "grant_id"):
             value = None if value is None else str(value)
         payload[name] = value
     return payload
 
 
 def compute_row_hash(row) -> str:
-    return sha256_hex(hash_payload(row))
+    try:
+        return sha256_hex(hash_payload(row))
+    except ChainWriteError:
+        return ""  # an unknown hash version never matches a stored hash
 
 
 def _locked_head():
@@ -141,9 +161,22 @@ def append(
     truncated=False,
     dropped_unmapped=0,
     duration_ms=0,
+    invocation_class="",
+    approval_id=None,
+    grant_id=None,
+    exit_code=None,
+    confirm_state="",
 ) -> NodeInvocation:
     """Append one chain row for a node call at its terminal state (D7).
-    Returns the saved NodeInvocation."""
+    Returns the saved NodeInvocation. An action call (Phase 10:
+    `invocation_class` confirm or gate) is written as a `hash_version` 2
+    row; a read call stays a version 1 row."""
+    if invocation_class not in ("", *ACTION_CLASSES):
+        raise ChainWriteError("unknown invocation class")
+    if confirm_state not in CONFIRM_STATES:
+        raise ChainWriteError("unknown confirm state")
+    if not invocation_class and (approval_id or grant_id or exit_code is not None or confirm_state):
+        raise ChainWriteError("action fields on a read row")
     _check(
         status=status,
         refusal_code=refusal_code,
@@ -174,6 +207,12 @@ def append(
             trace_id=trace_id,
             actor=actor,
             channel=channel,
+            invocation_class=invocation_class,
+            approval_id=approval_id,
+            grant_id=grant_id,
+            exit_code=exit_code,
+            confirm_state=confirm_state,
+            hash_version=2 if invocation_class else 1,
             prev_hash=head.last_hash,
         )
         row.row_hash = compute_row_hash(row)

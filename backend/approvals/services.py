@@ -52,7 +52,7 @@ from approvals.models import ApprovalRequest
 from audit.models import AuditLog
 from audit.services import record_audit
 from core.channels import CHANNEL_SYSTEM, CHANNEL_WEB
-from tools.registry import ToolValidationError
+from tools.registry import ToolDecisionForbidden, ToolValidationError
 from workspaces.models import WorkspaceMember
 
 _CURATOR_ROLES = {WorkspaceMember.Role.OWNER, WorkspaceMember.Role.ADMIN}
@@ -130,6 +130,26 @@ def _resolve_tool(tool_name):
     return get_tool(tool_name)
 
 
+def global_approval_ttl():
+    return timedelta(hours=settings.APPROVAL_REQUEST_TTL_HOURS)
+
+
+def effective_approval_ttl(tool_ttl_seconds):
+    """`min(tool TTL, APPROVAL_REQUEST_TTL_HOURS)` (Phase 10 D6): a tool's
+    own TTL can only shorten the global one, never lengthen it."""
+    if tool_ttl_seconds is None:
+        return global_approval_ttl()
+    return min(timedelta(seconds=int(tool_ttl_seconds)), global_approval_ttl())
+
+
+def approval_ttl(tool_name):
+    """The TTL a request of `tool_name` lives for while `pending`: the
+    tool's `approval_ttl_seconds` capped by the global TTL. getattr for the
+    SimpleNamespace test stubs that predate the field."""
+    tool = _resolve_tool(tool_name)
+    return effective_approval_ttl(getattr(tool, "approval_ttl_seconds", None))
+
+
 def _expire_if_stale(approval_request):
     """Decision-time expiry backstop: the periodic sweep (approvals.tasks)
     is best-effort, not the only enforcement point. A `pending` request
@@ -146,7 +166,7 @@ def _expire_if_stale(approval_request):
     `InvalidTransition` itself, only after this function's transaction has
     already committed.
     """
-    ttl = timedelta(hours=settings.APPROVAL_REQUEST_TTL_HOURS)
+    ttl = approval_ttl(approval_request.tool_name)
     if (
         approval_request.status == ApprovalRequest.Status.PENDING
         and timezone.now() - approval_request.created_at > ttl
@@ -295,7 +315,6 @@ def _record(approval_request, action, actor, channel, **metadata):
     )
 
 
-@transaction.atomic
 def create_request(
     *, workspace, actor, tool_name, payload=None, origin, channel, system_created=False
 ):
@@ -352,12 +371,61 @@ def create_request(
             validate_request(workspace, payload or {})
         except ToolValidationError as exc:
             raise InvalidTransition(str(exc)) from exc
+    # Phase 10 branch 3 (brief D6): the pre-transaction hook. It runs here,
+    # outside any transaction and only after every check above passed, so a
+    # caller who fails the role or validation checks never reaches it (the
+    # node action's trust check is a model call that must not run for an
+    # unauthorised caller, nor inside a database transaction).
+    precheck_hook = getattr(tool, "precheck_request", None)
+    precheck = None
+    if precheck_hook is not None:
+        try:
+            precheck = precheck_hook(workspace, actor, payload or {})
+        except ToolValidationError as exc:
+            raise InvalidTransition(str(exc)) from exc
+    return _create_request_atomic(
+        workspace=workspace,
+        actor=actor,
+        tool=tool,
+        tool_name=tool_name,
+        payload=payload,
+        origin=origin,
+        channel=channel,
+        system_created=system_created,
+        has_precheck=precheck_hook is not None,
+        precheck=precheck,
+    )
+
+
+@transaction.atomic
+def _create_request_atomic(
+    *,
+    workspace,
+    actor,
+    tool,
+    tool_name,
+    payload,
+    origin,
+    channel,
+    system_created,
+    has_precheck,
+    precheck,
+):
+    """The transactional half of `create_request` (Phase 10 D6 split): the
+    role check again (a role revoked during a slow precheck still
+    refuses), `prepare_payload`, the row and its audit row. `precheck=` is
+    passed only to a tool that declares `precheck_request`, so every other
+    tool is called with its old signature."""
+    _require(get_role(actor, workspace) in _WRITER_ROLES, "requesting a gated action")
     # Phase 5 branch 4 (brief D6): a tool that snapshots its request builds
     # the stored payload itself; the caller's payload is only its input.
     prepare_payload = getattr(tool, "prepare_payload", None)
     if prepare_payload is not None:
         try:
-            payload = prepare_payload(workspace, payload or {})
+            if has_precheck:
+                payload = prepare_payload(workspace, payload or {}, precheck=precheck)
+            else:
+                payload = prepare_payload(workspace, payload or {})
         except ToolValidationError as exc:
             raise InvalidTransition(str(exc)) from exc
     approval_request = ApprovalRequest.objects.create(
@@ -404,6 +472,16 @@ def approve_request(*, approval_request, actor, channel):
         if not expired:
             if approval_request.status != ApprovalRequest.Status.PENDING:
                 raise InvalidTransition(f"Cannot approve a {approval_request.status} request.")
+            tool = _resolve_tool(approval_request.tool_name)
+            # Phase 10 D6: the tool's own approver check, after the generic
+            # curator and channel rules and before the status changes. A
+            # refusal leaves the request `pending`, with no execution.
+            authorize_decision = getattr(tool, "authorize_decision", None)
+            if authorize_decision is not None:
+                try:
+                    authorize_decision(approval_request, actor)
+                except ToolDecisionForbidden as exc:
+                    raise ApprovalPermissionDenied(str(exc)) from exc
             approval_request.status = ApprovalRequest.Status.APPROVED
             approval_request.decided_by = actor
             approval_request.decided_at = timezone.now()
@@ -411,7 +489,6 @@ def approve_request(*, approval_request, actor, channel):
                 update_fields=["status", "decided_by", "decided_at", "updated_at"]
             )
             _record(approval_request, "approval.approved", actor, channel)
-            tool = _resolve_tool(approval_request.tool_name)
             if tool is not None:
                 execution_id = tool.create_execution(approval_request)
                 transaction.on_commit(lambda: tool.dispatch(execution_id))

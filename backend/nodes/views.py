@@ -1,20 +1,31 @@
 """Node HTTP endpoints. Branch 2: the anonymous pairing endpoint (D4). The
 owner-only node APIs (`GET /nodes`, detail, revoke, invocations) arrive in
-branches 4 and 5."""
+branches 4 and 5.
+
+Phase 10 branch 3 (brief D8): `POST /api/v1/nodes/<node_id>/actions` (the
+confirm-class path, the only caller of `nodes.services.invoke_confirm`) and
+`GET /api/v1/nodes/<node_id>/actions/<execution_id>` (status only, never
+output). Both are the node owner's web session only."""
 
 import logging
 
 from rest_framework import status
-from rest_framework.permissions import AllowAny
+from rest_framework.permissions import AllowAny, BasePermission, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from accounts import devices
 from core.client_ip import trusted_client_ip
+from core.permissions import IsWebChannel
 from core.throttling import ScopedRateThrottle
 from nodes import services
 from nodes.keys import SigningKeyUnavailable
-from nodes.serializers import NodePairSerializer
+from nodes.models import NodeActionExecution
+from nodes.serializers import (
+    NodeActionCreateSerializer,
+    NodeActionExecutionSerializer,
+    NodePairSerializer,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -88,3 +99,74 @@ class NodePairView(APIView):
             return _refusal("Invalid or expired code.", "invalid_code", status.HTTP_400_BAD_REQUEST)
         logger.info("node paired node_id=%s", result.node.pk)
         return Response(result.response_payload(), status=status.HTTP_201_CREATED)
+
+
+class IsHumanActor(BasePermission):
+    """No machine (`is_agent`) actor ever invokes a node action."""
+
+    message = "Agent accounts cannot invoke node actions."
+    code = "agent_forbidden"
+
+    def has_permission(self, request, view):
+        return not getattr(request.user, "is_agent", False)
+
+
+_NOT_FOUND = {"detail": "Not found.", "code": "not_found"}
+
+
+def _execution_body(execution):
+    return NodeActionExecutionSerializer(execution).data
+
+
+class NodeActionListView(APIView):
+    """`POST /api/v1/nodes/<node_id>/actions` -- a confirm-class node action
+    (`apps.open` / `apps.focus`, Phase 10 D8): the owner's card click on
+    screen, confirmed later by the click in the node's own window. No
+    `ApprovalRequest`. Body `{capability, args, source_message_id}`.
+
+    Web channel, human, the node's owner (and an `owner` of its personal
+    workspace) only. An unknown node and another user's node answer the same
+    404 (`nodes.services.invoke_confirm` writes the `nodes.refused` audit
+    row, and the chain row for a node that exists). A capability that is
+    not confirm-class, or args outside the server contract, is a 400 with
+    nothing written. Otherwise 202 with the execution (its status may
+    already be terminal: offline, not invocable, kill switch...)."""
+
+    permission_classes = [IsAuthenticated, IsWebChannel, IsHumanActor]
+
+    def post(self, request, node_id):
+        serializer = NodeActionCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+        try:
+            execution = services.invoke_confirm(
+                actor=request.user,
+                node_id=node_id,
+                capability=data["capability"],
+                args=data["args"],
+                source_message_id=data.get("source_message_id", ""),
+            )
+        except services.NodeNotFound:
+            return Response(_NOT_FOUND, status=status.HTTP_404_NOT_FOUND)
+        except services.ActionRefused as exc:
+            return _refusal("This node action is not allowed.", exc.code, 400)
+        return Response(_execution_body(execution), status=status.HTTP_202_ACCEPTED)
+
+
+class NodeActionDetailView(APIView):
+    """`GET /api/v1/nodes/<node_id>/actions/<execution_id>` -- one execution's
+    status, exit code and confirmation state (never args or output), for
+    the node's owner over the web channel; `for_actor()` scoped, 404
+    otherwise."""
+
+    permission_classes = [IsAuthenticated, IsWebChannel, IsHumanActor]
+
+    def get(self, request, node_id, execution_id):
+        execution = (
+            NodeActionExecution.objects.for_actor(request.user)
+            .filter(pk=execution_id, node_id=node_id, node__owner=request.user)
+            .first()
+        )
+        if execution is None:
+            return Response(_NOT_FOUND, status=status.HTTP_404_NOT_FOUND)
+        return Response(_execution_body(execution))

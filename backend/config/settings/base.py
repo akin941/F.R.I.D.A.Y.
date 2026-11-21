@@ -365,6 +365,17 @@ NODE_SIGNING_KEYS_RETIRED = env.list("NODE_SIGNING_KEYS_RETIRED", default=[])
 NODE_READ_INVOKE_TTL_SECONDS = env.int("NODE_READ_INVOKE_TTL_SECONDS", default=30)
 # The largest canonical `result.output` a node may return (64 KiB, D5).
 NODE_MAX_RESULT_BYTES = env.int("NODE_MAX_RESULT_BYTES", default=64 * 1024)
+# Phase 10 branch 3 (brief D2, D6, D7). A gate-class grant lives
+# NODE_GRANT_TTL_SECONDS (delivery plus the node's 60 s confirmation window;
+# refused at boot above the 120 s protocol ceiling). An approved node action
+# not dispatched within NODE_ACTION_DISPATCH_MAX_DELAY_SECONDS of its
+# decision fails `stale_dispatch` (nothing queued to run later). The
+# server-scrubbed output tail is cleared after NODE_ACTION_TAIL_RETENTION_DAYS.
+NODE_GRANT_TTL_SECONDS = env.int("NODE_GRANT_TTL_SECONDS", default=90)
+NODE_ACTION_DISPATCH_MAX_DELAY_SECONDS = env.int(
+    "NODE_ACTION_DISPATCH_MAX_DELAY_SECONDS", default=60
+)
+NODE_ACTION_TAIL_RETENTION_DAYS = env.int("NODE_ACTION_TAIL_RETENTION_DAYS", default=14)
 # PIN pairing codes are accepted only from these networks (LAN gating):
 # loopback, RFC 1918, IPv6 ULA and the CGNAT range Tailscale uses. Strong
 # codes and the remote key work from any network. Defense in depth, not the

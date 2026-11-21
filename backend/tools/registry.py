@@ -23,6 +23,14 @@ from typing import Any
 from core.channels import CHANNEL_CLI, CHANNEL_WEB
 
 
+class ToolDecisionForbidden(Exception):
+    """Raised by `ToolSpec.authorize_decision` to refuse an approval by this
+    actor (Phase 10 D6, the approver check). A tools-local type like
+    `ToolValidationError`: `approvals.services.approve_request` translates
+    it into its own `ApprovalPermissionDenied` (403); the request stays
+    `pending` and no execution is created."""
+
+
 class ToolValidationError(Exception):
     """Raised by `ToolSpec.validate_request` to reject a request before its
     `ApprovalRequest` row is even created. `tools` must not import
@@ -112,6 +120,26 @@ class ToolSpec:
     True; a tool whose outcomes are audit-worthy but not memory-worthy
     (e.g. a Home Assistant light toggle, VISION R5) sets False. Audit rows
     are unaffected either way.
+
+    Phase 10 branch 3 (brief D6) adds three optional hooks:
+
+    - `approval_ttl_seconds`: a per-tool approval TTL. The decision-time
+      expiry and the sweep use `min(approval_ttl_seconds,
+      APPROVAL_REQUEST_TTL_HOURS)`, so a tool can only shorten the global
+      TTL, never lengthen it. `None` (default) keeps the global TTL.
+    - `precheck_request(workspace, actor, payload)`: runs in
+      `approvals.services.create_request` OUTSIDE any database transaction,
+      after the role, tool and `validate_request` checks, and before
+      `prepare_payload`. Its return value reaches `prepare_payload` only as
+      the keyword `precheck=` (a tool that declares this hook must accept
+      it); a client can never supply it. For work that must not run inside
+      a transaction or for an unauthorised caller (the node action's trust
+      check, a model call). Raise `ToolValidationError` to refuse.
+    - `authorize_decision(approval_request, actor)`: called by
+      `approve_request` after its curator and channel checks and before the
+      status changes. Raise `ToolDecisionForbidden` to refuse this approver
+      (403, the request stays pending). `reject_request` never calls it:
+      declining is the safe direction.
     """
 
     name: str
@@ -130,6 +158,10 @@ class ToolSpec:
     # and dry pass), so one serialization computes it once per workspace
     # rather than once per row (no N+1 on the approvals list).
     describe_request_per_workspace: bool = False
+    # Phase 10 branch 3 (brief D6): see the class docstring.
+    approval_ttl_seconds: int | None = None
+    precheck_request: Callable[[Any, Any, dict], Any] | None = None
+    authorize_decision: Callable[[Any, Any], None] | None = None
 
 
 _REGISTRY: dict[str, ToolSpec] = {}
@@ -149,6 +181,16 @@ def unregister_tool(name: str) -> None:
 
 def get_tool(name: str) -> ToolSpec | None:
     return _REGISTRY.get(name)
+
+
+def tools_with_approval_ttl() -> dict[str, int]:
+    """`{tool name: approval_ttl_seconds}` for every registered tool with a
+    per-tool TTL (Phase 10 D6; the approvals sweep)."""
+    return {
+        name: spec.approval_ttl_seconds
+        for name, spec in _REGISTRY.items()
+        if spec.approval_ttl_seconds is not None
+    }
 
 
 def list_tool_names() -> list[str]:

@@ -37,9 +37,22 @@ _BEAT_SCHEDULE = {
         "task": "knowledge.tasks.recover_stale_knowledge_documents",
         "schedule": 60.0,
     },
+    # Every minute (Phase 10 D6: a `node_action` approval lives 10 minutes),
+    # still only a backstop to the decision-time check.
     "approval-request-expiry-sweep": {
         "task": "approvals.tasks.sweep_expired_approval_requests",
         "schedule": 60.0,
+    },
+    # Phase 10 D6/D7: stale dispatches and node actions whose gateway is
+    # gone end terminally (never retried); scrubbed tails are cleared after
+    # NODE_ACTION_TAIL_RETENTION_DAYS.
+    "node-action-sweep": {
+        "task": "nodes.tasks.sweep_node_actions_task",
+        "schedule": 60.0,
+    },
+    "node-action-tail-retention": {
+        "task": "nodes.tasks.clear_node_action_tails_task",
+        "schedule": 24 * 60 * 60.0,
     },
     "vault-export-recovery-scan": {
         "task": "tools.tasks.recover_stale_vault_export_runs",

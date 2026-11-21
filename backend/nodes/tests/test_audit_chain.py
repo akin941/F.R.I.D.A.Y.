@@ -78,7 +78,11 @@ def test_the_hash_covers_every_field_and_fks_as_ids(owner, personal, make_node):
     stored = NodeInvocation.objects.get(pk=row.pk)  # round trip through Postgres
     assert compute_row_hash(stored) == row.row_hash
     model_fields = {f.attname for f in NodeInvocation._meta.concrete_fields}
-    assert model_fields - set(audit_chain.HASHED_FIELDS) == {"row_hash"}
+    # A read row is a hash-version 1 row; the Phase 10 action columns are
+    # hashed by version 2 rows only (test_node_action_chain.py), so every
+    # column is covered by the v2 field list.
+    assert row.hash_version == 1
+    assert model_fields - set(audit_chain.HASHED_FIELDS_V2) == {"row_hash"}
 
 
 @pytest.mark.django_db
