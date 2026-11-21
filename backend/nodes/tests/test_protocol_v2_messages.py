@@ -147,7 +147,9 @@ def test_v1_types_keep_their_v1_properties_in_v2():
         assert v1 <= v2, message_type
         if message_type != "result":
             assert v1 == v2, message_type
-    added = set(load_schema("result", 2)["properties"]) - set(load_schema("result", 1)["properties"])
+    added = set(load_schema("result", 2)["properties"]) - set(
+        load_schema("result", 1)["properties"]
+    )
     assert added == {"exit_code", "output_bytes", "tail", "confirm_state", "sandbox_violation"}
 
 
@@ -317,7 +319,9 @@ def test_a_grant_object_is_checked_by_the_v2_schema():
     with pytest.raises(ProtocolError):
         validate({**envelope, "grant": {**envelope["grant"], "extra": 1}}, "server_to_node", 2)
     with pytest.raises(ProtocolError):
-        validate({**envelope, "grant": {**envelope["grant"], "class": "confirm"}}, "server_to_node", 2)
+        validate(
+            {**envelope, "grant": {**envelope["grant"], "class": "confirm"}}, "server_to_node", 2
+        )
     with pytest.raises(ProtocolError):
         validate_sub_schema("grant", {**envelope["grant"], "v": 1})
     # A null grant is schema-valid: presence is a class rule (check 14).

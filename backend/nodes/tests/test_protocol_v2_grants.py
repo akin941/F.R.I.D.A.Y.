@@ -74,7 +74,9 @@ def test_the_domains_are_the_briefs():
 
 
 def test_a_v2_envelope_is_signed_in_the_invoke_domain():
-    envelope = vectors_v2.plain_envelope("apps.open", {"bundle_id": "com.apple.Terminal"}, "confirm")
+    envelope = vectors_v2.plain_envelope(
+        "apps.open", {"bundle_id": "com.apple.Terminal"}, "confirm"
+    )
     body = {k: v for k, v in envelope.items() if k != "sig"}
     PINNED_PUBLIC = PINNED._private.public_key()
     PINNED_PUBLIC.verify(b64url_decode(envelope["sig"]), INVOKE_DOMAIN_V2 + canonicalize(body))
@@ -302,7 +304,9 @@ def test_binding_is_type_strict_and_requires_gate():
     envelope = gated_envelope()
     grant = envelope["grant"]
     with pytest.raises(GrantError):
-        check_grant_binding({**grant, "capability_version": True}, {**envelope, "capability_version": 1})
+        check_grant_binding(
+            {**grant, "capability_version": True}, {**envelope, "capability_version": 1}
+        )
     with pytest.raises(GrantError):
         check_grant_binding(grant, {**envelope, "class": "confirm"})
     with pytest.raises(GrantError):

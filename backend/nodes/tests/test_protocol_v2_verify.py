@@ -172,7 +172,9 @@ def test_the_first_failing_check_wins():
 def test_a_v1_session_refuses_every_non_read_class_at_check_13():
     v1_read = plain_envelope("git.status", {"repo_path": "~/work/acme"}, "read", version=1)
     verify_invoke(v1_read, version=1, state=node_state(), now=NOW)
-    v1_confirm = plain_envelope("apps.open", {"bundle_id": "com.apple.Terminal"}, "confirm", version=1)
+    v1_confirm = plain_envelope(
+        "apps.open", {"bundle_id": "com.apple.Terminal"}, "confirm", version=1
+    )
     assert _refused(v1_confirm, version=1) == ("class_not_allowed", 13)
     # A v2 grant-carrying envelope on a v1 session is a schema error.
     assert _refused(gated_envelope(), version=1) == ("schema", 4)

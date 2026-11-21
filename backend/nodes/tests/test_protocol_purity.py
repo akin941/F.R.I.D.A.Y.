@@ -15,11 +15,38 @@ PROBE = r"""
 import json, sys
 import nodes.protocol
 import nodes.protocol.canonical, nodes.protocol.signing, nodes.protocol.messages
+import nodes.protocol.grants, nodes.protocol.verify
 import nodes.capabilities
-from nodes.capabilities import load_contracts
+from nodes.capabilities import load_action_contracts, load_contracts, load_recipes
 from nodes.protocol import SigningKey, build_invoke, sign_envelope, validate, verify_envelope
+from nodes.protocol import NodeState, build_gated_invoke, verify_invoke
 
 load_contracts()
+load_action_contracts()
+load_recipes()
+gate_key = SigningKey.generate()
+gated = build_gated_invoke(
+    signer=gate_key,
+    approval_id="3c2b1a09-8f7e-4d6c-9b5a-4f3e2d1c0b0a",
+    node_id="7d0f2b8e-1c4a-4f5e-9b6d-2a3c4d5e6f70",
+    workspace_id="0b1c2d3e-4f50-4617-8a9b-0c1d2e3f4a5b",
+    capability="repo.command.run",
+    capability_version=1,
+    args={"repo_path": "~/work/acme", "command_kind": "test"},
+    trace_id="t",
+    issued_at=1800000000,
+    ttl_seconds=90,
+)
+verify_invoke(
+    gated,
+    version=2,
+    state=NodeState(
+        node_id="7d0f2b8e-1c4a-4f5e-9b6d-2a3c4d5e6f70",
+        pinned={gate_key.key_id: gate_key.public_key_bytes},
+        catalogue={n: c.catalogue_entry() for n, c in load_action_contracts().items()},
+    ),
+    now=1800000001,
+)
 key = SigningKey.generate()
 envelope = sign_envelope(
     build_invoke(
