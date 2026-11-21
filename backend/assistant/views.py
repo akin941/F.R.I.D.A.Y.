@@ -20,6 +20,8 @@ from assistant.serializers import (
     MessageSerializer,
 )
 from assistant.services import (
+    NODE_ACTION_TOOL,
+    NODE_ACTION_WHERE_TO_ACT,
     apply_voice_capability_cap,
     build_gateway_stream,
     classify_intent,
@@ -323,7 +325,17 @@ class ConversationMessageListView(APIView):
                 report_extra=turn_report or None,
             )
         )
+        # Phase 10 D13: a node action draft carries its source message's id
+        # (the trust check's evidence anchor), so the row's id is fixed
+        # first and written into the frozen intent payload.
+        user_message_id = uuid.uuid4()
+        if (
+            classification["intent"] == Message.Intent.TOOL_REQUEST
+            and classification["intent_payload"].get("tool_name") == NODE_ACTION_TOOL
+        ):
+            classification["intent_payload"]["payload"]["source_message_id"] = str(user_message_id)
         user_message = Message.objects.create(
+            id=user_message_id,
             workspace=conversation.workspace,
             conversation=conversation,
             role=Message.Role.USER,
@@ -361,6 +373,12 @@ class ConversationMessageListView(APIView):
                 "tool_name": classification["intent_payload"]["tool_name"],
                 "payload": classification["intent_payload"]["payload"],
             }
+            if classification["intent_payload"]["tool_name"] == NODE_ACTION_TOOL:
+                # D8/D13: a confirm-class card calls the node actions
+                # endpoint, a gate-class card `POST /approvals`; either way
+                # the owner acts on screen, then on the Mac.
+                draft_event["action_class"] = classification["intent_payload"]["action_class"]
+                draft_event["where_to_act"] = NODE_ACTION_WHERE_TO_ACT
 
         response = StreamingHttpResponse(
             stream_assistant_reply(

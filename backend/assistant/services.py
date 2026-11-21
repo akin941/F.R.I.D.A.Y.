@@ -24,6 +24,12 @@ from memory.services import privatize_conversation_memories
 _ROUTER_INTENT_PROMPT_NAME = "friday_router_intent"
 _TASK_DRAFT_PROMPT_NAME = "friday_router_task_draft"
 _CONNECTOR_ARGS_PROMPT_NAME = "friday_router_connector_args"
+_NODE_ACTION_ARGS_PROMPT_NAME = "friday_router_node_action_args"
+# Phase 10 D13: the one gated tool whose draft needs an argument step.
+NODE_ACTION_TOOL = "node_action"
+# The spoken/visible hint of a node action proposal (D13): where the owner
+# acts -- never "done", never a question a spoken "evet" could answer.
+NODE_ACTION_WHERE_TO_ACT = "Onay ekranda, sonra Mac'te bir tık"
 
 # Router-local tool vocabulary (MVP 6 §4) -- NOT on `ToolSpec` itself:
 # `tools/registry.py`'s own module docstring already rules out adding a
@@ -36,6 +42,12 @@ _CONNECTOR_ARGS_PROMPT_NAME = "friday_router_connector_args"
 # valid tool unreachable.
 _TOOL_DESCRIPTIONS = {
     "vault_export": "export approved memories/notes to the Obsidian vault",
+    # Phase 10 D13: proposals only -- approved on screen, confirmed on the Mac.
+    NODE_ACTION_TOOL: (
+        "run an action on the owner's paired Mac (Friday Node): run a repo's "
+        "tests, lint, typecheck, build or format check, open or focus an app, "
+        "or run a local recipe; it is only proposed here and approved on screen"
+    ),
 }
 
 
@@ -110,6 +122,20 @@ def _connector_args_prompt_version():
     if template.active_version_id is None:
         raise ImproperlyConfigured(
             f"{_CONNECTOR_ARGS_PROMPT_NAME} prompt template has no active version"
+        )
+    return template.active_version
+
+
+def _node_action_args_prompt_version():
+    try:
+        template = PromptTemplate.objects.get(name=_NODE_ACTION_ARGS_PROMPT_NAME)
+    except PromptTemplate.DoesNotExist as exc:
+        raise ImproperlyConfigured(
+            f"{_NODE_ACTION_ARGS_PROMPT_NAME} prompt template is not configured"
+        ) from exc
+    if template.active_version_id is None:
+        raise ImproperlyConfigured(
+            f"{_NODE_ACTION_ARGS_PROMPT_NAME} prompt template has no active version"
         )
     return template.active_version
 
@@ -334,6 +360,25 @@ def classify_intent(
     if parsed["intent"] == Message.Intent.TOOL_REQUEST:
         if parsed["tool_name"] not in list_tool_names():
             return {"intent": Message.Intent.CHAT, "intent_payload": {}}
+        if parsed["tool_name"] == NODE_ACTION_TOOL:
+            proposal = propose_node_action(
+                conversation,
+                actor=actor,
+                content=content,
+                channel=channel,
+                context_report=context_report,
+                personal_data=personal_data,
+            )
+            if proposal is None:
+                return {"intent": Message.Intent.CHAT, "intent_payload": {}}
+            return {
+                "intent": Message.Intent.TOOL_REQUEST,
+                "intent_payload": {
+                    "tool_name": NODE_ACTION_TOOL,
+                    "payload": proposal["payload"],
+                    "action_class": proposal["action_class"],
+                },
+            }
         return {
             "intent": parsed["intent"],
             "intent_payload": {"tool_name": parsed["tool_name"], "payload": {}},
@@ -353,6 +398,109 @@ def classify_intent(
         return {"intent": Message.Intent.TASK_DRAFT, "intent_payload": draft}
 
     return {"intent": parsed["intent"], "intent_payload": {}}
+
+
+# --- Node action proposals (Phase 10 D13, branch 4) ---
+
+_NODE_ACTION_ARGS_KEYS = frozenset({"node_id", "capability", "args"})
+
+
+class NodeActionArgsParseError(Exception):
+    """`router.node_action_args` output was not one allowed object."""
+
+
+def parse_node_action_args(raw_text):
+    """Strict parse of the argument step: exactly one JSON object with
+    exactly `node_id`, `capability` and `args`. All three null means "no
+    action fits" (returns None). Whether the values are valid is the server
+    contract's business (`validate_proposal`), not this parser's."""
+    try:
+        payload = json.loads(raw_text)
+    except (json.JSONDecodeError, TypeError) as exc:
+        raise NodeActionArgsParseError("invalid JSON") from exc
+    if not isinstance(payload, dict) or set(payload) != _NODE_ACTION_ARGS_KEYS:
+        raise NodeActionArgsParseError("unexpected shape")
+    if all(payload[key] is None for key in _NODE_ACTION_ARGS_KEYS):
+        return None
+    if not isinstance(payload["node_id"], str) or not isinstance(payload["capability"], str):
+        raise NodeActionArgsParseError("node_id and capability must be strings")
+    if not isinstance(payload["args"], dict):
+        raise NodeActionArgsParseError("args must be an object")
+    return payload
+
+
+def _node_action_targets_block(targets):
+    return (
+        "\n\nNodes and actions available for this message (server contracts, data):\n"
+        + json.dumps(targets, ensure_ascii=False, sort_keys=True)
+    )
+
+
+def propose_node_action(
+    conversation, *, actor, content, channel, context_report=None, personal_data=False
+):
+    """The D13 argument step of a `node_action` tool request: one cheap
+    `router.node_action_args` call that sees only the owner's message and
+    the server-side targets (the actor's own nodes, their invocable action
+    contracts, the workspace's 8A repo prefixes), then the server contract
+    over its untrusted output (`tools.node_actions.validate_proposal`
+    through the proposal port). Returns `{"payload": {node_id, capability,
+    args, source_message_id}, "action_class"}` or None -- the turn then
+    degrades to plain chat. Web channel only: the card click that requests
+    (or, for confirm class, invokes) the action exists only there. Creates
+    nothing: the card click goes through `create_request` (gate class) or
+    the actions view (confirm class), which re-validate everything."""
+    from core.channels import CHANNEL_WEB
+    from tools.node_action_ports import proposal_source, proposal_validator
+
+    if channel != CHANNEL_WEB:
+        return None
+    source, validator = proposal_source(), proposal_validator()
+    if source is None or validator is None:
+        return None
+    workspace = conversation.workspace
+    targets = source(workspace=workspace, actor=actor)
+    if not targets:
+        return None
+    prompt_version = _node_action_args_prompt_version()
+    try:
+        result = InferenceGateway().complete(
+            purpose="router.node_action_args",
+            messages=[
+                {
+                    "role": "system",
+                    "content": prompt_version.content + _node_action_targets_block(targets),
+                },
+                {"role": "user", "content": content},
+            ],
+            actor=actor,
+            workspace=workspace,
+            prompt_version=prompt_version,
+            stream=False,
+            context_report={**(context_report or {}), "node_action_targets": len(targets)},
+            personal_data=personal_data,
+        )
+    except GatewayError:
+        return None
+    try:
+        proposal = parse_node_action_args(result.text)
+    except NodeActionArgsParseError:
+        return None
+    if proposal is None:
+        return None
+    cleaned = validator(workspace=workspace, actor=actor, proposal=proposal)
+    if not cleaned:
+        return None
+    return {
+        "payload": {
+            "node_id": cleaned["node_id"],
+            "capability": cleaned["capability"],
+            "args": cleaned["args"],
+            # Filled with the persisted user message's id by the view.
+            "source_message_id": "",
+        },
+        "action_class": cleaned["class"],
+    }
 
 
 # --- Connector reads (Phase 5 branch 4, ADR-010 decisions 4-5, brief D4/D5) ---

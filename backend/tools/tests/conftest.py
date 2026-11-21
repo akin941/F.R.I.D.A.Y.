@@ -9,8 +9,10 @@ gate end to end (`approvals` -> `tools.node_actions` -> `nodes`), and the
 personal and a firm workspace, a paired node (v2 snapshot, present), the 8A
 path rules (`~/work` -> firm, `~/code` -> personal), a firm member and a
 firm curator (`admin`) who owns a second node, the server output scrubber
-(the 8A scrubber, as `config.asgi_nodes` registers it) and the registered
-trust-check stub. `link` connects a `nodes.gateway.NodeSession` in process
+(the 8A scrubber, as `config.asgi_nodes` registers it) and, for the
+branch-3 suites, the trust-check stub registered explicitly (the process's
+own registration -- the real check since branch 4 -- is restored after).
+`link` connects a `nodes.gateway.NodeSession` in process
 to a Python reference node v2 over a fixture home whose local policy maps
 `~/work/acme` and `~/code/friday`.
 """
@@ -102,6 +104,7 @@ def advertise(node, catalogue=None):
 
 @pytest.fixture
 def node_world(db, settings):
+    ports_state = node_action_ports.snapshot_ports()
     owner = _user("owner@test.dev", is_owner=True)
     personal = personal_of(owner)
     firm = Workspace.objects.create(name="Acme", type=Workspace.Type.COMPANY, owner=owner)
@@ -155,7 +158,7 @@ def node_world(db, settings):
         bus.clear_presence(pk)
         bus.clear_inbox(pk)
     output.reset_scrubber()
-    node_action_ports.register_trust_check(node_action_ports.pending_trust_check)
+    node_action_ports.restore_ports(ports_state)
 
 
 @pytest.fixture(scope="session")
