@@ -104,7 +104,9 @@ def make_memory(workspace, content, *, title=None, provider=None, vector=None, *
     memory = Memory.objects.create(**fields)
     if provider is not None:
         Memory.objects.filter(pk=memory.pk).update(
-            embedding=vector if vector is not None else embed_text(f"{fields['title']}\n\n{content}"),
+            embedding=vector
+            if vector is not None
+            else embed_text(f"{fields['title']}\n\n{content}"),
             embedding_provider=provider,
         )
         memory.refresh_from_db()
@@ -128,7 +130,9 @@ def stated(workspace, subject, statement, obj=None, **kwargs):
 
 
 def _retrieve(owner, workspace, query, **kwargs):
-    return retrieve(actor=owner, workspace=workspace, query_text=query, personal_data=False, **kwargs)
+    return retrieve(
+        actor=owner, workspace=workspace, query_text=query, personal_data=False, **kwargs
+    )
 
 
 # --- indexes -----------------------------------------------------------------------
@@ -136,7 +140,9 @@ def _retrieve(owner, workspace, query, **kwargs):
 
 def _index_defs():
     with connection.cursor() as cursor:
-        cursor.execute("SELECT indexname, indexdef FROM pg_indexes WHERE indexname LIKE '%%_hnsw_%%'")
+        cursor.execute(
+            "SELECT indexname, indexdef FROM pg_indexes WHERE indexname LIKE '%%_hnsw_%%'"
+        )
         return dict(cursor.fetchall())
 
 
@@ -392,7 +398,9 @@ def test_a_firm_fact_identical_to_the_query_never_reaches_a_personal_turn(
 ):
     text = "Y firmasının deploy'u payments servisine bağlı"
     firm_fact = embed_fact_row(stated(firm, entity(firm, "y"), text), provider)
-    personal_fact = embed_fact_row(stated(personal, entity(personal, "blog"), "blog uses sqlite"), provider)
+    personal_fact = embed_fact_row(
+        stated(personal, entity(personal, "blog"), "blog uses sqlite"), provider
+    )
     make_memory(firm, text, title="firm", provider=provider)
     personal_result = _retrieve(owner, personal, text)
     assert firm_fact.pk not in [f.pk for f in personal_result.facts]
@@ -483,9 +491,7 @@ def test_the_access_is_audited_with_ids_only(personal, owner):
 def test_private_facts_are_never_injected(personal, owner, provider):
     subject = entity(personal, "api")
     secret = embed_fact_row(
-        stated(
-            personal, subject, "api secret hetzner", sensitivity=MemoryFact.Sensitivity.PRIVATE
-        ),
+        stated(personal, subject, "api secret hetzner", sensitivity=MemoryFact.Sensitivity.PRIVATE),
         provider,
     )
     result = _retrieve(owner, personal, "api secret hetzner")
@@ -505,9 +511,7 @@ def test_a_fact_cannot_close_its_fence(personal):
 def test_no_graphify_fact_ever_reaches_the_memory_block(personal, owner, provider):
     query = "memory/graph/services.py imports memory/models.py"
     module = entity(personal, "memory/graph/services.py", MemoryEntity.Kind.CODE_MODULE, "graphify")
-    models_module = entity(
-        personal, "memory/models.py", MemoryEntity.Kind.CODE_MODULE, "graphify"
-    )
+    models_module = entity(personal, "memory/models.py", MemoryEntity.Kind.CODE_MODULE, "graphify")
     code_edge = system_fact(personal, module, models_module)
     MemoryFact.all_objects.filter(pk=code_edge.pk).update(statement=query)
     # A learned fact sharing an entity with a code edge.
@@ -554,7 +558,9 @@ def test_as_of_reads_a_superseded_fact(personal, owner):
         valid_from=timezone.now() - timedelta(days=300),
         valid_to=timezone.now() - timedelta(days=100),
     )
-    new = stated(personal, api, "api is deployed to hetzner", valid_from=timezone.now() - timedelta(days=100))
+    new = stated(
+        personal, api, "api is deployed to hetzner", valid_from=timezone.now() - timedelta(days=100)
+    )
     now_ids = [f.pk for f in _retrieve(owner, personal, "api deployed").facts]
     assert new.pk in now_ids and old.pk not in now_ids
     then = timezone.now() - timedelta(days=200)
