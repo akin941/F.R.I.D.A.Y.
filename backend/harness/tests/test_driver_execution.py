@@ -129,7 +129,9 @@ class Run:
         for name, value in patches.items():
             monkeypatch.setattr(runner, name, value)
         self.dispatch_review = mock.Mock()
-        monkeypatch.setattr(implementation_execution, "dispatch_created_review", self.dispatch_review)
+        monkeypatch.setattr(
+            implementation_execution, "dispatch_created_review", self.dispatch_review
+        )
 
     @property
     def container(self):
@@ -421,7 +423,9 @@ def test_drivers_disabled_runs_the_cli_path(job, monkeypatch, settings):
     settings.HARNESS_DRIVERS_ENABLED = False
     _patch_happy_path_runner(monkeypatch, result=_wrapper_result())
     interactive = mock.Mock()
-    monkeypatch.setattr(implementation_execution.runner, "launch_interactive_container", interactive)
+    monkeypatch.setattr(
+        implementation_execution.runner, "launch_interactive_container", interactive
+    )
     monkeypatch.setattr(implementation_execution, "dispatch_created_review", mock.Mock())
     implementation_execution.run_harness_implementation_job(job.id)
     job.refresh_from_db()
@@ -442,7 +446,9 @@ def test_claude_jobs_keep_the_cli_path_with_drivers_on(job, monkeypatch):
     HarnessImplementationJob.objects.filter(pk=job.pk).update(agent="claude_code")
     _patch_happy_path_runner(monkeypatch, result=_wrapper_result())
     interactive = mock.Mock()
-    monkeypatch.setattr(implementation_execution.runner, "launch_interactive_container", interactive)
+    monkeypatch.setattr(
+        implementation_execution.runner, "launch_interactive_container", interactive
+    )
     monkeypatch.setattr(implementation_execution, "dispatch_created_review", mock.Mock())
     implementation_execution.run_harness_implementation_job(job.id)
     job.refresh_from_db()

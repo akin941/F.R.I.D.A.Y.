@@ -175,6 +175,74 @@ def test_invalid_pin_is_refused():
         load_codex_snapshot("../../etc")
 
 
+def test_snapshot_converter_builds_a_loadable_non_provisional_snapshot(tmp_path):
+    """`codex_schema_subset.py` (run by generate_driver_schemas.sh) turns a
+    generated-schema layout into the snapshot format, stdlib only (`-I`,
+    run from outside the project so it can import nothing of ours)."""
+    import json
+    import subprocess
+    import sys
+
+    generated = tmp_path / "generated"
+    generated.mkdir()
+
+    def union(entries):
+        return {
+            "oneOf": [
+                {
+                    "properties": {
+                        "method": {"enum": [method]},
+                        "params": {"$ref": f"#/definitions/{params}"},
+                    }
+                }
+                for method, params in entries
+            ],
+            "definitions": {params: {"type": "object"} for _method, params in entries},
+        }
+
+    (generated / "ClientRequest.json").write_text(
+        json.dumps(union([("initialize", "InitializeParams")]))
+    )
+    (generated / "InitializeResponse.json").write_text(json.dumps({"type": "object"}))
+    (generated / "ClientNotification.json").write_text(
+        json.dumps({"oneOf": [{"properties": {"method": {"const": "initialized"}}}]})
+    )
+    (generated / "ServerRequest.json").write_text(
+        json.dumps(union([("item/commandExecution/requestApproval", "CmdParams")]))
+    )
+    (generated / "ServerNotification.json").write_text(
+        json.dumps(union([("turn/completed", "TurnCompletedParams")]))
+    )
+    out = tmp_path / "out" / "protocol.json"
+    script = Path(schema.__file__).resolve().parents[1] / "docker" / "codex_schema_subset.py"
+    subprocess.run(
+        [sys.executable, "-I", str(script), str(generated), "3.1.4", str(out)],
+        check=True,
+        cwd=tmp_path,
+    )
+    snapshot = schema.ProtocolSnapshot(json.loads(out.read_text()))
+    assert snapshot.version == "3.1.4"
+    assert snapshot.provisional is False
+    assert snapshot.has(CLIENT_REQUESTS, "initialize")
+    assert snapshot.validator(CLIENT_REQUESTS, "initialize", "result") is not None
+    assert snapshot.has(SERVER_NOTIFICATIONS, "turn/completed")
+    assert snapshot.validate(SERVER_REQUESTS, "item/commandExecution/requestApproval", "params", {})
+
+
+def test_snapshot_converter_refuses_an_unknown_layout(tmp_path):
+    import subprocess
+    import sys
+
+    script = Path(schema.__file__).resolve().parents[1] / "docker" / "codex_schema_subset.py"
+    result = subprocess.run(
+        [sys.executable, "-I", str(script), str(tmp_path), "1.0.0", str(tmp_path / "p.json")],
+        capture_output=True,
+        cwd=tmp_path,
+    )
+    assert result.returncode != 0
+    assert not (tmp_path / "p.json").exists()
+
+
 # --- selection and system checks ------------------------------------------
 
 

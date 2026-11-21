@@ -319,3 +319,60 @@ def test_failing_git_diff_after_tests_fails_closed(tmp_path):
         test_command=f"chmod u+w {base_object}; rm -f {base_object}",
     )
     assert result["tests"]["passed"] is False
+
+
+def test_driver_mode_streams_the_agent_stdio_then_runs_the_wrapper_sequence(tmp_path):
+    """Phase 10 D10: in driver mode the agent's server speaks over the
+    container's stdin/stdout (here: echoes each stdin line back with a
+    prefix until EOF) -- nothing is captured -- and once the host closes
+    stdin the wrapper commits, runs the tests and writes the result exactly
+    as on the CLI path, with an empty final frame."""
+    workspace, repo, base = _make_workspace(tmp_path, {"a.py": "old\n"})
+    driver = workspace.parent / "driver.sh"
+    driver.write_text(
+        "set -eu\n"
+        f'. "{LIBRARY}"\n'
+        f'HARNESS_WORKSPACE_DIR="{workspace}"\n'
+        "quiesce() { :; }\n"
+        'goal="$HW_GOAL"\n'
+        'test_command="$HW_TEST_COMMAND"\n'
+        'base_commit="$HW_BASE"\n'
+        "harness_driver_mode=true\n"
+        "run_cli() {\n"
+        '    (cd "$repo_dir" && printf "new\\n" > a.py)\n'
+        '    while IFS= read -r line; do printf "AGENT %s\\n" "$line"; done\n'
+        "}\n"
+        "harness_write_mode_main\n"
+    )
+    proc = subprocess.run(
+        ["sh", str(driver)],
+        input='{"id": 1, "method": "initialize"}\n{"method": "initialized"}\n',
+        capture_output=True,
+        text=True,
+        env={
+            **os.environ,
+            **_GIT_ENV,
+            "HW_GOAL": "driver goal",
+            "HW_TEST_COMMAND": "grep -q new a.py",
+            "HW_BASE": base,
+        },
+        timeout=60,
+    )
+    assert proc.returncode == 0, proc.stderr
+    lines = proc.stdout.splitlines()
+    assert lines[0] == 'AGENT {"id": 1, "method": "initialize"}'
+    assert lines[1] == 'AGENT {"method": "initialized"}'
+    result = json.loads((workspace / "result.json").read_text())
+    assert result["tests"]["passed"] is True
+    assert result["changed_files"] == ["a.py"]
+    assert result["commit_sha"] == _git(repo, "rev-parse", "HEAD").strip()
+    assert _framed_output(proc.stdout) == ""
+
+
+def test_codex_wrapper_runs_the_app_server_only_in_driver_mode():
+    script = (LIBRARY.parent / "codex_cli_run.sh").read_text()
+    assert "codex app-server 2>/dev/null" in script
+    assert '"$driver" = "app_server"' in script
+    assert "unknown driver" in script
+    # The one-shot path is unchanged.
+    assert 'codex exec --sandbox workspace-write "$goal" 2>&1' in script

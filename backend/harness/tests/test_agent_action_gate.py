@@ -71,7 +71,9 @@ def job(workspace, repo, owner):
 
 
 def _escalation(command="npm install left-pad", kind="command", reason="need a dependency"):
-    return Escalation(request_id=1, kind=kind, command=command, cwd="/workspace/repo", reason=reason)
+    return Escalation(
+        request_id=1, kind=kind, command=command, cwd="/workspace/repo", reason=reason
+    )
 
 
 def _mint(job, **kwargs):
