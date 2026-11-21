@@ -1,3 +1,4 @@
+import datetime
 import threading
 import time
 import uuid
@@ -91,11 +92,40 @@ class TestDescribeExecution:
             "removed_count": 0,
             "retry_count": 0,
             "conflicts_saved": 0,
+            "conflicts_private": 0,
+            "conflicts_folders": [],
             "entity_notes_count": 0,
             "inbox_imported_count": 0,
             "inbox_unmapped_count": 0,
             "inbox_skipped_count": 0,
         }
+
+    def test_names_the_conflict_folders_of_a_run_with_conflicts(self, workspace, owner):
+        run = make_run(workspace, owner)
+        run.status = VaultExportRun.Status.SUCCEEDED
+        run.conflicts_saved = 3
+        run.conflicts_private = 1
+        run.conflicts_day = datetime.date(2026, 11, 20)
+        run.save()
+        fresh_request = ApprovalRequest.objects.get(pk=run.approval_request_id)
+        summary = export.describe_vault_export_execution(fresh_request)
+        assert summary["conflicts_saved"] == 3
+        assert summary["conflicts_private"] == 1
+        assert summary["conflicts_folders"] == [
+            "_conflicts/2026-11-20/",
+            "_private/_conflicts/2026-11-20/",
+        ]
+
+    def test_only_private_conflicts_name_only_the_private_folder(self, workspace, owner):
+        run = make_run(workspace, owner)
+        run.status = VaultExportRun.Status.SUCCEEDED
+        run.conflicts_saved = 1
+        run.conflicts_private = 1
+        run.conflicts_day = datetime.date(2026, 11, 20)
+        run.save()
+        fresh_request = ApprovalRequest.objects.get(pk=run.approval_request_id)
+        summary = export.describe_vault_export_execution(fresh_request)
+        assert summary["conflicts_folders"] == ["_private/_conflicts/2026-11-20/"]
 
     def test_reflects_a_succeeded_runs_counts(self, workspace, owner, tmp_path, settings):
         settings.OBSIDIAN_VAULT_PATH = str(tmp_path)
