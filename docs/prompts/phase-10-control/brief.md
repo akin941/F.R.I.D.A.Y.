@@ -1335,7 +1335,7 @@ with the Mac rows pending owner evaluation.
 | brief | `docs/p10-brief` | This brief (full, from the stub; stub goal, scope, checkpoint and owner step d4 kept), MASTER_PLAN §AA row 10 Brief/Status | Phase 8B brief; Phase 9 brief | **implemented 2026-11-20**; review round 1 and round 2 findings fixed 2026-11-21 (docs only; awaits Sonnet 5 re-review) |
 | 1 | `feat/p10-protocol-v2` | Protocol v2 schemas, grant format and domain-separated signing, version negotiation, capability contracts v2 + recipe catalogue, argument-schema fuzz families, snapshot classes, ADR notes | Phase 9 branches 2–3 merged; brief approved | **implemented 2026-11-20** on its branch (merges `feat/p9-node-protocol` as its base); review round 1 findings (1 MEDIUM, 2 LOW) fixed 2026-11-21, awaits Sonnet 5 re-review; see "Implementation record — `feat/p10-protocol-v2`" |
 | 2 | `feat/p10-reference-executor` | Reference node v2 (verifier 13–24, confirmation double, executor port, runtime cap), `srt` policy generator + vectors, conformance cases v2, escape suite + runner | 1 | **implemented 2026-11-20** on its branch (based on the integration branch with branch 1 merged; Phase 9 branch 3 not merged, so the reference node v1 session half and the v1 protocol cases are built here too); awaits independent Sonnet 5 review; see "Implementation record — `feat/p10-reference-executor`" |
-| 3 | `feat/p10-invocation-grants` | Per-tool approval TTL + pre-transaction hook (`create_request` split) + approver hook, `node_action` tool with actor/approver checks, registered trust-check stub, `NodeActionExecution`, grant issuance, gated/confirm invocation, gateway v2 frames + watchdog, output scrubber port + `StreamScrubber` (tail re-scrub, fail closed), chain row v2, actions endpoints | 1, 2; Phase 9 branches 4–5 merged | not started |
+| 3 | `feat/p10-invocation-grants` | Per-tool approval TTL + pre-transaction hook (`create_request` split) + approver hook, `node_action` tool with actor/approver checks, registered trust-check stub, `NodeActionExecution`, grant issuance, gated/confirm invocation, gateway v2 frames + watchdog, output scrubber port + `StreamScrubber` (tail re-scrub, fail closed), chain row v2, actions endpoints | 1, 2; Phase 9 branches 4–5 merged | **implemented 2026-11-20** on its branch (based on the integration branch with branches 1–2 merged; Phase 9 branches 4–5 not merged, so the gateway's per-socket session core and the presence/inbox helpers are built here and the socket app stays Phase 9 branch 4's); awaits independent Sonnet 5 review; see "Implementation record — `feat/p10-invocation-grants`" |
 | 4 | `feat/p10-trust-check` | Trust check (rules + `control.trust_check`), evidence port, router `node_action` proposals, injection corpus, voice cap regressions | 3 | not started |
 | 5 | `feat/p10-hud-terminal` | Redis output stream (fed by the branch-3 scrubber), HUD `terminal` section + stream endpoint, terminal panel, draft/approval cards, `node_action_result` read tool | 3 (parallel with 4) | not started |
 | 6 | `feat/p10-codex-app-server` | Driver framework, interactive container, Codex app-server driver, `harness_agent_action` gate, usage per turn, pins + provisional snapshot + contract test | Phase 3 harness (merged); 3 (per-tool approval TTL only: `ToolSpec.approval_ttl_seconds`, `_expire_if_stale`, per-minute sweep); parallel with 4–5 | not started |
@@ -2082,3 +2082,183 @@ check-11-first order as intentional.
    re-resolve it at run time. Exploiting it needs local write access to the
    owner's repo path. Fix: re-realpath the repo root after the click and
    refuse with `not_configured` if it changed.
+
+## Implementation record — `feat/p10-invocation-grants` (branch 3, implemented 2026-11-20)
+
+**Base.** Cut from the integration branch with branches 1 and 2 merged.
+Phase 9 branches 4–5 (`feat/p9-node-gateway`, `feat/p9-node-reads`) have
+not merged, so there is no socket app, no Redis invoke bus and no
+`invoke_read` yet. This branch builds what D7 needs of the gateway as a
+transport-agnostic core — `nodes.gateway.NodeSession` (one per socket) and
+`nodes.bus` (presence key and per-node inbox) — and leaves the socket
+process itself (handshake, the `BLPOP` loop, revocation fan-out, limits) to
+Phase 9 branch 4, which wires the session in. The end-to-end tests drive
+the session in process against the Python reference node v2, as the brief's
+test list allows ("the gateway in-process").
+
+**Delivered (D2 issuance, D6, D7, D8, the D12 scrubber port).**
+- `approvals`: `ToolSpec.approval_ttl_seconds` (decision time and the
+  per-minute sweep use `min(tool TTL, APPROVAL_REQUEST_TTL_HOURS)`);
+  `create_request` split into the non-atomic wrapper (channel, role, tool,
+  gated / `user_invocable` / `proposable`, `validate_request`, then
+  `precheck_request`) and `_create_request_atomic` (role again,
+  `prepare_payload(..., precheck=)` only for a tool that declares the hook,
+  row and audit as before); `authorize_decision` called by
+  `approve_request` after the curator and channel checks and before the
+  status changes (`tools.registry.ToolDecisionForbidden` → 403, the request
+  stays pending); `reject_request` unchanged.
+- `tools/node_actions.py`: the `node_action` gated tool (`user_invocable`,
+  `proposable`, `records_work_log`, `approval_ttl_seconds=600`) with the
+  actor check first (unknown and foreign `node_id` give the same
+  `actor_not_owner`, one `nodes.refused` AuditLog row), the D6 refusal
+  order, the snapshot `{node_id, capability, capability_version, class,
+  args, args_sha256, workspace_id, source_message_id, source_input_mode,
+  trust, data_class}`, the approver check, the Turkish `describe_request`
+  ("Mac'teki onay penceresi kendi metnini gösterir", "Sesle önerildi"),
+  `create_execution` / `dispatch` / `describe_execution`, and the work-log
+  entry of each terminal gated execution (through a terminal hook, since
+  `nodes` cannot import `tools`).
+- `tools/node_action_ports.py`: the trust-check and evidence ports and
+  `pending_trust_check` (`warn:trust_check_pending`, `is_stub = True`);
+  unregistered → `block` (`trust_check_unavailable_config`).
+  `assistant.apps.AssistantConfig.ready()` registers the stub in one
+  explicit line, which branch 4 replaces.
+- `nodes`: `NodeActionExecution` (migration 0003, which also adds the
+  nullable chain columns and `hash_version`), `nodes/action_rules.py` (the
+  shared actor check, the D3 workspace rule, the 8A path-resolver port),
+  `nodes/grants.py` (`issue`: the D2 refusals in order, then
+  `build_gated_invoke`), `nodes/services.py` (`create_gated_execution`,
+  `dispatch_gated`, `invoke_confirm`, `record_gated_progress`,
+  `finish_execution` — one chain row and one `nodes.invoke` AuditLog row per
+  execution — and the beat backstops `sweep_node_actions` and
+  `clear_expired_tails`), `nodes/tasks.py` (`run_node_action`, the two beat
+  tasks), `nodes/gateway.py` (`NodeSession`: `hello` → snapshot + presence,
+  `heartbeat`, `pull_invokes` with node-id routing, `receive` for
+  `confirmation` / `output` / `result` of this socket's in-flight set only,
+  the watchdog `tick`, fail-closed `disconnect`), `nodes/bus.py`,
+  `nodes/output.py` (`register_scrubber`, `StreamScrubber` on the reference
+  carry-over algorithm, `scrub_tail`, the fail-closed marker),
+  `nodes/checks.py` (boot checks: grant TTL ≤ 120, dispatch delay, tail
+  retention, carry bound), chain row v2 in `nodes/audit_chain.py`, and
+  `POST /api/v1/nodes/<id>/actions` + `GET
+  /api/v1/nodes/<id>/actions/<execution_id>`.
+- `config/asgi_nodes.py`: the gateway process's composition root; registers
+  the 8A scrubber bound to the workspace's `ScrubTerm`s (the only scrubber
+  registration, pinned by a source test), `GET /healthz`; a WebSocket
+  handshake is closed 1013 until Phase 9 branch 4 adds the socket app.
+- Settings `NODE_GRANT_TTL_SECONDS` (90), `NODE_ACTION_DISPATCH_MAX_DELAY_SECONDS`
+  (60), `NODE_ACTION_TAIL_RETENTION_DAYS` (14) and `.env.example`; beat
+  entries `node-action-sweep` (every minute) and
+  `node-action-tail-retention` (daily); the approval sweep was already
+  every minute.
+- ADR-013 implementation note (grant issuance, fail closed, audit).
+
+**Tests.** `tools/tests/test_node_actions.py` (end to end: request →
+approve over web → one grant → window approves → fake executor → `ok`,
+exit 0, one chain row v2 and one AuditLog row; failing command; every
+owner-away rule — 10-minute expiry at decision time and by the sweep,
+`stale_dispatch` at 61 s and by the beat backstop, `node_offline` consuming
+the approval, `confirm_timeout`, owner denies — each with "no retry"; single
+use — double dispatch, a replayed envelope refused `replay`, approval A's
+grant on approval B's args refused `grant_mismatch` by the node; the
+compromised-server cases `args_changed`, `not_invocable`,
+`path_not_in_workspace`, kill switch, `signing_unavailable`; frame routing
+for another socket's and a finished invocation; the watchdog; socket loss;
+a misrouted envelope; tail retention; `issue` runs `check_gate_request`
+before `build_gated_invoke` — branch 1 known follow-up 2),
+`test_node_action_gate.py` (actor and approver checks in the firm and the
+personal workspace with a member and a curator, forged rows, the owner
+losing the role or being deactivated before dispatch, reject by a non-owner
+curator; precheck outside any transaction in a `transaction=True` test;
+viewer, agent, anonymous and non-owner writers never reach the trust check
+and write no `ModelUsage`; client `trust` dropped; the snapshot keys; the
+stub and the unregistered/failing/blocking trust checks; workspace
+isolation for AX, recipes, apps and repo paths in both directions),
+`test_node_action_scrub.py` (a node with its scrub disabled sends every
+corpus secret: none reaches the stored tail, any row, log or Redis key;
+marker-only tail without a scrubber; every corpus secret split at every
+offset and across a line break; carry bound; UTF-8; the shared
+`scrub_stream.json` vectors reproduced by the server scrubber; the carry
+flushed at result, socket loss and watchdog), `test_node_action_endpoints.py`
+(confirm class end to end, denial, validation, offline, the foreign-node
+404 with one chain and one AuditLog row, the source test that only
+`nodes.views` calls `invoke_confirm`, and role × endpoint for POST/GET
+actions and approving a `node_action`: owner web session; owner
+`cli`/`openai`/`hook` PATs; node secret; non-owner member; non-owner
+curator; `is_agent`; anonymous), `approvals/tests/test_tool_hooks.py`
+(per-tool TTL incl. the 24 h regression and the cap, the split and the old
+`prepare_payload` signature, the approver hook),
+`nodes/tests/test_node_action_chain.py` (hash version 2, tamper, the pinned
+closed vocabulary), `config/tests/test_asgi_nodes.py` (scrubber registration
+with workspace terms, the registration source test, `/healthz`, the 1013
+placeholder, beat entries, boot checks), `assistant/tests/test_node_trust_stub.py`.
+The tests live under `tools/tests` (not `nodes/tests`) because the `nodes`
+contract forbids `nodes` — tests included — to import `approvals`, `tools`
+or `memory`.
+
+**Deviations, recorded.**
+- No socket app (Phase 9 branch 4): `NodeSession` is called synchronously;
+  the socket app calls it through `sync_to_async(thread_sensitive=True)`.
+  Until then `config/asgi_nodes.py` closes WebSocket handshakes with 1013.
+- `precheck_request` returns a frozen `NodeActionPrecheck` object, not a
+  dict, so a client value can never pass for it.
+- The trust-check ports live in `tools/node_action_ports.py`, which imports
+  nothing of ours: `assistant → tools.node_actions → nodes` would break
+  "only tools, hud, ops may import nodes" transitively.
+- The 8A path lookup reaches `nodes` through a registered resolver
+  (`nodes.action_rules.register_path_resolver`, registered by
+  `tools.node_actions`); unregistered = no path resolves = refused.
+- `NodeActionExecution.approval` is a string reference and `nodes` imports
+  no `approvals` code (Phase 9 follow-up 2 still holds).
+- Added `server_refused` codes: `approval_not_approved`, `wrong_tool`,
+  `args_changed`, `kill_switch` (any `node_device_refusal`: revoked, kill
+  switch, credential expired, inactive owner), `node_mismatch` (a
+  misrouted inbox envelope) and `bus_unavailable` (Redis down at dispatch;
+  a grant was signed but never sent, so the chain row records no nonce).
+- A node `result{status: error}` ends `failed:node_error`; a node
+  `result{status: timeout}` (its runtime cap) ends `timeout`.
+- `granted` is held only between signing and the push; the row moves to
+  `sent` once the envelope is in the inbox.
+- `output_bytes` is the server's count of received `output` bytes (UTF-8),
+  not the node's own figure.
+- `source_input_mode` is `unknown` until branch 4 registers the evidence
+  source.
+- A confirm-class request that passes validation answers 202 with the
+  execution even when its status is already terminal (offline, not
+  invocable, kill switch); validation errors are 400 with nothing written.
+- The beat backstop `sweep_node_actions` (not in the brief) fails an
+  approved execution whose task never ran `stale_dispatch` and times out an
+  in-flight one whose gateway is gone (deadline + 60 s grace).
+- The carry boot check compares `SCRUB_CARRY_BYTES` with two 200-character
+  scrub terms.
+
+### Owner steps (pending) — `feat/p10-invocation-grants`, recorded 2026-11-20
+
+1. Run the independent Sonnet 5 review of this branch (CLAUDE.md
+   "Reviews") and fix findings until APPROVE.
+2. Phase 9 branch 4 (`feat/p9-node-gateway`): wire `nodes.gateway.NodeSession`
+   into the socket app — subprotocol `friday-node.v2, friday-node.v1`
+   negotiation (D1), `hello` → `session.hello` + `hello.ack`, `heartbeat`
+   → `session.heartbeat`, the inbox `BLPOP` loop → `session.pull_invokes`
+   (reuse `nodes.bus`), node frames → `session.receive`, a once-per-second
+   `session.tick`, socket close → `session.disconnect` — and replace the
+   1013 placeholder in `config/asgi_nodes.py`. Keep the scrubber
+   registration where it is.
+3. Phase 9 branch 5 (`feat/p9-node-reads`): `invoke_read` reuses
+   `nodes.bus` and `nodes.action_rules.actor_is_node_owner` for its step 0.
+4. Branch 4 (`feat/p10-trust-check`): replace the stub line in
+   `assistant/apps.py` with the real check, and register the evidence source
+   (`tools.node_action_ports.register_evidence_source`) so
+   `source_input_mode` records `text` / `voice`.
+5. Branch 5 (`feat/p10-hud-terminal`): append the scrubbed text that
+   `NodeSession._output` now counts and drops to `nodes:output:<invocation_id>`.
+6. Mac session M1 (deferred: Mac session): the Swift node must complete
+   the server flows of `tools/tests/test_node_actions.py` and
+   `test_node_action_endpoints.py` the way the Python reference node does —
+   `confirmation{shown}` then `{approved|denied|timed_out}`, one `result`
+   with `confirm_state`, `exit_code`, scrubbed `tail`, and nothing after a
+   socket loss — and show the approval id's first 8 characters in its
+   window (D5 check 23).
+7. Deployment: the `node-gateway` compose service (Phase 9 branch 4) is
+   what serves `config.asgi_nodes`; the three new settings have safe
+   defaults and need no `.env` value.

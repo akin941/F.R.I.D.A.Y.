@@ -312,3 +312,44 @@ writes a fresh row when the catalogue hash **or** the session version
 changes, so a node reconnecting on v2 does not keep its `protocol_v1`
 verdicts. `invocable_entry(snapshot, contract)` is the check branch 3 runs
 before signing a grant.
+
+## Implementation notes — grant issuance and gated invocation (Phase 10 branch 3, 2026-11-20)
+
+**Issuance (decision 4, brief D2).** `nodes.grants.issue(execution)` is the
+only code that signs a gate-class envelope. It runs with the
+`NodeActionExecution` row locked and refuses, signing nothing, unless (in
+this order): the approval's `requested_by` and `decided_by` are both the
+node's active owner holding the `owner` role in the approval's workspace
+(`server_refused:actor_not_owner`, first); the approval is `approved` and
+its tool `node_action`; it was decided at most
+`NODE_ACTION_DISPATCH_MAX_DELAY_SECONDS` (60) ago (else `stale_dispatch`);
+the stored snapshot's `args_sha256` equals the recomputed hash and names
+this node and capability (`args_changed`); `check_gate_request` accepts
+the args (before `build_gated_invoke` builds anything); the node is present
+(`node_offline`), its device may act (`kill_switch`) and its latest snapshot
+still lists the capability invocable at the same version, class and schema
+hashes (`not_invocable`); a `repo_path` still resolves to the approval's
+workspace (`path_not_in_workspace`); a signing key exists. The grant lives
+`NODE_GRANT_TTL_SECONDS` (90; a boot check refuses anything above 120).
+Single use: the node's nonce cache, `grant_issued_at` set once under the
+row lock (a second dispatch finds the row no longer `approved`), and the
+`OneToOne` between execution and approval.
+
+**Fail closed (decision 6).** Nothing is queued to run later: offline at
+dispatch is `node_offline` and consumes the approval; a dispatch later than
+60 s after the decision is `stale_dispatch` (also by the per-minute beat
+backstop when the task never ran); a `node_action` approval expires 10
+minutes after creation (per-tool approval TTL); nothing is retried. The
+gateway session (`nodes.gateway.NodeSession`) accepts `confirmation`,
+`output` and `result` only for invocations in its own in-flight set, runs a
+watchdog per invocation (`expires_at` + `max_runtime_seconds` + 30 s →
+`timeout`) and ends every in-flight invocation `node_disconnected` on
+socket loss. The server→node message set is unchanged.
+
+**Audit.** Every execution ends with exactly one `NodeInvocation` chain row
+(`hash_version` 2, hashing `invocation_class`, `approval_id`, `grant_id`,
+`exit_code`, `confirm_state`; Phase 9 rows stay version 1 and verify
+unchanged) and one `nodes.invoke` AuditLog row. The node's `tail` is
+re-scrubbed by the server (the registered output scrubber, fail closed to
+"[çıktı gizlendi]") before it is stored; `output` frames are scrubbed,
+counted and dropped until the HUD terminal stream (Phase 10 branch 5).
