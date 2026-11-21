@@ -359,10 +359,12 @@ def test_a_source_forgotten_during_the_call_yields_no_candidates(git, personal, 
     "raw",
     [
         "not json",
-        json.dumps({"version": 2, "candidates": []}),
+        # Phase 8B D4: schema v1 output is refused outright.
+        json.dumps({"version": 1, "candidates": []}),
+        json.dumps({"version": 3, "candidates": []}),
         json.dumps({"version": True, "candidates": []}),
-        json.dumps({"version": 1, "candidates": [], "extra": 1}),
-        json.dumps({"version": 1, "candidates": [{"type": "semantic"}]}),
+        json.dumps({"version": 2, "candidates": [], "extra": 1}),
+        json.dumps({"version": 2, "candidates": [{"type": "semantic"}]}),
         candidates_reply([("e", "q" * 20, {"type": "work_log"})]),
         candidates_reply([("e", "q" * 20, {"target": "everything"})]),
         candidates_reply([("e", "q" * 20, {"extra": "x"})]),
@@ -374,10 +376,17 @@ def test_schema_violations_are_parse_errors(raw):
         parse_episode_candidates(raw)
 
 
-def test_a_schema_error_is_terminal_and_marks_the_episodes_extracted(git, personal, llm):
+def test_an_empty_v2_reply_is_valid():
+    assert parse_episode_candidates(json.dumps({"version": 2, "candidates": []})) == []
+
+
+@pytest.mark.parametrize("version", [1, 2])
+def test_a_schema_error_is_terminal_and_marks_the_episodes_extracted(git, personal, llm, version):
     fake_provider()
     episode(git, owner_text=OWNER_LINE)
-    llm.overrides["memory.episode_extraction"] = '{"version": 1, "candidates": [{"x": 1}]}'
+    llm.overrides["memory.episode_extraction"] = json.dumps(
+        {"version": version, "candidates": [{"x": 1}]}
+    )
     jobs = plan()
     run_all(jobs)
     job = EpisodeExtractionJob.objects.get(pk=jobs[0])

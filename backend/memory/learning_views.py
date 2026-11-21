@@ -4,7 +4,9 @@ Owner only, trusted web session only, default authentication (a PAT is
 refused by authentication itself -> 401), `for_actor()` + owner-role lookups
 (another workspace's item -> 404). Decisions reuse the memory and core-block
 services one item at a time (`memory.ingestion.digest`); bulk approval
-exists only for `work_log` items.
+exists only for `work_log` items. Phase 8B: fact proposals (kind `fact`) are
+approved, edited or rejected through the graph services; a supersede whose
+target changed or would run backwards is a 409 with the graph's stable code.
 """
 
 from rest_framework import status
@@ -15,6 +17,8 @@ from rest_framework.views import APIView
 from core.api_errors import service_error_response
 from core.channels import request_channel
 from core.permissions import IsOwner, IsWebChannel
+from memory.graph import services as graph_services
+from memory.graph.serializers import FactEditSerializer, serialize_fact
 from memory.ingestion import digest
 from memory.serializers import (
     LearningBulkApproveSerializer,
@@ -30,18 +34,31 @@ from memory.services import (
 )
 
 _PERMISSIONS = [IsAuthenticated, IsWebChannel, IsOwner]
-_ERRORS = (MemoryPermissionDenied, InvalidTransition, DuplicateMemory, CoreBlockInvalid)
+_ERRORS = (
+    MemoryPermissionDenied,
+    InvalidTransition,
+    DuplicateMemory,
+    CoreBlockInvalid,
+    graph_services.GraphError,
+)
+_CONFLICTS = (graph_services.SupersedeOrder, graph_services.SupersedeTargetChanged)
 
 
 def _error(exc):
     if isinstance(exc, MemoryPermissionDenied):
         return service_error_response(exc, status.HTTP_403_FORBIDDEN)
+    if isinstance(exc, _CONFLICTS):
+        return service_error_response(exc, status.HTTP_409_CONFLICT)
+    if isinstance(exc, graph_services.SystemRowImmutable):
+        return service_error_response(exc, status.HTTP_405_METHOD_NOT_ALLOWED)
     return service_error_response(exc, status.HTTP_400_BAD_REQUEST)
 
 
 def _item_payload(kind, row):
     if kind == digest.KIND_MEMORY:
         return MemorySerializer(row).data
+    if kind == digest.KIND_FACT:
+        return serialize_fact(row)
     return {
         "id": str(row.id),
         "label": row.label,
@@ -83,6 +100,8 @@ class LearningItemActionView(APIView):
             allowed = digest.MEMORY_ACTIONS
         elif kind == digest.KIND_CORE_BLOCK:
             allowed = digest.CORE_BLOCK_ACTIONS
+        elif kind == digest.KIND_FACT:
+            allowed = digest.FACT_ACTIONS
         else:
             return Response(status=status.HTTP_404_NOT_FOUND)
         if action not in allowed:
@@ -93,6 +112,10 @@ class LearningItemActionView(APIView):
         fields = {}
         if kind == digest.KIND_MEMORY and action in ("approve", "edit"):
             serializer = MemoryCurateSerializer(data=request.data)
+            serializer.is_valid(raise_exception=True)
+            fields = serializer.validated_data
+        elif kind == digest.KIND_FACT and action == "edit":
+            serializer = FactEditSerializer(data=request.data)
             serializer.is_valid(raise_exception=True)
             fields = serializer.validated_data
         try:

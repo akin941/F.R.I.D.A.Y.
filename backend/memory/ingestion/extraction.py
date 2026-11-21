@@ -14,7 +14,15 @@ the next night), scrubs every text a second time, and sends **only
 an `untrusted_context` fence. The reply is parsed strictly (schema v1, any
 deviation is a terminal error), and a candidate survives only when its quote
 is a verbatim substring of the cited episode's owner text in this job
-(`memory.provenance`). Survivors wait on the job for the workspace's
+(`memory.provenance`).
+
+Schema v2 (Phase 8B brief D4) adds the `fact` key to every candidate:
+`null`, or -- for `target: "fact"` -- the structured fact object validated by
+`memory.graph.candidates.validate_fact_object`. A fact candidate also needs
+every entity name inside its quote (`fact_entity_not_in_quote`), and its
+`valid_from` within the cited episode's day +-1 (else the episode's date,
+counted `fact_valid_from_clamped`). Its sensitivity is the episode's, never
+the model's. Survivors wait on the job for the workspace's
 consolidation (`memory.ingestion.consolidation`); nothing here writes a
 memory or a block.
 """
@@ -36,6 +44,11 @@ from ai_core.gateway import InferenceGateway
 from ai_core.models import PromptTemplate
 from memory.context import neutralize_fence, strip_invisible_formatting
 from memory.core_blocks import labels_for_workspace
+from memory.graph.candidates import (
+    FactCandidateInvalid,
+    normalise_name,
+    validate_fact_object,
+)
 from memory.ingestion import services
 from memory.ingestion.scrubber import scrub_text, scrub_value
 from memory.models import (
@@ -52,7 +65,7 @@ from workspaces.models import Workspace
 logger = logging.getLogger(__name__)
 
 PROMPT_NAME = "friday_episode_extraction"
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 MAX_EPISODES_PER_JOB = 25
 MAX_CANDIDATES = 50
 MIN_OWNER_TEXT_CHARS = 20
@@ -65,23 +78,32 @@ MAX_RETRIES = 3
 PENDING_RECOVERY_GRACE_SECONDS = 60
 
 MEMORY_TARGET = "memory"
+# Phase 8B D4: a structured fact proposal (`fact` carries the object).
+FACT_TARGET = "fact"
 # `self` is assembler-only (D8): a candidate targeting it is dropped and
 # counted, never turned into a proposal.
-_TARGETS = {MEMORY_TARGET, *CoreMemoryBlock.Label.values}
+_TARGETS = {MEMORY_TARGET, FACT_TARGET, *CoreMemoryBlock.Label.values}
 _TYPES = frozenset(Memory.Type.values) - {Memory.Type.WORK_LOG}
 _TOP_KEYS = {"version", "candidates"}
-_CANDIDATE_KEYS = {"type", "title", "content", "quote", "episode_id", "target"}
+_TEXT_KEYS = ("type", "title", "content", "quote", "episode_id", "target")
+_CANDIDATE_KEYS = {*_TEXT_KEYS, "fact"}
+# A fact's `valid_from` may sit at most this many days from its episode.
+VALID_FROM_SLACK_DAYS = 1
 FENCE_WORDS = ("owner_item", "untrusted_context", "context_item")
 
 _OPEN = (EpisodeExtractionJob.Status.PENDING, EpisodeExtractionJob.Status.RUNNING)
 
 
 class EpisodeParseError(Exception):
-    """The reply did not match schema v1. Terminal, never retried; the
+    """The reply did not match schema v2. Terminal, never retried; the
     message never embeds model text."""
 
 
-def parse_episode_candidates(raw_text):
+def parse_episode_candidates(raw_text, *, max_candidates=MAX_CANDIDATES):
+    """Strict schema-v2 parse (D4). v1 output (`version: 1`, or a candidate
+    without `fact`) is refused; a `fact` target needs a valid fact object
+    and every other target `fact: null`. Returns plain dicts (JSON-safe:
+    the waiting candidates are stored on the job)."""
     try:
         payload = json.loads(raw_text)
     except (json.JSONDecodeError, TypeError) as exc:
@@ -94,13 +116,13 @@ def parse_episode_candidates(raw_text):
     candidates = payload["candidates"]
     if not isinstance(candidates, list):
         raise EpisodeParseError("'candidates' must be a list")
-    if len(candidates) > MAX_CANDIDATES:
-        raise EpisodeParseError(f"too many candidates (> {MAX_CANDIDATES})")
+    if len(candidates) > max_candidates:
+        raise EpisodeParseError(f"too many candidates (> {max_candidates})")
     parsed = []
     for index, candidate in enumerate(candidates):
         if not isinstance(candidate, dict) or set(candidate) != _CANDIDATE_KEYS:
             raise EpisodeParseError(f"candidate {index} has unexpected keys")
-        for key in _CANDIDATE_KEYS:
+        for key in _TEXT_KEYS:
             if not isinstance(candidate[key], str) or not candidate[key].strip():
                 raise EpisodeParseError(f"candidate {index} has an empty/invalid {key}")
         if candidate["type"] not in _TYPES:
@@ -115,6 +137,18 @@ def parse_episode_candidates(raw_text):
         ):
             if len(candidate[key]) > cap:
                 raise EpisodeParseError(f"candidate {index} {key} exceeds {cap} chars")
+        fact = candidate["fact"]
+        if candidate["target"] == FACT_TARGET:
+            if fact is None:
+                raise EpisodeParseError(f"candidate {index} targets fact without a fact")
+            try:
+                validate_fact_object(fact)
+            except FactCandidateInvalid as exc:
+                raise EpisodeParseError(
+                    f"candidate {index} has an invalid fact ({exc.reason})"
+                ) from None
+        elif fact is not None:
+            raise EpisodeParseError(f"candidate {index} carries a fact on a non-fact target")
         parsed.append(dict(candidate))
     return parsed
 
@@ -317,7 +351,7 @@ def finalize_success(job_id, claim_token, *, candidates, sent_episode_ids, drops
     candidates, drops = drop_inactive_source_candidates(candidates, drops)
     _close(job, EpisodeExtractionJob.Status.SUCCEEDED, candidates=candidates)
     _mark_extracted(sent_episode_ids)
-    _record_drops(drops)
+    record_drops(drops)
     workspace_id = job.workspace_id
     from memory.ingestion.consolidation import dispatch_consolidation
 
@@ -371,7 +405,7 @@ def finalize_failure(
     return True
 
 
-def _record_drops(drops):
+def record_drops(drops):
     for source_id, reasons in (drops or {}).items():
         source = IngestionSource.objects.filter(pk=source_id).first()
         if source is not None:
@@ -392,14 +426,19 @@ def _fence(text):
     return neutralize_fence(strip_invisible_formatting(text or ""), *FENCE_WORDS)
 
 
-def _second_scrub(episode, terms):
+def second_scrub(episode, terms, *, max_owner_chars=None):
     """Defence in depth (D3): every text is scrubbed again right before it
-    leaves for the gateway, so a rule added after ingestion still applies."""
+    leaves for the gateway, so a rule added after ingestion still applies.
+    `max_owner_chars` bounds the owner text (the weekly reflection's
+    1000); quotes are verified against exactly what was sent."""
     metadata, _ = scrub_value(episode.metadata or {}, terms=terms)
     metadata_text = json.dumps(metadata, sort_keys=True, ensure_ascii=False, default=str)
+    owner_text = scrub_text(episode.owner_text, terms=terms).text
+    if max_owner_chars is not None:
+        owner_text = owner_text[:max_owner_chars]
     return {
         "episode": episode,
-        "owner_text": _fence(scrub_text(episode.owner_text, terms=terms).text),
+        "owner_text": _fence(owner_text),
         "context_text": _fence(scrub_text(episode.context_text, terms=terms).text),
         "metadata": _fence(metadata_text[:MAX_METADATA_CHARS]),
     }
@@ -463,6 +502,54 @@ def _spend_tokens(episodes, usage):
         )
 
 
+def name_in_quote(name, quote):
+    """D4: an entity name must occur in the (stored) quote after
+    normalisation, so a model cannot hang an owner sentence on an invented
+    entity."""
+    needle = normalise_name(name)
+    return bool(needle) and needle in normalise_name(stored_quote(quote))
+
+
+def clamp_valid_from(valid_from, episode):
+    """`valid_from` within the episode's local day +-1, else that day (D4).
+    Returns `(date, clamped)`."""
+    day = timezone.localdate(episode.occurred_at)
+    if abs((valid_from - day).days) > VALID_FROM_SLACK_DAYS:
+        return day, True
+    return valid_from, False
+
+
+def verified_fact(candidate, episode):
+    """The code checks of a fact candidate whose quote is already verified
+    against `episode` (D4). Returns `(fact_dict, None)` -- JSON-safe, with a
+    `clamped` flag the caller pops -- or `(None, drop_reason)`."""
+    try:
+        fact = validate_fact_object(candidate["fact"])
+    except FactCandidateInvalid as exc:
+        return None, exc.reason
+    names = [fact.subject.name]
+    if fact.object_entity is not None:
+        names.append(fact.object_entity.name)
+    if not all(name_in_quote(name, candidate["quote"]) for name in names):
+        return None, "fact_entity_not_in_quote"
+    valid_from, clamped = clamp_valid_from(fact.valid_from, episode)
+    obj = (
+        {"kind": fact.object_entity.kind, "name": fact.object_entity.name}
+        if fact.object_entity is not None
+        else {"text": fact.object_text}
+    )
+    return (
+        {
+            "subject": {"kind": fact.subject.kind, "name": fact.subject.name},
+            "predicate": fact.predicate,
+            "object": obj,
+            "valid_from": valid_from.isoformat(),
+            "clamped": clamped,
+        },
+        None,
+    )
+
+
 def verify_candidates(raw, items_by_id, workspace):
     """The provenance check, in code (D9). Returns `(survivors, drops)` where
     drops maps source id -> Counter of reasons."""
@@ -479,10 +566,32 @@ def verify_candidates(raw, items_by_id, workspace):
         if item is None or not quote_is_verbatim(candidate["quote"], item["owner_text"]):
             drops[source_id]["no_provenance"] += 1
             continue
+        episode = item["episode"]
+        if target == FACT_TARGET:
+            fact, reason = verified_fact(candidate, episode)
+            if reason is not None:
+                drops[source_id][reason] += 1
+                continue
+            if fact.pop("clamped"):
+                drops[source_id]["fact_valid_from_clamped"] += 1
+            survivors.append(
+                {
+                    "type": candidate["type"],
+                    "title": candidate["title"].strip(),
+                    "content": candidate["content"].strip(),
+                    "quote": stored_quote(candidate["quote"]),
+                    "episode_id": str(episode.id),
+                    "source_id": str(episode.source_id),
+                    "target": FACT_TARGET,
+                    # Inherited from the cited episode, never the model's (D4).
+                    "sensitivity": episode.sensitivity,
+                    "fact": fact,
+                }
+            )
+            continue
         if target != MEMORY_TARGET and target not in allowed_labels:
             drops[source_id]["invalid_target"] += 1
             continue
-        episode = item["episode"]
         if target != MEMORY_TARGET and needs_personal_data(episode):
             # ADR-005: a core block has no per-line sensitivity and normal
             # blocks reach cloud payloads, so private/personal-class content
@@ -499,6 +608,7 @@ def verify_candidates(raw, items_by_id, workspace):
                 "source_id": str(episode.source_id),
                 "target": target,
                 "sensitivity": episode.sensitivity,
+                "fact": None,
             }
         )
     return survivors, {str(k): v for k, v in drops.items() if k is not None}
@@ -523,14 +633,14 @@ def process_claimed_job(job_id, claim_token):
     deferred_counts = defaultdict(Counter)
     for episode in deferred:
         deferred_counts[str(episode.source_id)]["deferred_budget"] += 1
-    _record_drops(deferred_counts)
+    record_drops(deferred_counts)
     if not within:
         finalize_deferred(job_id, claim_token, error_type="source_budget")
         return
 
     version = prompt_version(PROMPT_NAME)
     terms = services.scrub_terms_for(workspace)
-    items = [_second_scrub(e, terms) for e in within]
+    items = [second_scrub(e, terms) for e in within]
     report = {
         "job_id": str(job.id),
         "source_kinds": sorted({e.source.kind for e in within}),

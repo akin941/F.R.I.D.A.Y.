@@ -476,6 +476,10 @@ AI_PURPOSE_TIERS = {
     # a short structured pass; consolidation dedupes, merges and ranks.
     "memory.episode_extraction": "cheap",
     "memory.consolidation": "mid",
+    # Phase 8B learning (brief D4/D5/D15): the supersede judgement needs the
+    # current facts in view; the weekly reflection finds patterns.
+    "memory.fact_reconciliation": "mid",
+    "memory.reflection": "mid",
     # strong: planning
     "agent.plan": "strong",
 }
@@ -516,10 +520,22 @@ AI_BUDGET_AUDIO_DAILY_USD = env("AI_BUDGET_AUDIO_DAILY_USD", default="")
 # also gets its own daily cap. Seeded once by `seed_ai_defaults`
 # (`learning`, `learning_extraction_daily`, `learning_consolidation_daily`
 # AIBudget rows), owner-editable afterwards. Empty = no cap.
-AI_LEARNING_PURPOSES = ("memory.episode_extraction", "memory.consolidation")
+# Phase 8B D15 adds fact reconciliation and the weekly reflection to the
+# shared monthly cap, each with its own cap too (`learning_reconciliation_daily`,
+# `learning_reflection_weekly`). The reflection runs at most once per
+# workspace per ISO week, on Sunday, so its "weekly" cap is enforced as a
+# daily window on that one day (AIBudget has no weekly window).
+AI_LEARNING_PURPOSES = (
+    "memory.episode_extraction",
+    "memory.consolidation",
+    "memory.fact_reconciliation",
+    "memory.reflection",
+)
 AI_BUDGET_LEARNING_MONTHLY_USD = env("AI_BUDGET_LEARNING_MONTHLY_USD", default="20")
 AI_BUDGET_EPISODE_EXTRACTION_DAILY_USD = env("AI_BUDGET_EPISODE_EXTRACTION_DAILY_USD", default="1")
 AI_BUDGET_CONSOLIDATION_DAILY_USD = env("AI_BUDGET_CONSOLIDATION_DAILY_USD", default="0.5")
+AI_BUDGET_RECONCILIATION_DAILY_USD = env("AI_BUDGET_RECONCILIATION_DAILY_USD", default="0.5")
+AI_BUDGET_REFLECTION_WEEKLY_USD = env("AI_BUDGET_REFLECTION_WEEKLY_USD", default="1")
 
 # --- Voice / speech gateway (Phase 6 branch 1, ADR-011) ---
 # Utterance cap (D2/D3): 30 s of 16 kHz mono PCM16 = 960 KB, below Django's

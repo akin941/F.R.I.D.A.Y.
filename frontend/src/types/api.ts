@@ -1149,7 +1149,41 @@ export interface ApiLearningCoreBlockItem extends ApiLearningItemBase {
   actions: ("approve" | "reject")[];
 }
 
-export type ApiLearningItem = ApiLearningMemoryItem | ApiLearningCoreBlockItem;
+/** The learned predicate vocabulary v1 (Phase 8B D2; `MemoryFact.Predicate`, learned set). */
+export type LearnedFactPredicate =
+  | "decided"
+  | "uses"
+  | "depends_on"
+  | "deployed_to"
+  | "owned_by"
+  | "works_on"
+  | "prefers"
+  | "blocked_by"
+  | "replaced_by"
+  | "has_status";
+
+export interface ApiFactEntityRef {
+  kind: string;
+  name: string;
+}
+
+/** A learned fact proposal on the morning card (Phase 8B D4). */
+export interface ApiLearningFactItem extends ApiLearningItemBase {
+  kind: "fact";
+  statement: string;
+  predicate: LearnedFactPredicate;
+  subject: ApiFactEntityRef;
+  object: ApiFactEntityRef | { text: string };
+  valid_from: string;
+  valid_to: string | null;
+  confidence: number;
+  sensitivity: MemorySensitivity;
+  /** The current fact this proposal would replace if approved; `changed` once it no longer is current. */
+  supersedes: { id: string; statement: string; valid_from: string; changed: boolean } | null;
+  actions: ("approve" | "edit" | "reject")[];
+}
+
+export type ApiLearningItem = ApiLearningMemoryItem | ApiLearningCoreBlockItem | ApiLearningFactItem;
 
 export interface ApiLearningDigest {
   since: string;

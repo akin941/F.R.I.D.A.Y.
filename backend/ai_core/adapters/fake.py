@@ -117,7 +117,7 @@ FAKE_MEMORY_EXTRACTION_RESPONSE = fake_memory_extraction_response(
 
 # Purpose-aware fixtures for the Phase 8A learning loop (brief D9, D10),
 # hand-written mirrors of `memory.ingestion.extraction` / `.consolidation`'s
-# v1 schemas (ai_core must not import memory). Episode extraction: one
+# schemas (ai_core must not import memory). Episode extraction (v2): one
 # `memory` candidate per `<owner_item>` of the payload, quoting the item's
 # first characters verbatim. Consolidation: keep every candidate, in order,
 # with its own title/content.
@@ -129,9 +129,10 @@ def _all_content(messages):
     return "\n".join(str(m.get("content", "")) for m in messages or [])
 
 
-def fake_episode_extraction_response(messages):
+def fake_episode_extraction_response(messages, limit=None):
+    """Schema v2 (Phase 8B D4): every candidate carries `fact: null`."""
     candidates = []
-    for episode_id, text in _OWNER_ITEM.findall(_all_content(messages)):
+    for episode_id, text in _OWNER_ITEM.findall(_all_content(messages))[:limit]:
         text = text.strip()
         candidates.append(
             {
@@ -141,9 +142,20 @@ def fake_episode_extraction_response(messages):
                 "quote": text[:_FAKE_QUOTE_CHARS],
                 "episode_id": episode_id,
                 "target": "memory",
+                "fact": None,
             }
         )
-    return json.dumps({"version": 1, "candidates": candidates})
+    return json.dumps({"version": 2, "candidates": candidates})
+
+
+# Phase 8B (brief D4/D5), hand-written mirrors as above: reconciliation
+# decides nothing (every candidate stays `new`); the weekly reflection
+# proposes one memory per owner item, at most 5.
+FAKE_RECONCILIATION_RESPONSE = '{"version": 1, "decisions": []}'
+
+
+def fake_reflection_response(messages):
+    return fake_episode_extraction_response(messages, limit=5)
 
 
 def fake_consolidation_response(messages):
@@ -274,6 +286,10 @@ class FakeAdapter(BaseAdapter):
             return fake_episode_extraction_response(messages)
         if purpose == "memory.consolidation":
             return fake_consolidation_response(messages)
+        if purpose == "memory.fact_reconciliation":
+            return FAKE_RECONCILIATION_RESPONSE
+        if purpose == "memory.reflection":
+            return fake_reflection_response(messages)
         if purpose == "router.intent":
             latest = _latest_user_content(messages)
             if _TASK_DRAFT_TRIGGER in latest:

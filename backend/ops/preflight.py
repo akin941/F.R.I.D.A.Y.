@@ -697,6 +697,7 @@ LEARNING_BEAT_TASKS = {
     "worker": (
         "memory.ingestion.tasks.run_learning_night_task",
         "memory.ingestion.tasks.recover_stale_episode_extraction_jobs",
+        "memory.ingestion.tasks.run_weekly_reflection_task",
         "memory.ingestion.tasks.purge_expired_episodes_task",
         "connectors.tasks.ingest_calendar_metadata",
         "assistant.tasks.assemble_self_block_task",

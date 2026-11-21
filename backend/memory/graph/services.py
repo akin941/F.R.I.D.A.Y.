@@ -193,6 +193,25 @@ def render_statement(subject_name, predicate, object_name):
 # --- entities ----------------------------------------------------------------
 
 
+def find_entity(*, workspace, kind, name, terms=None, include_trashed=True):
+    """The learned entity `resolve_entity` would pick for `(kind, name)`,
+    without creating or reviving anything; None when it would create one
+    (branch 2: reconciliation's subject lookup and the nightly new-entity
+    cap). Read-only."""
+    if kind not in LEARNED_ENTITY_KINDS:
+        return None
+    terms = _terms(workspace) if terms is None else terms
+    normalised = normalise_name(_scrubbed(name, terms, MemoryEntity.MAX_NAME_CHARS))
+    if not normalised:
+        return None
+    manager = MemoryEntity.all_objects if include_trashed else MemoryEntity.objects
+    base = manager.filter(workspace=workspace, kind=kind, origin=MemoryEntity.Origin.LEARNED)
+    return (
+        base.filter(normalised_name=normalised).first()
+        or base.filter(aliases__contains=[normalised]).order_by("created_at").first()
+    )
+
+
 def resolve_entity(*, workspace, kind, name, terms=None):
     """Entity resolution is code, not model (D4): an exact `normalised_name`
     or alias match within the workspace and kind (learned origin), else a

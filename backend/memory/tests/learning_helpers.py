@@ -19,6 +19,8 @@ PROMPTS = {
     "friday_episode_extraction": "memory.episode_extraction",
     "friday_memory_consolidation": "memory.consolidation",
     "friday_memory_extraction": "memory.extraction",
+    "friday_fact_reconciliation": "memory.fact_reconciliation",
+    "friday_memory_reflection": "memory.reflection",
 }
 
 
@@ -114,7 +116,7 @@ def episode(
 
 
 def candidates_reply(items):
-    """A schema-v1 episode-extraction reply from `(episode_id, quote, extra)`
+    """A schema-v2 episode-extraction reply from `(episode_id, quote, extra)`
     tuples; `extra` overrides candidate keys."""
     out = []
     for index, (episode_id, quote, extra) in enumerate(items):
@@ -125,7 +127,8 @@ def candidates_reply(items):
             "quote": quote,
             "episode_id": str(episode_id),
             "target": "memory",
+            "fact": None,
         }
         candidate.update(extra or {})
         out.append(candidate)
-    return json.dumps({"version": 1, "candidates": out})
+    return json.dumps({"version": 2, "candidates": out})

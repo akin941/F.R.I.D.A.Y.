@@ -1924,6 +1924,113 @@ yields at most 10 proposals including verified fact proposals, an
 approved supersede closes the old fact's window, and a fixture Sunday
 yields at most 5 quoted reflection proposals.
 
+**Implementation record (2026-11-20).** Status: implemented on
+`feat/p8-fact-learning`, awaiting the independent Sonnet 5 review.
+- `memory/ingestion/extraction.py`: `SCHEMA_VERSION = 2`; every candidate
+  carries `fact` (null, or the D4 object for `target: "fact"`); v1 output
+  and a v2 candidate without `fact` are terminal `schema_invalid`; an
+  invalid fact object (`validate_fact_object`) is terminal too, like an
+  unknown `type` in v1. `verified_fact` adds the code checks: entity names
+  in the stored quote (`fact_entity_not_in_quote`), `valid_from` within the
+  episode's local day ± 1 (else that day, `fact_valid_from_clamped`),
+  sensitivity copied from the episode. Fact candidates from personal-class
+  episodes are allowed (only core-block targets are refused there). The
+  chat parser (`memory/extraction.py`) is untouched.
+- `memory/ingestion/reconciliation.py` (`memory.fact_reconciliation`,
+  prompt `friday_fact_reconciliation` v1): deterministic dedupe first
+  (`duplicate`), then one call with the normal candidates and the
+  `model_eligible()` facts of the same subject and predicate fenced as
+  `<existing_fact untrusted …>`; code validates each `supersede`
+  (`supersede_invalid`, `supersede_order`); `private` candidates skip it
+  (`reconcile_private_skipped`). Budget refusal, gateway or schema error →
+  every candidate stays `new` (`reconcile_budget_exceeded`,
+  `reconcile_failed`, `reconcile_schema_invalid`). A target that changed
+  between the call and the write is retried as `new`
+  (`supersede_target_changed`).
+- `memory/ingestion/consolidation.py`: fact candidates skip the memory
+  consolidation call; `create_capped_proposals` holds every cap (10 per
+  owner per night including facts and reflection; ≤ 6 facts, `fact_cap`;
+  ≤ 20 new learned entities per workspace per night, `entity_cap`; the
+  weekly core-block 3 through `create_core_block_proposal`). Memories and
+  core-block proposals are created before facts, so facts never crowd out
+  memories. Facts are written through `memory.graph.ports.propose_fact`.
+- `memory/ingestion/reflection.py` + `run_weekly_reflection_task`
+  (worker beat, `crontab(minute=30, hour=3, day_of_week=0)` in the app
+  timezone Europe/Istanbul): ≥ 5 approved items this ISO week, ≤ 40 normal
+  non-personal-class owner texts (≤ 1000 chars, second scrub), fenced
+  `cloud_eligible()` memories, `model_eligible()` facts and the normal
+  `current_focus`/`active_projects` blocks, `personal_data=False`; schema
+  v2 reply with at most 5 candidates (more is `schema_invalid`); `self` and
+  `developer` dropped (`reflection_target`); quotes verified with
+  `verify_candidates`.
+- Digest (`memory/ingestion/digest.py`, `memory/learning_views.py`): kind
+  `fact` with statement, quote, subject/object, validity, sensitivity and
+  the `supersedes` line from the FK (`changed: true` once the target is no
+  longer current; actions then `edit`, `reject`). Actions call
+  `approve_fact` / `edit_fact` / `reject_fact`; `SupersedeOrder` and
+  `SupersedeTargetChanged` are 409 with the graph codes. Bulk approval of a
+  fact is refused (400, nothing approved).
+- Purposes, budgets, prompts: `memory.fact_reconciliation` and
+  `memory.reflection` (tier `mid`) in `AI_PURPOSE_TIERS` and
+  `AI_LEARNING_PURPOSES`; `seed_ai_defaults` seeds
+  `friday_episode_extraction` v2 (moves an installation still on the
+  seeded v1), `friday_fact_reconciliation` v1, `friday_memory_reflection`
+  v1, the budgets `learning_reconciliation_daily` (0.5 USD) and
+  `learning_reflection_weekly` (1 USD), and adds the new purposes to an
+  existing `learning` budget (purposes only; limits untouched).
+  `memory.eval_answer` is left to branch 3. `.env.example` updated; the
+  preflight `learning_beat` check lists the reflection task.
+- Frontend: `LearningCardView` renders the fact item kind (statement,
+  quote, validity, supersedes line or changed notice, per-item approve /
+  edit / reject, no bulk control).
+- Decisions made while implementing, to confirm in review:
+  - **The "weekly" reflection budget is a daily window.** `AIBudget` has
+    no weekly window; the reflection runs at most once per workspace per
+    ISO week (an audit claim row `memory.learning.reflection_started`), on
+    Sunday, so `learning_reflection_weekly` is a `daily_limit_usd` of 1 USD
+    on that day. A weekly window on `AIBudget` would need an `ai_core`
+    migration.
+  - **Reconciliation runs per consolidation claim** (workspace × data
+    class), not strictly once per workspace-night: the personal-data
+    class is reconciled with `personal_data=True`, mirroring 8A's
+    consolidation. With no existing fact to compare against, no call is
+    made.
+  - **Reflection facts are not reconciled** (always `new`); the owner can
+    still supersede by an edit.
+  - **"Approved this week" for memories uses `updated_at`** (`Memory` has
+    no decision timestamp); facts use `decided_at`.
+  - **The new-entity cap counts learned entities created tonight** not
+    referenced by an owner-typed fact. With the 6-fact cap at most 12 new
+    entities arise per night, so the 20 cap only binds if the fact cap is
+    raised; the test raises it.
+- Tests: `memory/tests/test_fact_learning.py`,
+  `test_learning_fact_digest.py`, `test_learning_reflection.py`,
+  `test_fact_learning_night.py` (done-when), `test_fact_learning_fixtures.py`
+  (FakeAdapter drift guard); updated `test_learning_extraction.py`,
+  `test_learning_night.py` (v2 replies, fact injections),
+  `learning_helpers.py`, `config/tests/test_learning_beat.py`,
+  `ops/tests/test_preflight_learning.py`; Vitest
+  `LearningCardView.test.tsx`.
+
+**Owner steps (pending) — `feat/p8-fact-learning`, recorded 2026-11-20.**
+1. Run the independent Sonnet 5 review of this branch and fix findings
+   until APPROVE (CLAUDE.md "Reviews").
+2. Confirm the implementation decisions above, in particular the daily
+   window standing in for the weekly reflection budget.
+3. After deploy, run `manage.py seed_ai_defaults` so the episode prompt
+   moves to v2 (the v2 parser refuses v1 replies) and the new budgets and
+   prompts exist; then check `manage.py preflight` (`learning_budget`,
+   `learning_beat`).
+4. Watch the first real nights' `learning_drops` counters
+   (`fact_entity_not_in_quote`, `fact_valid_from_clamped`, `fact_cap`,
+   `supersede_invalid`) and the reconciliation/reflection spend against
+   the 1–3 USD/month estimate (paid calls; pending owner evaluation, does
+   not block the next branch).
+
+Nothing in this branch needs the Mac or real hardware; real model quality
+of fact extraction is only measurable with the owner's data (branch 3's
+private eval set, M2).
+
 ### 3. `feat/p8-eval-set` — harness, public seed, private loader, baseline
 
 **Scope.**
@@ -2615,7 +2722,7 @@ Mac and private-data rows pending owner evaluation.
 |---|---|---|---|---|
 | brief | `docs/p8b-brief` | This brief (full, from the stub), MASTER_PLAN §AA row 8B Brief/Status | Phase 8A closeout; Phase 9 brief | **implemented 2026-11-20** (docs only; pins verified 2026-11-21 against PyPI and the official repos; review round 1 findings fixed 2026-11-21; review round 2 findings fixed 2026-11-21; review round 3 findings fixed 2026-11-21; awaits the Sonnet 5 re-review) |
 | 1 | `feat/p8-temporal-facts` | `MemoryEntity`/`MemoryFact`, validity windows, supersede, recursive-CTE traversal, owner API, forget/trash/purge cascade, `memory.graph` contract | brief approved | **implemented 2026-11-20** (awaits the Sonnet 5 review; see "Implementation record" under branch 1) |
-| 2 | `feat/p8-fact-learning` | Episode extraction schema v1 → v2 with facts (chat extraction unchanged at v2), inherited fact sensitivity, entity-in-quote rule, reconciliation, weekly reflection, caps, digest fact items | 1 | not started |
+| 2 | `feat/p8-fact-learning` | Episode extraction schema v1 → v2 with facts (chat extraction unchanged at v2), inherited fact sensitivity, entity-in-quote rule, reconciliation, weekly reflection, caps, digest fact items | 1 | **implemented 2026-11-20** (awaits the Sonnet 5 review; see "Implementation record" under branch 2) |
 | 3 | `feat/p8-eval-set` | Eval harness, public seed, private loader, `memory_eval`, `memory.eval_answer` purpose, CI public run | 1 (parallel with 2) | not started |
 | 4 | `feat/p8-hybrid-retrieval` | `tsvector` + GIN, per-provider HNSW expression indexes, RRF + decay + hops, flag, `<memory_fact>` block, `memory_graph_lookup` | 1, 3 | not started |
 | 5 | `feat/p8-graphify-job` | Hash-pinned image, `--network none` runner primitive, trigger, importer + temporal replace, `self` codebase line, manifest | 1 (parallel with 2–4) | not started |

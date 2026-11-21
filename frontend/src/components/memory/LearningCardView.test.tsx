@@ -4,7 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { LearningCardView } from "@/components/memory/LearningCardView";
 import { calledWith, confirmInDialog } from "@/test/confirm";
 import { renderWithClient } from "@/test/render";
-import type { ApiLearningDigest, ApiLearningItem } from "@/types/api";
+import type { ApiLearningDigest, ApiLearningFactItem, ApiLearningItem } from "@/types/api";
 
 vi.mock("next/navigation", () => ({ usePathname: () => "/memory/learning" }));
 
@@ -45,6 +45,38 @@ function coreBlockItem(): ApiLearningItem {
     created_at: "2026-11-20T03:00:00Z",
     bulk_approvable: false,
     actions: ["approve", "reject"],
+  };
+}
+
+const F1 = "55555555-5555-4555-8555-555555555555";
+const F2 = "66666666-6666-4666-8666-666666666666";
+
+function factItem(overrides: Partial<ApiLearningFactItem> = {}): ApiLearningItem {
+  return {
+    kind: "fact",
+    id: F1,
+    title: "billing api Hetzner'da çalışıyor.",
+    content: "billing api Hetzner'da çalışıyor.",
+    statement: "billing api Hetzner'da çalışıyor.",
+    quote: "we moved the billing api to hetzner after the outage",
+    predicate: "deployed_to",
+    subject: { kind: "service", name: "billing api" },
+    object: { kind: "service", name: "Hetzner" },
+    valid_from: "2026-11-20T00:00:00Z",
+    valid_to: null,
+    confidence: 90,
+    sensitivity: "normal",
+    supersedes: {
+      id: "77777777-7777-4777-8777-777777777777",
+      statement: "billing api AWS'te çalışıyor.",
+      valid_from: "2026-10-01T00:00:00Z",
+      changed: false,
+    },
+    source_kind: "git",
+    created_at: "2026-11-20T03:00:00Z",
+    bulk_approvable: false,
+    actions: ["approve", "edit", "reject"],
+    ...overrides,
   };
 }
 
@@ -157,6 +189,77 @@ describe("LearningCardView", () => {
     await waitFor(() => expect(calledWith(fetchMock, "POST", "/api/memory/learning/bulk-approve")).toBe(true));
     const call = fetchMock.mock.calls.find(([url]) => url === "/api/memory/learning/bulk-approve")!;
     expect(JSON.parse(call[1]!.body as string)).toEqual({ ids: [M1, M2] });
+  });
+
+  it("renders a fact proposal's statement, quote, validity and supersedes line", async () => {
+    stub(digest([factItem()]));
+    renderWithClient(<LearningCardView />);
+    const card = await screen.findByTestId(`learning-item-${F1}`);
+    expect(card).toHaveAttribute("data-kind", "fact");
+    expect(within(card).getByRole("heading", { name: "billing api Hetzner'da çalışıyor." })).toBeInTheDocument();
+    expect(within(card).getByTestId("provenance-quote")).toHaveTextContent("we moved the billing api to hetzner");
+    expect(within(card).getByTestId("fact-validity")).toHaveTextContent(/Geçerli:/);
+    expect(within(card).getByTestId("fact-supersedes")).toHaveTextContent("billing api AWS'te çalışıyor.");
+    expect(within(card).getByText("Bilgi önerisi")).toBeInTheDocument();
+  });
+
+  it("approves and rejects a fact through its own routes, with no body", async () => {
+    const fetchMock = stub(digest([factItem(), factItem({ id: F2, supersedes: null })]));
+    renderWithClient(<LearningCardView />);
+    const card = await screen.findByTestId(`learning-item-${F1}`);
+    await userEvent.click(within(card).getByRole("button", { name: "Onayla" }));
+    await waitFor(() =>
+      expect(calledWith(fetchMock, "POST", `/api/memory/learning/proposals/fact/${F1}/approve`)).toBe(true),
+    );
+    const approve = fetchMock.mock.calls.find(([url]) => url.endsWith(`${F1}/approve`))!;
+    expect(approve[1]?.body).toBeUndefined();
+    const second = screen.getByTestId(`learning-item-${F2}`);
+    await userEvent.click(within(second).getByRole("button", { name: "Reddet" }));
+    await confirmInDialog("Reddet");
+    await waitFor(() =>
+      expect(calledWith(fetchMock, "POST", `/api/memory/learning/proposals/fact/${F2}/reject`)).toBe(true),
+    );
+  });
+
+  it("edits a fact's statement", async () => {
+    const fetchMock = stub(digest([factItem()]));
+    renderWithClient(<LearningCardView />);
+    const card = await screen.findByTestId(`learning-item-${F1}`);
+    await userEvent.click(within(card).getByRole("button", { name: "Düzenle" }));
+    const field = within(card).getByLabelText("Bilgi cümlesi");
+    await userEvent.clear(field);
+    await userEvent.type(field, "Billing api Hetzner'da.");
+    await userEvent.click(within(card).getByRole("button", { name: "Kaydet ve onayla" }));
+    await waitFor(() =>
+      expect(calledWith(fetchMock, "POST", `/api/memory/learning/proposals/fact/${F1}/edit`)).toBe(true),
+    );
+    const call = fetchMock.mock.calls.find(([url]) => url.endsWith("/edit"))!;
+    expect(JSON.parse(call[1]!.body as string)).toEqual({ statement: "Billing api Hetzner'da." });
+  });
+
+  it("a changed supersede target leaves only edit and reject", async () => {
+    stub(
+      digest([
+        factItem({
+          supersedes: { id: "t", statement: "old", valid_from: "2026-10-01T00:00:00Z", changed: true },
+          actions: ["edit", "reject"],
+        }),
+      ]),
+    );
+    renderWithClient(<LearningCardView />);
+    const card = await screen.findByTestId(`learning-item-${F1}`);
+    expect(within(card).getByTestId("fact-supersedes-changed")).toBeInTheDocument();
+    expect(within(card).queryByRole("button", { name: "Onayla" })).not.toBeInTheDocument();
+    expect(within(card).getByRole("button", { name: "Düzenle" })).toBeInTheDocument();
+    expect(within(card).getByRole("button", { name: "Reddet" })).toBeInTheDocument();
+  });
+
+  it("offers no bulk control for facts", async () => {
+    stub(digest([factItem(), factItem({ id: F2 })]));
+    renderWithClient(<LearningCardView />);
+    await screen.findByTestId(`learning-item-${F1}`);
+    expect(screen.queryByTestId("bulk-work-log")).not.toBeInTheDocument();
+    expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
   });
 
   it("shows the empty state when nothing is pending", async () => {
