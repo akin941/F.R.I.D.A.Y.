@@ -3,7 +3,9 @@
 > Status: **Draft (2026-11-20). Written on `docs/p10-brief` from the stub of
 > the same date, which was taken from the owner-approved Friday 3.0
 > roadmap. It needs its independent Sonnet 5 plan review before branch 1,
-> because the implementing model never reviews its own brief.**
+> because the implementing model never reviews its own brief.
+> Review round 1 findings (1 HIGH, 4 MEDIUM, 2 LOW) fixed 2026-11-21;
+> awaits re-review.**
 > Sources: `docs/research/2026-11-roadmap-proposal.md` §a.4, §a.5, §B1
 > (ADR-014 table, invocation grant, owner away), §B2 (ADR-015), §B6,
 > §c.4, §c.6, §c.7, §c.8, §c.9, §g d4/d7; MASTER_PLAN §AA "Friday 3.0
@@ -216,8 +218,17 @@ Concretely, at the end of the phase:
   conversation's. `repo_path` arguments resolve through the 8A path
   rules exactly as `git.status` does (Phase 9 D9); a path that maps
   elsewhere is refused before anything is requested. Personal-class
-  capabilities (recipes, AX, apps) are allowed only in the owner's
-  personal workspace.
+  capabilities (AX, apps, and recipes without a `repo_path` param) are
+  allowed only in the owner's personal workspace; a recipe with a
+  `repo_path` param follows the repo's workspace (D3).
+- **Owner-only, on both ends.** A node action is requested, approved and
+  invoked only by the node's owner (the user who paired it, Phase 9 D1),
+  who must also hold the `owner` role in the target workspace. `node_id`
+  is caller-supplied, so this is checked by the server at every step
+  (D6, D2, D8), for firm- and personal-class capabilities alike. Phase 9's
+  "Step 0, the actor check" (`server_refused:actor_not_owner`, 8B
+  follow-up) covers only `data_class: personal` reads; Phase 10 makes it
+  unconditional for every confirm- and gate-class capability.
 - **Harness keeps its pipeline.** Drivers replace only the "run the CLI
   once" step inside the existing implementation container. Gate A,
   the wrapper-owned test run, the cross-vendor review and Gate B are
@@ -293,7 +304,10 @@ ADR-013 decision 4, made concrete.
   issues nothing; and the `OneToOne` between execution and approval.
 - **Issued only from an approved, fresh, unused approval.** `nodes.grants.
   issue(execution)` refuses unless: the approval is `approved`, its tool
-  is `node_action`, it was decided ≤ `NODE_ACTION_DISPATCH_MAX_DELAY_SECONDS`
+  is `node_action`, its `requested_by` **and** `decided_by` are both the
+  named node's owner, active, and still holding the `owner` role in the
+  approval's workspace (else `server_refused:actor_not_owner`, checked
+  first), it was decided ≤ `NODE_ACTION_DISPATCH_MAX_DELAY_SECONDS`
   (default 60) ago, the stored `args_sha256` equals the recomputed hash
   of the stored args, the node is the one named in the snapshot and is
   present, its kill switch is released, its latest snapshot still has the
@@ -320,7 +334,7 @@ advertised entry (Phase 9 rule, extended by class).
 | Capability | Class | Args (all bounded, `additionalProperties: false`) | Data class | Workspace from |
 |---|---|---|---|---|
 | `repo.command.run` | gate | `repo_path` (absolute or `~/`, ≤ 1024, no `..` segment, no NUL/control/bidi characters), `command_kind` ∈ {`test`, `lint`, `typecheck`, `build`, `format_check`} | firm | `repo_path` |
-| `applescript.recipe.run` | gate | `recipe` ∈ the v1 recipe catalogue, `params` validated by that recipe's own schema | personal | personal only |
+| `applescript.recipe.run` | gate | `recipe` ∈ the v1 recipe catalogue, `params` validated by that recipe's own schema | personal; firm for a repo recipe whose `repo_path` resolves to a firm workspace | repo recipes (`params.repo_path`): the repo's workspace, as `repo.command.run`; every other recipe: personal only |
 | `ax.press` | gate | `bundle_id`, `role` ∈ {`button`, `menu_item`, `checkbox`}, `title` (≤ 120, printable, no bidi) | personal | personal only |
 | `ax.type_text` | gate | `bundle_id`, `text` (≤ 500, printable plus `\n`, no bidi/zero-width), `submit` (bool) | personal | personal only |
 | `apps.open` | confirm | `bundle_id` | personal | personal only |
@@ -332,10 +346,17 @@ advertised entry (Phase 9 rule, extended by class).
   with its own `params` schema and `confirm_template`):
   `music.play_pause` {}, `music.next_track` {}, `system.volume_set`
   {`level` 0–100}, `finder.reveal_repo` {`repo_path`},
-  `terminal.open_repo` {`repo_path`}. A recipe with a `repo_path` param
-  resolves its workspace like `repo.command.run` and is then firm-class
-  for that call. The AppleScript text lives only in the node; the server
-  never sends, stores or sees script source.
+  `terminal.open_repo` {`repo_path`}. **One workspace rule for recipes:**
+  a *repo recipe* (one whose `params` schema has `repo_path`:
+  `finder.reveal_repo`, `terminal.open_repo`) resolves its workspace from
+  `repo_path` through the 8A path rules exactly like `repo.command.run`,
+  is allowed only in that workspace (a firm-workspace conversation may
+  run it for a repo of that firm; the personal workspace for a personal
+  repo), and carries the data class of that workspace for the call. Every
+  other recipe is personal-class and allowed only in the personal
+  workspace. The loader marks repo recipes from their schema, so the rule
+  cannot drift from the catalogue. The AppleScript text lives only in the
+  node; the server never sends, stores or sees script source.
 - **Why typed intents and not command lines.** A server-chosen argv is
   "run this string" with extra steps (ADR-013 decision 3). With
   `command_kind`, a compromised server can at most ask the node to run a
@@ -417,11 +438,31 @@ v2 reads:
     capability_version, class, args, args_sha256, workspace_id,
     source_message_id, source_input_mode, trust}`; any caller-supplied
     key outside `{node_id, capability, args, source_message_id}` is
-    dropped. It refuses: an unknown or non-invocable capability, args
-    outside the server contract, a confirm-class capability (those never
-    become approvals, D8), a path that does not resolve to the request's
-    workspace, a personal capability outside the personal workspace, and
-    a trust verdict `block` (D9).
+    dropped. It refuses, in this order: **the actor check** (the
+    requesting actor is not active, is not the owner of the named
+    `node_id`, or does not hold the `owner` role in the request's
+    workspace → `actor_not_owner`; an unknown `node_id` is refused with
+    the same code, so a non-owner learns nothing about other users'
+    nodes); an unknown or non-invocable capability; args outside the
+    server contract; a confirm-class capability (those never become
+    approvals, D8); a `repo_path` (of `repo.command.run` or a repo recipe)
+    that does not resolve to the request's workspace; a personal-class
+    capability (AX, a non-repo recipe) outside the personal workspace;
+    and a trust verdict `block` (D9). Every refusal raises
+    `InvalidTransition`, so no `ApprovalRequest` row exists; an
+    `actor_not_owner` refusal additionally writes one `nodes.refused`
+    `AuditLog` row (actor, node id as given, capability) so probing is
+    visible.
+  - **Approver check.** `ToolSpec.authorize_decision(approval_request,
+    actor) -> None` (new, optional, default no-op) is called by
+    `approve_request` after its curator check and before the status
+    changes. `node_action` implements it: the approver must be the
+    snapshot's node owner, active and an `owner` of the workspace, else
+    `PermissionDenied` (the request stays `pending`; no execution).
+    `approve_request`'s generic curator rule is unchanged for every other
+    tool. `reject_request` keeps the curator rule (declining is the safe
+    direction). `nodes.grants.issue` re-checks both actors (D2), so a
+    future caller that skips the hook still signs nothing.
   - `describe_request` returns a whitelisted Turkish summary: the
     capability's server-side label, the repo's mapped name (never the
     raw path for firm repos outside the workspace), the trust verdict and
@@ -438,12 +479,26 @@ v2 reads:
   moves to every minute (beat), still a backstop to the decision-time
   check.
 - **Pre-transaction hook.** `ToolSpec.precheck_request(workspace, actor,
-  payload) -> dict | None` (new, optional). `create_request` calls it
-  **before** its transaction opens and hands the result to
-  `prepare_payload` as a keyword `precheck=` (passed only to tools that
-  declare the hook, so every existing tool is unchanged). The trust check
-  (a model call) therefore never runs inside a database transaction, and
-  a client can never smuggle a verdict in the payload.
+  payload) -> dict | None` (new, optional). Today `create_request` is
+  decorated `@transaction.atomic` (`approvals/services.py:298`), so the
+  hook needs a split, made in branch 3:
+  1. the public `create_request` loses the decorator and runs, outside
+     any transaction: the channel check, the writer-role check, tool
+     resolution and the gated / `user_invocable` / `proposable` checks,
+     then `validate_request`, then (only for a tool that declares it)
+     `precheck_request`;
+  2. it then calls `_create_request_atomic(...)`, `@transaction.atomic`,
+     which repeats the role check (a role revoked during a slow precheck
+     still refuses), calls `prepare_payload` with the keyword
+     `precheck=` (passed only to tools that declare the hook, so every
+     existing tool is called with its old signature), saves the row and
+     writes the audit row exactly as today.
+  The trust check (a model call) therefore never runs inside a database
+  transaction and never runs for a caller who fails the role or
+  validation checks, so an unauthorised caller cannot spend the
+  `control` budget. For `node_action`, `precheck_request` runs the D6
+  actor check before the trust check for the same reason. A client can
+  never smuggle a verdict in the payload: `trust` is not an accepted key.
 - **Owner-away rules** (ADR-013 decision 6), all server-enforced except
   the first:
   1. local confirmation 60 s → deny (node, D5 check 23);
@@ -465,11 +520,24 @@ v2 reads:
   after `NODE_ACTION_TAIL_RETENTION_DAYS`, default 14), `started_at`,
   `finished_at`, `trace_id`, `actor`. Not append-only (status moves); the
   append-only record is the chain row below.
+- **The server re-scrubs `tail`.** The node's scrub (D5, M1) is never
+  trusted: before `record_gated_progress` saves a `tail`, it passes the
+  whole string (≤ 4 096 bytes, complete, so no chunk boundary applies)
+  through the registered output scrubber of `nodes/output.py` (D12) with
+  the target workspace's `ScrubTerm`s. With no scrubber registered the
+  saved `tail` is the fixed marker "[çıktı gizlendi]" (fail closed).
+  The scrubber port, its registration in `config/asgi_nodes.py` and the
+  fail-closed marker therefore ship in **branch 3**, together with the
+  first code that persists a `tail`; branch 5 adds only the Redis stream
+  and the readers. Until branch 5, `output` frames are scrubbed through
+  the same streaming scrubber (D12), counted into `output_bytes`, and
+  then dropped (nothing stored, nothing published).
 - **Status machine.** `approved → granted → sent → confirming → running →
   {ok, failed}` with terminal side exits `refused`, `denied`,
   `confirm_timeout`, `timeout`, `node_disconnected`, `node_offline`,
   `server_refused`, `stale_dispatch`. `failed` means `exit_code ≠ 0`.
-- **Flow.** `run_node_action` locks the row, runs the D2 refusals, issues
+- **Flow.** `run_node_action` locks the row, runs the D2 refusals (the
+  actor check first), issues
   the grant, builds and signs the v2 envelope, pushes it to the node
   inbox (Phase 9 D6) and returns; it never blocks for the result. The
   **gateway** process that holds the socket owns the rest: it accepts
@@ -498,8 +566,14 @@ v2 reads:
 
 - `POST /api/v1/nodes/<node_id>/actions` (web channel, owner, human,
   `not is_agent`, `for_actor()`): body `{capability: apps.open |
-  apps.focus, args, source_message_id}`. It validates against the server
-  contract, refuses outside the personal workspace, invokes with
+  apps.focus, args, source_message_id}`. `nodes.services.invoke_confirm`
+  first runs the actor check (the requesting user is active, is the
+  owner of `<node_id>` and holds the `owner` role in the personal
+  workspace; else `server_refused:actor_not_owner`, nothing sent, one
+  chain row and one `AuditLog` row; the view answers `404` for an
+  unknown or foreign `node_id`, the same body either way). It then
+  validates against the server contract, refuses outside the personal
+  workspace, invokes with
   `class=confirm`, `grant=null` and a 90 s envelope, writes an execution
   (no approval) and returns `202` with the execution id. The node's
   window click is the confirmation (ADR-014 decision 2).
@@ -545,7 +619,17 @@ v2 reads:
   `assistant.apps.AssistantConfig.ready()` registers them (the existing
   `assistant → tools` edge). Unregistered → `block`
   (`trust_check_unavailable_config`), so a misconfigured process fails
-  closed.
+  closed. **This default never changes**, in any branch.
+- **Stub before branch 4.** Branch 3 adds an explicit registration line
+  in `AssistantConfig.ready()` that registers
+  `tools.node_actions.pending_trust_check` (returns
+  `warn:trust_check_pending`, makes no model call, and carries the marker
+  attribute `is_stub = True`). The stub is therefore *registered*, not
+  the unregistered default: removing the line yields `block`. Branch 4
+  replaces that same line with the real `check_node_action` and the
+  evidence source; `pending_trust_check` stays in `tools` only so a test
+  can register it. The closeout `trust_check` preflight fails while the
+  registered function has `is_stub = True`.
 
 ### D10 — Harness v3 drivers
 
@@ -596,6 +680,19 @@ v2 reads:
   - approve → `accept` for that one request only (never "for the
     session"); reject, expiry, job cancel or kill → `decline`; the driver
     never answers accept on its own;
+  - **how the decision reaches the driver:** the `ApprovalRequest` row is
+    the source of truth. While a request is pending, the driver polls the
+    row (`ApprovalRequest.objects.filter(workspace=job.workspace,
+    pk=request_id)`, every 2 s) and answers `accept` **only** when the
+    row's status is `approved` and its `harness_agent_action` execution
+    exists; `rejected`, `expired`, a missing row, a job cancel, the
+    runtime brake or 600 s since creation (the row's TTL; the sweep
+    expires it later) each answer `decline`. A Redis key
+    `harness:agent_action:<id>`, written by `dispatch` on approve, is
+    only a wake-up hint that shortens the poll; reject and expiry need no
+    signal (`approvals` gains no harness hook), the poll sees them. A
+    lost or forged key changes nothing, because the driver re-reads the
+    row before answering;
   - while a request is pending the job's runtime brake keeps running, so
     an owner who is away ends the job by time, not by approval.
 - **Usage.** Each turn's token usage (Codex turn completion; the SDK's
@@ -656,7 +753,31 @@ v2 reads:
   2 000, ≤ 1 MiB per invocation, TTL 15 minutes). No scrubber registered
   → the chunk is replaced by a fixed "[çıktı gizlendi]" marker (fail
   closed). Output is never written to Postgres except the scrubbed
-  `tail`.
+  `tail`. The port, its registration and the marker ship in branch 3
+  (D7); this branch adds the Redis stream.
+- **Streaming scrub with carry-over.** A secret can straddle two `output`
+  chunks (≤ 8 KiB each, cut anywhere, even mid-line or mid-UTF-8
+  sequence), so neither side scrubs chunks in isolation. Both the node
+  (reference node in branch 2, Swift `OutputStreamer` in M1) and the
+  server (`nodes.output.StreamScrubber`, one per invocation and stream)
+  keep a per-stream carry buffer:
+  1. `buffer = carry + chunk`;
+  2. the emit cut is the end of the last complete line in `buffer`; if
+     the remainder after it is longer than `SCRUB_CARRY_BYTES` (default
+     1 024, refused at boot below twice the longest registered
+     `ScrubTerm` or pattern bound), the cut moves to `len(buffer) -
+     SCRUB_CARRY_BYTES`;
+  3. the scrubber runs over the whole `buffer`; if a match crosses the
+     cut, the cut moves back to the match's start; the cut never splits a
+     UTF-8 sequence;
+  4. the scrubbed text before the cut is emitted, the raw text after it
+     becomes the new `carry` (never emitted, never stored, never
+     published);
+  5. at the final `result`, socket loss or the watchdog, the carry is
+     scrubbed and flushed (or, on socket loss, scrubbed and flushed
+     before the stream is closed).
+  The carry is bounded (≤ `SCRUB_CARRY_BYTES` plus one chunk) and lives
+  only in the gateway's memory for the invocation.
 - **Read side.** `hud` (which may import `nodes`, Phase 9 D2):
   - the `/hud/events` stream gains a `terminal` section: the actor's last
     five executions in the stream's workspace with capability label,
@@ -782,7 +903,10 @@ under ADR-004, recorded here.
   disconnect, one window at a time), an executor port with
   `FakeExecutor` (records argv, env, policy; scripted output and exit)
   and `SrtExecutor` (Linux, opt-in), the runtime cap and SIGTERM/SIGKILL
-  on disconnect, output chunking and node-side scrub, a local policy
+  on disconnect, output chunking and node-side scrub with the D12
+  carry-over algorithm (the reference implementation the Swift
+  `OutputStreamer` must match; vectors in
+  `conformance/vectors/scrub_stream.json`), a local policy
   fixture (repo mappings, recipes, bundle list) that the protocol cannot
   reach;
 - `nodes/reference/sandbox.py` and `vectors/sandbox.json`;
@@ -819,7 +943,7 @@ pass on a v2 node):
   factory);
 - `backend/nodes/conformance/{cases,runner}.py`,
   `backend/nodes/conformance/cases/v2/`,
-  `backend/nodes/conformance/vectors/sandbox.json`,
+  `backend/nodes/conformance/vectors/{sandbox,scrub_stream}.json`,
   `backend/nodes/conformance/escape/`;
 - `backend/nodes/management/commands/{build_node_conformance,node_conformance_server,node_escape_suite}.py`;
 - `backend/nodes/tests/`, `backend/pyproject.toml` (pytest marker `srt`);
@@ -835,6 +959,9 @@ pass on a v2 node):
 - The escape suite's static check passes against the generated policy
   for every case; the runner's verdict logic is tested with scripted
   executor results; `-m srt` runs it for real when `srt` exists.
+- Node-side streaming scrub: every corpus secret split at every byte
+  offset across two chunks is absent from the emitted `output` frames
+  and the `tail`; `vectors/scrub_stream.json` is byte-stable (`--check`).
 - Confirmation double: 60 s timeout with a frozen clock; disconnect
   closes the window; the executor is never called on any refusal path
   (asserted on the fake).
@@ -847,13 +974,20 @@ target loads.
 
 ### 3. `feat/p10-invocation-grants` — approval mapping, grants, gated and confirm invocation
 
-**Scope.** D2 (issuance), D6, D7, D8:
-- `approvals`: `ToolSpec.approval_ttl_seconds` and `precheck_request`
-  support in `create_request`, `_expire_if_stale` and the sweep (every
-  minute);
-- `tools/node_actions.py`: the `node_action` `ToolSpec`, the trust-check
-  and evidence ports (a stub verdict `warn:trust_check_pending` until
-  branch 4 registers the real check, so the branch is shippable);
+**Scope.** D2 (issuance), D6, D7, D8, and the D12 scrubber port:
+- `approvals`: `ToolSpec.approval_ttl_seconds`, `precheck_request` (the
+  `create_request` split into a non-atomic wrapper and
+  `_create_request_atomic`, D6) and `authorize_decision` (called by
+  `approve_request`), `_expire_if_stale` and the sweep (every minute);
+- `tools/node_actions.py`: the `node_action` `ToolSpec` with the actor
+  check and the approver check, the trust-check and evidence ports, and
+  `pending_trust_check` (D9), registered explicitly by one line in
+  `AssistantConfig.ready()` until branch 4 replaces it, so the branch is
+  shippable while the unregistered default stays `block`;
+- `nodes/output.py`: the scrubber port (`register_scrubber`), the
+  `StreamScrubber` with carry-over (D12), the fail-closed marker, and the
+  registration in `config/asgi_nodes.py`; used for `tail` and for
+  `output` frames, which are scrubbed, counted and dropped until branch 5;
 - `nodes`: `NodeActionExecution`, `nodes.grants.issue`,
   `nodes.tasks.run_node_action`, `invoke_gated`, `invoke_confirm`,
   gateway handling of v2 frames and the watchdog,
@@ -865,9 +999,10 @@ target loads.
 
 **Files.**
 - `backend/approvals/{services,tasks}.py`, `backend/tools/registry.py`,
-  `backend/tools/node_actions.py`;
-- `backend/nodes/{models,grants,services,gateway,tasks,views,urls,serializers}.py`
-  plus migrations;
+  `backend/tools/node_actions.py`, `backend/assistant/apps.py` (the stub
+  registration line);
+- `backend/nodes/{models,grants,services,gateway,tasks,views,urls,serializers,output}.py`
+  plus migrations, `backend/config/asgi_nodes.py`;
 - `backend/config/settings/{base,test}.py`, `backend/config/celery.py`
   (beat), `.env.example`;
 - `backend/{approvals,tools,nodes}/tests/`.
@@ -895,17 +1030,60 @@ target loads.
   socket's or a finished invocation are discarded and counted.
 - **Per-tool TTL:** existing tools keep 24 h (regression); a tool TTL
   longer than the global one is capped by it.
-- **Precheck:** runs outside the transaction (asserted with
-  `django_assert_num_queries`/connection state), its result reaches
-  `prepare_payload` only via `precheck=`, a client-sent `trust` key is
-  dropped, existing tools are called with the old signature.
+- **Precheck:** in a `@pytest.mark.django_db(transaction=True)` test (a
+  plain pytest-django test always runs inside an atomic block),
+  `connection.in_atomic_block` is `False` when the hook runs; its result
+  reaches `prepare_payload` only via `precheck=`; a client-sent `trust`
+  key is dropped; existing tools are called with the old signature and
+  the existing `create_request` tests stay green. A non-writer (viewer,
+  `is_agent`, anonymous) and a writer who is not the node's owner never
+  reach the hook: the fake trust check and FakeAdapter record zero calls
+  and no `ModelUsage` row is written.
+- **Actor and approver checks** (firm and personal workspaces, each with
+  a second user who is a member and a second user who is a curator
+  (`admin`), plus a second paired node owned by that user):
+  - requesting `node_action` naming another user's `node_id` →
+    `actor_not_owner`, no `ApprovalRequest`, one `nodes.refused`
+    `AuditLog` row; an unknown `node_id` gives the same code and body;
+  - a non-owner curator approving a pending `node_action` →
+    `PermissionDenied`, the row stays `pending`, no execution, no grant;
+  - an approval whose `requested_by` or `decided_by` is not the node's
+    owner (rows forged directly in the database) → `issue()` refuses
+    `server_refused:actor_not_owner`, nothing signed, one chain row and
+    one `AuditLog` row;
+  - the owner losing the `owner` role, or being deactivated, between
+    approval and dispatch → `server_refused:actor_not_owner`;
+  - `POST /nodes/<other user's node>/actions` → `404`, one chain row and
+    one `AuditLog` row, nothing sent;
+  - `reject_request` by a non-owner curator still works (safe direction).
+- **Tail and output scrub (moved from branch 5):** a reference-node run
+  whose fixture output and node-sent `tail` contain every corpus secret
+  (the node's own scrub disabled, simulating a compromised or buggy
+  node) stores a `tail` with none of them and no raw secret in any row,
+  log or gateway payload; with no scrubber registered the stored `tail`
+  is the marker only; `output` frames are dropped after scrubbing
+  (nothing in Redis, nothing in Postgres) and `output_bytes` counts
+  them. **Split secrets:** each corpus secret split at every byte offset
+  across two chunks, and across a line break where the pattern allows
+  none, is absent from the scrubbed output; the carry never exceeds its
+  bound; the carry is flushed and scrubbed at `result`, socket loss and
+  watchdog timeout; a multi-byte character cut at a chunk boundary is
+  never split on emit.
+- **Trust-check stub:** with the branch-3 registration, a typed proposal
+  stores `warn:trust_check_pending`; with the registration removed
+  (port reset in the test), the same proposal is refused `block`
+  (`trust_check_unavailable_config`).
 - **Role × endpoint** for `POST/GET /nodes/<id>/actions` and for
   approving a `node_action`: owner web session; owner `cli`/`openai`
-  PATs; `hook` PAT; node secret; non-owner member; `is_agent`;
-  anonymous. Only the owner web session invokes or approves.
+  PATs; `hook` PAT; node secret; non-owner member; non-owner curator;
+  `is_agent`; anonymous. Only the node owner's web session invokes or
+  approves.
 - Workspace isolation: a firm-workspace conversation cannot request a
-  personal capability, and its executions are invisible from the
-  personal workspace and the reverse.
+  personal capability (AX, a non-repo recipe, `apps.*`); a firm-workspace
+  conversation **can** request a repo recipe for a repo mapped to that
+  firm and **cannot** for a personal repo, and the personal workspace
+  the reverse; a repo recipe whose path maps to no workspace is refused;
+  executions are invisible from the other workspace.
 
 **Done when:** the end-to-end test passes and every D6 owner-away rule
 and every server-side compromised-server case has a passing test.
@@ -915,7 +1093,9 @@ and every server-side compromised-server case has a passing test.
 **Scope.** D9, D13:
 - `assistant/trust_check.py` (rules, the `control.trust_check` gateway
   call, strict parsing, prompt pack), the evidence source over
-  `Message`, registration in `AssistantConfig.ready()`;
+  `Message`, registration in `AssistantConfig.ready()` **replacing** the
+  branch-3 stub line (a test asserts the registered check has no
+  `is_stub` marker, and removing the registration still yields `block`);
 - router: `node_action` in the vocabulary, `router.node_action_args`
   argument step, the draft payload with `source_message_id`;
 - `AI_PURPOSE_TIERS` entries and the "control" budget row (data
@@ -960,16 +1140,18 @@ green.
 
 ### 5. `feat/p10-hud-terminal` — output transit, terminal panel, result read tool
 
-**Scope.** D12:
-- `nodes/output.py` (scrubber port, Redis stream writer/reader,
-  fail-closed marker), registration in `config/asgi_nodes.py`;
+**Scope.** D12 (the scrubber port, `StreamScrubber`, the marker and
+their registration already shipped in branch 3):
+- `nodes/output.py`: the Redis stream writer and reader, fed from the
+  branch-3 `StreamScrubber` output (the gateway stops dropping scrubbed
+  `output` frames and appends them instead);
 - `hud`: the `terminal` section and the stream endpoint;
 - `tools`: `node_action_result` read tool;
 - frontend: `HudTerminalPanel`, node-action draft and approval card
   summaries, the `tool-running` orb state wiring, BFF routes, `tr.ts`.
 
 **Files.**
-- `backend/nodes/output.py`, `backend/config/asgi_nodes.py`;
+- `backend/nodes/{output,gateway}.py`;
 - `backend/hud/{services,views,urls}.py`, `backend/tools/node_reads.py`
   (or a new `node_action_reads.py` beside it);
 - `frontend/src/components/hud/{HudTerminalPanel.tsx,HudTerminalPanel.test.tsx}`,
@@ -978,8 +1160,11 @@ green.
 - `backend/{nodes,hud,tools}/tests/`.
 
 **Tests.**
-- Every chunk passes the scrubber (corpus secrets in fixture output are
-  absent from the stream and the tail); no scrubber → marker only.
+- Every chunk reaches the Redis stream only through the branch-3
+  `StreamScrubber`: corpus secrets in fixture output, whole and split at
+  every byte offset across chunk boundaries, are absent from the stream
+  and the tail; no scrubber → marker only in the stream; the raw carry is
+  never appended.
 - Stream bounds: MAXLEN, 1 MiB cap with `truncated`, 15-minute TTL;
   nothing written to Postgres but `tail`.
 - ANSI/OSC escape sequences, bidi and zero-width characters stripped;
@@ -1002,8 +1187,9 @@ fenced tail.
 - `harness/drivers/{base,codex_app_server}.py`,
   `runner.launch_interactive_container`;
 - `harness_agent_action` `ToolSpec` (system-created, 600 s) and its
-  `create_execution`/`dispatch` that answer the waiting driver through
-  a Redis key the driver polls (decision → accept/decline);
+  `create_execution`/`dispatch`; the waiting driver polls the
+  `ApprovalRequest` row (the source of truth) and treats the Redis key
+  `dispatch` writes only as a wake-up hint (D10);
 - integration into `run_harness_implementation_job` behind
   `HARNESS_DRIVER_CODEX=app_server` and `HARNESS_DRIVERS_ENABLED`;
 - the provisional schema snapshot, the pin system check,
@@ -1034,6 +1220,12 @@ fenced tail.
   expiry at 10 min, job cancel and kill → decline; the driver never
   sends accept without an approved row; `POST /approvals` cannot mint
   the tool (user_invocable False).
+- Decision signal (no Redis key in any of these): a row rejected on
+  `/approvals` → decline on the next poll; a row expired by
+  `sweep_expired_approval_requests` (frozen clock) → decline; a row
+  still `pending` at 600 s → decline; a deleted/missing row → decline;
+  an approved row whose Redis key was lost → accept on the next poll; a
+  Redis key forged for a `pending` or `rejected` row → no accept.
 - Usage: one `ModelUsage` per turn, a failure row when the run ends
   without usage.
 - Robustness: oversize line, malformed JSON, unknown method, early exit
@@ -1088,7 +1280,8 @@ Claude driver and the bridge with the fake SDK.
   | `node_conformance_v2` | `build_node_conformance --check` passes for v1 and v2; `vectors/sandbox.json` current |
   | `node_escape_suite` | `node_escape_suite --executor fake` passes; the recorded Mac evidence date (ADR-014 note) is shown, **warn** while pending |
   | `node_output_scrubber` | the gateway reports a registered scrubber in `/healthz` |
-  | `trust_check` | the evidence and check ports are registered; `control.trust_check` has a tier and a budget |
+  | `trust_check` | the evidence and check ports are registered; **fails** while the registered check is the branch-3 stub (`is_stub = True`); `control.trust_check` has a tier and a budget |
+  | `node_action_actor` | `node_action` declares `authorize_decision` and `precheck_request`; `approve_request` calls the hook (source test) |
   | `harness_drivers` | per driver: disabled, or enabled with d4 recorded (`HARNESS_DRIVER_TERMS_CHECKED_ON`), a non-provisional snapshot and pins that agree |
 
 - **E2E (CI, fakes):** typed "testleri çalıştır" → draft → approval →
@@ -1115,7 +1308,8 @@ Claude driver and the bridge with the fake SDK.
 
 **Tests.** Every new preflight check passes, fails and warns with fakes
 (TTL above 120, missing sweep, stale case files, escape suite failure,
-missing scrubber, unregistered trust check, an enabled driver without
+missing scrubber, unregistered trust check, the stub trust check still
+registered, `node_action` without its approver hook, an enabled driver without
 d4 or with a provisional snapshot); the HUD reads the new check names;
 the e2e passes.
 
@@ -1127,12 +1321,12 @@ with the Mac rows pending owner evaluation.
 
 | # | Branch | Scope | Depends on | Status |
 |---|---|---|---|---|
-| brief | `docs/p10-brief` | This brief (full, from the stub; stub goal, scope, checkpoint and owner step d4 kept), MASTER_PLAN §AA row 10 Brief/Status | Phase 8B brief; Phase 9 brief | **implemented 2026-11-20** (docs only; awaits independent Sonnet 5 plan review) |
+| brief | `docs/p10-brief` | This brief (full, from the stub; stub goal, scope, checkpoint and owner step d4 kept), MASTER_PLAN §AA row 10 Brief/Status | Phase 8B brief; Phase 9 brief | **implemented 2026-11-20**; review round 1 findings fixed 2026-11-21 (docs only; awaits Sonnet 5 re-review) |
 | 1 | `feat/p10-protocol-v2` | Protocol v2 schemas, grant format and domain-separated signing, version negotiation, capability contracts v2 + recipe catalogue, argument-schema fuzz families, snapshot classes, ADR notes | Phase 9 branches 2–3 merged; brief approved | not started |
 | 2 | `feat/p10-reference-executor` | Reference node v2 (verifier 13–24, confirmation double, executor port, runtime cap), `srt` policy generator + vectors, conformance cases v2, escape suite + runner | 1 | not started |
-| 3 | `feat/p10-invocation-grants` | Per-tool approval TTL + pre-transaction hook, `node_action` tool, `NodeActionExecution`, grant issuance, gated/confirm invocation, gateway v2 frames + watchdog, chain row v2, actions endpoints | 1, 2; Phase 9 branches 4–5 merged | not started |
+| 3 | `feat/p10-invocation-grants` | Per-tool approval TTL + pre-transaction hook (`create_request` split) + approver hook, `node_action` tool with actor/approver checks, registered trust-check stub, `NodeActionExecution`, grant issuance, gated/confirm invocation, gateway v2 frames + watchdog, output scrubber port + `StreamScrubber` (tail re-scrub, fail closed), chain row v2, actions endpoints | 1, 2; Phase 9 branches 4–5 merged | not started |
 | 4 | `feat/p10-trust-check` | Trust check (rules + `control.trust_check`), evidence port, router `node_action` proposals, injection corpus, voice cap regressions | 3 | not started |
-| 5 | `feat/p10-hud-terminal` | Output scrubber port + Redis stream, HUD `terminal` section + stream endpoint, terminal panel, draft/approval cards, `node_action_result` read tool | 3 (parallel with 4) | not started |
+| 5 | `feat/p10-hud-terminal` | Redis output stream (fed by the branch-3 scrubber), HUD `terminal` section + stream endpoint, terminal panel, draft/approval cards, `node_action_result` read tool | 3 (parallel with 4) | not started |
 | 6 | `feat/p10-codex-app-server` | Driver framework, interactive container, Codex app-server driver, `harness_agent_action` gate, usage per turn, pins + provisional snapshot + contract test | Phase 3 harness (merged); parallel with 1–5 | not started |
 | 7 | `feat/p10-claude-agent-sdk` | Claude Agent SDK bridge + driver, bridge schemas, surface snapshot, pins | 6 | not started |
 | 8 | `chore/p10-closeout` | Preflight control checks, e2e, runbooks, ADR-013/014/015 notes, MASTER_PLAN row, `self_sources.json`, go/no-go record | 1–7 | not started |
@@ -1144,8 +1338,10 @@ with the Mac rows pending owner evaluation.
 **Minimum usable cut** if the phase runs long: 1, 2, 3, 5 and M1+M2 for
 `repo.command.run` and `apps.open` only. That delivers "testleri
 çalıştır" with two screen acts and one Mac click. 4 adds the trust check
-(the turn still needs both human acts without it, with the stub verdict
-`warn:trust_check_pending` shown on every card); 6–7 are independent of
+(the turn still needs both human acts without it, with the registered
+stub verdict `warn:trust_check_pending` shown on every card; the closeout
+`trust_check` preflight stays red until 4 merges). The cut never drops
+the tail scrub: it ships in 3. 6–7 are independent of
 the node and can ship whenever d4 is recorded.
 
 ## Mac session (deferred)
@@ -1182,12 +1378,16 @@ they name.
   loss, kill switch or timeout; one window at a time; a "Durdur" button
   while running;
 - `Sources/NodeCore/OutputStreamer.swift` (8 KiB chunks, seq, scrub with
-  the M2 scrubber port of Phase 9, 1 MiB cap, tail ≤ 4 KiB);
+  the M2 scrubber port of Phase 9 using the D12 carry-over algorithm, so
+  a secret split across chunks is still removed; must reproduce
+  `backend/nodes/conformance/vectors/scrub_stream.json`; 1 MiB cap, tail
+  ≤ 4 KiB);
 - v2 subprotocol offer in `Session.swift`;
 - tests in `Tests/NodeCoreTests/`.
 
 **Must satisfy:** `backend/nodes/protocol/schemas/v2/`,
-`backend/nodes/protocol/vectors/{signing_v2,grants}.json`, D5 (order and
+`backend/nodes/protocol/vectors/{signing_v2,grants}.json`,
+`backend/nodes/conformance/vectors/scrub_stream.json`, D5 (order and
 codes), D1 (no new server→node type handled), ADR-013 decision 6.
 
 **Server-side contract tests it must pass:**
@@ -1357,6 +1557,11 @@ member.
 - a raw corpus secret in the terminal stream, `tail`, a row, a log or a
   gateway payload;
 - a node action in a workspace its path does not map to;
+- a node action requested, approved or invoked by anyone but the node's
+  owner holding the `owner` role in the target workspace, or a grant
+  signed for such an approval;
+- an unregistered trust-check port that yields anything but `block`, or
+  the branch-3 stub still registered at closeout;
 - a driver answering "accept" without an approved `harness_agent_action`
   row, or a driver enabled without d4;
 - a model call without a `ModelUsage` row, or a model call from `nodes`;
@@ -1456,3 +1661,34 @@ The first one is from the stub and is kept.
    screenshots, server-side cancel or Mac-side agent start in Phase 10).
 4. Note the sequencing: Phase 9 server branches 2–8 must merge first;
    only branch 1 had merged when this brief was written.
+
+### Review round 1 — `docs/p10-brief`, fixed 2026-11-21
+
+1. HIGH, owner-only actions: actor check in `prepare_payload`
+   (`precheck_request` first), `nodes.grants.issue` and `invoke_confirm`
+   (`actor_not_owner`); approver check through the new
+   `ToolSpec.authorize_decision` hook; tests for non-owner members and
+   curators in firm and personal workspaces (Boundary, D2, D6, D8,
+   branch 3).
+2. MEDIUM, tail scrub ordering: the scrubber port, `StreamScrubber` and
+   the fail-closed marker move to branch 3; the server re-scrubs `tail`;
+   `output` frames are scrubbed and dropped until branch 5 (D7, D12,
+   branches 3 and 5).
+3. MEDIUM, split secrets: line-buffered streaming scrub with a bounded
+   carry, on node and server, with split-at-every-offset corpus tests and
+   `vectors/scrub_stream.json` for the Swift app (D12, branches 2, 3, 5,
+   M1).
+4. MEDIUM, recipe workspace: repo recipes follow the repo's workspace,
+   other recipes are personal only (D3 table and text, D6 refusal list,
+   branch 3 isolation tests).
+5. MEDIUM, trust-check stub: registered explicitly in
+   `AssistantConfig.ready()` with an `is_stub` marker; the unregistered
+   default stays `block`; branch 4 replaces it; the closeout preflight
+   fails while it is registered (D9, branches 3, 4, 8).
+6. LOW, precheck: the `create_request` split is spelled out (non-atomic
+   wrapper, then `_create_request_atomic`), tested with
+   `transaction=True`, and a non-writer never triggers a model call (D6,
+   branch 3).
+7. LOW, driver decision signal: the driver polls the `ApprovalRequest`
+   row; the Redis key is only a wake-up hint; decline on rejected,
+   expired, missing or 600 s pending (D10, branch 6).
