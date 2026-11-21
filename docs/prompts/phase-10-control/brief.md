@@ -5,7 +5,8 @@
 > roadmap. It needs its independent Sonnet 5 plan review before branch 1,
 > because the implementing model never reviews its own brief.
 > Review round 1 findings (1 HIGH, 4 MEDIUM, 2 LOW) fixed 2026-11-21;
-> awaits re-review.**
+> review round 2 findings (1 MEDIUM, 1 LOW) fixed 2026-11-21; awaits
+> re-review.**
 > Sources: `docs/research/2026-11-roadmap-proposal.md` §a.4, §a.5, §B1
 > (ADR-014 table, invocation grant, owner away), §B2 (ADR-015), §B6,
 > §c.4, §c.6, §c.7, §c.8, §c.9, §g d4/d7; MASTER_PLAN §AA "Friday 3.0
@@ -1183,6 +1184,16 @@ fenced tail.
 
 ### 6. `feat/p10-codex-app-server` — driver framework, Codex app-server, agent approval mapping
 
+**Depends on.** The Phase 3 harness (merged) and branch 3, for its
+per-tool approval TTL only (`ToolSpec.approval_ttl_seconds`, the
+`min(tool TTL, APPROVAL_REQUEST_TTL_HOURS)` rule in
+`approvals.services._expire_if_stale` and the sweep, the per-minute beat
+schedule; D6). None of these exist on the integration branch today, and
+without them `harness_agent_action` would fall back to the 24 h global
+TTL, breaking the D10 600 s decline rule and the ADR-013 owner-away
+rule. Branch 6 uses nothing else from branch 3 (no grants, no node
+code) and runs in parallel with 4–5.
+
 **Scope.** D10 for Codex, and the shared parts:
 - `harness/drivers/{base,codex_app_server}.py`,
   `runner.launch_interactive_container`;
@@ -1321,13 +1332,13 @@ with the Mac rows pending owner evaluation.
 
 | # | Branch | Scope | Depends on | Status |
 |---|---|---|---|---|
-| brief | `docs/p10-brief` | This brief (full, from the stub; stub goal, scope, checkpoint and owner step d4 kept), MASTER_PLAN §AA row 10 Brief/Status | Phase 8B brief; Phase 9 brief | **implemented 2026-11-20**; review round 1 findings fixed 2026-11-21 (docs only; awaits Sonnet 5 re-review) |
+| brief | `docs/p10-brief` | This brief (full, from the stub; stub goal, scope, checkpoint and owner step d4 kept), MASTER_PLAN §AA row 10 Brief/Status | Phase 8B brief; Phase 9 brief | **implemented 2026-11-20**; review round 1 and round 2 findings fixed 2026-11-21 (docs only; awaits Sonnet 5 re-review) |
 | 1 | `feat/p10-protocol-v2` | Protocol v2 schemas, grant format and domain-separated signing, version negotiation, capability contracts v2 + recipe catalogue, argument-schema fuzz families, snapshot classes, ADR notes | Phase 9 branches 2–3 merged; brief approved | not started |
 | 2 | `feat/p10-reference-executor` | Reference node v2 (verifier 13–24, confirmation double, executor port, runtime cap), `srt` policy generator + vectors, conformance cases v2, escape suite + runner | 1 | not started |
 | 3 | `feat/p10-invocation-grants` | Per-tool approval TTL + pre-transaction hook (`create_request` split) + approver hook, `node_action` tool with actor/approver checks, registered trust-check stub, `NodeActionExecution`, grant issuance, gated/confirm invocation, gateway v2 frames + watchdog, output scrubber port + `StreamScrubber` (tail re-scrub, fail closed), chain row v2, actions endpoints | 1, 2; Phase 9 branches 4–5 merged | not started |
 | 4 | `feat/p10-trust-check` | Trust check (rules + `control.trust_check`), evidence port, router `node_action` proposals, injection corpus, voice cap regressions | 3 | not started |
 | 5 | `feat/p10-hud-terminal` | Redis output stream (fed by the branch-3 scrubber), HUD `terminal` section + stream endpoint, terminal panel, draft/approval cards, `node_action_result` read tool | 3 (parallel with 4) | not started |
-| 6 | `feat/p10-codex-app-server` | Driver framework, interactive container, Codex app-server driver, `harness_agent_action` gate, usage per turn, pins + provisional snapshot + contract test | Phase 3 harness (merged); parallel with 1–5 | not started |
+| 6 | `feat/p10-codex-app-server` | Driver framework, interactive container, Codex app-server driver, `harness_agent_action` gate, usage per turn, pins + provisional snapshot + contract test | Phase 3 harness (merged); 3 (per-tool approval TTL only: `ToolSpec.approval_ttl_seconds`, `_expire_if_stale`, per-minute sweep); parallel with 4–5 | not started |
 | 7 | `feat/p10-claude-agent-sdk` | Claude Agent SDK bridge + driver, bridge schemas, surface snapshot, pins | 6 | not started |
 | 8 | `chore/p10-closeout` | Preflight control checks, e2e, runbooks, ADR-013/014/015 notes, MASTER_PLAN row, `self_sources.json`, go/no-go record | 1–7 | not started |
 | M1 | `feat/p10-node-confirm` | Swift: protocol v2 verifier and grant verification, confirmation window, fail-closed close, conformance v2 pass | 1–3 merged; Phase 9 M1 | deferred: Mac session |
@@ -1342,7 +1353,9 @@ with the Mac rows pending owner evaluation.
 stub verdict `warn:trust_check_pending` shown on every card; the closeout
 `trust_check` preflight stays red until 4 merges). The cut never drops
 the tail scrub: it ships in 3. 6–7 are independent of
-the node and can ship whenever d4 is recorded.
+the node and of the grant code, but 6 needs branch 3's per-tool approval
+TTL (600 s for `harness_agent_action`); 6–7 can ship once 3 has merged
+and d4 is recorded.
 
 ## Mac session (deferred)
 
@@ -1692,3 +1705,16 @@ The first one is from the stub and is kept.
 7. LOW, driver decision signal: the driver polls the `ApprovalRequest`
    row; the Redis key is only a wake-up hint; decline on rejected,
    expired, missing or 600 s pending (D10, branch 6).
+
+### Review round 2 — `docs/p10-brief`, fixed 2026-11-21
+
+1. MEDIUM, branch 6 dependency: `harness_agent_action` needs the
+   per-tool approval TTL (`ToolSpec.approval_ttl_seconds`,
+   `_expire_if_stale`, per-minute sweep) that branch 3 introduces.
+   Branch 6 now depends on 3 (TTL only) and runs in parallel with 4–5;
+   the branch-6 "Depends on" paragraph, the branch table and the
+   minimum-usable-cut sentence say so.
+2. LOW, status lines: header, branch-table `brief` row and MASTER_PLAN
+   row 6 record round 2 as fixed. On the reviewer's APPROVE they change
+   to "review round 2 approved" (that edit follows the verdict; it is
+   not made before it).
