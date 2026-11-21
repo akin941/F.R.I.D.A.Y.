@@ -109,6 +109,31 @@ the authoritative description; the operator-facing consequences are:
   `--security-opt no-new-privileges` in addition to the existing
   network/resource limits.
 
+## Driver mode (Phase 10 branch 6, 2026-11-20)
+
+`codex_cli_run.sh --driver app_server` (launched by
+`harness.runner.launch_interactive_container`, `docker run -i`, never
+detached) runs `codex app-server` with the container's stdin/stdout as the
+JSON-RPC transport to the host driver (`backend/harness/drivers/`); its
+stderr is dropped. `harness_write_mode.sh` does not capture the agent's
+stdout in driver mode (`harness_driver_mode=true`); when the host closes
+stdin the app-server exits and the unchanged write-mode sequence runs
+(quiesce, wrapper commit, pristine test run, result file, an empty final
+frame). Off unless `HARNESS_DRIVERS_ENABLED=true`,
+`HARNESS_DRIVER_CODEX=app_server` and the owner's terms check (d4) is
+recorded in `HARNESS_DRIVER_TERMS_CHECKED_ON`.
+
+Pins: `ARG CODEX_CLI_VERSION` is also the app-server pin. It must equal
+`HARNESS_CODEX_APP_SERVER_VERSION` and the version of
+`backend/harness/drivers/codex_schema/<version>/protocol.json` (system
+check `harness.E004`). The committed snapshot for the placeholder `0.1.0`
+is a hand-written **provisional** subset; after building the image for a
+real version, run `./generate_driver_schemas.sh codex <image>` from this
+directory (it runs `codex app-server generate-json-schema` inside the
+image with `--network none` and converts the output with
+`codex_schema_subset.py`), then the contract test
+`harness/tests/test_driver_contract.py`.
+
 ## Graphify image (Phase 8B branch 5, 2026-11-21)
 
 `graphify.Dockerfile` builds the Graphify AST-only code-graph image used by

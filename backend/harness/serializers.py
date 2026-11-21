@@ -346,10 +346,17 @@ class HarnessImplementationJobSerializer(serializers.ModelSerializer):
 
 class HarnessImplementationJobDetailSerializer(HarnessImplementationJobSerializer):
     reviews = HarnessReviewSerializer(many=True, read_only=True)
+    # Phase 10 brief D10/R5: the driver that ran the implementation step and
+    # how many escalation cards the agent raised (approval fatigue is
+    # visible on the job page). Counts only -- the agent-written text stays
+    # on the approval card, labelled untrusted.
+    agent_actions = serializers.SerializerMethodField()
 
     class Meta(HarnessImplementationJobSerializer.Meta):
         fields = [
             *HarnessImplementationJobSerializer.Meta.fields,
+            "driver",
+            "agent_actions",
             "base_commit_sha",
             "produced_commit_sha",
             "changed_files",
@@ -361,6 +368,23 @@ class HarnessImplementationJobDetailSerializer(HarnessImplementationJobSerialize
             "reviews",
         ]
         read_only_fields = fields
+
+    def get_agent_actions(self, obj):
+        from approvals.models import ApprovalRequest
+        from harness.models import HarnessAgentAction
+
+        requested = ApprovalRequest.objects.filter(
+            workspace_id=obj.workspace_id,
+            tool_name="harness_agent_action",
+            origin=ApprovalRequest.Origin.HARNESS,
+            payload__job_id=str(obj.id),
+        ).count()
+        actions = HarnessAgentAction.objects.filter(workspace_id=obj.workspace_id, job=obj)
+        return {
+            "requested": requested,
+            "approved": actions.count(),
+            "accepted": actions.filter(answer=HarnessAgentAction.Answer.ACCEPT).count(),
+        }
 
 
 class HarnessImplementationJobCreateSerializer(serializers.Serializer):

@@ -228,6 +228,21 @@ def test_fixture_run_reaches_gate_b_with_one_approved_and_one_declined_escalatio
     assert job.gate_b_request.tool_name == "harness_push"
 
 
+def test_job_page_shows_the_driver_and_the_escalation_counts(job, owner, monkeypatch, web_client):
+    steps = script_from_transcript(load_transcript("two_escalations.jsonl"))
+    Run(monkeypatch, steps)
+    owner_decides(monkeypatch, owner, npm_yes_curl_no)
+    implementation_execution.run_harness_implementation_job(job.id)
+    response = web_client(owner).get(
+        f"/api/v1/harness/implementation-jobs/{job.id}", {"workspace": str(job.workspace_id)}
+    )
+    assert response.status_code == 200, response.content
+    body = response.json()
+    assert body["driver"] == "app_server"
+    assert body["agent_actions"] == {"requested": 2, "approved": 1, "accepted": 1}
+    assert "curl" not in str(body["agent_actions"])
+
+
 # --- approval mapping inside the run ------------------------------------------
 
 
