@@ -16,8 +16,13 @@ class NodesConfig(AppConfig):
 
     Phase 9 `nodes` imports no `approvals` code either (brief follow-up 2):
     `tools` will import `nodes` (branch 5) and `tools` must not import
-    `approvals`, so any such edge would break that contract transitively."""
+    `approvals`, so any such edge would break that contract transitively.
+    Phase 10 keeps it that way: `NodeActionExecution.approval` is a string
+    reference, and `nodes` reads the approval row through that relation."""
 
     default_auto_field = "django.db.models.BigAutoField"
     name = "nodes"
     verbose_name = "Friday Node"
+
+    def ready(self):
+        import nodes.checks  # noqa: F401 -- registers the Phase 10 settings checks

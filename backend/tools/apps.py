@@ -11,6 +11,7 @@ class ToolsConfig(AppConfig):
         from tools.coding_sessions import _register as _register_sessions_read
         from tools.export import _register
         from tools.memory_graph import _register as _register_graph_read
+        from tools.node_actions import _register as _register_node_action
         from tools.purge import _register as _register_purge
 
         _register()
@@ -19,3 +20,5 @@ class ToolsConfig(AppConfig):
         _register_sessions_read()
         # Phase 8B D8: the ungated, web-only temporal-graph read tool.
         _register_graph_read()
+        # Phase 10 D6: the gated `node_action` tool (and its node ports).
+        _register_node_action()

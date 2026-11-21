@@ -100,6 +100,11 @@ class NodeInvocation(WorkspaceScopedModel):
         NODE_OFFLINE = "node_offline"
         BUSY = "busy"
         BUS_UNAVAILABLE = "bus_unavailable"
+        # Phase 10 D7: the gated / confirm-class terminal states.
+        FAILED = "failed"
+        DENIED = "denied"
+        CONFIRM_TIMEOUT = "confirm_timeout"
+        STALE_DISPATCH = "stale_dispatch"
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     seq = models.PositiveBigIntegerField(unique=True)
@@ -130,6 +135,15 @@ class NodeInvocation(WorkspaceScopedModel):
         related_name="node_invocations",
     )
     channel = models.CharField(max_length=20)
+    # Phase 10 D7: action rows (confirm / gate class). Nullable, so Phase 9
+    # read rows keep their shape; `hash_version` 2 hashes these fields too
+    # (`nodes.audit_chain.HASHED_FIELDS_V2`), 1 is a Phase 9 row.
+    invocation_class = models.CharField(max_length=10, blank=True, default="")
+    approval_id = models.UUIDField(null=True, blank=True)
+    grant_id = models.UUIDField(null=True, blank=True)
+    exit_code = models.SmallIntegerField(null=True, blank=True)
+    confirm_state = models.CharField(max_length=16, blank=True, default="")
+    hash_version = models.PositiveSmallIntegerField(default=1)
     prev_hash = models.CharField(max_length=64)
     row_hash = models.CharField(max_length=64, unique=True)
 
@@ -162,9 +176,54 @@ NODE_REFUSED_CODES = frozenset(
         "not_granted",
     }
 )
+# Phase 10 D5: the v2 node refusal codes a gated / confirm-class call may
+# end with. `owner_denied` and `confirm_timeout` are their own statuses
+# (`denied`, `confirm_timeout`), never `refused`.
+NODE_REFUSED_CODES_V2 = frozenset(
+    {
+        "unknown_key",
+        "bad_signature",
+        "wrong_node",
+        "not_yet_valid",
+        "expired",
+        "ttl_too_long",
+        "replay",
+        "nonce_cache_full",
+        "unknown_capability",
+        "class_mismatch",
+        "grant_unexpected",
+        "grant_missing",
+        "bad_grant_signature",
+        "grant_mismatch",
+        "args_hash_mismatch",
+        "args_schema",
+        "not_granted",
+        "not_configured",
+        "busy_confirming",
+        "expired_after_confirm",
+    }
+)
+# Phase 10 D2/D7/D8: why the server refused a gated or confirm-class call
+# before (or instead of) sending it. Nothing is signed for any of them.
+SERVER_REFUSED_ACTION_CODES = frozenset(
+    {
+        "actor_not_owner",
+        "approval_not_approved",
+        "wrong_tool",
+        "args_changed",
+        "args_contract",
+        "not_invocable",
+        "kill_switch",
+        "path_not_in_workspace",
+        "workspace_not_allowed",
+        "signing_unavailable",
+        "node_mismatch",
+        "bus_unavailable",
+    }
+)
 TERMINAL_VOCABULARY = {
     NodeInvocation.Status.OK: frozenset({""}),
-    NodeInvocation.Status.REFUSED: NODE_REFUSED_CODES,
+    NodeInvocation.Status.REFUSED: NODE_REFUSED_CODES | NODE_REFUSED_CODES_V2,
     NodeInvocation.Status.ERROR: frozenset({"node_error", "result_schema", "result_too_large"}),
     NodeInvocation.Status.TIMEOUT: frozenset({""}),
     NodeInvocation.Status.NODE_DISCONNECTED: frozenset({""}),
@@ -177,10 +236,17 @@ TERMINAL_VOCABULARY = {
             "workspace_not_allowed",
             "session_not_found",
         }
-    ),
+    )
+    | SERVER_REFUSED_ACTION_CODES,
     NodeInvocation.Status.NODE_OFFLINE: frozenset({""}),
     NodeInvocation.Status.BUSY: frozenset({""}),
     NodeInvocation.Status.BUS_UNAVAILABLE: frozenset({""}),
+    # Phase 10 D7. `failed`: the command ran and exited non-zero (""), or
+    # the node reported an error (start failure, kill switch while running).
+    NodeInvocation.Status.FAILED: frozenset({"", "node_error"}),
+    NodeInvocation.Status.DENIED: frozenset({"owner_denied"}),
+    NodeInvocation.Status.CONFIRM_TIMEOUT: frozenset({"confirm_timeout"}),
+    NodeInvocation.Status.STALE_DISPATCH: frozenset({""}),
 }
 # Statuses where nothing was signed or sent: nonce, output hash and size
 # are empty (D7).
@@ -190,6 +256,111 @@ NOT_SENT_STATUSES = frozenset(
         NodeInvocation.Status.NODE_OFFLINE,
         NodeInvocation.Status.BUSY,
         NodeInvocation.Status.BUS_UNAVAILABLE,
+        NodeInvocation.Status.STALE_DISPATCH,
+    }
+)
+
+
+class NodeActionExecution(WorkspaceScopedModel, TimestampedModel):
+    """One confirm- or gate-class node action (Phase 10 brief D7), in its
+    target workspace. Not append-only: `status` moves along
+
+        approved -> granted -> sent -> confirming -> running -> {ok, failed}
+
+    with the terminal side exits `refused`, `denied`, `confirm_timeout`,
+    `timeout`, `node_disconnected`, `node_offline`, `server_refused` and
+    `stale_dispatch`. A confirm-class execution has no approval and starts
+    at `sent`. The append-only record is the one `NodeInvocation` chain row
+    written at the terminal state (`nodes.services.finish_execution`).
+
+    Holds hashes, codes and the scrubbed `tail` only -- never the args
+    (the approval's snapshot holds those) and never raw output. `tail` is
+    re-scrubbed by the server before it is saved (`nodes.output`) and
+    cleared after `NODE_ACTION_TAIL_RETENTION_DAYS`."""
+
+    class Status(models.TextChoices):
+        APPROVED = "approved"
+        GRANTED = "granted"
+        SENT = "sent"
+        CONFIRMING = "confirming"
+        RUNNING = "running"
+        OK = "ok"
+        FAILED = "failed"
+        REFUSED = "refused"
+        DENIED = "denied"
+        CONFIRM_TIMEOUT = "confirm_timeout"
+        TIMEOUT = "timeout"
+        NODE_DISCONNECTED = "node_disconnected"
+        NODE_OFFLINE = "node_offline"
+        SERVER_REFUSED = "server_refused"
+        STALE_DISPATCH = "stale_dispatch"
+
+    workspace = models.ForeignKey(
+        "workspaces.Workspace", on_delete=models.PROTECT, related_name="node_action_executions"
+    )
+    # A string reference, never an import: `tools` imports `nodes`, and
+    # `tools` must not reach `approvals` (import contract), not even
+    # transitively.
+    approval = models.OneToOneField(
+        "approvals.ApprovalRequest",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="node_action_execution",
+    )
+    node = models.ForeignKey(Node, on_delete=models.PROTECT, related_name="action_executions")
+    capability = models.CharField(max_length=64)
+    capability_version = models.PositiveSmallIntegerField()
+    capability_class = models.CharField(max_length=10)
+    args_sha256 = models.CharField(max_length=64)
+    source_message_id = models.CharField(max_length=64, blank=True, default="")
+    invocation_id = models.UUIDField(null=True, blank=True, unique=True)
+    grant_id = models.UUIDField(null=True, blank=True, unique=True)
+    grant_issued_at = models.DateTimeField(null=True, blank=True)
+    nonce = models.CharField(max_length=43, blank=True, default="")
+    # Unix seconds of the envelope's (and grant's) expiry; the watchdog's
+    # deadline is this + the contract's max_runtime_seconds + 30 s.
+    expires_at = models.BigIntegerField(null=True, blank=True)
+    status = models.CharField(max_length=20, choices=Status.choices)
+    refusal_code = models.CharField(max_length=32, blank=True, default="")
+    confirm_state = models.CharField(max_length=16, blank=True, default="")
+    exit_code = models.SmallIntegerField(null=True, blank=True)
+    output_bytes = models.PositiveBigIntegerField(default=0)
+    output_sha256 = models.CharField(max_length=64, blank=True, default="")
+    tail = models.TextField(blank=True, default="")
+    truncated = models.BooleanField(default=False)
+    sandbox_violation = models.BooleanField(default=False)
+    started_at = models.DateTimeField(null=True, blank=True)
+    finished_at = models.DateTimeField(null=True, blank=True)
+    trace_id = models.CharField(max_length=64)
+    actor = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="node_action_executions",
+    )
+
+    objects = WorkspaceScopedManager()
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"{self.capability} {self.status}"
+
+
+# Terminal execution statuses (D7); every other status is in flight.
+EXECUTION_TERMINAL_STATUSES = frozenset(
+    {
+        NodeActionExecution.Status.OK,
+        NodeActionExecution.Status.FAILED,
+        NodeActionExecution.Status.REFUSED,
+        NodeActionExecution.Status.DENIED,
+        NodeActionExecution.Status.CONFIRM_TIMEOUT,
+        NodeActionExecution.Status.TIMEOUT,
+        NodeActionExecution.Status.NODE_DISCONNECTED,
+        NodeActionExecution.Status.NODE_OFFLINE,
+        NodeActionExecution.Status.SERVER_REFUSED,
+        NodeActionExecution.Status.STALE_DISPATCH,
     }
 )
 
