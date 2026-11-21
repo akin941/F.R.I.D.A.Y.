@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "node -> server: the state of the node's own confirmation window for one invoke",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "at",
+    "id",
+    "invocation_id",
+    "state",
+    "type",
+    "v"
+  ],
+  "properties": {
+    "v": {
+      "type": "integer",
+      "const": 2
+    },
+    "type": {
+      "type": "string",
+      "const": "confirmation",
+      "maxLength": 32
+    },
+    "id": {
+      "type": "string",
+      "minLength": 36,
+      "maxLength": 36,
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "invocation_id": {
+      "type": "string",
+      "minLength": 36,
+      "maxLength": 36,
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "state": {
+      "type": "string",
+      "enum": [
+        "shown",
+        "approved",
+        "denied",
+        "timed_out",
+        "closed"
+      ],
+      "maxLength": 16
+    },
+    "at": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 253402300799
+    }
+  }
+}

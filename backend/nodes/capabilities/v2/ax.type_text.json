@@ -1,0 +1,45 @@
+{
+  "name": "ax.type_text",
+  "version": 1,
+  "class": "gate",
+  "label": "Metin yaz",
+  "data_class": "personal",
+  "description": "Types bounded text into the focused field of an app on the local list.",
+  "path_args": [],
+  "workspace_resolution": "personal_only",
+  "max_result_bytes": 16,
+  "max_runtime_seconds": 30,
+  "streams_output": false,
+  "confirm_template": "{bundle_id} uygulamasına şu metin yazılsın mı: {text}",
+  "args_schema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "bundle_id",
+      "submit",
+      "text"
+    ],
+    "properties": {
+      "bundle_id": {
+        "type": "string",
+        "minLength": 3,
+        "maxLength": 155,
+        "pattern": "^[A-Za-z0-9-]{1,63}(?:\\.[A-Za-z0-9-]{1,63}){1,7}$"
+      },
+      "text": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 500,
+        "pattern": "^[^\\x00-\\x09\\x0b-\\x1f\\x7f-\\x9f\\u061c\\u180e\\u200b-\\u200f\\u2028-\\u202e\\u2060-\\u2064\\u2066-\\u2069\\ufeff]{1,500}$"
+      },
+      "submit": {
+        "type": "boolean"
+      }
+    }
+  },
+  "result_schema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "null"
+  }
+}

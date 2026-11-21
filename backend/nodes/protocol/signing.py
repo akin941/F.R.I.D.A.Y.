@@ -13,8 +13,14 @@ decision 4).
 
 Node side, the verifier is `verify_envelope(envelope, pinned)` with the keys
 pinned at pairing. The full D5 verification order (size, parse, type,
-schema, key, signature, node, time, nonce, catalogue, class, args) is the
-reference node's (branch 3); this module is its signature step.
+schema, key, signature, node, time, nonce, catalogue, class, args) is
+`nodes.protocol.verify`; this module is its signature step.
+
+Protocol v2 (Phase 10 brief D1) adds **domain separation**: a v2 envelope
+signs `b"friday-node/invoke/v2\\n" + canonical(envelope - sig)` and a grant
+(`nodes.protocol.grants`) signs `b"friday-node/grant/v2\\n" +
+canonical(grant - sig)`, with the same key. The domain follows the signed
+body's own `v`, which is inside the signature.
 """
 
 import base64
@@ -44,6 +50,14 @@ KEY_BYTES = 32
 SIGNATURE_BYTES = 64
 NONCE_BYTES = 32
 KEY_ID_HEX_CHARS = 16
+
+# Domain separation (Phase 10 D1): from v2 every signature is over a
+# prefixed message, so a v1 envelope signature never verifies as a v2
+# envelope or as a grant, and the reverse. v1 keeps the bare canonical body
+# so paired v1 nodes keep verifying.
+INVOKE_DOMAIN_V2 = b"friday-node/invoke/v2\n"
+GRANT_DOMAIN_V2 = b"friday-node/grant/v2\n"
+ENVELOPE_DOMAINS = {1: b"", 2: INVOKE_DOMAIN_V2}
 
 _B64URL = re.compile(r"[A-Za-z0-9_-]*")
 _B64STD = re.compile(r"[A-Za-z0-9+/]*={0,2}")
@@ -149,35 +163,79 @@ class SigningKey:
         return f"<SigningKey {self.key_id}>"
 
 
-def sign_envelope(envelope: Mapping, key: SigningKey) -> dict:
-    """Return `envelope` with `key_id` set to `key`'s id and `sig` added.
-    The input must not already carry `sig` (a signature is never over a
-    body that contains one)."""
-    if "sig" in envelope:
+def signed_message(body: Mapping, domain: bytes = b"") -> bytes:
+    """The exact bytes a signature covers: `domain + canonical(body)`."""
+    return domain + canonicalize(body)
+
+
+def envelope_domain(version) -> bytes:
+    """The signature domain of an `invoke` envelope of protocol `version`
+    (v1: none, kept for paired v1 nodes; v2: `friday-node/invoke/v2\\n`).
+    An unknown version has no domain and never verifies."""
+    if isinstance(version, bool) or version not in ENVELOPE_DOMAINS:
+        raise SignatureError("bad_signature", "unknown envelope version")
+    return ENVELOPE_DOMAINS[version]
+
+
+def sign_with_domain(body: Mapping, key: SigningKey, domain: bytes) -> dict:
+    """Return `body` with `key_id` set to `key`'s id and `sig` over
+    `domain + canonical(body with key_id)`. The input must not already
+    carry `sig` (a signature is never over a body that contains one)."""
+    if "sig" in body:
         raise SignatureError("bad_signature", "the signed body must not contain sig")
-    body = {**envelope, "key_id": key.key_id}
-    return {**body, "sig": b64url_encode(key.sign(canonicalize(body)))}
+    signed = {**body, "key_id": key.key_id}
+    return {**signed, "sig": b64url_encode(key.sign(signed_message(signed, domain)))}
 
 
-def verify_envelope(envelope: Mapping, pinned: Mapping[str, bytes]) -> None:
+def verify_with_domain(
+    signed: Mapping,
+    pinned: Mapping[str, bytes],
+    domain: bytes,
+    *,
+    unknown_key_code="unknown_key",
+    bad_signature_code="bad_signature",
+) -> None:
+    """Check `signed["sig"]` over `domain + canonical(signed without sig)`
+    against the pinned public keys (`{key_id: raw public key}`)."""
+    key_id = signed.get("key_id")
+    if not isinstance(key_id, str) or key_id not in pinned:
+        raise SignatureError(unknown_key_code)
+    try:
+        signature = b64url_decode(signed.get("sig"))
+    except ValueError as exc:
+        raise SignatureError(bad_signature_code) from exc
+    if len(signature) != SIGNATURE_BYTES:
+        raise SignatureError(bad_signature_code)
+    body = {name: value for name, value in signed.items() if name != "sig"}
+    try:
+        message = signed_message(body, domain)
+        Ed25519PublicKey.from_public_bytes(pinned[key_id]).verify(signature, message)
+    except (InvalidSignature, ValueError) as exc:
+        raise SignatureError(bad_signature_code) from exc
+
+
+def sign_envelope(envelope: Mapping, key: SigningKey) -> dict:
+    """Return `envelope` with `key_id` set to `key`'s id and `sig` added, in
+    the signature domain of the envelope's own `v` (v1: none; v2: the
+    invoke/v2 domain, Phase 10 D1)."""
+    return sign_with_domain(envelope, key, envelope_domain(envelope.get("v")))
+
+
+def verify_envelope(envelope: Mapping, pinned: Mapping[str, bytes], *, version=None) -> None:
     """Check `envelope`'s signature against the pinned public keys
     (`{key_id: raw public key}`). Raises SignatureError with `unknown_key`
-    (D5 check 5) or `bad_signature` (check 6)."""
+    (D5 check 5) or `bad_signature` (check 6).
+
+    `version` is the session's negotiated protocol version: an envelope of
+    another `v` is `bad_signature` (the schema already refuses it; this
+    keeps the signature step closed on its own). Without `version` the
+    envelope's own `v` picks the domain."""
     key_id = envelope.get("key_id")
-    if not isinstance(key_id, str) or key_id not in pinned:
+    if not isinstance(key_id, str) or key_id not in pinned:  # check 5 before 6
         raise SignatureError("unknown_key")
-    sig = envelope.get("sig")
-    try:
-        signature = b64url_decode(sig)
-    except ValueError as exc:
-        raise SignatureError("bad_signature") from exc
-    if len(signature) != SIGNATURE_BYTES:
-        raise SignatureError("bad_signature")
-    body = {name: value for name, value in envelope.items() if name != "sig"}
-    try:
-        Ed25519PublicKey.from_public_bytes(pinned[key_id]).verify(signature, canonicalize(body))
-    except (InvalidSignature, ValueError) as exc:
-        raise SignatureError("bad_signature") from exc
+    if version is not None and envelope.get("v") != version:
+        raise SignatureError("bad_signature", "envelope version is not the session's")
+    verify_with_domain(envelope, pinned, envelope_domain(envelope.get("v")))
 
 
 class KeyRing:
@@ -231,13 +289,18 @@ def build_invoke(
     invocation_id=None,
     message_id=None,
     nonce=None,
+    version=1,
 ) -> dict:
-    """An unsigned v1 `invoke` envelope (sign it with `KeyRing.sign` or
-    `sign_envelope`). Times are integer Unix seconds; `args_sha256` is the
-    sha256 of the canonical JSON of `args`; `grant` is reserved for Phase 10
-    and always null in v1."""
+    """An unsigned `invoke` envelope of protocol `version` (sign it with
+    `KeyRing.sign` or `sign_envelope`). Times are integer Unix seconds;
+    `args_sha256` is the sha256 of the canonical JSON of `args`; `grant` is
+    null here: a v1 envelope never carries one, and a gate-class v2
+    envelope is built by `nodes.protocol.grants.build_gated_invoke`, which
+    embeds the signed grant before signing the envelope."""
+    if isinstance(version, bool) or version not in ENVELOPE_DOMAINS:
+        raise ValueError(f"unknown protocol version {version!r}")
     return {
-        "v": 1,
+        "v": version,
         "type": "invoke",
         "id": str(message_id or uuid.uuid4()),
         "invocation_id": str(invocation_id or uuid.uuid4()),

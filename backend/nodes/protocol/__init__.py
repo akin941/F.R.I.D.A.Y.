@@ -1,4 +1,5 @@
-"""Friday Node protocol v1 (Phase 9 brief D5, ADR-013).
+"""Friday Node protocol v1 and v2 (Phase 9 brief D5, Phase 10 brief D1-D2,
+ADR-013).
 
 Pure Python: this package imports neither Django nor any project package
 outside `nodes.protocol` (a subprocess test and an import-linter contract
@@ -8,8 +9,12 @@ mirrors.
 
 - `canonical`: the RFC 8785 (JCS) subset our schemas allow, and strict JSON
   parsing.
-- `signing`: Ed25519 keys, key ids, signed `invoke` envelopes.
-- `messages`: the frozen message-type registry and `validate`.
+- `signing`: Ed25519 keys, key ids, signed `invoke` envelopes, and the v2
+  signature domains.
+- `grants`: the approval-bound grant of a gate-class v2 invoke.
+- `messages`: the frozen, version-aware message-type registry, `validate`
+  and subprotocol negotiation.
+- `verify`: the node-side verification order, protocol-level checks.
 """
 
 from nodes.protocol.canonical import (
@@ -18,17 +23,32 @@ from nodes.protocol.canonical import (
     parse_strict,
     sha256_hex,
 )
+from nodes.protocol.grants import (
+    GrantError,
+    build_gated_invoke,
+    build_grant,
+    check_grant_binding,
+    sign_grant,
+    verify_grant_signature,
+)
 from nodes.protocol.messages import (
+    MAX_GRANT_TTL_SECONDS,
     MESSAGE_TYPES,
     NODE_REFUSAL_CODES,
+    NODE_REFUSAL_CODES_V2,
     NODE_TO_SERVER,
+    NODE_TO_SERVER_V2,
     PROTOCOL_VERSION,
+    PROTOCOL_VERSIONS,
     SERVER_TO_NODE,
     ProtocolError,
     catalogue_sha256,
+    negotiate_subprotocol,
     validate,
 )
 from nodes.protocol.signing import (
+    GRANT_DOMAIN_V2,
+    INVOKE_DOMAIN_V2,
     KeyRing,
     SignatureError,
     SigningKey,
@@ -37,25 +57,43 @@ from nodes.protocol.signing import (
     sign_envelope,
     verify_envelope,
 )
+from nodes.protocol.verify import NodeState, NonceCache, Refusal, verify_invoke
 
 __all__ = [
+    "GRANT_DOMAIN_V2",
+    "INVOKE_DOMAIN_V2",
+    "MAX_GRANT_TTL_SECONDS",
     "MESSAGE_TYPES",
     "NODE_REFUSAL_CODES",
+    "NODE_REFUSAL_CODES_V2",
     "NODE_TO_SERVER",
+    "NODE_TO_SERVER_V2",
     "PROTOCOL_VERSION",
+    "PROTOCOL_VERSIONS",
     "SERVER_TO_NODE",
     "CanonicalizationError",
+    "GrantError",
     "KeyRing",
+    "NodeState",
+    "NonceCache",
     "ProtocolError",
+    "Refusal",
     "SignatureError",
     "SigningKey",
+    "build_gated_invoke",
+    "build_grant",
     "build_invoke",
     "canonicalize",
     "catalogue_sha256",
+    "check_grant_binding",
     "key_id_for",
+    "negotiate_subprotocol",
     "parse_strict",
     "sha256_hex",
     "sign_envelope",
+    "sign_grant",
     "validate",
     "verify_envelope",
+    "verify_grant_signature",
+    "verify_invoke",
 ]

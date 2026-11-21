@@ -1,0 +1,48 @@
+{
+  "name": "repo.command.run",
+  "version": 1,
+  "class": "gate",
+  "label": "Repoda komut çalıştır",
+  "data_class": "firm",
+  "description": "Runs the command the owner mapped locally for one repo and one closed command kind, under srt, with a stripped environment and no network by default. The server sends a typed intent, never a command line.",
+  "path_args": [
+    "repo_path"
+  ],
+  "workspace_resolution": "path_arg",
+  "max_result_bytes": 16,
+  "max_runtime_seconds": 900,
+  "streams_output": true,
+  "confirm_template": "{repo_path} reposunda '{command_kind}' komutu çalıştırılsın mı?",
+  "args_schema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "command_kind",
+      "repo_path"
+    ],
+    "properties": {
+      "repo_path": {
+        "type": "string",
+        "minLength": 2,
+        "maxLength": 1024,
+        "pattern": "^~?(?:/(?!\\.\\.?(?:/|$))[^/\\x00-\\x1f\\x7f-\\x9f\\u061c\\u180e\\u200b-\\u200f\\u2028-\\u202e\\u2060-\\u2064\\u2066-\\u2069\\ufeff;|&$`<>\\\\*?\"'{}\\[\\]!]{1,255})+$"
+      },
+      "command_kind": {
+        "type": "string",
+        "enum": [
+          "test",
+          "lint",
+          "typecheck",
+          "build",
+          "format_check"
+        ],
+        "maxLength": 16
+      }
+    }
+  },
+  "result_schema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "null"
+  }
+}

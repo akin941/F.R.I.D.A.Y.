@@ -1,0 +1,46 @@
+{
+  "name": "applescript.recipe.run",
+  "version": 1,
+  "class": "gate",
+  "label": "Mac tarifi çalıştır",
+  "data_class": "personal",
+  "description": "Runs one recipe of the node's local recipe catalogue. The AppleScript text lives only on the node; the server sends the recipe name and its typed params.",
+  "path_args": [],
+  "workspace_resolution": "recipe_params",
+  "max_result_bytes": 16,
+  "max_runtime_seconds": 30,
+  "streams_output": false,
+  "confirm_template": "Tarif çalıştırılsın mı: {recipe}",
+  "args_schema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "params",
+      "recipe"
+    ],
+    "properties": {
+      "recipe": {
+        "type": "string",
+        "enum": [
+          "finder.reveal_repo",
+          "music.next_track",
+          "music.play_pause",
+          "system.volume_set",
+          "terminal.open_repo"
+        ],
+        "maxLength": 64
+      },
+      "params": {
+        "type": "object",
+        "x-friday-opaque": "validated by the recipe's own params_schema",
+        "maxProperties": 8
+      }
+    },
+    "x-friday-recipe-catalogue-sha256": "32c5d834b3bef6684fc9895f9dc9a39253fcd4c4584c96ac07f6b685960e86c7"
+  },
+  "result_schema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "null"
+  }
+}

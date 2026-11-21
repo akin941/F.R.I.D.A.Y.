@@ -1,0 +1,22 @@
+{
+  "name": "system.volume_set",
+  "version": 1,
+  "label": "Ses düzeyi",
+  "description": "Sistem ses düzeyini 0-100 arasında ayarlar.",
+  "params_schema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "level"
+    ],
+    "properties": {
+      "level": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 100
+      }
+    }
+  },
+  "confirm_template": "Ses düzeyi {level} yapılsın mı?"
+}

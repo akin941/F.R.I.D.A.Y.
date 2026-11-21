@@ -1,0 +1,153 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "node -> server: the answer to one invoke, or a frame-error report",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "confirm_state",
+    "duration_ms",
+    "exit_code",
+    "id",
+    "invocation_id",
+    "output",
+    "output_bytes",
+    "output_sha256",
+    "refusal_code",
+    "sandbox_violation",
+    "status",
+    "tail",
+    "truncated",
+    "type",
+    "v"
+  ],
+  "properties": {
+    "v": {
+      "type": "integer",
+      "const": 2
+    },
+    "type": {
+      "type": "string",
+      "const": "result",
+      "maxLength": 32
+    },
+    "id": {
+      "type": "string",
+      "minLength": 36,
+      "maxLength": 36,
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "invocation_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "minLength": 36,
+      "maxLength": 36,
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "ok",
+        "refused",
+        "error",
+        "timeout"
+      ],
+      "maxLength": 16
+    },
+    "refusal_code": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "enum": [
+        "too_large",
+        "malformed",
+        "unknown_type",
+        "schema",
+        "unknown_key",
+        "bad_signature",
+        "wrong_node",
+        "not_yet_valid",
+        "expired",
+        "ttl_too_long",
+        "replay",
+        "nonce_cache_full",
+        "unknown_capability",
+        "class_mismatch",
+        "grant_unexpected",
+        "grant_missing",
+        "bad_grant_signature",
+        "grant_mismatch",
+        "args_hash_mismatch",
+        "args_schema",
+        "not_granted",
+        "not_configured",
+        "busy_confirming",
+        "owner_denied",
+        "confirm_timeout",
+        "expired_after_confirm",
+        null
+      ],
+      "maxLength": 32
+    },
+    "output": {
+      "type": [
+        "object",
+        "array",
+        "null"
+      ],
+      "x-friday-opaque": "validated against the capability's result_schema; at most 64 KiB canonical",
+      "maxProperties": 64,
+      "maxItems": 1024
+    },
+    "truncated": {
+      "type": "boolean"
+    },
+    "output_sha256": {
+      "type": "string",
+      "maxLength": 64,
+      "pattern": "^([0-9a-f]{64})?$"
+    },
+    "duration_ms": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 3600000
+    },
+    "exit_code": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": -255,
+      "maximum": 255
+    },
+    "output_bytes": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 1099511627776
+    },
+    "tail": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 4096,
+      "x-friday-max-bytes": 4096
+    },
+    "confirm_state": {
+      "type": "string",
+      "enum": [
+        "approved",
+        "denied",
+        "timed_out",
+        "closed",
+        "not_required"
+      ],
+      "maxLength": 16
+    },
+    "sandbox_violation": {
+      "type": "boolean"
+    }
+  }
+}
