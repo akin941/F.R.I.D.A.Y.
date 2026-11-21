@@ -189,3 +189,126 @@ readers, fixtures and conformance cases in `backend/integrations/
 node_reference/` and reaches the node through a `NodeReadPort` seam in
 `tools/transcript_ingest.py`; the move into `nodes/capabilities/v1/` and the
 `invoke_read` amendment are recorded as owner steps in the 8B brief.
+
+## Implementation notes — contracts, protocol v1, audit chain (Phase 9 branch 2, 2026-11-20)
+
+**Import contracts (decision 9, brief D2), in `backend/pyproject.toml`:**
+- "nodes may import only approvals, audit, workspaces, accounts, core":
+  forbids `config`, `ai_core`, `memory`, `knowledge`, `harness`,
+  `assistant`, `tools`, `agents`, `skills`, `integrations`, `connectors`,
+  `deploys`, `voice`, `hud`, `ops` and `tasks`. Phase 9 `nodes` does not
+  use its `approvals` edge (a `nodes` -> `approvals` import would break
+  "tools must not import approvals" once `tools` reads `nodes`).
+- "only tools, hud, ops may import nodes": every other kernel app is a
+  source; `config` is the composition root. `memory.ingestion`'s own
+  contract now lists `nodes` too, closing the Phase 8A placeholder.
+- `nodes.protocol` and `nodes.capabilities` import no project package and
+  no other part of `nodes`; `nodes/tests/test_protocol_purity.py` imports
+  them in a clean subprocess and asserts Django never loads.
+- `nodes` joined the blanket contracts: core independence, kernel apps ↛
+  config, ai_core ↛ business, audit ↛ business, no app ↛
+  harness/ops/voice/hud, kernel apps ↛ connectors/deploys, MCP client-only.
+
+**Dependencies (brief D3):** `cryptography==50.0.1` and `jsonschema==4.26.0`
+promoted from transitive to direct exact pins, recorded in
+`docs/mcp/dependencies/node-gateway.md`.
+
+**Protocol v1 (decision 3/4/5, brief D5)** lives in `backend/nodes/protocol/`:
+- `schemas/v1/<type>.schema.json` — the closed set of nine message types;
+  server → node is exactly `hello.ack`, `heartbeat.ack`, `invoke`,
+  `event.ack`, `bye` (`test_the_server_to_node_set_is_exactly_the_five_types`).
+  No type name or schema property matches the policy regex; the single
+  reserved exception is `invoke.grant` (null in v1, refused non-null by a v1
+  node: `test_no_schema_property_is_policy_shaped`). The regex is widened
+  from `catalogue_set` to `catalogue[._]set` so the dotted type
+  `catalogue.set` is caught.
+- Stricter-than-JSON-Schema semantics the Swift port must mirror: `pattern`
+  is a full match, and numbers must be integers (a float is refused even
+  where JSON Schema calls `1.0` an integer). Sub-schemas marked
+  `x-friday-opaque` are typed holes validated elsewhere (capability
+  schemas, event sinks).
+- Times are integer Unix seconds. Signatures and nonces are base64url
+  without padding; `key_id` is inside the signed body.
+- Shared vectors: `vectors/canonical.json` (incl. the RFC 8785 UTF-16 key
+  order example and the refusals) and `vectors/signing.json` (a published
+  TEST key; every server refuses it as `NODE_SIGNING_KEY`).
+
+**Capability contracts (brief D7)** in `backend/nodes/capabilities/v1/`: the
+eight read capabilities. Amounts are integer micro-USD (`usd_micros`,
+`total_usd_micros`); `output_sha256` is sha256 of the canonical JSON of
+`output` (brief follow-up 1). A catalogue entry is invocable only on equal
+name, version and sha256 of both schemas.
+
+**Pairing (brief D4):** `POST /api/v1/nodes/pair` (anonymous, throttle
+`node_pair`, fail-closed). `node_id` is the node's `TrustedDevice` id, so it
+is the same id in the pairing and rotate responses and every envelope. The
+response names the active signing key only (a retired key verifies but is
+never pinned by a new node). The signing key and protocol version are
+checked before any code is consumed.
+
+**Audit chain (decision 10, brief D8):** `NodeInvocation` rows are written
+only by `nodes.audit_chain.append` under `select_for_update` on the single
+`NodeAuditHead`, append-only by trigger (`nodes/0002_append_only_chain`),
+every FK `PROTECT`; `manage.py verify_node_audit_chain` reports the first
+break by `seq`. `row_hash` covers every column but itself (pinned by
+`test_the_hash_covers_every_field_and_fks_as_ids`).
+
+## Implementation notes — protocol v2 and the grant format (Phase 10 branch 1, 2026-11-20)
+
+Brief `docs/prompts/phase-10-control/brief.md` D1, D2, D3, D5. Phase 9's
+protocol v1 (branch 2, `feat/p9-node-protocol`) was not yet merged on the
+integration branch, so `feat/p10-protocol-v2` merges it as its base.
+
+**Negotiation (D1).** The node offers `friday-node.v2, friday-node.v1`;
+`nodes.protocol.messages.negotiate_subprotocol` picks the highest common
+version (None: close 4400). The path stays `/ws/node/v1`, and pairing keeps
+`protocol_version: 1` as its baseline: the session version is per socket.
+A v1 session gets read invokes only.
+
+**Schemas (D1).** `backend/nodes/protocol/schemas/v2/`: every v1 type at
+`v: 2`; `result` gains `exit_code` (-255..255 or null), `output_bytes`,
+`tail` (≤ 4 096 UTF-8 **bytes**, the new `x-friday-max-bytes` keyword the
+Swift port mirrors), `confirm_state` and `sandbox_violation`; two
+node → server types, `confirmation` and `output` (`seq` 0..65 535, `data`
+≤ 8 192 bytes). `MESSAGE_TYPES[version][direction]`; the server → node
+set is the same frozenset in both versions (no cancel, no policy type).
+The policy regex and the bounds meta-test cover v2, the action contracts
+and the recipe params; `invoke.grant` stays the one reserved property.
+
+**Domain separation (D1).** v2 signs `b"friday-node/invoke/v2\n" +
+canonical(envelope − sig)`; grants sign `b"friday-node/grant/v2\n" +
+canonical(grant − sig)`; v1 keeps the bare canonical body so paired v1 nodes
+keep verifying. The domain follows the body's own `v`, which is signed.
+Vectors: `vectors/signing_v2.json` (read and confirm envelopes, the signed
+bytes, and signatures in the wrong domain that must not verify).
+
+**The grant (decision 4, D2).** `schemas/v2/grant.schema.json`, embedded
+verbatim as `invoke.grant` (a test pins it): `{v: 2, grant_id, approval_id,
+node_id, workspace_id, capability, capability_version, class: "gate",
+args_sha256, nonce, issued_at, expires_at, key_id, sig}`. Same key as the
+envelope. Every shared field (`node_id`, `workspace_id`, `capability`,
+`capability_version`, `args_sha256`, `nonce`, `issued_at`, `expires_at`)
+must be equal between grant and envelope, type-strictly. `MAX_GRANT_TTL_SECONDS
+= 120` is refused at build (`nodes.protocol.grants.build_grant`,
+`build_gated_invoke`) and again by the node. Vectors: `vectors/grants.json`
+(a gated envelope, the signed bytes, and every D5 v2 refusal 13–20 as a
+frame a compromised server could sign, with its expected code and check).
+Issuing a grant only from an approved, fresh, unused `node_action`
+approval is server-side policy (Phase 10 branch 3, `nodes.grants.issue`).
+
+**Verification order (D5).** `nodes/protocol/verify.py` is the pure-Python,
+protocol-level part of the node's order: v1 checks 1–16 and v2 checks 1–21
+(class 13, grant presence 14, grant key 15, grant signature 16, binding 17,
+grant TTL 18, args hash 19, own args schema plus recipe params 20,
+availability 21), first failure wins, nothing echoed. Checks 22–24 (local
+policy, the confirmation window, the post-click re-check) are node-local
+(Phase 10 branch 2 reference node; Mac session M1). With equal times
+(check 17) and the class TTL ceiling (check 10), check 18 is defence in
+depth: a 121 s gated envelope is refused at 10 with the same code.
+
+**Capability snapshots (D1, D3).** Each snapshot entry records the
+session's `protocol_version`; `nodes.services.record_capability_snapshot`
+writes a fresh row when the catalogue hash **or** the session version
+changes, so a node reconnecting on v2 does not keep its `protocol_v1`
+verdicts. `invocable_entry(snapshot, contract)` is the check branch 3 runs
+before signing a grant.

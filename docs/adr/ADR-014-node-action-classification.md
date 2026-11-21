@@ -58,3 +58,36 @@ amendment; review rejected that.
 turns of Claude Code sessions and Codex threads) are session reads and are in
 the **read** class under this ADR's existing "session/thread lists and reads"
 entry. Nothing moves between classes.
+
+## Implementation note — capability classes in protocol v2 (Phase 10 branch 1, 2026-11-20)
+
+Brief `docs/prompts/phase-10-control/brief.md` D1, D3. The server-known
+action contracts live in `backend/nodes/capabilities/v2/` (one JSON file
+each; the v1 reads stay in `v1/`):
+
+| Capability | Class | Data class | Workspace from |
+|---|---|---|---|
+| `repo.command.run` (`repo_path`, `command_kind` ∈ test / lint / typecheck / build / format_check) | gate | firm | `repo_path` (`path_arg`) |
+| `applescript.recipe.run` (`recipe`, `params` per recipe) | gate | personal; a repo recipe takes its repo's workspace | `recipe_params` |
+| `ax.press` (`bundle_id`, `role`, `title`) | gate | personal | personal only |
+| `ax.type_text` (`bundle_id`, `text`, `submit`) | gate | personal | personal only |
+| `apps.open` (`bundle_id`) | confirm | personal | personal only |
+| `apps.focus` (`bundle_id`) | confirm | personal | personal only |
+
+- The confirm-class list is exactly decision 1's one kind (open/focus an app
+  from a local list); every other action contract is gate-class, and
+  test/lint (`repo.command.run`) stays gate-class (decision 3's evidence is
+  pending, Phase 10 M3).
+- The recipe catalogue v1 (`v2/recipes/`: `music.play_pause`,
+  `music.next_track`, `system.volume_set`, `finder.reveal_repo`,
+  `terminal.open_repo`) carries params schemas and Turkish confirm
+  templates only; the AppleScript text exists only on the node. A recipe
+  whose params have `repo_path` is a repo recipe, derived from the schema.
+- Each contract's `confirm_template` is rendered **by the node** from its own
+  validated args (decision 2); the loader refuses a template whose `{slot}`
+  names no real arg.
+- Class negotiation (ADR-013, protocol v2): a confirm- or gate-class entry is
+  invocable only on a `friday-node.v2` session whose advertised entry equals
+  the contract on name, version, **class** and both schema hashes; on a v1
+  session it is `not_invocable` with reason `protocol_v1`, and an action
+  entry advertised with another class is `class_mismatch`.

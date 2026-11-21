@@ -55,6 +55,15 @@ module. Contracts enforced with import-linter (see `backend/pyproject.toml`).
 > preflight` summary reaches it through the shared cache
 > (`HUD_PREFLIGHT_CACHE_KEY`), never an `ops` import.
 
+> Note (2026-11-20, Phase 9 branch 2, ADR-013 decision 9): the kernel app
+> `nodes` (the Friday Node server side) may import `approvals`, `audit`,
+> `workspaces`, `accounts` and `core` only, and only `tools`, `hud`, `ops`
+> and the composition root `config` may import it. Its `nodes.protocol` and
+> `nodes.capabilities` packages import no project package and no Django.
+> `nodes` joins the blanket `core`/`config`/`ai_core`/`audit`/`harness`/
+> `ops`/`voice`/`hud`/MCP contracts in `backend/pyproject.toml`, and
+> `memory.ingestion`'s forbidden list.
+
 ## Consequences
 A module can be extracted into a service later because boundaries stay clean.
 The first extraction candidate, if ever needed, is the AI gateway.

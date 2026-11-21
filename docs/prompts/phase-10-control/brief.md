@@ -1333,7 +1333,7 @@ with the Mac rows pending owner evaluation.
 | # | Branch | Scope | Depends on | Status |
 |---|---|---|---|---|
 | brief | `docs/p10-brief` | This brief (full, from the stub; stub goal, scope, checkpoint and owner step d4 kept), MASTER_PLAN §AA row 10 Brief/Status | Phase 8B brief; Phase 9 brief | **implemented 2026-11-20**; review round 1 and round 2 findings fixed 2026-11-21 (docs only; awaits Sonnet 5 re-review) |
-| 1 | `feat/p10-protocol-v2` | Protocol v2 schemas, grant format and domain-separated signing, version negotiation, capability contracts v2 + recipe catalogue, argument-schema fuzz families, snapshot classes, ADR notes | Phase 9 branches 2–3 merged; brief approved | not started |
+| 1 | `feat/p10-protocol-v2` | Protocol v2 schemas, grant format and domain-separated signing, version negotiation, capability contracts v2 + recipe catalogue, argument-schema fuzz families, snapshot classes, ADR notes | Phase 9 branches 2–3 merged; brief approved | **implemented 2026-11-20** on its branch (merges `feat/p9-node-protocol` as its base); review round 1 findings (1 MEDIUM, 2 LOW) fixed 2026-11-21, awaits Sonnet 5 re-review; see "Implementation record — `feat/p10-protocol-v2`" |
 | 2 | `feat/p10-reference-executor` | Reference node v2 (verifier 13–24, confirmation double, executor port, runtime cap), `srt` policy generator + vectors, conformance cases v2, escape suite + runner | 1 | not started |
 | 3 | `feat/p10-invocation-grants` | Per-tool approval TTL + pre-transaction hook (`create_request` split) + approver hook, `node_action` tool with actor/approver checks, registered trust-check stub, `NodeActionExecution`, grant issuance, gated/confirm invocation, gateway v2 frames + watchdog, output scrubber port + `StreamScrubber` (tail re-scrub, fail closed), chain row v2, actions endpoints | 1, 2; Phase 9 branches 4–5 merged | not started |
 | 4 | `feat/p10-trust-check` | Trust check (rules + `control.trust_check`), evidence port, router `node_action` proposals, injection corpus, voice cap regressions | 3 | not started |
@@ -1744,3 +1744,127 @@ starts.
    MASTER_PLAN row 6 say "awaits re-review" and are labelled round 2.
    Fix: after the verdict, edit the three status lines to "review round 3
    approved".
+
+## Implementation record — `feat/p10-protocol-v2` (branch 1, implemented 2026-11-20)
+
+**Base.** Phase 9 branch 2 (`feat/p9-node-protocol`, protocol v1, the
+`nodes` app) had not merged on the integration branch, so this branch
+merges it first (one merge commit; the only conflict, the ADR-013 notes
+section, kept both sides). Phase 9 branch 3 (the reference node v1) does
+not exist yet; the protocol-level verifier this branch needed lives in
+`nodes/protocol/verify.py` and covers v1 checks 1–16 too, so branch 2 and
+Phase 9 branch 3 build on it rather than duplicate it.
+
+**Delivered (D1, D2, D3, D5 protocol-level).**
+- `backend/nodes/protocol/schemas/v2/` (all v1 types at `v: 2`, the grant
+  sub-schema embedded verbatim as `invoke.grant`, `confirmation`, `output`,
+  the extended `result`); `x-friday-max-bytes` bounds `tail` and `output.data`
+  in UTF-8 bytes.
+- `messages.py`: `MESSAGE_TYPES[version][direction]` (the v1 direction map is
+  now `MESSAGE_TYPES[1]`), `validate(..., version=1)`, `NODE_TO_SERVER_V2`,
+  the unchanged server → node set, `NODE_CHECKS_V2` / `NODE_REFUSAL_CODES_V2`,
+  `MAX_GRANT_TTL_SECONDS = 120`, per-class TTL ceilings (read 30, confirm
+  120, gate 120), `negotiate_subprotocol`.
+- `signing.py`: the v2 invoke and grant domains, `sign_with_domain` /
+  `verify_with_domain`, `verify_envelope(..., version=)`, `build_invoke(...,
+  version=)`.
+- `grants.py`: `build_grant`, `sign_grant`, `verify_grant_signature`,
+  `check_grant_binding`, `check_grant_ttl`, `build_gated_invoke`.
+- `verify.py`: `verify_invoke`, `NodeState`, `NonceCache`, `Refusal(code,
+  check)` (v1 1–16, v2 1–21).
+- `backend/nodes/capabilities/v2/` (six contracts) and `v2/recipes/` (five
+  recipes); the loader validates class, runtime bound (≤ 900), label,
+  `confirm_template` slots against real args (and recipe params), the
+  recipe enum and `x-friday-recipe-catalogue-sha256` (so the catalogue hash
+  rule covers recipe params). `check_catalogue_entry(entry,
+  protocol_version=)` adds `protocol_v1` and `class_mismatch`;
+  `get_contract` still returns reads only, so `sign_read_invoke` can never
+  sign an action.
+- `nodes/services.py`: `classify_catalogue`, `record_capability_snapshot`
+  (rewrites when the catalogue hash or the session version changes; the
+  version is stored per entry, so no migration), `invocable_entry`.
+- Vectors: `vectors/signing_v2.json`, `vectors/grants.json`, built by
+  `nodes/tests/vectors_v2.py` (`--write`) and pinned byte-identical by a
+  test; their keys are refused as server keys (`nodes.keys`).
+- ADR-013 and ADR-014 implementation notes.
+
+**Tests.** `nodes/tests/test_protocol_v2_messages.py` (frozen sets, policy
+guard and bounds meta-test over v2 + action + recipe schemas, version
+pinning, negotiation, byte bounds), `test_protocol_v2_grants.py` (round
+trip, flipped bit, wrong key, unpinned key, cross-domain signatures both
+ways, TTL > 120 at build, binding per shared field, vectors),
+`test_protocol_v2_verify.py` (the done-when: every D5 v2 check 13–20 from a
+re-signed, compromised-server frame; checks 1–12 and 21 on v2; the v1 order
+on a v1 session), `test_capabilities_v2.py` (the table, loader refusals,
+catalogue matching by class and version, ~900 generated fuzz cases over
+every property of every argument and recipe-params schema),
+`test_snapshot_classes.py`, and the purity test now also imports `grants`,
+`verify` and the v2 contracts without Django.
+
+**Deviations, recorded.**
+- Check 18 (grant TTL) cannot be reached by a frame once checks 10 and 17
+  pass (equal times, a 120 s class ceiling); it stays as defence in depth
+  and is unit-tested, and a 121 s gated envelope is refused at check 10
+  with the same code (`ttl_too_long`).
+- `busy_confirming` is placed at check 23 (it is decided when a second
+  window would open).
+- A v2 node never sends `class_not_allowed`; it is v1-only.
+- Pairing still answers `protocol_version: 1` (the baseline); the session
+  version is negotiated per socket, as D1 says.
+
+**Review round 1 (2026-11-21).**
+- *MEDIUM, confirm-text spoofing.* The free strings (`ax.type_text.text`,
+  `ax.press.title`, `repo.command.run.repo_path`, the `repo_path` of
+  `finder.reveal_repo` and `terminal.open_repo`) now share one excluded
+  class, `nodes.capabilities.INVISIBLE_CHARACTER_CLASS`: C1 and DEL, every
+  Unicode 15 `Cf` code point (soft hyphen, U+0600-0605, U+061C, U+06DD,
+  U+070F, U+0890-0891, U+08E2, U+180E, U+200B-200F, U+202A-202E,
+  U+2060-206F, U+FEFF, U+FFF9-FFFB, Kaithi/Egyptian/shorthand/musical
+  format controls, tag characters), `Zl`/`Zp`, surrogates, private use (all
+  planes), noncharacters, blank glyphs of other categories (U+034F,
+  U+115F-1160, U+17B4-17B5, U+180B-180F, U+2800, U+3164, U+FFA0),
+  variation selectors (U+FE00-FE0F, U+E0100-E01EF), U+FFF0-FFF8 and planes
+  4-16 wholesale. Scattered unassigned code points of planes 0-3 stay
+  allowed on purpose (macOS draws them as visible Last Resort glyphs, and
+  listing ~700 ranges would pin the class to one Unicode version). The
+  loader refuses any free-string property (a negated-class pattern) that
+  does not contain the shared class, so the fields cannot drift; a path
+  segment made only of dots (`...`) is now refused too. The recipe
+  catalogue hash was regenerated; no signing vector changed (they hash
+  args, not schemas). Tests: 29 new hostile-insert families, a walk of
+  every `Cc`/`Cf`/`Co`/`Cs`/`Zl`/`Zp` code point (and `Cn` in planes 4-16
+  plus every noncharacter) over every free string, blank glyphs end to
+  end, visible Turkish/CJK/emoji text still accepted, and the drift refusal.
+- *LOW, `build_gated_invoke` contract check.* The builder stays
+  contract-agnostic (the compromised-server suite must sign hostile
+  grants); its docstring records the caller's duty, and
+  `nodes.capabilities.check_gate_request(capability, version, args)` is the
+  check branch 3's grant issuer must run before signing (unknown
+  capability, non-gate class, version mismatch, args outside the schema).
+- Not changed: the v1 read contracts keep their older, narrower class
+  (their hashes are what Phase 9 nodes advertise, and their strings are
+  read arguments, not confirm text); widening them is a v1 contract bump
+  for a later branch.
+
+### Owner steps (pending) — `feat/p10-protocol-v2`, recorded 2026-11-20
+
+### Owner steps (pending) — `feat/p10-protocol-v2`, recorded 2026-11-20
+
+1. Run the independent Sonnet 5 review of this branch (CLAUDE.md
+   "Reviews") and fix findings until APPROVE.
+2. Merge order: `feat/p9-node-protocol` (Phase 9 branch 2) first, then this
+   branch; if Phase 9 branch 2 changes in its own review, re-merge it here
+   and regenerate the v2 vectors (`uv run python -m nodes.tests.vectors_v2
+   --write`) if the v1 envelope shape changed.
+3. Mac session M1: load `backend/nodes/protocol/schemas/v2/`,
+   `vectors/signing_v2.json` and `vectors/grants.json` in the Swift test
+   target; every `grants.json` refusal must produce the same code at the
+   same check, and the `x-friday-max-bytes` keyword must be mirrored.
+   (deferred: Mac session)
+4. Mac session M1 (added 2026-11-21, review round 1): the Swift node must
+   validate `text`, `title` and `repo_path` with the **identical** pattern
+   strings from the v2 contract files (plain `\uXXXX`/`\UXXXXXXXX`
+   code-point ranges, valid ICU syntax), never a hand-written or
+   `CharacterSet`-based approximation, and its test target must replay the
+   hostile-insert families of `nodes/tests/test_capabilities_v2.py`.
+   (deferred: Mac session)

@@ -1,0 +1,107 @@
+{
+  "name": "usage.ccusage",
+  "version": 1,
+  "class": "read",
+  "data_class": "firm",
+  "description": "ccusage spend per project. Amounts are integer micro-USD. The server discards the node's totals and recomputes them from the rows that survive its filter.",
+  "path_args": [
+    "cwd_prefixes"
+  ],
+  "workspace_resolution": "row_cwd",
+  "max_result_bytes": 65536,
+  "args_schema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "period"
+    ],
+    "properties": {
+      "period": {
+        "type": "string",
+        "enum": [
+          "today",
+          "week",
+          "month"
+        ],
+        "maxLength": 8
+      },
+      "cwd_prefixes": {
+        "type": "array",
+        "minItems": 1,
+        "maxItems": 20,
+        "items": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 1024,
+          "pattern": "^~?(?:/(?!\\.\\.?(?:/|$))[^/\\x00-\\x1f\\x7f\\u200b-\\u200f\\u2028-\\u202e\\u2066-\\u2069\\ufeff;|&$`<>\\\\*?\"'{}\\[\\]!]{1,255})+$"
+        }
+      }
+    }
+  },
+  "result_schema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "by_project",
+      "tokens_in",
+      "tokens_out",
+      "total_usd_micros"
+    ],
+    "properties": {
+      "total_usd_micros": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 9007199254740991
+      },
+      "tokens_in": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 9007199254740991
+      },
+      "tokens_out": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 9007199254740991
+      },
+      "by_project": {
+        "type": "array",
+        "maxItems": 200,
+        "items": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "cwd",
+            "tokens_in",
+            "tokens_out",
+            "usd_micros"
+          ],
+          "properties": {
+            "cwd": {
+              "type": "string",
+              "minLength": 2,
+              "maxLength": 1024,
+              "pattern": "^~?(?:/(?!\\.\\.?(?:/|$))[^/\\x00-\\x1f\\x7f\\u200b-\\u200f\\u2028-\\u202e\\u2066-\\u2069\\ufeff;|&$`<>\\\\*?\"'{}\\[\\]!]{1,255})+$"
+            },
+            "usd_micros": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "tokens_in": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "tokens_out": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            }
+          }
+        }
+      }
+    }
+  }
+}

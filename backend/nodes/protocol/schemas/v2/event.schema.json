@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "node -> server: relayed events (never commands)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "batch",
+    "id",
+    "kind",
+    "spooled",
+    "type",
+    "v"
+  ],
+  "properties": {
+    "v": {
+      "type": "integer",
+      "const": 2
+    },
+    "type": {
+      "type": "string",
+      "const": "event",
+      "maxLength": 32
+    },
+    "id": {
+      "type": "string",
+      "minLength": 36,
+      "maxLength": 36,
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "kind": {
+      "type": "string",
+      "enum": [
+        "claude_code.hook",
+        "grant.availability_changed"
+      ],
+      "maxLength": 64
+    },
+    "batch": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 50,
+      "items": {
+        "type": "object",
+        "x-friday-opaque": "per-kind payload, validated by the event sink (8A hook-event schema)",
+        "maxProperties": 32
+      }
+    },
+    "spooled": {
+      "type": "boolean"
+    }
+  }
+}
