@@ -50,6 +50,7 @@ from tools.registry import (
     ReadToolSpec,
     register_read_tool,
 )
+from workspaces.models import Workspace
 
 TOOL_NAME = "node_action_result"
 SOURCE_LABEL = "friday-node"
@@ -68,7 +69,7 @@ def latest_execution(*, workspace, actor):
     return (
         NodeActionExecution.objects.for_actor(actor, workspace=workspace)
         .filter(actor=actor)
-        .select_related("approval")
+        .select_related("approval", "workspace")
         .order_by("-created_at", "-id")
         .first()
     )
@@ -78,6 +79,10 @@ def call_data_class(execution) -> str:
     """The data class of this one call (D3): the snapshot's `data_class`
     for a gated action; confirm-class actions are personal-only."""
     if execution.approval_id is None:
+        return DATA_CLASS_PERSONAL
+    # Output of a run in the personal workspace is personal whatever the
+    # capability's own class: the stricter of the two.
+    if execution.workspace.type == Workspace.Type.PERSONAL:
         return DATA_CLASS_PERSONAL
     payload = execution.approval.payload if execution.approval is not None else None
     value = payload.get("data_class") if isinstance(payload, dict) else None
@@ -89,12 +94,18 @@ def fenced_tail(tail: str, limit: int) -> tuple[str, bool]:
     """The tail as plain text: sanitised, invisible formatting stripped, fence
     tags neutralised, the last `limit` characters kept."""
     text = sanitize_terminal_text(tail or "")
-    text = strip_invisible_formatting(text)
+    text = neutralize_fence(strip_invisible_formatting(text), *FENCE_WORDS)
     truncated = False
     if len(text) > limit:
-        text = "…" + text[-(limit - 1) :]
+        # Cut at a line start where one is near, so a neutralised tag is
+        # never cut in half (a half tag cannot close a fence either).
+        text = text[-(limit - 1) :]
+        newline = text.find("\n")
+        if 0 <= newline < 200:
+            text = text[newline + 1 :]
+        text = "…" + text
         truncated = True
-    return neutralize_fence(text, *FENCE_WORDS), truncated
+    return text, truncated
 
 
 def _render(execution) -> tuple[str, bool]:
