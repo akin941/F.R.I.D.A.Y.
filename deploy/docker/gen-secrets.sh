@@ -13,6 +13,11 @@ random_hex() {
     python3 -c "import secrets, sys; print(secrets.token_hex(int(sys.argv[1])))" "$1"
 }
 
+random_b64() {
+    # $1 = number of random bytes, standard base64 with padding
+    python3 -c "import base64, secrets, sys; print(base64.b64encode(secrets.token_bytes(int(sys.argv[1]))).decode())" "$1"
+}
+
 has_key() {
     [ -f "$ENV_FILE" ] && grep -Eq "^$1=" "$ENV_FILE"
 }
@@ -41,6 +46,11 @@ if ! has_key FRIDAY_BFF_SHARED_SECRET && has_key JARVIS_BFF_SHARED_SECRET; then
     append FRIDAY_BFF_SHARED_SECRET "$(sed -n 's/^JARVIS_BFF_SHARED_SECRET=//p' "$ENV_FILE" | tail -n 1)"
 fi
 has_key FRIDAY_BFF_SHARED_SECRET || append FRIDAY_BFF_SHARED_SECRET "$(random_hex 32)"
+# Friday Node signing key (Phase 9 brief D4): an Ed25519 private key as
+# base64 of its raw 32 bytes (any 32 random bytes are a valid RFC 8032
+# seed). Signs every node `invoke`; nodes pin its public half at pairing, so
+# replacing it means re-pairing every node (docs/runbooks, Phase 9).
+has_key NODE_SIGNING_KEY || append NODE_SIGNING_KEY "$(random_b64 32)"
 
 if ! has_key POSTGRES_PASSWORD; then
     # POSTGRES_PASSWORD only takes effect when the data volume is first

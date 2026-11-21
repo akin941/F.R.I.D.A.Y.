@@ -95,9 +95,11 @@ BYE_REASONS = (
 
 # The policy-mutation guard (D5): no type name or schema property may look
 # like a policy surface. `invoke.grant` is the one reserved exception: the
-# Phase 10 approval-bound grant, null in v1 and refused by a v1 node.
+# Phase 10 approval-bound grant, null in v1 and refused by a v1 node. The
+# brief's `catalogue_set` is widened to `catalogue[._]set` so the dotted
+# type name of the conformance case (`catalogue.set`) is caught too.
 POLICY_SHAPED = re.compile(
-    r"(?i)policy|allowlist|grant(?!_id)|catalogue_set|config|exec_policy|settings"
+    r"(?i)policy|allowlist|grant(?!_id)|catalogue[._]set|config|exec_policy|settings"
 )
 RESERVED_POLICY_SHAPED_PROPERTIES = frozenset({("invoke", "grant")})
 
