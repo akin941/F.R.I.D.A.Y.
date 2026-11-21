@@ -524,9 +524,17 @@ Bulk approve stays `work_log`-only. Every fact is approved per item.
 ### D8 — Hybrid retrieval
 
 - **Full text.** `Memory`, `MemoryFact` and `KnowledgeChunk` each gain a
-  `search` column. It is a Postgres **generated** `tsvector`:
-  `setweight(to_tsvector('turkish', title), 'A') ||
-  to_tsvector('turkish', content) || to_tsvector('simple', content)`.
+  `search` column. It is a Postgres **generated** `tsvector`, with one
+  expression per table, because the text columns differ (verified on
+  the models: `Memory` has `title` and `content`, `KnowledgeChunk` has
+  only `content`, and `MemoryFact` (D2) has only `statement`):
+
+  | Table | Generated expression |
+  |---|---|
+  | `Memory` | `setweight(to_tsvector('turkish', title), 'A') \|\| to_tsvector('turkish', content) \|\| to_tsvector('simple', title \|\| ' ' \|\| content)` |
+  | `KnowledgeChunk` | `to_tsvector('turkish', content) \|\| to_tsvector('simple', content)` |
+  | `MemoryFact` | `to_tsvector('turkish', statement) \|\| to_tsvector('simple', statement)` |
+
   - The `simple` part keeps English and code identifiers that the
     Turkish stemmer would mangle.
   - Each has a `GinIndex`.
@@ -553,6 +561,15 @@ Bulk approve stays `work_log`-only. Every fact is approved per item.
   expression index keeps that property and still gets HNSW. A typed
   column would force a migration on every provider change. HNSW is in
   pgvector ≥ 0.5.0, and the dev stack has 0.6.0.
+  - **Dimension cap.** pgvector's HNSW index on `vector` supports at
+    most 2000 dimensions. For a provider whose stored dimension is
+    above 2000, `build_vector_indexes` creates no index, logs a
+    warning naming the provider and dimension, and reports it as
+    `skipped_dimension` (preflight `retrieval_indexes` shows it as a
+    **warn**, not a failure). Retrieval for that provider still works
+    as an exact (sequential) scan under the same guards. It never
+    falls back to `halfvec` silently; that would be a separate
+    decision.
 - **Retriever** `memory.retrieval.hybrid.retrieve(*, actor, workspace,
   query_text, personal_data, as_of=None, k=60)`. It runs these steps:
   1. **Workspace filter first.** Every candidate query starts from
@@ -609,9 +626,11 @@ Bulk approve stays `work_log`-only. Every fact is approved per item.
 
 - **Harness** in the `memory/evals/` package:
   - `schema.py` holds the case format v1:
-    `{id, workspace_ref, setup:{memories, facts, episodes},
-    question, expected:{must_contain:[...], must_not_contain:[...],
-    relevant_ids:[...]}}`;
+    `{id, workspace_ref, tags:[...], setup:{memories, facts, episodes},
+    history:[{role, content}], question, expected:{must_contain:[...],
+    must_not_contain:[...], relevant_ids:[...]}}`. `history` is
+    optional (prior `user`/`assistant` turns, D11 "Enabling per
+    purpose"); retrieval cases leave it empty;
   - `runner.py` and `manage.py memory_eval run|baseline|compare`.
 - **Two sets:**
   - **Public seed** (`memory/evals/cases/public/*.jsonl`, committed):
@@ -638,7 +657,10 @@ Bulk approve stays `work_log`-only. Every fact is approved per item.
   `memory.eval_answer` (tier `mid`). It is budgeted under
   `learning_eval` (monthly 5 USD, `AI_BUDGET_LEARNING_EVAL_MONTHLY_USD`)
   and writes one `ModelUsage` per call with the `eval_run_id` in the
-  context report.
+  context report. `memory.eval_answer` is always in the compression
+  bypass set. A compression compare (D11) issues its answer calls under
+  the candidate purpose instead, in both arms, under the same eval-only
+  budget.
 - **Isolation.** The set runs against a throwaway database: the
   `memory_eval` command refuses to run unless `DJANGO_SETTINGS_MODULE`
   points at the eval settings, which use their own DB name. It never
@@ -845,17 +867,58 @@ the pinned version on this machine:
     trust-check purposes when they land);
   - the learning prompts that check provenance
     (`memory.episode_extraction`, `memory.extraction`,
-    `memory.fact_reconciliation`, `memory.reflection`);
-  - `memory.eval_answer` when the eval runs the uncompressed arm;
+    `memory.consolidation`, `memory.fact_reconciliation`,
+    `memory.reflection`);
+  - `memory.eval_answer`, **unconditionally**. The compression arm of
+    the eval does not use this purpose at all (see "Enabling per
+    purpose" below), so the constant never needs a condition;
   - `ops.preflight`.
 
-  A test classifies every purpose in `AI_PURPOSE_TIERS` as bypass or
-  eligible, the coverage-test pattern.
-- **What is sent.** Only `assistant` history messages and tool-result
-  messages. **Never** system messages, which carry core blocks, the
-  `self` block and the fenced memory block, and never user messages.
-  Core-block assembly therefore cannot be compressed by construction,
-  and a test asserts it on a captured sidecar payload.
+  A test classifies every purpose in `AI_PURPOSE_TIERS` **and** in
+  `AI_UNTIERED_PURPOSES` as bypass, eligible or not-applicable (the
+  coverage-test pattern of `ai_core/tests/test_purpose_coverage.py`).
+  Among the untiered purposes, `ops.preflight` goes through
+  `complete()` and is in the bypass set; the others are not-applicable
+  by construction: embeddings
+  (`memory.retrieval`, `knowledge.*`) and speech (`voice.*`) never pass
+  through `complete()` with chat messages, and the external-CLI
+  `harness.discovery|implementation|review` rows come from
+  `record_external_usage`, which sends nothing. A new purpose in either
+  setting that is not classified fails the test.
+- **What is sent (grounded in `assistant/context.py`).** `build_context`
+  produces exactly this list, verified on the integration branch:
+  1. one `system` message: the `friday_system` prompt, core blocks, the
+     intent instruction, the fenced memory block, the knowledge block,
+     the firm profile and, when a connector or node read ran, the fenced
+     `<connector_result>` block (`render_connector_block`), all
+     concatenated into that **one** system message;
+  2. the stored history, `Message` rows with status `complete`, with
+     the role copied from the row (`user` or `assistant` in practice;
+     `Message.Role` also allows `system`, and such a row is treated as
+     a system message and never sent);
+  3. the new `user` message (`new_user_content`).
+
+  There is **no tool-role message** anywhere in Friday's chat payload:
+  connector and node results live inside the system message. So the
+  stage sends **only `assistant` history messages** to the sidecar.
+  It never sends the system message, any `user` message, or the last
+  message of the list. Consequences, stated so the eval measures the
+  right thing:
+  - **Tool outputs are out of reach** for compression in 8B. They are in
+    the system message with the core blocks, and splitting them into
+    separate role messages would change the fencing contract of Phase 5
+    D4 and Phase 9 D9. That is not done here; if a later phase wants
+    tool-output compression, it changes `build_context` in its own
+    reviewed branch.
+  - What can shrink is long prior assistant replies (summaries of
+    earlier reads, code listings). The saving is bounded by how much
+    assistant history a conversation has, which the eval measures.
+  - Core-block, `self`, memory-block and fenced read text cannot be
+    compressed by construction. A test asserts it on a captured
+    sidecar payload of a **real `build_context` output** (a conversation
+    with core blocks, a memory block, a connector block and three
+    history turns): the payload holds exactly the assistant history
+    messages, in order, and nothing else.
 - **Failure.** On a sidecar timeout (`AI_COMPRESSION_TIMEOUT_MS`,
   default 300) or error, the original messages are sent and the failure
   is recorded. The stage changes cost, not correctness.
@@ -865,11 +928,41 @@ the pinned version on this machine:
   local transform), so it writes no `ModelUsage` of its own. That is
   rule 3, unchanged.
 - **Enabling per purpose.** `memory_eval compare --compression
-  <purpose>` runs the private set with and without compression for that
-  purpose (`chat` is the only realistic candidate today). A purpose may
-  be added to `AI_COMPRESSION_PURPOSES` only with a recorded result of
-  **≤ 1 point** answer-accuracy loss and **zero** extra leaks. The
-  record goes in this brief's go/no-go table.
+  <purpose>` runs the private set twice and compares. The arms are
+  defined so that the comparison cannot pass vacuously:
+  - **Case format.** D9's case format v1 gains an optional `history`
+    (≤ 12 messages, `user`/`assistant` only, each ≤ 4000 characters).
+    Cases tagged `compression` must carry at least two `assistant`
+    messages totalling ≥ 2000 characters (the loader refuses one that
+    does not). The public seed gains about 10 such cases with realistic
+    long assistant replies (a summarised session list, a code listing,
+    a deploy log summary); the owner's private set should add real ones
+    (runbook `memory-eval.md`).
+  - **Both arms use the candidate purpose.** The answer call of each arm
+    is issued under `<purpose>` itself (for example `chat`), with the
+    messages laid out as `build_context` lays them out: one system
+    message (the retrieved context), the case's `history`, then the
+    question as the last `user` message. Arm A runs with compression
+    off; arm B with `AI_COMPRESSION_ENABLED=True` and
+    `AI_COMPRESSION_PURPOSES={<purpose>}` (the runner overrides the
+    settings per arm). Retrieval-only cases (no `history`) run in both
+    arms and must give identical payloads, which is a sanity check.
+  - **Budget and isolation.** These calls run only under the eval
+    settings module (own DB, D9). There, the `learning_eval` budget
+    covers `memory.eval_answer` **and** the purpose under comparison
+    (`config/settings/eval.py` sets `AI_LEARNING_EVAL_PURPOSES`), and
+    each `ModelUsage` row carries `eval_run_id` and `eval_arm` in its
+    context report, so eval spend is never mistaken for chat traffic.
+  - **Non-vacuity.** The compare reports `pre_tokens` and `post_tokens`
+    summed over arm B. If arm B compressed nothing (`applied` false on
+    every call, or `post_tokens == pre_tokens`), the result is
+    `inconclusive`, never `pass`, and the purpose cannot be enabled.
+  - **Gate.** A purpose may be added to `AI_COMPRESSION_PURPOSES` only
+    with a recorded result that is not `inconclusive`, with **≤ 1
+    point** answer-accuracy loss and **zero** extra leaks. The record
+    goes in this brief's go/no-go table. `chat` is the only candidate
+    today, because it is the only eligible purpose whose payload holds
+    multi-turn assistant history.
 - **Governance.** `docs/mcp/headroom.md` (the manifest: sidecar only,
   no egress, telemetry off, `litellm` excluded, the pin and hashes) and
   an allowlist row "Headroom (`compressor` sidecar)".
@@ -923,10 +1016,32 @@ episodes.
     ≤ 200 files per run, each ≤ 64 KB):
     - **Skip:** anything with `source: friday_export` (the echo-chamber
       guard), and anything under `_imported/`.
-    - **Mapping:** `path_prefix` rules with the vault-relative key
-      `vault:00_Inbox/<subfolder>`. An unmapped note is dropped and
-      counted **and left in place**. It is not moved, so the owner can
-      add a rule.
+    - **Mapping:** a new key prefix and rule type, because neither
+      exists today. `memory/ingestion/mapping.py` accepts only `repo:`,
+      `path:` and `calendar:` (`KEY_PREFIXES`), and `normalise_path`
+      refuses relative paths ("path must be absolute or start with
+      ~/"), so a vault-relative key would be unmapped. Branch 7 adds:
+      - `WorkspaceMappingRule.RuleType.VAULT_PREFIX = "vault_prefix"`
+        (a choices change, so a migration);
+      - `KEY_PREFIXES["vault"] = RuleType.VAULT_PREFIX` and a
+        `normalise_vault_path(path)`: the path must be relative to the
+        vault root, start with `00_Inbox` as its first segment, contain
+        no NUL or backslash, and normalise (`posixpath.normpath`) to a
+        path with no `..` segment; an absolute path, a `~` path or any
+        `..` escape raises `InvalidMappingKey`. `normalise_pattern`
+        uses it for the new type, so rules and keys normalise the same
+        way;
+      - `resolve_workspace` matches `vault_prefix` rules with the same
+        longest-prefix, segment-boundary rule as `path_prefix`
+        (`_path_matches`);
+      - the rule-write serializer accepts `vault_prefix` only on an
+        `obsidian_inbox` source, and refuses the other types there.
+
+      The scan passes `mapping_key = "vault:" + <vault-relative path of
+      the note's folder>` (for example `vault:00_Inbox/work`). A note
+      at the top level of `00_Inbox/` has the key `vault:00_Inbox`. An
+      unmapped note is dropped and counted **and left in place**. It is
+      not moved, so the owner can add a rule.
     - **Episode:** a mapped note becomes an episode through
       `record_episode`, with `owner_text` = the body (≤ 4000 after the
       scrub; longer bodies truncated and counted), `kind
@@ -999,9 +1114,43 @@ episodes.
   - For each workspace that has at least one `path_prefix` rule
     (`prefixes_for_workspace`), it makes one `invoke_read` per tool with
     that workspace's prefixes and `since` = the cursor. The invoke is
-    signed and writes one chain row and one `AuditLog` row, with
-    `actor=None` (a system call). Ingestion is therefore one workspace
-    per invoke, the same rule as chat reads.
+    signed and writes one chain row and one `AuditLog` row. Ingestion is
+    therefore one workspace per invoke, the same rule as chat reads.
+  - **Actor: the system-owner form, never `None`.** The Phase 9 brief
+    defines `invoke_read(*, node, capability, args, workspace, actor,
+    trace_id)` for tool calls made on a web turn, and only mentions
+    "null for system" on the `NodeInvocation.actor` column. It does not
+    define a system-initiated read, and the tools-registry checks
+    (channel, owner) that guard chat reads do not run for a beat job.
+    8B therefore does not rely on a null actor. It defines, and branch 8
+    adds to `nodes.services`, a **recorded Phase 9 amendment** (D7 and
+    D9 of the Phase 9 brief get a dated note in branch 8):
+    - `invoke_read` and `refuse_read` gain a keyword `channel`
+      (default `CHANNEL_WEB` for the existing tool path). The pull job
+      passes `actor=<the node's owner user>` and
+      `channel=CHANNEL_SYSTEM` (the existing `core.channels` constant
+      for machine-originated actions). The chain row's `channel` column
+      and the `AuditLog` row's metadata record `system: true` and the
+      job name `transcript_pull`.
+    - A new **actor check** runs as `invoke_read` step 0, before
+      anything is signed: for a capability whose contract has
+      `data_class: personal`, the actor must be non-null, active, and
+      the node's owner (the user of the node's `TrustedDevice`, which
+      is also the owner of the personal workspace the `Node` row lives
+      in, Phase 9 D1), and the target
+      workspace must be owned by that user. Otherwise the call ends as
+      `server_refused` with the new refusal code `actor_not_owner`
+      (nothing signed or sent, one chain row and one `AuditLog` row, as
+      every not-sent status). The D7 vocabulary test is updated to
+      include it.
+    - `channel=CHANNEL_SYSTEM` is accepted only for the two owner-turn
+      capabilities, and only from `tools.transcript_ingest` (an
+      allowlist constant in `nodes.services`, `SYSTEM_READ_CAPABILITIES`).
+      Any other capability with `channel=CHANNEL_SYSTEM` is refused
+      `server_refused:not_invocable`.
+    - If Phase 9 branch 4 or 5 has already landed an equivalent check
+      by then, branch 8 only adds the tests and the system-channel
+      allowlist and records that in the amendment note.
   - Rows whose `cwd` does not resolve, through `resolve_workspace`
     (longest prefix wins), to that invoke's workspace are dropped and
     counted. The Phase 9 hostile-node rule holds for ingestion too.
@@ -1014,7 +1163,9 @@ episodes.
     - `owner_text` = the turn text (scrubbed a second time with the
       workspace's `ScrubTerm`s);
     - `metadata` = `session_id`, `cwd` short form and `at`;
-    - `mapping_key` = `cwd`.
+    - `mapping_key` = `"path:" + cwd` (a valid `path:` key;
+      `parse_mapping_key` refuses a bare path, and the node returns
+      `cwd` in `normalise_path` form, absolute or `~/`).
   - `TranscriptCursor` (memory, the personal workspace; one row per
     source, workspace and node reference string) advances to
     `next_since` only after the episodes commit.
@@ -1024,10 +1175,36 @@ episodes.
   - `IngestionSource.Kind.CLAUDE_CODE_TRANSCRIPTS` and
     `CODEX_TRANSCRIPTS`, seeded disabled. The owner enables them (d5:
     on in 8B, after the grant).
-  - Mapping uses the `claude_code_hooks` source's `path_prefix` rules
-    through `workspace_for_path`, the one path registry of Phase 9 D9.
-    A transcript source has no rule set of its own, which the audit
-    view states.
+  - **Mapping uses the `claude_code_hooks` source's `path_prefix`
+    rules**, the one path registry of Phase 9 D9. Today
+    `resolve_workspace(source, mapping_key)` filters
+    `WorkspaceMappingRule` by `source=source`, so a transcript source
+    with no rules of its own would drop every turn as unmapped. Branch
+    8 therefore changes the mapping contract explicitly (a **rule
+    source** indirection):
+    - `memory/ingestion/mapping.py` gains
+      `SHARED_RULE_SOURCES = {CLAUDE_CODE_TRANSCRIPTS:
+      CLAUDE_CODE_HOOKS, CODEX_TRANSCRIPTS: CLAUDE_CODE_HOOKS}` and
+      `rule_source_for(source)`, which returns the same owner's
+      `claude_code_hooks` source in the same (personal) workspace for
+      a shared-rules kind, and `source` itself for every other kind.
+      With no hooks source it returns `None`, and the item is unmapped.
+    - `resolve_workspace` filters rules by `source=rule_source_for(
+      source)`. The ownership re-check still uses `owner_of(source)`
+      (the transcript source's owner), and the defence-in-depth check
+      in `record_episode` (`ports.py`) is unchanged.
+    - `record_episode` (`ports.py`) keeps its signature. The unmapped
+      counter and the audit entry are written on the **transcript**
+      source, not on the hooks source, so the hooks source's counters
+      stay its own.
+    - Rule writes on a shared-rules source are refused (400, "path
+      rules are shared with Claude Code hooks"), so a second registry
+      cannot appear by accident. The audit view states that the rules
+      are shared.
+    - Phase 9's `workspace_for_path(owner, path)` and
+      `prefixes_for_workspace(owner, workspace)` read the hooks source
+      directly, so the pull job's `cwd_prefixes` and the port's
+      resolution use the same rules.
   - **Both are personal-class** (ADR-012 decision 11 lists
     transcripts). `is_personal_class` covers them, so their extraction
     runs with `personal_data=True` (local providers only), and the
@@ -1380,8 +1557,14 @@ in CI, and the same command with `--set private` is ready for the owner.
   - the index is partial by provider;
   - a second provider with another dimension gets its own index and
     never compares across;
-  - the command is idempotent.
+  - the command is idempotent;
+  - a provider with a stored dimension of 3072 gets no index, a
+    warning, and a `skipped_dimension` entry in `--check`, and a
+    retrieval over it still returns results (exact scan).
 - **Full text:**
+  - each table's generated column uses its own expression (`Memory`
+    title and content, `KnowledgeChunk` content, `MemoryFact`
+    statement), asserted on the migrated column definition;
   - Turkish stemming (`deploylar` / `deploy`) through the `turkish`
     config;
   - code identifiers through `simple`;
@@ -1518,7 +1701,11 @@ the launch argv is network-denied.
 - `deploy/compressor/`, `deploy/docker/{compose.yml,compose.daily.yml}`;
 - `backend/ai_core/{compression,gateway}.py`,
   `backend/ai_core/tests/test_compression.py`;
-- `backend/memory/evals/runner.py`;
+- `backend/memory/evals/{runner,schema,loader}.py`,
+  `backend/memory/evals/cases/public/compression.jsonl`,
+  `backend/config/settings/eval.py`;
+- `backend/assistant/tests/test_compression_payload.py` (the real
+  `build_context` payload test);
 - `backend/config/settings/base.py`, `.env.example`;
 - `backend/ai_core/tests/test_no_headroom_import.py`;
 - `docs/mcp/headroom.md`, `docs/mcp/allowlist.md`.
@@ -1530,10 +1717,16 @@ the launch argv is network-denied.
   - an enabled purpose is compressed;
   - a bypass purpose never is, even when listed in
     `AI_COMPRESSION_PURPOSES` (bypass wins);
-  - every `AI_PURPOSE_TIERS` purpose is classified.
-- **Payload:** the sidecar request never contains a system or user
-  message (captured with a fake sidecar), so core-block, `self` and
-  memory-block text never leave unmodified.
+  - every purpose in `AI_PURPOSE_TIERS` and `AI_UNTIERED_PURPOSES` is
+    classified (bypass, eligible or not-applicable); an unclassified
+    purpose fails.
+- **Payload (on a real `build_context` output):** a conversation with
+  core blocks, a memory block, a fenced `<connector_result>` block and
+  three history turns is built with `assistant.context.build_context`;
+  the fake sidecar receives exactly the assistant history messages, in
+  order, and never the system message, a `user` message or the final
+  message. Core-block, `self`, memory-block and connector text reach
+  the adapter byte-identical.
 - **Failure:** timeout or 5xx → original messages sent, the failure in
   the context report, the call succeeds.
 - **Accounting:**
@@ -1550,13 +1743,24 @@ the launch argv is network-denied.
     imports and compresses a fixture;
   - the server refuses requests over 1 MB and any path but
     `/compress`.
-- **Eval arm:** `compare --compression chat` on the public set runs both
-  arms with a fake sidecar.
+- **Eval arm:**
+  - `compare --compression chat` on the public set runs both arms with
+    a fake sidecar (which shortens each assistant message), both under
+    purpose `chat` with the eval-only budget;
+  - the captured adapter payload of arm B differs from arm A for every
+    `compression`-tagged case and is identical for every case without
+    `history`;
+  - a set with no `compression`-tagged case, or a fake sidecar that
+    returns its input unchanged, yields `inconclusive`, never `pass`;
+  - the loader refuses a `compression` case with less than 2000
+    characters of assistant history;
+  - `memory.eval_answer` is never compressed, even with compression on
+    and the purpose listed.
 
 **Done when:** with the flag off nothing changes, and with a fake sidecar
-and `chat` enabled, a chat turn's tool-result history is compressed with
-pre/post counts in its single `ModelUsage` row while the system block is
-untouched.
+and `chat` enabled, a chat turn's assistant history is compressed with
+pre/post counts in its single `ModelUsage` row while the system message
+(core blocks and fenced reads) and every user message are untouched.
 
 ### 7. `feat/p8-obsidian-mirror` — format v2, entity notes, conflicts, `00_Inbox` import
 
@@ -1578,8 +1782,11 @@ untouched.
 **Files.**
 - `backend/tools/{export,vault_frontmatter,vault_paths}.py`,
   `backend/tools/models.py` plus a migration, `backend/tools/tests/`;
-- `backend/memory/models.py` (the kind) plus a migration,
-  `backend/memory/ingestion/services.py` (seed);
+- `backend/memory/models.py` (the `OBSIDIAN_INBOX` kind and the
+  `VAULT_PREFIX` rule type) plus a migration,
+  `backend/memory/ingestion/{mapping,serializers,services}.py` (the
+  `vault` key, the rule-type check, the seed),
+  `backend/memory/tests/test_ingestion.py` (the mapping tests live there);
 - `docs/memory/obsidian-vault-strategy.md`,
   `docs/adr/ADR-012-continuous-learning-ingestion.md` (the `00_Inbox`
   note).
@@ -1601,6 +1808,18 @@ export tests use).
   - private entities go to `_private/`;
   - a trashed entity's note is pruned;
   - `code_*` entities are not mirrored.
+- **Vault mapping** (in `test_ingestion.py`):
+  - `vault:00_Inbox/work/sub` resolves through a `vault_prefix` rule
+    `00_Inbox/work` (longest prefix wins over `00_Inbox`);
+  - `00_Inbox/workshop` does not match `00_Inbox/work` (segment
+    boundary);
+  - `vault:00_Inbox/../03_Workspaces`, `vault:00_Inbox/a/../../x`,
+    `vault:/abs/00_Inbox`, `vault:~/00_Inbox` and a key outside
+    `00_Inbox` are refused (unmapped), and the same patterns are
+    refused at rule write;
+  - a `vault_prefix` rule on a non-inbox source, and a `path_prefix`
+    rule on the inbox source, are refused (400);
+  - the existing `repo`/`path`/`calendar` tests are unchanged.
 - **Inbox:**
   - disabled source → nothing read;
   - a mapped note → an episode, then moved;
@@ -1637,6 +1856,13 @@ moves one mapped inbox note, and leaves an unmapped one in place.
     the transcript corpus);
   - `memory/ingestion/transcripts.py` (the port, the server marker
     re-check);
+  - the rule-source indirection in `memory/ingestion/mapping.py`
+    (`SHARED_RULE_SOURCES`, `rule_source_for`) used by
+    `resolve_workspace` and therefore by `record_episode`, and the
+    rule-write refusal for shared-rules sources;
+  - the Phase 9 amendment in `nodes/services.py`: the `channel`
+    keyword, the `actor_not_owner` actor check, and
+    `SYSTEM_READ_CAPABILITIES`;
   - `TranscriptCursor` plus a migration;
   - the two sources (seeded disabled, personal-class);
   - `tools/transcript_ingest.py` and its beat;
@@ -1653,8 +1879,15 @@ moves one mapped inbox note, and leaves an unmapped one in place.
 - `backend/nodes/conformance/cases.py`,
   `backend/nodes/conformance/cases/v1/`,
   `backend/nodes/conformance/vectors/scrub.json`;
-- `backend/memory/ingestion/{transcripts,services}.py`,
-  `backend/memory/models.py` plus a migration;
+- `backend/memory/ingestion/{transcripts,services,mapping,ports,views}.py`
+  (`ports.py`: the unmapped counter stays on the transcript source;
+  `views.py`: the shared-rules refusal),
+  `backend/memory/models.py` plus a migration,
+  `backend/memory/tests/test_ingestion.py`;
+- `backend/nodes/services.py`, `backend/nodes/models.py` (the
+  `actor_not_owner` choice) plus a migration, `backend/nodes/tests/`;
+- `docs/prompts/phase-9-friday-node/brief.md` (the dated D7/D9
+  amendment note);
 - `backend/memory/tests/scrubber_corpus/transcripts.jsonl`;
 - `backend/tools/{transcript_ingest,tasks}.py`, `backend/tools/tests/`;
 - `backend/config/celery.py`, `backend/config/settings/base.py`,
@@ -1678,7 +1911,9 @@ moves one mapped inbox note, and leaves an unmapped one in place.
   of Phase 9 branch 4):
   - one signed invoke per workspace with rules, carrying exactly that
     workspace's prefixes (asserted on the received frame);
-  - a chain row and an `AuditLog` row per invoke with `actor=None`;
+  - a chain row and an `AuditLog` row per invoke with `actor` = the
+    node's owner, `channel = system` and `system: true` in the audit
+    metadata (never a null actor);
   - no invoke when a source is disabled, the node is offline, the
     capability is `not_granted`, or a workspace has no rules;
   - the cursor advances only after commit;
@@ -1687,6 +1922,33 @@ moves one mapped inbox note, and leaves an unmapped one in place.
   workspace's session, returns an assistant-like turn with a
   `<system-reminder>` prefix, and returns aggregates. Each foreign row
   and marker turn is dropped and counted. Nothing is stored for them.
+- **Actor check (the Phase 9 amendment):**
+  - `invoke_read` of a personal-class capability (`node_sessions`'
+    capability and both owner-turn capabilities) with `actor=None` →
+    `server_refused:actor_not_owner`, nothing sent to the reference
+    node, one chain row and one `AuditLog` row;
+  - the same with an active non-owner user (a firm member) and with an
+    inactive owner → the same refusal;
+  - `channel=CHANNEL_SYSTEM` with any capability outside
+    `SYSTEM_READ_CAPABILITIES` → `server_refused:not_invocable`;
+  - the chat-turn path (Phase 9 branch 5 tests) is unchanged and still
+    green;
+  - the `(status, refusal_code)` vocabulary test includes
+    `actor_not_owner`.
+- **Rule source (mapping):**
+  - a transcript turn whose `cwd` lies under a `path_prefix` rule of the
+    owner's `claude_code_hooks` source is stored, in that rule's
+    workspace, with `mapping_key = "path:" + cwd`;
+  - a turn whose `cwd` lies outside every hooks rule is
+    `dropped_unmapped`, counted on the **transcript** source, with the
+    hooks source's counters unchanged;
+  - a bare `cwd` key (no `path:` prefix) is unmapped (the existing
+    `parse_mapping_key` rule, pinned);
+  - with no `claude_code_hooks` source, every turn is unmapped;
+  - a rule on another owner's hooks source never applies;
+  - creating a rule on a transcript source is refused (400);
+  - `git`, `harness`, `calendar` and hooks sources still resolve only
+    through their own rules (regression).
 - **Port:**
   - episodes in the mapped workspace only;
   - an unmapped `cwd` dropped;
@@ -1763,7 +2025,7 @@ eval status — at phone width too.
 
   | Check | What it verifies |
   |---|---|
-  | `graph_integrity` | no fact crosses workspaces; no current fact has `valid_to` set; every `superseded_by` has a closed window |
+  | `graph_integrity` | no fact crosses workspaces (subject, object and fact share one workspace); every approved fact with `superseded_by` set has a non-null `valid_to`; no fact has a `valid_to` earlier than its `valid_from` |
   | `retrieval_indexes` | `build_vector_indexes --check`: an HNSW index exists per active embedding provider; GIN indexes exist; `MEMORY_RETRIEVAL_MODE` reported |
   | `learning_budget` (extended) | the reconciliation, reflection and eval budgets are configured |
   | `learning_beat` (extended) | the reflection, transcript pull and Graphify recovery beats are scheduled |
@@ -1808,7 +2070,7 @@ Mac and private-data rows pending owner evaluation.
 
 | # | Branch | Scope | Depends on | Status |
 |---|---|---|---|---|
-| brief | `docs/p8b-brief` | This brief (full, from the stub), MASTER_PLAN §AA row 8B Brief/Status | Phase 8A closeout; Phase 9 brief | **implemented 2026-11-20** (docs only; pins verified 2026-11-21 against PyPI and the official repos; awaits the independent Sonnet 5 plan review) |
+| brief | `docs/p8b-brief` | This brief (full, from the stub), MASTER_PLAN §AA row 8B Brief/Status | Phase 8A closeout; Phase 9 brief | **implemented 2026-11-20** (docs only; pins verified 2026-11-21 against PyPI and the official repos; review round 1 findings fixed 2026-11-21; awaits the Sonnet 5 re-review) |
 | 1 | `feat/p8-temporal-facts` | `MemoryEntity`/`MemoryFact`, validity windows, supersede, recursive-CTE traversal, owner API, forget/trash/purge cascade, `memory.graph` contract | brief approved | not started |
 | 2 | `feat/p8-fact-learning` | Extraction schema v2 with facts, entity-in-quote rule, reconciliation, weekly reflection, caps, digest fact items | 1 | not started |
 | 3 | `feat/p8-eval-set` | Eval harness, public seed, private loader, `memory_eval`, `memory.eval_answer` purpose, CI public run | 1 (parallel with 2) | not started |
@@ -1821,6 +2083,15 @@ Mac and private-data rows pending owner evaluation.
 | 10 | `chore/p8b-closeout` | Preflight checks, e2e, retrieval default decision, runbooks, ADR notes, MASTER_PLAN row, go/no-go record | 1–9 | not started |
 | M1 | `feat/p8-node-transcript-readers` | Swift readers for the two owner-turn capabilities, grant wiring, real-file rule verification, conformance pass | 8 merged; Phase 9 M2 | deferred: Mac session |
 | M2 | Mac and owner evaluation | Private eval baseline, Headroom compare, real transcript run, go/no-go measurements | 3, 4, 6, M1 | deferred: Mac session (pending owner evaluation) |
+
+**Branch count.** Ten rows against the roughly 4–8 target: eight
+server-side feature branches, the UI and the closeout. Merging was
+considered in review round 1 (2026-11-21) and not done. 3 (eval set)
+is the measuring instrument that gates 4 and 6 and must merge before
+either; folding it into 9 (UI) would delay that gate behind frontend
+work. 6 (Headroom) is optional and may be dropped (owner step 4);
+folding it into the closeout would make the closeout carry a gateway
+change. Each row stays one reviewable unit with its own tests.
 
 **Minimum usable cut** if the phase runs long: 1, 2, 3, 4 and 8 with M1
 ("knows the details of your work"). 5 (self-knowledge), 6 (Headroom,
@@ -1936,6 +2207,9 @@ can start once branches 1–10 are green.
   - Headroom's proxy, `wrap`, MCP server, prose (Kompress) model,
     reversible-compression retrieval (CCR) and dashboards;
   - compressing system or user messages;
+  - compressing connector or node read output: it is fenced inside the
+    system message (D11), and splitting it into tool-role messages is a
+    `build_context` change for a later phase;
   - mail bodies and shell history (opt-in sources, still not built);
   - screen content, screenshots, AX trees, keystrokes, browser history
     (never, ADR-012).
@@ -2046,7 +2320,9 @@ non-owner member.
   edit-as-supersede and eval temporal cases.
 - **R4 — Headroom quality loss or supply chain.** The bounds:
   - off by default, per purpose, with a hard bypass set;
-  - only assistant and tool messages are sent;
+  - only assistant history messages are sent (Friday has no tool-role
+    messages; fenced reads stay in the system message, D11);
+  - a compression compare that compressed nothing is `inconclusive`;
   - an eval gate of ≤ 1 point and zero leaks;
   - sidecar isolation: no egress, no keys, no `litellm`, telemetry off,
     a hash pin;
@@ -2086,8 +2362,13 @@ non-owner member.
   They are model-free facts about Friday's own code. The owner disables
   them per repo.
 - **Q4 — Should `chat` be the only Headroom candidate?** Yes for now.
-  It is the only purpose with tool-result history. Others are bypassed
-  or have no such content.
+  It is the only eligible purpose whose payload carries multi-turn
+  assistant history. Friday has no tool-role messages: connector and
+  node results are fenced inside the single system message, which is
+  never compressed (D11). The other purposes are bypassed or send only
+  a system and a user message, so there is nothing to compress. Tool
+  output compression would need a `build_context` change in a later
+  phase.
 - **Q5 — Keep the `Inbox/` name from ADR-012?** Use the documented
   `00_Inbox/`. ADR-012's note records the mapping, with no ADR text
   change.
@@ -2119,7 +2400,7 @@ the Phase 8A go/no-go") is restated here as steps:
 7. **Compressor.** Build the `compressor` image only if M2 item 3 is
    to be run. Enable `chat` compression only on a recorded pass.
 8. **Obsidian inbox.** Opt in to the `obsidian_inbox` source and add
-   `vault:00_Inbox/<folder>` rules for the folders that should be
+   `vault_prefix` rules (`00_Inbox/<folder>`) for the folders that should be
    imported.
 9. **Record the go/no-go.** Record the measurements in the "Go/no-go
    record" above.
@@ -2143,3 +2424,13 @@ the Phase 8A go/no-go") is restated here as steps:
 4. Accept the D11 consequence: Headroom is adopted only as a sidecar
    without `litellm`. If that proves impossible at branch 6, Headroom
    stays off and is dropped from the phase.
+5. Review round 1 fixes (2026-11-21), to confirm with the plan review:
+   - the Phase 9 `invoke_read` amendment of D13 (system-owner actor,
+     `channel=system`, the `actor_not_owner` refusal), which branch 8
+     records in the Phase 9 brief;
+   - the mapping contract changes: the rule-source indirection for the
+     transcript sources (branch 8) and the `vault_prefix` rule type
+     (branch 7);
+   - D11 compresses only assistant history (tool outputs are in the
+     system message and out of reach), and the compression eval runs
+     both arms under the candidate purpose with `history` fixtures.
