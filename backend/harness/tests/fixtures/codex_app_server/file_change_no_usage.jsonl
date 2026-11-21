@@ -1,0 +1,10 @@
+{"dir": "c2s", "msg": {"id": 1, "method": "initialize", "params": {"clientInfo": {"name": "friday-harness", "title": "Friday harness", "version": "1"}}}}
+{"dir": "s2c", "msg": {"id": 1, "result": {"userAgent": "codex_cli_rs/0.1.0"}}}
+{"dir": "c2s", "msg": {"method": "initialized", "params": {}}}
+{"dir": "c2s", "msg": {"id": 2, "method": "thread/start", "params": {"cwd": "/workspace/repo", "approvalPolicy": "on-request", "sandbox": "workspace-write"}}}
+{"dir": "s2c", "msg": {"id": 2, "result": {"thread": {"id": "thr_9"}}}}
+{"dir": "c2s", "msg": {"id": 3, "method": "turn/start", "params": {"threadId": "thr_9", "input": [{"type": "text", "text": "tidy the config"}], "approvalPolicy": "on-request", "sandboxPolicy": {"type": "workspaceWrite", "writableRoots": ["/workspace/repo"], "networkAccess": false}}}}
+{"dir": "s2c", "msg": {"id": 3, "result": {"turn": {"id": "turn_9", "status": "inProgress"}}}}
+{"dir": "s2c", "msg": {"id": "fc-1", "method": "item/fileChange/requestApproval", "params": {"threadId": "thr_9", "turnId": "turn_9", "itemId": "item_9", "reason": "write outside the repo", "grantRoot": "/etc"}}}
+{"dir": "c2s", "msg": {"id": "fc-1", "result": {"decision": "decline"}}}
+{"dir": "s2c", "msg": {"method": "turn/completed", "params": {"threadId": "thr_9", "turn": {"id": "turn_9", "status": "completed"}}}}
