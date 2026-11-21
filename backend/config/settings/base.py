@@ -283,6 +283,9 @@ REST_FRAMEWORK = {
         # Phase 6 branch 5: HUD event-stream (re)connects; one stream lives
         # at most HUD_STREAM_MAX_SECONDS, so ~1/min per open HUD tab.
         "hud_events": env("HUD_EVENTS_RATE", default="20/min"),
+        # Phase 10 branch 5: terminal-panel output streams (one per
+        # execution opened in the panel, reconnecting at most once a minute).
+        "hud_terminal": env("HUD_TERMINAL_RATE", default="30/min"),
         # Phase 8A branch 3: Claude Code hook-event batches from
         # `friday-hook`, per hook token (one POST per hook invocation).
         "hook_ingest": env("HOOK_INGEST_RATE", default="240/min"),
@@ -741,6 +744,10 @@ HUD_PROVIDER_WINDOW_MINUTES = env.int("HUD_PROVIDER_WINDOW_MINUTES", default=30)
 # coupling). Kept for HUD_PREFLIGHT_CACHE_SECONDS.
 HUD_PREFLIGHT_CACHE_KEY = "ops:preflight:last"
 HUD_PREFLIGHT_CACHE_SECONDS = env.int("HUD_PREFLIGHT_CACHE_SECONDS", default=7 * 24 * 3600)
+# Phase 10 D12: `GET /api/v1/hud/terminal/<execution_id>/stream` polls the
+# node output Redis stream this often (it never blocks on Redis); it shares
+# HUD_STREAM_MAX_SECONDS / HUD_STREAM_RETRY_MS with the event stream.
+HUD_TERMINAL_POLL_SECONDS = env.float("HUD_TERMINAL_POLL_SECONDS", default=0.5)
 
 # --- Connectors (Phase 5 branch 4, ADR-010, brief D1-D6) ---
 

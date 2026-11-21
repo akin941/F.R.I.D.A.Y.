@@ -178,6 +178,8 @@ def test_snapshot_shape(stream, owner, workspace):
     assert snapshot["cost"]["calls"] == 0
     assert snapshot["cost"]["local_only"] is True
     assert snapshot["health"]["preflight"] is None
+    # Phase 10 D12: the terminal section (no executions yet).
+    assert snapshot["terminal"] == {"items": [], "running_count": 0}
 
 
 def test_approvals_section_only_lists_fresh_pending(stream, owner, workspace, settings):

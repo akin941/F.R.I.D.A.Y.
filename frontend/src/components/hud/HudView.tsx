@@ -5,6 +5,7 @@ import Link from "next/link";
 import { X } from "lucide-react";
 import { HudLearningPanel, HudSessionsPanel } from "@/components/hud/HudLearningPanels";
 import { HudOrb } from "@/components/hud/HudOrb";
+import { HudTerminalPanel, type TerminalStreamFactory } from "@/components/hud/HudTerminalPanel";
 import {
   ApprovalsPanel,
   CaptionsPanel,
@@ -45,6 +46,7 @@ import { cn } from "@/lib/utils";
 export interface HudViewProps {
   /** Test seams. */
   streamFactory?: HudStreamFactory;
+  terminalStreamFactory?: TerminalStreamFactory;
   webglAvailable?: () => boolean;
   earconDeps?: Partial<EarconPlayerDeps>;
 }
@@ -56,7 +58,7 @@ function micState(muted: boolean, phase: string, wake: string): MicState {
   return "closed";
 }
 
-export function HudView({ streamFactory, webglAvailable, earconDeps }: HudViewProps = {}) {
+export function HudView({ streamFactory, terminalStreamFactory, webglAvailable, earconDeps }: HudViewProps = {}) {
   const { activeWorkspace } = useWorkspace();
   const workspaceId = activeWorkspace?.id ?? null;
   const presence = useVoicePresence();
@@ -81,7 +83,8 @@ export function HudView({ streamFactory, webglAvailable, earconDeps }: HudViewPr
     streamLost: status === "lost",
     online,
     pendingApprovals: data?.approvals.pending_count ?? 0,
-    toolsRunning: data?.approvals.tools_running ?? 0,
+    // Phase 10 D12: a node action `running` on the Mac is a running tool.
+    toolsRunning: (data?.approvals.tools_running ?? 0) + (data?.terminal?.running_count ?? 0),
   });
   const visual = HUD_VISUALS[state];
   const fps = frameBudget({
@@ -155,6 +158,7 @@ export function HudView({ streamFactory, webglAvailable, earconDeps }: HudViewPr
         <div className="order-2 flex flex-col gap-3 lg:order-1">
           <TasksPanel tasks={data?.tasks ?? null} />
           <ApprovalsPanel approvals={data?.approvals ?? null} />
+          <HudTerminalPanel terminal={data?.terminal ?? null} streamFactory={terminalStreamFactory} />
         </div>
 
         <div className="order-1 flex flex-col items-center gap-3 lg:order-2">

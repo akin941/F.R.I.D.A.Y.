@@ -92,11 +92,36 @@ export interface HudHealth {
   preflight: HudPreflight | null;
 }
 
+// Phase 10 D12: the actor's last five node action executions (no output).
+export interface HudTerminalItem {
+  id: string;
+  capability: string;
+  label: string;
+  class: string;
+  repo_name: string;
+  status: string;
+  running: boolean;
+  terminal: boolean;
+  exit_code: number | null;
+  duration_ms: number;
+  created_at: string | null;
+  finished_at: string | null;
+}
+
+export interface HudTerminal {
+  items: HudTerminalItem[];
+  running_count: number;
+}
+
+export const EMPTY_TERMINAL: HudTerminal = { items: [], running_count: 0 };
+
 export interface HudData {
   approvals: HudApprovals;
   tasks: HudTasks;
   cost: HudCost;
   health: HudHealth;
+  /** Optional: absent from a backend predating Phase 10. */
+  terminal?: HudTerminal;
 }
 
 export const HUD_SECTIONS = ["approvals", "tasks", "cost", "health"] as const;
@@ -139,6 +164,7 @@ export function parseHudFrame(raw: string): HudFrame | null {
     for (const name of HUD_SECTIONS) {
       if (isObject(payload[name])) delta[name] = payload[name];
     }
+    if (isObject(payload.terminal)) delta.terminal = payload.terminal;
     return delta as HudFrame;
   }
   if (payload.type === "end") {
@@ -155,6 +181,7 @@ export function applyHudFrame(data: HudData | null, frame: HudFrame): HudData | 
       tasks: frame.tasks,
       cost: frame.cost,
       health: frame.health,
+      terminal: isObject(frame.terminal) ? frame.terminal : EMPTY_TERMINAL,
     };
   }
   if (frame.type === "delta") {
@@ -164,6 +191,7 @@ export function applyHudFrame(data: HudData | null, frame: HudFrame): HudData | 
       tasks: frame.tasks ?? data.tasks,
       cost: frame.cost ?? data.cost,
       health: frame.health ?? data.health,
+      terminal: frame.terminal ?? data.terminal,
     };
   }
   return data;

@@ -17,8 +17,16 @@ Rules this module keeps:
   cost and health carry numbers and status words only, never a prompt.
 - **No decisions (D8).** Approvals are listed for a deep link to
   `/approvals/<id>`; nothing here (or on the HUD) decides one.
+
+Phase 10 branch 5 (brief D12) adds a fifth section, `terminal`: the
+actor's last five node action executions in the stream's workspace
+(`for_actor()` and `actor=`), with capability label, repo name, status,
+exit code and duration -- never args and never output. The output itself
+travels only through the terminal stream endpoint (`hud.views`), read from
+the Redis stream the node gateway writes (`nodes.output`).
 """
 
+import posixpath
 from datetime import timedelta
 from decimal import Decimal
 
@@ -30,6 +38,9 @@ from django.utils import timezone
 from ai_core import budgets
 from ai_core.models import AIBudget, ModelProvider, ModelUsage
 from approvals.models import ApprovalRequest
+from nodes.action_rules import repo_path_of
+from nodes.capabilities import get_action_contract
+from nodes.models import EXECUTION_TERMINAL_STATUSES, NodeActionExecution
 from tasks.models import Task
 
 ZERO = Decimal("0")
@@ -42,7 +53,9 @@ _HEALTH_CAPABILITIES = (
     ModelProvider.Capability.STT,
     ModelProvider.Capability.TTS,
 )
-SECTIONS = ("approvals", "tasks", "cost", "health")
+SECTIONS = ("approvals", "tasks", "cost", "health", "terminal")
+# Phase 10 D12: the terminal section lists the actor's last five executions.
+TERMINAL_SECTION_LIMIT = 5
 
 
 def _money(value):
@@ -225,12 +238,82 @@ def health_section(workspace):
     }
 
 
+def _execution_repo_name(execution, contract):
+    """The repo's mapped name (the last segment of a `repo_path` the
+    approval resolved to this workspace), never more of the raw path; "" for
+    capabilities without one (confirm-class has no approval, no args)."""
+    if contract is None or execution.approval_id is None:
+        return ""
+    payload = execution.approval.payload if execution.approval is not None else None
+    args = payload.get("args") if isinstance(payload, dict) else None
+    if not isinstance(args, dict):
+        return ""
+    path = repo_path_of(contract, args)
+    if not path:
+        return ""
+    return posixpath.basename(str(path).rstrip("/"))[:120]
+
+
+def _execution_duration_ms(execution, now):
+    start = execution.started_at or execution.created_at
+    end = execution.finished_at or now
+    if start is None:
+        return 0
+    return max(0, int((end - start).total_seconds() * 1000))
+
+
+def execution_summary(execution, *, now=None):
+    """One execution as the HUD shows it: label, repo name, status, exit
+    code, duration -- never args or output."""
+    now = now or timezone.now()
+    contract = get_action_contract(execution.capability)
+    return {
+        "id": str(execution.id),
+        "capability": execution.capability,
+        "label": contract.label if contract is not None else execution.capability,
+        "class": execution.capability_class,
+        "repo_name": _execution_repo_name(execution, contract),
+        "status": execution.status,
+        "running": execution.status == NodeActionExecution.Status.RUNNING,
+        "terminal": execution.status in EXECUTION_TERMINAL_STATUSES,
+        "exit_code": execution.exit_code,
+        "duration_ms": _execution_duration_ms(execution, now),
+        "created_at": _iso(execution.created_at),
+        "finished_at": _iso(execution.finished_at),
+    }
+
+
+def actor_executions(actor, workspace):
+    """The actor's own node action executions in this workspace (D12),
+    through `for_actor()`; newest first."""
+    return (
+        NodeActionExecution.objects.for_actor(actor, workspace=workspace)
+        .filter(actor=actor)
+        .select_related("approval")
+        .order_by("-created_at", "-id")
+    )
+
+
+def terminal_section(actor, workspace):
+    """The actor's last `TERMINAL_SECTION_LIMIT` executions in the stream's
+    workspace (D12): capability label, repo name, status, exit code and
+    duration -- no output (the stream endpoint carries that)."""
+    now = timezone.now()
+    rows = list(actor_executions(actor, workspace)[:TERMINAL_SECTION_LIMIT])
+    items = [execution_summary(row, now=now) for row in rows]
+    return {
+        "items": items,
+        "running_count": sum(1 for item in items if item["running"]),
+    }
+
+
 def build_sections(actor, workspace, *, today=None):
     return {
         "approvals": approvals_section(actor, workspace),
         "tasks": tasks_section(actor, workspace, today=today),
         "cost": cost_section(workspace),
         "health": health_section(workspace),
+        "terminal": terminal_section(actor, workspace),
     }
 
 

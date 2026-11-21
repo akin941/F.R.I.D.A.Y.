@@ -590,8 +590,10 @@ forbidden_modules = ["voice"]
 # and `tasks`. It is a separate app, not part of `voice`, precisely because
 # `voice` may not import `approvals` or `tasks` (D11). It writes nothing and
 # decides nothing (D8): no `audit`, `tools`, `agents` or `assistant` edge.
+# Phase 10 D12: `hud` also reads `nodes` (its Phase 9 D2 edge) for the
+# terminal section and the terminal output stream.
 [[tool.importlinter.contracts]]
-name = "hud may import only core, workspaces, ai_core, approvals, tasks (Phase 6 A8)"
+name = "hud may import only core, workspaces, ai_core, approvals, tasks, nodes (Phase 6 A8, Phase 10 D12)"
 type = "forbidden"
 source_modules = ["hud"]
 forbidden_modules = ["config", "accounts", "audit", "assistant", "memory", "knowledge", "tools", "agents", "skills", "integrations", "harness", "connectors", "deploys", "ops", "voice"]

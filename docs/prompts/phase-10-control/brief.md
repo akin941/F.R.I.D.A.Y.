@@ -1337,7 +1337,7 @@ with the Mac rows pending owner evaluation.
 | 2 | `feat/p10-reference-executor` | Reference node v2 (verifier 13–24, confirmation double, executor port, runtime cap), `srt` policy generator + vectors, conformance cases v2, escape suite + runner | 1 | **implemented 2026-11-20** on its branch (based on the integration branch with branch 1 merged; Phase 9 branch 3 not merged, so the reference node v1 session half and the v1 protocol cases are built here too); awaits independent Sonnet 5 review; see "Implementation record — `feat/p10-reference-executor`" |
 | 3 | `feat/p10-invocation-grants` | Per-tool approval TTL + pre-transaction hook (`create_request` split) + approver hook, `node_action` tool with actor/approver checks, registered trust-check stub, `NodeActionExecution`, grant issuance, gated/confirm invocation, gateway v2 frames + watchdog, output scrubber port + `StreamScrubber` (tail re-scrub, fail closed), chain row v2, actions endpoints | 1, 2; Phase 9 branches 4–5 merged | **implemented 2026-11-20** on its branch (based on the integration branch with branches 1–2 merged; Phase 9 branches 4–5 not merged, so the gateway's per-socket session core and the presence/inbox helpers are built here and the socket app stays Phase 9 branch 4's); awaits independent Sonnet 5 review; see "Implementation record — `feat/p10-invocation-grants`" |
 | 4 | `feat/p10-trust-check` | Trust check (rules + `control.trust_check`), evidence port, router `node_action` proposals, injection corpus, voice cap regressions | 3 | not started |
-| 5 | `feat/p10-hud-terminal` | Redis output stream (fed by the branch-3 scrubber), HUD `terminal` section + stream endpoint, terminal panel, draft/approval cards, `node_action_result` read tool | 3 (parallel with 4) | not started |
+| 5 | `feat/p10-hud-terminal` | Redis output stream (fed by the branch-3 scrubber), HUD `terminal` section + stream endpoint, terminal panel, draft/approval cards, `node_action_result` read tool | 3 (parallel with 4) | **implemented 2026-11-20** on its branch (based on the integration branch with branches 1–3 merged); awaits independent Sonnet 5 review; see "Implementation record — `feat/p10-hud-terminal`" |
 | 6 | `feat/p10-codex-app-server` | Driver framework, interactive container, Codex app-server driver, `harness_agent_action` gate, usage per turn, pins + provisional snapshot + contract test | Phase 3 harness (merged); 3 (per-tool approval TTL only: `ToolSpec.approval_ttl_seconds`, `_expire_if_stale`, per-minute sweep); parallel with 4–5 | not started |
 | 7 | `feat/p10-claude-agent-sdk` | Claude Agent SDK bridge + driver, bridge schemas, surface snapshot, pins | 6 | not started |
 | 8 | `chore/p10-closeout` | Preflight control checks, e2e, runbooks, ADR-013/014/015 notes, MASTER_PLAN row, `self_sources.json`, go/no-go record | 1–7 | not started |
@@ -2283,3 +2283,143 @@ or `memory`.
    personal workspace this is visible only to the owner, so it is
    acceptable, but the field is typed text. Fix (optional): truncate `text`
    in the summary to a bounded length.
+
+## Implementation record — `feat/p10-hud-terminal` (branch 5, implemented 2026-11-20)
+
+**Base.** Cut from the integration branch with branches 1–3 merged. Branch 4
+(trust check, router `node_action` proposals) has not merged, so no router
+turn produces a `node_action` draft yet; the draft card handles the draft
+shape branch 4 will emit (`{node_id, capability, args}` plus the message's
+id) and is tested with constructed drafts. The socket app (Phase 9 branch 4)
+is still absent, so the transit is driven through `nodes.gateway.NodeSession`
+in process against the reference node v2, as in branch 3.
+
+**Delivered (D12, the D7 fencing of the tail).**
+- `nodes/output.py`:
+  - `sanitize_terminal_text`: CSI / OSC / DCS / other escape sequences
+    (7- and 8-bit), C0/C1 controls but `\n` and `\t` (`\r\n` and a lone
+    `\r` become `\n`), and `Cf`/`Zl`/`Zp`/`Co`/`Cs`/`Cn` characters (bidi,
+    zero-width, BOM, ...) removed. It runs **before** the scrubber inside
+    the function the carry algorithm drives (and in `scrub_tail`), so a
+    secret split by escape codes is joined before it is matched, and a cut
+    through an escape sequence is never scrub-neutral.
+  - `OutputStreamWriter`: `XADD nodes:output:<invocation_id> MAXLEN 2000`
+    (exact) with `EXPIRE 900` in the same `MULTI` (the key lives 15 minutes
+    after its last write), at most 1 MiB of scrubbed text per invocation
+    (then `truncated`; also `truncated` once MAXLEN starts trimming), and one
+    `end` entry `{status, exit_code, truncated}`. Redis down: the writer is
+    `broken`, logs ids and sizes only, and the execution is unaffected.
+  - `OutputTransit`: per invocation one `StreamScrubber` per stream plus
+    the writer; only emitted text is appended (never the raw carry); with
+    no scrubber one `FAIL_CLOSED_MARKER` per stream and nothing else.
+  - `read_output(invocation_id, after=)`: non-blocking `XREAD`.
+- `nodes/gateway.py`: `InFlight` holds an `OutputTransit`; `output` frames
+  are counted into `output_bytes` and pushed through it (the node's
+  `truncated` flag is carried); `result`, the watchdog and `disconnect`
+  flush the carry and then write the `end` entry from the terminal row.
+- `hud`: the fifth section `terminal` (`hud/services.py`: the actor's last
+  five executions in the stream's workspace through `for_actor()` and
+  `actor=`, with label, repo name — the last segment of the approval's
+  `repo_path`, never the raw path — status, `running`, exit code and
+  duration; no args, no output; `running_count` for the orb), and `GET
+  /api/v1/hud/terminal/<execution_id>/stream` (`hud/views.py`: web channel
+  + `IsOwner`, the execution resolved through `for_actor()` and required to
+  be the actor's own, else 404; SSE `start`, one `chunk {seq, stream,
+  text}` per stream entry with the entry id as SSE `id:` (a reconnect with
+  `Last-Event-ID` resumes after it), then one `end {status, exit_code,
+  truncated, output_unavailable}` read from the row; bounded by
+  `HUD_STREAM_MAX_SECONDS` and re-checking membership each poll). Settings
+  `HUD_TERMINAL_POLL_SECONDS` (0.5) and the `hud_terminal` throttle rate
+  (`HUD_TERMINAL_RATE`, 30/min), in `.env.example`. The `hud` import
+  contract's name now lists `nodes` (its Phase 9 D2 edge; no rule change).
+- `tools/node_action_reads.py`: `node_action_result` (`ReadToolSpec`, web
+  channel only, the installation owner as a workspace member via
+  `tools.owner_reads`, strict empty args):
+  the actor's most recent execution in the conversation's workspace —
+  capability, status, exit code and the tail, sanitised, invisible
+  formatting stripped, fence tags (`connector_result`, `memor`,
+  `knowledge`, `tool_result`, `system`) neutralised, ≤ 4 000 characters
+  (the end of the tail kept), under the header "Güvenilmeyen çıktı"; the
+  chat turn fences it as `<connector_result source="friday-node">`. One
+  `read_tool.read` audit row per call with ids and sizes only. Per-call
+  data class: the snapshot's `data_class`, but personal for any run in the
+  personal workspace and for confirm-class runs (the stricter class).
+- Frontend: `HudTerminalPanel.tsx` (the section's list; the selected —
+  by default the running — execution streamed into one `<pre>` as text
+  nodes only; label "Güvenilmeyen çıktı"; copy button; final status line),
+  `lib/hud/terminal.ts` (the SSE client: `Last-Event-ID` resume, no repeated
+  chunk, stops at the final frame), `lib/hud/events.ts` (optional
+  `terminal` section), `HudView` (`tool-running` while `running_count > 0`,
+  also under reduced motion), the `node_action` draft card in
+  `ToolRequestCard.tsx` (confirm-class `apps.open` / `apps.focus` posts to
+  `/api/nodes/<id>/actions`, everything else to `/api/approvals/requests`
+  with `source_message_id`; "Onay ekranda, sonra Mac'te bir tık"), the
+  `node_action` approval renderer (`renderers/node-action.tsx`: the D6
+  summary, voice label, TTL, execution status, polling), BFF routes
+  `api/hud/terminal/[executionId]/stream` (GET, streamed, only a well-formed
+  `Last-Event-ID` forwarded), `api/nodes/[nodeId]/actions` (POST, three keys
+  forwarded) and `api/nodes/[nodeId]/actions/[executionId]` (GET), strings
+  in `tr.ts`, types in `types/api.ts`.
+
+**Tests.** `tools/tests/test_node_output_stream.py` (reference-node run →
+stream chunks then `end`; a node with its scrub disabled: no corpus secret
+in the stream or the tail; a hostile node splitting every corpus secret
+across two frames; every corpus secret split at every offset never reaches
+the writer; the raw carry is never appended; no scrubber → one marker per
+stream; MAXLEN 2000 and TTL ≤ 900 s; the 1 MiB cap with `truncated`; the
+node's `truncated` reaches `end`; nothing but the tail in Postgres; escape
+sequences, bidi and zero-width characters stripped from stream and tail; a
+secret hidden by escape codes is joined, then scrubbed; socket loss and
+watchdog flush then `end`; Redis down leaves the execution `ok`),
+`tools/tests/test_node_terminal.py` (the panel's stream end to end, resume
+by `Last-Event-ID`, a live run, the time bound, hostile output as plain
+text, role × endpoint for owner web / CLI / OpenAI / hook PATs / node
+secret / member / curator / agent / anonymous, another user's and an
+unknown execution 404, lost membership 404, read-only; the `terminal`
+section: last five, no output, no path, the personal workspace lists none
+of the firm's, `running_count`; `node_action_result`: latest only, fenced
+tags neutralised, ≤ 4 000, web only for every other channel, non-owners and
+arguments refused, never across workspaces, personal class in the personal
+workspace; "testler ne dedi?" through the real chat view: router + args +
+chat only, the tail only inside `<connector_result source="friday-node">`,
+never in the router calls, no draft and no approval),
+`tools/tests/test_node_action_scrub.py` (the branch-3 test now checks the
+stream's content instead of its absence), `hud/tests/test_events.py`
+(snapshot shape). Vitest: `HudTerminalPanel.test.tsx` (text only for
+`<img>`/`<script>` strings, label, final line, selection, copy, list line),
+`terminal.test.ts`, `HudView.test.tsx` (reduced-motion `tool-running`),
+`ToolRequestCard.test.tsx` (confirm-class → `/nodes/<id>/actions`,
+gate-class → `/approvals`), `node-action.test.tsx`, the two BFF route
+tests.
+
+**Deviations, recorded.**
+- The stream's `seq` is the server's own counter per invocation, not the
+  node's frame `seq` (the server may split, merge or drop text through the
+  carry and the marker rule).
+- The final frame also carries `output_unavailable` (Redis could not be
+  read); a bounded window ends `{type: end, reason: max_age | scope_lost}`
+  and the client resumes with `Last-Event-ID`.
+- The HUD e2e "a reference-node run streams into the panel" is the backend
+  stream test plus the panel's vitest with a stream double; there is no
+  browser e2e harness for the HUD in CI.
+- `node_action_result` takes no arguments (always the latest execution);
+  an `execution_id` argument can come later if the owner asks about an
+  older run.
+
+### Owner steps (pending) — `feat/p10-hud-terminal`, recorded 2026-11-20
+
+1. Run the independent Sonnet 5 review of this branch (CLAUDE.md
+   "Reviews") and fix findings until APPROVE.
+2. Phase 9 branch 4 (`feat/p9-node-gateway`): keep calling
+   `NodeSession.receive` for `output` frames — the transit is inside the
+   session, so the socket app needs nothing more; the gateway process needs
+   Redis reachable for the stream (the execution never depends on it).
+3. Branch 4 (`feat/p10-trust-check`): emit `node_action` drafts in the
+   shape the card expects (`payload: {node_id, capability, args}`); the
+   card adds `source_message_id` itself.
+4. Deployment: a reverse proxy in front of the web app must not buffer
+   `/api/v1/hud/terminal/*/stream` (the view sets `X-Accel-Buffering: no`).
+5. Mac session M1 (deferred: Mac session): the Swift `OutputStreamer`
+   sends `output` frames the server can stream; nothing in the panel
+   changes. Check on the real Mac that a long `uv run pytest` streams into
+   the HUD panel within a second per line (pending owner evaluation).
