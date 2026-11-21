@@ -276,7 +276,11 @@ makes no model call (D10).
     deterministic, model-free index of Friday's own code, like
     `self_sources.json`. They carry `origin=graphify` and the status
     `system` (D3). They never enter the memory block and never appear on
-    the morning card.
+    the morning card. They get **no embedding** and take **no part in
+    `retrieve()`** (neither its vector or full-text lists nor its hop
+    expansion, D8). They are reachable only through the `self`
+    assembler, the `memory_graph_lookup` read tool and the read-only
+    `/memory/graph` view.
 - **The chat turn keeps its shape.**
   - Facts are one more fenced block inside the existing memory budget
     (D8).
@@ -386,6 +390,16 @@ taken after transcripts arrive could not tell what they changed.
     `old.superseded_by = new` in one transaction under
     `select_for_update` of both rows. It is allowed only when both have
     the same subject and predicate and the same workspace.
+  - **Supersede order.** A supersede needs
+    `new.valid_from >= old.valid_from`, otherwise the old row's window
+    would be negative and the DB check would fail. `supersede`,
+    `approve_fact` and `edit_fact` check it in code before any write:
+    if `new.valid_from < old.valid_from` they return 409
+    `supersede_order` and leave both rows unchanged (the proposal stays
+    pending; an owner edit with an earlier user-chosen date is refused
+    and the form says so). The DB check stays as the backstop, so an
+    `IntegrityError` is never the user-visible path. Reconciliation
+    applies the same rule before it links a target (D4).
   - **`approve_fact(proposal)`** of a proposal with `supersedes` set runs
     in one transaction: it locks the proposal and its target
     (`select_for_update`, in primary-key order), re-checks that the
@@ -402,13 +416,25 @@ taken after transcripts arrive could not tell what they changed.
     the target untouched.
   - **"Current facts"** are `approved` or `system`, with
     `valid_to IS NULL`, not trashed.
+  - **"Retrievable facts"** are the current facts with
+    `status = approved` and `origin = learned` only. They are the only
+    facts `retrieve()` (D8) ranks, embeds or hop-expands. `system`
+    facts are never retrievable.
   - **"Facts as of T"** are `valid_from <= T < coalesce(valid_to, ∞)`.
   - Approved facts are never edited in place: an owner edit creates a
     new version that supersedes the old one, so history stays readable.
 - **Traversal** (`memory/graph/selectors.py`): `neighbourhood(entity_ids,
-  *, hops, as_of)` is one recursive CTE.
-  - It runs over current facts of **one workspace**, which is a SQL
-    parameter applied in both the anchor and the recursive term.
+  *, hops, as_of, include_system=False, include_private=False)` is one
+  recursive CTE.
+  - It runs over current (or as-of) facts of **one workspace**, which is
+    a SQL parameter applied in both the anchor and the recursive term.
+  - The two flags are SQL predicates in both terms as well. With the
+    defaults it walks only `approved`, `learned`, non-`private` facts.
+    `include_system=True` adds `system` facts (used by
+    `memory_graph_lookup` and the `self` summary only).
+    `include_private=True` adds `private` facts and is passed only by
+    the owner's `/memory/graph` API, which is not a model path. No
+    caller that feeds a model payload passes it in 8B.
   - `hops` is 1 or 2 (any other value is refused).
   - It keeps a visited-set array, so cycles never loop.
   - It returns at most 200 edges.
@@ -421,7 +447,7 @@ taken after transcripts arrive could not tell what they changed.
 
 | Origin | Writer | Born as | Shown where |
 |---|---|---|---|
-| owner text (episodes, chat extraction v2) | `memory.graph.ports.propose_fact`, called only by the extraction and reflection jobs (D4, D5) | `pending_approval` | morning card, per item |
+| owner text (episode extraction v2, weekly reflection) | `memory.graph.ports.propose_fact`, called only by the episode extraction and reflection jobs (D4, D5) | `pending_approval` | morning card, per item |
 | owner, in the UI | the fact API (web channel, owner, human) | `approved`, as the owner's own words: `provenance_quote` is the owner's typed statement and the audit row names the writer | `/memory/graph` |
 | Graphify | `memory.graph.ports.import_code_graph` only (D10) | `system` | the `self` assembler, `memory_graph_lookup`, `/memory/graph` (read-only) |
 
@@ -441,10 +467,28 @@ taken after transcripts arrive could not tell what they changed.
   either way (8A D8). Recorded in ADR-012's implementation note
   (branch 5).
 
-### D4 — Fact learning: extraction schema v2 and reconciliation
+### D4 — Fact learning: episode extraction schema v2 and reconciliation
 
-- **`friday_episode_extraction` schema v2.** The candidate keys are
-  those of v1 plus `fact`, which is `null` or an object:
+Two extraction parsers exist today, with different shapes and versions
+(verified 2026-11-21):
+- the **episode** parser `parse_episode_candidates` in
+  `memory/ingestion/extraction.py` (`SCHEMA_VERSION = 1`, prompt
+  `friday_episode_extraction`, candidate keys `type`, `title`,
+  `content`, `quote`, `episode_id`, `target`);
+- the **chat** parser `parse_candidates` in `memory/extraction.py`
+  (`SCHEMA_VERSION = 2` since 8A D9, prompt `friday_memory_extraction`,
+  candidate keys `type`, `title`, `content`, `quote`).
+
+Only the episode parser changes in 8B: **v1 → v2**. The chat parser,
+its prompt and its tests stay at v2, unchanged, and chat extraction
+emits **no** fact candidates in 8B (Out of scope). Facts are learned
+only from episodes and the weekly reflection (D5). Chat turns that the
+owner wants remembered as facts still reach the graph through the
+owner UI (D3).
+
+- **`friday_episode_extraction` schema v2** (`parse_episode_candidates`).
+  The candidate keys are those of v1 plus `fact`, which is `null` or an
+  object:
   `{"subject": {"kind","name"}, "predicate",
   "object": {"kind","name"} | {"text"}, "valid_from"}`.
   - `target` gains the value `fact`. A `fact` candidate needs a non-null
@@ -454,7 +498,35 @@ taken after transcripts arrive could not tell what they changed.
   - `valid_from` is an ISO date within the cited episode's
     `occurred_at` ± 1 day, otherwise it is replaced by the episode's
     date and counted.
-  - v1-shaped output is rejected.
+  - v1-shaped output is rejected: the existing
+    `isinstance(version, bool) or version != SCHEMA_VERSION` check
+    refuses `version: 1`, and a v2 candidate without the `fact` key is a
+    missing-key error (exact key set), both terminal `schema_invalid`.
+  - The fact object is validated by one helper,
+    `memory/graph/candidates.py::validate_fact_object`, so reflection
+    (D5) uses the same rules.
+- **Sensitivity is inherited, never chosen by the model.** A fact
+  proposal's `sensitivity` is copied from its cited episode, exactly as
+  8A's `_create_proposal` copies `episode.sensitivity` into a memory
+  (via `verify_candidates`). A fact from a `private` episode (for
+  example a `private` Inbox note, D12) is born `private`; a candidate
+  the verifier flags `private` (the 8A `sensitivity` key it sets from
+  the episode) is born `private` whatever else it carries.
+  Personal-class only routes **extraction** to local providers (8A D9);
+  it does not by itself make a fact `private`, which keeps 8A's memory
+  rule (transcript and calendar facts follow their episode's
+  sensitivity). A reflection candidate (D5) takes
+  the sensitivity of the episode its quote was verified against. An
+  owner edit keeps the old row's sensitivity unless the owner changes
+  it in the form.
+- **Entity sensitivity is derived, not stored.** `MemoryEntity` has no
+  sensitivity column. An entity is **private** iff it has no live
+  (current or pending, not trashed or archived) non-`private` fact as
+  subject or object. `memory.graph.selectors.entity_is_private(entity)`
+  and the queryset annotation `with_privacy()` implement the rule in
+  one place; the vault mirror (D12), retrieval and the read tool use
+  it. An entity whose only facts are private is therefore never named
+  in an open-tree note or a model payload.
 - **Provenance is unchanged.** The 8A verbatim check (`quote ≥ 12`
   chars, a substring of the cited episode's `owner_text` in the same
   workspace) applies to facts too. Entity names must also occur in the
@@ -466,25 +538,34 @@ taken after transcripts arrive could not tell what they changed.
      kind.
   2. Otherwise a new entity is proposed together with its fact, with
      `pending_approval` riding on the fact. An entity with no approved
-     or system fact is invisible to retrieval.
+     learned fact is invisible to retrieval.
 - **Reconciliation** (purpose `memory.fact_reconciliation`, tier `mid`,
   one call per workspace on nights with fact candidates):
-  - Input: the night's fact candidates, and the current facts with the
-    same subject and predicate (≤ 50, fenced as
-    `<existing_fact untrusted>`).
+  - Input: the night's **normal** fact candidates, and the current
+    non-`private` facts with the same subject and predicate (≤ 50,
+    fenced as `<existing_fact untrusted>`). The call can reach a cloud
+    provider, so no `private` text enters it: a `private` candidate
+    skips reconciliation and stays `new` (counted
+    `reconcile_private_skipped`); the owner can still supersede by an
+    edit.
   - Output schema v1: `{"version":1,"decisions":[{"candidate_index",
     "action": "new"|"supersede"|"duplicate", "supersedes_fact_id"}]}`.
   - The code checks that a `supersede` names a current fact with the
-    same subject, predicate and workspace. Otherwise the decision falls
-    back to `new` and is counted.
+    same subject, predicate and workspace, and that the candidate's
+    `valid_from` is not earlier than the target's (the D2 supersede
+    order; nightly extraction of older episodes and the 7-day
+    transcript backfill can produce one). Otherwise the decision falls
+    back to `new` and is counted (`supersede_invalid` or
+    `supersede_order`). A target approved or edited after
+    reconciliation is caught again by `approve_fact` (409).
   - A `supersede` decision becomes a `pending_approval` fact whose
     `supersedes` FK (D2) names the validated target. **When approved**,
     `approve_fact` calls `supersede(old=supersedes, new=proposal)`
     atomically (D2). Nothing is applied by the model. This is ADR-012's
     "never applies". The digest's "supersedes" line is rendered from
     that FK.
-- **Chat extraction v2 (8A)** may also emit `fact` candidates, quoted
-  from `user` turns only, through the same parser.
+- **Chat extraction (8A, schema v2) is unchanged.** It emits no `fact`
+  candidates in 8B (see the note at the top of D4).
 - Justification: facts are short and structured, so the cheap tier
   extracts them in the existing call (no extra call per episode). The
   supersede judgement needs the current facts in view, so it is one
@@ -504,6 +585,11 @@ taken after transcripts arrive could not tell what they changed.
   - the current `current_focus` and `active_projects` blocks.
 
   Everything except the owner texts is fenced as untrusted context.
+  The call can reach a cloud provider, so `private` memories and facts,
+  and the owner texts of `private` or personal-class episodes, are
+  excluded from the input (the `cloud_eligible()` / `model_eligible()`
+  helpers and `needs_personal_data`). A reflection candidate therefore
+  quotes a normal episode and is born `normal`.
 - **Output:** at most 5 candidates of the D4 v2 shape. These are
   pattern-level observations (for example a `current_focus` diff, or a
   `prefers` fact), each with a quote verified against one of the
@@ -613,9 +699,13 @@ Bulk approve stays `work_log`-only. Every fact is approved per item.
   query_text, personal_data, as_of=None, k=60)`. It runs these steps:
   1. **Workspace filter first.** Every candidate query starts from
      `for_actor(actor, workspace=workspace)` with the existing
-     eligibility rules (`cloud_eligible()` for memories, `approved` or
-     `system` current facts, ready and non-trashed chunks). It never
-     ranks across workspaces and filters later.
+     eligibility rules (`cloud_eligible()` for memories, the D2
+     **retrievable** facts, that is `approved` `learned` current facts
+     that are not `private` (the `cloud_eligible()` parity: a fact
+     query helper `MemoryFact.objects.model_eligible()` is the only
+     sanctioned path into a payload), and ready, non-trashed chunks). It never ranks across
+     workspaces and filters later. `system` (Graphify) facts are never
+     candidates: no vector list, no full-text list, no hop.
   2. Vector top-50 and full-text top-50 per table.
   3. **RRF:** `score = Σ 1/(60 + rank_i)` over the lists an item appears
      in.
@@ -623,11 +713,15 @@ Bulk approve stays `work_log`-only. Every fact is approved per item.
      half-life is `MEMORY_RETRIEVAL_HALF_LIFE_DAYS` (default 45) and
      applies to `episodic` and `work_log` memories and learned facts.
      It does not apply to `semantic`, `preference` or `procedural`
-     memories or to `system` facts. Age is `updated_at` for memories
+     memories (`system` facts never reach this step). Age is
+     `updated_at` for memories
      and `valid_from` for facts.
   5. **Hop expansion:** the entities of the top-10 facts seed
-     `neighbourhood(hops=MEMORY_RETRIEVAL_HOPS, default 1, max 2)`.
-     Expanded facts enter at `score × 0.5` per hop.
+     `neighbourhood(hops=MEMORY_RETRIEVAL_HOPS, default 1, max 2)` with
+     its defaults `include_system=False, include_private=False` (D2),
+     so a hop never reaches a Graphify edge or a `private` fact, and an
+     entity that `entity_is_private` (D4) is never named in a hop
+     statement. Expanded facts enter at `score × 0.5` per hop.
   6. The result is cut to the existing budget: memories and facts share
      `MEMORY_CHAR_BUDGET` (4000).
 
@@ -650,12 +744,29 @@ Bulk approve stays `work_log`-only. Every fact is approved per item.
   `neutralize_fence` and `strip_invisible_formatting`. A `private` fact
   is never injected (`cloud_eligible` parity), and `personal_data` turns
   follow 8A.
+- **Embedding policy.** Only retrievable-candidate facts are embedded:
+  the fact embedding job (the `Memory` lease pattern) selects
+  `origin = learned` rows that are `approved` and current. `system`
+  facts keep `embedding = NULL` for good, so a Graphify import (up to
+  60 000 facts) makes **zero** embed calls and zero `ModelUsage` rows.
+  Pending, rejected and archived facts are not embedded either.
 - **Read tool `memory_graph_lookup`** (`tools/memory_graph.py`,
   `ReadToolSpec`, `data_class=firm`, `CHANNEL_WEB` only, audited
   `memory.graph.read`). Arguments: `entity` (≤ 200), `as_of` (an
   optional date) and `hops` (1–2). It returns fenced current or as-of
   facts of the conversation's workspace. It is the path that answers
   "ne zamandan beri?".
+  - Its output is fenced into the system message and goes to whatever
+    provider serves the turn, cloud included, so it calls
+    `neighbourhood(..., include_system=True, include_private=False)`
+    and never returns a `private` fact, nor an entity that
+    `entity_is_private` (an `entity` argument naming one answers "not
+    found", the same as a missing entity, so the name's existence is
+    not confirmed).
+  - It is the only model path that reads `system` facts (besides the
+    deterministic `self` summary), so code questions ("hangi modül
+    `memory.graph`'ı import ediyor?") are answered on demand rather
+    than by flooding the memory block.
 - **Audit:** every retrieval records `memory.context_accessed` with ids
   only, as today, and fact ids are added.
 - **`ModelUsage` context report:** retrieval mode, candidate counts per
@@ -700,12 +811,25 @@ Bulk approve stays `work_log`-only. Every fact is approved per item.
   bypass set. A compression compare (D11) issues its answer calls under
   the candidate purpose instead, in both arms, under the same eval-only
   budget.
-- **Isolation.** The set runs against a throwaway database: the
+- **Isolation.** The set runs against a separate eval database: the
   `memory_eval run|baseline|compare` subcommands refuse to run unless
   `DJANGO_SETTINGS_MODULE` points at the eval settings, which use their
   own DB name. They never write cases into the owner's live workspaces.
+  - **The eval database persists between runs**, so the monthly cap
+    holds. Each run clears only the previous run's case setup rows
+    (memories, facts, episodes, entities of the eval workspaces); it
+    never drops the database and never deletes `ModelUsage` rows.
+    The `learning_eval` budget check therefore sums the month's eval
+    `ModelUsage` across every run, exactly like a live budget.
+  - **Defence in depth against a recreated database:** every result
+    file records its `spend_usd`, and before each run `memory_eval`
+    adds the current month's `spend_usd` of the result files in the
+    results directory to the database sum and takes the larger of the
+    two totals. A dropped or recreated eval DB therefore cannot reset
+    the 5 USD cap. A run that would start over the cap is refused with
+    no call.
 - **Eligibility applies to eval setup rows.** A case's `setup` memories,
-  facts and episodes are loaded as ordinary rows of the throwaway
+  facts and episodes are loaded as ordinary rows of the eval
   database, so retrieval and the answer call apply exactly the chat
   rules: `cloud_eligible()` for memories, the `private` fact rule (D8),
   and `needs_personal_data` for episodes. A case may also carry
@@ -729,7 +853,9 @@ Bulk approve stays `work_log`-only. Every fact is approved per item.
     `compare`), `retrieval_mode`, `compression_purpose` (null or a
     purpose name), `arm` (null, `a` or `b`), `started_at` and
     `finished_at`;
-  - case counts (`total`, `answered`, `no_provider`, `budget_stopped`);
+  - case counts (`total`, `answered`, `no_provider`, `budget_stopped`)
+    and `spend_usd` (the run's eval spend, used by the budget check
+    above);
   - the aggregate metrics (recall@10, leak rate, temporal correctness,
     answer accuracy, `pre_tokens`/`post_tokens` for compares) and a
     `verdict` (`pass`, `fail`, `inconclusive` or null).
@@ -821,6 +947,18 @@ repo.
     excluding `.git`, runs the command above, then copies
     `graphify-out/graph.json` to `/out/graph.json`. A graph over 20 MB
     is a failure.
+  - **Reading `/out` on the host.** `/out` is writable by the container,
+    so the host treats it as hostile. The importer opens the out
+    directory and then `graph.json` relative to it with
+    `os.open(..., O_RDONLY | O_NOFOLLOW | O_NONBLOCK)` (reusing the
+    descriptor walk of `tools/vault_paths.py`'s pattern in a small
+    `harness/safe_read.py`), `fstat`s the descriptor, refuses anything
+    that is not a regular file (`S_ISREG`; a symlink, FIFO, device or
+    directory is refused) or whose `st_size` is over 20 MB **before
+    reading a byte**, then reads at most 20 MB + 1 from that same
+    descriptor (a file grown after the stat is still refused). A
+    refusal fails the run with nothing imported. The out directory is a
+    fresh `mkdtemp` (mode 0700) per run and is removed afterwards.
 - **Import** `harness/graphify.py`, through the memory port
   `memory.graph.ports.import_code_graph(*, workspace, repo_ref,
   commit_sha, committed_at, graph)`:
@@ -1056,10 +1194,17 @@ episodes.
 - **Format v2.**
   - Frontmatter gains `friday_format: 2` and `content_sha256`, the
     sha256 of the rendered body below the frontmatter.
-  - New entity notes: `03_Workspaces/<ws>/Entities/<entity-id>.md`
-    (private ones under `_private/`). Each holds the entity's current
-    approved or `system` facts, its superseded history (with validity
-    windows), and `[[<entity-id>]]` wiki-links between related
+  - New entity notes: `03_Workspaces/<ws>/Entities/<entity-id>.md`.
+    **Private entities** (D4's derived rule: no live non-`private`
+    fact, via `entity_is_private`) go to `_private/<ws>/Entities/`
+    instead. An open-tree note renders only the entity's non-`private`
+    facts; its `private` facts appear only in a companion note under
+    `_private/<ws>/Entities/<entity-id>.md`, and a wiki-link from an
+    open note never names a private entity (it is omitted). When an
+    entity becomes private (its last normal fact is forgotten), the
+    next run prunes the open note and writes the private one. Each note
+    holds the entity's current approved or `system` facts (of its
+    tier), its superseded history (with validity windows), and `[[<entity-id>]]` wiki-links between related
     entities, so Obsidian's graph view shows the graph.
   - Graphify `code_*` entities are not mirrored, because of their
     volume.
@@ -1134,6 +1279,15 @@ episodes.
       scrub; longer bodies truncated and counted), `kind
       obsidian.inbox_note`, and `external_id` = the sha256 of the path
       plus the content. Frontmatter `sensitivity: private` → `private`.
+    - **Provider class.** The `obsidian_inbox` source is **not**
+      personal-class (`is_personal_class` stays false for it; ADR-012
+      decision 11 lists calendar, mail and transcripts only). A normal
+      Inbox note is therefore extracted by the ordinary (cloud-capable)
+      `memory.episode_extraction` route, like a git commit. Only a note
+      with frontmatter `sensitivity: private` becomes a `private`
+      episode, which `needs_personal_data` routes to local providers
+      only, and whose facts are born `private` (D4). The runbook and the
+      approval description say so, so the owner flags sensitive notes.
     - **Move:** after the episode commits, the file is moved to
       `00_Inbox/_imported/<YYYY-MM-DD>/` with `renameat` under
       validated descriptors. It is never read again (dedupe holds even
@@ -1471,7 +1625,11 @@ No new ADR.
   - `ports.py` (`propose_fact`, and an `import_code_graph` stub raising
     `NotImplementedError` until branch 5);
   - `selectors.py` (`current_facts`, `facts_as_of`, `neighbourhood`
-    with a recursive CTE, `entity_timeline`).
+    with a recursive CTE and the `include_system` / `include_private`
+    flags, `entity_timeline`, `entity_is_private` and the
+    `with_privacy()` annotation);
+  - the `MemoryFact.objects.model_eligible()` helper (D8);
+  - `candidates.py` (`validate_fact_object`, used by branch 2).
 - The forget and restore cascade to facts and entities.
 - The `purge_trash` keys `fact_ids` and `entity_ids`.
 - The owner API under `/api/v1/memory/graph/{entities, entities/<id>,
@@ -1501,6 +1659,17 @@ No new ADR.
     supersede of one fact by two threads leaves one winner);
   - an edit of an approved fact creates a version;
   - `facts_as_of` at boundary instants (half-open interval).
+- **Supersede order (D2):**
+  - `supersede(old, new)` with `new.valid_from < old.valid_from` → 409
+    `supersede_order`, both rows unchanged, no `IntegrityError`
+    raised;
+  - `approve_fact` of a pending proposal whose `valid_from` is earlier
+    than its target's → 409 `supersede_order`, the proposal still
+    pending with its `supersedes` link, the target current;
+  - the owner edit API with a user-chosen `valid_from` earlier than the
+    edited fact's → 409 `supersede_order`, no new version written;
+  - `new.valid_from == old.valid_from` is allowed (a zero-length old
+    window, still `valid_to >= valid_from`).
 - **`supersedes` link (D2):**
   - the check refuses `supersedes` on an `approved`, `rejected`,
     `archived` or `system` row (ORM and raw-SQL UPDATE);
@@ -1523,7 +1692,14 @@ No new ADR.
   - `hops=3` is refused;
   - the edge cap holds;
   - a second workspace's edges never appear, even when entity names
-    collide.
+    collide;
+  - with the defaults, a `system` fact and a `private` fact adjacent to
+    the seed are never returned; `include_system=True` adds the first
+    only, `include_private=True` the second only.
+- **Entity privacy:** `entity_is_private` is true for an entity whose
+  only live facts are `private`, false once it has one live normal
+  fact, and true again after that fact is forgotten; `with_privacy()`
+  agrees with it on a mixed fixture.
 - **Cascade:**
   - forget archives exactly the source's learned facts and rejects its
     pending ones, clearing their `supersedes` links and leaving the
@@ -1551,12 +1727,17 @@ No new ADR.
 queried as of a date and two hops out, and forgotten and restored, in
 one workspace, with no cross-workspace edge possible.
 
-### 2. `feat/p8-fact-learning` — extraction v2, reconciliation, reflection, caps
+### 2. `feat/p8-fact-learning` — episode extraction v2, reconciliation, reflection, caps
 
 **Scope.**
 - D4, D5, D6, D15 (the learning purposes and budgets).
-- `friday_episode_extraction` and the chat `friday_memory_extraction`
-  move to schema v2 with `fact`.
+- The episode parser `parse_episode_candidates`
+  (`memory/ingestion/extraction.py`) and the `friday_episode_extraction`
+  prompt move from schema v1 to v2 with `fact` (a new prompt version
+  seeded by `seed_ai_defaults`). The chat parser `parse_candidates`
+  (`memory/extraction.py`, schema v2) and `friday_memory_extraction`
+  are **not** touched (D4).
+- Fact sensitivity inherited from the cited episode (D4).
 - The `fact_entity_not_in_quote` rule and code entity resolution.
 - `memory/ingestion/reconciliation.py` with the
   `friday_fact_reconciliation` prompt.
@@ -1570,7 +1751,19 @@ one workspace, with no cross-workspace edge possible.
 
 **Files.**
 - `backend/memory/ingestion/{extraction,consolidation,reconciliation,
-  reflection,digest,tasks}.py`, `backend/memory/extraction.py`;
+  reflection,digest,tasks}.py` (not `backend/memory/extraction.py`);
+- the existing episode-schema tests that pin v1 and move to v2:
+  `backend/memory/tests/test_learning_extraction.py`
+  (`test_schema_violations_are_parse_errors`, whose `version: 2` row
+  becomes a valid case and gains `version: 1` rows;
+  `test_a_schema_error_is_terminal_and_marks_the_episodes_extracted`),
+  `backend/memory/tests/learning_helpers.py` (`candidates_reply` emits
+  `version: 2` and `fact: null`) and `backend/memory/tests/test_learning_night.py`
+  (its inline `memory.episode_extraction` reply). The
+  `memory.consolidation` reply schema (`version: 1`, `proposals`, in
+  `test_learning_consolidation.py`) is a different schema and is not
+  changed. `backend/memory/tests/test_extraction.py` (chat, v2) stays
+  unchanged and must stay green;
 - `backend/ai_core/management/commands/seed_ai_defaults.py`,
   `backend/config/settings/base.py`, `backend/config/celery.py`,
   `.env.example`;
@@ -1585,7 +1778,21 @@ one workspace, with no cross-workspace edge possible.
   - transcript or calendar or `private` episodes go with
     `personal_data=True`, and with a cloud-only provider set they fail
     as `NoProviderAvailable` with no candidates.
-- **Schema:** v2 fact parsing; unknown keys terminal; v1 rejected.
+- **Schema (episode parser only):** v2 fact parsing; unknown keys
+  terminal; `version: 1` and a v2 candidate without the `fact` key both
+  rejected as `schema_invalid`; a `fact` target with `fact: null`, and a
+  `memory` target with a non-null `fact`, rejected; the chat parser's
+  v2 tests in `test_extraction.py` pass unmodified (a regression guard
+  that chat extraction emits no facts).
+- **Sensitivity:**
+  - a fact verified against a `private` episode (a `private` Inbox note
+    fixture) is born `private`, and so is its new entity's derived
+    privacy;
+  - a fact from a normal episode is born `normal`;
+  - reflection input (captured payload) holds no `private` memory, fact
+    or episode text and no personal-class owner text;
+  - the digest renders a `private` fact only to the owner web session
+    (role × endpoint unchanged).
 - **Provenance:**
   - a paraphrased quote is dropped;
   - an entity absent from the quote is dropped;
@@ -1593,7 +1800,14 @@ one workspace, with no cross-workspace edge possible.
   - a verbatim quote is kept.
 - **Validity:** a `valid_from` outside ± 1 day is clamped and counted.
 - **Reconciliation:**
-  - a `supersede` of another subject or workspace falls back to `new`;
+  - a `supersede` of another subject or workspace falls back to `new`
+    (`supersede_invalid` counted);
+  - a `private` candidate is not sent to the reconciliation call
+    (captured payload) and stays `new`; a `private` existing fact with
+    the same subject and predicate is not in the payload either;
+  - a `supersede` whose candidate `valid_from` is earlier than the
+    target's (an older episode extracted late) falls back to `new`,
+    counted `supersede_order`, with no `supersedes` link stored;
   - a validated `supersede` stores the target in the proposal's
     `supersedes` FK, and the digest's "supersedes" line names it;
   - approval of a supersede proposal through the digest action calls
@@ -1692,6 +1906,11 @@ yields at most 5 quoted reflection proposals.
 - `memory.eval_answer` writes one `ModelUsage` per case answered, with
   `eval_run_id`.
 - Budget refusal stops the run cleanly and records a partial result.
+- **Budget persistence (D9):** two runs in one month whose combined
+  spend crosses 5 USD stop the second at the cap (the eval DB keeps
+  `ModelUsage` between runs, and a run clears only case rows); after
+  the eval DB is dropped and recreated, a run still refuses to start
+  over the cap because the result files' `spend_usd` sum is used.
 - No real LLM: FakeAdapter answers keyed by case id.
 
 **Done when:** `memory_eval baseline --set public` prints a metrics table
@@ -1703,7 +1922,9 @@ in CI, and the same command with `--set private` is ready for the owner.
 - D8: the generated `search` columns and GIN indexes on `Memory`,
   `MemoryFact` and `KnowledgeChunk` (raw-SQL migrations, reversible);
 - `build_vector_indexes` (plus the `post_migrate` hook and the fact and
-  memory embedding jobs reusing the `Memory` lease pattern);
+  memory embedding jobs reusing the `Memory` lease pattern; the fact
+  job embeds only `approved` `learned` current facts, never `system`
+  ones, D8);
 - `memory/retrieval/hybrid.py`;
 - the `MEMORY_RETRIEVAL_MODE` switch in `assistant/context.py`;
 - the `<memory_fact>` block;
@@ -1758,11 +1979,28 @@ in CI, and the same command with `--set private` is ready for the owner.
 - **Budget:** facts and memories share 4000 characters.
 - **Safety:**
   - `private` facts are never injected;
-  - fence neutralisation of a fact containing `</memory_fact>`.
+  - fence neutralisation of a fact containing `</memory_fact>`;
+  - **no Graphify fact in the memory block:** with a Graphify import in
+    the workspace whose `system` fact statement equals the query text,
+    the `<memory_fact>` block (captured payload) never contains an
+    `origin=graphify` fact, the candidate SQL never selects
+    `status='system'` rows, and hop expansion from a learned fact
+    sharing an entity with a code edge never adds that edge;
+  - **no embedding of `system` facts:** importing the branch-5 fixture
+    graph (or a factory batch of `system` facts) then running the fact
+    embedding job makes zero gateway embed calls and zero `ModelUsage`
+    rows, and every `system` fact keeps `embedding IS NULL`;
+  - **private hop and lookup:** a `private` fact one hop from a
+    retrieved fact never appears in the payload; `memory_graph_lookup`
+    over an entity with one normal and one `private` fact returns only
+    the normal one, and for an entity that `entity_is_private` it
+    answers "not found" (captured payload contains neither the fact
+    text nor the entity name).
 - **Flag:** `legacy` behaviour is byte-identical to today (golden
   prompt).
 - **Read tool:** role × channel (web only), `for_actor()`, audited,
-  fenced, `as_of` behaviour.
+  fenced, `as_of` behaviour, `system` facts included (code questions),
+  `private` facts excluded.
 - **Eval:** `compare --retrieval hybrid` on the public set runs and
   reports both arms.
 
@@ -1830,6 +2068,12 @@ window, and the public eval set reports hybrid and legacy side by side.
   - an unknown top-level key or a missing field gives a refusal with
     nothing replaced;
   - an oversize graph refused;
+  - **hostile `/out`:** `graph.json` as a symlink to a host file (a
+    temp file holding a canary), a FIFO, a directory, and a regular
+    file over 20 MB are each refused **before any read** (the canary
+    never appears in any row, log or error; a spy on `read` sees no
+    call for the oversize case), and the run fails with nothing
+    replaced;
   - a label carrying a fake key is scrubbed;
   - a label shaped like a fence tag is neutralised when rendered.
 - **Temporal replace:** for two successive fixture snapshots, kept
@@ -1985,7 +2229,15 @@ export tests use).
 - **Entity notes:**
   - current and superseded facts are rendered;
   - wiki-links resolve to notes of the same workspace only;
-  - private entities go to `_private/`;
+  - **private entities** (D4's derived rule): an entity whose only
+    live facts are `private` gets its note under
+    `_private/<ws>/Entities/` and a scan of every file outside
+    `_private/` finds neither its name nor its facts' text; an entity
+    with mixed facts gets an open note with only the normal facts and
+    a `_private/` companion with the private ones; an open note never
+    wiki-links a private entity; forgetting an entity's last normal
+    fact moves its note to `_private/` on the next run (the open note
+    pruned);
   - a trashed entity's note is pruned;
   - `code_*` entities are not mirrored.
 - **Vault mapping** (in `test_ingestion.py`):
@@ -2009,6 +2261,12 @@ export tests use).
   - re-running is idempotent (dedupe);
   - a 70 KB note skipped and counted;
   - a private frontmatter note gives a `private` episode;
+  - **provider class (D12):** the `obsidian_inbox` source has
+    `is_personal_class == False`; a normal Inbox episode is extracted
+    with `personal_data=False` (captured on FakeAdapter, a cloud
+    provider allowed); a `sensitivity: private` note's episode is
+    extracted with `personal_data=True` and, with a cloud-only provider
+    set, fails `NoProviderAvailable` with no candidates;
   - a secret in a note is scrubbed before storage;
   - the move failing after commit causes no duplicate on the next run.
 - **Gate:** all of this happens only inside an approved run. A direct
@@ -2274,9 +2532,9 @@ Mac and private-data rows pending owner evaluation.
 
 | # | Branch | Scope | Depends on | Status |
 |---|---|---|---|---|
-| brief | `docs/p8b-brief` | This brief (full, from the stub), MASTER_PLAN §AA row 8B Brief/Status | Phase 8A closeout; Phase 9 brief | **implemented 2026-11-20** (docs only; pins verified 2026-11-21 against PyPI and the official repos; review round 1 findings fixed 2026-11-21; review round 2 findings fixed 2026-11-21; awaits the Sonnet 5 re-review) |
+| brief | `docs/p8b-brief` | This brief (full, from the stub), MASTER_PLAN §AA row 8B Brief/Status | Phase 8A closeout; Phase 9 brief | **implemented 2026-11-20** (docs only; pins verified 2026-11-21 against PyPI and the official repos; review round 1 findings fixed 2026-11-21; review round 2 findings fixed 2026-11-21; review round 3 findings fixed 2026-11-21; awaits the Sonnet 5 re-review) |
 | 1 | `feat/p8-temporal-facts` | `MemoryEntity`/`MemoryFact`, validity windows, supersede, recursive-CTE traversal, owner API, forget/trash/purge cascade, `memory.graph` contract | brief approved | not started |
-| 2 | `feat/p8-fact-learning` | Extraction schema v2 with facts, entity-in-quote rule, reconciliation, weekly reflection, caps, digest fact items | 1 | not started |
+| 2 | `feat/p8-fact-learning` | Episode extraction schema v1 → v2 with facts (chat extraction unchanged at v2), inherited fact sensitivity, entity-in-quote rule, reconciliation, weekly reflection, caps, digest fact items | 1 | not started |
 | 3 | `feat/p8-eval-set` | Eval harness, public seed, private loader, `memory_eval`, `memory.eval_answer` purpose, CI public run | 1 (parallel with 2) | not started |
 | 4 | `feat/p8-hybrid-retrieval` | `tsvector` + GIN, per-provider HNSW expression indexes, RRF + decay + hops, flag, `<memory_fact>` block, `memory_graph_lookup` | 1, 3 | not started |
 | 5 | `feat/p8-graphify-job` | Hash-pinned image, `--network none` runner primitive, trigger, importer + temporal replace, `self` codebase line, manifest | 1 (parallel with 2–4) | not started |
@@ -2423,6 +2681,9 @@ can start once branches 1–10 are green.
     is on local providers and costs nothing);
   - `sessions.summarize` (D13);
   - auto-approval of facts or bulk approval of non-`work_log` items;
+  - fact candidates from chat extraction (`friday_memory_extraction`
+    stays at schema v2 without `fact`, D4; a later phase may add a v3);
+  - `system` (Graphify) facts in hybrid retrieval or embeddings (D8);
   - voice approval of anything (ADR-015);
   - an LLM judge in the eval;
   - committing private eval cases or any real transcript.
@@ -2483,8 +2744,14 @@ non-owner member.
   - assistant, tool or injected text stored as a transcript owner turn;
   - a raw corpus secret in any row, log, gateway payload, node result
     frame or vault file;
-  - a transcript or inbox episode extracted without `personal_data=True`
-    where personal-class applies;
+  - a transcript episode, or a `private` (Inbox or other) episode,
+    extracted without `personal_data=True` (a normal Inbox note is not
+    personal-class, D12);
+  - a `private` fact or the name of a private entity in any model
+    payload (the memory block, hop expansion, `memory_graph_lookup`) or
+    in an open-tree vault file;
+  - an `origin=graphify` fact in the `<memory_fact>` block, or an embed
+    call for a `system` fact;
   - more than 10 proposals in a night, 6 fact proposals in a night or 3
     core-block proposals in a week.
 - **Gateway and dependencies:**
@@ -2652,3 +2919,22 @@ the Phase 8A go/no-go") is restated here as steps:
    - eval setup rows under the chat eligibility rules, with the
      `sensitivity: private` case flag (D9). The owner flags every
      private case built from firm or personal data.
+7. Review round 3 fixes (2026-11-21), to confirm with the plan review:
+   - Graphify `system` facts are never embedded and never take part in
+     `retrieve()` or its hop expansion; they reach a model only through
+     `memory_graph_lookup` and the deterministic `self` line (Boundary,
+     D2, D8);
+   - fact sensitivity is inherited from the cited episode, entity
+     privacy is derived ("no live non-`private` fact"), and the lookup
+     tool, hop expansion and the vault mirror exclude private facts and
+     entities from model payloads and the open tree (D4, D8, D12);
+   - the supersede-order rule (409 `supersede_order`, reconciliation
+     falls back to `new`) (D2, D4);
+   - chat fact extraction is dropped from 8B: only the episode parser
+     moves v1 → v2, the chat parser stays at v2 (D4, branch 2);
+   - the `obsidian_inbox` source is not personal-class; only
+     `sensitivity: private` notes go to local providers (D12). The
+     owner flags sensitive Inbox notes `private`;
+   - the hostile-`/out` read (`O_NOFOLLOW`, regular file, size before
+     read) and the persistent eval DB plus result-file spend sum for the
+     `learning_eval` cap (D9, D10).
