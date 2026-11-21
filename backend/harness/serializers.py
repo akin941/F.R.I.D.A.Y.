@@ -106,6 +106,8 @@ class HarnessRepoSerializer(serializers.ModelSerializer):
             "enabled",
             "sensitive",
             "test_command",
+            "graphify_enabled",
+            "last_graphify_sha",
             "self_repo_status",
             "created_at",
             "updated_at",
@@ -175,6 +177,8 @@ class HarnessRepoEditSerializer(serializers.Serializer):
     test_command = serializers.CharField(
         max_length=_MAX_TEST_COMMAND_CHARS, required=False, allow_blank=True
     )
+    # Phase 8B branch 5 (brief D10): the Graphify code-graph job switch.
+    graphify_enabled = serializers.BooleanField(required=False)
 
     def validate_name(self, value):
         if not value.strip():

@@ -29,6 +29,7 @@ from core.channels import CHANNEL_SYSTEM
 from core.repo_identity import is_self_repo
 from harness import ingestion, policy
 from harness.models import HarnessImplementationJob, HarnessJob, HarnessRepo, HarnessReview
+from memory.graph import ports as graph_ports
 from memory.models import Memory
 from workspaces.models import WorkspaceMember
 
@@ -44,6 +45,9 @@ EDITABLE_FIELDS = (
     "enabled",
     "sensitive",
     "test_command",
+    # Phase 8B branch 5 (brief D7, D10): turning it off retires the repo's
+    # Graphify rows in the same transaction (`edit_repo`).
+    "graphify_enabled",
 )
 
 # Agent selection (Phase 5 D11): `settings.HARNESS_AGENT_POLICY`, read
@@ -169,6 +173,21 @@ def edit_repo(*, repo, actor, **fields):
         return repo
     repo.save(update_fields=[*changed, "updated_at"])
     _record(repo, "harness.repo_updated", actor, fields_changed=sorted(changed))
+    if "graphify_enabled" in changed and not repo.graphify_enabled:
+        # D7: close every current `system` fact of the repo and hide its
+        # entities -- nothing is deleted; a permanent removal is the
+        # gate-class `purge_trash` (`graphify_repo_ids`). Re-enabling
+        # re-imports on the next default-branch head.
+        counts = graph_ports.retire_code_graph(
+            workspace=repo.workspace, repo_ref=str(repo.pk), actor=actor
+        )
+        _record(
+            repo,
+            "harness.graphify_retired",
+            actor,
+            facts_closed=counts["facts_closed"],
+            entities_hidden=counts["entities_hidden"],
+        )
     return repo
 
 

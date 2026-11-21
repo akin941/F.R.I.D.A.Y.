@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "friday:harness/graphify_schema_v1",
+  "title": "Graphify graph.json as written by `graphify update --no-cluster` (graphifyy 0.9.103)",
+  "description": "Pinned from the observed output of the pinned version (brief D10). Any unknown top-level key or a missing required field is a refusal. Node and link objects may carry further optional keys (for example `metadata`, `node_kind`, `_py_fixture`, `confidence_score`); the importer ignores them and never stores them.",
+  "type": "object",
+  "required": ["nodes", "links", "hyperedges", "directed", "multigraph", "input_tokens", "output_tokens"],
+  "additionalProperties": false,
+  "properties": {
+    "directed": {"type": "boolean"},
+    "multigraph": {"type": "boolean"},
+    "input_tokens": {"type": "integer", "minimum": 0},
+    "output_tokens": {"type": "integer", "minimum": 0},
+    "hyperedges": {"type": "array", "maxItems": 100000},
+    "nodes": {
+      "type": "array",
+      "maxItems": 200000,
+      "items": {
+        "type": "object",
+        "required": ["id", "label", "file_type"],
+        "additionalProperties": true,
+        "properties": {
+          "id": {"type": "string", "minLength": 1, "maxLength": 512},
+          "label": {"type": "string", "maxLength": 2048},
+          "file_type": {"type": "string", "maxLength": 64},
+          "source_file": {"type": "string", "maxLength": 4096},
+          "source_location": {"type": ["string", "null"], "maxLength": 64},
+          "type": {"type": "string", "maxLength": 64},
+          "external": {"type": "boolean"},
+          "_origin": {"type": "string", "maxLength": 32},
+          "_callable": {"type": "boolean"},
+          "_callable_class": {"type": "boolean"}
+        }
+      }
+    },
+    "links": {
+      "type": "array",
+      "maxItems": 600000,
+      "items": {
+        "type": "object",
+        "required": ["source", "target", "relation", "confidence", "_origin"],
+        "additionalProperties": true,
+        "properties": {
+          "source": {"type": "string", "minLength": 1, "maxLength": 512},
+          "target": {"type": "string", "minLength": 1, "maxLength": 512},
+          "relation": {"type": "string", "maxLength": 64},
+          "confidence": {"type": "string", "maxLength": 32},
+          "context": {"type": ["string", "null"], "maxLength": 256},
+          "source_file": {"type": "string", "maxLength": 4096},
+          "source_location": {"type": ["string", "null"], "maxLength": 64},
+          "weight": {"type": "number"},
+          "_origin": {"type": "string", "maxLength": 32}
+        }
+      }
+    }
+  }
+}

@@ -1038,6 +1038,118 @@ def launch_implementation_container(
     return result.stdout.strip()
 
 
+def launch_graphify_container(*, image, clone_dir, out_dir, name):
+    """Phase 8B branch 5 (brief D10): the Graphify AST-only container,
+    started **detached** like `launch_container`. It keeps every
+    `launch_container` policy (argv only, `--pull never`, `--cap-drop ALL`,
+    `no-new-privileges`, `--user {host_uid}:{host_gid}`, the resource caps,
+    a deterministic `name` persisted before the call) and adds:
+
+    - **`--network none`** -- never `HARNESS_DOCKER_NETWORK`: Graphify
+      makes no model call (`GRAPHIFY_BACKEND=none`, set in the image) and
+      needs no network at all;
+    - `--read-only` with size-capped, `noexec` tmpfs mounts for `/work`
+      (the repo copy and Graphify's output) and `/tmp`;
+    - `clone_dir` bind-mounted read-only at `/repo`, and `out_dir` at
+      `/out` as the **only** writable bind. The host reads `/out` as
+      hostile (`harness.safe_read`).
+
+    No env file and no credentials of any kind: the image's own `ENV`
+    carries the two non-secret Graphify switches. Returns the container
+    id."""
+    tmpfs_size = settings.HARNESS_GRAPHIFY_TMPFS_SIZE
+    argv = [
+        "docker",
+        "run",
+        "--detach",
+        "--pull",
+        "never",
+        "--cap-drop",
+        "ALL",
+        "--security-opt",
+        "no-new-privileges",
+        "--user",
+        f"{os.getuid()}:{os.getgid()}",
+        "--name",
+        name,
+        "--network",
+        "none",
+        "--read-only",
+        "--tmpfs",
+        f"/work:rw,noexec,nosuid,nodev,size={tmpfs_size},mode=1777",
+        "--tmpfs",
+        "/tmp:rw,noexec,nosuid,nodev,size=64m,mode=1777",
+        "--memory",
+        settings.HARNESS_CONTAINER_MEMORY,
+        "--cpus",
+        settings.HARNESS_CONTAINER_CPUS,
+        "--pids-limit",
+        str(settings.HARNESS_CONTAINER_PIDS_LIMIT),
+        "--mount",
+        f"type=bind,source={clone_dir},target=/repo,readonly",
+        "--mount",
+        f"type=bind,source={out_dir},target=/out",
+        "--workdir",
+        "/work",
+        image,
+    ]
+    try:
+        result = subprocess.run(
+            argv,
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=_CONTAINER_LAUNCH_TIMEOUT_SECONDS,
+        )
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
+        raise _launch_failure(exc, "graphify container launch") from exc
+    return result.stdout.strip()
+
+
+def head_commit(directory):
+    """The checked-out `HEAD` of a clone: `(sha, committer date as an ISO
+    8601 string)`. Raises `RunnerError` on any failure (Phase 8B branch 5:
+    a Graphify run imports exactly the head it cloned)."""
+    try:
+        result = subprocess.run(
+            ["git", "-C", directory, "log", "-1", "--format=%H%n%cI", "HEAD"],
+            capture_output=True,
+            text=True,
+            env={**os.environ, **_ISOLATED_GIT_ENV},
+            timeout=_GIT_PLUMBING_TIMEOUT_SECONDS,
+        )
+    except (subprocess.TimeoutExpired, OSError) as exc:
+        raise RunnerError(f"git log -1 failed: {type(exc).__name__}") from exc
+    lines = (result.stdout or "").split("\n")
+    if result.returncode != 0 or len(lines) < 2 or not _SHA_RE.match(lines[0].strip()):
+        raise RunnerError("git log -1 failed")
+    return lines[0].strip(), lines[1].strip()
+
+
+def remote_head(*, git_url, branch, clone_env=None):
+    """The sha `branch` points at on the remote (`git ls-remote`, no clone,
+    no content). Used by the Graphify trigger while the git ingestion
+    source is paused (its commit read is then skipped). Returns `""` when
+    the branch does not exist; raises `RunnerError` otherwise."""
+    try:
+        result = subprocess.run(
+            ["git", "ls-remote", "--heads", "--", git_url, f"refs/heads/{branch}"],
+            capture_output=True,
+            text=True,
+            env={**os.environ, **(clone_env or {})},
+            timeout=_GIT_FETCH_TIMEOUT_SECONDS,
+        )
+    except (subprocess.TimeoutExpired, OSError) as exc:
+        raise RunnerError(f"git ls-remote failed: {type(exc).__name__}") from exc
+    if result.returncode != 0:
+        raise RunnerError("git ls-remote failed")
+    for line in (result.stdout or "").splitlines():
+        sha, _, ref = line.partition("\t")
+        if ref.strip() == f"refs/heads/{branch}" and _SHA_RE.match(sha.strip()):
+            return sha.strip()
+    return ""
+
+
 def capture_logs(container_id):
     """Whatever the container has emitted so far -- always safe to call,
     running or already exited."""
