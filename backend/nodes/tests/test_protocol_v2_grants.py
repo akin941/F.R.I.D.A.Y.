@@ -9,7 +9,7 @@ import json
 
 import pytest
 
-from nodes.protocol import validate
+from nodes.protocol import ProtocolError, validate
 from nodes.protocol.canonical import canonicalize
 from nodes.protocol.grants import (
     SHARED_FIELDS,
@@ -277,9 +277,9 @@ def test_a_malformed_grant_is_never_signed():
         issued_at=1_800_000_000,
         expires_at=1_800_000_090,
     )
-    with pytest.raises(Exception) as exc:
+    with pytest.raises(ProtocolError) as exc:
         sign_grant(grant, PINNED)
-    assert getattr(exc.value, "code", None) == "schema"
+    assert exc.value.code == "schema"
 
 
 # --- binding ---
