@@ -550,3 +550,117 @@ def test_episode_for_actor_isolation(owner, hooks, personal, firm):
         "personal",
         "firm",
     }
+
+
+# --- vault mapping (Phase 8B branch 7, brief D12) -----------------------------
+
+VAULT = WorkspaceMappingRule.RuleType.VAULT_PREFIX
+
+
+@pytest.fixture
+def inbox(sources):
+    source = sources[IngestionSource.Kind.OBSIDIAN_INBOX]
+    source.enabled = True
+    source.save()
+    return source
+
+
+def test_inbox_source_is_seeded_disabled_and_not_personal_class(sources):
+    source = sources[IngestionSource.Kind.OBSIDIAN_INBOX]
+    assert source.enabled is False
+    assert source.is_personal_class is False
+
+
+def test_vault_longest_prefix_wins(inbox, personal, firm):
+    add_rule(inbox, VAULT, "00_Inbox", personal)
+    add_rule(inbox, VAULT, "00_Inbox/work", firm)
+    assert resolve_workspace(inbox, "vault:00_Inbox/work/sub") == firm
+    assert resolve_workspace(inbox, "vault:00_Inbox/work") == firm
+    assert resolve_workspace(inbox, "vault:00_Inbox") == personal
+    assert resolve_workspace(inbox, "vault:00_Inbox/home") == personal
+
+
+def test_vault_prefix_respects_the_segment_boundary(inbox, firm):
+    add_rule(inbox, VAULT, "00_Inbox/work", firm)
+    assert resolve_workspace(inbox, "vault:00_Inbox/workshop") is None
+    assert resolve_workspace(inbox, "vault:00_Inbox/work/") == firm
+
+
+ESCAPING_VAULT_PATHS = [
+    "00_Inbox/../03_Workspaces",
+    "00_Inbox/a/../../x",
+    "/abs/00_Inbox",
+    "~/00_Inbox",
+    "03_Workspaces",
+    "00_Inboxes/x",
+    "00_Inbox\\work",
+    "00_Inbox/\x00x",
+    "",
+]
+
+
+@pytest.mark.parametrize("raw", ESCAPING_VAULT_PATHS)
+def test_escaping_vault_keys_are_unmapped(inbox, personal, raw):
+    add_rule(inbox, VAULT, "00_Inbox", personal)
+    assert resolve_workspace(inbox, f"vault:{raw}") is None
+
+
+@pytest.mark.parametrize("raw", ESCAPING_VAULT_PATHS)
+def test_escaping_vault_patterns_are_refused_at_rule_write(owner, inbox, personal, raw):
+    with pytest.raises(services.IngestionInvalid):
+        services.create_mapping_rule(
+            inbox,
+            actor=owner,
+            channel=CHANNEL_WEB,
+            rule_type=VAULT,
+            pattern=raw,
+            target_workspace=personal,
+        )
+    assert not WorkspaceMappingRule.objects.filter(source=inbox).exists()
+
+
+def test_normalise_vault_path():
+    from memory.ingestion.mapping import normalise_vault_path
+
+    assert normalise_vault_path("00_Inbox/work/") == "00_Inbox/work"
+    assert normalise_vault_path("00_Inbox//work/./sub") == "00_Inbox/work/sub"
+    assert normalise_vault_path("00_Inbox/a/../b") == "00_Inbox/b"
+
+
+def test_vault_rule_only_on_the_inbox_source_and_only_vault_rules_there(
+    owner, hooks, inbox, personal
+):
+    with pytest.raises(services.IngestionInvalid):
+        services.create_mapping_rule(
+            hooks,
+            actor=owner,
+            channel=CHANNEL_WEB,
+            rule_type=VAULT,
+            pattern="00_Inbox/work",
+            target_workspace=personal,
+        )
+    for rule_type, pattern in ((PATH, "/Users/o"), (REPO, "42"), (CAL, "b1")):
+        with pytest.raises(services.IngestionInvalid):
+            services.create_mapping_rule(
+                inbox,
+                actor=owner,
+                channel=CHANNEL_WEB,
+                rule_type=rule_type,
+                pattern=pattern,
+                target_workspace=personal,
+            )
+    rule = services.create_mapping_rule(
+        inbox,
+        actor=owner,
+        channel=CHANNEL_WEB,
+        rule_type=VAULT,
+        pattern="00_Inbox/work/",
+        target_workspace=personal,
+    )
+    assert rule.pattern == "00_Inbox/work"
+
+
+def test_a_vault_key_never_matches_a_path_rule(hooks, inbox, personal):
+    add_rule(hooks, PATH, "/", personal)
+    assert resolve_workspace(hooks, "vault:00_Inbox") is None
+    assert resolve_workspace(inbox, "path:/x") is None

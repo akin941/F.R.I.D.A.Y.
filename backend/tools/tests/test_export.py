@@ -13,8 +13,8 @@ from audit.models import AuditLog
 from core.channels import CHANNEL_WEB
 from memory.models import Memory
 from tools import export
-from tools.tests.vault_helpers import claimed_run, export_in_run
 from tools.models import VaultExportRun
+from tools.tests.vault_helpers import claimed_run, export_in_run
 from tools.vault_paths import VaultPathEscapeError
 from workspaces.models import Workspace
 
