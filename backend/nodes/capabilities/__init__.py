@@ -106,8 +106,57 @@ _ACTION_CONTRACT_KEYS = _CONTRACT_KEYS | {
 _RECIPE_KEYS = frozenset(
     {"name", "version", "label", "description", "params_schema", "confirm_template"}
 )
+# The one "printable, no format or invisible characters" class (Phase 10
+# D3, review round 1). Every user-visible free string an action contract or
+# recipe accepts (`text`, `title`, `repo_path`) is a negated character class
+# that must contain exactly this body (after its own C0 exclusion, and for
+# paths its shell metacharacters), so the fields cannot drift apart. The
+# owner reads these values in the node's confirm sentence: anything they
+# cannot see could be typed or used while the owner approves only the
+# visible text. Excluded: C1 controls and DEL; every Cf (format) code point
+# of Unicode 15 (soft hyphen, Arabic/Syriac marks, bidi, zero-width,
+# U+2060-206F, BOM, interlinear annotation, Kaithi/Egyptian/shorthand/
+# musical format controls, tag characters); Zl/Zp; Cs (surrogates); Co
+# (private use, all planes); noncharacters; blank or invisible glyphs of
+# other categories (U+034F CGJ, Hangul fillers U+115F-1160/U+3164/U+FFA0,
+# Khmer U+17B4-17B5, Mongolian FVS U+180B-180F, Braille blank U+2800,
+# variation selectors U+FE00-FE0F and U+E0100-E01EF); U+FFF0-FFF8; and
+# planes 4-16 wholesale (no visible character is assigned there). Scattered
+# unassigned (Cn) code points of planes 0-3 stay allowed: macOS renders them
+# as visible Last Resort glyphs, and enumerating them (~700 ranges) would
+# pin the class to one Unicode version. The class is plain code-point ranges
+# (`\uXXXX`/`\UXXXXXXXX`, the same syntax in Python `re` and ICU), so the
+# Swift node applies the identical set whatever its Unicode version.
+INVISIBLE_CHARACTER_CLASS = (
+    r"\x7f-\x9f\xad\u034f\u0600-\u0605\u061c\u06dd\u070f\u0890-\u0891\u08e2"
+    r"\u115f-\u1160\u17b4-\u17b5\u180b-\u180f\u200b-\u200f\u2028-\u202e"
+    r"\u2060-\u206f\u2800\u3164\ud800-\udfff\ue000-\uf8ff\ufdd0-\ufdef"
+    r"\ufe00-\ufe0f\ufeff\uffa0\ufff0-\ufffb\ufffe-\uffff"
+    r"\U000110bd\U000110cd\U00013430-\U0001343f\U0001bca0-\U0001bca3"
+    r"\U0001d173-\U0001d17a\U0001fffe-\U0001ffff\U0002fffe-\U0002ffff"
+    r"\U0003fffe-\U0003ffff\U00040000-\U0010ffff"
+)
 _NAME = re.compile(r"[a-z][a-z0-9_]{0,31}(\.[a-z][a-z0-9_]{0,31}){1,3}")
 _SLOT = re.compile(r"\{([a-z][a-z0-9_]{0,31})\}")
+
+
+def free_string_properties(schema) -> dict:
+    """`{name: subschema}` of the free-text string properties of a closed
+    object schema: those whose pattern is a negated character class
+    (`[^...]`). Enum- and allow-list-patterned strings are not free text."""
+    return {
+        name: sub
+        for name, sub in (schema.get("properties") or {}).items()
+        if sub.get("type") == "string" and "[^" in sub.get("pattern", "")
+    }
+
+
+def _check_free_strings(path: Path, schema) -> None:
+    for name, sub in free_string_properties(schema).items():
+        if INVISIBLE_CHARACTER_CLASS not in sub["pattern"]:
+            raise ValueError(
+                f"{path.name}: {name} must exclude the shared invisible character class"
+            )
 
 
 def template_slots(template: str) -> tuple:
@@ -264,6 +313,7 @@ def _load_recipe(path: Path) -> RecipeContract:
     schema = body["params_schema"]
     if schema.get("type") != "object" or schema.get("additionalProperties") is not False:
         raise ValueError(f"{path.name}: params_schema must be a closed object")
+    _check_free_strings(path, schema)
     slots = template_slots(body["confirm_template"])
     if not set(slots) <= set(schema.get("properties") or {}):
         raise ValueError(f"{path.name}: confirm_template names a param that does not exist")
@@ -311,6 +361,7 @@ def _load_action(path: Path) -> CapabilityContract:
         raise ValueError(f"{path.name}: streams_output must be a boolean")
     if not isinstance(body["label"], str) or not body["label"]:
         raise ValueError(f"{path.name}: empty label")
+    _check_free_strings(path, body["args_schema"])
     args_properties = set(body["args_schema"].get("properties") or {})
     if not set(template_slots(body["confirm_template"])) <= args_properties:
         raise ValueError(f"{path.name}: confirm_template names an arg that does not exist")
@@ -387,6 +438,24 @@ def get_action_contract(name):
 
 def get_any_contract(name):
     return load_all_contracts().get(name)
+
+
+def check_gate_request(capability, capability_version, args, *, code="args_contract"):
+    """The server-side contract check a caller must run before
+    `nodes.protocol.grants.build_gated_invoke` signs a grant (review round
+    1): `capability` is a known gate-class action contract of exactly
+    `capability_version` and `args` match its `args_schema` (and, for a
+    recipe, the recipe's own params). Raises ProtocolError(code); returns
+    the contract."""
+    contract = get_action_contract(capability)
+    if contract is None:
+        raise ProtocolError(code, "unknown capability")
+    if contract.capability_class != "gate":
+        raise ProtocolError(code, "not a gate-class capability")
+    if isinstance(capability_version, bool) or capability_version != contract.version:
+        raise ProtocolError(code, "capability version mismatch")
+    contract.validate_args(args, code=code)
+    return contract
 
 
 def _schema_hash(schema):

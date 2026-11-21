@@ -10,11 +10,15 @@ unknown recipes and recipe params outside the recipe's schema."""
 
 import copy
 import json
+import re
+import unicodedata
+from functools import cache
 
 import pytest
 
 from nodes.capabilities import (
     ACTION_CONTRACT_DIR,
+    INVISIBLE_CHARACTER_CLASS,
     MAX_RUNTIME_SECONDS,
     NOT_INVOCABLE_REASONS,
     RECIPE_CATALOGUE_KEYWORD,
@@ -22,6 +26,8 @@ from nodes.capabilities import (
     _load_action,
     _load_recipe,
     check_catalogue_entry,
+    check_gate_request,
+    free_string_properties,
     get_action_contract,
     get_any_contract,
     get_contract,
@@ -322,7 +328,37 @@ HOSTILE_INSERTS = {
     "mongolian_vowel_separator": "᠎",
     "bom": "﻿",
     "line_separator": " ",
-    "paragraph_separator": " ",
+    "paragraph_separator": "\u2029",
+    # Review round 1: every other format or invisible code point.
+    "soft_hyphen": "\xad",
+    "combining_grapheme_joiner": "\u034f",
+    "arabic_number_sign": "\u0600",
+    "syriac_abbreviation_mark": "\u070f",
+    "hangul_choseong_filler": "\u115f",
+    "khmer_inherent_aq": "\u17b4",
+    "mongolian_fvs1": "\u180b",
+    "inhibit_symmetric_swapping": "\u206a",
+    "nominal_digit_shapes": "\u206f",
+    "braille_blank": "\u2800",
+    "hangul_filler": "\u3164",
+    "surrogate": "\ud800",
+    "private_use": "\ue000",
+    "noncharacter_fdd0": "\ufdd0",
+    "variation_selector_16": "\ufe0f",
+    "halfwidth_hangul_filler": "\uffa0",
+    "interlinear_anchor": "\ufff9",
+    "interlinear_terminator": "\ufffb",
+    "noncharacter_ffff": "\uffff",
+    "kaithi_number_sign": "\U000110bd",
+    "egyptian_joiner": "\U00013430",
+    "shorthand_format": "\U0001bca0",
+    "musical_begin_beam": "\U0001d173",
+    "language_tag": "\U000e0001",
+    "tag_latin_a": "\U000e0041",
+    "cancel_tag": "\U000e007f",
+    "variation_selector_17": "\U000e0100",
+    "supplementary_private_use": "\U000f0000",
+    "unassigned_plane_4": "\U00040000",
 }
 TYPE_CONFUSION = {"int": 1, "bool": True, "null": None, "list": ["x"], "object": {"x": "y"}}
 TRAVERSAL = [
@@ -337,6 +373,9 @@ TRAVERSAL = [
     "/",
     "~/work//double",
     "\\\\server\\share",
+    "~/work/...",
+    "~/.../work",
+    "/..../etc",
 ]
 SHELL_METACHARACTERS = [
     ";",
@@ -551,3 +590,153 @@ def test_the_args_hash_covers_the_recipe_params():
     a = {"recipe": "system.volume_set", "params": {"level": 10}}
     b = {"recipe": "system.volume_set", "params": {"level": 11}}
     assert sha256_hex(a) != sha256_hex(b)
+
+
+# --- review round 1: one invisible-character class for every free string ---
+
+VISIBLE_SAMPLES = ["Merhaba dünya ğüşıöçİ", "Yeniden Yükle", "终端 ターミナル", "😀 ok", "a b"]
+WALKED_CATEGORIES = ("Cc", "Cf", "Co", "Cs", "Zl", "Zp")
+
+
+def _free_string_patterns():
+    """(owner, property, pattern) for every user-visible free string of
+    every action contract and recipe (the negated-class strings)."""
+    out = []
+    for name, contract in sorted(load_action_contracts().items()):
+        for prop, sub in free_string_properties(contract.args_schema).items():
+            out.append((name, prop, sub["pattern"]))
+    for name, recipe in sorted(load_recipes().items()):
+        for prop, sub in free_string_properties(recipe.params_schema).items():
+            out.append((f"recipe:{name}", prop, sub["pattern"]))
+    return out
+
+
+def _sample(prop, insert):
+    return f"~/work/a{insert}b" if prop in PATH_PROPERTIES else f"ab{insert}cd"
+
+
+@cache
+def _code_points_by_category():
+    by_category = {}
+    for cp in range(0x110000):
+        by_category.setdefault(unicodedata.category(chr(cp)), []).append(cp)
+    return by_category
+
+
+def test_the_free_strings_are_exactly_text_title_and_repo_path():
+    found = {(owner, prop) for owner, prop, _ in _free_string_patterns()}
+    assert found == {
+        ("ax.type_text", "text"),
+        ("ax.press", "title"),
+        ("repo.command.run", "repo_path"),
+        ("recipe:finder.reveal_repo", "repo_path"),
+        ("recipe:terminal.open_repo", "repo_path"),
+    }
+    for _, _, pattern in _free_string_patterns():
+        assert INVISIBLE_CHARACTER_CLASS in pattern
+
+
+@pytest.mark.parametrize("category", WALKED_CATEGORIES)
+def test_every_free_string_refuses_every_code_point_of_the_invisible_categories(category):
+    code_points = _code_points_by_category()[category]
+    assert code_points
+    for owner, prop, pattern in _free_string_patterns():
+        compiled = re.compile(pattern)
+        allowed = [
+            hex(cp)
+            for cp in code_points
+            if not ((owner, prop) == ("ax.type_text", "text") and cp == 0x0A)
+            and compiled.fullmatch(_sample(prop, chr(cp)))
+        ]
+        assert not allowed, (owner, prop, category, allowed[:10])
+
+
+def test_unassigned_code_points_outside_planes_0_to_3_and_noncharacters_are_refused():
+    noncharacters = [cp for cp in range(0xFDD0, 0xFDF0)] + [
+        (plane << 16) | low for plane in range(17) for low in (0xFFFE, 0xFFFF)
+    ]
+    walked = [cp for cp in _code_points_by_category()["Cn"] if cp >= 0x40000] + noncharacters
+    for owner, prop, pattern in _free_string_patterns():
+        compiled = re.compile(pattern)
+        allowed = [hex(cp) for cp in walked if compiled.fullmatch(_sample(prop, chr(cp)))]
+        assert not allowed, (owner, prop, allowed[:10])
+
+
+def test_blank_glyphs_and_variation_selectors_are_refused_end_to_end():
+    blanks = [0x034F, 0x115F, 0x1160, 0x17B4, 0x17B5, 0x2800, 0x3164, 0xFFA0]
+    blanks += list(range(0x180B, 0x1810)) + list(range(0xFE00, 0xFE10))
+    blanks += list(range(0xE0100, 0xE01F0))
+    for cp in blanks:
+        with pytest.raises(ProtocolError):
+            get_action_contract("ax.type_text").validate_args(
+                {**VALID_ARGS["ax.type_text"], "text": f"merhaba{chr(cp)}"}
+            )
+        with pytest.raises(ProtocolError):
+            get_action_contract("applescript.recipe.run").validate_args(
+                {"recipe": "terminal.open_repo", "params": {"repo_path": f"~/w{chr(cp)}"}}
+            )
+
+
+@pytest.mark.parametrize("sample", VISIBLE_SAMPLES)
+def test_visible_text_in_every_script_is_still_accepted(sample):
+    get_action_contract("ax.type_text").validate_args(
+        {**VALID_ARGS["ax.type_text"], "text": sample}
+    )
+    get_action_contract("ax.press").validate_args({**VALID_ARGS["ax.press"], "title": sample})
+    get_action_contract("repo.command.run").validate_args(
+        {"repo_path": f"~/work/{sample}", "command_kind": "test"}
+    )
+
+
+def test_the_loader_refuses_a_free_string_without_the_shared_class(tmp_path):
+    path = RECIPE_DIR / "finder.reveal_repo.json"
+    body = json.loads(path.read_text(encoding="utf-8"))
+    body["params_schema"]["properties"]["repo_path"]["pattern"] = "^[^\\x00-\\x1f]{1,255}$"
+    drifted = tmp_path / "finder.reveal_repo.json"
+    drifted.write_text(json.dumps(body), encoding="utf-8")
+    with pytest.raises(ValueError, match="shared invisible character class"):
+        _load_recipe(drifted)
+    path = ACTION_CONTRACT_DIR / "ax.press.json"
+    body = json.loads(path.read_text(encoding="utf-8"))
+    pattern = body["args_schema"]["properties"]["title"]["pattern"]
+    body["args_schema"]["properties"]["title"]["pattern"] = pattern.replace("\\xad", "")
+    drifted = tmp_path / "ax.press.json"
+    drifted.write_text(json.dumps(body), encoding="utf-8")
+    with pytest.raises(ValueError, match="shared invisible character class"):
+        _load_action(drifted)
+
+
+# --- review round 1: the contract check a grant issuer runs before signing ---
+
+
+def test_check_gate_request_accepts_every_gate_contract_with_valid_args():
+    for name in ("repo.command.run", "applescript.recipe.run", "ax.press", "ax.type_text"):
+        contract = get_action_contract(name)
+        assert check_gate_request(name, contract.version, VALID_ARGS[name]) is contract
+
+
+@pytest.mark.parametrize(
+    ("capability", "version", "args"),
+    [
+        ("shell.run", 1, {}),
+        (sorted(load_contracts())[0], 1, {}),
+        ("apps.open", 1, VALID_ARGS["apps.open"]),
+        ("apps.focus", 1, VALID_ARGS["apps.focus"]),
+        ("repo.command.run", 2, VALID_ARGS["repo.command.run"]),
+        ("repo.command.run", True, VALID_ARGS["repo.command.run"]),
+        ("repo.command.run", 1, {**VALID_ARGS["repo.command.run"], "command_kind": "deploy"}),
+        ("ax.type_text", 1, {**VALID_ARGS["ax.type_text"], "text": f"ok{chr(0xAD)}hidden"}),
+        ("applescript.recipe.run", 1, {"recipe": "system.volume_set", "params": {}}),
+    ],
+)
+def test_check_gate_request_refuses_what_a_grant_must_never_cover(capability, version, args):
+    with pytest.raises(ProtocolError) as exc:
+        check_gate_request(capability, version, args)
+    assert exc.value.code == "args_contract"
+
+
+def test_the_shared_gate_vector_passes_the_contract_check():
+    from nodes.tests.vectors_v2 import gated_envelope
+
+    envelope = gated_envelope()
+    check_gate_request(envelope["capability"], envelope["capability_version"], envelope["args"])

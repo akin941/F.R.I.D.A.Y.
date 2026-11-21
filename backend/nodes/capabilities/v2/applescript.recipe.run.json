@@ -37,7 +37,7 @@
         "maxProperties": 8
       }
     },
-    "x-friday-recipe-catalogue-sha256": "32c5d834b3bef6684fc9895f9dc9a39253fcd4c4584c96ac07f6b685960e86c7"
+    "x-friday-recipe-catalogue-sha256": "6d3d0b331c18411902e89b360074642daf3bcf4279d62a413fa51442a02f0640"
   },
   "result_schema": {
     "$schema": "https://json-schema.org/draft/2020-12/schema",

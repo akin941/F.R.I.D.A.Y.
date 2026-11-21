@@ -184,7 +184,17 @@ def build_gated_invoke(
     grant takes its shared fields from the envelope (one nonce, one
     expiry), is signed in the grant domain, embedded, and then the envelope
     is signed in the invoke/v2 domain. Raises GrantError("ttl_too_long")
-    above `MAX_GRANT_TTL_SECONDS`."""
+    above `MAX_GRANT_TTL_SECONDS`.
+
+    This builder is deliberately contract-agnostic: it signs whatever
+    capability and args it is given, because the compromised-server
+    conformance suite must be able to sign hostile grants (wrong class,
+    unknown capability, args outside the schema) to prove the node refuses
+    them. Checking the request against the server's own contract is the
+    **caller's duty**: every production caller (branch 3's grant issuer)
+    must call `nodes.capabilities.check_gate_request(capability,
+    capability_version, args)` first, which refuses an unknown capability,
+    a non-gate class, a version mismatch and args outside `args_schema`."""
     if isinstance(ttl_seconds, bool) or not isinstance(ttl_seconds, int):
         raise GrantError("ttl_too_long", "ttl_seconds must be an integer")
     if not 0 < ttl_seconds <= MAX_GRANT_TTL_SECONDS:
