@@ -21,7 +21,7 @@ returns the memories and facts a chat turn injects when
    `neighbourhood(hops=MEMORY_RETRIEVAL_HOPS)` with its model-path
    defaults (`include_system=False, include_private=False`); a reached
    fact enters at `seed score * 0.5 ** hop`, and a fact naming an entity
-   that `entity_is_private` is dropped.
+   that `entity_is_private` is dropped (`private_entity_ids`).
 6. Memories and facts share `MEMORY_CHAR_BUDGET` (4000).
 
 A `GatewayError` on the query embed degrades to full text only, never to
@@ -47,8 +47,8 @@ from memory.context import (
     MEMORY_CONTENT_MAX_CHARS,
     render_fact_line,
 )
-from memory.graph.selectors import entity_is_private, neighbourhood
-from memory.models import Memory, MemoryFact
+from memory.graph.selectors import neighbourhood
+from memory.models import Memory, MemoryEntity, MemoryFact
 from memory.retrieval.search import fulltext_ranked, vector_ranked
 
 MODE = "hybrid"
@@ -107,11 +107,7 @@ def fact_base(actor, workspace, as_of=None):
     scoped = MemoryFact.objects.for_actor(actor, workspace=workspace)
     if as_of is None:
         return scoped.model_eligible()
-    return scoped.as_of(as_of).filter(
-        status=MemoryFact.Status.APPROVED,
-        origin=MemoryFact.Origin.LEARNED,
-        sensitivity=MemoryFact.Sensitivity.NORMAL,
-    )
+    return scoped.model_eligible_as_of(as_of)
 
 
 def _embed(*, actor, workspace, query_text, personal_data):
@@ -174,24 +170,28 @@ def _decayed(score, row, kind, reference):
     return score * decay_factor(_age_days(row.valid_from, reference))
 
 
-def _fact_names_private_entity(fact, cache):
-    for entity in (fact.subject, fact.object_entity):
-        if entity is None:
-            continue
-        if entity.pk not in cache:
-            cache[entity.pk] = entity_is_private(entity)
-        if cache[entity.pk]:
-            return True
-    return False
+def private_entity_ids(workspace, entity_ids):
+    """The ids among `entity_ids` (of `workspace`) that `entity_is_private`
+    (D4), in one workspace-scoped query (`with_privacy()`, the queryset
+    form of the same predicate)."""
+    if not entity_ids:
+        return set()
+    workspace_id = getattr(workspace, "pk", workspace)
+    return set(
+        MemoryEntity.all_objects.filter(workspace_id=workspace_id, pk__in=list(entity_ids))
+        .with_privacy()
+        .filter(is_private=True)
+        .values_list("pk", flat=True)
+    )
 
 
 def expand_hops(seeds, *, workspace, hops, as_of, known):
     """`{fact_id: (fact, score)}` reached from `seeds` (`[(fact, score)]`)
-    within `hops`, at `seed score * 0.5 ** hop` (the best seed wins)."""
+    within `hops`, at `seed score * 0.5 ** hop` (the best seed wins). A
+    reached fact naming an entity that `entity_is_private` is dropped."""
     reached = {}
     if hops <= 0:
         return reached
-    privacy = {}
     for seed, seed_score in seeds:
         entity_ids = [pk for pk in (seed.subject_id, seed.object_entity_id) if pk]
         for fact in neighbourhood(entity_ids, workspace=workspace, hops=hops, as_of=as_of):
@@ -202,12 +202,16 @@ def expand_hops(seeds, *, workspace, hops, as_of, known):
                 or fact.origin != MemoryFact.Origin.LEARNED
             ):
                 continue  # the neighbourhood defaults already exclude these
-            if _fact_names_private_entity(fact, privacy):
-                continue
             score = seed_score * math.pow(HOP_DISCOUNT, fact.hop)
             if fact.pk not in reached or reached[fact.pk][1] < score:
                 reached[fact.pk] = (fact, score)
-    return reached
+    named = {pk for f, _ in reached.values() for pk in (f.subject_id, f.object_entity_id) if pk}
+    private = private_entity_ids(workspace, named)
+    return {
+        pk: (f, score)
+        for pk, (f, score) in reached.items()
+        if f.subject_id not in private and f.object_entity_id not in private
+    }
 
 
 def _memory_cost(memory):

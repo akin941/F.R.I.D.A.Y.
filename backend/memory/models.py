@@ -878,11 +878,28 @@ class MemoryFactQuerySet(WorkspaceScopedQuerySet):
         """The only sanctioned path by which MemoryFact rows may enter a
         gateway payload (D2 "retrievable facts", D8; the
         `Memory.objects.cloud_eligible()` parity): current, `approved`,
-        `learned`, non-`private`. `system` (Graphify) facts never qualify."""
-        return self.current().filter(
+        `learned`, non-`private`. `system` (Graphify) facts never qualify:
+        the SQL names `approved` only (branch 4 asserts it never names
+        `system`)."""
+        return self.filter(
             status=MemoryFact.Status.APPROVED,
             origin=MemoryFact.Origin.LEARNED,
             sensitivity=MemoryFact.Sensitivity.NORMAL,
+            valid_to__isnull=True,
+            deleted_at__isnull=True,
+        )
+
+    def model_eligible_as_of(self, when):
+        """`model_eligible()` as of `when` (D2 "facts as of T"): approved,
+        learned, non-`private`, `valid_from <= when < coalesce(valid_to,
+        inf)`, not trashed. Superseded history is included."""
+        return self.filter(
+            models.Q(valid_to__isnull=True) | models.Q(valid_to__gt=when),
+            status=MemoryFact.Status.APPROVED,
+            origin=MemoryFact.Origin.LEARNED,
+            sensitivity=MemoryFact.Sensitivity.NORMAL,
+            valid_from__lte=when,
+            deleted_at__isnull=True,
         )
 
     def as_of(self, when):

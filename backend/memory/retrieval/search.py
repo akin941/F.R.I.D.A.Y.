@@ -95,7 +95,9 @@ def vector_ranked(queryset, *, column="embedding", query_vector, provider_id, li
         .annotate(_dims=VectorDims(column))
         .filter(_dims=dim)
         .annotate(_distance=CastCosineDistance(column, query_vector, dim))
-        .order_by("_distance", "id")[:limit]
+        # Distance only: a second sort key would stop the planner from
+        # using the HNSW index's ordered scan.
+        .order_by("_distance")[:limit]
     )
 
 
