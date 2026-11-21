@@ -1027,7 +1027,8 @@ class MemoryFact(WorkspaceScopedModel, TimestampedModel):
     # 0014, raw SQL) and is read through `memory.retrieval`.
     claim_token = models.UUIDField(null=True, blank=True)
     lease_expires_at = models.DateTimeField(null=True, blank=True)
-    retry_count = models.PositiveIntegerField(default=0)
+    # `db_default` too: raw-SQL inserts (the trigger tests) name no lease field.
+    retry_count = models.PositiveIntegerField(default=0, db_default=0)
     # Provenance of an owner-UI write (the audit row names the writer too).
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,

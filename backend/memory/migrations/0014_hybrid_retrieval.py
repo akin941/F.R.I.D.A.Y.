@@ -39,7 +39,7 @@ class Migration(migrations.Migration):
         migrations.AddField(
             model_name="memoryfact",
             name="retry_count",
-            field=models.PositiveIntegerField(default=0),
+            field=models.PositiveIntegerField(db_default=0, default=0),
         ),
         migrations.RunSQL(
             sql=[
