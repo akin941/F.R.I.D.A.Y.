@@ -401,7 +401,56 @@ export interface ApiPurgeTrashDisplaySummary {
   titles: string[];
 }
 
+// node_action (Phase 10 D6): the whitelisted summary of a gated Mac action.
+export interface ApiNodeActionDisplaySummary {
+  kind: "node_action";
+  title: string;
+  capability: string;
+  node_name: string;
+  repo_name: string;
+  trust_verdict: string;
+  trust_reason: string;
+  voice: boolean;
+  voice_label?: string;
+  note: string;
+  expires_in_seconds: number;
+  command_kind?: string;
+  recipe?: string;
+  bundle_id?: string;
+  role?: string;
+  element_title?: string;
+  text?: string;
+  submit?: boolean;
+}
+
+export interface ApiNodeActionApprovalExecution {
+  status: string;
+  refusal_code: string;
+  exit_code: number | null;
+  confirm_state: string;
+  finished_at: string | null;
+}
+
+// `POST/GET /api/v1/nodes/<id>/actions[/<execution_id>]` (Phase 10 D8).
+export interface ApiNodeActionExecution {
+  id: string;
+  node_id: string;
+  capability: string;
+  capability_class: string;
+  status: string;
+  refusal_code: string;
+  confirm_state: string;
+  exit_code: number | null;
+  output_bytes: number;
+  truncated: boolean;
+  approval_id: string | null;
+  created_at: string;
+  started_at: string | null;
+  finished_at: string | null;
+}
+
 export type ApiDisplaySummary =
+  | ApiNodeActionDisplaySummary
   | ApiHarnessImplementDisplaySummary
   | ApiHarnessPushDisplaySummary
   | ApiPurgeTrashDisplaySummary
@@ -440,6 +489,7 @@ export interface ApiApprovalRequest {
     | ApiHarnessPushExecution
     | ApiDeployExecution
     | ApiConnectorWriteExecution
+    | ApiNodeActionApprovalExecution
     | null;
   // Optional: absent on responses from a backend predating this field.
   display_summary?: ApiDisplaySummary;

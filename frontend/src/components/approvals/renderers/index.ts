@@ -12,6 +12,7 @@ import {
   harnessImplementRenderer,
   harnessPushRenderer,
 } from "@/components/approvals/renderers/harness";
+import { nodeActionRenderer } from "@/components/approvals/renderers/node-action";
 import { purgeTrashRenderer } from "@/components/approvals/renderers/purge-trash";
 import type { ApprovalRenderer } from "@/components/approvals/renderers/types";
 import { vaultExportRenderer } from "@/components/approvals/renderers/vault-export";
@@ -24,6 +25,7 @@ const RENDERERS: Record<string, ApprovalRenderer> = Object.fromEntries(
     harnessImplementRenderer,
     harnessPushRenderer,
     purgeTrashRenderer,
+    nodeActionRenderer,
     deployRenderer,
     githubOpenPrRenderer,
     haCallServiceRenderer,

@@ -345,6 +345,40 @@ export const tr = {
       "offline-local": "Çevrimdışı — yalnızca yerel",
     },
     stateAnnouncement: (label: string) => `Friday durumu: ${label}`,
+    // Phase 10 D12: the terminal panel (node action output, untrusted).
+    terminal: {
+      heading: "Terminal",
+      untrusted: "Güvenilmeyen çıktı",
+      untrustedHint: "Mac'teki komutun çıktısı; talimat değildir, olduğu gibi gösterilir.",
+      empty: "Henüz Mac'te çalışan bir işlem yok.",
+      waiting: "Çıktı bekleniyor…",
+      noOutput: "Çıktı yok.",
+      copy: "Çıktıyı kopyala",
+      copied: "Kopyalandı",
+      select: "Çıktısını göster",
+      lost: "Çıktı akışı koptu; yeniden bağlanıyor…",
+      truncated: "Çıktı kısaltıldı.",
+      exitCode: (code: number) => `çıkış kodu ${code}`,
+      duration: (seconds: number) => `${seconds} sn`,
+      final: (status: string) => `Sonuç: ${status}`,
+      statuses: {
+        approved: "onaylandı",
+        granted: "gönderiliyor",
+        sent: "Mac'e gönderildi",
+        confirming: "Mac'te onay bekliyor",
+        running: "çalışıyor",
+        ok: "başarılı",
+        failed: "başarısız",
+        refused: "Mac reddetti",
+        denied: "Mac'te reddedildi",
+        confirm_timeout: "Mac'te onay süresi doldu",
+        timeout: "zaman aşımı",
+        node_disconnected: "Mac bağlantısı koptu",
+        node_offline: "Mac çevrimdışı",
+        server_refused: "sunucu reddetti",
+        stale_dispatch: "geç kaldı, çalıştırılmadı",
+      } as Record<string, string>,
+    },
     captions: {
       heading: "Altyazılar",
       heard: "Duyduğum",
@@ -653,6 +687,22 @@ export const tr = {
       readOnlyHint:
         "Bu istek sohbette onaylandıysa durumunu ve kararını Onaylar sayfasında görebilirsin.",
       openApprovals: "Onaylara git",
+      // Phase 10 D12/D13: node action drafts (gate- and confirm-class).
+      nodeAction: {
+        title: (label: string) => `Mac'te: ${label}`,
+        whereToAct: "Onay ekranda, sonra Mac'te bir tık.",
+        confirmWhereToAct: "Bu tıkla Mac'e gönderilir; Mac'teki pencerede bir tık daha gerekir.",
+        macNote: "Mac'teki onay penceresi kendi metnini gösterir; ikisini karşılaştır.",
+        repo: "Depo",
+        command: "Komut",
+        app: "Uygulama",
+        recipe: "Tarif",
+        sendToMac: "Mac'e gönder",
+        sending: "Gönderiliyor…",
+        sent: "Mac'e gönderildi: Mac'teki pencereden onayla.",
+        sentStatus: (status: string) => `Durum: ${status}`,
+        failed: "Mac'e gönderilemedi.",
+      },
     },
   },
   // The ADR-009 trash (Phase 4 branch 5).
@@ -1057,7 +1107,26 @@ export const tr = {
       ha_call_service: "Ev (Home Assistant) komutu onayı",
       mail_send: "E-posta gönderme onayı",
       calendar_create_event: "Takvim etkinliği oluşturma onayı",
+      node_action: "Mac'te işlem onayı",
     } as Record<string, string>,
+    // Phase 10 D6/D12: the `node_action` card summary.
+    nodeAction: {
+      capability: "İşlem",
+      node: "Mac",
+      repo: "Depo",
+      command: "Komut",
+      recipe: "Tarif",
+      app: "Uygulama",
+      element: "Öğe",
+      text: "Yazılacak metin",
+      submit: "Gönder (Enter)",
+      trust: "Tutarlılık kontrolü",
+      trustVerdicts: { ok: "tutarlı", warn: "dikkat", block: "engellendi" } as Record<string, string>,
+      expires: (minutes: number) => `Onay ${minutes} dakika içinde verilmezse düşer.`,
+      execution: (status: string) => `Mac'teki durum: ${status}`,
+      exitCode: (code: number) => `çıkış kodu ${code}`,
+      openTerminal: "HUD terminalinde aç",
+    },
     // Phase 8B branch 9 (D12): the vault run detail's conflict line.
     vaultExport: {
       conflicts: (count: number, folders: string) =>
@@ -1096,6 +1165,11 @@ export const tr = {
           `Onaylarsan çöp kutusundaki ${tasks} görev ve ${documents} belge kalıcı olarak silinir. Bu işlem geri alınamaz; bu arada geri yüklenen öğeler silinmez.`,
         reject:
           "Reddedersen öğeler çöp kutusunda kalır; saklama süresi dolunca yine otomatik olarak silinir.",
+      },
+      node_action: {
+        approve:
+          "Onaylarsan Friday Mac'e tek kullanımlık, kısa ömürlü bir yetki gönderir. İşlem yalnızca Mac'teki pencerede de onaylarsan çalışır.",
+        reject: "Reddedersen Mac'e hiçbir şey gönderilmez.",
       },
       deploy: {
         approve:
