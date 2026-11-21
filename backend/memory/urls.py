@@ -1,5 +1,6 @@
 from django.urls import path
 
+from memory.evals.urls import urlpatterns as eval_urlpatterns
 from memory.graph.urls import urlpatterns as graph_urlpatterns
 from memory.ingestion.views import (
     CodingSessionListView,
@@ -107,6 +108,8 @@ urlpatterns = [
     ),
     # Phase 8B branch 1 (D3): the owner graph API. Owner, web.
     *graph_urlpatterns,
+    # Phase 8B branch 3 (D9): the metrics-only eval-run reads. Owner, web.
+    *eval_urlpatterns,
 ]
 
 

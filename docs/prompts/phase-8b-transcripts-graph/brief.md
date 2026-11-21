@@ -2127,6 +2127,134 @@ merge into the integration branch, 2026-11-21).**
 **Done when:** `memory_eval baseline --set public` prints a metrics table
 in CI, and the same command with `--set private` is ready for the owner.
 
+**Implementation record (2026-11-20).** Status: implemented on
+`feat/p8-eval-set`, awaiting the independent Sonnet 5 review.
+
+What was built:
+- **Harness** (`backend/memory/evals/`):
+  - `schema.py`: case format v1, strict, plus D11's `history` and the
+    `compression` rule;
+  - `loader.py`: the public seed, the 0700 private directory (only
+    `*.jsonl` and `results/`), and `stray_case_files`;
+  - `world.py`: the eval owner, the `eval:<ref>` firm workspaces, setup
+    rows as ordinary rows, and memories embedded through
+    `memory.tasks.embed_memory`;
+  - `retrieval.py`: `legacy`, plus a `register()` seam for branch 4's
+    `hybrid`;
+  - `metrics.py`, `runner.py` and `results.py`;
+  - `serializers.py`, `views.py` and `urls.py`.
+- **Command:** `manage.py memory_eval run|baseline|compare|record`.
+- **Model:** `MemoryEvalRun` (migration `memory/0013_memory_eval_run`) and
+  `GET /api/v1/memory/evals/runs`.
+- **Settings and seeds:**
+  - `config/settings/eval.py`;
+  - `memory.eval_answer` (tier `mid`);
+  - the `friday_memory_eval_answer` prompt;
+  - the `learning_eval` `AIBudget` (`AI_BUDGET_LEARNING_EVAL_MONTHLY_USD`,
+    5 USD), seeded by `seed_ai_defaults`.
+- **Public seed:** 63 synthetic cases in six files.
+- **Import-linter:** two contracts, `memory.evals` reach and "no app
+  imports `memory.evals`". The latter is backed by an AST test inside
+  `memory`.
+- **CI:** the step "Memory eval public set" runs
+  `memory_eval baseline --set public --retrieval-only` on FakeAdapter
+  against its own `friday_eval` database.
+- **Docs:** `docs/runbooks/memory-eval.md`, plus `.env.example` and
+  `.gitignore` (`friday-evals/`).
+
+Decisions made while implementing, to confirm in review:
+- **Result-file keys:** the D9 field list plus `run_id`, the run's random
+  UUID and the file name. It makes `record` idempotent and pairs a
+  compare's two arms. `MemoryEvalRun` stores the result file's null
+  `arm`/`verdict`/`compression_purpose` as `""`, because Django keeps no
+  NULL strings; the API returns them as `null`.
+- **The compare in this branch is a retrieval compare:**
+  - `compare --retrieval-mode <mode>` runs arm A `legacy` and arm B the
+    candidate under one run id;
+  - the verdict on B is `pass` when B ≥ A on recall@10 and answer
+    accuracy and B leaks no more; `inconclusive` without recall; `fail`
+    otherwise;
+  - `hybrid` is refused until branch 4 registers it;
+  - the D11 `--compression <purpose>` arm, with its candidate-purpose
+    calls, `pre_tokens`/`post_tokens` and the settings override per arm,
+    is branch 6's. The result format already carries those keys (null
+    today).
+- **Temporal correctness** uses the format's own fields: a `temporal` case
+  is correct when every `relevant_ids` row is in the top 10 and no
+  `must_not_contain` term (the superseded value) is in the context.
+- **`legacy` retrieval injects no facts and no episodes**, exactly as the
+  chat turn does today. Consequences on the public seed (FakeAdapter
+  embeddings, `--retrieval-only`): recall@10 0.5714, leak rate 0.0 and
+  temporal correctness 0.0. The fact-based cases are the headroom branch 4
+  is measured on.
+- **`private` cases:** setup rows are stored `private`, so (the unchanged
+  chat rules) they never enter a context, and a `private` case measures
+  leaks and the "do not know" answer, not recall. The runbook explains
+  this and the local-providers-only alternative for real work data.
+- **The cap check:**
+  - before the run and before every answer call:
+    `max(eval DB month sum, result-file month sum + this run's spend)`
+    against the `learning_eval` row, or the setting when the row is
+    absent;
+  - a gateway `BudgetExceeded` stops the run the same way;
+  - only the answer calls are capped; the setup and query embeds
+    (`memory.retrieval`) are not.
+- **`no_provider`:** decided with `has_eligible_provider` before the call,
+  so it writes no `ModelUsage` row. A case whose answer call fails with
+  another `GatewayError` counts as unanswered.
+- **`record --owner`** takes the owner's e-mail (Friday has no
+  usernames) and requires `is_owner`; `--workspace`, if given, must be
+  that owner's personal workspace.
+- **Tests:** `memory/tests/test_evals.py`, plus the updated seed-budget
+  assertion in `ai_core/tests/test_speech_gateway.py`.
+- **Result directories (review round 1):** the public results default is
+  `~/friday-evals-public-results`, outside the private directory (which
+  may hold only `*.jsonl` and `results/`), and `ensure_dir` creates every
+  missing ancestor with mode 0700, so a results file written first never
+  leaves `~/friday-evals` readable by others. A test runs a public
+  baseline and then a private baseline on the default paths.
+
+**Owner steps (pending) — `feat/p8-eval-set`, recorded 2026-11-20.**
+1. Run the independent Sonnet 5 review of this branch and fix findings
+   until APPROVE (CLAUDE.md "Reviews").
+2. Confirm the decisions above, in particular:
+   - `run_id` in the result-file keys;
+   - the retrieval-compare verdict rule;
+   - that `private` cases measure no recall under the unchanged chat
+     rules.
+3. On the owner's stack (pending owner evaluation, M2):
+   - write the private set (about 100 cases) under `~/friday-evals/`
+     (mode 0700), following `docs/runbooks/memory-eval.md`;
+   - create the `friday_eval` database and run `migrate` and
+     `seed_ai_defaults` under `config.settings.eval`;
+   - run `memory_eval baseline --set private`;
+   - record the file with `memory_eval record ... --owner <e-mail>`;
+   - copy the numbers into "Go/no-go record".
+
+   This needs the owner's real work data and providers, and costs real
+   calls (capped at 5 USD a month). It cannot run here.
+4. The merger: this branch's migration was written as
+   `memory/0011_memory_eval_run`. On integration (2026-11-21) it was
+   renumbered `memory/0013_memory_eval_run` and rebased onto
+   `memory/0012_code_graph_import`, so the memory graph stays linear.
+   `seed_ai_defaults`, the settings and the seed-budget test keep the rows
+   of both branches.
+
+**Known follow-ups — `feat/p8-eval-set` (review, LOW, unresolved at
+merge into the integration branch, 2026-11-21).**
+1. **The `ops` exemption is only a comment** (`backend/pyproject.toml`).
+   The comment above the "no app imports memory.evals" contract says
+   `ops` may import it, but `ops` is not in the forbidden source list, so
+   nothing enforces the D16 boundary for `ops` beyond that comment. Fix:
+   keep the comment, or add a short note that the exemption is
+   deliberate.
+2. **Arm A's result file is written after arm B**
+   (`backend/memory/evals/runner.py`). In a compare, the two arms' result
+   files are written only after both finish. A crash between the arms
+   loses arm A's file-based spend record; the DB sum still holds it
+   unless the eval DB is dropped. The budget guard itself is correct.
+   Fix (optional): write arm A's result file as soon as arm A finishes.
+
 ### 4. `feat/p8-hybrid-retrieval` — `tsvector`, HNSW expression indexes, RRF, hops, decay
 
 **Scope.**
@@ -3046,7 +3174,7 @@ Mac and private-data rows pending owner evaluation.
 | brief | `docs/p8b-brief` | This brief (full, from the stub), MASTER_PLAN §AA row 8B Brief/Status | Phase 8A closeout; Phase 9 brief | **implemented 2026-11-20** (docs only; pins verified 2026-11-21 against PyPI and the official repos; review round 1 findings fixed 2026-11-21; review round 2 findings fixed 2026-11-21; review round 3 findings fixed 2026-11-21; awaits the Sonnet 5 re-review) |
 | 1 | `feat/p8-temporal-facts` | `MemoryEntity`/`MemoryFact`, validity windows, supersede, recursive-CTE traversal, owner API, forget/trash/purge cascade, `memory.graph` contract | brief approved | **implemented 2026-11-20** (awaits the Sonnet 5 review; see "Implementation record" under branch 1) |
 | 2 | `feat/p8-fact-learning` | Episode extraction schema v1 → v2 with facts (chat extraction unchanged at v2), inherited fact sensitivity, entity-in-quote rule, reconciliation, weekly reflection, caps, digest fact items | 1 | **implemented 2026-11-20** (awaits the Sonnet 5 review; see "Implementation record" under branch 2) |
-| 3 | `feat/p8-eval-set` | Eval harness, public seed, private loader, `memory_eval`, `memory.eval_answer` purpose, CI public run | 1 (parallel with 2) | not started |
+| 3 | `feat/p8-eval-set` | Eval harness, public seed, private loader, `memory_eval`, `memory.eval_answer` purpose, CI public run | 1 (parallel with 2) | **implemented 2026-11-20** (awaits the Sonnet 5 review; see "Implementation record" under branch 3; the private baseline is pending owner evaluation, M2) |
 | 4 | `feat/p8-hybrid-retrieval` | `tsvector` + GIN, per-provider HNSW expression indexes, RRF + decay + hops, flag, `<memory_fact>` block, `memory_graph_lookup` | 1, 3 | not started |
 | 5 | `feat/p8-graphify-job` | Hash-pinned image, `--network none` runner primitive, trigger, importer + temporal replace, `self` codebase line, manifest | 1 (parallel with 2–4) | **implemented 2026-11-20** (awaits the Sonnet 5 review; see "Implementation record" under branch 5; the real image build and the owner's switch are owner steps) |
 | 6 | `feat/p8-headroom-stage` | `compressor` sidecar (no `litellm`, no egress, telemetry off), gateway stage, bypass set, context report, eval arm, manifest | 3 | not started |
@@ -3159,7 +3287,7 @@ session:
 
 | Item | How it is measured | Result |
 |---|---|---|
-| Eval baseline recorded | M2 item 1 (private); branch 3 CI (public) | pending (branch 3); private: pending owner evaluation |
+| Eval baseline recorded | M2 item 1 (private); branch 3 CI (public) | public, recorded 2026-11-20 (63 cases, `legacy`, FakeAdapter, `--retrieval-only`): recall@10 0.5714, leak rate 0.0, temporal correctness 0.0, answer accuracy n/a; private: pending owner evaluation |
 | Headroom stays off unless ≤ 1 point loss | M2 item 3; `compressor` preflight | pending owner evaluation (flag off by default) |
 | Scrubber corpus with transcript fragments at 100% secrets recall | Branch 8 corpus gate (server and vendored node scrubber); M1 parity | pending (branch 8); Swift parity: pending owner evaluation (Mac session) |
 | Zero cross-workspace leaks | Branches 1, 4, 8 isolation tests; eval leak rate | pending (branches 1, 4, 8) |

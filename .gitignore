@@ -25,6 +25,10 @@ postgres-data/
 # Local Obsidian vault export target (MVP 5 §3, deploy/docker/compose.yml)
 .devdata/
 
+# The owner's private memory eval set (Phase 8B D9): never committed. It
+# lives outside the repo (~/friday-evals/); this catches a copy inside it.
+friday-evals/
+
 # Dev tools
 graphify-out/
 .claude/
