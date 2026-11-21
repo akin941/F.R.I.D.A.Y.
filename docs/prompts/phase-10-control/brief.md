@@ -1848,8 +1848,6 @@ every property of every argument and recipe-params schema),
 
 ### Owner steps (pending) — `feat/p10-protocol-v2`, recorded 2026-11-20
 
-### Owner steps (pending) — `feat/p10-protocol-v2`, recorded 2026-11-20
-
 1. Run the independent Sonnet 5 review of this branch (CLAUDE.md
    "Reviews") and fix findings until APPROVE.
 2. Merge order: `feat/p9-node-protocol` (Phase 9 branch 2) first, then this
@@ -1868,3 +1866,19 @@ every property of every argument and recipe-params schema),
    `CharacterSet`-based approximation, and its test target must replay the
    hostile-insert families of `nodes/tests/test_capabilities_v2.py`.
    (deferred: Mac session)
+
+### Known follow-ups — `feat/p10-protocol-v2`, unresolved LOW review notes (recorded at merge, 2026-11-21)
+
+1. LOW, `backend/nodes/protocol/verify.py`: check 11 (nonce cache) runs
+   before the class/grant checks 13–21, so an envelope refused at 13–21
+   still burns its nonce. This matches v1 behaviour and the D5 order, and
+   a server retry uses a fresh nonce anyway, so no change is needed. Fix
+   (optional): a one-line comment in `verify_invoke` recording the order
+   as intentional.
+2. LOW, `backend/nodes/protocol/grants.py`: `build_gated_invoke` is
+   deliberately contract-agnostic and relies on callers running
+   `check_gate_request` first. The docstring says so, but no test or
+   import guard enforces it for the branch 3 issuer. Fix: when branch 3
+   (`feat/p10-invocation-grants`) lands, add a test that
+   `nodes.grants.issue` calls `check_gate_request` before
+   `build_gated_invoke`.
