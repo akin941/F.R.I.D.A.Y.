@@ -1,0 +1,241 @@
+"""The reference node's WebSocket client transport over `wsproto`
+(Phase 9 brief D13 item 1, Phase 10 brief D1).
+
+`NodeClient` connects outbound to the gateway (or the hostile fake gateway
+of `node_conformance_server`), offers the subprotocols `friday-node.v2,
+friday-node.v1` with `Authorization: Bearer <secret>` and no `Origin`,
+learns the negotiated version from the accepted subprotocol, sends `hello`,
+and then pumps frames: every text message goes to `ReferenceNode.receive`,
+every answer goes back as a text message, and `ReferenceNode.tick` runs
+between reads. The node is only ever touched from the transport thread;
+`call(fn)` runs `fn(node)` there (the conformance hook uses it) and sends
+the frames `fn` returns.
+
+When the socket closes (either side, or EOF) the node's `disconnect()` runs
+at once: fail closed, nothing late is sent. When the node closes the session
+itself (three frame errors, server silence, `bye`) the client sends a close
+frame and stops. There is no listener of any kind on the node side.
+"""
+
+import json
+import queue
+import select
+import socket
+import threading
+
+from wsproto import ConnectionType, WSConnection
+from wsproto.events import (
+    AcceptConnection,
+    CloseConnection,
+    Ping,
+    RejectConnection,
+    Request,
+    TextMessage,
+)
+
+from nodes.protocol.messages import GATEWAY_PATH, SUBPROTOCOLS
+
+DEFAULT_OFFER = (SUBPROTOCOLS[2], SUBPROTOCOLS[1])
+_VERSIONS = {name: version for version, name in SUBPROTOCOLS.items()}
+
+
+def encode_frame(frame) -> str:
+    return json.dumps(frame, ensure_ascii=False, separators=(",", ":"))
+
+
+class NodeClient:
+    def __init__(
+        self,
+        node,
+        host,
+        port,
+        *,
+        path=GATEWAY_PATH,
+        offer=DEFAULT_OFFER,
+        secret="jnd_conformance",
+        ssl_context=None,
+        tick_interval=0.01,
+    ):
+        self.node = node
+        self.host = host
+        self.port = port
+        self.path = path
+        self.offer = tuple(offer)
+        self.secret = secret
+        self.ssl_context = ssl_context
+        self.tick_interval = tick_interval
+        self.version = None
+        self.rejected = False
+        self.error = None
+        self._commands = queue.Queue()
+        self._thread = None
+        self._sock = None
+        self._ws = None
+        self._text = []
+        self._stop = threading.Event()
+        self._lock = threading.Lock()
+        self.finished = threading.Event()
+
+    # --- lifecycle -------------------------------------------------------
+
+    def start(self):
+        self._thread = threading.Thread(target=self._run_safely, daemon=True)
+        self._thread.start()
+        return self
+
+    def join(self, timeout=10):
+        if self._thread is not None:
+            self._thread.join(timeout)
+
+    def stop(self):
+        self._stop.set()
+        self.join()
+
+    @property
+    def alive(self) -> bool:
+        return self._thread is not None and not self.finished.is_set()
+
+    def call(self, fn, timeout=10):
+        """Run `fn(node)` on the transport thread (directly once the thread
+        has ended); its returned frames are sent while the socket is up."""
+        if not self.alive:
+            return fn(self.node)
+        box = {}
+        done = threading.Event()
+        with self._lock:
+            if not self.alive:
+                return fn(self.node)
+            self._commands.put((fn, box, done))
+        if not done.wait(timeout):
+            raise TimeoutError("the node transport did not answer")
+        if "error" in box:
+            raise box["error"]
+        return box.get("value")
+
+    # --- the loop --------------------------------------------------------
+
+    def _run_safely(self):
+        try:
+            self._run()
+        except Exception as exc:  # surfaced to the test / command
+            self.error = exc
+            self.node.disconnect("transport_error")
+        finally:
+            with self._lock:
+                self.finished.set()
+                self._drain_commands()
+            if self._sock is not None:
+                try:
+                    self._sock.close()
+                except OSError:
+                    pass
+
+    def _drain_commands(self):
+        while True:
+            try:
+                fn, box, done = self._commands.get_nowait()
+            except queue.Empty:
+                return
+            try:
+                box["value"] = fn(self.node)
+            except Exception as exc:  # pragma: no cover - surfaced to the caller
+                box["error"] = exc
+            done.set()
+
+    def _send_bytes(self, data):
+        if data:
+            self._sock.sendall(data)
+
+    def _send_frames(self, frames):
+        for frame in frames or ():
+            if isinstance(frame, dict):
+                self._send_bytes(self._ws.send(TextMessage(data=encode_frame(frame))))
+
+    def _connect(self):
+        raw = socket.create_connection((self.host, self.port), timeout=10)
+        if self.ssl_context is not None:
+            raw = self.ssl_context.wrap_socket(raw, server_hostname=self.host)
+        raw.setblocking(True)
+        self._sock = raw
+        self._ws = WSConnection(ConnectionType.CLIENT)
+        request = Request(
+            host=f"{self.host}:{self.port}",
+            target=self.path,
+            subprotocols=list(self.offer),
+            extra_headers=[(b"authorization", f"Bearer {self.secret}".encode("ascii"))],
+        )
+        self._send_bytes(self._ws.send(request))
+
+    def _close(self, code=1000):
+        try:
+            self._send_bytes(self._ws.send(CloseConnection(code=code)))
+        except Exception:  # noqa: BLE001 - the socket may already be gone
+            pass
+
+    def _run(self):
+        self._connect()
+        while not self._stop.is_set():
+            readable, _, _ = select.select([self._sock], [], [], self.tick_interval)
+            if readable:
+                data = self._sock.recv(65536)
+                if not data:
+                    self.node.disconnect("socket_lost")
+                    return
+                self._ws.receive_data(data)
+                if self._handle_events():
+                    return
+            self._run_commands()
+            if self.version is not None:
+                self._send_frames(self.node.tick())
+                if not self.node.connected:
+                    self._close(1000)
+                    return
+        self.node.disconnect("socket_lost")
+        self._close(1001)
+
+    def _run_commands(self):
+        while True:
+            try:
+                fn, box, done = self._commands.get_nowait()
+            except queue.Empty:
+                return
+            try:
+                value = fn(self.node)
+                box["value"] = value
+                if isinstance(value, list):
+                    self._send_frames(value)
+            except Exception as exc:
+                box["error"] = exc
+            done.set()
+
+    def _handle_events(self) -> bool:
+        """Returns True when the session is over."""
+        for event in self._ws.events():
+            if isinstance(event, AcceptConnection):
+                self.version = _VERSIONS.get(event.subprotocol)
+                if self.version is None:
+                    self._close(1002)
+                    self.node.disconnect("protocol_error")
+                    return True
+                self._send_frames(self.node.connect(self.version))
+            elif isinstance(event, RejectConnection):
+                self.rejected = True
+                return True
+            elif isinstance(event, TextMessage):
+                self._text.append(event.data)
+                if event.message_finished:
+                    text, self._text = "".join(self._text), []
+                    self._send_frames(self.node.receive(text))
+                    if not self.node.connected:
+                        self._close(1000)
+                        return True
+            elif isinstance(event, Ping):
+                self._send_bytes(self._ws.send(event.response()))
+            elif isinstance(event, CloseConnection):
+                self.node.disconnect("socket_lost")
+                try:
+                    self._send_bytes(self._ws.send(event.response()))
+                except Exception:  # noqa: BLE001
+                    pass
+                return True
+        return False

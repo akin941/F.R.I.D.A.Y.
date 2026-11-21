@@ -132,7 +132,7 @@ class InProcessDriver:
                 ack = {
                     "v": self.version,
                     "type": "heartbeat.ack",
-                    "id": "00000000-0000-4000-8000-%012d" % frame["seq"],
+                    "id": f"00000000-0000-4000-8000-{frame['seq']:012d}",
                     "seq": frame["seq"],
                     "server_time": self.node.clock.now(),
                 }

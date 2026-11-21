@@ -220,7 +220,11 @@ class ReferenceNode:
         return out
 
     def disconnect(self, reason="socket_lost") -> None:
-        """Fail closed: close the window, stop what runs, send nothing late."""
+        """Fail closed: close the window, stop what runs, send nothing late.
+        Idempotent: a second call (the transport noticing the socket the node
+        already closed) changes nothing."""
+        if not self.connected and self.closed_reason is not None:
+            return
         self.connected = False
         if self.window.is_open:
             self.window.force_close("disconnect")

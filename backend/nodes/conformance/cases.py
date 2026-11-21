@@ -100,8 +100,20 @@ def _flip(sig: str) -> str:
     return b64url_encode(bytes(raw))
 
 
-def plain(seed, capability, args, *, cls="read", version=2, ttl=None, issued=BASE, key=SIGNING,
-          capability_version=1, nonce=None, node_id=NODE_ID):
+def plain(
+    seed,
+    capability,
+    args,
+    *,
+    cls="read",
+    version=2,
+    ttl=None,
+    issued=BASE,
+    key=SIGNING,
+    capability_version=1,
+    nonce=None,
+    node_id=NODE_ID,
+):
     ttl = ttl if ttl is not None else (30 if cls == "read" else 90)
     envelope = build_invoke(
         node_id=node_id,
@@ -121,8 +133,16 @@ def plain(seed, capability, args, *, cls="read", version=2, ttl=None, issued=BAS
     return sign_envelope(envelope, key)
 
 
-def gated(seed, capability="repo.command.run", args=None, *, ttl=90, issued=BASE, nonce=None,
-          approval_id=APPROVAL_ID):
+def gated(
+    seed,
+    capability="repo.command.run",
+    args=None,
+    *,
+    ttl=90,
+    issued=BASE,
+    nonce=None,
+    approval_id=APPROVAL_ID,
+):
     return build_gated_invoke(
         signer=SIGNING,
         approval_id=approval_id,
@@ -304,7 +324,9 @@ def _common_cases(version):
             v,
             check=7,
             description="An envelope for another node.",
-            steps=[send(plain(f"v{v}-wrong", "apps.frontmost", {}, version=v, node_id=OTHER_NODE_ID))],
+            steps=[
+                send(plain(f"v{v}-wrong", "apps.frontmost", {}, version=v, node_id=OTHER_NODE_ID))
+            ],
             frames=[refused("wrong_node")],
         )
     )
@@ -364,11 +386,7 @@ def _common_cases(version):
             v,
             check=12,
             description="A known capability at another version.",
-            steps=[
-                send(
-                    plain(f"v{v}-ver", "apps.frontmost", {}, version=v, capability_version=2)
-                )
-            ],
+            steps=[send(plain(f"v{v}-ver", "apps.frontmost", {}, version=v, capability_version=2))],
             frames=[refused("unknown_capability")],
         )
     )
@@ -521,29 +539,70 @@ def _grant_cases():
 
     def one(name, check, code, frame, description):
         cases.append(
-            case(name, 2, check=check, description=description, steps=[send(frame)],
-                 frames=[refused(code)], executor_calls=0, windows_shown=0)
+            case(
+                name,
+                2,
+                check=check,
+                description=description,
+                steps=[send(frame)],
+                frames=[refused(code)],
+                executor_calls=0,
+                windows_shown=0,
+            )
         )
 
-    one("v2_gate_without_grant", 14, "grant_missing", resign({**base, "grant": None}),
-        "A gate invoke without a grant.")
+    one(
+        "v2_gate_without_grant",
+        14,
+        "grant_missing",
+        resign({**base, "grant": None}),
+        "A gate invoke without a grant.",
+    )
     read = plain("v2-read-grant", "git.status", {"repo_path": "~/work/acme"})
-    one("v2_read_with_grant", 14, "grant_unexpected", with_grant(read, grant),
-        "A read invoke carrying a grant.")
+    one(
+        "v2_read_with_grant",
+        14,
+        "grant_unexpected",
+        with_grant(read, grant),
+        "A read invoke carrying a grant.",
+    )
     confirm = plain("v2-confirm-grant", "apps.open", TERMINAL, cls="confirm")
-    one("v2_confirm_with_grant", 14, "grant_unexpected", with_grant(confirm, grant),
-        "A confirm invoke carrying a grant.")
+    one(
+        "v2_confirm_with_grant",
+        14,
+        "grant_unexpected",
+        with_grant(confirm, grant),
+        "A confirm invoke carrying a grant.",
+    )
     unpinned = sign_with_domain(_strip(grant), UNPINNED, GRANT_DOMAIN_V2)
-    one("v2_grant_unpinned_key", 15, "unknown_key", with_grant(base, unpinned),
-        "A grant signed by an unpinned key.")
-    one("v2_grant_bad_signature", 16, "bad_grant_signature",
-        with_grant(base, {**grant, "sig": _flip(grant["sig"])}), "A flipped grant signature.")
-    one("v2_grant_envelope_domain", 16, "bad_grant_signature",
+    one(
+        "v2_grant_unpinned_key",
+        15,
+        "unknown_key",
+        with_grant(base, unpinned),
+        "A grant signed by an unpinned key.",
+    )
+    one(
+        "v2_grant_bad_signature",
+        16,
+        "bad_grant_signature",
+        with_grant(base, {**grant, "sig": _flip(grant["sig"])}),
+        "A flipped grant signature.",
+    )
+    one(
+        "v2_grant_envelope_domain",
+        16,
+        "bad_grant_signature",
         with_grant(base, sign_with_domain(_strip(grant), SIGNING, INVOKE_DOMAIN_V2)),
-        "A grant signed in the envelope domain.")
-    one("v2_grant_no_domain", 16, "bad_grant_signature",
+        "A grant signed in the envelope domain.",
+    )
+    one(
+        "v2_grant_no_domain",
+        16,
+        "bad_grant_signature",
         with_grant(base, sign_with_domain(_strip(grant), SIGNING, ENVELOPE_DOMAINS[1])),
-        "A grant signed without a domain (v1 style).")
+        "A grant signed without a domain (v1 style).",
+    )
     for name in SHARED_FIELDS:
         changed = {**base, name: _other(name, base[name])}
         code, check = "grant_mismatch", 17
@@ -554,26 +613,63 @@ def _grant_cases():
             code, check = "wrong_node", 7
         if name == "capability_version":
             code, check = "unknown_capability", 12
-        one(f"v2_envelope_{name}_differs_from_grant", check, code, resign(changed),
-            f"The envelope's {name} differs from the grant's.")
-        rebound = sign_with_domain({**_strip(grant), name: _other(name, grant[name])}, SIGNING,
-                                   GRANT_DOMAIN_V2)
-        one(f"v2_grant_{name}_differs_from_envelope", 17, "grant_mismatch",
-            with_grant(base, rebound), f"The grant's {name} differs from the envelope's.")
-    one("v2_gate_ttl_121", 10, "ttl_too_long",
-        resign({**base, "expires_at": base["issued_at"] + 121}), "A gated TTL of 121 s.")
-    one("v2_grant_expired", 9, "expired", gated("v2-expired", issued=BASE - 200),
-        "An expired grant (and envelope).")
+        one(
+            f"v2_envelope_{name}_differs_from_grant",
+            check,
+            code,
+            resign(changed),
+            f"The envelope's {name} differs from the grant's.",
+        )
+        rebound = sign_with_domain(
+            {**_strip(grant), name: _other(name, grant[name])}, SIGNING, GRANT_DOMAIN_V2
+        )
+        one(
+            f"v2_grant_{name}_differs_from_envelope",
+            17,
+            "grant_mismatch",
+            with_grant(base, rebound),
+            f"The grant's {name} differs from the envelope's.",
+        )
+    one(
+        "v2_gate_ttl_121",
+        10,
+        "ttl_too_long",
+        resign({**base, "expires_at": base["issued_at"] + 121}),
+        "A gated TTL of 121 s.",
+    )
+    one(
+        "v2_grant_expired",
+        9,
+        "expired",
+        gated("v2-expired", issued=BASE - 200),
+        "An expired grant (and envelope).",
+    )
     gate_as_confirm = gated("v2-downgrade", "apps.open", TERMINAL)
-    one("v2_class_gate_for_confirm_entry", 13, "class_mismatch", gate_as_confirm,
-        "Class upgrade: a gate envelope for a confirm entry.")
-    one("v2_class_confirm_for_gate_entry", 13, "class_mismatch",
+    one(
+        "v2_class_gate_for_confirm_entry",
+        13,
+        "class_mismatch",
+        gate_as_confirm,
+        "Class upgrade: a gate envelope for a confirm entry.",
+    )
+    one(
+        "v2_class_confirm_for_gate_entry",
+        13,
+        "class_mismatch",
         resign({**base, "class": "confirm", "grant": None}),
-        "Class downgrade: a confirm envelope for a gate entry.")
-    one("v2_args_outside_node_schema_recipe", 20, "args_schema",
-        gated("v2-recipe-level", "applescript.recipe.run",
-              {"recipe": "system.volume_set", "params": {"level": 101}}),
-        "Recipe params outside the node's own recipe schema.")
+        "Class downgrade: a confirm envelope for a gate entry.",
+    )
+    one(
+        "v2_args_outside_node_schema_recipe",
+        20,
+        "args_schema",
+        gated(
+            "v2-recipe-level",
+            "applescript.recipe.run",
+            {"recipe": "system.volume_set", "params": {"level": 101}},
+        ),
+        "Recipe params outside the node's own recipe schema.",
+    )
     cases.append(
         case(
             "v2_args_outside_node_schema",
@@ -581,8 +677,9 @@ def _grant_cases():
             check=20,
             description="Args valid for the server contract but outside the node's own schema.",
             setup={"catalogue": "narrow"},
-            steps=[send(gated("v2-narrow", args={"repo_path": "~/work/acme",
-                                                 "command_kind": "build"}))],
+            steps=[
+                send(gated("v2-narrow", args={"repo_path": "~/work/acme", "command_kind": "build"}))
+            ],
             frames=[refused("args_schema")],
             executor_calls=0,
         )
@@ -608,13 +705,18 @@ def _grant_cases():
             description="The same gated envelope twice: the second is a replay.",
             setup={"window": deny},
             steps=[send(base), send(base)],
-            frames=[confirmation("shown"), confirmation("denied"), refused("owner_denied"),
-                    refused("replay")],
+            frames=[
+                confirmation("shown"),
+                confirmation("denied"),
+                refused("owner_denied"),
+                refused("replay"),
+            ],
             executor_calls=0,
         )
     )
-    reused = resign({**base, "id": _uuid4("reused-msg"),
-                     "invocation_id": _uuid4("reused-invocation")})
+    reused = resign(
+        {**base, "id": _uuid4("reused-msg"), "invocation_id": _uuid4("reused-invocation")}
+    )
     cases.append(
         case(
             "v2_replay_grant_on_new_envelope",
@@ -623,8 +725,12 @@ def _grant_cases():
             description="The same grant on a new envelope (same nonce): a replay.",
             setup={"window": deny},
             steps=[send(base), send(reused)],
-            frames=[confirmation("shown"), confirmation("denied"), refused("owner_denied"),
-                    refused("replay")],
+            frames=[
+                confirmation("shown"),
+                confirmation("denied"),
+                refused("owner_denied"),
+                refused("replay"),
+            ],
             executor_calls=0,
         )
     )
@@ -637,8 +743,12 @@ def _grant_cases():
             description="The same grant on a new envelope with a fresh nonce: grant_mismatch.",
             setup={"window": deny},
             steps=[send(base), send(new_nonce)],
-            frames=[confirmation("shown"), confirmation("denied"), refused("owner_denied"),
-                    refused("grant_mismatch")],
+            frames=[
+                confirmation("shown"),
+                confirmation("denied"),
+                refused("owner_denied"),
+                refused("grant_mismatch"),
+            ],
             executor_calls=0,
         )
     )
@@ -650,30 +760,54 @@ def _policy_cases():
 
     def nc(name, frame, description):
         cases.append(
-            case(name, 2, check=22, description=description, steps=[send(frame)],
-                 frames=[refused("not_configured")], executor_calls=0, windows_shown=0)
+            case(
+                name,
+                2,
+                check=22,
+                description=description,
+                steps=[send(frame)],
+                frames=[refused("not_configured")],
+                executor_calls=0,
+                windows_shown=0,
+            )
         )
 
-    nc("v2_not_configured_unmapped_repo",
-       gated("v2-nc-repo", args={"repo_path": "~/work/other", "command_kind": "test"}),
-       "A repo the node has no mapping for.")
-    nc("v2_not_configured_unmapped_kind",
-       gated("v2-nc-kind", args={"repo_path": "~/work/acme", "command_kind": "typecheck"}),
-       "A command kind not mapped for the repo.")
-    nc("v2_not_configured_disabled_recipe",
-       gated("v2-nc-recipe", "applescript.recipe.run", {"recipe": "music.next_track",
-                                                         "params": {}}),
-       "A recipe not enabled locally.")
-    nc("v2_not_configured_bundle_id",
-       plain("v2-nc-bundle", "apps.open", {"bundle_id": "com.example.Other"}, cls="confirm"),
-       "A bundle id not on the local list.")
-    nc("v2_not_configured_symlink",
-       gated("v2-nc-link", args={"repo_path": "~/work/link", "command_kind": "test"}),
-       "A repo_path symlink to an unmapped directory.")
-    nc("v2_not_configured_repo_recipe",
-       gated("v2-nc-reveal", "applescript.recipe.run",
-             {"recipe": "finder.reveal_repo", "params": {"repo_path": "~/work/other"}}),
-       "A repo recipe for an unmapped repo.")
+    nc(
+        "v2_not_configured_unmapped_repo",
+        gated("v2-nc-repo", args={"repo_path": "~/work/other", "command_kind": "test"}),
+        "A repo the node has no mapping for.",
+    )
+    nc(
+        "v2_not_configured_unmapped_kind",
+        gated("v2-nc-kind", args={"repo_path": "~/work/acme", "command_kind": "typecheck"}),
+        "A command kind not mapped for the repo.",
+    )
+    nc(
+        "v2_not_configured_disabled_recipe",
+        gated(
+            "v2-nc-recipe", "applescript.recipe.run", {"recipe": "music.next_track", "params": {}}
+        ),
+        "A recipe not enabled locally.",
+    )
+    nc(
+        "v2_not_configured_bundle_id",
+        plain("v2-nc-bundle", "apps.open", {"bundle_id": "com.example.Other"}, cls="confirm"),
+        "A bundle id not on the local list.",
+    )
+    nc(
+        "v2_not_configured_symlink",
+        gated("v2-nc-link", args={"repo_path": "~/work/link", "command_kind": "test"}),
+        "A repo_path symlink to an unmapped directory.",
+    )
+    nc(
+        "v2_not_configured_repo_recipe",
+        gated(
+            "v2-nc-reveal",
+            "applescript.recipe.run",
+            {"recipe": "finder.reveal_repo", "params": {"repo_path": "~/work/other"}},
+        ),
+        "A repo recipe for an unmapped repo.",
+    )
     cases.append(
         case(
             "v2_symlink_to_mapped_root_resolves",
@@ -681,8 +815,13 @@ def _policy_cases():
             check=23,
             description="A symlink that resolves to a mapped root reaches the window.",
             setup={"window": [{"action": "deny", "after": 0}]},
-            steps=[send(gated("v2-link-ok", args={"repo_path": "~/work/acme-link",
-                                                  "command_kind": "test"}))],
+            steps=[
+                send(
+                    gated(
+                        "v2-link-ok", args={"repo_path": "~/work/acme-link", "command_kind": "test"}
+                    )
+                )
+            ],
             frames=[confirmation("shown"), confirmation("denied"), refused("owner_denied")],
             executor_calls=0,
         )
@@ -699,15 +838,24 @@ def _window_cases():
             2,
             check=None,
             description="Approved on the Mac: the mapped command runs, output streams, result.",
-            setup={"window": approve,
-                   "executor": [{"chunks": [["stdout", "acme tests ok\n", 0]], "exit_code": 0}]},
+            setup={
+                "window": approve,
+                "executor": [{"chunks": [["stdout", "acme tests ok\n", 0]], "exit_code": 0}],
+            },
             steps=[send(gated("v2-run")), advance(2)],
             frames=[
                 confirmation("shown"),
                 confirmation("approved"),
                 {"type": "output", "seq": 0, "stream": "stdout", "data": "acme tests ok\n"},
-                {"type": "result", "status": "ok", "exit_code": 0, "confirm_state": "approved",
-                 "tail": "acme tests ok\n", "output_bytes": 14, "sandbox_violation": False},
+                {
+                    "type": "result",
+                    "status": "ok",
+                    "exit_code": 0,
+                    "confirm_state": "approved",
+                    "tail": "acme tests ok\n",
+                    "output_bytes": 14,
+                    "sandbox_violation": False,
+                },
             ],
             executor_calls=1,
             windows_shown=1,
@@ -718,12 +866,17 @@ def _window_cases():
             "v2_gate_command_worktree_mode",
             2,
             description="worktree mode: a throwaway worktree, deleted afterwards.",
-            setup={"window": [{"action": "approve", "after": 0}],
-                   "executor": [{"chunks": [["stdout", "lint ok\n", 0]], "exit_code": 0}]},
+            setup={
+                "window": [{"action": "approve", "after": 0}],
+                "executor": [{"chunks": [["stdout", "lint ok\n", 0]], "exit_code": 0}],
+            },
             steps=[send(gated("v2-wt", args=ACME_LINT))],
-            frames=[confirmation("shown"), confirmation("approved"),
-                    {"type": "output", "data": "lint ok\n"},
-                    {"type": "result", "status": "ok", "exit_code": 0}],
+            frames=[
+                confirmation("shown"),
+                confirmation("approved"),
+                {"type": "output", "data": "lint ok\n"},
+                {"type": "result", "status": "ok", "exit_code": 0},
+            ],
             executor_calls=1,
             worktrees_after=1,
         )
@@ -734,14 +887,26 @@ def _window_cases():
             "v2_output_secret_split_across_chunks",
             2,
             description="A secret split across two chunks is scrubbed on the node.",
-            setup={"window": [{"action": "approve", "after": 0}],
-                   "executor": [{"chunks": [["stdout", "export OPENAI_API_KEY=" + secret[:9], 0],
-                                            ["stdout", secret[9:] + "\ndone\n", 1]],
-                                 "duration": 1, "exit_code": 0}]},
+            setup={
+                "window": [{"action": "approve", "after": 0}],
+                "executor": [
+                    {
+                        "chunks": [
+                            ["stdout", "export OPENAI_API_KEY=" + secret[:9], 0],
+                            ["stdout", secret[9:] + "\ndone\n", 1],
+                        ],
+                        "duration": 1,
+                        "exit_code": 0,
+                    }
+                ],
+            },
             steps=[send(gated("v2-secret")), advance(1)],
-            frames=[confirmation("shown"), confirmation("approved"),
-                    {"type": "output", "stream": "stdout"},
-                    {"type": "result", "status": "ok", "exit_code": 0}],
+            frames=[
+                confirmation("shown"),
+                confirmation("approved"),
+                {"type": "output", "stream": "stdout"},
+                {"type": "result", "status": "ok", "exit_code": 0},
+            ],
             absent=[secret, SECRET_TAIL[:20], SECRET_TAIL[-20:]],
         )
     )
@@ -750,14 +915,23 @@ def _window_cases():
             "v2_sandbox_violation_reported",
             2,
             description="A command the sandbox stopped reports sandbox_violation.",
-            setup={"window": [{"action": "approve", "after": 0}],
-                   "executor": [{"chunks": [["stderr", "denied\n", 0]], "exit_code": 1,
-                                 "sandbox_violation": True}]},
+            setup={
+                "window": [{"action": "approve", "after": 0}],
+                "executor": [
+                    {
+                        "chunks": [["stderr", "denied\n", 0]],
+                        "exit_code": 1,
+                        "sandbox_violation": True,
+                    }
+                ],
+            },
             steps=[send(gated("v2-violation"))],
-            frames=[confirmation("shown"), confirmation("approved"),
-                    {"type": "output", "stream": "stderr"},
-                    {"type": "result", "status": "ok", "exit_code": 1,
-                     "sandbox_violation": True}],
+            frames=[
+                confirmation("shown"),
+                confirmation("approved"),
+                {"type": "output", "stream": "stderr"},
+                {"type": "result", "status": "ok", "exit_code": 1, "sandbox_violation": True},
+            ],
         )
     )
     cases.append(
@@ -767,9 +941,11 @@ def _window_cases():
             description="A confirm-class open runs only after the node click.",
             setup={"window": [{"action": "approve", "after": 1}]},
             steps=[send(plain("v2-open", "apps.open", TERMINAL, cls="confirm")), advance(1)],
-            frames=[confirmation("shown"), confirmation("approved"),
-                    {"type": "result", "status": "ok", "exit_code": None,
-                     "confirm_state": "approved"}],
+            frames=[
+                confirmation("shown"),
+                confirmation("approved"),
+                {"type": "result", "status": "ok", "exit_code": None, "confirm_state": "approved"},
+            ],
             executor_calls=1,
         )
     )
@@ -779,10 +955,20 @@ def _window_cases():
             2,
             description="An enabled recipe runs after the click.",
             setup={"window": [{"action": "approve", "after": 0}]},
-            steps=[send(gated("v2-recipe", "applescript.recipe.run",
-                              {"recipe": "music.play_pause", "params": {}}))],
-            frames=[confirmation("shown"), confirmation("approved"),
-                    {"type": "result", "status": "ok", "confirm_state": "approved"}],
+            steps=[
+                send(
+                    gated(
+                        "v2-recipe",
+                        "applescript.recipe.run",
+                        {"recipe": "music.play_pause", "params": {}},
+                    )
+                )
+            ],
+            frames=[
+                confirmation("shown"),
+                confirmation("approved"),
+                {"type": "result", "status": "ok", "confirm_state": "approved"},
+            ],
             executor_calls=1,
         )
     )
@@ -794,8 +980,11 @@ def _window_cases():
             description="The owner clicks Reddet.",
             setup={"window": [{"action": "deny", "after": 3}]},
             steps=[send(gated("v2-deny")), advance(3)],
-            frames=[confirmation("shown"), confirmation("denied"),
-                    {**refused("owner_denied"), "confirm_state": "denied"}],
+            frames=[
+                confirmation("shown"),
+                confirmation("denied"),
+                {**refused("owner_denied"), "confirm_state": "denied"},
+            ],
             executor_calls=0,
         )
     )
@@ -806,8 +995,11 @@ def _window_cases():
             check=23,
             description="No click within 60 s: confirm_timeout (nothing at 59 s).",
             steps=[send(gated("v2-timeout")), advance(59), advance(1)],
-            frames=[confirmation("shown"), confirmation("timed_out"),
-                    {**refused("confirm_timeout"), "confirm_state": "timed_out"}],
+            frames=[
+                confirmation("shown"),
+                confirmation("timed_out"),
+                {**refused("confirm_timeout"), "confirm_state": "timed_out"},
+            ],
             executor_calls=0,
         )
     )
@@ -831,8 +1023,11 @@ def _window_cases():
             description="The grant expires while the window is open (clicked at 95 s).",
             setup={"now": BASE + 40, "window": [{"action": "approve", "after": 55}]},
             steps=[send(gated("v2-late")), advance(55)],
-            frames=[confirmation("shown"), confirmation("approved"),
-                    {**refused("expired_after_confirm"), "confirm_state": "approved"}],
+            frames=[
+                confirmation("shown"),
+                confirmation("approved"),
+                {**refused("expired_after_confirm"), "confirm_state": "approved"},
+            ],
             executor_calls=0,
         )
     )
@@ -843,10 +1038,15 @@ def _window_cases():
             check=24,
             description="A confirm envelope expiring inside the window is refused after the click.",
             setup={"now": BASE + 40, "window": [{"action": "approve", "after": 55}]},
-            steps=[send(plain("v2-confirm-late", "apps.open", TERMINAL, cls="confirm")),
-                   advance(55)],
-            frames=[confirmation("shown"), confirmation("approved"),
-                    {**refused("expired_after_confirm"), "confirm_state": "approved"}],
+            steps=[
+                send(plain("v2-confirm-late", "apps.open", TERMINAL, cls="confirm")),
+                advance(55),
+            ],
+            frames=[
+                confirmation("shown"),
+                confirmation("approved"),
+                {**refused("expired_after_confirm"), "confirm_state": "approved"},
+            ],
             executor_calls=0,
         )
     )
@@ -856,8 +1056,11 @@ def _window_cases():
             2,
             description="The local kill switch closes an open window; nothing runs.",
             steps=[send(gated("v2-kill")), KILL_SWITCH],
-            frames=[confirmation("shown"), confirmation("closed"),
-                    {**refused("owner_denied"), "confirm_state": "closed"}],
+            frames=[
+                confirmation("shown"),
+                confirmation("closed"),
+                {**refused("owner_denied"), "confirm_state": "closed"},
+            ],
             executor_calls=0,
         )
     )
@@ -878,11 +1081,16 @@ def _window_cases():
             "v2_socket_dropped_while_running",
             2,
             description="The socket drops while a command runs: it is killed, no late result.",
-            setup={"window": [{"action": "approve", "after": 0}],
-                   "executor": [{"chunks": [["stdout", "started\n", 0]], "hang": True}]},
+            setup={
+                "window": [{"action": "approve", "after": 0}],
+                "executor": [{"chunks": [["stdout", "started\n", 0]], "hang": True}],
+            },
             steps=[send(gated("v2-drop-run")), DISCONNECT, advance(10)],
-            frames=[confirmation("shown"), confirmation("approved"),
-                    {"type": "output", "data": "started\n"}],
+            frames=[
+                confirmation("shown"),
+                confirmation("approved"),
+                {"type": "output", "data": "started\n"},
+            ],
             executor_calls=1,
             executor_terminated=1,
         )
@@ -892,11 +1100,16 @@ def _window_cases():
             "v2_runtime_cap",
             2,
             description="A command past its runtime cap is stopped (timeout).",
-            setup={"window": [{"action": "approve", "after": 0}],
-                   "executor": [{"chunks": [], "hang": True}]},
+            setup={
+                "window": [{"action": "approve", "after": 0}],
+                "executor": [{"chunks": [], "hang": True}],
+            },
             steps=[send(gated("v2-cap")), advance(299), advance(1)],
-            frames=[confirmation("shown"), confirmation("approved"),
-                    {"type": "result", "status": "timeout", "exit_code": None}],
+            frames=[
+                confirmation("shown"),
+                confirmation("approved"),
+                {"type": "result", "status": "timeout", "exit_code": None},
+            ],
             executor_calls=1,
             executor_terminated=1,
         )
