@@ -1004,6 +1004,13 @@ class MemoryFact(WorkspaceScopedModel, TimestampedModel):
     embedding_provider = models.ForeignKey(
         "ai_core.ModelProvider", null=True, blank=True, on_delete=models.PROTECT, related_name="+"
     )
+    # The `Memory` embedding lease pattern (branch 4, `memory.jobs`): one
+    # attempt in flight per row, a bounded retry budget. The generated
+    # `search` tsvector column (D8) lives in the database only (migration
+    # 0014, raw SQL) and is read through `memory.retrieval`.
+    claim_token = models.UUIDField(null=True, blank=True)
+    lease_expires_at = models.DateTimeField(null=True, blank=True)
+    retry_count = models.PositiveIntegerField(default=0)
     # Provenance of an owner-UI write (the audit row names the writer too).
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,

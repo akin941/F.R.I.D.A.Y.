@@ -19,8 +19,10 @@ from pgvector.django import CosineDistance
 from ai_core.exceptions import GatewayError
 from ai_core.gateway import InferenceGateway
 from audit.services import record_audit
+from core.ranking import rrf
 from knowledge.models import KnowledgeChunk
 from memory.context import neutralize_fence, strip_invisible_formatting
+from memory.retrieval.search import fulltext_ranked, vector_ranked
 
 
 class _VectorDims(Func):
@@ -55,7 +57,14 @@ _WHITESPACE_RUN = re.compile(r"\s+")
 
 
 def select_context_chunks(
-    *, actor, workspace, query_text, max_chunks=None, char_budget=None, personal_data=False
+    *,
+    actor,
+    workspace,
+    query_text,
+    max_chunks=None,
+    char_budget=None,
+    personal_data=False,
+    fused=False,
 ):
     """Return the ordered, budgeted list of KnowledgeChunk rows for a gateway
     call and record the access (`knowledge.context_accessed`, ids only —
@@ -74,7 +83,22 @@ def select_context_chunks(
     `personal_data` (Phase 5 D5): as in `memory.context.
     select_context_memories` -- the query embedding goes only to a provider
     with `personal_data_allowed`; with none, zero chunks.
+
+    `fused` (Phase 8B D8, `MEMORY_RETRIEVAL_MODE=hybrid`): the vector list
+    and a full-text list over the generated `search` column are fused with
+    `core.ranking.rrf` (`select_fused_chunks`), and a `GatewayError` on the
+    embed degrades to full text only instead of zero chunks. `False` keeps
+    the legacy selector unchanged.
     """
+    if fused:
+        return select_fused_chunks(
+            actor=actor,
+            workspace=workspace,
+            query_text=query_text,
+            max_chunks=max_chunks,
+            char_budget=char_budget,
+            personal_data=personal_data,
+        )
     if max_chunks is None:
         max_chunks = MAX_CONTEXT_CHUNKS
     if char_budget is None:
@@ -161,6 +185,86 @@ def select_context_chunks(
         budget -= cost
         selected.append(chunk)
 
+    _record_access(actor=actor, workspace=workspace, chunks=selected)
+    return selected
+
+
+FUSED_LIST_LIMIT = 50
+
+
+def _eligible_chunks(actor, workspace):
+    # The same scoped, eligible base as the legacy selector (`for_actor`,
+    # `cloud_eligible`, the document-workspace re-check).
+    return (
+        KnowledgeChunk.objects.for_actor(actor, workspace=workspace)
+        .cloud_eligible()
+        .filter(document__workspace=workspace)
+    )
+
+
+def select_fused_chunks(
+    *, actor, workspace, query_text, max_chunks=None, char_budget=None, personal_data=False
+):
+    """Vector top-50 plus full-text top-50, fused with RRF (Phase 8B D8),
+    then the legacy budget rules. Knowledge keeps its own selector and
+    budget; `memory` never imports `knowledge`."""
+    if max_chunks is None:
+        max_chunks = MAX_CONTEXT_CHUNKS
+    if char_budget is None:
+        char_budget = CHUNK_CHAR_BUDGET
+    lists = []
+    if query_text:
+        try:
+            result = InferenceGateway().embed(
+                purpose="knowledge.retrieval",
+                texts=[query_text],
+                actor=actor,
+                workspace=workspace,
+                personal_data=personal_data,
+            )
+        except GatewayError:
+            result = None
+        if result is not None:
+            lists.append(
+                list(
+                    vector_ranked(
+                        _eligible_chunks(actor, workspace),
+                        query_vector=result.vectors[0],
+                        provider_id=result.usage.provider_id,
+                        limit=FUSED_LIST_LIMIT,
+                    ).values_list("id", flat=True)
+                )
+            )
+        lists.append(
+            list(
+                fulltext_ranked(
+                    _eligible_chunks(actor, workspace),
+                    table="knowledge_knowledgechunk",
+                    query_text=query_text,
+                    limit=FUSED_LIST_LIMIT,
+                ).values_list("id", flat=True)
+            )
+        )
+    fused = rrf(lists)
+    by_id = {
+        chunk.pk: chunk
+        for chunk in _eligible_chunks(actor, workspace)
+        .filter(pk__in=[key for key, _ in fused])
+        .select_related("document")
+    }
+    selected = []
+    budget = char_budget
+    for key, _score in fused:
+        chunk = by_id.get(key)
+        if chunk is None:
+            continue
+        if len(selected) >= max_chunks:
+            break
+        cost = len(chunk.document.title) + min(len(chunk.content), CHUNK_CONTENT_MAX_CHARS)
+        if cost > budget:
+            continue
+        budget -= cost
+        selected.append(chunk)
     _record_access(actor=actor, workspace=workspace, chunks=selected)
     return selected
 

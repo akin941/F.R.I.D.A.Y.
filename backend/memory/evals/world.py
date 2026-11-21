@@ -36,7 +36,7 @@ from memory.models import (
     MemoryFact,
     compute_fingerprint,
 )
-from memory.tasks import embed_memory
+from memory.tasks import embed_fact, embed_memory
 from workspaces.models import Workspace, WorkspaceMember
 from workspaces.services import ensure_personal_workspace
 
@@ -200,4 +200,8 @@ def load_case(world, case):
     for memory_id in memory_ids:
         # The production path: claims, embeds only cloud_eligible() rows.
         embed_memory(str(memory_id))
+    for fact in facts.values():
+        # Branch 4: the fact embedding job, which embeds only retrievable
+        # (current, approved, learned, non-private) facts.
+        embed_fact(str(fact.pk))
     return loaded

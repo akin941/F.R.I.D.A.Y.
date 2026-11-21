@@ -435,6 +435,21 @@ MEMORY_GIT_INGEST_LOOKBACK_DAYS = env.int("MEMORY_GIT_INGEST_LOOKBACK_DAYS", def
 # memory.ingestion.consolidation, not settings).
 MEMORY_LEARNING_DIGEST_DAYS = env.int("MEMORY_LEARNING_DIGEST_DAYS", default=2)
 
+# --- Hybrid retrieval (Phase 8B branch 4, brief D8) ---
+# `legacy` (default): `memory.context.select_context_memories`, unchanged.
+# `hybrid`: full text + vector lists fused with RRF, recency decay and graph
+# hops (`memory.retrieval.hybrid`), with a `<memory_fact>` block. The
+# closeout flips the default only if the eval set shows hybrid >= legacy.
+MEMORY_RETRIEVAL_MODE = env("MEMORY_RETRIEVAL_MODE", default="legacy")
+if MEMORY_RETRIEVAL_MODE not in ("legacy", "hybrid"):
+    raise ImproperlyConfigured("MEMORY_RETRIEVAL_MODE must be 'legacy' or 'hybrid'.")
+# Recency half-life for episodic/work_log memories and learned facts.
+MEMORY_RETRIEVAL_HALF_LIFE_DAYS = env.int("MEMORY_RETRIEVAL_HALF_LIFE_DAYS", default=45)
+# Graph hops from the top facts (1 or 2; 0 disables the expansion).
+MEMORY_RETRIEVAL_HOPS = env.int("MEMORY_RETRIEVAL_HOPS", default=1)
+if not 0 <= MEMORY_RETRIEVAL_HOPS <= 2:
+    raise ImproperlyConfigured("MEMORY_RETRIEVAL_HOPS must be 0, 1 or 2.")
+
 # --- Memory eval set (Phase 8B branch 3, brief D9) ---
 # `memory_eval run|baseline|compare` run only under the eval settings module
 # (`config.settings.eval`, its own database), which flips this to True; the

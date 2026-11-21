@@ -25,16 +25,22 @@ from memory.jobs import (
     EMBEDDING_CLAIM_LEASE_SECONDS,
     MAX_EMBEDDING_RETRIES,
     claim_extraction_job,
+    claim_fact_for_embedding,
     claim_memory_for_embedding,
+    clear_ineligible_fact_embeddings,
     dispatch_extraction_job,
+    dispatch_fact_embedding,
     dispatch_memory_embedding,
+    fact_eligible_q,
     finalize_embedding_failure,
     finalize_embedding_success,
     finalize_extraction_failure,
     finalize_extraction_success,
+    finalize_fact_embedding_failure,
+    finalize_fact_embedding_success,
     message_range,
 )
-from memory.models import Memory, MemoryExtractionJob
+from memory.models import Memory, MemoryExtractionJob, MemoryFact
 from memory.provenance import quote_is_verbatim
 
 logger = logging.getLogger(__name__)
@@ -355,4 +361,57 @@ def recover_stale_memory_embeddings():
     )
     for memory_id in stale_ids:
         dispatch_memory_embedding(memory_id)
+    return len(stale_ids)
+
+
+@shared_task(soft_time_limit=_EMBEDDING_SOFT_TIME_LIMIT, time_limit=_EMBEDDING_TIME_LIMIT)
+def embed_fact(fact_id):
+    """Phase 8B branch 4 (D8): claim a retrievable fact, embed its
+    statement (`memory.retrieval`, one `ModelUsage` row via the gateway) and
+    store the vector. A safe no-op for a fact that is not claimable -- a
+    Graphify `system` fact never is, so it is never sent anywhere."""
+    claimed = claim_fact_for_embedding(fact_id)
+    if claimed is None:
+        return
+    claimed_id, claim_token = claimed
+    try:
+        _process_claimed_fact(claimed_id, claim_token)
+    except Exception:
+        logger.exception("Unexpected failure embedding fact %s", claimed_id)
+        finalize_fact_embedding_failure(claimed_id, claim_token, retryable=True)
+
+
+def _process_claimed_fact(fact_id, claim_token):
+    fact = MemoryFact.objects.filter(pk=fact_id).filter(fact_eligible_q()).first()
+    # Re-check right before the gateway call (the `_process_claimed_memory`
+    # rule): a fact that stopped being retrievable sends nothing.
+    if fact is None or fact.claim_token != claim_token:
+        return
+    try:
+        result = InferenceGateway().embed(
+            purpose="memory.retrieval", texts=[fact.statement], workspace=fact.workspace
+        )
+    except GatewayError as exc:
+        finalize_fact_embedding_failure(fact_id, claim_token, retryable=exc.retryable)
+        return
+    finalize_fact_embedding_success(
+        fact_id, claim_token, vector=result.vectors[0], provider=result.usage.provider
+    )
+
+
+@shared_task
+def recover_stale_fact_embeddings():
+    """Periodic scan: backfill retrievable facts missing a vector, re-dispatch
+    expired leases, and clear the vectors of facts that are no longer
+    retrievable (superseded, trashed, archived, private)."""
+    clear_ineligible_fact_embeddings()
+    now = timezone.now()
+    stale_ids = list(
+        MemoryFact.objects.filter(fact_eligible_q())
+        .filter(embedding__isnull=True, retry_count__lt=MAX_EMBEDDING_RETRIES)
+        .filter(Q(claim_token__isnull=True) | Q(lease_expires_at__lt=now))
+        .values_list("id", flat=True)
+    )
+    for fact_id in stale_ids:
+        dispatch_fact_embedding(fact_id)
     return len(stale_ids)

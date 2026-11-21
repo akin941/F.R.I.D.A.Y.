@@ -22,10 +22,22 @@ class WorkspaceScopedQuerySet(models.QuerySet):
         """
         if actor is None or not getattr(actor, "is_authenticated", False):
             return self.none()
-        qs = self.filter(workspace__members__user=actor)
         if workspace is not None:
-            qs = qs.filter(workspace=workspace)
-        return qs.distinct()
+            # One named workspace (Phase 8B branch 4): the same membership
+            # rule as an uncorrelated EXISTS instead of a join, so no
+            # DISTINCT is needed (a row belongs to exactly one workspace and
+            # `unique_workspace_member` holds). Rows are identical to the
+            # join form; the planner can then use an ordered index scan
+            # (HNSW, GIN) under the membership gate.
+            # The member model is reached through this model's own
+            # `workspace` FK (the `workspace__members__user` path below),
+            # so `core` still imports no kernel app.
+            workspace_model = self.model._meta.get_field("workspace").related_model
+            member_model = workspace_model._meta.get_field("members").related_model
+            return self.filter(workspace=workspace).filter(
+                models.Exists(member_model._default_manager.filter(workspace=workspace, user=actor))
+            )
+        return self.filter(workspace__members__user=actor).distinct()
 
 
 class WorkspaceScopedManager(models.Manager.from_queryset(WorkspaceScopedQuerySet)):

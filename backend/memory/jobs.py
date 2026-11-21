@@ -23,7 +23,7 @@ from django.db import transaction
 from django.db.models import Q
 from django.utils import timezone
 
-from memory.models import Memory, MemoryExtractionJob, compute_fingerprint
+from memory.models import Memory, MemoryExtractionJob, MemoryFact, compute_fingerprint
 from memory.provenance import stored_quote
 
 logger = logging.getLogger(__name__)
@@ -447,3 +447,120 @@ def finalize_embedding_failure(memory_id, claim_token, *, retryable):
     # identical note; a failed embedding attempt must not reorder the row.
     memory.save(update_fields=["claim_token", "lease_expires_at", "retry_count"])
     return True
+
+
+# --- MemoryFact embeddings (Phase 8B branch 4, brief D8) --------------------
+#
+# The `Memory` lease pattern above, applied to facts. Only RETRIEVABLE facts
+# are ever embedded: `origin=learned`, `approved`, current, non-`private`
+# (the `MemoryFact.objects.model_eligible()` predicate). Graphify `system`
+# facts keep `embedding = NULL` for good, so an import of thousands of code
+# edges makes zero embed calls and zero `ModelUsage` rows; pending,
+# rejected, archived and superseded facts are not embedded either.
+
+
+def fact_eligible_q():
+    return Q(
+        status=MemoryFact.Status.APPROVED,
+        origin=MemoryFact.Origin.LEARNED,
+        sensitivity=MemoryFact.Sensitivity.NORMAL,
+        valid_to__isnull=True,
+        deleted_at__isnull=True,
+    )
+
+
+def dispatch_fact_embedding(fact_id):
+    """Publish `fact_id` for an embedding attempt; a broker publication
+    failure never propagates (the scan picks the row up later)."""
+    from django.conf import settings
+
+    from memory.tasks import embed_fact
+
+    if settings.CELERY_TASK_ALWAYS_EAGER:
+        embed_fact.delay(str(fact_id))
+        return
+    try:
+        embed_fact.delay(str(fact_id))
+    except Exception:
+        logger.exception("Failed to publish fact %s embedding to the broker", fact_id)
+
+
+def claim_fact_for_embedding(fact_id):
+    """Claim a retrievable, unembedded fact under the retry budget. Returns
+    `(fact_id, claim_token)` or `None` (a safe no-op)."""
+    now = timezone.now()
+    with transaction.atomic():
+        fact = (
+            MemoryFact.objects.select_for_update(skip_locked=True)
+            .filter(
+                Q(pk=fact_id)
+                & fact_eligible_q()
+                & Q(embedding__isnull=True)
+                & Q(retry_count__lt=MAX_EMBEDDING_RETRIES)
+                & (Q(claim_token__isnull=True) | Q(lease_expires_at__lt=now))
+            )
+            .first()
+        )
+        if fact is None:
+            return None
+        token = uuid.uuid4()
+        fact.claim_token = token
+        fact.lease_expires_at = now + timedelta(seconds=EMBEDDING_CLAIM_LEASE_SECONDS)
+        # `updated_at` excluded: a background lease is not an owner edit.
+        fact.save(update_fields=["claim_token", "lease_expires_at"])
+    return fact_id, token
+
+
+def _fenced_fact(fact_id, claim_token):
+    """Re-lock and re-check: still this attempt's claim AND still
+    retrievable (a fact superseded, trashed or forgotten mid-call gets no
+    vector)."""
+    return (
+        MemoryFact.objects.select_for_update()
+        .filter(Q(pk=fact_id, claim_token=claim_token) & fact_eligible_q())
+        .first()
+    )
+
+
+@transaction.atomic
+def finalize_fact_embedding_success(fact_id, claim_token, *, vector, provider):
+    fact = _fenced_fact(fact_id, claim_token)
+    if fact is None:
+        return False
+    fact.embedding = vector
+    fact.embedding_provider = provider
+    fact.claim_token = None
+    fact.lease_expires_at = None
+    fact.retry_count = 0
+    fact.save(
+        update_fields=[
+            "embedding",
+            "embedding_provider",
+            "claim_token",
+            "lease_expires_at",
+            "retry_count",
+        ]
+    )
+    return True
+
+
+@transaction.atomic
+def finalize_fact_embedding_failure(fact_id, claim_token, *, retryable):
+    fact = _fenced_fact(fact_id, claim_token)
+    if fact is None:
+        return False
+    fact.claim_token = None
+    fact.lease_expires_at = None
+    fact.retry_count = fact.retry_count + 1 if retryable else MAX_EMBEDDING_RETRIES
+    fact.save(update_fields=["claim_token", "lease_expires_at", "retry_count"])
+    return True
+
+
+def clear_ineligible_fact_embeddings():
+    """Drop stored vectors of facts that are no longer retrievable
+    (superseded, private, trashed, archived). Returns the row count."""
+    return (
+        MemoryFact.all_objects.filter(embedding__isnull=False)
+        .exclude(fact_eligible_q())
+        .update(embedding=None, embedding_provider=None, claim_token=None, lease_expires_at=None)
+    )

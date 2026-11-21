@@ -10,9 +10,12 @@ class ToolsConfig(AppConfig):
         # models have loaded -- `tools.export` imports `memory.models`.
         from tools.coding_sessions import _register as _register_sessions_read
         from tools.export import _register
+        from tools.memory_graph import _register as _register_graph_read
         from tools.purge import _register as _register_purge
 
         _register()
         _register_purge()
         # Phase 8A D12: the ungated, web-only coding-sessions read tool.
         _register_sessions_read()
+        # Phase 8B D8: the ungated, web-only temporal-graph read tool.
+        _register_graph_read()

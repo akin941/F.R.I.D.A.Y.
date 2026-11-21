@@ -88,7 +88,8 @@ class Command(BaseCommand):
             if name == "run":
                 sub.add_argument("--retrieval-mode", default=BASELINE_MODE)
             if name == "compare":
-                sub.add_argument("--retrieval-mode", required=True)
+                # `--retrieval hybrid` (brief D8) is the same option.
+                sub.add_argument("--retrieval-mode", "--retrieval", required=True)
         record = actions.add_parser("record")
         record.add_argument("file")
         record.add_argument("--owner", required=True, help="The installation owner's e-mail.")

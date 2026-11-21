@@ -31,6 +31,7 @@ from audit.services import record_audit
 from core.channels import CHANNEL_WEB
 from memory.graph.candidates import normalise_name
 from memory.ingestion.scrubber import scrub_text
+from memory.jobs import dispatch_fact_embedding
 from memory.models import (
     LEARNED_ENTITY_KINDS,
     LEARNED_PREDICATES,
@@ -278,8 +279,26 @@ def supersede(old, new):
         raise GraphInvalidTransition("Only an approved fact can supersede another.")
     old.valid_to = new.valid_from
     old.superseded_by = new
-    old.save(update_fields=["valid_to", "superseded_by", "updated_at"])
+    # A superseded fact is no longer retrievable: its vector goes (D8).
+    old.embedding = None
+    old.embedding_provider = None
+    old.save(
+        update_fields=[
+            "valid_to",
+            "superseded_by",
+            "embedding",
+            "embedding_provider",
+            "updated_at",
+        ]
+    )
     return old
+
+
+def _embed_on_commit(fact):
+    """D8: a fact that just became retrievable is embedded once the write
+    commits (`memory.jobs`, which re-checks eligibility; a `system` or
+    `private` fact is never claimed)."""
+    transaction.on_commit(lambda fact_id=fact.pk: dispatch_fact_embedding(fact_id))
 
 
 # --- learned proposals (the port) --------------------------------------------
@@ -422,6 +441,7 @@ def approve_fact(*, fact, actor, channel):
     fact.save(update_fields=["status", "decided_by", "decided_at", "supersedes", "updated_at"])
     if target is not None:
         supersede(target, fact)
+    _embed_on_commit(fact)
     _count_decision(fact, "proposals_accepted")
     _audit(
         "memory.graph.fact_approved",
@@ -508,6 +528,7 @@ def _new_owner_fact(
         decided_at=timezone.now(),
     )
     fact.save()
+    _embed_on_commit(fact)
     return fact
 
 
@@ -754,6 +775,7 @@ def restore_fact(*, fact, actor, channel):
     _revive_entities(fact.subject, fact.object_entity)
     fact.deleted_at = None
     fact.save(update_fields=["deleted_at", "updated_at"])
+    _embed_on_commit(fact)
     _audit("memory.graph.fact_restored", actor=actor, workspace=fact.workspace, resource=fact)
     return fact
 
