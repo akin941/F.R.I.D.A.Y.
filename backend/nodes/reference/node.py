@@ -105,6 +105,7 @@ class _Running:
     repo_root: str | None = None
     worktree: str | None = None
     temp_dir: str | None = None
+    own_base: str | None = None
 
 
 @dataclass
@@ -463,11 +464,13 @@ class ReferenceNode:
         repo_root = resolved.repo.real_root
         temp_dir = tempfile.mkdtemp(prefix="friday-run-")
         os.chmod(temp_dir, 0o700)
-        worktree = None
+        worktree = own_base = None
         try:
             write_root = repo_root
             if command.mode == "worktree":
-                base = self.worktree_base or tempfile.mkdtemp(prefix="friday-wt-")
+                base = self.worktree_base
+                if base is None:
+                    base = own_base = tempfile.mkdtemp(prefix="friday-wt-")
                 worktree = create_worktree(repo_root, base)
                 write_root = worktree
             spec = build_sandbox(
@@ -484,6 +487,8 @@ class ReferenceNode:
             if worktree is not None:
                 remove_worktree(repo_root, worktree)
             _rmtree(temp_dir)
+            if own_base is not None:
+                _rmtree(own_base)
             return [
                 self._result(
                     envelope,
@@ -502,6 +507,7 @@ class ReferenceNode:
             repo_root=repo_root,
             worktree=worktree,
             temp_dir=temp_dir,
+            own_base=own_base,
         )
         self._running.append(running)
         return self._pump_running(running)
@@ -566,9 +572,10 @@ class ReferenceNode:
             except WorktreeError:
                 pass
             running.worktree = None
-        if running.temp_dir is not None:
-            _rmtree(running.temp_dir)
-            running.temp_dir = None
+        for name in ("temp_dir", "own_base"):
+            if getattr(running, name) is not None:
+                _rmtree(getattr(running, name))
+                setattr(running, name, None)
 
     # --- introspection (tests and the conformance hook) ------------------
 
