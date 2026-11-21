@@ -2423,3 +2423,19 @@ tests.
    sends `output` frames the server can stream; nothing in the panel
    changes. Check on the real Mac that a long `uv run pytest` streams into
    the HUD panel within a second per line (pending owner evaluation).
+
+### Known follow-ups — `feat/p10-hud-terminal`, unresolved LOW review notes (recorded at merge, 2026-11-21)
+
+1. LOW, `backend/hud/views.py`: `terminal_stream` is a synchronous
+   generator that calls `refresh_from_db` and sleeps each poll, so each open
+   stream holds a worker thread for up to `HUD_STREAM_MAX_SECONDS`. It is
+   bounded and throttled (`hud_terminal` scope) and follows the existing
+   `HudEventsView` pattern, so it does not block the merge. Fix (optional):
+   add a cap on concurrent terminal streams per actor in a later hardening
+   pass.
+2. LOW, `backend/nodes/output.py`: if the Redis writer breaks mid-run, no
+   `end` entry is written. The stream view handles this by falling back to
+   the execution row's terminal status plus an `output_unavailable` flag.
+   This is correct, but the fallback path is only implicitly covered. Fix
+   (optional): add an explicit test for the broken-writer then row-terminal
+   `end` frame.
