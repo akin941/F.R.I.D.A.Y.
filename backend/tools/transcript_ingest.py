@@ -266,7 +266,9 @@ def _audit(*, owner, workspace, capability, node, trace_id, metadata):
 
 
 def _pull_one(port, *, tool, source, node, workspace, prefixes, now, report):
-    owner = node.owner
+    # The actor is the transcript source's owner (the installation owner);
+    # `refusal_for` requires the node to be theirs too.
+    owner = source.workspace.owner
     capability = CAPABILITIES[tool]
     cursor = TranscriptCursor.objects.filter(
         source=source, target_workspace=workspace, node_ref=node.ref
