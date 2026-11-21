@@ -158,6 +158,10 @@ def _context_report(config):
     return report
 
 
+def _spend_dirs(spend_dirs, results_dir):
+    return tuple(spend_dirs) or tuple(d for d in (results_dir,) if d is not None)
+
+
 def run_cases(cases, config, *, results_dir, spend_dirs=()):
     """Run `cases` and write the result file. Returns `(result, path)`.
     `spend_dirs` are every results directory whose files count toward the
@@ -165,7 +169,7 @@ def run_cases(cases, config, *, results_dir, spend_dirs=()):
     require_eval_settings()
     retriever = retriever_for(config.retrieval_mode)
     prompt = None if config.retrieval_only else _prompt_version()
-    guard = budget_guard(config.run_id, spend_dirs or (results_dir,))
+    guard = budget_guard(config.run_id, _spend_dirs(spend_dirs, results_dir))
     if not config.retrieval_only and guard.exhausted():
         raise EvalRefused(
             f"the {BUDGET_NAME} monthly cap is spent; the run was refused with no model call"
@@ -264,7 +268,7 @@ def run_compare(cases, *, set_name, candidate_mode, retrieval_only, results_dir,
             run_id=run_id,
         ),
         results_dir=None,
-        spend_dirs=spend_dirs or (results_dir,),
+        spend_dirs=_spend_dirs(spend_dirs, results_dir),
     )
     arm_b, _ = run_cases(
         cases,
@@ -277,7 +281,7 @@ def run_compare(cases, *, set_name, candidate_mode, retrieval_only, results_dir,
             run_id=run_id,
         ),
         results_dir=None,
-        spend_dirs=spend_dirs or (results_dir,),
+        spend_dirs=_spend_dirs(spend_dirs, results_dir),
     )
     arm_b["verdict"] = metrics.compare_verdict(arm_a, arm_b)
     paths = [write_result(results_dir, arm_a), write_result(results_dir, arm_b)]
