@@ -142,7 +142,19 @@ harness_write_mode_main() {
     branch_ref=$(git -C "$repo_dir" symbolic-ref -q HEAD)
 
     cli_exit_code=0
-    cli_output=$(run_cli) || cli_exit_code=$?
+    if [ "${harness_driver_mode:-false}" = true ]; then
+        # Driver mode (Phase 10 brief D10): the agent's long-lived server
+        # speaks to the host driver over the container's stdin/stdout, so
+        # its stdout is NOT captured here -- it streams straight out. It
+        # ends when the host closes stdin after the last turn; everything
+        # below (quiesce, wrapper-owned commit, pristine test run, result
+        # file) is unchanged. The final frame carries an empty payload:
+        # usage and the transcript came over the protocol, per turn.
+        cli_output=""
+        run_cli || cli_exit_code=$?
+    else
+        cli_output=$(run_cli) || cli_exit_code=$?
+    fi
 
     quiesce
 

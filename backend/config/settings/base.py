@@ -1012,6 +1012,35 @@ HARNESS_AGENT_POLICY = {
 # (every terminal transition cleans up its own worktree immediately).
 HARNESS_WORKTREE_RETENTION_HOURS = env.int("HARNESS_WORKTREE_RETENTION_HOURS", default=72)
 
+# --- Harness v3 drivers (Phase 10 brief D10, branch 6) ---
+#
+# A driver replaces only the "run the CLI once" step of an implementation
+# run with a long-lived, bidirectional session (Codex app-server JSON-RPC
+# over the container's stdio). Off by default on both switches: a non-`cli`
+# driver needs HARNESS_DRIVERS_ENABLED=true (system check harness.E002) AND
+# the owner's third-party terms check (d4) recorded as a date in
+# HARNESS_DRIVER_TERMS_CHECKED_ON (harness.E003). Discovery and review keep
+# the CLI path in this phase. Allowed values per agent live in
+# `harness.drivers.DRIVER_CHOICES`.
+HARNESS_DRIVERS_ENABLED = env.bool("HARNESS_DRIVERS_ENABLED", default=False)
+HARNESS_DRIVER_CODEX = env("HARNESS_DRIVER_CODEX", default="cli")
+HARNESS_DRIVER_TERMS_CHECKED_ON = env("HARNESS_DRIVER_TERMS_CHECKED_ON", default="")
+# The one pin of the Codex app-server driver: must equal the Dockerfile
+# `ARG CODEX_CLI_VERSION` and the schema snapshot's recorded version under
+# harness/drivers/codex_schema/<version>/ (system check harness.E004).
+HARNESS_CODEX_APP_SERVER_VERSION = env("HARNESS_CODEX_APP_SERVER_VERSION", default="0.1.0")
+# How often a driver waiting on a `harness_agent_action` approval re-reads
+# the ApprovalRequest row (the source of truth); the Redis wake-up hint
+# written on approve only shortens the wait.
+HARNESS_AGENT_ACTION_POLL_SECONDS = env.int("HARNESS_AGENT_ACTION_POLL_SECONDS", default=2)
+# Escalation cards per job (brief R5, approval fatigue): beyond this the
+# driver declines without creating another ApprovalRequest.
+HARNESS_DRIVER_MAX_ESCALATIONS = env.int("HARNESS_DRIVER_MAX_ESCALATIONS", default=20)
+# Token brake for driver runs: the Codex app-server reports tokens but no
+# cost, so HARNESS_MAX_JOB_COST cannot bound it; a run whose summed turn
+# tokens exceed this fails `budget_exceeded`.
+HARNESS_DRIVER_MAX_TOKENS = env.int("HARNESS_DRIVER_MAX_TOKENS", default=2_000_000)
+
 # --- Deploys (Phase 5 branch 6, ADR-010 decision 7, brief D10) ---
 
 # The private key the runner uses for the forced-command deploy account on

@@ -56,3 +56,72 @@ def check_self_repo_identifiers_renamed(app_configs=None, **kwargs):
             id="harness.W001",
         )
     ]
+
+
+@register()
+def check_harness_drivers(app_configs=None, **kwargs):
+    """Phase 10 brief D10 "Selection" and "Pins": a non-`cli` driver is
+    refused unless `HARNESS_DRIVERS_ENABLED` is true (harness.E002) and the
+    owner's terms check (d4) is recorded as a date in
+    `HARNESS_DRIVER_TERMS_CHECKED_ON` (harness.E003); an unknown value is
+    refused (harness.E005); the Codex app-server pin must equal the
+    Dockerfile ARG and the snapshot version (harness.E004). An enabled
+    driver backed by a provisional snapshot is a warning here
+    (harness.W002); the closeout preflight fails on it."""
+    from harness.drivers import (
+        DRIVER_CHOICES,
+        DRIVER_CLI,
+        DRIVER_SETTINGS,
+        configured_driver,
+        drivers_enabled,
+        terms_checked_on,
+    )
+    from harness.drivers.schema import codex_pin_errors, load_codex_snapshot
+
+    messages = []
+    for agent, choices in DRIVER_CHOICES.items():
+        value = configured_driver(agent)
+        setting = DRIVER_SETTINGS[agent]
+        if value not in choices:
+            messages.append(
+                Error(f"{setting}={value!r} is not one of {', '.join(choices)}.", id="harness.E005")
+            )
+            continue
+        if value == DRIVER_CLI:
+            continue
+        if not drivers_enabled():
+            messages.append(
+                Error(
+                    f"{setting}={value!r} needs HARNESS_DRIVERS_ENABLED=true.",
+                    hint="Leave the driver on `cli` until drivers are enabled.",
+                    id="harness.E002",
+                )
+            )
+            continue
+        if terms_checked_on() is None:
+            messages.append(
+                Error(
+                    f"{setting}={value!r} is enabled but HARNESS_DRIVER_TERMS_CHECKED_ON "
+                    "holds no date.",
+                    hint=(
+                        "Record the third-party terms check (owner step d4, "
+                        "docs/prompts/phase-10-control/brief.md) as YYYY-MM-DD before enabling."
+                    ),
+                    id="harness.E003",
+                )
+            )
+        if agent == "codex_cli":
+            try:
+                snapshot = load_codex_snapshot(settings.HARNESS_CODEX_APP_SERVER_VERSION)
+            except (OSError, ValueError):
+                snapshot = None
+            if snapshot is not None and snapshot.provisional:
+                messages.append(
+                    Warning(
+                        "The Codex app-server driver is enabled on a provisional schema snapshot.",
+                        hint="Run harness/docker/generate_driver_schemas.sh for the pin.",
+                        id="harness.W002",
+                    )
+                )
+    messages.extend(Error(message, id="harness.E004") for message in codex_pin_errors())
+    return messages

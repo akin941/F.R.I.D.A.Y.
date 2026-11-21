@@ -22,6 +22,13 @@ FROM node@sha256:000000000000000000000000000000000000000000000000000000000000000
 # TODO(owner, before first real build): verify this against the npm
 # registry's current release and bump on the reviewed cadence the brief
 # calls for.
+#
+# Phase 10 branch 6 (brief D10): this ARG is ALSO the Codex app-server
+# driver's pin. It must equal HARNESS_CODEX_APP_SERVER_VERSION and the
+# version recorded in backend/harness/drivers/codex_schema/<version>/
+# (system check harness.E004 refuses to boot otherwise). Bump all three
+# together and regenerate the snapshot from the built image with
+# generate_driver_schemas.sh -- never hand-edit method names.
 ARG CODEX_CLI_VERSION=0.1.0
 
 # git (Codex code-review P1, branch 1 round 9) -- see
