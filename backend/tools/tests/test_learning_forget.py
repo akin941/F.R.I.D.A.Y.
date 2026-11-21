@@ -25,6 +25,7 @@ from memory.models import (
 )
 from memory.tests.learning_helpers import enable, episode, map_repo
 from tools import export
+from tools.tests.vault_helpers import export_in_run
 
 pytestmark = pytest.mark.django_db
 
@@ -306,13 +307,13 @@ def test_a_source_restored_before_the_decision_survives_the_purge(
 
 def test_previously_exported_notes_of_forgotten_rows_are_removed(owner, world, personal, tmp_path):
     vault = export.validate_vault_root_exists(str(tmp_path))
-    export.export_workspace_memories(vault, personal)
+    export_in_run(vault, personal)
     memory = world["rows"]["git_approved"]
     note = tmp_path / "03_Workspaces" / str(personal.id) / "Memory" / f"{memory.id}.md"
     assert note.exists()
     services.forget_source(world["git"], actor=owner, channel=CHANNEL_WEB)
-    written, updated, removed = export.export_workspace_memories(vault, personal)
+    written, updated, removed = export_in_run(vault, personal)
     assert not note.exists() and removed == 1
     services.restore_source(world["git"], actor=owner, channel=CHANNEL_WEB)
-    export.export_workspace_memories(vault, personal)
+    export_in_run(vault, personal)
     assert note.exists()

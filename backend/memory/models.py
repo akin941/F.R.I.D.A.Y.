@@ -427,6 +427,12 @@ class IngestionSource(WorkspaceScopedModel, TimestampedModel):
         HARNESS = "harness"
         CLAUDE_CODE_HOOKS = "claude_code_hooks"
         CALENDAR = "calendar"
+        # Phase 8B branch 7 (brief D12): the owner's `00_Inbox/` vault
+        # notes, imported once inside an approved `vault_export` run. Not
+        # personal-class (ADR-012 decision 11 lists calendar, mail and
+        # transcripts only): only a `sensitivity: private` note is routed
+        # to local providers.
+        OBSIDIAN_INBOX = "obsidian_inbox"
 
     kind = models.CharField(max_length=40, choices=Kind.choices)
     enabled = models.BooleanField(default=False)
@@ -478,6 +484,10 @@ class WorkspaceMappingRule(WorkspaceScopedModel, TimestampedModel):
         REPO = "repo"  # exact HarnessRepo id string
         PATH_PREFIX = "path_prefix"  # longest normalised prefix wins
         CALENDAR_BINDING = "calendar_binding"  # exact binding id
+        # Vault-relative folder under `00_Inbox` (brief D12); longest
+        # segment-boundary prefix wins, like `path_prefix`. Only valid on
+        # an `obsidian_inbox` source.
+        VAULT_PREFIX = "vault_prefix"
 
     source = models.ForeignKey(
         IngestionSource, on_delete=models.CASCADE, related_name="mapping_rules"

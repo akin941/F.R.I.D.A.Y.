@@ -48,6 +48,15 @@ class VaultExportRun(WorkspaceScopedModel, TimestampedModel):
     written_count = models.PositiveIntegerField(default=0)
     updated_count = models.PositiveIntegerField(default=0)
     removed_count = models.PositiveIntegerField(default=0)
+    # Phase 8B branch 7 (brief D12). Counts only -- never a file name.
+    # `conflicts_saved`: owner-edited export files copied to
+    # `_conflicts/<date>/` (or `_private/_conflicts/<date>/`) before being
+    # overwritten or pruned.
+    conflicts_saved = models.PositiveIntegerField(default=0)
+    entity_notes_count = models.PositiveIntegerField(default=0)
+    inbox_imported_count = models.PositiveIntegerField(default=0)
+    inbox_unmapped_count = models.PositiveIntegerField(default=0)
+    inbox_skipped_count = models.PositiveIntegerField(default=0)
 
     class Meta:
         indexes = [

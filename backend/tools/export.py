@@ -26,9 +26,13 @@ like `memory.jobs.finalize_extraction_success`, this is system/worker code,
 not a view or agent tool, so ADR-001's `for_actor()` rule doesn't apply.
 """
 
+import contextvars
 import errno
 import logging
+import os
 import uuid
+from contextlib import contextmanager
+from dataclasses import dataclass, field
 from datetime import timedelta
 
 from django.conf import settings
@@ -41,7 +45,9 @@ from audit.services import record_audit
 from memory.models import Memory
 from tools.models import VaultExportRun
 from tools.registry import ToolSpec, ToolValidationError, register_tool
-from tools.vault_frontmatter import parse_frontmatter, render_frontmatter
+from tools.vault_entities import plan_entity_notes
+from tools.vault_frontmatter import is_owner_edited, parse_frontmatter, render_frontmatter
+from tools.vault_inbox import InboxStats, inbox_source_for, scan_inbox
 from tools.vault_paths import (
     VaultPathError,
     VaultRootUnavailableError,
@@ -49,11 +55,13 @@ from tools.vault_paths import (
     dir_fd_scope,
     ensure_validated_subdir,
     list_validated,
+    open_existing_subdir,
     open_validated_dir,
-    read_validated,
+    read_validated_bytes,
     unlink_validated,
     validate_vault_root_exists,
     validate_vault_root_string,
+    write_new_validated,
 )
 from tools.work_log import record_tool_outcome
 from workspaces.models import Workspace
@@ -165,12 +173,53 @@ def _fenced(run_id, claim_token):
     )
 
 
+@dataclass
+class ExportStats:
+    """Everything one run counts (Phase 8B branch 7). Counts only -- no
+    file name or text ever lands here, so it can go to the run row, the
+    audit metadata and the work_log notice as-is."""
+
+    written: int = 0
+    updated: int = 0
+    removed: int = 0
+    entity_notes: int = 0
+    conflicts_saved: int = 0
+    conflicts_private: int = 0
+    inbox: InboxStats = field(default_factory=InboxStats)
+
+    def as_tuple(self):
+        return self.written, self.updated, self.removed
+
+
+def _as_stats(counts) -> ExportStats:
+    if isinstance(counts, ExportStats):
+        return counts
+    written, updated, removed = counts
+    return ExportStats(written=written, updated=updated, removed=removed)
+
+
+def conflict_notice(stats: ExportStats, day: str) -> str:
+    """The D12 work_log notice (Turkish, the owner's UI language): counts
+    and folder names only, never a note's name or text."""
+    folders = []
+    if stats.conflicts_saved - stats.conflicts_private:
+        folders.append(f"`_conflicts/{day}/`")
+    if stats.conflicts_private:
+        folders.append(f"`_private/_conflicts/{day}/`")
+    where = " ve ".join(folders)
+    return (
+        f"Obsidian'da düzenlenmiş {stats.conflicts_saved} not {where} klasörüne "
+        "kaydedildi; değişikliği web arayüzünde yapın."
+    )
+
+
 @transaction.atomic
 def finalize_vault_export_success(run_id, claim_token, counts):
     run = _fenced(run_id, claim_token)
     if run is None:
         return False
-    written, updated, removed = counts
+    stats = _as_stats(counts)
+    written, updated, removed = stats.as_tuple()
     run.status = VaultExportRun.Status.SUCCEEDED
     run.claim_token = None
     run.lease_expires_at = None
@@ -179,6 +228,11 @@ def finalize_vault_export_success(run_id, claim_token, counts):
     run.written_count = written
     run.updated_count = updated
     run.removed_count = removed
+    run.conflicts_saved = stats.conflicts_saved
+    run.entity_notes_count = stats.entity_notes
+    run.inbox_imported_count = stats.inbox.imported
+    run.inbox_unmapped_count = stats.inbox.unmapped
+    run.inbox_skipped_count = stats.inbox.skipped
     run.save(
         update_fields=[
             "status",
@@ -189,6 +243,11 @@ def finalize_vault_export_success(run_id, claim_token, counts):
             "written_count",
             "updated_count",
             "removed_count",
+            "conflicts_saved",
+            "entity_notes_count",
+            "inbox_imported_count",
+            "inbox_unmapped_count",
+            "inbox_skipped_count",
             "updated_at",
         ]
     )
@@ -205,18 +264,42 @@ def finalize_vault_export_success(run_id, claim_token, counts):
             "written": written,
             "updated": updated,
             "removed": removed,
+            "entity_notes": stats.entity_notes,
+            "conflicts_saved": stats.conflicts_saved,
+            "inbox_imported": stats.inbox.imported,
+            "inbox_duplicate": stats.inbox.duplicate,
+            "inbox_unmapped": stats.inbox.unmapped,
+            "inbox_skipped": stats.inbox.skipped,
+            "inbox_truncated": stats.inbox.truncated,
+            "inbox_deferred": stats.inbox.deferred,
+            "inbox_move_failed": stats.inbox.move_failed,
         },
     )
     # work_log (ADR-008 decision 4, brief D13): counts only, like the audit
     # row -- never memory titles or file names.
+    summary = f"Vault export run {run.id}: {written} written, {updated} updated, {removed} removed."
+    if stats.entity_notes:
+        summary += f" {stats.entity_notes} entity notes."
+    if stats.inbox.imported or stats.inbox.unmapped:
+        summary += (
+            f" Inbox: {stats.inbox.imported} imported, {stats.inbox.unmapped} unmapped"
+            " (left in place)."
+        )
     record_tool_outcome(
         run.approval_request,
         outcome="succeeded",
-        summary=(
-            f"Vault export run {run.id}: {written} written, {updated} updated, {removed} removed."
-        ),
+        summary=summary,
         sensitivity=Memory.Sensitivity.NORMAL,
     )
+    if stats.conflicts_saved:
+        # The D12 notice: its own work_log row, so the owner sees it as a
+        # separate item rather than a clause inside the success line.
+        record_tool_outcome(
+            run.approval_request,
+            outcome="conflicts_saved",
+            summary=conflict_notice(stats, timezone.localdate().isoformat()),
+            sensitivity=Memory.Sensitivity.NORMAL,
+        )
     return True
 
 
@@ -272,19 +355,184 @@ def finalize_vault_export_failure(run_id, claim_token, *, error_type):
 # synced workspace tree, and the sync-ignored tree for private memories.
 MAIN_TREE = "03_Workspaces"
 PRIVATE_TREE = "_private"
+# Owner-edited export files are copied here before being overwritten or
+# pruned (D12). A private file's copy stays inside `_private/`.
+CONFLICTS_DIR = "_conflicts"
+MEMORY_FOLDER = "Memory"
+ENTITY_FOLDER = "Entities"
+_MAX_UNIQUE_SUFFIX = 100
 
 
-def export_workspace_memories(vault_root_real, workspace):
-    """Tier 2 has already passed by the time this is called. For each tree
-    (`_private/` first, then `03_Workspaces/`), opens the
-    `<tree>/<workspace.id>/Memory/` chain as validated directory
-    descriptors (each `mkdir`-if-missing then re-opened with `O_NOFOLLOW`),
-    then runs the write + conservative-prune pass inside it against that
-    tree's own memory set: private memories in `_private/`, all others in
-    `03_Workspaces/`. The private tree is written before the main tree is
-    pruned, so a memory moving between trees is never missing from the
-    vault in between. Returns `(written, updated, removed)` summed over
-    both trees.
+# --- the approved-run gate (D12) ---------------------------------------------
+
+
+class VaultRunNotClaimed(Exception):
+    """A vault write or an inbox import was attempted outside an approved,
+    claimed `vault_export` run (CLAUDE.md rule 4): refused."""
+
+
+_CLAIMED_RUN: contextvars.ContextVar = contextvars.ContextVar("vault_export_claimed_run")
+
+
+@contextmanager
+def claimed_run_scope(run_id, claim_token):
+    """Verify this attempt owns `run_id` -- `running`, holding
+    `claim_token`, for an APPROVED `vault_export` request -- and mark the
+    current context as inside that run. Every vault write
+    (`export_workspace_memories`) and the inbox import (`import_inbox`)
+    refuses to run without it, so a direct call can never write the vault
+    or create episodes."""
+    run = (
+        VaultExportRun.objects.select_related("workspace", "approval_request")
+        .filter(
+            pk=run_id,
+            status=VaultExportRun.Status.RUNNING,
+            claim_token=claim_token,
+            approval_request__status="approved",
+            approval_request__tool_name="vault_export",
+        )
+        .first()
+    )
+    if run is None or claim_token is None:
+        raise VaultRunNotClaimed("No approved, claimed vault_export run.")
+    token = _CLAIMED_RUN.set(run.workspace_id)
+    try:
+        yield run
+    finally:
+        _CLAIMED_RUN.reset(token)
+
+
+def _require_claimed_run(workspace):
+    if _CLAIMED_RUN.get(None) != workspace.pk:
+        raise VaultRunNotClaimed("Vault writes happen only inside an approved, claimed run.")
+
+
+# --- planning: what each folder should mirror ---------------------------------
+
+
+def plan_workspace(workspace):
+    """`{tree: {folder: {filename: text}}}` -- exactly what this run will
+    write: approved memories (private ones in `_private/`) and entity notes
+    (`tools.vault_entities`). A pure DB read, shared by the run and the
+    approval's dry pass."""
+    approved = list(Memory.objects.filter(workspace=workspace, status=Memory.Status.APPROVED))
+    private_memories = {
+        f"{m.id}.md": render_frontmatter(m)
+        for m in approved
+        if m.sensitivity == Memory.Sensitivity.PRIVATE
+    }
+    shared_memories = {
+        f"{m.id}.md": render_frontmatter(m)
+        for m in approved
+        if m.sensitivity != Memory.Sensitivity.PRIVATE
+    }
+    open_entities, private_entities = plan_entity_notes(workspace)
+    # `_private/` first: a note moving between trees is written to its new
+    # tree before the old tree's copy is pruned.
+    return {
+        PRIVATE_TREE: {MEMORY_FOLDER: private_memories, ENTITY_FOLDER: private_entities},
+        MAIN_TREE: {MEMORY_FOLDER: shared_memories, ENTITY_FOLDER: open_entities},
+    }
+
+
+# --- conflicts (D12) ------------------------------------------------------------
+
+
+class _ConflictSink:
+    """Writes conflict copies for one tier: the open tree's go to
+    `_conflicts/<date>/<ws>/`, a `_private/` file's to
+    `_private/_conflicts/<date>/<ws>/`. The tier is the tree of the path
+    being overwritten, never the edited frontmatter. Directories are
+    created lazily (validated descriptors, `O_NOFOLLOW` -- a symlinked
+    `_conflicts` raises `VaultPathEscapeError`, failing the run BEFORE the
+    edited file is touched). `dry_run` only counts."""
+
+    def __init__(self, vault_root_real, root_fd, tree, workspace, stats, *, dry_run):
+        self.vault_root_real = vault_root_real
+        self.root_fd = root_fd
+        self.private = tree == PRIVATE_TREE
+        self.workspace = workspace
+        self.stats = stats
+        self.dry_run = dry_run
+        self.day = timezone.localdate().isoformat()
+        self._fds = []
+        self._fd = None
+        self._path = None
+
+    def _ensure(self):
+        if self._fd is not None:
+            return self._fd, self._path
+        parent_fd, parent_path = self.root_fd, self.vault_root_real
+        chain = [CONFLICTS_DIR, self.day, str(self.workspace.id)]
+        if self.private:
+            chain = [PRIVATE_TREE, *chain]
+        for name in chain:
+            fd = ensure_validated_subdir(self.vault_root_real, parent_fd, parent_path, name)
+            self._fds.append(fd)
+            parent_fd, parent_path = fd, f"{parent_path}/{name}"
+        self._fd, self._path = parent_fd, parent_path
+        return self._fd, self._path
+
+    def save(self, filename, data: bytes):
+        self.stats.conflicts_saved += 1
+        if self.private:
+            self.stats.conflicts_private += 1
+        if self.dry_run:
+            return
+        fd, path = self._ensure()
+        stem = filename[:-3] if filename.endswith(".md") else filename
+        for attempt in range(_MAX_UNIQUE_SUFFIX):
+            name = filename if attempt == 0 else f"{stem}.{attempt}.md"
+            try:
+                write_new_validated(self.vault_root_real, fd, path, name, data)
+                return
+            except FileExistsError:
+                continue
+        raise FileExistsError("no free conflict-copy name")
+
+    def close(self):
+        for fd in reversed(self._fds):
+            os.close(fd)
+        self._fds = []
+
+
+def _read_existing(vault_root_real, folder_fd, folder_path, filename):
+    """`(raw bytes, text or None)` of an existing file, or `None` when it
+    cannot be inspected (a symlink, a FIFO, unreadable): such a file is
+    never copied -- a rename replaces a symlink itself, never its target,
+    so nothing of the owner's is destroyed by overwriting it."""
+    try:
+        data, _ = read_validated_bytes(vault_root_real, folder_fd, folder_path, filename)
+    except OSError:
+        return None
+    try:
+        return data, data.decode("utf-8")
+    except UnicodeDecodeError:
+        return data, None
+
+
+def _edited(existing) -> bool:
+    data, text = existing
+    # Undecodable bytes at an export path are not ours: keep a copy.
+    return text is None or is_owner_edited(text)
+
+
+# --- the write + conservative prune pass -----------------------------------------
+
+
+def export_workspace_memories(vault_root_real, workspace, stats=None):
+    """Tier 2 has already passed by the time this is called, inside a
+    claimed run (`claimed_run_scope`; refused otherwise). For each tree
+    (`_private/` first, then `03_Workspaces/`) and each of its folders
+    (`Memory/`, `Entities/`), opens the `<tree>/<workspace.id>/<folder>/`
+    chain as validated directory descriptors (each `mkdir`-if-missing then
+    re-opened with `O_NOFOLLOW`), then runs the write + conservative-prune
+    pass inside it against that folder's own planned set. Before an
+    existing file is overwritten or pruned, an owner edit (its body no
+    longer matching its `content_sha256`) is copied to the tier's
+    `_conflicts/<date>/<ws>/`. Returns `(written, updated, removed)` summed
+    over every folder; `stats` (an `ExportStats`), when given, also
+    receives the entity-note and conflict counts.
 
     Serializes concurrent exports for the same workspace (Codex review
     finding) via a `select_for_update` lock on the workspace row, held for
@@ -293,72 +541,88 @@ def export_workspace_memories(vault_root_real, workspace):
     pass, still holding a snapshot from before a new approval, could delete
     a file a newer run just legitimately wrote for that same memory.
     """
+    _require_claimed_run(workspace)
+    stats = stats if stats is not None else ExportStats()
     with transaction.atomic():
         Workspace.objects.select_for_update().get(pk=workspace.pk)
-        approved = list(Memory.objects.filter(workspace=workspace, status=Memory.Status.APPROVED))
-        private = [m for m in approved if m.sensitivity == Memory.Sensitivity.PRIVATE]
-        shared = [m for m in approved if m.sensitivity != Memory.Sensitivity.PRIVATE]
-        totals = (0, 0, 0)
-        with dir_fd_scope(open_validated_dir(vault_root_real, vault_root_real)) as root_fd:
-            for tree, memories in ((PRIVATE_TREE, private), (MAIN_TREE, shared)):
-                counts = _export_tree(vault_root_real, root_fd, tree, workspace, memories)
-                totals = tuple(total + count for total, count in zip(totals, counts, strict=True))
-        return totals
-
-
-def _export_tree(vault_root_real, root_fd, tree, workspace, memories):
-    tree_path = f"{vault_root_real}/{tree}"
-    with dir_fd_scope(
-        ensure_validated_subdir(vault_root_real, root_fd, vault_root_real, tree)
-    ) as tree_fd:
-        ws_dir_path = f"{tree_path}/{workspace.id}"
-        with dir_fd_scope(
-            ensure_validated_subdir(vault_root_real, tree_fd, tree_path, str(workspace.id))
-        ) as ws_fd:
-            memory_dir_path = f"{ws_dir_path}/Memory"
-            with dir_fd_scope(
-                ensure_validated_subdir(vault_root_real, ws_fd, ws_dir_path, "Memory")
-            ) as memory_fd:
-                return _export_memory_dir(
-                    vault_root_real, memory_fd, memory_dir_path, workspace, memories
-                )
-
-
-def _export_memory_dir(vault_root_real, memory_fd, memory_path, workspace, approved):
-    """Write + conservative prune for one tree's Memory folder. `approved`
-    is exactly the set this folder should mirror; a recognized export file
-    for any other memory (deleted, archived, or belonging in the other
-    tree) is prunable."""
-    approved_ids = {memory.id for memory in approved}
-    approved_filenames = {f"{memory.id}.md" for memory in approved}
-    existing_files = set(list_validated(vault_root_real, memory_fd, memory_path))
-
-    written = updated = removed = 0
-    for memory in approved:
-        filename = f"{memory.id}.md"
-        atomic_write_validated(
-            vault_root_real, memory_fd, memory_path, filename, render_frontmatter(memory)
+        plan = plan_workspace(workspace)
+        stats.entity_notes = len(plan[PRIVATE_TREE][ENTITY_FOLDER]) + len(
+            plan[MAIN_TREE][ENTITY_FOLDER]
         )
+        with dir_fd_scope(open_validated_dir(vault_root_real, vault_root_real)) as root_fd:
+            for tree, folders in plan.items():
+                _export_tree(vault_root_real, root_fd, tree, workspace, folders, stats)
+        return stats.as_tuple()
+
+
+def _export_tree(vault_root_real, root_fd, tree, workspace, folders, stats, *, dry_run=False):
+    sink = _ConflictSink(vault_root_real, root_fd, tree, workspace, stats, dry_run=dry_run)
+    opener = open_existing_subdir if dry_run else ensure_validated_subdir
+    tree_path = f"{vault_root_real}/{tree}"
+    ws_path = f"{tree_path}/{workspace.id}"
+    try:
+        tree_fd = opener(vault_root_real, root_fd, vault_root_real, tree)
+        if tree_fd is None:
+            return
+        with dir_fd_scope(tree_fd):
+            ws_fd = opener(vault_root_real, tree_fd, tree_path, str(workspace.id))
+            if ws_fd is None:
+                return
+            with dir_fd_scope(ws_fd):
+                for folder, files in folders.items():
+                    folder_fd = opener(vault_root_real, ws_fd, ws_path, folder)
+                    if folder_fd is None:
+                        continue
+                    with dir_fd_scope(folder_fd):
+                        _export_folder(
+                            vault_root_real,
+                            folder_fd,
+                            f"{ws_path}/{folder}",
+                            workspace,
+                            files,
+                            stats,
+                            sink,
+                            dry_run=dry_run,
+                        )
+    finally:
+        sink.close()
+
+
+def _export_folder(
+    vault_root_real, folder_fd, folder_path, workspace, files, stats, sink, *, dry_run=False
+):
+    """Write + conservative prune for one folder. `files` is exactly the
+    set this folder should mirror; a recognized export file for any other
+    id (deleted, archived, trashed, or belonging in the other tree) is
+    prunable."""
+    wanted_ids = {uuid.UUID(name[:-3]) for name in files}
+    existing_files = set(list_validated(vault_root_real, folder_fd, folder_path))
+
+    for filename, content in files.items():
         if filename in existing_files:
-            updated += 1
+            existing = _read_existing(vault_root_real, folder_fd, folder_path, filename)
+            if existing is not None and _edited(existing):
+                sink.save(filename, existing[0])
+            stats.updated += 1
         else:
-            written += 1
+            stats.written += 1
+        if not dry_run:
+            atomic_write_validated(vault_root_real, folder_fd, folder_path, filename, content)
 
     for filename in existing_files:
-        if filename in approved_filenames or not filename.endswith(".md"):
+        if filename in files or not filename.endswith(".md"):
             continue
-        try:
-            text = read_validated(vault_root_real, memory_fd, memory_path, filename)
-        except (OSError, UnicodeDecodeError):
-            # Unreadable, or not valid UTF-8 (Codex review finding --
-            # `.read()` raises UnicodeDecodeError, a ValueError subclass,
-            # not OSError) -- skip, never destroy what we can't inspect.
+        existing = _read_existing(vault_root_real, folder_fd, folder_path, filename)
+        if existing is None or existing[1] is None:
+            # Unreadable, or not valid UTF-8 (Codex review finding) -- skip,
+            # never destroy what we can't inspect.
             continue
-        if _is_prunable(parse_frontmatter(text), workspace, approved_ids):
-            unlink_validated(vault_root_real, memory_fd, memory_path, filename)
-            removed += 1
-
-    return written, updated, removed
+        if _is_prunable(parse_frontmatter(existing[1]), workspace, wanted_ids):
+            if is_owner_edited(existing[1]):
+                sink.save(filename, existing[0])
+            if not dry_run:
+                unlink_validated(vault_root_real, folder_fd, folder_path, filename)
+            stats.removed += 1
 
 
 # Export-owned `source` tags -> the frontmatter key holding the memory id.
@@ -385,6 +649,44 @@ def _is_prunable(fields, workspace, approved_ids) -> bool:
     return parsed not in approved_ids
 
 
+def import_inbox(vault_root_real, workspace, stats=None):
+    """The `00_Inbox/` import-once (`tools.vault_inbox`), inside a claimed
+    run only. Runs BEFORE the export's workspace-lock transaction, with no
+    transaction of its own open: each episode commits in
+    `record_episode`'s own transaction before its note is moved, so a later
+    failure of the export pass can never roll back an episode whose note
+    has already been moved to `_imported/`."""
+    _require_claimed_run(workspace)
+    stats = stats if stats is not None else ExportStats()
+    with dir_fd_scope(open_validated_dir(vault_root_real, vault_root_real)) as root_fd:
+        stats.inbox = scan_inbox(vault_root_real, root_fd, workspace)
+    return stats.inbox
+
+
+def dry_pass(workspace):
+    """The approval's read-only preview (D12): what a run would do now --
+    conflicts it would save and inbox notes waiting -- or `None` when the
+    vault is not reachable from this process (the web container never has
+    it mounted). Writes nothing, creates no directory, records nothing."""
+    try:
+        vault_root_real = validate_vault_root_exists(settings.OBSIDIAN_VAULT_PATH)
+    except VaultPathError:
+        return None
+    stats = ExportStats()
+    try:
+        plan = plan_workspace(workspace)
+        with dir_fd_scope(open_validated_dir(vault_root_real, vault_root_real)) as root_fd:
+            for tree, folders in plan.items():
+                _export_tree(
+                    vault_root_real, root_fd, tree, workspace, folders, stats, dry_run=True
+                )
+            stats.inbox = scan_inbox(vault_root_real, root_fd, workspace, dry_run=True)
+    except (VaultPathError, OSError):
+        logger.exception("Vault dry pass failed")
+        return None
+    return stats
+
+
 def _classify_os_error(exc: OSError) -> str:
     if isinstance(exc, PermissionError):
         return VaultExportRun.ErrorType.PERMISSION_DENIED
@@ -394,11 +696,11 @@ def _classify_os_error(exc: OSError) -> str:
 
 
 def process_claimed_vault_export_run(run_id, claim_token):
-    """The claimed run's actual work: tier-2 vault-root check, then the
-    write + prune pass. Every failure mode maps to a sanitized, closed-
-    vocabulary `error_type` -- the underlying exception's own text (which
-    routinely embeds the real vault path and the host username) is logged,
-    never persisted."""
+    """The claimed run's actual work: tier-2 vault-root check, then (inside
+    `claimed_run_scope`) the `00_Inbox/` import and the write + prune pass.
+    Every failure mode maps to a sanitized, closed-vocabulary `error_type`
+    -- the underlying exception's own text (which routinely embeds the real
+    vault path and the host username) is logged, never persisted."""
     run = VaultExportRun.objects.select_related("workspace").get(pk=run_id)
     try:
         vault_root_real = validate_vault_root_exists(settings.OBSIDIAN_VAULT_PATH)
@@ -408,8 +710,16 @@ def process_claimed_vault_export_run(run_id, claim_token):
         )
         return
 
+    stats = ExportStats()
     try:
-        counts = export_workspace_memories(vault_root_real, run.workspace)
+        with claimed_run_scope(run_id, claim_token):
+            import_inbox(vault_root_real, run.workspace, stats)
+            export_workspace_memories(vault_root_real, run.workspace, stats)
+    except VaultRunNotClaimed:
+        # Lost the claim (lease takeover) or the approval is gone: no-op,
+        # like a fenced finalize that finds nothing to finalize.
+        logger.warning("Vault export run %s is no longer claimed by this attempt", run_id)
+        return
     except VaultPathError:
         logger.exception("Vault path escape detected during export run %s", run_id)
         finalize_vault_export_failure(
@@ -421,7 +731,7 @@ def process_claimed_vault_export_run(run_id, claim_token):
         finalize_vault_export_failure(run_id, claim_token, error_type=_classify_os_error(exc))
         return
 
-    finalize_vault_export_success(run_id, claim_token, counts)
+    finalize_vault_export_success(run_id, claim_token, stats)
 
 
 def describe_vault_export_execution(approval_request):
@@ -448,7 +758,62 @@ def describe_vault_export_execution(approval_request):
         "updated_count": run.updated_count,
         "removed_count": run.removed_count,
         "retry_count": run.retry_count,
+        # Phase 8B branch 7 (D12): the conflict count on the approval detail.
+        "conflicts_saved": run.conflicts_saved,
+        "entity_notes_count": run.entity_notes_count,
+        "inbox_imported_count": run.inbox_imported_count,
+        "inbox_unmapped_count": run.inbox_unmapped_count,
+        "inbox_skipped_count": run.inbox_skipped_count,
     }
+
+
+# Shown to the decider with the counts (D12): the inbox import is not
+# personal-class, so the owner must flag sensitive notes themselves.
+INBOX_ROUTING_NOTE = (
+    "00_Inbox notları bulut sağlayıcılarla da işlenebilir; hassas bir notu "
+    "`sensitivity: private` ile işaretleyin (yalnızca yerel modeller)."
+)
+
+
+def describe_vault_export_request(approval_request):
+    """`ToolSpec.describe_request` (D12): what the decider is approving, as
+    counts only -- the memories and entity notes the run will write, and,
+    while the request is still pending and the vault is reachable from
+    this process, a read-only dry pass: conflicts it would save and inbox
+    notes waiting. `None` counts mean "not known here" (the web container
+    has no vault mount). Never a file name, a title or any note text."""
+    workspace = approval_request.workspace
+    approved = Memory.objects.filter(workspace=workspace, status=Memory.Status.APPROVED)
+    private_memories = approved.filter(sensitivity=Memory.Sensitivity.PRIVATE).count()
+    open_entities, private_entities = plan_entity_notes(workspace)
+    source = inbox_source_for(workspace)
+    inbox_enabled = bool(source and source.is_accepting)
+    summary = {
+        "kind": "vault_export",
+        "memories": approved.count() - private_memories,
+        "private_memories": private_memories,
+        "entity_notes": len(open_entities),
+        "private_entity_notes": len(private_entities),
+        "inbox_enabled": inbox_enabled,
+        "inbox_waiting": None,
+        "inbox_unmapped": None,
+        "conflicts_detected": None,
+        "dry_pass": "skipped",
+        "inbox_routing_note": INBOX_ROUTING_NOTE if inbox_enabled else "",
+    }
+    if approval_request.status != "pending":
+        return summary
+    stats = dry_pass(workspace)
+    if stats is None:
+        summary["dry_pass"] = "vault_unavailable"
+        return summary
+    summary.update(
+        dry_pass="ok",
+        conflicts_detected=stats.conflicts_saved,
+        inbox_waiting=stats.inbox.waiting,
+        inbox_unmapped=stats.inbox.unmapped,
+    )
+    return summary
 
 
 def _register():
@@ -460,5 +825,6 @@ def _register():
             dispatch=dispatch_vault_export_run,
             validate_request=validate_vault_export_request,
             describe_execution=describe_vault_export_execution,
+            describe_request=describe_vault_export_request,
         )
     )

@@ -3,6 +3,7 @@ here is the stored, already-scrubbed text; nothing raw exists to show."""
 
 from rest_framework import serializers
 
+from memory.ingestion.mapping import allowed_rule_types
 from memory.models import (
     Episode,
     IngestionCounter,
@@ -104,9 +105,20 @@ class SourceUpdateSerializer(serializers.Serializer):
 
 
 class RuleCreateSerializer(serializers.Serializer):
+    """`context["source"]` (the rule's source) narrows the rule types it
+    accepts (`allowed_rule_types`); the service re-checks."""
+
     rule_type = serializers.ChoiceField(choices=WorkspaceMappingRule.RuleType.choices)
     pattern = serializers.CharField(max_length=500)
     target_workspace = serializers.UUIDField()
+
+    def validate_rule_type(self, value):
+        source = self.context.get("source")
+        if source is not None and value not in allowed_rule_types(source.kind):
+            raise serializers.ValidationError(
+                f"A {value} rule is not valid on a {source.kind} source."
+            )
+        return value
 
 
 class RuleUpdateSerializer(serializers.Serializer):

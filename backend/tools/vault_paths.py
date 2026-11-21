@@ -294,3 +294,145 @@ def list_validated(vault_root_real: str, parent_fd: int, parent_path) -> list[st
     path currently resolves to."""
     _check_inside_root(vault_root_real, os.path.realpath(parent_path), str(parent_path))
     return os.listdir(parent_fd)
+
+
+# --- Phase 8B branch 7 (brief D12): conflicts and the `00_Inbox` import ------
+
+
+class VaultFileTooLargeError(OSError):
+    """A file is larger than the caller's byte cap; nothing was read."""
+
+
+def read_validated_bytes(
+    vault_root_real: str, parent_fd: int, parent_path, filename: str, *, max_bytes=None
+) -> tuple[bytes, os.stat_result]:
+    """`read_validated`'s raw-bytes sibling, with the same refusals
+    (`O_NOFOLLOW`, `O_NONBLOCK`, `S_ISREG`) plus an optional byte cap
+    checked on the opened descriptor BEFORE any byte is read (a 70 KB inbox
+    note is skipped unread). Returns `(data, fstat)`. Used where a file's
+    text must be preserved even if it is not valid UTF-8 (a conflict copy)
+    and where its size or mtime matters (the inbox scan)."""
+    _check_inside_root(vault_root_real, os.path.realpath(parent_path), str(parent_path))
+    nonblock = getattr(os, "O_NONBLOCK", 0)
+    if _DIR_FD_SUPPORTED:
+        flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | nonblock
+        fd = os.open(filename, flags, dir_fd=parent_fd)
+    else:
+        file_path = Path(parent_path) / filename
+        if file_path.is_symlink():
+            raise OSError(f"{file_path} is a symlink, refusing to read.")
+        fd = os.open(file_path, os.O_RDONLY | nonblock)
+    try:
+        info = os.fstat(fd)
+        if not stat.S_ISREG(info.st_mode):
+            raise OSError(f"{filename} is not a regular file, refusing to read.")
+        if max_bytes is not None and info.st_size > max_bytes:
+            raise VaultFileTooLargeError(f"{filename} exceeds {max_bytes} bytes.")
+        chunks = []
+        total = 0
+        while True:
+            chunk = os.read(fd, 65536)
+            if not chunk:
+                break
+            chunks.append(chunk)
+            total += len(chunk)
+            if max_bytes is not None and total > max_bytes:
+                # Grew between fstat and read: refuse rather than read on.
+                raise VaultFileTooLargeError(f"{filename} exceeds {max_bytes} bytes.")
+        return b"".join(chunks), info
+    finally:
+        os.close(fd)
+
+
+def entry_kind(parent_fd: int, parent_path, name: str) -> str:
+    """`"dir"`, `"file"` or `"other"` for `name` under the validated
+    `parent_fd`, WITHOUT following a symlink (a symlink is `"other"`: never
+    descended into, never read). Raises `FileNotFoundError` if absent."""
+    if _DIR_FD_SUPPORTED:
+        info = os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
+    else:
+        info = os.lstat(Path(parent_path) / name)
+    if stat.S_ISDIR(info.st_mode):
+        return "dir"
+    if stat.S_ISREG(info.st_mode):
+        return "file"
+    return "other"
+
+
+def open_existing_subdir(vault_root_real: str, parent_fd: int, parent_path, name: str):
+    """A validated fd for an EXISTING directory `name` under `parent_fd`, or
+    `None` when nothing (or a plain file) is there -- never `mkdir` (a dry
+    pass, or a scan of a folder the owner may not have created, must not
+    create one). A symlink or other special entry in its place raises
+    `VaultPathEscapeError`, like `open_validated_dir`."""
+    try:
+        kind = entry_kind(parent_fd, parent_path, name)
+    except FileNotFoundError:
+        return None
+    if kind == "other":
+        raise VaultPathEscapeError(f"{name} is not a plain directory, refusing to follow.")
+    if kind != "dir":
+        return None
+    return open_validated_dir(vault_root_real, Path(parent_path) / name)
+
+
+def rename_validated(
+    vault_root_real: str,
+    src_fd: int,
+    src_path,
+    src_name: str,
+    dst_fd: int,
+    dst_path,
+    dst_name: str,
+) -> None:
+    """Move `src_name` (under the validated `src_fd`) to `dst_name` (under
+    the validated `dst_fd`) with `renameat(2)`: both directories are held
+    as `O_NOFOLLOW` descriptors, and both realpaths are re-checked right
+    before the call. Refuses to replace an existing destination
+    (`FileExistsError`) -- a move must never destroy a file already there
+    -- and refuses a source that is not a plain regular file (a symlink is
+    never moved)."""
+    _check_inside_root(vault_root_real, os.path.realpath(src_path), str(src_path))
+    _check_inside_root(vault_root_real, os.path.realpath(dst_path), str(dst_path))
+    if entry_kind(src_fd, src_path, src_name) != "file":
+        raise OSError(f"{src_name} is not a plain regular file, refusing to move.")
+    try:
+        entry_kind(dst_fd, dst_path, dst_name)
+    except FileNotFoundError:
+        pass
+    else:
+        raise FileExistsError(f"{dst_name} already exists, refusing to replace it.")
+    if _DIR_FD_SUPPORTED:
+        os.rename(src_name, dst_name, src_dir_fd=src_fd, dst_dir_fd=dst_fd)
+    else:
+        os.rename(Path(src_path) / src_name, Path(dst_path) / dst_name)
+
+
+def write_new_validated(
+    vault_root_real: str, parent_fd: int, parent_path, filename: str, data: bytes
+) -> None:
+    """Create `filename` under the validated `parent_fd` with `O_EXCL |
+    O_NOFOLLOW` (never through a planted symlink, never over an existing
+    file) and write `data` in full. A conflict copy is written this way: it
+    must never replace an earlier copy. On failure the partial file is
+    removed."""
+    _check_inside_root(vault_root_real, os.path.realpath(parent_path), str(parent_path))
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
+    if _DIR_FD_SUPPORTED:
+        fd = os.open(filename, flags, 0o644, dir_fd=parent_fd)
+    else:
+        fd = os.open(Path(parent_path) / filename, flags, 0o644)
+    try:
+        try:
+            _write_all(fd, data)
+        finally:
+            os.close(fd)
+    except Exception:
+        try:
+            if _DIR_FD_SUPPORTED:
+                os.unlink(filename, dir_fd=parent_fd)
+            else:
+                os.unlink(Path(parent_path) / filename)
+        except OSError:
+            pass
+        raise

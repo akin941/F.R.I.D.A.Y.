@@ -164,7 +164,7 @@ class MappingRuleListView(APIView):
         source = _source(request, source_id)
         if source is None:
             return Response(status=status.HTTP_404_NOT_FOUND)
-        body = RuleCreateSerializer(data=request.data)
+        body = RuleCreateSerializer(data=request.data, context={"source": source})
         body.is_valid(raise_exception=True)
         target = _workspace(request, body.validated_data["target_workspace"])
         if target is None:

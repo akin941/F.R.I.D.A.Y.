@@ -53,14 +53,18 @@ def _counter(source):
 # --- seed --------------------------------------------------------------------
 
 
-def test_seed_creates_four_disabled_sources_idempotently(owner, personal):
+def test_seed_creates_every_kind_disabled_idempotently(owner, personal):
     call_command("seed_ingestion_sources")
     call_command("seed_ingestion_sources")
     rows = IngestionSource.objects.filter(workspace=personal)
     assert sorted(r.kind for r in rows) == sorted(IngestionSource.Kind.values)
     assert not any(r.enabled for r in rows)
     assert {r.daily_token_budget for r in rows} == {40000}
-    assert AuditLog.objects.filter(action="memory.ingestion.source_created").count() == 4
+    # Phase 8B branch 7 adds `obsidian_inbox` (seeded disabled, brief D12).
+    assert IngestionSource.Kind.OBSIDIAN_INBOX in {r.kind for r in rows}
+    assert AuditLog.objects.filter(action="memory.ingestion.source_created").count() == len(
+        IngestionSource.Kind.values
+    )
 
 
 def test_seed_never_changes_an_existing_source(sources):
