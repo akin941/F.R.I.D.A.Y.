@@ -130,6 +130,13 @@ _BEAT_SCHEDULE = {
         "task": "connectors.tasks.ingest_calendar_metadata",
         "schedule": 6 * 60 * 60.0,
     },
+    # Phase 8B branch 8 (brief D13): the transcript pull through the owner's
+    # node, on the compose worker beat (`tools.` prefix). A no-op while both
+    # transcript sources are disabled or no node is reachable.
+    "memory-pull-transcripts": {
+        "task": "tools.tasks.pull_transcripts_task",
+        "schedule": float(os.environ.get("MEMORY_TRANSCRIPT_PULL_MINUTES") or 15) * 60.0,
+    },
     # Phase 6 A5: voice turn traces (timings only) live VOICE_TRACE_RETENTION_DAYS.
     "voice-turn-trace-prune": {
         "task": "voice.tasks.prune_voice_turn_traces_task",

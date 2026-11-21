@@ -433,9 +433,20 @@ class IngestionSource(WorkspaceScopedModel, TimestampedModel):
         # transcripts only): only a `sensitivity: private` note is routed
         # to local providers.
         OBSIDIAN_INBOX = "obsidian_inbox"
+        # Phase 8B branch 8 (brief D13): owner turns of Claude Code and Codex
+        # sessions, pulled through the owner's node. Personal-class (ADR-012
+        # decision 11 lists transcripts); their path rules are the
+        # `claude_code_hooks` source's (`mapping.SHARED_RULE_SOURCES`).
+        CLAUDE_CODE_TRANSCRIPTS = "claude_code_transcripts"
+        CODEX_TRANSCRIPTS = "codex_transcripts"
+
+    PERSONAL_CLASS_KINDS = frozenset({"calendar", "claude_code_transcripts", "codex_transcripts"})
 
     kind = models.CharField(max_length=40, choices=Kind.choices)
     enabled = models.BooleanField(default=False)
+    # Branch 8 (D13): when the owner last turned `enabled` on (set by
+    # `update_source`). The transcript pull never reads turns older than it.
+    enabled_at = models.DateTimeField(null=True, blank=True)
     paused_at = models.DateTimeField(null=True, blank=True)
     daily_token_budget = models.PositiveIntegerField(default=default_daily_token_budget)
     created_by = models.ForeignKey(
@@ -469,8 +480,9 @@ class IngestionSource(WorkspaceScopedModel, TimestampedModel):
     @property
     def is_personal_class(self):
         """Personal-class data (ADR-012 decision 11): extraction of its
-        episodes runs with `personal_data=True` (branch 5)."""
-        return self.kind == self.Kind.CALENDAR
+        episodes runs with `personal_data=True` (branch 5): calendar and,
+        since Phase 8B branch 8 (D13), the two transcript kinds."""
+        return self.kind in self.PERSONAL_CLASS_KINDS
 
 
 class WorkspaceMappingRule(WorkspaceScopedModel, TimestampedModel):
@@ -639,6 +651,12 @@ class IngestionCounter(WorkspaceScopedModel, TimestampedModel):
     # `duplicate`, `triage_short`, `deferred_budget`, ...) -> count.
     proposals_dropped_no_provenance = models.PositiveIntegerField(default=0)
     learning_drops = models.JSONField(default=dict, blank=True)
+    # Phase 8B branch 8 (D13): transcript turns refused before
+    # `record_episode` -- a turn that starts with a harness-injected marker
+    # (`dropped_not_owner`: a reader bug or a hostile node), and a row whose
+    # `cwd` does not resolve to the invoke's workspace (`dropped_foreign`).
+    dropped_not_owner = models.PositiveIntegerField(default=0)
+    dropped_foreign = models.PositiveIntegerField(default=0)
 
     class Meta:
         ordering = ["-day"]
@@ -648,6 +666,43 @@ class IngestionCounter(WorkspaceScopedModel, TimestampedModel):
 
     def __str__(self):
         return f"counter {self.source_id} {self.day}"
+
+
+class TranscriptCursor(WorkspaceScopedModel, TimestampedModel):
+    """The server-owned cursor of the transcript pull (Phase 8B brief D13,
+    D17 item 5: the node keeps none). One row per transcript source, target
+    workspace and node reference string; it lives in the source's
+    (personal) workspace like `IngestionCounter`. `since` advances only
+    after the pulled episodes commit; an empty result leaves it unchanged.
+
+    `since_clamped` counts invokes whose `since` the 7-day contract bound
+    moved forward (the skipped window is lost by design and audited);
+    `tie_overflow` counts truncated pulls whose one timestamp filled the
+    whole `max_turns` cap (the cursor then moves on by 1 ms)."""
+
+    source = models.ForeignKey(
+        IngestionSource, on_delete=models.CASCADE, related_name="transcript_cursors"
+    )
+    target_workspace = models.ForeignKey(
+        "workspaces.Workspace", on_delete=models.CASCADE, related_name="+"
+    )
+    node_ref = models.CharField(max_length=128)
+    since = models.DateTimeField()
+    since_clamped = models.PositiveIntegerField(default=0)
+    last_clamped_at = models.DateTimeField(null=True, blank=True)
+    tie_overflow = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        ordering = ["source", "target_workspace"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["source", "target_workspace", "node_ref"],
+                name="memory_transcript_cursor_unique",
+            )
+        ]
+
+    def __str__(self):
+        return f"transcript cursor {self.source_id} {self.target_workspace_id}"
 
 
 class CodingSession(WorkspaceScopedModel, TimestampedModel):

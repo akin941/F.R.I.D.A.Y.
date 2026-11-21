@@ -393,6 +393,16 @@ type = "forbidden"
 source_modules = ["integrations.cli.friday_hook", "integrations.cli._scrubber_vendored"]
 forbidden_modules = ["config", "core", "accounts", "workspaces", "audit", "ai_core", "assistant", "memory", "knowledge", "tasks", "approvals", "tools", "agents", "skills", "harness", "connectors", "deploys", "ops", "voice", "hud", "mcp"]
 
+# Phase 8B branch 8 (brief D17): the reference owner-turn readers are the
+# executable spec of the node side (the Swift app ports them), so like
+# friday-hook they import nothing of ours but the vendored scrubber. They
+# move under the `nodes` reference node once Phase 9 branch 3 merges.
+[[tool.importlinter.contracts]]
+name = "the owner-turn reference readers import no project package (Phase 8B D17)"
+type = "forbidden"
+source_modules = ["integrations.node_reference.owner_turns", "integrations.node_reference.build_conformance"]
+forbidden_modules = ["config", "core", "accounts", "workspaces", "audit", "ai_core", "assistant", "memory", "knowledge", "tasks", "approvals", "tools", "agents", "skills", "harness", "connectors", "deploys", "ops", "voice", "hud", "mcp"]
+
 # The remaining apps have no stated relationship with harness at all in
 # this phase (brief §"Boundary vs. existing systems": "nothing may import
 # harness"). One consolidated contract, mirroring how ai_core/audit's own

@@ -3,7 +3,8 @@ here is the stored, already-scrubbed text; nothing raw exists to show."""
 
 from rest_framework import serializers
 
-from memory.ingestion.mapping import allowed_rule_types
+from memory.ingestion.mapping import SHARED_RULE_SOURCES, allowed_rule_types
+from memory.ingestion.services import SHARED_RULES_MESSAGE
 from memory.models import (
     Episode,
     IngestionCounter,
@@ -23,6 +24,10 @@ def serialize_source(source, today=None):
         "daily_token_budget": source.daily_token_budget,
         "forgotten_at": source.forgotten_at.isoformat() if source.forgotten_at else None,
         "restorable": source.forget_operation_id is not None,
+        "enabled_at": source.enabled_at.isoformat() if source.enabled_at else None,
+        # Phase 8B branch 8 (D13, Q2): the transcript sources route through
+        # the hooks source's path rules; the audit view says so.
+        "rules_shared_with": SHARED_RULE_SOURCES.get(source.kind),
         "today": serialize_counter(today) if today else None,
     }
 
@@ -34,6 +39,8 @@ def serialize_counter(counter: IngestionCounter):
         "duplicate": counter.duplicate,
         "dropped_unmapped": counter.dropped_unmapped,
         "dropped_paused": counter.dropped_paused,
+        "dropped_not_owner": counter.dropped_not_owner,
+        "dropped_foreign": counter.dropped_foreign,
         "scrubber_hits": counter.scrubber_hits,
         "tokens_spent": counter.tokens_spent,
         "proposals_created": counter.proposals_created,
@@ -114,6 +121,8 @@ class RuleCreateSerializer(serializers.Serializer):
 
     def validate_rule_type(self, value):
         source = self.context.get("source")
+        if source is not None and source.kind in SHARED_RULE_SOURCES:
+            raise serializers.ValidationError(SHARED_RULES_MESSAGE)
         if source is not None and value not in allowed_rule_types(source.kind):
             raise serializers.ValidationError(
                 f"A {value} rule is not valid on a {source.kind} source."

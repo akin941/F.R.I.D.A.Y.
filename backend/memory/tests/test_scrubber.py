@@ -41,8 +41,12 @@ def _load(name):
     return rows
 
 
-SECRETS = _load("secrets.jsonl")
-PII_ITEMS = _load("pii.jsonl")
+# Phase 8B branch 8 (brief D14): synthetic Claude Code and Codex owner-turn
+# fragments, labelled per class; the same 100% secrets-recall gate covers
+# them, for this scrubber and the vendored node copy (test_transcript_corpus).
+TRANSCRIPTS = _load("transcripts.jsonl")
+SECRETS = _load("secrets.jsonl") + [r for r in TRANSCRIPTS if r["class"] == "secret"]
+PII_ITEMS = _load("pii.jsonl") + [r for r in TRANSCRIPTS if r["class"] == "pii"]
 BENIGN = _load("benign.jsonl")
 
 

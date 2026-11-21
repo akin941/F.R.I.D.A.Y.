@@ -20,6 +20,7 @@ from audit.services import record_audit
 from core.channels import CHANNEL_WEB
 from memory.graph import services as graph_services
 from memory.ingestion.mapping import (
+    SHARED_RULE_SOURCES,
     InvalidMappingKey,
     allowed_rule_types,
     normalise_pattern,
@@ -53,6 +54,9 @@ class IngestionInvalid(IngestionError):
     """→ 400. Shares the memory app's stable error code."""
 
     code = "memory.invalid_transition"
+
+
+SHARED_RULES_MESSAGE = "Path rules are shared with Claude Code hooks."
 
 
 # --- authorization -----------------------------------------------------------
@@ -211,6 +215,11 @@ def update_source(source, *, actor, channel, enabled=None, paused=None, daily_to
     if enabled is not None and source.enabled != enabled:
         source.enabled = enabled
         changed.append("enabled")
+        if enabled:
+            # Phase 8B branch 8 (D13): the transcript pull's first run never
+            # reads turns older than the time the owner (re-)enabled it.
+            source.enabled_at = timezone.now()
+            changed.append("enabled_at")
     if paused is not None:
         if paused and source.paused_at is None:
             source.paused_at = timezone.now()
@@ -475,6 +484,9 @@ def _validate_target(actor, source, target_workspace):
 @transaction.atomic
 def create_mapping_rule(source, *, actor, channel, rule_type, pattern, target_workspace):
     _require_owner(actor, source.workspace, channel, "Adding a mapping rule")
+    if source.kind in SHARED_RULE_SOURCES:
+        # Phase 8B branch 8 (D13): one path registry -- the hooks source's.
+        raise IngestionInvalid(SHARED_RULES_MESSAGE)
     _validate_target(actor, source, target_workspace)
     if rule_type not in WorkspaceMappingRule.RuleType.values:
         raise IngestionInvalid("Unknown rule type.")
