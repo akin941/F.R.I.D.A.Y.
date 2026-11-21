@@ -6,6 +6,8 @@ describe("activeNavHref (Phase 8A branch 6)", () => {
     const hrefs = NAV_GROUPS.flatMap((g) => g.items.map((i) => i.href));
     expect(hrefs).toContain("/sessions");
     expect(hrefs).toContain("/memory/learning");
+    expect(hrefs).toContain("/memory/graph");
+    expect(activeNavHref("/memory/graph")).toBe("/memory/graph");
   });
 
   it("marks only the most specific matching item", () => {

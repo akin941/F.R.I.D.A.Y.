@@ -67,6 +67,8 @@ describe("query keys", () => {
       "learningDigest",
       "codingSessions",
       "selfSources",
+      // Phase 8B branch 9: the eval runs live in the owner's personal workspace (one list).
+      "evalRuns",
     ]);
     const scoped = Object.entries(queryKeys).filter(([name]) => !crossWorkspace.has(name));
     for (const [name, key] of scoped) {
@@ -80,6 +82,7 @@ describe("query keys", () => {
     expect(queryKeys.learningDigest()[0]).toBe(ALL_WORKSPACES);
     expect(queryKeys.codingSessions()[0]).toBe(ALL_WORKSPACES);
     expect(queryKeys.selfSources()[0]).toBe(ALL_WORKSPACES);
+    expect(queryKeys.evalRuns()[0]).toBe(ALL_WORKSPACES);
   });
 });
 
