@@ -3602,6 +3602,21 @@ npm test` run green on the branch (156 files, 1454 tests).
 No step needs paid calls, real credentials or the Mac beyond step 2's
 manual check.
 
+**Known follow-ups — `feat/p8-graph-ui` (review, LOW, unresolved at merge
+into the integration branch, 2026-11-21).** The merge was clean (no
+migration renumbering needed).
+1. **Redundant owner check, no audit row on the Graphify run list**
+   (`backend/harness/views.py`). `GraphifyRunListView` adds an explicit
+   `WorkspaceMember` owner check after `for_actor()` on `Workspace`, and
+   writes no audit row (documented as intentional; it matches the
+   job-list precedent). Non-blocking. Optional fix: keep as is, or fold
+   the owner check into a shared helper.
+2. **Possibly dead `PATCH` BFF route on facts**
+   (`frontend/src/app/api/memory/graph/facts/[factId]/route.ts`). The BFF
+   exposes `PATCH` on facts although the UI edits only via supersede; if
+   the backend has no `PATCH` handler the route only ever returns 405.
+   Fix: drop the `PATCH` handler, or confirm the backend supports it.
+
 ### 10. `chore/p8b-closeout` — preflight, e2e, docs, go/no-go record
 
 **Scope.**
