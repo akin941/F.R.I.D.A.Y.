@@ -101,3 +101,36 @@ each; the v1 reads stay in `v1/`):
   the contract on name, version, **class** and both schema hashes; on a v1
   session it is `not_invocable` with reason `protocol_v1`, and an action
   entry advertised with another class is `class_mismatch`.
+
+## Implementation note — the test/lint decision (Phase 10 closeout, `chore/p10-closeout`, 2026-11-20)
+
+**Decision recorded: test and lint stay gate-class.** Evidence pending
+owner evaluation (Phase 10 brief, Mac session M3).
+
+- Decision 3's evidence bar is built and runs here as far as Linux allows:
+  the reference node creates a throwaway detached worktree, generates the
+  `srt` settings document (write root = the worktree, `/tmp` never writable,
+  network denied, environment allowlisted, CPU/time limits;
+  `backend/nodes/conformance/vectors/sandbox.json`), and removes the
+  worktree afterwards. The escape suite
+  (`backend/nodes/conformance/escape/cases.json`, 32 cases: writes outside
+  the worktree including `/tmp` symlinks, denied reads, network, env leaks,
+  limits, a deleted worktree) passes with `manage.py node_escape_suite
+  --executor fake` in CI and in the closeout preflight
+  (`node_escape_suite`).
+- That is **not** the evidence this ADR asks for. The evidence is the same
+  32 cases run through the Swift `SrtExecutor` under macOS Seatbelt in
+  worktree mode on the owner's Mac (M3), with per-case pass/fail, the `srt`
+  version, the macOS version and the date recorded here.
+- Until then every `repo.command.run` (`command_kind` test, lint,
+  typecheck, build, format_check) is gate-class: an `ApprovalRequest`
+  decided on `/approvals` **and** a click on the node's window, bound by
+  a grant. The only confirm-class kind is still `apps.open`/`apps.focus`
+  from the local list.
+- When M3 is recorded, the owner sets `NODE_ESCAPE_EVIDENCE_RECORDED_ON`
+  (ISO date) so the `node_escape_suite` preflight row passes instead of
+  warning. Setting it moves nothing between classes: only a later
+  amendment of this ADR, commissioned by the owner after reading the M3
+  record, may move worktree-mode test/lint to confirm-class (the Mac session
+  does not write that amendment). An escape found at any time keeps — or
+  moves back — test/lint in gate-class with no further decision.

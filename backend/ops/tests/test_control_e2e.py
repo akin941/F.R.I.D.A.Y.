@@ -42,7 +42,7 @@ from memory.models import IngestionSource, WorkspaceMappingRule
 from nodes import bus, output
 from nodes.audit_chain import verify_chain
 from nodes.gateway import NodeSocketApp
-from nodes.models import NodeActionExecution, NodeInvocation
+from nodes.models import EXECUTION_TERMINAL_STATUSES, NodeActionExecution, NodeInvocation
 from nodes.protocol.signing import load_public_key_b64
 from nodes.reference.confirm import ConfirmationWindowDouble, Decision
 from nodes.reference.executor import FakeExecutor
@@ -63,18 +63,6 @@ ACME = {"repo_path": "~/work/acme", "command_kind": "test"}
 TERMINAL = {"bundle_id": "com.apple.Terminal"}
 NODE_INTENT = json.dumps({"intent": "tool_request", "tool_name": "node_action"})
 CONSISTENT = '{"verdict": "consistent", "reason_code": "matches_request"}'
-TERMINAL_STATES = {
-    "ok",
-    "failed",
-    "denied",
-    "timeout",
-    "node_disconnected",
-    "node_refused",
-    "server_refused",
-    "node_offline",
-    "stale_dispatch",
-    "expired",
-}
 
 
 @pytest.fixture(scope="module")
@@ -295,7 +283,7 @@ def test_typed_voice_confirm_and_kill_switch(world, home, harness, friday, web_c
     decided = client.post(f"{APPROVALS_URL}/{approval.pk}/approve", format="json")
     assert decided.status_code == 200, decided.content
     execution = NodeActionExecution.objects.get(approval=approval)
-    assert _pump_until(link, lambda: _execution_status(execution.pk) in TERMINAL_STATES)
+    assert _pump_until(link, lambda: _execution_status(execution.pk) in EXECUTION_TERMINAL_STATUSES)
     execution.refresh_from_db()
     assert (execution.status, execution.confirm_state, execution.exit_code) == ("ok", "approved", 0)
     (invoke,) = link.frames_of("invoke")
@@ -347,7 +335,7 @@ def test_typed_voice_confirm_and_kill_switch(world, home, harness, friday, web_c
     assert opened.status_code == 202, opened.content
     confirm_id = opened.json()["id"]
     assert opened.json()["approval_id"] is None
-    assert _pump_until(link, lambda: _execution_status(confirm_id) in TERMINAL_STATES)
+    assert _pump_until(link, lambda: _execution_status(confirm_id) in EXECUTION_TERMINAL_STATUSES)
     confirm = NodeActionExecution.objects.get(pk=confirm_id)
     assert (confirm.status, confirm.confirm_state) == ("ok", "approved")
     assert reference.executor.calls[-1]["bundle_id"] == "com.apple.Terminal"

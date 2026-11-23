@@ -424,3 +424,56 @@ Completes the owner-turn note above. State at the 8B closeout:
   `warn` (the Swift readers and the Touch ID grant are deferred to the Mac
   session); a `failed` or `server_refused` last pull is a `fail`. It sends
   nothing to a node.
+
+## Implementation notes — Phase 10 closeout (`chore/p10-closeout`, 2026-11-20)
+
+**What the server half of Phase 10 delivers (branches 1–7, closeout).**
+Decisions 4 (invocation grant), 5 (policy is local-only) and 6 (fail closed,
+owner away = deny) are implemented server side and exercised against the
+Python reference node v2 (`backend/nodes/reference/`), which stands in for
+the deferred Swift app:
+- protocol v2 (`friday-node.v2`, negotiated per socket; pairing still
+  answers the v1 baseline): one new class of node → server frames
+  (`confirmation`, `output`, the extended `result`) and **no** new
+  server → node type (branch 1);
+- the grant: domain-separated Ed25519 over the canonical grant, single use,
+  ≤ 120 s (`NODE_GRANT_TTL_SECONDS`, 90 by default), bound to an approved,
+  fresh, unused `node_action` approval of the node's owner; issued only by
+  `nodes.grants.issue` after `check_gate_request`; an approved action not
+  dispatched within 60 s fails `stale_dispatch` and is never retried
+  (branch 3);
+- policy stays on the Mac: the server proposes from its own 8A path rules
+  and the closed `command_kind` vocabulary; an unmapped combination is a
+  node refusal the owner fixes locally (brief Q2); the confirmation window
+  is rendered by the node from its own validated args (branch 2);
+- fail closed: a socket loss, the kill switch or the watchdog ends every
+  in-flight execution terminally (`node_disconnected`, `timeout`) and the
+  node closes an open window; the output stream is scrubbed server side
+  (`nodes.output.StreamScrubber`, tail re-scrub, the fail-closed marker
+  without a scrubber) before it reaches Redis, the HUD or the stored tail
+  (branches 3, 5);
+- audit: chain row v2 (`hash_version` 2, class, approval and grant ids,
+  hashes only) and one `nodes.invoke` AuditLog row per execution.
+
+**Operations (closeout).** `manage.py preflight` gains the control checks
+(`ops/preflight.py` `check_control`, read-only, no model call, nothing sent
+to a node): `node_grant_config`, `node_protocol_v2` (per node; a `warn`
+while no node speaks v2), `node_conformance_v2`, `node_escape_suite`,
+`node_output_scrubber` (the gateway's `/healthz` now reports
+`output_scrubber`), `trust_check`, `node_action_actor` and
+`harness_drivers`. `manage.py run_reference_node` offers v2 by default, so
+the dev stack's preflight is green with the reference node paired. The
+runbook section is "Control" in `docs/runbooks/friday-node.md`.
+
+**The contract.** `ops/tests/test_control_e2e.py` pairs the reference node
+v2 through the endpoint, connects it to the real `NodeSocketApp` on v2, and
+runs a typed "acme'de testleri çalıştır" from the router's draft through the
+card, the trust check, `/approvals`, one grant, the node window and the
+fake executor into the HUD terminal stream, with one `ok` chain row (v2) and
+one audit row; the same turn as voice yields a draft only; a confirm-class
+`apps.open` runs with no `ApprovalRequest`; the kill switch while a window
+is open closes the socket and the window and ends the execution
+`node_disconnected` with nothing run. The Swift app must pass the
+conformance v1/v2 runs and the contract tests of the Phase 10 brief's "Mac
+session (deferred)" (M1–M2); its measurements (M4) are **pending owner
+evaluation**.
