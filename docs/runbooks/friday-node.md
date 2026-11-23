@@ -197,6 +197,21 @@ model call:
 The compose stack sets `PREFLIGHT_NODE_GATEWAY_URL=http://node-gateway:8002/healthz`
 for web. The HUD health panel shows only the names of failing checks.
 
+**Until the Mac app exists** (dev stack only, `DEBUG` on), pair the Python
+reference node so `node_link` has a node to report:
+
+```bash
+CODE=$(docker compose -f deploy/docker/compose.yml exec -T web \
+  uv run python manage.py issue_pairing_code --node --strong --plain)
+docker compose -f deploy/docker/compose.yml exec web \
+  uv run python manage.py run_reference_node --code "$CODE"   # Ctrl-C to stop
+make preflight                                                # in another shell
+```
+
+It reads a generated fixture home (fake sessions, two tiny git repos),
+never the host's files, and never prints its secret. Revoke it on
+`/devices` when done; the command refuses to run without `DEBUG`.
+
 ## Close codes a node sees
 
 | Code | Meaning |
