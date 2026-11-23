@@ -2,7 +2,8 @@
 branch 4's done criterion): `uvicorn --ws wsproto` serving
 `config.asgi_nodes.application`, the reference node's own `wsproto` client
 transport (`NodeClient`), a signed read answered, and the socket cut within
-2 s of `revoke_device`."""
+2 s of `revoke_device`. It lives under `config/tests` because it imports
+the composition root (`nodes` tests may not import `config`)."""
 
 import socket
 import threading
@@ -11,6 +12,8 @@ import time
 import pytest
 
 from accounts import devices
+from accounts.models import DevicePairingCode, TrustedDevice
+from accounts.services import register_user
 from nodes import bus, services
 from nodes.reference.transport import NodeClient
 from nodes.tests.gateway_harness import reference_node
@@ -25,7 +28,37 @@ def _free_port():
 
 
 @pytest.fixture
-def served(real_revocation):
+def owner(db):
+    user = register_user(email="owner@test.dev", password="Str0ngDevPass!42", name="Owner")
+    user.is_owner = True
+    user.save()
+    return user
+
+
+@pytest.fixture
+def paired(owner):
+    made = []
+
+    def make(name="MacBook"):
+        raw, _ = devices.issue_pairing_code(
+            owner=owner,
+            kind=DevicePairingCode.Kind.STRONG,
+            issued_via=DevicePairingCode.IssuedVia.MANAGEMENT_COMMAND,
+            device_kind=TrustedDevice.Kind.NODE,
+        )
+        result = services.pair_node(raw_code=raw, node_name=name, protocol_versions=[1])
+        made.append(result.node.pk)
+        return result.node, result.node_secret, result.keyring
+
+    yield make
+    for node_id in made:
+        bus.clear_presence(node_id)
+        bus.clear_inbox(node_id)
+        bus.clear_inflight(node_id)
+
+
+@pytest.fixture
+def served():
     import uvicorn
 
     from config import asgi_nodes
