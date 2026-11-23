@@ -98,6 +98,17 @@ Known issues the swarm must fix first:
   - No `timezone.now().date()` / `date.today()` remains server-side. The one
     `date.today()` is the CLI's intentional `client_local_date`.
   - Owner steps (pending), recorded 2026-11-20: none.
+  - Known follow-ups (LOW, from review, not blocking):
+    - `backend/conftest.py`: `frozen_now` patches only `timezone.now`. Code that
+      imports `now` directly (`from django.utils.timezone import now`) or uses the
+      DB-side `now()` is not frozen. The docstring says so, and no call site in the
+      repo is affected today. Optional: add a lint or grep guard against
+      `from django.utils.timezone import now`.
+    - `backend/connectors/ingestion.py:61` (`datetime.fromisoformat(value).date()`)
+      and `backend/connectors/bridges/google.py:596` call `.date()` on parsed
+      external ISO strings. They were not changed or covered by a boundary test.
+      The sweep judged them intentional: the source string's own offset is used.
+      Reviewed and left unchanged. No fix required.
 
 ## How to continue (Monday)
 
