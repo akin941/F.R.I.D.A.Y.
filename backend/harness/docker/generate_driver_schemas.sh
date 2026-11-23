@@ -17,14 +17,23 @@
 #      must exist in the new snapshot;
 #   3. commit the snapshot on a dedicated upgrade branch (brief R4).
 #
-# Branch 7 adds `claude <image>` (the Agent SDK surface snapshot).
+#   generate_driver_schemas.sh claude <image>
+#
+# (branch 7) writes
+# backend/harness/drivers/claude_sdk_surface/<version>/sdk_surface.json from
+# the image's installed claude-agent-sdk (claude_sdk_surface.py run by the
+# image's bridge interpreter), where <version> is the Dockerfile's
+# CLAUDE_AGENT_SDK_VERSION ARG; the installed version must match it. Then
+# set HARNESS_CLAUDE_AGENT_SDK_VERSION=<version> and run
+# `uv run pytest -q harness/tests/test_claude_driver_contract.py` (every name
+# the bridge uses must exist in the new surface).
 set -eu
 
 here=$(cd "$(dirname "$0")" && pwd)
 drivers_dir="$here/../drivers"
 
 usage() {
-    echo "usage: $0 codex <image>" >&2
+    echo "usage: $0 codex|claude <image>" >&2
     exit 64
 }
 
@@ -51,6 +60,28 @@ case "$target" in
         python3 -I "$here/codex_schema_subset.py" "$work" "$version" \
             "$drivers_dir/codex_schema/$version/protocol.json"
         echo "wrote $drivers_dir/codex_schema/$version/protocol.json"
+        ;;
+    claude)
+        version=$(sed -n 's/^ARG CLAUDE_AGENT_SDK_VERSION=\(.*\)$/\1/p' "$here/claude_code.Dockerfile")
+        [ -n "$version" ] || { echo "no ARG CLAUDE_AGENT_SDK_VERSION in claude_code.Dockerfile" >&2; exit 1; }
+        work=$(mktemp -d)
+        trap 'rm -rf "$work"' EXIT
+        # --network none: introspection needs nothing from outside. The
+        # script is mounted read-only and run by the bridge's own interpreter.
+        docker run --rm --pull never --network none \
+            --user "$(id -u):$(id -g)" \
+            --mount "type=bind,source=$here/claude_sdk_surface.py,target=/tmp/claude_sdk_surface.py,readonly" \
+            --entrypoint /opt/friday-bridge/bin/python \
+            "$image" -I /tmp/claude_sdk_surface.py > "$work/sdk_surface.json"
+        installed=$(python3 -I -c 'import json, sys; print(json.load(open(sys.argv[1]))["version"])' \
+            "$work/sdk_surface.json")
+        if [ "$installed" != "$version" ]; then
+            echo "image has claude-agent-sdk $installed, Dockerfile pins $version" >&2
+            exit 1
+        fi
+        mkdir -p "$drivers_dir/claude_sdk_surface/$version"
+        cp "$work/sdk_surface.json" "$drivers_dir/claude_sdk_surface/$version/sdk_surface.json"
+        echo "wrote $drivers_dir/claude_sdk_surface/$version/sdk_surface.json"
         ;;
     *)
         usage

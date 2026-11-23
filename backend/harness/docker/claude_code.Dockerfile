@@ -26,6 +26,14 @@ FROM node@sha256:000000000000000000000000000000000000000000000000000000000000000
 # registry's current release and bump on the reviewed cadence above.
 ARG CLAUDE_CODE_VERSION=1.0.0
 
+# Phase 10 branch 7 (brief D10): the one pin of the Claude Agent SDK driver.
+# Must equal HARNESS_CLAUDE_AGENT_SDK_VERSION and the surface snapshot under
+# backend/harness/drivers/claude_sdk_surface/<version>/ (system check
+# harness.E004). PLACEHOLDER like the pins above: the owner chooses the real
+# release, builds the image and regenerates the snapshot with
+# generate_driver_schemas.sh claude <image> (owner step 3).
+ARG CLAUDE_AGENT_SDK_VERSION=0.1.0
+
 # --disable-update-notifier / no auto-update: the container is disposable
 # per job (brief: "disable the CLI's runtime auto-update/update-check
 # behavior") -- there is nothing for an in-container update to persist to
@@ -39,9 +47,19 @@ ARG CLAUDE_CODE_VERSION=1.0.0
 # than assumed present; the apt lists are removed in the same layer so
 # this doesn't bloat the disposable per-job image with package metadata
 # it never needs again.
+#
+# python3 + venv (Phase 10 branch 7): the Agent SDK bridge runs on the
+# image's own Python from an isolated venv at /opt/friday-bridge holding
+# only the pinned claude-agent-sdk (the bridge imports nothing else but the
+# standard library). Installed at build time; the job container has no
+# package-registry access at run time.
 RUN apt-get update \
-    && apt-get install --yes --no-install-recommends git \
+    && apt-get install --yes --no-install-recommends git python3 python3-venv \
     && rm -rf /var/lib/apt/lists/*
+
+RUN python3 -m venv /opt/friday-bridge \
+    && /opt/friday-bridge/bin/pip install --no-cache-dir \
+        "claude-agent-sdk==${CLAUDE_AGENT_SDK_VERSION}"
 
 RUN npm install --global "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" \
     && useradd --create-home --uid 10001 harness \
@@ -65,6 +83,9 @@ COPY claude_code_run.sh /home/harness/run.sh
 # Shared write-mode logic (Phase 3 branch 5), sourced by run.sh from its
 # own directory.
 COPY harness_write_mode.sh /home/harness/harness_write_mode.sh
+# Driver mode (Phase 10 branch 7): the Agent SDK bridge, run by run.sh
+# --driver agent_sdk.
+COPY claude_agent_bridge.py /home/harness/claude_agent_bridge.py
 RUN chmod +x /home/harness/run.sh
 
 ENTRYPOINT ["/home/harness/run.sh"]

@@ -31,8 +31,13 @@ set -eu
 goal=""
 test_command=""
 base_commit=""
+driver=""
 while [ $# -gt 0 ]; do
     case "$1" in
+        --driver)
+            driver="$2"
+            shift 2
+            ;;
         --goal)
             goal="$2"
             shift 2
@@ -65,12 +70,36 @@ fi
 # shellcheck source=harness_write_mode.sh
 . "$(dirname "$0")/harness_write_mode.sh"
 
-# `--output-format json`: the captured stdout is Claude Code's JSON
-# result object -- the host reads total_cost_usd/usage from it (after the
-# wrapper's own base64 framing, never from raw container stdout). No
-# `2>&1` here: stderr warnings in front of the JSON would break parsing.
-run_cli() {
-    claude -p "$goal" --output-format json --permission-mode acceptEdits
-}
+if [ "$driver" = "agent_sdk" ]; then
+    # Driver mode (Phase 10 brief D10, branch 7): the Friday agent bridge
+    # runs the pinned claude-agent-sdk and speaks friday-agent-bridge/v1
+    # (one JSON object per line) over this container's stdin/stdout to the
+    # host driver (backend/harness/drivers/claude_agent_sdk.py). `-I`: no
+    # PYTHONPATH, no user site, no script-dir imports from the repo. Its
+    # stderr is dropped so it never interleaves with protocol frames. The
+    # agent's permission policy (file tools inside the repo, Bash only for
+    # the exact test command, everything else relayed for the owner's
+    # approval) lives in the bridge; the test command is handed to it here.
+    # The bridge exits 0 when the host closes stdin after the last turn and
+    # non-zero if stdin closes mid-turn; the shared write-mode sequence then
+    # commits, tests and writes the result file exactly as for `claude -p`.
+    harness_driver_mode=true
+    run_cli() {
+        /opt/friday-bridge/bin/python -I "$(dirname "$0")/claude_agent_bridge.py" \
+            --test-command "$test_command" 2>/dev/null
+    }
+elif [ -n "$driver" ]; then
+    echo "unknown driver: $driver" >&2
+    exit 64
+else
+    # `--output-format json`: the captured stdout is Claude Code's JSON
+    # result object -- the host reads total_cost_usd/usage from it (after
+    # the wrapper's own base64 framing, never from raw container stdout).
+    # No `2>&1` here: stderr warnings in front of the JSON would break
+    # parsing.
+    run_cli() {
+        claude -p "$goal" --output-format json --permission-mode acceptEdits
+    }
+fi
 
 harness_write_mode_main

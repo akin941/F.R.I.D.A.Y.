@@ -57,6 +57,19 @@ SANDBOX_POLICY = {
         "writable_roots": ("/workspace/repo",),
         "network_access": False,
     },
+    # Branch 7: enforced inside the container by claude_agent_bridge.py
+    # (which reports it back in its `ready` frame; the driver refuses any
+    # other): permission mode `default` with nothing pre-allowed, no
+    # settings files from the repo, no MCP servers; the permission callback
+    # answers locally only for file tools inside the writable root (not
+    # `.git/`) and `Bash` running the repo's test command verbatim.
+    "claude_code": {
+        "permission_mode": "default",
+        "setting_sources": (),
+        "writable_roots": ("/workspace/repo",),
+        "network_access": False,
+        "bash": "test_command_only",
+    },
 }
 
 # Answers a driver may send to an escalation: one request only, never "for
@@ -84,8 +97,12 @@ class TurnUsage:
     output_tokens: int = 0
     cached_input_tokens: int = 0
     reasoning_output_tokens: int = 0
+    cache_creation_input_tokens: int = 0
     reported: bool = False
     status: str = ""
+    # The turn's cost in USD as the agent reported it (a `Decimal`), or None
+    # when it reports none (the Codex app-server reports tokens only).
+    cost_usd: Any = None
 
 
 @dataclass
