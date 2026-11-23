@@ -72,13 +72,32 @@ def test_healthz_answers_without_key_material():
     assert sent[0]["status"] == 200
     body = json.loads(sent[1]["body"])
     assert body["status"] == "ok" and body["redis"] is True
-    assert set(body) == {"status", "redis", "signing_key_id"}
+    assert set(body) == {"status", "redis", "connected_nodes", "signing_key_id"}
     assert len(body["signing_key_id"]) == 16
+    assert body["connected_nodes"] == 0
+    from django.conf import settings
+
+    # The key id only: no key material in the body.
+    assert settings.NODE_SIGNING_KEY not in sent[1]["body"].decode()
 
 
-def test_websocket_is_closed_until_the_socket_app_lands():
-    sent = _call({"type": "websocket", "path": "/ws/node/v1"})
-    assert sent == [{"type": "websocket.close", "code": 1013}]
+@pytest.mark.django_db(transaction=True)
+def test_healthz_reports_redis_down(settings):
+    settings.REDIS_URL = "redis://127.0.0.1:1/0"
+    body = json.loads(_call({"type": "http", "method": "GET", "path": "/healthz"})[1]["body"])
+    assert body["redis"] is False
+
+
+def test_the_gateway_route_is_the_node_socket_app():
+    from nodes.gateway import NodeSocketApp
+
+    assert isinstance(asgi_nodes.node_app, NodeSocketApp)
+    assert asgi_nodes.GATEWAY_WS_PATH == "/ws/node/v1"
+
+
+def test_a_websocket_on_another_path_is_closed():
+    sent = _call({"type": "websocket", "path": "/ws/other"})
+    assert sent == [{"type": "websocket.close", "code": 4404}]
 
 
 def test_other_paths_are_404():
