@@ -54,9 +54,11 @@ COMPRESSION_BYPASS = frozenset(
         "router.intent",
         "router.task_draft",
         "router.connector_args",
+        "router.node_action_args",
         "agent.plan",
         "agent.skill_match",
-        # trust checks and reviews (Phase 10 adds its trust-check purposes)
+        # trust checks and reviews
+        "control.trust_check",
         "harness.review_summary",
         # learning prompts that check provenance
         "memory.episode_extraction",
