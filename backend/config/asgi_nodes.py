@@ -81,6 +81,7 @@ async def application(scope, receive, send):
         while True:
             message = await receive()
             if message["type"] == "lifespan.startup":
+                await node_app.startup()
                 await send({"type": "lifespan.startup.complete"})
             elif message["type"] == "lifespan.shutdown":
                 await node_app.shutdown()

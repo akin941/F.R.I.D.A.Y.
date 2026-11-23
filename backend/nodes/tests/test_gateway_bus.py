@@ -12,14 +12,6 @@ import pytest
 from audit.models import AuditLog
 from nodes import bus, services
 from nodes.models import NodeInvocation
-from nodes.tests.gateway_fixtures import (  # noqa: F401 - fixtures
-    cleanup_nodes,
-    gateway,
-    link_node,
-    make_app,
-    paired,
-    real_revocation,
-)
 from nodes.tests.gateway_harness import V1, V2, reference_node
 
 pytestmark = pytest.mark.django_db(transaction=True)

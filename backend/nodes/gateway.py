@@ -706,6 +706,11 @@ class NodeSocketApp:
         self.counters["revocation_closed"] += closed
         return closed
 
+    async def startup(self):
+        """Lifespan startup: subscribe to the revocation channel now rather
+        than at the first connection."""
+        self._ensure_subscriber()
+
     async def shutdown(self):
         """Lifespan shutdown: `bye{server_shutdown}` to every socket."""
         for conn in list(self.connections.values()):
