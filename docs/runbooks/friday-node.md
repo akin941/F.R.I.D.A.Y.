@@ -2,9 +2,10 @@
 
 Phase 9 branch 4 (`feat/p9-node-gateway`,
 `docs/prompts/phase-9-friday-node/brief.md` D3, D6). This v0 covers running
-the gateway and exposing `/ws/node/v1`. The closeout
+the gateway and exposing `/ws/node/v1`; branch 6 (`feat/p9-node-events`,
+D10) adds node events and switching the Claude Code hooks. The closeout
 (`chore/p9-closeout`) completes it: TLS pin, signing key rollover, pairing,
-kill switch, revocation, the audit chain and switching the Claude Code hooks.
+kill switch, revocation and the audit chain.
 
 ## What runs where
 
@@ -103,6 +104,57 @@ A value outside its bounds stops every process at boot (`nodes.E005`–`E007`).
   node's socket within ~2 s (pub/sub), at the latest at its next heartbeat.
 
 The `/devices` UI for these is branch 7.
+
+## Node events (branch 6)
+
+A node sends `event` frames (D10); the gateway answers each with an
+`event.ack` that carries **counts only** (`stored`, `duplicate`, `dropped`)
+and never anything else — no event ever leads to an `invoke`.
+
+- **`claude_code.hook`**: up to 50 Claude Code hook events per batch, in
+  `friday-hook`'s per-event shape. `config/asgi_nodes.py` registers
+  `memory.ingestion.hooks.ingest_hook_events` as the sink at start-up, so
+  these events go through exactly the 8A path: the owner's
+  `claude_code_hooks` source must be enabled, its path-prefix rules alone
+  decide each event's workspace (an unmapped `cwd` is `dropped`), and an
+  event id already stored (from `friday-hook` or an earlier upload) is a
+  `duplicate`. Events older than 24 h are dropped, like on the HTTP path.
+- **Spool upload**: after a reconnect the node uploads its spool
+  (`spooled: true`) one batch at a time, in order, and deletes a batch only
+  after its ack. The gateway paces spooled batches to 10 a second per node
+  (it delays the ack; nothing is refused).
+- **`grant.availability_changed`**: the node reports that the owner
+  granted or withdrew a capability on the Mac (`{name, version,
+  availability}` items). The gateway writes a successor capability snapshot
+  with those flags; `GET /api/v1/nodes/<id>` and the HUD node block follow,
+  and a withdrawn read is no longer offered (`server_refused:not_invocable`).
+  It never changes anything on the Mac.
+- **No sink registered** (a process not started through
+  `config.asgi_nodes`): every hook batch is acked `dropped` and stored
+  nowhere. If the sink raises (a database error), no ack is sent: the node
+  keeps the batch and sends it again after its next reconnect (deduped).
+- **Logs**: one `node event node=… kind=… spooled=… stored=… duplicate=…
+  dropped=…` line per batch; never an event's content.
+
+## Switching Claude Code hooks to the node
+
+`friday-hook` (`docs/runbooks/claude-code-hooks.md`) keeps working and stays
+the fallback; `integrations/cli/friday_hook.py` is unchanged. Both paths
+dedupe on the same event id, so running both during the switch-over stores
+each event once.
+
+1. Pair the Mac node and confirm it is `connected` (`GET /api/v1/nodes`).
+2. On the Mac (Mac session M3), add `friday-node hook` entries next to the
+   existing `friday_hook.py` entries in `~/.claude/settings.json` for
+   `SessionStart`, `Notification`, `Stop` and `SessionEnd`. Keep the old
+   entries for a few days: every event arrives twice and is stored once
+   (the node's acks show `duplicate`).
+3. Check `/sessions` (or `GET /api/v1/memory/sessions`) still updates; stop
+   the node app for a minute, start a Claude Code session, start the node
+   again: the spooled events arrive after reconnect.
+4. Remove the `friday_hook.py` entries. To fall back at any time, put them
+   back: nothing on the server changes, and the `hook` PAT stays valid
+   until revoked.
 
 ## Troubleshooting
 
