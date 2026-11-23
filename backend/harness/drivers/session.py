@@ -23,6 +23,7 @@ from ai_core.gateway import record_external_usage
 from harness.drivers import approval_mapping
 from harness.drivers.base import (
     CODE_DEADLINE,
+    CODE_PROTOCOL_ERROR,
     CODE_STOPPED,
     CODE_TURN_FAILED,
     DriverError,
@@ -144,6 +145,13 @@ class DriverSession:
             report.code = exc.code
             report.outcome = OUTCOME_STOPPED if exc.code == CODE_STOPPED else OUTCOME_FAILED
             logger.warning("harness driver run for job %s failed closed: %s", self.job.id, exc)
+        except Exception:
+            # Anything else (an unexpected frame shape, a database error in
+            # the poll) is still a closed failure with a deterministic code,
+            # never an escape past the job's own transition.
+            report.code = CODE_PROTOCOL_ERROR
+            report.outcome = OUTCOME_FAILED
+            logger.exception("harness driver run for job %s failed unexpectedly", self.job.id)
         finally:
             try:
                 self.driver.close()
@@ -159,36 +167,63 @@ class DriverSession:
         report = self.report
         report.escalations += 1
         approval = None
-        if report.escalations > self._max_escalations:
-            accept, reason = False, approval_mapping.ESCALATION_LIMIT
-        else:
-            approval = approval_mapping.request_agent_action(self.job, escalation)
-            if approval is None:
-                accept, reason = False, approval_mapping.REQUEST_REFUSED
+        try:
+            if report.escalations > self._max_escalations:
+                accept, reason = False, approval_mapping.ESCALATION_LIMIT
             else:
-                accept, reason = approval_mapping.wait_for_decision(
-                    self.job,
-                    approval.pk,
-                    deadline=self.deadline,
-                    should_stop=self.should_stop,
-                    clock=self.clock,
-                    now=self._now,
-                    wait=self._wait,
-                    poll_seconds=self._poll_seconds,
-                )
+                approval = approval_mapping.request_agent_action(self.job, escalation)
+                if approval is None:
+                    accept, reason = False, approval_mapping.REQUEST_REFUSED
+                else:
+                    accept, reason = approval_mapping.wait_for_decision(
+                        self.job,
+                        approval.pk,
+                        deadline=self.deadline,
+                        should_stop=self.should_stop,
+                        clock=self.clock,
+                        now=self._now,
+                        wait=self._wait,
+                        poll_seconds=self._poll_seconds,
+                    )
+        except Exception:
+            # The wait itself broke (e.g. a database error in the poll): the
+            # run fails closed; best effort, the agent hears `decline` and a
+            # still-pending card is revoked so it stops looking actionable.
+            self._abandon(escalation, approval, answer=True)
+            raise
         accept = accept is True and reason == approval_mapping.APPROVED
         try:
             self.driver.answer_approval(escalation.request_id, accept)
-        finally:
-            if accept:
-                report.accepted += 1
-            else:
-                report.declined += 1
-            approval_mapping.record_answer(self.job, approval, accept=accept, reason=reason)
+        except Exception:
+            # Nothing reached the agent: never record an accept that was not
+            # sent. The answer is recorded as a decline (DRIVER_ENDED).
+            self._abandon(escalation, approval, answer=False)
+            raise
+        if accept:
+            report.accepted += 1
+        else:
+            report.declined += 1
+        approval_mapping.record_answer(self.job, approval, accept=accept, reason=reason)
         if reason == approval_mapping.JOB_CANCELLED:
             raise DriverError(CODE_STOPPED, "job cancelled while an escalation was pending")
         if reason == approval_mapping.RUNTIME_BRAKE:
             raise DriverError(CODE_DEADLINE, "runtime brake while an escalation was pending")
+
+    def _abandon(self, escalation, approval, *, answer):
+        """An escalation the run gave up on mid-way. Never raises: the
+        caller re-raises the original failure."""
+        self.report.declined += 1
+        if answer:
+            try:
+                self.driver.answer_approval(escalation.request_id, False)
+            except Exception:
+                logger.warning("harness driver could not send decline for job %s", self.job.id)
+        try:
+            approval_mapping.record_answer(
+                self.job, approval, accept=False, reason=approval_mapping.DRIVER_ENDED
+            )
+        except Exception:
+            logger.exception("harness agent action answer for job %s not recorded", self.job.id)
 
     # --- usage --------------------------------------------------------------
 

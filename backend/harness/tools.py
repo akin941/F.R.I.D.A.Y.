@@ -370,6 +370,18 @@ def _scrub_agent_text(value, limit):
     return text if len(text) <= limit else text[: limit - 1] + "…"
 
 
+def agent_action_text_shown_verbatim(value, kind_limit):
+    """True when the approval card would show `value` exactly as the agent
+    wrote it: nothing truncated, no invisible/bidi formatting or control
+    character stripped, no secret redacted. The driver declines (no card)
+    otherwise, so what the owner approves is byte-for-byte what runs."""
+    limit = {
+        "command": _AGENT_ACTION_COMMAND_MAX_CHARS,
+        "cwd": _AGENT_ACTION_CWD_MAX_CHARS,
+    }[kind_limit]
+    return isinstance(value, str) and _scrub_agent_text(value, limit) == value
+
+
 def _agent_action_job(workspace, payload):
     job = _get_job_from_payload(payload)
     if job is None or job.workspace_id != getattr(workspace, "id", None):

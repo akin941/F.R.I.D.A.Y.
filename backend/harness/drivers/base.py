@@ -17,6 +17,10 @@ from typing import Any, Protocol
 
 MAX_LINE_BYTES = 1024 * 1024
 MAX_LINES = 50_000
+# Bytes the pump may hold for a consumer that is not reading (an approval
+# wait, the session's DB work): past it the pump stops reading, so the pipe
+# back-pressures the agent instead of the worker buffering its output.
+MAX_QUEUED_BYTES = 4 * MAX_LINE_BYTES
 
 # DriverError codes (each maps to one HarnessImplementationJob.FailureReason
 # in `harness.implementation_execution`).
@@ -151,6 +155,7 @@ class AgentDriver(Protocol):
 
 _EOF = object()
 _OVERSIZE = object()
+_TOO_MANY = object()
 
 
 class JsonlReader:
@@ -163,17 +168,52 @@ class JsonlReader:
     `too_many_lines`; EOF -> `early_exit` unless the caller expected it.
     `discard_rest()` keeps draining (and dropping) whatever the container
     still prints after the protocol phase, so the wrapper's test output can
-    never block on a full pipe."""
+    never block on a full pipe.
 
-    def __init__(self, stream, *, max_line_bytes=MAX_LINE_BYTES, max_lines=MAX_LINES):
+    The bounds are enforced in the pump itself, not only when the caller
+    reads: the line count stops the pump at `max_lines + 1`, and at most
+    `max_queued_bytes` (plus one line) of unread output is held -- past
+    that the pump waits for the caller, so the pipe back-pressures the
+    agent while the driver is busy (e.g. waiting on an approval)."""
+
+    def __init__(
+        self,
+        stream,
+        *,
+        max_line_bytes=MAX_LINE_BYTES,
+        max_lines=MAX_LINES,
+        max_queued_bytes=MAX_QUEUED_BYTES,
+    ):
         self._stream = stream
         self._max_line_bytes = max_line_bytes
         self._max_lines = max_lines
+        self._max_queued_bytes = max(1, max_queued_bytes)
         self._queue = queue.Queue()
         self._discard = threading.Event()
+        self._room = threading.Condition()
+        self._queued_bytes = 0
         self._lines = 0
         self._thread = threading.Thread(target=self._pump, name="driver-jsonl", daemon=True)
         self._thread.start()
+
+    @property
+    def queued_bytes(self):
+        with self._room:
+            return self._queued_bytes
+
+    def _wait_for_room(self, size):
+        """Blocks while the unread backlog is full; False once discarding."""
+        with self._room:
+            while (
+                self._queued_bytes > 0
+                and self._queued_bytes + size > self._max_queued_bytes
+                and not self._discard.is_set()
+            ):
+                self._room.wait(0.5)
+            if self._discard.is_set():
+                return False
+            self._queued_bytes += size
+            return True
 
     def _pump(self):
         try:
@@ -191,6 +231,13 @@ class JsonlReader:
                     # Stop reading: the run fails closed and is torn down.
                     self._queue.put(_OVERSIZE)
                     return
+                self._lines += 1
+                if self._lines > self._max_lines:
+                    # Stop reading: nothing past the bound is ever buffered.
+                    self._queue.put(_TOO_MANY)
+                    return
+                if not self._wait_for_room(len(body)):
+                    continue
                 self._queue.put(body)
         except (OSError, ValueError):
             self._queue.put(_EOF)
@@ -211,9 +258,12 @@ class JsonlReader:
                 raise DriverError(CODE_EARLY_EXIT, "agent stdout closed")
             if item is _OVERSIZE:
                 raise DriverError(CODE_OVERSIZE_LINE, f"line over {self._max_line_bytes} bytes")
-            self._lines += 1
-            if self._lines > self._max_lines:
+            if item is _TOO_MANY:
+                self._queue.put(_TOO_MANY)
                 raise DriverError(CODE_TOO_MANY_LINES, f"more than {self._max_lines} lines")
+            with self._room:
+                self._queued_bytes -= len(item)
+                self._room.notify_all()
             if not item.strip():
                 continue
             try:
@@ -225,4 +275,6 @@ class JsonlReader:
             return message
 
     def discard_rest(self):
-        self._discard.set()
+        with self._room:
+            self._discard.set()
+            self._room.notify_all()

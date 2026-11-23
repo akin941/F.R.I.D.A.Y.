@@ -262,6 +262,14 @@ def test_escalation_still_pending_at_ten_minutes_is_declined(job, owner, monkeyp
     assert run.container.answer(100) == "decline"
     assert run.container.answer(101) == "decline"
     assert not HarnessAgentAction.objects.exists()
+    # The driver gave up on them: revoked at once, never left actionable
+    # for an owner to approve what the agent was already denied.
+    statuses = set(
+        ApprovalRequest.objects.filter(tool_name="harness_agent_action").values_list(
+            "status", flat=True
+        )
+    )
+    assert statuses == {ApprovalRequest.Status.EXPIRED}
 
 
 def test_job_cancel_while_an_escalation_is_pending_declines_and_kills(job, owner, monkeypatch):
@@ -295,6 +303,52 @@ def test_escalation_cap_declines_without_another_card(job, owner, monkeypatch, s
     assert run.container.answer(100) == "accept"
     assert run.container.answer(101) == "decline"
     assert ApprovalRequest.objects.filter(tool_name="harness_agent_action").count() == 1
+
+
+def test_an_accept_the_agent_never_received_is_recorded_as_a_decline(job, owner, monkeypatch):
+    from harness.drivers.base import CODE_EARLY_EXIT, DriverError
+    from harness.drivers.codex_app_server import CodexAppServerDriver
+
+    def broken_answer(self, request_id, accept):
+        raise DriverError(CODE_EARLY_EXIT, "agent stdin closed")
+
+    monkeypatch.setattr(CodexAppServerDriver, "answer_approval", broken_answer)
+    steps = script_from_transcript(load_transcript("two_escalations.jsonl"))
+    run = Run(monkeypatch, steps)
+    owner_decides(monkeypatch, owner, lambda request: "approve")
+    implementation_execution.run_harness_implementation_job(job.id)
+    job.refresh_from_db()
+    assert job.status == HarnessImplementationJob.Status.FAILED
+    assert job.failure_reason == FAILURE.DRIVER_EARLY_EXIT
+    assert run.container.killed is True
+    [action] = HarnessAgentAction.objects.all()
+    assert action.answer != HarnessAgentAction.Answer.ACCEPT
+    from audit.models import AuditLog
+
+    [audit] = AuditLog.objects.filter(action="harness.agent_action_answered")
+    assert (audit.metadata["decision"], audit.metadata["reason"]) == ("decline", "driver_ended")
+
+
+def test_an_unexpected_error_mid_run_fails_the_job_closed(job, owner, monkeypatch):
+    def broken_decide(*args, **kwargs):
+        raise RuntimeError("database went away")
+
+    monkeypatch.setattr(approval_mapping, "decide", broken_decide)
+    steps = script_from_transcript(load_transcript("two_escalations.jsonl"))
+    run = Run(monkeypatch, steps)
+    owner_decides(monkeypatch, owner, lambda request: None)
+    implementation_execution.run_harness_implementation_job(job.id)
+    job.refresh_from_db()
+    assert job.status == HarnessImplementationJob.Status.FAILED
+    assert job.failure_reason == FAILURE.DRIVER_PROTOCOL_ERROR
+    assert run.container.killed is True
+    run.remove.assert_called()
+    run.cleanup.assert_called()
+    assert run.container.answer(100) == "decline"
+    [request] = ApprovalRequest.objects.filter(tool_name="harness_agent_action")
+    assert request.status == ApprovalRequest.Status.EXPIRED  # revoked, not actionable
+    [usage] = _usage_rows()
+    assert usage.success is False
 
 
 def test_driver_never_accepts_without_an_approved_row(job, owner, monkeypatch):

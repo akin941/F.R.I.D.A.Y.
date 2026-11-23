@@ -1338,7 +1338,7 @@ with the Mac rows pending owner evaluation.
 | 3 | `feat/p10-invocation-grants` | Per-tool approval TTL + pre-transaction hook (`create_request` split) + approver hook, `node_action` tool with actor/approver checks, registered trust-check stub, `NodeActionExecution`, grant issuance, gated/confirm invocation, gateway v2 frames + watchdog, output scrubber port + `StreamScrubber` (tail re-scrub, fail closed), chain row v2, actions endpoints | 1, 2; Phase 9 branches 4–5 merged | **implemented 2026-11-20** on its branch (based on the integration branch with branches 1–2 merged; Phase 9 branches 4–5 not merged, so the gateway's per-socket session core and the presence/inbox helpers are built here and the socket app stays Phase 9 branch 4's); awaits independent Sonnet 5 review; see "Implementation record — `feat/p10-invocation-grants`" |
 | 4 | `feat/p10-trust-check` | Trust check (rules + `control.trust_check`), evidence port, router `node_action` proposals, injection corpus, voice cap regressions | 3 | not started |
 | 5 | `feat/p10-hud-terminal` | Redis output stream (fed by the branch-3 scrubber), HUD `terminal` section + stream endpoint, terminal panel, draft/approval cards, `node_action_result` read tool | 3 (parallel with 4) | not started |
-| 6 | `feat/p10-codex-app-server` | Driver framework, interactive container, Codex app-server driver, `harness_agent_action` gate, usage per turn, pins + provisional snapshot + contract test | Phase 3 harness (merged); 3 (per-tool approval TTL only: `ToolSpec.approval_ttl_seconds`, `_expire_if_stale`, per-minute sweep); parallel with 4–5 | **implemented 2026-11-20** on its branch (based on the integration branch with branch 3 merged; drivers off by default, provisional snapshot); awaits independent Sonnet 5 review; see "Implementation record — `feat/p10-codex-app-server`" |
+| 6 | `feat/p10-codex-app-server` | Driver framework, interactive container, Codex app-server driver, `harness_agent_action` gate, usage per turn, pins + provisional snapshot + contract test | Phase 3 harness (merged); 3 (per-tool approval TTL only: `ToolSpec.approval_ttl_seconds`, `_expire_if_stale`, per-minute sweep); parallel with 4–5 | **implemented 2026-11-20** on its branch (based on the integration branch with branch 3 merged; drivers off by default, provisional snapshot); review round 1 findings (2 MEDIUM, 3 LOW) fixed 2026-11-23, awaits Sonnet 5 re-review; see "Implementation record — `feat/p10-codex-app-server`" |
 | 7 | `feat/p10-claude-agent-sdk` | Claude Agent SDK bridge + driver, bridge schemas, surface snapshot, pins | 6 | not started |
 | 8 | `chore/p10-closeout` | Preflight control checks, e2e, runbooks, ADR-013/014/015 notes, MASTER_PLAN row, `self_sources.json`, go/no-go record | 1–7 | not started |
 | M1 | `feat/p10-node-confirm` | Swift: protocol v2 verifier and grant verification, confirmation window, fail-closed close, conformance v2 pass | 1–3 merged; Phase 9 M1 | deferred: Mac session |
@@ -2410,6 +2410,39 @@ because the app-server reports tokens but no cost. (3) Usage rows carry
 `estimated_cost=0` with `cost_source: not_reported` until a reliable cost
 source exists for Codex. (4) The snapshot is one `protocol.json` subset
 file, not the raw generated directory; the converter writes it.
+
+**Review round 1 (2026-11-23).**
+- *MEDIUM, approval not bound to what runs.* `request_agent_action` now
+  fails closed: when the card could not show the agent's `command` or `cwd`
+  verbatim (over 2 000 / 500 characters, an invisible/bidi formatting or
+  control character, a harness secret that would be redacted) no card is
+  minted and the agent gets `decline` (`request_refused`), so what the
+  owner approves is byte-for-byte what runs
+  (`harness.tools.agent_action_text_shown_verbatim`). `prepare_payload`
+  keeps scrubbing as defence in depth; only `reason`, display-only text,
+  is still truncated. A `file_change` escalation carries only the grant
+  root and a reason in the app-server protocol; the grant root is now held
+  to the same verbatim rule, and the card can show nothing more until the
+  real snapshot (owner step 3) offers the change set at approval time.
+- *MEDIUM, reader bound only on the consumer side.* `JsonlReader` enforces
+  its bounds in the pump: the line count stops reading at `max_lines + 1`
+  (`too_many_lines`, sticky), and at most `MAX_QUEUED_BYTES` (4 MiB) of
+  unread output is held — past it the pump waits for the caller, so the
+  pipe back-pressures the agent during an approval wait instead of the
+  worker buffering it. `discard_rest()` releases a waiting pump.
+- *LOW.* A decline on `ttl_elapsed` now revokes the still-pending card.
+  An accept the agent never received (the answer write failed) is
+  recorded as a decline with reason `driver_ended`, and the card revoked.
+  `DriverSession.run` maps any non-`DriverError` exception (a DB error in
+  the poll, an unexpected frame shape) to `protocol_error`, so the job
+  fails closed and the container is torn down; a wait that breaks
+  mid-escalation still sends `decline` and revokes the card (best effort).
+- Tests: over-length, padded, zero-width, bidi and control-character
+  commands and a non-verbatim `cwd` decline without a card; a secret in
+  the command declines; a 2 000-character command still mints; TTL revoke
+  (the owner can no longer approve); a flooding agent with an idle caller
+  stays bounded and back-pressured; the pump-side line cap; an accept that
+  failed to send; an unexpected error mid-run.
 
 ### Owner steps (pending) — `feat/p10-codex-app-server`, recorded 2026-11-20
 

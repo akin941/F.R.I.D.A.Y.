@@ -99,8 +99,22 @@ def wait_wake_hint(approval_id, timeout):
 def request_agent_action(job, escalation):
     """Mints the `harness_agent_action` gate for one escalation, or returns
     None when it cannot be requested (the creator lost their role, the job
-    moved on): the caller then declines."""
+    moved on) or when the card could not show the command and cwd verbatim
+    (over-length, invisible/bidi/control characters, a secret): the caller
+    then declines. The agent is untrusted, and the owner must approve
+    exactly what will run, never a scrubbed or truncated copy of it."""
+    from harness.tools import agent_action_text_shown_verbatim
+
     if job.created_by_id is None:
+        return None
+    if not (
+        agent_action_text_shown_verbatim(escalation.command, "command")
+        and agent_action_text_shown_verbatim(escalation.cwd, "cwd")
+    ):
+        logger.warning(
+            "harness agent action for job %s declined: command/cwd not displayable verbatim",
+            job.id,
+        )
         return None
     try:
         return create_request(
@@ -184,8 +198,8 @@ def wait_for_decision(
 def record_answer(job, approval, *, accept, reason):
     """The driver's own record of what it sent: the execution row's
     `answer` for an accept, an audit row either way; a still-pending
-    request the driver gave up on (cancel, brake, the run ending) is
-    revoked so it stops looking actionable."""
+    request the driver gave up on (cancel, brake, the TTL elapsing, the run
+    ending) is revoked so it stops looking actionable."""
     approval_id = getattr(approval, "pk", None)
     if accept and approval_id is not None:
         HarnessAgentAction.objects.filter(
@@ -194,7 +208,7 @@ def record_answer(job, approval, *, accept, reason):
     if (
         not accept
         and approval is not None
-        and reason in (JOB_CANCELLED, RUNTIME_BRAKE, DRIVER_ENDED)
+        and reason in (JOB_CANCELLED, RUNTIME_BRAKE, DRIVER_ENDED, TTL_ELAPSED)
     ):
         revoke_request(approval_request=approval, actor=None)
     record_audit(

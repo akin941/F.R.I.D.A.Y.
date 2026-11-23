@@ -4,6 +4,7 @@ argv; and the bounded JSONL reader. `subprocess.Popen` is faked: no Docker."""
 
 import io
 import os
+import time
 from unittest import mock
 
 import pytest
@@ -182,3 +183,56 @@ def test_reader_discards_everything_after_the_protocol_phase():
     writer.close()
     reader._thread.join(5)
     assert not reader._thread.is_alive()
+
+
+class _FloodStream:
+    """An agent stdout that never stops printing; counts what was read."""
+
+    def __init__(self, line=b'{"pad": "' + b"x" * 1000 + b'"}\n'):
+        self.line = line
+        self.reads = 0
+
+    def readline(self, _size=-1):
+        self.reads += 1
+        return self.line
+
+
+def _wait_until(predicate, seconds=5.0):
+    end = time.monotonic() + seconds
+    while time.monotonic() < end:
+        if predicate():
+            return True
+        time.sleep(0.01)
+    return predicate()
+
+
+def test_reader_back_pressures_a_flooding_agent_while_the_caller_is_busy():
+    stream = _FloodStream()
+    reader = JsonlReader(stream, max_queued_bytes=16_000, max_lines=10**9)
+    # The caller is idle (an approval wait): the pump stops at the cap.
+    assert _wait_until(lambda: reader.queued_bytes > 16_000 - len(stream.line))
+    time.sleep(0.2)
+    reads = stream.reads
+    time.sleep(0.2)
+    assert stream.reads == reads  # blocked: the pipe back-pressures the agent
+    assert reader.queued_bytes <= 16_000
+    # Reading frees room and the pump resumes.
+    assert reader.next_message(1) == {"pad": "x" * 1000}
+    assert _wait_until(lambda: stream.reads > reads)
+    reader.discard_rest()
+    assert _wait_until(lambda: stream.reads > reads + 1000)
+
+
+def test_reader_line_cap_is_enforced_by_the_pump_with_an_idle_caller():
+    stream = _FloodStream(line=b"{}\n")
+    reader = JsonlReader(stream, max_lines=10)
+    reader._thread.join(5)
+    # The pump stopped on its own, one line past the bound: nothing more read.
+    assert not reader._thread.is_alive()
+    assert stream.reads == 11
+    for _ in range(10):
+        assert reader.next_message(1) == {}
+    for _ in range(2):  # sticky
+        with pytest.raises(DriverError) as exc:
+            reader.next_message(1)
+        assert exc.value.code == CODE_TOO_MANY_LINES
