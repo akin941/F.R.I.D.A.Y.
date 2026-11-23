@@ -3161,3 +3161,19 @@ follow-ups 1 and 2 are recorded there as accepted residual risks.
    the owner commissions.
 6. M4 (deferred: Mac session, pending owner evaluation): the window latency,
    close-on-loss and TCC measurements, recorded in the go/no-go table.
+
+**Known follow-ups from the independent review (recorded at merge, 2026-11-23).**
+These were left unresolved at APPROVE. They are LOW and do not block the merge.
+1. LOW, `backend/ops/preflight.py`: `_check_node_action_actor` checks the
+   approver hook only by AST ordering. It checks that `authorize_decision(` is
+   called before the first `.status =` assignment in `approve_request`. A
+   refactor that moves the status change into a helper would give a false
+   fail, and a hook called on only one branch would give a false pass. This is
+   acceptable for the brief's "source test" wording. Fix (optional): also
+   assert in a behavioural test that `approve_request` raises for a non-owner
+   actor on `node_action`.
+2. LOW, `backend/ops/tests/test_control_e2e.py`: all four e2e scenarios
+   (typed, voice, confirm, kill switch) run in one long test,
+   `test_typed_voice_confirm_and_kill_switch`, so a failure in an early step
+   hides the later scenarios. Fix (optional): split it into per-scenario tests
+   that share the fixtures.
