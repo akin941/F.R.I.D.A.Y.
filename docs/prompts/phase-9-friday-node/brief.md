@@ -4,6 +4,9 @@
 > the same date, which was taken from the owner-approved Friday 3.0 roadmap.
 > It needs its independent Sonnet 5 plan review before branch 1, because
 > the implementing model never reviews its own brief.**
+> Progress: the server branches 1–7 and the closeout are implemented
+> (2026-11-20, "Branch table"); the go/no-go record is written, with the Mac
+> rows pending owner evaluation ("Mac session (deferred)").
 > Sources: `docs/research/2026-11-roadmap-proposal.md` §B1, §c.4, §c.5,
 > §c.6, §c.7, §c.8, §c.9, §g d1/d9; MASTER_PLAN §AA "Friday 3.0 phases"
 > (order 4).
@@ -1567,6 +1570,11 @@ reference node.
 **Files.**
 - `backend/nodes/tasks.py` (the `nodes.signing_key_id` task: returns
   the key id only);
+- `backend/nodes/management/commands/run_reference_node.py` (added at
+  implementation: DEBUG-only, pairs the Python reference node and keeps it
+  connected, so the done criterion can be checked before the Mac app
+  exists), `backend/config/tests/test_reference_node_preflight.py`,
+  `backend/config/tests/test_preflight_hud_nodes.py`;
 - `backend/ops/preflight.py`, `backend/ops/tests/test_preflight_nodes.py`,
   `backend/ops/tests/test_node_e2e.py`;
 - `docs/runbooks/friday-node.md`, `docs/adr/ADR-013-friday-node-protocol.md`;
@@ -1600,7 +1608,7 @@ node paired, the e2e test is green, and the go/no-go record is written.
 | 5 | `feat/p9-node-reads` | `invoke_read` end to end, five read tools, path → workspace resolution, second scrub, fencing, chain + audit rows, invocations API | 4 | **implemented 2026-11-20** (done criterion met: `config/tests/test_node_read_turns.py::test_the_done_criterion_sessions_answered_from_the_node` — the reference node's fixture sessions in a FakeAdapter chat answer, filtered to the conversation's workspace, two `ok` chain rows, no stored content; 8B step-0 actor check in `invoke_read`; the 8B owner-turn move is a known follow-up below; awaits independent Sonnet 5 review) |
 | 6 | `feat/p9-node-events` | `event` sink wiring into `ingest_hook_events`, cross-relay dedupe, spool upload acks, availability events | 4 (parallel with 5) | **implemented 2026-11-20** (done criterion met: `config/tests/test_hooks_via_node.py::test_the_done_criterion` — an event written to the reference relay's Unix socket reaches `GET /memory/sessions` through the node, and a `friday-hook` replay is a `duplicate`; `nodes/events.py` sink registry + availability successor snapshots, spooled-batch pacing, `config.asgi_nodes` registration; awaits independent Sonnet 5 review) |
 | 7 | `feat/p9-node-ui` | `/devices` node section, invocation log page, HUD node line, `hud → nodes` contract | 4, 5 (6 for availability) | **implemented 2026-11-20** (done criterion met server- and UI-side: pair (node code shown once), inspect (status, heartbeat, credential age, capability availability as text, invocation log), kill-switch and revoke behind confirmations on `/devices`; the HUD health panel's node line from `health.node` — `hud/tests/test_node_line.py`, `components/nodes/*.test.tsx`, `HudNodeLine.test.tsx`; the `hud → nodes` edge already existed (Phase 10 D12), only its comment changed; awaits independent Sonnet 5 review) |
-| 8 | `chore/p9-closeout` | Preflight node checks, e2e, runbook, ADR-013 notes, MASTER_PLAN row, go/no-go record | 1–7 | not started |
+| 8 | `chore/p9-closeout` | Preflight node checks, e2e, runbook, ADR-013 notes, MASTER_PLAN row, go/no-go record | 1–7 | **implemented 2026-11-20** (done criterion met in process: `config/tests/test_reference_node_preflight.py::test_preflight_is_green_with_the_reference_node_paired` — the reference node paired by the new `run_reference_node` command and connected to the real gateway process, every node check `pass` (TLS pin `warn`, not configured); e2e `ops/tests/test_node_e2e.py` green; go/no-go record written; preflight on the owner's real dev stack is an owner step below; awaits independent Sonnet 5 review) |
 | M1 | `feat/p9-node-app` | Swift menu-bar app: signing/notarization, Keychain credential + TLS pin, pairing, WSS client, D5 verifier, conformance pass | 1–4 merged; owner's Apple Developer ID (d9) | deferred: Mac session |
 | M2 | `feat/p9-node-readers` | Swift readers for the eight capabilities, per-directory Touch ID grants, local policy UI, scrubber port + corpus | M1 | deferred: Mac session |
 | M3 | `feat/p9-node-hook-relay` | `friday-node hook` CLI, 0600 Unix socket + peer uid, spool, Claude Code hook switch-over | M1; 6 merged | deferred: Mac session |
@@ -1842,11 +1850,20 @@ session:
 
 | Item | How it is measured | Result |
 |---|---|---|
-| Spike S9.0, server half | Branch 1 tests (six criteria) | pending (branch 1) |
+| Spike S9.0, server half | Branch 1 tests (six criteria) | **passed 2026-11-20** (branch 1 tests; ADR-013 "Implementation notes — spike S9.0") |
 | Spike S9.0, Keychain half | M4 item 2 | pending owner evaluation (Mac session) |
-| Compromised-server suite, reference node | Branch 3 conformance run | pending (branch 3) |
+| Compromised-server suite, reference node | Branch 3 conformance run | **passed 2026-11-20** (`node_conformance_server --protocol 1` all-pass, `test_every_v1_case_passes_through_the_command_over_a_socket`; `build_node_conformance --check` in CI and as the `node_conformance` preflight check) |
 | Compromised-server suite, Swift app | M1 contract tests 1–2 | pending owner evaluation (Mac session) |
 | Notarized build keeps TCC grants across updates | M4 item 1 | pending owner evaluation (Mac session) |
+| Server half end to end (closeout) | `ops/tests/test_node_e2e.py`: pair through the endpoint → connect → `hello` → chat turn → fenced rows of the workspace → chain rows → revoke → `bye{revoked}` → tools unavailable | **passed 2026-11-20** (CI, fakes) |
+| Preflight green with a node paired | `config/tests/test_reference_node_preflight.py` (in process, real gateway process); `make preflight` on the owner's dev stack with `run_reference_node` | **passed 2026-11-20** in process; on the real dev stack: pending owner evaluation (owner step 2 of the closeout) |
+| Kill-switch latency, heartbeat/backoff, no TCP listener on the Mac | M4 items 3–5 | pending owner evaluation (Mac session); server side: socket closed within 2 s of revoke / kill switch (`nodes/tests/test_gateway_handshake.py`) |
+
+**Verdict (2026-11-20): continue.** Every server-side item passed. The Mac
+rows are pending owner evaluation and, as decided, do not block Phase 8B's
+or Phase 10's server branches. If the Mac session later fails an item, the
+node stays unpaired in daily use (`friday-hook` keeps the sessions panel
+alive) and the item is re-planned in its own brief.
 
 The two Mac rows do not block Phase 8B: its server branches can start
 once the server half is green. 8B's transcript ingestion needs M2's
@@ -2677,3 +2694,67 @@ Implementation notes (branch 5):
    queries plus a Redis presence read. This is bounded (a few nodes per owner)
    and a test pins that the stream writes no rows. Fix: if HUD tick cost
    matters later, cache the node block for a few seconds.
+
+### Owner steps (pending) — `chore/p9-closeout`, recorded 2026-11-20
+
+1. Run the independent Sonnet 5 review of `chore/p9-closeout` and fix
+   findings until APPROVE (CLAUDE.md "Reviews").
+2. **Preflight on the real dev stack (the done criterion's live half).**
+   `make up`, then pair the reference node and run preflight as
+   `docs/runbooks/friday-node.md` "Preflight node checks" shows
+   (`issue_pairing_code --node --strong --plain`, `run_reference_node --code
+   …`, `make preflight`). Expect `node_gateway`, `node_signing_key`,
+   `node_link:Reference node`, `node_audit_chain` and `node_conformance` to
+   pass (`node_tls_pin` warns until owner step 3). Then revoke the reference
+   node on `/devices`. Pending owner evaluation.
+3. **Optional TLS pin.** Compute the proxy's SPKI pin with the runbook's
+   `openssl` pipeline and set `NODE_TLS_PIN_SHA256` and
+   `PREFLIGHT_NODE_TLS_URL` in `deploy/docker/.env`; restart web.
+4. No migration, no new dependency. New optional settings (all in
+   `.env.example`): `PREFLIGHT_NODE_GATEWAY_URL` (the compose stack sets it
+   for web), `NODE_TLS_PIN_SHA256`, `PREFLIGHT_NODE_TLS_URL`. Rebuild web and
+   worker (`make up` / `make up-daily`) so the worker registers the
+   `nodes.signing_key_id` task; until it does, `node_signing_key` fails
+   with "no worker answered".
+5. **Mac session (deferred: Mac session).** Start it as owner step 7 of
+   this brief says; M1–M4 above are its task list, and the conformance suite
+   plus the server-side contract tests named there are its acceptance
+   tests. Record M4's measurements in the "Go/no-go record" (pending owner
+   evaluation).
+
+### Implementation notes — `chore/p9-closeout` (2026-11-20)
+
+- **Preflight** (`ops/preflight.py`, `check_nodes`, registered as `nodes`
+  after `learning`): six checks, read-only, no model call, nothing sent to a
+  node. New fakeable seams beside `celery_ping`: `worker_signing_key_id`
+  (sends the `nodes.signing_key_id` task by name and waits for its id),
+  `served_spki_sha256` (TLS handshake without trust verification, SNI = the
+  host; only the SPKI hash is compared, nothing is sent) and
+  `node_conformance_drift` (`build_node_conformance --check` in process).
+  The gateway's `/healthz` goes through the existing `http_get` seam.
+- **Verdict rules.** `node_gateway`: `PREFLIGHT_NODE_GATEWAY_URL` empty =
+  `warn`; unreachable, non-200, unexpected body or `redis: false` = `fail`.
+  `node_signing_key`: web's key missing, invalid or a published
+  test/conformance key = `fail` (reason only, never material); the
+  gateway's or worker's id missing or different = `fail`; no worker answer =
+  `fail`; an active (non-revoked) node with another `pinned_key_id` =
+  `fail` ("re-pair"); a skipped comparison (no gateway URL, eager Celery) =
+  `warn`. `node_link`: one row per active node, named
+  `node_link:<node name>` (`pass` only when connected with a heartbeat row
+  younger than 180 s and a snapshot; otherwise `warn`), or one `node_link`
+  `warn` when none is paired. `node_tls_pin`: pin or URL unset = `warn`;
+  malformed pin/URL, handshake error or mismatch = `fail`; the pin is
+  base64 or hex (a `sha256/` prefix is accepted). Each check is guarded:
+  one crash is one `fail` row, the others still report.
+- **HUD.** No change needed: `record_last_result` already forwards failing
+  check names, which now include the node names
+  (`config/tests/test_preflight_hud_nodes.py`).
+- **E2E** lives in `ops/tests/test_node_e2e.py` (spans `accounts`, `nodes`,
+  `tools`, `assistant`, `memory`); it reuses `nodes/tests/gateway_harness`
+  and `tools/tests/node_reads_helpers` and pins, after the revoke, that the
+  same routed question degrades to plain chat (the router no longer sees a
+  node tool) and that a reconnect with the revoked secret is closed 4401.
+- **Existing tests touched:** `ops/tests/test_preflight.py` stubs the two
+  new seams in `_stub_infra` and checks the voice check order by index (the
+  node checks are now last).
+
