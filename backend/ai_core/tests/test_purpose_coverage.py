@@ -18,8 +18,11 @@ from ai_core.models import ModelTier
 BACKEND = Path(__file__).resolve().parents[2]
 GATEWAY_CALLS = {"complete", "embed", "transcribe", "synthesize", "record_external_usage"}
 _SKIP_DIRS = {".venv", "tests", "migrations", "node_modules", "__pycache__"}
-# The gateway and adapters forward their caller's `purpose` parameter.
-_PASS_THROUGH_MODULES = {"ai_core/gateway.py"}
+# The gateway and adapters forward their caller's `purpose` parameter. The
+# eval runner (Phase 8B D11) answers under `memory.eval_answer` or, in a
+# compression compare, under a candidate that `check_compression_purpose`
+# has verified is classified eligible (so already tiered here).
+_PASS_THROUGH_MODULES = {"ai_core/gateway.py", "memory/evals/runner.py"}
 
 
 def _production_modules():

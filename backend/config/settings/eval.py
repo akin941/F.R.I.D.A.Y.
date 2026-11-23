@@ -35,9 +35,18 @@ if not MEMORY_EVAL_DATABASE_NAME or MEMORY_EVAL_DATABASE_NAME == _LIVE_DATABASE_
     )
 DATABASES["default"]["NAME"] = MEMORY_EVAL_DATABASE_NAME
 
-# The eval spend cap's purposes. Branch 6 (D11) adds the purpose under a
-# compression compare here, so both arms run under the same eval-only cap.
-AI_LEARNING_EVAL_PURPOSES = ("memory.eval_answer",)
+# The eval spend cap's purposes (D9, D11). `chat` is here for the
+# compression compare (`memory_eval compare --compression chat`): both arms
+# answer under `chat` and must be eval-only spend under the same cap. In
+# this database every `chat` row is an eval row (each carries `eval_run_id`
+# and `eval_arm` in its context report), never the owner's chat traffic.
+# The compare refuses a purpose that is not listed here, and one the
+# `learning_eval` AIBudget row (seeded from this tuple) does not cover.
+AI_LEARNING_EVAL_PURPOSES = ("memory.eval_answer", "chat")
+# Compression stays off under the eval settings; the compare switches it on
+# for arm B only, for the candidate purpose only.
+AI_COMPRESSION_ENABLED = False
+AI_COMPRESSION_PURPOSES = frozenset()
 
 # No broker is needed: the runner embeds setup memories in-process.
 CELERY_TASK_ALWAYS_EAGER = True

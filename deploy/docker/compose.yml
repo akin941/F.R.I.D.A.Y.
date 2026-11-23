@@ -143,9 +143,17 @@ services:
       # on /healthz. Empty = node pairing and invokes refuse (fail closed).
       NODE_SIGNING_KEY: "${NODE_SIGNING_KEY:-}"
       NODE_SIGNING_KEYS_RETIRED: "${NODE_SIGNING_KEYS_RETIRED:-}"
+      # Pre-send compression (Phase 8B D11, docs/mcp/headroom.md): off by
+      # default; the `compressor` sidecar runs only in the `compression`
+      # profile. A purpose is enabled only after a recorded eval pass.
+      AI_COMPRESSION_ENABLED: "${AI_COMPRESSION_ENABLED:-false}"
+      AI_COMPRESSION_PURPOSES: "${AI_COMPRESSION_PURPOSES:-}"
+      AI_COMPRESSION_URL: "${AI_COMPRESSION_URL:-http://compressor:8080/compress}"
+      AI_COMPRESSION_TIMEOUT_MS: "${AI_COMPRESSION_TIMEOUT_MS:-300}"
     # `connectors`: the internal network the MCP sidecars listen on (web
-    # runs connector reads in the chat request thread).
-    networks: ["default", "connectors"]
+    # runs connector reads in the chat request thread). `compression`: the
+    # internal network of the `compressor` sidecar (gateway stage, D11).
+    networks: ["default", "connectors", "compression"]
     depends_on:
       postgres:
         condition: service_healthy
@@ -182,8 +190,9 @@ services:
       # file; defaults to a repo-local, gitignored dev data directory.
       - ${OBSIDIAN_VAULT_HOST_PATH:-../../.devdata/obsidian-vault}:/vault
     environment: *backend_env
-    # Connector writes, pin checks and health checks run here (Celery).
-    networks: ["default", "connectors"]
+    # Connector writes, pin checks and health checks run here (Celery);
+    # background gateway calls may use the compression stage too.
+    networks: ["default", "connectors", "compression"]
     depends_on:
       postgres:
         condition: service_healthy
@@ -250,6 +259,25 @@ services:
       GITHUB_PERSONAL_ACCESS_TOKEN: "${GITHUB_PERSONAL_ACCESS_TOKEN:-}"
     networks: ["connectors", "connectors-egress"]
 
+  # Headroom compressor (Phase 8B branch 6, brief D11, docs/mcp/headroom.md):
+  # a stdlib HTTP server exposing only `POST /compress`, image
+  # deploy/compressor/Dockerfile (hash-locked wheels, no `litellm`). Opt-in
+  # profile (`docker compose --profile compression up -d compressor`). Only
+  # on the internal `compression` network shared with web and worker: no
+  # egress, no published port, no provider key, no env file, read-only root,
+  # every capability dropped; telemetry off and offline via the image env.
+  compressor:
+    profiles: ["compression"]
+    build:
+      context: ../compressor
+      dockerfile: Dockerfile
+    read_only: true
+    cap_drop: ["ALL"]
+    security_opt: ["no-new-privileges:true"]
+    tmpfs: ["/tmp"]
+    networks: ["compression"]
+    restart: unless-stopped
+
   postgres:
     image: pgvector/pgvector:pg16
     environment:
@@ -301,3 +329,6 @@ networks:
   # For sidecars whose server must reach its vendor API; never joined by
   # web or worker.
   connectors-egress: {}
+  # The compressor sidecar and its two clients only; no route out (D11).
+  compression:
+    internal: true

@@ -32,7 +32,7 @@ from decimal import Decimal
 from django.conf import settings
 from django.db import transaction
 
-from ai_core import budgets
+from ai_core import budgets, compression
 from ai_core.adapters import AdapterError, get_adapter
 from ai_core.audio import wav_seconds_or_zero
 from ai_core.exceptions import BudgetExceeded, GatewayError, NoProviderAvailable
@@ -214,6 +214,15 @@ class InferenceGateway:
                 personal_data=personal_data,
                 on_usage=on_usage,
             )
+
+        # Phase 8B D11: the pre-send compression stage, after budget and
+        # provider selection, before any adapter call (sync and stream alike).
+        # Off by default; with it off the messages are passed through as-is.
+        messages, compression_report = compression.apply(
+            purpose, messages, model=providers[0].model_id, personal_data=personal_data
+        )
+        if compression_report is not None:
+            base_report["compression"] = compression_report
 
         if stream:
             return self._stream_generator(

@@ -16,6 +16,11 @@ answer through the gateway under `memory.eval_answer`:
 - `context_report` carries `eval_run_id` (and `eval_arm` in a compare), so
   every eval `ModelUsage` row is attributable and never mistaken for chat.
 
+A compression compare (D11, `run_compression_compare`) answers under the
+candidate purpose (e.g. `chat`) in both arms, arm B with the compression
+stage switched on for that purpose only; `pre_tokens`/`post_tokens` are
+summed over arm B, and an arm B that compressed nothing is `inconclusive`.
+
 The `learning_eval` cap (D9): before the run and before every answer call,
 the month's eval spend is the larger of the eval database's `ModelUsage`
 sum and the result files' `spend_usd` sum plus this run's own spend. A run
@@ -31,8 +36,10 @@ from decimal import Decimal
 
 from django.conf import settings
 from django.db.models import Sum
+from django.test.utils import override_settings
 from django.utils import timezone
 
+from ai_core import compression
 from ai_core.budgets import spent
 from ai_core.exceptions import BudgetExceeded, GatewayError
 from ai_core.gateway import InferenceGateway
@@ -40,6 +47,7 @@ from ai_core.models import AIBudget, ModelUsage, PromptTemplate
 from memory.evals import metrics
 from memory.evals.results import month_spend, write_result
 from memory.evals.retrieval import BASELINE_MODE, retriever_for
+from memory.evals.schema import COMPRESSION_TAG
 from memory.evals.world import clear_case_rows, ensure_world, load_case
 from memory.ingestion.extraction import needs_personal_data
 
@@ -139,6 +147,12 @@ class RunConfig:
     run_id: uuid.UUID = field(default_factory=uuid.uuid4)
     compression_purpose: str | None = None
 
+    @property
+    def answer_purpose(self):
+        """D11: a compression compare answers under the candidate purpose
+        itself (both arms); every other run under `memory.eval_answer`."""
+        return self.compression_purpose or ANSWER_PURPOSE
+
 
 def _answer_messages(prompt, retrieved, case):
     system = prompt.content
@@ -156,6 +170,30 @@ def _context_report(config):
     if config.arm:
         report["eval_arm"] = config.arm
     return report
+
+
+def compression_totals(run_id, arm):
+    """`(pre_tokens, post_tokens, applied_calls)` summed over the compression
+    reports of one arm's `ModelUsage` rows."""
+    rows = ModelUsage.objects.filter(
+        context_report__eval_run_id=str(run_id), context_report__eval_arm=arm
+    ).values_list("context_report", flat=True)
+    pre = post = applied = 0
+    for report in rows:
+        block = (report or {}).get("compression") or {}
+        pre += int(block.get("pre_tokens") or 0)
+        post += int(block.get("post_tokens") or 0)
+        applied += 1 if block.get("applied") else 0
+    return pre, post, applied
+
+
+def _token_sums(config):
+    """D11 non-vacuity: `pre_tokens`/`post_tokens` summed over the compressed
+    arm (B) of a compression compare; `None` everywhere else."""
+    if not config.compression_purpose or config.arm != "b":
+        return {"pre_tokens": None, "post_tokens": None}
+    pre, post, _ = compression_totals(config.run_id, config.arm)
+    return {"pre_tokens": pre, "post_tokens": post}
 
 
 def _spend_dirs(spend_dirs, results_dir):
@@ -207,12 +245,14 @@ def run_cases(cases, config, *, results_dir, spend_dirs=()):
             continue
 
         personal_data = case.is_private or any(needs_personal_data(e) for e in retrieved.episodes)
-        if not gateway.has_eligible_provider(purpose=ANSWER_PURPOSE, personal_data=personal_data):
+        if not gateway.has_eligible_provider(
+            purpose=config.answer_purpose, personal_data=personal_data
+        ):
             counts["no_provider"] += 1
             continue
         try:
             result = gateway.complete(
-                ANSWER_PURPOSE,
+                config.answer_purpose,
                 _answer_messages(prompt, retrieved, case),
                 actor=world.owner,
                 workspace=workspace,
@@ -245,8 +285,7 @@ def run_cases(cases, config, *, results_dir, spend_dirs=()):
         **counts,
         "spend_usd": str(run_spend(config.run_id, config.arm)),
         **metrics.aggregate(outcomes),
-        "pre_tokens": None,
-        "post_tokens": None,
+        **_token_sums(config),
         "verdict": None,
     }
     return result, None if results_dir is None else write_result(results_dir, result)
@@ -286,3 +325,79 @@ def run_compare(cases, *, set_name, candidate_mode, retrieval_only, results_dir,
     arm_b["verdict"] = metrics.compare_verdict(arm_a, arm_b)
     paths = [write_result(results_dir, arm_a), write_result(results_dir, arm_b)]
     return (arm_a, arm_b), paths
+
+
+# --- the compression compare (D11) ----------------------------------------------
+
+
+def check_compression_purpose(purpose):
+    """Refuse a compression compare that could not measure what it claims:
+    the purpose must be classified eligible (a bypass purpose, including
+    `memory.eval_answer`, is never compressed), and the `learning_eval` cap
+    must cover it, so both arms' answer calls are eval-only spend."""
+    kind = compression.classify(purpose)
+    if kind != "eligible":
+        raise EvalRefused(
+            f"{purpose!r} is not a compression-eligible purpose ({kind or 'unclassified'}); "
+            "a compression compare runs only under an eligible purpose such as 'chat'"
+        )
+    if purpose not in eval_purposes():
+        raise EvalRefused(
+            f"the {BUDGET_NAME} cap does not cover {purpose!r}: add it to "
+            "AI_LEARNING_EVAL_PURPOSES in config/settings/eval.py"
+        )
+    row = AIBudget.objects.filter(name=BUDGET_NAME).first()
+    if row is not None and purpose not in (row.purposes or []):
+        raise EvalRefused(
+            f"the {BUDGET_NAME} budget row does not cover {purpose!r}: add it to that "
+            "AIBudget row's purposes (admin) before a compression compare"
+        )
+
+
+def _arm_settings(purpose, *, compressed):
+    return override_settings(
+        AI_COMPRESSION_ENABLED=compressed,
+        AI_COMPRESSION_PURPOSES=frozenset({purpose}) if compressed else frozenset(),
+    )
+
+
+def run_compression_compare(cases, *, set_name, purpose, results_dir, spend_dirs=()):
+    """`memory_eval compare --compression <purpose>` (D11): the same cases
+    twice, both arms answering under `purpose` with `legacy` retrieval; arm A
+    with compression off, arm B with `AI_COMPRESSION_ENABLED=True` and
+    `AI_COMPRESSION_PURPOSES={purpose}`. The verdict on arm B is never
+    `pass` when the arm compressed nothing (`metrics.compression_verdict`)."""
+    require_eval_settings()
+    check_compression_purpose(purpose)
+    run_id = uuid.uuid4()
+    arms = []
+    for arm, compressed in (("a", False), ("b", True)):
+        with _arm_settings(purpose, compressed=compressed):
+            result, _ = run_cases(
+                cases,
+                RunConfig(
+                    set_name=set_name,
+                    kind="compare",
+                    retrieval_mode=BASELINE_MODE,
+                    arm=arm,
+                    run_id=run_id,
+                    compression_purpose=purpose,
+                ),
+                results_dir=None,
+                spend_dirs=_spend_dirs(spend_dirs, results_dir),
+            )
+        arms.append(result)
+    arm_a, arm_b = arms
+    _, _, applied_calls = compression_totals(run_id, "b")
+    arm_b["verdict"] = metrics.compression_verdict(
+        arm_a,
+        arm_b,
+        compression_cases=sum(1 for c in cases if compression_case(c)),
+        applied_calls=applied_calls,
+    )
+    paths = [write_result(results_dir, arm_a), write_result(results_dir, arm_b)]
+    return (arm_a, arm_b), paths
+
+
+def compression_case(case):
+    return COMPRESSION_TAG in case.tags

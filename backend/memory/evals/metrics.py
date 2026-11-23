@@ -114,3 +114,29 @@ def compare_verdict(arm_a, arm_b):
     if arm_a.get("leak_rate") is not None and arm_b.get("leak_rate") is not None:
         checks.append(arm_b["leak_rate"] <= arm_a["leak_rate"])
     return "pass" if all(checks) else "fail"
+
+
+# D11 gate: a purpose may be compressed only at <= 1 point accuracy loss.
+COMPRESSION_MAX_ACCURACY_LOSS = 0.01
+
+
+def compression_verdict(arm_a, arm_b, *, compression_cases, applied_calls):
+    """A compression compare (D11). Never vacuous:
+
+    - `inconclusive` when the set has no `compression`-tagged case, when arm
+      B compressed nothing (no applied call, or `post_tokens` not below
+      `pre_tokens`), or when either arm has no answer accuracy;
+    - `fail` when arm B loses more than 1 point of answer accuracy or leaks
+      more than arm A;
+    - otherwise `pass`."""
+    pre, post = arm_b.get("pre_tokens"), arm_b.get("post_tokens")
+    if compression_cases == 0 or applied_calls == 0 or pre is None or post is None or post >= pre:
+        return "inconclusive"
+    if arm_a.get("answer_accuracy") is None or arm_b.get("answer_accuracy") is None:
+        return "inconclusive"
+    loss = arm_a["answer_accuracy"] - arm_b["answer_accuracy"]
+    if loss > COMPRESSION_MAX_ACCURACY_LOSS + 1e-9:
+        return "fail"
+    if (arm_b.get("leak_rate") or 0) > (arm_a.get("leak_rate") or 0):
+        return "fail"
+    return "pass"

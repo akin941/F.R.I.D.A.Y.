@@ -69,6 +69,15 @@ services:
       AI_FAKE_PROVIDER: "${AI_FAKE_PROVIDER:-false}"
     restart: unless-stopped
 
+  # Headroom compressor (Phase 8B D11): the base file's hardening restated
+  # so the daily stack can never loosen it; still the opt-in `compression`
+  # profile, still no published port, still only the internal network.
+  compressor:
+    read_only: true
+    cap_drop: ["ALL"]
+    security_opt: ["no-new-privileges:true"]
+    networks: ["compression"]
+
   frontend:
     image: node:24-slim
     working_dir: /app

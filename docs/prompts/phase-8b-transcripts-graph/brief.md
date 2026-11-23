@@ -2815,6 +2815,128 @@ and `chat` enabled, a chat turn's assistant history is compressed with
 pre/post counts in its single `ModelUsage` row while the system message
 (core blocks and fenced reads) and every user message are untouched.
 
+**Implementation record (2026-11-20).** Status: implemented on
+`feat/p8-headroom-stage`, awaiting the independent Sonnet 5 review.
+- **Pin re-checked 2026-11-21.** `headroom-ai==0.43.1` (sha256
+  `2e9cd1a9…915d6e`, re-verified by download) stays the newest release
+  ≥ 14 days old. Its declared base requirements include `litellm`, `click`,
+  `rich`, `ast-grep-cli`, `pyyaml`, `tomlkit`, `truststore`, `hf-xet` and
+  `filelock`; `compress()` imports none of them. The sidecar lock
+  (`deploy/compressor/requirements.lock.txt`, CPython 3.12 manylinux
+  x86_64) holds exactly what it does import: `headroom-ai`, `tiktoken`,
+  `regex`, `requests` (+ `urllib3`, `idna`, `certifi`,
+  `charset-normalizer`), `pydantic` (+ `pydantic-core`, `annotated-types`,
+  `typing-extensions`, `typing-inspection`) and `opentelemetry-api`, each
+  uploaded before 2026-11-07. The lock was installed with
+  `--require-hashes --no-deps --only-binary=:all:` into a fresh CPython
+  3.12 venv on this machine and both sidecar test files passed there
+  (`test_no_litellm.py`: the import blocker for `litellm`, `openai` and
+  `anthropic` holds and `compress()` runs). **So the D11 adoption
+  condition is met: Headroom is adopted as a sidecar, without `litellm`.**
+- **Observed behaviour, to weigh at M2 item 3.** On assistant-only input
+  (what the stage sends) with `protect_recent=0`, 0.43.1 routed the
+  fixture as `router:noop` with no token change: upstream leaves assistant
+  text uncompressed by default (`compress_assistant_text_blocks=False`,
+  for provider prefix-cache safety). The owner's
+  `compare --compression chat --set private` is therefore likely to be
+  `inconclusive`, which keeps `chat` off by the non-vacuity rule. Turning
+  on upstream assistant-text compression is a separate reviewed change in
+  `deploy/compressor/server.py`, re-measured by the eval. Without network
+  `tiktoken` falls back to an estimate; the image bakes the encodings in.
+- **Stage** (`backend/ai_core/compression.py`). Called once in
+  `InferenceGateway.complete` after budget and provider selection, before
+  the sync/stream split, so both paths send the same messages. Gating: flag
+  on **and** purpose listed **and** not in `COMPRESSION_BYPASS` **and** in
+  `COMPRESSION_ELIGIBLE` (fail closed: an unclassified purpose is never
+  compressed). With the flag off or the purpose unlisted the caller's list
+  object is passed through unchanged and the context report gets no
+  `compression` key. Classification decisions, to confirm in review:
+  - bypass adds `harness.briefing` and `harness.diff_summary` under
+    "approval and gate rendering" (both render what the owner approves);
+  - eligible: `chat`, `facade.ephemeral`, `agent.read_step` (only `chat`
+    carries assistant history today);
+  - not-applicable: the embedding, speech and external-CLI purposes.
+  Only `assistant` messages with string content, never the last message,
+  are sent. The answer is validated (same count, role `assistant`, string
+  content, a longer message keeps the original, non-negative counts); any
+  failure (`timeout`, `unreachable`, `http_<code>`, `invalid_response`,
+  `request_too_large`, `stage_error`) sends the originals. The client
+  disables environment proxies. The report:
+  `{applied, pre_tokens, post_tokens, transforms, lossless, error}` plus
+  `sent_messages`, `skipped` (`bypass`, `not_eligible`,
+  `no_assistant_history`) and `personal_data` when they apply. On a
+  failure `pre_tokens == post_tokens` is a local 4-chars-per-token
+  estimate.
+- **Sidecar** (`deploy/compressor/`). `server.py`: stdlib
+  `ThreadingHTTPServer`, only `POST /compress`, Content-Length checked
+  before the read (413 over 1 MB), closed request shape (assistant role
+  only, ≤ 64 messages), a count-changing result reverted, no body logged;
+  it calls `compress(..., protect_recent=0, kompress_model="disabled")`.
+  `Dockerfile`: the graphify base-image digest, hash-locked wheels, the
+  telemetry/offline env, baked `tiktoken` encodings, both test files run
+  at build (the build fails otherwise), non-root user. Compose: service
+  `compressor` in the opt-in `compression` profile, `read_only`,
+  `cap_drop: ALL`, `no-new-privileges`, no ports, only on the new
+  `compression` network (`internal: true`), which web and worker join;
+  `compose.daily.yml` restates the hardening. Checked with
+  `docker compose config` (after removing a pre-existing duplicate
+  `OPENROUTER_API_KEY` key in `compose.yml`'s web env, which makes
+  `docker compose config` refuse the file; not changed here). CI runs
+  `test_server.py` (stdlib only).
+- **Eval arm.** `memory_eval compare --set <set> --compression <purpose>`
+  (`run_compression_compare`): both arms answer under `<purpose>` with
+  `legacy` retrieval; arm B runs inside
+  `override_settings(AI_COMPRESSION_ENABLED=True,
+  AI_COMPRESSION_PURPOSES={<purpose>})`. Refused: a purpose that is not
+  classified eligible (so `memory.eval_answer` and every bypass purpose),
+  one not in `AI_LEARNING_EVAL_PURPOSES` (the eval settings now list
+  `memory.eval_answer` and `chat`), one the existing `learning_eval`
+  AIBudget row does not cover, and `--retrieval-only`. `pre_tokens` and
+  `post_tokens` are summed over arm B's `ModelUsage` compression reports.
+  `metrics.compression_verdict`: `inconclusive` with no `compression` case,
+  no applied call, `post_tokens >= pre_tokens` or a missing accuracy;
+  `fail` at > 1 point accuracy loss or a higher leak rate; else `pass`.
+  The result files keep exactly the D9 keys (no migration). The eval
+  runner forwards a validated purpose, so the purpose-coverage scan lists
+  `memory/evals/runner.py` as a pass-through module.
+- **Public seed.** `memory/evals/cases/public/compression.jsonl`: 8 new
+  `compression` cases (session lists, code listings, deploy-log summaries,
+  Turkish meeting notes); with the 3 from branch 3 the public set has 11
+  (71 cases in all).
+- Tests: `ai_core/tests/test_compression.py` (default off byte for byte,
+  gating, bypass per purpose, classification, failure, accounting, stream,
+  `personal_data`, the HTTP client against a localhost stub),
+  `ai_core/tests/test_no_headroom_import.py`,
+  `assistant/tests/test_compression_payload.py` (the real `build_context`
+  payload and a web chat turn), `memory/tests/test_evals_compression.py`
+  (the compare on the public set, inconclusive cases, refusals, the
+  command, the verdict), and the sidecar's own
+  `deploy/compressor/test_{no_litellm,server}.py`.
+
+**Owner steps (pending) — `feat/p8-headroom-stage`, recorded 2026-11-20.**
+1. Run the independent Sonnet 5 review of this branch and fix findings
+   until APPROVE (CLAUDE.md "Reviews").
+2. Confirm the classification decisions above (`harness.briefing` and
+   `harness.diff_summary` bypassed as approval rendering; `facade.ephemeral`
+   and `agent.read_step` eligible).
+3. Only if M2 item 3 is to be run: build the image
+   (`docker compose -f deploy/docker/compose.yml --profile compression build
+   compressor`; it needs PyPI and `openaipublic.blob.core.windows.net` at
+   build time only) and start it
+   (`docker compose ... --profile compression up -d compressor`).
+4. In the eval database, make sure the `learning_eval` AIBudget row covers
+   `chat` (a fresh `seed_ai_defaults` under `config.settings.eval` seeds it
+   so; an older row needs `chat` added in the admin — the compare refuses
+   otherwise). Then run `memory_eval compare --set private --compression
+   chat` with a real provider (paid calls; the eval-only cap applies) and
+   record both arms in the go/no-go table. Enable `chat`
+   (`AI_COMPRESSION_ENABLED=true`, `AI_COMPRESSION_PURPOSES=chat`) only on a
+   recorded `pass`. Given the observed `router:noop` on assistant text, an
+   `inconclusive` result is expected; the flag then stays off.
+5. Optional: remove the duplicate `OPENROUTER_API_KEY` key in
+   `deploy/docker/compose.yml` (web env) so `docker compose config`
+   validates the file; it predates this branch.
+
 ### 7. `feat/p8-obsidian-mirror` — format v2, entity notes, conflicts, `00_Inbox` import
 
 **Scope.**
@@ -3675,7 +3797,7 @@ Mac and private-data rows pending owner evaluation.
 | 3 | `feat/p8-eval-set` | Eval harness, public seed, private loader, `memory_eval`, `memory.eval_answer` purpose, CI public run | 1 (parallel with 2) | **implemented 2026-11-20** (awaits the Sonnet 5 review; see "Implementation record" under branch 3; the private baseline is pending owner evaluation, M2) |
 | 4 | `feat/p8-hybrid-retrieval` | `tsvector` + GIN, per-provider HNSW expression indexes, RRF + decay + hops, flag, `<memory_fact>` block, `memory_graph_lookup` | 1, 3 | **implemented 2026-11-20** (awaits the Sonnet 5 review; see "Implementation record" under branch 4; the private-set compare and the default flip are pending owner evaluation, M2) |
 | 5 | `feat/p8-graphify-job` | Hash-pinned image, `--network none` runner primitive, trigger, importer + temporal replace, `self` codebase line, manifest | 1 (parallel with 2–4) | **implemented 2026-11-20** (awaits the Sonnet 5 review; see "Implementation record" under branch 5; the real image build and the owner's switch are owner steps) |
-| 6 | `feat/p8-headroom-stage` | `compressor` sidecar (no `litellm`, no egress, telemetry off), gateway stage, bypass set, context report, eval arm, manifest | 3 | not started |
+| 6 | `feat/p8-headroom-stage` | `compressor` sidecar (no `litellm`, no egress, telemetry off), gateway stage, bypass set, context report, eval arm, manifest | 3 | **implemented 2026-11-20** (awaits the Sonnet 5 review; see "Implementation record" under branch 6; adopted as a sidecar without `litellm`, flag off; the image build and the private compare are owner steps, pending owner evaluation, M2 item 3) |
 | 7 | `feat/p8-obsidian-mirror` | Format v2, entity notes, `_conflicts/<date>/`, `00_Inbox` import-once inside the approved run | 1 | **implemented 2026-11-20** (awaits the Sonnet 5 review; see "Implementation record" under branch 7; real-vault check pending owner evaluation) |
 | 8 | `feat/p8-transcript-ingestion` | Owner-turn capabilities, reference readers + conformance, pull job in `tools`, port, cursor, personal-class sources, transcript corpus | 2; **Phase 9 branches 2–5 merged** | **implemented 2026-11-20** (awaits the Sonnet 5 review; see "Implementation record" under branch 8). Phase 9 branches 2–5 were not merged, so the contracts, readers and conformance files are staged in `integrations/node_reference/` and the node is reached through a `NodeReadPort` seam. The `nodes` wiring is owner steps 3–5 of branch 8. Swift readers: deferred: Mac session (M1) |
 | 9 | `feat/p8-graph-ui` | `/memory/graph`, timeline, sources/Graphify/conflict/eval views | 2, 4 (5, 7, 8 for their panels) | **implemented 2026-11-20** (awaits the Sonnet 5 review; see "Implementation record" under branch 9; the real-phone and screen-reader check is pending owner evaluation) |
@@ -3794,7 +3916,7 @@ session:
 | Item | How it is measured | Result |
 |---|---|---|
 | Eval baseline recorded | M2 item 1 (private); branch 3 CI (public) | public, recorded 2026-11-20 (63 cases, `legacy`, FakeAdapter, `--retrieval-only`): recall@10 0.5714, leak rate 0.0, temporal correctness 0.0, answer accuracy n/a; private: pending owner evaluation |
-| Headroom stays off unless ≤ 1 point loss | M2 item 3; `compressor` preflight | pending owner evaluation (flag off by default) |
+| Headroom stays off unless ≤ 1 point loss | M2 item 3; `compressor` preflight | pending owner evaluation (flag off by default; branch 6 implemented 2026-11-20: adopted as a sidecar without `litellm`; 0.43.1 left assistant-only text unchanged in a local probe, so an `inconclusive` compare is expected) |
 | Scrubber corpus with transcript fragments at 100% secrets recall | Branch 8 corpus gate (server and vendored node scrubber); M1 parity | **met 2026-11-20 on branch 8** (`transcripts.jsonl`, 14 items, 100% secrets recall for the server and the vendored scrubber; preflight `learning_scrubber` includes it); `scrub.json` regeneration waits for Phase 9 branch 3; Swift parity: pending owner evaluation (Mac session) |
 | Zero cross-workspace leaks | Branches 1, 4, 8 isolation tests; eval leak rate | pending (branches 1, 4, 8) |
 | Owner turns only | Branch 8 hostile-node and marker tests; M1 real-file counts; M2 item 4 | **met 2026-11-20 on branch 8** for the fixtures and the hostile-node double; real files: pending owner evaluation |
