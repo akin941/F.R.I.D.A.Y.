@@ -185,19 +185,23 @@ def resolve_workspace(source: IngestionSource, mapping_key) -> Workspace | None:
     rules = WorkspaceMappingRule.objects.filter(
         source=rule_source, rule_type=rule_type, enabled=True
     ).select_related("target_workspace")
-    winner = None
-    if rule_type in PREFIX_RULE_TYPES:
-        candidates = [r for r in rules if _path_matches(r.pattern, value)]
-        if candidates:
-            winner = max(candidates, key=lambda r: len(r.pattern))
-    else:
-        winner = next((r for r in rules if r.pattern == value), None)
+    winner = _winning_rule(list(rules), rule_type, value)
     if winner is None:
         return None
     target = winner.target_workspace
     if not owner_owns(owner_of(source), target):
         return None
     return target
+
+
+def _winning_rule(rules, rule_type, value):
+    """The rule that routes `value` (already normalised): the longest
+    segment-boundary prefix for a prefix rule type, the exact pattern
+    otherwise; None when nothing matches."""
+    if rule_type in PREFIX_RULE_TYPES:
+        candidates = [r for r in rules if _path_matches(r.pattern, value)]
+        return max(candidates, key=lambda r: len(r.pattern)) if candidates else None
+    return next((r for r in rules if r.pattern == value), None)
 
 
 def _hooks_source(owner):
@@ -215,9 +219,9 @@ def _hooks_source(owner):
 def prefixes_for_workspace(owner, workspace) -> list[str]:
     """The owner's enabled `path_prefix` rules (of the `claude_code_hooks`
     source, the one path registry) that target `workspace`, sorted. The
-    transcript pull sends exactly these as `cwd_prefixes` (D13). Empty when
-    the owner does not own `workspace` (Phase 9 D9 helper; branch 8 lands it
-    here because Phase 9 branch 5 has not merged yet)."""
+    transcript pull and the node read tools (`tools.node_reads`, Phase 9
+    D9) send exactly these as `cwd_prefixes`. Empty when the owner does not
+    own `workspace`."""
     hooks = _hooks_source(owner)
     if hooks is None or not owner_owns(owner, workspace):
         return []
@@ -238,6 +242,48 @@ def workspace_for_path(owner, path) -> Workspace | None:
     if hooks is None:
         return None
     return resolve_workspace(hooks, f"path:{path}")
+
+
+def path_resolver(owner):
+    """A `path -> Workspace | None` function over the owner's hooks
+    `path_prefix` rules, loaded once (Phase 9 D9: the node read tools filter
+    up to 50 rows per call). The same answer as `workspace_for_path` for
+    every path: longest segment-boundary prefix wins, enabled rules only,
+    and a target the owner no longer owns resolves to None. Unparsable
+    paths resolve to None (unmapped: dropped, never defaulted)."""
+    hooks = _hooks_source(owner)
+    if hooks is None:
+        return lambda path: None
+    rules = list(
+        WorkspaceMappingRule.objects.filter(
+            source=hooks,
+            rule_type=WorkspaceMappingRule.RuleType.PATH_PREFIX,
+            enabled=True,
+        ).select_related("target_workspace")
+    )
+    owner_id = owner_of(hooks).pk
+    owned = set(
+        WorkspaceMember.objects.filter(
+            user_id=owner_id,
+            role=WorkspaceMember.Role.OWNER,
+            workspace_id__in={r.target_workspace_id for r in rules},
+        ).values_list("workspace_id", flat=True)
+    )
+
+    def resolve(path):
+        # The same bound as the `path:<path>` mapping key.
+        if not isinstance(path, str) or len(path) + len("path:") > MAX_KEY_CHARS:
+            return None
+        try:
+            value = normalise_path(path)
+        except InvalidMappingKey:
+            return None
+        winner = _winning_rule(rules, WorkspaceMappingRule.RuleType.PATH_PREFIX, value)
+        if winner is None or winner.target_workspace_id not in owned:
+            return None
+        return winner.target_workspace
+
+    return resolve
 
 
 def unmapped_entry(mapping_key):

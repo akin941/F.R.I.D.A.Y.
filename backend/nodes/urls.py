@@ -4,6 +4,7 @@ from nodes.views import (
     NodeActionDetailView,
     NodeActionListView,
     NodeDetailView,
+    NodeInvocationListView,
     NodeListView,
     NodePairView,
     NodeRevokeView,
@@ -15,6 +16,12 @@ urlpatterns = [
     path("nodes", NodeListView.as_view(), name="node-list"),
     path("nodes/<uuid:node_id>", NodeDetailView.as_view(), name="node-detail"),
     path("nodes/<uuid:node_id>/revoke", NodeRevokeView.as_view(), name="node-revoke"),
+    # Phase 9 D11 (branch 5): the node's chain rows, never content.
+    path(
+        "nodes/<uuid:node_id>/invocations",
+        NodeInvocationListView.as_view(),
+        name="node-invocations",
+    ),
     # Phase 10 D8: confirm-class actions and execution status.
     path("nodes/<uuid:node_id>/actions", NodeActionListView.as_view(), name="node-actions"),
     path(

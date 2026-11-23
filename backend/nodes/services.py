@@ -38,10 +38,12 @@ from nodes.action_rules import actor_is_node_owner, workspace_refusal
 from nodes.capabilities import check_catalogue_entry, get_action_contract, get_contract
 from nodes.keys import SigningKeyUnavailable, signing_keyring
 from nodes.models import (
+    CALLER_REFUSAL_CODES,
     EXECUTION_TERMINAL_STATUSES,
     NODE_REFUSED_CODES,
     NODE_REFUSED_CODES_V2,
     NOT_SENT_STATUSES,
+    READ_TERMINAL_VOCABULARY,
     CapabilitySnapshot,
     Node,
     NodeActionExecution,
@@ -399,6 +401,8 @@ class ReadOutcome:
     invocation_id: str = ""
     trace_id: str = ""
     invocation: object = None
+    # Rows the caller's `row_filter` dropped (D9, Q5): a count only.
+    dropped: int = 0
 
     @property
     def ok(self) -> bool:
@@ -440,7 +444,10 @@ def _record_read(
 ):
     """D7 steps 7-8: exactly one chain row and one `nodes.invoke` AuditLog
     row for one read at its terminal state. Hashes, sizes and codes only:
-    never args, never output."""
+    never args, never output. A `(status, refusal_code)` pair outside the
+    read vocabulary (D7, `READ_TERMINAL_VOCABULARY`) is a programming error."""
+    if refusal_code not in READ_TERMINAL_VOCABULARY.get(status, ()):
+        raise ValueError(f"not a read terminal state: {status!r}/{refusal_code!r}")
     not_sent = status in NOT_SENT_STATUSES
     with transaction.atomic():
         row = audit_chain.append(
@@ -477,6 +484,7 @@ def _record_read(
                 "refusal_code": refusal_code,
                 "duration_ms": row.duration_ms,
                 "output_bytes": row.output_bytes,
+                "dropped_unmapped": row.dropped_unmapped,
                 "trace_id": trace_id,
                 "channel": channel,
             },
@@ -490,7 +498,10 @@ def refuse_read(
     """A caller's own pre-invoke refusal (D7, D9: `path_not_in_workspace`,
     `workspace_not_allowed`, `session_not_found`): nothing is signed or
     sent; the chain row and the AuditLog row are written as for any call.
-    The args are hashed, never stored."""
+    The args are hashed, never stored. `code` must be one of
+    `CALLER_REFUSAL_CODES` (a programming error otherwise)."""
+    if code not in CALLER_REFUSAL_CODES:
+        raise ValueError(f"not a caller refusal code: {code!r}")
     contract = get_contract(capability) if isinstance(capability, str) else None
     trace_id = _bounded_trace_id(trace_id)
     row = _record_read(
@@ -548,6 +559,7 @@ def invoke_read(
     channel=READ_CHANNEL,
     keyring=None,
     now=None,
+    row_filter=None,
 ) -> ReadOutcome:
     """One read of a node capability, synchronously (D7). Runs in any
     process (web, worker): the gateway process that holds the node's socket
@@ -567,9 +579,22 @@ def invoke_read(
     `nodes.invoke` AuditLog row, sent or not; neither holds args or output.
     The output is returned to the caller and stored nowhere.
 
-    Branch 5 adds the D9 workspace pre-checks in `tools` (they call
-    `refuse_read`), the Phase 8B step-0 actor check and the system
-    channel's capabilities."""
+    **Step 0** (Phase 8B D13 amendment, branch 5): for a capability whose
+    contract has `data_class: personal`, the actor must be active, human,
+    the node's owner and an `owner` of the target workspace; otherwise
+    `server_refused:actor_not_owner`, before anything is signed.
+
+    `row_filter(output) -> (output, dropped)` (D9, branch 5) runs on a valid
+    `ok` output before the chain row is written: the caller's row filter
+    (rows of another workspace or unmapped are dropped, aggregates
+    recomputed). The returned output is what the caller gets; `dropped` is
+    recorded on the chain row (`dropped_unmapped`, Q5) and the AuditLog row.
+    `output_sha256` / `output_bytes` stay those of the node's own answer. A
+    filter that raises ends the read `error:result_schema` (nothing of the
+    output is returned).
+
+    The D9 workspace pre-checks live in `tools` (they call `refuse_read`);
+    a system-channel read is limited to `SYSTEM_READ_CAPABILITIES`."""
     started = time.monotonic()
     trace_id = _bounded_trace_id(trace_id)
     contract = get_contract(capability) if isinstance(capability, str) else None
@@ -584,10 +609,18 @@ def invoke_read(
         "trace_id": trace_id,
     }
 
-    def finish(status, code="", *, invocation_id="", output=None, **sent):
+    def finish(status, code="", *, invocation_id="", output=None, dropped=0, **sent):
         duration = int((time.monotonic() - started) * 1000)
-        row = _record_read(status=status, refusal_code=code, duration_ms=duration, **common, **sent)
+        row = _record_read(
+            status=status,
+            refusal_code=code,
+            duration_ms=duration,
+            dropped_unmapped=max(0, min(int(dropped), 2**31 - 1)),
+            **common,
+            **sent,
+        )
         return ReadOutcome(
+            dropped=row.dropped_unmapped,
             status=status,
             refusal_code=code,
             output=output,
@@ -602,6 +635,8 @@ def invoke_read(
 
     if contract is None or contract.capability_class != "read":
         return finish("server_refused", "not_invocable")
+    if contract.data_class == "personal" and not actor_is_node_owner(actor, node, workspace):
+        return finish("server_refused", "actor_not_owner")
     if channel != READ_CHANNEL and contract.name not in SYSTEM_READ_CAPABILITIES:
         return finish("server_refused", "not_invocable")
     if invocable_entry(latest_snapshot(node), contract) is None:
@@ -660,15 +695,20 @@ def invoke_read(
             return finish(status, code, invocation_id=invocation_id)
         if status != "ok":
             return finish(status, code, invocation_id=invocation_id, nonce=nonce)
-        return finish(
-            "ok",
-            invocation_id=invocation_id,
-            output=output,
-            nonce=nonce,
-            output_sha256=sha256_hex(output),
-            output_bytes=len(canonicalize(output)),
-            truncated=truncated,
-        )
+        received = {
+            "nonce": nonce,
+            "output_sha256": sha256_hex(output),
+            "output_bytes": len(canonicalize(output)),
+            "truncated": truncated,
+        }
+        dropped = 0
+        if row_filter is not None:
+            try:
+                output, dropped = row_filter(output)
+            except Exception:
+                logger.exception("node read row filter failed capability=%s", contract.name)
+                return finish("error", "result_schema", invocation_id=invocation_id, **received)
+        return finish("ok", invocation_id=invocation_id, output=output, dropped=dropped, **received)
     finally:
         try:
             bus.release_inflight(node.pk)

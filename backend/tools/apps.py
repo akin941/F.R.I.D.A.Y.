@@ -13,6 +13,7 @@ class ToolsConfig(AppConfig):
         from tools.memory_graph import _register as _register_graph_read
         from tools.node_action_reads import _register as _register_node_action_read
         from tools.node_actions import _register as _register_node_action
+        from tools.node_reads import _register as _register_node_reads
         from tools.purge import _register as _register_purge
 
         _register()
@@ -25,3 +26,5 @@ class ToolsConfig(AppConfig):
         _register_node_action()
         # Phase 10 D12: the ungated, web-only node action result read tool.
         _register_node_action_read()
+        # Phase 9 D9: the five ungated, web-only Friday Node read tools.
+        _register_node_reads()
