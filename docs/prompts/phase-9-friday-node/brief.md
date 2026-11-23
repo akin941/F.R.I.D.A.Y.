@@ -2758,3 +2758,17 @@ Implementation notes (branch 5):
   new seams in `_stub_infra` and checks the voice check order by index (the
   node checks are now last).
 
+
+### Known follow-ups (LOW, from the `chore/p9-closeout` review)
+
+1. **LOW, `docs/prompts/phase-9-friday-node/brief.md`.** The closeout notes
+   and the branch-table row are dated 2026-11-20, but the work landed later
+   (merged 2026-11-23). Cosmetic only. Fix: optionally update the dates.
+2. **LOW, `backend/ops/preflight.py`.** `_active_nodes` reads `Node` rows
+   across all workspaces and owners without `for_actor()`. This is acceptable
+   for operations tooling and is documented in the docstring; `check_nodes`
+   details expose node names to the operator-only CLI. The HUD receives only
+   failing check names, but those now include `node_link:<node name>`, so a
+   user-chosen node name reaches the HUD. Fix: none required; optionally
+   emit a generic `node_link` name in the HUD's failing list if node names
+   are ever considered sensitive.
