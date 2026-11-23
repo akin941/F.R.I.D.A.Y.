@@ -100,7 +100,6 @@ services:
       VOICE_TTS_MODEL_ID: "${VOICE_TTS_MODEL_ID:-}"
       VOICE_STT_LANGUAGE: "${VOICE_STT_LANGUAGE:-tr}"
       VOICE_TTS_VOICE: "${VOICE_TTS_VOICE:-tr_TR-dfki-medium}"
-      OPENROUTER_API_KEY: "${OPENROUTER_API_KEY:-}"
       AI_BUDGET_AUDIO_MONTHLY_USD: "${AI_BUDGET_AUDIO_MONTHLY_USD:-20}"
       AI_BUDGET_AUDIO_SESSION_USD: "${AI_BUDGET_AUDIO_SESSION_USD:-1}"
       # Obsidian vault export (MVP 5 §3): the STRING value is shared by both

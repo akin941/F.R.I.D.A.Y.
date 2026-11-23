@@ -2935,7 +2935,44 @@ pre/post counts in its single `ModelUsage` row while the system message
    `inconclusive` result is expected; the flag then stays off.
 5. Optional: remove the duplicate `OPENROUTER_API_KEY` key in
    `deploy/docker/compose.yml` (web env) so `docker compose config`
-   validates the file; it predates this branch.
+   validates the file; it predates this branch. **Done 2026-11-23 at the merge into the
+   integration branch.**
+
+**Known follow-ups — `feat/p8-headroom-stage` (review, LOW, unresolved at
+merge into the integration branch, 2026-11-23).** The merge had three
+textual conflicts, all resolved keeping both sides: `memory_eval compare`
+takes `--retrieval-mode` (alias `--retrieval`, D8) or `--compression`
+(D11) as one required mutually exclusive arm, and the compose files keep
+both the Phase 9 node-gateway entries and the compressor entries. No
+migration renumbering was needed.
+1. **No socket timeout on the sidecar** (`deploy/compressor/server.py`).
+   The stdlib `ThreadingHTTPServer` sets no socket timeout: a client that
+   sends `Content-Length` and then stalls, or sends a short body, blocks
+   `rfile.read(length)` and its thread indefinitely, and threads are
+   unbounded. Only web and worker can reach it (internal network), so
+   exposure is small. Fix: set `timeout = 10` on the handler class
+   (`StreamRequestHandler` applies it to the socket) and optionally cap
+   concurrent threads.
+2. **Build-time tests run as root** (`deploy/compressor/Dockerfile`). The
+   container runs as uid 10002 with a read-only root filesystem and no
+   home directory. If Headroom or tiktoken writes a cache or config file
+   under `HOME` at import or call time, it fails only at run time (a 500
+   from the sidecar): fail-open on the backend, but the feature would be
+   silently inert. Fix: set `HOME=/tmp` (tmpfs) in the image `ENV`, or run
+   the build-time tests as `USER 10002`, and optionally add a run-time
+   smoke check as the non-root user.
+3. **Permissive URL opener** (`backend/ai_core/compression.py`).
+   `CompressorClient` uses the default urllib opener chain, which follows
+   redirects and accepts any URL scheme (for example `file://`) from
+   `AI_COMPRESSION_URL`. The setting is operator-controlled env, so there
+   is no external exploit path. Fix: in `get_client()` or `__init__`,
+   require an http(s) scheme and add a no-redirect handler to the opener.
+4. **Likely no-op stage** (product risk, not a defect). The implementation
+   record says Headroom 0.43.1 left assistant-only text unchanged
+   (`router:noop`), so the stage is likely a no-op and the eval likely
+   `inconclusive`. This is recorded honestly and handled by the
+   non-vacuity rule. No fix required: keep the owner step 4 note that
+   `chat` stays off unless the compare records a non-`inconclusive` pass.
 
 ### 7. `feat/p8-obsidian-mirror` — format v2, entity notes, conflicts, `00_Inbox` import
 
