@@ -2362,3 +2362,26 @@ Implementation notes (branch 4):
   `nodes/tests/gateway_harness.py` (an asyncio loop in a background thread,
   as under uvicorn; `django_db(transaction=True)`), plus one real-socket run
   under uvicorn with the reference node's `wsproto` client.
+
+### Known follow-ups (LOW, from the `feat/p9-node-gateway` review)
+
+1. **LOW, `backend/nodes/gateway.py`.** An oversize inbound frame is closed
+   1009, not the 4429 that the branch 4 Tests line literally names
+   ("oversize frame, frame rate → 4429"). The deviation is recorded in the
+   implementation notes and pinned by `test_an_oversize_frame_closes_1009`.
+   Keep 1009 and make the Tests line match, or switch to 4429.
+2. **LOW, `backend/nodes/gateway.py`.** The `hello` frame bypasses
+   `_rate_exceeded` and the frame-error accounting. It is bounded by the
+   10 s timeout and the size check, so it is not exploitable. Optionally
+   route the first frame through the same limit path.
+3. **LOW, `backend/nodes/gateway.py`.** All gateway DB work runs through
+   `sync_to_async(thread_sensitive=True)`, so it is serialised on one thread
+   across sockets. Fine for a single-owner fleet, but a scaling ceiling:
+   document it in the runbook, or use a bounded thread pool if the fleet
+   grows.
+4. **LOW, `backend/nodes/gateway.py`.** When a socket is replaced, the old
+   connection's inbox loop can pop an envelope after the new connection
+   registers; that read ends as a caller timeout or `node_disconnected`
+   rather than being delivered to the new socket. It fails closed, with no
+   retry by design. No change needed; optionally cancel the old inbox task
+   in `_register` before sending `bye`.
