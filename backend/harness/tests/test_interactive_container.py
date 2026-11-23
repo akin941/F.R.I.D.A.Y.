@@ -191,8 +191,11 @@ class _FloodStream:
     def __init__(self, line=b'{"pad": "' + b"x" * 1000 + b'"}\n'):
         self.line = line
         self.reads = 0
+        self.closed = False
 
     def readline(self, _size=-1):
+        if self.closed:  # EOF: lets the pump thread exit when the test ends
+            return b""
         self.reads += 1
         return self.line
 
@@ -221,6 +224,11 @@ def test_reader_back_pressures_a_flooding_agent_while_the_caller_is_busy():
     assert _wait_until(lambda: stream.reads > reads)
     reader.discard_rest()
     assert _wait_until(lambda: stream.reads > reads + 1000)
+    # Stop the endless flood so the discard pump does not keep spinning (and
+    # holding the GIL) for the rest of the test session.
+    stream.closed = True
+    reader._thread.join(5)
+    assert not reader._thread.is_alive()
 
 
 def test_reader_line_cap_is_enforced_by_the_pump_with_an_idle_caller():
