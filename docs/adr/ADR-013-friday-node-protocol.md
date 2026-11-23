@@ -353,3 +353,49 @@ unchanged) and one `nodes.invoke` AuditLog row. The node's `tail` is
 re-scrubbed by the server (the registered output scrubber, fail closed to
 "[çıktı gizlendi]") before it is stored; `output` frames are scrubbed,
 counted and dropped until the HUD terminal stream (Phase 10 branch 5).
+
+## Implementation notes — Phase 9 closeout (`chore/p9-closeout`, 2026-11-20)
+
+**What the server half delivers (Phase 9 branches 1–7, closeout).** The
+decisions of this ADR are implemented server side and exercised against the
+Python reference node (`backend/nodes/reference/`), which stands in for the
+deferred Swift app:
+- identity (decision 2): `TrustedDevice.kind=node`, `jnd_` secrets, rotation
+  with grace, the 90-day age cap, revocation and the per-owner kill switch
+  (branch 1, spike S9.0 server half);
+- transport (decisions 3, 6): the separate `node-gateway` ASGI process
+  (`config.asgi_nodes`, uvicorn + `wsproto`, loopback only), Redis as the
+  invoke bus, fail closed on any outage, no durable queue (branch 4);
+- signed envelopes and pinning (decision 4): Ed25519 over canonical JSON,
+  the key handed out at pairing and stored as `Node.pinned_key_id`
+  (branch 2); rollover is re-pairing in Phase 9 (brief Q3);
+- policy stays on the Mac (decision 5): no message type, endpoint, field or
+  UI control writes node policy; `grant.availability_changed` only reports
+  it (branches 4, 6, 7);
+- the hook relay (decision 7): node `event` frames reach the 8A ingestion
+  port through a sink the composition root registers; acks carry counts only
+  (branch 6);
+- the import contract (decision 9) and the hash-chained audit
+  (decision 10): `NodeInvocation`, `verify_node_audit_chain` (branches 2, 5).
+
+**Operations (closeout).** `manage.py preflight` gains six node checks
+(`ops/preflight.py` `check_nodes`, read-only, no model call, nothing sent to
+a node): `node_gateway` (`/healthz`, Redis), `node_signing_key` (a usable,
+non-test key; the same key id in web, worker -- the `nodes.signing_key_id`
+Celery task returns the id only -- and node-gateway; every active node pinned
+it), `node_link` (per node; a `warn` when none is paired), `node_tls_pin`
+(the served SPKI against `NODE_TLS_PIN_SHA256`), `node_audit_chain` and
+`node_conformance`. The HUD shows failing check names only. The runbook is
+`docs/runbooks/friday-node.md`.
+
+**The conformance suite is the contract.** `ops/tests/test_node_e2e.py`
+pairs the reference node through `POST /api/v1/nodes/pair`, connects it to
+the real `NodeSocketApp`, answers "Claude Code oturumlarım ne yapıyor?" in a
+FakeAdapter chat turn with fenced rows of the conversation's workspace only,
+checks the chain and audit rows, revokes the node over the web
+(`bye{revoked}`, socket closed, the read tools no longer offered) and
+refuses its reconnect (4401). The Swift app must pass the offline and live
+conformance runs and the server-side contract tests listed in the brief's
+"Mac session (deferred)" (M1–M3) before it is used; the Keychain half of
+the spike, the Swift conformance pass and TCC across notarized updates are
+**pending owner evaluation** (brief "Go/no-go record").

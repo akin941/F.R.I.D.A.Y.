@@ -251,10 +251,10 @@
   ],
   "phase": {
     "file": "docs/MASTER_PLAN.md",
-    "line": 984,
-    "phase": "9 Friday Node v1 (read-only)",
-    "outcome": "\"Claude Code / Codex oturumlarım ne yapıyor?\" with local transcript detail",
-    "status": "planned (full brief written 2026-11-20: server branches 1–7 + closeout; Swift app deferred to a Mac session)"
+    "line": 985,
+    "phase": "8B Transcripts + knowledge graph",
+    "outcome": "Friday knows the details of your work across tools",
+    "status": "planned (full brief written 2026-11-20: server branches 1–9 + closeout; branch 8 (transcripts) waits for Phase 9 server branches 2–5; Swift owner-turn readers and private-data evaluations deferred to a Mac session)"
   },
-  "content_hash": "843a5818cb0e3be7ee2254ae02f3fc3fcbab848db6f1a56c4b5a7f6173960065"
+  "content_hash": "6d07d3f3c346bc86538b1df5e2da4de1b2d662f061267606cbabe8a0709ef04a"
 }

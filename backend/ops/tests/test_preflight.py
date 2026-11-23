@@ -765,7 +765,7 @@ def test_a_crashing_check_becomes_one_fail_row():
 
 def test_the_voice_checks_are_registered():
     names = [name for name, _ in preflight.CHECKS]
-    assert names[-3:-1] == ["voice_config", "voice_mute"]
+    assert names.index("voice_mute") == names.index("voice_config") + 1
 
 
 def test_summarize():
@@ -774,8 +774,14 @@ def test_summarize():
 
 
 def _stub_infra(monkeypatch, *, celery_replies):
+    from nodes.keys import signing_key_id
+
     monkeypatch.setattr(preflight, "redis_ping", lambda url, *, timeout: True)
     monkeypatch.setattr(preflight, "celery_ping", lambda *, timeout: celery_replies)
+    # Phase 9 closeout: the node checks' worker and conformance seams (the
+    # node checks themselves: ops/tests/test_preflight_nodes.py).
+    monkeypatch.setattr(preflight, "worker_signing_key_id", lambda *, timeout: signing_key_id())
+    monkeypatch.setattr(preflight, "node_conformance_drift", lambda: [])
 
 
 def test_command_all_green_exits_zero(settings, monkeypatch):

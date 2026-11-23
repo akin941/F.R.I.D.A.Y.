@@ -66,6 +66,12 @@ services:
       # URL is in-container; the BFF (host `make frontend-dev`) is opt-in.
       PREFLIGHT_WEB_URL: "${PREFLIGHT_WEB_URL:-http://localhost:8000/healthz}"
       PREFLIGHT_BFF_URL: "${PREFLIGHT_BFF_URL:-}"
+      # Phase 9 closeout: `node_gateway` / `node_signing_key` read the
+      # gateway's /healthz over the compose network; the TLS pin check is
+      # opt-in (both empty = a warning).
+      PREFLIGHT_NODE_GATEWAY_URL: "${PREFLIGHT_NODE_GATEWAY_URL:-http://node-gateway:8002/healthz}"
+      NODE_TLS_PIN_SHA256: "${NODE_TLS_PIN_SHA256:-}"
+      PREFLIGHT_NODE_TLS_URL: "${PREFLIGHT_NODE_TLS_URL:-}"
       # OpenRouter (Phase 5 closeout): the seeded `openrouter` row stays
       # disabled while this is empty.
       OPENROUTER_API_KEY: "${OPENROUTER_API_KEY:-}"

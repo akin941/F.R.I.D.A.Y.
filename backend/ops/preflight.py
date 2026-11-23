@@ -9,7 +9,8 @@ Each check returns one or more `CheckResult`s with a status:
   nothing could be checked. A warning never fails the run.
 
 Every outside contact goes through a module-level seam (`http_get`,
-`db_fetchone`, `redis_ping`, `celery_ping`, `gateway_factory`,
+`db_fetchone`, `redis_ping`, `celery_ping`, `worker_signing_key_id`,
+`served_spki_sha256`, `node_conformance_drift`, `gateway_factory`,
 `pin_report`, `run_command`) so the unit tests replace exactly that and
 nothing else -- no test reaches a real provider, MCP server, browser or
 broker.
@@ -29,6 +30,19 @@ recovery and TTL tasks on the right beat and registered), `learning_scrubber`
 (the scrubber self-test over the labelled corpus: 100% secrets recall or
 `fail`), `learning_budget` (an active budget covers each learning purpose)
 and `learning_last_run` (the latest night's episode-extraction jobs).
+
+Phase 9 closeout adds the node checks (`check_nodes`, read-only, no model
+call, nothing sent to a node): `node_gateway` (the node-gateway's `/healthz`
+answers and its Redis is up), `node_signing_key` (a usable key that is not a
+published test or conformance key, the key every active node pinned at
+pairing, and the same key id in web, worker -- the `nodes.signing_key_id`
+task through the seam `worker_signing_key_id` -- and node-gateway),
+`node_link` (per active node: presence, heartbeat age, catalogue, counts; a
+`warn` when none is paired, because the Mac session is deferred),
+`node_tls_pin` (the served certificate's SPKI against `NODE_TLS_PIN_SHA256`,
+seam `served_spki_sha256`), `node_audit_chain` (`verify_node_audit_chain`)
+and `node_conformance` (`build_node_conformance --check`, seam
+`node_conformance_drift`).
 
 Rules this module keeps:
 
@@ -134,6 +148,55 @@ def celery_ping(*, timeout):
     from celery import current_app
 
     return current_app.control.ping(timeout=timeout) or []
+
+
+def worker_signing_key_id(*, timeout):
+    """The node signing key id a running worker reports (the
+    `nodes.signing_key_id` task: the id only, never key material), or None
+    when that worker has no usable key. A broker or result-backend failure,
+    or no worker answering in time, propagates (the caller maps it)."""
+    from celery import current_app
+
+    return current_app.send_task("nodes.signing_key_id").get(timeout=timeout)
+
+
+def served_spki_sha256(host, port, *, timeout):
+    """sha256 of the SubjectPublicKeyInfo of the certificate `host:port`
+    serves (SNI = host). Trust is not checked here: the question is only
+    whether the served key is the pinned one (an overlay may serve a private
+    CA's certificate). Network and TLS errors propagate."""
+    import hashlib
+    import socket
+    import ssl
+
+    from cryptography import x509
+    from cryptography.hazmat.primitives import serialization
+
+    context = ssl.create_default_context()
+    context.check_hostname = False
+    context.verify_mode = ssl.CERT_NONE  # noqa: S501 -- pin comparison only, nothing is sent
+    with socket.create_connection((host, port), timeout=timeout) as raw:
+        with context.wrap_socket(raw, server_hostname=host) as tls:
+            der = tls.getpeercert(binary_form=True)
+    spki = (
+        x509.load_der_x509_certificate(der)
+        .public_key()
+        .public_bytes(serialization.Encoding.DER, serialization.PublicFormat.SubjectPublicKeyInfo)
+    )
+    return hashlib.sha256(spki).digest()
+
+
+def node_conformance_drift():
+    """The stale conformance files (`build_node_conformance --check`): an
+    empty list when every committed case and vector file and the vendored
+    node scrubber are current."""
+    from nodes.conformance import build
+    from nodes.reference import vendor_scrubber
+
+    drift = list(build.check())
+    if vendor_scrubber.main(["--check"]) != 0:
+        drift.append("reference/_scrubber_vendored.py")
+    return drift
 
 
 def beat_schedules():
@@ -967,6 +1030,279 @@ def check_learning():
     ]
 
 
+# --- Phase 9: Friday Node (closeout) ----------------------------------------
+
+# A connected node writes `last_heartbeat_at` at most once per 60 s
+# (`nodes.presence`); a row older than this while the presence key says
+# "connected" means the gateway stopped writing heartbeats.
+NODE_HEARTBEAT_STALE_SECONDS = 180
+
+_SIGNING_KEY_REASONS = {
+    "missing": "NODE_SIGNING_KEY is not set in web",
+    "invalid": "NODE_SIGNING_KEY in web is not a valid Ed25519 key",
+    "test_key": "NODE_SIGNING_KEY in web is a published test or conformance key",
+    "retired_invalid": "NODE_SIGNING_KEYS_RETIRED has a malformed entry",
+}
+
+
+def _node_gateway_health():
+    """`(result, healthz)` for `node_gateway`: the result and the gateway's
+    /healthz JSON (None when not configured or unusable)."""
+    url = getattr(settings, "PREFLIGHT_NODE_GATEWAY_URL", "")
+    if not url:
+        return CheckResult("node_gateway", WARN, "PREFLIGHT_NODE_GATEWAY_URL not set"), None
+    try:
+        status, text = _get_page(url)
+    except Exception as exc:
+        return CheckResult("node_gateway", FAIL, f"unreachable: {_error_label(exc)}"), None
+    if status != 200:
+        return CheckResult("node_gateway", FAIL, f"HTTP {status}"), None
+    try:
+        body = json.loads(text)
+    except ValueError:
+        body = None
+    if not isinstance(body, dict) or body.get("status") != "ok":
+        return CheckResult("node_gateway", FAIL, "unexpected /healthz body"), None
+    if body.get("redis") is not True:
+        return CheckResult("node_gateway", FAIL, "the gateway reports Redis down"), body
+    connected = body.get("connected_nodes")
+    connected = connected if isinstance(connected, int) else 0
+    return CheckResult("node_gateway", PASS, f"Redis OK, {connected} node(s) connected"), body
+
+
+def _active_nodes():
+    """Every paired node whose device is not revoked or expired, with its
+    status. Preflight reads the whole installation (`ops` is operations
+    tooling; nothing here reaches a view or an agent tool)."""
+    from nodes.models import Node
+    from nodes.selectors import node_status
+
+    nodes = Node.objects.select_related("device", "device__user").order_by("created_at")
+    return [(node, status) for node in nodes if (status := node_status(node)) != "revoked"]
+
+
+def _gateway_key_problem(healthz, web_id, notes):
+    if healthz is None:
+        notes.append("node-gateway key id not compared (no /healthz)")
+        return None
+    gateway_id = healthz.get("signing_key_id")
+    if not gateway_id:
+        return "no usable key in node-gateway"
+    if gateway_id != web_id:
+        return "node-gateway signs with another key than web"
+    return None
+
+
+def _worker_key_problem(web_id, notes):
+    if getattr(settings, "CELERY_TASK_ALWAYS_EAGER", False):
+        notes.append("worker key id not compared (CELERY_TASK_ALWAYS_EAGER)")
+        return None
+    try:
+        worker_id = worker_signing_key_id(timeout=_timeout())
+    except Exception as exc:
+        return f"no worker answered nodes.signing_key_id ({_error_label(exc)})"
+    if not worker_id:
+        return "no usable key in the worker"
+    if worker_id != web_id:
+        return "the worker signs with another key than web"
+    return None
+
+
+def _check_node_signing_key(healthz, active):
+    """A usable key in web (not a published test or conformance key), the
+    same key id in node-gateway (/healthz) and a worker (the
+    `nodes.signing_key_id` task), and the key every active node pinned at
+    pairing (`Node.pinned_key_id`). A missing key in any of the three is a
+    `fail`. Only key ids are reported, never key material."""
+    from nodes.keys import SigningKeyUnavailable, signing_keyring
+
+    name = "node_signing_key"
+    try:
+        web_id = signing_keyring().key_id
+    except SigningKeyUnavailable as exc:
+        return CheckResult(name, FAIL, _SIGNING_KEY_REASONS.get(exc.reason, exc.reason))
+    notes = []
+    problems = [
+        problem
+        for problem in (
+            _gateway_key_problem(healthz, web_id, notes),
+            _worker_key_problem(web_id, notes),
+        )
+        if problem
+    ]
+    # Paired nodes pinned the key handed out at pairing (D4): another active
+    # key strands them until they re-pair (rollover = re-pair, Q3).
+    stranded = [node for node, _ in active if node.pinned_key_id != web_id]
+    if stranded:
+        problems.append(
+            f"{len(stranded)} active node(s) pinned another key id: re-pair them "
+            "(runbook: signing key rollover)"
+        )
+    detail = f"key id {web_id}"
+    if problems:
+        return CheckResult(name, FAIL, f"{detail}; " + "; ".join(problems))
+    if notes:
+        return CheckResult(name, WARN, f"{detail}; " + "; ".join(notes))
+    return CheckResult(name, PASS, f"{detail} in web, worker and node-gateway")
+
+
+def _heartbeat_age(node, now):
+    if node.last_heartbeat_at is None:
+        return None
+    return max(0, int((now - node.last_heartbeat_at).total_seconds()))
+
+
+def _node_link_result(node, status, now):
+    from nodes.selectors import latest_snapshot
+
+    snapshot = latest_snapshot(node)
+    entries = list(snapshot.entries or ()) if snapshot is not None else []
+    invocable = sum(1 for entry in entries if entry.get("invocable"))
+    age = _heartbeat_age(node, now)
+    detail = ", ".join(
+        [
+            status,
+            "no heartbeat yet" if age is None else f"heartbeat {age}s ago",
+            f"protocol v{node.protocol_version}",
+            f"catalogue {snapshot.catalogue_sha256[:12]}" if snapshot else "no catalogue",
+            f"{invocable}/{len(entries)} invocable",
+        ]
+    )
+    label = f"node_link:{node.name}"
+    if status != "connected" or snapshot is None:
+        return CheckResult(label, WARN, detail)
+    if age is None or age > NODE_HEARTBEAT_STALE_SECONDS:
+        return CheckResult(label, WARN, f"{detail} (stale heartbeat row)")
+    return CheckResult(label, PASS, detail)
+
+
+def _check_node_link(active):
+    """Per active node: presence, heartbeat age, protocol, catalogue short
+    hash and invocable/advertised counts. Only `connected` with a fresh
+    heartbeat row passes; anything else is a `warn` (a sleeping Mac is not a
+    broken stack). No paired node is a `warn` too, never a failure: the Mac
+    session is deferred."""
+    from django.utils import timezone
+
+    if not active:
+        return [
+            CheckResult("node_link", WARN, "no node paired (Mac session pending owner evaluation)")
+        ]
+    now = timezone.now()
+    return [_node_link_result(node, status, now) for node, status in active]
+
+
+def _decode_pin(value):
+    import base64
+    import binascii
+
+    value = value.strip().removeprefix("sha256/")
+    if re.fullmatch(r"[0-9a-fA-F]{64}", value):
+        return bytes.fromhex(value)
+    try:
+        raw = base64.b64decode(value, validate=True)
+    except (binascii.Error, ValueError):
+        return None
+    return raw if len(raw) == 32 else None
+
+
+def _check_node_tls_pin():
+    """When `NODE_TLS_PIN_SHA256` is set, the certificate served at
+    `PREFLIGHT_NODE_TLS_URL` (the proxy in front of `/ws/node/v1`) has that
+    SPKI. A changed certificate key would make every pinned node refuse the
+    server."""
+    name = "node_tls_pin"
+    pin = getattr(settings, "NODE_TLS_PIN_SHA256", "")
+    if not pin:
+        return CheckResult(name, WARN, "NODE_TLS_PIN_SHA256 not set")
+    expected = _decode_pin(pin)
+    if expected is None:
+        return CheckResult(name, FAIL, "NODE_TLS_PIN_SHA256 is not a base64 or hex sha256")
+    url = getattr(settings, "PREFLIGHT_NODE_TLS_URL", "")
+    if not url:
+        return CheckResult(name, WARN, "PREFLIGHT_NODE_TLS_URL not set")
+    parsed = urlparse(url)
+    try:
+        port = parsed.port or 443
+    except ValueError:
+        port = None
+    if parsed.scheme not in ("https", "wss") or not parsed.hostname or port is None:
+        return CheckResult(name, FAIL, "PREFLIGHT_NODE_TLS_URL is not an https/wss URL")
+    try:
+        served = served_spki_sha256(parsed.hostname, port, timeout=_timeout())
+    except Exception as exc:
+        return CheckResult(name, FAIL, f"TLS handshake failed: {_error_label(exc)}")
+    if served != expected:
+        return CheckResult(
+            name,
+            FAIL,
+            "the served certificate's SPKI does not match NODE_TLS_PIN_SHA256 "
+            "(paired nodes refuse it: restore the key or re-pair)",
+        )
+    return CheckResult(name, PASS, "served SPKI matches the pin")
+
+
+def _check_node_audit_chain():
+    """`verify_node_audit_chain`: the hash chain is intact."""
+    from nodes.audit_chain import verify_chain
+
+    result = verify_chain()
+    if not result.ok:
+        return CheckResult(
+            "node_audit_chain",
+            FAIL,
+            f"broken at seq {result.broken_seq} ({result.reason}); "
+            f"{result.rows} row(s) verified before it",
+        )
+    return CheckResult("node_audit_chain", PASS, f"{result.rows} row(s) intact")
+
+
+def _check_node_conformance():
+    """`build_node_conformance --check`: the committed case and vector files
+    (and the vendored node scrubber) match what the code renders."""
+    drift = node_conformance_drift()
+    if drift:
+        return CheckResult(
+            "node_conformance",
+            FAIL,
+            f"stale: {', '.join(sorted(drift))} (run build_node_conformance)",
+        )
+    return CheckResult("node_conformance", PASS, "case and vector files current")
+
+
+def _guarded(name, check):
+    """One crashing node check becomes its own `fail` row; the others still
+    report."""
+    try:
+        return check()
+    except Exception as exc:
+        return CheckResult(name, FAIL, f"check crashed: {_error_label(exc)}")
+
+
+def check_nodes():
+    """Phase 9 configuration and health, read-only (no model call, nothing
+    sent to a node): `node_gateway`, `node_signing_key`, `node_link`,
+    `node_tls_pin`, `node_audit_chain`, `node_conformance`. Details carry
+    key ids, counts, codes and node names only -- never key material, a
+    secret, a path or a read output."""
+    gateway, healthz = _node_gateway_health()
+    results = [gateway]
+    try:
+        active = _active_nodes()
+    except Exception as exc:
+        active = None
+        results.append(CheckResult("node_link", FAIL, f"check crashed: {_error_label(exc)}"))
+    if active is not None:
+        results.append(
+            _guarded("node_signing_key", lambda: _check_node_signing_key(healthz, active))
+        )
+        results.extend(_check_node_link(active))
+    results.append(_guarded("node_tls_pin", _check_node_tls_pin))
+    results.append(_guarded("node_audit_chain", _check_node_audit_chain))
+    results.append(_guarded("node_conformance", _check_node_conformance))
+    return results
+
+
 CHECKS = (
     ("web", check_web),
     ("bff", check_bff),
@@ -981,6 +1317,7 @@ CHECKS = (
     ("voice_config", check_voice_config),
     ("voice_mute", check_voice_mute),
     ("learning", check_learning),
+    ("nodes", check_nodes),
 )
 
 
