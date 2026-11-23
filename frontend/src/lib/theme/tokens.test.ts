@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { SESSION_HUD_TOKENS } from "@/components/hud/HudLearningPanels";
+import { NODE_HUD_TOKENS } from "@/components/hud/HudPanels";
 import { HUD_STATES } from "@/lib/hud/states";
 import { STATUS_TONES, TONE_PILL_CLASSES, type StatusTone } from "@/lib/theme/status";
 
@@ -150,6 +151,39 @@ describe("Phase 8B branch 9 surfaces", () => {
       const source = readFileSync(path.join(dir, file), "utf8");
       expect(source).not.toMatch(/#[0-9a-fA-F]{6}\b|oklch\(/);
       expect(source).not.toMatch(/\b(?:text|bg|border)-(?:red|green|blue|yellow|amber|emerald|slate|gray|zinc)-\d{2,3}\b/);
+    }
+  });
+});
+
+describe("Phase 9 branch 7 surfaces", () => {
+  it("colour the HUD node line only with checked HUD text tokens", () => {
+    const checked = new Set(PAIRS.filter(([, bg]) => bg === "hud-surface").map(([fg]) => fg));
+    for (const className of Object.values(NODE_HUD_TOKENS)) {
+      expect(className.startsWith("text-")).toBe(true);
+      expect(checked.has(className.slice("text-".length))).toBe(true);
+    }
+  });
+
+  it("map every node and chain-row status to a tone", () => {
+    expect(Object.keys(STATUS_TONES.node).sort()).toEqual([
+      "connected",
+      "credential_expiring",
+      "disconnected",
+      "kill_switch",
+      "never_paired",
+      "revoked",
+    ]);
+    expect(STATUS_TONES.nodeInvocation.ok).toBe("success");
+  });
+
+  it("add no colour token: the node section and log use only checked theme tokens", () => {
+    const dir = path.resolve(__dirname, "../../components/nodes");
+    for (const file of ["NodesSection.tsx", "NodeDetail.tsx", "labels.ts"]) {
+      const source = readFileSync(path.join(dir, file), "utf8");
+      expect(source).not.toMatch(/#[0-9a-fA-F]{6}\b|oklch\(/);
+      expect(source).not.toMatch(
+        /\b(?:text|bg|border)-(?:red|green|blue|yellow|amber|emerald|slate|gray|zinc)-\d{2,3}\b/,
+      );
     }
   });
 });
