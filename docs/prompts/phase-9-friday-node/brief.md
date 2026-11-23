@@ -1597,7 +1597,7 @@ node paired, the e2e test is green, and the go/no-go record is written.
 | 2 | `feat/p9-node-protocol` | `nodes` app + contracts, protocol v1 schemas, canonical JSON, Ed25519 envelopes, capability contracts, pairing endpoint, signing key config, hash-chained `NodeInvocation`, dependency manifest | 1 | **implemented 2026-11-20** (done criterion met: `test_the_done_criterion_signed_invoke_verifies_only_with_the_returned_key`; known follow-ups 1, 2 and 5 resolved; ADR-013 contract note; awaits independent Sonnet 5 review) |
 | 3 | `feat/p9-reference-node` | Python reference node, conformance cases + `--check`, hostile fake gateway, reference spool and Unix-socket relay | 2 | **implemented 2026-11-20** (done criterion met: `node_conformance_server --protocol 1` prints all-pass, `test_every_v1_case_passes_through_the_command_over_a_socket`; builds on the session half, v1 protocol cases and vendored scrubber that `feat/p10-reference-executor` already shipped; adds the readers, 13 reader cases, `reader_calls`, the spool, the hook relay, node event upload and `vectors/scrub.json`; awaits independent Sonnet 5 review) |
 | 4 | `feat/p9-node-gateway` | `asgi_nodes` + uvicorn/`wsproto`, `node-gateway` service, handshake, `hello`/snapshot, heartbeat/presence, invoke bus, revocation/kill-switch fan-out, limits, node APIs | 1, 2, 3 | **implemented 2026-11-20** (done criterion met: `test_the_done_criterion_round_trip` in process and `test_the_reference_node_over_a_real_socket` under uvicorn — `hello.ack`, a signed read answered, cut off within 2 s of `revoke_device`; `invoke_read` bus side with chain + AuditLog rows; known follow-up 3 resolved (Redis in-flight counter, two-process test); Phase 10 owner step 2 done (`NodeSession` wired into the socket app, 1013 placeholder replaced); awaits independent Sonnet 5 review) |
-| 5 | `feat/p9-node-reads` | `invoke_read` end to end, five read tools, path → workspace resolution, second scrub, fencing, chain + audit rows, invocations API | 4 | not started |
+| 5 | `feat/p9-node-reads` | `invoke_read` end to end, five read tools, path → workspace resolution, second scrub, fencing, chain + audit rows, invocations API | 4 | **implemented 2026-11-20** (done criterion met: `assistant/tests/test_node_read_turns.py::test_the_done_criterion_sessions_answered_from_the_node` — the reference node's fixture sessions in a FakeAdapter chat answer, filtered to the conversation's workspace, two `ok` chain rows, no stored content; 8B step-0 actor check in `invoke_read`; the 8B owner-turn move is a known follow-up below; awaits independent Sonnet 5 review) |
 | 6 | `feat/p9-node-events` | `event` sink wiring into `ingest_hook_events`, cross-relay dedupe, spool upload acks, availability events | 4 (parallel with 5) | not started |
 | 7 | `feat/p9-node-ui` | `/devices` node section, invocation log page, HUD node line, `hud → nodes` contract | 4, 5 (6 for availability) | not started |
 | 8 | `chore/p9-closeout` | Preflight node checks, e2e, runbook, ADR-013 notes, MASTER_PLAN row, go/no-go record | 1–7 | not started |
@@ -2385,3 +2385,105 @@ Implementation notes (branch 4):
    rather than being delivered to the new socket. It fails closed, with no
    retry by design. No change needed; optionally cancel the old inbox task
    in `_register` before sending `bye`.
+
+### Owner steps (pending) — `feat/p9-node-reads`, recorded 2026-11-20
+
+1. Run the independent Sonnet 5 review of `feat/p9-node-reads` and fix
+   findings until APPROVE (CLAUDE.md "Reviews").
+2. No migration, no new setting and no new dependency. Restart web (and
+   worker) after merging so the five read tools register at start-up.
+3. Make sure the Claude Code hook path rules (8A, `/memory` → sources →
+   `claude_code_hooks` → mapping rules) cover the directories you want
+   Friday to see, **in the `~/…` form**: the node reports `cwd` as `~/…`
+   under the Mac's home, and a `~/` rule never matches an absolute
+   `/Users/<you>/…` key (or the reverse). A workspace without a rule never
+   gets the node tools (D9 availability); unmapped rows are dropped and
+   counted (`dropped_unmapped` on `GET /api/v1/nodes/<id>/invocations`).
+4. Personal reads (`node_session_detail`, `node_desktop`) need a provider
+   with `personal_data_allowed` (a local model). Without one, the turn ends
+   "local model required" and nothing is read from the Mac — by design.
+5. **Mac session M2 (deferred: Mac session).** The Swift readers must honour
+   `cwd_prefixes` exactly as the reference node does: a list `invoke`
+   always carries the conversation workspace's rule prefixes in `~/` form,
+   and the server drops every row whose `cwd` resolves elsewhere anyway
+   (`tools/tests/test_node_reads.py` pins the server side, including a node
+   that ignores the prefixes and one that inflates `usage.ccusage` totals).
+   Report `cwd` in `~/` form under the user's home. M4 evaluates the answer
+   to "Claude Code oturumlarım ne yapıyor?" on the real Mac (pending owner
+   evaluation).
+
+Implementation notes (branch 5):
+- **`invoke_read`** gains the Phase 8B **step-0 actor check** (a
+  `data_class: personal` capability needs an active, human actor who owns
+  the node and holds `owner` in the target workspace, else
+  `server_refused:actor_not_owner`, nothing signed) and a **`row_filter`**
+  hook: it runs on a valid `ok` output before the chain row is written, and
+  its dropped count is hashed into the row (`dropped_unmapped`, Q5) and put
+  in the `nodes.invoke` AuditLog metadata. `output_sha256`/`output_bytes`
+  stay those of the node's own answer. A filter that raises ends the read
+  `error:result_schema` with no output.
+- **The read vocabulary** is `nodes.models.READ_TERMINAL_VOCABULARY`: the D7
+  table plus `actor_not_owner` (8B) and `node_mismatch` (branch 4's gateway
+  verdict). `_record_read` refuses any other pair, `refuse_read` accepts only
+  `CALLER_REFUSAL_CODES` (`path_not_in_workspace`, `workspace_not_allowed`,
+  `session_not_found`); `test_the_read_vocabulary_is_the_d7_table` pins it.
+- **The tools** (`tools/node_reads.py`): `node_sessions` (both lists; `tool`
+  = claude/codex/all, "all" calls only the invocable ones),
+  `node_session_detail` (lookup list with `since_hours=168, limit=50`, then
+  the read, one `trace_id`), `node_usage`, `node_git_status` (the path is
+  normalised and resolved before invoking; the normalised form is sent),
+  `node_desktop` (`view` = frontmost/windows/all). Turkish router
+  descriptions. A node call that does not end `ok` is returned as a short
+  Friday-authored Turkish status line with its code (for example "Mac'e şu
+  an ulaşılamıyor." for `node_offline`), never node text, so the chat model
+  can say what happened; a refused caller (wrong channel, not the owner,
+  no usable node, no rule for the workspace) is a `ReadToolError` before
+  `nodes` and writes no chain row.
+- **Which node.** `nodes.selectors.read_node_for(owner)`: a usable node (not
+  revoked, killed or expired), a live one first, else the latest usable one
+  (a direct call then writes its `node_offline` row).
+  `is_available(workspace)` uses the workspace's owner, checks the database
+  first and touches Redis only when a usable node exists.
+- **The row filter** uses the new `memory.ingestion.mapping.path_resolver(
+  owner)` (the hooks rules loaded once per call; same answers as
+  `workspace_for_path`, pinned by `memory/tests/test_mapping_node_helpers.py`).
+  `prefixes_for_workspace` and `workspace_for_path` already existed (8B
+  branch 8). More than 20 prefixes: the first 20 (sorted) are sent, the
+  server filter still applies.
+- **A `*.read` answered for another session** than the one asked is dropped
+  whole (its turns counted as dropped).
+- **Bounds.** The rendered text stays under `CONNECTOR_RESULT_MAX_CHARS`
+  (8 000) at whole lines; sections share the room (transcript turns keep the
+  newest), and a cut is marked ("N satır sığmadı").
+- **Invocations API.** `GET /api/v1/nodes/<id>/invocations?cursor=<seq>`:
+  50 rows per page, newest first, `next_cursor` = the last row's `seq` when
+  the page is full; rows of workspaces the actor cannot see are left out;
+  audited `nodes.invocations.viewed` (node id, count, cursor).
+- **Tests** drive the real gateway read path in process
+  (`tools/tests/node_reads_helpers.py`: a v1 `NodeSession` plus the reference
+  node with fixed-time readers; `bus.wait_result` pumps the session), so
+  every envelope the node received is asserted on. The 8A prompt-injection
+  corpus (`memory/tests/test_learning_night.py`) gains two transcript-shaped
+  items.
+
+### Known follow-ups (from `feat/p9-node-reads`)
+
+1. **The 8B owner-turn move (the D7/D9 amendment's "branch 5 or a
+   follow-up").** `claude.transcripts.owner_turns` and
+   `codex.transcripts.owner_turns` still live in
+   `integrations/node_reference/contracts/v1/`, `SYSTEM_READ_CAPABILITIES`
+   in `nodes.services` is still empty, and the transcript pull still uses
+   its `NodeReadPort` seam (`tools/transcript_ingest.py`, default
+   `UnavailableNodePort`). Moving the two contracts into
+   `nodes/capabilities/v1/` changes the v1 contract set (the snapshot
+   tests, the reference node's catalogue and the conformance case files,
+   `build_node_conformance --check`), moves `owner_turns.py` under
+   `nodes.reference` (with its fixtures and the vendored scrubber), and
+   adds a `nodes`-backed port that calls `invoke_read(channel=
+   CHANNEL_SYSTEM, actor=<owner>)`. The step-0 actor check it needs is in
+   place now. Its own branch, so the conformance regeneration is reviewed
+   on its own.
+2. **LOW.** `is_available` costs one Node query (and, with a usable node,
+   one Redis `EXISTS` and a snapshot query) per node tool per turn: five
+   tools, so up to five of each. Fine for one owner; cache per request if
+   the tool set grows.
