@@ -2251,3 +2251,18 @@ Implementation notes (branch 3):
    `tools/tests/transcript_nodes.py` and the `integrations → nodes` import
    contract, so it is left to branch 5 (`invoke_read`), as the 8B brief's
    owner steps already plan.
+2. **LOW, `backend/nodes/reference/hook_relay.py`.** `build_hook_event`
+   scrubs only `message`. The allow-listed string fields (`cwd`,
+   `session_id` and so on) pass through unchanged. This matches
+   `friday-hook`, and a parity test pins it, but a secret embedded in a
+   `cwd` would go through. Optionally scrub or identifier-check `cwd` in
+   `friday-hook` and the relay together, so parity is kept.
+3. **LOW, `backend/nodes/reference/readers.py`.** `claude.sessions.read`
+   picks the first file whose stem equals `session_id` across all project
+   directories. A duplicate `session_id` in two projects resolves to
+   whichever sorts first. This is theoretical, because only fixture data is
+   read. Document the tie-break, or return the most recently active match.
+4. **LOW, `backend/nodes/reference/spool.py`.** `_load` accepts a bool for
+   `created_at` because `bool` is a subclass of `int`. A crafted spool file
+   with `true` loads as `created_at=1`, and the age cap drops it, so this is
+   harmless. Add `and not isinstance(created_at, bool)`.
