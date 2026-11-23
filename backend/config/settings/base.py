@@ -722,6 +722,11 @@ PREFLIGHT_SCRUBBER_CORPUS_DIR = env("PREFLIGHT_SCRUBBER_CORPUS_DIR", default="")
 PREFLIGHT_NODE_GATEWAY_URL = env("PREFLIGHT_NODE_GATEWAY_URL", default="")
 NODE_TLS_PIN_SHA256 = env("NODE_TLS_PIN_SHA256", default="")
 PREFLIGHT_NODE_TLS_URL = env("PREFLIGHT_NODE_TLS_URL", default="")
+# Phase 10 closeout: the date (ISO, YYYY-MM-DD) the owner recorded the
+# ADR-014 evidence run of the escape suite under macOS `srt` (Mac session M3)
+# in ADR-014's implementation notes. Empty = pending owner evaluation: the
+# `node_escape_suite` preflight check is then a warning, never a failure.
+NODE_ESCAPE_EVIDENCE_RECORDED_ON = env("NODE_ESCAPE_EVIDENCE_RECORDED_ON", default="")
 
 # --- Knowledge/RAG (MVP 3) ---
 

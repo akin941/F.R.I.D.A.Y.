@@ -12,6 +12,11 @@ The Mac side (the Swift `friday-node` app) is **deferred to a Mac session**
 the Python reference node the tests run; every step below that happens "on
 the Mac" is pending owner evaluation.
 
+Phase 10 (`docs/prompts/phase-10-control/brief.md`, ADR-014) adds node
+actions with approval; its closeout (`chore/p10-closeout`) wrote the
+"Control" section below. The Swift confirmation window and executors are
+the Phase 10 Mac session (M1–M2).
+
 ## What runs where
 
 - **`node-gateway`** (compose service): `uvicorn config.asgi_nodes:application
@@ -198,7 +203,8 @@ The compose stack sets `PREFLIGHT_NODE_GATEWAY_URL=http://node-gateway:8002/heal
 for web. The HUD health panel shows only the names of failing checks.
 
 **Until the Mac app exists** (dev stack only, `DEBUG` on), pair the Python
-reference node so `node_link` has a node to report:
+reference node so `node_link` (and, on protocol v2, `node_protocol_v2`) has
+a node to report:
 
 ```bash
 CODE=$(docker compose -f deploy/docker/compose.yml exec -T web \
@@ -211,6 +217,145 @@ make preflight                                                # in another shell
 It reads a generated fixture home (fake sessions, two tiny git repos),
 never the host's files, and never prints its secret. Revoke it on
 `/devices` when done; the command refuses to run without `DEBUG`.
+
+## Control (Phase 10)
+
+Phase 10 lets Friday run a small, closed set of actions on the Mac: repo
+commands (`repo.command.run`: test, lint, typecheck, build, format_check),
+AppleScript recipes, two Accessibility primitives and open/focus an app.
+Brief: `docs/prompts/phase-10-control/brief.md`; classes: ADR-014. Until the
+Swift app ships (Mac session M1–M2), only the Python reference node runs
+them, on a fake executor.
+
+### Protocol v2
+
+- The node offers `friday-node.v2, friday-node.v1`; the gateway picks v2
+  when both sides speak it. Pairing still answers the v1 baseline; the
+  session version is per socket.
+- Actions are invocable only on a v2 session whose catalogue entry equals
+  the server contract (name, version, class, both schema hashes). On a v1
+  session every action is `not_invocable` (`protocol_v1`).
+- The server sends nothing new: actions ride the same signed `invoke`
+  envelope, with `class` (`confirm` or `gate`) and, for gate class, a
+  `grant`. The node answers `confirmation` (`shown`, then `approved`,
+  `denied`, `timed_out` or `closed`), `output` chunks and one `result`.
+- No server message reads or writes node policy (repos, command mappings,
+  recipes, the bundle list). The owner edits them on the Mac behind Touch ID.
+
+### Approving a node action
+
+Every action needs two human acts on screen or one on screen and one on the
+Mac; voice only proposes (ADR-015).
+
+| Class | Capabilities | Acts |
+|---|---|---|
+| gate | `repo.command.run`, `applescript.recipe.run`, `ax.press`, `ax.type_text` | card click → `ApprovalRequest` → **Approve on `/approvals`** → one grant → click **Çalıştır** in the Mac window |
+| confirm | `apps.open`, `apps.focus` | card click (`POST /api/v1/nodes/<id>/actions`) → click in the Mac window; no `ApprovalRequest` |
+
+- Only the installation owner, holding the `owner` role in the target
+  workspace, may request, approve or invoke a node action on their own
+  node (`actor_not_owner` otherwise; `node_action` has `precheck_request`
+  and `authorize_decision` hooks).
+- Repo commands follow the 8A path rules: `~/work/acme` resolves to the
+  workspace its `path_prefix` rule maps to; a path no rule maps is refused.
+  AX, app and non-repo recipe actions are personal-workspace only.
+- The trust check compares the proposal with what the owner actually typed
+  or said in the last 30 minutes: `ok`, `warn` (`voice_evidence`,
+  `repo_not_mentioned`, `unclear`) or `block` (no owner evidence, an
+  inconsistent proposal). It never approves anything; a `block` creates no
+  card. A voice-sourced card is at best `warn` and says "Sesle önerildi".
+
+### What the Mac window shows
+
+The node renders the window from **its own** validated args and the
+contract's Turkish template — never server text: the action, the repo's
+local name, the exact argv, the network setting ("Ağ: kapalı" unless the
+owner mapped domains), and for gate class the first 8 characters of the
+approval id, which must match the card on `/approvals`. One window at a
+time; it closes after 60 s, on socket loss and on the kill switch.
+
+### Owner-away rules (ADR-013 decision 6)
+
+| Situation | Outcome (never retried) |
+|---|---|
+| a `node_action` card not decided within 10 minutes | `expired` at decision time or by the per-minute sweep |
+| approved, but not dispatched within 60 s (`NODE_ACTION_DISPATCH_MAX_DELAY_SECONDS`) | `stale_dispatch` |
+| the node is offline at dispatch | `node_offline` (the approval is consumed) |
+| nobody clicks the Mac window within 60 s | `confirm_timeout` |
+| socket loss or kill switch while a window is open or a command runs | `node_disconnected` |
+| no result by the watchdog deadline | `timeout` |
+
+A grant lives `NODE_GRANT_TTL_SECONDS` (90 s; 70–120 enforced by the
+preflight, > 120 refused at boot), is single use and is bound to one
+approval's args: a replay is refused `replay`, approval A's grant on
+approval B's args `grant_mismatch`.
+
+### Reading executions and chain rows
+
+- `GET /api/v1/nodes/<id>/actions/<execution_id>` (owner web session):
+  status, class, capability, confirm state, exit code, refusal code,
+  timestamps — never args or output.
+- The HUD's terminal panel streams the output of the actor's executions
+  (`GET /api/v1/hud/terminal/<execution_id>/stream`, SSE): scrubbed by the
+  server, sanitised of escape and invisible characters, labelled
+  "Güvenilmeyen çıktı", kept in Redis 15 minutes, at most 1 MiB. Only a
+  4 KiB scrubbed `tail` is stored on the row, cleared after
+  `NODE_ACTION_TAIL_RETENTION_DAYS` (14). A reverse proxy must not buffer
+  `/api/v1/hud/terminal/*/stream`.
+- "Testler ne dedi?" uses the `node_action_result` read tool: the latest
+  execution's tail, fenced as untrusted text.
+- Each execution writes exactly one chain row (`NodeInvocation`,
+  `hash_version` 2: class, approval id, grant id, args hash — no args, no
+  output) and one `nodes.invoke` AuditLog row. `manage.py
+  verify_node_audit_chain` checks the chain.
+
+### The escape suite (ADR-014 decision 3)
+
+```bash
+cd backend
+uv run python manage.py node_escape_suite                    # fake sandbox (CI, preflight)
+uv run python manage.py node_escape_suite --executor srt     # Linux srt, opt-in, local evidence only
+uv run python manage.py node_escape_suite --export-policy /tmp/policies.json
+uv run python manage.py node_escape_suite --check-policy /tmp/policies.json
+```
+
+32 cases (writes outside the worktree incl. `/tmp` symlinks, denied reads,
+network, env leaks, limits, a deleted worktree) must all be contained. The
+ADR-014 evidence is the same cases under macOS `srt` in the Swift app
+(Mac session M3); record it in ADR-014 and set
+`NODE_ESCAPE_EVIDENCE_RECORDED_ON=<date>`. Test and lint stay gate-class
+until a later ADR-014 amendment, whatever the suite says.
+
+### Preflight control checks
+
+| Check | Pass | Warn | Fail |
+|---|---|---|---|
+| `node_grant_config` | grant TTL 70–120 s, dispatch delay ≤ 60 s, `node_action` approval 600 s, the approval sweep, node action sweep and tail retention on the worker beat | — | any bound broken, the tool unregistered, a sweep missing, too rare or unregistered |
+| `node_protocol_v2:<name>` | the node's catalogue is on v2 with gate/confirm actions invocable | v1 session, no catalogue, no action invocable | — |
+| `node_protocol_v2` | — | no node paired, or none speaks v2 (Mac session pending) | — |
+| `node_conformance_v2` | v1 and v2 case files and `vectors/sandbox.json` current | — | stale (`build_node_conformance`), no cases |
+| `node_escape_suite` | all cases contained and the Mac evidence date set | all contained, Mac evidence pending | a case escapes, a malformed date |
+| `node_output_scrubber` | the gateway's `/healthz` says `output_scrubber: true` | no `PREFLIGHT_NODE_GATEWAY_URL` | gateway down, no scrubber, an older gateway |
+| `trust_check` | the real check and evidence source registered; `control.trust_check` has a tier, a capped budget and its prompt | the budget has no monthly cap | nothing registered, the branch-3 stub, no tier, no budget, prompt not seeded |
+| `node_action_actor` | both hooks declared, `approve_request` calls the approver hook first | — | a hook missing, the call missing or after the decision |
+| `harness_drivers:<agent>` | disabled (CLI), or enabled with d4, a real snapshot and agreeing pins | — | see `docs/runbooks/harness-drivers.md` |
+
+On the dev stack, `run_reference_node` (above) offers v2 by default, so
+`node_protocol_v2` passes with the reference node paired. Its window is a
+scripted double: `--confirm none` (default) lets every window time out,
+`--confirm approve|deny` clicks it after one second; `--protocol 1` keeps a
+v1-only session. Actions only ever reach its fake executor.
+
+### Control settings (all optional)
+
+| Name | Default | What |
+|---|---|---|
+| `NODE_GRANT_TTL_SECONDS` | 90 | a gate-class grant's lifetime (boot refuses > 120; preflight wants ≥ 70) |
+| `NODE_ACTION_DISPATCH_MAX_DELAY_SECONDS` | 60 | approved → dispatched limit (`stale_dispatch` beyond) |
+| `NODE_ACTION_TAIL_RETENTION_DAYS` | 14 | when the stored scrubbed tail is cleared |
+| `HUD_TERMINAL_POLL_SECONDS` / `HUD_TERMINAL_RATE` | 0.5 / 30/min | the terminal stream's poll and throttle |
+| `AI_BUDGET_CONTROL_MONTHLY_USD` | 5 | the seed value of the `control` budget (edit the row in the admin) |
+| `NODE_ESCAPE_EVIDENCE_RECORDED_ON` | empty | the date the M3 evidence was recorded in ADR-014 |
 
 ## Close codes a node sees
 

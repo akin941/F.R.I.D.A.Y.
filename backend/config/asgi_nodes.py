@@ -19,8 +19,10 @@ scrubbers (a source test pins it, Phase 10 D14):
     instance per process: the live sockets, the inbox loops and the
     revocation subscriber);
   - `GET /healthz` -> a liveness JSON: process up, Redis reachable, the
-    number of connected nodes and the configured signing key id (never key
-    material; the closeout's `node_signing_key` preflight compares it);
+    number of connected nodes, the configured signing key id (never key
+    material; the closeout's `node_signing_key` preflight compares it) and
+    whether the output scrubber is registered (Phase 10 closeout,
+    `node_output_scrubber`);
   - lifespan shutdown sends `bye{server_shutdown}` to every node;
   - everything else -> 404 (a WebSocket on another path is closed 4404).
 
@@ -43,7 +45,7 @@ from nodes import bus  # noqa: E402
 from nodes.events import HOOK_EVENTS, register_sink  # noqa: E402
 from nodes.gateway import NodeSocketApp  # noqa: E402
 from nodes.keys import signing_key_id  # noqa: E402
-from nodes.output import register_scrubber  # noqa: E402
+from nodes.output import register_scrubber, scrubber_registered  # noqa: E402
 
 GATEWAY_WS_PATH = "/ws/node/v1"
 CLOSE_NOT_FOUND = 4404
@@ -80,6 +82,10 @@ def _healthz():
         "redis": redis_ok,
         "connected_nodes": len(node_app.connections),
         "signing_key_id": signing_key_id(),
+        # Phase 10 closeout: whether the server output scrubber is
+        # registered (without it every output chunk and tail is the
+        # fail-closed marker); the `node_output_scrubber` preflight reads it.
+        "output_scrubber": scrubber_registered(),
     }
 
 

@@ -99,6 +99,15 @@ def test_preflight_is_green_with_the_reference_node_paired(
             "node_conformance": preflight.PASS,
         }, results
         assert results["node_gateway"].detail == "Redis OK, 1 node(s) connected"
+        # Phase 10 closeout: the reference node speaks v2 with its gate- and
+        # confirm-class contracts invocable, and the real gateway process
+        # reports its output scrubber.
+        control = {r.name: r for r in preflight.check_control()}
+        protocol = control["node_protocol_v2:Reference node"]
+        assert protocol.status == preflight.PASS, protocol
+        assert "protocol v2" in protocol.detail
+        assert "node_protocol_v2" not in control  # a node speaks v2
+        assert control["node_output_scrubber"].status == preflight.PASS, control
         assert f"paired reference node {node.pk}" in out.getvalue()
         assert "jnd_" not in out.getvalue()  # the secret is never printed
     finally:
@@ -126,3 +135,23 @@ def test_run_reference_node_with_a_bad_code_pairs_nothing(owner, settings):
     with pytest.raises(CommandError, match="pairing refused"):
         call_command("run_reference_node", code=BAD_CODE)
     assert not Node.objects.exists()
+
+
+@pytest.mark.parametrize(("confirm", "expected"), [("none", None), ("approve", "approve")])
+def test_the_reference_nodes_window_is_scripted_by_confirm(owner, tmp_path, confirm, expected):
+    """Phase 10 closeout: `--confirm none` lets every window time out (the
+    owner is away); `approve`/`deny` script the owner one second after the
+    window opens. Actions only ever reach the fake executor."""
+    from nodes.management.commands.run_reference_node import build_node
+    from nodes.reference.executor import FakeExecutor
+    from nodes.reference.fixtures.factory import build_fixture_home
+    from nodes.services import pair_node
+
+    result = pair_node(raw_code=_node_code(owner), node_name="Ref", protocol_versions=[1])
+    node = build_node(result, build_fixture_home(tmp_path), confirm=confirm)
+    assert isinstance(node.executor, FakeExecutor)
+    script = node.window.script
+    if expected is None:
+        assert script == []
+    else:
+        assert script and {(d.action, d.after) for d in script} == {(expected, 1)}

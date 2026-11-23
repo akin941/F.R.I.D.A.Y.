@@ -118,3 +118,16 @@ yields at most a draft card) and `assistant/tests/test_trust_check.py`. The
 recorded-audio replay harness (Phase 6 branch 3a) is still not merged, so
 the self-trigger case drives the voice endpoints with fakes instead of a
 recorded clip; it moves onto the harness when 3a lands.
+
+## Implementation note — Phase 10 closeout (`chore/p10-closeout`, 2026-11-20)
+
+The closeout e2e (`backend/ops/tests/test_control_e2e.py`) runs the voice
+rule against the real node gateway and the reference node v2: the same
+"acme'de testleri çalıştır" that, typed, goes through the card, the trust
+check, `/approvals`, the grant and the node window to an `ok` run, yields,
+spoken, a `node_action` draft and nothing else — no approval, no trust-check
+call, no execution, no frame to the node. The `trust_check` preflight row
+fails while no real trust check (or the branch-3 stub) is registered, or
+while `control.trust_check` lacks a tier, a budget or its seeded prompt, so a
+deployment cannot silently run node actions without the voice cap.
+Decisions 1–6 are unchanged.

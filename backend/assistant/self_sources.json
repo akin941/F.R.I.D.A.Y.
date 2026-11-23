@@ -251,10 +251,10 @@
   ],
   "phase": {
     "file": "docs/MASTER_PLAN.md",
-    "line": 986,
-    "phase": "10 Control",
-    "outcome": "\"Testleri çalıştır\", \"Codex ile başlat\": proposed by voice, approved on screen, run safely",
-    "status": "planned (full brief written 2026-11-20: server branches 1–7 + closeout — protocol v2 and grants, reference executor + conformance/fuzz/escape suites, approval mapping, trust check, HUD terminal panel, Codex app-server and Claude Agent SDK…"
+    "line": 987,
+    "phase": "11 Local live voice",
+    "outcome": "Natural, interruptible voice anywhere on the Mac",
+    "status": "planned"
   },
-  "content_hash": "19a87703f0011ee3091956bbda8a3582d3e2a0c78f4577e8fda3eff28e158d84"
+  "content_hash": "b0062e335a76e69ee53f92f04d4275e23d8cdb0b9a7a74e9fc1eea82e765e166"
 }
