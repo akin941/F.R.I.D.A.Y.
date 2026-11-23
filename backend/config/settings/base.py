@@ -688,6 +688,16 @@ PREFLIGHT_VOICE_MUTE_TIMEOUT_SECONDS = env.int("PREFLIGHT_VOICE_MUTE_TIMEOUT_SEC
 # labelled corpus. Empty = the committed `memory/tests/scrubber_corpus/`
 # shipped with the backend; a missing directory makes the check a warning.
 PREFLIGHT_SCRUBBER_CORPUS_DIR = env("PREFLIGHT_SCRUBBER_CORPUS_DIR", default="")
+# Phase 9 closeout: the node checks. PREFLIGHT_NODE_GATEWAY_URL is the
+# node-gateway's liveness URL (`http://node-gateway:8002/healthz` inside the
+# compose network); empty = `node_gateway` is a warning and the gateway's key
+# id is not compared. NODE_TLS_PIN_SHA256 (base64 or hex sha256 of the
+# served certificate's SubjectPublicKeyInfo) and PREFLIGHT_NODE_TLS_URL (the
+# public https/wss URL the proxy serves `/ws/node/v1` on): when both are
+# set, `node_tls_pin` compares the served SPKI with the pin.
+PREFLIGHT_NODE_GATEWAY_URL = env("PREFLIGHT_NODE_GATEWAY_URL", default="")
+NODE_TLS_PIN_SHA256 = env("NODE_TLS_PIN_SHA256", default="")
+PREFLIGHT_NODE_TLS_URL = env("PREFLIGHT_NODE_TLS_URL", default="")
 
 # --- Knowledge/RAG (MVP 3) ---
 
