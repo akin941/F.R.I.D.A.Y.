@@ -2491,3 +2491,20 @@ Implementation notes (branch 5):
    one Redis `EXISTS` and a snapshot query) per node tool per turn: five
    tools, so up to five of each. Fine for one owner; cache per request if
    the tool set grows.
+
+### Known follow-ups (LOW, from the `feat/p9-node-reads` review)
+
+1. **LOW, `backend/nodes/tests/test_invoke_read.py`.**
+   `test_a_non_web_channel_is_refused_until_branch_5` keeps a stale name now
+   that branch 5 has landed. Rename it to describe the current behaviour: a
+   non-web channel is refused as `not_invocable` for non-system capabilities.
+2. **LOW, `backend/tools/node_reads.py`.** The `*.read` lookup asks only for
+   the last 168 h and 50 rows, so a valid session older than that, or beyond
+   the 50th row, gets `session_not_found`. Document the limit in the tool
+   description or the runbook; optionally pass a larger limit up to the
+   contract maximum, or look up by id if the contract allows.
+3. **LOW, this brief.** The branch 5 Files list names `backend/assistant/tests/`
+   for the chat-turn e2e and `nodes/serializers.py`. The e2e lives in
+   `backend/config/tests/test_node_read_turns.py` (import contracts) and no
+   serializers change was needed; the behaviour is covered. Note the actual
+   location in the branch 5 section, or leave it.
