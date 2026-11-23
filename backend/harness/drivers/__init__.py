@@ -6,7 +6,9 @@ the wrapper-owned test run, the cross-vendor review and Gate B are
 unchanged; coder != reviewer still holds. Discovery and review keep the CLI
 path in this phase.
 
-Selection: `HARNESS_DRIVER_CODEX` in `DRIVER_CHOICES["codex_cli"]`, honoured
+Selection: `HARNESS_DRIVER_CODEX` in `DRIVER_CHOICES["codex_cli"]` (branch 6,
+Codex app-server) and `HARNESS_DRIVER_CLAUDE` in
+`DRIVER_CHOICES["claude_code"]` (branch 7, Claude Agent SDK), each honoured
 only while `HARNESS_DRIVERS_ENABLED` is true (otherwise the CLI path runs,
 whatever the per-agent value says) and only once the owner's third-party
 terms check (d4) is recorded in `HARNESS_DRIVER_TERMS_CHECKED_ON`. The
@@ -24,14 +26,22 @@ from django.conf import settings
 
 DRIVER_CLI = "cli"
 DRIVER_CODEX_APP_SERVER = "app_server"
+DRIVER_CLAUDE_AGENT_SDK = "agent_sdk"
 
-# Allowed values per agent. Branch 7 adds `"claude_code": ("cli", "agent_sdk")`.
+# Allowed values per agent.
 DRIVER_CHOICES = {
     "codex_cli": (DRIVER_CLI, DRIVER_CODEX_APP_SERVER),
+    "claude_code": (DRIVER_CLI, DRIVER_CLAUDE_AGENT_SDK),
 }
 # The setting that selects each agent's driver.
 DRIVER_SETTINGS = {
     "codex_cli": "HARNESS_DRIVER_CODEX",
+    "claude_code": "HARNESS_DRIVER_CLAUDE",
+}
+# The setting that pins each agent's driver protocol version.
+DRIVER_PIN_SETTINGS = {
+    "codex_cli": "HARNESS_CODEX_APP_SERVER_VERSION",
+    "claude_code": "HARNESS_CLAUDE_AGENT_SDK_VERSION",
 }
 
 
@@ -87,19 +97,11 @@ def driver_status():
     """Per-agent driver state for the closeout preflight (`harness_drivers`)
     and the system checks: the configured value, whether it would run, the
     d4 date, the pin and whether its snapshot is provisional."""
-    from harness.drivers.schema import codex_pin_errors, load_codex_snapshot
-
     rows = []
     for agent, choices in DRIVER_CHOICES.items():
         value = configured_driver(agent)
-        snapshot = None
-        pin_errors = []
-        if agent == "codex_cli":
-            pin_errors = codex_pin_errors()
-            try:
-                snapshot = load_codex_snapshot(settings.HARNESS_CODEX_APP_SERVER_VERSION)
-            except (OSError, ValueError):
-                snapshot = None
+        snapshot = load_snapshot(agent)
+        pin_errors = pin_errors_for(agent)
         rows.append(
             {
                 "agent": agent,
@@ -107,9 +109,31 @@ def driver_status():
                 "known": value in choices,
                 "enabled": drivers_enabled() and value != DRIVER_CLI,
                 "terms_checked_on": terms_checked_on(),
-                "pin": getattr(settings, "HARNESS_CODEX_APP_SERVER_VERSION", ""),
+                "pin": str(getattr(settings, DRIVER_PIN_SETTINGS[agent], "")),
                 "provisional": snapshot is None or snapshot.provisional,
                 "pin_errors": pin_errors,
             }
         )
     return rows
+
+
+def load_snapshot(agent):
+    """The pinned protocol snapshot (Codex) or SDK surface (Claude) backing
+    `agent`'s driver, or None when it is missing or malformed."""
+    from harness.drivers.claude_surface import load_claude_surface
+    from harness.drivers.schema import load_codex_snapshot
+
+    loaders = {"codex_cli": load_codex_snapshot, "claude_code": load_claude_surface}
+    try:
+        return loaders[agent](getattr(settings, DRIVER_PIN_SETTINGS[agent]))
+    except (OSError, ValueError, KeyError):
+        return None
+
+
+def pin_errors_for(agent):
+    """Pin problems of `agent`'s driver (empty = pin, Dockerfile ARG and
+    snapshot version agree)."""
+    from harness.drivers.claude_surface import claude_pin_errors
+    from harness.drivers.schema import codex_pin_errors
+
+    return {"codex_cli": codex_pin_errors, "claude_code": claude_pin_errors}[agent]()

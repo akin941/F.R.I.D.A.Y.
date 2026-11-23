@@ -1339,7 +1339,7 @@ with the Mac rows pending owner evaluation.
 | 4 | `feat/p10-trust-check` | Trust check (rules + `control.trust_check`), evidence port, router `node_action` proposals, injection corpus, voice cap regressions | 3 | **implemented 2026-11-20** on its branch (based on the integration branch with branches 1–3 merged); awaits independent Sonnet 5 review; see "Implementation record — `feat/p10-trust-check`" |
 | 5 | `feat/p10-hud-terminal` | Redis output stream (fed by the branch-3 scrubber), HUD `terminal` section + stream endpoint, terminal panel, draft/approval cards, `node_action_result` read tool | 3 (parallel with 4) | **implemented 2026-11-20** on its branch (based on the integration branch with branches 1–3 merged); awaits independent Sonnet 5 review; see "Implementation record — `feat/p10-hud-terminal`" |
 | 6 | `feat/p10-codex-app-server` | Driver framework, interactive container, Codex app-server driver, `harness_agent_action` gate, usage per turn, pins + provisional snapshot + contract test | Phase 3 harness (merged); 3 (per-tool approval TTL only: `ToolSpec.approval_ttl_seconds`, `_expire_if_stale`, per-minute sweep); parallel with 4–5 | **implemented 2026-11-20** on its branch (based on the integration branch with branch 3 merged; drivers off by default, provisional snapshot); review round 1 findings (2 MEDIUM, 3 LOW) fixed 2026-11-23, awaits Sonnet 5 re-review; see "Implementation record — `feat/p10-codex-app-server`" |
-| 7 | `feat/p10-claude-agent-sdk` | Claude Agent SDK bridge + driver, bridge schemas, surface snapshot, pins | 6 | not started |
+| 7 | `feat/p10-claude-agent-sdk` | Claude Agent SDK bridge + driver, bridge schemas, surface snapshot, pins | 6 | **implemented 2026-11-20** on its branch (based on the integration branch with branch 6 merged; driver off by default, provisional surface snapshot); awaits independent Sonnet 5 review; see "Implementation record — `feat/p10-claude-agent-sdk`" |
 | 8 | `chore/p10-closeout` | Preflight control checks, e2e, runbooks, ADR-013/014/015 notes, MASTER_PLAN row, `self_sources.json`, go/no-go record | 1–7 | not started |
 | M1 | `feat/p10-node-confirm` | Swift: protocol v2 verifier and grant verification, confirmation window, fail-closed close, conformance v2 pass | 1–3 merged; Phase 9 M1 | deferred: Mac session |
 | M2 | `feat/p10-node-executors` | Swift: `srt` executor + local repo/command policy, AppleScript recipes, AX primitives, open/focus with the local bundle list, TCC grants, Touch ID policy UI | M1; 2 merged | deferred: Mac session |
@@ -2828,3 +2828,148 @@ These were left unresolved at APPROVE. They are LOW and do not block the merge.
    does not require an in-run token brake. Fix (optional): have
    `DriverSession` abort once the cumulative reported usage exceeds
    `HARNESS_DRIVER_MAX_TOKENS`.
+
+## Implementation record — `feat/p10-claude-agent-sdk` (branch 7, implemented 2026-11-20)
+
+**Base.** Cut from the integration branch with branch 6 merged (driver
+framework, `harness_agent_action`, the approval mapping and the session).
+No node, grant or trust-check code is touched.
+
+**Delivered (D10 for Claude, D14).**
+- `harness/docker/claude_agent_bridge.py` (runs in the image; imports only
+  the standard library and `claude_agent_sdk`): the bridge side of
+  `friday-agent-bridge/v1`. Handshake `initialize` → `ready` (protocol,
+  installed SDK version, the policy it enforces); one `turn` per goal;
+  `message`, `permission_request`, `result` (status, usage, `total_cost_usd`,
+  `error`), `error`. The SDK runs through `ClaudeSDKClient` with
+  `permission_mode="default"`, `allowed_tools=[]`, `setting_sources=[]` (a
+  repo's `.claude/settings.json` can pre-approve nothing), `mcp_servers={}`,
+  `cwd=/workspace/repo` and `can_use_tool`. The callback answers locally
+  only for Read/Glob/Grep/LS/Write/Edit/MultiEdit/NotebookEdit on paths that
+  resolve (symlinks followed) inside the repo — writes into `.git/` excluded,
+  Glob/Grep patterns that are absolute, `~` or `..` excluded — and for `Bash`
+  whose input is exactly the configured test command (keys limited to
+  `command`/`description`/`timeout`). Anything else is relayed and blocks
+  until the host answers; `deny` reaches the SDK as `PermissionResultDeny
+  (interrupt=False)`. stdin closed mid-turn (or any unexpected host frame)
+  denies every pending request, cancels the turn and exits non-zero (3,
+  protocol 2), so the wrapper fails the run; stdin closed while idle is the
+  normal end (0). An SDK exception or a response without a `ResultMessage` is
+  a `failed` result, never a hang. `SDK_SURFACE_USED` lists every SDK name it
+  touches.
+- `harness/drivers/claude_bridge_schema/v1.json`: JSON Schemas per frame
+  type and direction (Friday-owned, not provisional; the only host
+  decisions are `allow`/`deny`).
+- `harness/drivers/claude_surface.py`: `BridgeSchema`, `SdkSurface`
+  (`missing(used)`), `load_bridge_schema`, `load_claude_surface`,
+  `claude_pin_errors` (pin `HARNESS_CLAUDE_AGENT_SDK_VERSION` = Dockerfile
+  `ARG CLAUDE_AGENT_SDK_VERSION` = snapshot version).
+- `harness/drivers/claude_sdk_surface/0.1.0/sdk_surface.json`: the
+  hand-written **provisional** surface subset (`"provisional": true`).
+- `harness/drivers/claude_agent_sdk.py`: `ClaudeAgentSdkDriver` (agent
+  `claude_code`, name `agent_sdk`). Every inbound frame is schema-checked
+  (unknown type → `unknown_method`, invalid or out of order → `protocol_error`);
+  the `ready` frame must report the pinned SDK version and exactly
+  `SANDBOX_POLICY["claude_code"]` with the job's test command, else
+  `protocol_error` before any turn. `escalation_for` binds the card to what
+  will run: a plain `Bash` call shows its command verbatim (kind
+  `command`); a `Bash` call with other options, a write tool (kind
+  `file_change`) or any other tool (kind `tool`) shows `"<Tool> <input as
+  canonical JSON>"`; `cwd` is `/workspace/repo`. The branch-6 verbatim rule
+  then declines anything the card could not show exactly (over 2 000
+  characters, bidi/control characters, a secret). Answers are `allow` only
+  for the literal `True`. Usage and cost come from the `result` frame.
+- Shared framework: `SANDBOX_POLICY["claude_code"]`; `TurnUsage` gains
+  `cache_creation_input_tokens` and `cost_usd`; `DriverSession` records the
+  SDK's per-turn cost on the turn's `ModelUsage` row (`cost_source:
+  driver_reported`; the Codex rows stay 0 / `not_reported`) and labels a
+  failed turn's row `success=False`, `error_type=turn_failed` (branch-6
+  follow-up 1, fixed for both drivers); `DriverRunReport.estimated_cost`
+  feeds the job's existing cost brake (`HARNESS_MAX_JOB_COST`) — the token
+  brake still applies too.
+- Selection: `DRIVER_CHOICES["claude_code"] = ("cli", "agent_sdk")`,
+  `HARNESS_DRIVER_CLAUDE` (default `cli`), `driver_status()` and the system
+  checks cover both drivers (`E002`/`E003`/`E005`, `E004` per pin, `W002`
+  provisional per driver); `build_driver` builds the Claude driver from the
+  pinned surface and the job's test command (a missing surface fails the job
+  `runner_error` before launch).
+- Image and wrapper: `claude_code.Dockerfile` adds `ARG
+  CLAUDE_AGENT_SDK_VERSION=0.1.0` (placeholder), `python3`/`python3-venv`, a
+  venv at `/opt/friday-bridge` with the pinned SDK only, and copies the
+  bridge; `claude_code_run.sh --driver agent_sdk` runs
+  `/opt/friday-bridge/bin/python -I claude_agent_bridge.py --test-command
+  "$test_command" 2>/dev/null` in the shared driver mode; an unknown driver
+  exits 64; the one-shot and discovery paths are unchanged.
+  `generate_driver_schemas.sh claude <image>` runs
+  `harness/docker/claude_sdk_surface.py` (stdlib introspection of the
+  installed SDK) with `--network none` and refuses an installed version that
+  differs from the ARG.
+- Settings / `.env.example`: `HARNESS_DRIVER_CLAUDE` (`cli`),
+  `HARNESS_CLAUDE_AGENT_SDK_VERSION` (`0.1.0`).
+
+**Tests.** `harness/tests/doubles/claude_agent_sdk.py` (a fake SDK module
+replaying scripts through `can_use_tool`, and `BridgeContainer`: the real
+bridge loaded by path with the fake in `sys.modules`, on a thread over OS
+pipes) and fixtures under `harness/tests/fixtures/claude_agent_sdk/`.
+`test_claude_agent_bridge.py` (local allow/relay table incl. a planted
+symlink and `.git/` writes, relay blocks until answered, deny reaches the
+SDK, stdin closed mid-turn → deny + exit 3, unexpected frames, bad
+handshake, SDK failure → failed result, missing SDK, strict options, purity:
+AST imports and an `-I` subprocess run with the project absent),
+`test_claude_agent_sdk_driver.py` (driver + real bridge, every frame on the
+wire validates, handshake refuses a foreign policy or SDK version, every
+robustness fault, escalation rendering), `test_claude_driver_contract.py`
+(fixture frames vs the schema, driver frame types = schema types, every SDK
+name the bridge uses exists in the surface and in the fake, pin = ARG =
+snapshot, the surface generator, image/wrapper wiring, selection checks),
+`test_claude_driver_execution.py` (the done-when run through driver and
+bridge to Gate B with one approved and one declined escalation and a codex
+reviewer; 10-minute decline, cancel, planted execution row, non-verbatim
+commands decline without a card, `file_change` cards, usage/cost row,
+failure row, cost and token brakes, SDK failure, SDK version mismatch,
+deadline, wrapper failure, missing surface, disabled → CLI, no d4, audit).
+
+**Deviations.** (1) The bridge takes the test command from its argv (set by
+the wrapper from the host's launch argv) and reports it back in `ready`;
+the driver refuses a mismatch, so the policy is checked on both ends.
+(2) Cost: unlike Codex, the SDK reports cost, so Claude driver runs are
+bounded by `HARNESS_MAX_JOB_COST` as on the CLI path. (3) `TodoWrite` and
+other non-file tools are relayed like any other tool (strict reading of
+D10); if they cause approval fatigue (R5) the owner can widen the local list
+in a reviewed change once the real SDK surface is known.
+
+### Owner steps (pending) — `feat/p10-claude-agent-sdk`, recorded 2026-11-20
+
+1. Run the independent Sonnet 5 review of this branch (CLAUDE.md
+   "Reviews") and fix findings until APPROVE.
+2. d4: check the Anthropic terms for driving the Claude Agent SDK
+   unattended from the harness and record the date in
+   `HARNESS_DRIVER_TERMS_CHECKED_ON` and the note in
+   `docs/runbooks/harness-drivers.md` (closeout).
+3. Pin and surface: choose the real `claude-agent-sdk` release, set `ARG
+   CLAUDE_AGENT_SDK_VERSION` and `HARNESS_CLAUDE_AGENT_SDK_VERSION` to it,
+   resolve the base-image digest and the `CLAUDE_CODE_VERSION` placeholder
+   (Phase 3 owner steps), build the image, run
+   `backend/harness/docker/generate_driver_schemas.sh claude <image>`, then
+   `uv run pytest -q harness/tests/test_claude_driver_contract.py`. The
+   provisional names (`ClaudeSDKClient` with `query`/`receive_response` and
+   the async context manager, `ClaudeAgentOptions.can_use_tool`/
+   `permission_mode`/`allowed_tools`/`setting_sources`/`mcp_servers`/`cwd`,
+   `PermissionResultAllow(updated_input)`,
+   `PermissionResultDeny(message, interrupt)`, `AssistantMessage.content`,
+   `TextBlock.text`, `ResultMessage.subtype`/`is_error`/`usage`/
+   `total_cost_usd`) were not verified against an installed package; adjust
+   the bridge if the generated surface differs. Commit on a dedicated
+   upgrade branch (R4).
+4. Verify on the real image (manual smoke against a disposable repo, never
+   in CI) that with `permission_mode="default"`, no `allowed_tools` and
+   `setting_sources=[]` every tool call — the built-in file tools included —
+   reaches `can_use_tool`, that a denied call is not executed, that the
+   container's egress network blocks the SDK from anything but the model API
+   and that `usage` keys match `usage_frame`.
+5. Turn on `HARNESS_DRIVER_CLAUDE=agent_sdk` (with `HARNESS_DRIVERS_ENABLED`)
+   only after 2–4; the closeout preflight (`harness_drivers`) stays red while
+   the surface is provisional.
+
+No Mac session work: the driver runs in the Linux harness runner's
+containers.

@@ -66,12 +66,25 @@ class DriverRunReport:
     def total_tokens(self):
         return self.input_tokens + self.output_tokens
 
+    @property
+    def cost_reported(self):
+        """True when every turn reported its cost (the Agent SDK does; the
+        Codex app-server reports tokens only)."""
+        return bool(self.turns) and all(turn.cost_usd is not None for turn in self.turns)
+
+    @property
+    def estimated_cost(self):
+        """The summed reported cost (USD); turns without one count as 0."""
+        return sum(
+            (turn.cost_usd for turn in self.turns if turn.cost_usd is not None), Decimal("0")
+        )
+
     def context_report(self, driver_name):
         return {
             "usage_source": "driver_reported" if self.usage_complete else "unavailable",
             "driver": driver_name,
             "turns": len(self.turns),
-            "cost_source": "not_reported",
+            "cost_source": "driver_reported" if self.cost_reported else "not_reported",
             "escalations": self.escalations,
             "escalations_accepted": self.accepted,
             "escalations_declined": self.declined,
@@ -137,7 +150,15 @@ class DriverSession:
                     self._escalate(event.payload)
                 elif event.kind == "turn_completed":
                     turn = event.payload
-                    self._record_turn(turn, error_type="" if turn.reported else "usage_unreported")
+                    if not turn.reported:
+                        error_type = "usage_unreported"
+                    elif turn.status != "completed":
+                        # Branch 6 follow-up 1: a failed turn's usage row is
+                        # never labelled a success.
+                        error_type = CODE_TURN_FAILED
+                    else:
+                        error_type = ""
+                    self._record_turn(turn, error_type=error_type)
                     if turn.status != "completed":
                         raise DriverError(CODE_TURN_FAILED, f"turn ended {turn.status!r}")
             report.outcome = OUTCOME_COMPLETED
@@ -234,6 +255,9 @@ class DriverSession:
         started = self._turn_started.get(turn.turn_id, self.clock())
         latency_ms = max(0, int((self.clock() - started) * 1000))
         job = self.job
+        # Branch 7: the Agent SDK reports each turn's cost; the Codex
+        # app-server does not (`cost_source: not_reported`, cost 0).
+        cost = turn.cost_usd if turn.reported and turn.cost_usd is not None else None
         record_external_usage(
             workspace=job.workspace,
             purpose=PURPOSE,
@@ -241,7 +265,7 @@ class DriverSession:
             routing_reason=job.agent_routing_reason,
             input_tokens=turn.input_tokens if turn.reported else 0,
             output_tokens=turn.output_tokens if turn.reported else 0,
-            estimated_cost=Decimal("0"),
+            estimated_cost=cost if cost is not None else Decimal("0"),
             latency_ms=latency_ms,
             success=turn.reported and not error_type,
             actor=job.created_by,
@@ -253,7 +277,10 @@ class DriverSession:
                 "turn_status": turn.status,
                 "cached_input_tokens": turn.cached_input_tokens if turn.reported else 0,
                 "reasoning_output_tokens": turn.reasoning_output_tokens if turn.reported else 0,
-                "cost_source": "not_reported",
+                "cache_creation_input_tokens": (
+                    turn.cache_creation_input_tokens if turn.reported else 0
+                ),
+                "cost_source": "driver_reported" if cost is not None else "not_reported",
             },
         )
 

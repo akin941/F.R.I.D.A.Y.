@@ -64,8 +64,9 @@ def check_harness_drivers(app_configs=None, **kwargs):
     refused unless `HARNESS_DRIVERS_ENABLED` is true (harness.E002) and the
     owner's terms check (d4) is recorded as a date in
     `HARNESS_DRIVER_TERMS_CHECKED_ON` (harness.E003); an unknown value is
-    refused (harness.E005); the Codex app-server pin must equal the
-    Dockerfile ARG and the snapshot version (harness.E004). An enabled
+    refused (harness.E005); each driver's pin (Codex app-server, Claude
+    Agent SDK) must equal its Dockerfile ARG and its snapshot version
+    (harness.E004). An enabled
     driver backed by a provisional snapshot is a warning here
     (harness.W002); the closeout preflight fails on it."""
     from harness.drivers import (
@@ -74,9 +75,10 @@ def check_harness_drivers(app_configs=None, **kwargs):
         DRIVER_SETTINGS,
         configured_driver,
         drivers_enabled,
+        load_snapshot,
+        pin_errors_for,
         terms_checked_on,
     )
-    from harness.drivers.schema import codex_pin_errors, load_codex_snapshot
 
     messages = []
     for agent, choices in DRIVER_CHOICES.items():
@@ -110,18 +112,15 @@ def check_harness_drivers(app_configs=None, **kwargs):
                     id="harness.E003",
                 )
             )
-        if agent == "codex_cli":
-            try:
-                snapshot = load_codex_snapshot(settings.HARNESS_CODEX_APP_SERVER_VERSION)
-            except (OSError, ValueError):
-                snapshot = None
-            if snapshot is not None and snapshot.provisional:
-                messages.append(
-                    Warning(
-                        "The Codex app-server driver is enabled on a provisional schema snapshot.",
-                        hint="Run harness/docker/generate_driver_schemas.sh for the pin.",
-                        id="harness.W002",
-                    )
+        snapshot = load_snapshot(agent)
+        if snapshot is not None and snapshot.provisional:
+            messages.append(
+                Warning(
+                    f"The {agent} driver ({value}) is enabled on a provisional schema snapshot.",
+                    hint="Run harness/docker/generate_driver_schemas.sh for the pin.",
+                    id="harness.W002",
                 )
-    messages.extend(Error(message, id="harness.E004") for message in codex_pin_errors())
+            )
+    for agent in DRIVER_CHOICES:
+        messages.extend(Error(message, id="harness.E004") for message in pin_errors_for(agent))
     return messages

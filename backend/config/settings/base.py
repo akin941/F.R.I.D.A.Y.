@@ -1073,11 +1073,19 @@ HARNESS_WORKTREE_RETENTION_HOURS = env.int("HARNESS_WORKTREE_RETENTION_HOURS", d
 # `harness.drivers.DRIVER_CHOICES`.
 HARNESS_DRIVERS_ENABLED = env.bool("HARNESS_DRIVERS_ENABLED", default=False)
 HARNESS_DRIVER_CODEX = env("HARNESS_DRIVER_CODEX", default="cli")
+# Branch 7: cli | agent_sdk (the Claude Agent SDK through the in-image
+# bridge, harness/docker/claude_agent_bridge.py).
+HARNESS_DRIVER_CLAUDE = env("HARNESS_DRIVER_CLAUDE", default="cli")
 HARNESS_DRIVER_TERMS_CHECKED_ON = env("HARNESS_DRIVER_TERMS_CHECKED_ON", default="")
 # The one pin of the Codex app-server driver: must equal the Dockerfile
 # `ARG CODEX_CLI_VERSION` and the schema snapshot's recorded version under
 # harness/drivers/codex_schema/<version>/ (system check harness.E004).
 HARNESS_CODEX_APP_SERVER_VERSION = env("HARNESS_CODEX_APP_SERVER_VERSION", default="0.1.0")
+# The one pin of the Claude Agent SDK driver: must equal the Dockerfile
+# `ARG CLAUDE_AGENT_SDK_VERSION` and the SDK surface snapshot's version under
+# harness/drivers/claude_sdk_surface/<version>/ (harness.E004); the bridge
+# reports the installed SDK version and the driver refuses a mismatch.
+HARNESS_CLAUDE_AGENT_SDK_VERSION = env("HARNESS_CLAUDE_AGENT_SDK_VERSION", default="0.1.0")
 # How often a driver waiting on a `harness_agent_action` approval re-reads
 # the ApprovalRequest row (the source of truth); the Redis wake-up hint
 # written on approve only shortens the wait.

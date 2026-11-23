@@ -1,0 +1,5 @@
+[
+  {"tool": "Write", "input": {"file_path": "/etc/cron.d/x", "content": "* * * * * true"}},
+  {"text": "Could not finish."},
+  {"result": {"subtype": "success", "is_error": false, "usage": null, "total_cost_usd": null}}
+]

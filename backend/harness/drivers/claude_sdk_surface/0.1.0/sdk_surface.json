@@ -1,0 +1,28 @@
+{
+  "schema_format": "friday-claude-agent-sdk-surface/v1",
+  "package": "claude-agent-sdk",
+  "module": "claude_agent_sdk",
+  "version": "0.1.0",
+  "provisional": true,
+  "note": "Hand-written PROVISIONAL subset (Phase 10 branch 7): the implementation container cannot install or run the SDK. Replace it with the snapshot generated from the pinned version (harness/docker/generate_driver_schemas.sh claude <image>) before enabling the driver; the closeout preflight fails while a provisional snapshot backs an enabled driver.",
+  "classes": {
+    "ClaudeSDKClient": {
+      "fields": [],
+      "methods": ["__aenter__", "__aexit__", "connect", "disconnect", "interrupt", "query", "receive_messages", "receive_response"]
+    },
+    "ClaudeAgentOptions": {
+      "fields": ["allowed_tools", "can_use_tool", "cwd", "disallowed_tools", "env", "hooks", "max_turns", "mcp_servers", "model", "permission_mode", "setting_sources", "system_prompt"],
+      "methods": []
+    },
+    "PermissionResultAllow": {"fields": ["behavior", "updated_input", "updated_permissions"], "methods": []},
+    "PermissionResultDeny": {"fields": ["behavior", "interrupt", "message"], "methods": []},
+    "ToolPermissionContext": {"fields": ["signal", "suggestions"], "methods": []},
+    "AssistantMessage": {"fields": ["content", "model"], "methods": []},
+    "TextBlock": {"fields": ["text"], "methods": []},
+    "ResultMessage": {
+      "fields": ["duration_api_ms", "duration_ms", "is_error", "num_turns", "result", "session_id", "subtype", "total_cost_usd", "usage"],
+      "methods": []
+    }
+  },
+  "functions": ["query"]
+}

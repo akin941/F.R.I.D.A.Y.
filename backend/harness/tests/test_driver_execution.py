@@ -446,7 +446,7 @@ def test_oversize_line_fails_the_job_closed(job, monkeypatch):
     from harness.drivers.codex_app_server import CodexAppServerDriver
     from harness.drivers.schema import load_codex_snapshot
 
-    def small_driver(driver_name, *, deadline):
+    def small_driver(driver_name, *, deadline, **kwargs):
         return CodexAppServerDriver(
             snapshot=load_codex_snapshot("0.1.0"), deadline=deadline, max_line_bytes=64
         )

@@ -47,6 +47,8 @@ from ai_core.models import PromptTemplate
 from audit.services import record_audit
 from harness import container_lifecycle, drivers, ingestion, runner
 from harness.drivers import base as driver_base
+from harness.drivers.claude_agent_sdk import ClaudeAgentSdkDriver
+from harness.drivers.claude_surface import load_bridge_schema, load_claude_surface
 from harness.drivers.codex_app_server import CodexAppServerDriver
 from harness.drivers.schema import load_codex_snapshot
 from harness.drivers.session import OUTCOME_COMPLETED, OUTCOME_STOPPED, DriverSession
@@ -230,7 +232,7 @@ _DRIVER_FAILURE_REASONS = {
 }
 
 
-def build_driver(driver_name, *, deadline):
+def build_driver(driver_name, *, deadline, test_command=""):
     """The driver instance for `driver_name`. A seam: tests replace it to
     inject limits or a clock; production code always gets the pinned
     snapshot."""
@@ -238,6 +240,17 @@ def build_driver(driver_name, *, deadline):
         return CodexAppServerDriver(
             snapshot=load_codex_snapshot(settings.HARNESS_CODEX_APP_SERVER_VERSION),
             deadline=deadline,
+            poll_seconds=float(settings.HARNESS_CANCEL_POLL_SECONDS),
+        )
+    if driver_name == drivers.DRIVER_CLAUDE_AGENT_SDK:
+        # The surface snapshot must load for the pin (it is what the bridge
+        # was checked against); the bridge's `ready` must report that version.
+        surface = load_claude_surface(settings.HARNESS_CLAUDE_AGENT_SDK_VERSION)
+        return ClaudeAgentSdkDriver(
+            bridge_schema=load_bridge_schema(),
+            sdk_version=surface.version,
+            deadline=deadline,
+            test_command=test_command,
             poll_seconds=float(settings.HARNESS_CANCEL_POLL_SECONDS),
         )
     raise drivers.DriverConfigurationError(f"no driver implementation for {driver_name!r}")
@@ -256,7 +269,7 @@ def _run_with_driver(
     deterministic reason. Returns `(status, failure_reason, report)`."""
     deadline = started_monotonic + settings.HARNESS_MAX_JOB_SECONDS
     try:
-        driver = build_driver(driver_name, deadline=deadline)
+        driver = build_driver(driver_name, deadline=deadline, test_command=job.repo_test_command)
     except (OSError, ValueError) as exc:
         raise drivers.DriverConfigurationError(f"driver snapshot unavailable: {exc}") from exc
     container = runner.launch_interactive_container(
@@ -580,6 +593,9 @@ def run_harness_implementation_job(job_id):
         cli_output = driver_report.transcript
         input_tokens = driver_report.input_tokens
         output_tokens = driver_report.output_tokens
+        # The Agent SDK reports cost per turn (bounded by HARNESS_MAX_JOB_COST
+        # below); the Codex app-server reports none (0, token brake instead).
+        estimated_cost = driver_report.estimated_cost
         context_report = driver_report.context_report(driver_name)
     else:
         cli_output = extract_framed_cli_output(raw_output)
