@@ -1338,7 +1338,7 @@ with the Mac rows pending owner evaluation.
 | 3 | `feat/p10-invocation-grants` | Per-tool approval TTL + pre-transaction hook (`create_request` split) + approver hook, `node_action` tool with actor/approver checks, registered trust-check stub, `NodeActionExecution`, grant issuance, gated/confirm invocation, gateway v2 frames + watchdog, output scrubber port + `StreamScrubber` (tail re-scrub, fail closed), chain row v2, actions endpoints | 1, 2; Phase 9 branches 4–5 merged | **implemented 2026-11-20** on its branch (based on the integration branch with branches 1–2 merged; Phase 9 branches 4–5 not merged, so the gateway's per-socket session core and the presence/inbox helpers are built here and the socket app stays Phase 9 branch 4's); awaits independent Sonnet 5 review; see "Implementation record — `feat/p10-invocation-grants`" |
 | 4 | `feat/p10-trust-check` | Trust check (rules + `control.trust_check`), evidence port, router `node_action` proposals, injection corpus, voice cap regressions | 3 | **implemented 2026-11-20** on its branch (based on the integration branch with branches 1–3 merged); awaits independent Sonnet 5 review; see "Implementation record — `feat/p10-trust-check`" |
 | 5 | `feat/p10-hud-terminal` | Redis output stream (fed by the branch-3 scrubber), HUD `terminal` section + stream endpoint, terminal panel, draft/approval cards, `node_action_result` read tool | 3 (parallel with 4) | **implemented 2026-11-20** on its branch (based on the integration branch with branches 1–3 merged); awaits independent Sonnet 5 review; see "Implementation record — `feat/p10-hud-terminal`" |
-| 6 | `feat/p10-codex-app-server` | Driver framework, interactive container, Codex app-server driver, `harness_agent_action` gate, usage per turn, pins + provisional snapshot + contract test | Phase 3 harness (merged); 3 (per-tool approval TTL only: `ToolSpec.approval_ttl_seconds`, `_expire_if_stale`, per-minute sweep); parallel with 4–5 | not started |
+| 6 | `feat/p10-codex-app-server` | Driver framework, interactive container, Codex app-server driver, `harness_agent_action` gate, usage per turn, pins + provisional snapshot + contract test | Phase 3 harness (merged); 3 (per-tool approval TTL only: `ToolSpec.approval_ttl_seconds`, `_expire_if_stale`, per-minute sweep); parallel with 4–5 | **implemented 2026-11-20** on its branch (based on the integration branch with branch 3 merged; drivers off by default, provisional snapshot); review round 1 findings (2 MEDIUM, 3 LOW) fixed 2026-11-23, awaits Sonnet 5 re-review; see "Implementation record — `feat/p10-codex-app-server`" |
 | 7 | `feat/p10-claude-agent-sdk` | Claude Agent SDK bridge + driver, bridge schemas, surface snapshot, pins | 6 | not started |
 | 8 | `chore/p10-closeout` | Preflight control checks, e2e, runbooks, ADR-013/014/015 notes, MASTER_PLAN row, `self_sources.json`, go/no-go record | 1–7 | not started |
 | M1 | `feat/p10-node-confirm` | Swift: protocol v2 verifier and grant verification, confirmation window, fail-closed close, conformance v2 pass | 1–3 merged; Phase 9 M1 | deferred: Mac session |
@@ -2608,3 +2608,197 @@ These were left unresolved at APPROVE. They are LOW and do not block the merge.
    follows the existing `connector_args` precedent. Fix (optional): catch
    `ImproperlyConfigured` in `propose_node_action` and return `None`, so an
    unseeded environment degrades to plain chat.
+
+## Implementation record — `feat/p10-codex-app-server` (branch 6, implemented 2026-11-20)
+
+**Base.** Cut from the integration branch with branches 1–3 merged. Of
+branch 3 it uses only the per-tool approval TTL
+(`ToolSpec.approval_ttl_seconds`, `_expire_if_stale`, the per-minute sweep).
+No node, grant or trust-check code is touched.
+
+**Delivered (D10 for Codex and the shared parts, D14 contract).**
+- `harness/drivers/`:
+  - `__init__.py`: `DRIVER_CHOICES` (`codex_cli`: `cli`, `app_server`;
+    branch 7 adds `claude_code`), `selected_driver` (CLI path while
+    `HARNESS_DRIVERS_ENABLED` is false; an enabled non-`cli` driver without
+    a d4 date, or an unknown value, raises `DriverConfigurationError` and
+    the job fails `runner_error` before anything is cloned — the worker runs
+    no system checks), `driver_status()` for the closeout preflight.
+  - `base.py`: the `AgentDriver` protocol (`start`, `run_turn`, `events`,
+    `answer_approval`, `usage`, `close`), the bounded `JsonlReader`
+    (≤ 1 MiB per line, ≤ 50 000 lines, a pump thread so every wait has a
+    timeout, `discard_rest()` drains post-protocol output so the wrapper's
+    test output never blocks on a full pipe), `SANDBOX_POLICY`
+    (workspace-write, approvals on request, network off, writable root
+    `/workspace/repo`) and the deterministic `DriverError` codes.
+  - `schema.py` + `codex_schema/0.1.0/protocol.json`: the snapshot format
+    (`friday-codex-app-server-subset/v1`; four message classes, JSON
+    Schemas per method), the hand-written **provisional** subset, and
+    `codex_pin_errors` (pin = Dockerfile `ARG CODEX_CLI_VERSION` = snapshot
+    version).
+  - `codex_app_server.py`: JSON-RPC without the `jsonrpc` field over the
+    container stdio — `initialize` + `initialized`, `thread/start`,
+    `turn/start`; `item/completed` (agent messages → bounded transcript),
+    `thread/tokenUsage/updated` (per-turn usage = delta of running
+    totals), `turn/completed`; the server requests
+    `item/commandExecution/requestApproval` and
+    `item/fileChange/requestApproval`. Every inbound frame is validated
+    against the snapshot; a method it does not know is `unknown_method`;
+    answers are only `accept` (for the literal `True`) or `decline` for
+    that one request id, never `acceptForSession`.
+  - `approval_mapping.py`: `request_agent_action` (system-created,
+    origin `harness`, channel `system`, actor = the job's creator; any
+    refusal → decline), `decide` / `wait_for_decision` (row re-read every
+    `HARNESS_AGENT_ACTION_POLL_SECONDS` through the job's workspace; accept
+    only for `approved` + an existing `HarnessAgentAction`; rejected,
+    expired, missing, no execution, 600 s pending, job cancel and the
+    runtime brake decline; cancel and brake win over a decision read in
+    the same step), the Redis wake-up hint (`harness:agent_action:<id>`,
+    RPUSH + BLPOP, best effort), and `record_answer` (marks the execution,
+    revokes a request the driver abandoned, one
+    `harness.agent_action_answered` audit row).
+  - `session.py`: `DriverSession.run` — handshake, one turn with the
+    goal, escalations through the mapping, one ModelUsage row per turn
+    (`record_external_usage`, purpose `harness.implementation`, backend
+    `harness_app_server:codex_cli`, routing reason = the job's, cost 0 with
+    `cost_source: not_reported`), a `success=False` zero-token row for a
+    turn or a run without a usage report, the per-job escalation cap
+    (`HARNESS_DRIVER_MAX_ESCALATIONS`, R5). Never raises; returns a
+    `DriverRunReport`.
+- `runner.launch_interactive_container` + `InteractiveContainer`: the
+  implementation launch's hardening flags plus `--interactive` and pipes;
+  secrets passed as `--env NAME` with the value only in the docker
+  client's minimal environment (a foreground `docker run` keeps reading an
+  `--env-file`, so the file could not be deleted at once); `close_stdin`,
+  `reap`, `kill` (daemon kill + client kill).
+- `harness_agent_action` `ToolSpec` (`harness/tools.py`): gated,
+  `user_invocable=False`, `approval_ttl_seconds=600`,
+  `records_work_log=False`; `validate_request` (job in the workspace,
+  `implementing`, not cancelled, agent matches, known kind);
+  `prepare_payload` → `{job_id, agent, kind, command (≤ 2 000), cwd,
+  reason (≤ 500)}`, scrubbed of harness credentials, invisible formatting
+  and control characters, caller keys dropped; `create_execution` creates
+  `HarnessAgentAction` only for a harness-origin request whose job is still
+  running; `dispatch` pushes the wake-up hint only; `describe_request`
+  labels it "Ajanın isteği — güvenilmeyen metin" (`untrusted: true`).
+- Models (migration `harness/0015`): `HarnessAgentAction`;
+  `HarnessImplementationJob.driver`; seven `driver_*` failure reasons.
+- `run_harness_implementation_job`: driver chosen first; in driver mode
+  `_run_with_driver` launches interactively, runs the session, closes
+  stdin and waits for the wrapper with the existing brake loop
+  (`HARNESS_MAX_JOB_SECONDS`, cancel flag, confirmed exit code); any
+  driver failure kills and tears the container down with a deterministic
+  reason (deadline → `timeout`, cancel → `killed`). The rest — result
+  file, tests, secret scan, cross-vendor review, Gate B — is unchanged;
+  `usage_source` must be `driver_reported` (every turn reported), and the
+  token brake `HARNESS_DRIVER_MAX_TOKENS` stands in for the cost brake
+  (the app-server reports no cost). The job detail API shows `driver` and
+  `agent_actions` counts (R5).
+- Wrapper: `harness_write_mode.sh` driver mode (agent stdout not captured,
+  empty final frame); `codex_cli_run.sh --driver app_server` runs
+  `codex app-server 2>/dev/null`; unknown driver exits 64. Dockerfile ARG
+  comment; `generate_driver_schemas.sh codex <image>` +
+  `codex_schema_subset.py` (stdlib only).
+- Checks: `harness.E002` (non-`cli` while disabled), `E003` (enabled
+  without a d4 date), `E004` (pin mismatch), `E005` (unknown value),
+  `W002` (enabled on a provisional snapshot; the closeout preflight makes
+  this a failure).
+- Settings / `.env.example`: `HARNESS_DRIVERS_ENABLED` (False),
+  `HARNESS_DRIVER_CODEX` (`cli`), `HARNESS_DRIVER_TERMS_CHECKED_ON` (empty),
+  `HARNESS_CODEX_APP_SERVER_VERSION` (`0.1.0`),
+  `HARNESS_AGENT_ACTION_POLL_SECONDS` (2), `HARNESS_DRIVER_MAX_ESCALATIONS`
+  (20), `HARNESS_DRIVER_MAX_TOKENS` (2 000 000).
+- Import contract: `harness.drivers` may import only `harness`, `core`,
+  `approvals`, `ai_core`, `audit` (direct imports).
+
+**Tests.** `harness/tests/test_codex_app_server_driver.py` (driver over the
+pipe double: transcripts, strict sandbox policy, never accept-for-session,
+every robustness fault), `test_driver_contract.py` (every fixture frame
+validates, every method used exists, pin = ARG = snapshot, converter, the
+selection checks), `test_agent_action_gate.py` (gate, snapshot, TTL and
+sweep with a frozen clock, every decision-signal case of the brief, role x
+endpoint for `POST /approvals` and the decision over ten principals, a
+second workspace), `test_driver_execution.py` (the done-when run: one
+approved and one declined escalation, then review → Gate B; 10-minute
+decline, cancel during a pending escalation, cap, planted execution row,
+usage per turn and the failure row, token brake, every robustness fault
+tears down, deadline, wrapper failure, disabled → CLI path, Claude jobs
+unchanged, enabled without d4), `test_interactive_container.py`,
+`test_write_mode_wrapper.py` (driver mode with real git), and
+`harness/tests/doubles/codex_app_server.py` + two JSONL fixtures.
+
+**Deviations.** (1) The brief's protocol lists `events()` as a separate
+iterator; here `run_turn` starts the turn and returns its id, and
+`events()` yields until that turn completes, with an `idle` event per poll
+slice so the session checks the cancel flag. (2) A token brake was added
+because the app-server reports tokens but no cost. (3) Usage rows carry
+`estimated_cost=0` with `cost_source: not_reported` until a reliable cost
+source exists for Codex. (4) The snapshot is one `protocol.json` subset
+file, not the raw generated directory; the converter writes it.
+
+**Review round 1 (2026-11-23).**
+- *MEDIUM, approval not bound to what runs.* `request_agent_action` now
+  fails closed: when the card could not show the agent's `command` or `cwd`
+  verbatim (over 2 000 / 500 characters, an invisible/bidi formatting or
+  control character, a harness secret that would be redacted) no card is
+  minted and the agent gets `decline` (`request_refused`), so what the
+  owner approves is byte-for-byte what runs
+  (`harness.tools.agent_action_text_shown_verbatim`). `prepare_payload`
+  keeps scrubbing as defence in depth; only `reason`, display-only text,
+  is still truncated. A `file_change` escalation carries only the grant
+  root and a reason in the app-server protocol; the grant root is now held
+  to the same verbatim rule, and the card can show nothing more until the
+  real snapshot (owner step 3) offers the change set at approval time.
+- *MEDIUM, reader bound only on the consumer side.* `JsonlReader` enforces
+  its bounds in the pump: the line count stops reading at `max_lines + 1`
+  (`too_many_lines`, sticky), and at most `MAX_QUEUED_BYTES` (4 MiB) of
+  unread output is held — past it the pump waits for the caller, so the
+  pipe back-pressures the agent during an approval wait instead of the
+  worker buffering it. `discard_rest()` releases a waiting pump.
+- *LOW.* A decline on `ttl_elapsed` now revokes the still-pending card.
+  An accept the agent never received (the answer write failed) is
+  recorded as a decline with reason `driver_ended`, and the card revoked.
+  `DriverSession.run` maps any non-`DriverError` exception (a DB error in
+  the poll, an unexpected frame shape) to `protocol_error`, so the job
+  fails closed and the container is torn down; a wait that breaks
+  mid-escalation still sends `decline` and revokes the card (best effort).
+- Tests: over-length, padded, zero-width, bidi and control-character
+  commands and a non-verbatim `cwd` decline without a card; a secret in
+  the command declines; a 2 000-character command still mints; TTL revoke
+  (the owner can no longer approve); a flooding agent with an idle caller
+  stays bounded and back-pressured; the pump-side line cap; an accept that
+  failed to send; an unexpected error mid-run.
+
+### Owner steps (pending) — `feat/p10-codex-app-server`, recorded 2026-11-20
+
+1. Run the independent Sonnet 5 review of this branch (CLAUDE.md
+   "Reviews") and fix findings until APPROVE.
+2. d4: check the Codex (OpenAI) terms for driving `codex app-server`
+   unattended and record the date in `HARNESS_DRIVER_TERMS_CHECKED_ON` and
+   the note in `docs/runbooks/harness-drivers.md` (closeout). Until then
+   the system check refuses an enabled driver.
+3. Pin and snapshot: choose the real Codex CLI version, set
+   `ARG CODEX_CLI_VERSION` and `HARNESS_CODEX_APP_SERVER_VERSION` to it,
+   resolve the base-image digest, build the image, run
+   `backend/harness/docker/generate_driver_schemas.sh codex <image>`,
+   then `uv run pytest -q harness/tests/test_driver_contract.py`; adjust
+   `codex_schema_subset.py` if the generated layout differs (the script
+   fails loudly rather than write a partial snapshot) and re-check every
+   method name the driver uses against the real snapshot (the provisional
+   names — `thread/start`, `turn/start`,
+   `item/commandExecution/requestApproval`,
+   `item/fileChange/requestApproval`, `thread/tokenUsage/updated`,
+   `turn/completed` — were not verified against a binary). Commit on a
+   dedicated upgrade branch (R4).
+4. Verify on the real image that `codex app-server` honours
+   `sandbox: workspace-write`, `approvalPolicy: on-request` and
+   `sandboxPolicy.networkAccess: false` as sent, and that an escalation
+   reaches the driver as an approval request (a manual smoke run against
+   a disposable repo; never in CI).
+5. Turn on the `codex_cli` implementation slot in `HARNESS_AGENT_POLICY`
+   (selectable + reviewer `claude_code`) only after 2–4; today it stays
+   off, so no production job reaches the driver even with it enabled.
+6. Cost: decide whether Codex driver runs need a priced cost estimate
+   (today `estimated_cost=0`, bounded by `HARNESS_DRIVER_MAX_TOKENS`).
+
+No Mac session work: drivers run in the Linux harness runner's containers.

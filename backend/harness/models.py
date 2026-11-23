@@ -315,6 +315,16 @@ class HarnessImplementationJob(WorkspaceScopedModel, TimestampedModel):
         # a CLI API key the container had in its environment -- the job
         # fails before review, so the key is never bundled or pushed.
         SECRET_LEAK = "secret_leak"
+        # Phase 10 branch 6 (brief D10): a driver run (Codex app-server)
+        # failed closed on its protocol -- each a deterministic reason. The
+        # driver deadline maps to `timeout`, a job cancel to `killed`.
+        DRIVER_OVERSIZE_LINE = "driver_oversize_line"
+        DRIVER_MALFORMED_JSON = "driver_malformed_json"
+        DRIVER_UNKNOWN_METHOD = "driver_unknown_method"
+        DRIVER_EARLY_EXIT = "driver_early_exit"
+        DRIVER_TOO_MANY_LINES = "driver_too_many_lines"
+        DRIVER_PROTOCOL_ERROR = "driver_protocol_error"
+        DRIVER_TURN_FAILED = "driver_turn_failed"
 
     repo = models.ForeignKey(
         HarnessRepo, on_delete=models.PROTECT, related_name="implementation_jobs"
@@ -459,6 +469,10 @@ class HarnessImplementationJob(WorkspaceScopedModel, TimestampedModel):
     # `elapsed_seconds` already belong to that earlier phase's own
     # timing and must not be overwritten by this later one).
     push_started_at = models.DateTimeField(null=True, blank=True)
+    # Phase 10 branch 6 (brief D10): which driver ran the implementation
+    # step -- "cli" (the one-shot CLI, default) or a long-lived driver
+    # ("app_server"). Empty until the run starts.
+    driver = models.CharField(max_length=20, blank=True, default="")
 
     class Meta:
         ordering = ["-created_at"]
@@ -563,3 +577,49 @@ class HarnessReview(WorkspaceScopedModel, TimestampedModel):
 
     def __str__(self):
         return f"harness review {self.id} ({self.status})"
+
+
+class HarnessAgentAction(WorkspaceScopedModel, TimestampedModel):
+    """The execution row of one approved `harness_agent_action` gate (Phase
+    10 brief D10): an escalation a driver-run agent asked for (a command
+    outside its sandbox, network, a file change outside `/repo`, an MCP
+    tool). Created by the tool's `create_execution` inside the approval's
+    own transaction -- so it exists only for an `approved` request -- and
+    read by the waiting driver, which answers `accept` only when the
+    `ApprovalRequest` row is `approved` AND this row exists. `answer` is the
+    driver's own record of what it actually sent back to the agent (empty
+    if the driver had already given up -- job ended, cancel, brake -- by the
+    time the owner approved)."""
+
+    class Kind(models.TextChoices):
+        COMMAND = "command"
+        FILE_CHANGE = "file_change"
+        TOOL = "tool"
+
+    class Answer(models.TextChoices):
+        NONE = "", "not answered"
+        ACCEPT = "accept"
+
+    job = models.ForeignKey(
+        HarnessImplementationJob, on_delete=models.CASCADE, related_name="agent_actions"
+    )
+    approval = models.OneToOneField(
+        "approvals.ApprovalRequest",
+        on_delete=models.PROTECT,
+        related_name="harness_agent_action",
+    )
+    agent = models.CharField(max_length=20)
+    kind = models.CharField(max_length=20, choices=Kind.choices)
+    answer = models.CharField(max_length=10, choices=Answer.choices, blank=True, default="")
+    answered_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def save(self, *args, **kwargs):
+        if self.job_id is not None and self.job.workspace_id != self.workspace_id:
+            raise ValueError("HarnessAgentAction.job must belong to the action's own workspace.")
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f"harness agent action {self.id} ({self.kind})"

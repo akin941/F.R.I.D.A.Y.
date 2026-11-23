@@ -338,7 +338,185 @@ def describe_harness_push_request(approval_request):
     }
 
 
+# --- `harness_agent_action` (Phase 10 brief D10, branch 6) -------------------
+#
+# One escalation a driver-run agent asked for (a command outside its sandbox,
+# network, a file change outside /repo, an MCP tool). System-created only
+# (`user_invocable=False`: a `POST /approvals` can never mint it), origin
+# `harness`, gate-class, 600 s TTL (ADR-013 decision 6). `prepare_payload`
+# snapshots `{job_id, agent, kind, command, cwd, reason}` -- `command` bounded
+# to 2 000 characters and `reason` to 500, both scrubbed of harness
+# credentials and control characters; both are AGENT-WRITTEN, untrusted
+# text, and `describe_request` labels them so. Approve -> `create_execution`
+# writes the `HarnessAgentAction` row the waiting driver requires before it
+# answers `accept`; `dispatch` only pushes the Redis wake-up hint.
+
+AGENT_ACTION_TOOL = "harness_agent_action"
+_AGENT_ACTION_COMMAND_MAX_CHARS = 2000
+_AGENT_ACTION_REASON_MAX_CHARS = 500
+_AGENT_ACTION_CWD_MAX_CHARS = 500
+_AGENT_ACTION_INPUT_KEYS = ("job_id", "agent", "kind", "command", "cwd", "reason")
+_AGENT_ACTION_UNTRUSTED_LABEL = "Ajanın isteği — güvenilmeyen metin"
+_CONTROL_CHARS = {code: None for code in range(32) if code not in (9, 10)} | {127: None}
+
+
+def _scrub_agent_text(value, limit):
+    from harness.execution import redact_harness_secrets
+    from memory.context import strip_invisible_formatting
+
+    if not isinstance(value, str):
+        return ""
+    text = strip_invisible_formatting(redact_harness_secrets(value)).translate(_CONTROL_CHARS)
+    return text if len(text) <= limit else text[: limit - 1] + "…"
+
+
+def agent_action_text_shown_verbatim(value, kind_limit):
+    """True when the approval card would show `value` exactly as the agent
+    wrote it: nothing truncated, no invisible/bidi formatting or control
+    character stripped, no secret redacted. The driver declines (no card)
+    otherwise, so what the owner approves is byte-for-byte what runs."""
+    limit = {
+        "command": _AGENT_ACTION_COMMAND_MAX_CHARS,
+        "cwd": _AGENT_ACTION_CWD_MAX_CHARS,
+    }[kind_limit]
+    return isinstance(value, str) and _scrub_agent_text(value, limit) == value
+
+
+def _agent_action_job(workspace, payload):
+    job = _get_job_from_payload(payload)
+    if job is None or job.workspace_id != getattr(workspace, "id", None):
+        return None
+    return job
+
+
+def validate_agent_action_request(workspace, payload):
+    from harness.models import HarnessAgentAction
+
+    job = _agent_action_job(workspace, payload)
+    if job is None:
+        raise ToolValidationError("Unknown harness implementation job.")
+    if job.status != HarnessImplementationJob.Status.IMPLEMENTING or job.cancel_requested:
+        raise ToolValidationError("Job is not running an implementation step.")
+    if payload.get("agent") != job.agent:
+        raise ToolValidationError("Agent does not match the job.")
+    if payload.get("kind") not in HarnessAgentAction.Kind.values:
+        raise ToolValidationError("Unknown agent action kind.")
+
+
+def prepare_agent_action_payload(workspace, payload):
+    job = _agent_action_job(workspace, payload)
+    if job is None:
+        raise ToolValidationError("Unknown harness implementation job.")
+    clean = {key: payload.get(key) for key in _AGENT_ACTION_INPUT_KEYS}
+    return {
+        "job_id": str(job.id),
+        "agent": job.agent,
+        "kind": str(clean["kind"]),
+        "command": _scrub_agent_text(clean["command"], _AGENT_ACTION_COMMAND_MAX_CHARS),
+        "cwd": _scrub_agent_text(clean["cwd"], _AGENT_ACTION_CWD_MAX_CHARS),
+        "reason": _scrub_agent_text(clean["reason"], _AGENT_ACTION_REASON_MAX_CHARS),
+    }
+
+
+def create_agent_action_execution(approval_request):
+    """Inside the approval's own transaction. Only for a harness-origin
+    request whose job is still running its implementation step in the
+    same workspace; otherwise no execution exists and the waiting driver
+    (if any) declines."""
+    from approvals.models import ApprovalRequest
+    from harness.models import HarnessAgentAction
+
+    if approval_request.origin != ApprovalRequest.Origin.HARNESS:
+        return None
+    payload = approval_request.payload or {}
+    with transaction.atomic():
+        job = (
+            HarnessImplementationJob.objects.select_for_update(of=("self",))
+            .filter(pk=payload.get("job_id"), workspace_id=approval_request.workspace_id)
+            .first()
+        )
+        if (
+            job is None
+            or job.status != HarnessImplementationJob.Status.IMPLEMENTING
+            or job.cancel_requested
+        ):
+            return None
+        action, _created = HarnessAgentAction.objects.get_or_create(
+            approval=approval_request,
+            defaults={
+                "workspace_id": approval_request.workspace_id,
+                "job": job,
+                "agent": job.agent,
+                "kind": payload.get("kind", HarnessAgentAction.Kind.COMMAND),
+            },
+        )
+    return str(approval_request.id)
+
+
+def dispatch_agent_action_execution(execution_id):
+    """Only the wake-up hint: the decision itself is read from the row."""
+    if execution_id is None:
+        return
+    from harness.drivers.approval_mapping import push_wake_hint
+
+    push_wake_hint(execution_id)
+
+
+def describe_agent_action_request(approval_request):
+    from approvals.models import ApprovalRequest
+
+    payload = approval_request.payload or {}
+    job = _job_for_request(approval_request)
+    if (
+        job is None
+        or job.workspace_id != approval_request.workspace_id
+        or approval_request.origin != ApprovalRequest.Origin.HARNESS
+    ):
+        return None
+    return {
+        "kind": AGENT_ACTION_TOOL,
+        "job_id": str(job.id),
+        "agent": _text(payload.get("agent", job.agent), 50),
+        "action_kind": _text(payload.get("kind", ""), 20),
+        "label": _AGENT_ACTION_UNTRUSTED_LABEL,
+        "untrusted": True,
+        "command": _text(payload.get("command", ""), _AGENT_ACTION_COMMAND_MAX_CHARS),
+        "cwd": _text(payload.get("cwd", ""), _AGENT_ACTION_CWD_MAX_CHARS),
+        "reason": _text(payload.get("reason", ""), _AGENT_ACTION_REASON_MAX_CHARS),
+        "repo_name": _text(job.repo.name, 200),
+        "branch_name": _text(job.branch_name, 255),
+    }
+
+
+def describe_agent_action_execution(approval_request):
+    action = getattr(approval_request, "harness_agent_action", None)
+    if action is None:
+        return None
+    return {
+        "answer": action.answer,
+        "answered_at": action.answered_at.isoformat() if action.answered_at else None,
+    }
+
+
 def _register():
+    register_tool(
+        ToolSpec(
+            name=AGENT_ACTION_TOOL,
+            gated=True,
+            create_execution=create_agent_action_execution,
+            dispatch=dispatch_agent_action_execution,
+            validate_request=validate_agent_action_request,
+            prepare_payload=prepare_agent_action_payload,
+            describe_execution=describe_agent_action_execution,
+            describe_request=describe_agent_action_request,
+            user_invocable=False,
+            proposable=True,
+            # The job's own work log covers the run; an escalation is audit-
+            # worthy (approval + answer rows), not memory-worthy.
+            records_work_log=False,
+            approval_ttl_seconds=600,
+        )
+    )
     register_tool(
         ToolSpec(
             name="harness_implement",

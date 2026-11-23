@@ -45,8 +45,13 @@ set -eu
 goal=""
 test_command=""
 base_commit=""
+driver=""
 while [ $# -gt 0 ]; do
     case "$1" in
+        --driver)
+            driver="$2"
+            shift 2
+            ;;
         --goal)
             goal="$2"
             shift 2
@@ -80,10 +85,28 @@ fi
 # shellcheck source=harness_write_mode.sh
 . "$(dirname "$0")/harness_write_mode.sh"
 
-# `2>&1`: `codex exec` writes its real transcript to stderr (branch 3
-# round 11) -- the captured value is the implementation transcript.
-run_cli() {
-    codex exec --sandbox workspace-write "$goal" 2>&1
-}
+if [ "$driver" = "app_server" ]; then
+    # Driver mode (Phase 10 brief D10): `codex app-server` speaks JSON-RPC
+    # (one JSON object per line) over this container's stdin/stdout to the
+    # host driver (backend/harness/drivers/codex_app_server.py). Its stderr
+    # is dropped so it can never interleave with protocol frames. The
+    # sandbox (workspace-write, network off, approvals on request) is set
+    # per thread/turn by the driver, never here. The app-server exits when
+    # the host closes stdin; the shared write-mode sequence then commits,
+    # tests and writes the result file exactly as for `codex exec`.
+    harness_driver_mode=true
+    run_cli() {
+        codex app-server 2>/dev/null
+    }
+elif [ -n "$driver" ]; then
+    echo "unknown driver: $driver" >&2
+    exit 64
+else
+    # `2>&1`: `codex exec` writes its real transcript to stderr (branch 3
+    # round 11) -- the captured value is the implementation transcript.
+    run_cli() {
+        codex exec --sandbox workspace-write "$goal" 2>&1
+    }
+fi
 
 harness_write_mode_main

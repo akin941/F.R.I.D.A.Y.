@@ -45,7 +45,11 @@ from ai_core.exceptions import GatewayError
 from ai_core.gateway import InferenceGateway, record_external_usage
 from ai_core.models import PromptTemplate
 from audit.services import record_audit
-from harness import container_lifecycle, ingestion, runner
+from harness import container_lifecycle, drivers, ingestion, runner
+from harness.drivers import base as driver_base
+from harness.drivers.codex_app_server import CodexAppServerDriver
+from harness.drivers.schema import load_codex_snapshot
+from harness.drivers.session import OUTCOME_COMPLETED, OUTCOME_STOPPED, DriverSession
 from harness.execution import (
     _fence_and_bound_transcript,
     _parse_claude_code_output,
@@ -211,6 +215,95 @@ def _wait_for_implementation_container(job_id, container_name, started_monotonic
     return _WAIT_OUTCOME_STATUS[outcome.result]
 
 
+# DriverError code -> this job's failure reason (Phase 10 D10: each
+# robustness failure is deterministic). A cancel maps to `killed` through the
+# `cancelled` status; the deadline to the existing `timeout`.
+_DRIVER_FAILURE_REASONS = {
+    driver_base.CODE_OVERSIZE_LINE: HarnessImplementationJob.FailureReason.DRIVER_OVERSIZE_LINE,
+    driver_base.CODE_MALFORMED_JSON: HarnessImplementationJob.FailureReason.DRIVER_MALFORMED_JSON,
+    driver_base.CODE_UNKNOWN_METHOD: HarnessImplementationJob.FailureReason.DRIVER_UNKNOWN_METHOD,
+    driver_base.CODE_EARLY_EXIT: HarnessImplementationJob.FailureReason.DRIVER_EARLY_EXIT,
+    driver_base.CODE_TOO_MANY_LINES: HarnessImplementationJob.FailureReason.DRIVER_TOO_MANY_LINES,
+    driver_base.CODE_PROTOCOL_ERROR: HarnessImplementationJob.FailureReason.DRIVER_PROTOCOL_ERROR,
+    driver_base.CODE_TURN_FAILED: HarnessImplementationJob.FailureReason.DRIVER_TURN_FAILED,
+    driver_base.CODE_DEADLINE: HarnessImplementationJob.FailureReason.TIMEOUT,
+}
+
+
+def build_driver(driver_name, *, deadline):
+    """The driver instance for `driver_name`. A seam: tests replace it to
+    inject limits or a clock; production code always gets the pinned
+    snapshot."""
+    if driver_name == drivers.DRIVER_CODEX_APP_SERVER:
+        return CodexAppServerDriver(
+            snapshot=load_codex_snapshot(settings.HARNESS_CODEX_APP_SERVER_VERSION),
+            deadline=deadline,
+            poll_seconds=float(settings.HARNESS_CANCEL_POLL_SECONDS),
+        )
+    raise drivers.DriverConfigurationError(f"no driver implementation for {driver_name!r}")
+
+
+def _run_with_driver(
+    job, driver_name, *, image, workspace_dir, base_sha, cli_env, container_name, started_monotonic
+):
+    """Phase 10 D10: launch the interactive container, run the driver
+    session (handshake, one turn with the goal, escalations through
+    `harness_agent_action`, usage per turn), then end the protocol phase
+    and let the wrapper finish exactly as on the CLI path: the job's
+    existing wait loop (runtime brake, cancel flag, confirmed exit code)
+    waits for the commit, the test run and the result file. Any driver
+    failure tears the container down and fails closed with a
+    deterministic reason. Returns `(status, failure_reason, report)`."""
+    deadline = started_monotonic + settings.HARNESS_MAX_JOB_SECONDS
+    try:
+        driver = build_driver(driver_name, deadline=deadline)
+    except (OSError, ValueError) as exc:
+        raise drivers.DriverConfigurationError(f"driver snapshot unavailable: {exc}") from exc
+    container = runner.launch_interactive_container(
+        image=image,
+        workspace_dir=workspace_dir,
+        goal=job.goal,
+        test_command=job.repo_test_command,
+        base_sha=base_sha,
+        cli_env=cli_env,
+        name=container_name,
+        driver=driver_name,
+    )
+    session = DriverSession(
+        job=job,
+        driver=driver,
+        deadline=deadline,
+        should_stop=lambda: HarnessImplementationJob.objects.filter(
+            pk=job.pk, cancel_requested=True
+        ).exists(),
+    )
+    report = session.run(container, job.goal)
+    container.close_stdin()
+    if report.outcome != OUTCOME_COMPLETED:
+        container.kill()
+        _teardown_container(container_name)
+        if report.outcome == OUTCOME_STOPPED:
+            return "cancelled", HarnessImplementationJob.FailureReason.KILLED, report
+        reason = _DRIVER_FAILURE_REASONS.get(
+            report.code, HarnessImplementationJob.FailureReason.DRIVER_PROTOCOL_ERROR
+        )
+        return "failed", reason, report
+    try:
+        status, failure_reason = _wait_for_implementation_container(
+            job.pk, container_name, started_monotonic
+        )
+    except runner.RunnerError:
+        # The report is returned either way, so the turns' own usage rows
+        # stay the run's only ModelUsage rows.
+        logger.exception("Harness implementation job %s wait failed", job.pk)
+        status, failure_reason = "failed", HarnessImplementationJob.FailureReason.RUNNER_ERROR
+    if status != "succeeded":
+        container.kill()
+    else:
+        container.reap()
+    return status, failure_reason, report
+
+
 def _fail_and_cleanup(
     job,
     failure_reason,
@@ -223,6 +316,7 @@ def _fail_and_cleanup(
     output_tokens=0,
     estimated_cost=None,
     context_report=None,
+    record_usage=True,
 ):
     """Shared terminal-failure path for every non-success outcome below --
     cleans up the worktree immediately (brief round-2/3 MEDIUM finding:
@@ -290,22 +384,25 @@ def _fail_and_cleanup(
             locked, update_fields, worktree_cleanup_confirmed=worktree_cleanup_confirmed
         )
         locked.save(update_fields=update_fields)
-        record_external_usage(
-            workspace=locked.workspace,
-            purpose="harness.implementation",
-            backend=f"harness_cli:{locked.agent}",
-            routing_reason=locked.agent_routing_reason,
-            input_tokens=input_tokens,
-            output_tokens=output_tokens,
-            estimated_cost=estimated_cost if estimated_cost is not None else Decimal("0"),
-            latency_ms=latency_ms,
-            success=False,
-            actor=locked.created_by,
-            error_type=locked.failure_reason,
-            context_report=context_report
-            if context_report is not None
-            else {"usage_source": "unavailable"},
-        )
+        # `record_usage=False` for a driver run: its session already wrote
+        # one ModelUsage row per turn (Phase 10 D10).
+        if record_usage:
+            record_external_usage(
+                workspace=locked.workspace,
+                purpose="harness.implementation",
+                backend=f"harness_cli:{locked.agent}",
+                routing_reason=locked.agent_routing_reason,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                estimated_cost=estimated_cost if estimated_cost is not None else Decimal("0"),
+                latency_ms=latency_ms,
+                success=False,
+                actor=locked.created_by,
+                error_type=locked.failure_reason,
+                context_report=context_report
+                if context_report is not None
+                else {"usage_source": "unavailable"},
+            )
     record_audit(
         action=f"harness.implementation_job_{locked.status}",
         actor=locked.created_by,
@@ -341,7 +438,13 @@ def run_harness_implementation_job(job_id):
     removal_confirmed = True
     raw_output = ""
     cli_env = {}
+    driver_name = drivers.DRIVER_CLI
+    driver_report = None
     try:
+        # Phase 10 D10: the driver is chosen (and its d4 gate re-checked)
+        # before anything is cloned; a misconfigured driver fails closed.
+        driver_name = drivers.selected_driver(job.agent)
+        HarnessImplementationJob.objects.filter(pk=job.pk).update(driver=driver_name)
         # Codex code-review P2, branch 2 round 2: an earlier version
         # passed an empty `clone_env`, so any repo relying on
         # `HARNESS_GIT_SSH_KEY_PATH` (the same credential
@@ -383,33 +486,50 @@ def run_harness_implementation_job(job_id):
         base_sha = runner.resolve_commit_sha(repo_dir, "HEAD")
         image = runner.image_for_agent(job.agent)
         cli_env = _resolve_cli_env(job.agent)
-        runner.launch_implementation_container(
-            image=image,
-            workspace_dir=workspace_dir,
-            goal=job.goal,
-            # `job.repo_test_command` (Codex code-review P2, branch 2
-            # round 6), NOT `job.repo.test_command` -- the live FK read
-            # would let a curator edit the repo's `test_command` to
-            # blank/whitespace after this job was already approved,
-            # reaching the wrapper as a no-op that a shell exits 0 for.
-            # Same snapshot-at-creation rationale as `repo_git_url`/
-            # `repo_default_branch` above.
-            test_command=job.repo_test_command,
-            base_sha=base_sha,
-            cli_env=cli_env,
-            name=container_name,
-        )
-        status, failure_reason = _wait_for_implementation_container(
-            job.pk, container_name, started_monotonic
-        )
-        # Captured on EVERY post-launch outcome (Codex code-review P2,
-        # branch 6 round 2): a crashed/timed-out/cancelled CLI's output is
-        # exactly the diagnostic the stored transcript exists for. Always
-        # before the `finally` removal below.
-        try:
-            raw_output = runner.capture_logs(container_name)
-        except runner.RunnerError:
-            logger.exception("Harness implementation job %s logs unavailable", job_id)
+        if driver_name == drivers.DRIVER_CLI:
+            runner.launch_implementation_container(
+                image=image,
+                workspace_dir=workspace_dir,
+                goal=job.goal,
+                # `job.repo_test_command` (Codex code-review P2, branch 2
+                # round 6), NOT `job.repo.test_command` -- the live FK read
+                # would let a curator edit the repo's `test_command` to
+                # blank/whitespace after this job was already approved,
+                # reaching the wrapper as a no-op that a shell exits 0 for.
+                # Same snapshot-at-creation rationale as `repo_git_url`/
+                # `repo_default_branch` above.
+                test_command=job.repo_test_command,
+                base_sha=base_sha,
+                cli_env=cli_env,
+                name=container_name,
+            )
+            status, failure_reason = _wait_for_implementation_container(
+                job.pk, container_name, started_monotonic
+            )
+            # Captured on EVERY post-launch outcome (Codex code-review P2,
+            # branch 6 round 2): a crashed/timed-out/cancelled CLI's output
+            # is exactly the diagnostic the stored transcript exists for.
+            # Always before the `finally` removal below.
+            try:
+                raw_output = runner.capture_logs(container_name)
+            except runner.RunnerError:
+                logger.exception("Harness implementation job %s logs unavailable", job_id)
+        else:
+            # Phase 10 D10: a long-lived driver session instead of the
+            # one-shot CLI. Its transcript (the agent's own messages) and
+            # per-turn usage come from the session, never from container
+            # stdout after the protocol phase.
+            status, failure_reason, driver_report = _run_with_driver(
+                job,
+                driver_name,
+                image=image,
+                workspace_dir=workspace_dir,
+                base_sha=base_sha,
+                cli_env=cli_env,
+                container_name=container_name,
+                started_monotonic=started_monotonic,
+            )
+            raw_output = driver_report.transcript
         # Cost accounting reads the same capture (mirrors
         # `harness.execution._finalize`): the CLI's own stdout is framed by
         # the wrapper, separate from its result file; it must be read before
@@ -418,9 +538,18 @@ def run_harness_implementation_job(job_id):
     except runner.RunnerError:
         logger.exception("Harness implementation job %s failed to launch", job_id)
         status, failure_reason = "failed", HarnessImplementationJob.FailureReason.RUNNER_ERROR
+    except drivers.DriverConfigurationError:
+        logger.exception("Harness implementation job %s driver refused", job_id)
+        status, failure_reason = "failed", HarnessImplementationJob.FailureReason.RUNNER_ERROR
     finally:
         removal_confirmed = _safe_remove_container(container_name)
 
+    # A driver run records its own ModelUsage rows (one per turn, a failure
+    # row for a turn or a run without a usage report); the CLI path records
+    # one row at its terminal transition below. A driver run that never
+    # reached its session (the clone or the launch failed) falls back to the
+    # CLI path's single failure row, so it is still visible.
+    driver_mode = driver_report is not None
     if status != "succeeded":
         if raw_output:
             # The raw logs themselves, bounded and scrubbed of CLI keys: on a
@@ -437,6 +566,7 @@ def run_harness_implementation_job(job_id):
             workspace_dir=workspace_dir,
             removal_confirmed=removal_confirmed,
             started_monotonic=started_monotonic,
+            record_usage=not driver_mode,
         )
         return
 
@@ -446,11 +576,17 @@ def run_harness_implementation_job(job_id):
         Decimal("0"),
         {"usage_source": "unavailable"},
     )
-    cli_output = extract_framed_cli_output(raw_output)
-    if cli_output:
-        input_tokens, output_tokens, estimated_cost, context_report = _parse_claude_code_output(
-            cli_output
-        )
+    if driver_mode:
+        cli_output = driver_report.transcript
+        input_tokens = driver_report.input_tokens
+        output_tokens = driver_report.output_tokens
+        context_report = driver_report.context_report(driver_name)
+    else:
+        cli_output = extract_framed_cli_output(raw_output)
+        if cli_output:
+            input_tokens, output_tokens, estimated_cost, context_report = _parse_claude_code_output(
+                cli_output
+            )
     # Stored before any further decision (Phase 3 branch 6), mirroring the
     # discovery/review "persist the transcript first" discipline: the
     # wrapper-framed CLI output when present, else the bounded raw logs so
@@ -471,6 +607,8 @@ def run_harness_implementation_job(job_id):
         "output_tokens": output_tokens,
         "estimated_cost": estimated_cost,
         "context_report": context_report,
+        # Driver runs already recorded one row per turn.
+        "record_usage": not driver_mode,
     }
 
     try:
@@ -555,7 +693,11 @@ def run_harness_implementation_job(job_id):
     # above (mirrors discovery's own ordering: a job that failed for a
     # more specific reason is reported as that reason, not budget, even
     # if it also happened to run over budget).
-    if estimated_cost > Decimal(str(settings.HARNESS_MAX_JOB_COST)):
+    # Driver runs report tokens but no cost (Codex app-server): the token
+    # brake bounds them instead (`HARNESS_DRIVER_MAX_TOKENS`).
+    if estimated_cost > Decimal(str(settings.HARNESS_MAX_JOB_COST)) or (
+        driver_mode and driver_report.total_tokens > settings.HARNESS_DRIVER_MAX_TOKENS
+    ):
         _fail_and_cleanup(
             job,
             HarnessImplementationJob.FailureReason.BUDGET_EXCEEDED,
@@ -576,7 +718,8 @@ def run_harness_implementation_job(job_id):
     # `harness.execution._finalize`'s identical fail-closed check
     # (`usage_source != "cli_reported"` -> `runner_error`), checked in
     # the same order discovery uses (budget first, then availability).
-    if context_report.get("usage_source") != "cli_reported":
+    expected_usage_source = "driver_reported" if driver_mode else "cli_reported"
+    if context_report.get("usage_source") != expected_usage_source:
         _fail_and_cleanup(
             job,
             HarnessImplementationJob.FailureReason.RUNNER_ERROR,
@@ -695,20 +838,21 @@ def run_harness_implementation_job(job_id):
             # Same transaction as the transition: `pending_review` never
             # commits without the review that will resolve it.
             review = create_pending_review(locked, review_agent)
-            record_external_usage(
-                workspace=locked.workspace,
-                purpose="harness.implementation",
-                backend=f"harness_cli:{locked.agent}",
-                routing_reason=locked.agent_routing_reason,
-                input_tokens=input_tokens,
-                output_tokens=output_tokens,
-                estimated_cost=estimated_cost,
-                latency_ms=latency_ms,
-                success=True,
-                actor=locked.created_by,
-                error_type="",
-                context_report=context_report,
-            )
+            if not driver_mode:
+                record_external_usage(
+                    workspace=locked.workspace,
+                    purpose="harness.implementation",
+                    backend=f"harness_cli:{locked.agent}",
+                    routing_reason=locked.agent_routing_reason,
+                    input_tokens=input_tokens,
+                    output_tokens=output_tokens,
+                    estimated_cost=estimated_cost,
+                    latency_ms=latency_ms,
+                    success=True,
+                    actor=locked.created_by,
+                    error_type="",
+                    context_report=context_report,
+                )
 
     if cancelled_before_review:
         _fail_and_cleanup(

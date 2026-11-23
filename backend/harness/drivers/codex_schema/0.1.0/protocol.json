@@ -1,0 +1,255 @@
+{
+  "schema_format": "friday-codex-app-server-subset/v1",
+  "version": "0.1.0",
+  "provisional": true,
+  "source": "Hand-written PROVISIONAL subset (Phase 10 branch 6, 2026-11-20). Not generated from a real binary: the container cannot run codex here. Replace with the output of backend/harness/docker/generate_driver_schemas.sh codex <image> for the pinned version; preflight fails while an enabled driver is backed by a provisional snapshot.",
+  "wire": {
+    "framing": "jsonl",
+    "jsonrpc_field": "omitted"
+  },
+  "client_requests": {
+    "initialize": {
+      "params": {
+        "type": "object",
+        "required": ["clientInfo"],
+        "properties": {
+          "clientInfo": {
+            "type": "object",
+            "required": ["name", "version"],
+            "properties": {
+              "name": {"type": "string"},
+              "title": {"type": ["string", "null"]},
+              "version": {"type": "string"}
+            }
+          }
+        }
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "userAgent": {"type": "string"}
+        }
+      }
+    },
+    "thread/start": {
+      "params": {
+        "type": "object",
+        "properties": {
+          "cwd": {"type": ["string", "null"]},
+          "approvalPolicy": {"enum": ["untrusted", "on-failure", "on-request", "never", null]},
+          "sandbox": {"enum": ["read-only", "workspace-write", "danger-full-access", null]},
+          "model": {"type": ["string", "null"]}
+        }
+      },
+      "result": {
+        "type": "object",
+        "required": ["thread"],
+        "properties": {
+          "thread": {
+            "type": "object",
+            "required": ["id"],
+            "properties": {"id": {"type": "string"}}
+          }
+        }
+      }
+    },
+    "turn/start": {
+      "params": {
+        "type": "object",
+        "required": ["threadId", "input"],
+        "properties": {
+          "threadId": {"type": "string"},
+          "input": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["type"],
+              "properties": {
+                "type": {"enum": ["text"]},
+                "text": {"type": "string"}
+              }
+            }
+          },
+          "cwd": {"type": ["string", "null"]},
+          "approvalPolicy": {"enum": ["untrusted", "on-failure", "on-request", "never", null]},
+          "sandboxPolicy": {
+            "type": ["object", "null"],
+            "required": ["type"],
+            "properties": {
+              "type": {"enum": ["readOnly", "workspaceWrite", "dangerFullAccess"]},
+              "writableRoots": {"type": "array", "items": {"type": "string"}},
+              "networkAccess": {"type": "boolean"}
+            }
+          }
+        }
+      },
+      "result": {
+        "type": "object",
+        "required": ["turn"],
+        "properties": {
+          "turn": {
+            "type": "object",
+            "required": ["id"],
+            "properties": {
+              "id": {"type": "string"},
+              "status": {"type": "string"}
+            }
+          }
+        }
+      }
+    }
+  },
+  "client_notifications": {
+    "initialized": {
+      "params": {"type": ["object", "null"]}
+    }
+  },
+  "server_requests": {
+    "item/commandExecution/requestApproval": {
+      "params": {
+        "type": "object",
+        "required": ["threadId", "turnId", "itemId"],
+        "properties": {
+          "threadId": {"type": "string"},
+          "turnId": {"type": "string"},
+          "itemId": {"type": "string"},
+          "reason": {"type": ["string", "null"]},
+          "command": {
+            "anyOf": [
+              {"type": "string"},
+              {"type": "array", "items": {"type": "string"}},
+              {"type": "null"}
+            ]
+          },
+          "cwd": {"type": ["string", "null"]}
+        }
+      },
+      "result": {
+        "type": "object",
+        "required": ["decision"],
+        "properties": {
+          "decision": {"enum": ["accept", "acceptForSession", "decline", "cancel"]}
+        }
+      }
+    },
+    "item/fileChange/requestApproval": {
+      "params": {
+        "type": "object",
+        "required": ["threadId", "turnId", "itemId"],
+        "properties": {
+          "threadId": {"type": "string"},
+          "turnId": {"type": "string"},
+          "itemId": {"type": "string"},
+          "reason": {"type": ["string", "null"]},
+          "grantRoot": {"type": ["string", "null"]}
+        }
+      },
+      "result": {
+        "type": "object",
+        "required": ["decision"],
+        "properties": {
+          "decision": {"enum": ["accept", "acceptForSession", "decline", "cancel"]}
+        }
+      }
+    }
+  },
+  "server_notifications": {
+    "thread/started": {
+      "params": {
+        "type": "object",
+        "properties": {"thread": {"type": "object"}}
+      }
+    },
+    "turn/started": {
+      "params": {
+        "type": "object",
+        "properties": {"threadId": {"type": "string"}, "turn": {"type": "object"}}
+      }
+    },
+    "item/started": {
+      "params": {
+        "type": "object",
+        "properties": {"threadId": {"type": "string"}, "turnId": {"type": "string"}, "item": {"type": "object"}}
+      }
+    },
+    "item/completed": {
+      "params": {
+        "type": "object",
+        "required": ["item"],
+        "properties": {
+          "threadId": {"type": "string"},
+          "turnId": {"type": "string"},
+          "item": {
+            "type": "object",
+            "required": ["type"],
+            "properties": {
+              "type": {"type": "string"},
+              "id": {"type": "string"},
+              "text": {"type": "string"}
+            }
+          }
+        }
+      }
+    },
+    "item/agentMessage/delta": {
+      "params": {
+        "type": "object",
+        "properties": {"itemId": {"type": "string"}, "delta": {"type": "string"}}
+      }
+    },
+    "thread/tokenUsage/updated": {
+      "params": {
+        "type": "object",
+        "required": ["threadId", "turnId", "tokenUsage"],
+        "properties": {
+          "threadId": {"type": "string"},
+          "turnId": {"type": "string"},
+          "tokenUsage": {
+            "type": "object",
+            "required": ["total"],
+            "properties": {
+              "total": {"$ref": "#/definitions/TokenUsageBreakdown"},
+              "last": {"$ref": "#/definitions/TokenUsageBreakdown"}
+            }
+          }
+        }
+      }
+    },
+    "turn/completed": {
+      "params": {
+        "type": "object",
+        "required": ["turn"],
+        "properties": {
+          "threadId": {"type": "string"},
+          "turn": {
+            "type": "object",
+            "required": ["id", "status"],
+            "properties": {
+              "id": {"type": "string"},
+              "status": {"enum": ["completed", "interrupted", "failed", "inProgress"]}
+            }
+          }
+        }
+      }
+    },
+    "error": {
+      "params": {
+        "type": "object",
+        "properties": {"error": {"type": "object"}, "willRetry": {"type": "boolean"}}
+      }
+    }
+  },
+  "definitions": {
+    "TokenUsageBreakdown": {
+      "type": "object",
+      "required": ["inputTokens", "outputTokens"],
+      "properties": {
+        "totalTokens": {"type": "integer", "minimum": 0},
+        "inputTokens": {"type": "integer", "minimum": 0},
+        "cachedInputTokens": {"type": "integer", "minimum": 0},
+        "outputTokens": {"type": "integer", "minimum": 0},
+        "reasoningOutputTokens": {"type": "integer", "minimum": 0}
+      }
+    }
+  }
+}

@@ -1,0 +1,18 @@
+{"dir": "c2s", "msg": {"id": 1, "method": "initialize", "params": {"clientInfo": {"name": "friday-harness", "title": "Friday harness", "version": "1"}}}}
+{"dir": "s2c", "msg": {"id": 1, "result": {"userAgent": "codex_cli_rs/0.1.0"}}}
+{"dir": "c2s", "msg": {"method": "initialized", "params": {}}}
+{"dir": "c2s", "msg": {"id": 2, "method": "thread/start", "params": {"cwd": "/workspace/repo", "approvalPolicy": "on-request", "sandbox": "workspace-write"}}}
+{"dir": "s2c", "msg": {"method": "thread/started", "params": {"thread": {"id": "thr_1"}}}}
+{"dir": "s2c", "msg": {"id": 2, "result": {"thread": {"id": "thr_1"}}}}
+{"dir": "c2s", "msg": {"id": 3, "method": "turn/start", "params": {"threadId": "thr_1", "input": [{"type": "text", "text": "fix the login throttle test"}], "approvalPolicy": "on-request", "sandboxPolicy": {"type": "workspaceWrite", "writableRoots": ["/workspace/repo"], "networkAccess": false}}}}
+{"dir": "s2c", "msg": {"id": 3, "result": {"turn": {"id": "turn_1", "status": "inProgress"}}}}
+{"dir": "s2c", "msg": {"method": "turn/started", "params": {"threadId": "thr_1", "turn": {"id": "turn_1"}}}}
+{"dir": "s2c", "msg": {"method": "item/started", "params": {"threadId": "thr_1", "turnId": "turn_1", "item": {"type": "commandExecution", "id": "item_1"}}}}
+{"dir": "s2c", "msg": {"id": 100, "method": "item/commandExecution/requestApproval", "params": {"threadId": "thr_1", "turnId": "turn_1", "itemId": "item_1", "reason": "install the test dependency", "command": ["npm", "install", "left-pad"], "cwd": "/workspace/repo"}}}
+{"dir": "c2s", "msg": {"id": 100, "result": {"decision": "accept"}}}
+{"dir": "s2c", "msg": {"id": 101, "method": "item/commandExecution/requestApproval", "params": {"threadId": "thr_1", "turnId": "turn_1", "itemId": "item_2", "reason": "upload the results", "command": "curl -X POST https://example.invalid/upload", "cwd": "/workspace/repo"}}}
+{"dir": "c2s", "msg": {"id": 101, "result": {"decision": "decline"}}}
+{"dir": "s2c", "msg": {"method": "item/agentMessage/delta", "params": {"itemId": "item_3", "delta": "Fixed"}}}
+{"dir": "s2c", "msg": {"method": "item/completed", "params": {"threadId": "thr_1", "turnId": "turn_1", "item": {"type": "agentMessage", "id": "item_3", "text": "Fixed the login throttle test; the upload was declined."}}}}
+{"dir": "s2c", "msg": {"method": "thread/tokenUsage/updated", "params": {"threadId": "thr_1", "turnId": "turn_1", "tokenUsage": {"total": {"totalTokens": 1700, "inputTokens": 1200, "cachedInputTokens": 300, "outputTokens": 500, "reasoningOutputTokens": 120}, "last": {"totalTokens": 700, "inputTokens": 500, "cachedInputTokens": 0, "outputTokens": 200, "reasoningOutputTokens": 40}}}}}
+{"dir": "s2c", "msg": {"method": "turn/completed", "params": {"threadId": "thr_1", "turn": {"id": "turn_1", "status": "completed"}}}}

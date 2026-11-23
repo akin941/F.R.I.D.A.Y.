@@ -520,6 +520,19 @@ type = "forbidden"
 source_modules = ["harness"]
 forbidden_modules = ["deploys"]
 
+# Phase 10 brief D14 (branch 6): the harness v3 drivers talk to an
+# agent-controlled process, so their own imports stay narrow: `harness`,
+# `core`, `approvals` (the `harness_agent_action` gate), `ai_core`
+# (`record_external_usage` only, never a provider SDK) and `audit`. Direct
+# imports only (`allow_indirect_imports`): `harness.models` itself imports
+# `memory.models`, which is the harness app's edge, not the drivers'.
+[[tool.importlinter.contracts]]
+name = "harness.drivers may import only harness, core, approvals, ai_core, audit (Phase 10 D14)"
+type = "forbidden"
+source_modules = ["harness.drivers"]
+forbidden_modules = ["config", "accounts", "workspaces", "assistant", "memory", "knowledge", "tasks", "tools", "agents", "skills", "integrations", "connectors", "deploys", "ops", "voice", "hud", "nodes", "mcp"]
+allow_indirect_imports = true
+
 # `ops` (Phase 5 closeout: `manage.py preflight`) is a leaf like harness:
 # it reads kernel state (gateway, connector pins, the database) to check a
 # running stack, and nothing imports it -- operations tooling must never

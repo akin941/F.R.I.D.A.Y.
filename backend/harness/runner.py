@@ -1038,6 +1038,148 @@ def launch_implementation_container(
     return result.stdout.strip()
 
 
+class InteractiveContainer:
+    """A container launched by `launch_interactive_container`: `docker run
+    -i` in the foreground, its stdio piped to this process. `stdin`/`stdout`
+    are the driver's transport (binary, unbuffered); `name` is the same
+    deterministic handle every other Docker call in this module uses, so the
+    job's existing wait loop, teardown and removal work unchanged.
+    `close_stdin` ends the protocol phase (the agent sees EOF, the wrapper
+    goes on to its test run); `kill` is the cancel/brake path."""
+
+    def __init__(self, *, name, process):
+        self.name = name
+        self.process = process
+
+    @property
+    def stdin(self):
+        return self.process.stdin
+
+    @property
+    def stdout(self):
+        return self.process.stdout
+
+    def close_stdin(self):
+        try:
+            if self.process.stdin is not None and not self.process.stdin.closed:
+                self.process.stdin.close()
+        except OSError:
+            pass
+
+    def reap(self, timeout=_DOCKER_CONTROL_TIMEOUT_SECONDS):
+        """Waits for the `docker run` client after the container exited on
+        its own; kills it if it lingers."""
+        try:
+            self.process.wait(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            self.process.kill()
+
+    def kill(self):
+        """Kills the container (SIGKILL through the daemon) and the local
+        `docker run` client. Best effort: the caller still removes it."""
+        try:
+            kill_container(self.name)
+        except (subprocess.TimeoutExpired, OSError):
+            logger.warning("docker kill %s failed", self.name)
+        self.close_stdin()
+        try:
+            self.process.kill()
+        except OSError:
+            pass
+        try:
+            self.process.wait(timeout=_DOCKER_CONTROL_TIMEOUT_SECONDS)
+        except subprocess.TimeoutExpired:
+            logger.warning("docker client for %s did not exit after kill", self.name)
+
+
+# The docker client's own environment for an interactive launch: what it
+# needs to reach the daemon, nothing of the worker's other ambient state.
+_DOCKER_CLIENT_ENV_KEYS = ("PATH", "HOME", "DOCKER_HOST", "DOCKER_CONFIG", "DOCKER_CONTEXT")
+
+
+def launch_interactive_container(
+    *, image, workspace_dir, goal, test_command, base_sha, cli_env, name, driver
+):
+    """Phase 10 brief D10: the driver counterpart of
+    `launch_implementation_container`. The same hardening flags (`--pull
+    never`, `--cap-drop ALL`, `no-new-privileges`, `--user` host uid/gid,
+    the restricted-egress network, memory/CPU/PID caps, the read-write
+    `/workspace` mount, argv only), plus `-i` with stdin/stdout pipes: the
+    container is NOT detached, the driver speaks to the agent over this
+    process's pipes for the whole protocol phase. `--driver <name>` tells
+    the wrapper to run the agent's long-lived server mode with the
+    container's stdio (`harness_write_mode.sh`, driver mode) instead of a
+    one-shot CLI; the wrapper still owns the commit, the test run and the
+    result file afterwards.
+
+    Secrets: a foreground `docker run` keeps reading its `--env-file` after
+    this call returns, so the file could not be deleted right away. Each
+    `cli_env` key is passed instead as a bare `--env KEY` (name only -- the
+    value never appears in argv) and the docker client takes the value from
+    its own, minimal environment (`_DOCKER_CLIENT_ENV_KEYS` plus the keys).
+
+    The deadline and the kill path are the caller's: the driver session
+    enforces `HARNESS_MAX_JOB_SECONDS` and the cancel flag, and calls
+    `InteractiveContainer.kill` (or the job's existing teardown) on either.
+    """
+    argv = [
+        "docker",
+        "run",
+        "--interactive",
+        "--pull",
+        "never",
+        "--cap-drop",
+        "ALL",
+        "--security-opt",
+        "no-new-privileges",
+        "--user",
+        f"{os.getuid()}:{os.getgid()}",
+        "--name",
+        name,
+        "--network",
+        settings.HARNESS_DOCKER_NETWORK,
+        "--memory",
+        settings.HARNESS_CONTAINER_MEMORY,
+        "--cpus",
+        settings.HARNESS_CONTAINER_CPUS,
+        "--pids-limit",
+        str(settings.HARNESS_CONTAINER_PIDS_LIMIT),
+        "--mount",
+        f"type=bind,source={workspace_dir},target=/workspace",
+        "--workdir",
+        "/workspace/repo",
+    ]
+    client_env = {key: os.environ[key] for key in _DOCKER_CLIENT_ENV_KEYS if key in os.environ}
+    for key, value in (cli_env or {}).items():
+        argv.extend(["--env", key])
+        client_env[key] = value
+    argv.extend(
+        [
+            image,
+            "--driver",
+            driver,
+            "--goal",
+            goal,
+            "--test-command",
+            test_command,
+            "--base-commit",
+            base_sha,
+        ]
+    )
+    try:
+        process = subprocess.Popen(
+            argv,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            env=client_env,
+            bufsize=0,
+        )
+    except OSError as exc:
+        raise RunnerError(f"interactive container launch failed: {exc}") from exc
+    return InteractiveContainer(name=name, process=process)
+
+
 def launch_graphify_container(*, image, clone_dir, out_dir, name):
     """Phase 8B branch 5 (brief D10): the Graphify AST-only container,
     started **detached** like `launch_container`. It keeps every
