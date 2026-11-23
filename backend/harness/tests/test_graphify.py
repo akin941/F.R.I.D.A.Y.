@@ -528,6 +528,15 @@ def test_lock_pins_graphifyy_by_name_version_and_the_manifest_hash():
     assert version == "0.9.103" and hashes == [PINNED_WHEEL_SHA256]
     # the typosquat-prone neighbours are never installed
     assert "graphify" not in pins
+
+
+def test_the_image_version_label_matches_the_lock_pin():
+    """Phase 8B closeout: preflight's `graphify` check compares the local
+    image's `org.friday.graphify.version` label with the lock's pin."""
+    dockerfile = (DOCKER_DIR / "graphify.Dockerfile").read_text()
+    labels = re.findall(r'^LABEL org\.friday\.graphify\.version="([^"]+)"$', dockerfile, re.M)
+    version, _ = _requirements((DOCKER_DIR / "graphify.lock.txt").read_text())["graphifyy"]
+    assert labels == [version]
     manifest = (REPO_ROOT / "docs" / "mcp" / "graphify.md").read_text()
     assert "graphifyy==0.9.103" in manifest and PINNED_WHEEL_SHA256 in manifest
     # every transitive wheel is locked, and no LLM SDK is in the set

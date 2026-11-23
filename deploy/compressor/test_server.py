@@ -1,10 +1,12 @@
 """The sidecar server's refusals (brief D11): over 1 MB, any path but
-`/compress`, any method but POST, malformed bodies; a count-changing
-compressor is reverted. Uses a fake compress function, so it runs without
+`/compress` and `/healthz`, any method but POST (GET for `/healthz`),
+malformed bodies; a count-changing compressor is reverted; `/healthz`
+reports the telemetry and offline env (Phase 8B closeout). Uses a fake compress function, so it runs without
 Headroom (`python test_server.py` or pytest)."""
 
 import http.client
 import json
+import os
 import threading
 
 import server
@@ -58,11 +60,38 @@ def test_compress_round_trip():
 def test_refuses_other_paths_and_methods():
     httpd = _serve()
     try:
-        for path in ("/", "/compress/", "/v1/messages", "/compress?x=1", "/healthz"):
+        for path in ("/", "/compress/", "/v1/messages", "/compress?x=1", "/healthz/"):
             assert _request(httpd, "POST", path, _body(GOOD))[0] == 404, path
         assert _request(httpd, "GET", "/compress")[0] == 405
         assert _request(httpd, "GET", "/anything")[0] == 404
+        assert _request(httpd, "GET", "/healthz?x=1")[0] == 404
+        assert _request(httpd, "POST", "/healthz", _body(GOOD))[0] == 405
+        assert _request(httpd, "DELETE", "/healthz")[0] == 405
     finally:
+        httpd.shutdown()
+
+
+def test_healthz_reports_telemetry_off_and_offline():
+    """Phase 8B closeout: preflight's `compressor` check reads `/healthz`;
+    it calls no compressor and reports nothing but the env verdict."""
+    calls = []
+
+    def counting(messages, model):
+        calls.append(messages)
+        return _fake(messages, model)
+
+    httpd = _serve(counting)
+    saved = os.environ.get("HEADROOM_TELEMETRY")
+    try:
+        assert _request(httpd, "GET", "/healthz") == (
+            200,
+            {"status": "ok", "telemetry": "off", "offline": True},
+        )
+        os.environ["HEADROOM_TELEMETRY"] = "on"
+        assert _request(httpd, "GET", "/healthz")[1]["telemetry"] == "on"
+        assert calls == []
+    finally:
+        os.environ["HEADROOM_TELEMETRY"] = saved if saved is not None else "off"
         httpd.shutdown()
 
 

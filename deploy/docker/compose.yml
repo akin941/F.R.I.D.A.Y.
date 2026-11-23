@@ -259,7 +259,8 @@ services:
     networks: ["connectors", "connectors-egress"]
 
   # Headroom compressor (Phase 8B branch 6, brief D11, docs/mcp/headroom.md):
-  # a stdlib HTTP server exposing only `POST /compress`, image
+  # a stdlib HTTP server exposing only `POST /compress` (and the env-only
+  # `GET /healthz` preflight reads, Phase 8B closeout), image
   # deploy/compressor/Dockerfile (hash-locked wheels, no `litellm`). Opt-in
   # profile (`docker compose --profile compression up -d compressor`). Only
   # on the internal `compression` network shared with web and worker: no

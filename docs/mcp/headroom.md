@@ -62,6 +62,11 @@ apply.
   `{"model", "messages": [{"role": "assistant", "content"}]}`. Any other
   path (404), method (405), a body over 1 MB (413), extra keys, another role
   or a non-string content (400) is refused (`deploy/compressor/test_server.py`).
+- `GET /healthz` (Phase 8B closeout, 2026-11-20): `{"status": "ok",
+  "telemetry": "off"|"on", "offline": bool}`, computed from the process
+  environment only (no Headroom call, no input). `manage.py preflight`
+  (`compressor`) reads it while `AI_COMPRESSION_ENABLED` is on and fails on
+  telemetry on or not offline.
 - No proxy mode, no `wrap`, no MCP server, no CLI, no Kompress model
   (`kompress_model="disabled"`).
 
