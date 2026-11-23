@@ -10,6 +10,7 @@
         "type": "result"
       }
     ],
+    "reader_calls": 0,
     "windows_shown": 0
   },
   "name": "v2_grant_envelope_domain",

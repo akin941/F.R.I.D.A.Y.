@@ -9,7 +9,8 @@
         "status": "refused",
         "type": "result"
       }
-    ]
+    ],
+    "reader_calls": 0
   },
   "name": "v2_args_outside_node_schema",
   "setup": {

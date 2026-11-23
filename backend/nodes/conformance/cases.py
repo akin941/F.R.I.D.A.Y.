@@ -22,6 +22,8 @@ A case document:
 
 A matcher is a subset of one node frame's fields, in order; the node must
 send exactly as many frames as there are matchers. `expect` may also pin
+`reader_calls` (how many times a reader ran: every case whose frames are all
+refusals or frame errors pins 0, so no reader runs on any refusal path),
 `executor_calls`, `executor_terminated`, `windows_shown`,
 `closed_reason`, `reconnect_allowed`, `absent_b64` (base64 of strings no
 frame may contain: the case files never carry a raw fake secret; executor
@@ -32,7 +34,11 @@ local policy fingerprint is unchanged and that the gateway counted no
 frame errors.
 
 The node under test is configured by the case's `setup` and the fixture
-home of `nodes.reference.fixtures.factory` (repos named `~/work/acme`, ...).
+home of `nodes.reference.fixtures.factory` (repos named `~/work/acme`, ...,
+and the synthetic Claude Code and Codex transcripts under `~/.claude` and
+`~/.codex`). For reads, both directory grants are on unless
+`setup.reader_grants` turns one off (`{"claude": false}`), and window
+titles are off unless `setup.window_titles` is true (D13 item 5).
 """
 
 import base64
@@ -175,7 +181,17 @@ def confirmation(state):
     return {"type": "confirmation", "state": state}
 
 
+def _refusals_only(frames) -> bool:
+    return bool(frames) and all(
+        m.get("type") == "result"
+        and (m.get("status") == "refused" or m.get("invocation_id", "") is None)
+        for m in frames
+    )
+
+
 def case(name, version, *, check=None, description, steps, frames, setup=None, **expect):
+    if "reader_calls" not in expect and _refusals_only(frames):
+        expect["reader_calls"] = 0
     return {
         "name": name,
         "version": version,
@@ -220,6 +236,7 @@ def _common_cases(version):
                 }
             ],
             executor_calls=0,
+            reader_calls=1,
         )
     )
     cases.append(
@@ -370,6 +387,7 @@ def _common_cases(version):
             description="The same envelope twice: the second is a replay.",
             steps=[send(ok_read), send(ok_read)],
             frames=[{"type": "result", "status": "ok"}, refused("replay")],
+            reader_calls=1,
         )
     )
     cases.append(
@@ -484,8 +502,307 @@ def _common_cases(version):
     return cases
 
 
+# --- the readers (Phase 9 branch 3): fixture transcripts, scrub, prefixes --
+
+# Fake secrets of the fixture transcripts, assembled so no source file holds
+# one whole; the case files carry them base64 only (`absent_b64`).
+FIXTURE_SECRETS = (
+    "sk-" + "proj-FixtureFAKE0123456789abcdefGHIJKLmnopQR",
+    "ghp_" + "FixtureFAKE0123456789abcdefGHIJKLmn",
+    "AKIA" + "FIXTUREFAKE12345",
+    "Fixture" + "Pass2026x",
+    "owner.fixture@example.com",
+)
+# Text the readers must never return: tool results, file contents, reasoning,
+# summaries, meta and sidechain lines, harness markers, unknown line kinds.
+NEVER_RETURNED = (
+    "TOOL-RESULT-PHRASE",
+    "FILE-CONTENT-PHRASE",
+    "FUNCTION-OUTPUT-PHRASE",
+    "REASONING-PHRASE",
+    "SUMMARY-PHRASE",
+    "META-PHRASE",
+    "SIDECHAIN-PHRASE",
+    "MARKER-PHRASE",
+    "UNKNOWN-KIND-PHRASE",
+)
+
+
+def _absent(*texts):
+    return [base64.b64encode(t.encode("utf-8")).decode("ascii") for t in texts]
+
+
+def _ok(output):
+    return [{"type": "result", "status": "ok", "truncated": False, "output": output}]
+
+
+_ERROR = [{"type": "result", "status": "error", "refusal_code": None, "output": None}]
+
+ACME_SESSION_ROW = {
+    "session_id": "cc-acme-1",
+    "cwd": "~/work/acme",
+    "started_at": 1_795_982_400,
+    "last_activity_at": 1_795_982_520,
+    "message_count": 4,
+    "model": "claude-opus-4-5",
+    "status_hint": "idle",
+}
+FRIDAY_SESSION_ROW = {
+    "session_id": "cc-friday-1",
+    "cwd": "~/code/friday",
+    "started_at": 1_795_999_200,
+    "last_activity_at": 1_795_999_800,
+    "message_count": 2,
+    "model": "claude-sonnet-4-5",
+    "status_hint": "active",
+}
+LAST_ACME_TURN = {
+    "role": "assistant",
+    "at": 1_795_982_520,
+    "text": "Done: the test now waits for the clock. Ping [PII:email] if it fails again.",
+    "tool_calls": 0,
+    "tool_results": 0,
+}
+ACME_TURNS = [
+    {
+        "role": "user",
+        "at": 1_795_982_400,
+        "text": "Fix the flaky invoice test in acme.",
+        "tool_calls": 0,
+        "tool_results": 0,
+    },
+    {
+        "role": "assistant",
+        "at": 1_795_982_410,
+        "text": "I will look at the test first.",
+        "tool_calls": 2,
+        "tool_results": 2,
+    },
+    {
+        "role": "user",
+        "at": 1_795_982_460,
+        "text": "The staging key is [SECRET:openai_key], use it for the smoke run.",
+        "tool_calls": 0,
+        "tool_results": 0,
+    },
+    LAST_ACME_TURN,
+]
+CODEX_ACME_TURNS = [
+    {
+        "role": "user",
+        "at": 1_795_989_660,
+        "text": "Bump the acme API client; the token is [SECRET:github_token].",
+        "tool_calls": 0,
+        "tool_results": 0,
+    },
+    {
+        "role": "assistant",
+        "at": 1_795_989_720,
+        "text": "Bumped the client to 2.1.",
+        "tool_calls": 1,
+        "tool_results": 1,
+    },
+]
+WINDOWS = [
+    {
+        "bundle_id": "com.apple.Terminal",
+        "app_name": "Terminal",
+        "window_count": 2,
+        "on_screen": True,
+    },
+    {"bundle_id": "com.apple.Safari", "app_name": "Safari", "window_count": 1, "on_screen": True},
+    {"bundle_id": "com.apple.Notes", "app_name": "Notes", "window_count": 0, "on_screen": False},
+]
+
+
+def _read_case(name, capability, args, frames, *, description, setup=None, **expect):
+    return case(
+        f"v1_read_{name}",
+        1,
+        description=description,
+        setup=setup,
+        steps=[send(plain(f"v1-read-{name}", capability, args, version=1))],
+        frames=frames,
+        **expect,
+    )
+
+
+def _reader_cases():
+    return [
+        _read_case(
+            "sessions_list_cwd_prefixes",
+            "claude.sessions.list",
+            {"since_hours": 24, "limit": 50, "cwd_prefixes": ["~/work/acme"]},
+            _ok({"sessions": [ACME_SESSION_ROW]}),
+            description=(
+                "cwd_prefixes keeps only rows under the prefix at a segment boundary "
+                "(~/work/acme-secret and ~/code/friday are skipped before parsing)."
+            ),
+            reader_calls=1,
+            absent_b64=_absent("acme-secret", "cc-friday-1"),
+        ),
+        _read_case(
+            "sessions_list_since_hours",
+            "claude.sessions.list",
+            {"since_hours": 1, "limit": 50},
+            _ok({"sessions": [FRIDAY_SESSION_ROW]}),
+            description="since_hours drops sessions idle longer; activity within 300 s is active.",
+            reader_calls=1,
+        ),
+        _read_case(
+            "session_detail_scrubbed",
+            "claude.sessions.read",
+            {"session_id": "cc-acme-1", "last_turns": 20},
+            _ok({"session_id": "cc-acme-1", "turns": ACME_TURNS}),
+            description=(
+                "A session's turns: text scrubbed node-side, tool calls and results as counts "
+                "only, never tool results, file contents, meta, sidechain or summary lines."
+            ),
+            reader_calls=1,
+            absent_b64=_absent(*FIXTURE_SECRETS, *NEVER_RETURNED),
+        ),
+        _read_case(
+            "session_detail_last_turns",
+            "claude.sessions.read",
+            {"session_id": "cc-acme-1", "last_turns": 1},
+            _ok({"session_id": "cc-acme-1", "turns": [LAST_ACME_TURN]}),
+            description="last_turns keeps the newest turns.",
+            reader_calls=1,
+        ),
+        _read_case(
+            "session_not_found",
+            "claude.sessions.read",
+            {"session_id": "cc-missing-1", "last_turns": 5},
+            _ERROR,
+            description="An unknown session is an error without detail.",
+            reader_calls=1,
+        ),
+        _read_case(
+            "codex_threads_list_cwd_prefixes",
+            "codex.threads.list",
+            {"since_hours": 24, "limit": 50, "cwd_prefixes": ["~/code"]},
+            _ok(
+                {
+                    "threads": [
+                        {
+                            "thread_id": "cx-friday-1",
+                            "cwd": "~/code/friday",
+                            "started_at": 1_795_998_600,
+                            "last_activity_at": 1_795_998_720,
+                            "message_count": 2,
+                            "model": "gpt-5-codex",
+                            "status_hint": "idle",
+                        }
+                    ]
+                }
+            ),
+            description="Codex threads from session_meta, filtered by cwd_prefixes.",
+            reader_calls=1,
+            absent_b64=_absent("cx-acme-1"),
+        ),
+        _read_case(
+            "codex_thread_detail_scrubbed",
+            "codex.threads.read",
+            {"thread_id": "cx-acme-1", "last_turns": 20},
+            _ok({"thread_id": "cx-acme-1", "turns": CODEX_ACME_TURNS}),
+            description=(
+                "A Codex thread: harness markers, function outputs and reasoning are never "
+                "returned; calls are counted on the assistant turn they lead to."
+            ),
+            reader_calls=1,
+            absent_b64=_absent(*FIXTURE_SECRETS, *NEVER_RETURNED),
+        ),
+        _read_case(
+            "usage_cwd_prefixes",
+            "usage.ccusage",
+            {"period": "week", "cwd_prefixes": ["~/work/acme"]},
+            _ok(
+                {
+                    "total_usd_micros": 63_345,
+                    "tokens_in": 4_500,
+                    "tokens_out": 700,
+                    "by_project": [
+                        {
+                            "cwd": "~/work/acme",
+                            "usd_micros": 63_345,
+                            "tokens_in": 4_500,
+                            "tokens_out": 700,
+                        }
+                    ],
+                }
+            ),
+            description=(
+                "Spend per project in integer micro-USD (half-even); totals cover the "
+                "matching projects only (the nested sibling is not under the prefix)."
+            ),
+            reader_calls=1,
+        ),
+        _read_case(
+            "git_status",
+            "git.status",
+            {"repo_path": "~/work/acme"},
+            _ok(
+                {
+                    "branch": "main",
+                    "ahead": 0,
+                    "behind": 0,
+                    "dirty_files_count": 0,
+                    "untracked_count": 0,
+                    "last_commit_sha": "402c79a89633f13e35867980eb15af1cff398046",
+                    "last_commit_at": 1_795_132_800,
+                }
+            ),
+            description="Counts-only git state of a repo on the node-local list.",
+            reader_calls=1,
+            absent_b64=_absent("README.md"),
+        ),
+        _read_case(
+            "git_status_unlisted_repo",
+            "git.status",
+            {"repo_path": "~/work/other"},
+            _ERROR,
+            description="A repo that is not on the node-local list is never read.",
+            reader_calls=1,
+        ),
+        _read_case(
+            "windows_titles_off",
+            "windows.list",
+            {"limit": 30},
+            _ok({"windows": WINDOWS}),
+            description="Window titles stay on the node unless the owner enabled them locally.",
+            reader_calls=1,
+            absent_b64=_absent("Invoice", "pytest"),
+        ),
+        _read_case(
+            "windows_titles_on_scrubbed",
+            "windows.list",
+            {"limit": 2},
+            _ok(
+                {
+                    "windows": [
+                        {**WINDOWS[0], "titles": ["acme - pytest", "friday - zsh"]},
+                        {**WINDOWS[1], "titles": ["Invoice - [PII:email]"]},
+                    ]
+                }
+            ),
+            description="With titles enabled locally, every title is scrubbed; limit applies.",
+            setup={"window_titles": True},
+            reader_calls=1,
+            absent_b64=_absent("owner.fixture@example.com"),
+        ),
+        _read_case(
+            "directory_not_granted",
+            "claude.sessions.read",
+            {"session_id": "cc-acme-1", "last_turns": 5},
+            [refused("not_granted")],
+            description="Without the local ~/.claude grant the capability is not_granted.",
+            setup={"reader_grants": {"claude": False}},
+        ),
+    ]
+
+
 def v1_cases():
-    cases = _common_cases(1)
+    cases = _common_cases(1) + _reader_cases()
     grant_attached = plain("v1-grant", "apps.frontmost", {}, version=1)
     grant_attached = resign({**grant_attached, "grant": {"approval_id": APPROVAL_ID}})
     cases.append(

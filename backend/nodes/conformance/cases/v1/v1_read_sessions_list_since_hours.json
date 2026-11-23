@@ -1,0 +1,60 @@
+{
+  "check": null,
+  "description": "since_hours drops sessions idle longer; activity within 300 s is active.",
+  "expect": {
+    "frames": [
+      {
+        "output": {
+          "sessions": [
+            {
+              "cwd": "~/code/friday",
+              "last_activity_at": 1795999800,
+              "message_count": 2,
+              "model": "claude-sonnet-4-5",
+              "session_id": "cc-friday-1",
+              "started_at": 1795999200,
+              "status_hint": "active"
+            }
+          ]
+        },
+        "status": "ok",
+        "truncated": false,
+        "type": "result"
+      }
+    ],
+    "reader_calls": 1
+  },
+  "name": "v1_read_sessions_list_since_hours",
+  "setup": {
+    "now": 1796000005
+  },
+  "steps": [
+    {
+      "frame": {
+        "args": {
+          "limit": 50,
+          "since_hours": 1
+        },
+        "args_sha256": "33ac301af8a5bcce9c6fa99646180ab799cf8d877b428c21e8595da8e28e9ce2",
+        "capability": "claude.sessions.list",
+        "capability_version": 1,
+        "class": "read",
+        "expires_at": 1796000030,
+        "grant": null,
+        "id": "09a301f8-10ac-469f-8449-61c9aac36149",
+        "invocation_id": "58d836e9-b758-4b68-8166-eb74cb1914cf",
+        "issued_at": 1796000000,
+        "key_id": "03396219237f75a6",
+        "node_id": "6f1e2d3c-4b5a-4987-8a6b-5c4d3e2f1a0b",
+        "nonce": "BUDHqj5sEnlog026jIKB_7sfhb2KZwmR1dyu8TNzXIs",
+        "sig": "eWpMy7SY6l8_mNfr9Cdbohuy8o3QWieTqE3UQ9qVGep2wmygnzAoigC3n0X1E-DFPqbva0xYZ7ZeJj6HlGMsAg",
+        "trace_id": "conformance-v1-read-sessions_list_since_hours",
+        "type": "invoke",
+        "v": 1,
+        "workspace_id": "2a3b4c5d-6e7f-4a8b-9c0d-1e2f3a4b5c6d"
+      },
+      "op": "send"
+    }
+  ],
+  "version": 1
+}

@@ -1,0 +1,82 @@
+{
+  "check": null,
+  "description": "A Codex thread: harness markers, function outputs and reasoning are never returned; calls are counted on the assistant turn they lead to.",
+  "expect": {
+    "absent_b64": [
+      "c2stcHJvai1GaXh0dXJlRkFLRTAxMjM0NTY3ODlhYmNkZWZHSElKS0xtbm9wUVI=",
+      "Z2hwX0ZpeHR1cmVGQUtFMDEyMzQ1Njc4OWFiY2RlZkdISUpLTG1u",
+      "QUtJQUZJWFRVUkVGQUtFMTIzNDU=",
+      "Rml4dHVyZVBhc3MyMDI2eA==",
+      "b3duZXIuZml4dHVyZUBleGFtcGxlLmNvbQ==",
+      "VE9PTC1SRVNVTFQtUEhSQVNF",
+      "RklMRS1DT05URU5ULVBIUkFTRQ==",
+      "RlVOQ1RJT04tT1VUUFVULVBIUkFTRQ==",
+      "UkVBU09OSU5HLVBIUkFTRQ==",
+      "U1VNTUFSWS1QSFJBU0U=",
+      "TUVUQS1QSFJBU0U=",
+      "U0lERUNIQUlOLVBIUkFTRQ==",
+      "TUFSS0VSLVBIUkFTRQ==",
+      "VU5LTk9XTi1LSU5ELVBIUkFTRQ=="
+    ],
+    "frames": [
+      {
+        "output": {
+          "thread_id": "cx-acme-1",
+          "turns": [
+            {
+              "at": 1795989660,
+              "role": "user",
+              "text": "Bump the acme API client; the token is [SECRET:github_token].",
+              "tool_calls": 0,
+              "tool_results": 0
+            },
+            {
+              "at": 1795989720,
+              "role": "assistant",
+              "text": "Bumped the client to 2.1.",
+              "tool_calls": 1,
+              "tool_results": 1
+            }
+          ]
+        },
+        "status": "ok",
+        "truncated": false,
+        "type": "result"
+      }
+    ],
+    "reader_calls": 1
+  },
+  "name": "v1_read_codex_thread_detail_scrubbed",
+  "setup": {
+    "now": 1796000005
+  },
+  "steps": [
+    {
+      "frame": {
+        "args": {
+          "last_turns": 20,
+          "thread_id": "cx-acme-1"
+        },
+        "args_sha256": "19f76ff244b5ff05dc9677ad7710e19c9fb7bdfda5dfb859f8041ed67fe50038",
+        "capability": "codex.threads.read",
+        "capability_version": 1,
+        "class": "read",
+        "expires_at": 1796000030,
+        "grant": null,
+        "id": "9e743432-0859-4dfa-9f02-4ab0e3b6b249",
+        "invocation_id": "7d1c1b20-f668-4db8-a5fd-856e079d1802",
+        "issued_at": 1796000000,
+        "key_id": "03396219237f75a6",
+        "node_id": "6f1e2d3c-4b5a-4987-8a6b-5c4d3e2f1a0b",
+        "nonce": "_u4oxCxJ59qhQCwncIYAewWbYsLnYW8I_FU0xIQbpOM",
+        "sig": "H_DVXJgwRUAjchIBnLTwWfxVb4pfHQ0co18BNI6fBAmhIRajZiSkLB6P5Dgbs4T9iKrxA768zCUhvXSGDGH_Cw",
+        "trace_id": "conformance-v1-read-codex_thread_detail_scrubbed",
+        "type": "invoke",
+        "v": 1,
+        "workspace_id": "2a3b4c5d-6e7f-4a8b-9c0d-1e2f3a4b5c6d"
+      },
+      "op": "send"
+    }
+  ],
+  "version": 1
+}

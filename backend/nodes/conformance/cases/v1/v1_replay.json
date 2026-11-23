@@ -12,7 +12,8 @@
         "status": "refused",
         "type": "result"
       }
-    ]
+    ],
+    "reader_calls": 1
   },
   "name": "v1_replay",
   "setup": {

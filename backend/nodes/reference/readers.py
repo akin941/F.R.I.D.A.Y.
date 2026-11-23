@@ -539,7 +539,11 @@ class Readers:
             if item in ("function_call", "local_shell_call", "custom_tool_call"):
                 pending[0] += 1
                 continue
-            if item in ("function_call_output", "local_shell_call_output", "custom_tool_call_output"):
+            if item in (
+                "function_call_output",
+                "local_shell_call_output",
+                "custom_tool_call_output",
+            ):
                 pending[1] += 1
                 continue
             if item != "message" or payload.get("role") not in ("user", "assistant"):
@@ -580,7 +584,10 @@ class Readers:
         for path in self._codex_files():
             transcript = self._codex_transcript(path, None, want_turns=True)
             if transcript is not None and transcript.ident == args["thread_id"]:
-                return {"thread_id": transcript.ident, "turns": transcript.turns[-args["last_turns"] :]}
+                return {
+                    "thread_id": transcript.ident,
+                    "turns": transcript.turns[-args["last_turns"] :],
+                }
         raise ReaderError("thread not found")
 
     # --- git ---------------------------------------------------------------
@@ -719,7 +726,9 @@ def _codex_text(content, role):
     return "\n".join(
         part["text"]
         for part in content
-        if isinstance(part, dict) and part.get("type") == wanted and isinstance(part.get("text"), str)
+        if isinstance(part, dict)
+        and part.get("type") == wanted
+        and isinstance(part.get("text"), str)
     )
 
 
@@ -742,4 +751,3 @@ def _git(root, *args):
     if completed.returncode != 0:
         raise ReaderError("git failed")
     return completed.stdout
-

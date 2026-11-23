@@ -9,7 +9,8 @@
         "status": "error",
         "type": "result"
       }
-    ]
+    ],
+    "reader_calls": 0
   },
   "name": "v1_unknown_type",
   "setup": {

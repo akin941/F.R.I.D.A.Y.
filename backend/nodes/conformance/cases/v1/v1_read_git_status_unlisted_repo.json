@@ -1,0 +1,47 @@
+{
+  "check": null,
+  "description": "A repo that is not on the node-local list is never read.",
+  "expect": {
+    "frames": [
+      {
+        "output": null,
+        "refusal_code": null,
+        "status": "error",
+        "type": "result"
+      }
+    ],
+    "reader_calls": 1
+  },
+  "name": "v1_read_git_status_unlisted_repo",
+  "setup": {
+    "now": 1796000005
+  },
+  "steps": [
+    {
+      "frame": {
+        "args": {
+          "repo_path": "~/work/other"
+        },
+        "args_sha256": "8cea5f18b9728a4ce5ce3846032bc4980dd055815eb41128e7a7d7770efc9679",
+        "capability": "git.status",
+        "capability_version": 1,
+        "class": "read",
+        "expires_at": 1796000030,
+        "grant": null,
+        "id": "8e017e0a-b44b-4782-86d9-622e8a1117f1",
+        "invocation_id": "74dacef2-d2b2-4cd5-9bd8-e3dc8f7cbc92",
+        "issued_at": 1796000000,
+        "key_id": "03396219237f75a6",
+        "node_id": "6f1e2d3c-4b5a-4987-8a6b-5c4d3e2f1a0b",
+        "nonce": "kvolGc4TzqDPuP64knMA5FMZRHeu0XSeV7SyU92YqLA",
+        "sig": "r0MNf8jTeVEKT6BRqYRh81KDwXueYoNgdL-8kr7CEMxVqrlIIOCDIuXmL4GHiILmr4DlRMMaQLcBh_GGg2W_Cw",
+        "trace_id": "conformance-v1-read-git_status_unlisted_repo",
+        "type": "invoke",
+        "v": 1,
+        "workspace_id": "2a3b4c5d-6e7f-4a8b-9c0d-1e2f3a4b5c6d"
+      },
+      "op": "send"
+    }
+  ],
+  "version": 1
+}

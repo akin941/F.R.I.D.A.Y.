@@ -1,0 +1,58 @@
+{
+  "check": null,
+  "description": "Counts-only git state of a repo on the node-local list.",
+  "expect": {
+    "absent_b64": [
+      "UkVBRE1FLm1k"
+    ],
+    "frames": [
+      {
+        "output": {
+          "ahead": 0,
+          "behind": 0,
+          "branch": "main",
+          "dirty_files_count": 0,
+          "last_commit_at": 1795132800,
+          "last_commit_sha": "402c79a89633f13e35867980eb15af1cff398046",
+          "untracked_count": 0
+        },
+        "status": "ok",
+        "truncated": false,
+        "type": "result"
+      }
+    ],
+    "reader_calls": 1
+  },
+  "name": "v1_read_git_status",
+  "setup": {
+    "now": 1796000005
+  },
+  "steps": [
+    {
+      "frame": {
+        "args": {
+          "repo_path": "~/work/acme"
+        },
+        "args_sha256": "0128da9492974695f0291be1c7dd637e7a6186db6ac98d8e9da57638d54939b4",
+        "capability": "git.status",
+        "capability_version": 1,
+        "class": "read",
+        "expires_at": 1796000030,
+        "grant": null,
+        "id": "328529c9-fe3d-41ba-8628-1f80cd78ee2c",
+        "invocation_id": "1f97700a-f308-4198-b730-bcc0defb1bbd",
+        "issued_at": 1796000000,
+        "key_id": "03396219237f75a6",
+        "node_id": "6f1e2d3c-4b5a-4987-8a6b-5c4d3e2f1a0b",
+        "nonce": "XjHNLb8Zq6YJoxsXKwHbaYAKSdPoCP0h45gkW7jMvbA",
+        "sig": "8tlIpB3kJjm3h9VElrqQzOa1AfKxrJ9-RowC3Qcrq951C-oMcZDlaeRvEAvXA8f4cEokqO8eDxQbsb_Seu0VBA",
+        "trace_id": "conformance-v1-read-git_status",
+        "type": "invoke",
+        "v": 1,
+        "workspace_id": "2a3b4c5d-6e7f-4a8b-9c0d-1e2f3a4b5c6d"
+      },
+      "op": "send"
+    }
+  ],
+  "version": 1
+}

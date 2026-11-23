@@ -12,7 +12,8 @@
         "status": "ok",
         "type": "result"
       }
-    ]
+    ],
+    "reader_calls": 1
   },
   "name": "v2_read_ok",
   "setup": {
