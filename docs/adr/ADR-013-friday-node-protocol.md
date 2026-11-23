@@ -399,3 +399,28 @@ conformance runs and the server-side contract tests listed in the brief's
 "Mac session (deferred)" (M1–M3) before it is used; the Keychain half of
 the spike, the Swift conformance pass and TCC across notarized updates are
 **pending owner evaluation** (brief "Go/no-go record").
+
+## Implementation note — Phase 8B closeout (`chore/p8b-closeout`, 2026-11-20)
+
+Completes the owner-turn note above. State at the 8B closeout:
+
+- Phase 9's server half is merged: `nodes.services.invoke_read` takes the
+  `channel` keyword and runs the step-0 actor check (`actor_not_owner`)
+  before signing. `SYSTEM_READ_CAPABILITIES` is still empty, the two
+  owner-turn contracts still live in `backend/integrations/node_reference/
+  contracts/v1/`, and the transcript pull still uses its `NodeReadPort` seam
+  with the default `UnavailableNodePort` (a no-op). Moving the contracts
+  into `nodes/capabilities/v1/` changes the v1 contract set, the reference
+  node's catalogue and the conformance files, so it is its own reviewed
+  branch (Phase 9 brief "Known follow-ups (from `feat/p9-node-reads`)" 1;
+  8B brief, closeout owner steps), not part of the closeout.
+- The closeout's end-to-end test runs the pull against the Python reference
+  node double (the D13 readers over the synthetic fixtures, one chain row
+  per invoke). It is the server-side contract the live Mac node must pass
+  in the Mac session (8B M1), with the live node in place of the double.
+- `manage.py preflight` `transcripts` reports, per enabled source, whether
+  a node port is installed, the owner's node is reachable, the capability
+  is granted and the last pull's status. No port, no node or no grant is a
+  `warn` (the Swift readers and the Touch ID grant are deferred to the Mac
+  session); a `failed` or `server_refused` last pull is a `fail`. It sends
+  nothing to a node.

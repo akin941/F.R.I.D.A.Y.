@@ -6,6 +6,9 @@
 > stub is kept; see "From the stub" below. The brief needs its
 > independent Sonnet 5 plan review before branch 1, because the
 > implementing model never reviews its own brief.
+> **Phase status (2026-11-20, closeout):** server branches 1–10
+> implemented (see the branch table); the Mac session (M1, M2) and the
+> private-data go/no-go rows are pending owner evaluation.
 > Sources: `docs/research/2026-11-roadmap-proposal.md` §B4, §c.2, §c.6,
 > §c.8, §c.9, §c.10, §g d5/d6/d10; MASTER_PLAN §AA "Friday 3.0 phases"
 > (order 5).
@@ -3824,6 +3827,169 @@ reads the new failed-check names. The e2e test is green.
 paired, the e2e test passes, and the go/no-go record is written with the
 Mac and private-data rows pending owner evaluation.
 
+**Implementation record (2026-11-20).** Status: implemented on
+`chore/p8b-closeout`, awaiting the independent Sonnet 5 review.
+
+What was built:
+- `backend/ops/preflight.py`, a new group `check_graph` (registered as
+  `graph`, after `learning`; read-only: no model call, nothing sent to a
+  node, no container started; one crashing check is its own `fail` row):
+  - `graph_integrity`: counts facts (trashed included) whose subject or
+    object entity is in another workspace, approved facts with
+    `superseded_by` and no `valid_to`, and windows with `valid_to <
+    valid_from`. Any count fails; the detail names counts only.
+  - `retrieval_indexes`: `memory.retrieval.indexes.index_status()` (the
+    `build_vector_indexes --check` data), the three `search` GIN indexes
+    (seam `existing_index_names`), the mode. Missing/stale HNSW or a
+    missing GIN fails; no embedding provider, a provider above 2000
+    dimensions, or `hybrid` without a recorded passing **private**
+    `MemoryEvalRun` compare warns.
+  - `graphify`: the image's `org.friday.graphify.version` label (seam
+    `docker_image_labels`, `docker image inspect`, labels only) against
+    the `graphifyy==` pin read from `graphify.lock.txt`, and each enabled
+    `graphify_enabled` repo's last `GraphifyRun`. A failed last run, a
+    mislabelled image, or a missing image while a repo is enabled fails;
+    no enabled repo, a repo that never ran, a run in flight, or no
+    `docker` binary here (web/worker containers: "run on the runner
+    host") warns.
+  - `compressor`: `AI_COMPRESSION_ENABLED` off is `pass (off)`. On, the
+    sidecar's new `GET /healthz` (derived from `AI_COMPRESSION_URL`) must
+    answer `telemetry: off`, `offline: true`, and every enabled,
+    non-bypass purpose needs a recorded passing private compression
+    compare; otherwise fail. No purpose, or only bypass purposes, warns.
+  - `transcripts`: both sources disabled is `pass (off)`. An enabled
+    source warns while no node port is installed (the default
+    `UnavailableNodePort`), the owner's node is unreachable, the
+    capability is not granted, no pull happened yet or the source is
+    paused; the last `memory.transcript_pull.invoked` audit row per
+    capability decides otherwise (`ok` pass, `node_refused` warn,
+    `failed`/`server_refused` fail). Seam `transcript_node_port`.
+  - `eval_baseline`: a private baseline `MemoryEvalRun` passes with its
+    metrics; none warns (pending owner evaluation), naming a public one
+    if present.
+- Extended 8A checks: `learning_budget` requires
+  `memory.fact_reconciliation`, `memory.reflection` and
+  `memory.eval_answer` to be configured purposes and covered by an active
+  budget; `learning_beat` requires `harness.tasks.recover_stale_graphify_runs`
+  on the runner beat (the reflection and the transcript pull were already
+  required); `learning_scrubber` now **fails** when `transcripts.jsonl` is
+  missing or has no secret item (it was optional) and names the fragment
+  count.
+- `deploy/compressor/server.py`: `GET /healthz` (env-only verdict, no
+  Headroom call, no input); other methods on it are 405. `docs/mcp/
+  headroom.md` and the compose comment record it.
+- `backend/harness/docker/graphify.Dockerfile`: `LABEL
+  org.friday.graphify.version="0.9.103"`, pinned to the lock by a test.
+- E2E `backend/ops/tests/test_transcripts_e2e.py`: the owner enables the
+  hooks and both transcript sources and writes the two path rules over the
+  web API (a rule on a transcript source is refused 400) → the pull
+  through the reference node double (four invokes, each with exactly its
+  workspace's prefixes, four chain rows and four audit rows with the owner
+  as actor) → owner-turn episodes in both workspaces → the night (eager,
+  on-commit executed) with `personal_data=True` → one quoted
+  `deployed_to` proposal in the personal workspace only → approved from
+  the morning card → `legacy` injects no fact, `hybrid` answers the
+  temporal question from the fenced `<memory_fact>` with its window
+  (`2026-11-20–`), ids only in the context report, nothing in the firm
+  turn → a claimed `vault_export` run writes the entity note → forget over
+  the web (fact archived, episode trashed, entity trashed, the next run
+  prunes the note, the next chat turn has no fact, the paused source is
+  not pulled) → restore (fact approved again, note rewritten, fact back in
+  chat) → resume, the next pull stores no duplicate → `check_graph`:
+  `graph_integrity` passes, `transcripts` warns on the default port and
+  passes with the reference node installed.
+- Docs: `docs/runbooks/learning-memory.md` (title 8A+8B; §2a transcripts
+  updated, §2b Obsidian `00_Inbox`, §3 the 8B preflight lines, §8 facts and
+  the temporal graph, §9 vault v2 and conflict copies),
+  `docs/runbooks/memory-eval.md` (§6 the retrieval and compression
+  decisions, §7 preflight), ADR-012 part 3 note, ADR-013 and ADR-014
+  closeout notes, MASTER_PLAN §AA row 8B, `self_sources.json` regenerated
+  (the current-phase line moves to Phase 10).
+
+**The retrieval default decision (D8): `legacy` kept.** The public compare
+(branch 4: recall@10 0.5714 → 0.875, leak rate 0 → 0, verdict `pass`) shows
+no regression, but the owner's private compare is not recorded, and D8
+flips only on both. `MEMORY_RETRIEVAL_MODE` stays `legacy`;
+`retrieval_indexes` warns if `hybrid` is set without a recorded passing
+private compare.
+
+Decisions made while implementing, to confirm in review:
+- **The `nodes`-backed transcript port is not in the closeout.** Phase 9's
+  server half is merged, but its `feat/p9-node-reads` follow-up 1 records
+  the owner-turn move (contracts into `nodes/capabilities/v1/`,
+  `SYSTEM_READ_CAPABILITIES`, the reference readers and the conformance
+  regeneration, the port) as its own reviewed branch. The closeout keeps
+  the seam, runs the e2e against the reference node double, and makes
+  preflight `transcripts` say "no node port installed" (a `warn`). See
+  owner step 2 below.
+- **A new `graph` group, not more `learning_*` lines.** The six checks are
+  `check_graph`, so the 8A group keeps its five names and the HUD shows the
+  new names as they are.
+- **Missing image vs. no Docker.** Preflight usually runs in the web
+  container, which has no `docker` binary: that is a note (`warn` at
+  most), never a failure. The image is a failure only where Docker
+  answers and a repo needs the image.
+- **Private results only.** `retrieval_indexes` and `compressor` count only
+  `set=private` compares with verdict `pass`: the public seed is a CI
+  regression guard, not the D8/D11 gate.
+- **The compressor health endpoint** reports the env verdict only; it
+  imports nothing and never calls Headroom, so it cannot leak a message.
+- **Tests never reach Docker.** `ops/tests/conftest.py` replaces
+  `docker_image_labels` for every `ops` test with a "no docker binary"
+  fake; the seam itself is tested over a faked `subprocess.run`.
+
+Tests:
+- `ops/tests/test_preflight_graph.py` (47 tests): each new check passes,
+  fails and warns with fakes; the inverted-window case drops the check
+  constraint inside the test transaction, the crossing case moves an
+  entity with a raw update; details carry no statement, path, URL or
+  error message; the group is registered after `learning`, makes no
+  model call, and one crash does not hide the others.
+- `ops/tests/test_preflight_learning.py`: the beat, scrubber (missing or
+  secret-less `transcripts.jsonl`) and budget extensions.
+- `ops/tests/test_preflight.py`: the all-green command builds the vector
+  indexes after seeding, as a deploy does.
+- `config/tests/test_preflight_hud_graph.py`: the HUD shows
+  `graph_integrity`, `retrieval_indexes`, `graphify`, `compressor` and no
+  detail string.
+- `harness/tests/test_graphify.py`: the image label equals the lock pin.
+- `deploy/compressor/test_server.py`: `/healthz` and its refusals.
+- `ops/tests/test_transcripts_e2e.py`: the e2e above.
+
+**Owner steps (pending) — `chore/p8b-closeout`, recorded 2026-11-20.**
+1. Run the independent Sonnet 5 review of this branch and fix findings
+   until APPROVE (CLAUDE.md "Reviews").
+2. **The `nodes`-backed transcript port (its own branch).** Branch 8's
+   owner steps 3–5, now unblocked by Phase 9: move the two owner-turn
+   contracts into `nodes/capabilities/v1/` (ten contracts), dispatch them
+   in the reference node's `readers.py`, fold `owner_turns_cases.json`
+   into the conformance cases and regenerate `scrub.json` with
+   `transcripts.jsonl`, set `SYSTEM_READ_CAPABILITIES`, add a `NodeReadPort`
+   over `nodes.services.invoke_read(channel=CHANNEL_SYSTEM, actor=owner)`
+   and install it, then re-run `tools/tests/test_transcript_ingest.py` and
+   this e2e against the in-process gateway transport. Until then preflight
+   `transcripts` warns and the pull is a no-op.
+3. After deploy: `manage.py migrate`, `seed_ai_defaults`,
+   `seed_ingestion_sources` and `build_vector_indexes` (preflight
+   `retrieval_indexes` fails on a provider without its index).
+4. Run `manage.py preflight` on the dev stack with the reference node
+   paired (`run_reference_node`, `docs/runbooks/friday-node.md`) and
+   confirm no `fail` line. The expected warns until the Mac session and the
+   owner evaluations: `graphify` (no repo enabled), `transcripts` (no node
+   port, or not granted), `eval_baseline` (no private baseline).
+5. On the runner host: build the Graphify image (`docker build -f
+   graphify.Dockerfile -t friday-harness-graphify:0.9.103 .` in
+   `backend/harness/docker/`), enable `graphify_enabled` for the Friday
+   repo, and run preflight there so `graphify` checks the label (M2 item 5).
+6. M2 items 1–3 (private baseline, hybrid compare, Headroom compare) per
+   `docs/runbooks/memory-eval.md` §4–§6; flip `MEMORY_RETRIEVAL_MODE` only
+   on a recorded passing private compare.
+7. M1, then M2 item 4 (the real transcript week), after step 2.
+
+Nothing else in this branch needs the Mac, real credentials, paid calls or
+real hardware: the tests use FakeAdapter, the reference node double, a
+temporary vault, a faked `docker` seam and a faked sidecar.
+
 ## Branch table
 
 | # | Branch | Scope | Depends on | Status |
@@ -3838,7 +4004,7 @@ Mac and private-data rows pending owner evaluation.
 | 7 | `feat/p8-obsidian-mirror` | Format v2, entity notes, `_conflicts/<date>/`, `00_Inbox` import-once inside the approved run | 1 | **implemented 2026-11-20** (awaits the Sonnet 5 review; see "Implementation record" under branch 7; real-vault check pending owner evaluation) |
 | 8 | `feat/p8-transcript-ingestion` | Owner-turn capabilities, reference readers + conformance, pull job in `tools`, port, cursor, personal-class sources, transcript corpus | 2; **Phase 9 branches 2–5 merged** | **implemented 2026-11-20** (awaits the Sonnet 5 review; see "Implementation record" under branch 8). Phase 9 branches 2–5 were not merged, so the contracts, readers and conformance files are staged in `integrations/node_reference/` and the node is reached through a `NodeReadPort` seam. The `nodes` wiring is owner steps 3–5 of branch 8. Swift readers: deferred: Mac session (M1) |
 | 9 | `feat/p8-graph-ui` | `/memory/graph`, timeline, sources/Graphify/conflict/eval views | 2, 4 (5, 7, 8 for their panels) | **implemented 2026-11-20** (awaits the Sonnet 5 review; see "Implementation record" under branch 9; the real-phone and screen-reader check is pending owner evaluation) |
-| 10 | `chore/p8b-closeout` | Preflight checks, e2e, retrieval default decision, runbooks, ADR notes, MASTER_PLAN row, go/no-go record | 1–9 | not started |
+| 10 | `chore/p8b-closeout` | Preflight checks, e2e, retrieval default decision, runbooks, ADR notes, MASTER_PLAN row, go/no-go record | 1–9 | **implemented 2026-11-20** (awaits the Sonnet 5 review; see "Implementation record" under branch 10; `MEMORY_RETRIEVAL_MODE` kept `legacy`; the `nodes`-backed transcript port is a follow-up branch; preflight on the dev stack with a paired node and the Mac rows are owner steps, pending owner evaluation) |
 | M1 | `feat/p8-node-transcript-readers` | Swift readers for the two owner-turn capabilities, grant wiring, real-file rule verification, conformance pass | 8 merged; Phase 9 M2 | deferred: Mac session |
 | M2 | Mac and owner evaluation | Private eval baseline, Headroom compare, real transcript run, go/no-go measurements | 3, 4, 6, M1 | deferred: Mac session (pending owner evaluation) |
 
@@ -3955,11 +4121,13 @@ session:
 | Eval baseline recorded | M2 item 1 (private); branch 3 CI (public) | public, recorded 2026-11-20 (63 cases, `legacy`, FakeAdapter, `--retrieval-only`): recall@10 0.5714, leak rate 0.0, temporal correctness 0.0, answer accuracy n/a; private: pending owner evaluation |
 | Headroom stays off unless ≤ 1 point loss | M2 item 3; `compressor` preflight | pending owner evaluation (flag off by default; branch 6 implemented 2026-11-20: adopted as a sidecar without `litellm`; 0.43.1 left assistant-only text unchanged in a local probe, so an `inconclusive` compare is expected) |
 | Scrubber corpus with transcript fragments at 100% secrets recall | Branch 8 corpus gate (server and vendored node scrubber); M1 parity | **met 2026-11-20 on branch 8** (`transcripts.jsonl`, 14 items, 100% secrets recall for the server and the vendored scrubber; preflight `learning_scrubber` includes it); `scrub.json` regeneration waits for Phase 9 branch 3; Swift parity: pending owner evaluation (Mac session) |
-| Zero cross-workspace leaks | Branches 1, 4, 8 isolation tests; eval leak rate | pending (branches 1, 4, 8) |
-| Owner turns only | Branch 8 hostile-node and marker tests; M1 real-file counts; M2 item 4 | **met 2026-11-20 on branch 8** for the fixtures and the hostile-node double; real files: pending owner evaluation |
+| Zero cross-workspace leaks | Branches 1, 4, 8 isolation tests; eval leak rate; closeout `graph_integrity` and e2e | **met 2026-11-20 in tests** (branches 1, 4, 8 isolation tests; public eval leak rate 0.0 for both arms; the closeout e2e keeps the personal fact out of the firm chat turn and firm turns out of personal episodes; preflight `graph_integrity` checks the live data); private eval leak rate: pending owner evaluation (M2) |
+| Owner turns only | Branch 8 hostile-node and marker tests; M1 real-file counts; M2 item 4 | **met 2026-11-20 on branch 8** for the fixtures and the hostile-node double (re-run end to end in the closeout e2e); real files: pending owner evaluation |
+| Retrieval default (D8) | Public compare (branch 4) and private compare (M2 item 2) | **decided 2026-11-20 at the closeout: `legacy` kept** (public compare `pass`, recall@10 0.5714 → 0.875; private compare: pending owner evaluation) |
+| Preflight green on the dev stack with the reference node paired | Closeout owner step 4 | pending owner evaluation (the checks pass, fail and warn with fakes in CI; the `nodes`-backed transcript port is a follow-up branch, so `transcripts` warns until it lands) |
 
 The Mac and private-data rows do not block Phase 10. Its server branches
-can start once branches 1–10 are green.
+can start once branches 1–10 are green (branch 10 implemented 2026-11-20).
 
 ## Out of scope (explicit)
 

@@ -18,6 +18,11 @@
 #   runs; `--no-deps` so nothing outside the lock is ever resolved.
 FROM python:3.12-slim-bookworm@sha256:935c3c5b12357a7e10caa9c1e6ca5692344d97cf229832ef584be2cec9fc03df
 
+# The pinned `graphifyy` version, read by `manage.py preflight` (`graphify`,
+# Phase 8B closeout) to prove the local image matches graphify.lock.txt.
+# Bump it in the same branch as the lock (a test pins the two together).
+LABEL org.friday.graphify.version="0.9.103"
+
 # Graphify makes no model call and keeps no query log; no telemetry exists
 # upstream ("no telemetry", README of graphifyy 0.9.103).
 ENV GRAPHIFY_BACKEND=none \

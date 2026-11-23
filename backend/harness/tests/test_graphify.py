@@ -537,6 +537,15 @@ def test_lock_pins_graphifyy_by_name_version_and_the_manifest_hash():
         assert forbidden not in pins
 
 
+def test_the_image_version_label_matches_the_lock_pin():
+    """Phase 8B closeout: preflight's `graphify` check compares the local
+    image's `org.friday.graphify.version` label with the lock's pin."""
+    dockerfile = (DOCKER_DIR / "graphify.Dockerfile").read_text()
+    labels = re.findall(r'^LABEL org\.friday\.graphify\.version="([^"]+)"$', dockerfile, re.M)
+    version, _ = _requirements((DOCKER_DIR / "graphify.lock.txt").read_text())["graphifyy"]
+    assert labels == [version]
+
+
 def test_entrypoint_copies_without_git_and_bounds_the_output():
     script = (DOCKER_DIR / "graphify_run.sh").read_text()
     assert script.startswith("#!/bin/sh")

@@ -10,9 +10,14 @@ Request:  `{"model": str, "messages": [{"role": "assistant", "content": str}, ..
 Response: `{"messages", "tokens_before", "tokens_after", "transforms_applied",
           "lossless"}`; the same number of messages, in order.
 
-Refused: any path but `/compress` (404), any method but POST (405), a body
-over 1 MB (413, checked on Content-Length before reading), malformed JSON or
-a wrong shape (400). The server never logs message content.
+Health (Phase 8B closeout, `manage.py preflight` `compressor`): `GET /healthz`
+answers `{"status": "ok", "telemetry": "off"|"on", "offline": bool}`, read
+from this process's environment (no Headroom call, no request body).
+
+Refused: any other path (404), any method but POST on `/compress` and GET on
+`/healthz` (405), a body over 1 MB (413, checked on Content-Length before
+reading), malformed JSON or a wrong shape (400). The server never logs
+message content.
 
 Run: `python server.py` (env `COMPRESSOR_PORT`, default 8080). Tests inject a
 fake compress function via `make_server(compress_fn=...)`, so they run
@@ -26,18 +31,22 @@ import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 # Telemetry off and offline before Headroom is ever imported (D11).
-for _key, _value in (
-    ("HEADROOM_OFFLINE", "1"),
+TELEMETRY_OFF = (
     ("HEADROOM_TELEMETRY", "off"),
     ("HEADROOM_BEACON", "off"),
     ("DO_NOT_TRACK", "1"),
+)
+OFFLINE = (
+    ("HEADROOM_OFFLINE", "1"),
     ("HF_HUB_OFFLINE", "1"),
-):
+)
+for _key, _value in OFFLINE + TELEMETRY_OFF:
     os.environ.setdefault(_key, _value)
 
 MAX_BODY_BYTES = 1024 * 1024
 MAX_MESSAGES = 64
 PATH = "/compress"
+HEALTH_PATH = "/healthz"
 ALLOWED_ROLES = {"assistant"}
 
 logger = logging.getLogger("compressor")
@@ -114,6 +123,14 @@ def checked_result(result, messages):
     return result
 
 
+def health():
+    """The `/healthz` body: whether this process still runs with telemetry
+    off and offline (an operator env override would flip it)."""
+    telemetry_off = all(os.environ.get(key) == value for key, value in TELEMETRY_OFF)
+    offline = all(os.environ.get(key) == value for key, value in OFFLINE)
+    return {"status": "ok", "telemetry": "off" if telemetry_off else "on", "offline": offline}
+
+
 def make_handler(compress_fn):
     class Handler(BaseHTTPRequestHandler):
         server_version = "friday-compressor"
@@ -132,11 +149,19 @@ def make_handler(compress_fn):
             self.wfile.write(data)
 
         def _refuse_method(self):
-            self._reply(404 if self.path != PATH else 405, {"error": "refused"})
+            known = self.path in (PATH, HEALTH_PATH)
+            self._reply(405 if known else 404, {"error": "refused"})
 
-        do_GET = do_PUT = do_DELETE = do_PATCH = do_HEAD = do_OPTIONS = _refuse_method
+        do_PUT = do_DELETE = do_PATCH = do_HEAD = do_OPTIONS = _refuse_method
+
+        def do_GET(self):
+            if self.path != HEALTH_PATH:
+                return self._refuse_method()
+            return self._reply(200, health())
 
         def do_POST(self):
+            if self.path == HEALTH_PATH:
+                return self._reply(405, {"error": "refused"})
             if self.path != PATH:
                 return self._reply(404, {"error": "not_found"})
             try:

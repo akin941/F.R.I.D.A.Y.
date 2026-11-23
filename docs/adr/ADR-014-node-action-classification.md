@@ -59,6 +59,16 @@ turns of Claude Code sessions and Codex threads) are session reads and are in
 the **read** class under this ADR's existing "session/thread lists and reads"
 entry. Nothing moves between classes.
 
+**Completed at the Phase 8B closeout (2026-11-20).** The classification is
+unchanged and final for 8B: both owner-turn capabilities stay `read`, with
+`data_class: personal`, and are the only capabilities a `channel=system`
+read may name (the D13 amendment's `SYSTEM_READ_CAPABILITIES`). Being read
+class does not make them ungated in practice: they need the per-directory
+Touch ID grant on the Mac (ADR-013 decision 11), the pull is signed and
+chain-audited per call, and nothing they return is approved data until the
+owner approves a proposal built from it (ADR-012). The 8B closeout added no
+confirm- or gate-class capability.
+
 ## Implementation note — capability classes in protocol v2 (Phase 10 branch 1, 2026-11-20)
 
 Brief `docs/prompts/phase-10-control/brief.md` D1, D3. The server-known

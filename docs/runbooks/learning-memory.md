@@ -1,7 +1,11 @@
-# Runbook — Learning memory (Phase 8A)
+# Runbook — Learning memory (Phase 8A, 8B)
 
 Phase 8A closeout (brief `docs/prompts/phase-8a-learning-memory/brief.md`,
-ADR-012). How the owner turns on continuous learning, routes what it reads
+ADR-012), completed by the Phase 8B closeout (2026-11-20, brief
+`docs/prompts/phase-8b-transcripts-graph/brief.md`): transcripts (§2a), the
+Obsidian `00_Inbox/` (§2b), facts and the temporal graph (§8) and vault
+conflict copies (§9). The eval set has its own runbook, `memory-eval.md`.
+How the owner turns on continuous learning, routes what it reads
 to the right workspace, reads the audit view, reviews the morning card, and
 forgets or restores a source. Every control below is **owner only, web
 session only** (a PAT of any kind gets 401 on these endpoints); the web app
@@ -108,8 +112,40 @@ extracted only by a `personal_data_allowed` (local) provider, like calendar.
 - **Enable** (owner steps, after Phase 9's node is paired): grant the
   per-directory reads for `~/.claude/projects` and `~/.codex/sessions` with
   Touch ID on the Mac, then `PATCH …/sources/<id> {"enabled": true}` for each
-  source. Until Phase 9 branches 3–5 merge, the server has no node layer and
-  the pull is a no-op even when enabled.
+  source. The pull reaches the node through a port in
+  `tools.transcript_ingest`. Phase 9's `nodes` layer is merged, but the
+  `nodes`-backed port (and the move of the two owner-turn contracts into
+  `nodes/capabilities/v1/`) is its own follow-up branch (8B brief, closeout
+  owner steps). Until it lands the default port has no node, the pull is a
+  no-op even when enabled, and preflight `transcripts` warns "no node port
+  installed".
+- **Check it.** Preflight `transcripts` (§3) reads the last pull of each
+  enabled source from the audit rows: `ok` passes, `node_refused` warns,
+  `failed` / `server_refused` fail; no node, no grant or no pull yet warn
+  (the Swift readers and the Touch ID grant are the Mac session). The
+  `/memory/ingestion` transcript panel shows the cursors, the
+  `since_clamped` count with the last skipped window, and `tie_overflow`.
+
+### 2b. Obsidian `00_Inbox/` (Phase 8B branch 7, opt-in)
+
+The `obsidian_inbox` source imports notes you drop under
+`<vault>/00_Inbox/<folder>/` **once**, inside the gated `vault_export` run
+(nothing reads the vault outside an approved run), then moves each note to
+`00_Inbox/_imported/<date>/`.
+
+1. Enable `obsidian_inbox` (seeded disabled) and add a `vault_prefix` rule
+   per folder: `POST …/sources/<id>/rules {"rule_type": "vault_prefix",
+   "pattern": "00_Inbox/<folder>", "target_workspace": "<id>"}`. A note in a
+   folder with no rule is left in place and counted `inbox_unmapped`.
+2. Flag a sensitive note with frontmatter `sensitivity: private`: it becomes
+   a `private` episode, extracted only by a local provider and mirrored only
+   under `_private/`. Any value other than empty or `normal` is treated as
+   `private` (fail closed). A normal Inbox note is **not** personal-class.
+3. Approve a `vault_export` run. The approval card's summary counts the
+   notes waiting and the unmapped ones (a dry pass that writes nothing).
+4. Skipped and left in place: empty bodies, hidden folders, symlinks,
+   anything deeper than one subfolder, a note with an unclosed `---`
+   frontmatter; more than 200 notes wait for the next run.
 
 ## 3. Check it with preflight
 
@@ -122,12 +158,25 @@ The learning lines (read-only, no model call):
 | Check | `pass` | `warn` | `fail` |
 |---|---|---|---|
 | `learning_sources` | every enabled source is mapped, not paused; git has owner e-mails | all disabled; one paused/forgotten/unmapped; `MEMORY_OWNER_GIT_EMAILS` empty | a source is missing → run `seed_ingestion_sources` |
-| `learning_beat` | the nightly, recovery, TTL, calendar and `self` tasks on the worker beat, the git producer on the runner beat, all registered | — | a task missing from its beat or not registered |
-| `learning_scrubber` | the corpus self-test: 100% secrets recall, PII recall 100%, benign text unchanged | PII miss or a benign item altered (ids named); corpus not shipped here | any secret missed (a release-gate regression: do not enable sources) |
-| `learning_budget` | an active budget with a monthly cap covers both learning purposes | no monthly cap | no budget → run `seed_ai_defaults` |
+| `learning_beat` | the nightly, recovery, TTL, calendar, `self`, weekly reflection and transcript-pull tasks on the worker beat, the git producer and the Graphify recovery scan on the runner beat, all registered | — | a task missing from its beat or not registered |
+| `learning_scrubber` | the corpus self-test, `transcripts.jsonl` included: 100% secrets recall, PII recall 100%, benign text unchanged | PII miss or a benign item altered (ids named); corpus not shipped here | any secret missed, or `transcripts.jsonl` missing or without a secret item (a release-gate regression: do not enable sources) |
+| `learning_budget` | an active budget with a monthly cap covers every learning purpose (extraction, consolidation, fact reconciliation, reflection) and the eval answers (`learning_eval`) | no monthly cap | no budget → run `seed_ai_defaults`; a Phase 8B purpose missing from the settings |
 | `learning_last_run` | the latest night's jobs succeeded and were consolidated | no run yet; deferred by a budget; pending retry; expired lease; awaiting consolidation | a job failed terminally (error type named) |
 
-Only ids, counts and kinds are printed — never episode text.
+The Phase 8B lines (`check_graph`, read-only: no model call, nothing sent
+to a node, no container started):
+
+| Check | `pass` | `warn` | `fail` |
+|---|---|---|---|
+| `graph_integrity` | every fact's subject, object and fact share one workspace; every superseded approved fact has a `valid_to`; no window ends before it starts | — | any of the three (counts named, never a statement) |
+| `retrieval_indexes` | an HNSW index per active embedding provider and table, the three `search` GIN indexes, the mode reported | no embedding provider; a provider above 2000 dimensions (exact scan); `hybrid` without a recorded passing private compare | an index missing or stale → `build_vector_indexes`; a GIN index missing → `migrate` |
+| `graphify` | the image carries `org.friday.graphify.version` = the lock's pin; each `graphify_enabled` repo's last run succeeded | no repo enabled; a repo never ran or a run in flight; no `docker` here (run preflight on the runner host) | a failed last run (error type named); the image missing while a repo needs it, or built from another pin |
+| `compressor` | off; or the sidecar `/healthz` answers telemetry off and offline and every enabled purpose has a recorded passing private compare | enabled with no purpose, or only bypass purposes | sidecar down or telemetry on; a purpose without a passing private compare |
+| `transcripts` | off (both sources disabled); or the node is reachable, granted, and each source's last pull is `ok` | no node port installed yet; node not reachable; not granted; no pull yet; a source paused; last pull `node_refused` | last pull `failed` or `server_refused` |
+| `eval_baseline` | a private baseline `MemoryEvalRun` is recorded (its metrics shown) | none yet (pending owner evaluation, `memory-eval.md`) | — |
+
+Only ids, counts and kinds are printed — never episode text, a statement, a
+path or a turn. The HUD health panel shows the failing check names only.
 
 ## 4. Reading the audit view
 
@@ -184,6 +233,65 @@ scrubber corpus 100% secrets recall (preflight `learning_scrubber`), zero
 cross-workspace leaks (CI isolation tests), and the acceptance rate from the
 audit view. Below 60% accepted: tune the prompts, the caps and the
 owner-text rules before Phase 8B adds sources.
+
+## 8. Facts: the temporal graph (Phase 8B)
+
+Friday keeps **entities** (a repo, a service, a firm, a person by role, …)
+and **facts** between them with a validity window (`valid_from` →
+`valid_to`), per workspace, in Postgres (no graph database). Answers to
+"since when?" come from the window; superseded facts stay as history.
+
+- **Where facts come from.** Owner-text extraction proposes them (at most 6
+  of the nightly 10 proposals; the quote must be your verbatim words and name
+  the entity); the reconciliation pass proposes a supersession when a new
+  fact replaces a current one; the weekly reflection (Sunday 03:30) proposes
+  within the same caps; you add or edit them yourself in `/memory/graph`
+  (born approved, your own words). Graphify facts about Friday's own code
+  are `system` rows (§ below) and never take part in retrieval.
+- **Review.** Fact proposals sit on the morning card next to memories, with
+  the quote: approve, edit (an edit is a new version that supersedes the old
+  one) or reject; never bulk. A supersede proposal shows the fact it would
+  close; approving it sets the old fact's `valid_to` and `superseded_by`.
+- **Sensitivity.** A fact inherits the sensitivity of the episode it cites.
+  A `private` fact never reaches a model payload (memory block, hop
+  expansion, `memory_graph_lookup`) or the open vault tree; an entity whose
+  only live facts are private is a private entity.
+- **Retrieval.** With `MEMORY_RETRIEVAL_MODE=hybrid` the chat context gets a
+  fenced `<memory_fact>` block (statement + window) next to the memories,
+  ranked by vector + full-text RRF after the workspace filter, with 1–2 hop
+  expansion and recency decay. The default stays `legacy` until the owner's
+  private compare passes (`memory-eval.md` §4, brief D8); preflight
+  `retrieval_indexes` warns while `hybrid` runs without that record.
+- **Forget and restore.** Forgetting a source (§6) also archives the
+  approved facts derived from it, rejects its pending fact proposals and
+  trashes entities left with no live fact; restore puts them back. Facts
+  and entities are purged only through the gate-class `purge_trash`.
+- **Graphify (self-knowledge).** Per repo, `graphify_enabled` (default off)
+  runs the AST-only Graphify image on each new default-branch head, in a
+  network-denied container on the runner host, and imports its graph as
+  `origin=graphify` facts in the repo's workspace. Build the image first on
+  the runner host (`docker build -f backend/harness/docker/graphify.Dockerfile
+  -t friday-harness-graphify:0.9.103 backend/harness/docker`); preflight
+  `graphify` checks its version label against the lock's pin.
+
+## 9. Vault mirror v2: entity notes and conflict copies (Phase 8B)
+
+The Obsidian vault stays a **mirror** (ADR-005): every write happens inside
+an approved `vault_export` run, and Postgres wins.
+
+- Each mirrored note carries `friday_format: 2` and a `content_sha256` of
+  its body. Entities with an approved fact get a note under
+  `03_Workspaces/<workspace id>/Entities/<entity id>.md` (current facts,
+  then `## History`; links are `[[<entity id>|<name>]]`). Private entities
+  and private facts go to the `_private/` tree only.
+- **If you edit a mirrored note** in Obsidian, the next run notices the hash
+  changed and copies your version to `_conflicts/<date>/` (or
+  `_private/_conflicts/<date>/` for a private note) before rewriting it.
+  Nothing you typed is lost, but it is **not** applied to Postgres: copy
+  what you want into Friday (`/memory`, `/memory/graph`) yourself. The run's
+  `work_log` notice names the folders; `/memory/graph` lists them.
+- The first v2 run rewrites v1 files without conflict detection (they have
+  no hash): move hand-edited v1 notes elsewhere before approving it.
 
 ## Troubleshooting
 

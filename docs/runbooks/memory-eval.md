@@ -191,3 +191,48 @@ key outside the D9 list is refused. Re-recording the same file is a no-op.
 You can read the runs at `GET /api/v1/memory/evals/runs` (owner, web
 session only). Copy the baseline numbers into the brief's "Go/no-go
 record".
+
+## 6. The two decisions the eval gates (Phase 8B closeout)
+
+Both decisions are the owner's, on recorded **private** results. The public
+seed is synthetic and only guards against regressions in CI.
+
+**Retrieval default (brief D8).** Run the compare and record both arms:
+
+```bash
+export DJANGO_SETTINGS_MODULE=config.settings.eval
+uv run python manage.py memory_eval compare --set private --retrieval hybrid
+unset DJANGO_SETTINGS_MODULE
+uv run python manage.py memory_eval record ~/friday-evals/results/<id>-a.json --owner you@example.com
+uv run python manage.py memory_eval record ~/friday-evals/results/<id>-b.json --owner you@example.com
+```
+
+Flip `MEMORY_RETRIEVAL_MODE=hybrid` in `.env` (and restart web and worker)
+only when arm B's verdict is `pass`. Otherwise keep `legacy`. The closeout
+(2026-11-20) kept `legacy`: the public compare showed no regression, but
+no private compare is recorded yet (pending owner evaluation, brief M2
+item 2). Preflight `retrieval_indexes` warns while `hybrid` runs without a
+recorded passing private compare.
+
+**Headroom compression (brief D11).** Only `chat` is a candidate. Build and
+start the sidecar first (`docker compose --profile compression up -d
+compressor`), then:
+
+```bash
+export DJANGO_SETTINGS_MODULE=config.settings.eval
+uv run python manage.py memory_eval compare --set private --compression chat
+```
+
+Record both arms as above. Set `AI_COMPRESSION_ENABLED=true` and
+`AI_COMPRESSION_PURPOSES=chat` only on a `pass`: at most 1 point of answer
+accuracy lost, no extra leak, and something was actually compressed (a
+compare that compressed nothing is `inconclusive`). Preflight `compressor`
+fails while an enabled purpose has no recorded passing private compare, or
+while the sidecar's `/healthz` reports telemetry on.
+
+## 7. Preflight
+
+`manage.py preflight` reports `eval_baseline`: `pass` with the private
+baseline's metrics once one is recorded, `warn` (pending owner evaluation)
+until then. It never fails the run. Copy the numbers into the brief's
+"Go/no-go record" (8B brief, M2 items 1–3).
