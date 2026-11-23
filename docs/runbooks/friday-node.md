@@ -1,11 +1,16 @@
-# Friday Node gateway — runbook (v0)
+# Friday Node — runbook
 
-Phase 9 branch 4 (`feat/p9-node-gateway`,
-`docs/prompts/phase-9-friday-node/brief.md` D3, D6). This v0 covers running
-the gateway and exposing `/ws/node/v1`; branch 6 (`feat/p9-node-events`,
-D10) adds node events and switching the Claude Code hooks. The closeout
-(`chore/p9-closeout`) completes it: TLS pin, signing key rollover, pairing,
-kill switch, revocation and the audit chain.
+Phase 9 (`docs/prompts/phase-9-friday-node/brief.md`, ADR-013). Branch 4
+(`feat/p9-node-gateway`) wrote the gateway part, branch 6
+(`feat/p9-node-events`) node events and the hook switch-over, and the
+closeout (`chore/p9-closeout`) completed it: TLS pin, signing key generation
+and rollover, pairing, kill switch, revocation, the audit chain and the
+preflight node checks.
+
+The Mac side (the Swift `friday-node` app) is **deferred to a Mac session**
+(brief "Mac session (deferred)", M1–M4). Until it exists, the only node is
+the Python reference node the tests run; every step below that happens "on
+the Mac" is pending owner evaluation.
 
 ## What runs where
 
@@ -63,9 +68,134 @@ friday.example.net {
 - The proxy must pass the `Authorization` and `Sec-WebSocket-Protocol`
   headers through unchanged (Caddy does by default) and must not add an
   `Origin` header: the gateway closes any handshake that carries one (4403).
-- The node pins the certificate (or its CA) it paired over (Mac session M1).
-  Optionally set `NODE_TLS_PIN_SHA256` so the closeout's preflight can warn
-  when the served certificate changes.
+- The node pins the certificate key it paired over (Mac session M1).
+  Optionally set `NODE_TLS_PIN_SHA256` (next section) so preflight fails
+  when the served certificate key changes.
+
+### Pinning the served certificate (`NODE_TLS_PIN_SHA256`)
+
+The node pins the TLS key it paired over. If the proxy's certificate key
+changes (a new key, not just a renewal that keeps it), every paired node
+refuses the server. Let preflight catch that first:
+
+```bash
+# On any host that reaches the proxy: base64 sha256 of the served SPKI.
+openssl s_client -connect friday.example.net:443 -servername friday.example.net </dev/null 2>/dev/null \
+  | openssl x509 -pubkey -noout \
+  | openssl pkey -pubin -outform der \
+  | openssl dgst -sha256 -binary | base64
+```
+
+Put the value in `deploy/docker/.env` as `NODE_TLS_PIN_SHA256` (base64 or
+hex; a `sha256/` prefix is accepted) with
+`PREFLIGHT_NODE_TLS_URL=https://friday.example.net/ws/node/v1`, and restart
+web. `node_tls_pin` then compares the served SPKI with the pin on every
+preflight. Caddy keeps the key across automatic renewals only with
+`key_type` fixed and the key reused; otherwise plan a re-pin (and a re-pair
+on the Mac) with every renewal.
+
+## Signing key: generation and rollover
+
+- **Generate.** `make secrets` (`deploy/docker/gen-secrets.sh`) appends a
+  random `NODE_SIGNING_KEY` (base64 of 32 raw Ed25519 bytes) to
+  `deploy/docker/.env` once and never overwrites it. The key lives only in
+  that file and the containers' environment: never commit it, never copy it
+  to the Mac (the Mac pins the **public** key from the pairing response).
+- **Same key everywhere.** web, worker and node-gateway must have the same
+  key: preflight's `node_signing_key` compares web's key id with the
+  gateway's `/healthz` and with the id a worker returns from the
+  `nodes.signing_key_id` task. A published test key (the protocol vectors,
+  the conformance key pair) is refused everywhere.
+- **Rollover = re-pair (Phase 9, brief Q3).** There is no signed rollover
+  message yet. To replace the key:
+  1. put the old **public** key (base64) into `NODE_SIGNING_KEYS_RETIRED`
+     if anything must still verify against it, then set the new
+     `NODE_SIGNING_KEY`;
+  2. restart web, worker and node-gateway together;
+  3. revoke each paired node and pair it again (below); the new pairing
+     response hands out the new key. Until then the node refuses every
+     invoke (unknown key id), and `node_signing_key` fails with "N active
+     node(s) pinned another key id".
+
+## Pairing a node
+
+1. On `/devices` → "Mac düğümleri": "Mac eşleştir" issues a LAN-only PIN
+   (8 digits, 5 minutes); from another network use the strong code. From
+   the host shell: `manage.py issue_pairing_code --node --strong`. The code
+   is shown once and is refused while the kill switch is engaged.
+2. In the Mac app's pairing screen (Mac session M1) enter the server URL and
+   the code. The app calls `POST /api/v1/nodes/pair` and receives, once,
+   `node_id`, the `jnd_…` secret (kept in the Keychain), the server signing
+   key to pin, the protocol version and `gateway_path`.
+3. The node connects to `wss://…/ws/node/v1`; `/devices` shows it
+   `Bağlı`, with its capability list as text (grants are set on the Mac
+   only).
+
+The secret rotates every `NODE_CREDENTIAL_ROTATE_AFTER_DAYS` (30) through
+`POST /api/v1/auth/nodes/credential/rotate`; a secret older than
+`NODE_CREDENTIAL_MAX_AGE_DAYS` (90) or unused for `NODE_IDLE_EXPIRY_DAYS`
+(30) stops working and the node must re-pair.
+
+## Kill switch
+
+Cuts off **every** node of the owner at once, without forgetting them:
+
+- `/devices` → "Acil durdurmayı aç" / "Acil durdurmayı kapat" (behind a
+  confirmation), or
+  `manage.py node_kill_switch on` / `off` / `status`.
+- Engaged: every node handshake and pairing is refused, the gateway sends
+  `bye{kill_switch}` and closes the owner's live sockets within ~2 s (pub/sub;
+  the heartbeat re-check is the backstop), the HUD node line says "acil
+  durdurma açık". Another owner's nodes are untouched.
+- Released: the (non-revoked, unexpired) nodes reconnect without re-pairing.
+  Both are audited (`accounts.node.kill_switch.engaged` / `.released`).
+
+## Revocation
+
+- One node: `/devices` → the node → "İptal et", or
+  `POST /api/v1/nodes/<id>/revoke`. Permanent: the gateway sends
+  `bye{revoked}` and closes the socket within ~2 s, the node tools are no
+  longer offered to the chat, and the node must pair again to come back.
+- Everything: `manage.py revoke_all_devices` revokes every browser device
+  **and** every node of the owner.
+- The `Node` row stays (the audit chain's subject); its status reads
+  `revoked`.
+
+## Reading the audit chain
+
+Every node call writes exactly one hash-chained `NodeInvocation` row (codes,
+hashes, sizes, the target workspace; never args or output content) and one
+`nodes.invoke` `AuditLog` row.
+
+```bash
+docker compose -f deploy/docker/compose.yml exec web uv run python manage.py verify_node_audit_chain
+# node audit chain OK: 42 row(s)
+```
+
+A non-zero exit names the first broken `seq` and the reason (`seq_gap`,
+`prev_hash_mismatch`, `row_hash_mismatch`, `head_mismatch`, `head_missing`).
+The table is append-only by trigger: a break means someone bypassed it at
+the database level -- treat it as an incident, keep the database as it is,
+and engage the kill switch until it is understood. The owner reads the rows
+on `/devices/nodes/<id>` (last 50, newest first) or
+`GET /api/v1/nodes/<id>/invocations`.
+
+## Preflight node checks
+
+`make preflight` (`manage.py preflight`) runs, read-only and without any
+model call:
+
+| Check | Pass | Warn | Fail |
+|---|---|---|---|
+| `node_gateway` | `/healthz` answers, Redis OK | `PREFLIGHT_NODE_GATEWAY_URL` empty | unreachable, non-200, Redis down |
+| `node_signing_key` | one key id in web, worker and node-gateway; every active node pinned it | a comparison skipped (no gateway URL, eager Celery) | key missing/invalid/test key anywhere, ids differ, no worker answers, a node pinned another key |
+| `node_link:<name>` | connected, fresh heartbeat row, catalogue present | disconnected, kill switch, credential expiring, stale row; **no node paired** (Mac session pending) | — |
+| `node_tls_pin` | served SPKI = pin | pin or URL not set | mismatch, handshake error, malformed pin/URL |
+| `node_audit_chain` | chain intact | — | first broken `seq` |
+| `node_conformance` | case/vector files current | — | stale files (`build_node_conformance`) |
+
+The compose stack sets `PREFLIGHT_NODE_GATEWAY_URL=http://node-gateway:8002/healthz`
+for web. The HUD health panel shows only the names of failing checks.
 
 ## Close codes a node sees
 
@@ -103,7 +233,7 @@ A value outside its bounds stops every process at boot (`nodes.E005`–`E007`).
 - `POST /api/v1/nodes/<id>/revoke` — permanent; the gateway closes the
   node's socket within ~2 s (pub/sub), at the latest at its next heartbeat.
 
-The `/devices` UI for these is branch 7.
+The `/devices` UI for these is "Mac düğümleri" (branch 7).
 
 ## Node events (branch 6)
 
