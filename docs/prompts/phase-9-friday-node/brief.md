@@ -2664,3 +2664,16 @@ Implementation notes (branch 5):
    `backend/config/tests/test_node_read_turns.py` (import contracts) and no
    serializers change was needed; the behaviour is covered. Note the actual
    location in the branch 5 section, or leave it.
+
+### Known follow-ups (LOW, from the `feat/p9-node-ui` review)
+
+1. **LOW, `frontend/src/components/nodes/NodesSection.tsx`.** `handleChanged`
+   merges the revoke response (a summary) over the detail, so capability
+   entries stay shown for a just-revoked node until the next reload. Cosmetic
+   only; the backend refuses invocations for revoked nodes. Fix: call `load()`
+   after a successful revoke, as `handleKillSwitch` does.
+2. **LOW, `backend/hud/services.py`.** `node_section` reads
+   `node_health(actor)` on every HUD stream tick, so each tick runs node
+   queries plus a Redis presence read. This is bounded (a few nodes per owner)
+   and a test pins that the stream writes no rows. Fix: if HUD tick cost
+   matters later, cache the node block for a few seconds.
