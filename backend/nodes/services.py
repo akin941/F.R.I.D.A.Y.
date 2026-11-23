@@ -226,14 +226,19 @@ def record_capability_snapshot(
     """Write a `CapabilitySnapshot` when the catalogue hash **or** the
     session's protocol version changed since the node's latest snapshot
     (a node that reconnects on v2 with the same catalogue must not keep its
-    v1 `protocol_v1` verdicts, and the reverse). Returns the snapshot in
-    force. Called by the gateway on `hello` (Phase 9 branch 4)."""
+    v1 `protocol_v1` verdicts, and the reverse), or when the latest
+    snapshot's entries differ from this `hello`'s verdicts (a
+    `grant.availability_changed` successor, Phase 9 branch 6, keeps the
+    hello's hash: a node that reconnects with the catalogue it advertised
+    before the change must not inherit the changed flags). Returns the
+    snapshot in force. Called by the gateway on `hello` (Phase 9 branch 4)."""
     entries = classify_catalogue(catalogue, protocol_version=protocol_version)
     latest = CapabilitySnapshot.objects.filter(node=node).order_by("-created_at").first()
     if (
         latest is not None
         and latest.catalogue_sha256 == catalogue_sha256
         and snapshot_protocol_version(latest) in (protocol_version, None)
+        and list(latest.entries or ()) == entries
     ):
         return latest
     return CapabilitySnapshot.objects.create(

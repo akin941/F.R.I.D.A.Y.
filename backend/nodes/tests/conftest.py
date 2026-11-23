@@ -9,7 +9,7 @@ from accounts.authentication import TOKEN_PREFIX, hash_token
 from accounts.models import DevicePairingCode, PersonalAccessToken, TrustedDevice, User
 from accounts.services import register_user
 from core import revocation
-from nodes import bus
+from nodes import bus, events
 from nodes.gateway import NodeSocketApp
 from nodes.tests.gateway_harness import Harness, reference_node
 from workspaces.models import Workspace, WorkspaceMember
@@ -39,6 +39,16 @@ def fake_revocation_redis(monkeypatch):
     fake = FakeRedis()
     monkeypatch.setattr(revocation, "_client", lambda: fake)
     return fake
+
+
+@pytest.fixture(autouse=True)
+def no_event_sinks():
+    """No node event sink unless a test registers one (D10): importing the
+    composition root (`config.asgi_nodes`, from config tests in the same
+    process) registers the memory sink globally."""
+    events.reset_sinks()
+    yield
+    events.reset_sinks()
 
 
 @pytest.fixture

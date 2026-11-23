@@ -10,6 +10,10 @@ scrubbers (a source test pins it, Phase 10 D14):
   workspace's `ScrubTerm`s, so every `output` chunk and every `tail` the
   gateway handles is scrubbed server-side (never trusting the node's own
   scrub). `nodes` imports neither `memory` nor `config`, hence the port.
+  It also registers the `claude_code.hook` event sink (Phase 9 brief D10,
+  branch 6): `memory.ingestion.hooks.ingest_hook_events`, the same
+  channel-agnostic function behind 8A's `hook` PAT endpoint, called with
+  the node's owner and personal workspace.
 - `application` is a minimal raw-ASGI router (Phase 9 branch 4):
   - `websocket` on `/ws/node/v1` -> `nodes.gateway.NodeSocketApp` (one
     instance per process: the live sockets, the inbox loops and the
@@ -32,9 +36,11 @@ import django
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings.prod")
 django.setup()
 
+from memory.ingestion.hooks import ingest_hook_events  # noqa: E402
 from memory.ingestion.scrubber import scrub_text  # noqa: E402
 from memory.ingestion.services import scrub_terms_for  # noqa: E402
 from nodes import bus  # noqa: E402
+from nodes.events import HOOK_EVENTS, register_sink  # noqa: E402
 from nodes.gateway import NodeSocketApp  # noqa: E402
 from nodes.keys import signing_key_id  # noqa: E402
 from nodes.output import register_scrubber  # noqa: E402
@@ -58,6 +64,7 @@ def workspace_scrubber(workspace):
 
 def register_node_ports():
     register_scrubber(workspace_scrubber)
+    register_sink(HOOK_EVENTS, ingest_hook_events)
 
 
 register_node_ports()
