@@ -84,12 +84,33 @@ export interface HudPreflight {
   failed_checks: string[] | null;
 }
 
+// Phase 9 D11: the actor's own node link (codes and counts, no paths).
+export type HudNodeStatus =
+  | "connected"
+  | "disconnected"
+  | "kill_switch"
+  | "revoked"
+  | "credential_expiring"
+  | "never_paired";
+
+export interface HudNodeLine {
+  status: HudNodeStatus;
+  last_heartbeat_at: string | null;
+  catalogue_sha256: string;
+  invocable_count: number;
+  advertised_count: number;
+  spool_depth: number;
+  node_version: string;
+}
+
 export interface HudHealth {
   providers: HudProvider[];
   providers_down: number;
   budgets: HudBudget[];
   budgets_exhausted: number;
   preflight: HudPreflight | null;
+  /** Optional: absent from a backend predating Phase 9 branch 7. */
+  node?: HudNodeLine | null;
 }
 
 // Phase 10 D12: the actor's last five node action executions (no output).

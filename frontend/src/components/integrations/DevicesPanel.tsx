@@ -173,8 +173,8 @@ function DeviceRow({
  * unut", "Yeni cihaz eşleştir" (a PIN, or a strong code for another
  * network) and the remote access key. Friday Nodes (Phase 9 D1, the Mac
  * app) are listed with a "Mac düğümü" badge and their own revoke wording;
- * node pairing and the kill switch toggle arrive with the /devices node
- * section (Phase 9 branch 7).
+ * node pairing, status and the kill switch live in the "Mac düğümleri"
+ * section below (`components/nodes/NodesSection`, Phase 9 branch 7).
  */
 export function DevicesPanel() {
   const [devices, setDevices] = useState<ApiTrustedDevice[]>([]);

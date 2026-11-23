@@ -107,6 +107,91 @@ export interface ApiPairingCode {
   expires_at: string;
 }
 
+// --- Friday Nodes (Phase 9 D11, branch 7) ---
+
+/** `nodes.selectors.node_status` (+ `never_paired` on the HUD line). */
+export type ApiNodeStatus =
+  | "connected"
+  | "disconnected"
+  | "kill_switch"
+  | "revoked"
+  | "credential_expiring"
+  | "never_paired";
+
+/** `GET /api/v1/nodes` item: codes, counts, short hashes and times only. */
+export interface ApiNodeSummary {
+  id: string;
+  name: string;
+  status: Exclude<ApiNodeStatus, "never_paired">;
+  online: boolean;
+  protocol_version: number;
+  node_version: string;
+  os_version: string;
+  last_heartbeat_at: string | null;
+  spool_count: number;
+  spool_bytes: number;
+  paired_at: string;
+  revoked_at: string | null;
+  credential_age_days: number;
+  credential_expires_at: string | null;
+  rotate_after_days: number;
+  pinned_key_id: string;
+  catalogue_sha256: string;
+  advertised_count: number;
+  invocable_count: number;
+  snapshot_at: string | null;
+}
+
+/** One snapshot entry: availability is the Mac's own (read-only here). */
+export interface ApiNodeCapability {
+  name: string;
+  version: number | string | null;
+  class: string | null;
+  availability: string | null;
+  invocable: boolean;
+  reason: string | null;
+}
+
+export interface ApiNodeDetail extends ApiNodeSummary {
+  capabilities: ApiNodeCapability[];
+}
+
+/** One chain row (D8): hashes, codes and sizes -- never args or output. */
+export interface ApiNodeInvocation {
+  id: string;
+  seq: number;
+  created_at: string;
+  capability: string;
+  capability_version: number | string | null;
+  class: string;
+  status: string;
+  refusal_code: string;
+  args_sha256: string;
+  output_sha256: string;
+  output_bytes: number;
+  truncated: boolean;
+  dropped_unmapped: number;
+  duration_ms: number;
+  channel: string;
+  trace_id: string;
+  workspace_id: string;
+  workspace_name: string;
+  row_hash: string;
+}
+
+export interface ApiNodeInvocationPage {
+  results: ApiNodeInvocation[];
+  next_cursor: number | null;
+}
+
+/** `GET/POST/DELETE /api/v1/auth/nodes/kill-switch` (Phase 9 D1). */
+export interface ApiNodeKillSwitch {
+  engaged: boolean;
+  engaged_at: string | null;
+  engaged_via: string;
+  released_at: string | null;
+}
+
 export interface ApiRemoteKeyState {
   active: boolean;
   created_at: string | null;

@@ -1599,7 +1599,7 @@ node paired, the e2e test is green, and the go/no-go record is written.
 | 4 | `feat/p9-node-gateway` | `asgi_nodes` + uvicorn/`wsproto`, `node-gateway` service, handshake, `hello`/snapshot, heartbeat/presence, invoke bus, revocation/kill-switch fan-out, limits, node APIs | 1, 2, 3 | **implemented 2026-11-20** (done criterion met: `test_the_done_criterion_round_trip` in process and `test_the_reference_node_over_a_real_socket` under uvicorn — `hello.ack`, a signed read answered, cut off within 2 s of `revoke_device`; `invoke_read` bus side with chain + AuditLog rows; known follow-up 3 resolved (Redis in-flight counter, two-process test); Phase 10 owner step 2 done (`NodeSession` wired into the socket app, 1013 placeholder replaced); awaits independent Sonnet 5 review) |
 | 5 | `feat/p9-node-reads` | `invoke_read` end to end, five read tools, path → workspace resolution, second scrub, fencing, chain + audit rows, invocations API | 4 | **implemented 2026-11-20** (done criterion met: `config/tests/test_node_read_turns.py::test_the_done_criterion_sessions_answered_from_the_node` — the reference node's fixture sessions in a FakeAdapter chat answer, filtered to the conversation's workspace, two `ok` chain rows, no stored content; 8B step-0 actor check in `invoke_read`; the 8B owner-turn move is a known follow-up below; awaits independent Sonnet 5 review) |
 | 6 | `feat/p9-node-events` | `event` sink wiring into `ingest_hook_events`, cross-relay dedupe, spool upload acks, availability events | 4 (parallel with 5) | **implemented 2026-11-20** (done criterion met: `config/tests/test_hooks_via_node.py::test_the_done_criterion` — an event written to the reference relay's Unix socket reaches `GET /memory/sessions` through the node, and a `friday-hook` replay is a `duplicate`; `nodes/events.py` sink registry + availability successor snapshots, spooled-batch pacing, `config.asgi_nodes` registration; awaits independent Sonnet 5 review) |
-| 7 | `feat/p9-node-ui` | `/devices` node section, invocation log page, HUD node line, `hud → nodes` contract | 4, 5 (6 for availability) | not started |
+| 7 | `feat/p9-node-ui` | `/devices` node section, invocation log page, HUD node line, `hud → nodes` contract | 4, 5 (6 for availability) | **implemented 2026-11-20** (done criterion met server- and UI-side: pair (node code shown once), inspect (status, heartbeat, credential age, capability availability as text, invocation log), kill-switch and revoke behind confirmations on `/devices`; the HUD health panel's node line from `health.node` — `hud/tests/test_node_line.py`, `components/nodes/*.test.tsx`, `HudNodeLine.test.tsx`; the `hud → nodes` edge already existed (Phase 10 D12), only its comment changed; awaits independent Sonnet 5 review) |
 | 8 | `chore/p9-closeout` | Preflight node checks, e2e, runbook, ADR-013 notes, MASTER_PLAN row, go/no-go record | 1–7 | not started |
 | M1 | `feat/p9-node-app` | Swift menu-bar app: signing/notarization, Keychain credential + TLS pin, pairing, WSS client, D5 verifier, conformance pass | 1–4 merged; owner's Apple Developer ID (d9) | deferred: Mac session |
 | M2 | `feat/p9-node-readers` | Swift readers for the eight capabilities, per-directory Touch ID grants, local policy UI, scrubber port + corpus | M1 | deferred: Mac session |
@@ -2572,6 +2572,59 @@ Implementation notes (branch 5):
   nodes" and "tools ↛ assistant" contracts). The 8A prompt-injection
   corpus (`memory/tests/test_learning_night.py`) gains two transcript-shaped
   items.
+
+### Owner steps (pending) — `feat/p9-node-ui`, recorded 2026-11-20
+
+1. Run the independent Sonnet 5 review of `feat/p9-node-ui` and fix
+   findings until APPROVE (CLAUDE.md "Reviews").
+2. No migration, no new setting, no new dependency. Rebuild the frontend
+   and restart web (`make up` / `make up-daily`).
+3. On `/devices` → "Mac düğümleri": issue a node code ("Mac eşleştir" on
+   the LAN, or the strong code from another network). It is shown once;
+   enter it in the Mac app's pairing screen (**Mac session M1, deferred:
+   Mac session**). Then check that the node shows `Bağlı`, that its
+   capability list says "Mac'te izin verilmedi" for every directory you
+   have not granted on the Mac, and that granting one on the Mac (M2)
+   turns it into "Kullanılabilir" after the node's
+   `grant.availability_changed` (pending owner evaluation).
+4. Try the kill switch once from `/devices` (on, the node line in the HUD
+   shows "acil durdurma açık" and the Mac app drops the socket within 2 s;
+   off, it reconnects) and revoke a test node (M4 item 2, pending owner
+   evaluation).
+
+### Implementation notes — `feat/p9-node-ui` (2026-11-20)
+
+- **HUD.** `hud.services.health_section(workspace, actor)` gains
+  `node` (`hud.services.node_section`): `status`, `last_heartbeat_at`,
+  `catalogue_sha256` (12 chars), `invocable_count`, `advertised_count`,
+  `spool_depth`, `node_version` — nothing else (no node id, no path, no
+  capability name). It reads `nodes.selectors.node_health(actor)`, which
+  now goes through `nodes_for()` (`for_actor()` + `owner=actor`). The line
+  is the actor's own node, so it shows in each of the owner's workspace
+  streams (the stream is owner-only, `IsOwner`); presence flips change
+  `health` and produce a delta (pinned). The `hud → nodes` import edge was
+  already allowed by the Phase 10 D12 contract edit; only its comment
+  now names D11 too.
+- **BFF** (`frontend/src/app/api/nodes/`): `GET /api/nodes`,
+  `GET /api/nodes/[id]`, `GET /api/nodes/[id]/invocations?cursor=<digits>`,
+  `POST /api/nodes/[id]/revoke`, `GET/POST/DELETE /api/nodes/kill-switch`
+  (→ `/api/v1/auth/nodes/kill-switch`, no body forwarded) and
+  `POST /api/nodes/pairing-codes` (→ `/api/v1/auth/pairing-codes` with
+  `device_kind=node` always, `kind` pin/strong only). Mutations are
+  origin- and content-type-checked as the other BFF routes.
+- **UI.** `components/nodes/NodesSection.tsx` on `/devices` (below the
+  existing browser list, which keeps its "Mac düğümü" badge) and
+  `components/nodes/NodeDetail.tsx` on `/devices/nodes/[nodeId]`. The
+  capability list is text only (a test asserts no input, button, select
+  or switch inside it). The invocation log renders only named fields:
+  capability, status (+ refusal code), seq and time, workspace name,
+  duration, the args hash, the output hash and size, dropped-unmapped
+  count. Pairing buttons are disabled while the kill switch is engaged
+  (the backend refuses with 409 anyway). Status colours use the semantic
+  tones (`STATUS_TONES.node`, `.nodeInvocation`) and checked HUD text
+  tokens (`NODE_HUD_TOKENS`); no new colour token, so no new contrast
+  pair (pinned in `lib/theme/tokens.test.ts`). Layouts are single-column
+  below `sm`.
 
 ### Known follow-ups (from `feat/p9-node-reads`)
 

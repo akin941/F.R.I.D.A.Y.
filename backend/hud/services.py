@@ -18,6 +18,12 @@ Rules this module keeps:
 - **No decisions (D8).** Approvals are listed for a deep link to
   `/approvals/<id>`; nothing here (or on the HUD) decides one.
 
+Phase 9 branch 7 (brief D11) adds the `node` block to `health`: the
+actor's own node link (status word, last heartbeat, short catalogue hash,
+invocable/advertised counts, spool depth, node version) through
+`nodes.selectors.node_health` -- codes and counts only, never a path or
+content.
+
 Phase 10 branch 5 (brief D12) adds a fifth section, `terminal`: the
 actor's last five node action executions in the stream's workspace
 (`for_actor()` and `actor=`), with capability label, repo name, status,
@@ -41,6 +47,7 @@ from approvals.models import ApprovalRequest
 from nodes.action_rules import repo_path_of
 from nodes.capabilities import get_action_contract
 from nodes.models import EXECUTION_TERMINAL_STATUSES, NodeActionExecution
+from nodes.selectors import node_health
 from tasks.models import Task
 
 ZERO = Decimal("0")
@@ -205,10 +212,30 @@ def _preflight():
     return {key: value.get(key) for key in keys}
 
 
-def health_section(workspace):
+def node_section(actor):
+    """The health panel's node line (Phase 9 D11, branch 7): the actor's own
+    node link through `nodes.selectors.node_health` -- a status word, the
+    last heartbeat, a short catalogue hash, counts, the spool depth and the
+    node's version. No path, no capability name, no read output. The nodes
+    are the actor's own (`for_actor()` plus `owner=actor`), so the same
+    line shows in each of the owner's workspace streams and never another
+    user's node."""
+    block = node_health(actor)
+    return {
+        "status": block["status"],
+        "last_heartbeat_at": _iso(block.get("last_heartbeat_at")),
+        "catalogue_sha256": block.get("catalogue_sha256", ""),
+        "invocable_count": block.get("invocable_count", 0),
+        "advertised_count": block.get("advertised_count", 0),
+        "spool_depth": block.get("spool_depth", 0),
+        "node_version": block.get("node_version", ""),
+    }
+
+
+def health_section(workspace, actor=None):
     """Provider status (the last call in the window, per provider), budgets
-    used, and the last preflight result. Mic state is client-side; the node
-    link arrives in Phase 9."""
+    used, the last preflight result and (Phase 9 D11) the actor's node
+    link. Mic state is client-side."""
     since = timezone.now() - timedelta(minutes=settings.HUD_PROVIDER_WINDOW_MINUTES)
     # The workspace's own calls plus system calls (no workspace: preflight,
     # scheduled jobs) -- never another workspace's rows.
@@ -235,6 +262,7 @@ def health_section(workspace):
         "budgets": budget_rows,
         "budgets_exhausted": sum(1 for b in budget_rows if b["exhausted"]),
         "preflight": _preflight(),
+        "node": node_section(actor) if actor is not None else None,
     }
 
 
@@ -312,7 +340,7 @@ def build_sections(actor, workspace, *, today=None):
         "approvals": approvals_section(actor, workspace),
         "tasks": tasks_section(actor, workspace, today=today),
         "cost": cost_section(workspace),
-        "health": health_section(workspace),
+        "health": health_section(workspace, actor),
         "terminal": terminal_section(actor, workspace),
     }
 

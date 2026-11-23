@@ -9,6 +9,7 @@ import type {
   HudApprovals,
   HudCost,
   HudHealth,
+  HudNodeLine,
   HudProviderStatus,
   HudStreamStatus,
   HudTasks,
@@ -173,6 +174,49 @@ const PROVIDER_TONE: Record<HudProviderStatus, string> = {
   disabled: "text-hud-caption-muted",
 };
 
+// Phase 9 D11: the node line's text colour per status -- checked HUD text
+// tokens only (tokens.test.ts), and the status word carries the meaning.
+export const NODE_HUD_TOKENS: Record<HudNodeLine["status"], string> = {
+  connected: "text-hud-speaking",
+  disconnected: "text-hud-caption-muted",
+  kill_switch: "text-hud-error",
+  revoked: "text-hud-caption-muted",
+  credential_expiring: "text-hud-awaiting-approval",
+  never_paired: "text-hud-caption-muted",
+};
+
+/** The Mac node link (D11): status, last heartbeat, counts. No paths. */
+export function HudNodeLineView({ node }: { node: HudNodeLine }) {
+  const copy = tr.hud.health;
+  const paired = node.status !== "never_paired";
+  return (
+    <div className="flex flex-col gap-0.5 text-xs" data-testid="hud-node" data-status={node.status}>
+      <h3 className="flex justify-between text-hud-caption-muted">
+        <span>{copy.node}</span>
+        <Link href="/devices" className="underline underline-offset-2">
+          {copy.nodeManage}
+        </Link>
+      </h3>
+      <p className={NODE_HUD_TOKENS[node.status] ?? "text-hud-caption"} data-testid="hud-node-status">
+        {copy.nodeStates[node.status] ?? node.status}
+        {paired && node.last_heartbeat_at ? (
+          <span className="text-hud-caption-muted" title={formatDateTime(node.last_heartbeat_at)}>
+            {" · "}
+            {copy.nodeHeartbeat} {formatRelativeTime(node.last_heartbeat_at)}
+          </span>
+        ) : null}
+      </p>
+      {paired ? (
+        <p className="text-hud-caption-muted">
+          {copy.nodeCounts(node.invocable_count, node.advertised_count)}
+          {node.spool_depth > 0 ? ` · ${copy.nodeSpool(node.spool_depth)}` : null}
+          {node.node_version ? ` · v${node.node_version}` : null}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
 export type MicState = keyof typeof tr.hud.health.micStates;
 
 export function HealthPanel({
@@ -259,6 +303,8 @@ export function HealthPanel({
           </ul>
         )}
       </div>
+
+      {health?.node ? <HudNodeLineView node={health.node} /> : null}
 
       <div className="flex flex-col gap-0.5 text-xs" data-testid="hud-preflight">
         <h3 className="text-hud-caption-muted">{tr.hud.health.preflight}</h3>
