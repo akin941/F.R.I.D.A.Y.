@@ -150,6 +150,13 @@ def test_registry_scan_no_proposable_tool_executes_from_a_voice_turn(
         ):
             events = _post(client, conversation, f"run {name}", input_mode="voice")
         drafts = [e for e in events if e["type"] == "draft"]
+        if name == "node_action":
+            # Phase 10 D13: a node action draft needs an argument step over
+            # the owner's paired nodes; with none there is nothing to
+            # propose and the turn is plain chat. The node action voice
+            # regressions are tools/tests/test_node_action_trust.py.
+            assert drafts == [], name
+            continue
         assert [d["kind"] for d in drafts] == ["tool"], name
         assert drafts[0]["tool_name"] == name
     assert instrumented_registry == []

@@ -539,6 +539,10 @@ AI_PURPOSE_TIERS = {
     "router.intent": "cheap",
     "router.task_draft": "cheap",
     "router.connector_args": "cheap",  # Phase 5 branch 4 (D4)
+    # Phase 10 D13: the node action argument step (untrusted, re-validated).
+    "router.node_action_args": "cheap",
+    # Phase 10 D9: the node action trust check (the `control` budget).
+    "control.trust_check": "cheap",
     "agent.skill_match": "cheap",
     "harness.briefing": "cheap",
     "harness.diff_summary": "cheap",
@@ -620,6 +624,12 @@ AI_BUDGET_REFLECTION_WEEKLY_USD = env("AI_BUDGET_REFLECTION_WEEKLY_USD", default
 # eval settings module may widen the purposes (the D11 compression compare).
 AI_LEARNING_EVAL_PURPOSES = ("memory.eval_answer",)
 AI_BUDGET_LEARNING_EVAL_MONTHLY_USD = env("AI_BUDGET_LEARNING_EVAL_MONTHLY_USD", default="5")
+# Phase 10 D9: the `control` monthly cap over the node action trust check,
+# created once by the ai_core data migration 0008 (and `seed_ai_defaults`),
+# owner-editable afterwards. A refused call degrades the verdict to
+# `warn:trust_check_unavailable`; it never blocks or approves anything.
+AI_CONTROL_PURPOSES = ("control.trust_check",)
+AI_BUDGET_CONTROL_MONTHLY_USD = env("AI_BUDGET_CONTROL_MONTHLY_USD", default="5")
 
 # --- Pre-send compression stage (Phase 8B branch 6, brief D11) ---
 # `ai_core/compression.py`: shortens long prior assistant replies through

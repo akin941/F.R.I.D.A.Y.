@@ -88,3 +88,33 @@ decisions 4–5 (half-duplex suppression, the 1.5 s self-trigger discard,
 wake-storm auto-mute) also shipped with Phase 6 branch 4; their replay-
 harness CI test belongs to the eval branch 3a, and their completion for
 always-on listening stays a Phase 11 precondition.
+
+## Implementation note — node actions only propose (2026-11-20, Phase 10 branch 4)
+
+`feat/p10-trust-check` (`docs/prompts/phase-10-control/brief.md`, D9 and
+D13) extends decisions 1 and 6 to Friday Node actions without a new intent:
+
+1. **Proposal only.** A node action reaches a turn only as a
+   `tool_request` draft of the `node_action` tool (`EFFECT_PROPOSAL`). The
+   router's argument step (`router.node_action_args`, web channel only)
+   sees the owner's message and server-side contracts; its untrusted
+   answer is re-validated against the server contract, and anything
+   outside it is plain chat. The draft carries `source_message_id`; the
+   server records the source message's `input_mode` in the approval
+   snapshot (the client cannot set it). Gate-class drafts still need the
+   card click, the `/approvals` decision and the Mac click; the
+   confirm-class draft (`apps.open`/`apps.focus`) needs the card click and
+   the Mac click. A spoken "evet"/"onayla" decides nothing.
+2. **Voice is weaker evidence (decision 6).** The trust check
+   (`assistant.trust_check`, purpose `control.trust_check`) caps a
+   voice-sourced proposal at `warn` (`voice_evidence`); the approval card
+   shows "Sesle önerildi". It can warn or block, never approve.
+
+Release-gate regressions: `tools/tests/test_node_action_trust.py` (a voice
+turn naming a node action yields a draft and nothing else; a spoken yes
+decides nothing; a voice-sourced approval is at best `warn`; the
+self-trigger "Hey Friday, terminali aç" through fake TTS and fake STT
+yields at most a draft card) and `assistant/tests/test_trust_check.py`. The
+recorded-audio replay harness (Phase 6 branch 3a) is still not merged, so
+the self-trigger case drives the voice endpoints with fakes instead of a
+recorded clip; it moves onto the harness when 3a lands.

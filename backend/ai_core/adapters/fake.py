@@ -198,6 +198,12 @@ _KNOWLEDGE_QUERY_TRIGGER = "summarize my knowledge base"
 # apps reason as the fixtures above. Always a fixed title with no due date;
 # per-case behavior (title/due_date variations, malformed output) is
 # exercised by feeding `parse_task_draft` its own literal fixtures directly.
+# Phase 10 D9/D13: benign defaults. The argument step proposes nothing (the
+# turn degrades to chat) and the trust check answers consistent; tests that
+# need another answer script the adapter. Mirrors
+# assistant.services.parse_node_action_args / assistant.trust_check in prose.
+FAKE_NODE_ACTION_ARGS_RESPONSE = '{"node_id": null, "capability": null, "args": null}'
+FAKE_TRUST_CHECK_RESPONSE = '{"verdict": "consistent", "reason_code": "matches_request"}'
 FAKE_TASK_DRAFT_RESPONSE = '{"title": "Fake extracted task", "due_date": null}'
 
 # Purpose-aware fixture for `agent.plan` (MVP 7 §2) -- mirrors
@@ -303,6 +309,10 @@ class FakeAdapter(BaseAdapter):
             return FAKE_ROUTER_INTENT_RESPONSE
         if purpose == "router.task_draft":
             return FAKE_TASK_DRAFT_RESPONSE
+        if purpose == "router.node_action_args":
+            return FAKE_NODE_ACTION_ARGS_RESPONSE
+        if purpose == "control.trust_check":
+            return FAKE_TRUST_CHECK_RESPONSE
         if purpose == "agent.plan":
             latest = _latest_user_content(messages)
             if _AGENT_MULTI_STEP_PLAN_TRIGGER in latest:

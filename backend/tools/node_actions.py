@@ -40,8 +40,15 @@ evidence source are registered by `assistant.apps.AssistantConfig.ready()`.
 Unregistered -> `block` (`trust_check_unavailable_config`): a
 misconfigured process fails closed, and that default never changes. In
 branch 3 `assistant` registers `pending_trust_check` (`warn:
-trust_check_pending`, no model call, `is_stub = True`); branch 4 replaces
-that one line with the real check.
+trust_check_pending`, no model call, `is_stub = True`); branch 4 replaced
+that one line with the real check (`assistant.trust_check`).
+
+Router proposals (D13, branch 4): `proposal_targets` and
+`validate_proposal` are registered into `tools.node_action_ports` so the
+router (`assistant.services.classify_intent`) can name the actor's own
+nodes, their invocable action capabilities and the workspace's 8A repo
+prefixes, and re-validate its argument step's untrusted output against the
+server contract before a draft card is shown.
 """
 
 import logging
@@ -49,10 +56,16 @@ import posixpath
 from dataclasses import dataclass, field
 
 from memory.ingestion.mapping import workspace_for_path
+from memory.models import IngestionSource, WorkspaceMappingRule
 from nodes import action_rules
 from nodes import services as node_services
-from nodes.capabilities import get_action_contract, get_any_contract
-from nodes.models import NodeActionExecution
+from nodes.capabilities import (
+    RECIPE_CATALOGUE_KEYWORD,
+    get_action_contract,
+    get_any_contract,
+    load_action_contracts,
+)
+from nodes.models import Node, NodeActionExecution
 from nodes.protocol.canonical import CanonicalizationError, sha256_hex
 from nodes.protocol.messages import ProtocolError
 from tools import node_action_ports as ports
@@ -337,6 +350,149 @@ def _workspace_for_path(owner, path):
     return workspace_for_path(owner, path)
 
 
+# --- Router proposals (Phase 10 D13, branch 4) ---------------------------
+
+# Schema keys never shown to the router's argument step: the regex classes
+# are long and say nothing a model can use; the catalogue hash is internal.
+_HIDDEN_SCHEMA_KEYS = frozenset({"pattern", "$schema", RECIPE_CATALOGUE_KEYWORD})
+MAX_PROPOSAL_NODES = 5
+MAX_REPO_PREFIXES = 20
+
+
+def _schema_hint(schema):
+    """A compact copy of an args schema for the router prompt (no regex
+    classes, no internal keywords)."""
+    if isinstance(schema, dict):
+        return {
+            key: _schema_hint(value)
+            for key, value in schema.items()
+            if key not in _HIDDEN_SCHEMA_KEYS and not str(key).startswith("x-friday")
+        }
+    if isinstance(schema, list):
+        return [_schema_hint(item) for item in schema]
+    return schema
+
+
+def _capability_hint(contract):
+    hint = {
+        "capability": contract.name,
+        "class": contract.capability_class,
+        "label": contract.label,
+        "description": contract.description,
+        "args_schema": _schema_hint(contract.args_schema),
+    }
+    if contract.recipes:
+        hint["recipes"] = [
+            {
+                "recipe": recipe.name,
+                "label": recipe.label,
+                "params_schema": _schema_hint(recipe.params_schema),
+            }
+            for recipe in contract.recipes.values()
+        ]
+    return hint
+
+
+def _owned_nodes(workspace, actor):
+    """The actor's own unrevoked nodes for which the D6 actor check passes in
+    `workspace` (newest first, bounded)."""
+    if actor is None or not getattr(actor, "is_authenticated", False):
+        return []
+    nodes = (
+        Node.objects.select_related("owner", "device")
+        .filter(owner_id=actor.pk, device__revoked_at__isnull=True)
+        .order_by("-created_at")[:MAX_PROPOSAL_NODES]
+    )
+    return [node for node in nodes if action_rules.actor_is_node_owner(actor, node, workspace)]
+
+
+def repo_prefixes(workspace, owner):
+    """The enabled 8A `path_prefix` rules of `owner`'s path registry (the
+    `claude_code_hooks` source) that target `workspace`: the only repo
+    roots the router may build a `repo_path` under (Q2: the server never
+    learns the node's own repo list)."""
+    rules = WorkspaceMappingRule.objects.filter(
+        source__kind=IngestionSource.Kind.CLAUDE_CODE_HOOKS,
+        source__workspace__owner_id=owner.pk,
+        rule_type=WorkspaceMappingRule.RuleType.PATH_PREFIX,
+        target_workspace_id=workspace.pk,
+        enabled=True,
+    ).order_by("pattern")
+    return [rule.pattern for rule in rules[:MAX_REPO_PREFIXES]]
+
+
+def proposal_targets(*, workspace, actor):
+    """What the router may propose to `actor` in `workspace` (D13): each
+    of the actor's own nodes with its invocable action capabilities whose D3
+    workspace class can fit this workspace, and the workspace's repo
+    prefixes. Server-side contracts only -- never a node's own policy (Q2).
+    Read only: writes nothing."""
+    targets = []
+    for node in _owned_nodes(workspace, actor):
+        snapshot = node_services.latest_snapshot(node)
+        capabilities = []
+        for contract in load_action_contracts().values():
+            if node_services.invocable_entry(snapshot, contract) is None:
+                continue
+            personal_only = contract.workspace_resolution == "personal_only"
+            if personal_only and not action_rules.is_owners_personal_workspace(
+                workspace, node.owner
+            ):
+                continue
+            capabilities.append(_capability_hint(contract))
+        if capabilities:
+            targets.append(
+                {"node_id": str(node.pk), "node_name": node.name, "capabilities": capabilities}
+            )
+    if not targets:
+        return []
+    prefixes = repo_prefixes(workspace, actor)
+    for target in targets:
+        target["repo_prefixes"] = list(prefixes)
+    return targets
+
+
+def validate_proposal(*, workspace, actor, proposal):
+    """The server contract applied to the router's untrusted argument output
+    (D13): the D6 actor check, a known invocable action capability, args
+    inside the contract and the D3 workspace rule. Returns the cleaned draft
+    payload `{node_id, capability, args, class}`, or None (the turn degrades
+    to plain chat). Writes nothing: the card click's `create_request` (or
+    the actions view) re-runs every check."""
+    if not isinstance(proposal, dict):
+        return None
+    node_id = proposal.get("node_id")
+    capability = proposal.get("capability")
+    args = proposal.get("args")
+    if not isinstance(node_id, str) or not isinstance(capability, str):
+        return None
+    if not isinstance(args, dict):
+        return None
+    node = node_services.find_node(node_id)
+    if node is None or not action_rules.actor_is_node_owner(actor, node, workspace):
+        return None
+    if node.device.revoked_at is not None:
+        return None
+    contract = get_action_contract(capability)
+    if contract is None:
+        return None
+    if node_services.invocable_entry(node_services.latest_snapshot(node), contract) is None:
+        return None
+    try:
+        contract.validate_args(args)
+        sha256_hex(args)
+    except (ProtocolError, CanonicalizationError, TypeError, ValueError):
+        return None
+    if action_rules.workspace_refusal(contract, args, workspace, node.owner) is not None:
+        return None
+    return {
+        "node_id": str(node.pk),
+        "capability": contract.name,
+        "args": args,
+        "class": contract.capability_class,
+    }
+
+
 def record_outcome(execution):
     """The work-log entry of a terminal gated execution (ADR-008 decision
     4): capability label, status and exit code only -- never args or
@@ -379,6 +535,9 @@ def _register():
     # and the work-log entry of each terminal gated execution.
     action_rules.register_path_resolver(_workspace_for_path)
     node_services.register_terminal_hook(record_outcome)
+    # D13: the router's proposal ports (`assistant` cannot reach `nodes`).
+    ports.register_proposal_source(proposal_targets)
+    ports.register_proposal_validator(validate_proposal)
 
 
 __all__ = [

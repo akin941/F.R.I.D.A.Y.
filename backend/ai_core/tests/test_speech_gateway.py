@@ -425,7 +425,8 @@ def test_under_cap_call_proceeds_and_is_priced(user, workspace, calls):
     assert usage.estimated_cost == Decimal("0.015000")
     assert usage.context_report["budget_session"] == "s-1"
     assert usage.context_report["cost_source"] == "configured_price"
-    assert budgets.spent(AIBudget.objects.get(), "session", session="s-1") == Decimal("0.015")
+    audio = AIBudget.objects.get(name="audio")
+    assert budgets.spent(audio, "session", session="s-1") == Decimal("0.015")
 
 
 def test_stt_cost_from_configured_per_second_price(user, workspace):
@@ -563,7 +564,7 @@ def test_seed_local_speech_rows_with_voice_key_and_idempotent(monkeypatch):
         ModelProvider.objects.filter(name__in=["voice-stt-local", "voice-tts-local"]).count() == 2
     )
     # audio + the three Phase 8A and two Phase 8B learning budgets + the
-    # Phase 8B eval cap.
+    # Phase 8B eval cap + the Phase 10 `control` cap (migration 0008).
     assert set(AIBudget.objects.values_list("name", flat=True)) == {
         "audio",
         "learning",
@@ -572,6 +573,7 @@ def test_seed_local_speech_rows_with_voice_key_and_idempotent(monkeypatch):
         "learning_reconciliation_daily",
         "learning_reflection_weekly",
         "learning_eval",
+        "control",
     }
 
 

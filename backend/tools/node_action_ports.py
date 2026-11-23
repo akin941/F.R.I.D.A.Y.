@@ -14,8 +14,20 @@ ours.
 - Unregistered trust check -> `block` (`trust_check_unavailable_config`):
   a misconfigured process fails closed. This default never changes.
 - `pending_trust_check`: the branch-3 stub (`warn:trust_check_pending`, no
-  model call, `is_stub = True`), registered explicitly by `assistant.apps`
-  until branch 4 replaces that line.
+  model call, `is_stub = True`). Branch 4 replaced its registration in
+  `assistant.apps` with the real `assistant.trust_check.check_node_action`;
+  the stub stays here only so a test can register it, and the closeout
+  `trust_check` preflight fails while it is the registered function.
+- Branch 4 (D13) adds the two **proposal ports** the router uses, both
+  registered by `tools.node_actions` (which may reach `nodes`; the router in
+  `assistant` may not): `register_proposal_source(fn)` -- `fn(*, workspace,
+  actor) -> list[dict]`, the actor's own nodes with their invocable action
+  capabilities and the workspace's 8A path prefixes -- and
+  `register_proposal_validator(fn)` -- `fn(*, workspace, actor, proposal) ->
+  dict | None`, the deterministic server contract (actor check, contract,
+  args, workspace rule) applied to the router's untrusted output. Both
+  unregistered -> no target and no valid proposal (the router degrades to
+  chat).
 """
 
 from dataclasses import dataclass
@@ -37,6 +49,18 @@ TRUST_REASON_CODES = frozenset(
         "trust_check_failed",
     }
 )
+# Branch 4 (D9): the model step's own closed reason list
+# (`assistant.trust_check.MODEL_REASON_CODES`, pinned equal by a test).
+MODEL_REASON_CODES = frozenset(
+    {
+        "matches_request",
+        "different_action",
+        "different_target",
+        "not_requested",
+        "ambiguous_request",
+    }
+)
+TRUST_REASON_CODES = TRUST_REASON_CODES | MODEL_REASON_CODES
 INPUT_MODES = ("text", "voice", "unknown")
 
 
@@ -68,6 +92,8 @@ pending_trust_check.is_stub = True
 
 _trust_check = None
 _evidence_source = None
+_proposal_source = None
+_proposal_validator = None
 
 
 def register_trust_check(fn) -> None:
@@ -102,8 +128,47 @@ def registered_trust_check():
     return _trust_check
 
 
+def register_proposal_source(fn) -> None:
+    """`fn(*, workspace, actor) -> list[dict]` (D13): what the router may
+    propose to this actor in this workspace."""
+    global _proposal_source
+    if not callable(fn):
+        raise TypeError("the proposal source must be callable")
+    _proposal_source = fn
+
+
+def register_proposal_validator(fn) -> None:
+    """`fn(*, workspace, actor, proposal) -> dict | None` (D13): the server
+    contract applied to the router's untrusted argument output."""
+    global _proposal_validator
+    if not callable(fn):
+        raise TypeError("the proposal validator must be callable")
+    _proposal_validator = fn
+
+
+def proposal_source():
+    return _proposal_source
+
+
+def proposal_validator():
+    return _proposal_validator
+
+
+def snapshot_ports() -> tuple:
+    """Test-only: the current registrations, for `restore_ports`."""
+    return (_trust_check, _evidence_source, _proposal_source, _proposal_validator)
+
+
+def restore_ports(state) -> None:
+    """Test-only: put back what `snapshot_ports` returned."""
+    global _trust_check, _evidence_source, _proposal_source, _proposal_validator
+    _trust_check, _evidence_source, _proposal_source, _proposal_validator = state
+
+
 def reset_ports() -> None:
-    """Test-only: back to the unregistered (fail-closed) state."""
+    """Test-only: back to the unregistered (fail-closed) state of the trust
+    check and the evidence source (the proposal ports are `tools`'s own
+    registrations and are left alone)."""
     global _trust_check, _evidence_source
     _trust_check = None
     _evidence_source = None
