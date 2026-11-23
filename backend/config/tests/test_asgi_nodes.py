@@ -90,11 +90,22 @@ def _call(scope):
 
 @pytest.mark.django_db(transaction=True)
 def test_healthz_answers_without_key_material():
+    # Other suites reset the process-wide scrubber; the gateway process
+    # registers it once at import, which this re-does.
+    asgi_nodes.register_node_ports()
     sent = _call({"type": "http", "method": "GET", "path": "/healthz"})
     assert sent[0]["status"] == 200
     body = json.loads(sent[1]["body"])
     assert body["status"] == "ok" and body["redis"] is True
-    assert set(body) == {"status", "redis", "connected_nodes", "signing_key_id"}
+    assert set(body) == {
+        "status",
+        "redis",
+        "connected_nodes",
+        "signing_key_id",
+        "output_scrubber",
+    }
+    # Phase 10 closeout: the composition root registered the scrubber.
+    assert body["output_scrubber"] is True
     assert len(body["signing_key_id"]) == 16
     assert body["connected_nodes"] == 0
     from django.conf import settings

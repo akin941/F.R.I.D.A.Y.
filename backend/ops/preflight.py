@@ -11,7 +11,8 @@ Each check returns one or more `CheckResult`s with a status:
 Every outside contact goes through a module-level seam (`http_get`,
 `db_fetchone`, `redis_ping`, `celery_ping`, `worker_signing_key_id`,
 `served_spki_sha256`, `node_conformance_drift`, `gateway_factory`,
-`pin_report`, `run_command`) so the unit tests replace exactly that and
+`pin_report`, `run_command`, `node_conformance_case_counts`,
+`escape_suite_report`, `approve_request_source`) so the unit tests replace exactly that and
 nothing else -- no test reaches a real provider, MCP server, browser or
 broker.
 
@@ -43,6 +44,23 @@ task through the seam `worker_signing_key_id` -- and node-gateway),
 seam `served_spki_sha256`), `node_audit_chain` (`verify_node_audit_chain`)
 and `node_conformance` (`build_node_conformance --check`, seam
 `node_conformance_drift`).
+
+Phase 10 closeout adds the control checks (`check_control`, read-only, no
+model call, nothing sent to a node): `node_grant_config` (grant TTL 70..120 s,
+dispatch delay <= 60 s, the 600 s `node_action` approval TTL, the approval and
+node action sweeps on the worker beat), `node_protocol_v2` (per active node:
+negotiated version and invocable gate/confirm counts; a `warn` when no node
+speaks v2, because the Mac session is deferred), `node_conformance_v2` (the
+v1 and v2 case files and `vectors/sandbox.json` current, seams
+`node_conformance_drift` and `node_conformance_case_counts`),
+`node_escape_suite` (`node_escape_suite --executor fake`, seam
+`escape_suite_report`; the ADR-014 Mac evidence date, a `warn` while pending),
+`node_output_scrubber` (the gateway's /healthz reports its scrubber),
+`trust_check` (the real check registered, never the branch-3 stub; tier,
+budget and prompt of `control.trust_check`), `node_action_actor` (the owner
+hooks declared; `approve_request` calls the approver hook, seam
+`approve_request_source`) and `harness_drivers` (per driver: disabled, or
+enabled with d4, a non-provisional snapshot and agreeing pins).
 
 Rules this module keeps:
 
@@ -1757,6 +1775,427 @@ def check_nodes():
     return results
 
 
+# --- Phase 10: control, with approval (closeout) ----------------------------
+
+# D2/D6: a grant covers delivery plus the node's 60 s confirmation window
+# (so at least 70 s) and never exceeds the protocol ceiling (120 s); an
+# approved action not dispatched within 60 s is refused, never run later.
+NODE_GRANT_TTL_MIN_SECONDS = 70
+NODE_GRANT_TTL_MAX_SECONDS = 120
+NODE_DISPATCH_DELAY_MAX_SECONDS = 60
+# D6: a `node_action` approval lives 10 minutes (owner away = expire).
+NODE_ACTION_APPROVAL_TTL_SECONDS = 600
+NODE_ACTION_TOOL = "node_action"
+# The worker-beat tasks the control path relies on, each at most every
+# `max_interval` seconds: the approval expiry sweep (the decision-time check
+# is the gate; the sweep is the backstop that expires an unanswered card),
+# the node action backstop (stale dispatches, gateways gone) and the daily
+# tail retention.
+CONTROL_BEAT_TASKS = (
+    ("approvals.tasks.sweep_expired_approval_requests", 60),
+    ("nodes.tasks.sweep_node_actions_task", 60),
+    ("nodes.tasks.clear_node_action_tails_task", 24 * 60 * 60),
+)
+TRUST_CHECK_PURPOSE = "control.trust_check"
+TRUST_CHECK_PROMPT = "friday_control_trust_check"
+CONTROL_PENDING_MAC = "pending owner evaluation (Mac session)"
+
+
+def node_conformance_case_counts():
+    """`{protocol version: number of conformance cases}` the suite defines
+    (the files `build_node_conformance` writes under `cases/v<N>/`)."""
+    from nodes.conformance.cases import all_cases
+
+    return {version: len(cases) for version, cases in all_cases().items()}
+
+
+def escape_suite_report():
+    """`(passed, contained, total)` of `node_escape_suite --executor fake`:
+    the D11 cases against the reference generator's policies, the fake
+    sandbox model and the runner's caps. Nothing outside a temp dir is
+    touched and no `srt` runs."""
+    from nodes.conformance.escape.runner import run_suite
+
+    report = run_suite("fake")
+    contained = sum(1 for verdict in report.verdicts if verdict.passed)
+    return report.passed, contained, len(report.verdicts)
+
+
+def approve_request_source():
+    """The source of `approvals.services.approve_request` (the
+    `node_action_actor` source test)."""
+    import inspect
+
+    from approvals.services import approve_request
+
+    return inspect.getsource(approve_request)
+
+
+def _schedule_seconds(schedule):
+    if isinstance(schedule, int | float) and not isinstance(schedule, bool):
+        return float(schedule)
+    run_every = getattr(schedule, "run_every", None)  # celery.schedules.schedule
+    if run_every is not None:
+        return run_every.total_seconds()
+    return None  # a crontab: not an interval this check can bound
+
+
+def _control_beat_problems():
+    schedules, registered = beat_schedules()
+    worker = (schedules or {}).get("worker") or {}
+    if not worker:
+        return ["no worker beat schedule published by the Celery app"]
+    problems = []
+    for task, max_interval in CONTROL_BEAT_TASKS:
+        entries = [entry for entry in worker.values() if entry.get("task") == task]
+        if not entries:
+            problems.append(f"{task} not on the worker beat")
+        else:
+            seconds = _schedule_seconds(entries[0].get("schedule"))
+            if seconds is None or seconds > max_interval:
+                problems.append(f"{task} runs less often than every {max_interval}s")
+        if task not in registered:
+            problems.append(f"{task} not registered")
+    return problems
+
+
+def _int_setting(name):
+    value = getattr(settings, name, None)
+    return value if isinstance(value, int) and not isinstance(value, bool) else None
+
+
+def _check_node_grant_config():
+    """D2/D6: `NODE_GRANT_TTL_SECONDS` in 70..120, the dispatch delay at
+    most 60 s, `node_action` registered with its 600 s approval TTL (as the
+    approvals service computes it, so a lower global cap shows), and the
+    control sweeps on the worker beat."""
+    from approvals.services import approval_ttl
+    from tools.registry import get_tool
+
+    problems = []
+    ttl = _int_setting("NODE_GRANT_TTL_SECONDS")
+    if ttl is None or not NODE_GRANT_TTL_MIN_SECONDS <= ttl <= NODE_GRANT_TTL_MAX_SECONDS:
+        problems.append(
+            f"NODE_GRANT_TTL_SECONDS={ttl} is outside "
+            f"{NODE_GRANT_TTL_MIN_SECONDS}..{NODE_GRANT_TTL_MAX_SECONDS}"
+        )
+    delay = _int_setting("NODE_ACTION_DISPATCH_MAX_DELAY_SECONDS")
+    if delay is None or not 1 <= delay <= NODE_DISPATCH_DELAY_MAX_SECONDS:
+        problems.append(
+            f"NODE_ACTION_DISPATCH_MAX_DELAY_SECONDS={delay} is outside "
+            f"1..{NODE_DISPATCH_DELAY_MAX_SECONDS}"
+        )
+    approval_seconds = None
+    if get_tool(NODE_ACTION_TOOL) is None:
+        problems.append("the node_action tool is not registered")
+    else:
+        approval_seconds = int(approval_ttl(NODE_ACTION_TOOL).total_seconds())
+        if approval_seconds != NODE_ACTION_APPROVAL_TTL_SECONDS:
+            problems.append(
+                f"a node_action approval lives {approval_seconds}s, not "
+                f"{NODE_ACTION_APPROVAL_TTL_SECONDS}s"
+            )
+    problems.extend(_control_beat_problems())
+    if problems:
+        return CheckResult("node_grant_config", FAIL, "; ".join(problems))
+    return CheckResult(
+        "node_grant_config",
+        PASS,
+        f"grant TTL {ttl}s, dispatch delay {delay}s, node_action approval "
+        f"{approval_seconds}s, {len(CONTROL_BEAT_TASKS)} control sweeps on the worker beat",
+    )
+
+
+def _protocol_v2_row(node, status):
+    """`(row, speaks_v2)` for one active node."""
+    from nodes.selectors import latest_snapshot
+    from nodes.services import snapshot_protocol_version
+
+    snapshot = latest_snapshot(node)
+    label = f"node_protocol_v2:{node.name}"
+    if snapshot is None:
+        return CheckResult(label, WARN, f"{status}, no catalogue yet"), False
+    version = snapshot_protocol_version(snapshot)
+    counts = Counter(
+        entry.get("class") for entry in (snapshot.entries or ()) if entry.get("invocable")
+    )
+    detail = (
+        f"{status}, protocol v{version or '?'}, {counts['gate']} gate / "
+        f"{counts['confirm']} confirm invocable"
+    )
+    if version != 2:
+        return CheckResult(label, WARN, f"{detail} (actions need a v2 session)"), False
+    if not counts["gate"] + counts["confirm"]:
+        return CheckResult(label, WARN, f"{detail} (no action invocable)"), True
+    return CheckResult(label, PASS, detail), True
+
+
+def _check_node_protocol_v2():
+    """Per active node: the session version its latest catalogue was
+    classified for and how many gate- and confirm-class capabilities are
+    invocable. A `warn`, never a failure, when no node speaks v2: the Swift
+    app is the deferred Mac session."""
+    active = _active_nodes()
+    if not active:
+        return [CheckResult("node_protocol_v2", WARN, f"no node paired ({CONTROL_PENDING_MAC})")]
+    rows, speaks_v2 = [], False
+    for node, status in active:
+        row, is_v2 = _protocol_v2_row(node, status)
+        rows.append(row)
+        speaks_v2 = speaks_v2 or is_v2
+    if not speaks_v2:
+        rows.append(
+            CheckResult(
+                "node_protocol_v2", WARN, f"no node speaks protocol v2 ({CONTROL_PENDING_MAC})"
+            )
+        )
+    return rows
+
+
+def _check_node_conformance_v2():
+    """`build_node_conformance --check` for the v1 and v2 cases and
+    `vectors/sandbox.json` (what the Swift test target loads, M1/M2)."""
+    counts = node_conformance_case_counts()
+    missing = [f"v{version}" for version in (1, 2) if not counts.get(version)]
+    if missing:
+        return CheckResult(
+            "node_conformance_v2", FAIL, f"no {' or '.join(missing)} conformance cases defined"
+        )
+    drift = sorted(
+        path
+        for path in node_conformance_drift()
+        if path.startswith(("cases/v1/", "cases/v2/")) or path == "vectors/sandbox.json"
+    )
+    if drift:
+        shown = ", ".join(drift[:5]) + (f" (+{len(drift) - 5} more)" if len(drift) > 5 else "")
+        return CheckResult(
+            "node_conformance_v2", FAIL, f"stale: {shown} (run build_node_conformance)"
+        )
+    return CheckResult(
+        "node_conformance_v2",
+        PASS,
+        f"{counts[1]} v1 + {counts[2]} v2 cases and vectors/sandbox.json current",
+    )
+
+
+def _escape_evidence():
+    """`(status, note)` of the recorded ADR-014 Mac evidence date."""
+    import datetime
+
+    raw = str(getattr(settings, "NODE_ESCAPE_EVIDENCE_RECORDED_ON", "") or "").strip()
+    if not raw:
+        return WARN, "Mac evidence (ADR-014, M3) pending owner evaluation"
+    try:
+        recorded = datetime.date.fromisoformat(raw)
+    except ValueError:
+        return FAIL, "NODE_ESCAPE_EVIDENCE_RECORDED_ON is not an ISO date"
+    return PASS, f"Mac evidence (ADR-014, M3) recorded {recorded.isoformat()}"
+
+
+def _check_node_escape_suite():
+    """`node_escape_suite --executor fake` contains every case; the ADR-014
+    evidence date (the macOS `srt` run, M3) is shown, a `warn` while it is
+    pending owner evaluation."""
+    passed, contained, total = escape_suite_report()
+    if not passed:
+        return CheckResult(
+            "node_escape_suite",
+            FAIL,
+            f"{contained}/{total} contained with the fake executor (run node_escape_suite)",
+        )
+    status, note = _escape_evidence()
+    return CheckResult(
+        "node_escape_suite",
+        status,
+        f"{contained}/{total} contained with the fake executor; {note}",
+    )
+
+
+def _check_node_output_scrubber():
+    """The node-gateway reports a registered output scrubber in /healthz
+    (without one every output chunk and tail is the fail-closed marker)."""
+    name = "node_output_scrubber"
+    gateway, healthz = _node_gateway_health()
+    if healthz is None:
+        return CheckResult(name, gateway.status, f"not checked: {gateway.detail}")
+    registered = healthz.get("output_scrubber")
+    if registered is True:
+        return CheckResult(name, PASS, "the node-gateway has its output scrubber registered")
+    if registered is False:
+        return CheckResult(
+            name,
+            FAIL,
+            "the node-gateway has no output scrubber (every output is the fail-closed marker)",
+        )
+    return CheckResult(name, FAIL, "the node-gateway's /healthz does not report its scrubber")
+
+
+def _callable_name(fn):
+    qualname = getattr(fn, "__qualname__", type(fn).__name__)
+    return f"{getattr(fn, '__module__', '?')}.{qualname}"
+
+
+def _check_trust_check():
+    """D9: the trust check and its evidence source are registered, and the
+    registered check is not the branch-3 stub (`is_stub`); the model step's
+    purpose has a tier, an active budget and a seeded prompt."""
+    from ai_core.budgets import budgets_for
+    from ai_core.models import PromptTemplate
+    from tools import node_action_ports
+
+    name = "trust_check"
+    check = node_action_ports.registered_trust_check()
+    if check is None:
+        return CheckResult(name, FAIL, "no trust check registered (every node_action is blocked)")
+    if getattr(check, "is_stub", False):
+        return CheckResult(
+            name,
+            FAIL,
+            "the branch-3 stub is the registered trust check (warn:trust_check_pending)",
+        )
+    problems = []
+    if node_action_ports.evidence_source() is None:
+        problems.append("no evidence source registered")
+    tier = (getattr(settings, "AI_PURPOSE_TIERS", {}) or {}).get(TRUST_CHECK_PURPOSE)
+    if not tier:
+        problems.append(f"{TRUST_CHECK_PURPOSE} has no tier in AI_PURPOSE_TIERS")
+    budgets = budgets_for(TRUST_CHECK_PURPOSE)
+    if not budgets:
+        problems.append(f"no active budget covers {TRUST_CHECK_PURPOSE} (run migrate)")
+    template = (
+        PromptTemplate.objects.filter(name=TRUST_CHECK_PROMPT)
+        .select_related("active_version")
+        .first()
+    )
+    if template is None or template.active_version is None:
+        problems.append(f"{TRUST_CHECK_PROMPT} is not seeded (run seed_ai_defaults)")
+    if problems:
+        return CheckResult(name, FAIL, "; ".join(problems))
+    described = "; ".join(_describe_budget(b) for b in sorted(budgets, key=lambda b: b.name))
+    detail = f"{_callable_name(check)}, tier {tier}, {described}"
+    if all(b.monthly_limit_usd is None for b in budgets):
+        return CheckResult(name, WARN, f"{detail} (no monthly cap)")
+    return CheckResult(name, PASS, detail)
+
+
+def _approve_calls_hook_before_status_change(source):
+    """True when `authorize_decision(...)` is called in `source` before the
+    first assignment of a `.status` attribute (the decision)."""
+    import ast
+    import textwrap
+
+    tree = ast.parse(textwrap.dedent(source))
+    hook_lines = [
+        node.lineno
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "authorize_decision"
+    ]
+    status_lines = [
+        node.lineno
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Assign)
+        and any(isinstance(t, ast.Attribute) and t.attr == "status" for t in node.targets)
+    ]
+    if not hook_lines:
+        return False
+    return not status_lines or min(hook_lines) < min(status_lines)
+
+
+def _check_node_action_actor():
+    """D6: `node_action` declares the owner-only hooks (`precheck_request`
+    before any row or model call, `authorize_decision` on approval), and
+    `approve_request` calls the approver hook before the status changes
+    (a source test, as the brief asks)."""
+    from tools.registry import get_tool
+
+    name = "node_action_actor"
+    tool = get_tool(NODE_ACTION_TOOL)
+    if tool is None:
+        return CheckResult(name, FAIL, "the node_action tool is not registered")
+    missing = [
+        hook
+        for hook in ("precheck_request", "authorize_decision")
+        if not callable(getattr(tool, hook, None))
+    ]
+    if missing:
+        return CheckResult(name, FAIL, f"node_action declares no {', '.join(missing)}")
+    if not _approve_calls_hook_before_status_change(approve_request_source()):
+        return CheckResult(
+            name, FAIL, "approve_request does not call authorize_decision before deciding"
+        )
+    return CheckResult(
+        name,
+        PASS,
+        "precheck_request and authorize_decision declared; approve_request calls the hook",
+    )
+
+
+def _harness_driver_row(row):
+    label = f"harness_drivers:{row['agent']}"
+    driver = row["driver"]
+    if not row["known"]:
+        return CheckResult(label, FAIL, f"unknown driver {driver!r}")
+    if driver == "cli":
+        return CheckResult(label, PASS, "disabled (CLI path)")
+    if not row["enabled"]:
+        return CheckResult(label, FAIL, f"{driver} selected while HARNESS_DRIVERS_ENABLED is off")
+    problems = []
+    if row["terms_checked_on"] is None:
+        problems.append("d4 not recorded (HARNESS_DRIVER_TERMS_CHECKED_ON)")
+    if row["provisional"]:
+        problems.append(
+            f"the snapshot for pin {row['pin']} is provisional (run generate_driver_schemas.sh)"
+        )
+    if row["pin_errors"]:
+        problems.append(f"{len(row['pin_errors'])} pin problem(s): pin, ARG and snapshot differ")
+    if problems:
+        return CheckResult(label, FAIL, f"{driver} enabled; " + "; ".join(problems))
+    return CheckResult(
+        label,
+        PASS,
+        f"{driver} enabled, d4 {row['terms_checked_on'].isoformat()}, pin {row['pin']}",
+    )
+
+
+def _check_harness_drivers():
+    """D10: per driver, disabled (the CLI path) or enabled with d4
+    recorded, a non-provisional snapshot and pins that agree. The
+    `harness.W002` system check only warns on a provisional snapshot; this
+    check fails on it."""
+    from harness.drivers import driver_status
+
+    return [_harness_driver_row(row) for row in driver_status()]
+
+
+def _guarded_rows(name, check):
+    """`_guarded` for a check that returns a list of rows."""
+    try:
+        return list(check())
+    except Exception as exc:
+        return [CheckResult(name, FAIL, f"check crashed: {_error_label(exc)}")]
+
+
+def check_control():
+    """Phase 10 configuration and health, read-only (no model call, nothing
+    sent to a node, nothing executed outside a temp dir): `node_grant_config`,
+    `node_protocol_v2`, `node_conformance_v2`, `node_escape_suite`,
+    `node_output_scrubber`, `trust_check`, `node_action_actor` and
+    `harness_drivers`. Details carry settings names, counts, codes, node
+    names and dates -- never args, output, a path or a secret."""
+    return [
+        _guarded("node_grant_config", _check_node_grant_config),
+        *_guarded_rows("node_protocol_v2", _check_node_protocol_v2),
+        _guarded("node_conformance_v2", _check_node_conformance_v2),
+        _guarded("node_escape_suite", _check_node_escape_suite),
+        _guarded("node_output_scrubber", _check_node_output_scrubber),
+        _guarded("trust_check", _check_trust_check),
+        _guarded("node_action_actor", _check_node_action_actor),
+        *_guarded_rows("harness_drivers", _check_harness_drivers),
+    ]
+
+
 CHECKS = (
     ("web", check_web),
     ("bff", check_bff),
@@ -1773,6 +2212,7 @@ CHECKS = (
     ("learning", check_learning),
     ("graph", check_graph),
     ("nodes", check_nodes),
+    ("control", check_control),
 )
 
 
