@@ -151,7 +151,9 @@ def claude_pin_errors(*, pin=None, dockerfile=CLAUDE_DOCKERFILE):
     try:
         surface = load_claude_surface(pin)
     except (OSError, ValueError):
-        errors.append(f"No Claude Agent SDK surface snapshot for {pin!r} under claude_sdk_surface/.")
+        errors.append(
+            f"No Claude Agent SDK surface snapshot for {pin!r} under claude_sdk_surface/."
+        )
     else:
         if surface.version != pin:
             errors.append(

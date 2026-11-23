@@ -267,11 +267,7 @@ class Bridge:
         first = await self._next()
         if first is _EOF:
             return EXIT_OK
-        if (
-            first is _BAD
-            or first.get("type") != "initialize"
-            or first.get("protocol") != PROTOCOL
-        ):
+        if first is _BAD or first.get("type") != "initialize" or first.get("protocol") != PROTOCOL:
             self.send({"type": "error", "code": "protocol", "detail": "expected initialize"})
             return EXIT_PROTOCOL
         self.send(
@@ -320,9 +316,7 @@ class Bridge:
                     or frame.get("decision") not in ("allow", "deny")
                     or frame.get("request_id") not in self._pending
                 ):
-                    self.send(
-                        {"type": "error", "code": "protocol", "detail": "unexpected frame"}
-                    )
+                    self.send({"type": "error", "code": "protocol", "detail": "unexpected frame"})
                     await self._abandon(task)
                     return EXIT_PROTOCOL
                 future = self._pending.pop(frame["request_id"])

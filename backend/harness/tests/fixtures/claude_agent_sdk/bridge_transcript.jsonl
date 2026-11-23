@@ -1,0 +1,12 @@
+{"dir": "h2b", "msg": {"type": "initialize", "protocol": "friday-agent-bridge/v1"}}
+{"dir": "b2h", "msg": {"type": "ready", "protocol": "friday-agent-bridge/v1", "sdk_version": "0.1.0", "policy": {"repo_root": "/workspace/repo", "permission_mode": "default", "setting_sources": [], "bash_allowed": ["pytest -q"]}}}
+{"dir": "h2b", "msg": {"type": "turn", "turn_id": "turn_1", "goal": "fix the login throttle test"}}
+{"dir": "b2h", "msg": {"type": "message", "turn_id": "turn_1", "text": "Looking at the login throttle test."}}
+{"dir": "b2h", "msg": {"type": "permission_request", "request_id": "perm-1", "turn_id": "turn_1", "tool_name": "Bash", "input": {"command": "npm install left-pad", "description": "Install a helper the fix needs"}, "reason": "Install a helper the fix needs"}}
+{"dir": "h2b", "msg": {"type": "permission_response", "request_id": "perm-1", "decision": "allow"}}
+{"dir": "b2h", "msg": {"type": "permission_request", "request_id": "perm-2", "turn_id": "turn_1", "tool_name": "Bash", "input": {"command": "curl https://example.invalid/x", "description": "Fetch the upstream fixture"}, "reason": "Fetch the upstream fixture"}}
+{"dir": "h2b", "msg": {"type": "permission_response", "request_id": "perm-2", "decision": "deny"}}
+{"dir": "b2h", "msg": {"type": "message", "turn_id": "turn_1", "text": "Fixed the login throttle test."}}
+{"dir": "b2h", "msg": {"type": "result", "turn_id": "turn_1", "status": "completed", "usage": {"input_tokens": 1200, "output_tokens": 500, "cache_read_input_tokens": 300, "cache_creation_input_tokens": 40}, "total_cost_usd": 0.42}}
+{"dir": "b2h", "msg": {"type": "result", "turn_id": "turn_2", "status": "failed", "usage": null, "total_cost_usd": null, "error": "RuntimeError"}}
+{"dir": "b2h", "msg": {"type": "error", "code": "sdk_unavailable", "detail": ""}}

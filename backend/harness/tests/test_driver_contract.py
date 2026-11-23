@@ -309,8 +309,9 @@ def test_agents_without_a_driver_setting_use_the_cli(settings):
 
 
 def test_driver_status_reports_each_driver(settings):
-    [row] = drivers.driver_status()
-    assert row["agent"] == "codex_cli"
+    rows = {row["agent"]: row for row in drivers.driver_status()}
+    assert set(rows) == {"codex_cli", "claude_code"}
+    row = rows["codex_cli"]
     assert row["enabled"] is False
     assert row["provisional"] is True
     assert row["pin_errors"] == []

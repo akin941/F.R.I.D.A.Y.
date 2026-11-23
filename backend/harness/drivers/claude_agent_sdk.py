@@ -65,7 +65,9 @@ def escalation_for(request_id, tool_name, tool_input, reason, *, cwd):
     the approval to exactly what will run."""
     command = tool_input.get("command") if isinstance(tool_input, dict) else None
     if tool_name == BASH_TOOL and isinstance(command, str) and set(tool_input) <= BASH_PLAIN_KEYS:
-        return Escalation(request_id=request_id, kind="command", command=command, cwd=cwd, reason=reason)
+        return Escalation(
+            request_id=request_id, kind="command", command=command, cwd=cwd, reason=reason
+        )
     if tool_name == BASH_TOOL:
         kind = "command"
     elif tool_name in WRITE_TOOLS:
@@ -161,7 +163,9 @@ class ClaudeAgentSdkDriver:
                 f"bridge runs SDK {frame['sdk_version']!r}, pin is {self.sdk_version!r}",
             )
         if frame["policy"] != self.expected_policy():
-            raise DriverError(CODE_PROTOCOL_ERROR, "bridge reports a sandbox policy other than ours")
+            raise DriverError(
+                CODE_PROTOCOL_ERROR, "bridge reports a sandbox policy other than ours"
+            )
 
     def run_turn(self, goal):
         self._turn_seq += 1
@@ -232,7 +236,9 @@ class ClaudeAgentSdkDriver:
             self._stdin.write(line.encode("utf-8"))
             self._stdin.flush()
         except (BrokenPipeError, OSError, ValueError) as exc:
-            raise DriverError(CODE_EARLY_EXIT, f"bridge stdin closed: {type(exc).__name__}") from None
+            raise DriverError(
+                CODE_EARLY_EXIT, f"bridge stdin closed: {type(exc).__name__}"
+            ) from None
 
     def _check(self, frame):
         frame_type = frame.get("type")
