@@ -132,15 +132,14 @@ def node_detail(node, *, now=None) -> dict:
 
 
 def node_health(owner, *, now=None) -> dict:
-    """The HUD health panel's `node` block (D11; wired by branch 7): the
+    """The HUD health panel's `node` block (D11; `hud.services.node_section`
+    since branch 7), read through `nodes_for()` (`for_actor()`): the
     most relevant of the owner's nodes -- a connected one first, else the
     most recently paired non-revoked one, else the latest. No path, no
     content."""
-    nodes = list(
-        Node.objects.filter(owner=owner)
-        .select_related("device", "device__user")
-        .order_by("-created_at")
-    )
+    if owner is None or getattr(owner, "pk", None) is None:
+        return {"status": "never_paired"}
+    nodes = list(nodes_for(owner))
     if not nodes:
         return {"status": "never_paired"}
     summaries = [node_summary(node, now=now) for node in nodes]
