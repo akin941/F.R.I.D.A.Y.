@@ -259,6 +259,39 @@ NOT_SENT_STATUSES = frozenset(
         NodeInvocation.Status.STALE_DISPATCH,
     }
 )
+# Phase 9 D7 (branch 5): the whole `(status, refusal_code)` vocabulary of a
+# **read** (`nodes.services.invoke_read` / `refuse_read`), pinned by a test
+# against the brief's terminal-status table. A subset of
+# TERMINAL_VOCABULARY; `_record_read` refuses any other pair. Beyond the D7
+# table: the Phase 8B step-0 actor check (`actor_not_owner`) and the
+# gateway's own verdict for an envelope of another node (`node_mismatch`,
+# branch 4).
+CALLER_REFUSAL_CODES = frozenset(
+    {"path_not_in_workspace", "workspace_not_allowed", "session_not_found"}
+)
+READ_SERVER_REFUSED_CODES = (
+    frozenset(
+        {
+            "not_invocable",
+            "args_contract",
+            "signing_unavailable",
+            "actor_not_owner",
+            "node_mismatch",
+        }
+    )
+    | CALLER_REFUSAL_CODES
+)
+READ_TERMINAL_VOCABULARY = {
+    NodeInvocation.Status.OK: frozenset({""}),
+    NodeInvocation.Status.REFUSED: NODE_REFUSED_CODES,
+    NodeInvocation.Status.ERROR: frozenset({"node_error", "result_schema", "result_too_large"}),
+    NodeInvocation.Status.TIMEOUT: frozenset({""}),
+    NodeInvocation.Status.NODE_DISCONNECTED: frozenset({""}),
+    NodeInvocation.Status.SERVER_REFUSED: READ_SERVER_REFUSED_CODES,
+    NodeInvocation.Status.NODE_OFFLINE: frozenset({""}),
+    NodeInvocation.Status.BUSY: frozenset({""}),
+    NodeInvocation.Status.BUS_UNAVAILABLE: frozenset({""}),
+}
 
 
 class NodeActionExecution(WorkspaceScopedModel, TimestampedModel):

@@ -213,3 +213,98 @@ def test_the_inflight_cap_holds_across_two_processes(node):
     for _ in range(5):
         bus.release_inflight(node.pk)
     assert bus.inflight_count(node.pk) == 0  # never below zero
+
+
+# --- branch 5: the step-0 actor check and the row filter ---
+
+
+def test_a_personal_read_by_someone_else_is_actor_not_owner(node):
+    """Phase 8B D13 amendment, step 0: before anything is signed."""
+    from nodes.tests.gateway_helpers import other_user
+
+    bus.mark_present(node.pk)
+    stranger = other_user()
+    for actor in (stranger, None):
+        outcome = services.invoke_read(
+            node=node, capability="apps.frontmost", args={}, workspace=node.workspace, actor=actor
+        )
+        assert (outcome.status, outcome.refusal_code) == ("server_refused", "actor_not_owner")
+    node.owner.is_active = False
+    node.owner.save(update_fields=["is_active"])
+    outcome = read(node)
+    assert (outcome.status, outcome.refusal_code) == ("server_refused", "actor_not_owner")
+    assert inbox_len(node) == 0
+    assert NodeInvocation.objects.filter(nonce="").count() == 3
+    assert AuditLog.objects.filter(action="nodes.invoke").count() == 3
+
+
+def test_the_actor_check_needs_an_owner_role_in_the_target_workspace(node, firm):
+    from workspaces.models import WorkspaceMember
+
+    bus.mark_present(node.pk)
+    WorkspaceMember.objects.filter(workspace=firm, user=node.owner).update(
+        role=WorkspaceMember.Role.MEMBER
+    )
+    outcome = services.invoke_read(
+        node=node,
+        capability="claude.sessions.read",
+        args={"session_id": "s", "last_turns": 1},
+        workspace=firm,
+        actor=node.owner,
+    )
+    assert outcome.refusal_code == "actor_not_owner"
+    # A firm-class capability has no step 0: it goes on (to `node_offline`
+    # here).
+    bus.clear_presence(node.pk)
+    outcome = services.invoke_read(
+        node=node,
+        capability="git.status",
+        args={"repo_path": "~/work/acme"},
+        workspace=firm,
+        actor=node.owner,
+        row_filter=None,
+    )
+    assert outcome.status == "node_offline"
+
+
+def test_the_row_filter_result_and_dropped_count_are_recorded(node, monkeypatch):
+    bus.mark_present(node.pk)
+    output = {
+        "windows": [{"bundle_id": None, "app_name": "A", "window_count": 1, "on_screen": True}]
+    }
+    monkeypatch.setattr(bus, "wait_result", lambda *_: {"status": "ok", "output": output})
+    outcome = read(
+        node,
+        capability="windows.list",
+        args={"limit": 5},
+        row_filter=lambda out: ({"windows": []}, 7),
+    )
+    assert outcome.ok and outcome.output == {"windows": []} and outcome.dropped == 7
+    row = NodeInvocation.objects.get()
+    assert row.dropped_unmapped == 7
+    # The hashes are the node's own answer's.
+    from nodes.protocol.canonical import sha256_hex
+
+    assert row.output_sha256 == sha256_hex(output)
+    assert AuditLog.objects.get(action="nodes.invoke").metadata["dropped_unmapped"] == 7
+    assert audit_chain.verify_chain().ok
+
+
+def test_a_row_filter_that_raises_ends_the_read_without_output(node, monkeypatch):
+    bus.mark_present(node.pk)
+    monkeypatch.setattr(
+        bus,
+        "wait_result",
+        lambda *_: {"status": "ok", "output": {"bundle_id": None, "app_name": None}},
+    )
+
+    def broken(_):
+        raise KeyError("x")
+
+    outcome = read(node, row_filter=broken)
+    assert (outcome.status, outcome.refusal_code, outcome.output) == (
+        "error",
+        "result_schema",
+        None,
+    )
+    assert NodeInvocation.objects.get().status == "error"

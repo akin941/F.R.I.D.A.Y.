@@ -20,7 +20,7 @@ from django.utils import timezone
 
 from accounts.devices import node_device_refusal
 from nodes import presence
-from nodes.models import CapabilitySnapshot, Node
+from nodes.models import CapabilitySnapshot, Node, NodeInvocation
 
 STATUSES = (
     "connected",
@@ -162,3 +162,84 @@ def node_health(owner, *, now=None) -> dict:
         "spool_depth": best["spool_count"],
         "node_version": best["node_version"],
     }
+
+
+# --- the invocation log (Phase 9 D11, branch 5) ---
+
+
+def invocation_page(actor, node, *, before_seq=None, limit=50) -> list:
+    """The node's chain rows in workspaces `actor` can see (`for_actor()`),
+    newest first, `seq < before_seq` when given. Hashes, codes, sizes and
+    the workspace's name -- never args or output content (D8, D11)."""
+    rows = (
+        NodeInvocation.objects.for_actor(actor)
+        .filter(node=node)
+        .select_related("workspace")
+        .order_by("-seq")
+    )
+    if before_seq is not None:
+        rows = rows.filter(seq__lt=before_seq)
+    return [
+        {
+            "id": str(row.pk),
+            "seq": row.seq,
+            "created_at": row.created_at,
+            "capability": row.capability,
+            "capability_version": row.capability_version,
+            "class": row.invocation_class or "read",
+            "status": row.status,
+            "refusal_code": row.refusal_code,
+            "args_sha256": row.args_sha256,
+            "output_sha256": row.output_sha256,
+            "output_bytes": row.output_bytes,
+            "truncated": row.truncated,
+            "dropped_unmapped": row.dropped_unmapped,
+            "duration_ms": row.duration_ms,
+            "channel": row.channel,
+            "trace_id": row.trace_id,
+            "workspace_id": str(row.workspace_id),
+            "workspace_name": row.workspace.name,
+            "row_hash": row.row_hash,
+        }
+        for row in rows[: max(1, int(limit))]
+    ]
+
+
+# --- the read tools' node (Phase 9 D9, branch 5) ---
+
+
+def read_node_for(owner, *, now=None):
+    """The node the read tools (`tools.node_reads`) read from for `owner`:
+    a usable one (not revoked, killed or expired, D1), a live one first,
+    else the most recently paired usable one (a direct call then ends
+    `node_offline`, with its chain row). None when the owner has no usable
+    node. A system lookup by owner: the callers have already checked that
+    the actor is that owner (or, for `is_available`, offer nothing more
+    than a tool name)."""
+    if owner is None or getattr(owner, "pk", None) is None:
+        return None
+    now = now or timezone.now()
+    usable = [
+        node
+        for node in Node.objects.filter(owner=owner)
+        .select_related("device", "device__user", "workspace", "owner")
+        .order_by("-created_at")
+        if node_device_refusal(node.device, now) is None
+    ]
+    for node in usable:
+        if presence.is_online(node):
+            return node
+    return usable[0] if usable else None
+
+
+def invocable_capabilities(node) -> frozenset:
+    """The names of the read capabilities the node's latest snapshot marks
+    invocable (matching contract, granted on the Mac)."""
+    snapshot = latest_snapshot(node)
+    if snapshot is None:
+        return frozenset()
+    return frozenset(
+        entry.get("name")
+        for entry in snapshot.entries or ()
+        if entry.get("invocable") and entry.get("class") == "read"
+    )

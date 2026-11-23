@@ -1,7 +1,7 @@
 """Node HTTP endpoints. Branch 2: the anonymous pairing endpoint (D4).
 Branch 4: the owner-only node APIs `GET /api/v1/nodes`, `GET
 /api/v1/nodes/<id>` and `POST /api/v1/nodes/<id>/revoke` (D11, backend
-only; the invocations log is branch 5).
+only). Branch 5 adds `GET /api/v1/nodes/<id>/invocations` (chain rows).
 
 Phase 10 branch 3 (brief D8): `POST /api/v1/nodes/<node_id>/actions` (the
 confirm-class path, the only caller of `nodes.services.invoke_confirm`) and
@@ -16,6 +16,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from accounts import devices
+from audit.services import record_audit
 from core.client_ip import trusted_client_ip
 from core.permissions import IsOwner, IsWebChannel
 from core.throttling import ScopedRateThrottle
@@ -210,6 +211,49 @@ class NodeDetailView(APIView):
         if node is None:
             return Response(_NOT_FOUND, status=status.HTTP_404_NOT_FOUND)
         return Response(selectors.node_detail(node))
+
+
+INVOCATIONS_PAGE_SIZE = 50
+
+
+class NodeInvocationListView(APIView):
+    """`GET /api/v1/nodes/<id>/invocations?cursor=<seq>` -- the node's last
+    50 chain rows (D8, D11) in workspaces the actor can see (`for_actor()`),
+    newest first; `cursor` is the `next_cursor` of the previous page (the
+    rows with a lower `seq`). Each row: capability, status and refusal code,
+    args and output hashes, sizes, the dropped-row count, duration, channel,
+    trace id and the workspace's name -- never args or output content.
+    Owner, web channel, human only. Audited `nodes.invocations.viewed`
+    (counts only)."""
+
+    permission_classes = _NODE_PERMISSIONS
+
+    def get(self, request, node_id):
+        node = _owned_node(request, node_id)
+        if node is None:
+            return Response(_NOT_FOUND, status=status.HTTP_404_NOT_FOUND)
+        cursor = request.query_params.get("cursor")
+        if cursor not in (None, ""):
+            try:
+                cursor = int(cursor)
+            except (TypeError, ValueError):
+                return _refusal("Invalid cursor.", "invalid_cursor", status.HTTP_400_BAD_REQUEST)
+            if cursor < 0:
+                return _refusal("Invalid cursor.", "invalid_cursor", status.HTTP_400_BAD_REQUEST)
+        else:
+            cursor = None
+        rows = selectors.invocation_page(
+            request.user, node, before_seq=cursor, limit=INVOCATIONS_PAGE_SIZE
+        )
+        next_cursor = rows[-1]["seq"] if len(rows) == INVOCATIONS_PAGE_SIZE else None
+        record_audit(
+            action="nodes.invocations.viewed",
+            actor=request.user,
+            workspace=node.workspace,
+            resource=node,
+            metadata={"node_id": str(node.pk), "count": len(rows), "cursor": cursor},
+        )
+        return Response({"results": rows, "next_cursor": next_cursor})
 
 
 class NodeRevokeView(APIView):
