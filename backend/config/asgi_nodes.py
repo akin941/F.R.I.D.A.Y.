@@ -10,13 +10,18 @@ scrubbers (a source test pins it, Phase 10 D14):
   workspace's `ScrubTerm`s, so every `output` chunk and every `tail` the
   gateway handles is scrubbed server-side (never trusting the node's own
   scrub). `nodes` imports neither `memory` nor `config`, hence the port.
-- `application` is a minimal raw-ASGI router: `GET /healthz` answers a
-  liveness JSON (Redis reachable, the configured signing key id -- never key
-  material); the `/ws/node/v1` WebSocket route is served by Phase 9 branch 4
-  (`feat/p9-node-gateway`, `nodes.gateway`'s socket app around
-  `nodes.gateway.NodeSession`). Until that branch merges, a WebSocket
-  handshake is closed with 1013 (try again later) and nothing else is
-  served.
+- `application` is a minimal raw-ASGI router (Phase 9 branch 4):
+  - `websocket` on `/ws/node/v1` -> `nodes.gateway.NodeSocketApp` (one
+    instance per process: the live sockets, the inbox loops and the
+    revocation subscriber);
+  - `GET /healthz` -> a liveness JSON: process up, Redis reachable, the
+    number of connected nodes and the configured signing key id (never key
+    material; the closeout's `node_signing_key` preflight compares it);
+  - lifespan shutdown sends `bye{server_shutdown}` to every node;
+  - everything else -> 404 (a WebSocket on another path is closed 4404).
+
+Django is set up for ORM access; ORM calls go through
+`asgiref.sync.sync_to_async(thread_sensitive=True)` inside `nodes.gateway`.
 """
 
 import json
@@ -30,10 +35,14 @@ django.setup()
 from memory.ingestion.scrubber import scrub_text  # noqa: E402
 from memory.ingestion.services import scrub_terms_for  # noqa: E402
 from nodes import bus  # noqa: E402
+from nodes.gateway import NodeSocketApp  # noqa: E402
 from nodes.keys import signing_key_id  # noqa: E402
 from nodes.output import register_scrubber  # noqa: E402
 
 GATEWAY_WS_PATH = "/ws/node/v1"
+CLOSE_NOT_FOUND = 4404
+
+node_app = NodeSocketApp()
 
 
 def workspace_scrubber(workspace):
@@ -59,7 +68,12 @@ def _healthz():
         redis_ok = bus.ping()
     except bus.BusUnavailable:
         redis_ok = False
-    return {"status": "ok", "redis": redis_ok, "signing_key_id": signing_key_id()}
+    return {
+        "status": "ok",
+        "redis": redis_ok,
+        "connected_nodes": len(node_app.connections),
+        "signing_key_id": signing_key_id(),
+    }
 
 
 async def application(scope, receive, send):
@@ -67,12 +81,18 @@ async def application(scope, receive, send):
         while True:
             message = await receive()
             if message["type"] == "lifespan.startup":
+                await node_app.startup()
                 await send({"type": "lifespan.startup.complete"})
             elif message["type"] == "lifespan.shutdown":
+                await node_app.shutdown()
                 await send({"type": "lifespan.shutdown.complete"})
                 return
     if scope["type"] == "websocket":
-        await send({"type": "websocket.close", "code": 1013})
+        if scope.get("path") == GATEWAY_WS_PATH:
+            await node_app(scope, receive, send)
+        else:
+            await receive()  # websocket.connect
+            await send({"type": "websocket.close", "code": CLOSE_NOT_FOUND})
         return
     if scope["type"] == "http" and scope.get("method") == "GET" and scope.get("path") == "/healthz":
         from asgiref.sync import sync_to_async

@@ -12,11 +12,31 @@ dedicated branch (brief R1), never as a side effect of another change.
 |---|---|---|---|---|---|
 | `cryptography` | `==50.0.1` | Apache-2.0 OR BSD-3-Clause | `feat/p9-node-protocol` (2026-11-20) | transitive (MCP SDK) | Ed25519 signing and verification of `invoke` envelopes (`nodes.protocol.signing`) |
 | `jsonschema` | `==4.26.0` | MIT | `feat/p9-node-protocol` (2026-11-20) | transitive (MCP SDK) | Protocol v1 message validation and the capability contracts (`nodes.protocol.messages`, `nodes.capabilities`) |
-| `uvicorn` | `==0.54.0` (planned) | BSD-3-Clause | `feat/p9-node-gateway` | transitive (MCP SDK) | Serving `config/asgi_nodes.py` (`--ws wsproto`) |
+| `uvicorn` | `==0.54.0` | BSD-3-Clause | `feat/p9-node-gateway` (2026-11-20) | transitive (MCP SDK) | Serving `config/asgi_nodes.py` (`--ws wsproto`) in the `node-gateway` process |
 | `wsproto` | `==1.3.2` | MIT | `feat/p10-reference-executor` (2026-11-20; `feat/p9-reference-node` reuses the same pin unchanged, 2026-11-20) | new (its one dependency, `h11` 0.16.0, was already locked) | The WebSocket implementation on both ends: the reference node's client transport and the hostile fake gateway (`node_conformance_server`) now, uvicorn's server side in `feat/p9-node-gateway` |
 
-The `uvicorn` row is filled in by its branch; it is listed here so the
-gateway's full dependency surface is in one place.
+The gateway's full dependency surface is in this table.
+
+## `uvicorn` 0.54.0
+
+- **Source and maintenance:** the Encode project (Starlette, httpx), very
+  active, the reference ASGI server.
+- **Why direct now:** Phase 9 branch 4 serves the node gateway process with
+  it (`uvicorn config.asgi_nodes:application --ws wsproto --ws-max-size
+  262144 --lifespan on --no-server-header`, compose service
+  `node-gateway`). It was already locked at this version as a transitive
+  dependency of the MCP SDK; relying on that would let an SDK bump move the
+  server that faces the network.
+- **Install:** pure-Python wheel with a hash in `uv.lock`; no new transitive
+  dependency (`click`, `h11` were already locked). No `[standard]` extra:
+  no `uvloop`, `httptools` or `websockets` -- the WebSocket implementation
+  is `wsproto`, the same one the reference node uses.
+- **Surface used:** the HTTP/1.1 server (`h11`), the `wsproto` WebSocket
+  protocol, lifespan events. Published on `127.0.0.1:8002` only; exposed by
+  the owner's TLS reverse proxy for `/ws/node/v1` alone
+  (`docs/runbooks/friday-node.md`).
+- **Residual risk (brief R1):** a uvicorn or `wsproto` CVE. Upgrades go in
+  a dedicated branch.
 
 ## `wsproto` 1.3.2
 

@@ -11,6 +11,8 @@
 # - web and worker run `config.settings.prod` (fail-hard: DJANGO_SECRET_KEY,
 #   DATABASE_URL, DJANGO_ALLOWED_HOSTS and REDIS_URL are required; secure
 #   cookies, nosniff, X-Frame-Options DENY, referrer policy);
+# - `node-gateway` (Phase 9) runs `config.settings.prod` like web and
+#   restarts with the stack;
 # - a `frontend` service builds and serves the Next.js app with
 #   `next build && next start` (production mode: Secure cookies and the
 #   browser-facing security headers from frontend/next.config.ts).
@@ -54,6 +56,18 @@ services:
       DJANGO_DEBUG: "false"
       DJANGO_ALLOWED_HOSTS: web,localhost,127.0.0.1
       AI_FAKE_PROVIDER: "${AI_FAKE_PROVIDER:-false}"
+
+  # Friday Node gateway (Phase 9 branch 4): same settings module and
+  # hardening as web, restarted with the stack. Still loopback only; the
+  # owner's TLS reverse proxy routes wss://<host>/ws/node/v1 to it
+  # (docs/runbooks/friday-node.md).
+  node-gateway:
+    environment:
+      DJANGO_SETTINGS_MODULE: config.settings.prod
+      DJANGO_DEBUG: "false"
+      DJANGO_ALLOWED_HOSTS: web,localhost,127.0.0.1
+      AI_FAKE_PROVIDER: "${AI_FAKE_PROVIDER:-false}"
+    restart: unless-stopped
 
   frontend:
     image: node:24-slim

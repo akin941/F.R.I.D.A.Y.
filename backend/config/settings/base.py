@@ -368,6 +368,14 @@ NODE_SIGNING_KEYS_RETIRED = env.list("NODE_SIGNING_KEYS_RETIRED", default=[])
 NODE_READ_INVOKE_TTL_SECONDS = env.int("NODE_READ_INVOKE_TTL_SECONDS", default=30)
 # The largest canonical `result.output` a node may return (64 KiB, D5).
 NODE_MAX_RESULT_BYTES = env.int("NODE_MAX_RESULT_BYTES", default=64 * 1024)
+# Phase 9 branch 4 (brief D6): the invoke bus. A read waits at most
+# NODE_INVOKE_TIMEOUT_SECONDS for its result (below the envelope TTL); a
+# result nobody waits for expires from Redis after NODE_RESULT_TTL_SECONDS;
+# at most NODE_MAX_INFLIGHT reads per node run at once, counted in Redis
+# across web, worker and the gateway (beyond it: `busy`).
+NODE_INVOKE_TIMEOUT_SECONDS = env.int("NODE_INVOKE_TIMEOUT_SECONDS", default=10)
+NODE_RESULT_TTL_SECONDS = env.int("NODE_RESULT_TTL_SECONDS", default=30)
+NODE_MAX_INFLIGHT = env.int("NODE_MAX_INFLIGHT", default=4)
 # Phase 10 branch 3 (brief D2, D6, D7). A gate-class grant lives
 # NODE_GRANT_TTL_SECONDS (delivery plus the node's 60 s confirmation window;
 # refused at boot above the 120 s protocol ceiling). An approved node action

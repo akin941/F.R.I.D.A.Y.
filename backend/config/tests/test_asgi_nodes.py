@@ -72,13 +72,32 @@ def test_healthz_answers_without_key_material():
     assert sent[0]["status"] == 200
     body = json.loads(sent[1]["body"])
     assert body["status"] == "ok" and body["redis"] is True
-    assert set(body) == {"status", "redis", "signing_key_id"}
+    assert set(body) == {"status", "redis", "connected_nodes", "signing_key_id"}
     assert len(body["signing_key_id"]) == 16
+    assert body["connected_nodes"] == 0
+    from django.conf import settings
+
+    # The key id only: no key material in the body.
+    assert settings.NODE_SIGNING_KEY not in sent[1]["body"].decode()
 
 
-def test_websocket_is_closed_until_the_socket_app_lands():
-    sent = _call({"type": "websocket", "path": "/ws/node/v1"})
-    assert sent == [{"type": "websocket.close", "code": 1013}]
+@pytest.mark.django_db(transaction=True)
+def test_healthz_reports_redis_down(settings):
+    settings.REDIS_URL = "redis://127.0.0.1:1/0"
+    body = json.loads(_call({"type": "http", "method": "GET", "path": "/healthz"})[1]["body"])
+    assert body["redis"] is False
+
+
+def test_the_gateway_route_is_the_node_socket_app():
+    from nodes.gateway import NodeSocketApp
+
+    assert isinstance(asgi_nodes.node_app, NodeSocketApp)
+    assert asgi_nodes.GATEWAY_WS_PATH == "/ws/node/v1"
+
+
+def test_a_websocket_on_another_path_is_closed():
+    sent = _call({"type": "websocket", "path": "/ws/other"})
+    assert sent == [{"type": "websocket.close", "code": 4404}]
 
 
 def test_other_paths_are_404():
@@ -103,6 +122,10 @@ def test_the_node_action_backstops_are_on_the_beat():
         ("NODE_GRANT_TTL_SECONDS", "90", "nodes.E001"),
         ("NODE_ACTION_DISPATCH_MAX_DELAY_SECONDS", 0, "nodes.E002"),
         ("NODE_ACTION_TAIL_RETENTION_DAYS", 0, "nodes.E003"),
+        ("NODE_INVOKE_TIMEOUT_SECONDS", 30, "nodes.E005"),
+        ("NODE_INVOKE_TIMEOUT_SECONDS", 0, "nodes.E005"),
+        ("NODE_MAX_INFLIGHT", 0, "nodes.E006"),
+        ("NODE_RESULT_TTL_SECONDS", 0, "nodes.E007"),
     ],
 )
 def test_the_boot_checks_refuse_bad_node_action_settings(settings, name, value, check_id):
@@ -114,4 +137,7 @@ def test_the_defaults_pass_the_boot_checks(settings):
     assert settings.NODE_GRANT_TTL_SECONDS == 90
     assert settings.NODE_ACTION_DISPATCH_MAX_DELAY_SECONDS == 60
     assert settings.NODE_ACTION_TAIL_RETENTION_DAYS == 14
-    assert not {m.id for m in run_checks()} & {"nodes.E001", "nodes.E002", "nodes.E003"}
+    assert (settings.NODE_INVOKE_TIMEOUT_SECONDS, settings.NODE_MAX_INFLIGHT) == (10, 4)
+    assert settings.NODE_RESULT_TTL_SECONDS == 30
+    ids = {"nodes.E001", "nodes.E002", "nodes.E003", "nodes.E005", "nodes.E006", "nodes.E007"}
+    assert not {m.id for m in run_checks()} & ids

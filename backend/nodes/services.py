@@ -1,8 +1,11 @@
 """Node services (Phase 9 brief D4, D7).
 
-Branch 2 holds pairing and envelope signing. `invoke_read` / `refuse_read`
-(the invoke bus and the per-call chain + AuditLog rows) arrive with the
-gateway (branch 4) and the read tools (branch 5).
+Branch 2 holds pairing and envelope signing. Branch 4 (`feat/p9-node-gateway`)
+adds `invoke_read` (D7: the bus side -- snapshot and contract checks,
+presence, the shared in-flight cap, sign, push, wait, result validation --
+and the one chain row + one `nodes.invoke` AuditLog row per call) and
+`refuse_read` (a caller's own pre-invoke refusal: nothing signed or sent,
+the same two rows). The read tools that call them are branch 5.
 
 Phase 10 branch 1 adds snapshot classification by protocol version and
 class (`classify_catalogue`, `record_capability_snapshot`,
@@ -36,6 +39,7 @@ from nodes.capabilities import check_catalogue_entry, get_action_contract, get_c
 from nodes.keys import SigningKeyUnavailable, signing_keyring
 from nodes.models import (
     EXECUTION_TERMINAL_STATUSES,
+    NODE_REFUSED_CODES,
     NODE_REFUSED_CODES_V2,
     NOT_SENT_STATUSES,
     CapabilitySnapshot,
@@ -43,7 +47,7 @@ from nodes.models import (
     NodeActionExecution,
 )
 from nodes.output import scrub_tail
-from nodes.protocol.canonical import CanonicalizationError, sha256_hex
+from nodes.protocol.canonical import CanonicalizationError, canonicalize, sha256_hex
 from nodes.protocol.messages import (
     GATEWAY_PATH,
     MAX_READ_INVOKE_TTL_SECONDS,
@@ -360,6 +364,316 @@ def _args_hash(args):
 
 def _human(actor):
     return actor if getattr(actor, "is_authenticated", False) else None
+
+
+# --- reads over the invoke bus (Phase 9 D6, D7; branch 4) ---
+
+READ_CHANNEL = "web"
+# Capabilities a system-initiated read (`channel` other than web) may
+# invoke (Phase 8B D13 amendment to D7). Empty until branch 5 moves the two
+# owner-turn contracts into `nodes/capabilities/v1/`: until then every
+# non-web read is refused `not_invocable`.
+SYSTEM_READ_CAPABILITIES = frozenset()
+# The gateway's own verdicts on the result key -> (status, refusal_code);
+# the node's result frames are mapped by `_read_outcome`.
+GATEWAY_READ_VERDICTS = {
+    "node_disconnected": ("node_disconnected", ""),
+    "node_mismatch": ("server_refused", "node_mismatch"),
+    "result_schema": ("error", "result_schema"),
+    "result_too_large": ("error", "result_too_large"),
+}
+
+
+@dataclass(frozen=True)
+class ReadOutcome:
+    """The answer of one node read (D7). `output` is set only for `ok`: the
+    validated result, returned to the caller and stored nowhere."""
+
+    status: str
+    refusal_code: str = ""
+    output: object = None
+    truncated: bool = False
+    output_sha256: str = ""
+    output_bytes: int = 0
+    duration_ms: int = 0
+    invocation_id: str = ""
+    trace_id: str = ""
+    invocation: object = None
+
+    @property
+    def ok(self) -> bool:
+        return self.status == "ok"
+
+
+def invoke_timeout_seconds() -> int:
+    """NODE_INVOKE_TIMEOUT_SECONDS, always below the read envelope's TTL."""
+    timeout = max(1, int(settings.NODE_INVOKE_TIMEOUT_SECONDS))
+    return min(timeout, max(1, read_invoke_ttl_seconds() - 1))
+
+
+def max_inflight() -> int:
+    return max(1, int(settings.NODE_MAX_INFLIGHT))
+
+
+def _bounded_trace_id(trace_id):
+    return str(trace_id or "")[:64] or _trace_id()
+
+
+def _record_read(
+    *,
+    node,
+    workspace,
+    actor,
+    channel,
+    capability,
+    capability_version,
+    args_sha256,
+    trace_id,
+    status,
+    refusal_code="",
+    nonce="",
+    output_sha256="",
+    output_bytes=0,
+    truncated=False,
+    duration_ms=0,
+    dropped_unmapped=0,
+):
+    """D7 steps 7-8: exactly one chain row and one `nodes.invoke` AuditLog
+    row for one read at its terminal state. Hashes, sizes and codes only:
+    never args, never output."""
+    not_sent = status in NOT_SENT_STATUSES
+    with transaction.atomic():
+        row = audit_chain.append(
+            workspace=workspace,
+            node=node,
+            capability=capability,
+            capability_version=capability_version,
+            args_sha256=args_sha256,
+            status=status,
+            channel=channel,
+            trace_id=trace_id,
+            actor=_human(actor),
+            nonce="" if not_sent else nonce,
+            refusal_code=refusal_code,
+            output_sha256="" if not_sent else output_sha256,
+            output_bytes=0 if not_sent else min(int(output_bytes), 2**31 - 1),
+            truncated=False if not_sent else bool(truncated),
+            dropped_unmapped=dropped_unmapped,
+            duration_ms=max(0, min(int(duration_ms), 3_600_000)),
+        )
+        record_audit(
+            action=NODE_INVOKE_EVENT,
+            actor=_human(actor),
+            workspace=workspace,
+            resource=row,
+            metadata={
+                "node_id": str(node.pk),
+                "capability": capability,
+                "capability_version": capability_version,
+                "class": "read",
+                "args_sha256": args_sha256,
+                "nonce": row.nonce,
+                "status": status,
+                "refusal_code": refusal_code,
+                "duration_ms": row.duration_ms,
+                "output_bytes": row.output_bytes,
+                "trace_id": trace_id,
+                "channel": channel,
+            },
+        )
+    return row
+
+
+def refuse_read(
+    *, node, capability, args, workspace, actor, trace_id, code, channel=READ_CHANNEL
+) -> ReadOutcome:
+    """A caller's own pre-invoke refusal (D7, D9: `path_not_in_workspace`,
+    `workspace_not_allowed`, `session_not_found`): nothing is signed or
+    sent; the chain row and the AuditLog row are written as for any call.
+    The args are hashed, never stored."""
+    contract = get_contract(capability) if isinstance(capability, str) else None
+    trace_id = _bounded_trace_id(trace_id)
+    row = _record_read(
+        node=node,
+        workspace=workspace,
+        actor=actor,
+        channel=channel,
+        capability=str(capability)[:64],
+        capability_version=contract.version if contract is not None else 0,
+        args_sha256=_args_hash(args),
+        trace_id=trace_id,
+        status="server_refused",
+        refusal_code=code,
+    )
+    return ReadOutcome(
+        status="server_refused", refusal_code=code, trace_id=trace_id, invocation=row
+    )
+
+
+def _read_outcome(payload, contract):
+    """A result-key payload (the node's result, or a gateway verdict) ->
+    (status, refusal_code, output, truncated). The output is validated
+    again here against the server's own contract (the gateway already did;
+    this is the caller's own D7 step 6)."""
+    verdict = payload.get("verdict")
+    if verdict is not None:
+        status, code = GATEWAY_READ_VERDICTS.get(verdict, ("error", "node_error"))
+        return status, code, None, False
+    status = payload.get("status")
+    code = payload.get("refusal_code") or ""
+    if status == "ok":
+        output = payload.get("output")
+        try:
+            contract.validate_result(output)
+        except ProtocolError as exc:
+            return "error", exc.code, None, False
+        return "ok", "", output, bool(payload.get("truncated"))
+    if status == "refused":
+        if code in NODE_REFUSED_CODES:
+            return "refused", code, None, False
+        return "error", "node_error", None, False
+    if status == "timeout":
+        return "timeout", "", None, False
+    return "error", "node_error", None, False
+
+
+def invoke_read(
+    *,
+    node,
+    capability,
+    args,
+    workspace,
+    actor,
+    trace_id=None,
+    channel=READ_CHANNEL,
+    keyring=None,
+    now=None,
+) -> ReadOutcome:
+    """One read of a node capability, synchronously (D7). Runs in any
+    process (web, worker): the gateway process that holds the node's socket
+    forwards the envelope and pushes the answer back over Redis (D6).
+
+    Order: the server contract and the node's latest snapshot
+    (`server_refused:not_invocable`), the args (`args_contract`), presence
+    (`node_offline`: nothing queued), the shared in-flight cap (`busy`), the
+    signing key (`signing_unavailable`), the push (`bus_unavailable`), then
+    a wait of at most `NODE_INVOKE_TIMEOUT_SECONDS` (`timeout`). The answer
+    is `ok` (output valid against the server's `result_schema`), `refused`
+    (a D5 node code), `error` (`node_error` / `result_schema` /
+    `result_too_large`), `node_disconnected` or `server_refused:node_mismatch`.
+    Never retried (ADR-013 decision 6).
+
+    Every call writes exactly one `NodeInvocation` chain row and one
+    `nodes.invoke` AuditLog row, sent or not; neither holds args or output.
+    The output is returned to the caller and stored nowhere.
+
+    Branch 5 adds the D9 workspace pre-checks in `tools` (they call
+    `refuse_read`), the Phase 8B step-0 actor check and the system
+    channel's capabilities."""
+    started = time.monotonic()
+    trace_id = _bounded_trace_id(trace_id)
+    contract = get_contract(capability) if isinstance(capability, str) else None
+    common = {
+        "node": node,
+        "workspace": workspace,
+        "actor": actor,
+        "channel": channel,
+        "capability": contract.name if contract is not None else str(capability)[:64],
+        "capability_version": contract.version if contract is not None else 0,
+        "args_sha256": _args_hash(args),
+        "trace_id": trace_id,
+    }
+
+    def finish(status, code="", *, invocation_id="", output=None, **sent):
+        duration = int((time.monotonic() - started) * 1000)
+        row = _record_read(status=status, refusal_code=code, duration_ms=duration, **common, **sent)
+        return ReadOutcome(
+            status=status,
+            refusal_code=code,
+            output=output,
+            truncated=row.truncated,
+            output_sha256=row.output_sha256,
+            output_bytes=row.output_bytes,
+            duration_ms=row.duration_ms,
+            invocation_id=invocation_id,
+            trace_id=trace_id,
+            invocation=row,
+        )
+
+    if contract is None or contract.capability_class != "read":
+        return finish("server_refused", "not_invocable")
+    if channel != READ_CHANNEL and contract.name not in SYSTEM_READ_CAPABILITIES:
+        return finish("server_refused", "not_invocable")
+    if invocable_entry(latest_snapshot(node), contract) is None:
+        return finish("server_refused", "not_invocable")
+    try:
+        contract.validate_args(args)
+    except ProtocolError:
+        return finish("server_refused", "args_contract")
+    try:
+        version = bus.present_version(node.pk)
+    except bus.BusUnavailable:
+        return finish("bus_unavailable")
+    if version is None:
+        return finish("node_offline")
+    timeout = invoke_timeout_seconds()
+    try:
+        acquired = bus.acquire_inflight(
+            node.pk, max_inflight(), read_invoke_ttl_seconds() + timeout + 30
+        )
+    except bus.BusUnavailable:
+        return finish("bus_unavailable")
+    if not acquired:
+        return finish("busy")
+    try:
+        try:
+            keyring = keyring or signing_keyring()
+        except SigningKeyUnavailable:
+            return finish("server_refused", "signing_unavailable")
+        envelope = keyring.sign(
+            build_invoke(
+                node_id=node.pk,
+                workspace_id=workspace.pk,
+                capability=contract.name,
+                capability_version=contract.version,
+                args=args,
+                trace_id=trace_id,
+                issued_at=int(now if now is not None else time.time()),
+                ttl_seconds=read_invoke_ttl_seconds(),
+                version=version,
+            )
+        )
+        invocation_id = envelope["invocation_id"]
+        try:
+            bus.push_invoke(node.pk, envelope, now=now)
+        except bus.BusUnavailable:
+            return finish("bus_unavailable", invocation_id=invocation_id)
+        try:
+            payload = bus.wait_result(invocation_id, timeout)
+        except bus.BusUnavailable:
+            payload = None  # sent, but no answer can come back: a timeout
+        nonce = envelope["nonce"]
+        if payload is None:
+            return finish("timeout", invocation_id=invocation_id, nonce=nonce)
+        status, code, output, truncated = _read_outcome(payload, contract)
+        if status in NOT_SENT_STATUSES:
+            return finish(status, code, invocation_id=invocation_id)
+        if status != "ok":
+            return finish(status, code, invocation_id=invocation_id, nonce=nonce)
+        return finish(
+            "ok",
+            invocation_id=invocation_id,
+            output=output,
+            nonce=nonce,
+            output_sha256=sha256_hex(output),
+            output_bytes=len(canonicalize(output)),
+            truncated=truncated,
+        )
+    finally:
+        try:
+            bus.release_inflight(node.pk)
+        except bus.BusUnavailable:
+            logger.warning("node in-flight slot not released node=%s", node.pk)
 
 
 def record_actor_refusal(*, actor, node_id, capability, workspace=None):

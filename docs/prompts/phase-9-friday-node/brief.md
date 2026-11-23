@@ -1596,7 +1596,7 @@ node paired, the e2e test is green, and the go/no-go record is written.
 | 1 | `feat/p9-node-pairing` | Spike S9.0: `TrustedDevice.kind=node`, node pairing codes, `jnd_` secrets, rotation with grace, age cap, revocation fan-out, kill switch, `CHANNEL_NODE`, URL walk, ADR-013 spike note | brief approved | **implemented 2026-11-20** (spike S9.0 server half: passed, ADR-013 note; Keychain half pending owner evaluation, M1; known follow-up 4 resolved: `is_usable()` branches on `kind`; awaits independent Sonnet 5 review) |
 | 2 | `feat/p9-node-protocol` | `nodes` app + contracts, protocol v1 schemas, canonical JSON, Ed25519 envelopes, capability contracts, pairing endpoint, signing key config, hash-chained `NodeInvocation`, dependency manifest | 1 | **implemented 2026-11-20** (done criterion met: `test_the_done_criterion_signed_invoke_verifies_only_with_the_returned_key`; known follow-ups 1, 2 and 5 resolved; ADR-013 contract note; awaits independent Sonnet 5 review) |
 | 3 | `feat/p9-reference-node` | Python reference node, conformance cases + `--check`, hostile fake gateway, reference spool and Unix-socket relay | 2 | **implemented 2026-11-20** (done criterion met: `node_conformance_server --protocol 1` prints all-pass, `test_every_v1_case_passes_through_the_command_over_a_socket`; builds on the session half, v1 protocol cases and vendored scrubber that `feat/p10-reference-executor` already shipped; adds the readers, 13 reader cases, `reader_calls`, the spool, the hook relay, node event upload and `vectors/scrub.json`; awaits independent Sonnet 5 review) |
-| 4 | `feat/p9-node-gateway` | `asgi_nodes` + uvicorn/`wsproto`, `node-gateway` service, handshake, `hello`/snapshot, heartbeat/presence, invoke bus, revocation/kill-switch fan-out, limits, node APIs | 1, 2, 3 | not started |
+| 4 | `feat/p9-node-gateway` | `asgi_nodes` + uvicorn/`wsproto`, `node-gateway` service, handshake, `hello`/snapshot, heartbeat/presence, invoke bus, revocation/kill-switch fan-out, limits, node APIs | 1, 2, 3 | **implemented 2026-11-20** (done criterion met: `test_the_done_criterion_round_trip` in process and `test_the_reference_node_over_a_real_socket` under uvicorn — `hello.ack`, a signed read answered, cut off within 2 s of `revoke_device`; `invoke_read` bus side with chain + AuditLog rows; known follow-up 3 resolved (Redis in-flight counter, two-process test); Phase 10 owner step 2 done (`NodeSession` wired into the socket app, 1013 placeholder replaced); awaits independent Sonnet 5 review) |
 | 5 | `feat/p9-node-reads` | `invoke_read` end to end, five read tools, path → workspace resolution, second scrub, fencing, chain + audit rows, invocations API | 4 | not started |
 | 6 | `feat/p9-node-events` | `event` sink wiring into `ingest_hook_events`, cross-relay dedupe, spool upload acks, availability events | 4 (parallel with 5) | not started |
 | 7 | `feat/p9-node-ui` | `/devices` node section, invocation log page, HUD node line, `hud → nodes` contract | 4, 5 (6 for availability) | not started |
@@ -2266,3 +2266,99 @@ Implementation notes (branch 3):
    `created_at` because `bool` is a subclass of `int`. A crafted spool file
    with `true` loads as `created_at=1`, and the age cap drops it, so this is
    harmless. Add `and not isinstance(created_at, bool)`.
+
+### Owner steps (pending) — `feat/p9-node-gateway`, recorded 2026-11-20
+
+1. Run the independent Sonnet 5 review of `feat/p9-node-gateway` and fix
+   findings until APPROVE (CLAUDE.md "Reviews").
+2. Run `uv sync --frozen` wherever the backend is installed outside Docker:
+   `uvicorn==0.54.0` is now a direct, exact-pinned dependency (same version
+   as before, `docs/mcp/dependencies/node-gateway.md`). No migration.
+3. Rebuild and restart the stack (`make up` / `make up-daily`): the new
+   `node-gateway` service starts on `127.0.0.1:8002`, and web, worker and
+   node-gateway now all receive `NODE_SIGNING_KEY` (and
+   `NODE_SIGNING_KEYS_RETIRED`) from `deploy/docker/.env`. Check
+   `curl -s http://127.0.0.1:8002/healthz` shows `"redis": true` and a
+   16-character `signing_key_id` (null = no usable key: every node
+   handshake is refused 1013).
+4. Expose `/ws/node/v1` (only that path) through the existing overlay or TLS
+   reverse proxy (`docs/runbooks/friday-node.md`, Caddy example); never
+   publish 8002 on 0.0.0.0. Optionally set `NODE_TLS_PIN_SHA256` for the
+   closeout's preflight. This is the brief's owner step 6.
+5. Optional: `NODE_INVOKE_TIMEOUT_SECONDS` (10), `NODE_RESULT_TTL_SECONDS`
+   (30) and `NODE_MAX_INFLIGHT` (4) only to change the defaults; out-of-range
+   values stop boot (`nodes.E005`–`E007`).
+6. **Mac session M1 (deferred: Mac session).** The Swift app's WSS client
+   must satisfy the gateway as the reference node does in
+   `nodes/tests/test_gateway_*.py`: offer `friday-node.v2, friday-node.v1`,
+   send `Authorization: Bearer <jnd_…>` and **no `Origin`**, send `hello`
+   within 10 s and a heartbeat every 15 s (silence for 45 s is closed 4408),
+   stay under 20 frames/s and 256 KiB per frame, answer each `invoke` with
+   one `result` on the same socket only, treat `bye{revoked|kill_switch|
+   credential_expired}` as "do not reconnect", and treat the close codes of
+   the runbook's table (1013 = retry with backoff; 4401 = stop until the
+   owner re-pairs or releases the kill switch). Run it against a dev stack's
+   `node-gateway` (pair with `manage.py issue_pairing_code --node --strong`)
+   and confirm that `GET /api/v1/nodes` shows it `connected` and that
+   revoking it from `/api/v1/nodes/<id>/revoke` closes the app's socket
+   within 2 s (M4 item 2).
+
+Implementation notes (branch 4):
+- **Base.** Phase 10 branch 3 had already shipped the transport-agnostic
+  `nodes.gateway.NodeSession` and `nodes.bus` (presence, inbox). This branch
+  adds the socket app around them (`NodeSocketApp`, same module), the read
+  side of the session (a per-socket read in-flight set, result validation,
+  `nodes:result:<invocation_id>` pushes) and replaces the 1013 placeholder
+  in `config/asgi_nodes.py`; the Phase 10 action path is unchanged.
+- **Handshake order:** `Origin` (4403) → subprotocol (4400) → Redis (1013)
+  → usable signing key (1013, D4/D12: the gateway serves no node it could
+  not sign for) → credential (4401). Refusals accept and then close, so the
+  node sees the code (a close before accept is only an HTTP 403). The
+  credential check is `accounts.devices.authenticate_node_secret`
+  (`surface="gateway"`, audited and flood-capped there) plus the `Node`
+  row of that device and owner.
+- **Close codes:** a `bye` is followed by close 1000; an oversize frame is
+  closed 1009 (read as "oversize frame" and "frame rate → 4429" being two
+  limits); a first frame other than `hello`, three bad frames in 60 s or
+  three results for unknown/other sockets' invocations send
+  `bye{protocol_error}` and close 4400; silence beyond 45 s closes 4408.
+- **The presence value is the session's protocol version**, so
+  `invoke_read` signs a v1 or v2 read envelope to match the live socket. An
+  envelope signed for a session of another version (a reconnect in
+  between) is resolved `node_disconnected`.
+- **Gateway verdicts on the result key** are `{"verdict": …}`:
+  `node_disconnected`, `node_mismatch` (an envelope for another node:
+  `server_refused:node_mismatch`, the Phase 10 code, rather than the
+  brief's generic `error`, nothing sent), `result_schema` and
+  `result_too_large` (the output is dropped, never pushed). `invoke_read`
+  validates the output against the server contract a second time.
+- **`invoke_read`** already writes exactly one chain row and one
+  `nodes.invoke` AuditLog row per call for every D7 terminal status it can
+  reach, plus `refuse_read`; `channel` is a keyword (default `web`), and any
+  other channel is `server_refused:not_invocable` until branch 5 moves the
+  8B owner-turn contracts (`SYSTEM_READ_CAPABILITIES` is empty). Branch 5
+  adds the D9 pre-checks, the 8B step-0 actor check and the tools. A Redis
+  error **after** the push resolves `timeout` (the envelope may have been
+  delivered; `bus_unavailable` is a not-sent status).
+- **`NODE_MAX_INFLIGHT`** is the Redis counter `nodes:inflight:<node_id>`
+  (INCR + EXPIRE in one `MULTI`, DECR never below zero), so the cap holds
+  across web, worker and the gateway (known follow-up 3, with a
+  two-process test).
+- **`event` frames** are acknowledged `dropped` with counts only (D10's "no
+  sink registered") until branch 6 registers the memory sink. An event never
+  leads to an invoke.
+- **`hello`** stores `node_version`/`os_version` and counts as a heartbeat
+  for `last_heartbeat_at`; heartbeats write the row (and the spool depth) at
+  most once per 60 s (`nodes.presence`).
+- **One process.** The registry of live sockets (one per node; a second
+  connection replaces the first with `bye{replaced}`, and the replaced
+  socket's teardown leaves the new one's presence alone) is per process: run
+  one `node-gateway` replica (compose comment, runbook).
+- **Selectors** (`nodes.selectors`): `node_status`, `node_summary`,
+  `node_detail` and `node_health` (the HUD block branch 7 wires); the node
+  APIs use `IsAuthenticated + IsWebChannel + IsOwner` and
+  `Node.objects.for_actor(actor).filter(owner=actor)`.
+- **Tests** drive `NodeSocketApp` in process through
+  `nodes/tests/gateway_harness.py` (an asyncio loop in a background thread,
+  as under uvicorn; `django_db(transaction=True)`), plus one real-socket run
+  under uvicorn with the reference node's `wsproto` client.
