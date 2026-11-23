@@ -77,10 +77,27 @@ Known issues the swarm must fix first:
 - **Merger time limit.** Mergers returned before the full pytest (about 20 min)
   finished, because foreground Bash stops at 10 minutes. `swarm-resume.js` now tells
   mergers to run pytest in the background and wait for it.
-- **Timezone bug in a test.**
-  `memory/tests/test_fact_learning.py::test_valid_from_outside_one_day_is_clamped_and_counted`
-  and 2 sibling tests fail between 21:00 and 24:00 UTC. The cause is the
-  Europe/Istanbul date rollover. Fix it as a small `fix:` branch before the next merge.
+- **Timezone bug in a test — RESOLVED** by `fix/tz-fact-learning-test`
+  (status: implemented, 2026-11-20).
+  - Root cause, in the test: the `episode()` fixture defaults to `now - 1h`.
+    In the measured window 21:00–22:00 UTC (00:00–01:00 Istanbul) that falls
+    on the previous local day. The test anchored its expectation on today's
+    local date, but the clamp is ±1 day around the episode's local day (D4).
+    That production rule was right. The test now anchors on the episode's
+    local day under a frozen clock at 12:00, 21:30 and 22:30 UTC, plus a
+    cross-UTC-midnight case. The new root fixture `frozen_now` pins
+    `timezone.now`.
+  - Siblings found by the sweep were production bugs. Code called
+    `value.date()` on a UTC-aware row read back from Postgres. A fact whose
+    `valid_from` came from a date is stored at local midnight (21:00 UTC the
+    day before), so it rendered one day early at any hour. This happened in
+    three places: `render_fact_line` (chat context and the graph read tool),
+    the reconciliation payload's `existing_fact valid_from`, and the vault
+    entity notes. All three now use `timezone.localdate()`, with regressions
+    at 12:00/22:30 UTC.
+  - No `timezone.now().date()` / `date.today()` remains server-side. The one
+    `date.today()` is the CLI's intentional `client_local_date`.
+  - Owner steps (pending), recorded 2026-11-20: none.
 
 ## How to continue (Monday)
 

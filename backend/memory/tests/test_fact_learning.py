@@ -5,7 +5,7 @@ validated supersede, private skip, budget) and the nightly caps.
 FakeAdapter with captured payloads; no real model."""
 
 import json
-from datetime import timedelta
+from datetime import UTC, date, datetime, timedelta
 from unittest import mock
 
 import pytest
@@ -216,14 +216,56 @@ def test_a_quote_from_another_episode_or_from_context_is_dropped(git, personal, 
     assert drops(git).get("no_provenance") == 2
 
 
+# The clock pins of the date-boundary regressions. TIME_ZONE is
+# Europe/Istanbul (UTC+3): at 12:00 UTC both calendars agree; at 21:30 UTC
+# it is already 00:30 tomorrow locally while the episode fixture's default
+# `now - 1h` is still yesterday locally (the window the old test failed
+# in); at 22:30 UTC the episode and "now" share the new local day.
+CLOCKS = [
+    pytest.param(datetime(2026, 11, 20, 12, 0, tzinfo=UTC), id="12:00Z"),
+    pytest.param(datetime(2026, 11, 20, 21, 30, tzinfo=UTC), id="21:30Z"),
+    pytest.param(datetime(2026, 11, 20, 22, 30, tzinfo=UTC), id="22:30Z"),
+]
+
+
+@pytest.mark.parametrize("now", CLOCKS)
 @pytest.mark.parametrize("offset, clamped", [(1, False), (-1, False), (2, True), (-30, True)])
-def test_valid_from_outside_one_day_is_clamped_and_counted(git, personal, llm, offset, clamped):
-    eid = episode(git, owner_text=OWNER_LINE)
-    day = today() + timedelta(days=offset)
+def test_valid_from_outside_one_day_is_clamped_and_counted(
+    git, personal, llm, frozen_now, now, offset, clamped
+):
+    """D4: the slack is +-1 day around the EPISODE's local day, not today's.
+    The expectation is anchored on that day, so the test holds at any hour."""
+    frozen_now(now)
+    occurred_at = now - timedelta(hours=1)
+    eid = episode(git, owner_text=OWNER_LINE, occurred_at=occurred_at)
+    episode_day = timezone.localdate(occurred_at)
+    day = episode_day + timedelta(days=offset)
     night(llm, reply(candidate(eid, OWNER_LINE, fact=fact_obj(day=day))), personal)
     row = MemoryFact.objects.get()
-    expected = today() if clamped else day
+    expected = episode_day if clamped else day
     assert timezone.localdate(row.valid_from) == expected
+    assert drops(git).get("fact_valid_from_clamped", 0) == (1 if clamped else 0)
+
+
+@pytest.mark.parametrize(
+    "model_day, stored_day, clamped",
+    [
+        (date(2026, 11, 22), date(2026, 11, 22), False),
+        (date(2026, 11, 19), date(2026, 11, 21), True),
+    ],
+)
+def test_the_clamp_uses_the_episodes_local_day_across_utc_midnight(
+    git, personal, llm, frozen_now, model_day, stored_day, clamped
+):
+    """An episode at 21:30 UTC on the 20th happened on the 21st in
+    Istanbul: a model date of the 22nd is within the slack (not clamped),
+    while the 19th -- inside +-1 of the UTC date -- is clamped to the 21st."""
+    now = frozen_now(datetime(2026, 11, 20, 23, 0, tzinfo=UTC))
+    late = now - timedelta(minutes=90)  # 21:30Z == 00:30 local, 2026-11-21
+    assert timezone.localdate(late) == date(2026, 11, 21)
+    eid = episode(git, owner_text=OWNER_LINE, occurred_at=late)
+    night(llm, reply(candidate(eid, OWNER_LINE, fact=fact_obj(day=model_day))), personal)
+    assert timezone.localdate(MemoryFact.objects.get().valid_from) == stored_day
     assert drops(git).get("fact_valid_from_clamped", 0) == (1 if clamped else 0)
 
 

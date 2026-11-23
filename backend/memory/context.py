@@ -35,6 +35,7 @@ import re
 import unicodedata
 
 from django.db.models import Case, FloatField, Func, IntegerField, Q, Value, When
+from django.utils import timezone
 from pgvector.django import CosineDistance
 
 from ai_core.exceptions import GatewayError
@@ -286,14 +287,22 @@ def select_overlay_memories(*, actor, workspace):
     return selected
 
 
+def _local_day(value):
+    """The `TIME_ZONE`-local calendar day of an aware instant, ISO-formatted.
+    Not `value.date()`: a row read back from Postgres is UTC-aware, so a
+    fact starting at local midnight (`as_instant(date)`) would render as
+    the day before."""
+    return timezone.localdate(value).isoformat() if value else ""
+
+
 def render_fact_line(fact):
     """One `<memory_fact>` line (Phase 8B D8): `statement (valid_from–valid_to)`,
     dates only, an open end left empty ("still valid"). Normalized, then
     `neutralize_fence` LAST (the `render_memory_block` ordering rule), so a
     statement holding `</memory_fact>` cannot close the fence."""
     statement = strip_invisible_formatting(_WHITESPACE_RUN.sub(" ", fact.statement or ""))
-    valid_from = fact.valid_from.date().isoformat() if fact.valid_from else ""
-    valid_to = fact.valid_to.date().isoformat() if fact.valid_to else ""
+    valid_from = _local_day(fact.valid_from)
+    valid_to = _local_day(fact.valid_to)
     return _neutralize(f"{statement.strip()} ({valid_from}–{valid_to})")
 
 

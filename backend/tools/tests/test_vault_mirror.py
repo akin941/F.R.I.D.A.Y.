@@ -5,6 +5,7 @@ vault under `tmp_path`, as the existing export tests use; no Obsidian app."""
 import os
 import re
 import uuid
+from datetime import UTC, date, datetime
 
 import pytest
 from django.utils import timezone
@@ -13,10 +14,11 @@ from accounts.services import register_user
 from approvals.models import ApprovalRequest
 from audit.models import AuditLog
 from core.channels import CHANNEL_WEB
+from memory.graph.services import as_instant
 from memory.ingestion.services import ensure_default_sources
 from memory.models import Episode, IngestionSource, Memory, MemoryEntity, MemoryFact
 from memory.tests.graph_helpers import T0, T1, entity, fact, system_fact
-from tools import export
+from tools import export, vault_entities
 from tools.models import VaultExportRun
 from tools.tests.vault_helpers import claimed_run, export_in_run
 from tools.vault_frontmatter import body_sha256, is_owner_edited, split_frontmatter
@@ -315,6 +317,17 @@ class TestEntityNotes:
         assert new.statement in current and f"[[{hetzner.id}|Hetzner]]" in current
         assert old.statement in history and "2026-01-01 → 2026-03-01" in history
         assert stats.entity_notes == 3
+
+    @pytest.mark.parametrize("hour", [12, 22])
+    def test_a_window_is_the_local_calendar_day(self, personal, frozen_now, hour):
+        """A date-valued `valid_from` is stored as local midnight (21:00 UTC
+        the day before); read back UTC-aware it must still render as its
+        own local day, whatever the hour of the export."""
+        frozen_now(datetime(2026, 11, 20, hour, 30, tzinfo=UTC))
+        api = entity(personal, "Api")
+        fact(personal, api, text="hetzner", valid_from=as_instant(date(2026, 11, 20)))
+        open_files, _ = vault_entities.plan_entity_notes(personal)
+        assert "2026-11-20 → now" in open_files[f"{api.id}.md"]
 
     def test_wiki_links_resolve_to_notes_of_the_same_workspace(
         self, personal, firm, vault, tmp_path
