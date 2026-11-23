@@ -177,7 +177,10 @@ async function finish8a() {
   return ids.map((id, i) => ({ id, ...r[i] }))
 }
 
+NODES.tzfix = { branch: 'fix/tz-fact-learning-test', brief: '.swarm/README.md', deps: [],
+  section: 'Known issue "Timezone bug in a test": memory/tests/test_fact_learning.py::test_valid_from_outside_one_day_is_clamped_and_counted and 2 sibling tests fail between 21:00 and 24:00 UTC because of the Europe/Istanbul date rollover. Find the root cause (test fixture vs production date math using UTC vs local date); fix the code if production is wrong, otherwise make the tests timezone-robust (freeze time at both 12:00 and 22:30 UTC as regression cases). Also grep the suite for the same pattern (timezone.now().date() vs localdate()) and fix siblings. Update the README known-issues line to resolved.' }
 const all = []
+all.push({ id: 'tzfix', ...(await run('tzfix')) })
 all.push(...(await finish8a()))
 for (const P of PHASES) { all.push(...(await phaseRun(P))) }
 
