@@ -2973,3 +2973,40 @@ in a reviewed change once the real SDK surface is known.
 
 No Mac session work: the driver runs in the Linux harness runner's
 containers.
+
+**Known follow-ups from the independent review (recorded at merge, 2026-11-23).**
+These were left unresolved at APPROVE. They are LOW and do not block the merge.
+1. LOW, `backend/harness/docker/claude_agent_bridge.py`: the bridge writes
+   protocol frames to the container's real stdout, and the agent's own
+   processes share that container and uid. The locally allowed test command
+   runs repo code the agent may have just written, which could write to
+   `/proc/<bridge pid>/fd/1` and forge `result` frames (usage 0, cost 0,
+   status completed) or `message` frames. Forged frames cannot approve
+   anything (only the host's `permission_response` can), but they could
+   understate cost against `HARNESS_MAX_JOB_COST` and the token brake and put
+   forged text in the transcript. This is the same agent-writable-stdout
+   concern `implementation_execution.py` documents for the CLI path; the
+   Codex branch has the same exposure. Accepted residual risk. Fix
+   (optional): have the host cross-check cost against the model API's own
+   accounting, or move the bridge's protocol channel to a private fd/socket
+   that the agent's children do not inherit.
+2. LOW, `backend/harness/docker/claude_agent_bridge.py`: `LocalPolicy.allows`
+   lets the agent write any file inside the repo (except `.git/`) and run the
+   configured test command verbatim without approval, so the agent can write
+   a script or Makefile and then run the test command, which executes it
+   unapproved. This matches D10 and is bounded by the container sandbox and
+   egress network; owner step 4 still has to verify the network restriction
+   on the real image. Recorded as a known risk. Fix (optional): relay a Bash
+   test-command call when the diff touches the test entry points (Makefile,
+   conftest, `package.json` scripts).
+3. LOW, `backend/harness/docker/claude_agent_bridge.py`: `_safe_pattern` only
+   rejects a path segment that is exactly `..`; a brace pattern such as
+   `{..,x}/*` passes. The real SDK Glob/Grep semantics are unverified because
+   the surface snapshot is provisional. Fix: reject any `..` substring and any
+   `{` in Glob and Grep patterns, or re-verify against the real SDK in owner
+   step 4.
+4. LOW, this brief: the branch is not yet exercised against the real SDK (the
+   surface snapshot is provisional and `can_use_tool` is assumed to receive
+   every tool call). This is recorded as owner steps 3 and 4, not a defect.
+   No fix required; keep the closeout `harness_drivers` preflight red while
+   the surface is provisional.
