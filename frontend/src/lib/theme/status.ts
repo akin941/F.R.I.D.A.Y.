@@ -1,5 +1,6 @@
 import type {
   AgentStatus,
+  ApiNodeStatus,
   AgentStepStatus,
   ApprovalStatus,
   CiConclusion,
@@ -137,6 +138,32 @@ export const STATUS_TONES = {
     stopped: "neutral",
     stale: "neutral",
   },
+  // Phase 9 D11: a Mac node's link. The kill switch is danger, an ageing
+  // credential a warning; revoked / never paired are inert.
+  node: {
+    connected: "success",
+    disconnected: "neutral",
+    kill_switch: "danger",
+    revoked: "neutral",
+    credential_expiring: "warning",
+    never_paired: "neutral",
+  },
+  // Phase 9 D8: a chain row's terminal status.
+  nodeInvocation: {
+    ok: "success",
+    refused: "warning",
+    error: "danger",
+    timeout: "danger",
+    node_disconnected: "danger",
+    server_refused: "neutral",
+    node_offline: "neutral",
+    busy: "warning",
+    bus_unavailable: "danger",
+    failed: "danger",
+    denied: "neutral",
+    confirm_timeout: "neutral",
+    stale_dispatch: "neutral",
+  },
 } as const satisfies {
   approval: Record<ApprovalStatus, StatusTone>;
   agent: Record<AgentStatus, StatusTone>;
@@ -152,6 +179,8 @@ export const STATUS_TONES = {
   ci: Record<CiConclusion, StatusTone>;
   pin: Record<"ok" | "mismatch" | "missing" | "unchecked", StatusTone>;
   codingSession: Record<CodingSessionStatus, StatusTone>;
+  node: Record<ApiNodeStatus, StatusTone>;
+  nodeInvocation: Record<string, StatusTone>;
 };
 
 export type StatusDomain = keyof typeof STATUS_TONES;

@@ -1,4 +1,5 @@
 import { DevicesPanel } from "@/components/integrations/DevicesPanel";
+import { NodesSection } from "@/components/nodes/NodesSection";
 import { VIEW_SCROLL_ROOT } from "@/components/shell/view-scroll";
 import { cn } from "@/lib/utils";
 
@@ -13,6 +14,7 @@ export default function DevicesPage() {
         </p>
       </div>
       <DevicesPanel />
+      <NodesSection />
     </div>
   );
 }
