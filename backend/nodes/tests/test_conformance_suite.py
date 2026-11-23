@@ -255,6 +255,98 @@ def test_node_conformance_server_command_prints_all_pass(capsys):
     assert "ALL PASS" in out and "v2: 2/2 passed" in out
 
 
+def test_the_phase_9_case_list_is_present():
+    """Phase 9 brief branch 3 "Conformance cases" (the ADR-013 release gate)."""
+    names = {c["name"] for c in C.all_cases()[1]}
+    for name in (
+        "v1_unknown_capability",
+        "v1_args_extra_key",
+        "v1_args_wrong_type",
+        "v1_args_oversize",
+        "v1_args_traversal",
+        "v1_args_nul",
+        "v1_args_rtl_override",
+        "v1_args_shell_meta",
+        "v1_args_over_length_array",
+        "v1_replay",
+        "v1_expired",
+        "v1_not_yet_valid",
+        "v1_ttl_too_long",
+        "v1_bad_signature",
+        "v1_unknown_key",
+        "v1_args_hash_mismatch",
+        "v1_args_changed_after_signing",
+        "v1_wrong_node",
+        "v1_non_null_grant",
+        "v1_class_not_read",
+        "v1_not_granted",
+        "v1_unknown_type",
+        "v1_policy_shaped_policy_set",
+        "v1_policy_shaped_allowlist_add",
+        "v1_policy_shaped_catalogue_set",
+        "v1_policy_shaped_config_update",
+        "v1_policy_shaped_grant_add",
+        "v1_oversize_frame",
+        "v1_malformed_json",
+        "v1_three_bad_frames_close",
+        "v1_bye_revoked_no_reconnect",
+        "v1_server_silence_reconnect",
+        "v1_disconnect_mid_invoke_no_late_result",
+        # the readers (branch 3)
+        "v1_read_sessions_list_cwd_prefixes",
+        "v1_read_session_detail_scrubbed",
+        "v1_read_codex_thread_detail_scrubbed",
+        "v1_read_usage_cwd_prefixes",
+        "v1_read_git_status_unlisted_repo",
+        "v1_read_windows_titles_off",
+        "v1_read_directory_not_granted",
+    ):
+        assert name in names, name
+    pinned = {c["check"] for c in C.all_cases()[1] if c["check"]}
+    assert set(range(1, 17)) <= pinned  # every v1 node check (D5) has a case
+
+
+def test_no_reader_runs_on_any_refusal_case():
+    """Every case whose frames are refusals or frame errors pins
+    reader_calls == 0, and the runner catches a node whose reader ran."""
+    refusal_cases = [c for c in ALL if C._refusals_only(c["expect"]["frames"])]
+    assert len(refusal_cases) > 60
+    for case in refusal_cases:
+        assert case["expect"]["reader_calls"] == 0, case["name"]
+    for name in ("v1_read_ok", "v1_replay", "v1_read_session_detail_scrubbed"):
+        case = next(c for c in ALL if c["name"] == name)
+        assert case["expect"]["reader_calls"] == 1
+
+
+def test_a_reader_running_on_a_refusal_path_is_reported(home):
+    case = copy.deepcopy(next(c for c in ALL if c["name"] == "v1_args_traversal"))
+    case["steps"].insert(
+        0, {"op": "send", "frame": C.plain("extra-ok", "apps.frontmost", {}, version=1)}
+    )
+    case["expect"]["frames"].insert(0, {"type": "result", "status": "ok"})
+    result = run_case_in_process(case, home=home)
+    assert not result.passed
+    assert any("reader_calls" in failure for failure in result.failures)
+
+
+def test_a_raw_secret_in_a_read_result_is_reported(home):
+    case = copy.deepcopy(next(c for c in ALL if c["name"] == "v1_read_session_detail_scrubbed"))
+    case["setup"]["window_titles"] = True
+    raw = "[SECRET:openai_key]"
+    case["expect"]["absent_b64"] = C._absent(raw)
+    result = run_case_in_process(case, home=home)
+    assert "a raw secret reached a frame" in result.failures
+
+
+def test_every_v1_case_passes_through_the_command_over_a_socket(capsys):
+    """Phase 9 branch 3 "Done when": node_conformance_server against the
+    reference node prints all-pass."""
+    call_command("node_conformance_server", "--protocol", "1")
+    out = capsys.readouterr().out
+    total = len(C.all_cases()[1])
+    assert f"v1: {total}/{total} passed" in out and "ALL PASS" in out
+
+
 def test_node_conformance_server_refuses_an_unknown_case():
     with pytest.raises(CommandError):
         call_command("node_conformance_server", "--case", "nope")

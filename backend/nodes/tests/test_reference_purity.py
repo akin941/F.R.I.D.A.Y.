@@ -15,12 +15,14 @@ import nodes.reference, nodes.reference.node, nodes.reference.verifier_v2
 import nodes.reference.confirm, nodes.reference.executor, nodes.reference.sandbox
 import nodes.reference.local_policy, nodes.reference.stream_scrub, nodes.reference.transport
 import nodes.reference.worktree, nodes.reference._scrubber_vendored
+import nodes.reference.readers, nodes.reference.spool, nodes.reference.hook_relay
 import nodes.reference.fixtures.factory
 import nodes.conformance, nodes.conformance.cases, nodes.conformance.runner
 import nodes.conformance.gateway, nodes.conformance.build
 import nodes.conformance.escape, nodes.conformance.escape.runner
 nodes.conformance.cases.all_cases()
 nodes.conformance.build.sandbox_document()
+nodes.conformance.build.scrub_document()
 project = ("config", "core", "accounts", "workspaces", "audit", "ai_core", "assistant",
            "memory", "knowledge", "tasks", "approvals", "tools", "agents", "skills",
            "integrations", "harness", "connectors", "deploys", "ops", "voice", "hud")

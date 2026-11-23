@@ -1,12 +1,14 @@
 """Node-side streaming scrub with carry-over (Phase 10 brief D12) and the
 vendored scrubber (Phase 9 D13 item 6)."""
 
+import base64
 import json
 from pathlib import Path
 
 import pytest
 
 from nodes.conformance import build
+from nodes.conformance.cases import FIXTURE_SECRETS
 from nodes.protocol.messages import MAX_OUTPUT_CHUNK_BYTES, MAX_TAIL_BYTES
 from nodes.reference import vendor_scrubber
 from nodes.reference._scrubber_vendored import scrub_text
@@ -148,3 +150,63 @@ def test_scrub_stream_vectors_are_current_and_carry_no_raw_secret():
     document = json.loads(text)
     assert {"text", "pipeline"} <= set(document)
     assert len(document["text"]) >= len(SECRET_ROWS) * 2
+
+
+# --- Phase 9 branch 3: recall over the whole corpus, scrub.json parity ------
+
+ALL_SECRET_ROWS = [
+    row for name in ("secrets", "transcripts") for row in _rows(name) if row["class"] == "secret"
+]
+
+
+def test_vendored_scrubber_reaches_full_secret_recall_on_the_whole_corpus():
+    """The corpus files are read as data; nothing imports `memory`."""
+    assert len(ALL_SECRET_ROWS) > len(SECRET_ROWS)
+    for row in ALL_SECRET_ROWS:
+        out = scrub_text(row["text"]).text
+        assert not any(needle in out for needle in row["needles"]), row["id"]
+
+
+def test_scrub_vectors_are_current_complete_and_carry_no_raw_secret():
+    path = build.ROOT / "vectors" / "scrub.json"
+    text = path.read_text("utf-8")
+    assert text == build.rendered_files()["vectors/scrub.json"]
+    for row in ALL_SECRET_ROWS:
+        assert not any(needle in text for needle in row["needles"]), row["id"]
+    for secret in FIXTURE_SECRETS[:4]:
+        assert secret not in text
+    items = json.loads(text)["items"]
+    ids = [item["id"] for item in items]
+    assert len(ids) == len(set(ids))
+    corpus_ids = {
+        f"corpus:{name}:{row['id']}"
+        for name in ("benign", "pii", "secrets", "transcripts")
+        for row in _rows(name)
+    }
+    assert corpus_ids <= set(ids)
+    inputs = {base64.b64decode(item["input_b64"]).decode("utf-8") for item in items}
+    assert set(build.fixture_strings()) <= inputs
+    for item in items:
+        raw = base64.b64decode(item["input_b64"]).decode("utf-8")
+        assert scrub_text(raw).text == item["expected"], item["id"]
+
+
+def test_fixture_strings_include_the_transcripts_with_their_fake_secrets():
+    strings = build.fixture_strings()
+    joined = "\n".join(strings)
+    for secret in FIXTURE_SECRETS:
+        assert secret in joined
+    assert any("/Users/owner/work/acme" in s for s in strings)
+    assert not any("{{HOME}}" in s or "<<>>" in s for s in strings)
+
+
+def test_a_changed_scrub_vector_is_drift(monkeypatch):
+    original = build.rendered_files
+
+    def changed():
+        files = original()
+        files["vectors/scrub.json"] = files["vectors/scrub.json"].replace("PII:email", "PII:x", 1)
+        return files
+
+    monkeypatch.setattr(build, "rendered_files", changed)
+    assert build.check() == ["vectors/scrub.json"]

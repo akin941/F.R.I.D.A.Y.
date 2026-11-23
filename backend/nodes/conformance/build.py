@@ -9,25 +9,39 @@ Phase 10 brief branch 2; `manage.py build_node_conformance`):
 - `vectors/scrub_stream.json`: the streaming scrub with carry-over (D12)
   over fixed chunk sequences (the Swift `OutputStreamer` must reproduce
   every emitted piece, Mac session M1). Inputs are base64 so the file never
-  carries a raw (fake) secret; outputs are scrubbed.
+  carries a raw (fake) secret; outputs are scrubbed;
+- `vectors/scrub.json` (Phase 9 branch 3): every `memory/tests/
+  scrubber_corpus/*.jsonl` item and every string of the reader fixtures
+  (transcripts rendered with the home `/Users/owner`, and the desktop
+  fixture) with its expected output from the vendored scrubber (no
+  workspace terms). The Swift scrubber port must reproduce every
+  `expected` byte for byte (Mac session M2). Inputs are base64.
 
 `check()` lists every file that differs from its definition, and every
 stale case file that no definition renders. Pure Python.
 """
 
 import base64
+import hashlib
 import json
 from pathlib import Path
 
 from nodes.conformance.cases import all_cases, render_case
-from nodes.reference.fixtures.factory import policy_document
+from nodes.reference._scrubber_vendored import scrub_text
+from nodes.reference.fixtures.factory import (
+    FIXTURES_DIR,
+    policy_document,
+    render_template,
+    transcript_templates,
+)
 from nodes.reference.local_policy import LocalPolicy
 from nodes.reference.sandbox import build_sandbox
 from nodes.reference.stream_scrub import OutputPipeline, StreamScrubber
 
 ROOT = Path(__file__).resolve().parent
 BACKEND = ROOT.parents[1]
-CORPUS = BACKEND / "memory" / "tests" / "scrubber_corpus" / "secrets.jsonl"
+CORPUS_DIR = BACKEND / "memory" / "tests" / "scrubber_corpus"
+CORPUS = CORPUS_DIR / "secrets.jsonl"
 SPLIT_MARKER = "<<>>"
 
 VECTOR_HOME = "/Users/owner"
@@ -183,6 +197,67 @@ def scrub_stream_document() -> dict:
     }
 
 
+def _strings(value):
+    if isinstance(value, str):
+        yield value
+    elif isinstance(value, dict):
+        for key in sorted(value):
+            yield from _strings(value[key])
+    elif isinstance(value, list):
+        for item in value:
+            yield from _strings(item)
+
+
+def fixture_strings() -> list:
+    """Every string of the reader fixtures, rendered with `VECTOR_HOME`
+    (unparseable lines whole), deduplicated and sorted."""
+    found = set()
+    for _relative, text in transcript_templates():
+        for line in render_template(text, VECTOR_HOME).splitlines():
+            if not line.strip():
+                continue
+            try:
+                found.update(_strings(json.loads(line)))
+            except ValueError:
+                found.add(line)
+    desktop = json.loads((FIXTURES_DIR / "desktop.json").read_text(encoding="utf-8"))
+    found.update(_strings(desktop))
+    return sorted(s for s in found if s)
+
+
+def _scrub_item(item_id, text):
+    return {
+        "id": item_id,
+        "input_b64": _b64(text.encode("utf-8")),
+        "expected": scrub_text(text).text,
+    }
+
+
+def scrub_document() -> dict:
+    items = []
+    for path in sorted(CORPUS_DIR.glob("*.jsonl")):
+        for line in path.read_text(encoding="utf-8").splitlines():
+            if line.strip():
+                row = json.loads(line)
+                text = row["text"].replace(SPLIT_MARKER, "")
+                items.append(_scrub_item(f"corpus:{path.stem}:{row['id']}", text))
+    for text in fixture_strings():
+        digest = hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
+        items.append(_scrub_item(f"fixture:{digest}", text))
+    return {
+        "description": (
+            "Friday Node scrub parity vectors (Phase 9 brief D13 item 6, Mac session M2). Each "
+            "item's base64 UTF-8 input, scrubbed by backend/memory/ingestion/scrubber.py "
+            "(vendored in nodes/reference/_scrubber_vendored.py) with no workspace terms, gives "
+            "`expected` exactly. Items: every memory/tests/scrubber_corpus/*.jsonl row "
+            "(`corpus:<file>:<id>`) and every string of the reader fixtures, transcripts "
+            "rendered with the home /Users/owner (`fixture:<sha256 prefix>`). TEST DATA ONLY: "
+            "every secret is fake."
+        ),
+        "items": items,
+    }
+
+
 def rendered_files() -> dict:
     """`{path relative to nodes/conformance: text}` of every generated file."""
     files = {}
@@ -191,6 +266,7 @@ def rendered_files() -> dict:
             files[f"cases/v{version}/{case['name']}.json"] = render_case(case)
     files["vectors/sandbox.json"] = _render(sandbox_document())
     files["vectors/scrub_stream.json"] = _render(scrub_stream_document())
+    files["vectors/scrub.json"] = _render(scrub_document())
     return files
 
 
