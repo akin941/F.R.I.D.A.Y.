@@ -447,8 +447,9 @@ def test_three_malformed_frames_close_protocol_error(link_node):
 
 
 def test_an_event_is_acked_dropped_and_stored_nowhere(link_node):
-    """Branch 6 wires the memory sink; until then an `event` gets an
-    `event.ack` with counts only (D10, no sink registered)."""
+    """With no sink registered (D10; the package conftest clears the
+    composition root's registration) an `event` gets an `event.ack` with
+    counts only, `dropped`."""
     link, node, reference = link_node(subprotocols=(V1,))
     frame = {
         "v": 1,

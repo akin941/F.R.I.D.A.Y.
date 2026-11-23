@@ -42,6 +42,11 @@ Two layers:
   contract's `max_runtime_seconds` + 30 s -> `timeout`), and read entries
   past their envelope's expiry leave the in-flight set (a later result is
   discarded).
+- `event(frame)` (D10, branch 6): applies one `event` through
+  `nodes.events` (the hook sink the composition root registered, or the
+  `grant.availability_changed` flags) and returns its `event.ack`, counts
+  only. An event is never answered with anything else and never reaches
+  the invoke bus.
 - `disconnect()`: every in-flight read is resolved `node_disconnected`,
   every in-flight action ends `node_disconnected`, presence is cleared
   (unless a newer socket of the same node replaced this one). Nothing is
@@ -66,7 +71,7 @@ from django.db import close_old_connections
 from accounts.devices import NodeCredentialRejected, authenticate_node_secret, node_device_refusal
 from accounts.models import TrustedDevice
 from core.revocation import ALL_DEVICES, REVOCATION_CHANNEL, parse_revocation
-from nodes import bus, presence, services
+from nodes import bus, events, presence, services
 from nodes.capabilities import get_contract
 from nodes.keys import signing_key_id
 from nodes.models import Node
@@ -238,17 +243,30 @@ class NodeSession:
         frame = {"v": self.version, "type": "bye", "id": _message_id(), "reason": reason}
         return validate(frame, "server_to_node", self.version)
 
-    def event_ack(self, frame) -> dict:
-        """D10 with no sink registered (branch 6 wires the sink): the batch
-        is acknowledged `dropped`, stored nowhere. Counts only."""
+    def event(self, frame) -> tuple:
+        """D10: apply one `event` frame (`nodes.events`: the hook sink the
+        composition root registered, or the availability flags) and return
+        `(event.ack, outcome)`; the ack holds counts only. Raises
+        `events.SinkFailed` when the sink raised (no ack: the node keeps
+        the batch and sends it again)."""
+        validate(frame, "node_to_server", self.version)
+        outcome = events.handle_event(node=self.node, frame=frame)
+        return self.event_ack(frame, outcome), outcome
+
+    def event_ack(self, frame, outcome=None) -> dict:
+        """The `event.ack` for `frame`: its id and the outcome's counts,
+        never content. Without an outcome the whole batch is `dropped`."""
+        size = min(len(frame["batch"]), MAX_EVENT_BATCH)
+        if outcome is None:
+            outcome = events.EventOutcome(dropped=size)
         ack = {
             "v": self.version,
             "type": "event.ack",
             "id": _message_id(),
             "event_id": frame["id"],
-            "stored": 0,
-            "duplicate": 0,
-            "dropped": min(len(frame["batch"]), MAX_EVENT_BATCH),
+            "stored": outcome.stored,
+            "duplicate": outcome.duplicate,
+            "dropped": outcome.dropped,
         }
         return validate(ack, "server_to_node", self.version)
 
@@ -542,6 +560,7 @@ class Connection:
     last_frame_at: float = field(default_factory=time.monotonic)
     frame_times: deque = field(default_factory=deque)
     frame_error_times: deque = field(default_factory=deque)
+    spool_throttle: events.SpoolThrottle = field(default_factory=events.SpoolThrottle)
     tasks: list = field(default_factory=list)
 
     @property
@@ -880,7 +899,7 @@ class NodeSocketApp:
                 await self._close(conn, CLOSE_NORMAL, bye=reason)
             return
         if kind == "event":
-            await self._send_frame(conn, conn.session.event_ack(frame))
+            await self._event(conn, frame)
             return
         if kind == "hello":
             await self._frame_error(conn, "unexpected_hello")
@@ -891,6 +910,38 @@ class NodeSocketApp:
             await self._frame_error(conn, "unknown_invocation")
         elif outcome == "frame_error":
             await self._frame_error(conn, "schema")
+
+    async def _event(self, conn, frame):
+        """D10: one `event` frame, answered only by its `event.ack` (counts).
+        Spooled batches are paced (`events.SpoolThrottle`, 10/s per node);
+        frames of one socket are handled in order, each acked before the
+        next is read. A failing sink sends no ack (the node keeps the batch
+        and sends it again after a reconnect; the server dedupes)."""
+        if frame.get("spooled"):
+            wait = conn.spool_throttle.delay()
+            if wait > 0:
+                self.counters["event_throttled"] += 1
+                await asyncio.sleep(wait)
+                if conn.closed:
+                    return
+        try:
+            ack, outcome = await _db(conn.session.event, frame)
+        except events.SinkFailed:
+            self.counters["event_sink_failed"] += 1
+            return
+        self.counters["event_frames"] += 1
+        for key, value in outcome.detail.items():
+            self.counters[f"event_{key}"] += value
+        logger.info(
+            "node event node=%s kind=%s spooled=%s stored=%d duplicate=%d dropped=%d",
+            conn.node_id,
+            frame.get("kind"),
+            bool(frame.get("spooled")),
+            outcome.stored,
+            outcome.duplicate,
+            outcome.dropped,
+        )
+        await self._send_frame(conn, ack)
 
     async def _inbox_loop(self, conn):
         """The per-node inbox consumer (D6): `BLPOP nodes:inbox:<node_id>`,

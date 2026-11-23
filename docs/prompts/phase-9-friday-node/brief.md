@@ -1598,7 +1598,7 @@ node paired, the e2e test is green, and the go/no-go record is written.
 | 3 | `feat/p9-reference-node` | Python reference node, conformance cases + `--check`, hostile fake gateway, reference spool and Unix-socket relay | 2 | **implemented 2026-11-20** (done criterion met: `node_conformance_server --protocol 1` prints all-pass, `test_every_v1_case_passes_through_the_command_over_a_socket`; builds on the session half, v1 protocol cases and vendored scrubber that `feat/p10-reference-executor` already shipped; adds the readers, 13 reader cases, `reader_calls`, the spool, the hook relay, node event upload and `vectors/scrub.json`; awaits independent Sonnet 5 review) |
 | 4 | `feat/p9-node-gateway` | `asgi_nodes` + uvicorn/`wsproto`, `node-gateway` service, handshake, `hello`/snapshot, heartbeat/presence, invoke bus, revocation/kill-switch fan-out, limits, node APIs | 1, 2, 3 | **implemented 2026-11-20** (done criterion met: `test_the_done_criterion_round_trip` in process and `test_the_reference_node_over_a_real_socket` under uvicorn — `hello.ack`, a signed read answered, cut off within 2 s of `revoke_device`; `invoke_read` bus side with chain + AuditLog rows; known follow-up 3 resolved (Redis in-flight counter, two-process test); Phase 10 owner step 2 done (`NodeSession` wired into the socket app, 1013 placeholder replaced); awaits independent Sonnet 5 review) |
 | 5 | `feat/p9-node-reads` | `invoke_read` end to end, five read tools, path → workspace resolution, second scrub, fencing, chain + audit rows, invocations API | 4 | **implemented 2026-11-20** (done criterion met: `config/tests/test_node_read_turns.py::test_the_done_criterion_sessions_answered_from_the_node` — the reference node's fixture sessions in a FakeAdapter chat answer, filtered to the conversation's workspace, two `ok` chain rows, no stored content; 8B step-0 actor check in `invoke_read`; the 8B owner-turn move is a known follow-up below; awaits independent Sonnet 5 review) |
-| 6 | `feat/p9-node-events` | `event` sink wiring into `ingest_hook_events`, cross-relay dedupe, spool upload acks, availability events | 4 (parallel with 5) | not started |
+| 6 | `feat/p9-node-events` | `event` sink wiring into `ingest_hook_events`, cross-relay dedupe, spool upload acks, availability events | 4 (parallel with 5) | **implemented 2026-11-20** (done criterion met: `config/tests/test_hooks_via_node.py::test_the_done_criterion` — an event written to the reference relay's Unix socket reaches `GET /memory/sessions` through the node, and a `friday-hook` replay is a `duplicate`; `nodes/events.py` sink registry + availability successor snapshots, spooled-batch pacing, `config.asgi_nodes` registration; awaits independent Sonnet 5 review) |
 | 7 | `feat/p9-node-ui` | `/devices` node section, invocation log page, HUD node line, `hud → nodes` contract | 4, 5 (6 for availability) | not started |
 | 8 | `chore/p9-closeout` | Preflight node checks, e2e, runbook, ADR-013 notes, MASTER_PLAN row, go/no-go record | 1–7 | not started |
 | M1 | `feat/p9-node-app` | Swift menu-bar app: signing/notarization, Keychain credential + TLS pin, pairing, WSS client, D5 verifier, conformance pass | 1–4 merged; owner's Apple Developer ID (d9) | deferred: Mac session |
@@ -1744,7 +1744,11 @@ Apple frameworks unless one goes through the governance manifest
 **Must satisfy:**
 - D7 result schemas: the server rejects anything else (branch 5 tests).
 - Grants are off by default, and a revoked grant gives `not_granted`
-  immediately plus a `grant.availability_changed` event.
+  immediately plus a `grant.availability_changed` event. Its batch items
+  are exactly `{name, version, availability}` (`availability` one of
+  `granted`/`not_granted`/`unsupported`; any other key drops the item):
+  branch 6's `nodes/events.py` `apply_availability_change`, pinned by
+  `nodes/tests/test_node_events.py`.
 - The scrubber passes `backend/memory/tests/scrubber_corpus/` at 100%
   secrets recall: `friday-node scrub` over every corpus item compared
   with the labels, in a script `node/scripts/scrubber-corpus.sh`.
@@ -1807,6 +1811,13 @@ installed as the fallback.
 
 **Contract tests:**
 - the reference spool and relay tests re-expressed in Swift;
+- the server side the Swift relay must satisfy (branch 6):
+  `backend/config/tests/test_hooks_via_node.py` (an event over the relay's
+  Unix socket reaches `GET /memory/sessions`; a `friday-hook` replay is a
+  `duplicate`; a spooled backlog is ingested in order) and
+  `backend/nodes/tests/test_node_events.py` (`event.ack` counts only, one
+  batch in flight, deletion only on the ack naming the frame id, no ack
+  when the server's sink fails, so the batch stays spooled);
 - a manual pass: stop the stack, run a Claude Code session, restart,
   and the spooled events arrive once in `/sessions`.
 
@@ -2345,8 +2356,8 @@ Implementation notes (branch 4):
   across web, worker and the gateway (known follow-up 3, with a
   two-process test).
 - **`event` frames** are acknowledged `dropped` with counts only (D10's "no
-  sink registered") until branch 6 registers the memory sink. An event never
-  leads to an invoke.
+  sink registered") until branch 6 registers the memory sink (done on
+  `feat/p9-node-events`). An event never leads to an invoke.
 - **`hello`** stores `node_version`/`os_version` and counts as a heartbeat
   for `last_heartbeat_at`; heartbeats write the row (and the spool depth) at
   most once per 60 s (`nodes.presence`).
@@ -2362,6 +2373,98 @@ Implementation notes (branch 4):
   `nodes/tests/gateway_harness.py` (an asyncio loop in a background thread,
   as under uvicorn; `django_db(transaction=True)`), plus one real-socket run
   under uvicorn with the reference node's `wsproto` client.
+
+### Owner steps (pending) — `feat/p9-node-events`, recorded 2026-11-20
+
+1. Run the independent Sonnet 5 review of `feat/p9-node-events` and fix
+   findings until APPROVE (CLAUDE.md "Reviews").
+2. Restart `node-gateway` after deploying (`make up` / `make up-daily`):
+   the memory sink is registered when `config.asgi_nodes` starts. No
+   migration, no new dependency, no new setting.
+3. Make sure the owner's `claude_code_hooks` source is enabled and has
+   path-prefix rules (the 8A runbook): node-relayed events use exactly the
+   same rules, and without them every event is acked `dropped`.
+4. **Mac session M3 (deferred: Mac session).** Switch the Claude Code hook
+   entries to `friday-node hook` as "Switching Claude Code hooks to the
+   node" in `docs/runbooks/friday-node.md` describes, keeping `friday-hook`
+   as the fallback (both may run together: each event is stored once).
+   The Swift relay and spool must pass the server-side tests named in M3's
+   contract tests; the manual pass (stop the node, run a session, restart,
+   the events arrive once in `/sessions`) is **pending owner evaluation**.
+5. **Mac session M2 (deferred: Mac session).** Emit
+   `grant.availability_changed` with `{name, version, availability}` items
+   whenever a local grant changes; check on `/devices` (branch 7) that the
+   capability's availability text follows.
+
+### Implementation notes — `feat/p9-node-events` (2026-11-20)
+
+- **Sink registry** (`nodes/events.py`): `register_sink(kind, fn)` accepts
+  only `claude_code.hook`; `config/asgi_nodes.py` `register_node_ports()`
+  registers `memory.ingestion.hooks.ingest_hook_events` (a source test pins
+  `config/asgi_nodes.py` as the only caller). The sink is called with
+  `user=node.owner`, `bound_workspace_id=node.workspace_id`. `event.ack`
+  maps the 8A counts: `stored`, `duplicate`, and every other outcome
+  (`dropped_unmapped`, `dropped_paused`, `ignored`, `invalid`) as
+  `dropped`; the per-reason counts go to the gateway's counters and log
+  line only. A sink's counts are clamped to the batch size.
+- **A failing sink sends no ack** (D10 is silent on this case): the node keeps the batch in flight, then spools it after
+  the socket drops, and sends it again after reconnect; the event id
+  dedupes it. A batch that always fails is bounded by the node's 24 h
+  spool cap. `config/tests` and `nodes/tests` pin it.
+- **A batch of 51** is refused by the protocol schema (`maxItems: 50`)
+  before any sink: a frame error under D5's three-in-60 s rule, no ack.
+- **Spooled pacing**: `SpoolThrottle` books 10 slots a second per socket;
+  an 11th spooled batch within the second is handled (and acked) later,
+  never refused. Live batches are not paced (the 20 frames/s socket limit
+  still applies).
+- **Ordering**: one socket's frames are handled in order and each is acked
+  before the next is read, so spooled batches reach the sink in the order
+  the node sent them; 8A's upsert already tolerates out-of-order events.
+- **`grant.availability_changed`**: items are exactly `{name, version,
+  availability}`. A change writes a successor `CapabilitySnapshot` (same
+  `catalogue_sha256` as the `hello` it derives from) with the entry's
+  `availability` and its verdict moved between invocable, `not_granted`
+  and `unsupported`; a contract mismatch reason never moves. Unchanged
+  items count `duplicate`, invalid or unknown ones `dropped`; no row when
+  nothing changed. `services.record_capability_snapshot` now also writes a
+  new row when the latest snapshot's entries differ from the `hello`'s
+  verdicts, so a reconnect with the pre-change catalogue does not inherit
+  the changed flags. The HUD reads `nodes.selectors.node_health`, so its
+  `invocable_count` follows (branch 7 wires the HUD block itself).
+- **Test placement**: the end-to-end tests through the real memory sink are
+  `backend/config/tests/test_hooks_via_node.py` (the brief's Files line
+  names `backend/memory/tests/test_hooks_via_node.py`, but a `memory` test
+  importing `nodes` would break the "only tools, hud, ops may import nodes"
+  contract, and `nodes` tests may not import `memory`). The memory-side
+  file holds the sink contract under the node principal binding, without
+  importing `nodes`.
+
+### Known follow-ups (LOW, from the `feat/p9-node-events` review)
+
+1. **LOW, `backend/nodes/gateway.py`.** The spooled-batch throttle awaits
+   `asyncio.sleep` inside the per-socket receive loop (up to about 1 s), so
+   heartbeats and other frames on that socket wait while a backlog is paced.
+   Bounded by 10 batches/s and the 20 frames/s limit, so not blocking.
+   Optionally track `last_frame_at` before sleeping, or document that pacing
+   intentionally back-pressures the socket.
+2. **LOW, `backend/nodes/events.py`.** `grant.availability_changed` is
+   trusted node-supplied data and can flip a `not_granted` entry to
+   invocable in the snapshot. This matches ADR-013 decision 5 and D5 check
+   16 (the node still refuses ungranted reads itself), and entries with a
+   contract-mismatch reason cannot move. Add a one-line note to
+   `docs/runbooks/friday-node.md` that a compromised node can only affect
+   its own snapshot flags.
+3. **LOW, this brief.** The branch 6 Files line names
+   `backend/memory/tests/test_hooks_via_node.py`, while the end-to-end tests
+   live in `backend/config/tests/test_hooks_via_node.py` to respect import
+   contracts. The deviation is documented in the implementation notes; no
+   action required.
+4. **LOW, `backend`.** The branch's own combined pytest run (nodes + config
+   + memory test files) was stopped after more than 25 minutes under
+   contention, with no failures up to 76 %; `config/tests/test_hooks_via_node.py`,
+   `config/tests/test_asgi_nodes.py` and `memory/tests/test_hooks_via_node.py`
+   were not confirmed to completion there. Run them once on an idle machine
+   (the integration merge reruns the full suite).
 
 ### Known follow-ups (LOW, from the `feat/p9-node-gateway` review)
 

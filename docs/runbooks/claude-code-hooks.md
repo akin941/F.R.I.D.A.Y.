@@ -126,7 +126,9 @@ panel. Enabling the other sources, the audit view and forget/restore are in
 ## Limits (8A)
 
 - No spool: an event lost while the server is unreachable is gone; the panel
-  only goes stale. Phase 9's node relay (ADR-013) replaces this.
+  only goes stale. Phase 9's node relay (ADR-013) adds a spool: see
+  "Switching Claude Code hooks to the node" in `docs/runbooks/friday-node.md`.
+  `friday-hook` stays the fallback, and both paths dedupe on the event id.
 - No prompt text (`UserPromptSubmit`) and no transcripts: 8B, via the node.
 - Forgetting the `claude_code_hooks` source pauses it, trashes its episodes
   and hides its sessions until restored.

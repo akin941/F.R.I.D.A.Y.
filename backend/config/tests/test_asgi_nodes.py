@@ -12,7 +12,7 @@ from django.core.checks import run_checks
 
 from config import asgi_nodes
 from config.celery import app
-from nodes import output
+from nodes import events, output
 
 BACKEND = Path(__file__).resolve().parents[2]
 
@@ -21,6 +21,7 @@ BACKEND = Path(__file__).resolve().parents[2]
 def _reset_scrubber():
     yield
     output.reset_scrubber()
+    events.reset_sinks()
 
 
 @pytest.mark.django_db
@@ -51,6 +52,27 @@ def test_only_config_asgi_nodes_registers_node_scrubbers():
         if "register_scrubber(" in path.read_text("utf-8"):
             callers.append(path.relative_to(BACKEND).as_posix())
     assert sorted(callers) == ["config/asgi_nodes.py", "nodes/output.py"]
+
+
+def test_the_gateway_registers_the_memory_hook_sink():
+    """D10: the composition root hands `nodes.events` 8A's channel-agnostic
+    ingest function; `nodes` itself imports no `memory`."""
+    from memory.ingestion.hooks import ingest_hook_events
+
+    events.reset_sinks()
+    asgi_nodes.register_node_ports()
+    assert events._sinks == {events.HOOK_EVENTS: ingest_hook_events}
+
+
+def test_only_config_asgi_nodes_registers_node_event_sinks():
+    """D10: a source test (a call, not an import)."""
+    callers = []
+    for path in BACKEND.rglob("*.py"):
+        if {".venv", "tests", "migrations"} & set(path.parts):
+            continue
+        if "register_sink(" in path.read_text("utf-8"):
+            callers.append(path.relative_to(BACKEND).as_posix())
+    assert sorted(callers) == ["config/asgi_nodes.py", "nodes/events.py"]
 
 
 def _call(scope):
