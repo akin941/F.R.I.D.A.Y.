@@ -6,7 +6,7 @@ one `memory.graph.read` audit row per call (ids and counts, never text).
 The fence is asserted in `assistant/tests/test_hybrid_context.py` (`tools`
 may not import `assistant`)."""
 
-from datetime import timedelta
+from datetime import UTC, date, datetime, timedelta
 
 import pytest
 from django.utils import timezone
@@ -22,6 +22,7 @@ from core.channels import (
     CHANNEL_UNKNOWN,
     CHANNEL_WEB,
 )
+from memory.graph.services import as_instant
 from memory.models import MemoryEntity, MemoryFact
 from memory.tests.graph_helpers import entity, fact, system_fact
 from tools.memory_graph import AUDIT_ACTION, NOT_FOUND_TEXT, TOOL_NAME, read_memory_graph
@@ -91,7 +92,7 @@ def test_registered_web_only_and_only_where_facts_exist(firm, personal, deploy):
 
 def test_the_owner_reads_current_facts_with_their_window(firm, owner, deploy):
     result = _read(firm, owner)
-    since = deploy.valid_from.date().isoformat()
+    since = timezone.localdate(deploy.valid_from).isoformat()
     assert f"Y firmasının deploy'u payments-api servisine bağlı ({since}–)" in result.text
     log = AuditLog.objects.get(action=AUDIT_ACTION)
     assert log.metadata["outcome"] == "ok" and log.metadata["fact_ids"] == [str(deploy.pk)]
@@ -140,8 +141,21 @@ def test_as_of_reads_history(firm, owner):
     stated(firm, api, "api runs on hetzner", text="hetzner", valid_from=then + timedelta(days=50))
     now_text = _read(firm, owner, {"entity": "API"}).text
     assert "hetzner" in now_text and "heroku" not in now_text
-    then_text = _read(firm, owner, {"entity": "api", "as_of": then.date().isoformat()}).text
+    as_of = timezone.localdate(then).isoformat()
+    then_text = _read(firm, owner, {"entity": "api", "as_of": as_of}).text
     assert "heroku" in then_text and "hetzner" not in then_text
+
+
+@pytest.mark.parametrize("hour", [12, 22])
+def test_a_window_is_rendered_in_local_days(firm, owner, frozen_now, hour):
+    """A date-valued `valid_from` (local midnight = 21:00 UTC the day
+    before) reads as its own local day at any hour, not the UTC day."""
+    frozen_now(datetime(2026, 11, 20, hour, 30, tzinfo=UTC))
+    api = entity(firm, "api")
+    stated(
+        firm, api, "api runs on hetzner", text="hetzner", valid_from=as_instant(date(2026, 11, 20))
+    )
+    assert "api runs on hetzner (2026-11-20–)" in _read(firm, owner, {"entity": "api"}).text
 
 
 def test_system_facts_answer_code_questions(personal, owner):

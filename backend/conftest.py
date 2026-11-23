@@ -62,3 +62,25 @@ def web_client(db):
         return client
 
     return make
+
+
+@pytest.fixture
+def frozen_now(monkeypatch):
+    """Pin `django.utils.timezone.now` (and so `timezone.localdate()` /
+    `localtime()`, which call it) to an aware instant: `frozen_now(at)`.
+
+    Date-boundary regressions use it: `TIME_ZONE` is Europe/Istanbul
+    (UTC+3), so from 21:00 UTC on the local calendar day is already the
+    next one. A test that mixes a UTC date with a local one only fails in
+    that window; freezing the clock at both a midday and a late-evening UTC
+    instant makes the window part of every run. Only code that reads the
+    clock through the `timezone` module is frozen (Postgres `now()` is
+    not), which is every call site in this repo."""
+    from django.utils import timezone
+
+    def freeze(at):
+        assert timezone.is_aware(at), "freeze at an aware instant"
+        monkeypatch.setattr(timezone, "now", lambda: at)
+        return at
+
+    return freeze

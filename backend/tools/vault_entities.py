@@ -27,6 +27,8 @@ approved run, not from a request, so `for_actor()` does not apply.
 
 from dataclasses import dataclass, field
 
+from django.utils import timezone
+
 from memory.models import MemoryEntity, MemoryFact
 from tools.vault_frontmatter import EXPORT_SOURCE, render_note
 
@@ -44,7 +46,9 @@ def _link(entity) -> str:
 
 
 def _day(value) -> str:
-    return value.date().isoformat() if value is not None else ""
+    # The local calendar day, not `value.date()`: rows come back UTC-aware,
+    # so a local-midnight `valid_from` would otherwise read as the day before.
+    return timezone.localdate(value).isoformat() if value is not None else ""
 
 
 @dataclass

@@ -34,6 +34,7 @@ from collections import Counter, defaultdict
 from datetime import date
 
 from django.db.models import Q
+from django.utils import timezone
 
 from ai_core.exceptions import BudgetExceeded, GatewayError
 from ai_core.gateway import InferenceGateway
@@ -219,7 +220,7 @@ def build_reconciliation_messages(prompt_content, candidates, existing_by_index)
             listed.add((index, fact.pk))
             lines.append(
                 f'<existing_fact untrusted id="{fact.pk}" candidate_index="{index}" '
-                f'valid_from="{fact.valid_from.date().isoformat()}">'
+                f'valid_from="{timezone.localdate(fact.valid_from).isoformat()}">'
             )
             lines.append(_fence(fact.statement))
             lines.append("</existing_fact>")
