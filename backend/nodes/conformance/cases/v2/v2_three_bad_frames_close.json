@@ -22,7 +22,8 @@
         "status": "error",
         "type": "result"
       }
-    ]
+    ],
+    "reader_calls": 0
   },
   "name": "v2_three_bad_frames_close",
   "setup": {

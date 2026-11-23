@@ -1,0 +1,67 @@
+{
+  "check": null,
+  "description": "cwd_prefixes keeps only rows under the prefix at a segment boundary (~/work/acme-secret and ~/code/friday are skipped before parsing).",
+  "expect": {
+    "absent_b64": [
+      "YWNtZS1zZWNyZXQ=",
+      "Y2MtZnJpZGF5LTE="
+    ],
+    "frames": [
+      {
+        "output": {
+          "sessions": [
+            {
+              "cwd": "~/work/acme",
+              "last_activity_at": 1795982520,
+              "message_count": 4,
+              "model": "claude-opus-4-5",
+              "session_id": "cc-acme-1",
+              "started_at": 1795982400,
+              "status_hint": "idle"
+            }
+          ]
+        },
+        "status": "ok",
+        "truncated": false,
+        "type": "result"
+      }
+    ],
+    "reader_calls": 1
+  },
+  "name": "v1_read_sessions_list_cwd_prefixes",
+  "setup": {
+    "now": 1796000005
+  },
+  "steps": [
+    {
+      "frame": {
+        "args": {
+          "cwd_prefixes": [
+            "~/work/acme"
+          ],
+          "limit": 50,
+          "since_hours": 24
+        },
+        "args_sha256": "9648faa9b27b9afd42b49d41f107b59c28e7882d5e3786c69f2fc9ccab70c8a3",
+        "capability": "claude.sessions.list",
+        "capability_version": 1,
+        "class": "read",
+        "expires_at": 1796000030,
+        "grant": null,
+        "id": "bb21df2f-5de3-4918-a29a-fae9ae50550e",
+        "invocation_id": "ed446f03-d808-4cff-8dbf-04b277da1b50",
+        "issued_at": 1796000000,
+        "key_id": "03396219237f75a6",
+        "node_id": "6f1e2d3c-4b5a-4987-8a6b-5c4d3e2f1a0b",
+        "nonce": "vtU-UUoIceejUvGYVanE5s3AHqEnwOLhgeJaVS7xzyY",
+        "sig": "1U5jm_UaObbPMdJUn9Z_0Bf2znjjos0bHlKBOd5unBepWJXKhNWJozaUWKivGXBkXtxxUqVT0RBwKO5jjN1uDA",
+        "trace_id": "conformance-v1-read-sessions_list_cwd_prefixes",
+        "type": "invoke",
+        "v": 1,
+        "workspace_id": "2a3b4c5d-6e7f-4a8b-9c0d-1e2f3a4b5c6d"
+      },
+      "op": "send"
+    }
+  ],
+  "version": 1
+}

@@ -1,0 +1,73 @@
+{
+  "check": null,
+  "description": "With titles enabled locally, every title is scrubbed; limit applies.",
+  "expect": {
+    "absent_b64": [
+      "b3duZXIuZml4dHVyZUBleGFtcGxlLmNvbQ=="
+    ],
+    "frames": [
+      {
+        "output": {
+          "windows": [
+            {
+              "app_name": "Terminal",
+              "bundle_id": "com.apple.Terminal",
+              "on_screen": true,
+              "titles": [
+                "acme - pytest",
+                "friday - zsh"
+              ],
+              "window_count": 2
+            },
+            {
+              "app_name": "Safari",
+              "bundle_id": "com.apple.Safari",
+              "on_screen": true,
+              "titles": [
+                "Invoice - [PII:email]"
+              ],
+              "window_count": 1
+            }
+          ]
+        },
+        "status": "ok",
+        "truncated": false,
+        "type": "result"
+      }
+    ],
+    "reader_calls": 1
+  },
+  "name": "v1_read_windows_titles_on_scrubbed",
+  "setup": {
+    "now": 1796000005,
+    "window_titles": true
+  },
+  "steps": [
+    {
+      "frame": {
+        "args": {
+          "limit": 2
+        },
+        "args_sha256": "649c187d840a97ceebfecf4a5e8a1121655263c52487be7d5cd1970fe17e1bd3",
+        "capability": "windows.list",
+        "capability_version": 1,
+        "class": "read",
+        "expires_at": 1796000030,
+        "grant": null,
+        "id": "67297b1a-0f7f-41db-b22f-1881ec3a1d50",
+        "invocation_id": "89b14867-45ad-4e47-ba3d-2b7a480db80e",
+        "issued_at": 1796000000,
+        "key_id": "03396219237f75a6",
+        "node_id": "6f1e2d3c-4b5a-4987-8a6b-5c4d3e2f1a0b",
+        "nonce": "Kv-07-hfVvEoLvTE4tODJPz5ExhyRwR8GpLnCzEOWPE",
+        "sig": "FWEk4-Gz4YlkMfQ1wSO8EfgYK9qJDEP2dh9WOslAF9CSUZI4HRfdhgu5u0XQBd85gadqZyym3KRGlAhPfYs0Aw",
+        "trace_id": "conformance-v1-read-windows_titles_on_scrubbed",
+        "type": "invoke",
+        "v": 1,
+        "workspace_id": "2a3b4c5d-6e7f-4a8b-9c0d-1e2f3a4b5c6d"
+      },
+      "op": "send"
+    }
+  ],
+  "version": 1
+}

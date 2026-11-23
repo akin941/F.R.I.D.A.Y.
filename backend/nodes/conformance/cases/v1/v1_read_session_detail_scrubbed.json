@@ -1,0 +1,96 @@
+{
+  "check": null,
+  "description": "A session's turns: text scrubbed node-side, tool calls and results as counts only, never tool results, file contents, meta, sidechain or summary lines.",
+  "expect": {
+    "absent_b64": [
+      "c2stcHJvai1GaXh0dXJlRkFLRTAxMjM0NTY3ODlhYmNkZWZHSElKS0xtbm9wUVI=",
+      "Z2hwX0ZpeHR1cmVGQUtFMDEyMzQ1Njc4OWFiY2RlZkdISUpLTG1u",
+      "QUtJQUZJWFRVUkVGQUtFMTIzNDU=",
+      "Rml4dHVyZVBhc3MyMDI2eA==",
+      "b3duZXIuZml4dHVyZUBleGFtcGxlLmNvbQ==",
+      "VE9PTC1SRVNVTFQtUEhSQVNF",
+      "RklMRS1DT05URU5ULVBIUkFTRQ==",
+      "RlVOQ1RJT04tT1VUUFVULVBIUkFTRQ==",
+      "UkVBU09OSU5HLVBIUkFTRQ==",
+      "U1VNTUFSWS1QSFJBU0U=",
+      "TUVUQS1QSFJBU0U=",
+      "U0lERUNIQUlOLVBIUkFTRQ==",
+      "TUFSS0VSLVBIUkFTRQ==",
+      "VU5LTk9XTi1LSU5ELVBIUkFTRQ=="
+    ],
+    "frames": [
+      {
+        "output": {
+          "session_id": "cc-acme-1",
+          "turns": [
+            {
+              "at": 1795982400,
+              "role": "user",
+              "text": "Fix the flaky invoice test in acme.",
+              "tool_calls": 0,
+              "tool_results": 0
+            },
+            {
+              "at": 1795982410,
+              "role": "assistant",
+              "text": "I will look at the test first.",
+              "tool_calls": 2,
+              "tool_results": 2
+            },
+            {
+              "at": 1795982460,
+              "role": "user",
+              "text": "The staging key is [SECRET:openai_key], use it for the smoke run.",
+              "tool_calls": 0,
+              "tool_results": 0
+            },
+            {
+              "at": 1795982520,
+              "role": "assistant",
+              "text": "Done: the test now waits for the clock. Ping [PII:email] if it fails again.",
+              "tool_calls": 0,
+              "tool_results": 0
+            }
+          ]
+        },
+        "status": "ok",
+        "truncated": false,
+        "type": "result"
+      }
+    ],
+    "reader_calls": 1
+  },
+  "name": "v1_read_session_detail_scrubbed",
+  "setup": {
+    "now": 1796000005
+  },
+  "steps": [
+    {
+      "frame": {
+        "args": {
+          "last_turns": 20,
+          "session_id": "cc-acme-1"
+        },
+        "args_sha256": "21cc92bc463afd9bc30c7b962298d48a551e61566e0d981f52ca3160b3924a57",
+        "capability": "claude.sessions.read",
+        "capability_version": 1,
+        "class": "read",
+        "expires_at": 1796000030,
+        "grant": null,
+        "id": "d201457f-e956-4e48-a58e-a2202f461093",
+        "invocation_id": "ad887a48-f0a0-4db5-aba3-ca8290a15546",
+        "issued_at": 1796000000,
+        "key_id": "03396219237f75a6",
+        "node_id": "6f1e2d3c-4b5a-4987-8a6b-5c4d3e2f1a0b",
+        "nonce": "bYJFWWTRx9zZqVmEcrVwkg9cWzACN_4Ql8qlKYLBjws",
+        "sig": "5TGAjZzU-67kLxlesWwH9lOE5uyQaSURCH6Th6yBw4WhKUPDir6J9Gx3DvO8a2p_qPtmFOa8q-SZ4kwOzUVSBg",
+        "trace_id": "conformance-v1-read-session_detail_scrubbed",
+        "type": "invoke",
+        "v": 1,
+        "workspace_id": "2a3b4c5d-6e7f-4a8b-9c0d-1e2f3a4b5c6d"
+      },
+      "op": "send"
+    }
+  ],
+  "version": 1
+}

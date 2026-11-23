@@ -1,0 +1,765 @@
+"""The reference node's readers for the eight v1 read capabilities (Phase 9
+brief D7, D13 items 5-6; Mac session M2 ports them to Swift).
+
+They are bounded, read-only parsers over **fixture directories** (the
+reference node never reads a real `~/.claude` or `~/.codex`: its home is the
+fixture home of `nodes.reference.fixtures.factory`):
+
+- `claude.sessions.list` / `claude.sessions.read`: Claude Code JSONL
+  transcripts under `<home>/.claude/projects/*/<session_id>.jsonl`;
+- `codex.threads.list` / `codex.threads.read`: Codex rollout JSONL under
+  `<home>/.codex/sessions/**/*.jsonl` (the `session_meta` line names the
+  thread and its `cwd`);
+- `usage.ccusage`: per-project spend computed from the Claude transcripts'
+  assistant `message.usage` and `costUSD` (the reference stands in for the
+  ccusage CLI; amounts are integer micro-USD, rounded half-even);
+- `git.status`: counts-only `git status --porcelain=v2 --branch` of a repo
+  on the node-local list (the local policy's repos; a symlink resolving to a
+  listed root is the listed repo, anything else is refused);
+- `apps.frontmost` / `windows.list`: a desktop fixture (`desktop.json`);
+  window titles only when the owner enabled them locally (off by default).
+
+Normative rules (the Swift readers must match them, the conformance cases
+pin them):
+
+1. **Never tool results or file contents.** Tool calls and tool results are
+   returned as counts only (`tool_calls`, `tool_results`); `tool_result`
+   blocks, Codex `function_call_output`, reasoning items, summaries,
+   `isMeta` and `isSidechain` lines and harness-injected marker text are
+   never returned. Unknown line kinds and malformed lines are skipped (fail
+   closed).
+2. **`cwd_prefixes` first.** A transcript whose `cwd` lies outside every
+   prefix is skipped as soon as its `cwd` is known, before its turns are
+   parsed. A prefix matches when the `cwd` (normalised: `.`/`..`/double
+   slashes resolved, no trailing slash) equals it or starts with prefix +
+   `/` (segment boundaries only: `~/work/acme` never matches
+   `~/work/acme-secret`); both the absolute and the `~/` form of the node's
+   own home are checked.
+3. **Every returned string is scrubbed** with the vendored 8A scrubber (no
+   workspace terms). Free text is scrubbed first and then cut (2 000
+   characters for turns, 512 for titles), so a cut never leaves half a
+   secret. An identifier (`session_id`, `thread_id`, `cwd`, `model`,
+   `bundle_id`) that the scrub would change is not returned: its row is
+   dropped (a `model` becomes null).
+4. **Bounded.** At most `MAX_FILES` transcript files, `MAX_FILE_BYTES` per
+   file and `MAX_LINE_BYTES` per line are read. A row that does not match
+   the capability's `result_schema` is dropped. The output is cut to the
+   contract's `max_result_bytes` (oldest turns, or last rows, first) and
+   marked `truncated`.
+5. `cwd` is returned in `~/` form under the node's home, absolute
+   elsewhere. Times are integer Unix seconds.
+6. Nothing is cached, copied or logged: every call re-reads the files.
+
+Directory grants (D13 item 5) are local: `grants={"claude": bool, "codex":
+bool}`, both off by default. A family without its grant is advertised
+`not_granted` (check 16 refuses before any reader runs) and the reader
+itself refuses too (defence in depth).
+"""
+
+import json
+import os
+import posixpath
+import shutil
+import subprocess
+from dataclasses import dataclass
+from datetime import datetime
+from decimal import ROUND_HALF_EVEN, Decimal, InvalidOperation
+from pathlib import Path
+
+from nodes.capabilities import load_contracts
+from nodes.protocol.canonical import canonicalize
+from nodes.protocol.messages import ProtocolError, validate_instance
+from nodes.reference.local_policy import NotConfigured
+from nodes.reference.stream_scrub import default_scrub
+
+MAX_FILES = 2000
+MAX_FILE_BYTES = 32 * 1024 * 1024
+MAX_LINE_BYTES = 1024 * 1024
+MAX_TURN_CHARS = 2000
+MAX_TITLE_CHARS = 512
+MAX_TITLES = 50
+ACTIVE_SECONDS = 300
+GIT_TIMEOUT_SECONDS = 10
+
+CLAUDE_MARKERS = (
+    "<command-name>",
+    "<command-message>",
+    "<command-args>",
+    "<local-command-stdout>",
+    "<local-command-stderr>",
+    "<system-reminder>",
+    "<user-prompt-submit-hook>",
+    "Caveat: The messages below were generated",
+    "[Request interrupted",
+)
+CODEX_MARKERS = ("<environment_context>", "<user_instructions>", "<user_shell_command>")
+
+FAMILY = {
+    "claude.sessions.list": "claude",
+    "claude.sessions.read": "claude",
+    "usage.ccusage": "claude",
+    "codex.threads.list": "codex",
+    "codex.threads.read": "codex",
+    "git.status": "git",
+    "apps.frontmost": "desktop",
+    "windows.list": "desktop",
+}
+PERIOD_SECONDS = {"week": 7 * 86400, "month": 30 * 86400}
+_GIT_ENV = {
+    "PATH": "/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin",
+    "GIT_CONFIG_NOSYSTEM": "1",
+    "GIT_OPTIONAL_LOCKS": "0",
+    "GIT_TERMINAL_PROMPT": "0",
+    "LANG": "C",
+}
+
+FIXTURES_DIR = Path(__file__).resolve().parent / "fixtures"
+DESKTOP_FIXTURE = FIXTURES_DIR / "desktop.json"
+
+
+class ReaderError(Exception):
+    """The reader cannot answer (unknown session, unlisted repo, no grant).
+    The node answers `result{status: error}` with no code and no detail."""
+
+
+@dataclass(frozen=True)
+class ReadOutcome:
+    status: str  # "ok" or "error"
+    output: dict | None = None
+    truncated: bool = False
+
+
+# --- paths -----------------------------------------------------------------
+
+
+def normalise(path):
+    """`normalise_path` of 8A mapping (`~` kept as the home marker), or None
+    for an empty, relative or home-climbing path."""
+    if not isinstance(path, str) or not path or "\x00" in path:
+        return None
+    if path == "~" or path.startswith("~/"):
+        relative = posixpath.normpath(path[1:].lstrip("/") or ".")
+        if relative == ".." or relative.startswith("../"):
+            return None
+        return "~" if relative == "." else "~/" + relative
+    if not path.startswith("/"):
+        return None
+    normalised = posixpath.normpath(path)
+    if normalised.startswith("//"):
+        normalised = "/" + normalised.lstrip("/")
+    return normalised
+
+
+def path_forms(path, home):
+    """The normalised absolute form of `path` and, under `home`, its `~`
+    form, as `(display, {forms})`; `(None, set())` when unusable."""
+    value = normalise(path)
+    if value is None:
+        return None, set()
+    if value == "~" or value.startswith("~/"):
+        absolute = normalise(home + value[1:]) if value != "~" else home
+    else:
+        absolute = value
+    forms = {absolute}
+    display = absolute
+    if absolute == home:
+        display = "~"
+    elif absolute.startswith(home.rstrip("/") + "/"):
+        display = "~/" + absolute[len(home.rstrip("/")) + 1 :]
+    forms.add(display)
+    return display, forms
+
+
+def _path_matches(prefix, path):
+    if prefix in ("/", "~"):
+        return path == prefix or path.startswith(prefix.rstrip("/") + "/")
+    return path == prefix or path.startswith(prefix + "/")
+
+
+def matches_prefixes(prefixes, forms) -> bool:
+    """True when no prefixes were asked for, or one of `forms` lies under
+    one of them (segment boundaries only)."""
+    if prefixes is None:
+        return True
+    for raw in prefixes:
+        prefix = normalise(raw)
+        if prefix is None:
+            continue
+        if any(_path_matches(prefix, form) for form in forms):
+            return True
+    return False
+
+
+# --- small parsers ---------------------------------------------------------
+
+
+def parse_time(value):
+    """An RFC 3339 timestamp as integer Unix seconds, or None."""
+    if not isinstance(value, str) or len(value) > 64:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return None
+    seconds = int(parsed.timestamp())
+    return seconds if 0 <= seconds <= 253402300799 else None
+
+
+def iter_lines(path):
+    """The JSON objects of a JSONL file, bounded; malformed or oversized
+    lines are skipped."""
+    try:
+        if path.stat().st_size > MAX_FILE_BYTES:
+            return
+        handle = path.open("rb")
+    except OSError:
+        return
+    with handle:
+        for raw in handle:
+            if len(raw) > MAX_LINE_BYTES:
+                continue
+            try:
+                value = json.loads(raw.decode("utf-8"))
+            except (UnicodeDecodeError, ValueError):
+                continue
+            if isinstance(value, dict):
+                yield value
+
+
+def _files(root, pattern):
+    """The transcript files under `root`: regular files only, never through
+    a symlink (a symlinked file or directory resolving outside the root is
+    skipped), at most `MAX_FILES`."""
+    if not root.is_dir() or root.is_symlink():
+        return []
+    real_root = os.path.realpath(root)
+    files = []
+    for path in sorted(root.glob(pattern)):
+        if path.is_symlink() or not path.is_file():
+            continue
+        if not os.path.realpath(path).startswith(real_root + os.sep):
+            continue
+        files.append(path)
+        if len(files) >= MAX_FILES:
+            break
+    return files
+
+
+def _usd_micros(value):
+    if isinstance(value, bool) or not isinstance(value, int | float | str):
+        return 0
+    try:
+        amount = Decimal(str(value))
+    except InvalidOperation:
+        return 0
+    if not amount.is_finite() or amount < 0:
+        return 0
+    return int((amount * 1_000_000).quantize(Decimal(1), rounding=ROUND_HALF_EVEN))
+
+
+def _non_negative_int(value):
+    return value if isinstance(value, int) and not isinstance(value, bool) and value >= 0 else 0
+
+
+# --- the readers -----------------------------------------------------------
+
+
+@dataclass
+class _Transcript:
+    ident: str
+    cwd: str
+    forms: set
+    started_at: int | None = None
+    last_activity_at: int | None = None
+    message_count: int = 0
+    model: str | None = None
+    turns: list | None = None
+    usage: list | None = None
+
+
+class Readers:
+    """The eight v1 readers over one fixture home (see the module doc)."""
+
+    def __init__(
+        self,
+        *,
+        home,
+        policy=None,
+        scrub=None,
+        grants=None,
+        window_titles=False,
+        desktop=None,
+        claude_root=None,
+        codex_root=None,
+    ):
+        self.home = os.path.realpath(str(home))
+        self.policy = policy
+        self.scrub = scrub or default_scrub()
+        self.grants = {"claude": False, "codex": False, **(grants or {})}
+        self.window_titles = window_titles
+        if desktop is None:
+            desktop = json.loads(DESKTOP_FIXTURE.read_text(encoding="utf-8"))
+        self.desktop = desktop
+        self.claude_root = Path(claude_root or Path(self.home) / ".claude" / "projects")
+        self.codex_root = Path(codex_root or Path(self.home) / ".codex" / "sessions")
+        self.contracts = load_contracts()
+        self.calls: list = []
+
+    # --- availability ----------------------------------------------------
+
+    def availability(self) -> dict:
+        """`{capability: availability}` for the `hello` catalogue."""
+        out = {}
+        for name, family in FAMILY.items():
+            if family in ("claude", "codex"):
+                out[name] = "granted" if self.grants.get(family) else "not_granted"
+            elif family == "git":
+                out[name] = "granted" if self.policy is not None else "not_granted"
+            else:
+                out[name] = "granted"
+        return out
+
+    # --- entry point -----------------------------------------------------
+
+    def read(self, capability, args, *, now) -> ReadOutcome:
+        """Run one reader. `args` already passed checks 1-16."""
+        self.calls.append(capability)
+        if self.availability().get(capability) != "granted":
+            return ReadOutcome("error")
+        handler = getattr(self, "_" + capability.replace(".", "_"), None)
+        if handler is None:
+            return ReadOutcome("error")
+        try:
+            output = handler(args, now)
+        except ReaderError:
+            return ReadOutcome("error")
+        output, truncated = self._fit(capability, output)
+        try:
+            validate_instance(self.contracts[capability].result_schema, output, code="result")
+        except ProtocolError:
+            return ReadOutcome("error")
+        return ReadOutcome("ok", output, truncated)
+
+    # --- scrubbing helpers -------------------------------------------------
+
+    def _ident(self, value):
+        """An identifier the scrub leaves unchanged, else None."""
+        if not isinstance(value, str) or not value:
+            return None
+        return value if self.scrub(value) == value else None
+
+    def _text(self, value, limit):
+        return self.scrub(value)[:limit] if value else ""
+
+    def _row_ok(self, capability, list_key, row) -> bool:
+        schema = self.contracts[capability].result_schema
+        try:
+            validate_instance(schema["properties"][list_key]["items"], row, code="row")
+        except ProtocolError:
+            return False
+        return True
+
+    # --- Claude Code -------------------------------------------------------
+
+    def _claude_files(self):
+        return _files(self.claude_root, "*/*.jsonl")
+
+    def _claude_transcript(self, path, prefixes, *, want_turns=False, want_usage=False):
+        session_id = self._ident(path.stem)
+        if session_id is None:
+            return None
+        transcript = None
+        pending_counts = [0, 0]
+        for line in iter_lines(path):
+            if transcript is None:
+                cwd = line.get("cwd")
+                if not isinstance(cwd, str):
+                    continue
+                display, forms = path_forms(cwd, self.home)
+                if display is None or not matches_prefixes(prefixes, forms):
+                    return None  # rule 2: skipped before its turns are parsed
+                transcript = _Transcript(session_id, display, forms, turns=[], usage=[])
+            kind = line.get("type")
+            if kind not in ("user", "assistant"):
+                continue
+            if line.get("isMeta") is True or line.get("isSidechain") is True:
+                continue
+            if line.get("isCompactSummary") is True:
+                continue
+            at = parse_time(line.get("timestamp"))
+            if at is None:
+                continue
+            message = line.get("message")
+            if not isinstance(message, dict):
+                continue
+            text, calls, results = _claude_content(message.get("content"))
+            if text and text.lstrip().startswith(CLAUDE_MARKERS):
+                continue
+            if transcript.started_at is None:
+                transcript.started_at = at
+            transcript.last_activity_at = max(transcript.last_activity_at or at, at)
+            if kind == "assistant":
+                model = message.get("model")
+                if isinstance(model, str):
+                    transcript.model = model
+                usage = message.get("usage")
+                if want_usage and isinstance(usage, dict):
+                    transcript.usage.append(
+                        (
+                            at,
+                            _non_negative_int(usage.get("input_tokens")),
+                            _non_negative_int(usage.get("output_tokens")),
+                            _usd_micros(line.get("costUSD")),
+                        )
+                    )
+            if not text:
+                # A tool-only line: its counts belong to the turn before it.
+                if transcript.turns:
+                    transcript.turns[-1]["tool_calls"] += calls
+                    transcript.turns[-1]["tool_results"] += results
+                else:
+                    pending_counts[0] += calls
+                    pending_counts[1] += results
+                continue
+            transcript.message_count += 1
+            if want_turns:
+                transcript.turns.append(
+                    {
+                        "role": kind,
+                        "at": at,
+                        "text": self._text(text, MAX_TURN_CHARS),
+                        "tool_calls": calls + pending_counts[0],
+                        "tool_results": results + pending_counts[1],
+                    }
+                )
+                pending_counts = [0, 0]
+        return transcript
+
+    def _list_rows(self, transcripts, args, now, id_key):
+        since = now - args["since_hours"] * 3600
+        rows = []
+        for transcript in transcripts:
+            if transcript is None or transcript.last_activity_at is None:
+                continue
+            if transcript.last_activity_at < since:
+                continue
+            active = now - transcript.last_activity_at <= ACTIVE_SECONDS
+            model = transcript.model
+            if model is not None and self._ident(model) is None:
+                model = None
+            cwd = self._ident(transcript.cwd)
+            if cwd is None:
+                continue
+            rows.append(
+                {
+                    id_key: transcript.ident,
+                    "cwd": cwd,
+                    "started_at": transcript.started_at,
+                    "last_activity_at": transcript.last_activity_at,
+                    "message_count": transcript.message_count,
+                    "model": model,
+                    "status_hint": "active" if active else "idle",
+                }
+            )
+        rows.sort(key=lambda row: (-row["last_activity_at"], row[id_key]))
+        return rows
+
+    def _claude_sessions_list(self, args, now):
+        prefixes = args.get("cwd_prefixes")
+        transcripts = [self._claude_transcript(p, prefixes) for p in self._claude_files()]
+        rows = self._list_rows(transcripts, args, now, "session_id")
+        rows = [r for r in rows if self._row_ok("claude.sessions.list", "sessions", r)]
+        return {"sessions": rows[: args["limit"]]}
+
+    def _claude_sessions_read(self, args, now):
+        for path in self._claude_files():
+            if path.stem == args["session_id"]:
+                transcript = self._claude_transcript(path, None, want_turns=True)
+                if transcript is None:
+                    break
+                turns = transcript.turns[-args["last_turns"] :]
+                return {"session_id": transcript.ident, "turns": turns}
+        raise ReaderError("session not found")
+
+    # --- usage (ccusage stand-in) ----------------------------------------------
+
+    def _usage_ccusage(self, args, now):
+        if args["period"] == "today":
+            since = now - now % 86400
+        else:
+            since = now - PERIOD_SECONDS[args["period"]]
+        prefixes = args.get("cwd_prefixes")
+        projects = {}
+        for path in self._claude_files():
+            transcript = self._claude_transcript(path, prefixes, want_usage=True)
+            if transcript is None:
+                continue
+            cwd = self._ident(transcript.cwd)
+            if cwd is None:
+                continue
+            for at, tokens_in, tokens_out, micros in transcript.usage:
+                if at < since:
+                    continue
+                row = projects.setdefault(
+                    cwd, {"cwd": cwd, "usd_micros": 0, "tokens_in": 0, "tokens_out": 0}
+                )
+                row["usd_micros"] += micros
+                row["tokens_in"] += tokens_in
+                row["tokens_out"] += tokens_out
+        rows = [projects[cwd] for cwd in sorted(projects)]
+        return _usage_totals(rows)
+
+    # --- Codex -------------------------------------------------------------
+
+    def _codex_files(self):
+        return _files(self.codex_root, "**/*.jsonl")
+
+    def _codex_transcript(self, path, prefixes, *, want_turns=False):
+        transcript = None
+        pending = [0, 0]
+        for line in iter_lines(path):
+            kind = line.get("type")
+            payload = line.get("payload")
+            if not isinstance(payload, dict):
+                continue
+            if transcript is None:
+                if kind != "session_meta":
+                    continue
+                thread_id = self._ident(payload.get("id"))
+                cwd = payload.get("cwd")
+                if thread_id is None or not isinstance(cwd, str):
+                    return None
+                display, forms = path_forms(cwd, self.home)
+                if display is None or not matches_prefixes(prefixes, forms):
+                    return None  # rule 2
+                transcript = _Transcript(thread_id, display, forms, turns=[])
+                transcript.started_at = parse_time(payload.get("timestamp")) or parse_time(
+                    line.get("timestamp")
+                )
+                continue
+            at = parse_time(line.get("timestamp"))
+            if kind == "turn_context":
+                model = payload.get("model")
+                if isinstance(model, str):
+                    transcript.model = model
+                continue
+            if kind != "response_item" or at is None:
+                continue
+            item = payload.get("type")
+            if item in ("function_call", "local_shell_call", "custom_tool_call"):
+                pending[0] += 1
+                continue
+            if item in (
+                "function_call_output",
+                "local_shell_call_output",
+                "custom_tool_call_output",
+            ):
+                pending[1] += 1
+                continue
+            if item != "message" or payload.get("role") not in ("user", "assistant"):
+                continue
+            text = _codex_text(payload.get("content"), payload["role"])
+            if not text or (payload["role"] == "user" and text.lstrip().startswith(CODEX_MARKERS)):
+                continue
+            if transcript.started_at is None:
+                transcript.started_at = at
+            transcript.last_activity_at = max(transcript.last_activity_at or at, at)
+            transcript.message_count += 1
+            if want_turns:
+                calls, results = pending if payload["role"] == "assistant" else (0, 0)
+                transcript.turns.append(
+                    {
+                        "role": payload["role"],
+                        "at": at,
+                        "text": self._text(text, MAX_TURN_CHARS),
+                        "tool_calls": calls,
+                        "tool_results": results,
+                    }
+                )
+                if payload["role"] == "assistant":
+                    pending = [0, 0]
+        if transcript is not None and want_turns and transcript.turns and any(pending):
+            transcript.turns[-1]["tool_calls"] += pending[0]
+            transcript.turns[-1]["tool_results"] += pending[1]
+        return transcript
+
+    def _codex_threads_list(self, args, now):
+        prefixes = args.get("cwd_prefixes")
+        transcripts = [self._codex_transcript(p, prefixes) for p in self._codex_files()]
+        rows = self._list_rows(transcripts, args, now, "thread_id")
+        rows = [r for r in rows if self._row_ok("codex.threads.list", "threads", r)]
+        return {"threads": rows[: args["limit"]]}
+
+    def _codex_threads_read(self, args, now):
+        for path in self._codex_files():
+            transcript = self._codex_transcript(path, None, want_turns=True)
+            if transcript is not None and transcript.ident == args["thread_id"]:
+                return {
+                    "thread_id": transcript.ident,
+                    "turns": transcript.turns[-args["last_turns"] :],
+                }
+        raise ReaderError("thread not found")
+
+    # --- git ---------------------------------------------------------------
+
+    def _git_status(self, args, now):
+        if self.policy is None:
+            raise ReaderError("no local repo list")
+        try:
+            repo = self.policy.repo_for_path(args["repo_path"])
+        except NotConfigured as exc:
+            raise ReaderError("repo not on the local list") from exc
+        status = _git(repo.real_root, "status", "--porcelain=v2", "--branch")
+        branch = None
+        ahead = behind = dirty = untracked = 0
+        for line in status.splitlines():
+            if line.startswith("# branch.head "):
+                head = line[len("# branch.head ") :]
+                branch = None if head == "(detached)" else head
+            elif line.startswith("# branch.ab "):
+                parts = line.split()
+                ahead, behind = abs(int(parts[2])), abs(int(parts[3]))
+            elif line[:2] in ("1 ", "2 ", "u "):
+                dirty += 1
+            elif line.startswith("? "):
+                untracked += 1
+        sha = at = None
+        try:
+            head = _git(repo.real_root, "log", "-1", "--format=%H %ct").strip()
+        except ReaderError:
+            head = ""
+        if head:
+            sha, _, stamp = head.partition(" ")
+            at = int(stamp) if stamp.isdigit() else None
+        if branch is not None:
+            branch = self._text(branch, 255) or None
+        return {
+            "branch": branch,
+            "ahead": ahead,
+            "behind": behind,
+            "dirty_files_count": dirty,
+            "untracked_count": untracked,
+            "last_commit_sha": sha,
+            "last_commit_at": at,
+        }
+
+    # --- desktop -------------------------------------------------------------
+
+    def _app(self, entry):
+        bundle_id = entry.get("bundle_id")
+        if bundle_id is not None:
+            bundle_id = self._ident(bundle_id)
+        name = entry.get("app_name")
+        name = (self._text(name, 255) or None) if isinstance(name, str) else None
+        return bundle_id, name
+
+    def _apps_frontmost(self, args, now):
+        bundle_id, name = self._app(self.desktop.get("frontmost") or {})
+        return {"bundle_id": bundle_id, "app_name": name}
+
+    def _windows_list(self, args, now):
+        rows = []
+        for entry in self.desktop.get("windows") or []:
+            bundle_id, name = self._app(entry)
+            titles = [t for t in entry.get("titles") or [] if isinstance(t, str)]
+            row = {
+                "bundle_id": bundle_id,
+                "app_name": name,
+                "window_count": len(titles),
+                "on_screen": bool(entry.get("on_screen")),
+            }
+            if self.window_titles:
+                row["titles"] = [self._text(t, MAX_TITLE_CHARS) for t in titles[:MAX_TITLES]]
+            if self._row_ok("windows.list", "windows", row):
+                rows.append(row)
+        return {"windows": rows[: args["limit"]]}
+
+    # --- bounding --------------------------------------------------------------
+
+    def _fit(self, capability, output):
+        """Cut `output` to the contract's `max_result_bytes`: turns from the
+        oldest, other rows from the end (usage totals recomputed)."""
+        limit = self.contracts[capability].max_result_bytes
+        if len(canonicalize(output)) <= limit:
+            return output, False
+        key = next(
+            (k for k in ("turns", "sessions", "threads", "by_project", "windows") if k in output),
+            None,
+        )
+        if key is None:
+            raise ReaderError("output too large")  # pragma: no cover - fixed-size outputs
+        rows = list(output[key])
+        while rows:
+            rows = rows[1:] if key == "turns" else rows[:-1]
+            candidate = {**output, key: rows}
+            if key == "by_project":
+                candidate = _usage_totals(rows)
+            if len(canonicalize(candidate)) <= limit:
+                return candidate, True
+        candidate = _usage_totals([]) if key == "by_project" else {**output, key: []}
+        return candidate, True
+
+
+def _usage_totals(rows):
+    return {
+        "total_usd_micros": sum(row["usd_micros"] for row in rows),
+        "tokens_in": sum(row["tokens_in"] for row in rows),
+        "tokens_out": sum(row["tokens_out"] for row in rows),
+        "by_project": rows,
+    }
+
+
+def _claude_content(content):
+    """`(text, tool_calls, tool_results)` of a Claude message's content."""
+    if isinstance(content, str):
+        return content, 0, 0
+    if not isinstance(content, list):
+        return "", 0, 0
+    texts, calls, results = [], 0, 0
+    for block in content:
+        if not isinstance(block, dict):
+            continue
+        kind = block.get("type")
+        if kind == "text" and isinstance(block.get("text"), str):
+            texts.append(block["text"])
+        elif kind == "tool_use":
+            calls += 1
+        elif kind == "tool_result":
+            results += 1
+    return "\n".join(t for t in texts if t), calls, results
+
+
+def _codex_text(content, role):
+    if not isinstance(content, list):
+        return ""
+    wanted = "input_text" if role == "user" else "output_text"
+    return "\n".join(
+        part["text"]
+        for part in content
+        if isinstance(part, dict)
+        and part.get("type") == wanted
+        and isinstance(part.get("text"), str)
+    )
+
+
+def _git(root, *args):
+    git = shutil.which("git", path=_GIT_ENV["PATH"])
+    if git is None:
+        raise ReaderError("git is not installed")
+    try:
+        completed = subprocess.run(  # noqa: S603 - argv list, no shell
+            [git, "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", *args],
+            cwd=root,
+            env={**_GIT_ENV, "HOME": root},
+            capture_output=True,
+            text=True,
+            timeout=GIT_TIMEOUT_SECONDS,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise ReaderError("git failed") from exc
+    if completed.returncode != 0:
+        raise ReaderError("git failed")
+    return completed.stdout

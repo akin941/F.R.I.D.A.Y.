@@ -9,7 +9,8 @@
         "status": "error",
         "type": "result"
       }
-    ]
+    ],
+    "reader_calls": 0
   },
   "name": "v2_policy_shaped_catalogue_set",
   "setup": {

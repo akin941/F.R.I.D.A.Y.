@@ -9,7 +9,8 @@
         "status": "error",
         "type": "result"
       }
-    ]
+    ],
+    "reader_calls": 0
   },
   "name": "v1_policy_shaped_policy_set",
   "setup": {

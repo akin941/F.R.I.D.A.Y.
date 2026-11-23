@@ -434,7 +434,8 @@ forbidden_modules = ["config", "core", "accounts", "workspaces", "audit", "ai_co
 # Phase 8B branch 8 (brief D17): the reference owner-turn readers are the
 # executable spec of the node side (the Swift app ports them), so like
 # friday-hook they import nothing of ours but the vendored scrubber. They
-# move under the `nodes` reference node once Phase 9 branch 3 merges.
+# move under the `nodes` reference node with Phase 9 branch 5 (branch 3 left them
+# here; see the Phase 9 brief, known follow-ups of `feat/p9-reference-node`).
 [[tool.importlinter.contracts]]
 name = "the owner-turn reference readers import no project package (Phase 8B D17)"
 type = "forbidden"
@@ -626,6 +627,12 @@ name = "nodes may import only approvals, audit, workspaces, accounts, core (ADR-
 type = "forbidden"
 source_modules = ["nodes"]
 forbidden_modules = ["config", "ai_core", "memory", "knowledge", "harness", "assistant", "tools", "agents", "skills", "integrations", "connectors", "deploys", "voice", "hud", "ops", "tasks"]
+ignore_imports = [
+    # Phase 9 branch 3: the parity test proves the node's hook relay builds
+    # exactly friday-hook's event (so the server dedupes an event relayed by
+    # both). Test code only; production `nodes` never imports integrations.
+    "nodes.tests.test_reference_hook_relay -> integrations.cli.friday_hook",
+]
 
 # ...and only `tools` (read tools, D9), `hud` (the health read model, D11),
 # `ops` (preflight) and the composition root `config` may import `nodes`.

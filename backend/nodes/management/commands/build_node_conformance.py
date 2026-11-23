@@ -5,7 +5,7 @@ Phase 10 brief branch 2).
     manage.py build_node_conformance --check  # CI: non-zero exit on drift
 
 Covers `nodes/conformance/cases/v1/`, `cases/v2/`,
-`vectors/sandbox.json` and `vectors/scrub_stream.json`, and the vendored
+`vectors/sandbox.json`, `vectors/scrub_stream.json` and `vectors/scrub.json`, and the vendored
 node scrubber (`nodes/reference/_scrubber_vendored.py`)."""
 
 from django.core.management.base import BaseCommand, CommandError

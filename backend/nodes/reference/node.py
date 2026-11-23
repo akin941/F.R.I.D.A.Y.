@@ -36,6 +36,20 @@ invocation id and are counted; three within 60 s close the session
 silence beyond 45 s drops the socket and schedules a reconnect with
 exponential backoff (1 s -> 60 s, full jitter).
 
+Reads (Phase 9 branch 3) run `readers.Readers` over the fixture home: the
+reader runs only after every check passed, its output is checked against the
+node's own `result_schema` and never includes tool results or file contents.
+A read whose socket drops before it answered never runs.
+
+Hook events (D10, D13 item 7) come from the Unix-socket relay
+(`hook_relay`) through `relay_hook_event`: sent live as
+`event{spooled: false}` when the session is up (after `hello.ack`) and nothing
+is in flight, otherwise written to the bounded spool (`spool`) and uploaded
+after reconnect as `event{spooled: true}`, in order, one batch in flight,
+each deleted only after its `event.ack`. A live event not acked before the
+socket drops is spooled. An `event.ack` is never answered and can only
+delete the batch it names. Heartbeats carry the spool depth.
+
 Every frame the node sends is validated against the session version's
 schema before it leaves (a bug here is a test failure, never a malformed
 frame on the wire).
@@ -70,8 +84,9 @@ BACKOFF_MIN_SECONDS = 1
 BACKOFF_MAX_SECONDS = 60
 NO_RECONNECT_REASONS = frozenset({"revoked", "kill_switch", "credential_expired"})
 
-# Read outputs of the reference node's fake readers (the Phase 9 readers
-# proper are `feat/p9-reference-node`); every other read answers `error`.
+# Fixed read outputs for a node built without `readers` (unit tests of the
+# v2 session); a node with `readers` (the conformance suite, Phase 9 branch
+# 3) answers every read from them instead.
 DEFAULT_READ_OUTPUTS = {
     "apps.frontmost": {"app_name": "Terminal", "bundle_id": "com.apple.Terminal"}
 }
@@ -116,6 +131,13 @@ class _Read:
 
 
 @dataclass
+class _EventInFlight:
+    frame_id: str
+    events: list
+    batch_id: str | None  # the spool batch, or None for a live event
+
+
+@dataclass
 class ReferenceNode:
     node_id: str
     pinned: dict
@@ -129,6 +151,8 @@ class ReferenceNode:
     node_env: dict = field(default_factory=dict)
     worktree_base: str | None = None
     scrub: object = None
+    readers: object = None
+    spool: object = None
     rng: random.Random = field(default_factory=lambda: random.Random(0))
     id_factory: object = None
 
@@ -155,6 +179,10 @@ class ReferenceNode:
         self._pending: _Pending | None = None
         self._running: list = []
         self._reads: list = []
+        self._session_ready = False
+        self._event_inflight: _EventInFlight | None = None
+        self.events_dropped = 0
+        self.stray_event_acks = 0
 
     # --- session ---------------------------------------------------------
 
@@ -179,6 +207,8 @@ class ReferenceNode:
         self._last_heartbeat_at = self.clock.now()
         self.reconnect_attempts = 0
         self.next_reconnect_delay = None
+        self._session_ready = False
+        self._event_inflight = None
         return self._send([self.hello()])
 
     def hello(self) -> dict:
@@ -198,14 +228,15 @@ class ReferenceNode:
 
     def _heartbeat_frames(self) -> list:
         self._heartbeat_seq += 1
+        spool_count, spool_bytes = self.spool.depth() if self.spool is not None else (0, 0)
         frame = {
             "v": self.version,
             "type": "heartbeat",
             "id": self.id_factory(),
             "seq": self._heartbeat_seq,
             "uptime_seconds": 0,
-            "spool_count": 0,
-            "spool_bytes": 0,
+            "spool_count": spool_count,
+            "spool_bytes": spool_bytes,
         }
         return [frame]
 
@@ -235,6 +266,10 @@ class ReferenceNode:
             self._cleanup(running)
         self._running = []
         self._reads = []
+        self._session_ready = False
+        inflight, self._event_inflight = self._event_inflight, None
+        if inflight is not None and inflight.batch_id is None:
+            self._spool_events(inflight.events)  # a live event never acked
         if self.closed_reason is None:
             self.closed_reason = reason
         if self.reconnect_allowed:
@@ -359,8 +394,13 @@ class ReferenceNode:
                 self.reconnect_allowed = False
             self.disconnect(f"bye:{envelope['reason']}")
             return []
+        if kind == "hello.ack":
+            self._session_ready = True
+            return self._send(self._next_upload())
+        if kind == "event.ack":
+            return self._send(self._event_acked(envelope))
         if kind != "invoke":
-            return []  # hello.ack, heartbeat.ack, event.ack: nothing to answer
+            return []  # heartbeat.ack: nothing to answer
         if envelope["class"] == "read":
             return self._send(self._read(envelope, now))
         return self._send(self._open_window(envelope, verified.resolved, now))
@@ -372,6 +412,19 @@ class ReferenceNode:
         return [self._read_result(envelope, now)]
 
     def _read_result(self, envelope, received_at):
+        if self.readers is not None:
+            outcome = self.readers.read(
+                envelope["capability"], envelope["args"], now=self.clock.now()
+            )
+            if outcome.status != "ok":
+                return self._result(envelope, status="error", received_at=received_at)
+            return self._result(
+                envelope,
+                status="ok",
+                output=outcome.output,
+                truncated=outcome.truncated,
+                received_at=received_at,
+            )
         output = self.read_outputs.get(envelope["capability"])
         if output is None:
             return self._result(envelope, status="error", received_at=received_at)
@@ -390,6 +443,56 @@ class ReferenceNode:
             return [self._refused(envelope, "busy_confirming")]
         self._pending = _Pending(envelope, resolved, now)
         return self._confirmation(envelope, "shown") + self._pump_window()
+
+    # --- hook events: live, spooled, acked --------------------------------
+
+    def relay_hook_event(self, event) -> list:
+        """One hook event from the relay. Sent live when the session is up
+        and nothing is in flight or spooled; otherwise spooled (and the
+        oldest spooled batch uploaded when the session is up)."""
+        if self._can_upload() and (self.spool is None or self.spool.first() is None):
+            frame = self._event_frame([event], spooled=False)
+            self._event_inflight = _EventInFlight(frame["id"], [event], None)
+            return self._send([frame])
+        self._spool_events([event])
+        return self._send(self._next_upload())
+
+    def _can_upload(self) -> bool:
+        return self.connected and self._session_ready and self._event_inflight is None
+
+    def _spool_events(self, events):
+        if self.spool is None or self.spool.append(list(events)) is None:
+            self.events_dropped += len(events)
+
+    def _event_frame(self, events, *, spooled):
+        return {
+            "v": self.version,
+            "type": "event",
+            "id": self.id_factory(),
+            "kind": "claude_code.hook",
+            "batch": list(events),
+            "spooled": spooled,
+        }
+
+    def _next_upload(self) -> list:
+        if not self._can_upload() or self.spool is None:
+            return []
+        batch = self.spool.first()
+        if batch is None:
+            return []
+        frame = self._event_frame(batch.events, spooled=True)
+        self._event_inflight = _EventInFlight(frame["id"], batch.events, batch.batch_id)
+        return [frame]
+
+    def _event_acked(self, ack) -> list:
+        inflight = self._event_inflight
+        if inflight is None or ack["event_id"] != inflight.frame_id:
+            self.stray_event_acks += 1  # never deletes anything
+            return []
+        self._event_inflight = None
+        if inflight.batch_id is not None:
+            self.spool.ack(inflight.batch_id)
+        return self._next_upload()
 
     # --- the clock moved -------------------------------------------------
 

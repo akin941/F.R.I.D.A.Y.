@@ -28,6 +28,7 @@ from nodes.reference.confirm import ConfirmationWindowDouble, Decision, FakeCloc
 from nodes.reference.executor import FakeCommandScript, FakeExecutor
 from nodes.reference.fixtures.factory import fixture_policy
 from nodes.reference.node import ReferenceNode, default_catalogue
+from nodes.reference.readers import Readers
 from nodes.reference.worktree import list_worktrees
 
 ADVANCE_STEP_SECONDS = 5
@@ -48,10 +49,25 @@ def narrow_catalogue(availability=None):
     return entries
 
 
+def build_readers(setup, *, home, policy):
+    """The readers a case's node runs: both directory grants on unless
+    `setup.reader_grants` turns one off, window titles only with
+    `setup.window_titles`."""
+    return Readers(
+        home=home,
+        policy=policy,
+        grants={"claude": True, "codex": True, **setup.get("reader_grants", {})},
+        window_titles=bool(setup.get("window_titles", False)),
+    )
+
+
 def build_reference_node(case, *, home, worktree_base=None):
     """A fresh reference node configured by `case["setup"]` over the fixture
-    home. Returns the node (its clock, window and executor are attributes)."""
+    home. Returns the node (its clock, window, executor and readers are
+    attributes)."""
     setup = case.get("setup", {})
+    policy = fixture_policy(home)
+    readers = build_readers(setup, home=home, policy=policy)
     clock = FakeClock(setup.get("now"))
     window = ConfirmationWindowDouble(
         clock, [Decision.from_document(d) for d in setup.get("window", ())]
@@ -59,7 +75,7 @@ def build_reference_node(case, *, home, worktree_base=None):
     executor = FakeExecutor(
         clock, scripts=[FakeCommandScript.from_document(s) for s in setup.get("executor", ())]
     )
-    availability = setup.get("availability")
+    availability = {**readers.availability(), **setup.get("availability", {})}
     if setup.get("catalogue") == "narrow":
         catalogue = narrow_catalogue(availability)
     else:
@@ -67,11 +83,12 @@ def build_reference_node(case, *, home, worktree_base=None):
     return ReferenceNode(
         node_id=NODE_ID,
         pinned=dict(PINNED),
-        policy=fixture_policy(home),
+        policy=policy,
         executor=executor,
         clock=clock,
         window=window,
         catalogue=catalogue,
+        readers=readers,
         read_delay_seconds=setup.get("read_delay", 0),
         worktree_base=str(worktree_base) if worktree_base else None,
         node_env={"PYTHONHASHSEED": "0", "GITHUB_TOKEN": "ghp_" + "x" * 36},
@@ -171,7 +188,9 @@ class InProcessDriver:
 def node_report(node) -> dict:
     """What the hook reports about a node after a case."""
     calls = getattr(node.executor, "calls", [])
+    readers = getattr(node, "readers", None)
     return {
+        "reader_calls": len(readers.calls) if readers is not None else 0,
         "executor_calls": len(calls),
         "executor_terminated": sum(1 for call in calls if call.get("terminated")),
         "windows_shown": len(node.window.shown),
@@ -233,6 +252,7 @@ def check(case, frames, report, checker, *, policy_fingerprint, home=None) -> li
             if frame.get(key, _MISSING) != value:
                 failures.append(f"frame {index} ({_describe(frame)}): {key} != {value!r}")
     for key in (
+        "reader_calls",
         "executor_calls",
         "executor_terminated",
         "windows_shown",

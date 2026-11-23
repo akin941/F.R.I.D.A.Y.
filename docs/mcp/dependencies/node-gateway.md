@@ -13,7 +13,7 @@ dedicated branch (brief R1), never as a side effect of another change.
 | `cryptography` | `==50.0.1` | Apache-2.0 OR BSD-3-Clause | `feat/p9-node-protocol` (2026-11-20) | transitive (MCP SDK) | Ed25519 signing and verification of `invoke` envelopes (`nodes.protocol.signing`) |
 | `jsonschema` | `==4.26.0` | MIT | `feat/p9-node-protocol` (2026-11-20) | transitive (MCP SDK) | Protocol v1 message validation and the capability contracts (`nodes.protocol.messages`, `nodes.capabilities`) |
 | `uvicorn` | `==0.54.0` (planned) | BSD-3-Clause | `feat/p9-node-gateway` | transitive (MCP SDK) | Serving `config/asgi_nodes.py` (`--ws wsproto`) |
-| `wsproto` | `==1.3.2` | MIT | `feat/p10-reference-executor` (2026-11-20; planned for `feat/p9-reference-node`) | new (its one dependency, `h11` 0.16.0, was already locked) | The WebSocket implementation on both ends: the reference node's client transport and the hostile fake gateway (`node_conformance_server`) now, uvicorn's server side in `feat/p9-node-gateway` |
+| `wsproto` | `==1.3.2` | MIT | `feat/p10-reference-executor` (2026-11-20; `feat/p9-reference-node` reuses the same pin unchanged, 2026-11-20) | new (its one dependency, `h11` 0.16.0, was already locked) | The WebSocket implementation on both ends: the reference node's client transport and the hostile fake gateway (`node_conformance_server`) now, uvicorn's server side in `feat/p9-node-gateway` |
 
 The `uvicorn` row is filled in by its branch; it is listed here so the
 gateway's full dependency surface is in one place.

@@ -1,0 +1,59 @@
+{
+  "check": null,
+  "description": "last_turns keeps the newest turns.",
+  "expect": {
+    "frames": [
+      {
+        "output": {
+          "session_id": "cc-acme-1",
+          "turns": [
+            {
+              "at": 1795982520,
+              "role": "assistant",
+              "text": "Done: the test now waits for the clock. Ping [PII:email] if it fails again.",
+              "tool_calls": 0,
+              "tool_results": 0
+            }
+          ]
+        },
+        "status": "ok",
+        "truncated": false,
+        "type": "result"
+      }
+    ],
+    "reader_calls": 1
+  },
+  "name": "v1_read_session_detail_last_turns",
+  "setup": {
+    "now": 1796000005
+  },
+  "steps": [
+    {
+      "frame": {
+        "args": {
+          "last_turns": 1,
+          "session_id": "cc-acme-1"
+        },
+        "args_sha256": "a801a67903aaf83ade6c53eabe20c426525e87bc347217c7f6dd62171eaf3f40",
+        "capability": "claude.sessions.read",
+        "capability_version": 1,
+        "class": "read",
+        "expires_at": 1796000030,
+        "grant": null,
+        "id": "57690416-742d-459b-bf61-41d42177b662",
+        "invocation_id": "1680e92f-dcb0-4092-a8ed-fb0e7b7a9af6",
+        "issued_at": 1796000000,
+        "key_id": "03396219237f75a6",
+        "node_id": "6f1e2d3c-4b5a-4987-8a6b-5c4d3e2f1a0b",
+        "nonce": "uKPyH_Y55cPFxphMbqroXqA0DCtHgWEzwyjrSsSkPPI",
+        "sig": "HnvAN3fmiPyDsMiCDGkpsykol_ebpCUOmoH8iMJvyQdFQ_8k_Gs_SuismCLgqOQHIvj9bSRowHnO22Xo338GBQ",
+        "trace_id": "conformance-v1-read-session_detail_last_turns",
+        "type": "invoke",
+        "v": 1,
+        "workspace_id": "2a3b4c5d-6e7f-4a8b-9c0d-1e2f3a4b5c6d"
+      },
+      "op": "send"
+    }
+  ],
+  "version": 1
+}

@@ -1,0 +1,72 @@
+{
+  "check": null,
+  "description": "Window titles stay on the node unless the owner enabled them locally.",
+  "expect": {
+    "absent_b64": [
+      "SW52b2ljZQ==",
+      "cHl0ZXN0"
+    ],
+    "frames": [
+      {
+        "output": {
+          "windows": [
+            {
+              "app_name": "Terminal",
+              "bundle_id": "com.apple.Terminal",
+              "on_screen": true,
+              "window_count": 2
+            },
+            {
+              "app_name": "Safari",
+              "bundle_id": "com.apple.Safari",
+              "on_screen": true,
+              "window_count": 1
+            },
+            {
+              "app_name": "Notes",
+              "bundle_id": "com.apple.Notes",
+              "on_screen": false,
+              "window_count": 0
+            }
+          ]
+        },
+        "status": "ok",
+        "truncated": false,
+        "type": "result"
+      }
+    ],
+    "reader_calls": 1
+  },
+  "name": "v1_read_windows_titles_off",
+  "setup": {
+    "now": 1796000005
+  },
+  "steps": [
+    {
+      "frame": {
+        "args": {
+          "limit": 30
+        },
+        "args_sha256": "1ca058c86dd2414bcc64687b7f5aec84eab34eae4492a6436776e7b17e8eb6e2",
+        "capability": "windows.list",
+        "capability_version": 1,
+        "class": "read",
+        "expires_at": 1796000030,
+        "grant": null,
+        "id": "0d46a7f4-2c96-4dc0-ab61-19a89ec6607a",
+        "invocation_id": "cbf87413-87c7-41b8-94c2-6f94198dc533",
+        "issued_at": 1796000000,
+        "key_id": "03396219237f75a6",
+        "node_id": "6f1e2d3c-4b5a-4987-8a6b-5c4d3e2f1a0b",
+        "nonce": "u_cIMHykSp8x_RDuIzG3ZUsoZEcKAA1_AHMwIqav6f4",
+        "sig": "_VLIT9lbODGZjuuH70FOW5otxim07gwTVVCGs7SKjAishLXdINcl8ijCx_elCI_1oYwi-qD2KT2XtvoEOB4iBw",
+        "trace_id": "conformance-v1-read-windows_titles_off",
+        "type": "invoke",
+        "v": 1,
+        "workspace_id": "2a3b4c5d-6e7f-4a8b-9c0d-1e2f3a4b5c6d"
+      },
+      "op": "send"
+    }
+  ],
+  "version": 1
+}

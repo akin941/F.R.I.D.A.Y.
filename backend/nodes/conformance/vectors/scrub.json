@@ -1,0 +1,955 @@
+{
+  "description": "Friday Node scrub parity vectors (Phase 9 brief D13 item 6, Mac session M2). Each item's base64 UTF-8 input, scrubbed by backend/memory/ingestion/scrubber.py (vendored in nodes/reference/_scrubber_vendored.py) with no workspace terms, gives `expected` exactly. Items: every memory/tests/scrubber_corpus/*.jsonl row (`corpus:<file>:<id>`) and every string of the reader fixtures, transcripts rendered with the home /Users/owner (`fixture:<sha256 prefix>`). TEST DATA ONLY: every secret is fake.",
+  "items": [
+    {
+      "expected": "Claude Code session in /Users/owner/code/jarvis-os/backend/memory/ingestion",
+      "id": "corpus:benign:path",
+      "input_b64": "Q2xhdWRlIENvZGUgc2Vzc2lvbiBpbiAvVXNlcnMvb3duZXIvY29kZS9qYXJ2aXMtb3MvYmFja2VuZC9tZW1vcnkvaW5nZXN0aW9u"
+    },
+    {
+      "expected": "cwd /Users/Owner/Projects/friday-os-phase8a/backend",
+      "id": "corpus:benign:path-digits",
+      "input_b64": "Y3dkIC9Vc2Vycy9Pd25lci9Qcm9qZWN0cy9mcmlkYXktb3MtcGhhc2U4YS9iYWNrZW5k"
+    },
+    {
+      "expected": "commit 3f2a9c1e7b2d4f6a0e5c9b8d7a6f4e3c2b1a0f9e on main",
+      "id": "corpus:benign:sha",
+      "input_b64": "Y29tbWl0IDNmMmE5YzFlN2IyZDRmNmEwZTVjOWI4ZDdhNmY0ZTNjMmIxYTBmOWUgb24gbWFpbg=="
+    },
+    {
+      "expected": "Bugün hafıza modülünün ingestion kısmını yazdım ve testleri yeşil.",
+      "id": "corpus:benign:prose-tr",
+      "input_b64": "QnVnw7xuIGhhZsSxemEgbW9kw7xsw7xuw7xuIGluZ2VzdGlvbiBrxLFzbcSxbsSxIHlhemTEsW0gdmUgdGVzdGxlcmkgeWXFn2lsLg=="
+    },
+    {
+      "expected": "Refactor the workspace mapping resolver; longest prefix wins.",
+      "id": "corpus:benign:prose-en",
+      "input_b64": "UmVmYWN0b3IgdGhlIHdvcmtzcGFjZSBtYXBwaW5nIHJlc29sdmVyOyBsb25nZXN0IHByZWZpeCB3aW5zLg=="
+    },
+    {
+      "expected": "Meeting on 2026-11-20 at 14:30, 45 minutes.",
+      "id": "corpus:benign:date",
+      "input_b64": "TWVldGluZyBvbiAyMDI2LTExLTIwIGF0IDE0OjMwLCA0NSBtaW51dGVzLg=="
+    },
+    {
+      "expected": "order number 12345678901 shipped",
+      "id": "corpus:benign:invalid-tckn",
+      "input_b64": "b3JkZXIgbnVtYmVyIDEyMzQ1Njc4OTAxIHNoaXBwZWQ="
+    },
+    {
+      "expected": "ref TR33 0006 1005 1978 6457 8413 27 is wrong",
+      "id": "corpus:benign:invalid-iban",
+      "input_b64": "cmVmIFRSMzMgMDAwNiAxMDA1IDE5NzggNjQ1NyA4NDEzIDI3IGlzIHdyb25n"
+    },
+    {
+      "expected": "ticket 4111 1111 1111 1112 closed",
+      "id": "corpus:benign:invalid-card",
+      "input_b64": "dGlja2V0IDQxMTEgMTExMSAxMTExIDExMTIgY2xvc2Vk"
+    },
+    {
+      "expected": "job 7d9f8a2c-1b3e-4c5d-9e0f-a1b2c3d4e5f6 finished",
+      "id": "corpus:benign:uuid",
+      "input_b64": "am9iIDdkOWY4YTJjLTFiM2UtNGM1ZC05ZTBmLWExYjJjM2Q0ZTVmNiBmaW5pc2hlZA=="
+    },
+    {
+      "expected": "upgraded django to 5.2.4 and celery to 5.5.3",
+      "id": "corpus:benign:version",
+      "input_b64": "dXBncmFkZWQgZGphbmdvIHRvIDUuMi40IGFuZCBjZWxlcnkgdG8gNS41LjM="
+    },
+    {
+      "expected": "12 files changed, 340 insertions(+), 18 deletions(-)",
+      "id": "corpus:benign:counts",
+      "input_b64": "MTIgZmlsZXMgY2hhbmdlZCwgMzQwIGluc2VydGlvbnMoKyksIDE4IGRlbGV0aW9ucygtKQ=="
+    },
+    {
+      "expected": "memory.ingestion.services.record_episode_with_mapping_rules",
+      "id": "corpus:benign:module",
+      "input_b64": "bWVtb3J5LmluZ2VzdGlvbi5zZXJ2aWNlcy5yZWNvcmRfZXBpc29kZV93aXRoX21hcHBpbmdfcnVsZXM="
+    },
+    {
+      "expected": "feat/p8-ingestion-core merged into claude/inspiring-franklin-pw7avo",
+      "id": "corpus:benign:branch",
+      "input_b64": "ZmVhdC9wOC1pbmdlc3Rpb24tY29yZSBtZXJnZWQgaW50byBjbGF1ZGUvaW5zcGlyaW5nLWZyYW5rbGluLXB3N2F2bw=="
+    },
+    {
+      "expected": "ping [PII:email] about it",
+      "id": "corpus:pii:email",
+      "input_b64": "cGluZyBvd25lci5uYW1lK2ZyaWRheUBleGFtcGxlLmNvbS50ciBhYm91dCBpdA=="
+    },
+    {
+      "expected": "From: [PII:email]",
+      "id": "corpus:pii:email-upper",
+      "input_b64": "RnJvbTogQXlzZS5ZaWxtYXpARmlybWEuQ09N"
+    },
+    {
+      "expected": "beni [PII:phone] numarasından ara",
+      "id": "corpus:pii:phone-tr-mobile",
+      "input_b64": "YmVuaSAwNTMyIDEyMyA0NSA2NyBudW1hcmFzxLFuZGFuIGFyYQ=="
+    },
+    {
+      "expected": "WhatsApp: [PII:phone]",
+      "id": "corpus:pii:phone-tr-plus",
+      "input_b64": "V2hhdHNBcHA6ICs5MCAoNTMyKSA3NjUtNDMtMjE="
+    },
+    {
+      "expected": "tel:[PII:phone]",
+      "id": "corpus:pii:phone-tr-compact",
+      "input_b64": "dGVsOjA1NTUxMjM0NTY3"
+    },
+    {
+      "expected": "ofis [PII:phone]",
+      "id": "corpus:pii:phone-tr-landline",
+      "input_b64": "b2ZpcyAwMjEyIDU1NSA2NiA3Nw=="
+    },
+    {
+      "expected": "call [PII:phone] tomorrow",
+      "id": "corpus:pii:phone-e164",
+      "input_b64": "Y2FsbCArMTQxNTU1NTI2NzEgdG9tb3Jyb3c="
+    },
+    {
+      "expected": "UK: [PII:phone]",
+      "id": "corpus:pii:phone-e164-spaced",
+      "input_b64": "VUs6ICs0NCAyMCA3OTQ2IDA5NTg="
+    },
+    {
+      "expected": "TC kimlik no [PII:tckn] olarak kayıtlı",
+      "id": "corpus:pii:tckn",
+      "input_b64": "VEMga2ltbGlrIG5vIDEwMDAwMDAwMTQ2IG9sYXJhayBrYXnEsXRsxLE="
+    },
+    {
+      "expected": "tckn=[PII:tckn]",
+      "id": "corpus:pii:tckn-2",
+      "input_b64": "dGNrbj0xMjM0NTY3ODk1MA=="
+    },
+    {
+      "expected": "IBAN: [PII:iban] ödeme",
+      "id": "corpus:pii:iban-tr-spaced",
+      "input_b64": "SUJBTjogVFIzMyAwMDA2IDEwMDUgMTk3OCA2NDU3IDg0MTMgMjYgw7ZkZW1l"
+    },
+    {
+      "expected": "[PII:iban]",
+      "id": "corpus:pii:iban-tr-compact",
+      "input_b64": "VFIzMzAwMDYxMDA1MTk3ODY0NTc4NDEzMjY="
+    },
+    {
+      "expected": "[PII:iban] FOR rent",
+      "id": "corpus:pii:iban-de",
+      "input_b64": "REU4OSAzNzA0IDAwNDQgMDUzMiAwMTMwIDAwIEZPUiByZW50"
+    },
+    {
+      "expected": "kart [PII:card] son kullanım 12/28",
+      "id": "corpus:pii:card-visa",
+      "input_b64": "a2FydCA0MTExIDExMTEgMTExMSAxMTExIHNvbiBrdWxsYW7EsW0gMTIvMjg="
+    },
+    {
+      "expected": "card=[PII:card]",
+      "id": "corpus:pii:card-compact",
+      "input_b64": "Y2FyZD01NTAwMDA1NTU1NTU1NTU5"
+    },
+    {
+      "expected": "amex [PII:card]",
+      "id": "corpus:pii:card-dashed",
+      "input_b64": "YW1leCAzNzgyLTgyMjQ2My0xMDAwNQ=="
+    },
+    {
+      "expected": "export OPENAI_API_KEY=[SECRET:openai_key]",
+      "id": "corpus:secrets:openai-env",
+      "input_b64": "ZXhwb3J0IE9QRU5BSV9BUElfS0VZPXNrLXByb2otQWIzZEVmNmhJajlrTG0ybk9wNXFSczh0VXYxd1h5NHpBQjdDRDA="
+    },
+    {
+      "expected": "used key [SECRET:openai_key] in the script",
+      "id": "corpus:secrets:openai-inline",
+      "input_b64": "dXNlZCBrZXkgc2stWng4MUtkMDJMbVFwUnQ1VXZXeTdBYjlDZDNFZjRHaCBpbiB0aGUgc2NyaXB0"
+    },
+    {
+      "expected": "ANTHROPIC_API_KEY=\"[SECRET:anthropic_key]\"",
+      "id": "corpus:secrets:anthropic",
+      "input_b64": "QU5USFJPUElDX0FQSV9LRVk9InNrLWFudC1hcGkwMy1GQUtFZmFrZTAxMjM0NTY3ODlhYmNkZWZHSElKS0xtbm9wLVFSU1R1diI="
+    },
+    {
+      "expected": "fix: rotate [SECRET:anthropic_key] after leak",
+      "id": "corpus:secrets:anthropic-prose",
+      "input_b64": "Zml4OiByb3RhdGUgc2stYW50LWFkbWluMDEteFk3elczdlUydFMxclEwcE85bk04bEs3akk2aCBhZnRlciBsZWFr"
+    },
+    {
+      "expected": "git remote set-url origin https://[SECRET:github_token]@github.com/o/r.git",
+      "id": "corpus:secrets:ghp-url",
+      "input_b64": "Z2l0IHJlbW90ZSBzZXQtdXJsIG9yaWdpbiBodHRwczovL2docF9GQUtFMDEyMzQ1Njc4OWFiY2RlZkFCQ0RFRjAxMjM0NTY3ODlAZ2l0aHViLmNvbS9vL3IuZ2l0"
+    },
+    {
+      "expected": "oauth [SECRET:github_token] refreshed",
+      "id": "corpus:secrets:gho",
+      "input_b64": "b2F1dGggZ2hvX2FCY0RlRmdIaUprTG1Ob1BxUnNUdVZ3WHlaMDEyMzQ1IHJlZnJlc2hlZA=="
+    },
+    {
+      "expected": "GH_TOKEN: [SECRET:github_pat]",
+      "id": "corpus:secrets:github-pat",
+      "input_b64": "R0hfVE9LRU46IGdpdGh1Yl9wYXRfMTFGQUtFRkFLRTBfYWJjZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXowMTIzNDU2Nzg5QUJDRA=="
+    },
+    {
+      "expected": "SLACK_BOT=[SECRET:slack_token]",
+      "id": "corpus:secrets:slack-bot",
+      "input_b64": "U0xBQ0tfQk9UPXhveGItMDAwMDAwMDAwMDAwLTAwMDAwMDAwMDAwMDAtRkFLRWZha2VGQUtFZmFrZQ=="
+    },
+    {
+      "expected": "posted with [SECRET:slack_token] in a curl",
+      "id": "corpus:secrets:slack-user",
+      "input_b64": "cG9zdGVkIHdpdGggeG94cC0xMTExLTIyMjItMzMzMy1GQUtFRkFLRWZha2UgaW4gYSBjdXJs"
+    },
+    {
+      "expected": "aws_access_key_id = [SECRET:aws_key]",
+      "id": "corpus:secrets:aws-access",
+      "input_b64": "YXdzX2FjY2Vzc19rZXlfaWQgPSBBS0lBSU9TRk9ETk43RVhBTVBMRQ=="
+    },
+    {
+      "expected": "aws_secret_access_key = [SECRET:assignment]",
+      "id": "corpus:secrets:aws-secret",
+      "input_b64": "YXdzX3NlY3JldF9hY2Nlc3Nfa2V5ID0gd0phbHJYVXRuRkVNSS9LN01ERU5HL2JQeFJmaUNZRVhBTVBMRUtFWQ=="
+    },
+    {
+      "expected": "temporary creds [SECRET:aws_key] expired",
+      "id": "corpus:secrets:aws-temp-prose",
+      "input_b64": "dGVtcG9yYXJ5IGNyZWRzIEFTSUFZMzRGWktCT0tNVVRWVjdBIGV4cGlyZWQ="
+    },
+    {
+      "expected": "maps key [SECRET:google_api_key] in config",
+      "id": "corpus:secrets:google",
+      "input_b64": "bWFwcyBrZXkgQUl6YVN5RkFLRS1mYWtlXzAxMjM0NTY3ODlhYmNkZWZnaGlqa2xtbm8gaW4gY29uZmln"
+    },
+    {
+      "expected": "STRIPE=[SECRET:stripe_key]",
+      "id": "corpus:secrets:stripe",
+      "input_b64": "U1RSSVBFPXNrX3Rlc3RfRkFLRTRlQzM5SHFMeWpXRGFyanRUMXpkcDdkYw=="
+    },
+    {
+      "expected": "Cookie: session=[SECRET:jwt]",
+      "id": "corpus:secrets:jwt",
+      "input_b64": "Q29va2llOiBzZXNzaW9uPWV5SmhiR2NpT2lKSVV6STFOaUo5LmV5SnpkV0lpT2lKdmQyNWxjaUlzSW1saGRDSTZNVGN3TURBd01EQXdNSDAuYzJsbmJtRjBkWEpsWDJaaGEyVmZabUZyWlE="
+    },
+    {
+      "expected": "[SECRET:pem_private_key]\n",
+      "id": "corpus:secrets:pem-rsa",
+      "input_b64": "LS0tLS1CRUdJTiBSU0EgUFJJVkFURSBLRVktLS0tLQpNSUlFb3dJQkFBS0NBUUVBZmFrZWZha2VmYWtlMDEyMzQ1Njc4OQphYmNkZWZGQUtFRkFLRT09Ci0tLS0tRU5EIFJTQSBQUklWQVRFIEtFWS0tLS0tCg=="
+    },
+    {
+      "expected": "cat id_ed25519\n[SECRET:pem_private_key]",
+      "id": "corpus:secrets:pem-openssh-truncated",
+      "input_b64": "Y2F0IGlkX2VkMjU1MTkKLS0tLS1CRUdJTiBPUEVOU1NIIFBSSVZBVEUgS0VZLS0tLS0KYjNCbGJuTnphQzFyWlhrdGRqRUFBQUFBQkc1dmJtVUFBQUFFYm05dVpRCkFBQUFNd0FBQUF0emMyZ3RaV1F5TlRVeE9R"
+    },
+    {
+      "expected": "DATABASE_PASSWORD=[SECRET:assignment]\nDJANGO_SECRET_KEY=[SECRET:assignment]\nJWT_SIGNING_KEY_PASSWD=[SECRET:assignment]\nDEBUG=true",
+      "id": "corpus:secrets:dotenv-dump",
+      "input_b64": "REFUQUJBU0VfUEFTU1dPUkQ9aHVudGVyMi1idXQtbG9uZ2VyCkRKQU5HT19TRUNSRVRfS0VZPWRqYW5nby1pbnNlY3VyZS03YyR4IXE5I2sKSldUX1NJR05JTkdfS0VZX1BBU1NXRD1wYTU1dzByZApERUJVRz10cnVl"
+    },
+    {
+      "expected": "{\"api_key\": \"[SECRET:assignment]\", \"name\": \"svc\"}",
+      "id": "corpus:secrets:json-config",
+      "input_b64": "eyJhcGlfa2V5IjogImFiYzEyM2RlZjQ1NmdoaTc4OSIsICJuYW1lIjogInN2YyJ9"
+    },
+    {
+      "expected": "db:\n  password: [SECRET:assignment]\n  host: localhost",
+      "id": "corpus:secrets:yaml-config",
+      "input_b64": "ZGI6CiAgcGFzc3dvcmQ6IFRyMHViNGRvciYzCiAgaG9zdDogbG9jYWxob3N0"
+    },
+    {
+      "expected": "PRIVATE_KEY=[SECRET:assignment]",
+      "id": "corpus:secrets:private-key-var",
+      "input_b64": "UFJJVkFURV9LRVk9MHhkZWFkYmVlZmNhZmViYWJlMDEyMw=="
+    },
+    {
+      "expected": "DATABASE_URL=postgres://[SECRET:url_credentials]@db.internal:5432/friday",
+      "id": "corpus:secrets:url-creds",
+      "input_b64": "REFUQUJBU0VfVVJMPXBvc3RncmVzOi8vZnJpZGF5OlMzY3IzdFB3QGRiLmludGVybmFsOjU0MzIvZnJpZGF5"
+    },
+    {
+      "expected": "connecting to redis://[SECRET:url_credentials]@cache:6379/0 failed",
+      "id": "corpus:secrets:url-creds-redis",
+      "input_b64": "Y29ubmVjdGluZyB0byByZWRpczovL2RlZmF1bHQ6ckVkMXNQYXNzVzByZEBjYWNoZTo2Mzc5LzAgZmFpbGVk"
+    },
+    {
+      "expected": "curl -H 'Authorization: Bearer [SECRET:bearer_token]' http://localhost:8001/api",
+      "id": "corpus:secrets:bearer-header",
+      "input_b64": "Y3VybCAtSCAnQXV0aG9yaXphdGlvbjogQmVhcmVyIGZqcF85YVoza0xtUTgxeFl2QjJuQzdkRTRmRzZoSjAnIGh0dHA6Ly9sb2NhbGhvc3Q6ODAwMS9hcGk="
+    },
+    {
+      "expected": "{\"hook_event_name\":\"Notification\",\"message\":\"Claude needs permission to run: OPENAI_KEY=[SECRET:openai_key] python x.py\"}",
+      "id": "corpus:secrets:hook-notification",
+      "input_b64": "eyJob29rX2V2ZW50X25hbWUiOiJOb3RpZmljYXRpb24iLCJtZXNzYWdlIjoiQ2xhdWRlIG5lZWRzIHBlcm1pc3Npb24gdG8gcnVuOiBPUEVOQUlfS0VZPXNrLWxpdmUwMTIzNDU2Nzg5YWJjZGVmQUJDREVGIHB5dGhvbiB4LnB5In0="
+    },
+    {
+      "expected": "{\"tool_input\":{\"command\":\"gh auth login --with-token <<< [SECRET:github_token]\"}}",
+      "id": "corpus:secrets:hook-tool-input",
+      "input_b64": "eyJ0b29sX2lucHV0Ijp7ImNvbW1hbmQiOiJnaCBhdXRoIGxvZ2luIC0td2l0aC10b2tlbiA8PDwgZ2hwX1pZWFdWVVRTUlFQT05NTEtKSUhHRkVEQ0JBOTg3NjU0MzIxMCJ9fQ=="
+    },
+    {
+      "expected": "fix: temporary key for testing\n\n[SECRET:anthropic_key]",
+      "id": "corpus:secrets:commit-pasted",
+      "input_b64": "Zml4OiB0ZW1wb3Jhcnkga2V5IGZvciB0ZXN0aW5nCgpzay1hbnQtYXBpMDMtQ09NTUlUVEVEYnlNSVNUQUtFMDEyMzQ1Njc4OWFiY2RlZg=="
+    },
+    {
+      "expected": "  512  export HF_TOKEN=[SECRET:assignment]\n  513  python train.py",
+      "id": "corpus:secrets:shell-history",
+      "input_b64": "ICA1MTIgIGV4cG9ydCBIRl9UT0tFTj1oZl9GQUtFYUJjRGVGZ0hpSmtMbU5vUHFSc1R1VndYeVoKICA1MTMgIHB5dGhvbiB0cmFpbi5weQ=="
+    },
+    {
+      "expected": "mysql -u root --password=[SECRET:assignment] friday",
+      "id": "corpus:secrets:shell-mysql",
+      "input_b64": "bXlzcWwgLXUgcm9vdCAtLXBhc3N3b3JkPXJvb3RQdyEyMDI2IGZyaWRheQ=="
+    },
+    {
+      "expected": "the blob was [SECRET:high_entropy] in the log",
+      "id": "corpus:secrets:entropy-b64",
+      "input_b64": "dGhlIGJsb2Igd2FzIFptOXZZbUZ5UW1GNlVYVjRNVEl6TkRVMk56ZzVNRUZDUTBSRlJrZElTVXBMVEUxTyBpbiB0aGUgbG9n"
+    },
+    {
+      "expected": "webhook signing value [SECRET:high_entropy] in env",
+      "id": "corpus:secrets:entropy-hex",
+      "input_b64": "d2ViaG9vayBzaWduaW5nIHZhbHVlIDhmM2E5YzFlN2IyZDRmNmEwZTVjOWI4ZDdhNmY0ZTNjIGluIGVudg=="
+    },
+    {
+      "expected": "x-amz-security: [SECRET:high_entropy]",
+      "id": "corpus:secrets:entropy-mixed",
+      "input_b64": "eC1hbXotc2VjdXJpdHk6IFEyeGhkV1JsUTI5a1pUazVPRk5GUTFKRlZITXdNVEl6TkRVMk56ZzVZV0pqWkdWbQ=="
+    },
+    {
+      "expected": "auth [SECRET:high_entropy] configured",
+      "id": "corpus:secrets:twilio-like",
+      "input_b64": "YXV0aCBTS2ExQjJjM0Q0ZTVGNmc3SDhpOUowazFMMm0zTjRvNVA2IGNvbmZpZ3VyZWQ="
+    },
+    {
+      "expected": "{\"password\": \"[SECRET:assignment]\", \"user\": \"svc\"}",
+      "id": "corpus:secrets:json-quoted-passphrase",
+      "input_b64": "eyJwYXNzd29yZCI6ICJodW50ZXIgdHdvIHRocmVlIiwgInVzZXIiOiAic3ZjIn0="
+    },
+    {
+      "expected": "pwd: \"[SECRET:assignment]\"\nhost: db",
+      "id": "corpus:secrets:yaml-quoted-passphrase",
+      "input_b64": "cHdkOiAibXkgbG9uZyBwYXNzIgpob3N0OiBkYg=="
+    },
+    {
+      "expected": "DB_SECRET='[SECRET:assignment]' ./run.sh",
+      "id": "corpus:secrets:single-quoted-passphrase",
+      "input_b64": "REJfU0VDUkVUPSdjb3JyZWN0IGhvcnNlIGJhdHRlcnkgc3RhcGxlJyAuL3J1bi5zaA=="
+    },
+    {
+      "expected": "can you check why this fails? I set OPENAI_KEY to [SECRET:openai_key] and it still 401s",
+      "id": "corpus:transcripts:tx-cc-pasted-openai",
+      "input_b64": "Y2FuIHlvdSBjaGVjayB3aHkgdGhpcyBmYWlscz8gSSBzZXQgT1BFTkFJX0tFWSB0byBzay1wcm9qLVRyNG5TY1IxcFRmQWtFMDEyMzQ1Njc4OWFiY2RlZkdISUpLTCBhbmQgaXQgc3RpbGwgNDAxcw=="
+    },
+    {
+      "expected": "use this one for the smoke test: [SECRET:anthropic_key]",
+      "id": "corpus:transcripts:tx-cc-pasted-anthropic",
+      "input_b64": "dXNlIHRoaXMgb25lIGZvciB0aGUgc21va2UgdGVzdDogc2stYW50LWFwaTAzLVRSQU5TQ1JJUFRmYWtlMDEyMzQ1Njc4OWFiY2RlZkdISUotS0xtbg=="
+    },
+    {
+      "expected": "here is my .env, why does compose not pick it up?\nDJANGO_SECRET_KEY=[SECRET:assignment]\nPOSTGRES_PASSWORD=[SECRET:assignment]\nDEBUG=true",
+      "id": "corpus:transcripts:tx-cc-env-dump",
+      "input_b64": "aGVyZSBpcyBteSAuZW52LCB3aHkgZG9lcyBjb21wb3NlIG5vdCBwaWNrIGl0IHVwPwpESkFOR09fU0VDUkVUX0tFWT10OVFtMnZYYTdMcFI0c0t6OFdjWTFuSGI2SmRGM2dVZQpQT1NUR1JFU19QQVNTV09SRD1GcjFkYXlEZXZQYXNzMjAyNgpERUJVRz10cnVl"
+    },
+    {
+      "expected": "this works from my shell: curl -s -H \"Authorization: Bearer [SECRET:bearer_token]\" https://api.example.test/v1/me",
+      "id": "corpus:transcripts:tx-cc-curl-bearer",
+      "input_b64": "dGhpcyB3b3JrcyBmcm9tIG15IHNoZWxsOiBjdXJsIC1zIC1IICJBdXRob3JpemF0aW9uOiBCZWFyZXIgZXlGYWtlVHJhbnNjcmlwdFRva2VuMDEyMzQ1Njc4OWFiY2RlZlhZWiIgaHR0cHM6Ly9hcGkuZXhhbXBsZS50ZXN0L3YxL21l"
+    },
+    {
+      "expected": "$ export GH_TOKEN=[SECRET:github_token]\n$ export STRIPE=[SECRET:stripe_key]\n$ gh pr list\nno pull requests",
+      "id": "corpus:transcripts:tx-cc-shell-exports",
+      "input_b64": "JCBleHBvcnQgR0hfVE9LRU49Z2hwX1RSQU5TQ1JJUFRmYWtlMDEyMzQ1Njc4OWFiY2RlZkFCQ0RFRjAxCiQgZXhwb3J0IFNUUklQRT1za19saXZlX1RSQU5TQ1JJUFRmYWtlMDEyMzQ1Njc4OWFiY2QKJCBnaCBwciBsaXN0Cm5vIHB1bGwgcmVxdWVzdHM="
+    },
+    {
+      "expected": "deploy with these for now: AWS_ACCESS_KEY_ID=[SECRET:aws_key] and the secret AWS_SECRET_ACCESS_KEY=[SECRET:assignment]",
+      "id": "corpus:transcripts:tx-cx-aws-pair",
+      "input_b64": "ZGVwbG95IHdpdGggdGhlc2UgZm9yIG5vdzogQVdTX0FDQ0VTU19LRVlfSUQ9QUtJQVRSQU5TQ1JJUFRGQUtFMDEgYW5kIHRoZSBzZWNyZXQgQVdTX1NFQ1JFVF9BQ0NFU1NfS0VZPXdKYWxyWFV0bkZFTUkvSzdNREVORy9iUHhSZmlDWVRSQU5TQ1JJUFQ="
+    },
+    {
+      "expected": "point the worker at redis://[SECRET:url_credentials]@cache.internal:6379/0 instead",
+      "id": "corpus:transcripts:tx-cx-url-creds",
+      "input_b64": "cG9pbnQgdGhlIHdvcmtlciBhdCByZWRpczovL2ZyaWRheTpSM2Rpc1RyYW5zY3JpcHRQd0BjYWNoZS5pbnRlcm5hbDo2Mzc5LzAgaW5zdGVhZA=="
+    },
+    {
+      "expected": "the webhook bot uses [SECRET:slack_token], rotate it after",
+      "id": "corpus:transcripts:tx-cx-slack-paste",
+      "input_b64": "dGhlIHdlYmhvb2sgYm90IHVzZXMgeG94Yi0xMjM0NTY3ODkwMTItMTIzNDU2Nzg5MDEyMy1UUkFOU0NSSVBUZmFrZVRPS0VOLCByb3RhdGUgaXQgYWZ0ZXI="
+    },
+    {
+      "expected": "the log line was: auth ok token=[SECRET:jwt]",
+      "id": "corpus:transcripts:tx-cx-jwt-log",
+      "input_b64": "dGhlIGxvZyBsaW5lIHdhczogYXV0aCBvayB0b2tlbj1leUpoYkdjaU9pSklVekkxTmlKOS5leUp6ZFdJaU9pSjBjbUZ1YzJOeWFYQjBJbjAuVHI0blNjUjFwVHMxZ05hVHVSZUZhS2UwMTIzNDU2Nzg5YWJjZEVG"
+    },
+    {
+      "expected": "why is ssh refusing this key?\n[SECRET:pem_private_key]",
+      "id": "corpus:transcripts:tx-cc-pem",
+      "input_b64": "d2h5IGlzIHNzaCByZWZ1c2luZyB0aGlzIGtleT8KLS0tLS1CRUdJTiBPUEVOU1NIIFBSSVZBVEUgS0VZLS0tLS0KYjNCbGJuTnphQzFyWlhrdGRqRUFBQUFBQkc1dmJtVUFBQUFFYm05dVpRQUFBQUFBQUFBQkFBQUFNd0FBQUF0emMyZ3RaVwpReU5UVXhPUUFBQUNCVWNtRnVjMk55YVhCMFJtRnJaVXRsZVRBeE1qTTBOVFkzT0RsaFltTmtaV1lBQUFBPQotLS0tLUVORCBPUEVOU1NIIFBSSVZBVEUgS0VZLS0tLS0="
+    },
+    {
+      "expected": "müşterinin TC kimlik numarası [PII:tckn], faturaya ekle",
+      "id": "corpus:transcripts:tx-tr-tckn",
+      "input_b64": "bcO8xZ90ZXJpbmluIFRDIGtpbWxpayBudW1hcmFzxLEgMTAwMDAwMDAxNDYsIGZhdHVyYXlhIGVrbGU="
+    },
+    {
+      "expected": "Ayşe Hanım'ı [PII:phone] numarasından ara, deploy saatini teyit etsin",
+      "id": "corpus:transcripts:tx-tr-phone",
+      "input_b64": "QXnFn2UgSGFuxLFtJ8SxIDA1MzIgOTg3IDY1IDQzIG51bWFyYXPEsW5kYW4gYXJhLCBkZXBsb3kgc2FhdGluaSB0ZXlpdCBldHNpbg=="
+    },
+    {
+      "expected": "ödeme şu hesaba: [PII:iban] (Acme Ltd.)",
+      "id": "corpus:transcripts:tx-tr-iban",
+      "input_b64": "w7ZkZW1lIMWfdSBoZXNhYmE6IFRSMzMgMDAwNiAxMDA1IDE5NzggNjQ1NyA4NDEzIDI2IChBY21lIEx0ZC4p"
+    },
+    {
+      "expected": "raporu [PII:email] adresine gönder",
+      "id": "corpus:transcripts:tx-tr-email",
+      "input_b64": "cmFwb3J1IG1laG1ldC5rYXlhQGZpcm1hLW9ybmVrLmNvbS50ciBhZHJlc2luZSBnw7ZuZGVy"
+    },
+    {
+      "expected": "/Users/owner/code/friday",
+      "id": "fixture:b4f456f550db8b88",
+      "input_b64": "L1VzZXJzL293bmVyL2NvZGUvZnJpZGF5"
+    },
+    {
+      "expected": "/Users/owner/work/acme",
+      "id": "fixture:c8f8062fd2c5f0f2",
+      "input_b64": "L1VzZXJzL293bmVyL3dvcmsvYWNtZQ=="
+    },
+    {
+      "expected": "/Users/owner/work/acme-secret",
+      "id": "fixture:93300f921c5e976a",
+      "input_b64": "L1VzZXJzL293bmVyL3dvcmsvYWNtZS1zZWNyZXQ="
+    },
+    {
+      "expected": "/Users/owner/work/acme/tests/test_invoice.py",
+      "id": "fixture:cfddd68c744184de",
+      "input_b64": "L1VzZXJzL293bmVyL3dvcmsvYWNtZS90ZXN0cy90ZXN0X2ludm9pY2UucHk="
+    },
+    {
+      "expected": "/tmp/scratch",
+      "id": "fixture:e549f2e8c418f5c0",
+      "input_b64": "L3RtcC9zY3JhdGNo"
+    },
+    {
+      "expected": "2.0.0",
+      "id": "fixture:f22abd6773ab2328",
+      "input_b64": "Mi4wLjA="
+    },
+    {
+      "expected": "2026-11-25T10:00:00.000Z",
+      "id": "fixture:78f94d45dab2aa33",
+      "input_b64": "MjAyNi0xMS0yNVQxMDowMDowMC4wMDBa"
+    },
+    {
+      "expected": "2026-11-25T10:00:05.000Z",
+      "id": "fixture:bb4824b3e005d1ea",
+      "input_b64": "MjAyNi0xMS0yNVQxMDowMDowNS4wMDBa"
+    },
+    {
+      "expected": "2026-11-29T20:00:00.000Z",
+      "id": "fixture:31e5f22a92610e9a",
+      "input_b64": "MjAyNi0xMS0yOVQyMDowMDowMC4wMDBa"
+    },
+    {
+      "expected": "2026-11-29T20:00:10.000Z",
+      "id": "fixture:819ea53a49cbc223",
+      "input_b64": "MjAyNi0xMS0yOVQyMDowMDoxMC4wMDBa"
+    },
+    {
+      "expected": "2026-11-29T20:00:12.000Z",
+      "id": "fixture:6491641c8df464a3",
+      "input_b64": "MjAyNi0xMS0yOVQyMDowMDoxMi4wMDBa"
+    },
+    {
+      "expected": "2026-11-29T20:00:20.000Z",
+      "id": "fixture:8e34e51dda546ca2",
+      "input_b64": "MjAyNi0xMS0yOVQyMDowMDoyMC4wMDBa"
+    },
+    {
+      "expected": "2026-11-29T20:00:30.000Z",
+      "id": "fixture:f648f71170d58fb4",
+      "input_b64": "MjAyNi0xMS0yOVQyMDowMDozMC4wMDBa"
+    },
+    {
+      "expected": "2026-11-29T20:01:00.000Z",
+      "id": "fixture:550a8b26786f497b",
+      "input_b64": "MjAyNi0xMS0yOVQyMDowMTowMC4wMDBa"
+    },
+    {
+      "expected": "2026-11-29T20:01:01.000Z",
+      "id": "fixture:a64578b0fa10112b",
+      "input_b64": "MjAyNi0xMS0yOVQyMDowMTowMS4wMDBa"
+    },
+    {
+      "expected": "2026-11-29T20:01:02.000Z",
+      "id": "fixture:54a16a34a2c09291",
+      "input_b64": "MjAyNi0xMS0yOVQyMDowMTowMi4wMDBa"
+    },
+    {
+      "expected": "2026-11-29T20:02:00.000Z",
+      "id": "fixture:ce62b94094587ebc",
+      "input_b64": "MjAyNi0xMS0yOVQyMDowMjowMC4wMDBa"
+    },
+    {
+      "expected": "2026-11-29T20:02:01.000Z",
+      "id": "fixture:9b1d80c7c2332d2d",
+      "input_b64": "MjAyNi0xMS0yOVQyMDowMjowMS4wMDBa"
+    },
+    {
+      "expected": "2026-11-29T21:00:00.000Z",
+      "id": "fixture:602e70cc4c39bbaa",
+      "input_b64": "MjAyNi0xMS0yOVQyMTowMDowMC4wMDBa"
+    },
+    {
+      "expected": "2026-11-29T21:00:30.000Z",
+      "id": "fixture:3b484383f393ce97",
+      "input_b64": "MjAyNi0xMS0yOVQyMTowMDozMC4wMDBa"
+    },
+    {
+      "expected": "2026-11-29T22:00:00.000Z",
+      "id": "fixture:28c9f03fc5169edd",
+      "input_b64": "MjAyNi0xMS0yOVQyMjowMDowMC4wMDBa"
+    },
+    {
+      "expected": "2026-11-29T22:01:00.000Z",
+      "id": "fixture:dab744a0a58e73ca",
+      "input_b64": "MjAyNi0xMS0yOVQyMjowMTowMC4wMDBa"
+    },
+    {
+      "expected": "2026-11-29T22:01:10.000Z",
+      "id": "fixture:8b1c155203c547b7",
+      "input_b64": "MjAyNi0xMS0yOVQyMjowMToxMC4wMDBa"
+    },
+    {
+      "expected": "2026-11-29T22:01:11.000Z",
+      "id": "fixture:72aa2f2528e8213d",
+      "input_b64": "MjAyNi0xMS0yOVQyMjowMToxMS4wMDBa"
+    },
+    {
+      "expected": "2026-11-29T22:02:00.000Z",
+      "id": "fixture:d25ad7e4f8cb460d",
+      "input_b64": "MjAyNi0xMS0yOVQyMjowMjowMC4wMDBa"
+    },
+    {
+      "expected": "2026-11-29T22:02:01.000Z",
+      "id": "fixture:86c7dd7493a54b61",
+      "input_b64": "MjAyNi0xMS0yOVQyMjowMjowMS4wMDBa"
+    },
+    {
+      "expected": "2026-11-30T00:30:00.000Z",
+      "id": "fixture:71731064334af2b5",
+      "input_b64": "MjAyNi0xMS0zMFQwMDozMDowMC4wMDBa"
+    },
+    {
+      "expected": "2026-11-30T00:31:00.000Z",
+      "id": "fixture:8174019e1eb5c978",
+      "input_b64": "MjAyNi0xMS0zMFQwMDozMTowMC4wMDBa"
+    },
+    {
+      "expected": "2026-11-30T00:32:00.000Z",
+      "id": "fixture:840a6277d783a177",
+      "input_b64": "MjAyNi0xMS0zMFQwMDozMjowMC4wMDBa"
+    },
+    {
+      "expected": "2026-11-30T00:40:00.000Z",
+      "id": "fixture:aad96171c34c41ce",
+      "input_b64": "MjAyNi0xMS0zMFQwMDo0MDowMC4wMDBa"
+    },
+    {
+      "expected": "2026-11-30T00:50:00.000Z",
+      "id": "fixture:24d31a909136a7a5",
+      "input_b64": "MjAyNi0xMS0zMFQwMDo1MDowMC4wMDBa"
+    },
+    {
+      "expected": "<command-name>/clear</command-name> META-PHRASE",
+      "id": "fixture:e65f97f871304d3b",
+      "input_b64": "PGNvbW1hbmQtbmFtZT4vY2xlYXI8L2NvbW1hbmQtbmFtZT4gTUVUQS1QSFJBU0U="
+    },
+    {
+      "expected": "<environment_context>MARKER-PHRASE cwd</environment_context>",
+      "id": "fixture:5c23ec624e8e84f1",
+      "input_b64": "PGVudmlyb25tZW50X2NvbnRleHQ+TUFSS0VSLVBIUkFTRSBjd2Q8L2Vudmlyb25tZW50X2NvbnRleHQ+"
+    },
+    {
+      "expected": "Bash",
+      "id": "fixture:d1e9567da9a8a4b0",
+      "input_b64": "QmFzaA=="
+    },
+    {
+      "expected": "Bump the acme API client; the token is [SECRET:github_token].",
+      "id": "fixture:c3a0b91b0ed46c22",
+      "input_b64": "QnVtcCB0aGUgYWNtZSBBUEkgY2xpZW50OyB0aGUgdG9rZW4gaXMgZ2hwX0ZpeHR1cmVGQUtFMDEyMzQ1Njc4OWFiY2RlZkdISUpLTG1uLg=="
+    },
+    {
+      "expected": "Bumped the client to 2.1.",
+      "id": "fixture:e85379c7654e09bc",
+      "input_b64": "QnVtcGVkIHRoZSBjbGllbnQgdG8gMi4xLg=="
+    },
+    {
+      "expected": "Done: the test now waits for the clock. Ping [PII:email] if it fails again.",
+      "id": "fixture:b352f78f09e0dabe",
+      "input_b64": "RG9uZTogdGhlIHRlc3Qgbm93IHdhaXRzIGZvciB0aGUgY2xvY2suIFBpbmcgb3duZXIuZml4dHVyZUBleGFtcGxlLmNvbSBpZiBpdCBmYWlscyBhZ2Fpbi4="
+    },
+    {
+      "expected": "Drafting the memo outline.",
+      "id": "fixture:207a7338aaefbee4",
+      "input_b64": "RHJhZnRpbmcgdGhlIG1lbW8gb3V0bGluZS4="
+    },
+    {
+      "expected": "FILE-CONTENT-PHRASE def test_invoice(): pass",
+      "id": "fixture:cbf95449274fc072",
+      "input_b64": "RklMRS1DT05URU5ULVBIUkFTRSBkZWYgdGVzdF9pbnZvaWNlKCk6IHBhc3M="
+    },
+    {
+      "expected": "FUNCTION-OUTPUT-PHRASE setup(name='acme')",
+      "id": "fixture:ef9fdd2d6ffdde77",
+      "input_b64": "RlVOQ1RJT04tT1VUUFVULVBIUkFTRSBzZXR1cChuYW1lPSdhY21lJyk="
+    },
+    {
+      "expected": "Fix the flaky invoice test in acme.",
+      "id": "fixture:07f98d479a710454",
+      "input_b64": "Rml4IHRoZSBmbGFreSBpbnZvaWNlIHRlc3QgaW4gYWNtZS4="
+    },
+    {
+      "expected": "Gateway wired; tests are green.",
+      "id": "fixture:e66b7e720ebd66c5",
+      "input_b64": "R2F0ZXdheSB3aXJlZDsgdGVzdHMgYXJlIGdyZWVuLg=="
+    },
+    {
+      "expected": "Here is a regex.",
+      "id": "fixture:a86f2a42c220e7f6",
+      "input_b64": "SGVyZSBpcyBhIHJlZ2V4Lg=="
+    },
+    {
+      "expected": "I will look at the test first.",
+      "id": "fixture:b98fd70192fbb8a1",
+      "input_b64": "SSB3aWxsIGxvb2sgYXQgdGhlIHRlc3QgZmlyc3Qu"
+    },
+    {
+      "expected": "Invoice - [PII:email]",
+      "id": "fixture:b870dff84a654032",
+      "input_b64": "SW52b2ljZSAtIG93bmVyLmZpeHR1cmVAZXhhbXBsZS5jb20="
+    },
+    {
+      "expected": "NESTED-SIBLING-PHRASE plan the memo.",
+      "id": "fixture:91a476d9047ee181",
+      "input_b64": "TkVTVEVELVNJQkxJTkctUEhSQVNFIHBsYW4gdGhlIG1lbW8u"
+    },
+    {
+      "expected": "Notes",
+      "id": "fixture:8a7525b1492fb848",
+      "input_b64": "Tm90ZXM="
+    },
+    {
+      "expected": "REASONING-PHRASE",
+      "id": "fixture:d2a03a061eaf0d90",
+      "input_b64": "UkVBU09OSU5HLVBIUkFTRQ=="
+    },
+    {
+      "expected": "Read",
+      "id": "fixture:9b9a8d05a7ec353b",
+      "input_b64": "UmVhZA=="
+    },
+    {
+      "expected": "Review the HUD panel copy.",
+      "id": "fixture:b167cd182f7bf9a0",
+      "input_b64": "UmV2aWV3IHRoZSBIVUQgcGFuZWwgY29weS4="
+    },
+    {
+      "expected": "SCRATCH-PHRASE try a regex.",
+      "id": "fixture:dd88d61ac96eca99",
+      "input_b64": "U0NSQVRDSC1QSFJBU0UgdHJ5IGEgcmVnZXgu"
+    },
+    {
+      "expected": "SIDECHAIN-PHRASE subagent prompt",
+      "id": "fixture:96df012c84052970",
+      "input_b64": "U0lERUNIQUlOLVBIUkFTRSBzdWJhZ2VudCBwcm9tcHQ="
+    },
+    {
+      "expected": "SUMMARY-PHRASE acme billing",
+      "id": "fixture:bc1d75932eeb7cd2",
+      "input_b64": "U1VNTUFSWS1QSFJBU0UgYWNtZSBiaWxsaW5n"
+    },
+    {
+      "expected": "Safari",
+      "id": "fixture:5f0330392292a13a",
+      "input_b64": "U2FmYXJp"
+    },
+    {
+      "expected": "TOOL-RESULT-PHRASE 1 failed",
+      "id": "fixture:518e9754decef540",
+      "input_b64": "VE9PTC1SRVNVTFQtUEhSQVNFIDEgZmFpbGVk"
+    },
+    {
+      "expected": "Terminal",
+      "id": "fixture:e0926fdac700b094",
+      "input_b64": "VGVybWluYWw="
+    },
+    {
+      "expected": "The staging key is [SECRET:openai_key], use it for the smoke run.",
+      "id": "fixture:a085b5b0095cac13",
+      "input_b64": "VGhlIHN0YWdpbmcga2V5IGlzIHNrLXByb2otRml4dHVyZUZBS0UwMTIzNDU2Nzg5YWJjZGVmR0hJSktMbW5vcFFSLCB1c2UgaXQgZm9yIHRoZSBzbW9rZSBydW4u"
+    },
+    {
+      "expected": "Two strings need Turkish plurals.",
+      "id": "fixture:6eb52bd0c1eccfaf",
+      "input_b64": "VHdvIHN0cmluZ3MgbmVlZCBUdXJraXNoIHBsdXJhbHMu"
+    },
+    {
+      "expected": "UNKNOWN-KIND-PHRASE",
+      "id": "fixture:77927f6988444c94",
+      "input_b64": "VU5LTk9XTi1LSU5ELVBIUkFTRQ=="
+    },
+    {
+      "expected": "Wire the node gateway; my AWS key [SECRET:aws_key] must not leak and DB_PASSWORD=[SECRET:assignment] stays local.",
+      "id": "fixture:d294a3c4808512c4",
+      "input_b64": "V2lyZSB0aGUgbm9kZSBnYXRld2F5OyBteSBBV1Mga2V5IEFLSUFGSVhUVVJFRkFLRTEyMzQ1IG11c3Qgbm90IGxlYWsgYW5kIERCX1BBU1NXT1JEPUZpeHR1cmVQYXNzMjAyNnggc3RheXMgbG9jYWwu"
+    },
+    {
+      "expected": "a-0",
+      "id": "fixture:68571817c96c5c83",
+      "input_b64": "YS0w"
+    },
+    {
+      "expected": "a-1",
+      "id": "fixture:2f8fe63a6224321d",
+      "input_b64": "YS0x"
+    },
+    {
+      "expected": "a-2",
+      "id": "fixture:d72e654c3645b02d",
+      "input_b64": "YS0y"
+    },
+    {
+      "expected": "a-3",
+      "id": "fixture:2cb72cc6837572f4",
+      "input_b64": "YS0z"
+    },
+    {
+      "expected": "acme - pytest",
+      "id": "fixture:9849aa20738fcf91",
+      "input_b64": "YWNtZSAtIHB5dGVzdA=="
+    },
+    {
+      "expected": "assistant",
+      "id": "fixture:a39a7ffad4a3013f",
+      "input_b64": "YXNzaXN0YW50"
+    },
+    {
+      "expected": "c1",
+      "id": "fixture:d0f631ca1ddba8db",
+      "input_b64": "YzE="
+    },
+    {
+      "expected": "cc-acme-1",
+      "id": "fixture:c299bd7783b883ce",
+      "input_b64": "Y2MtYWNtZS0x"
+    },
+    {
+      "expected": "cc-friday-1",
+      "id": "fixture:736d8c92cd3fb51b",
+      "input_b64": "Y2MtZnJpZGF5LTE="
+    },
+    {
+      "expected": "cc-scratch-1",
+      "id": "fixture:5a2f1c3b8cc87cd2",
+      "input_b64": "Y2Mtc2NyYXRjaC0x"
+    },
+    {
+      "expected": "cc-secret-1",
+      "id": "fixture:675e367734777bf1",
+      "input_b64": "Y2Mtc2VjcmV0LTE="
+    },
+    {
+      "expected": "claude-opus-4-5",
+      "id": "fixture:a96b5ba4fb5fa294",
+      "input_b64": "Y2xhdWRlLW9wdXMtNC01"
+    },
+    {
+      "expected": "claude-sonnet-4-5",
+      "id": "fixture:f2b3b47fd9a71add",
+      "input_b64": "Y2xhdWRlLXNvbm5ldC00LTU="
+    },
+    {
+      "expected": "codex_cli",
+      "id": "fixture:64d91e65f41c722b",
+      "input_b64": "Y29kZXhfY2xp"
+    },
+    {
+      "expected": "com.apple.Notes",
+      "id": "fixture:19741fc99c683f15",
+      "input_b64": "Y29tLmFwcGxlLk5vdGVz"
+    },
+    {
+      "expected": "com.apple.Safari",
+      "id": "fixture:7cd9df4fce2816bc",
+      "input_b64": "Y29tLmFwcGxlLlNhZmFyaQ=="
+    },
+    {
+      "expected": "com.apple.Terminal",
+      "id": "fixture:29cc372c34959742",
+      "input_b64": "Y29tLmFwcGxlLlRlcm1pbmFs"
+    },
+    {
+      "expected": "cx-acme-1",
+      "id": "fixture:b1d979daff53e862",
+      "input_b64": "Y3gtYWNtZS0x"
+    },
+    {
+      "expected": "cx-friday-1",
+      "id": "fixture:e7bbf2b115d805ea",
+      "input_b64": "Y3gtZnJpZGF5LTE="
+    },
+    {
+      "expected": "external",
+      "id": "fixture:3c4623849a49a539",
+      "input_b64": "ZXh0ZXJuYWw="
+    },
+    {
+      "expected": "friday - zsh",
+      "id": "fixture:f113500c0ced6b91",
+      "input_b64": "ZnJpZGF5IC0genNo"
+    },
+    {
+      "expected": "function_call",
+      "id": "fixture:b75314988cced242",
+      "input_b64": "ZnVuY3Rpb25fY2FsbA=="
+    },
+    {
+      "expected": "function_call_output",
+      "id": "fixture:d941e28bec9643d8",
+      "input_b64": "ZnVuY3Rpb25fY2FsbF9vdXRwdXQ="
+    },
+    {
+      "expected": "gpt-5-codex",
+      "id": "fixture:87061d3552d5a135",
+      "input_b64": "Z3B0LTUtY29kZXg="
+    },
+    {
+      "expected": "input_text",
+      "id": "fixture:e153d609c3f3006f",
+      "input_b64": "aW5wdXRfdGV4dA=="
+    },
+    {
+      "expected": "message",
+      "id": "fixture:ab530a13e4591498",
+      "input_b64": "bWVzc2FnZQ=="
+    },
+    {
+      "expected": "output_text",
+      "id": "fixture:5b63d37ae5dcc884",
+      "input_b64": "b3V0cHV0X3RleHQ="
+    },
+    {
+      "expected": "pytest",
+      "id": "fixture:2b01214d32c382db",
+      "input_b64": "cHl0ZXN0"
+    },
+    {
+      "expected": "reasoning",
+      "id": "fixture:0c4d01e81bb3d1fd",
+      "input_b64": "cmVhc29uaW5n"
+    },
+    {
+      "expected": "response_item",
+      "id": "fixture:307d6888de458e57",
+      "input_b64": "cmVzcG9uc2VfaXRlbQ=="
+    },
+    {
+      "expected": "session_meta",
+      "id": "fixture:a39b6e83ef467714",
+      "input_b64": "c2Vzc2lvbl9tZXRh"
+    },
+    {
+      "expected": "shell",
+      "id": "fixture:ce635c4eabff5e4f",
+      "input_b64": "c2hlbGw="
+    },
+    {
+      "expected": "summary",
+      "id": "fixture:761b7ad8ad439b28",
+      "input_b64": "c3VtbWFyeQ=="
+    },
+    {
+      "expected": "summary_text",
+      "id": "fixture:3f9a74f6584cbac1",
+      "input_b64": "c3VtbWFyeV90ZXh0"
+    },
+    {
+      "expected": "t1",
+      "id": "fixture:628b49d96dcde97a",
+      "input_b64": "dDE="
+    },
+    {
+      "expected": "t2",
+      "id": "fixture:c44474038d459e40",
+      "input_b64": "dDI="
+    },
+    {
+      "expected": "text",
+      "id": "fixture:982d9e3eb996f559",
+      "input_b64": "dGV4dA=="
+    },
+    {
+      "expected": "tool_result",
+      "id": "fixture:d5c41a8cba9764bd",
+      "input_b64": "dG9vbF9yZXN1bHQ="
+    },
+    {
+      "expected": "tool_use",
+      "id": "fixture:42576899122f9f6a",
+      "input_b64": "dG9vbF91c2U="
+    },
+    {
+      "expected": "turn_context",
+      "id": "fixture:6dbc18ceb8ffa1c8",
+      "input_b64": "dHVybl9jb250ZXh0"
+    },
+    {
+      "expected": "u-1",
+      "id": "fixture:a24a7f55f278dd49",
+      "input_b64": "dS0x"
+    },
+    {
+      "expected": "u-2",
+      "id": "fixture:1fe2696cbaaf13d5",
+      "input_b64": "dS0y"
+    },
+    {
+      "expected": "u-3",
+      "id": "fixture:dba074d40fbe301b",
+      "input_b64": "dS0z"
+    },
+    {
+      "expected": "u-4",
+      "id": "fixture:9069a72d42f9bc57",
+      "input_b64": "dS00"
+    },
+    {
+      "expected": "u-5",
+      "id": "fixture:fe64b5057017057b",
+      "input_b64": "dS01"
+    },
+    {
+      "expected": "u-6",
+      "id": "fixture:50507465c472e904",
+      "input_b64": "dS02"
+    },
+    {
+      "expected": "unknown_kind",
+      "id": "fixture:a08226576294f61d",
+      "input_b64": "dW5rbm93bl9raW5k"
+    },
+    {
+      "expected": "user",
+      "id": "fixture:04f8996da763b7a9",
+      "input_b64": "dXNlcg=="
+    },
+    {
+      "expected": "{\"cmd\":\"cat setup.py\"}",
+      "id": "fixture:485cf40e0fb70e36",
+      "input_b64": "eyJjbWQiOiJjYXQgc2V0dXAucHkifQ=="
+    },
+    {
+      "expected": "{not json at all",
+      "id": "fixture:5904a5cacb8ec3ce",
+      "input_b64": "e25vdCBqc29uIGF0IGFsbA=="
+    }
+  ]
+}

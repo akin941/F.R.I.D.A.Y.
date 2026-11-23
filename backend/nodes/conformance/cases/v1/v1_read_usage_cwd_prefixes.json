@@ -1,0 +1,62 @@
+{
+  "check": null,
+  "description": "Spend per project in integer micro-USD (half-even); totals cover the matching projects only (the nested sibling is not under the prefix).",
+  "expect": {
+    "frames": [
+      {
+        "output": {
+          "by_project": [
+            {
+              "cwd": "~/work/acme",
+              "tokens_in": 4500,
+              "tokens_out": 700,
+              "usd_micros": 63345
+            }
+          ],
+          "tokens_in": 4500,
+          "tokens_out": 700,
+          "total_usd_micros": 63345
+        },
+        "status": "ok",
+        "truncated": false,
+        "type": "result"
+      }
+    ],
+    "reader_calls": 1
+  },
+  "name": "v1_read_usage_cwd_prefixes",
+  "setup": {
+    "now": 1796000005
+  },
+  "steps": [
+    {
+      "frame": {
+        "args": {
+          "cwd_prefixes": [
+            "~/work/acme"
+          ],
+          "period": "week"
+        },
+        "args_sha256": "d76cb7487651c0b29591c733110a17632d91b1dd7147c865a0b987eeeb46071d",
+        "capability": "usage.ccusage",
+        "capability_version": 1,
+        "class": "read",
+        "expires_at": 1796000030,
+        "grant": null,
+        "id": "52df4237-cff1-4c10-8c35-ceaddc55992f",
+        "invocation_id": "d6896345-305d-40f2-80ce-a827614b0380",
+        "issued_at": 1796000000,
+        "key_id": "03396219237f75a6",
+        "node_id": "6f1e2d3c-4b5a-4987-8a6b-5c4d3e2f1a0b",
+        "nonce": "IXlLtv6eJntRtqXPrqeHKK_wJKC4PaPSdApON3gcRKQ",
+        "sig": "LF59RTGQjxFS_AxX9rlKze-XGjoSoouQ_kmTmN0Pz8zVhIoa2_UqYwhtHNrkWcG8_ozgnyIROTQCgUuQSt4MCA",
+        "trace_id": "conformance-v1-read-usage_cwd_prefixes",
+        "type": "invoke",
+        "v": 1,
+        "workspace_id": "2a3b4c5d-6e7f-4a8b-9c0d-1e2f3a4b5c6d"
+      },
+      "op": "send"
+    }
+  ],
+  "version": 1
+}

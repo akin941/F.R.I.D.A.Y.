@@ -1,0 +1,66 @@
+{
+  "check": null,
+  "description": "Codex threads from session_meta, filtered by cwd_prefixes.",
+  "expect": {
+    "absent_b64": [
+      "Y3gtYWNtZS0x"
+    ],
+    "frames": [
+      {
+        "output": {
+          "threads": [
+            {
+              "cwd": "~/code/friday",
+              "last_activity_at": 1795998720,
+              "message_count": 2,
+              "model": "gpt-5-codex",
+              "started_at": 1795998600,
+              "status_hint": "idle",
+              "thread_id": "cx-friday-1"
+            }
+          ]
+        },
+        "status": "ok",
+        "truncated": false,
+        "type": "result"
+      }
+    ],
+    "reader_calls": 1
+  },
+  "name": "v1_read_codex_threads_list_cwd_prefixes",
+  "setup": {
+    "now": 1796000005
+  },
+  "steps": [
+    {
+      "frame": {
+        "args": {
+          "cwd_prefixes": [
+            "~/code"
+          ],
+          "limit": 50,
+          "since_hours": 24
+        },
+        "args_sha256": "e7f3918e14382d4365c882c09f001025773fd8328764cafc7dd157b62efab2b2",
+        "capability": "codex.threads.list",
+        "capability_version": 1,
+        "class": "read",
+        "expires_at": 1796000030,
+        "grant": null,
+        "id": "1015cd7f-8b26-4dc2-9831-22dac882e9ca",
+        "invocation_id": "7486d689-c138-4e94-a6e8-c7ff24e67c70",
+        "issued_at": 1796000000,
+        "key_id": "03396219237f75a6",
+        "node_id": "6f1e2d3c-4b5a-4987-8a6b-5c4d3e2f1a0b",
+        "nonce": "gsg2H2Lue7y5xWoTMZzXRKf6uxMWDZpd7ez832r0CuQ",
+        "sig": "X9k4o-NB0rbAVR1UeKuMzsWXksqEjKXpTbow7S7qMHIo710vM11sqVuQHHAzJRrkDip7jyFmwW3VjBXEeeKuDQ",
+        "trace_id": "conformance-v1-read-codex_threads_list_cwd_prefixes",
+        "type": "invoke",
+        "v": 1,
+        "workspace_id": "2a3b4c5d-6e7f-4a8b-9c0d-1e2f3a4b5c6d"
+      },
+      "op": "send"
+    }
+  ],
+  "version": 1
+}

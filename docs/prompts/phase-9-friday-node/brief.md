@@ -1595,7 +1595,7 @@ node paired, the e2e test is green, and the go/no-go record is written.
 | brief | `docs/p9-brief` | This brief (full, from the stub), MASTER_PLAN §AA row 9 Brief/Status, regenerated `self_sources.json` | Phase 8A closeout | **implemented 2026-11-20** (docs only; review round 1 findings addressed 2026-11-20 — D7 terminal-status table and `refuse_read`, D8 deletion policy, vendored node scrubber + `scrub.json` parity, `cwd_prefixes`, per-owner kill-switch payload, per-socket result routing, `CONFORMANCE` build-only mode; review round 2 findings addressed 2026-11-20 — server-recomputed `usage.ccusage` aggregates with per-project tokens and the nested-rule test, authenticator wording, `NODE_SIGNING_KEY` in web/worker/gateway + preflight, ephemeral TTL-bound Redis result keys; awaits re-review) |
 | 1 | `feat/p9-node-pairing` | Spike S9.0: `TrustedDevice.kind=node`, node pairing codes, `jnd_` secrets, rotation with grace, age cap, revocation fan-out, kill switch, `CHANNEL_NODE`, URL walk, ADR-013 spike note | brief approved | **implemented 2026-11-20** (spike S9.0 server half: passed, ADR-013 note; Keychain half pending owner evaluation, M1; known follow-up 4 resolved: `is_usable()` branches on `kind`; awaits independent Sonnet 5 review) |
 | 2 | `feat/p9-node-protocol` | `nodes` app + contracts, protocol v1 schemas, canonical JSON, Ed25519 envelopes, capability contracts, pairing endpoint, signing key config, hash-chained `NodeInvocation`, dependency manifest | 1 | **implemented 2026-11-20** (done criterion met: `test_the_done_criterion_signed_invoke_verifies_only_with_the_returned_key`; known follow-ups 1, 2 and 5 resolved; ADR-013 contract note; awaits independent Sonnet 5 review) |
-| 3 | `feat/p9-reference-node` | Python reference node, conformance cases + `--check`, hostile fake gateway, reference spool and Unix-socket relay | 2 | not started |
+| 3 | `feat/p9-reference-node` | Python reference node, conformance cases + `--check`, hostile fake gateway, reference spool and Unix-socket relay | 2 | **implemented 2026-11-20** (done criterion met: `node_conformance_server --protocol 1` prints all-pass, `test_every_v1_case_passes_through_the_command_over_a_socket`; builds on the session half, v1 protocol cases and vendored scrubber that `feat/p10-reference-executor` already shipped; adds the readers, 13 reader cases, `reader_calls`, the spool, the hook relay, node event upload and `vectors/scrub.json`; awaits independent Sonnet 5 review) |
 | 4 | `feat/p9-node-gateway` | `asgi_nodes` + uvicorn/`wsproto`, `node-gateway` service, handshake, `hello`/snapshot, heartbeat/presence, invoke bus, revocation/kill-switch fan-out, limits, node APIs | 1, 2, 3 | not started |
 | 5 | `feat/p9-node-reads` | `invoke_read` end to end, five read tools, path → workspace resolution, second scrub, fencing, chain + audit rows, invocations API | 4 | not started |
 | 6 | `feat/p9-node-events` | `event` sink wiring into `ingest_hook_events`, cross-relay dedupe, spool upload acks, availability events | 4 (parallel with 5) | not started |
@@ -1756,6 +1756,23 @@ Apple frameworks unless one goes through the governance manifest
 
 **Contract tests:**
 - conformance cases `not_granted` and the args-schema family;
+- the reader cases `backend/nodes/conformance/cases/v1/v1_read_*.json`
+  (branch 3): the `CONFORMANCE` build reads the fixture home that
+  `backend/nodes/reference/fixtures/factory.py` builds (the transcript
+  templates under `fixtures/transcripts/` rendered with `{{HOME}}` = the
+  fixture home and the `<<>>` split marker removed, the repos `~/work/acme`
+  and `~/code/friday`, `fixtures/desktop.json` in place of `NSWorkspace`).
+  There `usage.ccusage` follows the reference rule (assistant
+  `message.usage` and `costUSD` of the Claude transcripts, micro-USD
+  half-even) because no ccusage binary runs in a test; the release build
+  runs ccusage. The prepare op's `setup.reader_grants` and
+  `setup.window_titles` set the local grants and the titles toggle, and
+  `report` must include `reader_calls` (refusal cases pin 0: no reader
+  may run on any refusal path);
+- the normative reader rules in the `backend/nodes/reference/readers.py`
+  module docstring (prefix match at segment boundaries on both the
+  absolute and the `~/` form, identifiers the scrub would change dropped,
+  scrub then cut, oldest turns cut first to `max_result_bytes`);
 - branch 5's server tests re-run against a live Mac node with the
   owner's real sessions. This is a manual pass: the chat answers "Claude
   Code oturumlarım ne yapıyor?" from local detail, and rows of
@@ -1771,8 +1788,12 @@ Apple frameworks unless one goes through the governance manifest
   3 s on any error;
 - `Sources/NodeCore/HookSocket.swift`: directory 0700, socket 0600,
   `getpeereid` uid == own uid, otherwise close;
-- `Sources/NodeCore/Spool.swift`: ≤ 10 MB, ≤ 24 h, file 0600, events
-  only, upload via `event{spooled:true}`, delete on `event.ack`.
+- `Sources/NodeCore/Spool.swift`: ≤ 10 MiB (`MAX_SPOOL_BYTES` =
+  10 485 760, oldest batch dropped first), ≤ 24 h, file 0600 created
+  `O_EXCL` in a 0700 directory, batches of 1–50 events only, upload via
+  `event{spooled:true}` after `hello.ack`, one batch in flight, delete on
+  the `event.ack` naming that frame's id (a stray ack deletes nothing); a
+  live event not acked before the socket drops is spooled.
 
 **Must satisfy:**
 - the reference implementation `backend/nodes/reference/{hook_relay,spool}.py`;
@@ -2155,3 +2176,78 @@ Implementation notes (branch 2):
 - `published_test_key_ids()` (in `nodes/keys.py`) is where branch 3 adds the
   conformance key pair.
 
+### Owner steps (pending) — `feat/p9-reference-node`, recorded 2026-11-20
+
+1. Run the independent Sonnet 5 review of `feat/p9-reference-node` and fix
+   findings until APPROVE (CLAUDE.md "Reviews").
+2. No migration, no new setting and no new dependency: `wsproto==1.3.2`
+   was already pinned by `feat/p10-reference-executor` and is reused
+   unchanged (manifest row updated). Nothing to run on the daily stack.
+3. Mac session M2 (deferred: Mac session): the Swift readers must pass the
+   `v1_read_*` conformance cases against the fixture home (M2 "Contract
+   tests" above) and `ScrubParityTests.swift` must reproduce
+   `backend/nodes/conformance/vectors/scrub.json` byte for byte.
+4. Mac session M3 (deferred: Mac session): re-express
+   `nodes/tests/test_reference_spool.py` and
+   `nodes/tests/test_reference_hook_relay.py` in Swift; the peer check uses
+   `getpeereid`/`LOCAL_PEERCRED` instead of `SO_PEERCRED`.
+
+Implementation notes (branch 3):
+- **Base.** `feat/p10-reference-executor` had already shipped the session
+  half (`node.py`, `transport.py`, the hostile fake gateway, the v1
+  protocol cases, the vendored scrubber and `build_node_conformance`), so
+  this branch extends those files instead of adding parallel ones (that
+  branch's owner step 2).
+- **Readers** (`nodes/reference/readers.py`): the eight v1 capabilities
+  over fixture directories, with local directory grants off by default
+  (`not_granted` in `hello`, and the reader refuses too). Reader failures
+  (unknown session, repo not on the local list) answer
+  `result{status: error}` with a null code: the v1 refusal enum has no
+  reader code and the server's lookup (D9) runs first anyway. Codex
+  `function_call`/`function_call_output` are counted on the assistant turn
+  they lead to; a Claude tool-only line adds its counts to the turn before
+  it. `usage.ccusage` is computed from the transcripts' usage fields (the
+  ccusage stand-in), amounts in integer micro-USD rounded half-even.
+- **Fixtures** (`nodes/reference/fixtures/transcripts/`, `desktop.json`):
+  synthetic Claude and Codex JSONL as templates; `build_fixture_home`
+  renders them under `~/.claude` and `~/.codex`. The fake secrets carry the
+  corpus split marker `<<>>` in the committed files, and the case and vector
+  files carry them base64 only.
+- **Conformance.** 13 `v1_read_*` cases (prefixes at segment boundaries,
+  `since_hours`, scrubbed detail with tool results/file contents/meta/
+  sidechain/markers absent, last turns, unknown session, Codex list and
+  detail, usage, git status, an unlisted repo, titles off and on, a
+  directory not granted). New report field `reader_calls`; every case whose
+  frames are all refusals or frame errors pins `reader_calls: 0` (99 cases
+  across v1 and v2), so no reader runs on any refusal path, and the runner
+  reports a node whose reader ran. v1 now has 49 cases; v2 is unchanged (91).
+- **Spool and relay** (`spool.py`, `hook_relay.py`): 10 MiB (read as
+  MiB, the brief's "10 MB"), 24 h, 0600/0700, oldest first, deleted only
+  after ack, survives a restart; the relay socket 0600 in a 0700 directory,
+  `SO_PEERCRED` uid check behind a seam (a failing check refuses), input
+  over 256 KiB dropped whole, the event built exactly as `friday-hook`'s
+  `build_event` (a parity test imports `friday_hook`, the one
+  `ignore_imports` entry added to the `nodes` contract, test code only).
+  `relay_stdin` is the reference `friday-node hook`: exits 0 within 3 s.
+- **Node events.** `ReferenceNode.relay_hook_event`: live
+  `event{spooled:false}` after `hello.ack` when nothing is in flight or
+  spooled, otherwise spooled; spooled batches upload in order, one in
+  flight; `event.ack` is never answered; heartbeats carry the spool depth.
+- **`vectors/scrub.json`** (190 items): every corpus row
+  (`corpus:<file>:<id>`) and every fixture string (`fixture:<sha256
+  prefix>`, transcripts rendered with home `/Users/owner`), inputs base64,
+  generated and `--check`ed by `build_node_conformance`.
+- The production `NODE_SIGNING_KEY` validation already refuses the
+  conformance key (`nodes.keys.published_test_key_ids`, Phase 10 branch 2);
+  `test_the_conformance_keys_are_refused_as_server_keys` covers it.
+
+### Known follow-ups (from `feat/p9-reference-node`)
+
+1. **8B owner-turn readers.** `integrations/node_reference/owner_turns.py`
+   (Phase 8B branch 8) still lives outside `nodes.reference`, with its own
+   fixtures and the `integrations.cli` vendored scrubber. Moving it under
+   `nodes/reference/readers.py` (and its two contracts into
+   `nodes/capabilities/v1/`) touches `integrations/tests` and
+   `tools/tests/transcript_nodes.py` and the `integrations → nodes` import
+   contract, so it is left to branch 5 (`invoke_read`), as the 8B brief's
+   owner steps already plan.
