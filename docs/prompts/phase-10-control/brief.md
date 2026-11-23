@@ -2588,3 +2588,23 @@ paired node is plain chat), `ai_core/tests/test_speech_gateway.py` (the
    that window the test's `today()` (UTC) and `TIME_ZONE = Europe/Istanbul`
    fall on different dates. This branch changes nothing under `memory/`.
    Fix in a memory branch: compute the expected date in the local timezone.
+
+**Known follow-ups from the independent review (recorded at merge, 2026-11-23).**
+These were left unresolved at APPROVE. They are LOW and do not block the merge.
+1. LOW, `backend/assistant/trust_check.py`: the `repo_not_mentioned` rule
+   matches a raw substring on casefolded text. Short path segments (2 or more
+   characters, such as `ui`, `work` or `code`) can match inside unrelated
+   words, so the warn is easy to satisfy. `repo_mentioned()` also searches the
+   full message content, while the model only sees the first 2000 characters,
+   so a repo name past that point satisfies the rule but is invisible to the
+   model. This conforms to the spec (a path segment counts), and the rule can
+   only warn. Fix (optional): match on word boundaries (a `\b` regex or a
+   token split) and run `repo_mentioned` over the same truncated text the
+   model sees.
+2. LOW, `backend/assistant/services.py`: `propose_node_action` raises
+   `ImproperlyConfigured` through `_node_action_args_prompt_version()` when
+   `friday_router_node_action_args` is not seeded. A turn classified as
+   `node_action` then fails with a 500 instead of degrading to chat. This
+   follows the existing `connector_args` precedent. Fix (optional): catch
+   `ImproperlyConfigured` in `propose_node_action` and return `None`, so an
+   unseeded environment degrades to plain chat.
