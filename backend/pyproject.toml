@@ -434,7 +434,8 @@ forbidden_modules = ["config", "core", "accounts", "workspaces", "audit", "ai_co
 # Phase 8B branch 8 (brief D17): the reference owner-turn readers are the
 # executable spec of the node side (the Swift app ports them), so like
 # friday-hook they import nothing of ours but the vendored scrubber. They
-# move under the `nodes` reference node once Phase 9 branch 3 merges.
+# move under the `nodes` reference node with Phase 9 branch 5 (branch 3 left them
+# here; see the Phase 9 brief, known follow-ups of `feat/p9-reference-node`).
 [[tool.importlinter.contracts]]
 name = "the owner-turn reference readers import no project package (Phase 8B D17)"
 type = "forbidden"

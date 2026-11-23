@@ -27,6 +27,9 @@ Two hooks exist:
   `policy_fingerprint` before the case, `report` answers the report object
   of `runner.node_report`). After `prepare` the node connects to the gateway
   for that case. The reference node's side of it is `HookClient`.
+  `prepare` also configures the node's readers from the case's `setup`
+  (`reader_grants`, `window_titles`) over the fixture home, and `report`
+  includes `reader_calls` (how many times a reader ran; Phase 9 branch 3).
 """
 
 import datetime
