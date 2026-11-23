@@ -766,7 +766,12 @@ LEARNING_BEAT_TASKS = {
         "assistant.tasks.assemble_self_block_task",
         "tools.tasks.pull_transcripts_task",
     ),
-    "runner": ("harness.tasks.ingest_repo_commits",),
+    # Phase 8B closeout: the Graphify lease-recovery scan rides the runner
+    # beat with the git producer that triggers the runs.
+    "runner": (
+        "harness.tasks.ingest_repo_commits",
+        "harness.tasks.recover_stale_graphify_runs",
+    ),
 }
 # The corpus files and the marker that keeps provider prefixes split in the
 # committed files (see memory/tests/test_scrubber.py).
@@ -894,13 +899,14 @@ def _load_scrubber_corpus(directory):
         corpus[name] = _corpus_rows(directory / filename)
     # Phase 8B branch 8 (D14): the labelled transcript fragments join the
     # secrets and PII classes (the same 100% secrets-recall gate).
-    transcripts = directory / SCRUBBER_TRANSCRIPT_CORPUS
-    if transcripts.is_file():
-        for row in _corpus_rows(transcripts):
-            if row["class"] == "secret":
-                corpus["secrets"].append(row)
-            elif row["class"] == "pii":
-                corpus["pii"].append(row)
+    # The closeout makes the file required: a deployment without it fails
+    # the gate (`learning_scrubber`), it is never silently skipped.
+    corpus["transcripts"] = _corpus_rows(directory / SCRUBBER_TRANSCRIPT_CORPUS)
+    for row in corpus["transcripts"]:
+        if row["class"] == "secret":
+            corpus["secrets"].append(row)
+        elif row["class"] == "pii":
+            corpus["pii"].append(row)
     return corpus
 
 
@@ -914,6 +920,13 @@ def _check_learning_scrubber():
     directory = scrubber_corpus_dir()
     if not all((directory / f).is_file() for f in SCRUBBER_CORPUS_FILES.values()):
         return CheckResult("learning_scrubber", WARN, "scrubber corpus not found here")
+    if not (directory / SCRUBBER_TRANSCRIPT_CORPUS).is_file():
+        return CheckResult(
+            "learning_scrubber",
+            FAIL,
+            f"{SCRUBBER_TRANSCRIPT_CORPUS} is missing (Phase 8B D14: the transcript "
+            "fragments are part of the 100% secrets-recall gate)",
+        )
     try:
         corpus = _load_scrubber_corpus(directory)
     except (ValueError, KeyError, TypeError, AttributeError, OSError) as exc:
@@ -928,6 +941,11 @@ def _check_learning_scrubber():
 
     if not corpus["secrets"]:
         return CheckResult("learning_scrubber", FAIL, "the secrets corpus is empty")
+    transcript_secrets = [r for r in corpus["transcripts"] if r["class"] == "secret"]
+    if not transcript_secrets:
+        return CheckResult(
+            "learning_scrubber", FAIL, f"{SCRUBBER_TRANSCRIPT_CORPUS} has no secret item"
+        )
     secrets_missed = missed(corpus["secrets"])
     pii_missed = missed(corpus["pii"])
     benign_changed = [
@@ -938,7 +956,8 @@ def _check_learning_scrubber():
     detail = (
         f"secrets {secrets_total - len(secrets_missed)}/{secrets_total}, "
         f"PII {pii_total - len(pii_missed)}/{pii_total}, "
-        f"benign {benign_total - len(benign_changed)}/{benign_total} unchanged"
+        f"benign {benign_total - len(benign_changed)}/{benign_total} unchanged, "
+        f"incl. {len(corpus['transcripts'])} transcript fragments"
     )
     if secrets_missed:
         return CheckResult(
@@ -950,12 +969,31 @@ def _check_learning_scrubber():
     return CheckResult("learning_scrubber", PASS, detail)
 
 
+# Phase 8B closeout: the purposes whose budgets `learning_budget` must find
+# beyond the nightly two (D15): fact reconciliation, the weekly reflection
+# and the eval-set answers (`learning_eval`, outside the nightly cap).
+LEARNING_BUDGET_REQUIRED = (
+    "memory.fact_reconciliation",
+    "memory.reflection",
+    "memory.eval_answer",
+)
+
+
 def _check_learning_budget():
     from ai_core.budgets import budgets_for
 
-    purposes = tuple(getattr(settings, "AI_LEARNING_PURPOSES", ()) or ())
-    if not purposes:
+    learning = tuple(getattr(settings, "AI_LEARNING_PURPOSES", ()) or ())
+    if not learning:
         return CheckResult("learning_budget", FAIL, "AI_LEARNING_PURPOSES is empty")
+    configured = learning + tuple(getattr(settings, "AI_LEARNING_EVAL_PURPOSES", ()) or ())
+    not_configured = [p for p in LEARNING_BUDGET_REQUIRED if p not in configured]
+    if not_configured:
+        return CheckResult(
+            "learning_budget",
+            FAIL,
+            f"{', '.join(not_configured)} not in AI_LEARNING_PURPOSES / AI_LEARNING_EVAL_PURPOSES",
+        )
+    purposes = tuple(dict.fromkeys(configured))
     covers = {p: budgets_for(p) for p in purposes}
     uncovered = [p for p in purposes if not covers[p]]
     if uncovered:
@@ -1027,6 +1065,422 @@ def check_learning():
         _check_learning_scrubber(),
         _check_learning_budget(),
         _check_learning_last_run(),
+    ]
+
+
+# --- Phase 8B: transcripts and knowledge graph (closeout) -----------------
+
+# The tsvector GIN indexes of hybrid retrieval (D8; migrations
+# memory/0015_hybrid_retrieval and knowledge/0004_chunk_search).
+RETRIEVAL_GIN_INDEXES = (
+    "memory_memory_search_gin",
+    "memory_memoryfact_search_gin",
+    "knowledge_knowledgechunk_search_gin",
+)
+# The label `harness/docker/graphify.Dockerfile` stamps on the image; its
+# value must equal the `graphifyy` pin of `graphify.lock.txt`.
+GRAPHIFY_VERSION_LABEL = "org.friday.graphify.version"
+_GRAPHIFY_PIN = re.compile(r"^graphifyy==([0-9][0-9A-Za-z.\-]*)", re.MULTILINE)
+
+
+def existing_index_names(names):
+    """The subset of `names` that exist as indexes (pg_indexes)."""
+    from django.db import connection
+
+    with connection.cursor() as cursor:
+        cursor.execute("SELECT indexname FROM pg_indexes WHERE indexname = ANY(%s)", [list(names)])
+        return {row[0] for row in cursor.fetchall()}
+
+
+def docker_image_labels(image, *, timeout):
+    """The labels of a local Docker image: a dict, or None when the image is
+    not present. `OSError` (no `docker` binary here) and `TimeoutExpired`
+    propagate. Only the label map is read; no container starts."""
+    import subprocess
+
+    completed = subprocess.run(  # noqa: S603 -- fixed argv, image from settings, no shell
+        ["docker", "image", "inspect", "--format", "{{json .Config.Labels}}", image],  # noqa: S607
+        capture_output=True,
+        timeout=timeout,
+        check=False,
+    )
+    if completed.returncode != 0:
+        return None
+    try:
+        labels = json.loads(completed.stdout or b"null")
+    except ValueError:
+        return {}
+    return labels if isinstance(labels, dict) else {}
+
+
+def graphify_pinned_version():
+    """The `graphifyy==` pin of the hash-locked requirements the image is
+    built from (one source of truth with the Dockerfile's label)."""
+    import harness
+
+    lock = Path(harness.__file__).resolve().parent / "docker" / "graphify.lock.txt"
+    match = _GRAPHIFY_PIN.search(lock.read_text(encoding="utf-8"))
+    return match.group(1) if match else None
+
+
+def transcript_node_port():
+    """The transcript pull's installed node port (`tools.transcript_ingest`)."""
+    from tools.transcript_ingest import get_node_port
+
+    return get_node_port()
+
+
+def _check_graph_integrity():
+    """The temporal graph's invariants (D2) over every row, trashed ones
+    included: no fact crosses workspaces (subject, object and fact share one
+    workspace), every approved fact with `superseded_by` set has a closed
+    window, no window ends before it starts. Counts only, never a
+    statement."""
+    from django.db.models import F, Q
+
+    from memory.models import MemoryEntity, MemoryFact
+
+    facts = MemoryFact.all_objects
+    crossing = facts.filter(
+        ~Q(subject__workspace_id=F("workspace_id"))
+        | (Q(object_entity__isnull=False) & ~Q(object_entity__workspace_id=F("workspace_id")))
+    ).count()
+    open_superseded = facts.filter(
+        status=MemoryFact.Status.APPROVED, superseded_by__isnull=False, valid_to__isnull=True
+    ).count()
+    inverted = facts.filter(valid_to__isnull=False, valid_to__lt=F("valid_from")).count()
+    problems = [
+        f"{count} {label}"
+        for count, label in (
+            (crossing, "fact(s) crossing workspaces"),
+            (open_superseded, "superseded approved fact(s) with no valid_to"),
+            (inverted, "fact(s) with valid_to before valid_from"),
+        )
+        if count
+    ]
+    if problems:
+        return CheckResult("graph_integrity", FAIL, "; ".join(problems))
+    return CheckResult(
+        "graph_integrity",
+        PASS,
+        f"{facts.count()} fact(s), {MemoryEntity.all_objects.count()} entit(ies) consistent",
+    )
+
+
+def _hybrid_compare_recorded():
+    from memory.models import MemoryEvalRun
+
+    return MemoryEvalRun.objects.filter(
+        set=MemoryEvalRun.Set.PRIVATE,
+        kind=MemoryEvalRun.Kind.COMPARE,
+        retrieval_mode="hybrid",
+        compression_purpose="",
+        verdict=MemoryEvalRun.Verdict.PASS,
+    ).exists()
+
+
+def _check_retrieval_indexes():
+    """`build_vector_indexes --check` (an HNSW index per active embedding
+    provider and table), the three tsvector GIN indexes, and the retrieval
+    mode. `hybrid` without a recorded passing private compare is a `warn`
+    (D8: the default flips only on the owner's recorded compare)."""
+    from memory.retrieval.indexes import (
+        MISSING,
+        SKIPPED_DIMENSION,
+        SKIPPED_NO_DIMENSION,
+        STALE,
+        index_status,
+    )
+
+    name = "retrieval_indexes"
+    mode = getattr(settings, "MEMORY_RETRIEVAL_MODE", "legacy")
+    entries = index_status()
+    gin_missing = sorted(set(RETRIEVAL_GIN_INDEXES) - existing_index_names(RETRIEVAL_GIN_INDEXES))
+    failing = sorted(e.name for e in entries if e.status in (MISSING, STALE))
+    skipped = sorted(
+        {e.provider_name for e in entries if e.status in (SKIPPED_DIMENSION, SKIPPED_NO_DIMENSION)}
+    )
+    providers = {e.provider_id for e in entries}
+    healthy = sum(1 for e in entries if e.status not in (MISSING, STALE))
+    detail = (
+        f"mode {mode}; {healthy}/{len(entries)} HNSW entr(ies) over {len(providers)} "
+        f"provider(s); {len(RETRIEVAL_GIN_INDEXES) - len(gin_missing)}"
+        f"/{len(RETRIEVAL_GIN_INDEXES)} GIN"
+    )
+    problems = []
+    if failing:
+        problems.append(f"missing or stale: {', '.join(failing)} (run build_vector_indexes)")
+    if gin_missing:
+        problems.append(f"GIN missing: {', '.join(gin_missing)} (run migrate)")
+    if problems:
+        return CheckResult(name, FAIL, f"{detail}; " + "; ".join(problems))
+    notes = []
+    if not entries:
+        notes.append("no active embedding provider (retrieval is full-text only)")
+    if skipped:
+        notes.append(f"no HNSW for {', '.join(skipped)} (exact scan)")
+    if mode == "hybrid" and not _hybrid_compare_recorded():
+        notes.append("hybrid without a recorded passing private compare (D8)")
+    if notes:
+        return CheckResult(name, WARN, f"{detail}; " + "; ".join(notes))
+    return CheckResult(name, PASS, detail)
+
+
+def _graphify_image_problem(enabled, notes):
+    """None when the pinned image is present with the right label; a `fail`
+    reason when it is mislabelled, or absent while a repo needs it. Without
+    a `docker` binary here (the web and worker containers) it is a note
+    only: the image lives on the runner host."""
+    image = getattr(settings, "HARNESS_IMAGE_GRAPHIFY", "")
+    pinned = graphify_pinned_version()
+    if not image or pinned is None:
+        return "HARNESS_IMAGE_GRAPHIFY or the graphifyy pin is not set"
+    try:
+        labels = docker_image_labels(image, timeout=_timeout())
+    except Exception as exc:
+        notes.append(f"image not checked here ({_error_label(exc)}; run on the runner host)")
+        return None
+    if labels is None:
+        message = f"image {image} not built (owner step: docker build graphify.Dockerfile)"
+        if enabled:
+            return message
+        notes.append(message)
+        return None
+    found = labels.get(GRAPHIFY_VERSION_LABEL)
+    if found != pinned:
+        return f"image {image} label {GRAPHIFY_VERSION_LABEL}={found or 'none'}, pin {pinned}"
+    return None
+
+
+def _check_graphify():
+    """The Graphify job (D10): the pinned image is present locally with its
+    version label, and the last run of each `graphify_enabled` repo
+    succeeded. A `warn` when no repo is enabled or none ran yet; a `fail`
+    on a failed last run or a missing/mislabelled image a repo needs."""
+    from harness.models import GraphifyRun, HarnessRepo
+
+    name = "graphify"
+    repos = list(
+        HarnessRepo.objects.filter(graphify_enabled=True, enabled=True).order_by("created_at")
+    )
+    notes = []
+    problems = []
+    image_problem = _graphify_image_problem(bool(repos), notes)
+    if image_problem:
+        problems.append(image_problem)
+    if not repos:
+        notes.insert(0, "no repo has graphify_enabled (owner step)")
+    statuses = Counter()
+    for repo in repos:
+        last = GraphifyRun.objects.filter(repo=repo).order_by("-created_at").first()
+        if last is None:
+            statuses["never ran"] += 1
+            continue
+        statuses[last.status] += 1
+        if last.status == GraphifyRun.Status.FAILED:
+            problems.append(f"{repo.name}: last run failed ({last.error_type or 'error'})")
+    detail = f"{len(repos)} enabled repo(s)"
+    if statuses:
+        counted = sorted(statuses.items())
+        detail += ": " + ", ".join(f"{count} {status}" for status, count in counted)
+    if problems:
+        return CheckResult(name, FAIL, f"{detail}; " + "; ".join(problems))
+    if statuses["never ran"]:
+        notes.append("an enabled repo has no run yet")
+    in_flight = statuses[GraphifyRun.Status.PENDING] + statuses[GraphifyRun.Status.RUNNING]
+    if in_flight:
+        notes.append(f"{in_flight} in flight")
+    if notes:
+        return CheckResult(name, WARN, f"{detail}; " + "; ".join(notes))
+    return CheckResult(name, PASS, f"{detail}; image label matches the pin")
+
+
+def _compressor_health_url():
+    parsed = urlparse(getattr(settings, "AI_COMPRESSION_URL", "") or "")
+    if parsed.scheme not in ("http", "https") or not parsed.netloc:
+        return ""
+    return f"{parsed.scheme}://{parsed.netloc}/healthz"
+
+
+def _compression_eval_recorded(purpose):
+    from memory.models import MemoryEvalRun
+
+    return MemoryEvalRun.objects.filter(
+        set=MemoryEvalRun.Set.PRIVATE,
+        kind=MemoryEvalRun.Kind.COMPARE,
+        compression_purpose=purpose,
+        verdict=MemoryEvalRun.Verdict.PASS,
+    ).exists()
+
+
+def _check_compressor():
+    """The Headroom stage (D11). Off: `pass (off)`. On: the sidecar's
+    `/healthz` answers with telemetry off and offline, and every enabled
+    purpose has a recorded passing private compression compare (the
+    go/no-go: <= 1 point loss, zero extra leaks)."""
+    from ai_core.compression import COMPRESSION_BYPASS
+
+    name = "compressor"
+    if not getattr(settings, "AI_COMPRESSION_ENABLED", False):
+        return CheckResult(name, PASS, "off (AI_COMPRESSION_ENABLED is false)")
+    purposes = sorted(getattr(settings, "AI_COMPRESSION_PURPOSES", ()) or ())
+    url = _compressor_health_url()
+    if not url:
+        return CheckResult(name, FAIL, "AI_COMPRESSION_URL is not an http(s) URL")
+    try:
+        status, text = _get_page(url)
+    except Exception as exc:
+        return CheckResult(name, FAIL, f"sidecar unreachable: {_error_label(exc)}")
+    if status != 200:
+        return CheckResult(name, FAIL, f"sidecar /healthz HTTP {status}")
+    try:
+        body = json.loads(text)
+    except ValueError:
+        body = None
+    if not isinstance(body, dict) or body.get("status") != "ok":
+        return CheckResult(name, FAIL, "unexpected sidecar /healthz body")
+    problems = []
+    if body.get("telemetry") != "off" or body.get("offline") is not True:
+        problems.append("the sidecar reports telemetry on or not offline")
+    unrecorded = [
+        p for p in purposes if p not in COMPRESSION_BYPASS and not _compression_eval_recorded(p)
+    ]
+    if unrecorded:
+        problems.append(
+            f"no recorded passing private compare for {', '.join(unrecorded)} "
+            "(memory_eval compare --compression)"
+        )
+    detail = f"sidecar healthy; purposes: {', '.join(purposes) or 'none'}"
+    if problems:
+        return CheckResult(name, FAIL, f"{detail}; " + "; ".join(problems))
+    bypassed = [p for p in purposes if p in COMPRESSION_BYPASS]
+    if not purposes:
+        return CheckResult(name, WARN, f"{detail}; no purpose enabled (nothing is compressed)")
+    if bypassed:
+        return CheckResult(name, WARN, f"{detail}; {', '.join(bypassed)} always bypassed")
+    return CheckResult(name, PASS, detail)
+
+
+def _last_pull(capability):
+    from audit.models import AuditLog
+    from memory.ingestion.transcript_audit import PULL_AUDIT_ACTION
+
+    return (
+        AuditLog.objects.filter(action=PULL_AUDIT_ACTION, metadata__capability=capability)
+        .order_by("-created_at")
+        .values_list("metadata", flat=True)
+        .first()
+    )
+
+
+def _transcript_capability_result(port, node, source, rows, problems, notes):
+    from memory.ingestion.transcript_audit import CAPABILITY_BY_SOURCE_KIND
+
+    capability = CAPABILITY_BY_SOURCE_KIND[source.kind]
+    if source.paused_at is not None:
+        notes.append(f"{source.kind} paused")
+    if not port.capability_granted(node, capability):
+        notes.append(f"{capability} not granted (Touch ID grant, Mac session)")
+        return
+    last = _last_pull(capability)
+    if not isinstance(last, dict):
+        notes.append(f"{capability}: no pull yet")
+        return
+    status = str(last.get("status") or "unknown")[:40]
+    code = str(last.get("code") or "")[:40]
+    rows.append(f"{capability} {status}{f' ({code})' if code else ''}")
+    if status in ("failed", "server_refused"):
+        problems.append(f"{capability} last pull {status}")
+    elif status != "ok":
+        notes.append(f"{capability} last pull {status}")
+
+
+def _check_transcripts():
+    """The transcript pull (D13). Both sources disabled: `pass (off)`. An
+    enabled source: the owner's node is reachable through the pull's port,
+    the capability is granted, and the last pull's status (`ok` passes,
+    `node_refused` warns, `failed`/`server_refused` fail). No port, no node
+    or no grant is a `warn`: the `nodes`-backed port is a pending follow-up
+    and the Swift readers and the Touch ID grant are the Mac session (M1).
+    Codes and counts only, never a path or a turn."""
+    from memory.ingestion.transcript_audit import CAPABILITY_BY_SOURCE_KIND
+    from memory.models import IngestionSource
+    from tools.transcript_ingest import UnavailableNodePort
+
+    name = "transcripts"
+    workspace = _installation_owner_workspace()
+    if workspace is None:
+        return CheckResult(name, WARN, "no installation owner workspace")
+    enabled = list(
+        IngestionSource.objects.filter(
+            workspace=workspace, kind__in=list(CAPABILITY_BY_SOURCE_KIND), enabled=True
+        ).order_by("kind")
+    )
+    if not enabled:
+        return CheckResult(name, PASS, "off (both transcript sources disabled)")
+    port = transcript_node_port()
+    if isinstance(port, UnavailableNodePort):
+        return CheckResult(
+            name, WARN, "no node port installed (nodes-backed port pending; the pull is a no-op)"
+        )
+    node = port.owner_node(workspace.owner)
+    if node is None:
+        return CheckResult(
+            name, WARN, "the owner's node is not reachable (Mac session pending owner evaluation)"
+        )
+    rows, problems, notes = [], [], []
+    for source in enabled:
+        _transcript_capability_result(port, node, source, rows, problems, notes)
+    detail = "; ".join(rows) or "node reachable, no pull status"
+    if problems:
+        return CheckResult(name, FAIL, f"{detail}; " + "; ".join(problems))
+    if notes:
+        return CheckResult(name, WARN, f"{detail}; " + "; ".join(notes))
+    return CheckResult(name, PASS, detail)
+
+
+def _metric(value):
+    return "n/a" if value is None else f"{value:.4f}"
+
+
+def _check_eval_baseline():
+    """A private baseline `MemoryEvalRun` exists (D9, M2 item 1). Without
+    one it is a `warn` (pending owner evaluation), never a failure. Metrics
+    only: the row stores nothing else."""
+    from memory.models import MemoryEvalRun
+
+    name = "eval_baseline"
+    baselines = MemoryEvalRun.objects.filter(kind=MemoryEvalRun.Kind.BASELINE)
+    private = baselines.filter(set=MemoryEvalRun.Set.PRIVATE).order_by("-started_at").first()
+    if private is None:
+        public = baselines.filter(set=MemoryEvalRun.Set.PUBLIC).exists()
+        return CheckResult(
+            name,
+            WARN,
+            "no private baseline recorded (pending owner evaluation, M2 item 1)"
+            + ("; a public baseline exists" if public else ""),
+        )
+    return CheckResult(
+        name,
+        PASS,
+        f"private baseline {private.started_at.date().isoformat()} ({private.retrieval_mode}): "
+        f"recall@10 {_metric(private.recall_at_10)}, leak rate {_metric(private.leak_rate)}, "
+        f"temporal {_metric(private.temporal_correctness)}, {private.total} case(s)",
+    )
+
+
+def check_graph():
+    """Phase 8B configuration and health, read-only (no model call, nothing
+    sent to a node, no container started): `graph_integrity`,
+    `retrieval_indexes`, `graphify`, `compressor`, `transcripts`,
+    `eval_baseline`. One crashing check is its own `fail` row."""
+    return [
+        _guarded("graph_integrity", _check_graph_integrity),
+        _guarded("retrieval_indexes", _check_retrieval_indexes),
+        _guarded("graphify", _check_graphify),
+        _guarded("compressor", _check_compressor),
+        _guarded("transcripts", _check_transcripts),
+        _guarded("eval_baseline", _check_eval_baseline),
     ]
 
 
@@ -1317,6 +1771,7 @@ CHECKS = (
     ("voice_config", check_voice_config),
     ("voice_mute", check_voice_mute),
     ("learning", check_learning),
+    ("graph", check_graph),
     ("nodes", check_nodes),
 )
 

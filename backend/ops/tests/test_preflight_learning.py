@@ -156,7 +156,29 @@ def test_a_disabled_rule_does_not_count_as_mapped(settings, sources, personal):
 def test_beat_passes_on_the_real_schedule():
     result = _learning()["learning_beat"]
     assert result.status == PASS, result.detail
-    assert "7 worker-beat and 1 runner-beat" in result.detail
+    assert "7 worker-beat and 2 runner-beat" in result.detail
+
+
+def test_beat_fails_without_the_graphify_recovery_scan(monkeypatch):
+    """Phase 8B closeout: the reflection, the transcript pull and the
+    Graphify lease-recovery scan are all required."""
+    schedules, registered = preflight.beat_schedules()
+    runner = {
+        name: entry
+        for name, entry in schedules["runner"].items()
+        if entry["task"] != "harness.tasks.recover_stale_graphify_runs"
+    }
+    worker = {
+        name: entry
+        for name, entry in schedules["worker"].items()
+        if entry["task"] != "memory.ingestion.tasks.run_weekly_reflection_task"
+    }
+    trimmed = {"worker": worker, "runner": runner}
+    monkeypatch.setattr(preflight, "beat_schedules", lambda: (trimmed, registered))
+    result = _learning()["learning_beat"]
+    assert result.status == FAIL
+    assert "recover_stale_graphify_runs not on the runner beat" in result.detail
+    assert "run_weekly_reflection_task not on the worker beat" in result.detail
 
 
 def test_beat_fails_when_a_task_is_on_the_wrong_beat(monkeypatch):
@@ -194,9 +216,21 @@ def test_scrubber_self_test_passes_on_the_committed_corpus():
     assert hit == total and int(total) > 0
 
 
-def _write_corpus(directory, *, secrets, pii=(), benign=()):
+# The transcript corpus is required since the Phase 8B closeout; by default
+# a test corpus carries one transcript secret the fake scrubbers below hide.
+TRANSCRIPT_SECRET = {"id": "tx", "class": "secret", "text": "pasted S3CR3T", "needles": ["S3CR3T"]}
+
+
+def _write_corpus(directory, *, secrets, pii=(), benign=(), transcripts=(TRANSCRIPT_SECRET,)):
     directory.mkdir(parents=True, exist_ok=True)
-    for name, rows in (("secrets", secrets), ("pii", pii), ("benign", benign)):
+    for name, rows in (
+        ("secrets", secrets),
+        ("pii", pii),
+        ("benign", benign),
+        ("transcripts", transcripts),
+    ):
+        if rows is None:
+            continue
         (directory / f"{name}.jsonl").write_text(
             "\n".join(json.dumps(r) for r in rows) + "\n", encoding="utf-8"
         )
@@ -234,7 +268,8 @@ def test_scrubber_warns_on_pii_miss_or_changed_benign(settings, tmp_path, monkey
     monkeypatch.setattr("memory.ingestion.scrubber.scrub_text", fake_scrub)
     result = _learning()["learning_scrubber"]
     assert result.status == WARN
-    assert result.detail.startswith("secrets 1/1, PII 0/1, benign 1/1 unchanged")
+    assert result.detail.startswith("secrets 2/2, PII 0/1, benign 1/1 unchanged")
+    assert "incl. 1 transcript fragments" in result.detail
     assert "check: p" in result.detail
 
 
@@ -243,8 +278,27 @@ def test_scrubber_warns_when_the_corpus_is_absent(settings, tmp_path):
     assert _learning()["learning_scrubber"].status == WARN
 
 
+def test_scrubber_fails_without_the_transcript_corpus(settings, tmp_path):
+    """Phase 8B closeout: `transcripts.jsonl` is part of the gate; a corpus
+    without it, or without one transcript secret, fails."""
+    _write_corpus(
+        tmp_path,
+        secrets=[{"id": "s", "text": "sk-ant-api03-abcdefghijklmnopqrstuvwx", "needles": []}],
+        transcripts=None,
+    )
+    settings.PREFLIGHT_SCRUBBER_CORPUS_DIR = str(tmp_path)
+    result = _learning()["learning_scrubber"]
+    assert result.status == FAIL and "transcripts.jsonl is missing" in result.detail
+    (tmp_path / "transcripts.jsonl").write_text(
+        json.dumps({"id": "tx-pii", "class": "pii", "text": "call 555", "needles": []}) + "\n",
+        encoding="utf-8",
+    )
+    result = _learning()["learning_scrubber"]
+    assert result.status == FAIL and "has no secret item" in result.detail
+
+
 def test_scrubber_fails_on_an_unreadable_or_empty_corpus(settings, tmp_path):
-    _write_corpus(tmp_path, secrets=[])
+    _write_corpus(tmp_path, secrets=[], transcripts=[])
     settings.PREFLIGHT_SCRUBBER_CORPUS_DIR = str(tmp_path)
     assert _learning()["learning_scrubber"].status == FAIL
     (tmp_path / "secrets.jsonl").write_text("{not json\n", encoding="utf-8")
@@ -265,10 +319,32 @@ def test_budget_fails_before_seed_and_passes_after():
 
 
 def test_budget_warns_without_a_monthly_cap(settings):
-    AIBudget.objects.create(name="daily-only", purposes=list(settings.AI_LEARNING_PURPOSES))
+    purposes = list(settings.AI_LEARNING_PURPOSES) + list(settings.AI_LEARNING_EVAL_PURPOSES)
+    AIBudget.objects.create(name="daily-only", purposes=purposes)
     AIBudget.objects.filter(name="daily-only").update(daily_limit_usd=1)
     result = _learning()["learning_budget"]
     assert result.status == WARN and "no monthly cap" in result.detail
+
+
+def test_budget_fails_when_a_phase_8b_purpose_is_not_configured(settings):
+    """Phase 8B closeout: reconciliation, reflection and the eval answers
+    must each be a configured budget purpose."""
+    call_command("seed_ai_defaults", stdout=StringIO())
+    settings.AI_LEARNING_EVAL_PURPOSES = ()
+    result = _learning()["learning_budget"]
+    assert result.status == FAIL and "memory.eval_answer" in result.detail
+    settings.AI_LEARNING_EVAL_PURPOSES = ("memory.eval_answer",)
+    settings.AI_LEARNING_PURPOSES = ("memory.episode_extraction", "memory.consolidation")
+    result = _learning()["learning_budget"]
+    assert result.status == FAIL
+    assert "memory.fact_reconciliation, memory.reflection" in result.detail
+
+
+def test_budget_fails_when_the_eval_budget_is_missing():
+    call_command("seed_ai_defaults", stdout=StringIO())
+    AIBudget.objects.filter(name="learning_eval").update(is_active=False)
+    result = _learning()["learning_budget"]
+    assert result.status == FAIL and "memory.eval_answer" in result.detail
 
 
 def test_budget_ignores_inactive_budgets(settings):
@@ -346,6 +422,7 @@ def test_command_prints_the_learning_lines(settings, monkeypatch, owner, sources
     settings.AI_FAKE_PROVIDER = True
     settings.CELERY_TASK_ALWAYS_EAGER = True
     call_command("seed_ai_defaults", stdout=StringIO())
+    call_command("build_vector_indexes", stdout=StringIO())
     out = StringIO()
     call_command("preflight", "--no-model-calls", stdout=out)
     lines = out.getvalue().splitlines()

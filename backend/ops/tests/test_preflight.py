@@ -782,6 +782,10 @@ def _stub_infra(monkeypatch, *, celery_replies):
     # node checks themselves: ops/tests/test_preflight_nodes.py).
     monkeypatch.setattr(preflight, "worker_signing_key_id", lambda *, timeout: signing_key_id())
     monkeypatch.setattr(preflight, "node_conformance_drift", lambda: [])
+    # Phase 8B closeout: `seed_ai_defaults` adds the fake embedder after the
+    # test database's `post_migrate` index build, so build its HNSW indexes
+    # the way a deploy does (`retrieval_indexes`).
+    call_command("build_vector_indexes", stdout=StringIO())
 
 
 def test_command_all_green_exits_zero(settings, monkeypatch):
