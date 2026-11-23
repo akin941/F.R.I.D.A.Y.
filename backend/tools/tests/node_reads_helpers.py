@@ -1,6 +1,6 @@
 """The owner's world for the Friday Node read tool tests (Phase 9 brief
 branch 5), shared by `tools/tests/test_node_reads.py` and the chat-turn e2e
-`assistant/tests/test_node_read_turns.py`.
+`config/tests/test_node_read_turns.py`.
 
 `make_world()` builds: the installation owner with a personal workspace and
 two firm workspaces (`Acme`, `Secret`), the 8A hooks path rules

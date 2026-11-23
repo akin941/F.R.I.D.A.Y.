@@ -1597,7 +1597,7 @@ node paired, the e2e test is green, and the go/no-go record is written.
 | 2 | `feat/p9-node-protocol` | `nodes` app + contracts, protocol v1 schemas, canonical JSON, Ed25519 envelopes, capability contracts, pairing endpoint, signing key config, hash-chained `NodeInvocation`, dependency manifest | 1 | **implemented 2026-11-20** (done criterion met: `test_the_done_criterion_signed_invoke_verifies_only_with_the_returned_key`; known follow-ups 1, 2 and 5 resolved; ADR-013 contract note; awaits independent Sonnet 5 review) |
 | 3 | `feat/p9-reference-node` | Python reference node, conformance cases + `--check`, hostile fake gateway, reference spool and Unix-socket relay | 2 | **implemented 2026-11-20** (done criterion met: `node_conformance_server --protocol 1` prints all-pass, `test_every_v1_case_passes_through_the_command_over_a_socket`; builds on the session half, v1 protocol cases and vendored scrubber that `feat/p10-reference-executor` already shipped; adds the readers, 13 reader cases, `reader_calls`, the spool, the hook relay, node event upload and `vectors/scrub.json`; awaits independent Sonnet 5 review) |
 | 4 | `feat/p9-node-gateway` | `asgi_nodes` + uvicorn/`wsproto`, `node-gateway` service, handshake, `hello`/snapshot, heartbeat/presence, invoke bus, revocation/kill-switch fan-out, limits, node APIs | 1, 2, 3 | **implemented 2026-11-20** (done criterion met: `test_the_done_criterion_round_trip` in process and `test_the_reference_node_over_a_real_socket` under uvicorn — `hello.ack`, a signed read answered, cut off within 2 s of `revoke_device`; `invoke_read` bus side with chain + AuditLog rows; known follow-up 3 resolved (Redis in-flight counter, two-process test); Phase 10 owner step 2 done (`NodeSession` wired into the socket app, 1013 placeholder replaced); awaits independent Sonnet 5 review) |
-| 5 | `feat/p9-node-reads` | `invoke_read` end to end, five read tools, path → workspace resolution, second scrub, fencing, chain + audit rows, invocations API | 4 | **implemented 2026-11-20** (done criterion met: `assistant/tests/test_node_read_turns.py::test_the_done_criterion_sessions_answered_from_the_node` — the reference node's fixture sessions in a FakeAdapter chat answer, filtered to the conversation's workspace, two `ok` chain rows, no stored content; 8B step-0 actor check in `invoke_read`; the 8B owner-turn move is a known follow-up below; awaits independent Sonnet 5 review) |
+| 5 | `feat/p9-node-reads` | `invoke_read` end to end, five read tools, path → workspace resolution, second scrub, fencing, chain + audit rows, invocations API | 4 | **implemented 2026-11-20** (done criterion met: `config/tests/test_node_read_turns.py::test_the_done_criterion_sessions_answered_from_the_node` — the reference node's fixture sessions in a FakeAdapter chat answer, filtered to the conversation's workspace, two `ok` chain rows, no stored content; 8B step-0 actor check in `invoke_read`; the 8B owner-turn move is a known follow-up below; awaits independent Sonnet 5 review) |
 | 6 | `feat/p9-node-events` | `event` sink wiring into `ingest_hook_events`, cross-relay dedupe, spool upload acks, availability events | 4 (parallel with 5) | not started |
 | 7 | `feat/p9-node-ui` | `/devices` node section, invocation log page, HUD node line, `hud → nodes` contract | 4, 5 (6 for availability) | not started |
 | 8 | `chore/p9-closeout` | Preflight node checks, e2e, runbook, ADR-013 notes, MASTER_PLAN row, go/no-go record | 1–7 | not started |
@@ -2462,7 +2462,11 @@ Implementation notes (branch 5):
 - **Tests** drive the real gateway read path in process
   (`tools/tests/node_reads_helpers.py`: a v1 `NodeSession` plus the reference
   node with fixed-time readers; `bus.wait_result` pumps the session), so
-  every envelope the node received is asserted on. The 8A prompt-injection
+  every envelope the node received is asserted on. The chat-turn e2e lives
+  in `config/tests/test_node_read_turns.py`, not `assistant/tests/` as the
+  Files list says: it needs `assistant`, `tools` and `nodes` together, and
+  only `config` may import all three (the "only tools, hud, ops may import
+  nodes" and "tools ↛ assistant" contracts). The 8A prompt-injection
   corpus (`memory/tests/test_learning_night.py`) gains two transcript-shaped
   items.
 
