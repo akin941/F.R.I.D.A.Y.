@@ -7,6 +7,11 @@
 > Review round 1 findings (1 HIGH, 4 MEDIUM, 2 LOW) fixed 2026-11-21;
 > review round 2 findings (1 MEDIUM, 1 LOW) fixed 2026-11-21; awaits
 > re-review.**
+> **Server half implemented (2026-11-20):** branches 1–7 and the closeout
+> (`chore/p10-closeout`: preflight control checks, the control e2e,
+> runbooks, ADR-013/014/015 notes, go/no-go record — server half "go",
+> ADR-014 test/lint "stay gate-class"); the Mac session (M1–M4) is
+> pending owner evaluation.
 > Sources: `docs/research/2026-11-roadmap-proposal.md` §a.4, §a.5, §B1
 > (ADR-014 table, invocation grant, owner away), §B2 (ADR-015), §B6,
 > §c.4, §c.6, §c.7, §c.8, §c.9, §g d4/d7; MASTER_PLAN §AA "Friday 3.0
@@ -1340,7 +1345,7 @@ with the Mac rows pending owner evaluation.
 | 5 | `feat/p10-hud-terminal` | Redis output stream (fed by the branch-3 scrubber), HUD `terminal` section + stream endpoint, terminal panel, draft/approval cards, `node_action_result` read tool | 3 (parallel with 4) | **implemented 2026-11-20** on its branch (based on the integration branch with branches 1–3 merged); awaits independent Sonnet 5 review; see "Implementation record — `feat/p10-hud-terminal`" |
 | 6 | `feat/p10-codex-app-server` | Driver framework, interactive container, Codex app-server driver, `harness_agent_action` gate, usage per turn, pins + provisional snapshot + contract test | Phase 3 harness (merged); 3 (per-tool approval TTL only: `ToolSpec.approval_ttl_seconds`, `_expire_if_stale`, per-minute sweep); parallel with 4–5 | **implemented 2026-11-20** on its branch (based on the integration branch with branch 3 merged; drivers off by default, provisional snapshot); review round 1 findings (2 MEDIUM, 3 LOW) fixed 2026-11-23, awaits Sonnet 5 re-review; see "Implementation record — `feat/p10-codex-app-server`" |
 | 7 | `feat/p10-claude-agent-sdk` | Claude Agent SDK bridge + driver, bridge schemas, surface snapshot, pins | 6 | **implemented 2026-11-20** on its branch (based on the integration branch with branch 6 merged; driver off by default, provisional surface snapshot); awaits independent Sonnet 5 review; see "Implementation record — `feat/p10-claude-agent-sdk`" |
-| 8 | `chore/p10-closeout` | Preflight control checks, e2e, runbooks, ADR-013/014/015 notes, MASTER_PLAN row, `self_sources.json`, go/no-go record | 1–7 | not started |
+| 8 | `chore/p10-closeout` | Preflight control checks, e2e, runbooks, ADR-013/014/015 notes, MASTER_PLAN row, `self_sources.json`, go/no-go record | 1–7 | **implemented 2026-11-20** on its branch (based on the integration branch with branches 1–7 and the Phase 9 closeout merged); awaits independent Sonnet 5 review; see "Implementation record — `chore/p10-closeout`" |
 | M1 | `feat/p10-node-confirm` | Swift: protocol v2 verifier and grant verification, confirmation window, fail-closed close, conformance v2 pass | 1–3 merged; Phase 9 M1 | deferred: Mac session |
 | M2 | `feat/p10-node-executors` | Swift: `srt` executor + local repo/command policy, AppleScript recipes, AX primitives, open/focus with the local bundle list, TCC grants, Touch ID policy UI | M1; 2 merged | deferred: Mac session |
 | M3 | ADR-014 evidence run | Escape suite under macOS `srt` (Seatbelt) in `worktree` mode; result recorded in ADR-014 | M2 | deferred: Mac session (pending owner evaluation) |
@@ -1421,7 +1426,9 @@ codes), D1 (no new server→node type handled), ADR-013 decision 6.
    approved on `/approvals`, shows the window with the same approval id
    prefix; deny → `denied` on `/approvals` and the HUD; allow → output in
    the HUD terminal panel; kill switch while the window is open closes it
-   within 2 s.
+   within 2 s. These are the flows `backend/ops/tests/test_control_e2e.py`
+   runs against the Python reference node (closeout); the Swift node must
+   produce the same frames, statuses and chain rows.
 
 ### M2 — `feat/p10-node-executors`: srt, recipes, AX, open/focus
 
@@ -1490,16 +1497,22 @@ decision recorded".
 
 | Item | How it is measured | Result |
 |---|---|---|
-| Fuzz suites, server contracts and reference node | Branches 1–2 | pending (branches 1–2) |
-| Compromised-server suite v2, reference node | Branch 2 conformance run; branch 3 server-side cases | pending (branches 2–3) |
-| Escape suite, static policy check + reference runner | Branch 2 `node_escape_suite --executor fake` | pending (branch 2) |
-| ADR-014 test/lint decision recorded | Closeout note: "stay gate-class" | pending (closeout) |
+| Fuzz suites, server contracts and reference node | Branches 1–2 | **pass (2026-11-20)** — the generated fuzz families (~900 cases plus the hostile-insert families) over every argument and recipe-params schema refused by the server contract and the reference node; CI |
+| Compromised-server suite v2, reference node | Branch 2 conformance run; branch 3 server-side cases | **pass (2026-11-20)** — 49 v1 + 91 v2 conformance cases all-pass in process and over a localhost `wsproto` socket; the branch-3 compromised-server cases (`args_changed`, `grant_mismatch`, `replay`, `not_invocable`, `path_not_in_workspace`, kill switch, `signing_unavailable`) green; `node_conformance_v2` preflight |
+| Escape suite, static policy check + reference runner | Branch 2 `node_escape_suite --executor fake` | **pass (2026-11-20)** — 32/32 contained with the fake executor (CI and the `node_escape_suite` preflight row, a `warn` only for the pending Mac evidence) |
+| ADR-014 test/lint decision recorded | Closeout note: "stay gate-class" | **recorded 2026-11-20: test/lint stay gate-class**; evidence pending owner evaluation (M3) — ADR-014 "Implementation note — the test/lint decision" |
+| Closeout e2e (typed → approval → grant → node window → HUD stream; voice → draft only; confirm-class; kill switch during a window) | `ops/tests/test_control_e2e.py` against the real `NodeSocketApp` and the reference node v2 | **pass (2026-11-20)** — CI |
+| Preflight green with the reference node (v2) paired | `config/tests/test_reference_node_preflight.py` (uvicorn gateway process, `run_reference_node` on v2) | **pass in process (2026-11-20)**: every node and control row passes except the documented warnings (`node_tls_pin` unset, `node_escape_suite` Mac evidence pending); the run on the owner's dev stack is an owner step |
 | Conformance v2 and fuzz, Swift app | M1/M2 contract tests | pending owner evaluation (Mac session) |
 | Escape suite under macOS `srt` | M3 | pending owner evaluation (Mac session) |
 | Window latency, close-on-loss, TCC across updates | M4 | pending owner evaluation (Mac session) |
-| Drivers enabled after d4 | Owner step 1 + `harness_drivers` preflight | pending owner evaluation |
+| Drivers enabled after d4 | Owner step 1 + `harness_drivers` preflight | pending owner evaluation — both drivers off; `harness_drivers` passes while disabled and fails for an enabled driver without d4, on a provisional snapshot or with disagreeing pins |
 
-The Mac rows and the driver row do not block Phase 11.
+**Checkpoint verdict (server half, 2026-11-20): go.** The stub checkpoint
+("fuzz/escape suites green; the ADR-014 test/lint decision recorded") is met
+for everything that runs here: the suites are green against the reference
+node and the decision is recorded as "stay gate-class". The Mac rows and the
+driver row are pending owner evaluation and do not block Phase 11.
 
 ## Out of scope (explicit)
 
@@ -3010,3 +3023,141 @@ These were left unresolved at APPROVE. They are LOW and do not block the merge.
    every tool call). This is recorded as owner steps 3 and 4, not a defect.
    No fix required; keep the closeout `harness_drivers` preflight red while
    the surface is provisional.
+
+## Implementation record — `chore/p10-closeout` (branch 8, implemented 2026-11-20)
+
+**Base.** Cut from the integration branch with branches 1–7 merged and the
+Phase 9 server branches 2–8 (including `chore/p9-closeout`: the socket app,
+`NodeSocketApp`, the node preflight checks, `run_reference_node`) merged.
+The trust check is the real one (branch 4), so the closeout's `trust_check`
+row passes; no row of this branch is "deferred: Mac session".
+
+**Delivered.**
+- `backend/ops/preflight.py` `check_control` (section `control`, after
+  `nodes` in `CHECKS`; read-only, no model call, nothing sent to a node):
+  - `node_grant_config`: `NODE_GRANT_TTL_SECONDS` in 70..120,
+    `NODE_ACTION_DISPATCH_MAX_DELAY_SECONDS` in 1..60, `node_action`
+    registered and its effective approval TTL 600 s (so a lower
+    `APPROVAL_REQUEST_TTL_HOURS` cap shows), and the approval expiry sweep,
+    the node action sweep (both ≤ 60 s) and the daily tail retention on the
+    worker beat and registered;
+  - `node_protocol_v2:<name>` per active node (the session version of its
+    latest snapshot, invocable gate/confirm counts; `warn` on v1, no
+    catalogue or no action) and an aggregate `node_protocol_v2` `warn` when
+    none is paired or none speaks v2;
+  - `node_conformance_v2`: v1 and v2 cases defined, the v1/v2 case files
+    and `vectors/sandbox.json` current (seams `node_conformance_drift`,
+    `node_conformance_case_counts`);
+  - `node_escape_suite`: `node_escape_suite --executor fake` (seam
+    `escape_suite_report`), `warn` while `NODE_ESCAPE_EVIDENCE_RECORDED_ON`
+    (new setting, `.env.example`) is empty, `fail` on an escape or a
+    malformed date;
+  - `node_output_scrubber`: the gateway's `/healthz` now reports
+    `output_scrubber` (`config/asgi_nodes.py`); `fail` on `false` or a
+    gateway that does not report it;
+  - `trust_check`: a registered check that is not the branch-3 stub
+    (`is_stub`), the evidence source, the `control.trust_check` tier, an
+    active budget (`warn` without a monthly cap) and the seeded
+    `friday_control_trust_check` prompt;
+  - `node_action_actor`: `precheck_request` and `authorize_decision`
+    declared; an AST source test (seam `approve_request_source`) that
+    `approve_request` calls `authorize_decision(...)` before the first
+    `.status` assignment (a call inside a string does not count);
+  - `harness_drivers:<agent>` from `harness.drivers.driver_status()`:
+    `cli` passes; an unknown value, a driver selected while
+    `HARNESS_DRIVERS_ENABLED` is off, or an enabled driver without d4, on a
+    provisional snapshot or with pin errors fails.
+- `manage.py run_reference_node`: `--protocol 2` (default; `1` keeps the
+  v1-only session) and `--confirm none|approve|deny` (the scripted window;
+  `none` lets every window time out), so the dev stack's preflight is green
+  with the reference node (v2) paired. Actions still reach only its fake
+  executor.
+- Docs: `docs/runbooks/friday-node.md` "Control" (protocol v2, approving
+  node actions, the Mac window, owner-away rules, reading executions and
+  chain rows, the escape suite, the preflight control checks, settings);
+  new `docs/runbooks/harness-drivers.md` (d4, pins and snapshots, smoke
+  test, enabling, rollback, known limits, settings); ADR-013, ADR-014
+  ("test/lint stay gate-class; evidence pending owner evaluation, M3") and
+  ADR-015 closeout notes; MASTER_PLAN §AA row 10; `self_sources.json`
+  regenerated (the current phase is now 11).
+
+**Tests.** `ops/tests/test_preflight_control.py` (63: the healthy section
+with the Mac rows pending; every check passes, fails and warns with fakes —
+TTL above 120 and below 70, a non-int TTL, the dispatch delay, the tool
+unregistered, a global cap cutting the approval TTL, a missing, too rare or
+unregistered sweep, no beat; no node, a v1 node, mixed nodes, a v2 node
+without actions, a revoked node; stale case and sandbox files, a long drift
+list, no v2 cases; the escape suite failing, pending, recorded, a malformed
+date; the scrubber reported, absent, not reported, no URL, unreachable; the
+real trust check, the stub, nothing registered, no evidence source, no
+tier, no budget, no prompt, an uncapped budget; the hooks, a missing hook,
+no tool, a source without the call, the call after the decision, the call
+inside a string; drivers disabled, enabled without d4, on a provisional
+snapshot, with real pins, with pin errors, selected while disabled,
+unknown; a crashing check is its own row; the real case-count, escape and
+source seams; the command's lines; no `ModelUsage`),
+`ops/tests/test_control_e2e.py` (the brief's e2e against the real
+`NodeSocketApp` with the reference node v2 paired through the endpoint:
+typed turn → draft → card → trust check `ok` → `/approvals` → one grant
+(≤ 120 s, bound to the approval) → the node window shows the approval id
+prefix → fake executor → stdout/stderr chunks then `end` on the HUD terminal
+stream → `ok`, one chain row v2 and one `nodes.invoke` audit row, chain
+intact; the same turn as voice → a draft only, no trust-check call, no
+approval, execution or invoke; `apps.open` → `ok` with no
+`ApprovalRequest`; the kill switch over the web while a window is open →
+socket closed, window force-closed, `node_disconnected` on the execution
+and its chain row, nothing ran),
+`config/tests/test_preflight_hud_control.py` (the HUD shows the failing
+control check names only, never a detail),
+`config/tests/test_reference_node_preflight.py` (the reference node now
+connects on v2: `node_protocol_v2:Reference node` and
+`node_output_scrubber` pass against the real gateway process; the scripted
+window option), `config/tests/test_asgi_nodes.py` (`/healthz` reports
+`output_scrubber: true`), `ops/tests/test_preflight.py` (the all-green
+command run stubs the escape seam).
+
+**Deviations, recorded.**
+- `node_grant_config` also checks the node action sweep and the tail
+  retention task (the brief names only the approval sweep): all three back
+  the owner-away rules.
+- `node_protocol_v2` is per node plus an aggregate row; a v2 node with no
+  invocable action is a `warn`, not a pass.
+- The ADR-014 evidence date is a setting (`NODE_ESCAPE_EVIDENCE_RECORDED_ON`),
+  not parsed from the ADR text (docs are not shipped in the image); the
+  owner sets it when M3 is recorded. It changes no class.
+- `node_conformance_v2` reports only v1/v2 case files and
+  `vectors/sandbox.json`; the scrub vectors and the vendored scrubber stay
+  with the Phase 9 `node_conformance` row.
+- The e2e runs the gateway in process (`gateway_harness`), as the Phase 9
+  closeout e2e does; the uvicorn process is covered by
+  `test_reference_node_preflight.py`.
+
+**Follow-ups resolved here.** Branch 6 known follow-up 2 (a `file_change`
+card shows only the grant root) is recorded as a known limit in
+`docs/runbooks/harness-drivers.md`, as that note offered; branch 7 known
+follow-ups 1 and 2 are recorded there as accepted residual risks.
+
+### Owner steps (pending) — `chore/p10-closeout`, recorded 2026-11-20
+
+1. Run the independent Sonnet 5 review of this branch (CLAUDE.md
+   "Reviews") and fix findings until APPROVE.
+2. Dev stack: rebuild `node-gateway` (its `/healthz` now reports
+   `output_scrubber`), pair the reference node (`run_reference_node --code
+   …`, v2 by default) and run `make preflight`: every control row must pass
+   except `node_escape_suite` (Mac evidence pending) and, while no driver is
+   enabled, nothing else may warn but the documented Phase 9 rows. Record
+   the result in the go/no-go table above.
+3. d4 (brief owner step 1): record the terms check in
+   `docs/runbooks/harness-drivers.md` and `HARNESS_DRIVER_TERMS_CHECKED_ON`
+   before enabling any driver; then the pins and real snapshots (branches
+   6–7 owner steps 3–4). `harness_drivers` stays red for an enabled driver
+   until both are done. (pending owner evaluation)
+4. Mac session (deferred: Mac session): M1–M2 per "Mac session (deferred)";
+   the Swift node must complete the flows of `ops/tests/test_control_e2e.py`
+   on the real stack (M1 contract test 3).
+5. M3 (deferred: Mac session, pending owner evaluation): record the macOS
+   `srt` escape run in ADR-014 and set `NODE_ESCAPE_EVIDENCE_RECORDED_ON`;
+   any move of test/lint to confirm-class is a separate ADR-014 amendment
+   the owner commissions.
+6. M4 (deferred: Mac session, pending owner evaluation): the window latency,
+   close-on-loss and TCC measurements, recorded in the go/no-go table.
