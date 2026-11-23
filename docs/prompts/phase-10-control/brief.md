@@ -2802,3 +2802,29 @@ file, not the raw generated directory; the converter writes it.
    (today `estimated_cost=0`, bounded by `HARNESS_DRIVER_MAX_TOKENS`).
 
 No Mac session work: drivers run in the Linux harness runner's containers.
+
+**Known follow-ups from the independent review (recorded at merge, 2026-11-23).**
+These were left unresolved at APPROVE. They are LOW and do not block the merge.
+1. LOW, `backend/harness/drivers/session.py`: on `turn_completed`,
+   `_record_turn` is called with `error_type=''` whenever usage was reported,
+   so a turn that ended `failed` or `interrupted` gets a `ModelUsage` row with
+   `success=True`. The run then raises `turn_failed`, so the job itself fails
+   closed; only the usage row is mislabelled. Fix: pass
+   `error_type='turn_failed'` (or set `success=False`) in `_record_turn` when
+   `turn.status != 'completed'`.
+2. LOW, `backend/harness/drivers/codex_app_server.py`: a `file_change`
+   escalation shows the owner only `grantRoot` (as cwd), an empty command and
+   the agent's reason. The proposed diff or file list is not on the card, so
+   the owner approves a path scope rather than concrete changes. The
+   wrapper's pristine test run, Gate B and review still follow. Fix
+   (optional): carry the changed file paths from the `item/started`
+   `fileChange` item into `Escalation.command`, subject to the verbatim
+   check; or record this as a known limit in the harness-drivers runbook that
+   branch 8 writes.
+3. LOW, `backend/harness/implementation_execution.py`: the token brake
+   (`HARNESS_DRIVER_MAX_TOKENS`) is applied only after the run completes. The
+   in-run bounds are the runtime deadline, the escalation cap and the line
+   limits, so a runaway agent can burn tokens until the deadline. The brief
+   does not require an in-run token brake. Fix (optional): have
+   `DriverSession` abort once the cumulative reported usage exceeds
+   `HARNESS_DRIVER_MAX_TOKENS`.
