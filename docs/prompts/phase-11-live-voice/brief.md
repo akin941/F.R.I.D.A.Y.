@@ -2,8 +2,8 @@
 
 > Status: **Draft (2026-11-23). Written on `docs/p11-brief` from the stub of
 > 2026-11-20, which was taken from the owner-approved Friday 3.0
-> roadmap; plan-review round 1 findings addressed 2026-11-23 (see
-> "Review round 1" at the end). It needs its independent Sonnet 5 plan
+> roadmap; plan-review rounds 1 and 2 findings addressed 2026-11-23 (see
+> "Review round 1" and "Review round 2" at the end). It needs its independent Sonnet 5 plan
 > review to reach APPROVE before branch 1, because the implementing model
 > never reviews its own brief.**
 > Sources: `docs/research/2026-11-roadmap-proposal.md` §a (scenario 1–2),
@@ -379,12 +379,29 @@ by D3.
   ≤ 60 s before expiry, and hands it to the child **over the stdin
   control pipe** (`credential` message, D6) — never in argv, the
   environment, a file or the Keychain.
-- **Authentication.** `NodeVoiceTokenAuthentication` (in `accounts`, a
-  `PersonalAccessTokenAuthentication` subclass with `accepted_kind =
-  NODE_VOICE`, surface `node_voice`) additionally calls
+- **Authentication.** Today `PersonalAccessTokenAuthentication`
+  (`accounts/authentication.py`) claims every `jpat_`-prefixed bearer
+  token and raises 403 `token_kind_forbidden` for any kind other than its
+  single `accepted_kind`; it never returns `None` for a PAT of another
+  kind. A node-voice authenticator placed in front of it would therefore
+  403 every `cli` PAT on the chat turn. So the base class gains
+  `accepted_kinds` (a frozenset, defaulting to `{accepted_kind}`, so
+  `cli`, `FacadeTokenAuthentication` and `HookTokenAuthentication` behave
+  exactly as today) and the principal's channel keeps coming from
+  `KIND_CHANNELS[token.kind]`. `NodeVoiceTokenAuthentication` (in
+  `accounts`, surface `node_voice`) is a subclass with
+  `accepted_kinds = {cli, node_voice}`: it **replaces** the base PAT
+  authenticator in the lists of the routes the token reaches (D4), so a
+  `cli` PAT on those routes gets exactly the result it gets today and a
+  `node_voice` token gets `CHANNEL_NODE_VOICE`; `openai` and `hook`
+  tokens still get 403 `token_kind_forbidden`. When, and only when, the
+  token's kind is `node_voice`, it additionally calls
   `accounts.devices.node_device_refusal(token.node_device)` on **every
   request**, so revoking the node, engaging the kill switch or
   `revoke_all_devices` kills the voice credential on the next request.
+  The policy endpoint's `NodeVoicePolicyAuthentication` narrows
+  `accepted_kinds` to `{node_voice}` (a `cli` PAT there is a deliberate
+  403 `token_kind_forbidden`) and is mute-tolerant (D12).
   `revoke_all_devices` and the device revoke path also soft-revoke the
   device's `node_voice` tokens. The principal is
   `ChannelPrincipal(channel=CHANNEL_NODE_VOICE, bound_workspace_id=<personal>,
@@ -425,6 +442,23 @@ by D3.
   - the new `POST /api/v1/voice/live/sessions` (D5, `voice`) and
     `GET /api/v1/auth/nodes/voice-policy` (D11, `accounts`) — node voice
     only.
+- **How the authenticators coexist.** `ConversationMessageListView`
+  alone swaps `PersonalAccessTokenAuthentication` for
+  `NodeVoiceTokenAuthentication` (`accepted_kinds = {cli, node_voice}`,
+  D3) in its own list (`[NodeVoiceTokenAuthentication,
+  *DEFAULT_AUTHENTICATION_CLASSES]`); the shared
+  `_PAT_ALLOWLISTED_AUTHENTICATION_CLASSES` stay unchanged, so every other
+  assistant, agents and approvals view still answers a `node_voice` token
+  with the base authenticator's 403 `token_kind_forbidden`. On the chat
+  turn a web JWT and a `cli` PAT keep working exactly as today, and
+  `openai` and `hook` tokens are still refused (403
+  `token_kind_forbidden`). `config/urls.py` injects the same list into
+  the `voice` routes in place of today's
+  `[PersonalAccessTokenAuthentication, *DEFAULT…]`, so a `cli` PAT there
+  still authenticates as `cli` and still gets the views' deliberate 403
+  from the permission class (`IsWebOrNodeVoiceChannel`, or the sessions
+  endpoint's node-voice-only permission), unchanged from Phase 6. The
+  policy endpoint refuses `cli` in the authenticator itself (D3).
 - **Refused** (403 `token_kind_forbidden` for the token on any other PAT
   surface, 401 on JWT-only surfaces): approvals, tasks, memory, tools,
   agents, harness, connectors, deploys, nodes endpoints, the facade, the
@@ -592,6 +626,24 @@ host audio ─▶ RingBuffer(2 s) ─▶ WakeGate ─▶ TurnCapture(VAD + smart
                     ▲ BargeInMonitor (VAD on AEC signal while speaking)
 ```
 
+- **Tunables are package constants, not server settings.** The child
+  has no Django settings and no environment of its own (the host hands it
+  only the D6 frames), so every child-side number lives in one module,
+  `friday_voice/config.py`: `WAKE_THRESHOLD`, `WAKE_REFRACTORY_MS`
+  (2 000), `WAKE_NO_SPEECH_S` (5), `BARGE_IN_VAD` (0.7),
+  `BARGE_IN_MIN_MS` (250), `BARGE_IN_AEC_GUARD_MS` (300),
+  `BARGE_IN_PREROLL_MS` (300), `SELF_TRIGGER_MS` (1 500),
+  `SILENCE_CLOSE_S` (30), `SESSION_MAX_MINUTES` (15),
+  `WAKE_STORM_MAX` (3) / `WAKE_STORM_WINDOW_S` (60). `WakeGate`, the
+  `wake-eval` harness defaults and the policy request all read
+  `WAKE_THRESHOLD` and `WAKE_REFRACTORY_MS` from that module, so the
+  `threshold` and `refractory_ms` the policy request carries are always
+  the values the running detector uses (a test asserts the request is
+  built from the constants, not from a copy). Changing one is a code
+  change in `node/friday-voice`, reviewed like any other, and a threshold
+  change re-closes the D11 gate until re-measured. Server-side numbers
+  (token TTL, storm backstop, FAR/FRR budgets, the always-on switch) stay
+  Django settings.
 - **Ports with fakes** (`friday_voice/ports.py`): `WakeDetector`
   (`OpenWakeWordDetector` over the pinned ONNX graphs + `hey_friday.onnx`;
   `ScriptedWakeDetector`), `VoiceActivity` (`SileroVad`; `ScriptedVad`),
@@ -608,8 +660,8 @@ host audio ─▶ RingBuffer(2 s) ─▶ WakeGate ─▶ TurnCapture(VAD + smart
   `make voice-models` gains a `--node` target writing into the node's
   model directory (outside the repo).
 - **WakeGate.** Pre-wake audio exists only in the 2 s ring buffer. On a
-  detection at or above the threshold (`VOICE_LIVE_WAKE_THRESHOLD`,
-  default the Phase 6 browser value), the utterance starts at the first
+  detection at or above the threshold (`friday_voice.config.WAKE_THRESHOLD`,
+  the Phase 6 browser value), the utterance starts at the first
   frame after the detection frame (no pre-roll, ADR-011 decision 2). No
   speech within 5 s of the wake → back to armed, nothing uploaded.
 - **TurnCapture.** Silero VAD marks speech; after ≥ 200 ms of trailing
@@ -652,9 +704,9 @@ host audio ─▶ RingBuffer(2 s) ─▶ WakeGate ─▶ TurnCapture(VAD + smart
 ### D9 — Barge-in
 
 - While *speaking*, `BargeInMonitor` runs Silero VAD on the AEC-cleaned
-  signal. Barge-in fires when speech probability ≥ `VOICE_LIVE_BARGE_IN_VAD`
-  (default 0.7) persists ≥ `VOICE_LIVE_BARGE_IN_MIN_MS` (default 250 ms)
-  and playback started ≥ 300 ms ago (the AEC convergence guard).
+  signal. Barge-in fires when speech probability ≥ `config.BARGE_IN_VAD`
+  (0.7) persists ≥ `config.BARGE_IN_MIN_MS` (250 ms; both D8 package
+  constants) and playback started ≥ 300 ms ago (the AEC convergence guard).
 - On barge-in the child sends `stop_playback`, cancels the in-flight TTS
   requests and closes the chat SSE (the server finishes or aborts the
   reply as it does for a closed browser stream), marks the trace
@@ -667,7 +719,7 @@ host audio ─▶ RingBuffer(2 s) ─▶ WakeGate ─▶ TurnCapture(VAD + smart
   Friday was saying is discarded, the turn ends, the session continues.
 - **Budget.** Barge-in onset → `stop_playback` sent ≤ 100 ms in the
   replay harness (CI, manual clock); host stop ≤ 100 ms after the frame
-  (Mac M4). "Dur"/"Durdur"/"Stop" need no special handling: any speech
+  (Mac M4); together the end-to-end ≤ 200 ms p95 of M4 item 4. "Dur"/"Durdur"/"Stop" need no special handling: any speech
   stops playback.
 - The state machine (`friday_voice/session.py`, pure, clock-injected) has
   the states of D6's `state` message and a transition table tested
@@ -680,7 +732,7 @@ host audio ─▶ RingBuffer(2 s) ─▶ WakeGate ─▶ TurnCapture(VAD + smart
   ADR-015 option for full duplex) instead of being suppressed while TTS
   plays. Two filters stand behind it:
   1. **Window rule.** A wake detection while playback is active or within
-     `VOICE_SELF_TRIGGER_MS` (1.5 s) after playback ended is marked
+     `config.SELF_TRIGGER_MS` (1.5 s, the browser's `VOICE_SELF_TRIGGER_MS`) after playback ended is marked
      *suspect*; its utterance is transcribed and **discarded** if the
      transcript matches recent TTS text (the browser's rule, D8 below).
      Discarded means: no chat turn, nothing spoken, counter
@@ -724,7 +776,8 @@ host audio ─▶ RingBuffer(2 s) ─▶ WakeGate ─▶ TurnCapture(VAD + smart
   `GET /api/v1/auth/nodes/voice-policy?model_sha256=<sha>&threshold=<t>&refractory_ms=<ms>`
   says `always_on_permitted: true` for the sha256 of the wake model the
   child loaded **and the threshold and refractory period it runs at**
-  (`VOICE_LIVE_WAKE_THRESHOLD`, the 2 s refractory); (c) `link: up`; (d) mute is
+  (`friday_voice.config.WAKE_THRESHOLD` and `WAKE_REFRACTORY_MS`, the
+  single definition, D8); (c) `link: up`; (d) mute is
   readable and off; (e) no storm mute (D12); (f) every model hash
   verified. Otherwise it is `armed_ptt` (hotkey only) or `off`. The policy
   is re-read at session start and every 10 minutes; a `false` disarms at
@@ -754,6 +807,14 @@ host audio ─▶ RingBuffer(2 s) ─▶ WakeGate ─▶ TurnCapture(VAD + smart
   explicit numbers or `--from-report <json>` from branch 6's harness),
   audited (`accounts.voice_wake_eval.recorded`), append-only (a newer row
   supersedes, nothing is edited or deleted).
+- **Workspace scoping (ADR-001).** `VoiceWakeEvaluation` and
+  `VoiceLiveMute` are read only through `for_actor()` /
+  `scoped_for_actor` in every view (`voice-policy`, `voice-live`, the
+  mute release), in the guards and in the authenticator's mute check
+  (scoped to the token's bound personal workspace); the device id in a
+  URL is resolved through the actor's own node devices, so another
+  user's or a firm workspace's device id is a 404, never a 403 that
+  confirms it exists.
 - **Server-side backstop for the trigger kind.** The gate is enforced by
   the child; a buggy child that ignored `always_on_permitted: false`
   would keep listening. So every `POST /api/v1/voice/live/sessions` and
@@ -785,12 +846,14 @@ host audio ─▶ RingBuffer(2 s) ─▶ WakeGate ─▶ TurnCapture(VAD + smart
 - **Session close.** After 30 s without speech the session closes:
   `listening`/`armed` → the arming state, the conversation id is kept for
   reuse (D5), an `end` earcon plays. A session also closes on
-  `VOICE_LIVE_SESSION_MAX_MINUTES` (default 15) of continuous activity.
+  `config.SESSION_MAX_MINUTES` (15, a D8 package constant enforced by the
+  child; the server has no use for it, so it is not a Django setting) of
+  continuous activity.
 - **Wake storm (client).** More than 3 wake activations within 60 s
   without a dispatched turn → `storm_muted`: the child stops consuming
   audio, sends `release_mic` and `state: storm_muted`; it re-arms only
   after the owner un-mutes on the Mac (a `mute` true→false cycle). Same
-  constants as the browser (`VOICE_WAKE_STORM_MAX = 3`, 60 s).
+  constants as the browser (`VOICE_WAKE_STORM_MAX = 3`, 60 s), mirrored in `config.WAKE_STORM_MAX` / `WAKE_STORM_WINDOW_S`.
 - **Storm backstop (server).** The child might be the thing that
   misbehaves, so the server counts transcription requests per node
   device in a sliding 60 s window (Redis). The counter is
@@ -807,11 +870,14 @@ host audio ─▶ RingBuffer(2 s) ─▶ WakeGate ─▶ TurnCapture(VAD + smart
   constraint), audits `accounts.voice_live_mute.engaged`, and answers
   423 `voice.live_muted`.
 - **Where the 423 comes from.** `NodeVoiceTokenAuthentication` itself
-  (`accounts`) checks for an unreleased `VoiceLiveMute` on the token's
-  device after `node_device_refusal`, and raises a 423 `voice.live_muted`
-  API exception. Because the authenticator is installed on every route
+  (`accounts`), for a `node_voice`-kind token only, checks for an
+  unreleased `VoiceLiveMute` on the token's device after
+  `node_device_refusal`, and raises a 423 `voice.live_muted` API
+  exception (a `cli` PAT on the same routes is never affected by a
+  mute). Because the authenticator is installed on every route
   the token reaches — the three voice endpoints, the sessions endpoint
-  and `assistant.ConversationMessageListView` (the chat turn, D4) — the
+  and `assistant.ConversationMessageListView` (the chat turn, D4), always in
+  place of the base PAT authenticator — the
   423 reaches all of them with no `assistant → voice` or
   `accounts → voice` edge. The one exception is the policy endpoint,
   which uses the mute-tolerant subclass
@@ -868,7 +934,11 @@ host audio ─▶ RingBuffer(2 s) ─▶ WakeGate ─▶ TurnCapture(VAD + smart
 
 ### D14 — Latency trace
 
-- `VoiceTurnTrace` gains `source` (`web` | `node`, default `web`),
+- `VoiceTurnTrace` gains `source` (`web` | `node`, default `web`; set
+  **by the server** from the request's channel — `node` for
+  `CHANNEL_NODE_VOICE`, `web` for `CHANNEL_WEB` — and never read from the
+  `timings` body, where a `source` key is dropped like any key outside
+  the allow-list),
   `wake_to_listen_ms` (detection → capture start, client), and
   `interrupted_at_ms` (nullable, ms after playback start). Still no
   free-text column; the allow-list test is updated. The child reports its
@@ -963,7 +1033,7 @@ host audio ─▶ RingBuffer(2 s) ─▶ WakeGate ─▶ TurnCapture(VAD + smart
     already imports `audit`, `core` and `workspaces`, and it imports no
     `voice`, `assistant` or `nodes`.
   - `assistant` (chat turn) already imports `accounts.authentication`; it
-    adds `NodeVoiceTokenAuthentication` to one view and checks
+    swaps `NodeVoiceTokenAuthentication` in for the base PAT authenticator on one view (D4) and checks
     `opened_via` (its own column). No `voice` import: the 423 comes from
     the authenticator.
   - `ops` (preflight, branch 8) reads `accounts` models (an existing,
@@ -1006,7 +1076,8 @@ Nothing moves between gate-class and confirm-class.
 
 **Scope.** D3, D4, D5:
 - `accounts`: `PersonalAccessToken.Kind.NODE_VOICE`, `node_device` FK and
-  its check constraint (migration), `NodeVoiceTokenAuthentication`,
+  its check constraint (migration), `accepted_kinds` on the base PAT
+  authenticator (default `{accepted_kind}`), `NodeVoiceTokenAuthentication`,
   `KIND_CHANNELS[NODE_VOICE] = CHANNEL_NODE_VOICE`,
   `POST /api/v1/auth/nodes/voice-token` (mint, previous token shortened
   to the 30 s rotation grace, audit, throttle), device revoke /
@@ -1022,17 +1093,20 @@ Nothing moves between gate-class and confirm-class.
   forces `input_mode=voice` on the channel and answers 404 for a
   conversation not opened via `node_voice` (GET and POST), the
   node-action argument step accepts it, and `ConversationMessageListView`
-  alone gains the authenticator
-  (ahead of the shared `_PAT_ALLOWLISTED_AUTHENTICATION_CLASSES`, which
-  stay unchanged, so every other assistant view answers the token with
-  the base PAT authenticator's 403 `token_kind_forbidden`);
+  alone replaces `PersonalAccessTokenAuthentication` with
+  `NodeVoiceTokenAuthentication` (`accepted_kinds = {cli, node_voice}`)
+  in its own list, D4 (the shared
+  `_PAT_ALLOWLISTED_AUTHENTICATION_CLASSES` stay unchanged, so every
+  other assistant view answers the token with the base PAT
+  authenticator's 403 `token_kind_forbidden`);
 - `tools/registry.py`: `READ_CHANNELS` widened as D4 says, with the
   ADR-010 amendment in the same commit;
 - `voice`: the three endpoints accept the channel; `POST
   /voice/live/sessions` (throttle scope `node_voice_session`);
   `build_urlpatterns` gains the `node_voice_permissions=` injection seam
   (empty in this branch; branch 5 fills it);
-- `config/urls.py`: inject the authenticator into `voice` routes;
+- `config/urls.py`: inject `NodeVoiceTokenAuthentication` into the
+  `voice` routes in place of the base PAT authenticator (D4);
 - settings and `.env.example`: `VOICE_LIVE_TOKEN_TTL_SECONDS`,
   `VOICE_LIVE_ROTATION_GRACE_SECONDS`,
   `VOICE_LIVE_CONVERSATION_REUSE_MINUTES`, throttle rates
@@ -1073,6 +1147,15 @@ Nothing moves between gate-class and confirm-class.
 - Authentication: expiry, revoke, device revoke after mint, kill switch
   after mint, `revoke_all_devices`, inactive owner → refused on the next
   request; wrong kind on every other PAT surface → 403.
+- Authenticator coexistence (D3, D4): after the change a web JWT and a
+  `cli` PAT still reach `GET`/`POST /api/v1/conversations/{id}/messages`
+  (the `cli` turn's message has `channel="cli"`, `input_mode` handling as
+  today), and `openai` and `hook` tokens are still refused there with 403
+  `token_kind_forbidden`; on the three voice endpoints and the sessions
+  endpoint a `cli` PAT still gets the deliberate 403 from the permission
+  class, and on the policy endpoint 403 `token_kind_forbidden`; the
+  existing `cli`/`openai`/`hook` authenticator tests pass unchanged
+  (`accepted_kinds` defaults to the single kind).
 - Route walk: the token reaches exactly the D4 list; every other route
   refuses it.
 - Chat turn: `input_mode` forced to `voice` even when the body says
@@ -1202,7 +1285,7 @@ loads.
 - synthetic fixture WAVs (tones, silence, scripted transcripts) only.
 
 **Files.**
-- `node/friday-voice/friday_voice/{pipeline,wake,turn,client,llm,segmenter,language,tts,audio}.py`,
+- `node/friday-voice/friday_voice/{config,pipeline,wake,turn,client,llm,segmenter,language,tts,audio}.py`,
   `node/friday-voice/friday_voice/fakes.py`,
   `node/friday-voice/fixtures/` (synthetic WAVs + scripts),
   `node/friday-voice/vectors/segmenter.json`,
@@ -1233,7 +1316,9 @@ loads.
   frame; hard caps.
 - Segmenter and language: shared vectors in pytest and vitest.
 - Trace: the child's timings land in `VoiceTurnTrace` with `source=node`;
-  the shape allow-list holds.
+  the shape allow-list holds; a `source` key in the `timings` body is
+  ignored (a web request with `"source": "node"` records `web`, a node
+  voice request with `"source": "web"` records `node`).
 - Replay: the fixture set runs in CI under a manual clock, reports
   per-stage numbers, and a synthetic 25 % overhead regression fails it.
 - Real detectors (opt-in `-m real_models`, Linux CPU): Silero and
@@ -1296,8 +1381,8 @@ languages.
   `config/urls.py` injects the two guards into the transcription and
   sessions routes through `node_voice_permissions=`; settings
   `VOICE_LIVE_ALWAYS_ON_ENABLED`, `VOICE_LIVE_MAX_FAR_PER_HOUR`,
-  `VOICE_LIVE_MAX_FRR`, `VOICE_LIVE_STORM_MAX_STT_PER_MINUTE`,
-  `VOICE_LIVE_SESSION_MAX_MINUTES`;
+  `VOICE_LIVE_MAX_FRR`, `VOICE_LIVE_STORM_MAX_STT_PER_MINUTE` (the
+  child's own tunables stay in `friday_voice/config.py`, D8);
 - child: sends `threshold` and `refractory_ms` with every policy request
   and `X-Friday-Voice-Trigger` on sessions and transcriptions;
 - frontend `/voice`: the "Canlı ses (Mac)" panel (policy verdict and
@@ -1360,7 +1445,11 @@ languages.
   fake records none).
 - Silence close at 30 s and the 15 min cap (manual clock).
 - Role × endpoint for the policy, `voice-live`, mute release and
-  sessions endpoints.
+  sessions endpoints; cross-workspace (ADR-001): `DELETE
+  /api/v1/auth/nodes/{device_id}/voice-mute` with another owner's node
+  device id, or as a firm-workspace member, → 404 and the mute stays
+  engaged; `voice-live` never lists another user's devices, mutes or
+  evaluation rows.
 - Frontend: panel renders each verdict, the release button calls the BFF
   route and is absent when not muted.
 
@@ -1468,7 +1557,7 @@ conversation page.
   | `voice_live_policy` | `VOICE_LIVE_ALWAYS_ON_ENABLED` and `accounts.VoiceWakeEvaluation` judged exactly as D11 does (the **latest** row per `(model_sha256, kind)`, the two latest rows at the same threshold; the same `accounts.voice_live` verdict function, not a copy): **warn** "always-on not permitted: <reasons>" while no model has a passing latest household + positives pair (pending owner evaluation), pass when one does, **fail** when the setting is on and no model's latest pair passes |
   | `voice_live_storm` | an unreleased `accounts.VoiceLiveMute` is a **warn** with its age |
   | `voice_live_selftest` | the nightly result file: pass when green and < 48 h old; **warn** when missing (Mac pending); **fail** when the last run failed |
-  | `friday_voice_conformance` | the case and vector files in the repo match `friday-voice conformance --check` output recorded at build (hash list in `node/friday-voice/conformance.lock`) |
+  | `friday_voice_conformance` | the case and vector files in the repo match `friday-voice conformance --check` output recorded at build (hash list in `node/friday-voice/conformance.lock`). Meaningful only where a repository checkout is present (CI and the owner's dev checkout, as `build_node_conformance --check` is); the backend image does not ship `node/`, so when the path is absent the check **warns** "conformance not checkable here (no node/friday-voice)" and never fails |
   | `node_voice_state` | per active node: a v2 node reports `voice.state`; **warn** when none does (Mac pending) |
 
 - **E2E (CI, fakes):** the reference host + `friday-voice run` + a live
@@ -1499,8 +1588,8 @@ conversation page.
 **Tests.** Every new preflight check passes, warns and fails with fakes
 (always-on enabled with FAR above budget, an earlier passing row
 superseded by a later failing one, stale selftest, failed selftest,
-engaged mute, conformance drift, a voice token reaching a forbidden
-surface); the HUD reads the new check names; the e2e passes;
+engaged mute, conformance drift, `node/friday-voice` absent → warn,
+a voice token reaching a forbidden surface); the HUD reads the new check names; the e2e passes;
 `uv run lint-imports` is green with no contract changed.
 
 **Done when:** preflight is green on the fake stack apart from the
@@ -1511,7 +1600,7 @@ is written with the Mac rows pending owner evaluation.
 
 | # | Branch | Scope | Depends on | Status |
 |---|---|---|---|---|
-| brief | `docs/p11-brief` | This brief (full, from the stub; stub goal, scope, checkpoint and owner step kept), MASTER_PLAN §AA row 11 Brief/Status | Phase 10 closeout; Phase 10 brief | **implemented 2026-11-23** (docs only; plan-review round 1 findings addressed 2026-11-23; awaits re-review to APPROVE) |
+| brief | `docs/p11-brief` | This brief (full, from the stub; stub goal, scope, checkpoint and owner step kept), MASTER_PLAN §AA row 11 Brief/Status | Phase 10 closeout; Phase 10 brief | **implemented 2026-11-23** (docs only; plan-review rounds 1 and 2 findings addressed 2026-11-23; awaits re-review to APPROVE) |
 | 1 | `feat/p11-node-voice-channel` | `node_voice` credential + mint, `CHANNEL_NODE_VOICE`, chat/voice endpoint acceptance, personal reads, node-action proposals, live sessions, route walk, ADR-011 amendment | Phase 10 closeout; brief approved | planned |
 | 2 | `feat/p11-voice-child-protocol` | `node/friday-voice` package, pins + step 0, `friday-voice/v1` framing/schemas/vectors, reference host + echo double, conformance (host and child families), import/listener guards, CI job, dependency manifest, ADR-013 note | brief approved (parallel with 1) | planned |
 | 3 | `feat/p11-pipecat-pipeline` | Pipecat pipeline, detector ports, gateway STT/chat/TTS clients, segmenter + language routing, push-to-talk, replay harness + baseline, trace fields | 1, 2 | planned |
@@ -1644,7 +1733,10 @@ the evidence for the checkpoint.
    p95 ≤ 2.5 s; if missed, the dominant stage is named and the target
    re-set here consciously (§c.3 rule).
 4. **Barge-in**: onset → playback stopped ≤ 200 ms p95 over 20 trials;
-   no self barge-in across 20 replies at normal speaker volume.
+   no self barge-in across 20 replies at normal speaker volume. The
+   200 ms is the end-to-end figure (speech onset → audio actually
+   stopped); D9's two 100 ms figures are its components (onset →
+   `stop_playback` sent by the child, then frame → host stop).
 5. **CPU**: the child with always-on wake < 10 % of one core at rest.
 6. **TCC**: the Microphone grant survives an update signed by the same
    Developer ID (Phase 9 M4 item 1 pattern).
@@ -1888,3 +1980,36 @@ answers them:
    a server guarantee against a lying child (D11, Q4).
 8. **LOW — dates.** Status line, branch-table row, owner-step heading and
    the MASTER_PLAN row use 2026-11-23.
+
+## Review round 2 (2026-11-23)
+
+1. **MEDIUM — authenticator coexistence on the chat turn.** The base
+   `PersonalAccessTokenAuthentication` claims every `jpat_` token and
+   403s a foreign kind instead of falling through, so a node-voice
+   authenticator *ahead of* it would have broken `cli` PATs on the chat
+   turn. Fixed (D3, D4, D12, branch 1): the base class gains
+   `accepted_kinds`; `NodeVoiceTokenAuthentication` accepts `{cli,
+   node_voice}` and **replaces** the base authenticator on the chat turn
+   and the `voice` routes, mapping each kind to its own channel and
+   running the device and mute checks for `node_voice` tokens only; the
+   shared allowlist is unchanged. Tests: a web JWT and a `cli` PAT still
+   reach the chat turn, `openai` and `hook` stay refused, a `cli` PAT
+   keeps its deliberate 403 on the voice routes (permission class) and
+   on the policy endpoint (`token_kind_forbidden`).
+2. **LOW — child tunables.** All child-side numbers are constants in
+   `friday_voice/config.py` (D8); the policy request is built from the
+   same `WAKE_THRESHOLD` / `WAKE_REFRACTORY_MS`; the 15-minute cap is a
+   child constant and `VOICE_LIVE_SESSION_MAX_MINUTES` is gone from the
+   Django settings (D9, D11, D12, branch 5).
+3. **LOW — trace `source`.** Set by the server from the request channel,
+   never from `timings`; test that a body `source` is ignored (D14,
+   branch 3).
+4. **LOW — ADR-001 for the new `accounts` models.** Views, guards and the
+   mute check read through `for_actor()` / `scoped_for_actor`; another
+   owner's or a firm member's device id on the mute release is a 404
+   (D11, branch 5).
+5. **LOW — preflight and budgets.** `friday_voice_conformance` runs where
+   a repository checkout exists and warns (never fails) when
+   `node/friday-voice` is absent; M4 item 4 and D9 now say that 200 ms is
+   end to end and the two 100 ms figures are its components (branch 8,
+   D9, M4).
