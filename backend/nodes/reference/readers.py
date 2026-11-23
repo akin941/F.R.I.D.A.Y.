@@ -229,10 +229,22 @@ def iter_lines(path):
 
 
 def _files(root, pattern):
-    if not root.is_dir():
+    """The transcript files under `root`: regular files only, never through
+    a symlink (a symlinked file or directory resolving outside the root is
+    skipped), at most `MAX_FILES`."""
+    if not root.is_dir() or root.is_symlink():
         return []
-    files = sorted(p for p in root.glob(pattern) if p.is_file() and not p.is_symlink())
-    return files[:MAX_FILES]
+    real_root = os.path.realpath(root)
+    files = []
+    for path in sorted(root.glob(pattern)):
+        if path.is_symlink() or not path.is_file():
+            continue
+        if not os.path.realpath(path).startswith(real_root + os.sep):
+            continue
+        files.append(path)
+        if len(files) >= MAX_FILES:
+            break
+    return files
 
 
 def _usd_micros(value):

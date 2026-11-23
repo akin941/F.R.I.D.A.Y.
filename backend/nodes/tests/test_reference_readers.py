@@ -274,6 +274,21 @@ def test_symlinked_and_oversized_transcripts_are_not_read(home, monkeypatch):
     assert "cc-link-1" not in json.dumps(rows)
 
 
+def test_a_symlinked_project_directory_outside_the_root_is_not_read(home):
+    outside = home / "elsewhere"
+    outside.mkdir()
+    line = {
+        "type": "user",
+        "cwd": str(home / "work" / "acme"),
+        "timestamp": "2026-11-29T23:00:00.000Z",
+        "message": {"role": "user", "content": "hi"},
+    }
+    (outside / "cc-outside-1.jsonl").write_text(json.dumps(line) + "\n", encoding="utf-8")
+    os.symlink(outside, home / ".claude" / "projects" / "-linked")
+    rows = _read(_readers(home), "claude.sessions.list", {"since_hours": 168, "limit": 50})
+    assert "cc-outside-1" not in json.dumps(rows.output)
+
+
 def test_a_large_session_is_cut_to_the_result_budget_and_marked_truncated(home):
     target = home / ".claude" / "projects" / "big"
     target.mkdir()
