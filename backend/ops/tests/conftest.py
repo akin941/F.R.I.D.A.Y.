@@ -10,6 +10,8 @@ import pytest
 
 from ops import preflight
 
+_REAL_DOCKER_IMAGE_LABELS = preflight.docker_image_labels
+
 
 def _no_docker(image, *, timeout):
     raise FileNotFoundError("docker")
@@ -18,3 +20,10 @@ def _no_docker(image, *, timeout):
 @pytest.fixture(autouse=True)
 def no_docker_daemon(monkeypatch):
     monkeypatch.setattr(preflight, "docker_image_labels", _no_docker)
+
+
+@pytest.fixture
+def real_docker_image_labels():
+    """The unpatched seam, for the test that drives it over a faked
+    `subprocess.run`."""
+    return _REAL_DOCKER_IMAGE_LABELS

@@ -528,6 +528,13 @@ def test_lock_pins_graphifyy_by_name_version_and_the_manifest_hash():
     assert version == "0.9.103" and hashes == [PINNED_WHEEL_SHA256]
     # the typosquat-prone neighbours are never installed
     assert "graphify" not in pins
+    manifest = (REPO_ROOT / "docs" / "mcp" / "graphify.md").read_text()
+    assert "graphifyy==0.9.103" in manifest and PINNED_WHEEL_SHA256 in manifest
+    # every transitive wheel is locked, and no LLM SDK is in the set
+    for needed in ("networkx", "numpy", "rapidfuzz", "pyyaml", "tree-sitter", "tree-sitter-python"):
+        assert needed in pins
+    for forbidden in ("openai", "anthropic", "litellm", "google-genai", "requests", "httpx"):
+        assert forbidden not in pins
 
 
 def test_the_image_version_label_matches_the_lock_pin():
@@ -537,13 +544,6 @@ def test_the_image_version_label_matches_the_lock_pin():
     labels = re.findall(r'^LABEL org\.friday\.graphify\.version="([^"]+)"$', dockerfile, re.M)
     version, _ = _requirements((DOCKER_DIR / "graphify.lock.txt").read_text())["graphifyy"]
     assert labels == [version]
-    manifest = (REPO_ROOT / "docs" / "mcp" / "graphify.md").read_text()
-    assert "graphifyy==0.9.103" in manifest and PINNED_WHEEL_SHA256 in manifest
-    # every transitive wheel is locked, and no LLM SDK is in the set
-    for needed in ("networkx", "numpy", "rapidfuzz", "pyyaml", "tree-sitter", "tree-sitter-python"):
-        assert needed in pins
-    for forbidden in ("openai", "anthropic", "litellm", "google-genai", "requests", "httpx"):
-        assert forbidden not in pins
 
 
 def test_entrypoint_copies_without_git_and_bounds_the_output():
