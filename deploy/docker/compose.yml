@@ -128,6 +128,15 @@ services:
       GOOGLE_OAUTH_CLIENT_ID: "${GOOGLE_OAUTH_CLIENT_ID:-}"
       GOOGLE_OAUTH_CLIENT_SECRET: "${GOOGLE_OAUTH_CLIENT_SECRET:-}"
       GOOGLE_OAUTH_REFRESH_TOKEN: "${GOOGLE_OAUTH_REFRESH_TOKEN:-}"
+      # Friday Node (Phase 9 branch 4, docs/runbooks/friday-node.md): the
+      # server's Ed25519 signing key (`make secrets` writes it into
+      # deploy/docker/.env) and the retired public keys that still verify.
+      # Shared by web, worker and node-gateway: `invoke_read` signs in
+      # whichever process runs it (a chat turn in web, a task in worker);
+      # the gateway refuses to serve without a usable key and reports its id
+      # on /healthz. Empty = node pairing and invokes refuse (fail closed).
+      NODE_SIGNING_KEY: "${NODE_SIGNING_KEY:-}"
+      NODE_SIGNING_KEYS_RETIRED: "${NODE_SIGNING_KEYS_RETIRED:-}"
     # `connectors`: the internal network the MCP sidecars listen on (web
     # runs connector reads in the chat request thread).
     networks: ["default", "connectors"]
@@ -180,6 +189,40 @@ services:
       timeout: 15s
       retries: 3
       start_period: 40s
+
+  # Friday Node gateway (Phase 9 branch 4, brief D3): the WebSocket server
+  # a paired Mac node connects to (`/ws/node/v1`), in its own process --
+  # `uvicorn --ws wsproto` serving config.asgi_nodes (web stays WSGI). One
+  # process holds every live node socket, the per-node inbox loops and the
+  # revocation subscriber; do not scale it beyond one replica. Published on
+  # loopback only: expose `/ws/node/v1` through the overlay or the TLS
+  # reverse proxy (docs/runbooks/friday-node.md), never on 0.0.0.0.
+  node-gateway:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile.dev
+    command: >-
+      uv run uvicorn config.asgi_nodes:application --host 0.0.0.0 --port 8002
+      --ws wsproto --ws-max-size 262144 --lifespan on --no-server-header
+    volumes:
+      - ../../backend:/app
+    ports:
+      - "127.0.0.1:8002:8002"
+    environment: *backend_env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      # web runs the migrations the gateway's tables need.
+      web:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8002/healthz')"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
 
   # GitHub connector (Phase 5 branch 5, brief D7, docs/mcp/github.md): the
   # official github-mcp-server v1.12.2 (digest-pinned in the Dockerfile)

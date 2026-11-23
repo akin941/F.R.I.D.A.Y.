@@ -68,6 +68,7 @@ from accounts.models import TrustedDevice
 from core.revocation import ALL_DEVICES, REVOCATION_CHANNEL, parse_revocation
 from nodes import bus, presence, services
 from nodes.capabilities import get_contract
+from nodes.keys import signing_key_id
 from nodes.models import Node
 from nodes.output import OutputStreamWriter, OutputTransit, scrubber_for, utf8_len
 from nodes.protocol.messages import (
@@ -618,6 +619,11 @@ class NodeSocketApp:
         version, subprotocol = negotiated
         if not await self._redis_up():
             await self._refuse(send, CLOSE_TRY_AGAIN, subprotocol, reason="bus_unavailable")
+            return
+        if signing_key_id() is None:
+            # D4/D12: without a usable server key nothing can be invoked;
+            # the gateway serves no node rather than a half-working one.
+            await self._refuse(send, CLOSE_TRY_AGAIN, subprotocol, reason="signing_unavailable")
             return
         client = scope.get("client") or (None, None)
         node = await _db(authenticate_handshake, headers, client[0])

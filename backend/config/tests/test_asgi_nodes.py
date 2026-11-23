@@ -122,6 +122,10 @@ def test_the_node_action_backstops_are_on_the_beat():
         ("NODE_GRANT_TTL_SECONDS", "90", "nodes.E001"),
         ("NODE_ACTION_DISPATCH_MAX_DELAY_SECONDS", 0, "nodes.E002"),
         ("NODE_ACTION_TAIL_RETENTION_DAYS", 0, "nodes.E003"),
+        ("NODE_INVOKE_TIMEOUT_SECONDS", 30, "nodes.E005"),
+        ("NODE_INVOKE_TIMEOUT_SECONDS", 0, "nodes.E005"),
+        ("NODE_MAX_INFLIGHT", 0, "nodes.E006"),
+        ("NODE_RESULT_TTL_SECONDS", 0, "nodes.E007"),
     ],
 )
 def test_the_boot_checks_refuse_bad_node_action_settings(settings, name, value, check_id):
@@ -133,4 +137,7 @@ def test_the_defaults_pass_the_boot_checks(settings):
     assert settings.NODE_GRANT_TTL_SECONDS == 90
     assert settings.NODE_ACTION_DISPATCH_MAX_DELAY_SECONDS == 60
     assert settings.NODE_ACTION_TAIL_RETENTION_DAYS == 14
-    assert not {m.id for m in run_checks()} & {"nodes.E001", "nodes.E002", "nodes.E003"}
+    assert (settings.NODE_INVOKE_TIMEOUT_SECONDS, settings.NODE_MAX_INFLIGHT) == (10, 4)
+    assert settings.NODE_RESULT_TTL_SECONDS == 30
+    ids = {"nodes.E001", "nodes.E002", "nodes.E003", "nodes.E005", "nodes.E006", "nodes.E007"}
+    assert not {m.id for m in run_checks()} & ids

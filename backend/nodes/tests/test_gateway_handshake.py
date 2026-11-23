@@ -175,6 +175,18 @@ def test_redis_down_refuses_the_handshake_1013(gateway, paired, settings):
     assert link.wait_closed() and link.close_code == 1013
 
 
+@pytest.mark.parametrize("key", ["", "not-base64!"])
+def test_a_missing_or_invalid_signing_key_refuses_the_handshake_1013(
+    gateway, paired, settings, key
+):
+    app, harness = gateway
+    node, secret, _ = paired()
+    settings.NODE_SIGNING_KEY = key
+    link = harness.connect(secret=secret)
+    assert link.wait_closed() and link.close_code == 1013
+    assert not bus.is_present(node.pk)
+
+
 def test_the_highest_common_version_is_negotiated(link_node):
     link, node, reference = link_node(subprotocols=(V2, V1))
     assert link.subprotocol == V2 and reference.version == 2
