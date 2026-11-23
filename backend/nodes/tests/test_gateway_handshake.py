@@ -452,3 +452,13 @@ def test_an_event_is_acked_dropped_and_stored_nowhere(link_node):
     assert (ack["event_id"], ack["stored"], ack["dropped"]) == (frame["id"], 0, 1)
     assert "ghp_" not in json.dumps(ack)
     assert not link.frames_of("invoke")  # an event never leads to an invoke
+
+
+def test_revoke_through_the_node_api_closes_the_socket(gateway, owner, link_node, web_client):
+    app, harness = gateway
+    link, node, reference = link_node()
+    assert app.subscriber_ready.wait(5)
+    response = web_client(owner).post(f"/api/v1/nodes/{node.pk}/revoke")
+    assert response.status_code == 200
+    assert link.wait_closed(timeout=2.0)
+    assert link.frames_of("bye")[-1]["reason"] == "revoked"
