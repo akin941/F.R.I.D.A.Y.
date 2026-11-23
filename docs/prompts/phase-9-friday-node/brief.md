@@ -2407,8 +2407,7 @@ Implementation notes (branch 4):
   (`dropped_unmapped`, `dropped_paused`, `ignored`, `invalid`) as
   `dropped`; the per-reason counts go to the gateway's counters and log
   line only. A sink's counts are clamped to the batch size.
-- **A failing sink sends no ack** (deviation from nothing in D10, which is
-  silent on it): the node keeps the batch in flight, then spools it after
+- **A failing sink sends no ack** (D10 is silent on this case): the node keeps the batch in flight, then spools it after
   the socket drops, and sends it again after reconnect; the event id
   dedupes it. A batch that always fails is bounded by the node's 24 h
   spool cap. `config/tests` and `nodes/tests` pin it.
