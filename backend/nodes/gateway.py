@@ -388,7 +388,8 @@ class NodeSession:
     def _read_result(self, flight, frame):
         """Validate a read result against the server's own contract and push
         it to the caller's result key (D6). An invalid output is replaced by
-        an `error` with the code; nothing of it is pushed."""
+        the gateway's verdict (`result_schema` / `result_too_large`): nothing
+        of it is pushed."""
         payload = {
             "status": frame["status"],
             "refusal_code": frame.get("refusal_code"),
@@ -411,7 +412,7 @@ class NodeSession:
                     flight.capability,
                     exc.code,
                 )
-                payload.update(status="error", refusal_code=exc.code, truncated=False)
+                payload = {"verdict": exc.code}
             else:
                 payload["output"] = output
         self._resolve_read(flight.invocation_id, payload)

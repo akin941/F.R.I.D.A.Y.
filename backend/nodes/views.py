@@ -1,6 +1,7 @@
-"""Node HTTP endpoints. Branch 2: the anonymous pairing endpoint (D4). The
-owner-only node APIs (`GET /nodes`, detail, revoke, invocations) arrive in
-branches 4 and 5.
+"""Node HTTP endpoints. Branch 2: the anonymous pairing endpoint (D4).
+Branch 4: the owner-only node APIs `GET /api/v1/nodes`, `GET
+/api/v1/nodes/<id>` and `POST /api/v1/nodes/<id>/revoke` (D11, backend
+only; the invocations log is branch 5).
 
 Phase 10 branch 3 (brief D8): `POST /api/v1/nodes/<node_id>/actions` (the
 confirm-class path, the only caller of `nodes.services.invoke_confirm`) and
@@ -16,9 +17,9 @@ from rest_framework.views import APIView
 
 from accounts import devices
 from core.client_ip import trusted_client_ip
-from core.permissions import IsWebChannel
+from core.permissions import IsOwner, IsWebChannel
 from core.throttling import ScopedRateThrottle
-from nodes import services
+from nodes import selectors, services
 from nodes.keys import SigningKeyUnavailable
 from nodes.models import NodeActionExecution
 from nodes.serializers import (
@@ -170,3 +171,60 @@ class NodeActionDetailView(APIView):
         if execution is None:
             return Response(_NOT_FOUND, status=status.HTTP_404_NOT_FOUND)
         return Response(_execution_body(execution))
+
+
+# --- the owner's node APIs (Phase 9 D11, branch 4) ---
+
+_NODE_PERMISSIONS = [IsAuthenticated, IsWebChannel, IsOwner]
+
+
+def _owned_node(request, node_id):
+    """The actor's own node through `for_actor()`, or None (one 404 for an
+    unknown node and another user's)."""
+    return selectors.nodes_for(request.user).filter(pk=node_id).first()
+
+
+class NodeListView(APIView):
+    """`GET /api/v1/nodes` -- the owner's paired nodes with their link
+    status, heartbeat, spool depth, credential age and catalogue counts.
+    Owner, web channel, human only (default authentication: a node secret or
+    a PAT never reaches it). Codes and counts only -- no path, no content."""
+
+    permission_classes = _NODE_PERMISSIONS
+
+    def get(self, request):
+        nodes = selectors.nodes_for(request.user)
+        return Response([selectors.node_summary(node) for node in nodes])
+
+
+class NodeDetailView(APIView):
+    """`GET /api/v1/nodes/<id>` -- one node plus its latest snapshot's
+    entries (name, version, class, availability, invocable, and the
+    `not_invocable` reason). Read-only: there is no policy surface (ADR-013
+    decision 5), availability is what the node reported."""
+
+    permission_classes = _NODE_PERMISSIONS
+
+    def get(self, request, node_id):
+        node = _owned_node(request, node_id)
+        if node is None:
+            return Response(_NOT_FOUND, status=status.HTTP_404_NOT_FOUND)
+        return Response(selectors.node_detail(node))
+
+
+class NodeRevokeView(APIView):
+    """`POST /api/v1/nodes/<id>/revoke` -- delegates to
+    `accounts.devices.revoke_device` (permanent; audited
+    `accounts.device.revoked`). The revocation is published after commit,
+    so the gateway closes the node's socket within ~2 s (D6); the next
+    heartbeat re-check is the backstop."""
+
+    permission_classes = _NODE_PERMISSIONS
+
+    def post(self, request, node_id):
+        node = _owned_node(request, node_id)
+        if node is None:
+            return Response(_NOT_FOUND, status=status.HTTP_404_NOT_FOUND)
+        devices.revoke_device(device=node.device, actor=request.user)
+        node.device.refresh_from_db()
+        return Response(selectors.node_summary(node))

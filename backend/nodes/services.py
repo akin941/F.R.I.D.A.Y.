@@ -379,6 +379,8 @@ SYSTEM_READ_CAPABILITIES = frozenset()
 GATEWAY_READ_VERDICTS = {
     "node_disconnected": ("node_disconnected", ""),
     "node_mismatch": ("server_refused", "node_mismatch"),
+    "result_schema": ("error", "result_schema"),
+    "result_too_large": ("error", "result_too_large"),
 }
 
 
