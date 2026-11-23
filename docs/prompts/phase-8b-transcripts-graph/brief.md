@@ -3990,6 +3990,30 @@ Nothing else in this branch needs the Mac, real credentials, paid calls or
 real hardware: the tests use FakeAdapter, the reference node double, a
 temporary vault, a faked `docker` seam and a faked sidecar.
 
+**Known follow-ups — `chore/p8b-closeout` (review, LOW, unresolved at merge
+into the integration branch, 2026-11-23).** The merge was clean (no
+migration renumbering needed).
+1. **`_check_transcripts` notes a `paused` source despite a recent failed
+   pull** (`backend/ops/preflight.py`). The new checks are read-only and
+   leak nothing; the sidecar URL comes from settings, so SSRF is not a
+   concern. A `paused` source is reported as a note even when its
+   capability has a recent failed pull; the result is still correct
+   because failures are reported separately. Fix: none needed (optional).
+2. **Keep the transcripts-port follow-up visible**
+   (`docs/MASTER_PLAN.md`, this brief). "Done when" needs preflight green
+   on the dev stack with the reference node paired; that is pending owner
+   step 4, and the `nodes`-backed transcript port is deferred to its own
+   branch (owner step 2). The e2e uses the reference node double through
+   the seam, not the in-process gateway. MASTER_PLAN row 8B says "server
+   half done" while that port is outstanding. Fix: keep the follow-up
+   branch (`feat/p9-node-reads` follow-up 1) visible in the MASTER_PLAN
+   go/no-go table.
+3. **`test_headroom_compresses_with_litellm_blocked` fails where headroom
+   is absent** (`deploy/compressor/test_no_litellm.py`). It raises
+   `ModuleNotFoundError: headroom` outside the sidecar image; environmental,
+   not a regression, and not collected by backend pytest. Fix (optional):
+   add `pytest.importorskip("headroom")` so it skips instead of failing.
+
 ## Branch table
 
 | # | Branch | Scope | Depends on | Status |
