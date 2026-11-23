@@ -242,10 +242,16 @@ class _Report:
         headers = "\n\n".join("\n".join(header) for header, _, _ in self.sections)
         room = max(0, limit - len(headers) - 2 * len(self.sections) - 64)
         parts, truncated, size = [], False, len(headers)
-        per_section = room // max(1, len(self.sections))
+        # Sections with rows share the room; what one leaves unused passes
+        # on to the next.
+        waiting = sum(1 for _, lines, _ in self.sections if lines)
         for header, lines, keep_last in self.sections:
             size += sum(len(line) + 1 for line in lines)
-            kept, cut = bounded_lines(lines, per_section, keep_last=keep_last)
+            share = room // waiting if lines else 0
+            kept, cut = bounded_lines(lines, share, keep_last=keep_last)
+            if lines:
+                waiting -= 1
+                room -= sum(len(line) + 1 for line in kept)
             truncated = truncated or cut
             body = "\n".join(header + kept)
             if cut:
