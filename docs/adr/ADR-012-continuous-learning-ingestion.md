@@ -294,3 +294,41 @@ note: Graphify as `system`).** Details in
 - **Workspace axis.** Rows land in the repo's own workspace; the `self`
   line reads only the owner's personal workspace, so a firm repo's graph
   never reaches it.
+
+**Phase 8B closeout, `chore/p8b-closeout` (2026-11-20; part 3, completing
+the 8B note).** Details in `docs/prompts/phase-8b-transcripts-graph/brief.md`
+D4, D8, D13, D14 and the branch 8 and 10 records.
+
+- **Transcript sources (decisions 1, 2, 11).** `claude_code_transcripts`
+  and `codex_transcripts` are personal-class sources, seeded disabled.
+  They own no mapping rules: they route through the `claude_code_hooks`
+  source's `path_prefix` rules (one path registry), and only owner-typed
+  turns are stored, scrubbed on the node and again on the server (with the
+  workspace's scrub terms), with harness-injected markers re-checked
+  (`dropped_not_owner`) and rows outside the invoke's workspace dropped
+  (`dropped_foreign`). The pull is a signed, chain-audited node read per
+  workspace (ADR-013); until the `nodes`-backed port lands it is a no-op.
+- **The scrubber corpus (decision 3).** `transcripts.jsonl` (14 labelled
+  fragments) is part of the 100% secrets-recall gate for the server
+  scrubber and the vendored node scrubber. Since the closeout preflight's
+  `learning_scrubber` **fails** when the file is missing or has no secret
+  item, instead of skipping it.
+- **Facts follow the episode's class (decision 11).** A fact inherits its
+  cited episode's sensitivity, so a transcript- or `private`-derived fact
+  is extracted only on a `personal_data_allowed` provider, and a `private`
+  fact never reaches a model payload or the open vault tree.
+- **Retrieval default.** `MEMORY_RETRIEVAL_MODE` stays `legacy` at the
+  closeout: the public compare passed (recall@10 0.5714 → 0.875, leak rate
+  0), but the owner's private compare is not recorded (pending owner
+  evaluation). Hybrid retrieval only ever ranks `model_eligible()` facts
+  after the workspace filter.
+- **Operations.** `manage.py preflight` gains `graph_integrity` (no fact
+  crosses workspaces, superseded facts are closed, no inverted window),
+  `retrieval_indexes`, `graphify`, `compressor`, `transcripts` and
+  `eval_baseline`, and extends `learning_budget` (reconciliation,
+  reflection, eval), `learning_beat` (reflection, transcript pull,
+  Graphify recovery) and `learning_scrubber` (above). The end-to-end test
+  `ops/tests/test_transcripts_e2e.py` runs fixture transcripts through the
+  reference node double to an approved fact used in a hybrid chat turn,
+  mirrored as an entity note, forgotten (fact archived, note pruned) and
+  restored.

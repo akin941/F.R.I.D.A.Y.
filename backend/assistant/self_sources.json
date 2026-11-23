@@ -251,10 +251,10 @@
   ],
   "phase": {
     "file": "docs/MASTER_PLAN.md",
-    "line": 985,
-    "phase": "8B Transcripts + knowledge graph",
-    "outcome": "Friday knows the details of your work across tools",
-    "status": "planned (full brief written 2026-11-20: server branches 1–9 + closeout; branch 8 (transcripts) waits for Phase 9 server branches 2–5; Swift owner-turn readers and private-data evaluations deferred to a Mac session)"
+    "line": 986,
+    "phase": "10 Control",
+    "outcome": "\"Testleri çalıştır\", \"Codex ile başlat\": proposed by voice, approved on screen, run safely",
+    "status": "planned (full brief written 2026-11-20: server branches 1–7 + closeout — protocol v2 and grants, reference executor + conformance/fuzz/escape suites, approval mapping, trust check, HUD terminal panel, Codex app-server and Claude Agent SDK…"
   },
-  "content_hash": "6d07d3f3c346bc86538b1df5e2da4de1b2d662f061267606cbabe8a0709ef04a"
+  "content_hash": "19a87703f0011ee3091956bbda8a3582d3e2a0c78f4577e8fda3eff28e158d84"
 }
