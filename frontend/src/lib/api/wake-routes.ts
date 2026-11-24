@@ -22,6 +22,8 @@ export interface WakeRoute {
   effect: "read" | "proposal";
   phrases: string[];
   aliases: WakeAlias[];
+  /** Phase 12 branch 4: a `tool.*` route's Friday-authored tool label ("" otherwise). */
+  label?: string;
 }
 
 export interface WakeRouteList {
@@ -47,21 +49,38 @@ export const ROUTE_LABELS: Record<string, { title: string; description: string }
 };
 
 /**
- * Phase 12 branch 5: one `skill.<name>` route per usable instruction skill.
- * It has no default phrase; an utterance that starts with one of its
- * aliases uses that skill for the turn (the normal router still decides).
+ * Title and description of any route: the code-defined ones above, a
+ * `tool.*` route (Phase 12 branch 4: an owner alias for one tool, followed
+ * by the request -- "ev yedeği nas"; a read tool's route reads, a write
+ * tool's route only proposes a card the owner approves on screen), or a
+ * `skill.<name>` route (Phase 12 branch 5: one per usable instruction skill;
+ * an utterance that starts with one of its aliases uses that skill for the
+ * turn, the normal router still decides). Accepts the route or its name.
  */
-export function routeLabel(name: string): { title: string; description: string } {
-  const known = ROUTE_LABELS[name];
+export function routeLabel(
+  routeOrName: WakeRoute | string,
+): { title: string; description: string } {
+  const route = typeof routeOrName === "string" ? { name: routeOrName } : routeOrName;
+  const known = ROUTE_LABELS[route.name];
   if (known) return known;
-  if (name.startsWith("skill.")) {
+  if (route.name.startsWith("skill.")) {
     return {
-      title: `Beceri: ${name.slice("skill.".length)}`,
+      title: `Beceri: ${route.name.slice("skill.".length)}`,
       description:
         "Takma adla başlayan cümle bu beceriyi kullanır. Yalnızca talimat metnidir; hiçbir aracı açmaz.",
     };
   }
-  return { title: name, description: "" };
+  if (route.name.startsWith("tool.")) {
+    const full = route as Partial<WakeRoute> & { name: string };
+    return {
+      title: full.label || route.name.slice("tool.".length),
+      description:
+        full.effect === "proposal"
+          ? "Takma adın ardından söylediklerinden bir taslak kart önerir; onay ekranda verilir."
+          : "Takma adın ardından söylediklerinle bu aracı okur; yavaş okumaların sonucu konuşmaya sonradan yazılır.",
+    };
+  }
+  return { title: route.name, description: "" };
 }
 
 const ws = (workspaceId: string) => `workspace=${encodeURIComponent(workspaceId)}`;

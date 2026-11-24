@@ -10,10 +10,10 @@ import { VIEW_SCROLL_ROOT } from "@/components/shell/view-scroll";
 import { useWorkspace } from "@/contexts/workspace-context";
 import { errorMessage } from "@/lib/api-client";
 import {
-  routeLabel,
   createWakeAlias,
   deleteWakeAlias,
   fetchWakeRoutes,
+  routeLabel,
   type WakeRouteList,
 } from "@/lib/api/wake-routes";
 import { cn } from "@/lib/utils";
@@ -92,7 +92,8 @@ export function WakeRoutesSettings() {
         title="Sesli komutlar"
         description={
           "\"Hey Friday\" dedikten sonra bu ifadelerden biri tek başına söylenirse Friday yönlendiriciyi " +
-          "atlayıp doğrudan cevap verir. Komutlar yalnızca okur; hiçbir şeyi onaylamaz ya da çalıştırmaz."
+          "atlayıp doğrudan cevap verir. Araç komutlarında takma addan sonra isteğini söylersin. Komutlar " +
+          "yalnızca okur ya da taslak önerir; hiçbir şeyi onaylamaz ya da çalıştırmaz."
         }
       />
       {error ? (
@@ -102,7 +103,7 @@ export function WakeRoutesSettings() {
       ) : null}
       {data === null && !error ? <p className="text-sm text-muted-foreground">Yükleniyor…</p> : null}
       {data?.routes.map((route) => {
-        const label = routeLabel(route.name);
+        const label = routeLabel(route);
         const full = route.aliases.length >= data.limits.aliases_per_route;
         const inputId = `alias-${route.name}`;
         return (

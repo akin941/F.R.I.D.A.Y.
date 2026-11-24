@@ -11,7 +11,7 @@ from importlib import import_module
 
 from connectors.manifest import get_manifest, register_manifest
 
-BUILTIN = ("external_installation", "github", "google", "home_assistant")
+BUILTIN = ("external_installation", "github", "google", "home_assistant", "n8n")
 
 
 def load_builtin():

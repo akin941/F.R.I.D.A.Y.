@@ -30,6 +30,16 @@ class AssistantConfig(AppConfig):
         validate_routes()
         register_trust_check(check_node_action)
         register_evidence_source(input_mode_of)
+
+        # Phase 12 D11: async read follow-ups wake on the read's completion
+        # (`tools.registry`; assistant never imports connectors), and the
+        # `assistant.followups_ready` probe announces them (core.probes).
+        from assistant.followups import on_async_read_finished
+        from assistant.probes import register as register_probes
+        from tools.registry import register_async_read_listener
+
+        register_async_read_listener(on_async_read_finished)
+        register_probes()
         post_migrate.connect(
             _refresh_self_block, sender=self, dispatch_uid="assistant.refresh_self_block"
         )

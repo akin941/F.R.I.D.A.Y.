@@ -18,6 +18,7 @@ class ConnectorsConfig(AppConfig):
     def ready(self):
         from connectors.manifest import list_manifests
         from connectors.manifests import load_builtin
+        from connectors.probes import register as register_probes
         from connectors.reads import register_reads
         from connectors.writes import register_writes
 
@@ -25,3 +26,5 @@ class ConnectorsConfig(AppConfig):
         for manifest in list_manifests():
             register_reads(manifest)
             register_writes(manifest)
+        # Phase 12 D1/D12: finished n8n writes as notices (core.probes).
+        register_probes()

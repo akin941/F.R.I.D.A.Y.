@@ -380,9 +380,18 @@ def classify_intent(
                     "action_class": proposal["action_class"],
                 },
             }
+        payload = draft_tool_payload(
+            conversation,
+            actor=actor,
+            content=content,
+            tool_name=parsed["tool_name"],
+            context_report=context_report,
+        )
+        if payload is None:
+            return {"intent": Message.Intent.CHAT, "intent_payload": {}}
         return {
             "intent": parsed["intent"],
-            "intent_payload": {"tool_name": parsed["tool_name"], "payload": {}},
+            "intent_payload": {"tool_name": parsed["tool_name"], "payload": payload},
         }
 
     if parsed["intent"] == Message.Intent.TASK_DRAFT:
@@ -589,6 +598,51 @@ def _extract_connector_args(
     return parse_connector_args(result.text)
 
 
+def draft_tool_payload(conversation, *, actor, content, tool_name, context_report=None):
+    """A `tool_request` draft's payload (Phase 12 D12). `{}` for a gated
+    tool without `draft_arguments` (every tool before Phase 12: the card
+    carries no arguments). For one with them (an n8n write), the arguments
+    are extracted from the owner's own words by `router.connector_args`
+    (the tool's Friday-authored description and serializer only; a
+    `personal` tool's call carries `personal_data=True`), validated by the
+    tool's strict serializer and returned as `{"arguments": {...}}` -- the
+    exact connector-write payload the card sends to `POST /approvals`, where
+    the owner sees and decides them. `None` (degrade the turn to chat) when
+    the extraction fails or the arguments are invalid. Nothing is created
+    here: the card is still only a proposal."""
+    from types import SimpleNamespace
+
+    from tools.registry import DATA_CLASS_PERSONAL, get_tool
+
+    spec = get_tool(tool_name)
+    draft = getattr(spec, "draft_arguments", None) if spec is not None else None
+    if draft is None:
+        return {}
+    personal = draft.data_class == DATA_CLASS_PERSONAL or conversation_has_personal_data(
+        conversation
+    )
+    described = SimpleNamespace(
+        name=tool_name,
+        description=draft.description,
+        argument_serializer=draft.argument_serializer,
+    )
+    try:
+        arguments = _extract_connector_args(
+            conversation,
+            actor=actor,
+            content=content,
+            spec=described,
+            personal_data=personal,
+            context_report=context_report,
+        )
+    except (GatewayError, ConnectorArgsParseError):
+        return None
+    serializer = draft.argument_serializer(data=arguments)
+    if not serializer.is_valid():
+        return None
+    return {"arguments": json.loads(json.dumps(serializer.validated_data, default=str))}
+
+
 @dataclass
 class ConnectorTurn:
     """The outcome of one turn's connector read. With `error_type` set, the
@@ -601,6 +655,14 @@ class ConnectorTurn:
     error_type: str = ""
     block: str = ""
     reads: list = field(default_factory=list)
+    # Phase 12 D11: an async read was started instead -- the turn's reply is
+    # `reply_text` (a Friday template, no chat completion) and the view
+    # records the follow-up once the user message exists.
+    async_handle: object = None
+    reply_text: str = ""
+    tool_label: str = ""
+    source: str = ""
+    data_class: str = ""
 
 
 def prepare_connector_read(
@@ -630,9 +692,11 @@ def prepare_connector_read(
     e.g. the voice turn's trace id."""
     from tools.registry import (
         DATA_CLASS_PERSONAL,
+        READ_MODE_ASYNC,
         ReadToolError,
         list_read_tools,
         run_read_tool,
+        start_async_read,
     )
 
     spec = next(
@@ -649,8 +713,14 @@ def prepare_connector_read(
         )
     personal = spec.data_class == DATA_CLASS_PERSONAL
     personal_context = personal or conversation_has_personal_data(conversation)
+    is_async = spec.mode == READ_MODE_ASYNC
+    # The completion that will consume the result: this turn's chat reply,
+    # or (D11) the follow-up's one `chat.followup` call.
+    consumer_purpose = "chat.followup" if is_async else "chat"
     gateway = InferenceGateway()
-    if personal_context and not gateway.has_eligible_provider(purpose="chat", personal_data=True):
+    if personal_context and not gateway.has_eligible_provider(
+        purpose=consumer_purpose, personal_data=True
+    ):
         return ConnectorTurn(
             tool_name=tool_name,
             outcome="local_model_required",
@@ -684,9 +754,18 @@ def prepare_connector_read(
             error_type=CONNECTOR_ERROR_INVALID_ARGUMENTS,
         )
     try:
-        result = run_read_tool(
-            spec, workspace=conversation.workspace, actor=actor, args=arguments, channel=channel
-        )
+        if is_async:
+            handle = start_async_read(
+                spec,
+                workspace=conversation.workspace,
+                actor=actor,
+                args=arguments,
+                channel=channel,
+            )
+        else:
+            result = run_read_tool(
+                spec, workspace=conversation.workspace, actor=actor, args=arguments, channel=channel
+            )
     except ReadToolError as exc:
         if exc.code in _INVALID_ARGUMENT_CODES:
             error_type = CONNECTOR_ERROR_INVALID_ARGUMENTS
@@ -695,6 +774,34 @@ def prepare_connector_read(
         else:
             error_type = CONNECTOR_ERROR_READ_FAILED
         return ConnectorTurn(tool_name=tool_name, outcome=exc.code, error_type=error_type)
+    if is_async:
+        # D11: no result yet and no chat completion this turn. A personal
+        # read marks the conversation now -- before its result can ever
+        # reach a completion (the follow-up reads the flag fresh).
+        from assistant.followups import started_reply
+
+        if personal:
+            mark_conversation_personal_data(conversation=conversation, actor=actor)
+        data_class = DATA_CLASS_PERSONAL if personal else spec.data_class
+        return ConnectorTurn(
+            tool_name=tool_name,
+            outcome="started",
+            reads=[
+                {
+                    "tool": spec.name,
+                    "source": spec.source,
+                    "data_class": data_class,
+                    "size": 0,
+                    "truncated": False,
+                    "mode": "async",
+                }
+            ],
+            async_handle=handle,
+            reply_text=started_reply(spec.display_label),
+            tool_label=spec.display_label,
+            source=spec.source,
+            data_class=data_class,
+        )
     # Phase 5 branch 5: one call can be stricter than its spec (a GitHub
     # read of a `sensitive` repo is `personal` on a `firm` connector). Such
     # a result is only kept if a personal-data provider can consume it --

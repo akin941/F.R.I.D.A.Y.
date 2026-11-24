@@ -340,6 +340,9 @@ export interface ApiMessage {
   input_mode?: MessageInputMode;
   // Connector reads supplied as context for this reply (Phase 5 branch 4).
   connector_reads?: ApiConnectorRead[];
+  // Phase 12 D11: on an async read's follow-up reply, the user message whose
+  // turn started the read; null otherwise. Optional for older payloads.
+  followup_of?: string | null;
   // The task confirmed from this task-draft message (Task.source_message),
   // or null -- how a reloaded chat knows a draft was already confirmed.
   confirmed_task: string | null;

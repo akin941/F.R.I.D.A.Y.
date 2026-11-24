@@ -596,6 +596,9 @@ ignore_imports = [
     # runs only inside a connector sidecar, never in web/worker/runner (D1).
     "connectors.docker.stdio_bridge -> mcp.server",
     "connectors.docker.stdio_bridge -> mcp.client.stdio",
+    # Phase 12 D9/D19: the HTTP relay IS a server too (it adds the n8n
+    # bearer upstream); it runs only inside the `n8n-relay` sidecar.
+    "connectors.docker.http_relay -> mcp.server",
 ]
 
 # Phase 6 branch 2 (ADR-011 decision 6, brief D11): `voice` may import

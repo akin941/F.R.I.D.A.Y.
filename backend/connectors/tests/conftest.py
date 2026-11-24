@@ -51,6 +51,26 @@ def server(monkeypatch, fake_state):
     return fake_state
 
 
+@pytest.fixture
+def n8n_state():
+    return fakes.N8nServerState()
+
+
+@pytest.fixture
+def n8n(monkeypatch, n8n_state):
+    """The fake n8n trigger behind the in-process relay, wired to the
+    production MCP client (Phase 12 branch 4). The `n8n` manifest itself is
+    the committed one (registered at boot)."""
+    return fakes.install_n8n(monkeypatch, n8n_state)
+
+
+@pytest.fixture
+def n8n_binding(n8n, workspace, enable):
+    from connectors.manifest import get_manifest
+
+    return enable(get_manifest("n8n"), workspace)
+
+
 def _install(manifest):
     register_manifest(manifest)
     register_reads(manifest)

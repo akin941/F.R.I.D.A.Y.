@@ -342,3 +342,200 @@ def install_github(monkeypatch, state):
     monkeypatch.setenv("GITHUB_MCP_URL", GITHUB_URL)
     monkeypatch.setattr(mcp_client, "_connect_http", github_connector(state))
     return state
+
+
+# --- n8n (Phase 12 branch 4) ---
+#
+# An n8n-shaped "Friday tools" MCP Server Trigger: the two allowlisted
+# `wf_<id>` tools with the reference schemas, plus a third workflow tool the
+# allowlist does not name and an instance-level `search_workflows` -- both
+# must stay unreachable. The trigger answers only with the right bearer
+# (401 otherwise) and can be told to redirect. Friday reaches it the
+# production way: the real MCP client -> the in-process HTTP relay
+# (`connectors.docker.http_relay.build_app`) -> this server; both HTTP legs
+# are recorded (requests and response bodies).
+
+N8N_RELAY_URL = "http://n8n-relay:8080/mcp"
+N8N_UPSTREAM_URL = "http://n8n.test:5678/mcp"
+N8N_BEARER = "n8n-BEARER-CANARY-0123456789abcdef"
+N8N_STATUS_TOOL = "wf_Ab12Cd34Ef56Gh78"
+N8N_BACKUP_TOOL = "wf_Hb34Kd56Mf78Np90"
+N8N_UNLISTED_TOOL = "wf_Zz99Yy88Xx77Ww66"
+
+
+@dataclass
+class N8nServerState:
+    schemas: dict = field(default_factory=dict)
+    calls: list = field(default_factory=list)
+    # Friday -> relay and relay -> n8n, each `{method, url, headers, body,
+    # status, response}`.
+    relay_requests: list = field(default_factory=list)
+    upstream_requests: list = field(default_factory=list)
+    status_text: str = "Disk %42 dolu, tüm servisler çalışıyor."
+    status_is_error: bool = False
+    backup_text: str = "Ev yedeği tamamlandı."
+    backup_is_error: bool = False
+    expected_bearer: str = N8N_BEARER
+    redirect: bool = False
+    redirect_target_hits: int = 0
+    # Called with the tool name before replying; a test can raise here.
+    on_call: object = None
+
+    def __post_init__(self):
+        from connectors.manifests.n8n import REFERENCE_SCHEMAS
+
+        if not self.schemas:
+            self.schemas = copy.deepcopy(REFERENCE_SCHEMAS)
+            self.schemas[N8N_UNLISTED_TOOL] = {
+                "type": "object",
+                "properties": {"path": {"type": "string"}},
+            }
+            self.schemas["search_workflows"] = {
+                "type": "object",
+                "properties": {"query": {"type": "string"}},
+            }
+
+    def names(self):
+        return [name for name, _ in self.calls]
+
+
+def build_n8n_server(state):
+    async def list_tools(ctx, params):
+        return ListToolsResult(
+            tools=[
+                Tool(name=name, description=SERVER_DESCRIPTION_CANARY, input_schema=schema)
+                for name, schema in state.schemas.items()
+            ]
+        )
+
+    async def call_tool(ctx, params):
+        state.calls.append((params.name, dict(params.arguments or {})))
+        if state.on_call is not None:
+            await state.on_call(params.name)
+        if params.name == N8N_STATUS_TOOL:
+            return CallToolResult(
+                content=[TextContent(text=state.status_text)], is_error=state.status_is_error
+            )
+        if params.name == N8N_BACKUP_TOOL:
+            return CallToolResult(
+                content=[TextContent(text=state.backup_text)], is_error=state.backup_is_error
+            )
+        return CallToolResult(content=[TextContent(text="workflow ran")])
+
+    return Server(
+        "n8n-mcp-server-trigger",
+        version="1.0.0",
+        instructions=SERVER_INSTRUCTIONS_CANARY,
+        on_list_tools=list_tools,
+        on_call_tool=call_tool,
+    )
+
+
+def _n8n_guard(app, state):
+    """The trigger's bearer auth (and an optional redirect) in front of the
+    MCP app, like n8n's own credential check."""
+    from starlette.responses import Response
+
+    async def guarded(scope, receive, send):
+        if scope["type"] == "http":
+            if scope.get("path") == "/elsewhere":
+                state.redirect_target_hits += 1
+                await Response(status_code=404)(scope, receive, send)
+                return
+            if state.redirect:
+                await Response(status_code=307, headers={"location": "/elsewhere"})(
+                    scope, receive, send
+                )
+                return
+            headers = {k.decode().lower(): v.decode() for k, v in scope.get("headers", [])}
+            if headers.get("authorization") != f"Bearer {state.expected_bearer}":
+                await Response(status_code=401)(scope, receive, send)
+                return
+        await app(scope, receive, send)
+
+    return guarded
+
+
+class _FullRecorder(httpx2.AsyncBaseTransport):
+    """Records each request and its full response body (JSON responses)."""
+
+    def __init__(self, inner, log):
+        self.inner = inner
+        self.log = log
+
+    async def handle_async_request(self, request):
+        body = await request.aread()
+        response = await self.inner.handle_async_request(request)
+        content = await response.aread()
+        self.log.append(
+            {
+                "method": request.method,
+                "url": str(request.url),
+                "headers": dict(request.headers),
+                "body": body.decode("utf-8", "replace"),
+                "status": response.status_code,
+                "response": content.decode("utf-8", "replace"),
+                "response_headers": dict(response.headers),
+            }
+        )
+        headers = [
+            (k, v)
+            for k, v in response.headers.items()
+            if k.lower() not in ("content-length", "transfer-encoding", "content-encoding")
+        ]
+        return httpx2.Response(
+            status_code=response.status_code,
+            headers=headers,
+            content=content,
+            request=request,
+            extensions=response.extensions,
+        )
+
+
+def relay_environ(allowed_tools=None):
+    from connectors.manifests.n8n import relay_allowed_tools
+
+    return {
+        "RELAY_UPSTREAM_URL": N8N_UPSTREAM_URL,
+        "RELAY_BEARER_TOKEN": N8N_BEARER,
+        "BRIDGE_ALLOWED_TOOLS": allowed_tools
+        if allowed_tools is not None
+        else (relay_allowed_tools()),
+        "RELAY_TIMEOUT_SECONDS": "10",
+    }
+
+
+def n8n_relay_connector(state, *, environ=None):
+    """A drop-in for `mcp_client._connect_http`: the fake n8n trigger (with
+    its lifespan) behind the in-process relay (with its lifespan), the
+    production-built Friday client in front."""
+    from connectors.docker.http_relay import build_app
+
+    @asynccontextmanager
+    async def connect(url, *, timeout):
+        # `host` off localhost: the trigger is reached as `n8n.test`, so the
+        # SDK's localhost-only DNS-rebinding guard must not apply.
+        upstream = build_n8n_server(state).streamable_http_app(
+            stateless_http=True, json_response=True, host="0.0.0.0"
+        )
+        async with upstream.router.lifespan_context(upstream):
+            upstream_transport = _FullRecorder(
+                httpx2.ASGITransport(app=_n8n_guard(upstream, state)), state.upstream_requests
+            )
+            relay = build_app(environ or relay_environ(), transport=upstream_transport)
+            async with relay.router.lifespan_context(relay):
+                transport = _FullRecorder(httpx2.ASGITransport(app=relay), state.relay_requests)
+                async with mcp_client.build_http_client(
+                    timeout=timeout, transport=transport
+                ) as client:
+                    yield client
+
+    return connect
+
+
+def install_n8n(monkeypatch, state, *, environ=None):
+    """Point the production MCP client at the relay in front of the fake
+    n8n trigger."""
+    monkeypatch.setenv("N8N_MCP_URL", N8N_RELAY_URL)
+    monkeypatch.setattr(mcp_client, "_connect_http", n8n_relay_connector(state, environ=environ))
+    return state

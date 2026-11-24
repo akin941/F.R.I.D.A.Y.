@@ -17,9 +17,11 @@ from approvals.tasks import sweep_expired_approval_requests
 from audit.models import AuditLog
 from audit.unattended import DENIAL_ACTION, recorded_unattended_run
 from config.celery import app as celery_app
+from connectors import async_reads as connector_async_reads
 from connectors import reads as connector_reads
 from connectors import tasks as connector_tasks
 from connectors import writes as connector_writes
+from connectors.models import ConnectorAsyncRead
 from core.unattended import UnattendedDenied
 from harness import services as harness_services
 from memory import services as memory_services
@@ -78,6 +80,20 @@ EFFECTS = {
     "connector_read": lambda ws, owner: connector_reads.perform_read(
         None, None, workspace=ws, actor=owner, args={}, channel="web"
     ),
+    # Phase 12 branch 4 (D2/D11): an async read is denied before any
+    # `ConnectorAsyncRead` row or dispatch -- at the registry door and at the
+    # connectors implementation of `start_async`.
+    "read_tool:start_async": lambda ws, owner: registry.start_async_read(
+        registry.get_read_tool("n8n_server_status"),
+        workspace=ws,
+        actor=owner,
+        args={"scope": "summary"},
+        channel="web",
+    ),
+    "connector_read:start_async": lambda ws, owner: connector_async_reads.start_async_read(
+        None, None, workspace=ws, actor=owner, args={}, channel="web"
+    ),
+    "connector_read:run_async": lambda ws, owner: connector_tasks.run_async_read(uuid.uuid4()),
     "connector_write:prepare": lambda ws, owner: connector_writes.prepare_write_payload(
         "github", "github_open_issue", ws, {"arguments": {}}
     ),
@@ -194,6 +210,7 @@ def test_every_effect_is_denied_inside_a_run_with_one_audit_row(owner, workspace
     assert Memory.objects.count() == before["memories"]
     assert ModelUsage.objects.count() == before["usage"]
     assert Task.all_objects.count() == before["tasks"]
+    assert not ConnectorAsyncRead.objects.exists()
 
 
 def test_outside_a_run_the_services_behave_as_before(owner, workspace):

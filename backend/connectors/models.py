@@ -9,8 +9,13 @@ column exists that could.
 
 String FK label for `approvals.ApprovalRequest`: `connectors` must not import
 `approvals` (ADR-010 contract) -- the same shape as `tools.VaultExportRun`.
+
+Phase 12 (branch 4) adds the third: `ConnectorAsyncRead`, the run-once
+record of one async read (D11), whose bounded result text lives only until
+the follow-up that consumes it has been written.
 """
 
+from django.conf import settings
 from django.db import models
 
 from core.db import WorkspaceScopedModel
@@ -121,3 +126,70 @@ class ConnectorWriteExecution(WorkspaceScopedModel, TimestampedModel):
 
     def __str__(self):
         return f"{self.connector}.{self.tool} write {self.id} ({self.status})"
+
+
+class ConnectorAsyncRead(WorkspaceScopedModel, TimestampedModel):
+    """One async connector read (Phase 12 D11, ADR-010 amendment 2026-11):
+    started by an owner's turn (`connectors.reads.start_async_read_impl`),
+    run **once** by `connectors.tasks.run_async_read`, never retried.
+
+    `pending` -> `running` (claimed; `started_at` set in the same
+    transaction, the moment the one call may start) -> `ok` / `failed` /
+    `timed_out`. A `pending` row is sent at most once: only one claim can
+    win. A `running` row whose worker was lost is moved to `failed`
+    (`worker_lost`) by the recovery scan -- never re-sent.
+
+    `arguments` are the serializer-validated arguments the call sends; they
+    are cleared when the read ends (only their sha256 stays). `result_text`
+    is the bounded, invisible-formatting-stripped server text -- low-trust
+    data, fenced by the follow-up and never rendered as instructions, never
+    a memory. `error_code` is a closed vocabulary, never server text."""
+
+    class Status(models.TextChoices):
+        PENDING = "pending"
+        RUNNING = "running"
+        OK = "ok"
+        FAILED = "failed"
+        TIMED_OUT = "timed_out"
+
+    TERMINAL = frozenset({Status.OK, Status.FAILED, Status.TIMED_OUT})
+
+    binding = models.ForeignKey(
+        ConnectorBinding,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="async_reads",
+    )
+    connector = models.CharField(max_length=40)
+    tool = models.CharField(max_length=40)
+    channel = models.CharField(max_length=20)
+    requested_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="+",
+    )
+    manifest_version = models.PositiveIntegerField()
+    schema_sha256 = models.CharField(max_length=64)
+    arguments = models.JSONField(default=dict, blank=True)
+    arguments_sha256 = models.CharField(max_length=64)
+    # "" = the manifest's class; `personal` when one call is stricter.
+    data_class = models.CharField(max_length=10, blank=True, default="")
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDING)
+    started_at = models.DateTimeField(null=True, blank=True)
+    finished_at = models.DateTimeField(null=True, blank=True)
+    error_code = models.CharField(max_length=40, blank=True, default="")
+    result_text = models.TextField(blank=True, default="")
+    result_size = models.PositiveIntegerField(default=0)
+    truncated = models.BooleanField(default=False)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["status", "created_at"]),
+            models.Index(fields=["workspace", "status"]),
+        ]
+
+    def __str__(self):
+        return f"{self.connector}.{self.tool} async read {self.id} ({self.status})"

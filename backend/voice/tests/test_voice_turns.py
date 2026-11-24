@@ -157,6 +157,12 @@ def test_registry_scan_no_proposable_tool_executes_from_a_voice_turn(
             # regressions are tools/tests/test_node_action_trust.py.
             assert drafts == [], name
             continue
+        if registry.get_tool(name).draft_arguments is not None:
+            # Phase 12 D12: a personal tool's argument step needs a
+            # personal-data provider; this setup has none, so the turn is
+            # plain chat (the drafted path: connectors/tests/test_n8n_writes.py).
+            assert drafts == [], name
+            continue
         assert [d["kind"] for d in drafts] == ["tool"], name
         assert drafts[0]["tool_name"] == name
     assert instrumented_registry == []

@@ -169,8 +169,18 @@ def test_list_shows_routes_phrases_and_the_workspaces_aliases(owner, personal, w
     assert body["workspace"] == str(personal.pk)
     assert body["limits"] == {"aliases_per_route": 5, "min_chars": 2, "max_chars": 40}
     by_name = {route["name"]: route for route in body["routes"]}
-    assert set(by_name) == {"digest.today", "digest.learning", "notices.read"}
-    assert {route["effect"] for route in body["routes"]} == {"read"}
+    fixed = [route for route in body["routes"] if not route["name"].startswith("tool.")]
+    assert [route["name"] for route in fixed] == ["digest.today", "digest.learning", "notices.read"]
+    assert {route["effect"] for route in fixed} == {"read"}
+    # Phase 12 branch 4: the `tool.*` routes follow, alias-only, read or
+    # proposal, never anything else.
+    tools = [route for route in body["routes"] if route["name"].startswith("tool.")]
+    assert body["routes"][: len(fixed)] == fixed
+    assert {route["effect"] for route in tools} <= {"read", "proposal"}
+    assert all(route["phrases"] == [] for route in tools)
+    assert by_name["tool.n8n_server_status"]["label"] == "Sunucu durumu"
+    assert by_name["tool.mcp_n8n_home_backup"]["effect"] == "proposal"
+    assert "tool.node_action" not in by_name
     assert "günaydın" in by_name["digest.today"]["phrases"]
     assert [a["phrase"] for a in by_name["digest.today"]["aliases"]] == ["sabah oldu"]
     assert [a["id"] for a in by_name["digest.today"]["aliases"]] == [str(aliases["personal"].pk)]

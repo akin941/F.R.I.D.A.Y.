@@ -1,0 +1,54 @@
+{
+  "name": "Friday: home backup (sample)",
+  "id": "Hb34Kd56Mf78Np90",
+  "active": false,
+  "meta": {
+    "note": "Sample sub-workflow called by the Friday tools trigger's wf_Hb34Kd56Mf78Np90 node, only after the owner approved the exact arguments on Friday's /approvals. Replace the Code node with the owner's real backup steps."
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "nodes": [
+    {
+      "id": "2e3f4051-0000-4000-8000-000000000001",
+      "name": "When called by Friday tools",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [0, 0],
+      "parameters": {
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "target",
+              "type": "string"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "2e3f4051-0000-4000-8000-000000000002",
+      "name": "Run backup",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [240, 0],
+      "parameters": {
+        "jsCode": "// Sample only: replace with the real backup (target is 'nas' or 'cloud').\nif (!['nas', 'cloud'].includes($json.target)) { throw new Error('unknown target'); }\nreturn [{ json: { response: `backup to ${$json.target} finished` } }];"
+      }
+    }
+  ],
+  "connections": {
+    "When called by Friday tools": {
+      "main": [
+        [
+          {
+            "node": "Run backup",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}

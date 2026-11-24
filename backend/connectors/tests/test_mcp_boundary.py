@@ -12,8 +12,9 @@ from pathlib import Path
 BACKEND = Path(__file__).resolve().parents[2]
 PYPROJECT = BACKEND / "pyproject.toml"
 _SKIP = {".venv", "tests", "migrations", "node_modules", "__pycache__"}
-# The stdio<->HTTP bridge runs only inside a connector sidecar (D1).
-_BRIDGE = Path("connectors/docker/stdio_bridge.py")
+# The stdio<->HTTP bridge (D1) and the HTTP relay (Phase 12 D9) run only
+# inside a connector sidecar.
+_SIDECARS = {Path("connectors/docker/stdio_bridge.py"), Path("connectors/docker/http_relay.py")}
 ALLOWED_PREFIXES = ("mcp.client.client", "mcp.client.streamable_http", "mcp.types", "mcp_types")
 
 
@@ -33,7 +34,7 @@ def test_production_modules_import_only_the_client_side():
     offenders = []
     for path in BACKEND.rglob("*.py"):
         rel = path.relative_to(BACKEND)
-        if _SKIP.intersection(rel.parts) or rel == _BRIDGE:
+        if _SKIP.intersection(rel.parts) or rel in _SIDECARS:
             continue
         for module in _mcp_imports(path):
             if not module.startswith(ALLOWED_PREFIXES):
@@ -45,7 +46,7 @@ def test_the_facade_is_the_only_production_mcp_importer():
     importers = set()
     for path in BACKEND.rglob("*.py"):
         rel = path.relative_to(BACKEND)
-        if _SKIP.intersection(rel.parts) or rel == _BRIDGE:
+        if _SKIP.intersection(rel.parts) or rel in _SIDECARS:
             continue
         if any(True for _ in _mcp_imports(path)):
             importers.add(str(rel))

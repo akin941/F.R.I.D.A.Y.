@@ -10,7 +10,7 @@ from celery import shared_task
 from django.conf import settings
 from django.utils import timezone
 
-from connectors import ingestion
+from connectors import async_reads, ingestion
 from connectors.manifest import get_manifest
 from connectors.models import ConnectorBinding, ConnectorWriteExecution
 from connectors.services import check_binding_pins
@@ -66,6 +66,38 @@ def recover_stale_connector_writes():
         dispatch_write_execution(str(execution_id))
     lost = mark_lost_executions(now)
     return {"redispatched": len(pending_ids), "unknown_outcome": lost}
+
+
+def _async_read_time_limits():
+    # Above the longest per-tool timeout a manifest may name (n8n's default
+    # 120 s) plus the MCP session setup; the task never runs past it.
+    timeout = max(
+        int(getattr(settings, "N8N_ASYNC_READ_TIMEOUT_SECONDS", 120)),
+        int(settings.CONNECTOR_READ_TIMEOUT_SECONDS),
+    )
+    return {"soft_time_limit": timeout + 30, "time_limit": timeout + 45}
+
+
+@shared_task(**_async_read_time_limits())
+def run_async_read(read_id):
+    """Phase 12 D11: claim a `pending` async read and make its one call.
+    A no-op for anything not `pending` (a second delivery never re-sends)."""
+    deny_if_unattended("connector_read")
+    row = async_reads.claim_async_read(read_id)
+    if row is None:
+        return
+    try:
+        async_reads.execute_claimed_read(row)
+    except Exception:
+        logger.exception("Unexpected failure in async read %s", read_id)
+        async_reads.fail_unexpected(row)
+
+
+@shared_task
+def recover_async_reads():
+    """Every minute: re-publish lost `pending` dispatches, fail `running`
+    reads whose worker was lost (never re-sent), clear old result text."""
+    return async_reads.recover_async_reads()
 
 
 @shared_task

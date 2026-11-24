@@ -42,7 +42,7 @@ from typing import Any
 
 from rest_framework import serializers
 
-from tools.registry import DATA_CLASSES, READ_CHANNELS
+from tools.registry import DATA_CLASSES, READ_CHANNELS, READ_MODE_ASYNC, READ_MODE_SYNC, READ_MODES
 
 KIND_MCP = "mcp"
 KIND_NATIVE = "native"
@@ -113,6 +113,24 @@ class ToolPolicy:
     # a Home Assistant entity's HA-supplied name and current state). Raises
     # `tools.registry.ToolValidationError` to refuse the request.
     request_rows: Callable[[Any, dict], list] | None = None
+    # Phase 12 D11 (branch 4): `"async"` for a slow read -- started in the
+    # turn, run once in a worker (`connectors.tasks.run_async_read`), its
+    # result delivered as one follow-up message. Reads only.
+    mode: str = READ_MODE_SYNC
+    # The settings attribute holding this tool's call timeout in seconds
+    # (e.g. `N8N_ASYNC_READ_TIMEOUT_SECONDS`); empty = the framework default
+    # (`CONNECTOR_READ_TIMEOUT_SECONDS` / `CONNECTOR_WRITE_TIMEOUT_SECONDS`).
+    timeout_setting: str = ""
+    # A short Friday-authored label ("Ev yedeği") for templates, follow-ups
+    # and notices; empty = the tool name.
+    label: str = ""
+    # Phase 12 D12: a write whose draft card carries router-extracted
+    # arguments (`tools.registry.DraftArguments`). Writes only.
+    draft_arguments: bool = False
+
+    @property
+    def display_label(self):
+        return self.label or self.name
 
 
 @dataclass(frozen=True)
@@ -233,6 +251,16 @@ def _validate_tool(manifest, policy):
         policy.context_serializer or policy.precondition or policy.request_rows
     ):
         raise ValueError(f"{where}: context, preconditions and request rows apply to writes only.")
+    if policy.mode not in READ_MODES:
+        raise ValueError(f"{where}: unknown mode {policy.mode!r}.")
+    if policy.mode == READ_MODE_ASYNC and policy.kind != TOOL_READ:
+        raise ValueError(f"{where}: only a read may be async.")
+    if policy.draft_arguments and policy.kind != TOOL_WRITE:
+        raise ValueError(f"{where}: draft arguments apply to writes only.")
+    if policy.timeout_setting and not _ENV_RE.match(policy.timeout_setting):
+        raise ValueError(f"{where}: {policy.timeout_setting!r} is not a settings name.")
+    if policy.label and (len(policy.label) > 60 or not policy.label.strip()):
+        raise ValueError(f"{where}: a label is 1-60 characters.")
 
 
 _MANIFESTS: dict[str, ConnectorManifest] = {}

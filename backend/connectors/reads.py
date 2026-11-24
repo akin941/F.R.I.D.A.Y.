@@ -37,6 +37,7 @@ from core.unattended import deny_if_unattended
 from tools.registry import (
     DATA_CLASS_PERSONAL,
     READ_CHANNELS,
+    READ_MODE_ASYNC,
     ReadResult,
     ReadToolError,
     ReadToolSpec,
@@ -105,6 +106,34 @@ def parse_json_result(result):
     return None
 
 
+def checked_arguments(manifest, policy, *, workspace, binding, args, channel, audit):
+    """Steps 1-2 of every read, sync or async: channel, binding and pin,
+    serializer and scope check, the per-call class. Returns `(clean,
+    data_class)` or raises `ReadToolError`; fills `audit` as it goes."""
+    if channel not in manifest.read_channels:
+        raise ReadToolError("channel_forbidden")
+    if not tool_available(binding, policy):
+        raise ReadToolError("not_available")
+    clean = validate_arguments(manifest, policy, workspace, args)
+    audit["args_sha256"] = arguments_sha256(clean)
+    data_class = policy.classify(workspace, clean) if policy.classify else ""
+    if data_class:
+        audit["data_class"] = data_class
+    # A call classified personal is held to the personal channel set
+    # (web, and node voice since Phase 11), whatever the connector's own
+    # channels (D5).
+    if data_class == DATA_CLASS_PERSONAL and channel not in READ_CHANNELS[data_class]:
+        raise ReadToolError("channel_forbidden")
+    return clean, data_class
+
+
+def read_timeout(policy, default_setting="CONNECTOR_READ_TIMEOUT_SECONDS"):
+    """A tool's call timeout: its own `timeout_setting` when it names one,
+    else the framework default."""
+    name = policy.timeout_setting or default_setting
+    return int(getattr(settings, name, settings.CONNECTOR_READ_TIMEOUT_SECONDS))
+
+
 def perform_read(manifest, policy, *, workspace, actor, args, channel, as_data=False):
     """One audited read. `as_data=True` (Friday-internal callers: the
     harness PR panel, the deploy snapshot) returns the parsed JSON in
@@ -124,27 +153,22 @@ def perform_read(manifest, policy, *, workspace, actor, args, channel, as_data=F
         "outcome": "ok",
     }
     try:
-        if channel not in manifest.read_channels:
-            raise ReadToolError("channel_forbidden")
-        if not tool_available(binding, policy):
-            raise ReadToolError("not_available")
-        clean = validate_arguments(manifest, policy, workspace, args)
-        audit["args_sha256"] = arguments_sha256(clean)
-        data_class = policy.classify(workspace, clean) if policy.classify else ""
-        if data_class:
-            audit["data_class"] = data_class
-        # A call classified personal is held to the personal channel set
-        # (web, and node voice since Phase 11), whatever the connector's own
-        # channels (D5).
-        if data_class == DATA_CLASS_PERSONAL and channel not in READ_CHANNELS[data_class]:
-            raise ReadToolError("channel_forbidden")
+        clean, data_class = checked_arguments(
+            manifest,
+            policy,
+            workspace=workspace,
+            binding=binding,
+            args=args,
+            channel=channel,
+            audit=audit,
+        )
         try:
             result = bridges.call_tool(
                 manifest,
                 server_tool=policy.server_tool,
                 arguments=clean,
                 schema_sha256=policy.schema_sha256,
-                timeout=settings.CONNECTOR_READ_TIMEOUT_SECONDS,
+                timeout=read_timeout(policy),
             )
         except mcp_client.ConnectorError as exc:
             if exc.listing is not None:
@@ -189,10 +213,31 @@ def _availability(manifest, policy):
     return is_available
 
 
+def _async_starter(manifest, policy):
+    def start_async(*, workspace, actor, args, channel):
+        from connectors.async_reads import start_async_read
+
+        return start_async_read(
+            manifest, policy, workspace=workspace, actor=actor, args=args, channel=channel
+        )
+
+    return start_async
+
+
+def _async_fetcher():
+    def fetch_async(handle):
+        from connectors.async_reads import fetch_async_read
+
+        return fetch_async_read(handle)
+
+    return fetch_async
+
+
 def register_reads(manifest):
     if manifest.blocked:
         return
     for policy in manifest.reads:
+        is_async = policy.mode == READ_MODE_ASYNC
         register_read_tool(
             ReadToolSpec(
                 name=policy.name,
@@ -203,6 +248,10 @@ def register_reads(manifest):
                 execute=_executor(manifest, policy),
                 is_available=_availability(manifest, policy),
                 source=manifest.name,
+                mode=policy.mode,
+                start_async=_async_starter(manifest, policy) if is_async else None,
+                fetch_async=_async_fetcher() if is_async else None,
+                label=policy.label,
             )
         )
 

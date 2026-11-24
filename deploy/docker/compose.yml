@@ -126,6 +126,9 @@ services:
       # Connector sidecar URLs (Phase 5, ADR-010): only the URL -- each
       # credential lives in its sidecar's own environment, never here.
       GITHUB_MCP_URL: "${GITHUB_MCP_URL:-}"
+      # n8n (Phase 12 D9): the `n8n-relay` sidecar's internal URL only; the
+      # trigger's bearer lives in that sidecar alone (RELAY_BEARER_TOKEN).
+      N8N_MCP_URL: "${N8N_MCP_URL:-}"
       # Google mail/calendar bridge (Phase 5 branch 8, brief D9): the
       # Desktop-app OAuth client and the owner's refresh token printed once
       # by the host-side `manage.py connect_google`. Env only -- never the
@@ -256,6 +259,26 @@ services:
       BRIDGE_ENV_PASSTHROUGH: "GITHUB_PERSONAL_ACCESS_TOKEN"
       # Env-only, from deploy/docker/.env; this service only.
       GITHUB_PERSONAL_ACCESS_TOKEN: "${GITHUB_PERSONAL_ACCESS_TOKEN:-}"
+    networks: ["connectors", "connectors-egress"]
+
+  # n8n relay (Phase 12 D9, docs/mcp/n8n.md, deploy/n8n/README.md): the
+  # bridge image in HTTP relay mode. Friday (N8N_MCP_URL=http://n8n-relay:8080/mcp)
+  # speaks Streamable HTTP to it on the internal `connectors` network; it
+  # forwards only tools/list and tools/call for BRIDGE_ALLOWED_TOOLS (print
+  # the line with `manage.py n8n_relay_env`) to the owner's n8n MCP Server
+  # Trigger, adding the trigger's bearer -- which lives only here. No
+  # redirects, no client capabilities, no published port.
+  n8n-relay:
+    <<: *connector-sidecar
+    build:
+      context: ../..
+      dockerfile: backend/connectors/docker/Dockerfile.bridge
+    entrypoint: ["python", "-m", "connectors.docker.http_relay"]
+    environment:
+      RELAY_UPSTREAM_URL: "${RELAY_UPSTREAM_URL:-}"
+      # Env-only, from deploy/docker/.env; this service only.
+      RELAY_BEARER_TOKEN: "${RELAY_BEARER_TOKEN:-}"
+      BRIDGE_ALLOWED_TOOLS: "${N8N_RELAY_ALLOWED_TOOLS:-wf_Ab12Cd34Ef56Gh78,wf_Hb34Kd56Mf78Np90}"
     networks: ["connectors", "connectors-egress"]
 
   # Headroom compressor (Phase 8B branch 6, brief D11, docs/mcp/headroom.md):

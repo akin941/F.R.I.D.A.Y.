@@ -1722,7 +1722,7 @@ updated.
 | 1 | `feat/p12-proactive-core` | `core.probes`, `core.unattended` + guards, `proactive` app (schedules, runs, notices, heartbeat), contracts, ADR-016 | brief approved | **implemented 2026-11-20** (`core.probes` / `core.unattended` / `core.owner_web`, `audit.unattended.DenialRecorder`, guards in every D2 service plus `tools.registry.run_read_tool`, the gateway purpose check and the Celery publish/eager-prerun guard; `proactive` app with schedules, pause, runs, notices, probe state, heartbeat + prune beat entries, owner-only web endpoints; D19 contracts; ADR-016 written as Proposed; see "Implementation notes — branch 1"; review round 1 findings addressed 2026-11-24, see "Review round 1 fixes"; awaits the Sonnet 5 re-review) |
 | 2 | `feat/p12-morning-digest` | Probes in owner apps, `DigestRun`, number-checked composition + template fallback, `/today`, notice bell, HUD `notices`, "Dinle", `proactive_checkpoint` | 1 | **implemented 2026-11-20** (nine probes in their owner apps, `DigestRun` + one number-checked `proactive.digest` call with template fallback, `proactive.digest` tier/prompt/budget/compression bypass, digest `latest`/detail/`ack` endpoints, HUD `notices` + `digest` sections, `/today` digest card + schedule editor + pause toggle, shell bell + `/notices`, "Dinle" and `speak_on_open`, `proactive_checkpoint`, `proactive_heartbeat`; see "Implementation notes — branch 2"; the on-Mac spoken route is branch 3 / M1; awaits the Sonnet 5 review) |
 | 3 | `feat/p12-wake-routes` | Wake-phrase routes + aliases, `digest.today` / `digest.learning` / `notices.read` on web voice and `node_voice`, vectors, ADR-015 note | 2 | **implemented 2026-11-20** (`assistant/wake_routes.py` table + boot check + normalizer + matcher, `Message.route` and `WakeRouteAlias` (assistant 0013), owner-web alias services in `assistant/wake_aliases.py`, `/api/v1/assistant/wake-routes` + alias CRUD, `/settings/wake-routes`, shared vectors checked by pytest and vitest, ADR-015 implementation note; see "Implementation notes — branch 3"; on-Mac verification: deferred: Mac session, M1; awaits the Sonnet 5 review) |
-| 4 | `feat/p12-n8n-connector` | n8n manifest + workflow-ID allowlist, relay sidecar mode, async reads + follow-ups, gated writes, probes, `tool.*` routes, ADR-010 amendment | 3 (and so 1, 2) | planned (live n8n pins: owner step) |
+| 4 | `feat/p12-n8n-connector` | n8n manifest + workflow-ID allowlist, relay sidecar mode, async reads + follow-ups, gated writes, probes, `tool.*` routes, ADR-010 amendment | 3 (and so 1, 2) | **implemented 2026-11-20** (`n8n` manifest + `WORKFLOWS` allowlist with the two reference entries, `http_relay` sidecar mode + compose `n8n-relay`, `n8n_relay_env`, async reads (`ConnectorAsyncRead`, `run_async_read` + recovery) and follow-ups (`PendingFollowUp`, `Message.followup_of`, one `chat.followup` completion), gated writes with draft arguments, probes `connectors.n8n_finished` / `assistant.followups_ready`, `tool.*` wake routes, ADR-010 amendment; see "Implementation notes — branch 4"; live n8n pins and licence: owner steps; awaits the Sonnet 5 review) |
 | 5 | `feat/p12-skills-core` | SKILL.md parser + refusals, staged lifecycle, matcher + injection, `/skills`, `skill.*` routes | 3 (and so 1, 2); merges after 4 if both are ready (migration order) | **implemented 2026-11-20** (`skills/skill_md.py` strict parser + bundle reader, `InstructionSkill` / `InstructionSkillVersion` (skills 0001), owner-web lifecycle services, `skills.ports.propose_version`, `skills.proposals` probe, `skills.match` matcher + `<skill>` injection with the `skills` context-report entry, `/skill <name>` prefix and `skill.<name>` wake routes, `skills.match` tier/prompt/budget/compression bypass (ai_core 0010), `/skills` + `/skills/<id>` pages, D19 skills contract, `docs/skills/README.md`; see "Implementation notes — branch 5"; no Mac work; awaits the Sonnet 5 review) |
 | 6 | `feat/p12-skill-curator` | Stale marking, curator proposals, archive suggestions | 5 | planned |
 | 7 | `feat/p12-harness-playbooks` | Playbook sources from harness, provenance-checked distillation, attach to implementation jobs, ADR-012 note | 5 (parallel with 6) | planned |
@@ -2528,3 +2528,121 @@ integration branch.
    the `upload.size > max_bytes` check still bound it afterwards. Fix:
    optionally set `DATA_UPLOAD_MAX_MEMORY_SIZE` or
    `FILE_UPLOAD_MAX_MEMORY_SIZE`, or cap with a limited reader.
+
+### Implementation notes — branch 4 (`feat/p12-n8n-connector`), recorded 2026-11-20
+
+Choices made while implementing D9–D12 and the `tool.*` routes that the
+brief left open or that later branches build on:
+
+1. **Relay.** `connectors/docker/http_relay.py` (`build_relay`,
+   `relay_config`, `build_app`) shares `connectors/docker/common.py`
+   (`csv_list`, `allowed_tool_set`) with the stdio bridge. One fresh
+   upstream MCP `Client` per relayed request (stateless); every result is
+   rebuilt from its content blocks, upstream failures answer a fixed
+   message and are logged by class name. Compose `n8n-relay` overrides the
+   bridge image's entrypoint; `BRIDGE_ALLOWED_TOOLS` comes from
+   `N8N_RELAY_ALLOWED_TOOLS` (default: the two reference tools).
+2. **Manifest.** `build_manifest` also refuses a Friday name outside
+   `n8n_<snake_case>`, an unknown kind/mode and an async write; gates are
+   named `mcp_<tool>` (so `mcp_n8n_home_backup`, the brief's
+   `mcp_n8n_<tool>`). `ToolPolicy` gains `mode`, `timeout_setting`, `label`
+   and `draft_arguments`; `ReadToolSpec` gains `mode`, `start_async`,
+   `fetch_async`, `label`; `ToolSpec` gains `draft_arguments`
+   (`DraftArguments`) and `label`. Pins are the sha256 of
+   `REFERENCE_SCHEMAS` (the reference export's inputs); live pins are an
+   owner step. Reference export: `deploy/n8n/friday-tools.workflow.json` and
+   two sample sub-workflows under `deploy/n8n/sub-workflows/`.
+3. **`fetch_async` returns an `AsyncReadOutcome`** (status, `ReadResult`
+   when `ok`, closed error code), not a bare `ReadResult`: the follow-up
+   needs to tell "still running" from "failed".
+4. **Async read lifecycle.** `ConnectorAsyncRead` keeps the validated
+   arguments only until the read ends (then only their sha256); result
+   text is cleared a day after the read ends (`recover_async_reads`, every
+   minute, also re-publishes lost `pending` dispatches until the deadline,
+   then `dispatch_lost`, and fails `running` rows past timeout + 60 s as
+   `worker_lost`). The task's soft limit is the n8n timeout + 30 s. Audit:
+   one `connector.read` row (`mode=async`) per refused start and per ended
+   read.
+5. **Follow-ups.** `assistant/followups.py`: the turn's template reply is
+   "Başlattım: <label>. Sonucu bu konuşmaya yazacağım." (no completion; the
+   personal flag is committed at start). The `PendingFollowUp` is written
+   right after the user message; if the read already ended it dispatches
+   itself (no lost race). Composition is claimed once (`claimed_at`);
+   `recover_followups_task` (every minute) re-dispatches lost notifications
+   and fails claims older than 10 minutes (`worker_lost`, no second call).
+   Templates replace model text for `timed_out`, `failed` codes,
+   `budget_refused`, `local_model_required`, `no_prompt`, `empty`.
+6. **R6 without a conversation trash.** Conversations have no trash today
+   (ADR-009 covers tasks and knowledge); `PendingFollowUp.conversation` is
+   `SET_NULL` and a gone (deleted) conversation drops the follow-up with no
+   call and nothing appended. `_conversation_live` also honours a future
+   `deleted_at`, and `dropped` is final, so a later restore never replays.
+7. **Draft arguments (D12).** A gated tool with `draft_arguments` (the n8n
+   write) gets its arguments from `router.connector_args` over the owner's
+   words, validated by its serializer, so the card's `POST /approvals`
+   payload is `{"arguments": {...}}`; invalid → the turn is plain chat.
+   Tools without it keep the empty payload.
+8. **`tool.*` routes.** Built from the registries at call time for every
+   read tool and user-invocable gated tool except `node_action` (its
+   proposal step and trust check stay router-only). Alias-only, matched as
+   leading words after the zero-argument routes, longest alias first; the
+   remainder feeds the argument step. `route_names()` stays the
+   code-defined table (the shared vectors cover it); `all_routes()` adds
+   the tool routes, listed on `/settings/wake-routes` with their labels.
+9. **Probes.** `connectors.n8n_finished` (section `n8n`, "n8n: <label>
+   bitti|başarısız|sonucu belirsiz", link `/approvals/<id>`) and
+   `assistant.followups_ready` (section `followups`, "Sonuç hazır:
+   <label>", link `/chat/<conversation>`, never a dropped one), both over a
+   one-day window.
+10. **Purpose `chat.followup`**: tier `mid`, prompt `friday_chat_followup`
+    (seed, `ai_core/0011`, `docs/prompts/phase-12-reach/followup.md`, kept
+    equal by a test), `COMPRESSION_BYPASS`; no budget row (the chat path's).
+
+### Owner steps (pending) — `feat/p12-n8n-connector`, recorded 2026-11-20
+
+1. Run the independent Sonnet 5 review of this branch to APPROVE before
+   merge.
+2. After merge: `manage.py migrate` (connectors 0004, assistant 0014,
+   ai_core 0011).
+3. Run n8n, import `deploy/n8n/` (README), create the trigger's bearer
+   credential and put it only in `deploy/docker/.env` as
+   `RELAY_BEARER_TOKEN`; set `RELAY_UPSTREAM_URL`, `N8N_RELAY_ALLOWED_TOOLS`
+   (`manage.py n8n_relay_env`) and `N8N_MCP_URL`; start `n8n-relay`.
+4. Re-pin both tools against the live trigger (and update the workflow ids
+   if n8n changed them) in a reviewed commit with a manifest version bump;
+   enable the `n8n` connector for the personal workspace.
+5. Confirm n8n's licence terms for personal use and record the result in
+   `docs/mcp/n8n.md` (R7).
+6. Optionally add aliases ("ev yedeği", "sunucu durumu") on
+   `/settings/wake-routes`; Mac session M1 covers the spoken path.
+
+### Known follow-ups (LOW) — `feat/p12-n8n-connector`, recorded 2026-11-24
+
+These review notes were left unresolved when the branch merged into the
+integration branch.
+
+1. **Migration numbering at merge (`backend/ai_core/migrations/`,
+   `backend/assistant/migrations/0014_async_followups.py`).** The branch
+   was not rebased on the integration branch (merge-base `1bbdd5b`), and
+   `feat/p12-skills-core` had already added ai_core
+   `0010_skills_match_prompt_and_budget`. Resolved at merge: the follow-up
+   prompt migration is renumbered `0011_chat_followup_prompt` and depends
+   on `0010_skills_match_prompt_and_budget`; the `wake_routes`,
+   `wake_views` and `/settings/wake-routes` conflicts keep both the
+   `skill.*` and the `tool.*` routes and labels. Recorded for the trail.
+2. **Conversation trash does not exist yet
+   (`backend/assistant/followups.py`).** `_conversation_live` relies on a
+   deleted conversation (the `PendingFollowUp` FK is `SET_NULL`) or on a
+   future `deleted_at` via `getattr`. This is deliberate (implementation
+   note 6), but the R6 test covers hard delete only, so the
+   restore-from-trash path is not exercised. Fix: when conversation trash
+   lands, add a test that a trashed conversation drops the follow-up and
+   that a later restore does not replay it.
+3. **`compose_followup` does not re-check the binding or membership when
+   the result arrives (`backend/assistant/followups.py`).** The read was
+   authorized at start and re-checked at execution, and the follow-up only
+   appends to the owner's own conversation; the remaining exposure is that
+   the result text stays up to one day in
+   `ConnectorAsyncRead.result_text` for a personal-class read. Optional
+   hardening: clear `result_text` as soon as the follow-up has consumed it
+   instead of waiting for the one-day retention sweep.
