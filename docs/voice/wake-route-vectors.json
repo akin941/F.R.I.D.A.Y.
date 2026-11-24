@@ -1,0 +1,39 @@
+{
+  "version": 1,
+  "description": "Phase 12 D8 shared vectors for the wake-route normalizer and matcher. `speech` is the output of normalizeSpeech (frontend/src/lib/voice/self-trigger.ts) and of its Python port assistant.wake_routes.normalize_speech; `utterance` is assistant.wake_routes.normalize_utterance (one leading wake phrase and trailing fillers stripped). `match` rows give the route a whole utterance selects (null = the normal router), optionally with owner aliases. Checked by backend/assistant/tests/test_wake_routes.py and frontend/src/lib/voice/wake-route-vectors.test.ts.",
+  "normalize": [
+    {"input": "Hey Friday, günaydın!", "speech": "hey friday günaydın", "utterance": "günaydın"},
+    {"input": "HEY FRIDAY GÜNAYDIN", "speech": "hey frıday günaydın", "utterance": "günaydın"},
+    {"input": "  friday   brifing lütfen.", "speech": "friday brifing lütfen", "utterance": "brifing"},
+    {"input": "İSTANBUL IĞDIR", "speech": "istanbul ığdır", "utterance": "istanbul ığdır"},
+    {"input": "günaydın", "speech": "günaydın", "utterance": "günaydın"},
+    {"input": "Hey, Friday — bildirimler?", "speech": "hey friday bildirimler", "utterance": "bildirimler"},
+    {"input": "Friday, Friday günaydın", "speech": "friday friday günaydın", "utterance": "friday günaydın"},
+    {"input": "Günaydın Friday, lütfen.", "speech": "günaydın friday lütfen", "utterance": "günaydın"},
+    {"input": "Hey Friday: “Bildirimleri oku”", "speech": "hey friday bildirimleri oku", "utterance": "bildirimleri oku"},
+    {"input": "Öğrenme kartı...", "speech": "öğrenme kartı", "utterance": "öğrenme kartı"},
+    {"input": "Ev yedeğini başlat (şimdi)", "speech": "ev yedeğini başlat şimdi", "utterance": "ev yedeğini başlat şimdi"},
+    {"input": "hey friday", "speech": "hey friday", "utterance": ""},
+    {"input": "Saat 9'da ne var?", "speech": "saat 9 da ne var", "utterance": "saat 9 da ne var"}
+  ],
+  "match": [
+    {"input": "Hey Friday, günaydın", "route": "digest.today"},
+    {"input": "Friday, brifing", "route": "digest.today"},
+    {"input": "GÜNAYDIN", "route": "digest.today"},
+    {"input": "Good morning, Friday!", "route": "digest.today"},
+    {"input": "BRIEFING", "route": "digest.today"},
+    {"input": "Hey Friday, bildirimler", "route": "notices.read"},
+    {"input": "bildirimleri oku lütfen", "route": "notices.read"},
+    {"input": "Hey Friday, öğrenme kartı", "route": "digest.learning"},
+    {"input": "ne öğrendin", "route": "digest.learning"},
+    {"input": "Hey Friday günaydın, bugün ne var?", "route": null},
+    {"input": "günaydınlar", "route": null},
+    {"input": "brifing hazırla", "route": null},
+    {"input": "bildirim", "route": null},
+    {"input": "hey friday", "route": null},
+    {"input": "", "route": null},
+    {"input": "Hey Friday, kahve zamanı", "route": "digest.today", "aliases": {"digest.today": ["kahve zamanı"]}},
+    {"input": "kahve zamanı geldi", "route": null, "aliases": {"digest.today": ["kahve zamanı"]}},
+    {"input": "Friday, neler oldu?", "route": "notices.read", "aliases": {"notices.read": ["neler oldu"]}}
+  ]
+}

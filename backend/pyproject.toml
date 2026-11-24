@@ -522,6 +522,8 @@ source_modules = ["accounts", "workspaces", "assistant", "memory", "knowledge", 
 forbidden_modules = ["connectors", "deploys"]
 ignore_imports = [
     "proactive.tests.** -> connectors.**",
+    # The alias walk reads every connector manifest (Phase 12 branch 3).
+    "assistant.tests.** -> connectors.**",
 ]
 
 # harness may import connectors (the `github_open_pr` gate, PR/CI reads)
@@ -755,8 +757,10 @@ type = "forbidden"
 source_modules = ["assistant", "hud"]
 forbidden_modules = ["proactive.services", "proactive.tasks", "proactive.views", "proactive.runs", "proactive.urls", "proactive.serializers", "proactive.models", "proactive.timing", "proactive.apps", "proactive.digest", "proactive.templates", "proactive.number_check", "proactive.checkpoint", "proactive.probes", "proactive.management"]
 allow_indirect_imports = true
-# The hud tests seed notice and digest rows (branch 2).
+# The hud tests seed notice and digest rows (branch 2); the assistant
+# tests seed digest and notice rows for the wake routes (branch 3).
 ignore_imports = [
     "hud.tests.** -> proactive.**",
+    "assistant.tests.** -> proactive.**",
 ]
 

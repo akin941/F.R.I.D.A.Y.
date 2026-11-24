@@ -1059,6 +1059,7 @@ def iter_assistant_reply_events(
     draft_event=None,
     channel=Message.Channel.WEB,
     connector_reads=None,
+    route=None,
 ):
     """The assistant reply as structured events (Phase 4 branch 6): zero or
     more `{"type": "chunk", "text"}`, then -- only on success -- the
@@ -1101,6 +1102,10 @@ def iter_assistant_reply_events(
     `connector_reads` (Phase 5 branch 4) is this turn's connector-read
     bookkeeping, persisted on `Message.connector_reads` and included in
     `done` -- never content.
+
+    `route` (Phase 12 D8) is the wake route that answered this voice turn
+    (`Message.route`), or None. A routed reply that made no model call is
+    Friday's own stored text, so it allocates no memory extraction job.
     """
     token = request_id_var.set(request_id)
     try:
@@ -1115,6 +1120,7 @@ def iter_assistant_reply_events(
             draft_event,
             channel,
             connector_reads or [],
+            route,
         )
     finally:
         request_id_var.reset(token)
@@ -1151,6 +1157,7 @@ def _assistant_reply_events(
     draft_event=None,
     channel=Message.Channel.WEB,
     connector_reads=(),
+    route=None,
 ):
     accumulated = []
     status = Message.Status.FAILED  # defined even if no branch below runs
@@ -1198,6 +1205,7 @@ def _assistant_reply_events(
             overlay_source_workspaces=overlay_source_workspaces,
             channel=channel,
             connector_reads=list(connector_reads),
+            route=route,
         )
 
     if draft_event is not None and terminal_event["type"] == "done":
@@ -1218,6 +1226,7 @@ def _persist_assistant_message(
     overlay_source_workspaces=None,
     channel=Message.Channel.WEB,
     connector_reads=None,
+    route=None,
 ):
     """The single write site for the assistant `Message` row.
 
@@ -1248,8 +1257,16 @@ def _persist_assistant_message(
         overlay_source_workspaces=overlay_source_workspaces or {},
         channel=channel,
         connector_reads=connector_reads or [],
+        route=route,
     )
-    if status == Message.Status.COMPLETE and not locked_conversation.private:
+    # A routed reply with no model call (Phase 12 D8) is Friday's stored
+    # text: nothing to distill, and the route stays free of model calls.
+    routed_without_model = route is not None and usage is None
+    if (
+        status == Message.Status.COMPLETE
+        and not locked_conversation.private
+        and not routed_without_model
+    ):
         create_extraction_job(conversation=locked_conversation, through_message=message)
     return message
 

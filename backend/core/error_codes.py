@@ -100,6 +100,11 @@ DOMAIN_ERROR_CODES = frozenset(
         "voice.stt_failed",
         "voice.tts_failed",
         "voice.budget_exceeded",
+        # Wake-route aliases (Phase 12 branch 3, D8).
+        "wake_alias.unknown_route",
+        "wake_alias.invalid_length",
+        "wake_alias.conflict",
+        "wake_alias.limit",
         "workspace.permission_denied",
     }
 )

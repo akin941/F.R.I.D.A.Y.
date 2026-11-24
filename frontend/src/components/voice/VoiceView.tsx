@@ -545,6 +545,12 @@ export function VoiceView({
         <>
       <WakeSettingsPanel disabled={mute.muted || !workspaceId} />
       {liveVoicePanel ? <LiveVoicePanel workspaceId={workspaceId} /> : null}
+      <p className="text-xs text-muted-foreground">
+        &quot;Hey Friday, günaydın&quot; gibi sesli komutlar ve takma adları:{" "}
+        <Link href="/settings/wake-routes" className="underline underline-offset-2">
+          Sesli komutlar
+        </Link>
+      </p>
 
       <label className="flex items-center gap-2 text-xs text-muted-foreground">
         <input

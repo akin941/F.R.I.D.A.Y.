@@ -89,6 +89,7 @@ class MessageSerializer(serializers.ModelSerializer):
             "channel",
             "connector_reads",
             "input_mode",
+            "route",
             "confirmed_task",
         ]
         read_only_fields = fields
