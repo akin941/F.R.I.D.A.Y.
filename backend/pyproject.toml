@@ -88,6 +88,7 @@ testpaths = [
     "ops",
     "voice",
     "nodes",
+    "proactive",
 ]
 
 [tool.importlinter]
@@ -115,6 +116,8 @@ root_packages = [
     "hud",
     # Phase 9 (ADR-013): the Friday Node server side.
     "nodes",
+    # Phase 12 (ADR-016): owner schedules, proactive runs, notices.
+    "proactive",
     # The MCP SDK (Phase 5 branch 4, ADR-010 decision 3) is analysed as a
     # root package only so the contract below can name its `mcp.server`
     # subpackage -- import-linter cannot forbid a subpackage of an external
@@ -137,12 +140,12 @@ forbidden_modules = ["config"]
 name = "core must stay independent of kernel apps"
 type = "forbidden"
 source_modules = ["core"]
-forbidden_modules = ["accounts", "workspaces", "audit", "ai_core", "assistant", "memory", "knowledge", "tasks", "approvals", "tools", "agents", "skills", "integrations", "harness", "connectors", "deploys", "voice", "hud", "nodes"]
+forbidden_modules = ["accounts", "workspaces", "audit", "ai_core", "assistant", "memory", "knowledge", "tasks", "approvals", "tools", "agents", "skills", "integrations", "harness", "connectors", "deploys", "voice", "hud", "nodes", "proactive"]
 
 [[tool.importlinter.contracts]]
 name = "kernel apps must not import the Django project config"
 type = "forbidden"
-source_modules = ["accounts", "workspaces", "audit", "ai_core", "assistant", "memory", "knowledge", "tasks", "approvals", "tools", "agents", "skills", "integrations", "harness", "connectors", "deploys", "ops", "voice", "hud", "nodes"]
+source_modules = ["accounts", "workspaces", "audit", "ai_core", "assistant", "memory", "knowledge", "tasks", "approvals", "tools", "agents", "skills", "integrations", "harness", "connectors", "deploys", "ops", "voice", "hud", "nodes", "proactive"]
 forbidden_modules = ["config"]
 
 # ai_core is the single door for LLM traffic (ADR-003): it must never depend on
@@ -151,7 +154,7 @@ forbidden_modules = ["config"]
 name = "ai_core must not import business apps"
 type = "forbidden"
 source_modules = ["ai_core"]
-forbidden_modules = ["accounts", "workspaces", "audit", "assistant", "memory", "knowledge", "tasks", "approvals", "tools", "agents", "skills", "integrations", "harness", "connectors", "deploys", "voice", "hud", "nodes"]
+forbidden_modules = ["accounts", "workspaces", "audit", "assistant", "memory", "knowledge", "tasks", "approvals", "tools", "agents", "skills", "integrations", "harness", "connectors", "deploys", "voice", "hud", "nodes", "proactive"]
 ignore_imports = [
     "ai_core.tests.* -> accounts.*",
     # D5 (Phase 5 branch 2): flipping `personal_data_allowed` must be
@@ -168,7 +171,7 @@ ignore_imports = [
 name = "audit must not depend on business apps (one-way: apps call audit)"
 type = "forbidden"
 source_modules = ["audit"]
-forbidden_modules = ["accounts", "workspaces", "assistant", "memory", "knowledge", "tasks", "approvals", "tools", "agents", "harness", "connectors", "deploys", "voice", "hud", "nodes"]
+forbidden_modules = ["accounts", "workspaces", "assistant", "memory", "knowledge", "tasks", "approvals", "tools", "agents", "harness", "connectors", "deploys", "voice", "hud", "nodes", "proactive"]
 # Tests exercise the wired flows end-to-end; the contract targets production code.
 ignore_imports = [
     "audit.tests.* -> accounts.*",
@@ -391,7 +394,7 @@ forbidden_modules = ["harness"]
 name = "memory.ingestion may import only memory, workspaces, audit, core, ai_core (Phase 8A D14)"
 type = "forbidden"
 source_modules = ["memory.ingestion"]
-forbidden_modules = ["config", "accounts", "assistant", "knowledge", "tasks", "approvals", "tools", "agents", "skills", "integrations", "harness", "connectors", "deploys", "ops", "voice", "hud", "nodes"]
+forbidden_modules = ["config", "accounts", "assistant", "knowledge", "tasks", "approvals", "tools", "agents", "skills", "integrations", "harness", "connectors", "deploys", "ops", "voice", "hud", "nodes", "proactive"]
 
 # Phase 8B branch 1 (brief Boundary, D3): the temporal graph package has the
 # same reach as `memory.ingestion`. Producers outside memory (the Graphify
@@ -401,7 +404,7 @@ forbidden_modules = ["config", "accounts", "assistant", "knowledge", "tasks", "a
 name = "memory.graph may import only memory, workspaces, audit, core, ai_core (Phase 8B)"
 type = "forbidden"
 source_modules = ["memory.graph"]
-forbidden_modules = ["config", "accounts", "assistant", "knowledge", "tasks", "approvals", "tools", "agents", "skills", "integrations", "harness", "connectors", "deploys", "ops", "voice", "hud"]
+forbidden_modules = ["config", "accounts", "assistant", "knowledge", "tasks", "approvals", "tools", "agents", "skills", "integrations", "harness", "connectors", "deploys", "ops", "voice", "hud", "proactive"]
 
 # Phase 8B branch 3 (brief D9, D16): the eval set may import memory, ai_core,
 # workspaces and core directly. `memory` itself reaches `audit` (that is
@@ -410,7 +413,7 @@ forbidden_modules = ["config", "accounts", "assistant", "knowledge", "tasks", "a
 name = "memory.evals may import only memory, ai_core, workspaces, core (Phase 8B D16)"
 type = "forbidden"
 source_modules = ["memory.evals"]
-forbidden_modules = ["config", "accounts", "audit", "assistant", "knowledge", "tasks", "approvals", "tools", "agents", "skills", "integrations", "harness", "connectors", "deploys", "ops", "voice", "hud"]
+forbidden_modules = ["config", "accounts", "audit", "assistant", "knowledge", "tasks", "approvals", "tools", "agents", "skills", "integrations", "harness", "connectors", "deploys", "ops", "voice", "hud", "proactive"]
 allow_indirect_imports = true
 
 # ...and no production code imports it (D16): no other app may (`ops` may,
@@ -421,7 +424,7 @@ allow_indirect_imports = true
 [[tool.importlinter.contracts]]
 name = "no app imports memory.evals (a measuring instrument, Phase 8B D16)"
 type = "forbidden"
-source_modules = ["core", "accounts", "workspaces", "audit", "ai_core", "assistant", "knowledge", "tasks", "approvals", "tools", "agents", "skills", "integrations", "harness", "connectors", "deploys", "voice", "hud"]
+source_modules = ["core", "accounts", "workspaces", "audit", "ai_core", "assistant", "knowledge", "tasks", "approvals", "tools", "agents", "skills", "integrations", "harness", "connectors", "deploys", "voice", "hud", "proactive"]
 forbidden_modules = ["memory.evals"]
 
 # Phase 8A branch 3 (brief D6/D14): `friday-hook` runs on the owner's Mac
@@ -433,7 +436,7 @@ forbidden_modules = ["memory.evals"]
 name = "friday-hook imports no project package (Phase 8A D6, D14)"
 type = "forbidden"
 source_modules = ["integrations.cli.friday_hook", "integrations.cli._scrubber_vendored"]
-forbidden_modules = ["config", "core", "accounts", "workspaces", "audit", "ai_core", "assistant", "memory", "knowledge", "tasks", "approvals", "tools", "agents", "skills", "harness", "connectors", "deploys", "ops", "voice", "hud", "nodes", "mcp"]
+forbidden_modules = ["config", "core", "accounts", "workspaces", "audit", "ai_core", "assistant", "memory", "knowledge", "tasks", "approvals", "tools", "agents", "skills", "harness", "connectors", "deploys", "ops", "voice", "hud", "nodes", "mcp", "proactive"]
 
 # Phase 8B branch 8 (brief D17): the reference owner-turn readers are the
 # executable spec of the node side (the Swift app ports them), so like
@@ -444,7 +447,7 @@ forbidden_modules = ["config", "core", "accounts", "workspaces", "audit", "ai_co
 name = "the owner-turn reference readers import no project package (Phase 8B D17)"
 type = "forbidden"
 source_modules = ["integrations.node_reference.owner_turns", "integrations.node_reference.build_conformance"]
-forbidden_modules = ["config", "core", "accounts", "workspaces", "audit", "ai_core", "assistant", "memory", "knowledge", "tasks", "approvals", "tools", "agents", "skills", "harness", "connectors", "deploys", "ops", "voice", "hud", "mcp"]
+forbidden_modules = ["config", "core", "accounts", "workspaces", "audit", "ai_core", "assistant", "memory", "knowledge", "tasks", "approvals", "tools", "agents", "skills", "harness", "connectors", "deploys", "ops", "voice", "hud", "mcp", "proactive"]
 
 # The remaining apps have no stated relationship with harness at all in
 # this phase (brief §"Boundary vs. existing systems": "nothing may import
@@ -457,7 +460,7 @@ forbidden_modules = ["config", "core", "accounts", "workspaces", "audit", "ai_co
 [[tool.importlinter.contracts]]
 name = "no other app may import harness (harness is a leaf dependency root)"
 type = "forbidden"
-source_modules = ["accounts", "assistant", "knowledge", "tasks", "approvals", "tools", "agents", "skills", "integrations", "connectors", "deploys", "voice", "hud", "nodes"]
+source_modules = ["accounts", "assistant", "knowledge", "tasks", "approvals", "tools", "agents", "skills", "integrations", "connectors", "deploys", "voice", "hud", "nodes", "proactive"]
 forbidden_modules = ["harness"]
 
 # Phase 5 (ADR-010): two new kernel apps, `connectors` (MCP servers and
@@ -475,7 +478,7 @@ forbidden_modules = ["harness"]
 name = "connectors may import only core, workspaces, audit, ai_core, tools, memory (ADR-010)"
 type = "forbidden"
 source_modules = ["connectors"]
-forbidden_modules = ["config", "accounts", "assistant", "knowledge", "tasks", "approvals", "agents", "skills", "integrations", "harness", "deploys"]
+forbidden_modules = ["config", "accounts", "assistant", "knowledge", "tasks", "approvals", "agents", "skills", "integrations", "harness", "deploys", "proactive"]
 # Tests drive the wired flows end to end (a user, a chat turn, an approval
 # decision); the contract targets production code.
 ignore_imports = [
@@ -493,7 +496,7 @@ ignore_imports = [
 name = "deploys may import only core, workspaces, audit, ai_core, tools, memory, connectors, approvals (ADR-010)"
 type = "forbidden"
 source_modules = ["deploys"]
-forbidden_modules = ["config", "accounts", "assistant", "knowledge", "tasks", "agents", "skills", "integrations", "harness"]
+forbidden_modules = ["config", "accounts", "assistant", "knowledge", "tasks", "agents", "skills", "integrations", "harness", "proactive"]
 # Tests build users and PATs for the role x endpoint matrix (the
 # ai_core.tests/audit.tests exemption). Production code never imports
 # accounts: the PAT authenticator is injected by config/urls.py.
@@ -509,7 +512,7 @@ ignore_imports = [
 [[tool.importlinter.contracts]]
 name = "kernel apps must not import connectors or deploys (ADR-010)"
 type = "forbidden"
-source_modules = ["accounts", "workspaces", "assistant", "memory", "knowledge", "tasks", "approvals", "tools", "agents", "skills", "integrations", "nodes"]
+source_modules = ["accounts", "workspaces", "assistant", "memory", "knowledge", "tasks", "approvals", "tools", "agents", "skills", "integrations", "nodes", "proactive"]
 forbidden_modules = ["connectors", "deploys"]
 
 # harness may import connectors (the `github_open_pr` gate, PR/CI reads)
@@ -530,7 +533,7 @@ forbidden_modules = ["deploys"]
 name = "harness.drivers may import only harness, core, approvals, ai_core, audit (Phase 10 D14)"
 type = "forbidden"
 source_modules = ["harness.drivers"]
-forbidden_modules = ["config", "accounts", "workspaces", "assistant", "memory", "knowledge", "tasks", "tools", "agents", "skills", "integrations", "connectors", "deploys", "ops", "voice", "hud", "nodes", "mcp"]
+forbidden_modules = ["config", "accounts", "workspaces", "assistant", "memory", "knowledge", "tasks", "tools", "agents", "skills", "integrations", "connectors", "deploys", "ops", "voice", "hud", "nodes", "mcp", "proactive"]
 allow_indirect_imports = true
 
 # `ops` (Phase 5 closeout: `manage.py preflight`) is a leaf like harness:
@@ -540,7 +543,7 @@ allow_indirect_imports = true
 [[tool.importlinter.contracts]]
 name = "no app may import ops (ops is a leaf: operations tooling only)"
 type = "forbidden"
-source_modules = ["core", "accounts", "workspaces", "audit", "ai_core", "assistant", "memory", "knowledge", "tasks", "approvals", "tools", "agents", "skills", "integrations", "harness", "connectors", "deploys", "voice", "hud", "nodes"]
+source_modules = ["core", "accounts", "workspaces", "audit", "ai_core", "assistant", "memory", "knowledge", "tasks", "approvals", "tools", "agents", "skills", "integrations", "harness", "connectors", "deploys", "voice", "hud", "nodes", "proactive"]
 forbidden_modules = ["ops"]
 
 # The MCP SDK (ADR-010 decision 3, brief D2) ships server-side code
@@ -557,7 +560,7 @@ forbidden_modules = ["ops"]
 [[tool.importlinter.contracts]]
 name = "production code imports only the MCP client side (ADR-010, D2)"
 type = "forbidden"
-source_modules = ["core", "accounts", "workspaces", "audit", "ai_core", "assistant", "memory", "knowledge", "tasks", "approvals", "tools", "agents", "skills", "integrations", "harness", "connectors", "deploys", "ops", "voice", "hud", "nodes"]
+source_modules = ["core", "accounts", "workspaces", "audit", "ai_core", "assistant", "memory", "knowledge", "tasks", "approvals", "tools", "agents", "skills", "integrations", "harness", "connectors", "deploys", "ops", "voice", "hud", "nodes", "proactive"]
 forbidden_modules = ["mcp.server", "mcp.client.stdio", "mcp.client.sse", "mcp.cli", "mcp.os"]
 allow_indirect_imports = true
 ignore_imports = [
@@ -580,7 +583,7 @@ ignore_imports = [
 name = "voice may import only core, workspaces, ai_core, assistant (ADR-011, D11)"
 type = "forbidden"
 source_modules = ["voice"]
-forbidden_modules = ["config", "accounts", "approvals", "tasks", "tools", "agents", "skills", "memory", "knowledge", "integrations", "harness", "connectors", "deploys", "ops"]
+forbidden_modules = ["config", "accounts", "approvals", "tasks", "tools", "agents", "skills", "memory", "knowledge", "integrations", "harness", "connectors", "deploys", "ops", "proactive"]
 # `voice -> assistant` is allowed, and `assistant` itself imports memory,
 # knowledge, tools and audit -- those are assistant's edges, not voice's.
 allow_indirect_imports = true
@@ -599,7 +602,7 @@ ignore_imports = [
 [[tool.importlinter.contracts]]
 name = "no app may import voice (voice is a leaf, ADR-011)"
 type = "forbidden"
-source_modules = ["core", "accounts", "workspaces", "audit", "ai_core", "assistant", "memory", "knowledge", "tasks", "approvals", "tools", "agents", "skills", "integrations", "harness", "connectors", "deploys", "ops", "nodes"]
+source_modules = ["core", "accounts", "workspaces", "audit", "ai_core", "assistant", "memory", "knowledge", "tasks", "approvals", "tools", "agents", "skills", "integrations", "harness", "connectors", "deploys", "ops", "nodes", "proactive"]
 forbidden_modules = ["voice"]
 
 # Phase 6 branch 5 (brief A8, "5. `feat/p6-hud`"): `hud` -- the HUD's
@@ -616,7 +619,7 @@ forbidden_modules = ["voice"]
 name = "hud may import only core, workspaces, ai_core, approvals, tasks, nodes (Phase 6 A8, Phase 10 D12)"
 type = "forbidden"
 source_modules = ["hud"]
-forbidden_modules = ["config", "accounts", "audit", "assistant", "memory", "knowledge", "tools", "agents", "skills", "integrations", "harness", "connectors", "deploys", "ops", "voice"]
+forbidden_modules = ["config", "accounts", "audit", "assistant", "memory", "knowledge", "tools", "agents", "skills", "integrations", "harness", "connectors", "deploys", "ops", "voice", "proactive"]
 # `approvals` and `tasks` reach `tools`, `audit`, `assistant` themselves;
 # those are their edges, not hud's.
 allow_indirect_imports = true
@@ -630,7 +633,7 @@ ignore_imports = [
 [[tool.importlinter.contracts]]
 name = "no app may import hud (hud is a leaf, Phase 6 A8)"
 type = "forbidden"
-source_modules = ["core", "accounts", "workspaces", "audit", "ai_core", "assistant", "memory", "knowledge", "tasks", "approvals", "tools", "agents", "skills", "integrations", "harness", "connectors", "deploys", "ops", "voice", "nodes"]
+source_modules = ["core", "accounts", "workspaces", "audit", "ai_core", "assistant", "memory", "knowledge", "tasks", "approvals", "tools", "agents", "skills", "integrations", "harness", "connectors", "deploys", "ops", "voice", "nodes", "proactive"]
 forbidden_modules = ["hud"]
 
 # Phase 9 (ADR-013 decision 9, brief D2): `nodes` may import `approvals`,
@@ -645,7 +648,7 @@ forbidden_modules = ["hud"]
 name = "nodes may import only approvals, audit, workspaces, accounts, core (ADR-013)"
 type = "forbidden"
 source_modules = ["nodes"]
-forbidden_modules = ["config", "ai_core", "memory", "knowledge", "harness", "assistant", "tools", "agents", "skills", "integrations", "connectors", "deploys", "voice", "hud", "ops", "tasks"]
+forbidden_modules = ["config", "ai_core", "memory", "knowledge", "harness", "assistant", "tools", "agents", "skills", "integrations", "connectors", "deploys", "voice", "hud", "ops", "tasks", "proactive"]
 ignore_imports = [
     # Phase 9 branch 3: the parity test proves the node's hook relay builds
     # exactly friday-hook's event (so the server dedupes an event relayed by
@@ -660,7 +663,7 @@ ignore_imports = [
 [[tool.importlinter.contracts]]
 name = "only tools, hud, ops may import nodes (ADR-013, Phase 9 D2)"
 type = "forbidden"
-source_modules = ["core", "accounts", "workspaces", "audit", "ai_core", "assistant", "memory", "knowledge", "tasks", "approvals", "agents", "skills", "integrations", "harness", "connectors", "deploys", "voice"]
+source_modules = ["core", "accounts", "workspaces", "audit", "ai_core", "assistant", "memory", "knowledge", "tasks", "approvals", "agents", "skills", "integrations", "harness", "connectors", "deploys", "voice", "proactive"]
 forbidden_modules = ["nodes"]
 
 # `nodes.protocol` and `nodes.capabilities` are the shared spec the Swift
@@ -672,7 +675,7 @@ forbidden_modules = ["nodes"]
 name = "nodes.protocol and nodes.capabilities import no project package (Phase 9 D2)"
 type = "forbidden"
 source_modules = ["nodes.protocol", "nodes.capabilities"]
-forbidden_modules = ["config", "core", "accounts", "workspaces", "audit", "ai_core", "assistant", "memory", "knowledge", "tasks", "approvals", "tools", "agents", "skills", "integrations", "harness", "connectors", "deploys", "ops", "voice", "hud", "mcp", "nodes.models", "nodes.services", "nodes.audit_chain", "nodes.keys", "nodes.views", "nodes.urls", "nodes.serializers", "nodes.admin", "nodes.apps", "nodes.management", "nodes.migrations", "nodes.tests"]
+forbidden_modules = ["config", "core", "accounts", "workspaces", "audit", "ai_core", "assistant", "memory", "knowledge", "tasks", "approvals", "tools", "agents", "skills", "integrations", "harness", "connectors", "deploys", "ops", "voice", "hud", "mcp", "nodes.models", "nodes.services", "nodes.audit_chain", "nodes.keys", "nodes.views", "nodes.urls", "nodes.serializers", "nodes.admin", "nodes.apps", "nodes.management", "nodes.migrations", "nodes.tests", "proactive"]
 
 # Phase 10 branch 2: the reference node and the conformance suite are the
 # executable spec of the node side (the Swift app mirrors them), so they
@@ -684,7 +687,7 @@ forbidden_modules = ["config", "core", "accounts", "workspaces", "audit", "ai_co
 name = "nodes.reference and nodes.conformance import no project package (Phase 10 D4)"
 type = "forbidden"
 source_modules = ["nodes.reference", "nodes.conformance"]
-forbidden_modules = ["config", "core", "accounts", "workspaces", "audit", "ai_core", "assistant", "memory", "knowledge", "tasks", "approvals", "tools", "agents", "skills", "integrations", "harness", "connectors", "deploys", "ops", "voice", "hud", "mcp", "nodes.models", "nodes.services", "nodes.audit_chain", "nodes.keys", "nodes.views", "nodes.urls", "nodes.serializers", "nodes.admin", "nodes.apps", "nodes.management", "nodes.migrations", "nodes.tests"]
+forbidden_modules = ["config", "core", "accounts", "workspaces", "audit", "ai_core", "assistant", "memory", "knowledge", "tasks", "approvals", "tools", "agents", "skills", "integrations", "harness", "connectors", "deploys", "ops", "voice", "hud", "mcp", "nodes.models", "nodes.services", "nodes.audit_chain", "nodes.keys", "nodes.views", "nodes.urls", "nodes.serializers", "nodes.admin", "nodes.apps", "nodes.management", "nodes.migrations", "nodes.tests", "proactive"]
 
 [[tool.importlinter.contracts]]
 name = "the reference node does not import the conformance suite (the node is the lower layer)"
@@ -697,3 +700,32 @@ name = "nodes.protocol does not import nodes.capabilities (the protocol is the l
 type = "forbidden"
 source_modules = ["nodes.protocol"]
 forbidden_modules = ["nodes.capabilities"]
+
+# Phase 12 (brief D19, ADR-016): `proactive` reaches every other app"s data
+# through `core.probes` (a registry of callables in `core`), never by
+# importing it. `accounts` only for the owner lookup and active state the
+# heartbeat checks.
+[[tool.importlinter.contracts]]
+name = "proactive may import only core, workspaces, audit, ai_core, accounts (Phase 12 D19)"
+type = "forbidden"
+source_modules = ["proactive"]
+forbidden_modules = ["config", "assistant", "memory", "knowledge", "tasks", "approvals", "tools", "agents", "skills", "integrations", "harness", "connectors", "deploys", "ops", "voice", "hud", "nodes", "mcp"]
+
+# Phase 12 D19 / D3 ("cron cannot create cron"): only assistant, hud and ops
+# may import proactive at all -- no tool, connector, skill, agent or harness
+# path can reach a schedule or the pause.
+[[tool.importlinter.contracts]]
+name = "only assistant, hud, ops may import proactive (Phase 12 D19)"
+type = "forbidden"
+source_modules = ["core", "accounts", "workspaces", "audit", "ai_core", "memory", "knowledge", "tasks", "approvals", "tools", "agents", "skills", "integrations", "harness", "connectors", "deploys", "voice", "nodes"]
+forbidden_modules = ["proactive"]
+
+# ... and assistant / hud only through its narrow read surface,
+# `proactive.api` (direct imports; `proactive.api` itself reads the models).
+[[tool.importlinter.contracts]]
+name = "assistant and hud reach proactive only through proactive.api (Phase 12 D19)"
+type = "forbidden"
+source_modules = ["assistant", "hud"]
+forbidden_modules = ["proactive.services", "proactive.tasks", "proactive.views", "proactive.runs", "proactive.urls", "proactive.serializers", "proactive.models", "proactive.timing", "proactive.apps"]
+allow_indirect_imports = true
+

@@ -30,7 +30,7 @@ def require_owner_web(*, actor, workspace, channel) -> None:
     if actor is None or not getattr(actor, "is_authenticated", False):
         raise OwnerWebRequired("owner_required", "Only the owner can do this.")
     if getattr(actor, "is_agent", False):
-        raise OwnerWebRequired("agent_forbidden", "An agent can never do this.")
+        raise OwnerWebRequired("owner_required", "An agent can never do this.")
     if not getattr(actor, "is_active", False) or not getattr(actor, "is_owner", False):
         raise OwnerWebRequired("owner_required", "Only the owner can do this.")
     owner_id = getattr(workspace, "owner_id", None)
