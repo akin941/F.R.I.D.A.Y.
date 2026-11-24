@@ -185,9 +185,7 @@ def test_no_provider(workspace, distill_prompt):
     assert PlaybookSource.objects.filter(distill_run__isnull=True).count() == 3
 
 
-def test_personal_data_follows_the_workspace_class(
-    owner, workspace, distill_prompt, fake_provider
-):
+def test_personal_data_follows_the_workspace_class(owner, workspace, distill_prompt, fake_provider):
     member = __import__("accounts.services", fromlist=["register_user"]).register_user(
         email="m@test.dev", password=PASSWORD, name="M"
     )
@@ -269,11 +267,12 @@ def test_the_owner_approves_a_playbook_by_hash(
 def test_the_task_entry_point_and_the_beat_entry(workspace, distill_prompt, fake_provider):
     record_sources(workspace, 3)
     assert distill_task() == {Outcome.DROPPED: 1}
-    from config.celery import _BEAT_SCHEDULE, app
+    from celery import current_app
 
-    entry = _BEAT_SCHEDULE["skills-playbook-distill-nightly"]
+    worker_beat = current_app.conf.friday_beat_schedules["worker"]
+    entry = worker_beat["skills-playbook-distill-nightly"]
     assert entry["task"] == "skills.tasks.distill_playbooks"
-    assert "skills-playbook-distill-nightly" in app.conf.friday_beat_schedules["worker"]
+    assert "skills-playbook-distill-nightly" not in current_app.conf.friday_beat_schedules["runner"]
     assert json.dumps(sorted(django_settings.AI_SKILLS_PURPOSES)) == json.dumps(
         ["skills.match", "skills.playbook_distill"]
     )

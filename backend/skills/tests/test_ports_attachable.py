@@ -75,7 +75,14 @@ def test_active_versions_come_back_with_content_and_hash(owner, workspace):
 def test_stale_skills_are_attachable(owner, workspace):
     skill = active_skill(workspace, owner)
     InstructionSkill.objects.filter(pk=skill.pk).update(status=InstructionSkill.Status.STALE)
-    assert len(ports.get_attachable_versions(workspace=workspace, version_ids=[skill.current_version_id])) == 1
+    assert (
+        len(
+            ports.get_attachable_versions(
+                workspace=workspace, version_ids=[skill.current_version_id]
+            )
+        )
+        == 1
+    )
 
 
 def _assert_refused(workspace, ids, offending):
@@ -95,7 +102,11 @@ def test_pending_rejected_archived_and_superseded_are_refused(owner, workspace):
 
     archived = active_skill(workspace, owner, skill_text(name="arsiv"))
     services.archive_skill(actor=owner, channel=CHANNEL_WEB, skill=archived)
-    _assert_refused(workspace, [good.current_version_id, archived.current_version_id], archived.current_version_id)
+    _assert_refused(
+        workspace,
+        [good.current_version_id, archived.current_version_id],
+        archived.current_version_id,
+    )
 
     old_version_id = good.current_version_id
     newer = propose(workspace, owner, skill_text(name="iyi", body="Yeni gövde metni."))
@@ -110,7 +121,9 @@ def test_unknown_malformed_and_other_workspace_ids_are_refused(owner, workspace,
     unknown = uuid.uuid4()
     _assert_refused(workspace, [mine.current_version_id, unknown], unknown)
     _assert_refused(workspace, ["nope"], "nope")
-    _assert_refused(workspace, [mine.current_version_id, theirs.current_version_id], theirs.current_version_id)
+    _assert_refused(
+        workspace, [mine.current_version_id, theirs.current_version_id], theirs.current_version_id
+    )
     _assert_refused(firm, [mine.current_version_id], mine.current_version_id)
     assert ports.get_attachable_versions(workspace=firm, version_ids=[theirs.current_version_id])
 

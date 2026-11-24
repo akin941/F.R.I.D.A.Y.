@@ -62,7 +62,12 @@ def draft(steps, *, name="acme-api-migration", description="acme-api'ye migratio
 def good_draft(sources):
     return draft(
         [
-            step(sources[0], "Migration ekle.", "migration ekle", ["backend/app/migrations/0002_x.py"]),
+            step(
+                sources[0],
+                "Migration ekle.",
+                "migration ekle",
+                ["backend/app/migrations/0002_x.py"],
+            ),
             step(sources[1], "Testleri make test ile çalıştır.", "make test"),
         ]
     )

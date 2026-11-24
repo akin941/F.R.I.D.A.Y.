@@ -50,7 +50,9 @@ def test_goal_and_test_command_quotes_are_verified(sources):
 def test_test_command_field_is_quotable(workspace):
     from skills.tests.playbook_helpers import record_source
 
-    source_id = record_source(workspace, goal="kullanıcı modeline alan ekle", test_command="uv run pytest -q")
+    source_id = record_source(
+        workspace, goal="kullanıcı modeline alan ekle", test_command="uv run pytest -q"
+    )
     from skills.models import PlaybookSource
 
     source = PlaybookSource.objects.get(pk=source_id)

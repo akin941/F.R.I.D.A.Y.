@@ -8,9 +8,9 @@ import uuid
 
 import pytest
 
+from accounts.services import register_user
 from skills import ports
 from skills.models import PlaybookSource
-from accounts.services import register_user
 from skills.tests.helpers import PASSWORD, make_firm
 from skills.tests.playbook_helpers import owner, record_source, workspace  # noqa: F401
 

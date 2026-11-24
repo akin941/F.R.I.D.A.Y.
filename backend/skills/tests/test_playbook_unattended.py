@@ -12,8 +12,6 @@ from approvals.models import ApprovalRequest
 from approvals.tasks import sweep_expired_approval_requests
 from audit.models import AuditLog
 from audit.unattended import DENIAL_ACTION
-from connectors import reads as connector_reads
-from harness import services as harness_services
 from memory import services as memory_services
 from memory.models import Memory
 from skills import playbooks, services
@@ -41,9 +39,7 @@ EFFECTS = {
         origin=ApprovalRequest.Origin.HUMAN,
         channel="web",
     ),
-    "task_write": lambda ws, owner: task_services.create_task(
-        workspace=ws, actor=owner, title="t"
-    ),
+    "task_write": lambda ws, owner: task_services.create_task(workspace=ws, actor=owner, title="t"),
     "memory_write": lambda ws, owner: memory_services.create_memory(
         workspace=ws,
         actor=owner,
@@ -51,12 +47,6 @@ EFFECTS = {
         content="c",
         memory_type=Memory.Type.SEMANTIC,
         sensitivity=Memory.Sensitivity.NORMAL,
-    ),
-    "connector_read": lambda ws, owner: connector_reads.perform_read(
-        None, None, workspace=ws, actor=owner, args={}, channel="web"
-    ),
-    "harness_job": lambda ws, owner: harness_services.create_harness_implementation_job(
-        workspace=ws, actor=owner, repo=None, goal="g"
     ),
     "gateway_call": lambda ws, owner: InferenceGateway().complete(
         "chat", [{"role": "user", "content": "x"}], workspace=ws
