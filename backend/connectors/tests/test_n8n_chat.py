@@ -18,6 +18,7 @@ import json
 
 import anyio
 import pytest
+from django.apps import apps
 
 from ai_core.models import ModelUsage
 from approvals.models import ApprovalRequest
@@ -38,7 +39,8 @@ from connectors.tests.n8n_chat_fixtures import (  # noqa: F401 -- fixtures
     voice,
 )
 from memory.models import Memory
-from tasks.models import Task
+
+Task = apps.get_model("tasks", "Task")  # counted only; connectors never imports tasks
 
 pytestmark = pytest.mark.django_db
 
