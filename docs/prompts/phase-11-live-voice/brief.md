@@ -1265,6 +1265,54 @@ families against the reference implementations, the CI job is green and
 the case and vector files are what the Mac session's Swift test target
 loads.
 
+**Status: implemented 2026-11-20** (`feat/p11-voice-child-protocol`).
+
+**Step 0 record (checked against PyPI on 2026-11-24; cut-off for "at
+least two weeks old": 2026-11-10).** Full record, deviations and hashes in
+`docs/mcp/dependencies/friday-voice.md`.
+- `pipecat-ai==1.15.0` (2026-10-29, BSD-2-Clause; 1.16.0 and 1.17.0 too
+  new), `onnxruntime==1.31.1` (MIT; 1.32.0 too new), `openwakeword==0.6.0`
+  (code Apache-2.0, latest), `numpy==2.5.4` (2.5.5 too new),
+  `httpx==0.28.1` (BSD-3-Clause, latest stable), plus `jsonschema==4.26.0`
+  (the backend's pin) for schema validation. Pipecat core installs and
+  imports on Linux / CPython 3.12 with no extras.
+- Licences: openWakeWord code Apache-2.0, its melspectrogram and
+  embedding graphs CC BY-NC-SA 4.0 (and `hey_friday` with them); Silero
+  VAD v5.1.2 MIT; smart-turn v3 BSD-2-Clause.
+- smart-turn v3: the pinned wheel bundles `smart-turn-v3.2-cpu.onnx`
+  (`pipecat/audio/turn/smart_turn/data/`), sha256
+  `2bb026316b14a660486a75b1733cd3fbab8c2fd0314dc9af7be49f8cca967e4f`,
+  pinned in `node/friday-voice/models.json`; upstream
+  `https://huggingface.co/pipecat-ai/smart-turn-v3` (not reachable from
+  the container: model-card confirmation is an owner step).
+- Two deviations: (1) Pipecat **core** requires the `openai` SDK (no
+  extra needed); it is installed but never imported (the D2 guard) and
+  no other provider SDK is installed (tested). (2) `openwakeword` 0.6.0
+  declares `tflite-runtime` on Linux, which has no CPython 3.12 wheel; a
+  uv override drops it (the child runs the ONNX models only).
+
+**As built.**
+- Frames: `u32` big-endian length ≤ 1 MiB, canonical JSON header line,
+  then the PCM payload for `audio`/`play` only. Refusal codes are a closed
+  set (`friday_voice.protocol.messages.ERROR_CODES`). Numbers are integers
+  only; `muted` is `true | false | "unreadable"`; `credential.token` must
+  look like a `jpat_` token (a `jnd_` node secret is refused by schema);
+  `server_url` is `https://…` or loopback `http://` (dev only).
+- Case files: `friday_voice/conformance/cases/host/*.json` (28 cases) and
+  `…/cases/child/*.json` (23 cases), generated with the vectors from
+  `friday_voice/conformance/definitions.py`, whose docstring defines the
+  step vocabulary the Swift test target implements. A case marked
+  `"clock": "manual"` (watchdog, backoff, keepalive, expiry) needs an
+  injectable clock; the Python live runs skip those.
+- `friday-voice conformance-child --case <id> [--cases <dir>]
+  [--time-scale <f>] [--settle-ms <n>]` plays one host case's child side
+  (one process per case); it syncs on the host frames each `host_local`
+  and `expect` step names, so every host-side step after a `child_send`
+  has an `expect` before it (tested).
+- `friday-voice run` is the protocol shell only (no pipeline): push-to-talk
+  opens `listening`, `always_on` runs as `armed_ptt` until the arming
+  policy (branch 5), audio is held in a 2 s ring buffer and dropped.
+
 ### 3. `feat/p11-pipecat-pipeline` — pipeline, gateway clients, replay harness, trace
 
 **Scope.** D7 (adapter), D8, D14:
@@ -1602,7 +1650,7 @@ is written with the Mac rows pending owner evaluation.
 |---|---|---|---|---|
 | brief | `docs/p11-brief` | This brief (full, from the stub; stub goal, scope, checkpoint and owner step kept), MASTER_PLAN §AA row 11 Brief/Status | Phase 10 closeout; Phase 10 brief | **implemented 2026-11-23** (docs only; plan-review rounds 1 and 2 findings addressed 2026-11-23; awaits re-review to APPROVE) |
 | 1 | `feat/p11-node-voice-channel` | `node_voice` credential + mint, `CHANNEL_NODE_VOICE`, chat/voice endpoint acceptance, personal reads, node-action proposals, live sessions, route walk, ADR-011 amendment | Phase 10 closeout; brief approved | planned |
-| 2 | `feat/p11-voice-child-protocol` | `node/friday-voice` package, pins + step 0, `friday-voice/v1` framing/schemas/vectors, reference host + echo double, conformance (host and child families), import/listener guards, CI job, dependency manifest, ADR-013 note | brief approved (parallel with 1) | planned |
+| 2 | `feat/p11-voice-child-protocol` | `node/friday-voice` package, pins + step 0, `friday-voice/v1` framing/schemas/vectors, reference host + echo double, conformance (host and child families), import/listener guards, CI job, dependency manifest, ADR-013 note | brief approved (parallel with 1) | **implemented 2026-11-20** (step 0 recorded; 28 host + 23 child cases all-pass in process and live; owner steps below) |
 | 3 | `feat/p11-pipecat-pipeline` | Pipecat pipeline, detector ports, gateway STT/chat/TTS clients, segmenter + language routing, push-to-talk, replay harness + baseline, trace fields | 1, 2 | planned |
 | 4 | `feat/p11-barge-in` | Session state machine, barge-in, self-trigger window + content rule, shared vectors, echo scenarios, ADR-015 note (d4) | 3 | planned |
 | 5 | `feat/p11-always-on` | Arming policy, `accounts.VoiceWakeEvaluation` gate (latest row, threshold match), trigger backstop, storms (client + `accounts.VoiceLiveMute` server backstop, 423 from the authenticator), silence close, fail closed, `/voice` live panel, ADR-015 note (d5, d3) | 3 (parallel with 4) | planned |
@@ -1686,10 +1734,14 @@ closed), D12 (release on link loss, mute unreadable, child exit), D15
    `node/friday-voice/friday_voice/conformance/cases/` passes in
    `VoiceConformanceTests.swift` with the reference verdicts, none
    skipped.
-2. Live conformance: `friday-voice conformance-child --cases <dir>` (the
-   scripted hostile child) launched by a conformance build of the host
-   (unsigned, `#if CONFORMANCE` only) prints all-pass, including the
-   watchdog and child-exit releases.
+2. Live conformance: `friday-voice conformance-child --case <id>
+   [--cases <dir>]` (the scripted hostile child, one process per host
+   case) launched by a conformance build of the host (unsigned, `#if
+   CONFORMANCE` only) writes a `"verdict": "pass"` line for every host
+   case, including the watchdog and child-exit releases (the host runs
+   its real clock; the hostile child sleeps through `advance_ms`, scaled
+   by `--time-scale`), and the host side asserts each case's `expect`
+   steps (mic, link, indicator, failure, restart, dropped plays).
 3. Node conformance: `uv run python manage.py node_conformance_server
    --external --protocol 2` passes the `voice.state` cases added by
    branch 7.
@@ -1937,6 +1989,25 @@ The first one is from the stub and is kept.
 4. Confirm D4's widening of personal reads to the node voice channel
    (an ADR-010 amendment) and D11's always-on gate (child-enforced, with
    the server's trigger and storm backstops).
+
+### Owner steps (pending) — `feat/p11-voice-child-protocol`, recorded 2026-11-20
+
+1. Run the independent Sonnet 5 review of the branch and fix findings
+   until APPROVE (CLAUDE.md "Reviews").
+2. Confirm the step 0 pins and accept the two recorded deviations
+   (`docs/mcp/dependencies/friday-voice.md`): the `openai` SDK installed
+   (never imported) as a requirement of Pipecat core, and the
+   `tflite-runtime` override.
+3. Confirm the smart-turn v3 model card licence (BSD-2-Clause expected)
+   and that the bundled `smart-turn-v3.2-cpu.onnx` sha256 matches the
+   upstream file at `https://huggingface.co/pipecat-ai/smart-turn-v3`
+   (huggingface.co is not reachable from the build container).
+4. On the Mac (M1): run `make friday-voice-install` (needs `rsync` and
+   `shasum`, both in macOS) and compile the installed `uv.lock` sha256
+   into the host; implement the host-case step vocabulary
+   (`friday_voice/conformance/definitions.py` docstring) in
+   `VoiceConformanceTests.swift`, and run the live host family against
+   `friday-voice conformance-child`.
 
 ## Review round 1 (2026-11-23)
 
