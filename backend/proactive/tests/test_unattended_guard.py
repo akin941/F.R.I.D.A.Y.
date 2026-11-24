@@ -100,6 +100,42 @@ EFFECTS = {
     "memory_write:work_log": lambda ws, owner: memory_services.record_work_log(
         workspace=ws, title="t", content="c"
     ),
+    # Beyond the D2 minimum (review round 1): every other memory / task
+    # writer refuses too, so a probe reusing one cannot slip past.
+    "memory_write:reject": lambda ws, owner: memory_services.reject_memory(
+        memory=None, actor=owner
+    ),
+    "memory_write:restore": lambda ws, owner: memory_services.restore_memory(
+        memory=None, actor=owner
+    ),
+    "memory_write:forget": lambda ws, owner: memory_services.forget_memory(
+        memory=None, actor=owner
+    ),
+    "memory_write:delete": lambda ws, owner: memory_services.delete_memory(
+        memory=None, actor=owner, channel="web"
+    ),
+    "memory_write:privatize": lambda ws, owner: memory_services.privatize_conversation_memories(
+        conversation=None, actor=owner
+    ),
+    "memory_write:self_block": lambda ws, owner: memory_services.set_assembled_self_block(
+        workspace=ws, content="x"
+    ),
+    "memory_write:core_rollback": lambda ws, owner: memory_services.rollback_core_block(
+        workspace=ws, label="human", version=1, actor=owner, channel="web"
+    ),
+    "memory_write:core_reject": lambda ws, owner: memory_services.reject_core_block_proposal(
+        proposal=None, actor=owner, channel="web"
+    ),
+    "task_write:complete": lambda ws, owner: task_services.complete_task(task=None, actor=owner),
+    "task_write:delete": lambda ws, owner: task_services.delete_task(
+        task=None, actor=owner, channel="web"
+    ),
+    "task_write:restore": lambda ws, owner: task_services.restore_task(
+        task=None, actor=owner, channel="web"
+    ),
+    "task_write:purge": lambda ws, owner: task_services.purge_trashed_task(
+        None, reason="retention"
+    ),
     "fact_write:propose": lambda ws, owner: graph_services.propose_fact(
         workspace=ws, subject=None, predicate="x", valid_from=None, provenance_quote="q"
     ),

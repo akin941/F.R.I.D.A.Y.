@@ -39,9 +39,14 @@ class DenialRecorder:
         return len(self._buffer)
 
     def flush(self) -> int:
-        """Write the buffered denials; returns how many were written."""
-        buffered, self._buffer = self._buffer, []
-        for denial in buffered:
+        """Write the buffered denials; returns how many were written.
+
+        Denials leave the buffer one at a time, only after their row is
+        written: if a write raises, that denial and the unwritten tail stay
+        buffered for the next flush (exactly one row per denial)."""
+        written = 0
+        while self._buffer:
+            denial = self._buffer[0]
             record_audit(
                 action=DENIAL_ACTION,
                 actor=None,
@@ -54,7 +59,9 @@ class DenialRecorder:
                     "source": self.source,
                 },
             )
-        return len(buffered)
+            self._buffer.pop(0)
+            written += 1
+        return written
 
 
 @contextmanager

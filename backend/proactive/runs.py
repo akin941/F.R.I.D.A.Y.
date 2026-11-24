@@ -23,9 +23,10 @@ audited exactly once whatever the probe's transaction did.
 
 import logging
 import time as clock
+from contextlib import contextmanager
 
 from django.conf import settings
-from django.db import IntegrityError, transaction
+from django.db import IntegrityError, OperationalError, connection, transaction
 from django.utils import timezone
 
 from audit.unattended import DenialRecorder
@@ -114,9 +115,43 @@ def _notify_delta(*, run, schedule, spec, result):
     return created
 
 
+# Postgres SQLSTATE for a statement cancelled by `statement_timeout`.
+QUERY_CANCELED = "57014"
+
+
+@contextmanager
+def _bounded_statements():
+    """Cap every statement of the current probe transaction (`SET LOCAL`,
+    via `set_config(..., true)`). `PROACTIVE_PROBE_TIMEOUT_MS` only flags a
+    slow probe; this is the hard bound that keeps a hung probe query from
+    blocking the heartbeat worker. The previous value is restored when the
+    probe succeeds (so a caller's outer transaction is not left capped; on
+    failure the probe's savepoint rollback reverts it). Postgres only;
+    0 disables it."""
+    limit = int(settings.PROACTIVE_PROBE_STATEMENT_TIMEOUT_MS)
+    if limit <= 0 or connection.vendor != "postgresql":
+        yield
+        return
+    with connection.cursor() as cursor:
+        cursor.execute(
+            "SELECT current_setting('statement_timeout'), "
+            "set_config('statement_timeout', %s, true)",
+            [f"{limit}ms"],
+        )
+        previous = cursor.fetchone()[0]
+    yield
+    with connection.cursor() as cursor:
+        cursor.execute("SELECT set_config('statement_timeout', %s, true)", [previous])
+
+
+def _is_statement_timeout(exc) -> bool:
+    cause = exc.__cause__
+    return getattr(cause, "sqlstate", None) == QUERY_CANCELED
+
+
 def _collect_one(*, run, schedule, spec, now, owner):
     """Run one probe in its own transaction. Returns (count, notices)."""
-    with transaction.atomic():
+    with transaction.atomic(), _bounded_statements():
         result = spec.collect(schedule.workspace, owner, now)
         result = probes.validate_result(spec, result, max_keys=_max_keys())
         if result.data_class != workspace_data_class(schedule.workspace):
@@ -169,6 +204,14 @@ def run_schedule(schedule, *, now=None):
                     except UnattendedDenied:
                         denials += 1
                         failures[spec.name] = "denied"
+                    except OperationalError as exc:
+                        if _is_statement_timeout(exc):
+                            failures[spec.name] = "probe_timeout"
+                            slow.append(spec.name)
+                            logger.warning("Probe %s hit the statement timeout", spec.name)
+                        else:
+                            failures[spec.name] = "probe_failed"
+                            logger.warning("Probe %s failed (OperationalError)", spec.name)
                     except probes.ProbeResultInvalid as exc:
                         failures[spec.name] = f"probe_invalid:{exc}"[:60]
                         logger.warning("Probe %s returned an invalid result", spec.name)
@@ -176,7 +219,7 @@ def run_schedule(schedule, *, now=None):
                         failures[spec.name] = "probe_failed"
                         logger.warning("Probe %s failed (%s)", spec.name, exc.__class__.__name__)
                 elapsed_ms = int((clock.monotonic() - probe_started) * 1000)
-                if elapsed_ms > timeout_ms:
+                if elapsed_ms > timeout_ms and spec.name not in slow:
                     slow.append(spec.name)
                 recorder.flush()
             if schedule.kind == ProactiveSchedule.Kind.MORNING_DIGEST and any(counts.values()):

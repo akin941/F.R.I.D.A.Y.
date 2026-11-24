@@ -102,6 +102,61 @@ def test_a_heartbeat_schedule_with_quiet_hours(owner, workspace, frozen_now):
     assert schedule.next_run_at == datetime(2026, 11, 24, 7, 30, tzinfo=UTC)
 
 
+def _heartbeat(owner, workspace, **fields):
+    return services.save_schedule(
+        actor=owner,
+        channel=CHANNEL_WEB,
+        workspace=workspace,
+        kind="heartbeat",
+        enabled=True,
+        interval_minutes=30,
+        **fields,
+    )
+
+
+def test_quiet_hours_can_be_cleared_with_explicit_nulls(owner, workspace):
+    _heartbeat(owner, workspace, quiet_start=time(22, 0), quiet_end=time(7, 0))
+    schedule = _heartbeat(owner, workspace, quiet_start=None, quiet_end=None)
+    schedule.refresh_from_db()
+    assert schedule.quiet_start is None and schedule.quiet_end is None
+
+
+def test_omitting_quiet_hours_keeps_them(owner, workspace):
+    _heartbeat(owner, workspace, quiet_start=time(22, 0), quiet_end=time(7, 0))
+    schedule = _heartbeat(owner, workspace)
+    schedule.refresh_from_db()
+    assert (schedule.quiet_start, schedule.quiet_end) == (time(22, 0), time(7, 0))
+
+
+def test_a_single_quiet_bound_can_be_edited_against_the_stored_pair(owner, workspace):
+    _heartbeat(owner, workspace, quiet_start=time(22, 0), quiet_end=time(7, 0))
+    schedule = _heartbeat(owner, workspace, quiet_start=time(23, 0))
+    schedule.refresh_from_db()
+    assert (schedule.quiet_start, schedule.quiet_end) == (time(23, 0), time(7, 0))
+
+
+@pytest.mark.parametrize(
+    "fields",
+    [
+        {"quiet_start": None},
+        {"quiet_end": None},
+        {"quiet_start": None, "quiet_end": time(6, 0)},
+    ],
+)
+def test_clearing_one_quiet_bound_alone_is_refused(owner, workspace, fields):
+    _heartbeat(owner, workspace, quiet_start=time(22, 0), quiet_end=time(7, 0))
+    with pytest.raises(services.ProactiveInvalid):
+        _heartbeat(owner, workspace, **fields)
+    schedule = ProactiveSchedule.objects.get(kind="heartbeat")
+    assert (schedule.quiet_start, schedule.quiet_end) == (time(22, 0), time(7, 0))
+
+
+def test_a_lone_quiet_bound_on_a_new_schedule_is_refused(owner, workspace):
+    with pytest.raises(services.ProactiveInvalid):
+        _heartbeat(owner, workspace, quiet_end=time(7, 0))
+    assert ProactiveSchedule.objects.count() == 0
+
+
 @pytest.mark.parametrize(
     ("kind", "fields"),
     [

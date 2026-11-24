@@ -61,3 +61,35 @@ def test_the_recorder_stamps_the_workspace(db):
     [row] = _rows()
     assert row.workspace == workspace
     assert row.metadata["source"] == "proactive.heartbeat"
+
+
+def test_a_failed_write_keeps_the_unwritten_denials_buffered(monkeypatch):
+    """A write that raises mid-flush loses nothing: the failed denial and
+    the tail stay buffered, and the next flush writes each exactly once."""
+    from audit import unattended
+
+    recorder = DenialRecorder(source="test")
+    with unattended_run("r5", allowed_purposes=frozenset(), on_denied=recorder):
+        for effect in ("task_write", "memory_write", "harness_job"):
+            with pytest.raises(UnattendedDenied):
+                deny_if_unattended(effect)
+    real = unattended.record_audit
+    calls = {"n": 0}
+
+    def flaky(**kwargs):
+        calls["n"] += 1
+        if calls["n"] == 2:
+            raise RuntimeError("audit store hiccup")
+        return real(**kwargs)
+
+    monkeypatch.setattr(unattended, "record_audit", flaky)
+    with pytest.raises(RuntimeError):
+        recorder.flush()
+    assert recorder.pending == 2
+    assert recorder.flush() == 2
+    assert recorder.pending == 0
+    assert sorted(row.metadata["effect"] for row in _rows()) == [
+        "harness_job",
+        "memory_write",
+        "task_write",
+    ]

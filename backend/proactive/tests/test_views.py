@@ -161,6 +161,32 @@ def test_schedule_put_round_trip_and_strict_fields(owner, workspace, web_client)
     assert client.put(f"{BASE}/schedules/nightly", {"enabled": True}).status_code == 404
 
 
+def test_schedule_put_edits_and_clears_quiet_hours(owner, workspace, web_client):
+    client = web_client(owner)
+    url = f"{BASE}/schedules/heartbeat"
+    set_both = client.put(
+        url,
+        {"enabled": True, "interval_minutes": 30, "quiet_start": "22:00", "quiet_end": "07:00"},
+        format="json",
+    )
+    assert set_both.status_code == 200, set_both.content
+    one_bound = client.put(url, {"enabled": True, "quiet_start": "23:00"}, format="json")
+    assert one_bound.status_code == 200, one_bound.content
+    assert (one_bound.json()["quiet_start"], one_bound.json()["quiet_end"]) == (
+        "23:00:00",
+        "07:00:00",
+    )
+    cleared = client.put(
+        url, {"enabled": True, "quiet_start": None, "quiet_end": None}, format="json"
+    )
+    assert cleared.status_code == 200, cleared.content
+    assert cleared.json()["quiet_start"] is None and cleared.json()["quiet_end"] is None
+    half = client.put(url, {"enabled": True, "quiet_end": None}, format="json")
+    assert half.status_code == 200  # nothing stored to unbalance: both already null
+    lone = client.put(url, {"enabled": True, "quiet_end": "07:00"}, format="json")
+    assert lone.status_code == 400 and lone.json()["code"] == "invalid"
+
+
 def test_notice_list_read_and_dismiss_all(owner, workspace, web_client, notice):
     client = web_client(owner)
     body = client.get(f"{BASE}/notices").json()

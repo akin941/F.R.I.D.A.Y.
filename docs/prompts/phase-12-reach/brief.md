@@ -1700,7 +1700,7 @@ updated.
 | # | Branch | Scope | Depends on | Status |
 |---|---|---|---|---|
 | brief | `docs/p12-brief` | This brief (full, from the stub; stub goal, scope, parent decisions and checkpoint kept), MASTER_PLAN §AA row 12 Brief/Status, `backend/assistant/self_sources.json` regenerated for the row's new status (`build_self_sources --check`) | Phase 11 closeout | **implemented 2026-11-20** (docs only; review round 1 findings addressed 2026-11-24: numeral-word number check, notice delta baseline, skill mount exclusion, calendar labels, owner-web helper in `core`, bookkeeping outside the run context, `start_async` guard, matcher ordering/latency, zip limits, quotable fields; review round 2 findings addressed 2026-11-24: denial audit through a required `on_denied` recorder that survives rollback, `/proactive/pause` endpoint with role × endpoint tests and the `/today` toggle, uniform first-run baseline, branches 4/5 sequenced after 3 with migration renumbering at merge, `skills.ports.get_attachable_versions`, trashed-conversation follow-up test; awaits the independent Sonnet 5 plan review to APPROVE) |
-| 1 | `feat/p12-proactive-core` | `core.probes`, `core.unattended` + guards, `proactive` app (schedules, runs, notices, heartbeat), contracts, ADR-016 | brief approved | **implemented 2026-11-20** (`core.probes` / `core.unattended` / `core.owner_web`, `audit.unattended.DenialRecorder`, guards in every D2 service plus `tools.registry.run_read_tool`, the gateway purpose check and the Celery publish/eager-prerun guard; `proactive` app with schedules, pause, runs, notices, probe state, heartbeat + prune beat entries, owner-only web endpoints; D19 contracts; ADR-016 written as Proposed; see "Implementation notes — branch 1"; awaits the independent Sonnet 5 review) |
+| 1 | `feat/p12-proactive-core` | `core.probes`, `core.unattended` + guards, `proactive` app (schedules, runs, notices, heartbeat), contracts, ADR-016 | brief approved | **implemented 2026-11-20** (`core.probes` / `core.unattended` / `core.owner_web`, `audit.unattended.DenialRecorder`, guards in every D2 service plus `tools.registry.run_read_tool`, the gateway purpose check and the Celery publish/eager-prerun guard; `proactive` app with schedules, pause, runs, notices, probe state, heartbeat + prune beat entries, owner-only web endpoints; D19 contracts; ADR-016 written as Proposed; see "Implementation notes — branch 1"; review round 1 findings addressed 2026-11-24, see "Review round 1 fixes"; awaits the Sonnet 5 re-review) |
 | 2 | `feat/p12-morning-digest` | Probes in owner apps, `DigestRun`, number-checked composition + template fallback, `/today`, notice bell, HUD `notices`, "Dinle", `proactive_checkpoint` | 1 | planned |
 | 3 | `feat/p12-wake-routes` | Wake-phrase routes + aliases, `digest.today` / `digest.learning` / `notices.read` on web voice and `node_voice`, vectors, ADR-015 note | 2 | planned (on-Mac verification: deferred: Mac session, M1) |
 | 4 | `feat/p12-n8n-connector` | n8n manifest + workflow-ID allowlist, relay sidecar mode, async reads + follow-ups, gated writes, probes, `tool.*` routes, ADR-010 amendment | 3 (and so 1, 2) | planned (live n8n pins: owner step) |
@@ -2033,6 +2033,29 @@ later branches build on:
    DELETE /api/v1/proactive/pause`; each takes `?workspace=` (default: the
    owner's personal workspace) and runs only for the owner's web session
    (PATs, node secret, node voice token: 401; member, agent: 403).
+
+### Review round 1 fixes — `feat/p12-proactive-core`, recorded 2026-11-24
+
+1. **Quiet hours are clearable and editable per bound (MEDIUM).** An
+   explicit `null` for `quiet_start` / `quiet_end` now clears that bound
+   (both `null` removes quiet hours); an omitted key keeps the stored
+   value. The "both or neither" rule is checked on the merged row inside
+   `save_schedule`, so changing one bound against a stored pair works and
+   clearing only one bound is refused.
+2. **`DenialRecorder.flush()` keeps unwritten denials (LOW).** Each denial
+   leaves the buffer only after its row is written; a failing write keeps
+   it and the tail buffered for the next flush.
+3. **Hard probe bound (LOW).** Each probe's `atomic()` block sets a
+   Postgres `statement_timeout` (`PROACTIVE_PROBE_STATEMENT_TIMEOUT_MS`,
+   default 10000, 0 = off), restored when the probe succeeds; a cancelled
+   probe is recorded as `probe_timeout` and listed in `slow_probes`.
+   Recorded in ADR-016 decision 3.
+4. **Guards beyond create/update (LOW).** The D2 table names the minimum;
+   to make "holds for code not yet written" true for the remaining
+   writers, the guard now also sits in `memory.services` reject / restore /
+   forget / delete / privatize-conversation / self-block assembly / core
+   block rollback / core proposal reject, and `tasks.services.
+   purge_trashed_task` (each in the guard suite).
 
 ### Owner steps (pending) — `feat/p12-proactive-core`, recorded 2026-11-20
 

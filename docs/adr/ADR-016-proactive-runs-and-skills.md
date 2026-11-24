@@ -70,7 +70,12 @@ supply chain (ClawHub, agentskills.io).
    something, only for the `morning_digest` kind, and only for an
    allowlisted purpose; a heartbeat never calls a model and turns probe
    deltas into notices with Friday-authored templates. A run writes only
-   its own rows (run, digest, notices, probe state) plus audit.
+   its own rows (run, digest, notices, probe state) plus audit. Each probe
+   runs in its own transaction under a Postgres `statement_timeout`
+   (`PROACTIVE_PROBE_STATEMENT_TIMEOUT_MS`, default 10 s): a hung probe
+   query is cancelled and recorded as `probe_timeout`, and the run goes
+   on; `PROACTIVE_PROBE_TIMEOUT_MS` only flags a slow probe. Python time
+   spent outside SQL is not bounded (probes are DB reads by contract).
 4. **Instruction skills are text that grants no capability.** A `SKILL.md`
    skill changes what the model is told, never which tools exist, which
    channel may read, which class an action has or who decides. Every

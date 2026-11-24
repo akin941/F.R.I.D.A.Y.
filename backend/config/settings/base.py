@@ -1202,6 +1202,12 @@ TELEGRAM_BOT_TOKEN = env("TELEGRAM_BOT_TOKEN", default="")
 # A probe slower than this is flagged in its run row and in preflight
 # (measured, not interrupted: probes are DB reads).
 PROACTIVE_PROBE_TIMEOUT_MS = env.int("PROACTIVE_PROBE_TIMEOUT_MS", default=2000)
+# The hard bound: every statement of a probe's transaction is cancelled
+# after this long (Postgres `SET LOCAL statement_timeout`); the probe is
+# recorded as `probe_timeout` and the run continues. 0 disables it.
+PROACTIVE_PROBE_STATEMENT_TIMEOUT_MS = env.int(
+    "PROACTIVE_PROBE_STATEMENT_TIMEOUT_MS", default=10000
+)
 # Read or dismissed notices are hard-deleted after this many days
 # (`proactive.tasks.prune`, daily).
 PROACTIVE_NOTICE_RETENTION_DAYS = env.int("PROACTIVE_NOTICE_RETENTION_DAYS", default=30)

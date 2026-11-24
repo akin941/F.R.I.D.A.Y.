@@ -391,6 +391,7 @@ def purge_trashed_task(task, *, reason, actor=None, approval_request_id=None):
     retention sweep (`reason="retention"`) or an approved `purge_trash`
     request (`reason="approval"`). Caller holds the transaction. A row
     that is no longer trashed (restored meanwhile) is left alone."""
+    deny_if_unattended("task_write")
     if task.deleted_at is None:
         return False
     record_audit(

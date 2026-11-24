@@ -345,6 +345,7 @@ def privatize_conversation_memories(*, conversation, actor):
     right after, and a restore that arrives second sees the already-set
     `privacy_locked`/`private` state and is correctly rejected.
     """
+    deny_if_unattended("memory_write")
     memories = list(Memory.objects.select_for_update().filter(source_conversation=conversation))
     for memory in memories:
         if memory.status == Memory.Status.PENDING_APPROVAL:
@@ -439,6 +440,7 @@ def approve_memory(*, memory, actor, **curated_fields):
 
 @transaction.atomic
 def reject_memory(*, memory, actor):
+    deny_if_unattended("memory_write")
     memory = _locked(memory, actor)
     _require(get_role(actor, memory.workspace) in _CURATOR_ROLES, "rejecting memories")
     if memory.status == Memory.Status.REJECTED:
@@ -456,6 +458,7 @@ def reject_memory(*, memory, actor):
 
 @transaction.atomic
 def restore_memory(*, memory, actor):
+    deny_if_unattended("memory_write")
     memory = _locked(memory, actor)
     _require(get_role(actor, memory.workspace) in _CURATOR_ROLES, "restoring memories")
     if memory.status == Memory.Status.APPROVED:
@@ -486,6 +489,7 @@ def restore_memory(*, memory, actor):
 
 @transaction.atomic
 def forget_memory(*, memory, actor):
+    deny_if_unattended("memory_write")
     memory = _locked(memory, actor)
     role = get_role(actor, memory.workspace)
     _require(
@@ -509,6 +513,7 @@ def delete_memory(*, memory, actor, channel):
     fingerprint slot. Confirm-class under ADR-009 (approved memories are
     archived by `forget_memory` instead, restorable): a human actor over the
     web channel only -- `channel` is required, never defaulted."""
+    deny_if_unattended("memory_write")
     if getattr(actor, "is_agent", False) or channel != CHANNEL_WEB:
         raise MemoryPermissionDenied("Deleting a memory is only allowed for a person over the web.")
     memory = _locked(memory, actor)
@@ -763,6 +768,7 @@ def set_assembled_self_block(*, workspace, content):
     assembler (`assistant.self_block`), never by a view or an agent. Writes
     a new version only when the content hash changes; returns
     `(block, changed)`."""
+    deny_if_unattended("memory_write")
     if workspace.type != Workspace.Type.PERSONAL:
         raise CoreBlockInvalid("The self block lives in the owner's personal workspace.")
     _check_budget(CoreMemoryBlock.Label.SELF, content)
@@ -812,6 +818,7 @@ def update_core_block(
 def rollback_core_block(*, workspace, label, version, actor, channel):
     """Confirm-class in-app edit (D7): restore an earlier version's content
     as a NEW version (history is never rewritten)."""
+    deny_if_unattended("memory_write")
     _require_owner_web(actor=actor, workspace=workspace, channel=channel)
     _check_label(workspace, label)
     with transaction.atomic():
@@ -945,6 +952,7 @@ def approve_core_block_proposal(*, proposal, actor, channel):
 
 
 def reject_core_block_proposal(*, proposal, actor, channel):
+    deny_if_unattended("memory_write")
     _require_owner_web(actor=actor, workspace=proposal.workspace, channel=channel)
     with transaction.atomic():
         proposal = _locked_proposal(proposal)

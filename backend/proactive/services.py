@@ -53,6 +53,9 @@ def _audit(action, *, actor, workspace, resource=None, **metadata):
     )
 
 
+QUIET_FIELDS = frozenset({"quiet_start", "quiet_end"})
+
+
 def _validated_fields(kind, fields):
     """The closed per-kind field set. Unknown kinds and fields of the other
     kind are refused, never ignored."""
@@ -68,6 +71,12 @@ def _validated_fields(kind, fields):
     if given & foreign:
         raise ProactiveInvalid("These fields do not belong to this schedule kind.")
     clean = {key: fields[key] for key in allowed if fields.get(key) is not None}
+    # Quiet hours are clearable: an explicit null for a bound clears it
+    # (null for both removes quiet hours). Whether the pair is complete is
+    # checked in `save_schedule` against the merged row, not the payload.
+    for key in QUIET_FIELDS & allowed:
+        if key in fields and fields[key] is None:
+            clean[key] = None
     if "weekdays" in clean and not (0 < int(clean["weekdays"]) <= timing.ALL_WEEKDAYS):
         raise ProactiveInvalid("Pick at least one weekday.")
     if (
@@ -76,10 +85,8 @@ def _validated_fields(kind, fields):
     ):
         raise ProactiveInvalid("The heartbeat interval is 15, 30, 60 or 120 minutes.")
     for key in ("local_time", "quiet_start", "quiet_end"):
-        if key in clean and not isinstance(clean[key], time):
+        if clean.get(key) is not None and not isinstance(clean[key], time):
             raise ProactiveInvalid("Times are HH:MM.")
-    if ("quiet_start" in clean) != ("quiet_end" in clean):
-        raise ProactiveInvalid("Quiet hours need both a start and an end.")
     return clean
 
 
@@ -104,6 +111,8 @@ def save_schedule(*, actor, channel, workspace, kind, enabled, **fields):
             schedule = ProactiveSchedule(workspace=workspace, kind=kind, created_by=actor)
         for key, value in clean.items():
             setattr(schedule, key, value)
+        if (schedule.quiet_start is None) != (schedule.quiet_end is None):
+            raise ProactiveInvalid("Quiet hours need both a start and an end.")
         schedule.enabled = bool(enabled)
         if schedule.enabled:
             if kind == ProactiveSchedule.Kind.MORNING_DIGEST and schedule.local_time is None:

@@ -14,6 +14,7 @@ from ai_core.models import ModelUsage
 from audit.models import AuditLog
 from audit.unattended import DENIAL_ACTION
 from config.celery import build_beat_schedule
+from core import probes
 from proactive import tasks as proactive_tasks
 from proactive.models import (
     ProactiveNotice,
@@ -23,7 +24,7 @@ from proactive.models import (
     ProactiveSchedule,
 )
 from proactive.tasks import heartbeat, run_due_schedules
-from proactive.tests.conftest import TUESDAY_10, make_schedule
+from proactive.tests.conftest import TUESDAY_10, FakeProbe, make_schedule
 
 pytestmark = pytest.mark.django_db
 
@@ -239,3 +240,28 @@ def test_a_locked_schedule_is_skipped_not_waited_for(owner, workspace, fake_prob
         thread.join()
     assert run_due_schedules(NOW)["ran"] == 1
     connection.close()
+
+
+def test_a_hung_probe_is_cancelled_by_the_statement_timeout(owner, workspace, fake_probe, settings):
+    """`PROACTIVE_PROBE_TIMEOUT_MS` only flags; the per-probe statement
+    timeout bounds a hung probe query: it is recorded as `probe_timeout`,
+    the next probe still runs, and the cap does not outlive the probe."""
+    settings.PROACTIVE_PROBE_STATEMENT_TIMEOUT_MS = 100
+
+    def hang(ws, actor, now):
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT pg_sleep(5)")
+
+    fake_probe.on_collect = hang
+    healthy = FakeProbe(name="tasks.fake_healthy")
+    probes.register_probe(healthy.spec)
+    healthy.items[workspace.pk] = [("t1", "Kira")]
+    make_schedule(workspace, owner, next_run_at=NOW - timedelta(minutes=1))
+    run_due_schedules(NOW)
+    run = ProactiveRun.objects.get()
+    assert run.probe_failures == {"tasks.fake_due": "probe_timeout"}
+    assert "tasks.fake_due" in run.slow_probes
+    assert run.probe_counts == {"tasks.fake_healthy": 1}
+    with connection.cursor() as cursor:
+        cursor.execute("SELECT current_setting('statement_timeout')")
+        assert cursor.fetchone()[0] != "100ms"
