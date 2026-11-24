@@ -1,0 +1,20 @@
+{
+  "$comment": "Phase 11 brief D8: per-sentence TTS language routing vectors (friday_voice/language.py). `fallback` is the transcript's language; the expected value is what detect(sentence, fallback) must return.",
+  "cases": [
+    {"sentence": "Bugün iki toplantın var.", "fallback": "", "expected": "tr"},
+    {"sentence": "Saat onda gel.", "fallback": "en", "expected": "tr"},
+    {"sentence": "İyi akşamlar.", "fallback": "en", "expected": "tr"},
+    {"sentence": "The meeting starts at ten.", "fallback": "tr", "expected": "en"},
+    {"sentence": "Your flight is tomorrow morning.", "fallback": "tr", "expected": "en"},
+    {"sentence": "I will remind you.", "fallback": "tr", "expected": "en"},
+    {"sentence": "Kod ekranda.", "fallback": "en", "expected": "en"},
+    {"sentence": "Kart ekranda.", "fallback": "tr", "expected": "tr"},
+    {"sentence": "OK.", "fallback": "", "expected": "tr"},
+    {"sentence": "OK.", "fallback": "en-US", "expected": "en"},
+    {"sentence": "Tamam, bu da var ve o da var.", "fallback": "en", "expected": "tr"},
+    {"sentence": "Spotify ve Netflix abonelikleri yenilenecek.", "fallback": "en", "expected": "tr"},
+    {"sentence": "Release notes: version 2 is out and it is stable.", "fallback": "tr", "expected": "en"},
+    {"sentence": "3.5 km", "fallback": "tr", "expected": "tr"},
+    {"sentence": "", "fallback": "english", "expected": "en"}
+  ]
+}

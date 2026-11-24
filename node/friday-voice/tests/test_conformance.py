@@ -35,6 +35,25 @@ def test_every_child_case_passes_against_the_reference_child(case):
     assert runner.run_child_case(case) == []
 
 
+def _child_with_pipeline(clock):
+    import io
+
+    from friday_voice.fakes import FakeFriday
+    from friday_voice.pipeline import VoicePipeline
+    from friday_voice.workers import SimWorker
+
+    log = io.StringIO()
+    pipeline = VoicePipeline(clock, FakeFriday(), SimWorker(clock), log_stream=log)
+    return ChildCore(clock, log_stream=log, pipeline=pipeline)
+
+
+@pytest.mark.parametrize("case", CHILD_CASES, ids=lambda c: c["id"])
+def test_every_child_case_passes_with_the_voice_pipeline_attached(case):
+    """Branch 3: the pipeline changes none of the shell's protocol rules
+    (every manual-clock case included)."""
+    assert runner.run_child_case(case, make_core=_child_with_pipeline) == []
+
+
 LIVE_HOST = [c for c in HOST_CASES if c["clock"] != "manual"]
 LIVE_CHILD = [c for c in CHILD_CASES if c["clock"] != "manual"]
 

@@ -20,6 +20,16 @@ Rules (D6, D12), each pinned by a child conformance case:
   watchdog;
 - always-on is wired but not armed: the arming policy (server gate, D11)
   lands in branch 5, so `always_on` runs as push-to-talk (`armed_ptt`).
+
+With a `VoicePipeline` attached (branch 3, `friday_voice.pipeline`) the
+shell hands it every consumed frame, the push-to-talk key, the host's
+playback reports and every credential, and the pipeline adds its states
+(`listening`, `thinking`, `speaking`, `error`, `storm_muted`) and frames
+(`play`, `stop_playback`, `earcon`, its own `release_mic`). Every
+fail-closed rule above stays the shell's and runs first: a release aborts
+the pipeline's turn (its jobs cancelled, its playback stopped). Without a
+pipeline the shell behaves exactly as the branch 2 reference child (the
+conformance runner's in-process child).
 """
 
 import os
@@ -60,8 +70,9 @@ def parse_expires_at(value) -> int:
 
 
 class ChildCore:
-    def __init__(self, clock, *, version=__version__, log_stream=None):
+    def __init__(self, clock, *, version=__version__, log_stream=None, pipeline=None):
         self.clock = clock
+        self.pipeline = pipeline
         self.log_stream = log_stream
         self.version = version
         self.phase = AWAIT_HELLO
@@ -81,6 +92,9 @@ class ChildCore:
         self._last_state = None
         self._last_state_at = None
         self._expired_reported = False
+        self._pending = []  # pipeline frames produced between host frames
+        if pipeline is not None:
+            pipeline.attach(self)
 
     # --- derived state ---
 
@@ -108,7 +122,11 @@ class ChildCore:
         return None
 
     def consuming(self) -> bool:
-        return self.phase == RUNNING and self.blocking_reason() is None
+        return (
+            self.phase == RUNNING
+            and self.blocking_reason() is None
+            and (self.pipeline is None or self.pipeline.accepting())
+        )
 
     def current_state(self) -> str:
         reason = self.blocking_reason()
@@ -118,12 +136,18 @@ class ChildCore:
             return "off"
         if reason is not None:
             return "error"
+        if self.pipeline is not None:
+            return self.pipeline.state(self.mode)
         if self.ptt_down:
             return "listening"
         return "armed_ptt"
 
     def buffered_bytes(self) -> int:
-        return len(self.ring) + len(self.utterance)
+        size = len(self.ring) + len(self.utterance)
+        turn = self.pipeline.turn if self.pipeline is not None else None
+        if turn is not None:
+            size += len(turn.capture.pcm) + len(turn.wav or b"")
+        return size
 
     # --- outbound helpers ---
 
@@ -139,7 +163,7 @@ class ChildCore:
                 "type": "state",
                 "state": state,
                 "mode": self.mode,
-                "session_open": False,
+                "session_open": bool(self.pipeline and self.pipeline.session_open),
                 **self.counters,
                 "at_ms": self.clock.now_ms(),
             },
@@ -158,11 +182,37 @@ class ChildCore:
         self.utterance.clear()
         self.ptt_down = False
 
+    def drop_buffers(self):
+        """The pipeline released the mic itself (credential refused, storm)."""
+        self._drop_buffers()
+
     def _release(self, reason):
+        stops = []
+        if self.pipeline is not None:
+            stops = self.pipeline.abort(reason)
         self._drop_buffers()
         if self.phase != RUNNING:
             return []
-        return [({"type": "release_mic", "reason": reason}, b"")]
+        return [*stops, ({"type": "release_mic", "reason": reason}, b"")]
+
+    def _take_pending(self):
+        out, self._pending = self._pending, []
+        return out
+
+    def flush_pipeline(self, frames=()):
+        """Pipeline frames produced outside a host frame (a worker event):
+        kept until the next receive/tick/on_worker returns them."""
+        if self.pipeline is None or self.finished:
+            return
+        self._pending += [*frames, *self.pipeline._drain()]
+        self._pending += self._state_if_changed()
+
+    def on_worker(self, job_id, event):
+        """A worker event from the stdio runner's inbox."""
+        if self.finished or self.pipeline is None:
+            return []
+        out = self._take_pending() + self.pipeline.on_worker(job_id, event)
+        return out + self._state_if_changed()
 
     def _finish(self, code):
         self._drop_buffers()
@@ -207,7 +257,9 @@ class ChildCore:
     def tick(self):
         if self.phase != RUNNING:
             return []
-        out = []
+        out = self._take_pending()
+        if self.pipeline is not None:
+            out += self.pipeline.tick()
         if self.token is not None and not self.credential_valid() and not self._expired_reported:
             self._expired_reported = True
             self._log("credential.expired")
@@ -232,6 +284,8 @@ class ChildCore:
         self.ca_sha256 = header["ca_sha256"]
         self.expires_ms = expires_ms
         self._expired_reported = False
+        if self.pipeline is not None:
+            self.pipeline.on_credential(self.token, self.server_url, self.ca_sha256)
         if self.phase == AWAIT_CREDENTIAL:
             self.phase = RUNNING
             return [
@@ -247,12 +301,17 @@ class ChildCore:
         self.ring += payload
         if len(self.ring) > RING_BUFFER_BYTES:
             del self.ring[: len(self.ring) - RING_BUFFER_BYTES]
+        if self.pipeline is not None:
+            return [*self.pipeline.on_audio(payload, self.mode), *self._state_if_changed()]
         if self.ptt_down and len(self.utterance) + len(payload) <= UTTERANCE_MAX_BYTES:
             self.utterance += payload
         return []
 
-    def _on_playback(self, _header, _payload):
-        return []  # the shell never plays anything (the pipeline does, branch 3)
+    def _on_playback(self, header, _payload):
+        if self.pipeline is None:
+            return []  # the shell alone never plays anything
+        out = self.pipeline.on_playback(header["utterance_id"], header["state"])
+        return [*out, *self._state_if_changed()]
 
     def _on_mode(self, header, _payload):
         self.mode = header["mode"]
@@ -262,6 +321,8 @@ class ChildCore:
 
     def _on_mute(self, header, _payload):
         self.muted = header["muted"]
+        if self.pipeline is not None:
+            self._pending += self.pipeline.on_mute(self.muted)
         if self.muted == "unreadable":
             return [*self._release("mute_unreadable"), *self._state_if_changed()]
         if self.muted is True:
@@ -275,6 +336,10 @@ class ChildCore:
         return self._state_if_changed()
 
     def _on_ptt(self, header, _payload):
+        if self.pipeline is not None:
+            if header["key"] == "down" and not self.consuming():
+                return []
+            return [*self.pipeline.on_ptt(header["key"]), *self._state_if_changed()]
         if header["key"] == "down":
             if self.consuming():
                 self.ptt_down = True
@@ -352,11 +417,19 @@ def _reader(stream, inbox):
         inbox.put(("frame", frame))
 
 
-def run_stdio(stdin, stdout, clock, *, core=None, tick_seconds=TICK_SECONDS) -> int:
+def run_stdio(
+    stdin, stdout, clock, *, core=None, make_pipeline=None, tick_seconds=TICK_SECONDS
+) -> int:
     """Serve one host over a pair of binary streams until the core finishes.
-    Returns the process exit code."""
-    core = core or ChildCore(clock)
+    Returns the process exit code. `make_pipeline(post)` builds the voice
+    pipeline whose worker posts `(job_id, event)` back into this loop's
+    inbox, so the pipeline itself only ever runs on this thread."""
     inbox = queue.Queue()
+    if core is None:
+        pipeline = None
+        if make_pipeline is not None:
+            pipeline = make_pipeline(lambda job_id, event: inbox.put(("worker", (job_id, event))))
+        core = ChildCore(clock, pipeline=pipeline)
     threading.Thread(target=_reader, args=(stdin, inbox), daemon=True).start()
 
     def send(frames):
@@ -376,6 +449,8 @@ def run_stdio(stdin, stdout, clock, *, core=None, tick_seconds=TICK_SECONDS) -> 
             continue
         if kind == "frame":
             send(core.receive(*value))
+        elif kind == "worker":
+            send(core.on_worker(*value))
         elif kind == "error":
             send(core.protocol_error(value))
         else:

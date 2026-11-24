@@ -35,7 +35,7 @@ from ai_core.gateway import InferenceGateway
 from ai_core.models import ModelUsage
 from assistant.models import Message
 from core.tracing import TRACE_REPORT_KEY, trace_report
-from voice.models import CLIENT_STAGES, MAX_STAGE_MS, VoiceTurnTrace
+from voice.models import CLIENT_STAGES, MAX_STAGE_MS, SOURCE_WEB, SOURCES, VoiceTurnTrace
 
 logger = logging.getLogger(__name__)
 
@@ -128,7 +128,7 @@ def _map_gateway_error(exc, failure_cls):
     return failure_cls(f"{failure_cls.default_message} ({exc.error_type})")
 
 
-def transcribe_utterance(*, conversation, actor, audio, trace_id=""):
+def transcribe_utterance(*, conversation, actor, audio, trace_id="", source=SOURCE_WEB):
     """D1/D2/D3: validate `audio` and transcribe it in the request thread.
     Returns `{"text", "audio_seconds", "language"}`. Raises a
     `VoiceServiceError` -- before any model call for bad audio."""
@@ -156,6 +156,7 @@ def transcribe_utterance(*, conversation, actor, audio, trace_id=""):
             conversation=conversation,
             trace_id=trace_id,
             server_timings={"stt_ms": result.usage.latency_ms},
+            source=source,
         )
     return {
         "text": result.text,
@@ -165,7 +166,9 @@ def transcribe_utterance(*, conversation, actor, audio, trace_id=""):
     }
 
 
-def synthesize_sentence(*, conversation, actor, text, language="", trace_id="", timings=None):
+def synthesize_sentence(
+    *, conversation, actor, text, language="", trace_id="", timings=None, source=SOURCE_WEB
+):
     """D1/D7/A2: one reply sentence -> checked WAV bytes. `language` picks
     the TTS route (provider chosen by the gateway among allowed rows, never
     by the client). `timings` are the client's stage timings for the trace
@@ -195,6 +198,7 @@ def synthesize_sentence(*, conversation, actor, text, language="", trace_id="", 
             trace_id=trace_id,
             server_timings={"tts_first_ms": result.usage.latency_ms},
             client_timings=timings,
+            source=source,
         )
     return wav
 
@@ -209,13 +213,21 @@ def _clean_timings(timings, allowed):
     return cleaned
 
 
-def record_trace(*, conversation, trace_id, server_timings=None, client_timings=None):
+def record_trace(
+    *, conversation, trace_id, server_timings=None, client_timings=None, source=SOURCE_WEB
+):
     """Upsert the turn's `VoiceTurnTrace` (A5): timings only. A server
     stage is written once (the first STT/TTS call of the turn); client
     stages are overwritten by the latest report. A trace id already used
     by another conversation of the workspace is left alone (correlation
     id, never a key into someone else's row). Never raises: a trace is
-    observability, it must not fail the voice request."""
+    observability, it must not fail the voice request.
+
+    `source` (Phase 11 D14) is the server's reading of the request channel
+    (`web` | `node`), written when the row is created; a `source` key in the
+    client's timings is never read (it is not a stage)."""
+    if source not in dict(SOURCES):
+        source = SOURCE_WEB
     server = _clean_timings(server_timings, {"stt_ms", "tts_first_ms"})
     client = _clean_timings(client_timings, set(CLIENT_STAGES))
     if not server and not client:
@@ -225,7 +237,7 @@ def record_trace(*, conversation, trace_id, server_timings=None, client_timings=
             trace, _created = VoiceTurnTrace.objects.select_for_update().get_or_create(
                 workspace=conversation.workspace,
                 trace_id=trace_id,
-                defaults={"conversation": conversation},
+                defaults={"conversation": conversation, "source": source},
             )
             if trace.conversation_id != conversation.pk:
                 return None

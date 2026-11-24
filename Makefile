@@ -104,7 +104,8 @@ friday-voice-test:
 		uv run ruff format --check . && uv run friday-voice conformance --check && \
 		uv run python scripts/vendor_scrubber.py --check && \
 		uv run python scripts/snapshot_pipecat.py --check && \
-		uv run friday-voice conformance && uv run pytest
+		uv run python scripts/make_fixtures.py --check && \
+		uv run friday-voice conformance && uv run friday-voice replay --check && uv run pytest
 
 friday-voice-install:
 	mkdir -p "$(FRIDAY_VOICE_HOME)"

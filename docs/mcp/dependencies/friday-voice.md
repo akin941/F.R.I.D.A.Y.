@@ -88,14 +88,23 @@ piper` anywhere in the repository.
 
 ## Surface used
 
-- Pipecat: nothing yet in branch 2 (`pipecat_adapter.SURFACE` is empty;
-  `pipecat_surface.json` records the version and the bundled model hash).
-  Branch 3 adds the frame classes, `FrameProcessor`, `Pipeline`,
-  `PipelineTask`, the VAD analyzer interface and the smart-turn analyzer;
-  never `pipecat.services.*`.
-- Network: none in branch 2. From branch 3 the child calls only Friday's
-  transcription, chat-turn, speech, live-session and voice-policy endpoints
-  over HTTPS (pinned CA), outbound only.
+- Pipecat (branch 3, `feat/p11-pipecat-pipeline`, 2026-11-20):
+  `pipecat_adapter.SURFACE` lists `InputAudioRawFrame`,
+  `OutputAudioRawFrame`, `EndFrame`, `FrameProcessor`, `FrameDirection`,
+  `Pipeline`, `PipelineWorker`, `WorkerRunner` (Pipecat 1.15 deprecates
+  `PipelineTask`/`PipelineRunner` for these two), `SileroOnnxModel` (run
+  over the pinned Silero v5.1.2 file, not the wheel's copy) and
+  `LocalSmartTurnAnalyzerV3` (the bundled model, hash-checked; its audio log
+  forced off); `pipecat_surface.json` snapshots them. Never
+  `pipecat.services.*`.
+- Imported directly, already locked as transitive dependencies (no new
+  pin): `certifi` (httpx's CA bundle, the child's TLS trust store) and
+  `loguru` (only to disable Pipecat's unscrubbed log output).
+- Network (branch 3): the child calls only Friday's live-session,
+  transcription, chat-turn, speech and voice-policy endpoints, outbound
+  only, through `friday_voice/client.py`; an `https://` server must
+  present the pinned CA in its verified chain, checked before any request
+  byte is written.
 - Files: reads its own install and the model directory; writes nothing
   (no audio is ever written, ADR-011 decision 3).
 

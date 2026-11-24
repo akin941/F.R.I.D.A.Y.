@@ -3,6 +3,222 @@
     "smart_turn_v3": "2bb026316b14a660486a75b1733cd3fbab8c2fd0314dc9af7be49f8cca967e4f"
   },
   "distribution": "pipecat-ai",
-  "surface": {},
+  "surface": {
+    "pipecat.audio.turn.smart_turn.local_smart_turn_v3:LocalSmartTurnAnalyzerV3": {
+      "bases": [
+        "pipecat.audio.turn.smart_turn.base_smart_turn.BaseSmartTurn",
+        "pipecat.audio.turn.base_turn_analyzer.BaseTurnAnalyzer",
+        "abc.ABC",
+        "builtins.object"
+      ],
+      "init": "(self, *, smart_turn_model_path: str | None = None, cpu_count: int = 1, **kwargs)",
+      "kind": "class",
+      "methods": {}
+    },
+    "pipecat.audio.vad.silero:SileroOnnxModel": {
+      "bases": [
+        "builtins.object"
+      ],
+      "init": "(self, path, force_onnx_cpu=True)",
+      "kind": "class",
+      "methods": {
+        "reset_states": "(self, batch_size=1)"
+      }
+    },
+    "pipecat.frames.frames:EndFrame": {
+      "bases": [
+        "pipecat.frames.frames.ControlFrame",
+        "pipecat.frames.frames.Frame",
+        "builtins.object"
+      ],
+      "fields": [
+        "id",
+        "name",
+        "pts",
+        "broadcast_sibling_id",
+        "metadata",
+        "transport_source",
+        "transport_destination",
+        "interruptible",
+        "reason"
+      ],
+      "init": "(self, reason: 'Any | None' = None) -> None",
+      "kind": "class",
+      "methods": {}
+    },
+    "pipecat.frames.frames:InputAudioRawFrame": {
+      "bases": [
+        "pipecat.frames.frames.SystemFrame",
+        "pipecat.frames.frames.Frame",
+        "pipecat.frames.frames.AudioRawFrame",
+        "builtins.object"
+      ],
+      "fields": [
+        "audio",
+        "sample_rate",
+        "num_channels",
+        "num_frames",
+        "id",
+        "name",
+        "pts",
+        "broadcast_sibling_id",
+        "metadata",
+        "transport_source",
+        "transport_destination",
+        "interruptible"
+      ],
+      "init": "(self, audio: 'bytes', sample_rate: 'int', num_channels: 'int') -> None",
+      "kind": "class",
+      "methods": {}
+    },
+    "pipecat.frames.frames:OutputAudioRawFrame": {
+      "bases": [
+        "pipecat.frames.frames.DataFrame",
+        "pipecat.frames.frames.Frame",
+        "pipecat.frames.frames.AudioRawFrame",
+        "builtins.object"
+      ],
+      "fields": [
+        "audio",
+        "sample_rate",
+        "num_channels",
+        "num_frames",
+        "id",
+        "name",
+        "pts",
+        "broadcast_sibling_id",
+        "metadata",
+        "transport_source",
+        "transport_destination",
+        "interruptible"
+      ],
+      "init": "(self, audio: 'bytes', sample_rate: 'int', num_channels: 'int') -> None",
+      "kind": "class",
+      "methods": {}
+    },
+    "pipecat.pipeline.pipeline:Pipeline": {
+      "bases": [
+        "pipecat.pipeline.base_pipeline.BasePipeline",
+        "pipecat.processors.frame_processor.FrameProcessor",
+        "pipecat.utils.base_object.BaseObject",
+        "abc.ABC",
+        "builtins.object"
+      ],
+      "init": "(self, processors: collections.abc.Sequence[pipecat.processors.frame_processor.FrameProcessor], *, source: pipecat.processors.frame_processor.FrameProcessor | None = None, sink: pipecat.processors.frame_processor.FrameProcessor | None = None)",
+      "kind": "class",
+      "methods": {
+        "cleanup": "(self)",
+        "process_frame": "(self, frame: pipecat.frames.frames.Frame, direction: pipecat.processors.frame_processor.FrameDirection)",
+        "processors_with_metrics": "(self)",
+        "setup": "(self, setup: pipecat.processors.frame_processor.FrameProcessorSetup)"
+      }
+    },
+    "pipecat.pipeline.worker:PipelineWorker": {
+      "bases": [
+        "pipecat.workers.base_worker.BaseWorker",
+        "pipecat.utils.base_object.BaseObject",
+        "abc.ABC",
+        "pipecat.bus.subscriber.BusSubscriber",
+        "builtins.object"
+      ],
+      "init": "(self, pipeline: pipecat.pipeline.base_pipeline.BasePipeline, *, active: bool = True, additional_span_attributes: dict | None = None, app_resources: Any = None, bridged: tuple[str, ...] | None = None, cancel_on_idle_timeout: bool = True, cancel_runner_on_idle_timeout: bool = True, cancel_timeout_secs: float = 20.0, capabilities: pipecat.pipeline.capabilities.BotCapabilities | None = None, check_dangling_tasks: bool = True, clock: pipecat.clocks.base_clock.BaseClock | None = None, conversation_id: str | None = None, enable_tracing: bool = False, enable_turn_tracking: bool = True, handle_flush_frame: bool | None = None, enable_rtvi: bool | None = None, exclude_frames: tuple[type[pipecat.frames.frames.Frame], ...] | None = None, idle_timeout_frames: tuple[type[pipecat.frames.frames.Frame], ...] = (<class 'pipecat.frames.frames.BotSpeakingFrame'>, <class 'pipecat.frames.frames.InterimTranscriptionFrame'>, <class 'pipecat.frames.frames.TranscriptionFrame'>, <class 'pipecat.frames.frames.UserSpeakingFrame'>, <class 'pipecat.frames.frames.UserStartedSpeakingFrame'>), idle_timeout_secs: float | None = 300, name: str | None = None, observers: list[pipecat.observers.base_observer.BaseObserver] | None = None, processor_unusable_policy: pipecat.pipeline.worker.ProcessorUnusablePolicy = <ProcessorUnusablePolicy.CONTINUE: 'continue'>, params: pipecat.pipeline.worker.PipelineParams | None = None, rtvi_processor: pipecat.processors.frameworks.rtvi.processor.RTVIProcessor | None = None, rtvi_observer_params: pipecat.processors.frameworks.rtvi.observer.RTVIObserverParams | None = None, setup_timeout_secs: float = 20.0, start_timeout_secs: float = 20.0, task_manager: pipecat.utils.asyncio.task_manager.BaseTaskManager | None = None, tool_resources: Any = None)",
+      "kind": "class",
+      "methods": {
+        "activate_worker": "(self, worker_name: str, *, args: pipecat.workers.base_worker.WorkerActivationArgs | None = None, deactivate_self: bool = False) -> None",
+        "add_observer": "(self, observer: pipecat.observers.base_observer.BaseObserver)",
+        "add_reached_downstream_filter": "(self, types: tuple[type[pipecat.frames.frames.Frame], ...])",
+        "add_reached_upstream_filter": "(self, types: tuple[type[pipecat.frames.frames.Frame], ...])",
+        "cancel": "(self, *, reason: str | None = None)",
+        "end": "(self, *, reason: str | None = None) -> None",
+        "flush_pipeline": "(self, timeout: float = 5.0) -> bool",
+        "has_finished": "(self) -> bool",
+        "on_bus_message": "(self, message: pipecat.bus.messages.BusMessage) -> None",
+        "queue_frame": "(self, frame: pipecat.frames.frames.Frame, direction: pipecat.processors.frame_processor.FrameDirection = <FrameDirection.DOWNSTREAM: 1>)",
+        "queue_frames": "(self, frames: collections.abc.Iterable[pipecat.frames.frames.Frame] | collections.abc.AsyncIterable[pipecat.frames.frames.Frame], direction: pipecat.processors.frame_processor.FrameDirection = <FrameDirection.DOWNSTREAM: 1>)",
+        "remove_observer": "(self, observer: pipecat.observers.base_observer.BaseObserver)",
+        "run": "(self, params: pipecat.workers.base_worker.WorkerParams)",
+        "set_reached_downstream_filter": "(self, types: tuple[type[pipecat.frames.frames.Frame], ...])",
+        "set_reached_upstream_filter": "(self, types: tuple[type[pipecat.frames.frames.Frame], ...])",
+        "stop_when_done": "(self)",
+        "track_flush_probe": "(self, frame: pipecat.frames.frames.PipelineFlushFrame) -> None"
+      }
+    },
+    "pipecat.processors.frame_processor:FrameDirection": {
+      "bases": [
+        "enum.Enum",
+        "builtins.object"
+      ],
+      "init": "(self, *args, **kwds)",
+      "kind": "class",
+      "methods": {}
+    },
+    "pipecat.processors.frame_processor:FrameProcessor": {
+      "bases": [
+        "pipecat.utils.base_object.BaseObject",
+        "abc.ABC",
+        "builtins.object"
+      ],
+      "init": "(self, *, name: 'str | None' = None, enable_direct_mode: 'bool' = False, metrics: 'FrameProcessorMetrics | None' = None, **kwargs)",
+      "kind": "class",
+      "methods": {
+        "broadcast_frame": "(self, frame_cls: 'type[Frame]', **kwargs)",
+        "broadcast_frame_instance": "(self, frame: 'Frame')",
+        "broadcast_interruption": "(self)",
+        "can_generate_metrics": "(self) -> 'bool'",
+        "cancel_ttfb_metrics": "(self)",
+        "cleanup": "(self)",
+        "get_clock": "(self) -> 'BaseClock'",
+        "get_event_loop": "(self) -> 'asyncio.AbstractEventLoop'",
+        "has_queued_frame": "(self, frame_type: 'type[Frame]') -> 'bool'",
+        "link": "(self, processor: 'FrameProcessor')",
+        "pause_processing_all_frames_until": "(self, ready: 'Callable[[], Awaitable[Any]]', *, timeout: 'float' = 5.0)",
+        "pause_processing_frames": "(self)",
+        "pause_processing_system_frames": "(self)",
+        "process_frame": "(self, frame: 'Frame', direction: 'FrameDirection')",
+        "process_ttfa_metrics": "(self, frame: 'TTSAudioRawFrame')",
+        "processors_with_metrics": "(self)",
+        "push_error": "(self, error_msg: 'str', exception: 'Exception | None' = None, fatal: 'bool' = False, category: 'ErrorCategory | None' = None, force_treat_as_permanent: 'bool' = False)",
+        "push_error_frame": "(self, error: 'ErrorFrame', force_treat_as_permanent: 'bool' = False)",
+        "push_frame": "(self, frame: 'Frame', direction: 'FrameDirection' = <FrameDirection.DOWNSTREAM: 1>)",
+        "push_interruption_task_frame_and_wait": "(self, *, timeout: 'float' = 5.0)",
+        "queue_frame": "(self, frame: 'Frame', direction: 'FrameDirection' = <FrameDirection.DOWNSTREAM: 1>, callback: 'FrameCallback | None' = None)",
+        "resume_processing_frames": "(self)",
+        "resume_processing_system_frames": "(self)",
+        "set_core_metrics_data": "(self, data: 'MetricsData')",
+        "set_usable": "(self, is_usable: 'bool')",
+        "setup": "(self, setup: 'FrameProcessorSetup')",
+        "start_llm_usage_metrics": "(self, tokens: 'LLMTokenUsage')",
+        "start_processing_metrics": "(self, *, start_time: 'float | None' = None)",
+        "start_stt_usage_metrics": "(self, usage: 'STTUsage')",
+        "start_text_aggregation_metrics": "(self)",
+        "start_ttfb_metrics": "(self, *, start_time: 'float | None' = None)",
+        "start_tts_usage_metrics": "(self, text: 'str')",
+        "stop_all_metrics": "(self)",
+        "stop_processing_metrics": "(self, *, end_time: 'float | None' = None)",
+        "stop_text_aggregation_metrics": "(self)",
+        "stop_ttfat_metrics": "(self, *, end_time: 'float | None' = None)",
+        "stop_ttfb_metrics": "(self, *, end_time: 'float | None' = None)"
+      }
+    },
+    "pipecat.workers.runner:WorkerRunner": {
+      "bases": [
+        "pipecat.utils.base_object.BaseObject",
+        "abc.ABC",
+        "pipecat.bus.subscriber.BusSubscriber",
+        "builtins.object"
+      ],
+      "init": "(self, *, name: str | None = None, bus: pipecat.bus.bus.WorkerBus | None = None, handle_sigint: bool = True, handle_sigterm: bool = False, force_gc: bool = False, check_dangling_tasks: bool = True, loop: asyncio.events.AbstractEventLoop | None = None, task_manager: pipecat.utils.asyncio.task_manager.BaseTaskManager | None = None)",
+      "kind": "class",
+      "methods": {
+        "add_workers": "(self, *workers: pipecat.workers.base_worker.BaseWorker) -> None",
+        "cancel": "(self, reason: str | None = None) -> None",
+        "end": "(self, reason: str | None = None) -> None",
+        "get_worker": "(self, name: str) -> pipecat.workers.base_worker.BaseWorker | None",
+        "on_bus_message": "(self, message: pipecat.bus.messages.BusMessage) -> None",
+        "run": "(self, worker: pipecat.workers.base_worker.BaseWorker | None = None, *, auto_end: bool = True) -> None",
+        "stop_when_done": "(self) -> None"
+      }
+    }
+  },
   "version": "1.15.0"
 }

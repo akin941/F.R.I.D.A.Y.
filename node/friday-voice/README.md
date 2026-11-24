@@ -8,8 +8,11 @@ never the node secret, and imports nothing from `backend/`.
 
 Branch 2 (`feat/p11-voice-child-protocol`) ships the package, the pins, the
 protocol, the reference host, the protocol shell of the child and the
-conformance suite. The Pipecat pipeline (wake gate, turn capture, Friday's
-STT / chat / TTS clients) plugs in behind the same shell in branch 3.
+conformance suite. Branch 3 (`feat/p11-pipecat-pipeline`) plugs the voice
+pipeline in behind the same shell: wake gate (wired; always-on is refused
+until branch 5), turn capture, Friday's STT / chat / TTS clients, the
+segmenter port, per-sentence language routing, `play` frames, and the
+replay harness.
 
 ## Layout
 
@@ -20,6 +23,13 @@ STT / chat / TTS clients) plugs in behind the same shell in branch 3.
 | `friday_voice/reference/` | `host.py` (the reference parent double: watchdog, backoff, play bookkeeping, local fail-closed rules, `ProcessHost`), `echo.py` (`EchoDouble`) |
 | `friday_voice/conformance/` | `definitions.py` (cases + vectors, the source), `build.py` (render / `--check`), `runner.py`, `hostile.py` (`conformance-child`), `cases/{host,child}/*.json` |
 | `friday_voice/ports.py` | detector / client / clock ports, `ManualClock` |
+| `friday_voice/pipeline.py` | `VoicePipeline`: the D8 stages, the error rules, the turn timer |
+| `friday_voice/{wake,turn}.py` | `WakeGate` + wake detectors; `TurnCapture` + VAD / smart-turn detectors and their scripted doubles |
+| `friday_voice/client.py`, `fakes.py` | `HttpFridayClient` (the five endpoints, CA pin) and `FakeFriday` |
+| `friday_voice/workers.py` | `ThreadWorker` (stdio) and `SimWorker` (manual clock) for the network jobs |
+| `friday_voice/{segmenter,language,audio,config}.py` | sentence segmenter (port of `segmenter.ts`), tr/en routing, PCM/WAV helpers, every child tunable |
+| `friday_voice/replay.py`, `fixtures/`, `baselines/replay.json` | the replay harness, its synthetic fixtures and the overhead baseline |
+| `vectors/` | shared segmenter vectors (also run by vitest) and language vectors |
 | `friday_voice/pipecat_adapter.py` | the only door to Pipecat; `pipecat_surface.json` is its snapshot |
 | `friday_voice/log.py`, `_scrubber_vendored.py` | stderr log, scrubbed with the vendored ADR-012 scrubber |
 | `models.json`, `friday_voice/models.py` | pinned detector models (shared entries equal the browser's manifest) |
@@ -37,7 +47,10 @@ uv run friday-voice conformance --build       # after changing definitions.py
 uv run friday-voice conformance-child --case <id>   # the hostile child a host conformance build launches
 uv run python scripts/vendor_scrubber.py [--check]
 uv run python scripts/snapshot_pipecat.py [--check]
-uv run pytest                                 # default run; `-m real_models` is opt-in (branch 3+)
+uv run python scripts/make_fixtures.py [--check]  # the synthetic replay fixtures
+uv run friday-voice replay [--check | --write-baseline]
+uv run friday-voice replay --server http://127.0.0.1:8001 --token-file <file>  # a running Friday
+uv run pytest                                 # default run; `-m real_models` is opt-in
 ```
 
 `make friday-voice-test` runs the CI job locally; `make friday-voice-install`

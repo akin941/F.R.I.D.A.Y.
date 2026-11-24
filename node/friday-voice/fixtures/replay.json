@@ -1,0 +1,165 @@
+{
+  "$comment": "Phase 11 brief D14: the replay fixture set. Synthetic WAVs only (tones and silence, scripts/make_fixtures.py); transcripts, replies and latencies are scripted (FakeFriday). Wake scenarios use a scripted detector and scripted arming: the real arming policy refuses always-on until branch 5.",
+  "scenarios": [
+    {
+      "id": "ptt_today",
+      "trigger": "ptt",
+      "wav": "ptt_question.wav",
+      "transcript": {
+        "text": "bugün ne var",
+        "language": "tr"
+      },
+      "reply": [
+        {
+          "type": "chunk",
+          "text": "Bugün iki toplantın var. "
+        },
+        {
+          "type": "chunk",
+          "text": "İlki saat onda, ikincisi üçte."
+        },
+        {
+          "type": "done",
+          "message_id": "00000000-0000-4000-8000-00000000000a"
+        }
+      ],
+      "latencies": {
+        "session": 30,
+        "stt": 300,
+        "chat_first": 450,
+        "chat_chunk": 40,
+        "tts": 150
+      }
+    },
+    {
+      "id": "ptt_mixed_language",
+      "trigger": "ptt",
+      "wav": "ptt_long_question.wav",
+      "transcript": {
+        "text": "yarınki planı oku",
+        "language": "tr"
+      },
+      "reply": [
+        {
+          "type": "chunk",
+          "text": "Yarın sabah spor salonu var, öğlen ise proje toplantısı. "
+        },
+        {
+          "type": "chunk",
+          "text": "The meeting title is quarterly planning review. "
+        },
+        {
+          "type": "chunk",
+          "text": "Akşam serbestsin."
+        },
+        {
+          "type": "done",
+          "message_id": "00000000-0000-4000-8000-00000000000a"
+        }
+      ],
+      "latencies": {
+        "session": 30,
+        "stt": 300,
+        "chat_first": 450,
+        "chat_chunk": 40,
+        "tts": 150
+      }
+    },
+    {
+      "id": "wake_today",
+      "trigger": "wake",
+      "wav": "wake_question.wav",
+      "wake_after_frames": 10,
+      "transcript": {
+        "text": "bugün hava nasıl",
+        "language": "tr"
+      },
+      "reply": [
+        {
+          "type": "chunk",
+          "text": "Bugün hava güneşli ve ılık olacak, akşam serinler."
+        },
+        {
+          "type": "done",
+          "message_id": "00000000-0000-4000-8000-00000000000a"
+        }
+      ],
+      "latencies": {
+        "session": 30,
+        "stt": 300,
+        "chat_first": 450,
+        "chat_chunk": 40,
+        "tts": 150
+      }
+    },
+    {
+      "id": "wake_node_action_draft",
+      "trigger": "wake",
+      "wav": "wake_followup.wav",
+      "wake_after_frames": 5,
+      "transcript": {
+        "text": "testleri çalıştır",
+        "language": "tr"
+      },
+      "reply": [
+        {
+          "type": "draft",
+          "kind": "tool",
+          "source_message_id": "00000000-0000-4000-8000-00000000000b",
+          "tool_name": "node_action",
+          "payload": {}
+        },
+        {
+          "type": "done",
+          "message_id": "00000000-0000-4000-8000-00000000000a"
+        }
+      ],
+      "latencies": {
+        "session": 30,
+        "stt": 300,
+        "chat_first": 450,
+        "chat_chunk": 40,
+        "tts": 150
+      }
+    },
+    {
+      "id": "wake_long_reply",
+      "trigger": "wake",
+      "wav": "wake_question.wav",
+      "wake_after_frames": 10,
+      "transcript": {
+        "text": "haftayı özetle",
+        "language": "tr"
+      },
+      "reply": [
+        {
+          "type": "chunk",
+          "text": "Bu hafta üç toplantı, iki teslim ve bir doktor randevusu var. "
+        },
+        {
+          "type": "chunk",
+          "text": "Pazartesi bütçe toplantısı saat onda başlıyor. "
+        },
+        {
+          "type": "chunk",
+          "text": "Çarşamba raporun son günü, perşembe ise diş randevun var. "
+        },
+        {
+          "type": "chunk",
+          "text": "Cuma günü boş görünüyor, istersen bir şey planlayabiliriz."
+        },
+        {
+          "type": "done",
+          "message_id": "00000000-0000-4000-8000-00000000000a"
+        }
+      ],
+      "latencies": {
+        "session": 30,
+        "stt": 300,
+        "chat_first": 450,
+        "chat_chunk": 40,
+        "tts": 150
+      }
+    }
+  ]
+}

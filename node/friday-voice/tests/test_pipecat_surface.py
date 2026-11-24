@@ -75,7 +75,7 @@ def test_describe_a_class_and_a_function():
 def test_snapshot_is_deterministic_and_covers_the_surface():
     first = pipecat_adapter.snapshot()
     assert first == pipecat_adapter.snapshot()
-    assert first["surface"] == {}  # branch 2: empty surface
+    assert set(first["surface"]) == {f"{m}:{a}" for m, a in pipecat_adapter.SURFACE}
     probe = pipecat_adapter.snapshot((("pipecat.pipeline.pipeline", "Pipeline"),))
     assert probe["surface"]["pipecat.pipeline.pipeline:Pipeline"]["kind"] == "class"
 

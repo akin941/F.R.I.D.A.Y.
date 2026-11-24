@@ -52,3 +52,17 @@ def verify(model_dir, roles=None, manifest=None) -> dict:
 
 def wake_armable(model_dir, manifest=None) -> bool:
     return all(state == "ok" for state in verify(model_dir, WAKE_ROLES, manifest).values())
+
+
+class ModelNotArmable(RuntimeError):
+    """A detector model is missing, unpinned or modified: it is not loaded."""
+
+
+def path_of(model_dir, role, manifest=None) -> Path:
+    return Path(model_dir) / by_role(manifest)[role]["file"]
+
+
+def default_model_dir(manifest=None) -> Path:
+    """The node's model directory (outside the repo; `make voice-models
+    --node` writes it)."""
+    return Path((manifest or load_manifest())["modelDir"]).expanduser()

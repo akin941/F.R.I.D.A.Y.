@@ -139,6 +139,12 @@ jobs:
       - name: friday-voice/v1 conformance (reference implementations)
         run: uv run friday-voice conformance
 
+      - name: Replay fixtures check
+        run: uv run python scripts/make_fixtures.py --check
+
+      - name: Replay (fixture set, manual clock, overhead baseline)
+        run: uv run friday-voice replay --check
+
       - name: Tests
         run: uv run pytest
 
