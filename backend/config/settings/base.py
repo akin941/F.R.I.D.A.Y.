@@ -553,6 +553,9 @@ AI_PURPOSE_TIERS = {
     "router.node_action_args": "cheap",
     # Phase 10 D9: the node action trust check (the `control` budget).
     "control.trust_check": "cheap",
+    # Phase 12 D6/D18: the morning digest's one spoken summary per run
+    # (personal data, local provider, the `proactive` budget).
+    "proactive.digest": "cheap",
     "agent.skill_match": "cheap",
     "harness.briefing": "cheap",
     "harness.diff_summary": "cheap",
@@ -640,6 +643,13 @@ AI_BUDGET_LEARNING_EVAL_MONTHLY_USD = env("AI_BUDGET_LEARNING_EVAL_MONTHLY_USD",
 # `warn:trust_check_unavailable`; it never blocks or approves anything.
 AI_CONTROL_PURPOSES = ("control.trust_check",)
 AI_BUDGET_CONTROL_MONTHLY_USD = env("AI_BUDGET_CONTROL_MONTHLY_USD", default="5")
+# Phase 12 D18: the `proactive` cap over the morning digest's composition
+# (3 USD/month, 0.25 USD/day), created once by the ai_core data migration
+# 0009 (and `seed_ai_defaults`), owner-editable afterwards. A refused call
+# degrades the digest to its template text; the run still succeeds.
+AI_PROACTIVE_PURPOSES = ("proactive.digest",)
+AI_BUDGET_PROACTIVE_MONTHLY_USD = env("AI_BUDGET_PROACTIVE_MONTHLY_USD", default="3")
+AI_BUDGET_PROACTIVE_DAILY_USD = env("AI_BUDGET_PROACTIVE_DAILY_USD", default="0.25")
 
 # --- Pre-send compression stage (Phase 8B branch 6, brief D11) ---
 # `ai_core/compression.py`: shortens long prior assistant replies through
@@ -1222,6 +1232,12 @@ PROACTIVE_UNATTENDED_TASKS = tuple(
         default=["proactive.tasks.heartbeat", "proactive.tasks.prune"],
     )
 )
+# Phase 12 D6: the spoken digest text is bounded (characters, after the
+# Markdown/invisible-formatting strip); the template fallback obeys it too.
+PROACTIVE_DIGEST_MAX_CHARS = env.int("PROACTIVE_DIGEST_MAX_CHARS", default=900)
+# The `ai_core.budgets` probe reports a budget window at or above this
+# share of its limit (D1: "any budget >= 80 %").
+PROACTIVE_BUDGET_WARN_PERCENT = env.int("PROACTIVE_BUDGET_WARN_PERCENT", default=80)
 
 # A value WE choose and register with Telegram via `setWebhook`
 # (`manage.py register_telegram_webhook`) -- Telegram echoes it back on

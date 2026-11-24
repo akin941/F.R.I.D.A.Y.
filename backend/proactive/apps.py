@@ -35,3 +35,9 @@ class ProactiveConfig(AppConfig):
             guard_task_publish, weak=False, dispatch_uid="proactive.guard_publish"
         )
         task_prerun.connect(guard_task_prerun, weak=False, dispatch_uid="proactive.guard_prerun")
+
+        # Phase 12 D1 (branch 2): `ai_core` imports no business app, so its
+        # budgets probe is registered here over the `ai_core.budgets` read.
+        from proactive.probes import register
+
+        register()

@@ -33,9 +33,9 @@ APPS = [
 ]
 MAY_IMPORT = {"core", "workspaces", "audit", "ai_core", "accounts"}
 IMPORTERS = {"assistant", "hud", "ops"}
-# Branch 2 widens the hud contract by `proactive` (the notice section);
-# until then hud's own allowlist still forbids it.
-NOT_YET = {"hud"}
+# Branch 2 widened the hud contract by `proactive` (the notice section and
+# the digest card), so every importer is now allowed.
+NOT_YET = set()
 
 
 def _config():

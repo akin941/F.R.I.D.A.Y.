@@ -16,3 +16,8 @@ class HarnessConfig(AppConfig):
         # The GitHub scope check (connectors may not import harness):
         # `owner/repo` must canonicalize to a HarnessRepo of the workspace.
         register_repo_resolver(resolve_repo_scope)
+
+        # Phase 12 D1: the `harness.waiting_gates` probe.
+        from harness.probes import register as register_probes
+
+        register_probes()
