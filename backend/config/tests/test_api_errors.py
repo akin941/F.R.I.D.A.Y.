@@ -105,6 +105,13 @@ def test_every_generic_code_the_handler_can_emit_is_registered():
     assert GENERIC_ERROR_CODES <= ERROR_CODES
 
 
+def test_the_node_voice_backstop_codes_are_registered():
+    from accounts.voice_live import AlwaysOnNotPermitted, VoiceLiveMuted, VoiceTriggerInvalid
+
+    for cls in (AlwaysOnNotPermitted, VoiceLiveMuted, VoiceTriggerInvalid):
+        assert cls.default_code in GENERIC_ERROR_CODES, cls
+
+
 def test_codes_are_flat_quoted_literals_the_frontend_can_parse():
     # frontend/src/lib/i18n/catalog.test.ts extracts every "..." literal
     # from core/error_codes.py; a code must be a plain dotted identifier.
