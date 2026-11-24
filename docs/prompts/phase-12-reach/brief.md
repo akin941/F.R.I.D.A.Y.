@@ -354,9 +354,10 @@ reaches `connectors` against ADR-010 decision 1.
 
 ```python
 @contextmanager
-def unattended_run(run_id: str, *, allowed_purposes: frozenset): ...
+def unattended_run(run_id: str, *, allowed_purposes: frozenset,
+                   on_denied: Callable[[UnattendedDenial], None]): ...
 def current() -> UnattendedContext | None
-def deny_if_unattended(effect: str) -> None   # raises UnattendedDenied
+def deny_if_unattended(effect: str) -> None   # calls on_denied, then raises UnattendedDenied
 ```
 
 Every proactive run executes inside `unattended_run`. The guard is called
@@ -376,7 +377,33 @@ at the **first line** of each effect in its owning service:
 A refusal raises `UnattendedDenied(effect)`, audits
 `proactive.unattended_denied` (effect, run id, probe or step name; no
 content) and ends the run step `denied`; the run continues with the next
-probe. There is **no allow list of unattended actions in this phase**:
+probe.
+
+**Who writes the audit row.** `core` may not import `audit` (the
+existing "core must stay independent of kernel apps" contract), so the
+guard cannot write the row itself. `unattended_run` takes a **required**
+`on_denied` callback, supplied at runtime by whoever opens the run;
+`deny_if_unattended` builds an `UnattendedDenial(effect, run_id, step)`
+(frozen dataclass, no content), calls `on_denied(denial)` and only then
+raises. The one callback implementation is
+`audit.unattended.DenialRecorder` (branch 1; `audit` imports only
+`core`, and `proactive` and `skills` may both import `audit` per D19):
+calling it **appends to an in-memory buffer** — no database write at
+raise time, so a denial raised inside a caller's `transaction.atomic()`
+that then rolls back cannot take the row with it.
+`DenialRecorder.flush()` writes one `proactive.unattended_denied` row
+per buffered denial through `audit.services.record_audit` and empties
+the buffer. The runners (`proactive.runs.run_schedule`, the curator, the
+distiller) are **not** wrapped in an outer `atomic()`: each probe or
+step runs in its own `atomic()` block, and the runner calls
+`recorder.flush()` after every step's block has ended (committed or
+rolled back) and again in a `finally` when the run ends, so every
+denial is audited exactly once whatever the step's transaction did.
+Tests that call a service directly (e.g.
+`approvals.services.create_request`) open the context through the
+helper `audit.unattended.recorded_unattended_run(run_id,
+allowed_purposes=…)`, which yields the recorder and flushes on exit, so
+the direct test sees its row after the block. There is **no allow list of unattended actions in this phase**:
 the owner cannot switch one on, and no setting widens it (a later ADR
 would). The contextvar does not cross a Celery hop, which is why
 dispatch itself is guarded.
@@ -446,7 +473,18 @@ minutes, quiet hours `start`/`end`) — `enabled`, `created_by`,
   `/today` (`ProactivePause` row per workspace, web only, audited), or a
   deactivated owner skips every schedule (`skipped:paused` /
   `skipped:owner_inactive`), audited once per
-  transition.
+  transition. The toggle is its own endpoint, `GET/POST/DELETE
+  /api/v1/proactive/pause` (`GET` reads the state; `POST` pauses,
+  `DELETE` resumes; both idempotent), written only through
+  `proactive.services.set_pause(actor, channel, workspace, paused)`,
+  which calls `core.owner_web.require_owner_web` exactly like
+  `save_schedule` and writes a `proactive.paused` / `proactive.resumed`
+  audit row on a state change only. `ProactivePause.save()` and
+  `.delete()` raise inside an unattended context, like
+  `ProactiveSchedule.save()`, and the cron-cannot-create-cron walk
+  covers the pause write path too (no tool, intent, skill, manifest or
+  harness path reaches `set_pause`): a run can neither pause nor resume
+  proactivity.
 
 **Why closed kinds and code beat.** Hermes' lesson is "cron jobs should
 be script-gated so they wake the LLM only when there is work"; OpenClaw's
@@ -495,10 +533,13 @@ filled with D1 labels, ≤ 160 chars), `count`, `link` (closed set:
   still pending, a session still waiting) is notified **once**, whatever
   the owner did with the notice (read, dismissed, retention-pruned); it
   is notified again only after it has left the probe's result on some
-  run and re-entered. The first run of a new schedule (no state row)
-  records the baseline and notifies nothing for keys older than the
-  schedule's `created_at` (where the probe's item carries a timestamp)
-  — enabling the heartbeat does not flood the bell. A probe that fails
+  run and re-entered. The first run for a (schedule, probe) pair (no
+  `ProactiveProbeState` row) records `item_keys` as `seen_keys` — the
+  baseline — and notifies **nothing**, whatever the items' age and
+  whether or not they carry a timestamp; enabling the heartbeat does not
+  flood the bell. Items present at that first run are therefore never
+  notified unless they leave and re-enter; the digest and `/today` still
+  show their counts. A probe that fails
   on a run leaves its state unchanged (a failure is not "left"). The
   state rows are written by the run inside its context through the
   `proactive` model layer (rows the run owns, like its run row), never
@@ -766,7 +807,8 @@ you"). A read tool may be declared `mode="async"`:
    existing `assistant.context.render_connector_block`), no tools, no
    router, no read; it appends an assistant message to the conversation
    (`Message.followup_of` → the source message) and marks the follow-up
-   `done`. A failed or timed-out read appends a template message with the
+   `done`. If the conversation has been trashed meanwhile, it makes no
+   completion, appends nothing and marks the follow-up `dropped` (R6). A failed or timed-out read appends a template message with the
    closed error code, no model call.
 4. The `assistant.followups_ready` probe turns completed follow-ups into
    notices; the voice owner hears them via `notices.read` or by opening
@@ -971,7 +1013,10 @@ archive suggestions and stale flags (D2).
   with each step's source job linked. Owner approves per item (D14).
 - **Reuse in the harness.** `HarnessImplementationJob` gains
   `skill_version_ids` (owner-selected on the implementation request over
-  the web; active, same workspace). The runner writes each version's
+  the web; active, same workspace). `harness` reads them only through
+  `skills.ports.get_attachable_versions(workspace=…, version_ids=…)`
+  (validation at request time, contents at run time; branch 7), never
+  `skills.models`. The runner writes each version's
   `SKILL.md` (and references) **outside the tracked tree**, at
   `{workspace_dir}/skills/<name>/` (a sibling of `{workspace_dir}/repo`),
   and mounts that directory read-only into the container as the agent's
@@ -1047,6 +1092,9 @@ New and changed import-linter contracts (branch that introduces each):
   `audit`, `ai_core`); async completion goes through `tools.registry`.
 - `core.probes` and `core.unattended` import nothing outside the
   standard library (the existing core contracts cover it).
+- `audit.unattended` (the D2 `DenialRecorder`) imports only `core` and
+  `audit` itself; `proactive` and `skills` already may import `audit`,
+  so no contract widens for it.
 - The relay is `connectors.docker.http_relay`, added to the
   `mcp.server` ignore list next to `stdio_bridge` (sidecar-only).
 
@@ -1108,7 +1156,10 @@ Nothing moves between gate-class and confirm-class.
   notice kinds and link paths);
 - `core/owner_web.py` (`require_owner_web`, the shared owner-web check,
   D3) and its test;
-- `core/unattended.py` (context, `deny_if_unattended`, `UnattendedDenied`)
+- `core/unattended.py` (context, required `on_denied` callback,
+  `UnattendedDenial`, `deny_if_unattended`, `UnattendedDenied`) and
+  `audit/unattended.py` (`DenialRecorder` buffer + `flush()`,
+  `recorded_unattended_run` helper — D2 "Who writes the audit row"),
   and the guard calls in every row of the D2 table, plus the
   `before_task_publish` handler (registered in `proactive.apps`) and the
   gateway purpose check;
@@ -1117,8 +1168,9 @@ Nothing moves between gate-class and confirm-class.
 - `proactive` app: `ProactiveSchedule`, `ProactivePause`, `ProactiveRun`,
   `ProactiveNotice`, `ProactiveProbeState` (migration), `services.save_schedule`, `api` (the public surface D19
   allows), `tasks.heartbeat`,
-  `tasks.prune`, `runs.run_schedule` (collect → notices), views
-  (`/api/v1/proactive/schedules`, `/notices`), audit events;
+  `tasks.prune`, `runs.run_schedule` (collect → notices),
+  `services.set_pause`, views (`/api/v1/proactive/schedules`,
+  `/notices`, `/pause` — D3), audit events;
 - `config/celery.py`: `proactive-heartbeat` (60 s) and
   `proactive-notice-prune` (daily) entries;
 - settings and `.env.example`: `PROACTIVE_PROBE_TIMEOUT_MS`,
@@ -1130,6 +1182,7 @@ Nothing moves between gate-class and confirm-class.
 **Files.**
 - `backend/core/{probes,unattended,owner_web}.py`, `backend/core/tests/test_probes.py`,
   `backend/core/tests/test_unattended.py`, `backend/core/tests/test_owner_web.py`;
+- `backend/audit/unattended.py`, `backend/audit/tests/test_unattended_recorder.py`;
 - `backend/proactive/{__init__,apps,models,services,api,runs,tasks,views,urls,serializers}.py`,
   `backend/proactive/migrations/0001_initial.py`,
   `backend/proactive/tests/{test_schedules,test_heartbeat,test_notices,test_unattended_guard,test_views,test_isolation}.py`;
@@ -1146,17 +1199,31 @@ Nothing moves between gate-class and confirm-class.
   gated dispatch, read tool, connector read/write, task create, memory
   create/approve, fact write, node invocation, harness job, a gateway
   call with a non-allowlisted purpose, `apply_async` of a non-allowlisted
-  task) and writes one `proactive.unattended_denied` audit row; outside
-  it, every existing test passes unchanged. (The connectors
+  task) and, once the recorder flushes, exactly one
+  `proactive.unattended_denied` audit row exists per denial; outside
+  it, every existing test passes unchanged.
+- Denial audit survives rollback: a fake probe that calls
+  `tasks.services` create inside its own `transaction.atomic()` block
+  and lets the denial roll that block back → after the run the task row
+  does not exist and exactly one `proactive.unattended_denied` row
+  does; a denial in a step that commits → also exactly one row (no
+  double flush); `unattended_run` without `on_denied` is a `TypeError`
+  (no run can be opened without a recorder); `core` still imports
+  nothing outside the standard library (`lint-imports`). (The connectors
   `start_async` row is added to this suite by branch 4: no
   `ConnectorAsyncRead` row and no `run_async_read` dispatch inside a
   run.)
-- Cron cannot create cron: `ProactiveSchedule.save()` inside a run
-  raises; the services refuse every channel but web and every actor but
-  the owner (agent, `cli`/`openai`/`hook`/`node`/`node_voice` tokens,
+- Cron cannot create cron: `ProactiveSchedule.save()`,
+  `ProactivePause.save()` and `ProactivePause.delete()` inside a run
+  raise; `save_schedule` and `set_pause` refuse every channel but web
+  and every actor but the owner (agent, `cli`/`openai`/`hook`/`node`/`node_voice` tokens,
   member, anonymous); a walk of `list_tool_names()`, read tools, router
   intents, MVP 8 skills and connector manifests finds no path to
-  schedules; `lint-imports` enforces D19.
+  schedules or to the pause; `lint-imports` enforces D19.
+- Pause endpoint: `POST` then `GET` shows paused and the next heartbeat
+  skips (`skipped:paused`); `DELETE` resumes; a repeated `POST` writes
+  no second `proactive.paused` row (state changes only); the other
+  workspace's pause is untouched.
 - Heartbeat: due selection, `skip_locked` claim, `next_run_at` advanced
   before the run (a crash mid-run never repeats it), no catch-up after a
   48 h gap (one run), quiet hours honoured, pause / inactive owner
@@ -1174,14 +1241,16 @@ Nothing moves between gate-class and confirm-class.
   dismissed while its item is still pending → the next heartbeat
   creates nothing** (and none after retention pruning either); the key
   leaving the probe result on one run and re-entering on a later run →
-  one new notice; the first run of a new schedule notifies nothing for
-  pre-existing items; a probe failure leaves the state unchanged; the
+  one new notice; the first run for a (schedule, probe) pair with no state
+  row records the baseline and notifies nothing (items with and without
+  timestamps, up to `PROACTIVE_PROBE_MAX_KEYS`), and the second run
+  notifies only keys new since that baseline; a probe failure leaves the state unchanged; the
   partial unique constraint holds under two racing runs; link outside the closed set refused at registration, title
   template only (a probe returning an item label with a `<` or a URL is
   refused by validation), retention prune.
 - Probe isolation: two workspaces, two owners' rows; each probe sees only
   its workspace (a fake probe set here; the real probes in branch 2).
-- Role × endpoint: schedules and notices endpoints × the five Phase 4
+- Role × endpoint: schedules, notices and pause endpoints × the five Phase 4
   principals, `cli`/`openai`/`hook` PATs, node secret, `node_voice` token,
   kill-switched owner, firm workspace with a non-owner member.
 
@@ -1204,7 +1273,8 @@ heartbeat on the worker beat, every D2 effect is denied inside a run,
 - purpose `proactive.digest`: tier, seeded prompt (data migration),
   `proactive` budget rows (`seed_ai_defaults` + migration),
   `COMPRESSION_BYPASS`;
-- frontend: `/today` digest card + schedule editor, shell notice bell and
+- frontend: `/today` digest card + schedule editor + the pause toggle
+  ("Proaktif çalışmaları duraklat", over branch 1's `/pause` endpoint), shell notice bell and
   `/notices`, HUD `notices` section and digest card; "Dinle" through
   `segmenter.ts` and the speech client; `speak_on_open`;
 - `hud/services.py` `notices` section (`SECTIONS` + `proactive.api`),
@@ -1222,7 +1292,7 @@ heartbeat on the worker beat, every D2 effect is denied inside a run,
   `backend/proactive/tests/{test_digest,test_number_check,test_probes_*,test_checkpoint}.py`;
 - `backend/hud/{services,views}.py`, `backend/hud/tests/test_notices_section.py`;
 - `frontend/src/app/(shell)/today/page.tsx`,
-  `frontend/src/components/proactive/{DigestCard,ScheduleEditor,NoticeBell,NoticesPanel}.tsx`,
+  `frontend/src/components/proactive/{DigestCard,ScheduleEditor,PauseToggle,NoticeBell,NoticesPanel}.tsx`,
   `frontend/src/lib/api/proactive.ts`, HUD panel component, vitest specs,
   `frontend/e2e/digest.e2e.ts`;
 - `backend/config/settings/base.py`, `.env.example`
@@ -1381,7 +1451,11 @@ on the web; vectors are green.
   recovery scan marks `failed`, never re-sends; completion → exactly one
   `chat.followup` `ModelUsage` with the result fenced and no tools; a
   hostile result ("onayla", "call mcp_n8n_…") produces no draft, approval
-  or read; follow-up appended to the right conversation only; inside
+  or read; follow-up appended to the right conversation only; a result
+  arriving after the owner trashed the conversation (R6) → no model
+  call, no message appended, the `PendingFollowUp` marked `dropped`, no
+  notice, and restoring the conversation from trash later does not
+  replay it; inside
   an unattended run `start_async` is denied before any
   `ConnectorAsyncRead` row or task dispatch (the D2 suite row); probe
   notice created.
@@ -1513,6 +1587,16 @@ other effect.
   `record_episode`, swallowed on error like the 8A producers);
 - `skills/playbooks.py` (selection, one `skills.playbook_distill` call,
   provenance check, cap), nightly static beat entry;
+- `skills.ports.get_attachable_versions(*, workspace, version_ids) ->
+  list[AttachableSkillVersion]` (frozen dataclass: id, skill name,
+  content sha256, `SKILL.md` text, reference files; raises
+  `SkillVersionNotAttachable` naming the first id that is unknown, not
+  `active`, or in another workspace — no partial result), the one read
+  `harness` uses: the request serializer validates through it and the
+  runner fetches the contents through it again at write time (a version
+  archived between request and run fails the job closed,
+  `skill_version_unavailable`, before the agent starts); `harness` never
+  imports `skills.models` or `skills.selectors`;
 - `HarnessImplementationJob.skill_version_ids` (migration), request
   serializer and Gate A display, runner writes the files to
   `{workspace_dir}/skills/<name>/` (outside the clone) and mounts them
@@ -1524,7 +1608,7 @@ other effect.
 
 **Files.**
 - `backend/skills/{playbooks,ports,models}.py`, migration,
-  `backend/skills/tests/{test_playbook_sources,test_playbook_distill,test_playbook_provenance}.py`;
+  `backend/skills/tests/{test_playbook_sources,test_playbook_distill,test_playbook_provenance,test_ports_attachable}.py`;
 - `backend/harness/{ingestion,services,serializers,implementation_execution,runner}.py`,
   migration, `backend/harness/tests/{test_playbook_hook,test_skill_mount}.py`;
 - `backend/config/celery.py`, `backend/ai_core/migrations/…` (prompt,
@@ -1544,8 +1628,16 @@ other effect.
   an "unverified" `paths` hint, not counted toward the minimum); < 2 valid steps →
   dropped and counted; weekly cap 3; draft passes the SKILL.md parser;
   `personal_data` by workspace class; budget refusal → skipped.
+- `skills.ports.get_attachable_versions`: active versions of the
+  workspace returned with content and hash; a proposed, rejected or
+  archived version, an unknown id, and an active version of another
+  workspace (both workspaces populated) each raise
+  `SkillVersionNotAttachable` with no partial result; a contract test
+  that `harness` imports only `skills.ports` from `skills`.
 - Reuse: only active versions of the job's workspace attachable (other
-  workspace → 400); Gate A display lists name + hash; the fake runner
+  workspace → 400, through the port); a version archived after the
+  request → the runner fails the job `skill_version_unavailable` before
+  the agent starts; Gate A display lists name + hash; the fake runner
   writes the files read-only under `{workspace_dir}/skills/` only (never
   inside `{workspace_dir}/repo`) and mounts them read-only; the clone's
   `.git/info/exclude` lists `.claude/skills/`; the produced commit, the
@@ -1607,16 +1699,31 @@ updated.
 
 | # | Branch | Scope | Depends on | Status |
 |---|---|---|---|---|
-| brief | `docs/p12-brief` | This brief (full, from the stub; stub goal, scope, parent decisions and checkpoint kept), MASTER_PLAN §AA row 12 Brief/Status, `backend/assistant/self_sources.json` regenerated for the row's new status (`build_self_sources --check`) | Phase 11 closeout | **implemented 2026-11-20** (docs only; review round 1 findings addressed 2026-11-24: numeral-word number check, notice delta baseline, skill mount exclusion, calendar labels, owner-web helper in `core`, bookkeeping outside the run context, `start_async` guard, matcher ordering/latency, zip limits, quotable fields; awaits the independent Sonnet 5 plan review to APPROVE) |
+| brief | `docs/p12-brief` | This brief (full, from the stub; stub goal, scope, parent decisions and checkpoint kept), MASTER_PLAN §AA row 12 Brief/Status, `backend/assistant/self_sources.json` regenerated for the row's new status (`build_self_sources --check`) | Phase 11 closeout | **implemented 2026-11-20** (docs only; review round 1 findings addressed 2026-11-24: numeral-word number check, notice delta baseline, skill mount exclusion, calendar labels, owner-web helper in `core`, bookkeeping outside the run context, `start_async` guard, matcher ordering/latency, zip limits, quotable fields; review round 2 findings addressed 2026-11-24: denial audit through a required `on_denied` recorder that survives rollback, `/proactive/pause` endpoint with role × endpoint tests and the `/today` toggle, uniform first-run baseline, branches 4/5 sequenced after 3 with migration renumbering at merge, `skills.ports.get_attachable_versions`, trashed-conversation follow-up test; awaits the independent Sonnet 5 plan review to APPROVE) |
 | 1 | `feat/p12-proactive-core` | `core.probes`, `core.unattended` + guards, `proactive` app (schedules, runs, notices, heartbeat), contracts, ADR-016 | brief approved | planned |
 | 2 | `feat/p12-morning-digest` | Probes in owner apps, `DigestRun`, number-checked composition + template fallback, `/today`, notice bell, HUD `notices`, "Dinle", `proactive_checkpoint` | 1 | planned |
 | 3 | `feat/p12-wake-routes` | Wake-phrase routes + aliases, `digest.today` / `digest.learning` / `notices.read` on web voice and `node_voice`, vectors, ADR-015 note | 2 | planned (on-Mac verification: deferred: Mac session, M1) |
-| 4 | `feat/p12-n8n-connector` | n8n manifest + workflow-ID allowlist, relay sidecar mode, async reads + follow-ups, gated writes, probes, `tool.*` routes, ADR-010 amendment | 1 (3 for `tool.*` routes) | planned (live n8n pins: owner step) |
-| 5 | `feat/p12-skills-core` | SKILL.md parser + refusals, staged lifecycle, matcher + injection, `/skills`, `skill.*` routes | 1 (3 for `skill.*` routes; parallel with 2–4) | planned |
+| 4 | `feat/p12-n8n-connector` | n8n manifest + workflow-ID allowlist, relay sidecar mode, async reads + follow-ups, gated writes, probes, `tool.*` routes, ADR-010 amendment | 3 (and so 1, 2) | planned (live n8n pins: owner step) |
+| 5 | `feat/p12-skills-core` | SKILL.md parser + refusals, staged lifecycle, matcher + injection, `/skills`, `skill.*` routes | 3 (and so 1, 2); merges after 4 if both are ready (migration order) | planned |
 | 6 | `feat/p12-skill-curator` | Stale marking, curator proposals, archive suggestions | 5 | planned |
 | 7 | `feat/p12-harness-playbooks` | Playbook sources from harness, provenance-checked distillation, attach to implementation jobs, ADR-012 note | 5 (parallel with 6) | planned |
 | 8 | `chore/p12-closeout` | Preflight rows, reach e2e, runbooks, ADR notes, `self_sources.json`, MASTER_PLAN row, go/no-go record | 1–7 | planned |
 | M1 | Spoken digest and wake routes on the Mac | Real mic/STT/TTS run of `digest.today`, `notices.read`, `tool.*` drafts, barge-in during a long digest; Turkish route-phrase recognition | 3 merged; Phase 11 M1 | deferred: Mac session (pending owner evaluation) |
+
+**Sequencing and migrations.** Branches 4 and 5 edit
+`assistant/wake_routes.py` and add `assistant` migrations on top of
+branch 3's `Message.route` migration, use the probe-section
+(`digest_section`) vocabulary that branch 2 completes, and add `ai_core`
+`00xx` data migrations; so both depend on 3 (hence on 2 and 1) and start
+from the integration branch after 3 has merged. Migration numbers in
+this brief (`00xx`, "migration") are placeholders: each branch creates
+its migrations with `makemigrations` on the latest integration branch
+and, before merge, rebases on it and renumbers / re-parents its
+migrations onto the newest leaf of every app it touches
+(`makemigrations --check --dry-run` green, no merge migrations). 4 and
+5 may be developed concurrently but merge one at a time, the second
+rebasing on the first; 6 and 7 both add `skills` migrations after 5's
+`0001`, so the same rule applies between them.
 
 **Minimum usable cut** if the phase runs long: 1, 2 and 3 — the digest
 exists, is spoken on the web and on the Mac on request, and the
@@ -1809,7 +1916,8 @@ workspace with a non-owner member.
 - **R6 — Async follow-ups to stale conversations.** A result arriving
   after the owner moved on. Mitigation: the follow-up is a message plus
   a notice, never a voice push; it is ignored if the conversation was
-  trashed.
+  trashed (`compose_followup` checks the conversation is live before
+  any completion and marks the follow-up `dropped`; branch 4 test).
 - **R7 — n8n licence.** n8n is "Sustainable Use" (fair-code); running it
   for personal automations is the intended use; Friday does not
   redistribute it (the relay image contains no n8n code). Recorded in
