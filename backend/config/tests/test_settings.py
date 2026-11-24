@@ -218,3 +218,16 @@ def test_manage_py_keeps_the_dev_default():
     )
     assert result.returncode == 0, result.stderr
     assert "+ DEBUG = True" in result.stdout
+
+
+# Phase 11 D3: the node voice credential's lifetime is capped at boot.
+@pytest.mark.parametrize(("ttl", "ok"), [("3601", False), ("59", False), ("3600", True)])
+def test_the_token_ttl_is_capped_at_boot(ttl, ok):
+    result = _run(
+        "import django; django.setup()",
+        DJANGO_SETTINGS_MODULE="config.settings.dev",
+        VOICE_LIVE_TOKEN_TTL_SECONDS=ttl,
+    )
+    assert (result.returncode == 0) is ok, result.stderr[-500:]
+    if not ok:
+        assert "VOICE_LIVE_TOKEN_TTL_SECONDS" in result.stderr

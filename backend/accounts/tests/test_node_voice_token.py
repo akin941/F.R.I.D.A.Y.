@@ -12,7 +12,8 @@
   any other PAT surface is 403 `token_kind_forbidden`;
 - `accepted_kinds` defaults keep the existing authenticators unchanged;
 - the voice-policy read (always closed in branch 1);
-- the check constraint and the boot-time TTL cap.
+- the check constraint (the boot-time TTL cap is in
+  config/tests/test_settings.py).
 
 No Redis is touched: `core.revocation._client` is a recorder.
 """
@@ -50,7 +51,6 @@ from accounts.tests.node_voice_helpers import (
     pair_node,
 )
 from audit.models import AuditLog
-from config.tests.test_settings import _run
 from core import revocation
 from workspaces.models import Workspace
 
@@ -450,15 +450,3 @@ def test_a_node_with_voice_tokens_cannot_be_deleted_alone(node):
     with pytest.raises(RestrictedError), transaction.atomic():
         device.delete()
     assert PersonalAccessToken.objects.filter(kind=KIND.NODE_VOICE).count() == 1
-
-
-@pytest.mark.parametrize(("ttl", "ok"), [("3601", False), ("59", False), ("3600", True)])
-def test_the_token_ttl_is_capped_at_boot(ttl, ok):
-    result = _run(
-        "import django; django.setup()",
-        DJANGO_SETTINGS_MODULE="config.settings.dev",
-        VOICE_LIVE_TOKEN_TTL_SECONDS=ttl,
-    )
-    assert (result.returncode == 0) is ok, result.stderr[-500:]
-    if not ok:
-        assert "VOICE_LIVE_TOKEN_TTL_SECONDS" in result.stderr
