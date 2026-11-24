@@ -1721,7 +1721,7 @@ updated.
 | brief | `docs/p12-brief` | This brief (full, from the stub; stub goal, scope, parent decisions and checkpoint kept), MASTER_PLAN §AA row 12 Brief/Status, `backend/assistant/self_sources.json` regenerated for the row's new status (`build_self_sources --check`) | Phase 11 closeout | **implemented 2026-11-20** (docs only; review round 1 findings addressed 2026-11-24: numeral-word number check, notice delta baseline, skill mount exclusion, calendar labels, owner-web helper in `core`, bookkeeping outside the run context, `start_async` guard, matcher ordering/latency, zip limits, quotable fields; review round 2 findings addressed 2026-11-24: denial audit through a required `on_denied` recorder that survives rollback, `/proactive/pause` endpoint with role × endpoint tests and the `/today` toggle, uniform first-run baseline, branches 4/5 sequenced after 3 with migration renumbering at merge, `skills.ports.get_attachable_versions`, trashed-conversation follow-up test; awaits the independent Sonnet 5 plan review to APPROVE) |
 | 1 | `feat/p12-proactive-core` | `core.probes`, `core.unattended` + guards, `proactive` app (schedules, runs, notices, heartbeat), contracts, ADR-016 | brief approved | **implemented 2026-11-20** (`core.probes` / `core.unattended` / `core.owner_web`, `audit.unattended.DenialRecorder`, guards in every D2 service plus `tools.registry.run_read_tool`, the gateway purpose check and the Celery publish/eager-prerun guard; `proactive` app with schedules, pause, runs, notices, probe state, heartbeat + prune beat entries, owner-only web endpoints; D19 contracts; ADR-016 written as Proposed; see "Implementation notes — branch 1"; review round 1 findings addressed 2026-11-24, see "Review round 1 fixes"; awaits the Sonnet 5 re-review) |
 | 2 | `feat/p12-morning-digest` | Probes in owner apps, `DigestRun`, number-checked composition + template fallback, `/today`, notice bell, HUD `notices`, "Dinle", `proactive_checkpoint` | 1 | **implemented 2026-11-20** (nine probes in their owner apps, `DigestRun` + one number-checked `proactive.digest` call with template fallback, `proactive.digest` tier/prompt/budget/compression bypass, digest `latest`/detail/`ack` endpoints, HUD `notices` + `digest` sections, `/today` digest card + schedule editor + pause toggle, shell bell + `/notices`, "Dinle" and `speak_on_open`, `proactive_checkpoint`, `proactive_heartbeat`; see "Implementation notes — branch 2"; the on-Mac spoken route is branch 3 / M1; awaits the Sonnet 5 review) |
-| 3 | `feat/p12-wake-routes` | Wake-phrase routes + aliases, `digest.today` / `digest.learning` / `notices.read` on web voice and `node_voice`, vectors, ADR-015 note | 2 | planned (on-Mac verification: deferred: Mac session, M1) |
+| 3 | `feat/p12-wake-routes` | Wake-phrase routes + aliases, `digest.today` / `digest.learning` / `notices.read` on web voice and `node_voice`, vectors, ADR-015 note | 2 | **implemented 2026-11-20** (`assistant/wake_routes.py` table + boot check + normalizer + matcher, `Message.route` and `WakeRouteAlias` (assistant 0013), owner-web alias services in `assistant/wake_aliases.py`, `/api/v1/assistant/wake-routes` + alias CRUD, `/settings/wake-routes`, shared vectors checked by pytest and vitest, ADR-015 implementation note; see "Implementation notes — branch 3"; on-Mac verification: deferred: Mac session, M1; awaits the Sonnet 5 review) |
 | 4 | `feat/p12-n8n-connector` | n8n manifest + workflow-ID allowlist, relay sidecar mode, async reads + follow-ups, gated writes, probes, `tool.*` routes, ADR-010 amendment | 3 (and so 1, 2) | planned (live n8n pins: owner step) |
 | 5 | `feat/p12-skills-core` | SKILL.md parser + refusals, staged lifecycle, matcher + injection, `/skills`, `skill.*` routes | 3 (and so 1, 2); merges after 4 if both are ready (migration order) | planned |
 | 6 | `feat/p12-skill-curator` | Stale marking, curator proposals, archive suggestions | 5 | planned |
@@ -2259,3 +2259,102 @@ integration branch.
    but the e2e has still not been run. Owner step 3 records the e2e run, so
    this does not block. Fix: run the e2e on the CI stack and record the
    result.
+
+### Implementation notes — branch 3 (`feat/p12-wake-routes`), recorded 2026-11-20
+
+Choices made while implementing D8 (zero-argument routes) and D7 (the Mac
+half) that the brief left open or that branches 4 and 5 build on:
+
+1. **Where the hook sits.** `ConversationMessageListView.post` calls
+   `assistant.wake_routes.route_voice_turn` after `input_mode` is resolved
+   (node_voice forces `voice`) and before `classify_intent`; a miss or a
+   typed turn runs the router unchanged. A matched route with a reply
+   streams that text as one chunk through the existing
+   `stream_assistant_reply` (same `done` event, zero usage), with no
+   `build_context`, no gateway call and no `ModelUsage`. `Message.route`
+   is stamped on both the user message and the reply (the brief named the
+   reply; both make audit by conversation simpler).
+2. **Routes answer only the workspace owner** (`workspace.owner_id ==
+   actor`, not an agent). A member's voice turn in a firm workspace goes to
+   the normal router; the digest, notices and learning card are owner
+   surfaces (D20).
+3. **`digest.today` answers only a digest created today** (local date);
+   an older or missing one answers "Bugün için brifing yok." and writes
+   nothing. `spoken_channel` is `node_voice` on the node channel and `web`
+   for web voice. The write is committed only after the cap kept the route
+   (`RouteResult.commit`). This resolves known follow-up (LOW) 3 of the
+   plan review: the ADR-015 note names it as the only write a route may
+   make, and `test_the_route_writes_only_the_digest_telemetry` diffs every
+   model's row count (only the turn's two messages appear) and the digest's
+   columns (only `spoken_at` / `spoken_channel` change).
+4. **A routed reply allocates no memory extraction job** when it made no
+   model call (`_persist_assistant_message(route=...)`): it is Friday's
+   stored text. The extraction cursor still covers those messages in the
+   next ordinary turn's job.
+5. **`digest.learning`** counts pending learned proposals by kind over the
+   `/memory/learning` window (`memory.probes.learning_counts(...,
+   days=MEMORY_LEARNING_DIGEST_DAYS)`, a new keyword; the probe keeps one
+   day) and points to the page; no item text is spoken. **`notices.read`**
+   speaks the unread count and the five latest titles
+   (`proactive.api.notice_section`) and marks nothing.
+6. **Normalizer.** `normalize_speech` is the port of `normalizeSpeech`;
+   `normalize_utterance` also strips one leading "hey friday" / "friday"
+   and trailing fillers (`lütfen`, `please`, `friday`). Comparisons use
+   `match_key` (dotless ı folded to i), because an all-caps transcript
+   ("HEY FRIDAY", "BRIEFING") lower-cases the Turkish way; aliases are
+   stored normalized and clash-checked by the same key. The vectors
+   (`docs/voice/wake-route-vectors.json`) are checked by pytest (normalizer
+   + matcher) and by vitest (`normalizeSpeech` agrees with the port).
+7. **Default phrases.** `digest.today`: günaydın, brifing, bugünün
+   brifingi, sabah brifingi, good morning, briefing; `digest.learning`:
+   öğrenme kartı, ne öğrendin, learning card; `notices.read`: bildirimler,
+   bildirimleri oku, notifications. The boot check also refuses a phrase
+   that is not normalized or that equals / word-prefixes another route's.
+8. **Alias rules as implemented.** 2–40 characters after normalization;
+   unique per workspace (by match key); refused when equal to any route's
+   phrase or alias, or when it word-prefixes (or is word-prefixed by) a
+   phrase or alias of **another** route (extending the same route's phrase,
+   "günaydın canım", is allowed); at most five per route; a known route
+   only. Errors carry `wake_alias.unknown_route` / `.invalid_length` /
+   `.conflict` / `.limit` (catalogued in `core.error_codes` and `tr.ts`);
+   audits `assistant.wake_alias.created` / `.updated` / `.deleted`; the
+   model refuses `save`/`delete` inside an unattended run (`alias_write`).
+9. **Module placement.** The alias services live in
+   `assistant/wake_aliases.py`, not `assistant/services.py`:
+   `assistant.services` is imported by other apps (integrations, tests of
+   accounts/connectors/memory), and `wake_routes` reads `proactive.api`,
+   which only `assistant`, `hud` and `ops` may reach — even indirectly
+   (the D19 contract). The endpoints are mounted at
+   `/api/v1/assistant/wake-routes` (`assistant/wake_urls.py`) as the brief
+   names them, beside the chat API's `/api/v1/ai/`.
+10. **Endpoints.** `GET /api/v1/assistant/wake-routes[?workspace=]`
+    (routes, effects, default phrases, the workspace's aliases, limits),
+    `POST …/aliases[?workspace=]` `{"route", "phrase"}`, `PATCH
+    …/aliases/<id>` `{"phrase"}`, `DELETE …/aliases/<id>`; owner web
+    session only (PATs, node secret, node voice token: 401; member, agent:
+    403; another workspace: 404). The frontend page is
+    `/settings/wake-routes` (linked from `/voice`; `/settings` added to the
+    shell's guarded paths).
+11. **Frozen protocols.** `test_wake_routes_node_voice.py` runs
+    `build_node_conformance --check` and, where `node/friday-voice` has its
+    environment, the child's `conformance --check`; both green, no change
+    to `conformance.lock`.
+12. **Not done here (closeout).** The Done-when's run through the Phase 11
+    reference host and the real `friday-voice` child with its playback
+    double is the closeout's `backend/ops/tests/test_reach_e2e.py`
+    (branch 8); this branch's node-side contract is the token-minted
+    `node_voice` turn in `test_wake_routes_node_voice.py`.
+
+### Owner steps (pending) — `feat/p12-wake-routes`, recorded 2026-11-20
+
+1. Run the independent Sonnet 5 review of this branch to APPROVE before
+   merge (the implementing model does not review its own work).
+2. After merge: `manage.py migrate` (assistant 0013: `Message.route`,
+   `WakeRouteAlias`). Optionally add your own aliases on
+   `/settings/wake-routes`.
+3. Mac session M1 (deferred: Mac session): say "Hey Friday, günaydın",
+   "Friday, brifing" and "Hey Friday, bildirimler" through the real
+   microphone, Whisper and TTS; record route matches, first-audio latency
+   and barge-in as M1 describes. Add aliases for misrecognized phrases
+   rather than fuzzy matching.
+

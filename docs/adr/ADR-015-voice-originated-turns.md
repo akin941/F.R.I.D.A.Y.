@@ -291,3 +291,33 @@ visible in operations:
 The real-world evidence — FAR on 24 h of household audio, FRR, seven green
 nights of the real self-trigger, latency and barge-in measurements — is
 pending owner evaluation (brief M3, M4). No decision changes.
+
+## Implementation note — wake-phrase routes stay inside the cap (Phase 12 branch 3, 2026-11-20)
+
+Phase 12 D8 adds wake-phrase routes (`backend/assistant/wake_routes.py`):
+for a voice turn only (web voice and every `node_voice` turn) whose whole
+normalized utterance is a route phrase or an owner alias, a code-defined
+handler replaces the `router.intent` call. Decision 1 is unchanged:
+- every route's `effect` is `read` or `proposal` by construction — the
+  table is validated at boot (`validate_routes`, called from
+  `AssistantConfig.ready`) and the app refuses to start otherwise;
+- `apply_voice_capability_cap` still runs on the route's classification;
+  a route whose result the cap degrades loses its reply and its write, and
+  the turn is answered as plain chat;
+- the branch 3 routes (`digest.today`, `digest.learning`, `notices.read`)
+  read only. `notices.read` marks nothing read; `digest.learning` decides
+  nothing (the owner decides on `/memory/learning`).
+- **The one write a route may make** is the digest's own `spoken_at` /
+  `spoken_channel` telemetry on the digest `digest.today` answered with
+  (`proactive.api.mark_digest_spoken`, set once, refused inside an
+  unattended run). It is checkpoint bookkeeping, not an act: it creates,
+  approves, sends or runs nothing. The route test asserts it is the only
+  row the route writes besides the turn's two messages (a routed reply
+  makes no model call, so it writes no `ModelUsage` and allocates no memory
+  extraction job).
+- Aliases (`assistant.WakeRouteAlias`) are written only by the workspace
+  owner over the web; no voice turn, tool, skill, model or connector has a
+  path to them, so a spoken sentence can never widen what a later spoken
+  sentence may do.
+
+No decision changes; no node protocol or `friday-voice/v1` surface is added.
