@@ -304,7 +304,11 @@ def host_cases():
         host_case(
             "host.invalid_utf8",
             "A header that is not UTF-8 is refused",
-            [*HOST_PRELUDE, child_send(raw_frame(b'{"type":"st\xffate"}')), _dropped("invalid_utf8")],
+            [
+                *HOST_PRELUDE,
+                child_send(raw_frame(b'{"type":"st\xffate"}')),
+                _dropped("invalid_utf8"),
+            ],
         ),
         host_case(
             "host.duplicate_key",
@@ -613,7 +617,10 @@ def child_cases():
                 *CHILD_PRELUDE,
                 host_send(audio()),
                 host_send({"type": "link", "state": "down"}),
-                frames({"type": "release_mic", "reason": "link_down"}, {"type": "state", "state": "off"}),
+                frames(
+                    {"type": "release_mic", "reason": "link_down"},
+                    {"type": "state", "state": "off"},
+                ),
                 {"op": "expect_buffered", "bytes": 0},
                 host_send(audio()),
                 frames(),
@@ -629,7 +636,9 @@ def child_cases():
                 *CHILD_PRELUDE,
                 host_send(audio()),
                 host_send({"type": "mute", "muted": True}),
-                frames({"type": "release_mic", "reason": "muted"}, {"type": "state", "state": "muted"}),
+                frames(
+                    {"type": "release_mic", "reason": "muted"}, {"type": "state", "state": "muted"}
+                ),
                 {"op": "expect_buffered", "bytes": 0},
                 host_send(audio()),
                 {"op": "expect_buffered", "bytes": 0},
@@ -656,7 +665,9 @@ def child_cases():
             [
                 *CHILD_PRELUDE,
                 host_send({"type": "mode", "mode": "off"}),
-                frames({"type": "release_mic", "reason": "mode_off"}, {"type": "state", "state": "off"}),
+                frames(
+                    {"type": "release_mic", "reason": "mode_off"}, {"type": "state", "state": "off"}
+                ),
             ],
         ),
         child_case(
@@ -768,7 +779,9 @@ def child_cases():
             "stdin ending inside a frame is a protocol error",
             [
                 *CHILD_PRELUDE,
-                host_send(encode_frame({"type": "ptt", "key": "down"}, direction=HOST_TO_CHILD)[:7]),
+                host_send(
+                    encode_frame({"type": "ptt", "key": "down"}, direction=HOST_TO_CHILD)[:7]
+                ),
                 {"op": "close_stdin"},
                 *_protocol_error("short_read"),
             ],
@@ -893,7 +906,9 @@ def frame_vectors():
         _invalid("over_length", CHILD_TO_HOST, OVERSIZE_PREFIX, "frame_too_large"),
         _invalid("short_prefix", CHILD_TO_HOST, b"\x00\x00", "short_read"),
         _invalid("short_body", CHILD_TO_HOST, ok_state[:-3], "short_read"),
-        _invalid("unterminated_header", CHILD_TO_HOST, LENGTH.pack(4) + b"{}{}", "header_unterminated"),
+        _invalid(
+            "unterminated_header", CHILD_TO_HOST, LENGTH.pack(4) + b"{}{}", "header_unterminated"
+        ),
         _invalid("invalid_utf8", CHILD_TO_HOST, raw_frame(b'{"type":"\xc3"}'), "invalid_utf8"),
         _invalid("invalid_json", CHILD_TO_HOST, raw_frame(b'{"type":'), "invalid_json"),
         _invalid("nan", CHILD_TO_HOST, raw_frame(b'{"at_ms":NaN,"type":"state"}'), "invalid_json"),
@@ -903,7 +918,9 @@ def frame_vectors():
             raw_frame(b'{"type":"earcon","type":"earcon","earcon":"wake"}'),
             "duplicate_key",
         ),
-        _invalid("float", CHILD_TO_HOST, raw_frame(b'{"at_ms":0.5,"type":"state"}'), "number_not_integer"),
+        _invalid(
+            "float", CHILD_TO_HOST, raw_frame(b'{"at_ms":0.5,"type":"state"}'), "number_not_integer"
+        ),
         _invalid("header_array", CHILD_TO_HOST, raw_frame(b'["state"]'), "header_not_object"),
         _invalid(
             "odd_pcm",

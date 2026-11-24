@@ -95,7 +95,13 @@ FRAMING_ERRORS = frozenset(
 )
 SCHEMA_ERRORS = frozenset({"unknown_type", "schema_invalid"})
 SESSION_ERRORS = frozenset(
-    {"hello_expected", "ready_expected", "duplicate_hello", "duplicate_ready", "version_unsupported"}
+    {
+        "hello_expected",
+        "ready_expected",
+        "duplicate_hello",
+        "duplicate_ready",
+        "version_unsupported",
+    }
 )
 ERROR_CODES = FRAMING_ERRORS | SCHEMA_ERRORS | SESSION_ERRORS
 

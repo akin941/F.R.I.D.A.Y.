@@ -226,14 +226,18 @@ def run_child_case_live(case, argv=None) -> list:
             elif op == "close_stdin":
                 process.stdin.close()
             elif op == "expect_frames":
-                failures += _match_frames(_collect(inbox, len(step["frames"])), step["frames"], index)
+                failures += _match_frames(
+                    _collect(inbox, len(step["frames"])), step["frames"], index
+                )
             elif op == "expect_exit":
                 try:
                     code = process.wait(timeout=LIVE_TIMEOUT_S)
                 except subprocess.TimeoutExpired:
                     code = None
                 if code != step["code"]:
-                    failures.append(f"step {index}: child exit is {code!r}, expected {step['code']}")
+                    failures.append(
+                        f"step {index}: child exit is {code!r}, expected {step['code']}"
+                    )
             elif op == "expect_running":
                 time.sleep(LIVE_SETTLE_S)
                 if process.poll() is not None:

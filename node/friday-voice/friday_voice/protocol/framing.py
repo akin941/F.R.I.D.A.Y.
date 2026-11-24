@@ -42,9 +42,9 @@ def encode_frame(header, payload=b"", *, direction=None) -> bytes:
     payload = bytes(payload)
     if header.get("type") in AUDIO_TYPES:
         header["pcm_bytes"] = len(payload)
+    _check_payload(header, payload)
     if direction is not None:
         validate(header, direction)
-    _check_payload(header, payload)
     body = canonical_header(header) + b"\n" + payload
     if len(body) > MAX_FRAME_BYTES:
         raise ProtocolError("frame_too_large")

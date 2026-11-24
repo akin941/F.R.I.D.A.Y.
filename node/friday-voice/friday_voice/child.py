@@ -302,7 +302,9 @@ class ChildLink:
 
     @staticmethod
     def _encode(frames):
-        return [encode_frame(header, payload, direction=CHILD_TO_HOST) for header, payload in frames]
+        return [
+            encode_frame(header, payload, direction=CHILD_TO_HOST) for header, payload in frames
+        ]
 
     def feed(self, data) -> list:
         out = []

@@ -1,0 +1,43 @@
+{
+  "$comment": "Phase 11 brief D8: the detector models the voice child loads, pinned by sha256. The shared entries (melspectrogram, embedding, keyword, vad) must equal frontend/src/lib/voice/model-manifest.json (tests/test_models.py), so the browser and the node run the same wake model. smart_turn ships inside the pinned pipecat-ai wheel and is verified against this hash before loading. The child refuses to arm wake mode unless every wake file's sha256 matches; an empty sha256 means 'not pinned yet' and always refuses. Files live outside the repo, in the node's model directory.",
+  "wakePhrase": "Hey Friday",
+  "modelDir": "~/Library/Application Support/Friday/voice/models/",
+  "models": [
+    {
+      "role": "melspectrogram",
+      "file": "melspectrogram.onnx",
+      "source": "https://github.com/dscripka/openWakeWord/releases/download/v0.5.1/melspectrogram.onnx",
+      "sha256": "ba2b0e0f8b7b875369a2c89cb13360ff53bac436f2895cced9f479fa65eb176f",
+      "license": "openWakeWord pre-trained model: CC BY-NC-SA 4.0 (non-commercial, R7)"
+    },
+    {
+      "role": "embedding",
+      "file": "embedding_model.onnx",
+      "source": "https://github.com/dscripka/openWakeWord/releases/download/v0.5.1/embedding_model.onnx",
+      "sha256": "70d164290c1d095d1d4ee149bc5e00543250a7316b59f31d056cff7bd3075c1f",
+      "license": "openWakeWord re-implementation of Google speech_embedding: CC BY-NC-SA 4.0 model terms (R7)"
+    },
+    {
+      "role": "keyword",
+      "file": "hey_friday.onnx",
+      "source": null,
+      "sha256": "",
+      "license": "Owner-trained openWakeWord head derived from the embedding graph: treated as CC BY-NC-SA 4.0 (owner step: train, then pin its sha256 here and in the frontend manifest)"
+    },
+    {
+      "role": "vad",
+      "file": "silero_vad.onnx",
+      "source": "https://raw.githubusercontent.com/snakers4/silero-vad/v5.1.2/src/silero_vad/data/silero_vad.onnx",
+      "sha256": "2623a2953f6ff3d2c1e61740c6cdb7168133479b267dfef114a4a3cc5bdd788f",
+      "license": "Silero VAD v5.1.2: MIT"
+    },
+    {
+      "role": "smart_turn",
+      "file": "smart-turn-v3.2-cpu.onnx",
+      "source": "pipecat-ai==1.15.0 wheel: pipecat/audio/turn/smart_turn/data/smart-turn-v3.2-cpu.onnx",
+      "upstream": "https://huggingface.co/pipecat-ai/smart-turn-v3",
+      "sha256": "2bb026316b14a660486a75b1733cd3fbab8c2fd0314dc9af7be49f8cca967e4f",
+      "license": "smart-turn v3: BSD-2-Clause (shipped inside the BSD-2-Clause pipecat-ai wheel; model-card confirmation is an owner step)"
+    }
+  ]
+}

@@ -85,6 +85,8 @@ def snapshot(surface=SURFACE) -> dict:
     return {
         "distribution": DISTRIBUTION,
         "version": installed_version(),
-        "surface": {f"{module}:{attribute}": describe(module, attribute) for module, attribute in surface},
+        "surface": {
+            f"{module}:{attribute}": describe(module, attribute) for module, attribute in surface
+        },
         "bundled_models": {name: bundled_model_sha256(name) for name in sorted(BUNDLED_MODELS)},
     }
