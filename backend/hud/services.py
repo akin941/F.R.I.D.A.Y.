@@ -32,6 +32,10 @@ actor's last five node action executions in the stream's workspace
 exit code and duration -- never args and never output. The output itself
 travels only through the terminal stream endpoint (`hud.views`), read from
 the Redis stream the node gateway writes (`nodes.output`).
+
+Phase 12 branch 2 (brief D5/D7/D20) adds `notices` (unread count and the
+five latest notice titles and links) and `digest` (the newest morning
+digest's card), both read through `proactive.api` only (D19).
 """
 
 import posixpath
@@ -50,6 +54,7 @@ from nodes.action_rules import repo_path_of
 from nodes.capabilities import get_action_contract
 from nodes.models import EXECUTION_TERMINAL_STATUSES, NodeActionExecution
 from nodes.selectors import node_health
+from proactive import api as proactive_api
 from tasks.models import Task
 
 ZERO = Decimal("0")
@@ -62,7 +67,7 @@ _HEALTH_CAPABILITIES = (
     ModelProvider.Capability.STT,
     ModelProvider.Capability.TTS,
 )
-SECTIONS = ("approvals", "tasks", "cost", "health", "terminal")
+SECTIONS = ("approvals", "tasks", "cost", "health", "terminal", "notices", "digest")
 # Phase 10 D12: the terminal section lists the actor's last five executions.
 TERMINAL_SECTION_LIMIT = 5
 
@@ -354,6 +359,21 @@ def terminal_section(actor, workspace):
     }
 
 
+def notices_section(actor, workspace):
+    """Phase 12 D5/D20: the unread proactive notices of the stream's
+    workspace (`proactive.api.notice_section`, `for_actor()`): the unread
+    count and the five latest titles and links -- Friday templates over D1
+    labels, no deep content. Nothing here marks a notice read."""
+    return proactive_api.notice_section(actor=actor, workspace=workspace)
+
+
+def digest_section(actor, workspace):
+    """Phase 12 D7/D20: the newest morning digest's card (id, spoken text,
+    time, opened/spoken flags, `speak_on_open`), or None. "Dinle" speaks it
+    in the browser through the speech endpoint; the HUD decides nothing."""
+    return proactive_api.digest_section(actor=actor, workspace=workspace)
+
+
 def build_sections(actor, workspace, *, today=None):
     return {
         "approvals": approvals_section(actor, workspace),
@@ -361,6 +381,8 @@ def build_sections(actor, workspace, *, today=None):
         "cost": cost_section(workspace),
         "health": health_section(workspace, actor),
         "terminal": terminal_section(actor, workspace),
+        "notices": notices_section(actor, workspace),
+        "digest": digest_section(actor, workspace),
     }
 
 

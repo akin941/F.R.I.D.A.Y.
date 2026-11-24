@@ -4,7 +4,10 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { X } from "lucide-react";
 import { HudLearningPanel, HudSessionsPanel } from "@/components/hud/HudLearningPanels";
+import { HudNoticesPanel } from "@/components/hud/HudNoticesPanel";
 import { HudOrb } from "@/components/hud/HudOrb";
+import { DigestCard } from "@/components/proactive/DigestCard";
+import type { DigestPlayerDeps } from "@/components/proactive/use-digest-player";
 import { HudTerminalPanel, type TerminalStreamFactory } from "@/components/hud/HudTerminalPanel";
 import {
   ApprovalsPanel,
@@ -49,6 +52,8 @@ export interface HudViewProps {
   terminalStreamFactory?: TerminalStreamFactory;
   webglAvailable?: () => boolean;
   earconDeps?: Partial<EarconPlayerDeps>;
+  /** Phase 12: the digest player's speech seam. */
+  digestPlayerDeps?: DigestPlayerDeps;
 }
 
 function micState(muted: boolean, phase: string, wake: string): MicState {
@@ -58,7 +63,13 @@ function micState(muted: boolean, phase: string, wake: string): MicState {
   return "closed";
 }
 
-export function HudView({ streamFactory, terminalStreamFactory, webglAvailable, earconDeps }: HudViewProps = {}) {
+export function HudView({
+  streamFactory,
+  terminalStreamFactory,
+  webglAvailable,
+  earconDeps,
+  digestPlayerDeps,
+}: HudViewProps = {}) {
   const { activeWorkspace } = useWorkspace();
   const workspaceId = activeWorkspace?.id ?? null;
   const presence = useVoicePresence();
@@ -202,6 +213,15 @@ export function HudView({ streamFactory, terminalStreamFactory, webglAvailable, 
         </div>
 
         <div className="order-3 flex flex-col gap-3">
+          {/* Phase 12 D7/D20: the digest card ("Dinle", speak_on_open) and notices. */}
+          <DigestCard
+            digest={data?.digest ?? null}
+            workspaceId={workspaceId}
+            variant="hud"
+            autoSpeak
+            playerDeps={digestPlayerDeps}
+          />
+          <HudNoticesPanel notices={data?.notices ?? null} />
           <CostPanel cost={data?.cost ?? null} />
           <HealthPanel health={data?.health ?? null} mic={mic} stream={status} />
           {/* Phase 8A branch 6: the sessions panel and the morning-card summary. */}

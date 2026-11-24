@@ -624,11 +624,14 @@ forbidden_modules = ["voice"]
 # terminal section and the terminal output stream; Phase 9 branch 7 (D11)
 # uses the same edge for the health panel's node line
 # (`nodes.selectors.node_health`).
+# Phase 12 D19 (branch 2): `hud` also reads `proactive` for the `notices`
+# section and the digest card -- through `proactive.api` only (the
+# "assistant and hud reach proactive only through proactive.api" contract).
 [[tool.importlinter.contracts]]
-name = "hud may import only core, workspaces, ai_core, approvals, tasks, nodes (Phase 6 A8, Phase 10 D12)"
+name = "hud may import only core, workspaces, ai_core, approvals, tasks, nodes, proactive (Phase 6 A8, Phase 10 D12, Phase 12 D19)"
 type = "forbidden"
 source_modules = ["hud"]
-forbidden_modules = ["config", "accounts", "audit", "assistant", "memory", "knowledge", "tools", "agents", "skills", "integrations", "harness", "connectors", "deploys", "ops", "voice", "proactive"]
+forbidden_modules = ["config", "accounts", "audit", "assistant", "memory", "knowledge", "tools", "agents", "skills", "integrations", "harness", "connectors", "deploys", "ops", "voice"]
 # `approvals` and `tasks` reach `tools`, `audit`, `assistant` themselves;
 # those are their edges, not hud's.
 allow_indirect_imports = true
@@ -750,6 +753,10 @@ forbidden_modules = ["proactive"]
 name = "assistant and hud reach proactive only through proactive.api (Phase 12 D19)"
 type = "forbidden"
 source_modules = ["assistant", "hud"]
-forbidden_modules = ["proactive.services", "proactive.tasks", "proactive.views", "proactive.runs", "proactive.urls", "proactive.serializers", "proactive.models", "proactive.timing", "proactive.apps"]
+forbidden_modules = ["proactive.services", "proactive.tasks", "proactive.views", "proactive.runs", "proactive.urls", "proactive.serializers", "proactive.models", "proactive.timing", "proactive.apps", "proactive.digest", "proactive.templates", "proactive.number_check", "proactive.checkpoint", "proactive.probes", "proactive.management"]
 allow_indirect_imports = true
+# The hud tests seed notice and digest rows (branch 2).
+ignore_imports = [
+    "hud.tests.** -> proactive.**",
+]
 

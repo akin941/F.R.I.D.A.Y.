@@ -13,6 +13,7 @@ import { WorkspaceSwitcher } from "@/components/shell/WorkspaceSwitcher";
 import { ThemeToggle } from "@/components/theme/ThemeToggle";
 import { VoiceMuteToggle } from "@/components/shell/VoiceMuteToggle";
 import { HudMiniOrb } from "@/components/shell/HudMiniOrb";
+import { NoticeBell } from "@/components/proactive/NoticeBell";
 import { useWorkspace } from "@/contexts/workspace-context";
 import { apiPostJson } from "@/lib/api-client";
 import { tr } from "@/lib/i18n/tr";
@@ -95,7 +96,10 @@ export function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
     <div className="flex h-full flex-col gap-4 p-4">
       <div className="flex items-center justify-between gap-2">
         <div className="text-lg font-semibold tracking-tight">Friday</div>
-        <HudMiniOrb onNavigate={onNavigate} />
+        <div className="flex items-center gap-1">
+          <NoticeBell onNavigate={onNavigate} />
+          <HudMiniOrb onNavigate={onNavigate} />
+        </div>
       </div>
       <WorkspaceSwitcher />
       <Separator />

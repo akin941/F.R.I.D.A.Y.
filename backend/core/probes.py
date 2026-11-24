@@ -61,6 +61,9 @@ LINK_PATTERNS = (
     re.compile(r"^/memory/learning$"),
     re.compile(r"^/sessions$"),
     re.compile(rf"^/harness/{_ID}$"),
+    # Branch 2: the implementation-job page (Gate A / Gate B) and the console.
+    re.compile(r"^/harness$"),
+    re.compile(rf"^/harness/implementations/{_ID}$"),
     re.compile(r"^/devices$"),
     re.compile(rf"^/chat/{_ID}$"),
     re.compile(r"^/skills$"),
@@ -224,3 +227,25 @@ def render_notice_title(spec: ProbeSpec, *, label: str, count: int, max_chars: i
     validated); bounded."""
     title = spec.notice_template.replace("{count}", str(int(count))).replace("{label}", label)
     return title[:max_chars]
+
+
+def safe_label(text: Any, fallback: str, *, prefix: str = "") -> str:
+    """An owner-authored field as a D1 label, or the Friday `fallback` when
+    the field is empty or has a shape `validate_label` refuses (markup, a
+    URL, control or invisible characters). Whitespace is collapsed and the
+    result bounded, so one odd task title never fails a whole probe."""
+    cleaned = " ".join(str(text or "").split())
+    candidate = f"{prefix}{cleaned}" if cleaned else ""
+    if len(candidate) > MAX_LABEL_CHARS:
+        candidate = candidate[: MAX_LABEL_CHARS - 1].rstrip() + "…"
+    try:
+        validate_label(candidate)
+    except ProbeResultInvalid:
+        return f"{prefix}{fallback}"[:MAX_LABEL_CHARS]
+    return candidate
+
+
+def data_class_of(workspace: Any) -> str:
+    """The D1 data class of a workspace: `personal` for the personal
+    workspace, `firm` for every other kind."""
+    return DATA_CLASS_PERSONAL if getattr(workspace, "type", "") == "personal" else DATA_CLASS_FIRM

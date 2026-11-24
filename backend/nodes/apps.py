@@ -26,3 +26,7 @@ class NodesConfig(AppConfig):
 
     def ready(self):
         import nodes.checks  # noqa: F401 -- registers the Phase 10 settings checks
+        from nodes.probes import register
+
+        # Phase 12 D1: the `nodes.link` probe.
+        register()

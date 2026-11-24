@@ -205,6 +205,11 @@ _KNOWLEDGE_QUERY_TRIGGER = "summarize my knowledge base"
 FAKE_NODE_ACTION_ARGS_RESPONSE = '{"node_id": null, "capability": null, "args": null}'
 FAKE_TRUST_CHECK_RESPONSE = '{"verdict": "consistent", "reason_code": "matches_request"}'
 FAKE_TASK_DRAFT_RESPONSE = '{"title": "Fake extracted task", "due_date": null}'
+# Phase 12 D6: a spoken digest with no numbers at all, so it passes the
+# number check against any facts (tests script other answers).
+FAKE_PROACTIVE_DIGEST_RESPONSE = (
+    "Günaydın! Bugün seni bekleyen birkaç şey var; ayrıntılar Bugün sayfasında."
+)
 
 # Purpose-aware fixture for `agent.plan` (MVP 7 §2) -- mirrors
 # agents.planner's schema for the same ai_core-must-not-import-business-
@@ -313,6 +318,8 @@ class FakeAdapter(BaseAdapter):
             return FAKE_NODE_ACTION_ARGS_RESPONSE
         if purpose == "control.trust_check":
             return FAKE_TRUST_CHECK_RESPONSE
+        if purpose == "proactive.digest":
+            return FAKE_PROACTIVE_DIGEST_RESPONSE
         if purpose == "agent.plan":
             latest = _latest_user_content(messages)
             if _AGENT_MULTI_STEP_PLAN_TRIGGER in latest:

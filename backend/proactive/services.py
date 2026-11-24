@@ -18,7 +18,7 @@ from audit.services import record_audit
 from core.owner_web import OwnerWebRequired, require_owner_web
 from core.unattended import deny_if_unattended
 from proactive import timing
-from proactive.models import ProactiveNotice, ProactivePause, ProactiveSchedule
+from proactive.models import DigestRun, ProactiveNotice, ProactivePause, ProactiveSchedule
 
 
 class ProactiveError(Exception):
@@ -186,3 +186,26 @@ def dismiss_all_notices(*, actor, channel, workspace):
             count=count,
         )
     return count
+
+
+DIGEST_ACK_EVENTS = ("opened", "spoken")
+
+
+def ack_digest(*, actor, channel, digest, event):
+    """D6: the web's `opened` / `spoken` acknowledgement -- the digest's
+    own telemetry, set once (idempotent: a repeat changes nothing). Owner
+    over the web only. Returns True when this call set the timestamp."""
+    deny_if_unattended("digest_write")
+    _require_owner_web(actor=actor, workspace=digest.workspace, channel=channel)
+    if event not in DIGEST_ACK_EVENTS:
+        raise ProactiveInvalid("event is opened or spoken.")
+    now = timezone.now()
+    rows = DigestRun.objects.filter(pk=digest.pk)
+    if event == "opened":
+        updated = rows.filter(opened_at__isnull=True).update(opened_at=now)
+    else:
+        updated = rows.filter(spoken_at__isnull=True).update(
+            spoken_at=now, spoken_channel=DigestRun.SpokenChannel.WEB
+        )
+    digest.refresh_from_db()
+    return bool(updated)

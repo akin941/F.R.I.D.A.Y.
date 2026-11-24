@@ -168,3 +168,50 @@ class ProactiveProbeState(WorkspaceScopedModel):
         constraints = [
             models.UniqueConstraint(fields=["schedule", "probe"], name="proactive_probe_state_one")
         ]
+
+
+class DigestRun(WorkspaceScopedModel, TimestampedModel):
+    """D6: one morning digest. `sections` are the facts (per digest
+    section, the probes' counts and D1 labels, in D6 order); `spoken_text`
+    is the number-checked model text or the template text. Written only by
+    the run that produced it; afterwards only `opened_at` / `spoken_at` /
+    `spoken_channel` change (the owner's web ack, the `node_voice` route)."""
+
+    class ComposedBy(models.TextChoices):
+        MODEL = "model"
+        TEMPLATE = "template"
+
+    class FallbackReason(models.TextChoices):
+        NONE = ""
+        NO_PROVIDER = "no_provider"
+        NO_PROMPT = "no_prompt"
+        BUDGET_EXCEEDED = "budget_exceeded"
+        MODEL_ERROR = "model_error"
+        EMPTY = "empty"
+        NUMBER_CHECK_FAILED = "number_check_failed"
+
+    class SpokenChannel(models.TextChoices):
+        NONE = ""
+        WEB = "web"
+        NODE_VOICE = "node_voice"
+
+    run = models.OneToOneField(ProactiveRun, on_delete=models.CASCADE, related_name="digest")
+    schedule = models.ForeignKey(
+        ProactiveSchedule, on_delete=models.SET_NULL, null=True, related_name="digests"
+    )
+    sections = models.JSONField(default=list, blank=True)
+    spoken_text = models.TextField()
+    composed_by = models.CharField(max_length=10, choices=ComposedBy.choices)
+    fallback_reason = models.CharField(
+        max_length=24, choices=FallbackReason.choices, default="", blank=True
+    )
+    model_usage_id = models.UUIDField(null=True, blank=True)
+    data_class = models.CharField(max_length=10, choices=ProactiveNotice.DataClass.choices)
+    opened_at = models.DateTimeField(null=True, blank=True)
+    spoken_at = models.DateTimeField(null=True, blank=True)
+    spoken_channel = models.CharField(
+        max_length=12, choices=SpokenChannel.choices, default="", blank=True
+    )
+
+    class Meta:
+        indexes = [models.Index(fields=["workspace", "-created_at"])]

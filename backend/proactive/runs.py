@@ -3,7 +3,7 @@
 A run is two steps. **Collect**: run the schedule kind's probes --
 deterministic DB reads, no model call, no network. **Speak**: only for
 `morning_digest`, only when a probe found something (the composition and
-its one `proactive.digest` gateway call land with branch 2). A `heartbeat`
+its one `proactive.digest` gateway call: `proactive.digest`). A `heartbeat`
 run never calls a model: it turns probe deltas into notices with
 Friday-authored templates.
 
@@ -12,7 +12,7 @@ every effect's owning service refuses (`UnattendedDenied`), the gateway
 refuses every purpose outside the kind's allowlist (none for heartbeat),
 and Celery dispatch outside `PROACTIVE_UNATTENDED_TASKS` is refused. The
 run writes only its own rows -- `ProactiveRun`, `ProactiveNotice`,
-`ProactiveProbeState` -- plus audit.
+`ProactiveProbeState`, `DigestRun` -- plus audit.
 
 Transactions: the runner is not wrapped in an outer `atomic()`. Each probe
 runs in its own `atomic()` block (so a denial or a failure rolls back only
@@ -32,6 +32,7 @@ from django.utils import timezone
 from audit.unattended import DenialRecorder
 from core import probes
 from core.unattended import UnattendedDenied, unattended_run, unattended_step
+from proactive import digest as digest_step
 from proactive.models import (
     ProactiveNotice,
     ProactiveProbeState,
@@ -150,7 +151,7 @@ def _is_statement_timeout(exc) -> bool:
 
 
 def _collect_one(*, run, schedule, spec, now, owner):
-    """Run one probe in its own transaction. Returns (count, notices)."""
+    """Run one probe in its own transaction. Returns (result, notices)."""
     with transaction.atomic(), _bounded_statements():
         result = spec.collect(schedule.workspace, owner, now)
         result = probes.validate_result(spec, result, max_keys=_max_keys())
@@ -159,14 +160,15 @@ def _collect_one(*, run, schedule, spec, now, owner):
         notices = 0
         if schedule.kind == ProactiveSchedule.Kind.HEARTBEAT and spec.notice_kind:
             notices = _notify_delta(run=run, schedule=schedule, spec=spec, result=result)
-        return result.count, notices
+        return result, notices
 
 
-def compose_digest(*, run, schedule, counts):
-    """The Speak step (branch 2: `DigestRun`, one number-checked
-    `proactive.digest` call, template fallback). Until then a
-    `morning_digest` run collects only. Returns the outcome or None."""
-    return None
+def compose_digest(*, run, schedule, results, now):
+    """The Speak step (D4/D6, `proactive.digest`): one number-checked
+    gateway call or the template, and the `DigestRun` row. Runs in its own
+    `atomic()` block inside the run's context. Returns the `DigestRun`."""
+    with transaction.atomic():
+        return digest_step.compose_digest(run=run, schedule=schedule, results=results, now=now)
 
 
 def run_schedule(schedule, *, now=None):
@@ -182,9 +184,10 @@ def run_schedule(schedule, *, now=None):
         workspace=workspace, schedule=schedule, kind=schedule.kind, started_at=now
     )
     recorder = DenialRecorder(workspace=workspace, source=f"proactive.{schedule.kind}")
-    counts, failures, slow = {}, {}, []
+    counts, failures, slow, results = {}, {}, [], []
     denials = notices = 0
     outcome = None
+    usage_id = None
     timeout_ms = int(settings.PROACTIVE_PROBE_TIMEOUT_MS)
     try:
         with unattended_run(
@@ -196,10 +199,11 @@ def run_schedule(schedule, *, now=None):
                 probe_started = clock.monotonic()
                 with unattended_step(spec.name):
                     try:
-                        count, created = _collect_one(
+                        result, created = _collect_one(
                             run=run, schedule=schedule, spec=spec, now=now, owner=owner
                         )
-                        counts[spec.name] = count
+                        counts[spec.name] = result.count
+                        results.append((spec, result))
                         notices += created
                     except UnattendedDenied:
                         denials += 1
@@ -223,11 +227,22 @@ def run_schedule(schedule, *, now=None):
                     slow.append(spec.name)
                 recorder.flush()
             if schedule.kind == ProactiveSchedule.Kind.MORNING_DIGEST and any(counts.values()):
-                try:
-                    outcome = compose_digest(run=run, schedule=schedule, counts=counts)
-                except UnattendedDenied:
-                    denials += 1
-                    failures["digest"] = "denied"
+                with unattended_step("digest"):
+                    try:
+                        digest = compose_digest(
+                            run=run, schedule=schedule, results=results, now=now
+                        )
+                        outcome = ProactiveRun.Outcome.DIGEST
+                        usage_id = digest.model_usage_id
+                        if digest.fallback_reason:
+                            failures["digest"] = digest.fallback_reason
+                    except UnattendedDenied:
+                        denials += 1
+                        failures["digest"] = "denied"
+                    except Exception as exc:
+                        failures["digest"] = "digest_failed"
+                        logger.warning("Digest composition failed (%s)", exc.__class__.__name__)
+                recorder.flush()
     except UnattendedDenied:
         denials += 1
         outcome = ProactiveRun.Outcome.DENIED
@@ -255,6 +270,7 @@ def run_schedule(schedule, *, now=None):
         slow_probes=slow,
         denials=denials,
         notices_created=notices,
+        model_usage_id=usage_id,
     )
     ProactiveSchedule.objects.filter(pk=schedule.pk).update(last_run_at=finished)
     run.refresh_from_db()

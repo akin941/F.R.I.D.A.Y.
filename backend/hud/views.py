@@ -4,7 +4,9 @@ one event stream (Phase 6 branch 5, brief A8).
 Server-Sent Events, `text/event-stream`, one JSON object per `data:` line:
 
 - `{"type": "snapshot", "workspace", "interval_seconds", "approvals",
-  "tasks", "cost", "health"}` first;
+  "tasks", "cost", "health", "terminal", "notices", "digest"}` first
+  (Phase 12 branch 2 adds `notices` and `digest`, read through
+  `proactive.api`);
 - `{"type": "delta", <changed sections only>}` when something changed
   since the previous tick; a `: keepalive` comment otherwise;
 - `{"type": "end", "reason"}` when the stream closes on purpose

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
@@ -77,7 +77,7 @@ function TodayTaskItem({
   );
 }
 
-export function TodayView() {
+export function TodayView({ children }: { children?: ReactNode } = {}) {
   const { activeWorkspace } = useWorkspace();
 
   const [tasks, setTasks] = useState<ApiTask[]>([]);
@@ -136,6 +136,9 @@ export function TodayView() {
         <h1 className="text-2xl font-semibold tracking-tight">Bugün</h1>
         <p className="text-sm text-muted-foreground">Bugün vadesi gelen veya geçen görevler.</p>
       </div>
+
+      {/* Phase 12: the morning digest, schedules and pause (page slot). */}
+      {children}
 
       {loadError ? (
         <Alert variant="destructive" role="alert">

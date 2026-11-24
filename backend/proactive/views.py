@@ -13,6 +13,9 @@ workspace the actor is not a member of is a 404.
 - `POST /api/v1/proactive/notices/<id>/read`
 - `POST /api/v1/proactive/notices/dismiss-all[?workspace=]`
 - `GET | POST | DELETE /api/v1/proactive/pause[?workspace=]`
+- `GET  /api/v1/proactive/digests/latest[?workspace=]` (branch 2, D6)
+- `GET  /api/v1/proactive/digests/<id>`
+- `POST /api/v1/proactive/digests/<id>/ack` `{"event": "opened"|"spoken"}`
 """
 
 import uuid
@@ -26,7 +29,8 @@ from core.api_errors import service_error_response
 from core.channels import request_channel
 from core.permissions import IsOwner, IsWebChannel
 from proactive import services
-from proactive.models import ProactiveNotice, ProactiveSchedule
+from proactive.api import digest_payload
+from proactive.models import DigestRun, ProactiveNotice, ProactiveSchedule
 from proactive.serializers import NoticeSerializer, ScheduleSerializer, ScheduleWriteSerializer
 from workspaces.models import Workspace
 
@@ -203,3 +207,74 @@ class PauseView(APIView):
 
     def delete(self, request):
         return self._set(request, False)
+
+
+def _digest(request, digest_id):
+    """A digest the actor can see (`for_actor()`), or None (404)."""
+    return DigestRun.objects.for_actor(request.user).filter(pk=digest_id).first()
+
+
+def _speak_on_open(workspace):
+    return bool(
+        ProactiveSchedule.objects.filter(
+            workspace=workspace, kind=ProactiveSchedule.Kind.MORNING_DIGEST, enabled=True
+        )
+        .values_list("speak_on_open", flat=True)
+        .first()
+    )
+
+
+class DigestLatestView(APIView):
+    """`GET /api/v1/proactive/digests/latest[?workspace=]` -> the newest
+    digest of the workspace, or `{"digest": null}`."""
+
+    permission_classes = _PERMISSIONS
+
+    def get(self, request):
+        workspace = _workspace(request)
+        if workspace is None:
+            return _not_found()
+        row = (
+            DigestRun.objects.for_actor(request.user, workspace=workspace)
+            .order_by("-created_at", "-id")
+            .first()
+        )
+        payload = (
+            digest_payload(row, speak_on_open=_speak_on_open(workspace))
+            if row is not None
+            else None
+        )
+        return Response({"workspace": str(workspace.pk), "digest": payload})
+
+
+class DigestDetailView(APIView):
+    """`GET /api/v1/proactive/digests/<id>`."""
+
+    permission_classes = _PERMISSIONS
+
+    def get(self, request, digest_id):
+        row = _digest(request, digest_id)
+        if row is None:
+            return _not_found()
+        return Response(digest_payload(row, speak_on_open=_speak_on_open(row.workspace)))
+
+
+class DigestAckView(APIView):
+    """`POST /api/v1/proactive/digests/<id>/ack` `{"event": "opened" |
+    "spoken"}`: idempotent; another workspace's digest is a 404."""
+
+    permission_classes = _PERMISSIONS
+
+    def post(self, request, digest_id):
+        row = _digest(request, digest_id)
+        if row is None:
+            return _not_found()
+        event = request.data.get("event") if isinstance(request.data, dict) else None
+        try:
+            changed = services.ack_digest(
+                actor=request.user, channel=request_channel(request), digest=row, event=event
+            )
+        except services.ProactiveError as exc:
+            return _error(exc)
+        payload = digest_payload(row, speak_on_open=_speak_on_open(row.workspace))
+        return Response({**payload, "changed": changed})

@@ -119,3 +119,39 @@ def find_refusal(purpose, *, estimate=ZERO, priced=False, session=""):
                     estimate=estimate,
                 )
     return None
+
+
+@dataclass(frozen=True)
+class BudgetUsage:
+    """One active budget window's usage (a read for the `ai_core.budgets`
+    probe, Phase 12 D1): numbers and the budget's name only."""
+
+    budget_id: object
+    name: str
+    window: str
+    limit: Decimal
+    spent: Decimal
+
+    @property
+    def percent(self) -> int:
+        if self.limit <= 0:
+            return 100
+        return int((self.spent / self.limit) * 100)
+
+
+def usage_at_or_above(percent, *, now=None):
+    """Every active budget's daily/monthly window whose spend is at least
+    `percent` % of its limit, by name then window. Reads only."""
+    rows = []
+    for budget in AIBudget.objects.filter(is_active=True).order_by("name"):
+        for window, limit in _windows(budget, ""):
+            usage = BudgetUsage(
+                budget_id=budget.pk,
+                name=budget.name,
+                window=window,
+                limit=limit,
+                spent=spent(budget, window, now=now),
+            )
+            if usage.percent >= percent:
+                rows.append(usage)
+    return rows

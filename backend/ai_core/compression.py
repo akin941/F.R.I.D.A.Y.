@@ -69,6 +69,9 @@ COMPRESSION_BYPASS = frozenset(
         # the eval answer purpose, unconditionally: the compression arm of the
         # eval runs under the candidate purpose itself, never this one
         "memory.eval_answer",
+        # Phase 12 D18: the morning digest's number check needs the exact
+        # facts it was given
+        "proactive.digest",
         # preflight probes a provider; its payload must be exactly as written
         "ops.preflight",
     }
