@@ -9,6 +9,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { PageHeader } from "@/components/ui/page-header";
 import { Textarea } from "@/components/ui/textarea";
 import { VIEW_SCROLL_ROOT } from "@/components/shell/view-scroll";
+import { CuratorPanel } from "@/components/skills/CuratorPanel";
 import { useWorkspace } from "@/contexts/workspace-context";
 import { errorMessage } from "@/lib/api-client";
 import {
@@ -118,6 +119,7 @@ export function SkillsView() {
           Henüz beceri yok. Aşağıdan bir SKILL.md yükle ya da yaz.
         </p>
       ) : null}
+      <CuratorPanel workspaceId={workspaceId} onChanged={() => void load(workspaceId)} />
       {groups.map((group) => (
         <section key={group.status} aria-label={STATUS_LABELS[group.status]} className="flex flex-col gap-2">
           <h2 className="text-sm font-medium text-muted-foreground">{STATUS_LABELS[group.status]}</h2>

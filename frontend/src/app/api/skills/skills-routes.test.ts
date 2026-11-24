@@ -81,7 +81,23 @@ describe("skills BFF routes", () => {
     ["@/app/api/skills/versions/[versionId]/approve/route", `/api/skills/versions/${ID}/approve`, { versionId: ID }, { sha256: "a" }, `/skills/versions/${ID}/approve`],
     ["@/app/api/skills/versions/[versionId]/edit-approve/route", `/api/skills/versions/${ID}/edit-approve`, { versionId: ID }, { sha256: "a", text: "x" }, `/skills/versions/${ID}/edit-approve`],
     ["@/app/api/skills/versions/[versionId]/reject/route", `/api/skills/versions/${ID}/reject`, { versionId: ID }, {}, `/skills/versions/${ID}/reject`],
+    // Phase 12 branch 6: dismiss one curator archive suggestion.
+    ["@/app/api/skills/curator/dismiss/route", "/api/skills/curator/dismiss", {}, { run_id: ID, skill_id: ID }, "/skills/curator/dismiss"],
   ];
+
+  it("GET curator: 401 without a cookie, workspace required and a UUID, forwarded", async () => {
+    const { GET } = (await import("@/app/api/skills/curator/route")) as { GET: Handler };
+    cookiesMock.mockResolvedValue(cookieStore());
+    let fetchMock = stubBackend();
+    expect((await GET(get(`/api/skills/curator?workspace=${WS}`), p({}))).status).toBe(401);
+    cookiesMock.mockResolvedValue(cookieStore("token"));
+    expect((await GET(get("/api/skills/curator"), p({}))).status).toBe(400);
+    expect((await GET(get("/api/skills/curator?workspace=nope"), p({}))).status).toBe(400);
+    expect(fetchMock).not.toHaveBeenCalled();
+    fetchMock = stubBackend(200, { suggestions: [] });
+    expect((await GET(get(`/api/skills/curator?workspace=${WS}`), p({}))).status).toBe(200);
+    expect(fetchMock.mock.calls[0]![0].endsWith(`/skills/curator?workspace=${WS}`)).toBe(true);
+  });
 
   it.each(cases)("%s: cross-origin refused, then forwarded", async (mod, path, params, body, backend) => {
     const handler = ((await import(mod)) as Record<string, Handler>).POST!;

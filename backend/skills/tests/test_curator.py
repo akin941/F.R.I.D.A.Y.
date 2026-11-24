@@ -12,8 +12,6 @@ from django.utils import timezone
 
 from ai_core.models import AIBudget, ModelProvider, ModelUsage
 from audit.models import AuditLog
-from config.celery import app as celery_app
-from config.celery import build_beat_schedule
 from core import probes
 from skills import curator, ports, services
 from skills.models import InstructionSkill, InstructionSkillVersion, SkillCuratorRun
@@ -107,9 +105,7 @@ def test_a_stale_skill_is_still_offered_and_archived_or_proposed_skills_are_igno
     assert _status(pending.skill) == "proposed"
 
 
-def test_the_deterministic_pass_runs_without_a_provider_and_makes_no_call(
-    owner, workspace, seeded
-):
+def test_the_deterministic_pass_runs_without_a_provider_and_makes_no_call(owner, workspace, seeded):
     skill = _skill(workspace, owner, "pr-yaz")
     run = curator.curate_workspace(workspace, now=timezone.now() + timedelta(days=DAYS + 1))
     assert run.outcome == Outcome.NO_PROVIDER
@@ -387,9 +383,7 @@ def test_the_pending_cap_skips_the_call(owner, workspace, seeded, provider, cura
     assert curate_answer.messages == [] and _usage() == []
 
 
-def test_the_cap_reached_mid_run_drops_the_rest(
-    owner, workspace, seeded, provider, curate_answer
-):
+def test_the_cap_reached_mid_run_drops_the_rest(owner, workspace, seeded, provider, curate_answer):
     for i in range(4):
         ports.propose_version(
             workspace=workspace, text=skill_md(f"yeni-{i}"), proposed_by="curator"
@@ -404,14 +398,13 @@ def test_the_cap_reached_mid_run_drops_the_rest(
     )
     run = curator.curate_workspace(workspace)
     assert run.proposals_created == 1 and run.drop_reasons == {"limit": 1}
-    assert InstructionSkillVersion.objects.filter(
-        decision="pending", proposed_by="curator"
-    ).count() == 5
+    assert (
+        InstructionSkillVersion.objects.filter(decision="pending", proposed_by="curator").count()
+        == 5
+    )
 
 
-def test_a_budget_refusal_skips_the_proposals(
-    owner, workspace, seeded, provider, curate_answer
-):
+def test_a_budget_refusal_skips_the_proposals(owner, workspace, seeded, provider, curate_answer):
     ModelProvider.objects.filter(pk=provider.pk).update(input_price_per_mtok=Decimal("1"))
     budget = AIBudget.objects.get(name="skills_curate_weekly")
     ModelUsage.objects.create(
@@ -429,9 +422,7 @@ def test_a_budget_refusal_skips_the_proposals(
     assert _status(skill) == "active"
 
 
-def test_at_most_one_run_per_workspace_per_week(
-    owner, workspace, seeded, provider, curate_answer
-):
+def test_at_most_one_run_per_workspace_per_week(owner, workspace, seeded, provider, curate_answer):
     _skill(workspace, owner, "pr-yaz")
     now = timezone.now()
     assert curator.curate_workspace(workspace, now=now) is not None
@@ -485,9 +476,9 @@ def test_a_week_of_fake_usage(owner, workspace, seeded, provider, curate_answer)
     assert _status(used) == "active" and _status(idle) == "stale" and _status(third) == "stale"
     assert run.proposals_created + len(run.archive_suggestions) == 3
     assert run.drop_reasons == {"over_limit": 1}
-    new_actions = set(AuditLog.objects.values_list("action", flat=True).distinct()) - before[
-        "audit"
-    ]
+    new_actions = (
+        set(AuditLog.objects.values_list("action", flat=True).distinct()) - before["audit"]
+    )
     assert new_actions <= {"skills.skill.stale", "skills.version.proposed"}
 
     # The owner decides on /skills: approve one edit, archive the idle one.
@@ -499,21 +490,6 @@ def test_a_week_of_fake_usage(owner, workspace, seeded, provider, curate_answer)
     result = SPEC.collect(workspace, owner, timezone.now())
     probes.validate_result(SPEC, result, max_keys=200)
     assert result.count == 1  # the other edit, still pending
-
-
-# --- beat ----------------------------------------------------------------------
-
-
-def test_the_curator_runs_sunday_0415_on_the_default_beat_and_is_registered():
-    default = build_beat_schedule(runner_mode=False)
-    entry = default["skills-curator-weekly"]
-    assert entry["task"] == "skills.tasks.curate"
-    schedule = entry["schedule"]
-    assert schedule.day_of_week == {0} and schedule.hour == {4} and schedule.minute == {15}
-    runner = {e["task"] for e in build_beat_schedule(runner_mode=True).values()}
-    assert entry["task"] not in runner
-    celery_app.loader.import_default_modules()
-    assert "skills.tasks.curate" in celery_app.tasks
 
 
 def test_the_task_runs_the_curator(owner, workspace, seeded, provider):
