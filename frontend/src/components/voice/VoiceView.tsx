@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { FridayOrb, type FridayOrbState } from "@/components/voice/FridayOrb";
 import { useVoiceWake } from "@/components/voice/VoiceProvider";
+import { LiveVoicePanel } from "@/components/voice/LiveVoicePanel";
 import { WakeSettingsPanel } from "@/components/voice/WakeSettingsPanel";
 import { TaskDraftCard } from "@/components/chat/TaskDraftCard";
 import { ToolRequestCard } from "@/components/chat/ToolRequestCard";
@@ -98,9 +99,19 @@ export interface VoiceViewProps {
    * from the published voice presence.
    */
   variant?: "page" | "hud";
+  /**
+   * Phase 11 D15: render the "Canlı ses (Mac)" panel (the always-on gate
+   * and the node's storm mute) under the wake settings. The /voice page
+   * turns it on; the HUD and the component tests do not.
+   */
+  liveVoicePanel?: boolean;
 }
 
-export function VoiceView({ depsOverride, variant = "page" }: VoiceViewProps = {}) {
+export function VoiceView({
+  depsOverride,
+  variant = "page",
+  liveVoicePanel = false,
+}: VoiceViewProps = {}) {
   const full = variant === "page";
   const { activeWorkspace } = useWorkspace();
   const workspaceId = activeWorkspace?.id ?? null;
@@ -533,6 +544,7 @@ export function VoiceView({ depsOverride, variant = "page" }: VoiceViewProps = {
       {full ? (
         <>
       <WakeSettingsPanel disabled={mute.muted || !workspaceId} />
+      {liveVoicePanel ? <LiveVoicePanel workspaceId={workspaceId} /> : null}
 
       <label className="flex items-center gap-2 text-xs text-muted-foreground">
         <input

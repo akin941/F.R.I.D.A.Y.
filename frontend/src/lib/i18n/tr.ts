@@ -246,6 +246,19 @@ export const ERROR_MESSAGES = {
       "Ses bütçesi doldu. Bütçe yenilenene kadar sesli mod kullanılamaz; yazarak devam edebilirsin.",
     specific: true,
   },
+  // The node voice backstops (Phase 11 D11/D12).
+  "voice.trigger_invalid": {
+    message: "Mac'teki ses süreci isteğin nasıl başladığını bildirmedi; istek reddedildi.",
+    specific: true,
+  },
+  "voice.always_on_not_permitted": {
+    message: "Sürekli dinleme izinli değil: yanlış uyanma değerlendirmesi henüz geçmedi. Kısayol tuşuyla konuş.",
+    specific: true,
+  },
+  "voice.live_muted": {
+    message: "Mac'te canlı ses bir uyanma fırtınası yüzünden susturuldu. /voice sayfasından aç.",
+    specific: true,
+  },
   // Workspaces
   "workspace.permission_denied": {
     message: "Rolün bu çalışma alanını düzenlemeye yetmiyor.",
@@ -2031,6 +2044,46 @@ export const tr = {
     ci: "CI",
     ciUnavailable: "CI durumu okunamadı",
     noCi: "CI durumu yok (GitHub bağlı değil ya da iş henüz tamamlanmadı).",
+  },
+  // Phase 11 D11/D12/D15 (branch 5): the /voice "Canlı ses (Mac)" panel.
+  liveVoice: {
+    heading: "Canlı ses (Mac)",
+    intro:
+      "Sürekli dinleme (\"Hey Friday\") yalnızca Mac'te seçilir. Sunucu yalnızca hayır diyebilir: ölçülmüş bir yanlış uyanma değerlendirmesi geçmeden izin vermez.",
+    loading: "Canlı ses durumu yükleniyor…",
+    loadError: "Canlı ses durumu okunamadı.",
+    permitted: "Sürekli dinleme izinli",
+    notPermitted: "Sürekli dinleme izinli değil — yalnızca kısayol tuşu",
+    settingOff: "Sunucu ayarı kapalı (VOICE_LIVE_ALWAYS_ON_ENABLED).",
+    budgets: (far: string, frr: string, hours: string) =>
+      `Bütçe: saatte en fazla ${far} yanlış uyanma (en az ${hours} saat ev sesi), en fazla %${Math.round(Number(frr) * 100)} kaçırma.`,
+    noModels: "Henüz kayıtlı değerlendirme yok (manage.py voice_wake_eval record).",
+    model: (sha: string) => `Model ${sha.slice(0, 12)}…`,
+    measuredAt: (threshold: string, refractory: number) =>
+      `eşik ${threshold}, bekleme ${refractory} ms`,
+    household: (hours: string, far: string) => `Ev sesi: ${hours} saat, saatte ${far} yanlış uyanma`,
+    positives: (count: number, frr: string) =>
+      `Pozitifler: ${count} kayıt, %${Math.round(Number(frr) * 100)} kaçırma`,
+    reasons: {
+      disabled: "sunucu ayarı kapalı",
+      no_household_eval: "24 saatlik ev sesi değerlendirmesi yok",
+      far_above_budget: "yanlış uyanma oranı bütçenin üstünde",
+      no_positive_eval: "pozitif kayıt değerlendirmesi yok",
+      frr_above_budget: "kaçırma oranı bütçenin üstünde",
+      model_mismatch: "Mac'teki model ölçülen model değil",
+      threshold_mismatch: "ölçüm başka bir eşikte yapılmış",
+      storm_muted: "fırtına susturması etkin",
+    } as Record<string, string>,
+    noNodes: "Eşleşmiş Mac düğümü yok.",
+    stormBanner: (name: string) =>
+      `${name}: canlı ses susturuldu — dakikada çok fazla konuşma isteği geldi (uyanma fırtınası).`,
+    stormSince: (when: string) => `Susturma zamanı: ${when}`,
+    release: "Susturmayı kaldır",
+    releasing: "Kaldırılıyor…",
+    releaseError: "Susturma kaldırılamadı.",
+    notMuted: (name: string) => `${name}: canlı ses açık`,
+    conversationsHeading: "Son canlı ses konuşmaları",
+    noConversations: "Henüz canlı ses konuşması yok.",
   },
   // Phase 9 D11 (branch 7): the /devices "Mac düğümleri" section and the
   // node detail page. Capability availability is read-only text: policy
