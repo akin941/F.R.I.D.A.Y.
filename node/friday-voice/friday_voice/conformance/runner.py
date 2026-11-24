@@ -136,9 +136,12 @@ def _match_frames(got, want, index):
     return failures
 
 
-def run_child_case(case) -> list:
+def run_child_case(case, make_core=None) -> list:
+    """`make_core(clock)` builds the child under test (default: the
+    protocol shell alone; the tests also run every case with the voice
+    pipeline attached)."""
     clock = ManualClock()
-    core = ChildCore(clock, log_stream=io.StringIO())
+    core = make_core(clock) if make_core else ChildCore(clock, log_stream=io.StringIO())
     link = ChildLink(core)
     got = []
     failures = []

@@ -83,6 +83,8 @@ def decode_wav(data: bytes) -> bytes:
         raise ValueError("not a PCM WAV") from exc
     if channels not in (1, 2) or rate <= 0:
         raise ValueError("unsupported WAV layout")
+    if (channels, width, rate) == (1, 2, config.SAMPLE_RATE):
+        return frames[: len(frames) - len(frames) % 2]  # already the playback format
     samples = _to_float(frames, width)
     if channels == 2:
         samples = samples[: len(samples) - len(samples) % 2].reshape(-1, 2).mean(axis=1)

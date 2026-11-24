@@ -75,6 +75,14 @@ class AllowAlwaysOn:
         return True
 
 
+def request_policy(client, model_sha256):
+    """`GET /auth/nodes/voice-policy` for the loaded wake model at the
+    threshold and refractory period the detector runs at -- read from
+    `config` at call time, never from a copy (D8, D11; polled by the
+    arming policy in branch 5)."""
+    return client.voice_policy(model_sha256, config.WAKE_THRESHOLD, config.WAKE_REFRACTORY_MS)
+
+
 # --- jobs (run by a worker; see friday_voice.workers) ---
 
 
