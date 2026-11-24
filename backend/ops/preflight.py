@@ -12,7 +12,8 @@ Every outside contact goes through a module-level seam (`http_get`,
 `db_fetchone`, `redis_ping`, `celery_ping`, `worker_signing_key_id`,
 `served_spki_sha256`, `node_conformance_drift`, `gateway_factory`,
 `pin_report`, `run_command`, `node_conformance_case_counts`,
-`escape_suite_report`, `approve_request_source`) so the unit tests replace exactly that and
+`escape_suite_report`, `approve_request_source`, `drf_routes`,
+`friday_voice_dir`) so the unit tests replace exactly that and
 nothing else -- no test reaches a real provider, MCP server, browser or
 broker.
 
@@ -61,6 +62,21 @@ budget and prompt of `control.trust_check`), `node_action_actor` (the owner
 hooks declared; `approve_request` calls the approver hook, seam
 `approve_request_source`) and `harness_drivers` (per driver: disabled, or
 enabled with d4, a non-provisional snapshot and agreeing pins).
+
+Phase 11 closeout adds the live-voice checks (`check_live_voice`, read-only,
+no model call, nothing sent to a node, no `voice` import -- `voice` is a
+leaf whose contract lists `ops`): `voice_live_channel` (the `node_voice`
+kind and its authenticator reach exactly the D4 views, a walk of the live
+URL table through the seam `drf_routes`; token TTL <= 1 h),
+`voice_live_policy` (D11 through `accounts.voice_live.model_verdicts`, the
+policy endpoint's own function: `warn` while no model's latest pair passes,
+`fail` when always-on is enabled without one), `voice_live_storm` (an
+engaged `VoiceLiveMute` is a `warn` with its age), `voice_live_selftest`
+(the nightly result line at `VOICE_LIVE_SELFTEST_RESULT_PATH`),
+`friday_voice_conformance` (the `node/friday-voice` case, vector and schema
+files against `conformance.lock`, seam `friday_voice_dir`; a `warn` where
+no checkout exists) and `node_voice_state` (per active node, its last
+`voice.state`; a `warn` while none reports, the Mac session is deferred).
 
 Rules this module keeps:
 
@@ -2196,6 +2212,421 @@ def check_control():
     ]
 
 
+# --- Phase 11: local live voice (closeout) ----------------------------------
+
+# D4: the only DRF views a `node_voice` token may reach -- the chat turn,
+# the three voice endpoints, live sessions and the policy read. Named, not
+# imported: `voice` is a leaf whose contract lists `ops` (ADR-002), so this
+# module compares the routed view classes by their dotted names.
+NODE_VOICE_SURFACES = frozenset(
+    {
+        "assistant.views.ConversationMessageListView",
+        "voice.views.TranscriptionCreateView",
+        "voice.views.SpeechCreateView",
+        "voice.views.UsageReceiptView",
+        "voice.views.LiveSessionCreateView",
+        "accounts.views.NodeVoicePolicyView",
+    }
+)
+VOICE_LIVE_TOKEN_TTL_MAX_SECONDS = 3600
+# D13/M3: a green nightly self-trigger result older than this is stale.
+VOICE_LIVE_SELFTEST_MAX_AGE_HOURS = 48
+VOICE_LIVE_SELFTEST_SCHEMA = "friday-voice/selftest/v1"
+VOICE_LIVE_PENDING_MAC = "Mac session pending owner evaluation"
+FRIDAY_VOICE_LOCK = "conformance.lock"
+# What `friday-voice conformance --build` writes and the lock must cover:
+# the case files of both families, the frame vectors and the v1 schemas.
+FRIDAY_VOICE_LOCKED_GLOBS = (
+    "friday_voice/conformance/cases/*/*.json",
+    "friday_voice/protocol/vectors/frames.json",
+    "friday_voice/protocol/schemas/v1/*/*.schema.json",
+)
+_LOCK_LINE = re.compile(r"^([0-9a-f]{64})  ([A-Za-z0-9_./-]+)$")
+
+
+def drf_routes():
+    """Every routed DRF view of the running URL table, as
+    `(route, view_class, authentication classes)` -- the same walk the
+    route-walk tests make (`config/tests/test_node_voice_surfaces.py`),
+    at runtime, so a view added after the tests ran still shows."""
+    from django.urls import URLPattern, URLResolver, get_resolver
+    from rest_framework.views import APIView
+
+    def walk(resolver, prefix):
+        for pattern in resolver.url_patterns:
+            route = prefix + str(pattern.pattern)
+            if isinstance(pattern, URLResolver):
+                yield from walk(pattern, route)
+            elif isinstance(pattern, URLPattern):
+                view_class = getattr(pattern.callback, "view_class", None)
+                if view_class is None or not issubclass(view_class, APIView):
+                    continue
+                initkwargs = getattr(pattern.callback, "view_initkwargs", {}) or {}
+                auth = initkwargs.get("authentication_classes", view_class.authentication_classes)
+                yield route, view_class, list(auth)
+
+    return list(walk(get_resolver(), ""))
+
+
+def friday_voice_dir():
+    """The `node/friday-voice` checkout preflight hashes, or None when this
+    host has none (the backend image does not ship `node/`)."""
+    configured = getattr(settings, "PREFLIGHT_FRIDAY_VOICE_DIR", "") or ""
+    path = (
+        Path(configured)
+        if configured
+        else Path(settings.BASE_DIR).resolve().parent / "node" / "friday-voice"
+    )
+    return path if path.is_dir() else None
+
+
+def _view_name(view_class):
+    return f"{view_class.__module__}.{view_class.__qualname__}"
+
+
+def _accepts_kind(auth_classes, kind):
+    from accounts.authentication import PersonalAccessTokenAuthentication
+
+    return any(
+        isinstance(cls, type)
+        and issubclass(cls, PersonalAccessTokenAuthentication)
+        and kind in cls().get_accepted_kinds()
+        for cls in auth_classes
+    )
+
+
+def _check_voice_live_channel():
+    """D3/D4: the `node_voice` kind exists, maps to the node voice channel
+    and is not mintable through `/auth/tokens`; the routed views whose
+    authenticators accept it are exactly the D4 list (a walk of the live
+    URL table); the token lifetime is at most one hour."""
+    from accounts.authentication import KIND_CHANNELS, NodeVoiceTokenAuthentication
+    from accounts.models import MINTABLE_PAT_KINDS, PersonalAccessToken
+    from core.channels import CHANNEL_NODE_VOICE
+
+    name = "voice_live_channel"
+    kind = getattr(PersonalAccessToken.Kind, "NODE_VOICE", None)
+    if kind is None:
+        return CheckResult(name, FAIL, "the node_voice token kind is not registered")
+    problems = []
+    if KIND_CHANNELS.get(kind) != CHANNEL_NODE_VOICE:
+        problems.append("node_voice does not authenticate as the node_voice channel")
+    if kind in MINTABLE_PAT_KINDS:
+        problems.append("node_voice is mintable through /auth/tokens")
+    if kind not in NodeVoiceTokenAuthentication().get_accepted_kinds():
+        problems.append("NodeVoiceTokenAuthentication does not accept node_voice")
+    accepting = {
+        _view_name(view) for _route, view, auth in drf_routes() if _accepts_kind(auth, kind)
+    }
+    extra = sorted(accepting - NODE_VOICE_SURFACES)
+    missing = sorted(NODE_VOICE_SURFACES - accepting)
+    if extra:
+        problems.append(f"node_voice reaches {len(extra)} view(s) outside D4: {', '.join(extra)}")
+    if missing:
+        problems.append(f"{len(missing)} D4 view(s) not routed with it: {', '.join(missing)}")
+    ttl = _int_setting("VOICE_LIVE_TOKEN_TTL_SECONDS")
+    if ttl is None or not 0 < ttl <= VOICE_LIVE_TOKEN_TTL_MAX_SECONDS:
+        problems.append(
+            f"VOICE_LIVE_TOKEN_TTL_SECONDS={ttl} is outside 1..{VOICE_LIVE_TOKEN_TTL_MAX_SECONDS}"
+        )
+    if problems:
+        return CheckResult(name, FAIL, "; ".join(problems))
+    return CheckResult(
+        name,
+        PASS,
+        f"node_voice reaches exactly the {len(NODE_VOICE_SURFACES)} D4 views; token TTL {ttl}s",
+    )
+
+
+def _verdict_evidence_reasons(entry):
+    """A model's D11 reasons apart from `disabled` (the setting is judged
+    separately here): empty when its latest household + positives pair
+    passes at the threshold it was measured at."""
+    return [reason for reason in entry["verdict"].reasons if reason != "disabled"]
+
+
+def _check_voice_live_policy():
+    """D11 judged exactly as the policy endpoint judges it: the same
+    `accounts.voice_live.model_verdicts` (the LATEST row per model and kind,
+    the pair at the same threshold), never a copy. `warn` while no model's
+    latest pair passes (pending owner evaluation), `pass` when one does,
+    `fail` when VOICE_LIVE_ALWAYS_ON_ENABLED is on and none does."""
+    from accounts import voice_live
+
+    name = "voice_live_policy"
+    enabled = voice_live.always_on_enabled()
+    workspace = _installation_owner_workspace()
+    verdicts = (
+        voice_live.model_verdicts(workspace.owner, workspace.pk) if workspace is not None else []
+    )
+    passing = [entry for entry in verdicts if not _verdict_evidence_reasons(entry)]
+    setting = f"VOICE_LIVE_ALWAYS_ON_ENABLED={'on' if enabled else 'off'}"
+    if passing:
+        best = passing[0]
+        detail = (
+            f"{setting}; model {best['model_sha256'][:12]} passes at threshold "
+            f"{best['threshold']} / {best['refractory_ms']} ms"
+        )
+        if not enabled:
+            detail += " (always-on stays off until the setting is enabled)"
+        return CheckResult(name, PASS, detail)
+    reasons = sorted(
+        {reason for entry in verdicts for reason in _verdict_evidence_reasons(entry)}
+    ) or [voice_live.REASON_NO_HOUSEHOLD, voice_live.REASON_NO_POSITIVES]
+    measured = f"{len(verdicts)} wake model(s) measured"
+    if enabled:
+        return CheckResult(
+            name,
+            FAIL,
+            f"{setting} but no model's latest evaluation pair passes: "
+            f"{', '.join(reasons)} ({measured})",
+        )
+    return CheckResult(
+        name,
+        WARN,
+        f"always-on not permitted: {', '.join(reasons)} ({measured}; {VOICE_LIVE_PENDING_MAC})",
+    )
+
+
+def _age_label(seconds):
+    seconds = max(0, int(seconds))
+    if seconds < 3600:
+        return f"{seconds // 60} min"
+    if seconds < 2 * 86400:
+        return f"{seconds // 3600} h"
+    return f"{seconds // 86400} d"
+
+
+def _check_voice_live_storm():
+    """D12: an unreleased `accounts.VoiceLiveMute` is a `warn` with its age
+    (the owner releases it on screen, /voice). Whole installation: `ops` is
+    operations tooling, nothing here reaches a view or an agent tool."""
+    from django.utils import timezone
+
+    from accounts.models import VoiceLiveMute
+
+    engaged = list(
+        VoiceLiveMute.objects.filter(released_at__isnull=True)
+        .select_related("node_device")
+        .order_by("engaged_at")
+    )
+    if not engaged:
+        return [CheckResult("voice_live_storm", PASS, "no storm mute engaged")]
+    now = timezone.now()
+    return [
+        CheckResult(
+            f"voice_live_storm:{mute.node_device.name}",
+            WARN,
+            f"storm mute ({mute.reason}) engaged "
+            f"{_age_label((now - mute.engaged_at).total_seconds())} ago: "
+            "release it on screen (/voice)",
+        )
+        for mute in engaged
+    ]
+
+
+def _parse_selftest_line(text):
+    """The last non-empty line of the result file as the `friday-voice/
+    selftest/v1` document, or None when it is not one."""
+    lines = [line for line in text.splitlines() if line.strip()]
+    if not lines:
+        return None
+    try:
+        document = json.loads(lines[-1])
+    except ValueError:
+        return None
+    if not isinstance(document, dict) or document.get("schema") != VOICE_LIVE_SELFTEST_SCHEMA:
+        return None
+    if document.get("result") not in ("pass", "fail", "error"):
+        return None
+    return document
+
+
+def _check_voice_live_selftest():
+    """D13/M3: the nightly self-trigger's one-line result
+    (`VOICE_LIVE_SELFTEST_RESULT_PATH`, written by `friday-voice selftest
+    --nightly --result-file`): `pass` when green and younger than 48 h,
+    `warn` when not configured, missing or stale (the Mac is pending or
+    asleep), `fail` when the last run failed or could not judge."""
+    import datetime
+
+    from django.utils import timezone
+
+    name = "voice_live_selftest"
+    configured = getattr(settings, "VOICE_LIVE_SELFTEST_RESULT_PATH", "") or ""
+    if not configured:
+        return CheckResult(
+            name, WARN, f"VOICE_LIVE_SELFTEST_RESULT_PATH not set ({VOICE_LIVE_PENDING_MAC})"
+        )
+    path = Path(configured).expanduser()
+    if not path.exists():
+        return CheckResult(name, WARN, f"no nightly result yet ({VOICE_LIVE_PENDING_MAC})")
+    try:
+        document = _parse_selftest_line(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError) as exc:
+        return CheckResult(name, FAIL, f"result file unreadable: {_error_label(exc)}")
+    if document is None:
+        return CheckResult(
+            name, FAIL, f"the result file is not a {VOICE_LIVE_SELFTEST_SCHEMA} line"
+        )
+    try:
+        at = datetime.datetime.fromisoformat(str(document.get("at", "")).replace("Z", "+00:00"))
+    except ValueError:
+        return CheckResult(name, FAIL, "the result line has no valid `at` timestamp")
+    if at.tzinfo is None:
+        at = at.replace(tzinfo=datetime.UTC)
+    age = (timezone.now() - at).total_seconds()
+    mode = document.get("mode", "?")
+    wakes = int(document.get("wakes") or 0)
+    posted = int(document.get("posted_turns") or 0)
+    counts = f"wakes {wakes}, posted turns {posted}"
+    detail = f"{mode} run {_age_label(age)} ago: {document['result']} ({counts})"
+    if document["result"] != "pass":
+        reason = str(document.get("reason") or "")[:60]
+        return CheckResult(name, FAIL, detail + (f", reason {reason}" if reason else ""))
+    if age < -300:
+        return CheckResult(name, FAIL, "the result line is dated in the future")
+    if mode != "nightly":
+        return CheckResult(name, WARN, f"{detail} (not a nightly run; {VOICE_LIVE_PENDING_MAC})")
+    if age > VOICE_LIVE_SELFTEST_MAX_AGE_HOURS * 3600:
+        return CheckResult(
+            name, WARN, f"{detail} (stale: older than {VOICE_LIVE_SELFTEST_MAX_AGE_HOURS} h)"
+        )
+    return CheckResult(name, PASS, detail)
+
+
+def _read_lock(path):
+    """`{relative path: sha256}` of a conformance.lock, or None when a line
+    is malformed."""
+    entries = {}
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if not line.strip() or line.startswith("#"):
+            continue
+        match = _LOCK_LINE.match(line)
+        if match is None or ".." in match.group(2).split("/"):
+            return None
+        entries[match.group(2)] = match.group(1)
+    return entries
+
+
+def _sha256_file(path):
+    import hashlib
+
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _check_friday_voice_conformance():
+    """The `friday-voice/v1` case, vector and schema files in the checkout
+    match `node/friday-voice/conformance.lock` (written by `friday-voice
+    conformance --build`, checked by `--check` in CI). Hashes only: the
+    backend imports nothing from the child. Where the checkout is absent
+    (the backend image ships no `node/`), a `warn`, never a failure."""
+    name = "friday_voice_conformance"
+    root = friday_voice_dir()
+    if root is None:
+        return CheckResult(name, WARN, "conformance not checkable here (no node/friday-voice)")
+    lock = root / FRIDAY_VOICE_LOCK
+    if not lock.is_file():
+        return CheckResult(
+            name, FAIL, f"{FRIDAY_VOICE_LOCK} missing (run friday-voice conformance --build)"
+        )
+    entries = _read_lock(lock)
+    if not entries:
+        return CheckResult(name, FAIL, f"{FRIDAY_VOICE_LOCK} is malformed or empty")
+    on_disk = {
+        path.relative_to(root).as_posix()
+        for pattern in FRIDAY_VOICE_LOCKED_GLOBS
+        for path in root.glob(pattern)
+    }
+    drift = sorted(
+        rel
+        for rel, digest in entries.items()
+        if not (root / rel).is_file() or _sha256_file(root / rel) != digest
+    )
+    drift += sorted(on_disk - set(entries))
+    if drift:
+        shown = ", ".join(drift[:5]) + (f" (+{len(drift) - 5} more)" if len(drift) > 5 else "")
+        return CheckResult(
+            name,
+            FAIL,
+            f"drift against {FRIDAY_VOICE_LOCK}: {shown} (run friday-voice conformance --check)",
+        )
+    families = Counter(
+        rel.split("/")[3] for rel in entries if rel.startswith("friday_voice/conformance/cases/")
+    )
+    return CheckResult(
+        name,
+        PASS,
+        f"{len(entries)} files match {FRIDAY_VOICE_LOCK} ({families['host']} host + "
+        f"{families['child']} child cases, vectors, schemas)",
+    )
+
+
+def _voice_state_row(node, status, now):
+    """`(row, reported)` for one active node's `voice.state`."""
+    from nodes.selectors import voice_summary
+
+    label = f"node_voice_state:{node.name}"
+    if node.voice_state_at is None:
+        return (
+            CheckResult(
+                label,
+                WARN,
+                f"{status}, protocol v{node.protocol_version}, no voice.state reported yet",
+            ),
+            False,
+        )
+    summary = voice_summary(node, status=status, online=status == "connected", now=now)
+    age = _age_label((now - node.voice_state_at).total_seconds())
+    detail = (
+        f"{status}, state {summary['state']} (reported {node.voice_state} {age} ago), "
+        f"mode {node.voice_mode or '-'}, wake accepts {node.voice_wake_accepts_today}, "
+        f"discards {node.voice_wake_discards_today}, storm mutes {node.voice_storm_mutes_today}"
+    )
+    return CheckResult(label, PASS, detail), True
+
+
+def _check_node_voice_state():
+    """D15: per active node, whether it reports `voice.state` (protocol v2)
+    and what the HUD shows from it. A `warn`, never a failure, when no node
+    does: the Swift voice host is the deferred Mac session (M1)."""
+    from django.utils import timezone
+
+    active = _active_nodes()
+    if not active:
+        return [CheckResult("node_voice_state", WARN, f"no node paired ({VOICE_LIVE_PENDING_MAC})")]
+    now = timezone.now()
+    rows, reported = [], False
+    for node, status in active:
+        row, has_state = _voice_state_row(node, status, now)
+        rows.append(row)
+        reported = reported or has_state
+    if not reported:
+        rows.append(
+            CheckResult(
+                "node_voice_state", WARN, f"no node reports voice.state ({VOICE_LIVE_PENDING_MAC})"
+            )
+        )
+    return rows
+
+
+def check_live_voice():
+    """Phase 11 configuration and health, read-only (no model call, nothing
+    sent to a node, no `voice` import): `voice_live_channel`,
+    `voice_live_policy`, `voice_live_storm`, `voice_live_selftest`,
+    `friday_voice_conformance` and `node_voice_state`. Details carry setting
+    names, codes, counts, short hashes, ages and node names -- never a
+    token, a transcript, a path or audio."""
+    return [
+        _guarded("voice_live_channel", _check_voice_live_channel),
+        _guarded("voice_live_policy", _check_voice_live_policy),
+        *_guarded_rows("voice_live_storm", _check_voice_live_storm),
+        _guarded("voice_live_selftest", _check_voice_live_selftest),
+        _guarded("friday_voice_conformance", _check_friday_voice_conformance),
+        *_guarded_rows("node_voice_state", _check_node_voice_state),
+    ]
+
+
 CHECKS = (
     ("web", check_web),
     ("bff", check_bff),
@@ -2213,6 +2644,7 @@ CHECKS = (
     ("graph", check_graph),
     ("nodes", check_nodes),
     ("control", check_control),
+    ("live_voice", check_live_voice),
 )
 
 
