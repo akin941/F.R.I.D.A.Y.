@@ -13,7 +13,8 @@ FRONTEND := cd frontend &&
 .PHONY: up up-daily down logs secrets test lint fmt shell migrate makemigrations \
 	harness-images harness-smoke harness-runner deploy-smoke preflight \
 	test-backend test-frontend test-e2e lint-backend lint-frontend \
-	frontend-install frontend-dev frontend-build e2e-install voice-models
+	frontend-install frontend-dev frontend-build e2e-install voice-models \
+	friday-voice-test friday-voice-install
 
 # Generates any missing secret into the gitignored deploy/docker/.env
 # (never overwrites an existing key). `make up` runs it first, so a fresh
@@ -87,6 +88,30 @@ frontend-build:
 # The owner-trained keyword model is copied from VOICE_WAKE_MODEL_SRC.
 voice-models:
 	$(FRONTEND) node scripts/voice-models.mjs
+
+# --- Node voice child (Phase 11 branch 2, brief D16) ---
+# node/friday-voice is its own uv project (pyproject.toml + uv.lock); it
+# imports nothing from backend/. `friday-voice-test` is the CI job locally.
+# `friday-voice-install` (on the Mac) copies the package outside the signed
+# app bundle and installs the locked environment there; the Swift host
+# launches $(FRIDAY_VOICE_HOME)/.venv/bin/friday-voice run and refuses to
+# when the installed uv.lock sha256 differs from the one compiled into it.
+FRIDAY_VOICE_DIR := node/friday-voice
+FRIDAY_VOICE_HOME ?= $(HOME)/Library/Application Support/Friday/voice
+
+friday-voice-test:
+	cd $(FRIDAY_VOICE_DIR) && uv sync --frozen && uv run ruff check . && \
+		uv run ruff format --check . && uv run friday-voice conformance --check && \
+		uv run python scripts/vendor_scrubber.py --check && \
+		uv run python scripts/snapshot_pipecat.py --check && \
+		uv run friday-voice conformance && uv run pytest
+
+friday-voice-install:
+	mkdir -p "$(FRIDAY_VOICE_HOME)"
+	rsync -a --delete --exclude .venv --exclude __pycache__ --exclude .pytest_cache \
+		--exclude .ruff_cache --exclude tests $(FRIDAY_VOICE_DIR)/ "$(FRIDAY_VOICE_HOME)/"
+	cd "$(FRIDAY_VOICE_HOME)" && uv sync --frozen --no-dev
+	shasum -a 256 "$(FRIDAY_VOICE_HOME)/uv.lock"
 
 # --- Harness runner (Phase 3 branch 8; docs/runbooks/harness-first-run.md) ---
 # Builds both CLI images. Pin the real base-image digest and CLI versions in

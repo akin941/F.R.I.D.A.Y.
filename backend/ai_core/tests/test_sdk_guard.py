@@ -62,3 +62,44 @@ def test_speech_guard_pattern_matches_what_it_claims():
         assert SPEECH_IMPORT_RE.search(line), line
     assert not SPEECH_IMPORT_RE.search("import whisperish")
     assert not SPEECH_IMPORT_RE.search("# whisper is out of process")
+
+
+# Phase 11 brief D2 / D16: Piper is GPL-3.0 and stays the speech server's
+# separate executable (roadmap §c.8). No Python file ANYWHERE in the
+# repository -- backend, the node voice child (node/friday-voice), deploy
+# sidecars, scripts -- may import it. Virtualenvs, node_modules and hidden
+# directories (worktrees, caches) are not the repository's own code.
+REPO_ROOT = BACKEND_DIR.parent
+PIPER_IMPORT_RE = re.compile(r"^\s*(?:import|from)\s+piper\b", re.MULTILINE)
+REPO_SKIP_DIRS = SKIP_DIRS | {"node_modules", "site-packages"}
+
+
+def _repo_python_files():
+    for path in REPO_ROOT.rglob("*.py"):
+        parts = path.relative_to(REPO_ROOT).parts
+        if any(part in REPO_SKIP_DIRS or part.startswith(".") for part in parts[:-1]):
+            continue
+        yield path
+
+
+def test_no_piper_import_anywhere_in_the_repository():
+    files = list(_repo_python_files())
+    assert any(p.relative_to(REPO_ROOT).parts[0] == "node" for p in files), (
+        "the scan must cover node/friday-voice"
+    )
+    violations = [
+        str(path.relative_to(REPO_ROOT))
+        for path in files
+        if PIPER_IMPORT_RE.search(path.read_text(encoding="utf-8"))
+    ]
+    assert violations == [], (
+        f"`import piper` in {violations} -- Piper (GPL-3.0) runs only as the speech "
+        "server's separate executable (Phase 11 brief D2, D16)."
+    )
+
+
+def test_piper_guard_pattern_matches_what_it_claims():
+    for line in ("import piper", "from piper import PiperVoice", "  from piper.voice import x"):
+        assert PIPER_IMPORT_RE.search(line), line
+    for line in ("import piperish", "# piper runs out of process", '"import piper"'):
+        assert not PIPER_IMPORT_RE.search(line), line
