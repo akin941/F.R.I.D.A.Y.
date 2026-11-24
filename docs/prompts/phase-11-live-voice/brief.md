@@ -1376,6 +1376,132 @@ least two weeks old": 2026-11-10).** Full record, deviations and hashes in
 CI, and `friday-voice replay --server` completes a push-to-talk turn
 against a local dev server with FakeAdapter and the fake speech provider.
 
+**Status: implemented 2026-11-20** (`feat/p11-pipecat-pipeline`; see
+"Branch 3 implementation notes" below).
+
+## Branch 3 implementation notes (`feat/p11-pipecat-pipeline`, 2026-11-20)
+
+Implemented as scoped (D7 adapter, D8, D14), with these recorded choices:
+
+1. **A stage engine hosted in Pipecat, driven directly by the child.**
+   `friday_voice/pipeline.py` (`VoicePipeline`) holds the D8 stages as a
+   pure, clock-injected, single-threaded engine behind the branch 2
+   protocol shell (`ChildCore(pipeline=...)`; every fail-closed rule stays
+   the shell's and runs first, and a release aborts the turn: jobs
+   cancelled, open utterances `stop_playback`ed, chat stream closed).
+   Pipecat supplies the detectors (its Silero ONNX wrapper over the
+   **pinned** v5.1.2 file, never the copy in the wheel; its
+   `LocalSmartTurnAnalyzerV3` over the bundled `smart-turn-v3.2-cpu.onnx`,
+   hash-checked against `models.json`) and the runtime:
+   `pipecat_adapter.voice_processor` hosts the engine as a Pipecat
+   `FrameProcessor`, and `run_pipeline` runs it in a real `Pipeline` /
+   `PipelineWorker` / `WorkerRunner` (tested). The stdio child and the
+   replay harness drive the engine directly because Pipecat's runner is
+   asyncio on a real clock and the D14 replay needs a manual one. Pipecat
+   1.15 deprecates `PipelineTask`/`PipelineRunner` in favour of
+   `PipelineWorker`/`WorkerRunner`, so the adapter surface lists the new
+   names. `pipecat_adapter.quiet()` disables Pipecat's (unscrubbed)
+   loguru output, and `load_smart_turn` forces the analyzer's
+   `PIPECAT_SMART_TURN_LOG_DATA` audio log off (it would write captured
+   audio to `./smart_turn_audio_log/`, ADR-011 decision 3; tested with the
+   variable set).
+2. **The protocol loop never blocks on the network.** Every Friday call
+   is a job (`friday_voice/workers.py`): a generator yielding events,
+   `Delay` (scripted latency) and `Closer` (the SSE stream's close).
+   `ThreadWorker` (stdio child: one daemon thread per job, events posted to
+   the loop's inbox) and `SimWorker` (tests and replay: discrete-event
+   scheduling on the `ManualClock`, so the chat stream and the speech calls
+   overlap in manual time, reproducibly).
+3. **Child tunables** live in `friday_voice/config.py` (D8 list plus
+   `TURN_TRAILING_SILENCE_MS` 200, `TURN_HARD_SILENCE_MS` 1 500,
+   `UTTERANCE_MAX_S` 30, `PTT_MIN_MS` 300, `PLAY_CHUNK_MS` 200,
+   `ERROR_HOLD_MS` 2 000, `REPLAY_REGRESSION_PCT` 20), integers only
+   (scores in thousandths; `WAKE_THRESHOLD` = 500 is the browser's 0.5).
+   `pipeline.request_policy()` builds the voice-policy request from
+   `config` at call time (tested by monkeypatching the constants); branch 5
+   polls it.
+4. **Push-to-talk** opens a live session (`X-Friday-Voice-Trigger: ptt`,
+   reused while the last activity is younger than `SILENCE_CLOSE_S`),
+   uploads every frame while the key is down (a press shorter than 300 ms
+   is a slip: nothing uploaded), and a key-down during a reply cuts it
+   (playback stopped, stream closed) and listens again — the "Durdur by
+   hotkey" fallback of R3 before branch 4's barge-in. **Wake mode** is
+   wired (`WakeGate`, VAD + smart-turn capture, the wake earcon, the
+   accept counter) and tested with a scripted detector and scripted
+   arming; `friday-voice run` uses `RefuseAlwaysOn` and loads no detector,
+   so `always_on` runs as `armed_ptt` until branch 5.
+5. **Errors as D8**, with one reading recorded: the child→host set has no
+   "send me a credential" message, so "ask the host for a new credential"
+   is `release_mic` with reason `credential_refused` (the host re-mints);
+   the child then shows `error` and consumes nothing until a new
+   `credential` frame arrives. A 401 is retried once only when a newer
+   credential arrived while the request was in flight (the job compares
+   the client's credential generation after the response). A 403
+   `voice.always_on_not_permitted` disarms wake mode; a 423
+   `voice.live_muted` is `storm_muted` + `release_mic(storm)` until a mute
+   on → off cycle; 429/5xx/network → the error earcon, nothing spoken,
+   `error` for `ERROR_HOLD_MS`. STT and TTS retry a network error once;
+   the chat turn never.
+6. **TLS (D6 `ca_sha256`).** `HttpFridayClient` verifies `https://` against
+   the trust store (certifi, plus an optional `--ca-file` for replay) and
+   then requires the pinned fingerprint in the **verified** chain, checked
+   in an httpcore trace hook on `connection.start_tls.complete`, i.e.
+   before a request byte (and the token) is written. CPython 3.12 keeps
+   `get_verified_chain` private (`SSLObject._sslobj`); 3.13 exposes it —
+   the code takes either. The hook is unit-tested with fake TLS objects;
+   no TLS server runs in CI.
+7. **Replies.** Sentences from the segmenter port, one `play` utterance per
+   sentence (`t<turn>s<index>`, 200 ms chunks), one TTS request in flight
+   plus one sentence prefetched ahead of the one playing (tested with a
+   host that holds playback open). A `draft` event adds "Kart ekranda."
+   after the reply. Stage timings ride on every speech request (the
+   browser's rule): `end_of_turn_ms` (end of owner speech → end-of-turn
+   decision), `llm_first_sentence_ms`, `playback_start_ms`, `total_ms`,
+   `wake_to_listen_ms`.
+8. **Trace (server).** `VoiceTurnTrace.source` (`web`|`node`, written when
+   the row is created, from `request_channel`), `wake_to_listen_ms`,
+   `interrupted_at_ms`; the two stages join `CLIENT_STAGES`, so the speech
+   endpoint's `timings` serializer and `record_trace` accept them from
+   either channel. Migration `voice/0002`.
+9. **Replay.** `fixtures/` holds five synthetic WAVs (tones and digital
+   silence) and `replay.json` (scripted transcripts, replies, latencies at
+   the §c.1 budgets), generated by `scripts/make_fixtures.py` (`--check` in
+   CI). Overhead is measured in manual-clock time as "end of owner speech
+   → first playback start" minus the scripted server time on that path;
+   baseline (`baselines/replay.json`): overhead p50 200 ms (the 200 ms
+   trailing-silence wait of the VAD scenarios; push-to-talk is 0).
+   `replay --check` runs in CI; a synthetic 25 % regression and a real one
+   (a longer trailing-silence wait) both fail it (tested).
+10. **Language routing** (`friday_voice/language.py`): Turkish letters →
+    `tr`; else stop-word counts; a tie → the transcript's language, else
+    `tr`. Vectors `vectors/language.json` (pytest only; the browser has no
+    per-sentence router).
+11. **Done when, checked here 2026-11-20:** `friday-voice replay --check`
+    green on the fixture set; `friday-voice replay --server
+    http://127.0.0.1:8011 --token-file <file>` against `manage.py
+    runserver` (`AI_FAKE_PROVIDER=true`, `seed_ai_defaults`, a paired test
+    node, a minted `node_voice` token) completed both push-to-talk
+    scenarios with audio played; the server recorded `node_voice` voice
+    turns and a `VoiceTurnTrace` with `source=node`. The automated version
+    of that run is the closeout e2e (branch 8).
+
+### Owner steps (pending) — `feat/p11-pipecat-pipeline`, recorded 2026-11-20
+
+1. Run the independent Sonnet 5 review of this branch and fix findings
+   until APPROVE (CLAUDE.md "Reviews").
+2. Confirm the reading in note 5 (`release_mic(credential_refused)` is the
+   child's request for a new credential) and note 1 (stage engine driven
+   directly, hosted in Pipecat via the adapter).
+3. **Mac (deferred: Mac session, M1/M4).** On the Mac: run
+   `uv run pytest -m real_models` with `FRIDAY_VOICE_MODEL_DIR` pointing at
+   the node model directory (`make voice-models --node`) so the pinned
+   Silero file is scored (here only the bundled smart-turn model and
+   Pipecat's own Silero copy could be exercised); check the CA pin against
+   the real server's chain (a Caddy internal CA must be in the trust store
+   the child uses, or passed as the install's CA file); measure the real
+   end-of-turn, STT, first-sentence and first-audio latencies from
+   `VoiceTurnTrace` rows with `source=node` (M4 item 3).
+
 ### 4. `feat/p11-barge-in` — barge-in, self-trigger rule on the AEC signal
 
 **Scope.** D9, D10:
@@ -1651,7 +1777,7 @@ is written with the Mac rows pending owner evaluation.
 | brief | `docs/p11-brief` | This brief (full, from the stub; stub goal, scope, checkpoint and owner step kept), MASTER_PLAN §AA row 11 Brief/Status | Phase 10 closeout; Phase 10 brief | **implemented 2026-11-23** (docs only; plan-review rounds 1 and 2 findings addressed 2026-11-23; awaits re-review to APPROVE) |
 | 1 | `feat/p11-node-voice-channel` | `node_voice` credential + mint, `CHANNEL_NODE_VOICE`, chat/voice endpoint acceptance, personal reads, node-action proposals, live sessions, route walk, ADR-011 amendment | Phase 10 closeout; brief approved | **implemented 2026-11-20** (server side complete; the Swift host's use of the mint is M1, deferred: Mac session; see "Branch 1 implementation notes") |
 | 2 | `feat/p11-voice-child-protocol` | `node/friday-voice` package, pins + step 0, `friday-voice/v1` framing/schemas/vectors, reference host + echo double, conformance (host and child families), import/listener guards, CI job, dependency manifest, ADR-013 note | brief approved (parallel with 1) | **implemented 2026-11-20** (step 0 recorded; 28 host + 23 child cases all-pass in process and live; owner steps below) |
-| 3 | `feat/p11-pipecat-pipeline` | Pipecat pipeline, detector ports, gateway STT/chat/TTS clients, segmenter + language routing, push-to-talk, replay harness + baseline, trace fields | 1, 2 | planned |
+| 3 | `feat/p11-pipecat-pipeline` | Pipecat pipeline, detector ports, gateway STT/chat/TTS clients, segmenter + language routing, push-to-talk, replay harness + baseline, trace fields | 1, 2 | **implemented 2026-11-20** (fixture replay + baseline in CI; `replay --server` turn completed against a local dev server; real-model checks and latencies: deferred: Mac session; see "Branch 3 implementation notes") |
 | 4 | `feat/p11-barge-in` | Session state machine, barge-in, self-trigger window + content rule, shared vectors, echo scenarios, ADR-015 note (d4) | 3 | planned |
 | 5 | `feat/p11-always-on` | Arming policy, `accounts.VoiceWakeEvaluation` gate (latest row, threshold match), trigger backstop, storms (client + `accounts.VoiceLiveMute` server backstop, 423 from the authenticator), silence close, fail closed, `/voice` live panel, ADR-015 note (d5, d3) | 3 (parallel with 4) | planned |
 | 6 | `feat/p11-wake-eval-harness` | CI self-trigger release gate, `selftest`, `wake-eval` FAR/FRR harness, `--from-report`, eval doc | 4, 5 | planned |
@@ -1816,7 +1942,7 @@ met".
 | FAR ≤ 0.2 / h on 24 h household audio | M4 item 1 → `VoiceWakeEvaluation` | pending owner evaluation (Mac session; owner step 1) |
 | FRR ≤ 10 % | M4 item 2 | pending owner evaluation (Mac session) |
 | Latency p50 ≤ 1.5 s, p95 ≤ 2.5 s (local) | M4 item 3 | pending owner evaluation (Mac session) |
-| Replay pipeline overhead within baseline | Branch 3 replay check | pending (branch 3) |
+| Replay pipeline overhead within baseline | Branch 3 replay check | baseline recorded 2026-11-20 (overhead p50 200 ms on the fixture set); `friday-voice replay --check` in CI |
 | `friday-voice/v1` conformance, reference host and child | Branch 2 | pending (branch 2) |
 | Swift host conformance | M1 | pending owner evaluation (Mac session) |
 | Always-on gate refuses without evidence | Branch 5 tests + `voice_live_policy` preflight | pending (branch 5) |
