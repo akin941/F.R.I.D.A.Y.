@@ -2820,3 +2820,21 @@ answers them:
    the branch table. Barge-in stays off in `friday-voice run` until branch 5
    loads the detectors. This is recorded for tracking only. **Fix:** none
    required.
+
+### Known follow-ups — `feat/p11-always-on` (unresolved review notes, recorded at merge 2026-11-24)
+
+1. **LOW — the `wake` trigger backstop checks any model
+   (`backend/accounts/voice_live.py`).** `NodeVoiceTriggerGuard`'s `wake`
+   check uses `any_model_permitted`: it asks whether ANY measured model's
+   latest evaluation pair passes, because the server cannot see which model
+   the child loaded. A child that lies about its model could pass this
+   backstop. The brief and the module docstring already say the gate is
+   child-enforced and the backstop only bounds an honest but faulty child.
+   **Fix:** none required. Optionally have the child send the model sha256
+   in a header so the backstop can check that model's verdict.
+2. **LOW — frontend live-panel tests not run in review
+   (`frontend/src/components/voice/LiveVoicePanel.test.tsx`).** The review
+   worktree had no `frontend/node_modules`, so the panel and BFF route tests
+   were read but not executed. At merge the frontend lint, typecheck and the
+   full vitest suite (including these files) ran green on the integration
+   branch. **Fix:** confirm `make test` stays green for the frontend in CI.
