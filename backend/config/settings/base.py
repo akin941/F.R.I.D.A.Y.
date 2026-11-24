@@ -923,6 +923,13 @@ CONNECTOR_WRITE_LEASE_SECONDS = env.int("CONNECTOR_WRITE_LEASE_SECONDS", default
 # (`RELAY_BEARER_TOKEN`). The one tunable: how long an async read's one
 # call may take (D11; the worker never retries it).
 N8N_ASYNC_READ_TIMEOUT_SECONDS = env.int("N8N_ASYNC_READ_TIMEOUT_SECONDS", default=120)
+# Phase 12 closeout: the relay sidecar's tool ceiling (`BRIDGE_ALLOWED_TOOLS`
+# there), names only. Compose hands the same variable with the same default
+# to the sidecar and to web/worker, so `manage.py preflight` (`n8n_allowlist`)
+# can compare it with the manifest. Never read by any request path.
+N8N_RELAY_ALLOWED_TOOLS = env(
+    "N8N_RELAY_ALLOWED_TOOLS", default="wf_Ab12Cd34Ef56Gh78,wf_Hb34Kd56Mf78Np90"
+)
 # Google bridge (Phase 5 branch 8, brief D9). Credentials are NOT settings:
 # `GOOGLE_OAUTH_CLIENT_ID` / `_CLIENT_SECRET` / `_REFRESH_TOKEN` are read from
 # the environment at call time by `connectors.bridges.google` only (never

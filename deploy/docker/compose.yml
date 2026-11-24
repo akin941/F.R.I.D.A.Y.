@@ -129,6 +129,9 @@ services:
       # n8n (Phase 12 D9): the `n8n-relay` sidecar's internal URL only; the
       # trigger's bearer lives in that sidecar alone (RELAY_BEARER_TOKEN).
       N8N_MCP_URL: "${N8N_MCP_URL:-}"
+      # The relay's tool ceiling (names only, the same value and default as
+      # the sidecar's BRIDGE_ALLOWED_TOOLS below), read by preflight only.
+      N8N_RELAY_ALLOWED_TOOLS: "${N8N_RELAY_ALLOWED_TOOLS:-wf_Ab12Cd34Ef56Gh78,wf_Hb34Kd56Mf78Np90}"
       # Google mail/calendar bridge (Phase 5 branch 8, brief D9): the
       # Desktop-app OAuth client and the owner's refresh token printed once
       # by the host-side `manage.py connect_google`. Env only -- never the
