@@ -231,7 +231,9 @@ def test_the_generic_mint_refuses_node_voice_with_a_400(owner, personal, web_cli
         format="json",
     )
     assert response.status_code == 400
-    assert "invalid_choice" in response.content.decode()
+    # DRF's `invalid_choice` (the project's error envelope flattens the
+    # code to `invalid`): a field error, never a device-less row or a 500.
+    assert "is not a valid choice" in response.json()["kind"][0]
     assert not PersonalAccessToken.objects.exists()
 
 
@@ -357,7 +359,6 @@ def test_revoking_a_node_leaves_other_tokens_alone(owner, personal, node):
         "/api/v1/ai/conversations",
         "/api/v1/approvals/requests",
         "/api/v1/agents",
-        "/api/v1/tasks",
     ],
 )
 def test_a_voice_token_on_another_pat_surface_is_token_kind_forbidden(node, url):

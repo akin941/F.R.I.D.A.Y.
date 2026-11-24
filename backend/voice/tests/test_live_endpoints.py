@@ -194,9 +194,10 @@ def test_an_empty_live_conversation_is_reused_not_duplicated(voice):
     assert Conversation.objects.filter(opened_via="node_voice").count() == 1
 
 
-def test_reuse_follows_the_last_activity(owner, workspace, voice, frozen_now):
+def test_reuse_follows_the_last_activity(owner, workspace, node, frozen_now):
+    _, secret = node
     t0 = frozen_now(timezone.now())
-    first = open_session(voice)["conversation_id"]
+    first = open_session(bearer(mint_token(secret)))["conversation_id"]
     conversation = Conversation.objects.get(pk=first)
     Message.objects.create(
         workspace=workspace,
@@ -207,12 +208,13 @@ def test_reuse_follows_the_last_activity(owner, workspace, voice, frozen_now):
         channel="node_voice",
     )
     Message.objects.filter(conversation=conversation).update(created_at=t0 + timedelta(minutes=20))
-    # 45 min after creation, 25 min after the last message: reused.
+    # 45 min after creation, 25 min after the last message: reused. (The
+    # host re-mints its 15-minute token as it would.)
     frozen_now(t0 + timedelta(minutes=45))
-    assert open_session(voice)["conversation_id"] == first
+    assert open_session(bearer(mint_token(secret)))["conversation_id"] == first
     # 31 min after the last message: a new one.
     frozen_now(t0 + timedelta(minutes=51))
-    assert open_session(voice)["conversation_id"] != first
+    assert open_session(bearer(mint_token(secret)))["conversation_id"] != first
 
 
 def test_another_channels_conversation_is_never_reused(owner, workspace, voice, frozen_now):
