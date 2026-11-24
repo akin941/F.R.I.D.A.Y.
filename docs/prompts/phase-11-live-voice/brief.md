@@ -2111,3 +2111,32 @@ answers them:
    `ValidationError` with code `voice.trigger_invalid` from
    `has_permission` (a wake trigger stays 403); keep the existing
    missing/unknown-header 400 test. No design change.
+
+### Known follow-ups — `feat/p11-voice-child-protocol` (unresolved review notes, recorded at merge 2026-11-24)
+
+1. **LOW — ADR-013 implementation note overstates the import guard
+   (`docs/adr/ADR-013-friday-node-protocol.md`).** The note says the
+   backend imports nothing from the child with tests on both sides, but
+   only the child-side test exists
+   (`tests/test_guards.py::test_nothing_is_imported_from_backend`); no
+   backend test or import-linter contract refuses imports of
+   `friday_voice`. Harmless today (`node/` is not on the backend path),
+   but the claim is inaccurate. **Fix:** reword the note to say the
+   child-side test is the only guard, or add a small backend test or an
+   import-linter forbidden contract for `friday_voice`.
+2. **LOW — inconsistent dates for branch 2.** The status reads
+   "implemented 2026-11-20" while the step 0 record says it was checked
+   against PyPI on 2026-11-24; the ADR note and the allowlist row are
+   also dated 2026-11-20. **Fix:** date the status, ADR note and
+   allowlist row 2026-11-24, or word the step 0 line as a re-check.
+3. **LOW — reference host keeps the mic on a non-acquire child state
+   (`node/friday-voice/friday_voice/reference/host.py`).** `_on_state`
+   never releases a held mic when the child reports a state outside
+   `ACQUIRE_STATES` (`off`, `muted`, `error`, `storm_muted`); the mic is
+   released only by the child's `release_mic` frame, a local event or a
+   failure. A child that reports `error` without `release_mic` keeps
+   capture flowing to it (the child drops it, so not exploitable in the
+   shell), and the Swift host (M1) would copy the weaker rule. **Fix:**
+   in `_on_state`, call `_release("child_state:<state>")` when the child
+   state is not in `ACQUIRE_STATES` and `mic_held` is true, and add a
+   host conformance case for it.
