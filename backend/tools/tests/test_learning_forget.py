@@ -162,6 +162,7 @@ def test_forget_archives_exactly_the_sources_memories_and_rejects_its_proposals(
     assert set(audit.metadata) == {
         "kind",
         "operation_id",
+        "repeat",
         "episodes",
         "memories_archived",
         "memories_rejected",
