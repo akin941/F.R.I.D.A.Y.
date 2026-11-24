@@ -123,3 +123,71 @@ export function archiveSkill(skillId: string): Promise<SkillDetail> {
 export function restoreSkill(skillId: string): Promise<SkillDetail> {
   return apiPostJson(`/api/skills/${id(skillId)}/restore`);
 }
+
+/**
+ * The weekly curator (Phase 12 D16): stale marks, at most three proposals
+ * (pending versions, decided on each skill's page) and archive suggestions
+ * the owner archives or dismisses here. The curator never applies anything.
+ */
+export type ArchiveReason = "unused" | "duplicate" | "outdated" | "merged";
+
+export interface CuratorRun {
+  id: string;
+  week: string;
+  outcome: string;
+  started_at: string;
+  finished_at: string | null;
+  stale_marked: number;
+  reactivated: number;
+  skills_considered: number;
+  proposals_created: number;
+  proposals_dropped: number;
+  drop_reasons: Record<string, number>;
+  proposal_version_ids: string[];
+}
+
+export interface ArchiveSuggestion {
+  run_id: string;
+  skill_id: string;
+  skill_name: string;
+  skill_status: SkillStatus;
+  use_count: number;
+  last_used_at: string | null;
+  reason: ArchiveReason;
+  into_skill_id: string | null;
+  into_skill_name: string | null;
+}
+
+export interface CuratorState {
+  workspace: string;
+  latest_run: CuratorRun | null;
+  suggestions: ArchiveSuggestion[];
+}
+
+export const ARCHIVE_REASON_LABELS: Record<ArchiveReason, string> = {
+  unused: "Uzun süredir kullanılmıyor",
+  duplicate: "Başka bir beceriyle aynı işi yapıyor",
+  outdated: "Güncelliğini yitirmiş",
+  merged: "Başka bir beceriyle birleştirilmesi önerildi",
+};
+
+export const CURATOR_ACTION_LABELS: Record<string, string> = {
+  edit: "düzenleme",
+  merge: "birleştirme",
+};
+
+export function fetchCurator(workspaceId: string): Promise<CuratorState> {
+  return apiGetJson(`/api/skills/curator?${ws(workspaceId)}`);
+}
+
+export function dismissSuggestion(runId: string, skillId: string): Promise<unknown> {
+  return apiPostJson(`/api/skills/curator/dismiss`, { run_id: runId, skill_id: skillId });
+}
+
+/** A curator version's provenance, in Friday's words (no model text). */
+export function curatorNote(provenance: Record<string, unknown> | null | undefined): string | null {
+  if (!provenance || typeof provenance.curator_run_id !== "string") return null;
+  const action = typeof provenance.action === "string" ? CURATOR_ACTION_LABELS[provenance.action] : undefined;
+  const week = typeof provenance.week === "string" ? provenance.week : "";
+  return [action ? `Haftalık küratör ${action} önerisi` : "Haftalık küratör önerisi", week].filter(Boolean).join(" · ");
+}

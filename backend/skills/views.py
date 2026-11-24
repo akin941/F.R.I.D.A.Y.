@@ -17,6 +17,9 @@ through `for_actor()`; another workspace's row is a 404.
 - `POST /api/v1/skills/versions/<id>/approve` `{"sha256"}`
 - `POST /api/v1/skills/versions/<id>/edit-approve` `{"sha256", "text"}`
 - `POST /api/v1/skills/versions/<id>/reject` `{"sha256"?}`
+- `GET  /api/v1/skills/curator[?workspace=]` -- the latest curator run and
+  its open archive suggestions (D16)
+- `POST /api/v1/skills/curator/dismiss` `{"run_id", "skill_id"}`
 
 There is no delete (a 405) and no bulk endpoint: one item at a time.
 """
@@ -35,15 +38,19 @@ from core.api_errors import service_error_response
 from core.channels import request_channel
 from core.permissions import IsOwner, IsWebChannel
 from skills import selectors, services
-from skills.models import InstructionSkill, InstructionSkillVersion
+from skills.models import InstructionSkill, InstructionSkillVersion, SkillCuratorRun
+from skills.probes import open_archive_suggestions
 from skills.serializers import (
     STATUSES,
     DecisionSerializer,
+    DismissSuggestionSerializer,
     EditApproveSerializer,
     RejectSerializer,
     SkillTextSerializer,
+    curator_run_payload,
     skill_detail,
     skill_summary,
+    suggestion_payload,
     version_payload,
 )
 from workspaces.models import Workspace
@@ -307,3 +314,69 @@ class VersionRejectView(APIView):
         except (services.SkillServiceError, services.SkillPermissionDenied) as exc:
             return _error(exc)
         return Response(version_payload(version))
+
+
+class CuratorView(APIView):
+    """`GET /api/v1/skills/curator[?workspace=]`: the latest curator run's
+    counts and its open archive suggestions (D16). Edit and merge proposals
+    are pending versions, listed on each skill's page."""
+
+    permission_classes = _PERMISSIONS
+
+    def get(self, request):
+        workspace = _workspace(request)
+        if not _owns(request, workspace):
+            return _not_found()
+        latest = (
+            SkillCuratorRun.objects.for_actor(request.user, workspace=workspace)
+            .order_by("-started_at")
+            .first()
+        )
+        open_rows = open_archive_suggestions(request.user, workspace)
+        into_ids = [s.get("into_skill_id") for _, s, _ in open_rows if s.get("into_skill_id")]
+        names = {
+            str(pk): name
+            for pk, name in selectors.skills_for(request.user, workspace)
+            .filter(pk__in=into_ids)
+            .values_list("pk", "name")
+        }
+        return Response(
+            {
+                "workspace": str(workspace.pk),
+                "latest_run": curator_run_payload(latest),
+                "suggestions": [
+                    suggestion_payload(run, suggestion, skill, names)
+                    for run, suggestion, skill in open_rows
+                ],
+            }
+        )
+
+
+class CuratorDismissView(APIView):
+    """`POST /api/v1/skills/curator/dismiss` `{"run_id", "skill_id"}`: the
+    owner dismisses one archive suggestion (one item at a time)."""
+
+    permission_classes = _PERMISSIONS
+    parser_classes = [JSONParser]
+
+    def post(self, request):
+        serializer = DismissSuggestionSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        run = (
+            SkillCuratorRun.objects.for_actor(request.user)
+            .select_related("workspace")
+            .filter(pk=serializer.validated_data["run_id"])
+            .first()
+        )
+        if run is None:
+            return _not_found()
+        try:
+            services.dismiss_archive_suggestion(
+                actor=request.user,
+                channel=request_channel(request),
+                run=run,
+                skill_id=serializer.validated_data["skill_id"],
+            )
+        except (services.SkillServiceError, services.SkillPermissionDenied) as exc:
+            return _error(exc)
+        return Response(status=status.HTTP_204_NO_CONTENT)

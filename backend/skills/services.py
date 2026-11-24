@@ -23,7 +23,7 @@ from django.utils import timezone
 from audit.services import record_audit
 from core.owner_web import OwnerWebRequired, require_owner_web
 from core.unattended import deny_if_unattended
-from skills.models import InstructionSkill, InstructionSkillVersion
+from skills.models import InstructionSkill, InstructionSkillVersion, SkillCuratorRun
 from skills.skill_md import (
     ParsedSkill,
     SkillBundleError,
@@ -416,9 +416,60 @@ def restore_skill(*, actor, channel, skill):
         return locked
 
 
+def dismiss_archive_suggestion(*, actor, channel, run, skill_id):
+    """The owner dismisses one open archive suggestion of a curator run
+    (D16). The skill itself is untouched; archiving it is the separate
+    one-click `archive_skill`."""
+    deny_if_unattended("skill_decision")
+    _require_owner(actor=actor, workspace=run.workspace, channel=channel)
+    with transaction.atomic():
+        locked = SkillCuratorRun.objects.select_for_update().get(pk=run.pk)
+        suggestions = [dict(s) for s in (locked.archive_suggestions or [])]
+        match = next(
+            (
+                s
+                for s in suggestions
+                if s.get("skill_id") == str(skill_id) and not s.get("dismissed")
+            ),
+            None,
+        )
+        if match is None:
+            raise SkillInvalidState("No open archive suggestion for this skill.")
+        match["dismissed"] = True
+        locked.archive_suggestions = suggestions
+        locked.save(update_fields=["archive_suggestions", "updated_at"])
+        _audit(
+            "skills.curator.suggestion_dismissed",
+            actor=actor,
+            workspace=locked.workspace,
+            resource=locked,
+            run_id=str(locked.pk),
+            skill_id=str(skill_id),
+            reason=match.get("reason", ""),
+        )
+        return locked
+
+
 def record_use(skill_id, *, now=None):
     """Usage telemetry (the curator's input, D15/D16): one counter bump
-    and the last-used time. The only write a turn's skill use makes."""
+    and the last-used time, and a `stale` skill becomes `active` again (D16:
+    "a stale skill used again becomes active"; metadata, audited as
+    `skills.skill.reactivated`). The only writes a turn's skill use makes."""
+    now = now or timezone.now()
     InstructionSkill.objects.filter(pk=skill_id).update(
-        use_count=F("use_count") + 1, last_used_at=now or timezone.now()
+        use_count=F("use_count") + 1, last_used_at=now
     )
+    if InstructionSkill.objects.filter(pk=skill_id, status=Status.STALE).update(
+        status=Status.ACTIVE, updated_at=now
+    ):
+        skill = InstructionSkill.objects.select_related("workspace").get(pk=skill_id)
+        _audit(
+            "skills.skill.reactivated",
+            actor=None,
+            workspace=skill.workspace,
+            resource=skill,
+            skill_id=str(skill.pk),
+            previous=Status.STALE,
+            version_id=str(skill.current_version_id or ""),
+            source="use",
+        )

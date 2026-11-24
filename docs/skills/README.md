@@ -115,11 +115,57 @@ and voice, yields the same classification, drafts, approvals, reads, router
 prompts and voice-cap result as no skill
 (`skills/tests/test_no_capability.py`).
 
+### The weekly curator (D16)
+
+`skills.tasks.curate` — a static beat entry, Sunday 04:15 `TIME_ZONE`
+(after the 8B reflection), a fixed system task, never an owner schedule.
+Per workspace with usable skills, at most once per ISO week
+(`skills.SkillCuratorRun`), inside
+`unattended_run(allowed_purposes={"skills.curate"})`:
+
+1. **Stale pass (no model call).** An active skill unused for
+   `SKILLS_STALE_DAYS` (45; since its last use, or since its current version
+   was approved) becomes `stale` — still offered to the matcher, shown
+   dimmed. A stale skill used again is `active` again (at the moment of use
+   in `record_use`, and in the pass). Audited `skills.skill.stale` /
+   `.reactivated`.
+2. **One `skills.curate` call** (mid tier; the `skills` budget plus
+   `skills_curate_weekly`, 0.5 USD on the Sunday run day) over the usable
+   skills' names, descriptions, bodies (cut to
+   `SKILLS_CURATE_BODY_MAX_CHARS`, block ≤ `SKILLS_CURATE_INPUT_MAX_CHARS`)
+   and usage. No call when there is no usable skill, when 5 curator
+   proposals are already pending, without the prompt or an eligible
+   provider (`personal_data` for the personal workspace), or on a budget
+   refusal (`skipped_budget`).
+3. **At most 3 proposals from a closed set:** `edit` (a new pending version
+   of one skill), `merge` (a new pending version of one of two skills, plus
+   an archive suggestion for the other) and `archive` (a suggestion with a
+   closed reason: `unused`, `duplicate`, `outdated`). Every SKILL.md passes
+   the parser and refusals like an upload; anything else is dropped and
+   counted on the run (`drop_reasons`). A skill with a pending owner or
+   playbook version is left alone; only a skill whose whole body was shown
+   may be rewritten.
+4. **Never applied.** Versions stay `pending` until the owner approves that
+   hash; archive suggestions wait for the owner's one-click archive (or a
+   dismiss). Inside its run every other effect — approvals, tasks, memory,
+   schedules, connector calls, other purposes, Celery dispatch, owner skill
+   decisions — is refused with a `proactive.unattended_denied` row
+   (`skills/tests/test_curator_unattended.py`).
+
+Prompt pack: `docs/prompts/phase-12-reach/skills-curate.md`.
+
 ### Surfaces
 
 - `/skills`: list by status, upload, editor; `/skills/<id>`: the version in
   use, each pending version with its diff, approve / edit-then-approve /
-  reject, archive / restore.
+  reject, archive / restore; a curator version is labelled with its action
+  and week. `/skills` also shows the latest curator run and its open archive
+  suggestions (Arşivle / Yoksay).
 - API: `/api/v1/skills…` (owner, web session only; PATs, node secret and
   node voice token are 401; members and agents 403; another workspace 404).
-- Notices / digest: the `skills.proposals` probe (pending versions).
+- Curator API: `GET /api/v1/skills/curator[?workspace=]` (latest run and
+  open suggestions), `POST /api/v1/skills/curator/dismiss`
+  `{"run_id", "skill_id"}` (owner, web, one item).
+- Notices / digest: the `skills.proposals` probe (pending versions and the
+  latest curator run's open archive suggestions, labelled
+  "Arşiv önerisi: <approved name>").

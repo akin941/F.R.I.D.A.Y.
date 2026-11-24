@@ -62,4 +62,5 @@ def test_seed_ai_defaults_seeds_the_prompt_and_the_budget():
     template = PromptTemplate.objects.get(name="friday_skills_match")
     assert template.active_version.content == seed_ai_defaults.FRIDAY_SKILLS_MATCH_V1
     budget = AIBudget.objects.get(name="skills")
-    assert budget.purposes == [PURPOSE]
+    # Branch 6 adds the curator's purpose to the same row.
+    assert budget.purposes[0] == PURPOSE and "skills.curate" in budget.purposes

@@ -16,6 +16,7 @@ import {
   STATUS_LABELS,
   approveVersion,
   archiveSkill,
+  curatorNote,
   editAndApprove,
   fetchSkill,
   proposeVersion,
@@ -212,6 +213,11 @@ function PendingVersion({
           {PROPOSER_LABELS[version.proposed_by]} · sha256{" "}
           <span className="font-mono">{version.sha256.slice(0, 16)}…</span>
         </p>
+        {version.proposed_by === "curator" && curatorNote(version.provenance) ? (
+          <p className="text-xs text-muted-foreground" data-testid="curator-note">
+            {curatorNote(version.provenance)}. Sen onaylayana kadar kullanılmaz; farkı aşağıda.
+          </p>
+        ) : null}
       </CardHeader>
       <CardContent className="flex flex-col gap-3">
         <pre className="overflow-x-auto rounded-md bg-muted p-3 text-xs" aria-label="Fark" data-testid="skill-diff">

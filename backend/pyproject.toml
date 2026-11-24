@@ -337,6 +337,10 @@ forbidden_modules = ["connectors", "nodes", "assistant", "proactive"]
 ignore_imports = [
     "skills.tests.** -> assistant.**",
     "skills.tests.** -> accounts.**",
+    # Branch 6: the curator's D2 test calls the schedule and connector
+    # services inside its run to prove each is refused.
+    "skills.tests.test_curator_unattended -> proactive.**",
+    "skills.tests.test_curator_unattended -> connectors.**",
 ]
 
 [[tool.importlinter.contracts]]
@@ -539,6 +543,8 @@ ignore_imports = [
     "proactive.tests.** -> connectors.**",
     # The alias walk reads every connector manifest (Phase 12 branch 3).
     "assistant.tests.** -> connectors.**",
+    # Branch 6: the curator's D2 test calls a connector read inside its run.
+    "skills.tests.test_curator_unattended -> connectors.**",
 ]
 
 # harness may import connectors (the `github_open_pr` gate, PR/CI reads)
@@ -770,6 +776,9 @@ forbidden_modules = ["proactive"]
 # fixtures (which seed digest rows); production `skills` never reaches it.
 ignore_imports = [
     "skills.tests.** -> assistant.tests.**",
+    # Branch 6: the curator's D2 test calls the schedule service inside its
+    # run to prove it is refused.
+    "skills.tests.test_curator_unattended -> proactive.**",
 ]
 
 # ... and assistant / hud only through its narrow read surface,
