@@ -2493,3 +2493,38 @@ brief left open or that branches 6 and 7 build on:
 4. Mac session M1 (deferred: Mac session): re-measure the Phase 11 voice
    latency targets with one active skill (the matcher adds at most 600 ms
    to a voice turn). No Swift change and no protocol surface.
+
+### Known follow-ups (LOW) — `feat/p12-skills-core`, recorded 2026-11-24
+
+These review notes were left unresolved when the branch merged into the
+integration branch.
+
+1. **POST resolves any visible workspace before the owner check
+   (`backend/skills/views.py`).** `SkillListView.post` and
+   `SkillUploadView.post` resolve any workspace the actor can see via
+   `for_actor`. Parsing and the upload read run before the owner check,
+   which only happens in `services.propose_from_owner`. A non-owner who can
+   see a workspace gets a 403 where an unknown workspace gets a 404, and
+   the parse work runs first. `IsOwner` is installation-level, not
+   workspace-level. Fix: apply the same `_owns(request, workspace)` check
+   to POST that GET uses, so a non-owned workspace returns 404 before any
+   parsing.
+2. **`/skill x` prefix can leak when a `skill.<name>` route fires
+   (`backend/assistant/views.py`).** When a `skill.<name>` route fires and
+   the utterance also starts with `/skill x`, `turn_content` falls back to
+   the raw content, so the `/skill x` prefix reaches the router and the
+   completion. The `else` branch resets it. Unlikely edge. Fix: strip the
+   prefix whenever `prefixed_skill` is not `None`, and only choose
+   `forced_skill` by precedence.
+3. **A skill use is recorded before the completion runs
+   (`backend/assistant/services.py`).** `select_turn_skill` calls
+   `record_use` before the completion runs. A completion that later fails
+   still counts as a skill use in `use_count` and `last_used_at`, which
+   feed the stale marking in branch 6. Fix: record the use after the
+   stream completes, or accept the over-count and document it.
+4. **The upload size guard relies on `CONTENT_LENGTH`
+   (`backend/skills/views.py`).** A chunked upload with no
+   `CONTENT_LENGTH` skips the pre-parse refusal. The frontend proxy and
+   the `upload.size > max_bytes` check still bound it afterwards. Fix:
+   optionally set `DATA_UPLOAD_MAX_MEMORY_SIZE` or
+   `FILE_UPLOAD_MAX_MEMORY_SIZE`, or cap with a limited reader.
