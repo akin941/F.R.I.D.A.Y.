@@ -12,7 +12,10 @@ conformance suite. Branch 3 (`feat/p11-pipecat-pipeline`) plugs the voice
 pipeline in behind the same shell: wake gate (wired; always-on is refused
 until branch 5), turn capture, Friday's STT / chat / TTS clients, the
 segmenter port, per-sentence language routing, `play` frames, and the
-replay harness.
+replay harness. Branch 4 (`feat/p11-barge-in`) adds barge-in on the
+AEC-cleaned signal, the self-trigger window and content rules, the session
+state machine with its exhaustive transition table, and the barge-in and
+echo replay scripts (residual 0 / 0.3 / 1.0).
 
 ## Layout
 
@@ -26,10 +29,12 @@ replay harness.
 | `friday_voice/pipeline.py` | `VoicePipeline`: the D8 stages, the error rules, the turn timer |
 | `friday_voice/{wake,turn}.py` | `WakeGate` + wake detectors; `TurnCapture` + VAD / smart-turn detectors and their scripted doubles |
 | `friday_voice/client.py`, `fakes.py` | `HttpFridayClient` (the five endpoints, CA pin) and `FakeFriday` |
+| `friday_voice/session.py` | `derive_state` (the one state precedence) and `TRANSITIONS` (every D6 state x every host input; `tests/test_session.py` checks each cell against the real child) |
+| `friday_voice/{barge_in,self_trigger}.py` | `BargeInMonitor` (D9) and `SelfTriggerFilter` + the port of `self-trigger.ts` (D10) |
 | `friday_voice/workers.py` | `ThreadWorker` (stdio) and `SimWorker` (manual clock) for the network jobs |
 | `friday_voice/{segmenter,language,audio,config}.py` | sentence segmenter (port of `segmenter.ts`), tr/en routing, PCM/WAV helpers, every child tunable |
-| `friday_voice/replay.py`, `fixtures/`, `baselines/replay.json` | the replay harness, its synthetic fixtures and the overhead baseline |
-| `vectors/` | shared segmenter vectors (also run by vitest) and language vectors |
+| `friday_voice/replay.py`, `fixtures/`, `baselines/replay.json` | the replay harness, its synthetic fixtures (`replay.json`, `barge_in.json`) and the overhead baseline |
+| `vectors/` | shared segmenter and self-trigger vectors (also run by vitest) and language vectors |
 | `friday_voice/pipecat_adapter.py` | the only door to Pipecat; `pipecat_surface.json` is its snapshot |
 | `friday_voice/log.py`, `_scrubber_vendored.py` | stderr log, scrubbed with the vendored ADR-012 scrubber |
 | `models.json`, `friday_voice/models.py` | pinned detector models (shared entries equal the browser's manifest) |

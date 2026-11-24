@@ -147,3 +147,40 @@ observation. The menu-bar icon on the Mac stays the primary indicator
 (Mac session M1). Drafts from a live voice turn (`node_voice`) render as
 the same cards on `/chat/<id>` and are confirmed only by a click there;
 nothing on the HUD decides anything. Decisions 1 and 3–7 are unchanged.
+
+## Implementation note — decision 4 on the echo-cancelled signal (Phase 11 branch 4, 2026-11-20)
+
+Decision 4 now holds for the Mac node's voice child in its full-duplex form
+(`feat/p11-barge-in`; brief D9, D10). While Friday speaks, the child's
+barge-in VAD and (with always-on armed) its wake detector are **fed the
+host's AEC-cleaned capture** instead of being suppressed. Two filters stand
+behind them, both applied to the transcript before any chat turn is
+posted (`node/friday-voice/friday_voice/self_trigger.py`):
+
+1. **Window rule** (the decision as written): a wake detection while
+   playback runs or within 1.5 s after it ended, and every barge-in, marks
+   its utterance *suspect*; a suspect transcript that matches recent TTS
+   text is discarded.
+2. **Content rule** (stricter than the decision): any transcript —
+   wake-initiated, push-to-talk or barge-in — that matches what Friday
+   spoke in the last 60 s is discarded, whatever the timing.
+
+"Matches" has one definition in two languages: the child's Python port of
+the browser's `self-trigger.ts` (Turkish lower-casing, NFC, wake-phrase
+stripping, containment or ≥ 60 % token overlap for ≥ 2 tokens), pinned by
+shared vectors (`node/friday-voice/vectors/self_trigger.json`) that pytest
+and vitest both run. A discard posts no turn, speaks nothing, increments
+the day's `wake_discards_today` (the `voice.state` counter the HUD shows)
+and keeps the session open.
+
+The decision's self-trigger test exists in CI with fakes in its branch 4
+form: the reference host's `EchoDouble` leaks Friday's own playback into
+the capture at residual 0.3 and 1.0 (a failing canceller) and a scripted
+wake detector fires on "Hey Friday, terminali aç." while it plays — no turn
+is posted and the discard is counted; a negative control with the filter
+disabled does post the turn, so the test proves the filter and not the
+fake. With a perfect canceller (residual 0.0) a detection captures no
+speech and nothing is uploaded at all. Branch 6 turns this into the release
+gate over the dedicated fixture; the real-model run is the nightly Mac job
+(M3, pending owner evaluation). Decisions 1–3 and 5–7 are unchanged; a
+barge-in turn is an ordinary voice turn under decision 1's capability cap.
