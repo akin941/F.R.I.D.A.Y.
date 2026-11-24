@@ -1,0 +1,55 @@
+{
+  "$comment": "Phase 11 brief D13: the CI self-trigger release gate (scripts/make_fixtures.py). `friday-voice selftest --ci` plays the clip as Friday's own reply through the reference host's EchoDouble at every residual, with a scripted wake detector firing on it; the run fails on any posted echo turn, draft or spoken reply, and the negative control (filter off) must post the turn.",
+  "clip": {
+    "text": "Hey Friday, terminali aç.",
+    "wav": "selftrigger_hey_friday_terminali_ac.wav"
+  },
+  "question": {
+    "text": "bir örnek komut söyle",
+    "language": "tr"
+  },
+  "heard": {
+    "text": "Hey Friday, terminali aç",
+    "language": "tr"
+  },
+  "reply_to_question": [
+    {
+      "type": "chunk",
+      "text": "Hey Friday, terminali aç."
+    },
+    {
+      "type": "done",
+      "message_id": "00000000-0000-4000-8000-00000000000c"
+    }
+  ],
+  "reply_to_echo": [
+    {
+      "type": "draft",
+      "kind": "tool",
+      "source_message_id": "00000000-0000-4000-8000-00000000000d",
+      "tool_name": "node_action",
+      "payload": {}
+    },
+    {
+      "type": "done",
+      "message_id": "00000000-0000-4000-8000-00000000000a"
+    }
+  ],
+  "residuals": [
+    0.0,
+    0.3,
+    1.0
+  ],
+  "echo_delay_ms": 40,
+  "negative_control_residuals": [
+    0.3,
+    1.0
+  ],
+  "latencies": {
+    "session": 30,
+    "stt": 300,
+    "chat_first": 450,
+    "chat_chunk": 40,
+    "tts": 150
+  }
+}

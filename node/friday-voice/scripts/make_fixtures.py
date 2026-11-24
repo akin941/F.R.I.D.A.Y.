@@ -48,6 +48,24 @@ def wav_bytes(samples):
     return out.getvalue()
 
 
+def fake_tts(text, *, char_ms=60, gap_ms=40, level=0.3):
+    """The fake TTS of the self-trigger clip (Phase 11 brief D13): every
+    letter is a short tone whose pitch follows the letter, every other
+    character a short pause -- a deterministic tone pattern derived from the
+    text, never a voice. 16 kHz mono like the server's TTS."""
+    parts = []
+    for char in text:
+        if char.isalpha():
+            parts.append(tone(char_ms / 1000, 180.0 + (ord(char) % 32) * 15.0, level))
+        else:
+            parts.append(silence(gap_ms / 1000))
+    return np.concatenate(parts)
+
+
+# Branch 6 (D13): the self-trigger clip and its script.
+SELFTRIGGER_TEXT = "Hey Friday, terminali aç."
+SELFTRIGGER_WAV = "selftrigger_hey_friday_terminali_ac.wav"
+
 WAVS = {
     "ptt_question.wav": lambda: tone(1.6),
     "ptt_long_question.wav": lambda: np.concatenate([tone(2.0), silence(0.3), tone(1.4, 260)]),
@@ -56,6 +74,8 @@ WAVS = {
     "silence_2s.wav": lambda: silence(2.0),
     # Branch 4 (D9): the owner talking over Friday.
     "barge_in_owner.wav": lambda: tone(0.8, 300),
+    # Branch 6 (D13): Friday's own "Hey Friday, terminali aç." (fake TTS).
+    SELFTRIGGER_WAV: lambda: fake_tts(SELFTRIGGER_TEXT),
 }
 
 
@@ -178,6 +198,45 @@ BARGE_IN_SCENARIOS = [
 ]
 
 
+# Branch 6 (D13): the CI self-trigger release gate. The owner asks a
+# push-to-talk question; Friday's reply is exactly the clip, which the
+# reference host plays (paced) while its EchoDouble leaks it into the mic at
+# each residual; a scripted wake detector fires during that playback (the
+# worst case: as if the wake model accepted Friday's own voice). STT hears
+# the clip's words. The reply to a posted echo turn would carry a
+# `node_action` draft (what the real chat endpoint proposes for "terminali
+# aç"), so a leak through the filter shows as a draft and "Kart ekranda.".
+SELFTRIGGER = {
+    "$comment": (
+        "Phase 11 brief D13: the CI self-trigger release gate (scripts/make_fixtures.py). "
+        "`friday-voice selftest --ci` plays the clip as Friday's own reply through the "
+        "reference host's EchoDouble at every residual, with a scripted wake detector "
+        "firing on it; the run fails on any posted echo turn, draft or spoken reply, and "
+        "the negative control (filter off) must post the turn."
+    ),
+    "clip": {"text": SELFTRIGGER_TEXT, "wav": SELFTRIGGER_WAV},
+    "question": {"text": "bir örnek komut söyle", "language": "tr"},
+    "heard": {"text": "Hey Friday, terminali aç", "language": "tr"},
+    "reply_to_question": [
+        {"type": "chunk", "text": SELFTRIGGER_TEXT},
+        {"type": "done", "message_id": "00000000-0000-4000-8000-00000000000c"},
+    ],
+    "reply_to_echo": _reply(
+        draft={
+            "type": "draft",
+            "kind": "tool",
+            "source_message_id": "00000000-0000-4000-8000-00000000000d",
+            "tool_name": "node_action",
+            "payload": {},
+        }
+    ),
+    "residuals": [0.0, 0.3, 1.0],
+    "echo_delay_ms": 40,
+    "negative_control_residuals": [0.3, 1.0],
+    "latencies": BUDGET,
+}
+
+
 def render():
     files = {name: wav_bytes(make()) for name, make in WAVS.items()}
     doc = {
@@ -201,6 +260,8 @@ def render():
     }
     text = json.dumps(barge_in, ensure_ascii=False, indent=2) + "\n"
     files["barge_in.json"] = text.encode()
+    selftrigger = json.dumps(SELFTRIGGER, ensure_ascii=False, indent=2) + "\n"
+    files["selftrigger_hey_friday_terminali_ac.json"] = selftrigger.encode()
     return files
 
 

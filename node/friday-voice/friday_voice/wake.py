@@ -94,3 +94,34 @@ class OpenWakeWordDetector:
 
     def reset(self) -> None:
         self._model.reset()
+
+
+class OpenWakeWordEvalDetector(OpenWakeWordDetector):
+    """The FAR/FRR harness's detector (`friday-voice wake-eval`, D13): the
+    pinned melspectrogram and embedding graphs of `model_dir` (refused
+    unless both match their pins) and the keyword head under evaluation at
+    `keyword_path` -- not necessarily pinned yet: the owner measures a newly
+    trained `hey_friday` before pinning it. `model_sha256` is the head's
+    content hash, the key the always-on gate is judged by (D11). Never used
+    by `friday-voice run`, which loads only the pinned head."""
+
+    def __init__(self, model_dir, keyword_path, manifest=None):
+        from pathlib import Path
+
+        model_dir = models.default_model_dir(manifest) if model_dir is None else model_dir
+        states = models.verify(model_dir, ("melspectrogram", "embedding"), manifest)
+        if any(state != "ok" for state in states.values()):
+            raise models.ModelNotArmable("feature graphs missing, unpinned or modified")
+        keyword_path = Path(keyword_path)
+        if not keyword_path.is_file():
+            raise models.ModelNotArmable("the keyword model file does not exist")
+        from openwakeword.model import Model  # lazy: heavy
+
+        self.model_sha256 = models.sha256_file(keyword_path)
+        self._keyword = keyword_path.stem
+        self._model = Model(
+            wakeword_models=[str(keyword_path)],
+            melspec_model_path=str(models.path_of(model_dir, "melspectrogram", manifest)),
+            embedding_model_path=str(models.path_of(model_dir, "embedding", manifest)),
+            inference_framework="onnx",
+        )
