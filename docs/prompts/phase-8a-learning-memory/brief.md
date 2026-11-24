@@ -724,7 +724,7 @@ from yesterday".
 | # | Status |
 |---|---|
 | brief (`docs/friday-3-roadmap`) | **implemented 2026-11-20** (draft brief; awaits Sonnet 5 plan review) |
-| 1 `feat/p8-ingestion-core` | **implemented 2026-11-20** (sources, mapping, scrubber + corpus gate, episodes, port, TTL beat, forget/restore (episodes), counters, owner API, contract, ADR-012 note; awaits Sonnet 5 review). Merged after branch 2: its migration is `0007_ingestion_core` |
+| 1 `feat/p8-ingestion-core` | **implemented 2026-11-20** (sources, mapping, scrubber + corpus gate, episodes, port, TTL beat, forget/restore (episodes), counters, owner API, contract, ADR-012 note; review fixes applied 2026-11-24 (idempotent forget-source, placeholder-safe caps, scoped audit view); awaits Sonnet 5 re-review). Merged after branch 2: its migration is `0007_ingestion_core` |
 | 2 `feat/p8-core-blocks` | **implemented 2026-11-20** — see "Branch 2 implementation notes" below; awaits independent Sonnet 5 review |
 | 3 `feat/p8-hook-relay` | **implemented 2026-11-20** — see "Branch 3 implementation notes" below; awaits independent Sonnet 5 review |
 | 4 `feat/p8-source-producers` | **implemented 2026-11-20** — git commit producer (runner `commit_log` primitive, cursor, authorship rules), harness outcome producer (discovery + implementation, every terminal path), calendar metadata producer; see "Branch 4 implementation notes" below; awaits independent Sonnet 5 review. Migration `harness/0013_repo_commit_cursor` |
@@ -937,6 +937,20 @@ fully replaced; corpus rows added). `path:~/../x` (a key climbing above `~`)
 is now an invalid key, hence unmapped, instead of normalising to `~/x`. The
 PAT wording in this section and branch 2's matrix now says 401.
 
+Review fixes, second pass (branch 1, 2026-11-24): `forget_source` is
+idempotent — a repeat forget while the source is still forgotten (double
+click, retry, or a forget after the owner resumed it) reuses the pending
+operation id instead of minting a new one, so `restore_source` brings back
+every episode either call trashed (audit metadata gains `repeat`). All
+post-scrub caps (episode text, metadata strings and keys, the unmapped short
+form) go through `scrubber.truncate_scrubbed`, which drops a placeholder
+straddling the cap whole instead of leaving a `[SECRET:aws_k` fragment. The
+unmapped short form applies the source (personal) workspace's scrub terms.
+The audit view lists episodes only from workspaces the actor still owns
+(`owner_workspaces`), not every workspace `for_actor()` admits. Note: the
+reviewed branch was already merged into the integration branch (merge
+92a7303); these fixes land on top of it.
+
 ## Known follow-ups (from review, unresolved at merge)
 
 - **LOW — D11 reference.** D11 cites "ADR-009 decision 3a" for the TTL
@@ -962,6 +976,24 @@ PAT wording in this section and branch 2's matrix now says 401.
   D4 mapping alone decides the target workspace; add a test that a hook token
   bound to personal lands a mapped firm `cwd` only in the firm workspace, and
   only when the owner owns that workspace.
+
+### Branch 1 (`feat/p8-ingestion-core`) review fixes, second pass — known follow-ups (from review, unresolved at merge)
+
+- **LOW — fixed placeholder window in `truncate_scrubbed`**
+  (`backend/memory/ingestion/scrubber.py`). `truncate_scrubbed` hardcodes a
+  64-char window for placeholder length. This is safe today (the longest
+  placeholder, `[SECRET:<name>]`, is well under 64), but a future long secret
+  rule name would silently break the straddle detection. Fix: derive the
+  window from the longest rule or term name, or add a test asserting every
+  placeholder name is under 64 chars.
+- **LOW — forget after resume reuses the old operation**
+  (`backend/memory/ingestion/services.py`). A forget issued after the owner
+  resumed the source reuses the old operation id and keeps the original
+  `forgotten_at`. The source stays marked forgotten while it is live again,
+  and a later restore also revives episodes trashed by the earlier forget.
+  This is covered by a test and matches the ADR-009 reversibility intent, but
+  it is a behaviour the owner UI should explain. Fix: document it in the
+  runbook or UI confirmation text. No code change needed.
 
 ### Branch 2 (`feat/p8-core-blocks`) — known follow-ups (from review, unresolved at merge)
 

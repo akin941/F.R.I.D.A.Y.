@@ -367,6 +367,21 @@ def scrub_text(text, *, terms=()):
     return ScrubResult(scrubber.run(bound_input(str(text))), dict(scrubber.counts))
 
 
+def truncate_scrubbed(text, limit):
+    """Cut scrubbed `text` to at most `limit` characters without splitting a
+    placeholder: one that straddles the cut is dropped whole (a fragment
+    such as `[SECRET:aws_k` is not matched by PLACEHOLDER_RE, so it would
+    neither read as a placeholder nor stay idempotent under a second
+    scrub)."""
+    if len(text) <= limit:
+        return text
+    # Placeholders are short (< 64 chars); only one can straddle the cut.
+    for match in PLACEHOLDER_RE.finditer(text, max(limit - 64, 0), limit + 64):
+        if match.start() < limit < match.end():
+            return text[: match.start()]
+    return text[:limit]
+
+
 def merge_reports(*reports):
     total = Counter()
     for report in reports:
@@ -391,7 +406,7 @@ def scrub_value(value, *, terms=(), _depth=0):
         return value, {}
     if isinstance(value, str):
         result = scrub_text(value, terms=terms)
-        return result.text[:METADATA_MAX_STRING], result.report
+        return truncate_scrubbed(result.text, METADATA_MAX_STRING), result.report
     if _depth >= METADATA_MAX_DEPTH:
         return None, {}
     if isinstance(value, dict):
@@ -399,7 +414,7 @@ def scrub_value(value, *, terms=(), _depth=0):
         for key, item in list(value.items())[:METADATA_MAX_ITEMS]:
             key_result = scrub_text(str(key), terms=terms)
             scrubbed, report = scrub_value(item, terms=terms, _depth=_depth + 1)
-            out[key_result.text[:METADATA_MAX_KEY]] = scrubbed
+            out[truncate_scrubbed(key_result.text, METADATA_MAX_KEY)] = scrubbed
             reports.extend([key_result.report, report])
         return out, merge_reports(*reports)
     if isinstance(value, list | tuple):

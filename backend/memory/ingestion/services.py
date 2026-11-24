@@ -256,12 +256,18 @@ def forget_source(source, *, actor, channel):
     the trash (`deleted_at`), marking them with a fresh operation id. A
     reversible confirm-class move (ADR-009): `restore_source` undoes exactly
     the rows marked by this operation while they are still in the trash;
+    a repeat forget before a restore reuses the same operation id;
     permanent purge is the gate-class `purge_trash` (branch 5) or TTL. The
     cascade to derived memories and proposals lands in branch 5."""
     _require_owner(actor, source.workspace, channel, "Forgetting an ingestion source")
     source = _locked_source(source)
     now = timezone.now()
-    operation_id = uuid.uuid4()
+    # Idempotent (ADR-009 reversibility): a repeat forget -- a double click,
+    # a retry -- reuses the pending operation id, so every episode trashed
+    # by either call is restored together by `restore_source`. A fresh id
+    # here would orphan the first call's episodes in the trash.
+    repeat = source.forgotten_at is not None and source.forget_operation_id is not None
+    operation_id = source.forget_operation_id if repeat else uuid.uuid4()
     episodes = Episode.all_objects.filter(source=source, deleted_at__isnull=True)
     trashed = episodes.update(deleted_at=now, forget_operation_id=operation_id)
     # Branch 5 cascade: every memory derived from the source (found through
@@ -298,7 +304,7 @@ def forget_source(source, *, actor, channel):
     # entities left with no live fact, under the same operation id.
     facts = graph_services.forget_source_facts(source, operation_id)
     source.paused_at = source.paused_at or now
-    source.forgotten_at = now
+    source.forgotten_at = source.forgotten_at if repeat else now
     source.forget_operation_id = operation_id
     source.save(update_fields=["paused_at", "forgotten_at", "forget_operation_id", "updated_at"])
     counts = {
@@ -314,7 +320,12 @@ def forget_source(source, *, actor, channel):
         actor=actor,
         workspace=source.workspace,
         resource=source,
-        metadata={"kind": source.kind, "operation_id": str(operation_id), **counts},
+        metadata={
+            "kind": source.kind,
+            "operation_id": str(operation_id),
+            "repeat": repeat,
+            **counts,
+        },
     )
     return {"operation_id": str(operation_id), **counts}
 
@@ -600,14 +611,16 @@ AUDIT_VIEW_EPISODES = 20
 
 def source_audit(source, *, actor, channel):
     """The D11 audit view of one source. Episodes are listed through
-    `for_actor()` (they live in their target workspaces). Audited
+    `for_actor()` (they live in their target workspaces) and limited to
+    workspaces the actor still owns: a firm workspace where the owner was
+    demoted to a plain member does not show its episodes here. Audited
     `memory.ingestion.viewed` with ids and counts only."""
     require_owner_read(actor, source.workspace, channel)
     since = timezone.localdate() - timedelta(days=AUDIT_VIEW_DAYS - 1)
     counters = list(IngestionCounter.objects.filter(source=source, day__gte=since).order_by("day"))
     episodes = list(
         Episode.objects.for_actor(actor)
-        .filter(source=source)
+        .filter(source=source, workspace__in=owner_workspaces(actor))
         .select_related("workspace")
         .order_by("-occurred_at", "-id")[:AUDIT_VIEW_EPISODES]
     )

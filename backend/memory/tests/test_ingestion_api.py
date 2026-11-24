@@ -232,6 +232,32 @@ def test_list_and_audit_view(owner, personal, firm, hooks, setup, web_client):
     assert "hello" not in str(list(viewed.values_list("metadata", flat=True)))
 
 
+def test_audit_view_hides_episodes_of_a_workspace_no_longer_owned(
+    owner, personal, firm, hooks, web_client
+):
+    from workspaces.models import WorkspaceMember
+
+    add_rule(hooks, PATH, "/f", firm)
+    record_episode(
+        source=hooks,
+        kind="hook.stop",
+        external_id="firm-1",
+        occurred_at=WHEN,
+        mapping_key="path:/f/x",
+        owner_text="firm work",
+    )
+    client = web_client(owner)
+    body = client.get(f"{BASE}/sources/{hooks.id}").json()
+    assert [e["owner_text"] for e in body["episodes"]] == ["firm work"]
+    # Demoted to a plain member of the firm workspace: still a member (so
+    # for_actor() alone would list the row), no longer its owner.
+    WorkspaceMember.objects.filter(workspace=firm, user=owner).update(
+        role=WorkspaceMember.Role.MEMBER
+    )
+    body = client.get(f"{BASE}/sources/{hooks.id}").json()
+    assert body["episodes"] == []
+
+
 def test_owner_flow_over_the_api(owner, personal, firm, hooks, setup, web_client):
     client = web_client(owner)
     src = f"{BASE}/sources/{hooks.id}"

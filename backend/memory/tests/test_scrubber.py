@@ -24,6 +24,7 @@ from memory.ingestion.scrubber import (
     scrub_text,
     scrub_value,
     tckn_is_valid,
+    truncate_scrubbed,
 )
 
 CORPUS = Path(__file__).parent / "scrubber_corpus"
@@ -255,3 +256,33 @@ def test_quoted_secret_values_are_scrubbed_up_to_the_closing_quote(text, expecte
     assert result.text == expected
     assert result.report == {"SECRET:assignment": 1}
     assert scrub_text(result.text).text == result.text
+
+
+# --- truncation never cuts a placeholder ------------------------------------
+
+
+@pytest.mark.parametrize("limit", range(4, 26))
+def test_truncate_scrubbed_drops_a_straddling_placeholder_whole(limit):
+    text = "abc [SECRET:aws_key] def"
+    out = truncate_scrubbed(text, limit)
+    if 4 < limit < len("abc [SECRET:aws_key]"):
+        assert out == "abc "
+    else:
+        assert out == text[:limit]
+    assert scrub_text(out).text == out  # idempotent under a second scrub
+
+
+def test_truncate_scrubbed_is_a_noop_under_the_limit():
+    assert truncate_scrubbed("[PII:email]", 11) == "[PII:email]"
+    assert truncate_scrubbed("short", 100) == "short"
+
+
+def test_metadata_string_and_key_caps_never_split_a_placeholder():
+    secret = "AKIA" + "ABCDEFGHIJKLMNOP"
+    value = "x" * (scrubber.METADATA_MAX_STRING - 5) + " " + secret
+    key = "k" * (scrubber.METADATA_MAX_KEY - 5) + " " + secret
+    cleaned, report = scrub_value({key: value})
+    [(out_key, out_value)] = cleaned.items()
+    assert out_value == "x" * (scrubber.METADATA_MAX_STRING - 5) + " "
+    assert out_key == "k" * (scrubber.METADATA_MAX_KEY - 5) + " "
+    assert report == {"SECRET:aws_key": 2}
