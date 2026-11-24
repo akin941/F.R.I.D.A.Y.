@@ -3142,3 +3142,24 @@ answers them:
    tests cover reports that were rehashed but are inconsistent. **Fix:**
    optional. State in `docs/voice/live-eval.md` that the hashes detect
    accidental or hand edits only, not a deliberate forgery by the owner.
+
+### Known follow-ups — `chore/p11-closeout` (unresolved review notes, recorded at merge 2026-11-24)
+
+1. **LOW — `self_sources.json` listed but untouched
+   (`docs/prompts/phase-11-live-voice/brief.md`).** The brief's "Files" list
+   names `backend/assistant/self_sources.json`, but the closeout diff does
+   not touch it. The MASTER_PLAN row 11 change is already covered:
+   `build_self_sources --check` reports "self sources up to date", so the
+   notes' "build_self_sources --check current" is accurate. **Fix:**
+   optional. Add one line saying the snapshot needed no regeneration.
+2. **LOW — stale or non-nightly selftest reports WARN
+   (`backend/ops/preflight.py`).** A selftest line that is 48 h old or more,
+   or is not nightly, gives WARN. The brief only defines pass/warn/fail for
+   green under 48 h, missing and failed. This reading is recorded in
+   implementation note 1 and owner step 2, and it is reasonable. **Fix:**
+   none required. The owner confirms the reading in owner step 2.
+3. **LOW — `disabled` reason is non-evidence in `voice_live_policy`
+   (`backend/ops/preflight.py`).** A passing evaluation pair reports PASS
+   even when the setting is off, because the `disabled` reason is not
+   treated as evidence. This matches the brief ("pass when one does") and is
+   recorded as a reading. **Fix:** none required.
