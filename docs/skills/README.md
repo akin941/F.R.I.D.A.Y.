@@ -123,3 +123,36 @@ prompts and voice-cap result as no skill
 - API: `/api/v1/skills…` (owner, web session only; PATs, node secret and
   node voice token are 401; members and agents 403; another workspace 404).
 - Notices / digest: the `skills.proposals` probe (pending versions).
+
+### Playbooks from harness runs (D17)
+
+- **Sources.** When an implementation job `succeeded`, its review approved
+  it, its tests passed and the owner typed its goal, `harness` records a
+  `PlaybookSource` through `skills.ports.record_playbook_source` (goal,
+  the job's test command snapshot, changed-file paths only, test counts,
+  bounded model summaries as untrusted context). Sensitive repos record
+  nothing; `.claude/skills/` paths are dropped.
+- **Distillation.** Nightly (`skills.tasks.distill_playbooks`, 04:45), a
+  repo with `SKILLS_PLAYBOOK_MIN_SOURCES` (3) unused sources gets one
+  `skills.playbook_distill` call inside an unattended run whose only
+  allowed purpose is that one. Each step must carry a `source` job and a
+  verbatim `quote` of that job's goal or test command (checked in code);
+  paths are unverified hints, summaries are never quotable; fewer than 2
+  verified steps drop the draft. At most `SKILLS_PLAYBOOK_WEEKLY_CAP` (3)
+  proposals per week and `SKILLS_MAX_PENDING_PLAYBOOK` (3) pending. Every
+  attempt is a `PlaybookDistillRun` row (outcome, reason, counts).
+- **Proposal.** A kept draft is a `proposed` version (origin `playbook`);
+  `/skills/<id>` lists each step's source job (linked) and quote. A
+  playbook never proposes a version of an owner's own skill (name clash →
+  `playbook-<repo>`).
+- **Reuse.** On "Uygulama iste" the owner may tick active skills; the
+  request validates them through `skills.ports.get_attachable_versions`
+  (all or none, same workspace, approved current versions) and Gate A
+  lists them by name and sha256. At run time the runner fetches them
+  again (archived since → `skill_version_unavailable`; a hash differing
+  from Gate A → same), writes them read-only to `{workspace}/skills/`
+  outside the clone, mounts that directory read-only at
+  `HARNESS_CONTAINER_SKILLS_PATH` (`~/.claude/skills`) and over
+  `/workspace/skills`, and adds `.claude/skills/` to `.git/info/exclude`.
+  A produced commit touching `.claude/skills/` fails closed
+  (`skill_path_in_commit`): no review, bundle, Gate B or push.

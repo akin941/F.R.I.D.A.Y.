@@ -1725,7 +1725,7 @@ updated.
 | 4 | `feat/p12-n8n-connector` | n8n manifest + workflow-ID allowlist, relay sidecar mode, async reads + follow-ups, gated writes, probes, `tool.*` routes, ADR-010 amendment | 3 (and so 1, 2) | **implemented 2026-11-20** (`n8n` manifest + `WORKFLOWS` allowlist with the two reference entries, `http_relay` sidecar mode + compose `n8n-relay`, `n8n_relay_env`, async reads (`ConnectorAsyncRead`, `run_async_read` + recovery) and follow-ups (`PendingFollowUp`, `Message.followup_of`, one `chat.followup` completion), gated writes with draft arguments, probes `connectors.n8n_finished` / `assistant.followups_ready`, `tool.*` wake routes, ADR-010 amendment; see "Implementation notes — branch 4"; live n8n pins and licence: owner steps; awaits the Sonnet 5 review) |
 | 5 | `feat/p12-skills-core` | SKILL.md parser + refusals, staged lifecycle, matcher + injection, `/skills`, `skill.*` routes | 3 (and so 1, 2); merges after 4 if both are ready (migration order) | **implemented 2026-11-20** (`skills/skill_md.py` strict parser + bundle reader, `InstructionSkill` / `InstructionSkillVersion` (skills 0001), owner-web lifecycle services, `skills.ports.propose_version`, `skills.proposals` probe, `skills.match` matcher + `<skill>` injection with the `skills` context-report entry, `/skill <name>` prefix and `skill.<name>` wake routes, `skills.match` tier/prompt/budget/compression bypass (ai_core 0010), `/skills` + `/skills/<id>` pages, D19 skills contract, `docs/skills/README.md`; see "Implementation notes — branch 5"; no Mac work; awaits the Sonnet 5 review) |
 | 6 | `feat/p12-skill-curator` | Stale marking, curator proposals, archive suggestions | 5 | planned |
-| 7 | `feat/p12-harness-playbooks` | Playbook sources from harness, provenance-checked distillation, attach to implementation jobs, ADR-012 note | 5 (parallel with 6) | planned |
+| 7 | `feat/p12-harness-playbooks` | Playbook sources from harness, provenance-checked distillation, attach to implementation jobs, ADR-012 note | 5 (parallel with 6) | **implemented 2026-11-20** (`PlaybookSource` / `PlaybookDistillRun` (skills 0002), `skills.ports.record_playbook_source` called beside the harness episode, `skills/playbooks.py` nightly distiller (one unattended `skills.playbook_distill` call per eligible repo, provenance checked in code, weekly/pending caps, every attempt counted), `skills.playbook_distill` tier/prompt/budgets/compression bypass (ai_core 0012), `skills.ports.get_attachable_versions`, `HarnessImplementationJob.skill_version_ids` (harness 0016) with Gate A name + hash, read-only mounts outside the clone, `.git/info/exclude`, fail-closed `skill_version_unavailable` / `skill_path_in_commit`, skill picker and `/skills/<id>` provenance, ADR-012 note; see "Implementation notes — branch 7"; real agent pick-up of mounted skills: owner steps; awaits the Sonnet 5 review) |
 | 8 | `chore/p12-closeout` | Preflight rows, reach e2e, runbooks, ADR notes, `self_sources.json`, MASTER_PLAN row, go/no-go record | 1–7 | planned |
 | M1 | Spoken digest and wake routes on the Mac | Real mic/STT/TTS run of `digest.today`, `notices.read`, `tool.*` drafts, barge-in during a long digest; Turkish route-phrase recognition | 3 merged; Phase 11 M1 | deferred: Mac session (pending owner evaluation) |
 
@@ -2646,3 +2646,94 @@ integration branch.
    `ConnectorAsyncRead.result_text` for a personal-class read. Optional
    hardening: clear `result_text` as soon as the follow-up has consumed it
    instead of waiting for the one-day retention sweep.
+
+### Implementation notes — branch 7 (`feat/p12-harness-playbooks`), recorded 2026-11-20
+
+Choices made while implementing D17 that the brief left open:
+
+1. **Where the hook sits.** `harness.ingestion.record_implementation_outcome`
+   (every terminal hook already calls it) now also calls
+   `record_playbook_outcome`, in its own savepoint, swallowed on error. It
+   records only when the job is `succeeded`, the latest *succeeded* review's
+   verdict is `approved`, `test_result.passed` is `true`, the creator is the
+   human installation owner (not an agent) and neither the repo nor the job
+   snapshot is sensitive. The port re-checks sensitivity, test outcome and
+   non-empty goal/test command, drops `.claude/skills/` paths and is
+   idempotent per (workspace, job). `repo_key` is the repo id, the label
+   the owner-configured repo name.
+2. **Quote rules beyond the brief.** Case-sensitive substring match after
+   whitespace normalisation (invisible formatting stripped, NFC, runs of
+   whitespace collapsed); a quote must be at least
+   `SKILLS_PLAYBOOK_MIN_QUOTE_CHARS` (8) long unless it is the whole field;
+   only the named source's fields count (a quote from another job's goal
+   is `quote_not_found`). Drop reasons are closed tokens
+   (`malformed_step`, `empty_text`, `unknown_source`, `no_quote`,
+   `quote_is_path`, `quote_from_context`, `quote_not_found`,
+   `quote_too_short`, `over_limit`); a step's `paths` survive only when
+   they are that source's changed paths; a path quote's paths go to a
+   playbook-level "unverified" list.
+3. **Consumption.** A call that got an answer consumes its sources
+   (`distill_run` set) whatever the outcome, so a dropped draft is not
+   re-paid every night; a weekly-cap/pending-cap skip, budget refusal, no
+   provider, model error or denial leaves them unused. Every attempt is a
+   `PlaybookDistillRun` row (`proposed`, `dropped` + reason, `skipped_cap`,
+   `skipped_pending`, `budget_refused`, `no_provider`, `no_prompt`,
+   `model_error`, `denied`, `failed`) with counts only.
+4. **Budgets.** `skills.playbook_distill` joins the shared `skills` row
+   (ai_core 0012 adds it to an existing row; `seed_ai_defaults` too) and
+   gets its own `skills_playbook_daily` row (0.5 USD/day). Tier `mid`.
+5. **Names.** The model's name is used when valid and not already used by
+   a non-playbook skill of the workspace (a playbook never proposes a
+   version of an owner's or curator's skill); otherwise
+   `playbook-<repo slug>`. The body is Friday-authored framing around the
+   verified steps; each step cites `iş <job id> (hedef|test komutu): "…"`.
+6. **Attach.** `skill_versions` (≤ `SKILLS_ATTACH_MAX` = 5) on the
+   implementation request; the service validates through the port (all or
+   none, `harness.skill_not_attachable` 400 naming the id). Gate A's
+   payload gains `skills: [{id, name, version, sha256}]` only when skills
+   are attached; the job serializer and `describe_request` expose name,
+   version and hash, never the text. Stale skills are attachable (stale is
+   metadata only).
+7. **Run time.** `prepare_skills` (after the clone, before any launch)
+   fetches again through the port and compares each hash with Gate A's
+   snapshot; any mismatch or a no-longer-attachable version fails the job
+   `skill_version_unavailable` before the agent starts. Files are written
+   0444 / directories 0555 to `{workspace_dir}/skills/<name>/`; both the
+   CLI and the driver launches add two read-only bind mounts of that
+   directory -- at `HARNESS_CONTAINER_SKILLS_PATH`
+   (`/home/harness/.claude/skills`) and over `/workspace/skills`, so the
+   read-write `/workspace` mount cannot reach it.
+8. **Exclusion, as it really holds.** The wrapper (`harness_write_mode.sh`)
+   deletes `.git/info` before its own `add -A` commit, so the
+   `.git/info/exclude` line is belt only; the enforcement is the host
+   check on the wrapper-owned `changed_files`: a job with attached skills
+   whose commit touches any `.claude/skills/` path (root or nested) fails
+   `skill_path_in_commit` before review, bundle, Gate B or push. Jobs
+   without skills are unaffected (a repo may legitimately version its own
+   `.claude/skills/`), and playbook sources drop such paths always.
+9. **Contracts.** New import-linter contract: `harness` may import only
+   `skills.ports` from `skills` (indirect imports through the port
+   allowed); a test scans `harness/` for the same.
+
+### Owner steps (pending) — `feat/p12-harness-playbooks`, recorded 2026-11-20
+
+1. Run the independent Sonnet 5 review of this branch to APPROVE before
+   merge. Branch 6 (`feat/p12-skill-curator`) also adds a `skills`
+   migration after `0001` and a `skills/tasks.py`: whichever merges second
+   renumbers its migration (`0002` here) and merges `skills/tasks.py`; this
+   branch's ai_core data migration is `0012` (renumber if 6 also adds one).
+2. After merge: `manage.py migrate` (skills 0002, harness 0016, ai_core
+   0012: the `friday_skills_playbook_distill` prompt, `skills` budget
+   purposes, `skills_playbook_daily`). Make sure a mid-tier chat provider
+   is active (`personal_data_allowed` for personal workspaces); without one
+   every distillation is `no_provider` and the sources wait.
+3. Verify on the real runner (not possible here: no Docker images, no real
+   agent) that the Claude Code CLI inside `harness-claude-code` picks up
+   `~/.claude/skills/<name>/SKILL.md` from the read-only mount. The Agent
+   SDK driver bridge runs with `setting_sources=[]`, which may keep user
+   skills from loading in driver mode; decide whether to enable the user
+   setting source there (a separate, reviewed change). Codex CLI does not
+   read `~/.claude/skills`; attaching a skill to a Codex job only mounts it.
+4. After three real successful, approved, owner-typed jobs on one repo,
+   check the first proposal on `/skills` (sources linked, quotes verbatim)
+   and decide it.
