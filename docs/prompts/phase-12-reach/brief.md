@@ -1724,7 +1724,7 @@ updated.
 | 3 | `feat/p12-wake-routes` | Wake-phrase routes + aliases, `digest.today` / `digest.learning` / `notices.read` on web voice and `node_voice`, vectors, ADR-015 note | 2 | **implemented 2026-11-20** (`assistant/wake_routes.py` table + boot check + normalizer + matcher, `Message.route` and `WakeRouteAlias` (assistant 0013), owner-web alias services in `assistant/wake_aliases.py`, `/api/v1/assistant/wake-routes` + alias CRUD, `/settings/wake-routes`, shared vectors checked by pytest and vitest, ADR-015 implementation note; see "Implementation notes — branch 3"; on-Mac verification: deferred: Mac session, M1; awaits the Sonnet 5 review) |
 | 4 | `feat/p12-n8n-connector` | n8n manifest + workflow-ID allowlist, relay sidecar mode, async reads + follow-ups, gated writes, probes, `tool.*` routes, ADR-010 amendment | 3 (and so 1, 2) | planned (live n8n pins: owner step) |
 | 5 | `feat/p12-skills-core` | SKILL.md parser + refusals, staged lifecycle, matcher + injection, `/skills`, `skill.*` routes | 3 (and so 1, 2); merges after 4 if both are ready (migration order) | **implemented 2026-11-20** (`skills/skill_md.py` strict parser + bundle reader, `InstructionSkill` / `InstructionSkillVersion` (skills 0001), owner-web lifecycle services, `skills.ports.propose_version`, `skills.proposals` probe, `skills.match` matcher + `<skill>` injection with the `skills` context-report entry, `/skill <name>` prefix and `skill.<name>` wake routes, `skills.match` tier/prompt/budget/compression bypass (ai_core 0010), `/skills` + `/skills/<id>` pages, D19 skills contract, `docs/skills/README.md`; see "Implementation notes — branch 5"; no Mac work; awaits the Sonnet 5 review) |
-| 6 | `feat/p12-skill-curator` | Stale marking, curator proposals, archive suggestions | 5 | planned |
+| 6 | `feat/p12-skill-curator` | Stale marking, curator proposals, archive suggestions | 5 | **implemented 2026-11-20** (`skills/curator.py` stale pass + one `skills.curate` call + strict closed-set parser, proposals through `skills.ports`, archive suggestions on `SkillCuratorRun` (skills 0002) surfaced by the `skills.proposals` probe, `record_use` reactivation, `skills.tasks.curate` static beat Sunday 04:15 under `unattended_run({"skills.curate"})`, `skills.curate` tier/prompt/`skills` + `skills_curate_weekly` budgets/compression bypass (ai_core 0011), curator GET + dismiss endpoints, `/skills` curator panel and curator provenance on pending versions; see "Implementation notes — branch 6"; no Mac work; awaits the Sonnet 5 review) |
 | 7 | `feat/p12-harness-playbooks` | Playbook sources from harness, provenance-checked distillation, attach to implementation jobs, ADR-012 note | 5 (parallel with 6) | planned |
 | 8 | `chore/p12-closeout` | Preflight rows, reach e2e, runbooks, ADR notes, `self_sources.json`, MASTER_PLAN row, go/no-go record | 1–7 | planned |
 | M1 | Spoken digest and wake routes on the Mac | Real mic/STT/TTS run of `digest.today`, `notices.read`, `tool.*` drafts, barge-in during a long digest; Turkish route-phrase recognition | 3 merged; Phase 11 M1 | deferred: Mac session (pending owner evaluation) |
@@ -2528,3 +2528,74 @@ integration branch.
    the `upload.size > max_bytes` check still bound it afterwards. Fix:
    optionally set `DATA_UPLOAD_MAX_MEMORY_SIZE` or
    `FILE_UPLOAD_MAX_MEMORY_SIZE`, or cap with a limited reader.
+
+### Implementation notes — branch 6 (`feat/p12-skill-curator`), recorded 2026-11-20
+
+Choices made while implementing D16 that the brief left open:
+
+1. **Stale reference time.** A skill's clock is the later of its last use
+   and the approval of its current version (a newly approved version
+   restarts it). A skill restored from the archive keeps its old usage, so
+   it can be marked stale again on the next Sunday (it stays usable).
+   `services.record_use` flips a stale skill back to `active` at the moment
+   of use (audited `skills.skill.reactivated`, `source: use`); the weekly
+   pass also reactivates a stale skill used inside the window.
+2. **Once per week.** `SkillCuratorRun` is unique per (workspace, ISO week
+   in `TIME_ZONE`); a second run in the same week (a Celery retry, a manual
+   call) returns without doing anything. The run row is created before and
+   finished after the unattended context (bookkeeping outside it).
+3. **No call** without usable skills, at the curator pending cap (5,
+   `skipped_cap`), without the prompt (`no_prompt`) or without an eligible
+   provider (`no_provider`, checked with `has_eligible_provider`, so no
+   `ModelUsage` row). The stale pass runs in every case. `personal_data` is
+   `True` for the personal workspace and `False` for a firm one ("by
+   workspace class", D18).
+4. **Item rules beyond the brief.** Items past the third are dropped
+   (`over_limit`); exact key sets per action; a merge's SKILL.md must carry
+   one of the two names and becomes a version of that skill, the other
+   gets an archive suggestion (reason `merged`, `into_skill_id`); one change
+   per skill per run (`duplicate_target`); a skill whose body was cut or
+   omitted from the input cannot be rewritten (`incomplete_input`); a skill
+   with a pending owner or playbook version is left alone (`other_pending`,
+   so a machine proposal never supersedes the owner's draft). Drop reasons
+   are closed tokens counted on the run (`drop_reasons`); the parser's own
+   codes (e.g. `permission_key_refused`) and the port's `limit` pass
+   through.
+5. **Archive suggestions** are stored on the run as
+   `{"skill_id", "reason", "dismissed"}` (no model text; reasons are closed
+   tokens). Only the latest finished run's open suggestions for still
+   active/stale skills are shown and reach the probe (key
+   `archive:<run>:<skill>`, label "Arşiv önerisi: <approved name>"). The
+   probe's notice template is now "{label} kararını bekliyor" (it covers
+   both pending versions and suggestions).
+6. **Endpoints.** `GET /api/v1/skills/curator[?workspace=]` and `POST
+   /api/v1/skills/curator/dismiss` `{"run_id","skill_id"}` (owner web only,
+   audited `skills.curator.suggestion_dismissed`; a second dismiss is
+   `skill.invalid_state`). Archiving a suggested skill is the existing
+   one-click archive endpoint.
+7. **Budgets.** `skills.curate` is added to the `skills` row's purposes
+   (data migration and `seed_ai_defaults` only ever add a purpose) and a new
+   `skills_curate_weekly` row carries the 0.5 USD cap as a daily window
+   (the curator only calls on Sunday), like `learning_reflection_weekly`.
+8. **Contracts.** No production edge changes. Test-only ignores:
+   `skills.tests.test_curator_unattended -> proactive.**, connectors.**`
+   (the D2 test calls those services inside the run); the beat test lives
+   in `config/tests/test_skills_curator_beat.py`.
+9. **Branch 7 overlap.** `feat/p12-harness-playbooks` also adds a `skills`
+   migration after `0001` and an ai_core data migration after `0010`;
+   whichever merges second renumbers per the sequencing rule.
+
+### Owner steps (pending) — `feat/p12-skill-curator`, recorded 2026-11-20
+
+1. Run the independent Sonnet 5 review of this branch to APPROVE before
+   merge (the implementing model does not review its own work).
+2. After merge: `manage.py migrate` (skills 0002: curator runs; ai_core
+   0011: the `friday_skills_curate` prompt, `skills.curate` on the `skills`
+   budget, the `skills_curate_weekly` budget 0.5 USD). Make sure a mid-tier
+   chat provider with `personal_data_allowed` is active for the personal
+   workspace; without one the curator only marks stale skills.
+3. Restart the worker so its embedded beat picks up `skills-curator-weekly`
+   (Sunday 04:15 `TIME_ZONE`).
+4. Decide curator proposals and archive suggestions on `/skills` as they
+   arrive (approve, edit-then-approve, reject; archive or dismiss).
+5. No Mac work and no protocol surface in this branch.
