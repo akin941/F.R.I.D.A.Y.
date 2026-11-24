@@ -1655,7 +1655,7 @@ is written with the Mac rows pending owner evaluation.
 | 4 | `feat/p11-barge-in` | Session state machine, barge-in, self-trigger window + content rule, shared vectors, echo scenarios, ADR-015 note (d4) | 3 | planned |
 | 5 | `feat/p11-always-on` | Arming policy, `accounts.VoiceWakeEvaluation` gate (latest row, threshold match), trigger backstop, storms (client + `accounts.VoiceLiveMute` server backstop, 423 from the authenticator), silence close, fail closed, `/voice` live panel, ADR-015 note (d5, d3) | 3 (parallel with 4) | planned |
 | 6 | `feat/p11-wake-eval-harness` | CI self-trigger release gate, `selftest`, `wake-eval` FAR/FRR harness, `--from-report`, eval doc | 4, 5 | planned |
-| 7 | `feat/p11-hud-live-voice` | `voice.state` event kind (v2), node voice fields, HUD mic state, `node_voice` drafts on screen, ADR-013/015 notes | 1 (parallel with 3–6) | planned |
+| 7 | `feat/p11-hud-live-voice` | `voice.state` event kind (v2), node voice fields, HUD mic state, `node_voice` drafts on screen, ADR-013/015 notes | 1 (parallel with 3–6) | **implemented 2026-11-20** (server side, reference relay, 9 node conformance cases, HUD and chat surfaces; the Swift relay is M1, deferred: Mac session; see "Branch 7 implementation notes") |
 | 8 | `chore/p11-closeout` | Preflight live-voice checks, e2e, runbook, ADR notes, MASTER_PLAN row, `self_sources.json`, go/no-go record | 1–7 | planned |
 | M1 | `feat/p11-node-voice-host` | Swift voice host: child spawn + stdio framing, AVAudioEngine voice processing (AEC), playback, menu-bar mic indicator, global hotkey, mute, voice token mint + hand-over, Microphone TCC, `voice.state` relay; conformance host family | 1, 2, 7 merged; Phase 9 M1–M3 | deferred: Mac session |
 | M2 | Speech server spike (MLX Whisper) | MLX Whisper behind an OpenAI-compatible server as a gateway row; Turkish WER spot check, latency; fallback recorded | 1 merged | deferred: Mac session (pending owner evaluation) |
@@ -1720,7 +1720,17 @@ section, the merged branches 1–7 and the files they name.
   token with the Keychain node secret over HTTPS (pinned CA), passes it
   in a `credential` frame, refreshes ≤ 60 s before expiry, never writes
   it anywhere;
-- `voice.state` relay to the WS (coalesced, ≤ 1/s);
+- `voice.state` relay to the WS (coalesced, ≤ 1/s), exactly as
+  `backend/nodes/reference/node.py` `relay_voice_state` does (branch 7):
+  item from the child's `state` frame (`state`, `mode`, `session_open`,
+  the three counters) plus `at` = host clock in Unix seconds; validated
+  against the v2 `event` schema's `$defs.voice_state_item` before sending
+  (drop and count anything else); v2 sessions only; only after
+  `hello.ack`; latest state wins inside a second; re-sent with every
+  heartbeat and after a reconnect; never spooled; no wait for its
+  `event.ack`. The Conformance build implements the hook op
+  `{"op": "voice_state", "state": {...}}` and reports
+  `voice_states_dropped`;
 - the Microphone entitlement and TCC usage string; notarized build;
 - tests in `Tests/NodeCoreTests/Voice*`.
 
@@ -2091,6 +2101,76 @@ The first one is from the stub and is kept.
    (`friday_voice/conformance/definitions.py` docstring) in
    `VoiceConformanceTests.swift`, and run the live host family against
    `friday-voice conformance-child`.
+
+## Branch 7 implementation notes (`feat/p11-hud-live-voice`, 2026-11-20)
+
+Status: **implemented 2026-11-20**. Lint, import contracts (no contract
+changed), `makemigrations --check`, `build_node_conformance --check`, the
+full backend suite and the frontend lint/typecheck/vitest are green.
+
+- **Protocol (`nodes.protocol`).** `VOICE_STATE_KIND = "voice.state"`,
+  `EVENT_KINDS_BY_VERSION` (`EVENT_KINDS` itself, the v1 set, is
+  unchanged), the enumerations `VOICE_STATES` / `VOICE_MODES` (equal to
+  the `friday-voice/v1` child `state` schema, a test reads it when
+  `node/friday-voice` is present), `MAX_VOICE_COUNTER = 100 000`,
+  `VOICE_STATE_MIN_INTERVAL_SECONDS = 1`, `VOICE_STATE_STALE_SECONDS = 30`
+  (two heartbeats). The v2 `event` schema gains `$defs.voice_state_item`
+  applied by `allOf`/`if`/`then` on `kind`: exactly one item, `spooled:
+  false`, closed, bounded, enumerated. The v1 schema is byte-identical, so
+  the kind on v1 is a schema frame error. The meta-tests walk `$defs` and
+  conditional branches (a `$ref` must be local). Server → node set frozen.
+- **Server (`nodes`).** Migration `nodes.0004_node_voice_state`:
+  `voice_state`, `voice_mode`, `voice_session_open`, `voice_state_at`
+  (server receive time), and the three counters on `Node`.
+  `nodes.events.apply_voice_state` writes them with one conditional
+  `UPDATE` (at most one write per node per second; a frame inside the
+  second is acked `duplicate`, detail `voice_state_coalesced`), re-checks
+  the item defensively, takes no sink and touches no bus.
+  `nodes.selectors.voice_summary` / `node_health["voice"]`: `unknown`
+  while offline, never reported, or older than two heartbeats; `off` while
+  the node is cut off (kill switch, revoked: the fail-closed reading).
+- **Reference node.** `relay_voice_state(state)` is the Swift host's
+  executable spec (see M1): validates, v2 only, after `hello.ack`,
+  coalesced ≤ 1/s (latest wins, flushed on `tick`), re-sent with each
+  heartbeat (`at` = now) and after a reconnect, never spooled, does not
+  occupy the hook events' in-flight slot, its acks are not stray.
+- **Conformance.** `v1_voice_state_never_sent` and eight `v2_voice_state_*`
+  cases (relayed, coalesced, refreshed with the heartbeat, waits for the
+  session, unknown state, oversize counter, extra key, unknown mode); hook
+  op `voice_state` (in process, socket, external hook) and the report key
+  `voice_states_dropped`. Negative controls show an unchecked, careless or
+  non-coalescing node fails them.
+- **HUD (`hud.services.node_section`).** The node line gains `voice`
+  (`state`, `mode`, `session_open`, three counters, `at`), read through
+  `nodes` only. The ring (`deriveHudState`, `nodeVoice`) shows
+  *listening/thinking/speaking* from the node while the browser voice is
+  idle, labelled "(Mac)" (`HudOrb` `data-source="node"`); the browser's
+  own voice, mute and a lost stream still win. The health panel's node line
+  renders the mic state, mode, session flag and counters.
+- **Drafts on screen.** `drafts.ts` reconstructs task/tool drafts for
+  `channel ∈ {web, node_voice}` (cli/openai/telegram still not); a task
+  card is confirmed only by its click, a persisted tool request is the
+  read-only notice that points to `/approvals`. `MessageChannel` gains
+  `node_voice` ("Canlı ses (Mac)"); the conversation list and header badge
+  a conversation with `opened_via = "node_voice"` even while it is empty.
+- **Not done here (by scope).** The D15 "FAR estimate" indicator needs
+  dispatched-turn and armed-time counts the child does not report yet
+  (branches 3–5); it is left to the closeout once those counters exist.
+  The `/voice` "Canlı ses (Mac)" panel belongs to branch 5.
+
+### Owner steps (pending) — `feat/p11-hud-live-voice`, recorded 2026-11-20
+
+1. Run the independent Sonnet 5 review of the branch and fix findings
+   until APPROVE (CLAUDE.md "Reviews").
+2. Mac session M1: implement the `voice.state` relay in the Swift host as
+   specified in the M1 list above (the reference node is the spec), the
+   Conformance build's `voice_state` hook op and `voice_states_dropped`
+   report key, and pass `uv run python manage.py node_conformance_server
+   --external --protocol 2` including the nine voice-state cases.
+3. On the real stack (pending owner evaluation): with the Mac node
+   connected, check that the HUD node line and ring follow the menu-bar
+   state within ~1 s, read `unknown` 30 s after quitting the node, and
+   `off` after engaging the kill switch.
 
 ## Review round 1 (2026-11-23)
 

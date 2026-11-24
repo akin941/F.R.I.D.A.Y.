@@ -21,6 +21,19 @@ interface ConversationListProps {
   disabled: boolean;
 }
 
+/**
+ * The badge channel of one conversation: its first message's channel, or
+ * (Phase 11 D5) `node_voice` for a live Mac voice conversation, which is
+ * badged even before its first turn. Web conversations carry no badge.
+ */
+export function conversationChannel(
+  conversation: Pick<ApiConversation, "origin_channel" | "opened_via">,
+): string | null {
+  if (conversation.opened_via === "node_voice") return "node_voice";
+  const origin = conversation.origin_channel;
+  return origin && origin !== "web" ? origin : null;
+}
+
 /** The conversation list: the desktop column and the phone drawer's body. */
 export function ConversationList({
   conversations,
@@ -54,10 +67,7 @@ export function ConversationList({
           ) : (
             conversations.map((conversation) => {
               const selected = selectedId === conversation.id;
-              const channel =
-                conversation.origin_channel && conversation.origin_channel !== "web"
-                  ? conversation.origin_channel
-                  : null;
+              const channel = conversationChannel(conversation);
               return (
                 <button
                   key={conversation.id}

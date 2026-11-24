@@ -40,7 +40,20 @@ export interface HudStateInputs {
   online: boolean;
   pendingApprovals: number;
   toolsRunning: number;
+  /**
+   * Phase 11 D15: the Mac node's mic state (the HUD stream's
+   * `health.node.voice.state`). Shown on the ring only while no browser
+   * voice turn is active; absent on a backend predating it.
+   */
+  nodeVoice?: string | null;
 }
+
+/** The node mic states the ring shows (D15), when the browser is idle. */
+const NODE_RING_STATES: Readonly<Record<string, HudState>> = {
+  listening: "listening",
+  thinking: "thinking",
+  speaking: "speaking",
+};
 
 /** Voice error codes that mean the turn connection itself was lost. */
 const CONNECTION_ERRORS = new Set(["disconnected", "network", "stream_lost"]);
@@ -59,6 +72,9 @@ export function deriveHudState(input: HudStateInputs): HudState {
   if (input.phase === "listening" || input.phase === "finishing") return "listening";
   if (input.phase === "transcribing" || input.phase === "thinking") return "thinking";
   if (input.phase === "speaking") return "speaking";
+  const fromNode =
+    input.phase === "idle" && input.nodeVoice ? NODE_RING_STATES[input.nodeVoice] : undefined;
+  if (fromNode) return fromNode;
   if (input.toolsRunning > 0) return "tool-running";
   if (input.pendingApprovals > 0) return "awaiting-approval";
   if (!input.online) return "offline-local";

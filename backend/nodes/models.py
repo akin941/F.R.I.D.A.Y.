@@ -54,6 +54,19 @@ class Node(WorkspaceScopedModel, TimestampedModel):
     last_heartbeat_at = models.DateTimeField(null=True, blank=True)
     spool_count = models.PositiveIntegerField(default=0)
     spool_bytes = models.PositiveBigIntegerField(default=0)
+    # Phase 11 D15: the latest `voice.state` event (v2 only), written by
+    # `nodes.events` at most once a second per node. Codes and counts only:
+    # the voice child's state, the node's local mic mode, the session flag
+    # and the child's daily counters. `voice_state_at` is the SERVER's
+    # receive time (staleness never trusts the node clock); "" / null until
+    # the node first reports.
+    voice_state = models.CharField(max_length=16, blank=True, default="")
+    voice_mode = models.CharField(max_length=16, blank=True, default="")
+    voice_session_open = models.BooleanField(default=False)
+    voice_state_at = models.DateTimeField(null=True, blank=True)
+    voice_wake_accepts_today = models.PositiveIntegerField(default=0)
+    voice_wake_discards_today = models.PositiveIntegerField(default=0)
+    voice_storm_mutes_today = models.PositiveIntegerField(default=0)
 
     class Meta:
         ordering = ["-created_at"]

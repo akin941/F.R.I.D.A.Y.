@@ -200,7 +200,14 @@ def test_policy_shaped_and_unknown_types_are_unknown_in_v2(message_type):
 def test_every_v2_schema_is_closed_and_bounded():
     problems = []
     for label, schema in _all_v2_schemas():
+        definitions = set(schema.get("$defs") or {})
         for path, sub in _walk(schema):
+            if isinstance(sub, dict) and set(sub) == {"$ref"}:
+                # Phase 11 D15: a local reference; its target is walked
+                # (and checked) under `$defs`.
+                if sub["$ref"].removeprefix("#/$defs/") not in definitions:
+                    problems.append((label, path, "non-local $ref"))
+                continue
             if not isinstance(sub, dict) or messages.OPAQUE_KEYWORD in sub:
                 if isinstance(sub, dict) and "object" in _types(sub):
                     if "maxProperties" not in sub:

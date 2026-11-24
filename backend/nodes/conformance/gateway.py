@@ -22,7 +22,10 @@ Two hooks exist:
   (the Swift `Conformance` build, Mac session M1): the node connects to the
   hook socket and to the gateway; the gateway sends `{"op": "prepare",
   "case": ...}`, `{"op": "advance", "seconds": n}`, `{"op": "tick"}`,
-  `{"op": "kill_switch"}`, `{"op": "report"}`, `{"op": "wait_disconnected"}`
+  `{"op": "kill_switch"}`, `{"op": "voice_state", "state": {...}}` (Phase 11
+  D15: the voice child reported a mic state; the node relays it as a
+  `voice.state` event or refuses it), `{"op": "report"}`,
+  `{"op": "wait_disconnected"}`
   and reads one JSON line per op (`{"ok": true}`; `prepare` adds the node's
   `policy_fingerprint` before the case, `report` answers the report object
   of `runner.node_report`). After `prepare` the node connects to the gateway
@@ -265,6 +268,10 @@ class SocketDriver:
         self.hook.kill_switch()
         self.collect()
 
+    def voice_state(self, state):
+        self.hook.voice_state(state)
+        self.collect()
+
     def report(self):
         return self.hook.report()
 
@@ -296,6 +303,9 @@ class InProcessHook:
 
     def kill_switch(self):
         return self.client.call(lambda node: node.engage_kill_switch())
+
+    def voice_state(self, state):
+        return self.client.call(lambda node: node.relay_voice_state(state))
 
     def report(self):
         return self.client.call(node_report)
@@ -403,6 +413,9 @@ class ExternalHook:
     def kill_switch(self):
         return self._op({"op": "kill_switch"})
 
+    def voice_state(self, state):
+        return self._op({"op": "voice_state", "state": state})
+
     def report(self):
         return self._op({"op": "report"})
 
@@ -458,6 +471,8 @@ class HookClient:
             self.inner.tick()
         elif name == "kill_switch":
             self.inner.kill_switch()
+        elif name == "voice_state":
+            self.inner.voice_state(op["state"])
         elif name == "wait_disconnected":
             self.inner.wait_disconnected()
         return {"ok": True}

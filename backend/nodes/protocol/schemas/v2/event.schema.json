@@ -31,7 +31,8 @@
       "type": "string",
       "enum": [
         "claude_code.hook",
-        "grant.availability_changed"
+        "grant.availability_changed",
+        "voice.state"
       ],
       "maxLength": 64
     },
@@ -41,12 +42,105 @@
       "maxItems": 50,
       "items": {
         "type": "object",
-        "x-friday-opaque": "per-kind payload, validated by the event sink (8A hook-event schema)",
+        "x-friday-opaque": "per-kind payload, validated by the event sink (8A hook-event schema) or nodes.events; voice.state items by $defs.voice_state_item below",
         "maxProperties": 32
       }
     },
     "spooled": {
       "type": "boolean"
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "voice.state"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "properties": {
+          "batch": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 1,
+            "items": {
+              "$ref": "#/$defs/voice_state_item"
+            }
+          },
+          "spooled": {
+            "const": false
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "voice_state_item": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "at",
+        "mode",
+        "session_open",
+        "state",
+        "storm_mutes_today",
+        "wake_accepts_today",
+        "wake_discards_today"
+      ],
+      "properties": {
+        "state": {
+          "type": "string",
+          "maxLength": 16,
+          "enum": [
+            "off",
+            "armed_ptt",
+            "armed_wake",
+            "listening",
+            "thinking",
+            "speaking",
+            "muted",
+            "storm_muted",
+            "error"
+          ]
+        },
+        "mode": {
+          "type": "string",
+          "maxLength": 16,
+          "enum": [
+            "off",
+            "push_to_talk",
+            "always_on"
+          ]
+        },
+        "session_open": {
+          "type": "boolean"
+        },
+        "wake_accepts_today": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100000
+        },
+        "wake_discards_today": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100000
+        },
+        "storm_mutes_today": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100000
+        },
+        "at": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4102444800
+        }
+      }
     }
   }
 }

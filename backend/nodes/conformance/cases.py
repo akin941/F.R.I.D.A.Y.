@@ -17,7 +17,8 @@ A case document:
                "narrow", "availability": {name: value}, "read_delay"},
      "steps": [{"op": "send", "frame"} | {"op": "send_raw", "data",
                "repeat"} | {"op": "advance", "seconds"} | {"op": "tick"} |
-               {"op": "disconnect"} | {"op": "kill_switch"}],
+               {"op": "disconnect"} | {"op": "kill_switch"} |
+               {"op": "voice_state", "state"}],
      "expect": {"frames": [matcher...], "executor_calls", ...}}
 
 A matcher is a subset of one node frame's fields, in order; the node must
@@ -28,7 +29,8 @@ refusals or frame errors pins 0, so no reader runs on any refusal path),
 `closed_reason`, `reconnect_allowed`, `absent_b64` (base64 of strings no
 frame may contain: the case files never carry a raw fake secret; executor
 chunks may be `{"b64": ...}` for the same reason), `backoff_max_seconds`
-and `worktrees_after` (the source repo's worktree count).
+and `worktrees_after` (the source repo's worktree count), and
+`voice_states_dropped` (Phase 11 D15: mic states the node refused to relay).
 Unspecified keys are not checked. Every case also checks that the node's
 local policy fingerprint is unchanged and that the gateway counted no
 frame errors.
@@ -802,7 +804,7 @@ def _reader_cases():
 
 
 def v1_cases():
-    cases = _common_cases(1) + _reader_cases()
+    cases = _common_cases(1) + _reader_cases() + _voice_state_cases(1)
     grant_attached = plain("v1-grant", "apps.frontmost", {}, version=1)
     grant_attached = resign({**grant_attached, "grant": {"approval_id": APPROVAL_ID}})
     cases.append(
@@ -1439,7 +1441,148 @@ def _window_cases():
 
 
 def v2_cases():
-    return _common_cases(2) + _grant_cases() + _policy_cases() + _window_cases()
+    return (
+        _common_cases(2)
+        + _grant_cases()
+        + _policy_cases()
+        + _window_cases()
+        + _voice_state_cases(2)
+    )
+
+
+# --- Phase 11 D15: the node -> server `voice.state` event ---------------
+
+LISTENING = {
+    "state": "listening",
+    "mode": "always_on",
+    "session_open": True,
+    "wake_accepts_today": 3,
+    "wake_discards_today": 1,
+    "storm_mutes_today": 0,
+}
+
+
+def hello_ack(version):
+    """The gateway's `hello.ack` (unsigned): the session is up, so the node
+    may relay events."""
+    return {
+        "v": version,
+        "type": "hello.ack",
+        "id": _uuid4(f"v{version}-hello-ack"),
+        "node_id": NODE_ID,
+        "heartbeat_seconds": 15,
+        "rotate_after_days": 30,
+        "server_time": NOW,
+        "accepted": ["apps.frontmost"],
+    }
+
+
+def voice_state(state):
+    return {"op": "voice_state", "state": state}
+
+
+def voice_event(state, at):
+    """The matcher of one relayed `voice.state` event."""
+    return {
+        "type": "event",
+        "kind": "voice.state",
+        "spooled": False,
+        "batch": [{**state, "at": at}],
+    }
+
+
+def _voice_state_cases(version):
+    v = version
+    up = send(hello_ack(v))
+    if v == 1:
+        return [
+            case(
+                "v1_voice_state_never_sent",
+                1,
+                description="A v1 session has no voice.state kind: the node never sends it.",
+                steps=[up, voice_state(LISTENING)],
+                frames=[],
+                voice_states_dropped=1,
+            )
+        ]
+    thinking = {**LISTENING, "state": "thinking"}
+    speaking = {**LISTENING, "state": "speaking"}
+    return [
+        case(
+            "v2_voice_state_relayed",
+            2,
+            description="A mic state from the voice child is relayed as one live voice.state "
+            "event: one item, the node clock as `at`, never spooled.",
+            steps=[up, voice_state(LISTENING)],
+            frames=[voice_event(LISTENING, NOW)],
+            voice_states_dropped=0,
+        ),
+        case(
+            "v2_voice_state_coalesced",
+            2,
+            description="At most one voice.state a second: states reported inside the same "
+            "second coalesce and only the latest goes out once the second has passed.",
+            steps=[
+                up,
+                voice_state(LISTENING),
+                voice_state(thinking),
+                voice_state(speaking),
+                advance(1),
+            ],
+            frames=[voice_event(LISTENING, NOW), voice_event(speaking, NOW)],
+            voice_states_dropped=0,
+        ),
+        case(
+            "v2_voice_state_refreshed_with_the_heartbeat",
+            2,
+            description="The current mic state is re-sent with every heartbeat, as of now, so "
+            "the server can tell an idle node from a silent one.",
+            steps=[up, voice_state(LISTENING), advance(15)],
+            frames=[voice_event(LISTENING, NOW), voice_event(LISTENING, NOW + 15)],
+        ),
+        case(
+            "v2_voice_state_waits_for_the_session",
+            2,
+            description="Before hello.ack nothing is relayed; the latest state goes out once "
+            "the session is up.",
+            steps=[voice_state(LISTENING), voice_state(speaking), up],
+            frames=[voice_event(speaking, NOW)],
+        ),
+        case(
+            "v2_voice_state_unknown_state",
+            2,
+            description="A state outside the enumerated set is never relayed (the server "
+            "would count it a schema frame error).",
+            steps=[up, voice_state({**LISTENING, "state": "recording"})],
+            frames=[],
+            voice_states_dropped=1,
+        ),
+        case(
+            "v2_voice_state_oversize_counter",
+            2,
+            description="A counter above its bound (100 000 a day) is never relayed.",
+            steps=[up, voice_state({**LISTENING, "wake_accepts_today": 100_001})],
+            frames=[],
+            voice_states_dropped=1,
+        ),
+        case(
+            "v2_voice_state_extra_key",
+            2,
+            description="A voice item carries no text: an extra key (a transcript) is never "
+            "relayed.",
+            steps=[up, voice_state({**LISTENING, "transcript": "Hey Friday, bugün ne var?"})],
+            frames=[],
+            voice_states_dropped=1,
+        ),
+        case(
+            "v2_voice_state_unknown_mode",
+            2,
+            description="A mode outside off / push_to_talk / always_on is never relayed.",
+            steps=[up, voice_state({**LISTENING, "mode": "remote"})],
+            frames=[],
+            voice_states_dropped=1,
+        ),
+    ]
 
 
 @cache

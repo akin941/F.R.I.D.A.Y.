@@ -131,3 +131,19 @@ fails while no real trust check (or the branch-3 stub) is registered, or
 while `control.trust_check` lacks a tier, a budget or its seeded prompt, so a
 deployment cannot silently run node actions without the voice cap.
 Decisions 1–6 are unchanged.
+
+## Implementation note — decision 2 on the node (Phase 11 branch 7, 2026-11-20)
+
+Decision 2 (the owner can always see that the mic is live) now reaches the
+Mac node's mic on the server's screens too. The node relays its voice
+child's state as the `voice.state` event (ADR-013 note of the same date);
+the HUD health panel's node line shows the mic state, mode, session flag
+and the day's wake accepts / discards / storm mutes, and the HUD ring shows
+*listening / thinking / speaking* from the node while no browser voice turn
+is active (labelled "(Mac)"). The state reads `unknown` when the node is
+offline or silent for two heartbeats, and `off` while the node is cut off
+(kill switch, revoked) — the server's fail-closed reading, not an
+observation. The menu-bar icon on the Mac stays the primary indicator
+(Mac session M1). Drafts from a live voice turn (`node_voice`) render as
+the same cards on `/chat/<id>` and are confirmed only by a click there;
+nothing on the HUD decides anything. Decisions 1 and 3–7 are unchanged.

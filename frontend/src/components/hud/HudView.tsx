@@ -85,7 +85,12 @@ export function HudView({ streamFactory, terminalStreamFactory, webglAvailable, 
     pendingApprovals: data?.approvals.pending_count ?? 0,
     // Phase 10 D12: a node action `running` on the Mac is a running tool.
     toolsRunning: (data?.approvals.tools_running ?? 0) + (data?.terminal?.running_count ?? 0),
+    // Phase 11 D15: the Mac's live voice, when the browser has none.
+    nodeVoice: data?.health?.node?.voice?.state ?? null,
   });
+  // With the browser idle, a live voice state on the ring is the Mac's.
+  const fromNode =
+    presence.phase === "idle" && (state === "listening" || state === "thinking" || state === "speaking");
   const visual = HUD_VISUALS[state];
   const fps = frameBudget({
     active: visual.active,
@@ -169,6 +174,7 @@ export function HudView({ streamFactory, terminalStreamFactory, webglAvailable, 
             level={level}
             size={240}
             webglAvailable={webglAvailable}
+            source={fromNode ? "node" : "browser"}
           />
           <p className="flex items-center gap-2 text-lg font-semibold" data-testid="hud-state-label">
             <span
@@ -177,6 +183,11 @@ export function HudView({ streamFactory, terminalStreamFactory, webglAvailable, 
               style={{ backgroundColor: `var(${visual.token})` }}
             />
             <span style={{ color: `var(${visual.token})` }}>{label}</span>
+            {fromNode ? (
+              <span className="text-xs text-hud-caption-muted" data-testid="hud-state-source">
+                {tr.hud.fromNode}
+              </span>
+            ) : null}
           </p>
           {/* Every state is announced (A8). */}
           <p className="sr-only" role="status" aria-live="polite" data-testid="hud-state-announcement">

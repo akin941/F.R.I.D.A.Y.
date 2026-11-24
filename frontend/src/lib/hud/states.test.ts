@@ -131,6 +131,21 @@ describe("deriveHudState", () => {
     expect(deriveHudState({ ...BASE, online: false, wakeState: "armed" })).toBe("offline-local");
   });
 
+  it("shows the Mac node's live voice on the ring only while the browser is idle (Phase 11 D15)", () => {
+    expect(deriveHudState({ ...BASE, nodeVoice: "listening" })).toBe("listening");
+    expect(deriveHudState({ ...BASE, nodeVoice: "thinking" })).toBe("thinking");
+    expect(deriveHudState({ ...BASE, nodeVoice: "speaking", pendingApprovals: 1 })).toBe("speaking");
+    // Resting and unknown node states leave the ring to the other signals.
+    for (const nodeVoice of ["armed_ptt", "armed_wake", "off", "muted", "storm_muted", "error", "unknown", null]) {
+      expect(deriveHudState({ ...BASE, nodeVoice })).toBe("idle");
+    }
+    // The browser's own voice wins; mute and a lost stream win over both.
+    expect(deriveHudState({ ...BASE, phase: "speaking", nodeVoice: "listening" })).toBe("speaking");
+    expect(deriveHudState({ ...BASE, phase: "error", voiceError: "x", nodeVoice: "listening" })).toBe("error");
+    expect(deriveHudState({ ...BASE, muted: true, nodeVoice: "listening" })).toBe("muted");
+    expect(deriveHudState({ ...BASE, streamLost: true, nodeVoice: "speaking" })).toBe("disconnected");
+  });
+
   it("captions the transcribing phase", () => {
     expect(phaseCaption("transcribing")).toBe("transcribing");
     expect(tr.hud.captions.transcribing).toContain("yazıya dökülüyor");
