@@ -1,0 +1,72 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "friday-voice/v1/state",
+  "title": "state",
+  "description": "The child's state and daily counters; the host derives the voice.state node event from it and runs its 10 s watchdog on it.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "type",
+    "state",
+    "mode",
+    "session_open",
+    "wake_accepts_today",
+    "wake_discards_today",
+    "storm_mutes_today",
+    "at_ms"
+  ],
+  "properties": {
+    "type": {
+      "type": "string",
+      "maxLength": 16,
+      "const": "state"
+    },
+    "state": {
+      "type": "string",
+      "maxLength": 16,
+      "enum": [
+        "off",
+        "armed_ptt",
+        "armed_wake",
+        "listening",
+        "thinking",
+        "speaking",
+        "muted",
+        "storm_muted",
+        "error"
+      ]
+    },
+    "mode": {
+      "type": "string",
+      "maxLength": 16,
+      "enum": [
+        "off",
+        "push_to_talk",
+        "always_on"
+      ]
+    },
+    "session_open": {
+      "type": "boolean"
+    },
+    "wake_accepts_today": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 100000
+    },
+    "wake_discards_today": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 100000
+    },
+    "storm_mutes_today": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 100000
+    },
+    "at_ms": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    }
+  }
+}

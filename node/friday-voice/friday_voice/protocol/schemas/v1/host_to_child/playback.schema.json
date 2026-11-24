@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "friday-voice/v1/playback",
+  "title": "playback",
+  "description": "What the host's player did with an utterance the child sent.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "type",
+    "utterance_id",
+    "state",
+    "at_ms"
+  ],
+  "properties": {
+    "type": {
+      "type": "string",
+      "maxLength": 16,
+      "const": "playback"
+    },
+    "utterance_id": {
+      "type": "string",
+      "maxLength": 64,
+      "pattern": "[A-Za-z0-9_-]{1,64}"
+    },
+    "state": {
+      "type": "string",
+      "maxLength": 8,
+      "enum": [
+        "started",
+        "ended",
+        "stopped"
+      ]
+    },
+    "at_ms": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    }
+  }
+}

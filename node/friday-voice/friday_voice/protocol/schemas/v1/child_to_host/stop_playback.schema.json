@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "friday-voice/v1/stop_playback",
+  "title": "stop_playback",
+  "description": "Barge-in or cancel: stop this utterance now.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "type",
+    "utterance_id"
+  ],
+  "properties": {
+    "type": {
+      "type": "string",
+      "maxLength": 16,
+      "const": "stop_playback"
+    },
+    "utterance_id": {
+      "type": "string",
+      "maxLength": 64,
+      "pattern": "[A-Za-z0-9_-]{1,64}"
+    }
+  }
+}

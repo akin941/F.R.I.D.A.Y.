@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "friday-voice/v1/audio",
+  "title": "audio",
+  "description": "One AEC-cleaned capture frame: 16 kHz mono PCM16 little-endian, pcm_bytes long, even.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "type",
+    "seq",
+    "captured_at_ms",
+    "aec",
+    "pcm_bytes"
+  ],
+  "properties": {
+    "type": {
+      "type": "string",
+      "maxLength": 16,
+      "const": "audio"
+    },
+    "seq": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 4294967295
+    },
+    "captured_at_ms": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "aec": {
+      "type": "string",
+      "maxLength": 3,
+      "enum": [
+        "on",
+        "off"
+      ]
+    },
+    "pcm_bytes": {
+      "type": "integer",
+      "minimum": 2,
+      "maximum": 65536
+    }
+  }
+}

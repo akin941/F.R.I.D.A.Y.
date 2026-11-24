@@ -1,0 +1,22 @@
+{
+  "format": 1,
+  "protocol": "friday-voice/v1",
+  "family": "child",
+  "id": "child.hello_expected",
+  "title": "The first frame must be hello; the child stops without sending anything",
+  "clock": "any",
+  "steps": [
+    {
+      "op": "host_send",
+      "frame_b64": "AAAA33siY2Ffc2hhMjU2IjoiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYiIsImV4cGlyZXNfYXQiOiIyMDk5LTAxLTAxVDAwOjAwOjAwWiIsInNlcnZlcl91cmwiOiJodHRwczovL2ZyaWRheS5leGFtcGxlIiwidG9rZW4iOiJqcGF0X2MwbmYwcm1hbmNlVDBrZW5jMG5mMHJtYW5jZVQwa2VuIiwidHlwZSI6ImNyZWRlbnRpYWwifQo="
+    },
+    {
+      "op": "expect_frames",
+      "frames": []
+    },
+    {
+      "op": "expect_exit",
+      "code": 2
+    }
+  ]
+}

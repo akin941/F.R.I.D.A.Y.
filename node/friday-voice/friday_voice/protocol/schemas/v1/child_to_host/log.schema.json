@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "friday-voice/v1/log",
+  "title": "log",
+  "description": "A log code and a short scrubbed detail for the host's rotated local log; never a transcript, reply text or token.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "type",
+    "code",
+    "detail"
+  ],
+  "properties": {
+    "type": {
+      "type": "string",
+      "maxLength": 16,
+      "const": "log"
+    },
+    "code": {
+      "type": "string",
+      "maxLength": 48,
+      "pattern": "[a-z][a-z0-9_.]{0,47}"
+    },
+    "detail": {
+      "type": "string",
+      "maxLength": 200
+    }
+  }
+}

@@ -1,0 +1,52 @@
+{
+  "format": 1,
+  "protocol": "friday-voice/v1",
+  "family": "host",
+  "id": "host.play_length_mismatch",
+  "title": "pcm_bytes must equal the payload length",
+  "clock": "any",
+  "host": {
+    "mode": "push_to_talk",
+    "muted": false,
+    "link_up": true
+  },
+  "steps": [
+    {
+      "op": "expect",
+      "mic": "released",
+      "link": "open",
+      "to_child": [
+        "hello",
+        "credential"
+      ]
+    },
+    {
+      "op": "child_send",
+      "frame_b64": "AAAARnsiY2hpbGRfdmVyc2lvbiI6IjAuMS4wIiwicHJvdG9jb2wiOiJmcmlkYXktdm9pY2UvdjEiLCJ0eXBlIjoicmVhZHkifQo="
+    },
+    {
+      "op": "child_send",
+      "frame_b64": "AAAAq3siYXRfbXMiOjE4MDAwMDAwMDAwMDAsIm1vZGUiOiJwdXNoX3RvX3RhbGsiLCJzZXNzaW9uX29wZW4iOmZhbHNlLCJzdGF0ZSI6ImFybWVkX3B0dCIsInN0b3JtX211dGVzX3RvZGF5IjowLCJ0eXBlIjoic3RhdGUiLCJ3YWtlX2FjY2VwdHNfdG9kYXkiOjAsIndha2VfZGlzY2FyZHNfdG9kYXkiOjB9Cg=="
+    },
+    {
+      "op": "expect",
+      "mic": "held",
+      "link": "open",
+      "indicator": "armed_ptt",
+      "to_child": []
+    },
+    {
+      "op": "child_send",
+      "frame_b64": "AAAASHsibGFzdCI6dHJ1ZSwicGNtX2J5dGVzIjo0LCJzZXEiOjAsInR5cGUiOiJwbGF5IiwidXR0ZXJhbmNlX2lkIjoidTEifQoAAQ=="
+    },
+    {
+      "op": "expect",
+      "mic": "released",
+      "link": "dropped",
+      "indicator": "off",
+      "failure": "payload_length_mismatch",
+      "restart_in_ms": 1000,
+      "to_child": []
+    }
+  ]
+}

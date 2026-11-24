@@ -1,0 +1,52 @@
+{
+  "format": 1,
+  "protocol": "friday-voice/v1",
+  "family": "host",
+  "id": "host.play_odd_pcm",
+  "title": "PCM of odd length is a protocol error",
+  "clock": "any",
+  "host": {
+    "mode": "push_to_talk",
+    "muted": false,
+    "link_up": true
+  },
+  "steps": [
+    {
+      "op": "expect",
+      "mic": "released",
+      "link": "open",
+      "to_child": [
+        "hello",
+        "credential"
+      ]
+    },
+    {
+      "op": "child_send",
+      "frame_b64": "AAAARnsiY2hpbGRfdmVyc2lvbiI6IjAuMS4wIiwicHJvdG9jb2wiOiJmcmlkYXktdm9pY2UvdjEiLCJ0eXBlIjoicmVhZHkifQo="
+    },
+    {
+      "op": "child_send",
+      "frame_b64": "AAAAq3siYXRfbXMiOjE4MDAwMDAwMDAwMDAsIm1vZGUiOiJwdXNoX3RvX3RhbGsiLCJzZXNzaW9uX29wZW4iOmZhbHNlLCJzdGF0ZSI6ImFybWVkX3B0dCIsInN0b3JtX211dGVzX3RvZGF5IjowLCJ0eXBlIjoic3RhdGUiLCJ3YWtlX2FjY2VwdHNfdG9kYXkiOjAsIndha2VfZGlzY2FyZHNfdG9kYXkiOjB9Cg=="
+    },
+    {
+      "op": "expect",
+      "mic": "held",
+      "link": "open",
+      "indicator": "armed_ptt",
+      "to_child": []
+    },
+    {
+      "op": "child_send",
+      "frame_b64": "AAAASXsibGFzdCI6dHJ1ZSwicGNtX2J5dGVzIjozLCJzZXEiOjAsInR5cGUiOiJwbGF5IiwidXR0ZXJhbmNlX2lkIjoidTEifQoAAQI="
+    },
+    {
+      "op": "expect",
+      "mic": "released",
+      "link": "dropped",
+      "indicator": "off",
+      "failure": "pcm_odd_length",
+      "restart_in_ms": 1000,
+      "to_child": []
+    }
+  ]
+}

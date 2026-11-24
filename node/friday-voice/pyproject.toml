@@ -1,0 +1,58 @@
+[project]
+name = "friday-voice"
+version = "0.1.0"
+description = "Friday live voice child process (Phase 11): spawned by friday-node over stdio, speaks friday-voice/v1"
+requires-python = ">=3.12,<3.13"
+# Exact pins only (Phase 11 brief D7 step 0, docs/mcp/dependencies/friday-voice.md).
+# Upgrades go in a dedicated `chore/p11-pipecat-<version>` branch, never as
+# a side effect of another change.
+dependencies = [
+    # Core only, no extras: every Pipecat extra pulls a provider SDK or a
+    # network transport. The child reaches Pipecat only through
+    # friday_voice/pipecat_adapter.py.
+    "pipecat-ai==1.15.0",
+    "onnxruntime==1.31.1",
+    "openwakeword==0.6.0",
+    "numpy==2.5.4",
+    "httpx==0.28.1",
+    "jsonschema==4.26.0",
+]
+
+[project.scripts]
+friday-voice = "friday_voice.cli:main"
+
+[dependency-groups]
+dev = [
+    "pytest==9.1.1",
+    "ruff==0.15.20",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["friday_voice"]
+
+[tool.uv]
+# openwakeword 0.6.0 declares `tflite-runtime` on Linux, which ships no
+# wheel for CPython 3.12. The child runs openWakeWord with
+# `inference_framework="onnx"` only, so tflite is never needed: this
+# override drops it on every platform (docs/mcp/dependencies/friday-voice.md).
+override-dependencies = ["tflite-runtime; python_version < '3.0'"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "real_models: loads the real ONNX detectors (opt-in: -m real_models; never in the default run)",
+]
+addopts = "-m 'not real_models'"
+# Pipecat 1.15.0 imports the stdlib `audioop` (removed in 3.13; the pin is 3.12).
+filterwarnings = ["ignore:'audioop' is deprecated:DeprecationWarning"]

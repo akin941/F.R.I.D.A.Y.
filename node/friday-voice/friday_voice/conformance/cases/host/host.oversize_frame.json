@@ -1,0 +1,52 @@
+{
+  "format": 1,
+  "protocol": "friday-voice/v1",
+  "family": "host",
+  "id": "host.oversize_frame",
+  "title": "A length prefix above 1 MiB is refused before its body is read",
+  "clock": "any",
+  "host": {
+    "mode": "push_to_talk",
+    "muted": false,
+    "link_up": true
+  },
+  "steps": [
+    {
+      "op": "expect",
+      "mic": "released",
+      "link": "open",
+      "to_child": [
+        "hello",
+        "credential"
+      ]
+    },
+    {
+      "op": "child_send",
+      "frame_b64": "AAAARnsiY2hpbGRfdmVyc2lvbiI6IjAuMS4wIiwicHJvdG9jb2wiOiJmcmlkYXktdm9pY2UvdjEiLCJ0eXBlIjoicmVhZHkifQo="
+    },
+    {
+      "op": "child_send",
+      "frame_b64": "AAAAq3siYXRfbXMiOjE4MDAwMDAwMDAwMDAsIm1vZGUiOiJwdXNoX3RvX3RhbGsiLCJzZXNzaW9uX29wZW4iOmZhbHNlLCJzdGF0ZSI6ImFybWVkX3B0dCIsInN0b3JtX211dGVzX3RvZGF5IjowLCJ0eXBlIjoic3RhdGUiLCJ3YWtlX2FjY2VwdHNfdG9kYXkiOjAsIndha2VfZGlzY2FyZHNfdG9kYXkiOjB9Cg=="
+    },
+    {
+      "op": "expect",
+      "mic": "held",
+      "link": "open",
+      "indicator": "armed_ptt",
+      "to_child": []
+    },
+    {
+      "op": "child_send",
+      "frame_b64": "ABAAAQ=="
+    },
+    {
+      "op": "expect",
+      "mic": "released",
+      "link": "dropped",
+      "indicator": "off",
+      "failure": "frame_too_large",
+      "restart_in_ms": 1000,
+      "to_child": []
+    }
+  ]
+}

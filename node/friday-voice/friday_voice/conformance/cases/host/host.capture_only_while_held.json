@@ -1,0 +1,75 @@
+{
+  "format": 1,
+  "protocol": "friday-voice/v1",
+  "family": "host",
+  "id": "host.capture_only_while_held",
+  "title": "Capture frames reach the child only while the mic is held",
+  "clock": "any",
+  "host": {
+    "mode": "push_to_talk",
+    "muted": false,
+    "link_up": true
+  },
+  "steps": [
+    {
+      "op": "expect",
+      "mic": "released",
+      "to_child": [
+        "hello",
+        "credential"
+      ]
+    },
+    {
+      "op": "host_capture",
+      "frames": 2
+    },
+    {
+      "op": "expect",
+      "mic": "released",
+      "to_child": []
+    },
+    {
+      "op": "child_send",
+      "frame_b64": "AAAARnsiY2hpbGRfdmVyc2lvbiI6IjAuMS4wIiwicHJvdG9jb2wiOiJmcmlkYXktdm9pY2UvdjEiLCJ0eXBlIjoicmVhZHkifQo="
+    },
+    {
+      "op": "child_send",
+      "frame_b64": "AAAAq3siYXRfbXMiOjE4MDAwMDAwMDAwMDAsIm1vZGUiOiJwdXNoX3RvX3RhbGsiLCJzZXNzaW9uX29wZW4iOmZhbHNlLCJzdGF0ZSI6ImFybWVkX3B0dCIsInN0b3JtX211dGVzX3RvZGF5IjowLCJ0eXBlIjoic3RhdGUiLCJ3YWtlX2FjY2VwdHNfdG9kYXkiOjAsIndha2VfZGlzY2FyZHNfdG9kYXkiOjB9Cg=="
+    },
+    {
+      "op": "expect",
+      "mic": "held",
+      "to_child": []
+    },
+    {
+      "op": "host_capture",
+      "frames": 2
+    },
+    {
+      "op": "expect",
+      "mic": "held",
+      "to_child": [
+        "audio",
+        "audio"
+      ]
+    },
+    {
+      "op": "child_send",
+      "frame_b64": "AAAAKHsicmVhc29uIjoiZXJyb3IiLCJ0eXBlIjoicmVsZWFzZV9taWMifQo="
+    },
+    {
+      "op": "expect",
+      "mic": "released",
+      "to_child": []
+    },
+    {
+      "op": "host_capture",
+      "frames": 2
+    },
+    {
+      "op": "expect",
+      "mic": "released",
+      "to_child": []
+    }
+  ]
+}

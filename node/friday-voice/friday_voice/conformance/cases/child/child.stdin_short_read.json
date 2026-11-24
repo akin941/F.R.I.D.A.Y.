@@ -1,0 +1,59 @@
+{
+  "format": 1,
+  "protocol": "friday-voice/v1",
+  "family": "child",
+  "id": "child.stdin_short_read",
+  "title": "stdin ending inside a frame is a protocol error",
+  "clock": "any",
+  "steps": [
+    {
+      "op": "host_send",
+      "frame_b64": "AAAAjHsiaG9zdF92ZXJzaW9uIjoiMS4wLjAiLCJsaW5rX3VwIjp0cnVlLCJtb2RlIjoicHVzaF90b190YWxrIiwibXV0ZWQiOmZhbHNlLCJwcm90b2NvbCI6ImZyaWRheS12b2ljZS92MSIsInNhbXBsZV9yYXRlIjoxNjAwMCwidHlwZSI6ImhlbGxvIn0K"
+    },
+    {
+      "op": "expect_frames",
+      "frames": []
+    },
+    {
+      "op": "host_send",
+      "frame_b64": "AAAA33siY2Ffc2hhMjU2IjoiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYiIsImV4cGlyZXNfYXQiOiIyMDk5LTAxLTAxVDAwOjAwOjAwWiIsInNlcnZlcl91cmwiOiJodHRwczovL2ZyaWRheS5leGFtcGxlIiwidG9rZW4iOiJqcGF0X2MwbmYwcm1hbmNlVDBrZW5jMG5mMHJtYW5jZVQwa2VuIiwidHlwZSI6ImNyZWRlbnRpYWwifQo="
+    },
+    {
+      "op": "expect_frames",
+      "frames": [
+        {
+          "type": "ready",
+          "protocol": "friday-voice/v1"
+        },
+        {
+          "type": "state",
+          "state": "armed_ptt"
+        }
+      ]
+    },
+    {
+      "op": "host_send",
+      "frame_b64": "AAAAHHsiaw=="
+    },
+    {
+      "op": "close_stdin"
+    },
+    {
+      "op": "expect_frames",
+      "frames": [
+        {
+          "type": "log",
+          "code": "protocol.short_read"
+        },
+        {
+          "type": "release_mic",
+          "reason": "protocol_error"
+        }
+      ]
+    },
+    {
+      "op": "expect_exit",
+      "code": 2
+    }
+  ]
+}
