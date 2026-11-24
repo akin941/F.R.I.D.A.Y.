@@ -10,10 +10,12 @@ from conftest import PACKAGE_ROOT
 from friday_voice import cli
 
 
-@pytest.mark.parametrize("command", ["selftest", "wake-eval"])
-def test_later_commands_say_where_they_land(command, capsys):
-    assert cli.main([command]) == 2
-    assert "lands in feat/p11-" in capsys.readouterr().err
+def test_selftest_and_wake_eval_are_real_commands(capsys):
+    # Branch 6 landed them (tests/test_selftest.py, tests/test_wake_eval.py).
+    assert cli.main(["selftest"]) == 2  # neither --ci nor --nightly
+    assert "lands in" not in capsys.readouterr().err
+    with pytest.raises(SystemExit):
+        cli.main(["wake-eval"])  # --model is required
 
 
 def test_run_takes_no_configuration():

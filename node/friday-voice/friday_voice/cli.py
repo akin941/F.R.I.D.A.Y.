@@ -4,7 +4,10 @@
     friday-voice conformance [--check | --build | --live]
     friday-voice conformance-child --case <id> [--cases <dir>] [--time-scale <f>]
     friday-voice replay [--check | --write-baseline | --server <url> --token-file <path>]
-    friday-voice selftest | wake-eval   (branch 6)
+    friday-voice selftest --ci | --nightly --server <url> --token-file <path>
+                          --model-dir <dir> --loopback-cmd <cmd> [--result-file <path>]
+    friday-voice wake-eval [--negative <dir>] [--positives <dir>] --model <onnx>
+                           [--threshold <t>] [--refractory-ms <ms>] [--out <path>]
 
 `run` takes no configuration: the host hands the child everything over
 stdin (`hello`, `credential`, ...). Never pass a credential in argv or the
@@ -14,11 +17,6 @@ environment (brief D3).
 import argparse
 import os
 import sys
-
-LATER = {
-    "selftest": "feat/p11-wake-eval-harness",
-    "wake-eval": "feat/p11-wake-eval-harness",
-}
 
 
 def load_wake_stack(model_dir=None):
@@ -185,9 +183,16 @@ def _conformance_child(args) -> int:
     return hostile.main(args.case, args.cases, args.time_scale, args.settle_ms)
 
 
-def _later(args) -> int:
-    print(f"friday-voice {args.command}: lands in {LATER[args.command]}", file=sys.stderr)
-    return 2
+def _selftest(args) -> int:
+    from . import selftest
+
+    return selftest.main(args)
+
+
+def _wake_eval(args) -> int:
+    from . import wake_eval
+
+    return wake_eval.main(args)
 
 
 def build_parser():
@@ -234,8 +239,36 @@ def build_parser():
     )
     replay.set_defaults(func=_replay)
 
-    for name in LATER:
-        sub.add_parser(name, help=f"lands in {LATER[name]}").set_defaults(func=_later)
+    selftest = sub.add_parser(
+        "selftest", help="the self-trigger test (D13): --ci with fakes, --nightly on the Mac"
+    )
+    group = selftest.add_mutually_exclusive_group()
+    group.add_argument("--ci", action="store_true", help="the release gate, fakes only")
+    group.add_argument("--nightly", action="store_true", help="real models and audio (Mac)")
+    selftest.add_argument("--server", default=None, help="--nightly: Friday's URL (real TTS/STT)")
+    selftest.add_argument("--token-file", default=None, help="--nightly: a node_voice token")
+    selftest.add_argument("--model-dir", default=None, help="--nightly: the node model directory")
+    selftest.add_argument(
+        "--loopback-cmd",
+        default=None,
+        help="--nightly: the host's audio path (WAV on stdin -> AEC capture WAV on stdout)",
+    )
+    selftest.add_argument("--ca-file", default=None, help="--nightly: extra CA bundle")
+    selftest.add_argument("--ca-sha256", default=None, help="--nightly: pinned CA fingerprint")
+    selftest.add_argument("--result-file", default=None, help="write the one-line JSON result")
+    selftest.set_defaults(func=_selftest)
+
+    wake_eval = sub.add_parser("wake-eval", help="the FAR/FRR harness (D13): a JSON report")
+    wake_eval.add_argument("--negative", default=None, help="WAVs without the wake phrase")
+    wake_eval.add_argument("--positives", default=None, help="WAVs with one wake phrase each")
+    wake_eval.add_argument("--model", required=True, help="the keyword head (.onnx) evaluated")
+    wake_eval.add_argument(
+        "--model-dir", default=None, help="the pinned feature graphs (default: the node's)"
+    )
+    wake_eval.add_argument("--threshold", default=None, help="in (0, 1]; default: the child's")
+    wake_eval.add_argument("--refractory-ms", default=None, type=int)
+    wake_eval.add_argument("--out", default=None, help="write the report here (default: stdout)")
+    wake_eval.set_defaults(func=_wake_eval)
     return parser
 
 

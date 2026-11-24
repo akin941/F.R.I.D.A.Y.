@@ -105,7 +105,8 @@ friday-voice-test:
 		uv run python scripts/vendor_scrubber.py --check && \
 		uv run python scripts/snapshot_pipecat.py --check && \
 		uv run python scripts/make_fixtures.py --check && \
-		uv run friday-voice conformance && uv run friday-voice replay --check && uv run pytest
+		uv run friday-voice conformance && uv run friday-voice replay --check && \
+		uv run friday-voice selftest --ci && uv run pytest
 
 friday-voice-install:
 	mkdir -p "$(FRIDAY_VOICE_HOME)"

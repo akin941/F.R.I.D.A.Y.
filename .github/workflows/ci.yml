@@ -145,6 +145,14 @@ jobs:
       - name: Replay (fixture set, manual clock, overhead baseline, barge-in + echo scripts)
         run: uv run friday-voice replay --check
 
+      # Phase 11 D13 release gate (ADR-015 decision 4): Friday's own "Hey
+      # Friday, terminali aç" through the reference host's echo double at
+      # residual 0.0 / 0.3 / 1.0 never becomes a turn, a draft or a reply;
+      # the negative control (filter off) must post it. Required: a failure
+      # here fails the job.
+      - name: Self-trigger release gate (fakes, three AEC residuals + negative control)
+        run: uv run friday-voice selftest --ci
+
       - name: Tests
         run: uv run pytest
 

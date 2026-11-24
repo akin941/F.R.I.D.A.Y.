@@ -48,6 +48,24 @@ def wav_bytes(samples):
     return out.getvalue()
 
 
+def fake_tts(text, *, char_ms=60, gap_ms=40, level=0.3):
+    """The fake TTS of the self-trigger clip (Phase 11 brief D13): every
+    letter is a short tone whose pitch follows the letter, every other
+    character a short pause -- a deterministic tone pattern derived from the
+    text, never a voice. 16 kHz mono like the server's TTS."""
+    parts = []
+    for char in text:
+        if char.isalpha():
+            parts.append(tone(char_ms / 1000, 180.0 + (ord(char) % 32) * 15.0, level))
+        else:
+            parts.append(silence(gap_ms / 1000))
+    return np.concatenate(parts)
+
+
+# Branch 6 (D13): the self-trigger clip and its script.
+SELFTRIGGER_TEXT = "Hey Friday, terminali aç."
+SELFTRIGGER_WAV = "selftrigger_hey_friday_terminali_ac.wav"
+
 WAVS = {
     "ptt_question.wav": lambda: tone(1.6),
     "ptt_long_question.wav": lambda: np.concatenate([tone(2.0), silence(0.3), tone(1.4, 260)]),
@@ -56,6 +74,8 @@ WAVS = {
     "silence_2s.wav": lambda: silence(2.0),
     # Branch 4 (D9): the owner talking over Friday.
     "barge_in_owner.wav": lambda: tone(0.8, 300),
+    # Branch 6 (D13): Friday's own "Hey Friday, terminali aç." (fake TTS).
+    SELFTRIGGER_WAV: lambda: fake_tts(SELFTRIGGER_TEXT),
 }
 
 
@@ -178,6 +198,85 @@ BARGE_IN_SCENARIOS = [
 ]
 
 
+# Branch 6 (D13): the CI self-trigger release gate. The owner asks a
+# push-to-talk question; Friday's reply is exactly the clip, which the
+# reference host plays (paced) while its EchoDouble leaks it into the mic at
+# each residual; a scripted wake detector fires during that playback (the
+# worst case: as if the wake model accepted Friday's own voice). STT hears
+# the clip's words. The reply to a posted echo turn would carry a
+# `node_action` draft (what the real chat endpoint proposes for "terminali
+# aç"), so a leak through the filter shows as a draft and "Kart ekranda.".
+SELFTRIGGER = {
+    "$comment": (
+        "Phase 11 brief D13: the CI self-trigger release gate (scripts/make_fixtures.py). "
+        "`friday-voice selftest --ci` plays the clip as Friday's own reply through the "
+        "reference host's EchoDouble at every residual, with a scripted wake detector "
+        "firing on it; the run fails on any posted echo turn, draft or spoken reply, and "
+        "the negative control (filter off) must post the turn."
+    ),
+    "clip": {"text": SELFTRIGGER_TEXT, "wav": SELFTRIGGER_WAV},
+    "question": {"text": "bir örnek komut söyle", "language": "tr"},
+    "heard": {"text": "Hey Friday, terminali aç", "language": "tr"},
+    "reply_to_question": [
+        {"type": "chunk", "text": SELFTRIGGER_TEXT},
+        {"type": "done", "message_id": "00000000-0000-4000-8000-00000000000c"},
+    ],
+    "reply_to_echo": _reply(
+        draft={
+            "type": "draft",
+            "kind": "tool",
+            "source_message_id": "00000000-0000-4000-8000-00000000000d",
+            "tool_name": "node_action",
+            "payload": {},
+        }
+    ),
+    "residuals": [0.0, 0.3, 1.0],
+    "echo_delay_ms": 40,
+    "negative_control_residuals": [0.3, 1.0],
+    "latencies": BUDGET,
+}
+
+
+# Branch 6 (D13): a FAR/FRR report as `friday-voice wake-eval` writes it
+# (`friday_voice.wake_eval.build_report`), from scripted per-file results: 24
+# one-hour household files with 3 false accepts in all (FAR 0.125 / h) and 50
+# positives with 4 false rejects (FRR 0.08), for the fixture model at the
+# child's threshold and refractory period. The backend records it with
+# `voice_wake_eval record --from-report` and the policy endpoint honours it
+# (`backend/accounts/tests/test_wake_eval_record.py` reads its byte-identical
+# copy `backend/accounts/tests/fixtures/wake_eval_report.json`).
+REPORT_MODEL_SHA256 = "f" * 64  # friday_voice.replay.FIXTURE_WAKE_MODEL_SHA256
+
+
+def _entry(label, ms, detections):
+    import hashlib
+
+    return {
+        "sha256": hashlib.sha256(label.encode()).hexdigest(),
+        "ms": ms,
+        "detections": detections,
+    }
+
+
+def wake_eval_report():
+    from friday_voice import config, wake_eval
+
+    household = [
+        _entry(f"household-{i}", 3_600_000, 1 if i in (3, 11, 19) else 0) for i in range(24)
+    ]
+    positives = [
+        _entry(f"positive-{i}", 1_800, 0 if i in (5, 17, 33, 41) else 1) for i in range(50)
+    ]
+    report = wake_eval.build_report(
+        model_sha256=REPORT_MODEL_SHA256,
+        threshold=config.WAKE_THRESHOLD,
+        refractory_ms=config.WAKE_REFRACTORY_MS,
+        negative=sorted(household, key=lambda e: e["sha256"]),
+        positives=sorted(positives, key=lambda e: e["sha256"]),
+    )
+    return wake_eval.render(report)
+
+
 def render():
     files = {name: wav_bytes(make()) for name, make in WAVS.items()}
     doc = {
@@ -201,6 +300,9 @@ def render():
     }
     text = json.dumps(barge_in, ensure_ascii=False, indent=2) + "\n"
     files["barge_in.json"] = text.encode()
+    selftrigger = json.dumps(SELFTRIGGER, ensure_ascii=False, indent=2) + "\n"
+    files["selftrigger_hey_friday_terminali_ac.json"] = selftrigger.encode()
+    files["wake_eval_report.json"] = wake_eval_report().encode()
     return files
 
 

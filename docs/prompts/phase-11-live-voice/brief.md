@@ -1962,6 +1962,163 @@ Implemented as scoped (D11, D12), with these recorded choices:
 a report produced by `wake-eval` round-trips into a `VoiceWakeEvaluation`
 row that the policy endpoint honours.
 
+## Branch 6 implementation notes (`feat/p11-wake-eval-harness`, 2026-11-20)
+
+Implemented as scoped (D13), with these recorded choices:
+
+1. **The CI release gate** (`friday_voice/selftest.py`, `friday-voice
+   selftest --ci`, a required step of the `friday-voice` CI job and of
+   `make friday-voice-test`; a test pins both). The owner asks a
+   push-to-talk question; Friday's reply is exactly the clip
+   `fixtures/selftrigger_hey_friday_terminali_ac.wav` — the fake TTS of
+   "Hey Friday, terminali aç." in `scripts/make_fixtures.py` (one short tone
+   per letter, pitch from the letter, a pause per other character; `--check`
+   in CI), served by `FakeFriday(speech={text: wav})` — which the reference
+   host plays with paced playback while its `EchoDouble` leaks it into the
+   microphone. The script is `fixtures/selftrigger_hey_friday_terminali_ac.json`
+   (the question, what STT hears of the echo, the reply to a posted echo
+   turn with a `node_action` draft, residuals, echo delay). The real child
+   runs on the manual clock with the **real** `ArmingPolicy` against a
+   permitting fake policy (so wake mode is genuinely armed) and the real
+   self-trigger filter.
+2. **"Fires on the echo", read as the worst case.** The scripted wake
+   detector fires once 400 ms of the clip has been played, at **every**
+   residual — as if the wake model accepted whatever reached it, even a
+   perfectly cancelled signal. 400 ms is before the VAD barge-in monitor
+   could fire on a leak (300 ms guard + 250 ms persistence), so the gate
+   drives the wake path at all three residuals (asserted:
+   `interrupted_via == ["wake"]`); the VAD path on Friday's own echo stays
+   branch 4's `echo_r03` / `echo_r10` replay scripts.
+3. **Assertions per residual** (branch 4 note 7's reading): the wake fired;
+   no echo turn posted; no `draft` reached the child; nothing spoken but the
+   clip (no `play` frame of any other turn); every upload discarded as
+   self-trigger — `discarded_self` + 1 at 0.3 and 1.0, while at 0.0 the
+   perfect canceller leaves no speech after the stop, so nothing is uploaded
+   and nothing needs discarding. **Negative control** at 0.3 and 1.0 with
+   the filter off: the echo **is** posted as a turn, the draft arrives and
+   "Kart ekranda." is spoken — and the same result fails the gate's judge.
+   A monkeypatched filter that never discards fails the gate at 0.3 and 1.0;
+   a detector that never fires fails it too (tested).
+4. **The chat-endpoint case** (`backend/tools/tests/test_selftrigger_node_voice.py`):
+   the Phase 10 release-gate regression end to end through the node voice
+   channel — the voice token (minted with the reference node's secret)
+   synthesises the clip on the speech endpoint, uploads it as the child does
+   for a wake during playback (`X-Friday-Voice-Trigger: barge_in`; a `wake`
+   upload is refused 403 `voice.always_on_not_permitted` with no
+   `ModelUsage`, since no model is permitted), and posts the transcript as
+   the live conversation's chat turn: at most one confirm-class
+   `node_action` draft (`apps.open`), nothing requested, invoked or framed.
+5. **`selftest --nightly`** (Mac M3). Refuses (exit 2, and an `error` /
+   `usage` result line when `--result-file` is set) without `--server`,
+   `--token-file`, `--model-dir` and `--loopback-cmd`. **Reading:** the
+   child cannot reach the speakers or the AEC itself, so "the host's real
+   audio path" is a seam: `--loopback-cmd` names a command (to be provided
+   by the Swift host, M3) that reads the clip as a WAV on stdin, plays it,
+   and writes the AEC-cleaned capture as a WAV on stdout (in memory; nothing
+   on disk here). The run opens a live session (`ptt`), synthesises the clip
+   through Friday's real TTS (gateway, `ModelUsage`), plays/captures it,
+   scores the capture with the pinned `hey_friday` behind the child's
+   `WakeGate`, and transcribes after every detection (`barge_in`) to apply
+   the self-trigger filter: a transcript the filter would let through is a
+   **posted turn** — counted, never posted (the selftest makes no chat
+   call). Exit 0 only with no wake and no posted turn; 1 when the gate bit;
+   2 when it could not run. Tested with fakes (client, detector, loopback)
+   and a real subprocess for the loopback contract.
+6. **The result line** (`--result-file`, written atomically): one JSON line,
+   schema `friday-voice/selftest/v1`, with `mode`, `result`
+   (`pass|fail|error`), `at`, `wakes`, `posted_turns`, `model_sha256`,
+   `threshold`, `refractory_ms`, `reason` — no text. The
+   `voice_live_selftest` preflight check (branch 8) reads it from
+   `VOICE_LIVE_SELFTEST_RESULT_PATH`; that setting lands with the check, not
+   here.
+7. **`friday-voice wake-eval`** (`friday_voice/wake_eval.py`). WAV files
+   (recursively, `.wav` only; 16 kHz mono streamed, anything else normalised
+   with the child's `decode_wav`) in the pipeline's 20 ms frames through the
+   detector behind a fresh `WakeGate` per file on a manual clock (threshold
+   and refractory period from `config` unless given, so the refractory
+   period applies in audio time). `--threshold` is a fraction with at most
+   3 decimals (the child runs in thousandths). The detector is
+   `OpenWakeWordEvalDetector`: the pinned melspectrogram/embedding graphs
+   (refused unless both match their pins) plus the keyword head under
+   evaluation at `--model` — **not** required to be pinned (the owner
+   measures a new `hey_friday` before pinning it); its content sha256 is the
+   report's `model_sha256`. The same recording twice (same sha256) is
+   refused.
+8. **The report** (`friday-voice/wake-eval/v1`): `model_sha256`,
+   `threshold` ("0.5000"), `refractory_ms`, `frame_ms`, a `negative` section
+   (`files`, `manifest_sha256`, `hours` to 3 decimals, `false_accepts`,
+   `far_per_hour` = false accepts / hours to 4 decimals) and/or a
+   `positives` section (`files`, `manifest_sha256`, `positives`,
+   `false_rejects` = files without a detection, `frr`), and `report_sha256`
+   over the canonical JSON of the rest. Each file entry is only `{sha256,
+   ms, detections}`, sorted by hash — no name, path, order, audio or text
+   (tested against the fixture's file and directory names). Decimals are
+   strings so the backend's arithmetic is exact.
+9. **`voice_wake_eval record --from-report <json> --kind <k>
+   [--model-sha256 <hex>]`** writes **exactly one** row:
+   `household` / `negative_set` from the negative section, `positives` from
+   the positives section (one report with both sections is recorded with
+   two calls). `accounts/wake_eval_report.py` (pure) refuses: unknown or
+   missing fields anywhere (a file name has nowhere to hide), a wrong
+   schema, `report_sha256` or a `manifest_sha256` mismatch (a number edited
+   by hand), a model other than `--model-sha256`, hours not the files'
+   total, false accepts not their detections, FAR ≠ false accepts / hours,
+   positives ≠ files, false rejects ≠ files without a detection,
+   FRR ≠ false rejects / positives, a duplicate or unsorted file list,
+   non-string decimals; explicit numbers mixed with `--from-report` are
+   refused too. The row carries `report_sha256`; `record_evaluation`
+   re-validates the numbers and audits as before. Without `--from-report`
+   the explicit form is unchanged (`--model-sha256`, `--threshold`,
+   `--refractory-ms` now checked in the command rather than by argparse).
+10. **The round trip.** `fixtures/wake_eval_report.json` (24 one-hour
+    household files, 3 false accepts → FAR 0.125/h; 50 positives, 4 false
+    rejects → FRR 0.08; model `f…f`, threshold 0.5000, refractory 2000) is
+    rendered by `make_fixtures.py` through the harness's own
+    `build_report` from scripted per-file results (24 h of synthetic audio
+    would be 2.7 GB); its byte-identical copy
+    `backend/accounts/tests/fixtures/wake_eval_report.json` is checked from
+    the node tests. `backend/accounts/tests/test_wake_eval_record.py`
+    records it and the policy endpoint answers `always_on_permitted: true`
+    at 0.5000 / 2000 (and `threshold_mismatch` at 0.4500); a rehashed worse
+    report closes the gate (`far_above_budget`).
+11. **Real models here.** The opt-in `-m real_models` test ran green on
+    this Linux container with the pinned melspectrogram and embedding
+    graphs and openWakeWord's public `hey_jarvis_v0.1` head (both graphs'
+    downloads matched their pins in `models.json`): a synthetic tone file,
+    zero false accepts. The tunables, the protocol and `backend/` contracts
+    are unchanged; no migration; `lint-imports` green with no contract
+    changed (`accounts` gains a pure module; `voice` untouched).
+12. **ADR-015** gains the branch 6 implementation note (decision 4's test is
+    a release gate; d3's instrument); `self_sources.json` regenerated.
+13. **Done when, checked here 2026-11-20:** `friday-voice selftest --ci` is
+    a required CI step and green; the wake-eval report round-trips into a
+    `VoiceWakeEvaluation` row the policy endpoint honours.
+
+### Owner steps (pending) — `feat/p11-wake-eval-harness`, recorded 2026-11-20
+
+1. Run the independent Sonnet 5 review of this branch and fix findings
+   until APPROVE (CLAUDE.md "Reviews").
+2. Confirm the readings in note 2 (the scripted detector fires at every
+   residual, at 400 ms, so the gate tests the wake path; residual 0.0
+   asserts "nothing uploaded" rather than a discard), note 5 (the host's
+   audio path is the `--loopback-cmd` seam; a filter-passing transcript is
+   counted as a posted turn, never posted) and note 9 (one row per
+   `--from-report` call, kind chosen by the owner).
+3. **Pending owner evaluation (Mac session M4).** Record ≥ 24 h of household
+   audio and ≥ 50 "Hey Friday" positives outside the repository, run
+   `friday-voice wake-eval` with the trained `hey_friday.onnx`, record both
+   sections with `voice_wake_eval record --from-report`, and follow
+   `docs/voice/live-eval.md` (pin the model, enable the setting only on
+   `permitted`).
+4. **Mac (deferred: Mac session, M3).** The Swift host provides the
+   `--loopback-cmd` command (WAV on stdin → plays it through the
+   voice-processing engine → AEC-cleaned capture WAV on stdout, mic released
+   afterwards), a token hand-over for the nightly job (a fresh `node_voice`
+   token in a file readable only by the owner), `selftest-nightly.sh` and
+   the launchd agent of `docs/voice/live-eval.md`; then seven consecutive
+   green nights. Branch 8 adds `VOICE_LIVE_SELFTEST_RESULT_PATH` and the
+   `voice_live_selftest` preflight check reading the result line.
+
 ### 7. `feat/p11-hud-live-voice` — `voice.state` event, HUD mic state, live drafts on screen
 
 **Scope.** D15 and D4's on-screen half:
@@ -2068,7 +2225,7 @@ is written with the Mac rows pending owner evaluation.
 | 3 | `feat/p11-pipecat-pipeline` | Pipecat pipeline, detector ports, gateway STT/chat/TTS clients, segmenter + language routing, push-to-talk, replay harness + baseline, trace fields | 1, 2 | **implemented 2026-11-20** (fixture replay + baseline in CI; `replay --server` turn completed against a local dev server; real-model checks and latencies: deferred: Mac session; see "Branch 3 implementation notes") |
 | 4 | `feat/p11-barge-in` | Session state machine, barge-in, self-trigger window + content rule, shared vectors, echo scenarios, ADR-015 note (d4) | 3 | **implemented 2026-11-20** (barge-in and echo scenarios green at residual 0 / 0.3 / 1.0 in pytest and `friday-voice replay --check`; 144-cell transition table checked against the real child; shared vectors green in pytest and vitest; real AEC, stop time and self barge-in rate: deferred: Mac session (M1, M4); see "Branch 4 implementation notes") |
 | 5 | `feat/p11-always-on` | Arming policy, `accounts.VoiceWakeEvaluation` gate (latest row, threshold match), trigger backstop, storms (client + `accounts.VoiceLiveMute` server backstop, 423 from the authenticator), silence close, fail closed, `/voice` live panel, ADR-015 note (d5, d3) | 3 (parallel with 4) | **implemented 2026-11-20** (server gate, backstops and the child's arming all green here; the gate stays closed until the owner records evaluations — pending owner evaluation (M4); the Swift host's mute/link/mode inputs are M1, deferred: Mac session; see "Branch 5 implementation notes") |
-| 6 | `feat/p11-wake-eval-harness` | CI self-trigger release gate, `selftest`, `wake-eval` FAR/FRR harness, `--from-report`, eval doc | 4, 5 | planned |
+| 6 | `feat/p11-wake-eval-harness` | CI self-trigger release gate, `selftest`, `wake-eval` FAR/FRR harness, `--from-report`, eval doc | 4, 5 | **implemented 2026-11-20** (`selftest --ci` a required CI step, green at residual 0.0 / 0.3 / 1.0 with the negative control biting; the node-voice chat-turn case green; `wake-eval` report round-trips through `--from-report` into a row the policy endpoint honours; the real detector ran here with the stand-in `hey_jarvis` head; `selftest --nightly`'s real audio path and the household/positive measurements: deferred: Mac session (M3, M4), pending owner evaluation; see "Branch 6 implementation notes") |
 | 7 | `feat/p11-hud-live-voice` | `voice.state` event kind (v2), node voice fields, HUD mic state, `node_voice` drafts on screen, ADR-013/015 notes | 1 (parallel with 3–6) | **implemented 2026-11-20** (server side, reference relay, 9 node conformance cases, HUD and chat surfaces; the Swift relay is M1, deferred: Mac session; see "Branch 7 implementation notes") |
 | 8 | `chore/p11-closeout` | Preflight live-voice checks, e2e, runbook, ADR notes, MASTER_PLAN row, `self_sources.json`, go/no-go record | 1–7 | planned |
 | M1 | `feat/p11-node-voice-host` | Swift voice host: child spawn + stdio framing, AVAudioEngine voice processing (AEC), playback, menu-bar mic indicator, global hotkey, mute, voice token mint + hand-over, Microphone TCC, `voice.state` relay; conformance host family | 1, 2, 7 merged; Phase 9 M1–M3 | deferred: Mac session |
@@ -2221,6 +2378,25 @@ result line lands in `VOICE_LIVE_SELFTEST_RESULT_PATH` for the
 `voice_live_selftest` preflight check. Seven consecutive green nights are
 the evidence for the checkpoint.
 
+Contract the Mac side must satisfy (branch 6, `node/friday-voice/friday_voice/selftest.py`,
+`docs/voice/live-eval.md`):
+- **`friday-node voice-loopback`** (Swift, new subcommand): reads one PCM
+  WAV on stdin, plays it through the same AVAudioEngine voice-processing
+  graph the voice host uses, captures the AEC-cleaned microphone signal for
+  the clip's length plus 1 s, writes it as a 16 kHz mono PCM16 WAV on
+  stdout, exits 0 (non-zero on any audio or TCC failure), never writes
+  audio to disk and releases the mic on exit. Conformance: the selftest's
+  `CommandLoopback` contract tests (`tests/test_selftest.py`, the loopback
+  section) with the real binary substituted for the Python echo script.
+- **Token hand-over:** the host mints a fresh `node_voice` token with the
+  node secret and writes it to a file readable only by the owner (0600) for
+  `--token-file`; the file is deleted after the run.
+- **`selftest-nightly.sh` + the launchd agent** of `docs/voice/live-eval.md`
+  (skip on battery; result line to the path the server's
+  `VOICE_LIVE_SELFTEST_RESULT_PATH` reads, synced or on the same host).
+- Run `uv run pytest -m real_models` with `FRIDAY_VOICE_MODEL_DIR` and the
+  owner-trained head before the first night.
+
 ### M4 — Mac evaluation (go/no-go measurements)
 
 1. **FAR** on 24 h of household audio (owner step 1, recorded outside
@@ -2249,7 +2425,7 @@ met".
 
 | Item | How it is measured | Result |
 |---|---|---|
-| Self-trigger test (CI, fakes, three AEC residuals + negative control) | Branch 6 release gate | pending (branch 6) |
+| Self-trigger test (CI, fakes, three AEC residuals + negative control) | Branch 6 release gate | **green 2026-11-20** (`friday-voice selftest --ci`, a required step of the `friday-voice` CI job; `backend/tools/tests/test_selftrigger_node_voice.py` for the chat turn) |
 | Self-trigger nightly (real models, speakers, AEC) | M3, seven green nights | pending owner evaluation (Mac session) |
 | FAR ≤ 0.2 / h on 24 h household audio | M4 item 1 → `VoiceWakeEvaluation` | pending owner evaluation (Mac session; owner step 1) |
 | FRR ≤ 10 % | M4 item 2 | pending owner evaluation (Mac session) |

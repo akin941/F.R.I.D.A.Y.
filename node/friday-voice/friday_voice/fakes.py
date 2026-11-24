@@ -11,6 +11,8 @@ Scripts:
   `chat_first` -- before the first event --, `chat_chunk` -- between
   events --, `tts`, `policy`); the worker applies them as `Delay`s, so the
   replay harness measures them on a manual clock;
+- `speech`: `{text: wav bytes}` -- what synthesis returns for that exact
+  text (the self-trigger clip, branch 6); any other text is a `tone_wav`;
 - `fail_next(endpoint, error)`: queue a `FridayError` for the next call;
 - `revoked`: tokens refused with 401 (a rotation test revokes the old one).
 
@@ -67,8 +69,9 @@ def _wav_pcm(data) -> bytes:
 
 
 class FakeFriday:
-    def __init__(self, *, transcripts=("bugün ne var",), replies=None, latencies=None):
+    def __init__(self, *, transcripts=("bugün ne var",), replies=None, latencies=None, speech=None):
         self.transcripts = list(transcripts)
+        self.speech = dict(speech or {})
         self.replies = [DEFAULT_REPLY] if replies is None else list(replies)
         self.latencies = {**DEFAULT_LATENCIES, **(latencies or {})}
         self.requests = []
@@ -185,7 +188,8 @@ class FakeFriday:
             language=language,
             timings=dict(timings or {}),
         )
-        return Reply(tone_wav(text), generation, latency)
+        wav = self.speech.get(text)
+        return Reply(wav if wav is not None else tone_wav(text), generation, latency)
 
     def abort_speech(self, trace_id, index) -> None:
         """The pipeline cancelled a synthesis still in flight."""

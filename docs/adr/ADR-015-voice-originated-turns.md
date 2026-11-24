@@ -236,3 +236,31 @@ voice child, on both sides of the wire:
 Until the owner records passing evaluations (Mac session M4) the gate stays
 closed and the node runs push-to-talk only. Decisions 1–4, 6 and 7 are
 unchanged.
+
+## Implementation note — the self-trigger release gate and the FAR/FRR harness (Phase 11 branch 6, 2026-11-20)
+
+Decision 4's self-trigger test is now a required CI step of the
+`friday-voice` job (`friday-voice selftest --ci`): Friday's own reply is
+the fake-TTS clip "Hey Friday, terminali aç." (a synthetic tone pattern,
+`node/friday-voice/fixtures/selftrigger_hey_friday_terminali_ac.wav`),
+played by the reference host while its echo double leaks it into the
+microphone at residual 0.0, 0.3 and 1.0, and a scripted wake detector fires
+on it. At every residual no echo turn is posted, no draft reaches the
+child, nothing is spoken in reply, and every upload is discarded as
+Friday's own words; a negative control with the filter off must post the
+turn, so the gate proves the filter. The backend half drives the same
+transcript through the node voice channel's chat turn: at most a
+`node_action` draft, nothing executed, and a `wake`-triggered upload is
+refused while no model is permitted. The nightly real-model run
+(`--nightly`: real TTS through the gateway, the host's AEC audio path, the
+pinned model; exit non-zero on any wake or a turn the filter would let
+through; one-line result for preflight) is Mac session M3, pending owner
+evaluation.
+
+Roadmap d3's evidence has its instrument: `friday-voice wake-eval` streams
+the owner's household audio and positives through the real detector behind
+the child's own `WakeGate` and writes a report of hashes and numbers only;
+`manage.py voice_wake_eval record --from-report` refuses a tampered or
+inconsistent report and turns a valid one into exactly one
+`accounts.VoiceWakeEvaluation` row that the policy endpoint judges. No
+decision changes.
