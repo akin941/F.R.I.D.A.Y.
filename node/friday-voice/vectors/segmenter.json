@@ -1,0 +1,379 @@
+{
+  "$comment": "Phase 11 brief D8: shared vectors of the sentence segmenter. Run by node/friday-voice/tests/test_segmenter.py (friday_voice/segmenter.py) and by frontend/src/lib/voice/segmenter.vectors.test.ts (segmenter.ts): the two implementations must give exactly these outputs. `live[i]` is what push(chunks[i]) returned, `flush` what flush() returned at the end.",
+  "speakable_line": [
+    {
+      "input": "## Başlık burada",
+      "expected": "Başlık burada"
+    },
+    {
+      "input": "- liste maddesi",
+      "expected": "liste maddesi"
+    },
+    {
+      "input": "3. üçüncü madde",
+      "expected": "üçüncü madde"
+    },
+    {
+      "input": "> alıntı",
+      "expected": "alıntı"
+    },
+    {
+      "input": "Bak: [belgeye](https://example.com/x) git",
+      "expected": "Bak: belgeye git"
+    },
+    {
+      "input": "![resim](a.png) metin",
+      "expected": "metin"
+    },
+    {
+      "input": "`npm test` çalıştır",
+      "expected": "npm test çalıştır"
+    },
+    {
+      "input": "**kalın** ve *eğik* yazı",
+      "expected": "kalın ve eğik yazı"
+    },
+    {
+      "input": "adres https://example.com/a?b=1 burada",
+      "expected": "adres bağlantı burada"
+    },
+    {
+      "input": "~~eski~~ yeni plan",
+      "expected": "eski yeni plan"
+    },
+    {
+      "input": "---",
+      "expected": ""
+    },
+    {
+      "input": "İSTANBUL ve Iğdır için _hava_ durumu",
+      "expected": "İSTANBUL ve Iğdır için hava durumu"
+    }
+  ],
+  "segment": [
+    {
+      "id": "sentence_ends",
+      "chunks": [
+        "Bugün hava çok güzel görünüyor. Yarın yağmur bekleniyor, şemsiye al!"
+      ],
+      "live": [
+        [
+          "Bugün hava çok güzel görünüyor."
+        ]
+      ],
+      "flush": [
+        "Yarın yağmur bekleniyor, şemsiye al!"
+      ]
+    },
+    {
+      "id": "abbreviation_and_initial",
+      "chunks": [
+        "Dr. Ayşe Yılmaz yarın gelecek. Prof. Ahmet B. Kaya da örn. öğleden sonra uğrar."
+      ],
+      "live": [
+        [
+          "Dr. Ayşe Yılmaz yarın gelecek."
+        ]
+      ],
+      "flush": [
+        "Prof. Ahmet B. Kaya da örn. öğleden sonra uğrar."
+      ]
+    },
+    {
+      "id": "decimal",
+      "chunks": [
+        "Sıcaklık 3.5 derece olacak ve rüzgar 12.75 km hızla esecek."
+      ],
+      "live": [
+        []
+      ],
+      "flush": [
+        "Sıcaklık 3.5 derece olacak ve rüzgar 12.75 km hızla esecek."
+      ]
+    },
+    {
+      "id": "short_merge",
+      "chunks": [
+        "Tamam. Oldu. Şimdi bir sonraki adıma geçiyoruz."
+      ],
+      "live": [
+        []
+      ],
+      "flush": [
+        "Tamam. Oldu. Şimdi bir sonraki adıma geçiyoruz."
+      ]
+    },
+    {
+      "id": "long_split",
+      "chunks": [
+        "kelime kelime kelime kelime kelime kelime kelime kelime kelime kelime kelime kelime kelime kelime kelime kelime kelime kelime kelime kelime kelime kelime kelime kelime kelime kelime kelime kelime kelime kelime , başka başka başka başka başka başka başka başka başka başka başka başka başka başka başka başka başka başka başka başka başka başka başka başka başka başka başka başka başka başka başka başka başka başka başka başka başka başka başka başka son."
+      ],
+      "live": [
+        []
+      ],
+      "flush": [
+        "kelime kelime kelime kelime kelime kelime kelime kelime kelime kelime kelime kelime kelime kelime kelime kelime kelime kelime kelime kelime kelime kelime kelime kelime kelime kelime kelime kelime kelime kelime ,",
+        "başka başka başka başka başka başka başka başka başka başka başka başka başka başka başka başka başka başka başka başka başka başka başka başka başka başka başka başka başka başka başka başka başka başka başka başka başka başka başka başka son."
+      ]
+    },
+    {
+      "id": "code_fence",
+      "chunks": [
+        "İşte örnek komut aşağıda:\n```bash\nrm -rf /tmp/x\necho merhaba\n```\nBunu terminalde çalıştırabilirsin."
+      ],
+      "live": [
+        [
+          "İşte örnek komut aşağıda:"
+        ]
+      ],
+      "flush": [
+        "Kod ekranda. Bunu terminalde çalıştırabilirsin."
+      ]
+    },
+    {
+      "id": "table",
+      "chunks": [
+        "Sonuçlar şöyle özetlenebilir:\n| a | b |\n|---|---|\n| 1 | 2 |\n| 3 | 4 |\nHepsi bu kadar, teşekkürler."
+      ],
+      "live": [
+        [
+          "Sonuçlar şöyle özetlenebilir:"
+        ]
+      ],
+      "flush": [
+        "Tablo ekranda. Hepsi bu kadar, teşekkürler."
+      ]
+    },
+    {
+      "id": "unclosed_fence",
+      "chunks": [
+        "Kodun başlangıcı aşağıda:\n```python\nprint('x')"
+      ],
+      "live": [
+        [
+          "Kodun başlangıcı aşağıda:"
+        ]
+      ],
+      "flush": [
+        "Kod ekranda."
+      ]
+    },
+    {
+      "id": "streamed_first_sentence",
+      "chunks": [
+        "Merhaba, bugün sana ",
+        "yardım edebilirim. Ne ",
+        "istersin?"
+      ],
+      "live": [
+        [],
+        [
+          "Merhaba, bugün sana yardım edebilirim."
+        ],
+        []
+      ],
+      "flush": [
+        "Ne istersin?"
+      ]
+    },
+    {
+      "id": "streamed_decimal",
+      "chunks": [
+        "Toplam tutar 3.",
+        "5 milyon lira olarak hesaplandı. "
+      ],
+      "live": [
+        [],
+        [
+          "Toplam tutar 3.5 milyon lira olarak hesaplandı."
+        ]
+      ],
+      "flush": []
+    },
+    {
+      "id": "streamed_fence",
+      "chunks": [
+        "Komut şu şekilde olmalı:\n```sh\nmake ",
+        "test\n```\nSonra sonucu kontrol et lütfen.\n"
+      ],
+      "live": [
+        [
+          "Komut şu şekilde olmalı:"
+        ],
+        [
+          "Kod ekranda. Sonra sonucu kontrol et lütfen."
+        ]
+      ],
+      "flush": []
+    },
+    {
+      "id": "streamed_link",
+      "chunks": [
+        "Ayrıntılar için [bu belgeye. Bak",
+        "](https://x.dev) göz atabilirsin. "
+      ],
+      "live": [
+        [],
+        [
+          "Ayrıntılar için bu belgeye.",
+          "Bak göz atabilirsin."
+        ]
+      ],
+      "flush": []
+    },
+    {
+      "id": "streamed_7",
+      "chunks": [
+        "Dr. Kay",
+        "a yarın",
+        " saat 1",
+        "0'da ge",
+        "lecek. ",
+        "Toplant",
+        "ı 2.5 s",
+        "aat sür",
+        "er!\n- G",
+        "ündem: ",
+        "bütçe\n-",
+        " Ardınd",
+        "an: [pl",
+        "an](htt",
+        "p://p) ",
+        "gözden ",
+        "geçiril",
+        "ecek."
+      ],
+      "live": [
+        [],
+        [],
+        [],
+        [],
+        [
+          "Dr. Kaya yarın saat 10'da gelecek."
+        ],
+        [],
+        [],
+        [],
+        [
+          "Toplantı 2.5 saat sürer!"
+        ],
+        [],
+        [],
+        [],
+        [],
+        [],
+        [],
+        [],
+        [],
+        []
+      ],
+      "flush": [
+        "Gündem: bütçe Ardından: plan gözden geçirilecek."
+      ]
+    },
+    {
+      "id": "whole_streamed_text",
+      "chunks": [
+        "Dr. Kaya yarın saat 10'da gelecek. Toplantı 2.5 saat sürer!\n- Gündem: bütçe\n- Ardından: [plan](http://p) gözden geçirilecek."
+      ],
+      "live": [
+        [
+          "Dr. Kaya yarın saat 10'da gelecek.",
+          "Toplantı 2.5 saat sürer!"
+        ]
+      ],
+      "flush": [
+        "Gündem: bütçe Ardından: plan gözden geçirilecek."
+      ]
+    },
+    {
+      "id": "ordinal",
+      "chunks": [
+        "Listeye bak: 3. madde önemli. Diğerleri ise sonra konuşulacak konular."
+      ],
+      "live": [
+        [
+          "Listeye bak: 3. madde önemli."
+        ]
+      ],
+      "flush": [
+        "Diğerleri ise sonra konuşulacak konular."
+      ]
+    },
+    {
+      "id": "english",
+      "chunks": [
+        "Your meeting with Mr. Smith starts at 3 pm. Don't forget the slides!"
+      ],
+      "live": [
+        [
+          "Your meeting with Mr. Smith starts at 3 pm."
+        ]
+      ],
+      "flush": [
+        "Don't forget the slides!"
+      ]
+    },
+    {
+      "id": "question_and_ellipsis",
+      "chunks": [
+        "Bunu mu demek istedin… Yoksa başka bir şey mi? Söyle lütfen."
+      ],
+      "live": [
+        [
+          "Bunu mu demek istedin…",
+          "Yoksa başka bir şey mi?"
+        ]
+      ],
+      "flush": [
+        "Söyle lütfen."
+      ]
+    },
+    {
+      "id": "markdown_list",
+      "chunks": [
+        "Bugün üç işin var:\n- **Rapor** teslimi\n- Doktor randevusu\n- Market"
+      ],
+      "live": [
+        [
+          "Bugün üç işin var: Rapor teslimi"
+        ]
+      ],
+      "flush": [
+        "Doktor randevusu Market"
+      ]
+    },
+    {
+      "id": "url_only",
+      "chunks": [
+        "Belge burada: https://example.com/x/y?z=1 adresinde duruyor, bakabilirsin."
+      ],
+      "live": [
+        []
+      ],
+      "flush": [
+        "Belge burada: bağlantı adresinde duruyor, bakabilirsin."
+      ]
+    },
+    {
+      "id": "empty",
+      "chunks": [
+        ""
+      ],
+      "live": [
+        []
+      ],
+      "flush": []
+    },
+    {
+      "id": "whitespace",
+      "chunks": [
+        "   \n\n  "
+      ],
+      "live": [
+        []
+      ],
+      "flush": []
+    }
+  ]
+}

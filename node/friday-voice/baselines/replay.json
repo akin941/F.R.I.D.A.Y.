@@ -1,0 +1,34 @@
+{
+  "$comment": "Phase 11 brief D14: the replay harness's stage numbers on the fixture set (manual clock, FakeFriday latencies at the \u00a7c.1 budgets). `friday-voice replay --check` fails when overhead_ms p50 grows more than 20 %. Regenerate with `friday-voice replay --write-baseline` only for a deliberate change.",
+  "scenarios": 5,
+  "stages": {
+    "end_of_turn_ms": {
+      "p50": 200,
+      "p95": 200
+    },
+    "llm_first_sentence_ms": {
+      "p50": 450,
+      "p95": 490
+    },
+    "overhead_ms": {
+      "p50": 200,
+      "p95": 200
+    },
+    "playback_start_ms": {
+      "p50": 1130,
+      "p95": 1170
+    },
+    "session_ms": {
+      "p50": 30,
+      "p95": 30
+    },
+    "stt_ms": {
+      "p50": 300,
+      "p95": 300
+    },
+    "tts_first_ms": {
+      "p50": 150,
+      "p95": 150
+    }
+  }
+}
