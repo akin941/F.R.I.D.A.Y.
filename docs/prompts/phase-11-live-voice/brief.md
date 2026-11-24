@@ -2013,3 +2013,30 @@ answers them:
    `node/friday-voice` is absent; M4 item 4 and D9 now say that 200 ms is
    end to end and the two 100 ms figures are its components (branch 8,
    D9, M4).
+
+## Known follow-ups (unresolved review notes, recorded at merge 2026-11-24)
+
+1. **LOW — voice endpoints and `opened_via` (D4, branch 1 Tests,
+   "Release-gate regressions").** The `opened_via == node_voice`
+   restriction is applied only to the chat turn (GET and POST messages).
+   The three voice endpoints (transcriptions, speech, receipt) still
+   resolve the conversation through `scoped_for_actor` alone
+   (`voice/views.py` `_conversation`), so a leaked 15-minute
+   `node_voice` token could run STT/TTS against, and read the usage
+   receipt of, any personal conversation id it knew. That contradicts
+   D4's principle that the token reaches only what a node voice session
+   opened; branch 1 only tests the cross-workspace 404 on the voice
+   endpoints. Impact is small (STT/TTS are budgeted, the receipt is usage
+   totals only). **Fix in branch 1:** make `voice._conversation` return
+   404 for `CHANNEL_NODE_VOICE` unless `conversation.opened_via ==
+   "node_voice"` (voice may import assistant, so no new import edge), and
+   add a test that a web-opened personal conversation id returns 404 on
+   transcriptions, speech and receipt with a voice token while the web
+   session still works.
+2. **LOW — `NodeVoiceTriggerGuard` 400 semantics (D11 trigger backstop,
+   branch 5).** A DRF permission class normally signals denial only, so
+   the 400 for a missing or unknown `X-Friday-Voice-Trigger` header needs
+   an explicit exception. **Fix in branch 5:** the guard raises a
+   `ValidationError` with code `voice.trigger_invalid` from
+   `has_permission` (a wake trigger stays 403); keep the existing
+   missing/unknown-header 400 test. No design change.
