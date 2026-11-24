@@ -15,7 +15,11 @@ segmenter port, per-sentence language routing, `play` frames, and the
 replay harness. Branch 4 (`feat/p11-barge-in`) adds barge-in on the
 AEC-cleaned signal, the self-trigger window and content rules, the session
 state machine with its exhaustive transition table, and the barge-in and
-echo replay scripts (residual 0 / 0.3 / 1.0).
+echo replay scripts (residual 0 / 0.3 / 1.0). Branch 6
+(`feat/p11-wake-eval-harness`) adds the self-trigger release gate
+(`friday-voice selftest --ci`, a required CI step), the Mac's nightly
+selftest (`--nightly`) and the FAR/FRR harness (`friday-voice wake-eval`);
+the owner's procedure is `docs/voice/live-eval.md`.
 
 ## Layout
 
@@ -34,6 +38,8 @@ echo replay scripts (residual 0 / 0.3 / 1.0).
 | `friday_voice/workers.py` | `ThreadWorker` (stdio) and `SimWorker` (manual clock) for the network jobs |
 | `friday_voice/{segmenter,language,audio,config}.py` | sentence segmenter (port of `segmenter.ts`), tr/en routing, PCM/WAV helpers, every child tunable |
 | `friday_voice/replay.py`, `fixtures/`, `baselines/replay.json` | the replay harness, its synthetic fixtures (`replay.json`, `barge_in.json`) and the overhead baseline |
+| `friday_voice/selftest.py`, `fixtures/selftrigger_*` | the self-trigger release gate (`--ci`: the fake-TTS clip at three AEC residuals + a negative control) and the nightly Mac run (`--nightly`, one-line JSON result) |
+| `friday_voice/wake_eval.py`, `fixtures/wake_eval_report.json` | the FAR/FRR harness (hashes and numbers only) and the report the backend's `--from-report` test records |
 | `vectors/` | shared segmenter and self-trigger vectors (also run by vitest) and language vectors |
 | `friday_voice/pipecat_adapter.py` | the only door to Pipecat; `pipecat_surface.json` is its snapshot |
 | `friday_voice/log.py`, `_scrubber_vendored.py` | stderr log, scrubbed with the vendored ADR-012 scrubber |
@@ -55,6 +61,9 @@ uv run python scripts/snapshot_pipecat.py [--check]
 uv run python scripts/make_fixtures.py [--check]  # the synthetic replay fixtures
 uv run friday-voice replay [--check | --write-baseline]
 uv run friday-voice replay --server http://127.0.0.1:8001 --token-file <file>  # a running Friday
+uv run friday-voice selftest --ci             # the self-trigger release gate (fakes)
+uv run friday-voice selftest --nightly --server <url> --token-file <f> --model-dir <d> --loopback-cmd <cmd>  # Mac
+uv run friday-voice wake-eval --negative <dir> --positives <dir> --model <onnx> --out report.json  # FAR/FRR
 uv run pytest                                 # default run; `-m real_models` is opt-in
 ```
 

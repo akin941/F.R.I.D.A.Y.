@@ -114,6 +114,16 @@ def test_the_cli_gate_fails_with_a_broken_filter(monkeypatch, capsys):
     assert "friday-voice selftest ci: FAIL" in capsys.readouterr().out
 
 
+def test_the_gate_is_a_required_ci_step_and_part_of_the_local_job():
+    from conftest import REPO_ROOT
+
+    workflow = (REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text("utf-8")
+    job = workflow.split("\n  friday-voice:\n", 1)[1].split("\n  frontend:\n", 1)[0]
+    assert "run: uv run friday-voice selftest --ci" in job
+    assert "continue-on-error" not in job
+    assert "friday-voice selftest --ci" in (REPO_ROOT / "Makefile").read_text("utf-8")
+
+
 def test_selftest_needs_exactly_one_mode(capsys):
     assert cli.main(["selftest"]) == 2
     with pytest.raises(SystemExit):
