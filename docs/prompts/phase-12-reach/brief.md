@@ -2948,3 +2948,19 @@ Choices made while implementing the closeout that the brief left open:
 4. After two weeks of the digest: `manage.py proactive_checkpoint` and the
    go/no-go rows (Phase 12 owner step 7); Mac session M1 when Phase 11 M1
    has merged.
+
+### Known follow-ups (LOW) — `chore/p12-closeout`, recorded 2026-11-24
+
+1. **Skill names in preflight output (`backend/ops/preflight.py`).**
+   `_check_skills_parser` puts owner-chosen skill names into the check
+   detail (as the docstring and this brief say). The names are
+   owner-authored, so this is not a leak, but they are free text printed
+   to operator output. Fix (optional): truncate the names to a fixed
+   length, or print skill ids instead.
+2. **Voice e2e cases skip without friday-voice
+   (`backend/ops/tests/test_reach_e2e.py`).** The voice cases (reference
+   host and the `friday-voice` run) skip where `node/friday-voice` has no
+   environment (2 skipped in the review container). The skip is documented
+   and CI runs them, so there is no gate gap, but the reviewer could not
+   verify those two locally. Fix: none required; keep the CI
+   `friday-voice` job mandatory.
