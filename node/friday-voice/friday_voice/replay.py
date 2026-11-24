@@ -130,8 +130,8 @@ class ReplaySession:
         self.host.start_child()
         self.pump()
         # Let the calls the credential started (the D11 policy read) land
-        # before the first frame, as they would on a real clock.
-        self.advance(0)
+        # before the first frame.
+        self.settle()
         return self
 
     # --- driving ---

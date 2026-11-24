@@ -85,7 +85,9 @@ def test_a_push_to_talk_turn_end_to_end():
         assert [p["last"] for p in plays if p["utterance_id"] == utterance_id][-1] is True
     assert session.host.dropped_play == 0
     states = session.states()
-    assert states[:4] == ["armed_ptt", "listening", "thinking", "speaking"]
+    # A `state` also goes out when the session opens (same state, session_open).
+    distinct = [s for i, s in enumerate(states) if i == 0 or states[i - 1] != s]
+    assert distinct[:4] == ["armed_ptt", "listening", "thinking", "speaking"]
     assert states[-1] == "armed_ptt"
     assert session.sent("release_mic") == [] and session.host.mic_held
     assert session.sent("state")[-1]["session_open"] is True
@@ -417,7 +419,7 @@ def test_shutdown_mid_turn_cancels_every_job():
     assert session.worker.cancelled
 
 
-# --- wake gate (scripted detector; the arming policy refuses until branch 5) ---
+# --- wake gate (scripted detector, scripted arming; the real policy: test_always_on.py) ---
 
 
 def wake_session(scores, **fake_kwargs):

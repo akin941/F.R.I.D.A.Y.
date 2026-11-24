@@ -357,8 +357,8 @@ class VoicePipeline:
         """Read the voice policy when wake mode could arm: a wake detector
         is loaded, the arming policy polls, the local mode is `always_on`
         and a credential is held. `force` at a session start and a mode
-        change to `always_on`; after a failed read at the next chance;
-        otherwise every `POLICY_POLL_S`."""
+        change to `always_on`; after a failed read every `POLICY_RETRY_S`
+        (disarmed meanwhile); otherwise every `POLICY_POLL_S`."""
         if not getattr(self.arming, "polls", False) or not self.wake_capable():
             return
         if self.policy_job is not None or self.refused:
@@ -367,8 +367,13 @@ class VoicePipeline:
             return
         if self.core is not None and not self.core.credential_valid():
             return
-        due = poll_due(self.arming.checked_at_ms, self.clock.monotonic_ms())
-        if not (force or due or self._policy_failed):
+        now = self.clock.monotonic_ms()
+        due = poll_due(self.arming.checked_at_ms, now)
+        retry = self._policy_failed and (
+            self.arming.checked_at_ms is None
+            or now - self.arming.checked_at_ms >= config.POLICY_RETRY_S * 1000
+        )
+        if not (force or due or retry):
             return
         self.policy_job = self.worker.submit(
             policy_job(self.client, self.wake_gate.detector.model_sha256)
@@ -434,7 +439,9 @@ class VoicePipeline:
     def on_credential(self, token, server_url, ca_sha256):
         self.client.set_credential(token, server_url, ca_sha256)
         self.refused = False
-        self._maybe_poll()
+        # The first credential reads the policy; a new one after a failed
+        # read (a refused token, say) reads it again at once.
+        self._maybe_poll(force=self._policy_failed)
         return self._drain()
 
     def on_mute(self, muted):

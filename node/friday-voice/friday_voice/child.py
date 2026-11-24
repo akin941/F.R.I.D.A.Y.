@@ -155,16 +155,20 @@ class ChildCore:
     def _log(self, code, detail=""):
         log.emit(code, detail, stream=self.log_stream)
 
+    def _session_open(self) -> bool:
+        return bool(self.pipeline and self.pipeline.session_open)
+
     def _state_frame(self):
         state = self.current_state()
-        self._last_state = state
+        session_open = self._session_open()
+        self._last_state = (state, session_open)
         self._last_state_at = self.clock.monotonic_ms()
         return (
             {
                 "type": "state",
                 "state": state,
                 "mode": self.mode,
-                "session_open": bool(self.pipeline and self.pipeline.session_open),
+                "session_open": session_open,
                 **self.counters,
                 "at_ms": self.clock.now_ms(),
             },
@@ -174,7 +178,8 @@ class ChildCore:
     def _state_if_changed(self):
         if self.phase != RUNNING:
             return []
-        if self.current_state() != self._last_state:
+        # A new state, or a live session opening or closing (D12, the HUD).
+        if (self.current_state(), self._session_open()) != self._last_state:
             return [self._state_frame()]
         return []
 
