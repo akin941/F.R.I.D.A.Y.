@@ -581,3 +581,24 @@ how the child honours them.
   (the scripted child state) and the report key `voice_states_dropped`;
   negative-control tests prove that a node which relays unchecked items,
   sends the kind on v1 or does not coalesce fails them.
+
+## Implementation notes — Phase 11 closeout (`chore/p11-closeout`, 2026-11-20)
+
+- **The voice child's contract files are locked.** `friday-voice
+  conformance --build` now also writes `node/friday-voice/conformance.lock`
+  (sha256 of every host/child case file, `frames.json` and the frozen v1
+  schemas); `--check` fails on its drift. The server's
+  `friday_voice_conformance` preflight row hashes the checkout against it
+  with hashlib only (the backend imports nothing from the child) and warns
+  where no `node/friday-voice` exists (the backend image).
+- **`node_voice_state`** (preflight, per active node): passes for a node
+  whose `voice.state` is stored, warns while none reports — the Swift relay
+  is the deferred Mac session (M1).
+- **The e2e** drives the reference host (`HostCore`, paced playback, the
+  echo double) and a real child process over stdio against a live server;
+  the child's last `state` frame, relayed as the node's `voice.state`
+  event through `nodes.events.handle_event`, is what the HUD shows; after
+  the kill switch the HUD's mic state is `off` and the host, its link
+  dropped, shows `off` with the mic released (decision 6).
+- Decisions 1, 6 and 8 are unchanged: the child stays a stdio-only,
+  model-free, keyless process; the server→node message set is untouched.

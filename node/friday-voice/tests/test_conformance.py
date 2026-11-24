@@ -162,6 +162,7 @@ def test_a_wrong_expectation_is_reported():
 
 
 def test_check_fails_on_a_changed_case_file(tmp_path, monkeypatch):
+    real_lock = build.lock_file()
     cases = tmp_path / "cases"
     shutil.copytree(build.CASES_DIR, cases)
     vectors = tmp_path / "frames.json"
@@ -169,6 +170,8 @@ def test_check_fails_on_a_changed_case_file(tmp_path, monkeypatch):
     monkeypatch.setattr(build, "CASES_DIR", cases)
     monkeypatch.setattr(build, "VECTORS_FILE", vectors)
     monkeypatch.setattr(build, "PACKAGE_DIR", tmp_path / "package")
+    assert build.check() == ["conformance.lock"]  # not copied yet
+    shutil.copy(real_lock, tmp_path / "conformance.lock")
     assert build.check() == []
 
     target = cases / "host" / "host.watchdog.json"
@@ -212,3 +215,45 @@ def test_the_hostile_child_refuses_an_unknown_case(tmp_path):
     )
     assert done.returncode == 2
     assert b"unknown_case" in done.stderr
+
+
+# --- the lock the server's preflight reads (Phase 11 closeout) ---
+
+
+def _lock_entries(text):
+    entries = {}
+    for line in text.splitlines():
+        if line.startswith("#") or not line.strip():
+            continue
+        digest, path = line.split("  ", 1)
+        entries[path] = digest
+    return entries
+
+
+def test_the_lock_hashes_every_case_vector_and_schema_file_on_disk():
+    import hashlib
+
+    root = build.PACKAGE_DIR.parent
+    entries = _lock_entries(build.lock_file().read_text("utf-8"))
+    expected = {
+        path.relative_to(root).as_posix()
+        for path in [
+            *build.CASES_DIR.glob("*/*.json"),
+            build.VECTORS_FILE,
+            *build.SCHEMAS_DIR.glob("*/*.schema.json"),
+        ]
+    }
+    assert set(entries) == expected
+    assert len(entries) == len(HOST_CASES) + len(CHILD_CASES) + 1 + 16
+    for path, digest in entries.items():
+        assert hashlib.sha256((root / path).read_bytes()).hexdigest() == digest
+
+
+def test_a_changed_schema_drifts_the_lock(tmp_path, monkeypatch):
+    schemas = tmp_path / "schemas"
+    shutil.copytree(build.SCHEMAS_DIR, schemas)
+    monkeypatch.setattr(build, "SCHEMAS_DIR", schemas)
+    assert build.check() == []
+    target = schemas / "host_to_child" / "ptt.schema.json"
+    target.write_text(target.read_text("utf-8") + " ", encoding="utf-8")
+    assert build.check() == ["conformance.lock"]

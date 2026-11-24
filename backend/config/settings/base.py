@@ -775,6 +775,15 @@ PREFLIGHT_NODE_TLS_URL = env("PREFLIGHT_NODE_TLS_URL", default="")
 # in ADR-014's implementation notes. Empty = pending owner evaluation: the
 # `node_escape_suite` preflight check is then a warning, never a failure.
 NODE_ESCAPE_EVIDENCE_RECORDED_ON = env("NODE_ESCAPE_EVIDENCE_RECORDED_ON", default="")
+# Phase 11 closeout: the one-line JSON result the nightly self-trigger run on
+# the Mac writes (`friday-voice selftest --nightly --result-file`, Mac
+# session M3), read by `voice_live_selftest`. Empty or missing = pending owner
+# evaluation (a warning); a failed last run is a failure.
+VOICE_LIVE_SELFTEST_RESULT_PATH = env("VOICE_LIVE_SELFTEST_RESULT_PATH", default="")
+# The `node/friday-voice` checkout `friday_voice_conformance` hashes against
+# its `conformance.lock`. Empty = `<repo>/node/friday-voice` next to the
+# backend; absent (the backend image ships no `node/`) = a warning.
+PREFLIGHT_FRIDAY_VOICE_DIR = env("PREFLIGHT_FRIDAY_VOICE_DIR", default="")
 
 # --- Knowledge/RAG (MVP 3) ---
 
