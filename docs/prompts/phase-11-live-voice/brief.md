@@ -2650,3 +2650,26 @@ answers them:
    the branch 3 notes do not mention the deviation. **Fix:** add one line
    to the branch 3 notes saying that `FridayChatLLM` and `FridayTTS` live
    in `client.py` and `pipeline.py`.
+
+### Known follow-ups — `feat/p11-barge-in` (unresolved review notes, recorded at merge 2026-11-24)
+
+1. **LOW — self-trigger content rule uses substring containment
+   (`node/friday-voice/friday_voice/self_trigger.py`).**
+   `matches_recent_speech` checks containment on the normalized strings
+   (`heard in said`, `said in heard`), as the browser's `self-trigger.ts`
+   does. This branch applies the content rule to every transcript, not only
+   suspect ones. A short owner utterance (for example "ok" or "ekran") that
+   appears anywhere in Friday's last 60 s of speech, even mid-word, is
+   silently discarded and counted as self-echo. It fails closed, and the ADR
+   and this brief record that as intended, but it is a likely usability
+   false-discard. **Fix:** use word-boundary containment (pad both strings
+   with spaces) or require a minimum token count for the containment branch.
+   Change `self-trigger.ts` and the Python port together, and add shared
+   vectors in `node/friday-voice/vectors/self_trigger.json`.
+2. **LOW — Mac-only items and barge-in in `friday-voice run`
+   (`docs/prompts/phase-11-live-voice/brief.md`).** Owner steps 2 and 3 are
+   pending and recorded. The Mac-only items (real AEC, stop time, self
+   barge-in rate, Swift host pacing) are marked "deferred: Mac session" in
+   the branch table. Barge-in stays off in `friday-voice run` until branch 5
+   loads the detectors. This is recorded for tracking only. **Fix:** none
+   required.
