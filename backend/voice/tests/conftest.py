@@ -103,6 +103,9 @@ def chat_setup(db):
     _prompt("friday_system", "chat", "You are Friday.")
     _prompt("friday_router_intent", "router.intent", "Classify the message.")
     _prompt("friday_router_task_draft", "router.task_draft", "Extract the task.")
+    # Phase 12 D12: a gated tool with draft arguments (the n8n write) runs
+    # the argument step before its draft.
+    _prompt("friday_router_connector_args", "router.connector_args", "Extract the arguments.")
 
 
 def pat_client(owner, workspace, kind):
