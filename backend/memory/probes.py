@@ -99,8 +99,11 @@ _LEARNING_KINDS = (
 )
 
 
-def learning_counts(workspace, owner, now):
-    since = window_start(1, now)
+def learning_counts(workspace, owner, now, days=1):
+    """Pending learned proposals by kind created since the local day
+    `days - 1` days before `now` (the probe: today only; the
+    `digest.learning` wake route: the `/memory/learning` window)."""
+    since = window_start(days, now)
     memories = Memory.objects.for_actor(owner, workspace=workspace).filter(
         ingestion_source__isnull=False,
         status=Memory.Status.PENDING_APPROVAL,

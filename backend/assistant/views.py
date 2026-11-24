@@ -34,6 +34,7 @@ from assistant.services import (
     rename_conversation,
     stream_assistant_reply,
 )
+from assistant.wake_routes import route_voice_turn, static_reply_stream
 from core.channels import (
     CHANNEL_NODE_VOICE,
     CHANNEL_WEB,
@@ -322,14 +323,28 @@ class ConversationMessageListView(APIView):
         # still runs before the user Message row exists, so build_context's
         # history query (which excludes the message being sent) is never at
         # risk of double-counting it.
-        classification = classify_intent(
+        # Phase 12 D8: a voice turn whose whole utterance is a wake-route
+        # phrase (or an owner alias) is answered by the route -- no
+        # `router.intent` call; a miss (and every typed turn) falls through
+        # to the normal router.
+        routed = route_voice_turn(
             conversation,
             actor=request.user,
             content=content,
-            client_local_date=serializer.validated_data["client_local_date"],
             channel=channel,
-            context_report=turn_report or None,
+            input_mode=input_mode,
         )
+        if routed is not None:
+            classification = dict(routed.classification)
+        else:
+            classification = classify_intent(
+                conversation,
+                actor=request.user,
+                content=content,
+                client_local_date=serializer.validated_data["client_local_date"],
+                channel=channel,
+                context_report=turn_report or None,
+            )
         # ADR-015 decision 1 (Phase 6 A6): a voice turn reads and proposes
         # only -- capped here, before any of the turn's paths run.
         classification = apply_voice_capability_cap(classification, input_mode=input_mode)
@@ -353,17 +368,24 @@ class ConversationMessageListView(APIView):
                 "outcome": connector_turn.outcome,
             }
 
-        gateway_stream, usage_holder, memory_ids, chunk_ids, overlay_source_workspaces = (
-            build_gateway_stream(
-                conversation,
-                actor=request.user,
-                content=content,
-                channel=channel,
-                intent=classification["intent"],
-                connector_turn=connector_turn,
-                report_extra=turn_report or None,
+        if routed is not None and routed.reply_text is not None:
+            # The route's stored text is the reply: no gateway call, no
+            # ModelUsage (there is no call), no context assembly.
+            gateway_stream, usage_holder = static_reply_stream(routed.reply_text), {}
+            memory_ids, chunk_ids, overlay_source_workspaces = [], [], {}
+        else:
+            gateway_stream, usage_holder, memory_ids, chunk_ids, overlay_source_workspaces = (
+                build_gateway_stream(
+                    conversation,
+                    actor=request.user,
+                    content=content,
+                    channel=channel,
+                    intent=classification["intent"],
+                    connector_turn=connector_turn,
+                    report_extra=turn_report or None,
+                )
             )
-        )
+        route_name = routed.route if routed is not None else None
         # Phase 10 D13: a node action draft carries its source message's id
         # (the trust check's evidence anchor), so the row's id is fixed
         # first and written into the frozen intent payload.
@@ -385,6 +407,7 @@ class ConversationMessageListView(APIView):
             intent_payload=classification["intent_payload"],
             channel=channel,
             input_mode=input_mode,
+            route=route_name,
         )
 
         # `draft` SSE event (MVP 6 §3/§4/§5): non-terminal, emitted only for
@@ -431,6 +454,7 @@ class ConversationMessageListView(APIView):
                 draft_event=draft_event,
                 channel=channel,
                 connector_reads=connector_turn.reads if connector_turn else None,
+                route=route_name,
             ),
             content_type="text/event-stream",
         )

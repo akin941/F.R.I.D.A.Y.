@@ -259,6 +259,17 @@ export const ERROR_MESSAGES = {
     message: "Mac'te canlı ses bir uyanma fırtınası yüzünden susturuldu. /voice sayfasından aç.",
     specific: true,
   },
+  // Wake-route aliases (Phase 12 D8).
+  "wake_alias.unknown_route": { message: "Böyle bir sesli komut yok.", specific: true },
+  "wake_alias.invalid_length": {
+    message: "Bir takma ad, noktalama ve \"Hey Friday\" atıldıktan sonra 2-40 karakter olmalı.",
+    specific: true,
+  },
+  "wake_alias.conflict": {
+    message: "Bu ifade zaten kullanılıyor ya da başka bir komutun ifadesiyle çakışıyor.",
+    specific: true,
+  },
+  "wake_alias.limit": { message: "Bir komutun en fazla 5 takma adı olabilir.", specific: true },
   // Workspaces
   "workspace.permission_denied": {
     message: "Rolün bu çalışma alanını düzenlemeye yetmiyor.",

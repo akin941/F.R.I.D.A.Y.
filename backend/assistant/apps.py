@@ -20,8 +20,14 @@ class AssistantConfig(AppConfig):
         # unregistered, which blocks every proposal
         # (`trust_check_unavailable_config`); that default never changes.
         from assistant.trust_check import check_node_action, input_mode_of
+
+        # Phase 12 D8: the wake-route table is validated at boot -- an
+        # effect other than read/proposal, a malformed name or a phrase
+        # clash refuses to start.
+        from assistant.wake_routes import validate_routes
         from tools.node_action_ports import register_evidence_source, register_trust_check
 
+        validate_routes()
         register_trust_check(check_node_action)
         register_evidence_source(input_mode_of)
         post_migrate.connect(

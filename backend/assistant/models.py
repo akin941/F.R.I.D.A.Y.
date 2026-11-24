@@ -3,6 +3,7 @@ from django.db import models
 
 from core.db import WorkspaceScopedModel
 from core.models import TimestampedModel
+from core.unattended import deny_if_unattended
 
 
 class MessageChannel(models.TextChoices):
@@ -192,6 +193,11 @@ class Message(WorkspaceScopedModel, TimestampedModel):
     # drives the mic badge. Forced to `text` for every non-web channel.
     # Stamped on the USER row only (the reply is never "spoken input").
     input_mode = models.CharField(max_length=10, choices=InputMode.choices, default=InputMode.TEXT)
+    # Phase 12 D8: the wake-phrase route that answered this voice turn
+    # (`digest.today`, ...), stamped on both the user message and the reply
+    # of a routed turn; null for every turn the normal router handled.
+    # Audit and test bookkeeping only, immutable once written.
+    route = models.CharField(max_length=64, null=True, blank=True, default=None)  # noqa: DJ001
 
     class Meta:
         ordering = ["created_at"]
@@ -202,3 +208,40 @@ class Message(WorkspaceScopedModel, TimestampedModel):
 
     def __str__(self):
         return f"{self.role} message {self.id}"
+
+
+class WakeRouteAlias(WorkspaceScopedModel, TimestampedModel):
+    """Phase 12 D8: an owner's own phrase for one code-defined wake route.
+
+    Created, changed and deleted only by the workspace owner over the web
+    (`assistant.services.create_wake_alias` / `update_wake_alias` /
+    `delete_wake_alias`); no voice turn, tool, skill, model, connector or
+    proactive run has a path here, and a write inside an unattended run is
+    refused (`alias_write`). `phrase` is stored normalized
+    (`assistant.wake_routes.normalize_utterance`), unique per workspace."""
+
+    route = models.CharField(max_length=64)
+    phrase = models.CharField(max_length=64)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="+"
+    )
+
+    class Meta:
+        ordering = ["route", "created_at"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["workspace", "phrase"], name="assistant_wake_alias_unique_phrase"
+            )
+        ]
+        indexes = [models.Index(fields=["workspace", "route"])]
+
+    def save(self, *args, **kwargs):
+        deny_if_unattended("alias_write")
+        super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        deny_if_unattended("alias_write")
+        return super().delete(*args, **kwargs)
+
+    def __str__(self):
+        return f"{self.route}: {self.phrase}"

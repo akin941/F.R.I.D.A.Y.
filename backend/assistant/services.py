@@ -14,10 +14,12 @@ from ai_core.gateway import InferenceGateway
 from ai_core.models import PromptTemplate
 from assistant.context import build_context, render_connector_block
 from assistant.intent import IntentParseError, parse_intent
-from assistant.models import Conversation, Message
+from assistant.models import Conversation, Message, WakeRouteAlias
 from assistant.task_draft import TaskDraftParseError, parse_task_draft
 from audit.services import record_audit
 from core.context import request_id_var
+from core.owner_web import OwnerWebRequired, require_owner_web
+from core.unattended import deny_if_unattended
 from memory.jobs import create_extraction_job
 from memory.services import privatize_conversation_memories
 
@@ -1059,6 +1061,7 @@ def iter_assistant_reply_events(
     draft_event=None,
     channel=Message.Channel.WEB,
     connector_reads=None,
+    route=None,
 ):
     """The assistant reply as structured events (Phase 4 branch 6): zero or
     more `{"type": "chunk", "text"}`, then -- only on success -- the
@@ -1101,6 +1104,10 @@ def iter_assistant_reply_events(
     `connector_reads` (Phase 5 branch 4) is this turn's connector-read
     bookkeeping, persisted on `Message.connector_reads` and included in
     `done` -- never content.
+
+    `route` (Phase 12 D8) is the wake route that answered this voice turn
+    (`Message.route`), or None. A routed reply that made no model call is
+    Friday's own stored text, so it allocates no memory extraction job.
     """
     token = request_id_var.set(request_id)
     try:
@@ -1115,6 +1122,7 @@ def iter_assistant_reply_events(
             draft_event,
             channel,
             connector_reads or [],
+            route,
         )
     finally:
         request_id_var.reset(token)
@@ -1151,6 +1159,7 @@ def _assistant_reply_events(
     draft_event=None,
     channel=Message.Channel.WEB,
     connector_reads=(),
+    route=None,
 ):
     accumulated = []
     status = Message.Status.FAILED  # defined even if no branch below runs
@@ -1198,6 +1207,7 @@ def _assistant_reply_events(
             overlay_source_workspaces=overlay_source_workspaces,
             channel=channel,
             connector_reads=list(connector_reads),
+            route=route,
         )
 
     if draft_event is not None and terminal_event["type"] == "done":
@@ -1218,6 +1228,7 @@ def _persist_assistant_message(
     overlay_source_workspaces=None,
     channel=Message.Channel.WEB,
     connector_reads=None,
+    route=None,
 ):
     """The single write site for the assistant `Message` row.
 
@@ -1248,11 +1259,158 @@ def _persist_assistant_message(
         overlay_source_workspaces=overlay_source_workspaces or {},
         channel=channel,
         connector_reads=connector_reads or [],
+        route=route,
     )
-    if status == Message.Status.COMPLETE and not locked_conversation.private:
+    # A routed reply with no model call (Phase 12 D8) is Friday's stored
+    # text: nothing to distill, and the route stays free of model calls.
+    routed_without_model = route is not None and usage is None
+    if (
+        status == Message.Status.COMPLETE
+        and not locked_conversation.private
+        and not routed_without_model
+    ):
         create_extraction_job(conversation=locked_conversation, through_message=message)
     return message
 
 
 def sse_event(payload: dict) -> bytes:
     return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n".encode()
+
+
+# --- Phase 12 D8: wake-route aliases (owner, web) -------------------------------
+
+
+class WakeAliasError(Exception):
+    """A refused alias write; each subclass carries its closed `code`
+    (`core.error_codes`)."""
+
+    code = "wake_alias.conflict"
+
+
+class WakeAliasUnknownRoute(WakeAliasError):
+    code = "wake_alias.unknown_route"
+
+
+class WakeAliasInvalidLength(WakeAliasError):
+    code = "wake_alias.invalid_length"
+
+
+class WakeAliasConflict(WakeAliasError):
+    code = "wake_alias.conflict"
+
+
+class WakeAliasLimit(WakeAliasError):
+    code = "wake_alias.limit"
+
+
+class WakeAliasPermissionDenied(Exception):
+    """Not the owner over the web: `owner_required` / `channel_forbidden`
+    (the generic `core.owner_web` codes, so not a `WakeAliasError`)."""
+
+    def __init__(self, message, code="owner_required"):
+        self.code = code
+        super().__init__(message)
+
+
+def _require_alias_owner_web(*, actor, workspace, channel):
+    try:
+        require_owner_web(actor=actor, workspace=workspace, channel=channel)
+    except OwnerWebRequired as exc:
+        raise WakeAliasPermissionDenied(str(exc), code=exc.code) from None
+
+
+def _lock_workspace(workspace):
+    # Serialize alias writes per workspace so the limit and the clash checks
+    # see every committed row.
+    type(workspace).objects.select_for_update().filter(pk=workspace.pk).first()
+
+
+def _clean_alias(*, workspace, route, phrase, exclude_id=None):
+    """Validate one alias against D8's rules; returns the normalized phrase."""
+    from assistant import wake_routes
+
+    if wake_routes.get_route(route) is None:
+        raise WakeAliasUnknownRoute("Unknown wake route.")
+    normalized = wake_routes.normalize_utterance(phrase if isinstance(phrase, str) else "")
+    if not wake_routes.ALIAS_MIN_CHARS <= len(normalized) <= wake_routes.ALIAS_MAX_CHARS:
+        raise WakeAliasInvalidLength(
+            f"An alias is {wake_routes.ALIAS_MIN_CHARS}-{wake_routes.ALIAS_MAX_CHARS} "
+            "characters after normalization."
+        )
+    others = WakeRouteAlias.objects.filter(workspace=workspace)
+    if exclude_id is not None:
+        others = others.exclude(pk=exclude_id)
+    taken = [(r.name, p) for r in wake_routes.ROUTES for p in r.default_phrases]
+    taken += list(others.values_list("route", "phrase"))
+    for owner_route, other in taken:
+        if wake_routes.match_key(normalized) == wake_routes.match_key(other):
+            raise WakeAliasConflict("This phrase is already in use.")
+        if owner_route != route and wake_routes.phrase_clash(normalized, other):
+            raise WakeAliasConflict("This phrase clashes with another route's phrase.")
+    if exclude_id is None and others.filter(route=route).count() >= (
+        wake_routes.MAX_ALIASES_PER_ROUTE
+    ):
+        raise WakeAliasLimit(f"A route has at most {wake_routes.MAX_ALIASES_PER_ROUTE} aliases.")
+    return normalized
+
+
+def create_wake_alias(*, actor, channel, workspace, route, phrase):
+    """The owner adds an alias over the web (D8). Audited
+    `assistant.wake_alias.created`."""
+    deny_if_unattended("alias_write")
+    _require_alias_owner_web(actor=actor, workspace=workspace, channel=channel)
+    with transaction.atomic():
+        _lock_workspace(workspace)
+        normalized = _clean_alias(workspace=workspace, route=route, phrase=phrase)
+        alias = WakeRouteAlias.objects.create(
+            workspace=workspace, route=route, phrase=normalized, created_by=actor
+        )
+        record_audit(
+            action="assistant.wake_alias.created",
+            actor=actor,
+            workspace=workspace,
+            resource=alias,
+            metadata={"route": route, "phrase": normalized},
+        )
+    return alias
+
+
+def update_wake_alias(*, actor, channel, alias, phrase):
+    """The owner rewords an alias over the web. Audited
+    `assistant.wake_alias.updated`."""
+    deny_if_unattended("alias_write")
+    workspace = alias.workspace
+    _require_alias_owner_web(actor=actor, workspace=workspace, channel=channel)
+    with transaction.atomic():
+        _lock_workspace(workspace)
+        normalized = _clean_alias(
+            workspace=workspace, route=alias.route, phrase=phrase, exclude_id=alias.pk
+        )
+        previous = alias.phrase
+        alias.phrase = normalized
+        alias.save(update_fields=["phrase", "updated_at"])
+        record_audit(
+            action="assistant.wake_alias.updated",
+            actor=actor,
+            workspace=workspace,
+            resource=alias,
+            metadata={"route": alias.route, "phrase": normalized, "previous": previous},
+        )
+    return alias
+
+
+def delete_wake_alias(*, actor, channel, alias):
+    """The owner removes an alias over the web. Audited
+    `assistant.wake_alias.deleted`."""
+    deny_if_unattended("alias_write")
+    workspace = alias.workspace
+    _require_alias_owner_web(actor=actor, workspace=workspace, channel=channel)
+    with transaction.atomic():
+        record_audit(
+            action="assistant.wake_alias.deleted",
+            actor=actor,
+            workspace=workspace,
+            resource=alias,
+            metadata={"route": alias.route, "phrase": alias.phrase},
+        )
+        alias.delete()

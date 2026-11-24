@@ -34,6 +34,8 @@ urlpatterns = [
     path("api/v1/workspaces", include("workspaces.urls")),
     path("api/v1/workspaces/", include("workspaces.urls")),
     path("api/v1/ai/", include("assistant.urls")),
+    # Phase 12 D8: wake routes and their owner aliases (owner, web).
+    path("api/v1/assistant/", include("assistant.wake_urls")),
     path("api/v1/", include("memory.urls")),
     # Phase 8A branch 3 (D6): the append-only Claude Code hook-event ingest.
     # Its ONLY authenticator is the hook PAT (no device session, no other

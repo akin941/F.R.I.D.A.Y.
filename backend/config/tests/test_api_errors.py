@@ -28,6 +28,7 @@ from accounts.services import register_user
 from agents.execution import AgentServiceError
 from approvals.models import ApprovalRequest
 from approvals.services import ApprovalServiceError
+from assistant.services import WakeAliasError
 from connectors.services import ConnectorServiceError
 from core.api_errors import (
     STATUS_FALLBACK_CODES,
@@ -58,6 +59,7 @@ _DOMAIN_BASES = [
     MemoryServiceError,
     TaskServiceError,
     VoiceServiceError,
+    WakeAliasError,
 ]
 
 
