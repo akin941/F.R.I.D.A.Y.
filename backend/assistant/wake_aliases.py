@@ -71,7 +71,7 @@ def _lock_workspace(workspace):
 
 def _clean_alias(*, workspace, route, phrase, exclude_id=None):
     """Validate one alias against D8's rules; returns the normalized phrase."""
-    if wake_routes.get_route(route) is None:
+    if not wake_routes.is_known_route(route, workspace=workspace):
         raise WakeAliasUnknownRoute("Unknown wake route.")
     normalized = wake_routes.normalize_utterance(phrase if isinstance(phrase, str) else "")
     if not wake_routes.ALIAS_MIN_CHARS <= len(normalized) <= wake_routes.ALIAS_MAX_CHARS:

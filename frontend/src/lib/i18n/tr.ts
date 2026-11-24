@@ -259,6 +259,33 @@ export const ERROR_MESSAGES = {
     message: "Mac'te canlı ses bir uyanma fırtınası yüzünden susturuldu. /voice sayfasından aç.",
     specific: true,
   },
+  // SKILL.md instruction skills (Phase 12 D13/D14).
+  "skill.invalid": {
+    message: "Bu SKILL.md kabul edilmedi: başlık bloğu, ad, açıklama ya da gövde kurallara uymuyor.",
+    specific: true,
+  },
+  "skill.bundle_refused": {
+    message: "Paket reddedildi: yalnızca SKILL.md ve references/*.md dosyaları olabilir.",
+    specific: true,
+  },
+  "skill.bundle_too_large": {
+    message: "Paket çok büyük ya da bir dosyası beyan edilen boyutuna uymuyor.",
+    specific: true,
+  },
+  "skill.host_execution_refused": {
+    message: "Pakette betik ya da çalıştırılabilir dosya var; beceriler yalnızca metindir.",
+    specific: true,
+  },
+  "skill.version_changed": {
+    message: "Bu sürüm sen bakarken değişti. Sayfayı yenileyip yeniden incele.",
+    specific: true,
+  },
+  "skill.invalid_state": { message: "Bu beceri ya da sürüm bu işlem için uygun durumda değil.", specific: true },
+  "skill.limit": { message: "Etkin beceri sınırına ulaşıldı. Önce birini arşivle.", specific: true },
+  "skill.name_mismatch": {
+    message: "Bir becerinin adı değiştirilemez; yeni bir ad için yeni beceri yükle.",
+    specific: true,
+  },
   // Wake-route aliases (Phase 12 D8).
   "wake_alias.unknown_route": { message: "Böyle bir sesli komut yok.", specific: true },
   "wake_alias.invalid_length": {

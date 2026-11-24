@@ -32,6 +32,8 @@ from assistant.services import (
     mark_conversation_private,
     prepare_connector_read,
     rename_conversation,
+    select_turn_skill,
+    split_skill_prefix,
     stream_assistant_reply,
 )
 from assistant.wake_routes import route_voice_turn, static_reply_stream
@@ -334,13 +336,25 @@ class ConversationMessageListView(APIView):
             channel=channel,
             input_mode=input_mode,
         )
-        if routed is not None:
+        # Phase 12 D15: a `skill.<name>` route or an explicit `/skill <name>`
+        # prefix names the turn's skill (no `skills.match` call). The prefix
+        # is stripped from what the router and the completion see; the
+        # stored message keeps what the owner said.
+        forced_skill = routed.skill_name if routed is not None else None
+        prefixed_skill, turn_content = split_skill_prefix(content)
+        if forced_skill is None and prefixed_skill is not None:
+            forced_skill = prefixed_skill
+        else:
+            turn_content = content
+        if not turn_content.strip():
+            turn_content = content
+        if routed is not None and routed.classification is not None:
             classification = dict(routed.classification)
         else:
             classification = classify_intent(
                 conversation,
                 actor=request.user,
-                content=content,
+                content=turn_content,
                 client_local_date=serializer.validated_data["client_local_date"],
                 channel=channel,
                 context_report=turn_report or None,
@@ -358,7 +372,7 @@ class ConversationMessageListView(APIView):
             connector_turn = prepare_connector_read(
                 conversation,
                 actor=request.user,
-                content=content,
+                content=turn_content,
                 channel=channel,
                 tool_name=classification["intent_payload"]["tool_name"],
                 context_report=turn_report or None,
@@ -374,15 +388,29 @@ class ConversationMessageListView(APIView):
             gateway_stream, usage_holder = static_reply_stream(routed.reply_text), {}
             memory_ids, chunk_ids, overlay_source_workspaces = [], [], {}
         else:
+            # Phase 12 D15: after the route, `router.intent` and the cap;
+            # only for a turn answered by a chat completion. It selects
+            # owner-approved text only -- the classification above is final.
+            skill_turn = select_turn_skill(
+                conversation,
+                actor=request.user,
+                content=turn_content,
+                input_mode=input_mode,
+                intent=classification["intent"],
+                forced_name=forced_skill,
+                connector_turn=connector_turn,
+                context_report=turn_report or None,
+            )
             gateway_stream, usage_holder, memory_ids, chunk_ids, overlay_source_workspaces = (
                 build_gateway_stream(
                     conversation,
                     actor=request.user,
-                    content=content,
+                    content=turn_content,
                     channel=channel,
                     intent=classification["intent"],
                     connector_turn=connector_turn,
                     report_extra=turn_report or None,
+                    skill_turn=skill_turn,
                 )
             )
         route_name = routed.route if routed is not None else None

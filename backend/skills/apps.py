@@ -18,6 +18,12 @@ class SkillsConfig(AppConfig):
 
         self._validate_tool_references()
 
+        # Phase 12 D1/D14: pending SKILL.md proposals as a digest section and
+        # notices (`core.probes`; `proactive` never imports `skills`).
+        from skills.probes import register as register_probes
+
+        register_probes()
+
     def _validate_tool_references(self):
         """Boot-time tool-reference validation (MVP 8 §2, brief): a skill
         can be renamed, removed, or have its expected payload shape changed

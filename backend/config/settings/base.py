@@ -556,6 +556,9 @@ AI_PURPOSE_TIERS = {
     # Phase 12 D6/D18: the morning digest's one spoken summary per run
     # (personal data, local provider, the `proactive` budget).
     "proactive.digest": "cheap",
+    # Phase 12 D15/D18: the per-turn instruction-skill matcher (the `skills`
+    # budget; a timeout or refusal means "no skill").
+    "skills.match": "cheap",
     "agent.skill_match": "cheap",
     "harness.briefing": "cheap",
     "harness.diff_summary": "cheap",
@@ -650,6 +653,13 @@ AI_BUDGET_CONTROL_MONTHLY_USD = env("AI_BUDGET_CONTROL_MONTHLY_USD", default="5"
 AI_PROACTIVE_PURPOSES = ("proactive.digest",)
 AI_BUDGET_PROACTIVE_MONTHLY_USD = env("AI_BUDGET_PROACTIVE_MONTHLY_USD", default="3")
 AI_BUDGET_PROACTIVE_DAILY_USD = env("AI_BUDGET_PROACTIVE_DAILY_USD", default="0.25")
+# Phase 12 D18: the `skills` cap over the instruction-skill purposes (5 USD
+# a month), created once by the ai_core data migration 0010 (and
+# `seed_ai_defaults`), owner-editable afterwards. Branches 6/7 add the
+# curator and distiller purposes to the row. A refused match means "no
+# skill"; the turn is answered without one.
+AI_SKILLS_PURPOSES = ("skills.match",)
+AI_BUDGET_SKILLS_MONTHLY_USD = env("AI_BUDGET_SKILLS_MONTHLY_USD", default="5")
 
 # --- Pre-send compression stage (Phase 8B branch 6, brief D11) ---
 # `ai_core/compression.py`: shortens long prior assistant replies through
@@ -1238,6 +1248,26 @@ PROACTIVE_DIGEST_MAX_CHARS = env.int("PROACTIVE_DIGEST_MAX_CHARS", default=900)
 # The `ai_core.budgets` probe reports a budget window at or above this
 # share of its limit (D1: "any budget >= 80 %").
 PROACTIVE_BUDGET_WARN_PERCENT = env.int("PROACTIVE_BUDGET_WARN_PERCENT", default=80)
+
+# --- SKILL.md instruction skills (Phase 12 D13-D15, ADR-016 decision 4) ---
+# A skill body is plain text up to this many characters (after invisible
+# formatting is stripped); a longer one is refused (`body_too_large`).
+SKILLS_BODY_MAX_CHARS = env.int("SKILLS_BODY_MAX_CHARS", default=16000)
+# One upload (a SKILL.md or a .zip bundle) is at most this many bytes; also
+# enforced on the request body before the upload is parsed.
+SKILLS_BUNDLE_MAX_BYTES = env.int("SKILLS_BUNDLE_MAX_BYTES", default=1024 * 1024)
+# At most this many active (or stale) skills per workspace (D14).
+SKILLS_MAX_ACTIVE = env.int("SKILLS_MAX_ACTIVE", default=50)
+# Pending proposals at any time, per workspace and proposer (D14, D16, D17).
+SKILLS_MAX_PENDING_CURATOR = env.int("SKILLS_MAX_PENDING_CURATOR", default=5)
+SKILLS_MAX_PENDING_PLAYBOOK = env.int("SKILLS_MAX_PENDING_PLAYBOOK", default=3)
+# The `skills.match` call's gateway timeout (D15): a voice turn's budget is
+# small (it adds to the spoken reply's latency); a timeout means "no skill".
+SKILLS_MATCH_TIMEOUT_MS = env.int("SKILLS_MATCH_TIMEOUT_MS", default=1500)
+SKILLS_MATCH_VOICE_TIMEOUT_MS = env.int("SKILLS_MATCH_VOICE_TIMEOUT_MS", default=600)
+# The injected skill block (body plus the references the body names) is
+# bounded to this many characters.
+SKILLS_CONTEXT_MAX_CHARS = env.int("SKILLS_CONTEXT_MAX_CHARS", default=8000)
 
 # A value WE choose and register with Telegram via `setWebhook`
 # (`manage.py register_telegram_webhook`) -- Telegram echoes it back on

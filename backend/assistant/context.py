@@ -301,6 +301,8 @@ def build_context(
     intent=Message.Intent.CHAT,
     connector_block="",
     connector_reads=None,
+    skill_block="",
+    skill_entries=None,
 ):
     """Build (messages, context_report, prompt_version, memory_ids,
     chunk_ids, overlay_source_workspaces) for a gateway call.
@@ -344,6 +346,13 @@ def build_context(
     system prompt; `connector_reads` its bookkeeping, recorded in the
     context report (never content). Both only for the turn of the read:
     later turns never re-inject a connector result.
+
+    `skill_block` (Phase 12 D15) is this turn's matched instruction skill,
+    rendered by `skills.match.render_skill_block` (owner-approved text in a
+    `<skill name version>` block); `skill_entries` its bookkeeping, recorded
+    in the context report as `skills` (name, version, sha256 -- never the
+    body). It follows the intent framing and precedes the retrieved data
+    blocks; it never changes what is retrieved.
     """
     try:
         template = PromptTemplate.objects.get(name="friday_system")
@@ -441,6 +450,7 @@ def build_context(
             "content": prompt_version.content
             + core_block_text
             + intent_instruction
+            + (skill_block or "")
             + memory_block
             + knowledge_block
             + firm_profile_block
@@ -486,6 +496,13 @@ def build_context(
         # truncation -- never the content.
         "connector_reads": list(connector_reads or []),
         "connector_block_chars": len(connector_block or ""),
+        # Phase 12 D15: the instruction skill used in this turn -- name,
+        # version, content hash, references used, size; never its text.
+        "skills": [
+            {"name": e["name"], "version": e["version"], "sha256": e["sha256"]}
+            for e in (skill_entries or [])
+        ],
+        "skill_block_chars": len(skill_block or ""),
         # Phase 8A D7: labels and versions only, never block content.
         "core_block_labels": [b.label for b in core_blocks],
         "core_block_versions": {b.label: b.version for b in core_blocks},

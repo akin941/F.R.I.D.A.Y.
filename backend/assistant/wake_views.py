@@ -107,6 +107,17 @@ def routes_payload(workspace):
                 "aliases": aliases.get(route.name, []),
             }
             for route in wake_routes.ROUTES
+        ]
+        # Phase 12 branch 5: one `skill.<name>` route per usable skill,
+        # aliases only (no default phrase), matched as a leading alias.
+        + [
+            {
+                "name": name,
+                "effect": wake_routes.EFFECT_READ,
+                "phrases": [],
+                "aliases": aliases.get(name, []),
+            }
+            for name in wake_routes.skill_routes(workspace.owner, workspace)
         ],
     }
 
