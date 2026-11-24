@@ -95,6 +95,10 @@ DOMAIN_ERROR_CODES = frozenset(
         "voice.stt_failed",
         "voice.tts_failed",
         "voice.budget_exceeded",
+        # The node voice backstops (Phase 11 D11/D12, `accounts.voice_live`).
+        "voice.trigger_invalid",
+        "voice.always_on_not_permitted",
+        "voice.live_muted",
         "workspace.permission_denied",
     }
 )

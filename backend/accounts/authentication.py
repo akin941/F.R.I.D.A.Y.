@@ -220,6 +220,11 @@ class NodeVoiceTokenAuthentication(PersonalAccessTokenAuthentication):
 
     accepted_kinds = frozenset({PersonalAccessToken.Kind.CLI, PersonalAccessToken.Kind.NODE_VOICE})
     surface = "node_voice"
+    # Phase 11 D12: a `node_voice` token whose device is storm-muted gets
+    # 423 `voice.live_muted` here, on every route this authenticator guards
+    # (the chat turn and the voice routes) -- no `assistant -> voice` or
+    # `accounts -> voice` edge needed. A `cli` PAT is never affected.
+    enforce_live_mute = True
 
     def check_token(self, token, raw_token, now):
         if token.kind != PersonalAccessToken.Kind.NODE_VOICE:
@@ -235,18 +240,23 @@ class NodeVoiceTokenAuthentication(PersonalAccessTokenAuthentication):
         if reason is not None:
             _audit_auth_failure(raw_token, f"node_{reason}", self.surface)
             raise AuthenticationFailed("Invalid, expired or revoked token.")
+        if self.enforce_live_mute:
+            from accounts.voice_live import VoiceLiveMuted, engaged_mute
+
+            if engaged_mute(token.user, token.workspace_id, token.node_device_id) is not None:
+                raise VoiceLiveMuted()
 
 
 class NodeVoicePolicyAuthentication(NodeVoiceTokenAuthentication):
     """`GET /api/v1/auth/nodes/voice-policy` only (Phase 11 D3/D11):
     `node_voice` tokens alone (a `cli` PAT is a deliberate 403
-    `token_kind_forbidden`). Mute-tolerant by design: once branch 5 adds
-    the storm mute's 423 to `NodeVoiceTokenAuthentication`, this subclass
-    keeps answering so the policy can report `storm_muted` in its
-    reasons."""
+    `token_kind_forbidden`). Mute-tolerant by design: the storm mute's 423
+    is not raised here, so the policy answers 200 with `storm_muted` among
+    its reasons."""
 
     accepted_kinds = frozenset({PersonalAccessToken.Kind.NODE_VOICE})
     surface = "node_voice_policy"
+    enforce_live_mute = False
 
 
 class DeviceJWTAuthentication(JWTAuthentication):

@@ -5,7 +5,7 @@ from django.contrib.auth.models import AbstractBaseUser, BaseUserManager, Permis
 from django.db import models
 from django.utils import timezone
 
-from core.db import WorkspaceScopedModel
+from core.db import WorkspaceScopedManager, WorkspaceScopedModel, WorkspaceScopedQuerySet
 from core.models import TimestampedModel
 
 
@@ -387,3 +387,114 @@ class NodeKillSwitch(TimestampedModel):
     @property
     def engaged(self):
         return self.engaged_at is not None
+
+
+# --- Live voice: the always-on gate and the storm mute (Phase 11 D11/D12) ---
+#
+# Placement (brief D11, ADR-002): `voice` is a leaf that nothing may import,
+# while preflight (`ops`), the chat turn (`assistant`) and the authenticator
+# (`accounts`) all need these rows -- so they live here, next to the node
+# credentials and devices they qualify. Read through `for_actor()` only.
+
+
+class VoiceWakeEvaluationQuerySet(WorkspaceScopedQuerySet):
+    """Bulk `update()`/`delete()` are refused: an evaluation row is never
+    edited or removed (a newer row supersedes it)."""
+
+    def update(self, **kwargs):
+        raise TypeError("VoiceWakeEvaluation rows are append-only.")
+
+    def delete(self):
+        raise TypeError("VoiceWakeEvaluation rows are append-only.")
+
+
+class VoiceWakeEvaluation(WorkspaceScopedModel):
+    """One false-accept / false-reject measurement of a wake model (Phase 11
+    D11, roadmap d3). Numbers only: no audio, no transcript, no file name,
+    no free text. Written only by `manage.py voice_wake_eval record` (owner
+    shell), audited as `accounts.voice_wake_eval.recorded`, append-only: a
+    newer row for the same `(model_sha256, kind)` supersedes the older one,
+    which stays as history. The always-on verdict judges only the latest row
+    per `(model_sha256, kind)` (`accounts.voice_live`)."""
+
+    class Kind(models.TextChoices):
+        HOUSEHOLD = "household"  # >= 24 h of the owner's household audio: FAR
+        NEGATIVE_SET = "negative_set"  # a negative corpus: FAR (informational)
+        POSITIVES = "positives"  # recorded "Hey Friday" positives: FRR
+
+    model_sha256 = models.CharField(max_length=64)
+    kind = models.CharField(max_length=20, choices=Kind.choices)
+    hours = models.DecimalField(max_digits=8, decimal_places=3, default=0)
+    false_accepts = models.PositiveIntegerField(default=0)
+    far_per_hour = models.DecimalField(max_digits=10, decimal_places=4, null=True, blank=True)
+    positives = models.PositiveIntegerField(default=0)
+    false_rejects = models.PositiveIntegerField(default=0)
+    frr = models.DecimalField(max_digits=5, decimal_places=4, null=True, blank=True)
+    # Fixed precision so that equality with the child's runtime threshold
+    # (`friday_voice.config.WAKE_THRESHOLD`, sent with 4 decimals) is exact.
+    threshold = models.DecimalField(max_digits=5, decimal_places=4)
+    refractory_ms = models.PositiveIntegerField()
+    report_sha256 = models.CharField(max_length=64, blank=True, default="")
+    recorded_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="+"
+    )
+    recorded_at = models.DateTimeField(default=timezone.now)
+
+    objects = WorkspaceScopedManager.from_queryset(VoiceWakeEvaluationQuerySet)()
+
+    class Meta:
+        ordering = ["-recorded_at", "-id"]
+        indexes = [
+            models.Index(
+                fields=["workspace", "model_sha256", "kind", "-recorded_at"],
+                name="accounts_vwe_latest_idx",
+            )
+        ]
+
+    def __str__(self):
+        return f"wake eval {self.kind} {self.model_sha256[:12]}"
+
+    def save(self, *args, **kwargs):
+        if not self._state.adding:
+            raise TypeError("VoiceWakeEvaluation rows are append-only.")
+        super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise TypeError("VoiceWakeEvaluation rows are append-only.")
+
+
+class VoiceLiveMute(WorkspaceScopedModel):
+    """The server's storm backstop (Phase 11 D12, ADR-015 decision 5): a
+    node device whose voice child sent more transcriptions than
+    VOICE_LIVE_STORM_MAX_STT_PER_MINUTE in 60 s is muted. While a row is
+    unreleased, `NodeVoiceTokenAuthentication` answers that device's voice
+    tokens with 423 `voice.live_muted` on every route they reach. Released
+    only on screen (web session, owner): `released_at` / `released_by`. At
+    most one unreleased row per device."""
+
+    class Reason(models.TextChoices):
+        STT_STORM = "stt_storm"
+
+    node_device = models.ForeignKey(
+        TrustedDevice, on_delete=models.CASCADE, related_name="voice_live_mutes"
+    )
+    engaged_at = models.DateTimeField(default=timezone.now)
+    reason = models.CharField(max_length=20, choices=Reason.choices, default=Reason.STT_STORM)
+    released_at = models.DateTimeField(null=True, blank=True)
+    released_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="+"
+    )
+
+    class Meta:
+        ordering = ["-engaged_at"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["node_device"],
+                condition=models.Q(released_at__isnull=True),
+                name="accounts_one_engaged_voice_mute_per_device",
+            )
+        ]
+
+    def __str__(self):
+        state = "released" if self.released_at else "engaged"
+        return f"voice live mute {state} ({self.node_device_id})"
