@@ -8,6 +8,7 @@
                           --model-dir <dir> --loopback-cmd <cmd> [--result-file <path>]
     friday-voice wake-eval [--negative <dir>] [--positives <dir>] --model <onnx>
                            [--threshold <t>] [--refractory-ms <ms>] [--out <path>]
+    friday-voice e2e --server <url> --token-file <path> --scenario <name>
 
 `run` takes no configuration: the host hands the child everything over
 stdin (`hello`, `credential`, ...). Never pass a credential in argv or the
@@ -195,6 +196,12 @@ def _wake_eval(args) -> int:
     return wake_eval.main(args)
 
 
+def _e2e(args) -> int:
+    from . import e2e
+
+    return e2e.main(args)
+
+
 def build_parser():
     parser = argparse.ArgumentParser(prog="friday-voice")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -269,6 +276,14 @@ def build_parser():
     wake_eval.add_argument("--refractory-ms", default=None, type=int)
     wake_eval.add_argument("--out", default=None, help="write the report here (default: stdout)")
     wake_eval.set_defaults(func=_wake_eval)
+
+    e2e = sub.add_parser(
+        "e2e", help="the closeout e2e: reference host + real child against a running Friday"
+    )
+    e2e.add_argument("--server", required=True, help="a running Friday (loopback http)")
+    e2e.add_argument("--token-file", required=True, help="file holding a node_voice token")
+    e2e.add_argument("--scenario", required=True, help="ptt, node_action, barge_in, ...")
+    e2e.set_defaults(func=_e2e)
     return parser
 
 

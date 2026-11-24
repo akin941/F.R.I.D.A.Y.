@@ -14,7 +14,7 @@ FRONTEND := cd frontend &&
 	harness-images harness-smoke harness-runner deploy-smoke preflight \
 	test-backend test-frontend test-e2e lint-backend lint-frontend \
 	frontend-install frontend-dev frontend-build e2e-install voice-models \
-	friday-voice-test friday-voice-install
+	friday-voice-test friday-voice-e2e friday-voice-install
 
 # Generates any missing secret into the gitignored deploy/docker/.env
 # (never overwrites an existing key). `make up` runs it first, so a fresh
@@ -107,6 +107,13 @@ friday-voice-test:
 		uv run python scripts/make_fixtures.py --check && \
 		uv run friday-voice conformance && uv run friday-voice replay --check && \
 		uv run friday-voice selftest --ci && uv run pytest
+
+# Phase 11 closeout: the live-voice e2e -- the reference host and the real
+# child against this checkout's Django on a loopback uvicorn (FakeAdapter,
+# fake speech). Needs the dev Postgres and Redis (`make up`).
+friday-voice-e2e:
+	cd $(FRIDAY_VOICE_DIR) && uv sync --frozen
+	cd backend && FRIDAY_VOICE_E2E=1 uv run pytest ops/tests/test_live_voice_e2e.py
 
 friday-voice-install:
 	mkdir -p "$(FRIDAY_VOICE_HOME)"

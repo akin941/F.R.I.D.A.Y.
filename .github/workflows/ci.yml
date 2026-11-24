@@ -109,6 +109,32 @@ jobs:
     defaults:
       run:
         working-directory: node/friday-voice
+    # Phase 11 closeout: the live-voice e2e (last step) runs the backend's
+    # test against a live dev server, so this job has the backend's
+    # Postgres; Redis for the node bus (presence) the HUD reads.
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: friday
+          POSTGRES_PASSWORD: friday
+          POSTGRES_DB: friday
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U friday -d friday"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - uses: actions/checkout@v4
 
@@ -155,6 +181,22 @@ jobs:
 
       - name: Tests
         run: uv run pytest
+
+      # Phase 11 closeout (brief §8): the reference host + `friday-voice run`
+      # + a live dev server (uvicorn, FakeAdapter, the fake speech provider),
+      # all over real HTTP on the loopback: push-to-talk, a node action as a
+      # card only, barge-in, the self-trigger clip at residual 1.0, the kill
+      # switch and a storm. FRIDAY_VOICE_E2E=1 makes a missing child
+      # environment a failure instead of a skip.
+      - name: Live voice e2e (reference host + friday-voice run + live server)
+        working-directory: backend
+        env:
+          DATABASE_URL: postgres://friday:friday@localhost:5432/friday
+          REDIS_URL: redis://localhost:6379/0
+          FRIDAY_VOICE_E2E: "1"
+        run: |
+          uv sync --frozen
+          uv run pytest ops/tests/test_live_voice_e2e.py
 
   frontend:
     runs-on: ubuntu-latest
