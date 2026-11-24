@@ -231,3 +231,28 @@ def test_the_token_ttl_is_capped_at_boot(ttl, ok):
     assert (result.returncode == 0) is ok, result.stderr[-500:]
     if not ok:
         assert "VOICE_LIVE_TOKEN_TTL_SECONDS" in result.stderr
+
+
+# Phase 11 D11/D12: the always-on budgets and the storm backstop are checked
+# at boot (a malformed budget must never silently open or close the gate).
+@pytest.mark.parametrize(
+    ("name", "value", "ok"),
+    [
+        ("VOICE_LIVE_MAX_FAR_PER_HOUR", "abc", False),
+        ("VOICE_LIVE_MAX_FAR_PER_HOUR", "-1", False),
+        ("VOICE_LIVE_MAX_FAR_PER_HOUR", "0.5", True),
+        ("VOICE_LIVE_MAX_FRR", "1.5", False),
+        ("VOICE_LIVE_MAX_FRR", "nan", False),
+        ("VOICE_LIVE_STORM_MAX_STT_PER_MINUTE", "0", False),
+        ("VOICE_LIVE_STORM_MAX_STT_PER_MINUTE", "12", True),
+    ],
+)
+def test_the_live_voice_gate_settings_are_checked_at_boot(name, value, ok):
+    result = _run(
+        "import django; django.setup()",
+        DJANGO_SETTINGS_MODULE="config.settings.dev",
+        **{name: value},
+    )
+    assert (result.returncode == 0) is ok, result.stderr[-500:]
+    if not ok:
+        assert name.split("_PER")[0][:20] in result.stderr
