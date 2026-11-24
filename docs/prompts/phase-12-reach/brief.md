@@ -550,19 +550,32 @@ filled with D1 labels, ≤ 160 chars), `count`, `link` (closed set:
   on, yirmi, otuz, kırk, elli, altmış, yetmiş, seksen, doksan, yüz, bin`
   and English `zero … twenty, thirty … ninety, hundred, thousand`, plus
   the ordinals `birinci, ikinci, üçüncü, …` and `first, second, third,
-  …`. Adjacent numeral tokens are summed the Turkish way ("yirmi beş" =
-  25, "iki yüz" = 200) before comparing. Every resulting value must equal
+  …`. Turkish attaches suffixes, so a token also counts when it is a
+  table stem followed only by suffixes from a closed list (case:
+  `-(y)a/-(y)e`, `-da/-de/-ta/-te`, `-dan/-den/-tan/-ten`,
+  `-(y)ı/-(y)i/-(y)u/-(y)ü`; ordinal `-(ı)ncı/-(i)nci/-(u)ncu/-(ü)ncü`;
+  distributive `-er/-ar/-şer/-şar`; with or without an apostrophe):
+  "beşte", "dokuzda", "on'da", "ikişer" are numerals; "onay" is not
+  (`ay` is not a listed suffix). Adjacent numeral tokens combine the
+  Turkish way — additive ("yirmi beş" = 25) and multiplicative before
+  `yüz`/`bin` ("iki yüz" = 200) — before comparing. Every resulting value must equal
   a number present in `sections` (counts, times, dates); otherwise the
   model text is discarded, `composed_by=template` and the run counts
   `number_check_failed`. **Ambiguous tokens, documented rules:**
   `bir` ("one" / the indefinite article "a") and `one` are **not**
   counted as numerals (the article is far more common; a bare invented
-  "bir onay" is a residual, R2). `on` is **always** counted as 10, even
-  where it is the English preposition ("turned on") or part of a
-  non-numeric phrase: the check is conservative by design, because a
-  false rejection only costs the template fallback, never a wrong
-  number. The numeral table, the summing rule and the ambiguity rules
-  live in that one module with table-driven unit tests. Names are not checked (the facts contain them),
+  "bir onay" is a residual, R2). The forms of the pronoun `o` that look
+  like `on` + suffix — `ona, onu, onun, onda, ondan, onlar…` — are an
+  explicit exception list and are not numerals (they are far more
+  common in Turkish than "ten" with a case suffix; residual "onda" = "at
+  ten" is accepted, R2). Otherwise `on` is **always** counted as 10, as
+  are the homographs `yüz` (face), `bin` (ride), `altı` (beneath),
+  even where `on` is the English preposition ("turned on"): the check is
+  conservative by design, because a false rejection only costs the
+  template fallback, never a wrong number. The numeral table, the
+  suffix list, the combining rule and the exception lists live in that
+  one module with table-driven unit tests.
+  Names are not checked (the facts contain them),
   but the output is length-bounded and stripped of Markdown and invisible
   formatting (`memory.context.strip_invisible_formatting`).
 - **Per workspace.** A personal schedule digests the personal workspace
@@ -1233,7 +1246,9 @@ heartbeat on the worker beat, every D2 effect is denied inside a run,
   extra number ("5 onay" when the facts say 2) → template,
   `number_check_failed`; the same with a numeral word ("beş onay" vs 2,
   "five approvals" vs 2, "yirmi beş" vs 20 and 5) → template; "iki onay"
-  vs 2 and "saat dokuzda" vs a 09:00 fact pass; `on` counted as 10
+  vs 2 and "saat dokuzda" vs a 09:00 fact pass, "saat beşte" vs a 09:00
+  fact → template (suffixed numeral); "onay" and "onu" are not numerals;
+  `on` counted as 10
   ("on onay" vs 2 → template; "on" vs a fact of 10 → passes; English
   "on" in a text with no 10 → template, the documented conservative
   rule); `bir` not counted ("bir toplantı" with facts 1 or 2 passes —
@@ -1768,7 +1783,8 @@ workspace with a non-owner member.
   fenced, the number check over digits **and** Turkish/English numeral
   words (D6), the template fallback; names are not checked (residual:
   the model could garble a title; it can only use titles it was given).
-  Residual of the number check: `bir` / `one` are not treated as
+  Residual of the number check: `on`+suffix forms on the pronoun
+  exception list ("onda") and `bir` / `one` are not treated as
   numerals (they are mostly the indefinite article), so an invented
   "bir onay" when the facts say 0 or 2 passes; numerals outside the
   closed table (e.g. "düzine", "a couple", "birkaç") pass. Both are
