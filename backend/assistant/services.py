@@ -2,6 +2,7 @@
 single door for LLM traffic; this module never talks to a provider SDK)."""
 
 import json
+import re
 import uuid
 from dataclasses import dataclass, field
 from datetime import date
@@ -960,6 +961,85 @@ def mark_conversation_personal_data(*, conversation, actor):
     return locked
 
 
+# --- Instruction skills in a turn (Phase 12 D15, branch 5) ---
+
+# The intents whose turn is answered by a chat completion the skill can
+# shape. A draft card (task_draft / tool_request), an approval or a route
+# reply makes no `skills.match` call.
+SKILL_COMPLETION_INTENTS = frozenset(
+    {
+        Message.Intent.CHAT,
+        Message.Intent.MEMORY_QUERY,
+        Message.Intent.KNOWLEDGE_QUERY,
+        Message.Intent.CONNECTOR_READ,
+    }
+)
+_SKILL_PREFIX = re.compile(r"^\s*/skill\s+([a-z][a-z0-9-]{1,63})(?:\s+|$)", re.IGNORECASE)
+
+
+def split_skill_prefix(content):
+    """`/skill <name> rest` -> (name, rest); anything else -> (None, content).
+    The explicit prefix (typed or voice) forces that skill and skips the
+    match call."""
+    match = _SKILL_PREFIX.match(content or "")
+    if not match:
+        return None, content
+    return match.group(1).lower(), content[match.end() :].strip()
+
+
+@dataclass
+class TurnSkill:
+    """The turn's skill: the rendered block for the system context, its
+    context-report entry, and the selection's outcome (for the report)."""
+
+    block: str = ""
+    entries: list = field(default_factory=list)
+    outcome: dict = field(default_factory=dict)
+
+
+def select_turn_skill(
+    conversation,
+    *,
+    actor,
+    content,
+    input_mode,
+    intent,
+    forced_name=None,
+    connector_turn=None,
+    context_report=None,
+):
+    """D15: runs after the wake-route check, `router.intent` and the voice
+    cap, and only when the turn will make a chat completion. Returns a
+    `TurnSkill` (empty when no skill applies). Never changes the
+    classification, the tool vocabulary, the read channels, the cap or any
+    approval: it only selects owner-approved text for the completion.
+    Usage telemetry (`use_count` / `last_used_at`) is the one write."""
+    from skills import match as skill_match
+    from skills.services import record_use
+
+    if intent not in SKILL_COMPLETION_INTENTS:
+        return TurnSkill()
+    if connector_turn is not None and connector_turn.error_type:
+        return TurnSkill()
+    workspace = conversation.workspace
+    if forced_name:
+        selection = skill_match.forced_selection(actor=actor, workspace=workspace, name=forced_name)
+    else:
+        selection = skill_match.match_skill(
+            actor=actor,
+            workspace=workspace,
+            content=content,
+            voice=input_mode == Message.InputMode.VOICE,
+            personal_data=conversation_has_personal_data(conversation),
+            context_report=context_report,
+        )
+    if selection.version is None:
+        return TurnSkill(outcome=dict(selection.report))
+    block, entry = skill_match.render_skill_block(selection.version)
+    record_use(selection.skill.pk)
+    return TurnSkill(block=block, entries=[entry], outcome=dict(selection.report))
+
+
 def build_gateway_stream(
     conversation,
     *,
@@ -969,6 +1049,7 @@ def build_gateway_stream(
     intent=Message.Intent.CHAT,
     report_extra=None,
     connector_turn=None,
+    skill_turn=None,
 ):
     """Start the gateway call and return (generator, usage_holder, memory_ids,
     chunk_ids, overlay_source_workspaces).
@@ -1006,6 +1087,10 @@ def build_gateway_stream(
     conversation (D5) -- a personal read of this very turn has already set
     it, so the completion that first sees personal content is already
     restricted to allowed providers.
+
+    `skill_turn` (optional, Phase 12 D15) is `select_turn_skill`'s result:
+    its `<skill>` block joins the system context and its outcome the
+    context report (`skills`, `skills_match`). It changes nothing else.
     """
     if connector_turn is not None and connector_turn.error_type:
         return _eager_error_stream(GatewayError(connector_turn.error_type)), {}, [], [], {}
@@ -1019,8 +1104,12 @@ def build_gateway_stream(
             intent=intent,
             connector_block=connector_turn.block if connector_turn else "",
             connector_reads=connector_turn.reads if connector_turn else None,
+            skill_block=skill_turn.block if skill_turn else "",
+            skill_entries=skill_turn.entries if skill_turn else None,
         )
     )
+    if skill_turn is not None and skill_turn.outcome:
+        context_report = {**context_report, "skills_match": dict(skill_turn.outcome)}
     if report_extra:
         context_report = {**context_report, **report_extra}
     usage_holder = {}

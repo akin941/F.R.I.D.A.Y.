@@ -1723,7 +1723,7 @@ updated.
 | 2 | `feat/p12-morning-digest` | Probes in owner apps, `DigestRun`, number-checked composition + template fallback, `/today`, notice bell, HUD `notices`, "Dinle", `proactive_checkpoint` | 1 | **implemented 2026-11-20** (nine probes in their owner apps, `DigestRun` + one number-checked `proactive.digest` call with template fallback, `proactive.digest` tier/prompt/budget/compression bypass, digest `latest`/detail/`ack` endpoints, HUD `notices` + `digest` sections, `/today` digest card + schedule editor + pause toggle, shell bell + `/notices`, "Dinle" and `speak_on_open`, `proactive_checkpoint`, `proactive_heartbeat`; see "Implementation notes — branch 2"; the on-Mac spoken route is branch 3 / M1; awaits the Sonnet 5 review) |
 | 3 | `feat/p12-wake-routes` | Wake-phrase routes + aliases, `digest.today` / `digest.learning` / `notices.read` on web voice and `node_voice`, vectors, ADR-015 note | 2 | **implemented 2026-11-20** (`assistant/wake_routes.py` table + boot check + normalizer + matcher, `Message.route` and `WakeRouteAlias` (assistant 0013), owner-web alias services in `assistant/wake_aliases.py`, `/api/v1/assistant/wake-routes` + alias CRUD, `/settings/wake-routes`, shared vectors checked by pytest and vitest, ADR-015 implementation note; see "Implementation notes — branch 3"; on-Mac verification: deferred: Mac session, M1; awaits the Sonnet 5 review) |
 | 4 | `feat/p12-n8n-connector` | n8n manifest + workflow-ID allowlist, relay sidecar mode, async reads + follow-ups, gated writes, probes, `tool.*` routes, ADR-010 amendment | 3 (and so 1, 2) | planned (live n8n pins: owner step) |
-| 5 | `feat/p12-skills-core` | SKILL.md parser + refusals, staged lifecycle, matcher + injection, `/skills`, `skill.*` routes | 3 (and so 1, 2); merges after 4 if both are ready (migration order) | planned |
+| 5 | `feat/p12-skills-core` | SKILL.md parser + refusals, staged lifecycle, matcher + injection, `/skills`, `skill.*` routes | 3 (and so 1, 2); merges after 4 if both are ready (migration order) | **implemented 2026-11-20** (`skills/skill_md.py` strict parser + bundle reader, `InstructionSkill` / `InstructionSkillVersion` (skills 0001), owner-web lifecycle services, `skills.ports.propose_version`, `skills.proposals` probe, `skills.match` matcher + `<skill>` injection with the `skills` context-report entry, `/skill <name>` prefix and `skill.<name>` wake routes, `skills.match` tier/prompt/budget/compression bypass (ai_core 0010), `/skills` + `/skills/<id>` pages, D19 skills contract, `docs/skills/README.md`; see "Implementation notes — branch 5"; no Mac work; awaits the Sonnet 5 review) |
 | 6 | `feat/p12-skill-curator` | Stale marking, curator proposals, archive suggestions | 5 | planned |
 | 7 | `feat/p12-harness-playbooks` | Playbook sources from harness, provenance-checked distillation, attach to implementation jobs, ADR-012 note | 5 (parallel with 6) | planned |
 | 8 | `chore/p12-closeout` | Preflight rows, reach e2e, runbooks, ADR notes, `self_sources.json`, MASTER_PLAN row, go/no-go record | 1–7 | planned |
@@ -2389,3 +2389,107 @@ integration branch.
    (`backend/assistant/models.py`).** The field comment says "immutable
    once written", but only code review enforces it. Fix: guard it in
    `Message.save`, or drop the word "immutable" from the comment.
+
+
+### Implementation notes — branch 5 (`feat/p12-skills-core`), recorded 2026-11-20
+
+Choices made while implementing D13–D15 and the `skill.*` routes that the
+brief left open or that branches 6 and 7 build on:
+
+1. **Parser details beyond the list.** Full-line `#` comments are skipped;
+   a plain scalar that contains `: ` or ` #`, or ends with `:`, must be
+   double-quoted (`yaml_feature_refused`), as must anything starting with
+   `&`, `*`, `!`, `[`, `{`, `|`, `>`, `%`, `@` or a backtick; single quotes
+   are refused; `\"` and `\\` are the only escapes. `name` is required
+   (`missing_name`) as well as `description`; an empty body is refused
+   (`body_empty`). The permission-key list is wider than the brief's five
+   (`allowed-tools`, `tools`, `permissions`, `allow`, `auto_approve`,
+   `trust`, plus their spellings and `capabilities`, `scopes`, `exec`,
+   `run`, `commands`, `hosts`, `approve`, `approval(s)`), case-insensitive,
+   and also refused inside `metadata`. The content hash is SHA-256 over
+   canonical JSON of front matter, body and references.
+2. **Zip limits as implemented.** The compression-ratio check applies to
+   entries whose declared size is above 4 KB (a short Markdown file of
+   repeated words legitimately compresses past 20:1 and can do no harm at
+   that size); every other limit is as specified. A header that
+   under-declares its size is caught by the capped read (and the zip
+   module's own CRC check) and refused as `bundle_too_large`. A bundle's
+   entries must sit at the archive root (`SKILL.md`, `references/<name>.md`
+   only, no nested directory, no top-level folder).
+3. **One pending version per skill.** A new proposal for a skill that
+   already has a pending version supersedes it (`decision=superseded`,
+   audited `skills.version.superseded`); the same content again returns the
+   existing pending row. Edit-then-approve inserts the edited text as a new
+   owner version (provenance `edited_from`), supersedes the edited one and
+   approves the new one in the same transaction. A proposal identical to
+   the version in use is refused (`skill.invalid_state`). A rejected skill
+   returns to `proposed` when a new version is proposed. A skill's name
+   never changes (`skill.name_mismatch`).
+4. **Immutability.** `InstructionSkillVersion.save()` on a stored row is
+   allowed only with `update_fields` within the decision fields and only
+   while the stored decision is `pending`; `delete()` raises on versions
+   and skills.
+5. **Matcher seam.** The matcher builds its own `InferenceGateway` with
+   connect/read timeouts set to the budget (`SKILLS_MATCH_VOICE_TIMEOUT_MS`
+   600 / `SKILLS_MATCH_TIMEOUT_MS` 1500) and `max_retries = 0`, so the
+   voice-turn bound is one attempt; the budget is also recorded on the
+   call's `ModelUsage.context_report` (`skills_match_timeout_ms`). The chat
+   call's report gains `skills` (name, version, sha256) and
+   `skills_match` (outcome: `matched`, `none`, `unknown_name`,
+   `parse_error`, `timeout`, `budget_refused`, `gateway_error`, `forced`,
+   `forced_unknown`, `no_prompt`). `use_count` / `last_used_at` are the one
+   write a turn's skill use makes (curator telemetry, like the digest's
+   `spoken_at` on a route).
+6. **Where the block goes.** After the core blocks and the intent framing,
+   before memory, knowledge, firm profile and connector blocks; a body
+   cannot close its own `<skill>` block (`</skill` is escaped).
+7. **`/skill <name>` prefix.** `/skill <name> rest` (case-insensitive
+   keyword) forces that skill on any turn; the router and the completion
+   see `rest`, the stored user message keeps what was typed. An unknown or
+   unusable name means no skill and no match call.
+8. **`skill.<name>` routes.** One route per usable (active or stale) skill
+   of the workspace, effect `read`, **no default phrase**: the owner adds
+   aliases on `/settings/wake-routes` (the alias validator now accepts
+   `skill.<name>` for a usable skill of the alias's workspace). A voice
+   utterance that starts with such an alias (longest alias wins) keeps the
+   normal router (`RoutedTurn.classification` is `None`), forces the skill
+   and stamps `Message.route = "skill.<name>"`; an alias whose skill was
+   archived simply stops matching. Code-defined zero-argument routes are
+   checked first.
+9. **Probe labels.** `skills.proposals` labels an owner proposal with its
+   (owner-typed) name, a curator/playbook proposal for an existing approved
+   skill with that skill's name, and a new machine-proposed skill with the
+   Friday words "yeni beceri" -- a model-chosen name never reaches a
+   notice.
+10. **Endpoints.** `GET|POST /api/v1/skills[?workspace=]`, `POST
+    /api/v1/skills/upload[?workspace=]` (multipart `file`), `GET
+    /api/v1/skills/<id>`, `POST …/<id>/versions`, `POST …/<id>/archive`,
+    `POST …/<id>/restore`, `POST /api/v1/skills/versions/<id>/approve`
+    `{"sha256"}`, `…/edit-approve` `{"sha256","text"}`, `…/reject`; owner
+    web session only; no delete (405), no bulk route. Error codes
+    `skill.invalid` (with the parser's `reason`), `skill.bundle_refused`,
+    `skill.bundle_too_large`, `skill.host_execution_refused`,
+    `skill.version_changed`, `skill.invalid_state`, `skill.limit`,
+    `skill.name_mismatch`.
+11. **Contracts.** New: `skills` must not import `connectors`, `nodes`,
+    `assistant`, `proactive` (tests excepted). `assistant` imports
+    `skills.match`, `skills.selectors`, `skills.services.record_use`
+    lazily inside the turn and the wake-route functions.
+12. **Branch 4 overlap.** `assistant/wake_routes.py` (prefix routes,
+    `RoutedTurn`) and the ai_core data migration number (`0010`) overlap
+    with `feat/p12-n8n-connector`; whichever merges second rebases and
+    renumbers per the sequencing rule above.
+
+### Owner steps (pending) — `feat/p12-skills-core`, recorded 2026-11-20
+
+1. Run the independent Sonnet 5 review of this branch to APPROVE before
+   merge (the implementing model does not review its own work).
+2. After merge: `manage.py migrate` (skills 0001: instruction skills;
+   ai_core 0010: the `friday_skills_match` prompt and the `skills` budget,
+   5 USD/month). Make sure a cheap-tier chat provider is active; without
+   one every match degrades to "no skill" (the turn is unaffected).
+3. Upload or write the first SKILL.md skills on `/skills` and approve
+   them; optionally add `skill.<name>` aliases on `/settings/wake-routes`.
+4. Mac session M1 (deferred: Mac session): re-measure the Phase 11 voice
+   latency targets with one active skill (the matcher adds at most 600 ms
+   to a voice turn). No Swift change and no protocol surface.

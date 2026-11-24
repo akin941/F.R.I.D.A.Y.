@@ -575,6 +575,7 @@ def test_seed_local_speech_rows_with_voice_key_and_idempotent(monkeypatch):
         "learning_eval",
         "control",
         "proactive",
+        "skills",
     }
 
 

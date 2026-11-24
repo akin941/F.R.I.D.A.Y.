@@ -42,6 +42,7 @@ from deploys.services import DeployServiceError
 from harness.services import HarnessServiceError
 from knowledge.services import KnowledgeServiceError
 from memory.services import MemoryServiceError
+from skills.services import SkillServiceError
 from tasks.services import TaskServiceError
 from voice.services import VoiceServiceError
 from workspaces.models import Workspace, WorkspaceMember
@@ -57,6 +58,7 @@ _DOMAIN_BASES = [
     HarnessServiceError,
     KnowledgeServiceError,
     MemoryServiceError,
+    SkillServiceError,
     TaskServiceError,
     VoiceServiceError,
     WakeAliasError,

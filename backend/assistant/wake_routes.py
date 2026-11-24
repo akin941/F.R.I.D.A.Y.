@@ -148,11 +148,14 @@ class WakeRoute:
 
 @dataclass(frozen=True)
 class RoutedTurn:
-    """`route_voice_turn`'s answer to the chat turn."""
+    """`route_voice_turn`'s answer to the chat turn. A `skill.<name>` route
+    (branch 5) has no classification of its own (`None`: the normal router
+    runs) and no reply; it only names the skill the turn must use."""
 
     route: str
-    classification: dict
+    classification: dict | None
     reply_text: str | None
+    skill_name: str | None = None
 
 
 # --- handlers -----------------------------------------------------------------
@@ -305,6 +308,71 @@ def get_route(name):
     return None
 
 
+# --- skill.<name> routes (Phase 12 D8/D15, branch 5) ------------------------------
+#
+# One route per usable (active or stale) instruction skill of the workspace,
+# named `skill.<skill name>`. It has no default phrase: the owner gives it
+# aliases on `/settings/wake-routes`. It matches a leading alias followed by
+# the remainder ("pr açıklaması yaz şunu" with alias "pr açıklaması") and
+# force-selects that skill for the turn -- no `skills.match` call. The
+# effect is `read`: the skill only changes the completion's instructions;
+# the normal router, the ADR-015 cap and the trust check still run.
+
+SKILL_ROUTE_PREFIX = "skill."
+
+
+def skill_route_name(skill_name):
+    return f"{SKILL_ROUTE_PREFIX}{skill_name}"
+
+
+def skill_name_of(route_name):
+    if isinstance(route_name, str) and route_name.startswith(SKILL_ROUTE_PREFIX):
+        return route_name[len(SKILL_ROUTE_PREFIX) :]
+    return None
+
+
+def skill_routes(actor, workspace):
+    """The workspace's `skill.<name>` route names (usable skills only)."""
+    from skills.selectors import usable_skills
+
+    return [skill_route_name(skill.name) for skill in usable_skills(actor, workspace)]
+
+
+def is_known_route(name, *, workspace=None):
+    """A code-defined route, or the `skill.<name>` route of a usable skill
+    of this workspace."""
+    if get_route(name) is not None:
+        return True
+    skill_name = skill_name_of(name)
+    if skill_name is None or workspace is None:
+        return False
+    from skills.selectors import usable_skill_by_name
+
+    return usable_skill_by_name(workspace.owner, workspace, skill_name) is not None
+
+
+def match_skill_alias(text, *, aliases=None):
+    """(skill name, remainder) for an utterance that starts with an alias of
+    a `skill.<name>` route, or None. The longest alias wins."""
+    utterance = normalize_utterance(text)
+    key = match_key(utterance)
+    if not key:
+        return None
+    best = None
+    for route_name, phrases in (aliases or {}).items():
+        skill_name = skill_name_of(route_name)
+        if skill_name is None:
+            continue
+        for phrase in phrases:
+            alias_key = match_key(phrase)
+            if key == alias_key or key.startswith(alias_key + " "):
+                if best is None or len(alias_key) > len(best[2]):
+                    best = (skill_name, utterance[len(phrase) :].strip(), alias_key)
+    if best is None:
+        return None
+    return best[0], best[1]
+
+
 def route_names():
     return [route.name for route in ROUTES]
 
@@ -359,9 +427,10 @@ def route_voice_turn(conversation, *, actor, content, channel, input_mode, now=N
     workspace = conversation.workspace
     if not _is_workspace_owner(actor, workspace):
         return None
-    route = match_utterance(content, aliases=aliases_for(workspace))
+    aliases = aliases_for(workspace)
+    route = match_utterance(content, aliases=aliases)
     if route is None:
-        return None
+        return _route_skill(actor, workspace, content, aliases)
     turn = WakeTurn(
         conversation=conversation,
         actor=actor,
@@ -382,3 +451,23 @@ def route_voice_turn(conversation, *, actor, content, channel, input_mode, now=N
     if result.commit is not None:
         result.commit()
     return RoutedTurn(route=route.name, classification=capped, reply_text=result.reply_text)
+
+
+def _route_skill(actor, workspace, content, aliases):
+    """A `skill.<name>` alias at the start of the utterance: the turn keeps
+    the normal router and uses that skill (when it is still usable in this
+    workspace); otherwise a miss."""
+    from skills.selectors import usable_skill_by_name
+
+    matched = match_skill_alias(content, aliases=aliases)
+    if matched is None:
+        return None
+    skill_name, _remainder = matched
+    if usable_skill_by_name(actor, workspace, skill_name) is None:
+        return None
+    return RoutedTurn(
+        route=skill_route_name(skill_name),
+        classification=None,
+        reply_text=None,
+        skill_name=skill_name,
+    )

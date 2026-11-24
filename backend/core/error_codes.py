@@ -100,6 +100,15 @@ DOMAIN_ERROR_CODES = frozenset(
         "voice.stt_failed",
         "voice.tts_failed",
         "voice.budget_exceeded",
+        # SKILL.md instruction skills (Phase 12 branch 5, D13/D14).
+        "skill.invalid",
+        "skill.bundle_refused",
+        "skill.bundle_too_large",
+        "skill.host_execution_refused",
+        "skill.version_changed",
+        "skill.invalid_state",
+        "skill.limit",
+        "skill.name_mismatch",
         # Wake-route aliases (Phase 12 branch 3, D8).
         "wake_alias.unknown_route",
         "wake_alias.invalid_length",

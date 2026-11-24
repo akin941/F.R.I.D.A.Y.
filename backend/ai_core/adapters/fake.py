@@ -207,6 +207,9 @@ FAKE_TRUST_CHECK_RESPONSE = '{"verdict": "consistent", "reason_code": "matches_r
 FAKE_TASK_DRAFT_RESPONSE = '{"title": "Fake extracted task", "due_date": null}'
 # Phase 12 D6: a spoken digest with no numbers at all, so it passes the
 # number check against any facts (tests script other answers).
+# Phase 12 D15: the instruction-skill matcher's default answer is "no
+# skill"; tests that need a match patch the adapter's text for the purpose.
+FAKE_SKILLS_MATCH_RESPONSE = '{"skill": null}'
 FAKE_PROACTIVE_DIGEST_RESPONSE = (
     "Günaydın! Bugün seni bekleyen birkaç şey var; ayrıntılar Bugün sayfasında."
 )
@@ -320,6 +323,8 @@ class FakeAdapter(BaseAdapter):
             return FAKE_TRUST_CHECK_RESPONSE
         if purpose == "proactive.digest":
             return FAKE_PROACTIVE_DIGEST_RESPONSE
+        if purpose == "skills.match":
+            return FAKE_SKILLS_MATCH_RESPONSE
         if purpose == "agent.plan":
             latest = _latest_user_content(messages)
             if _AGENT_MULTI_STEP_PLAN_TRIGGER in latest:

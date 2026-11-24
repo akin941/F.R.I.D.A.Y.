@@ -72,6 +72,8 @@ COMPRESSION_BYPASS = frozenset(
         # Phase 12 D18: the morning digest's number check needs the exact
         # facts it was given
         "proactive.digest",
+        # Phase 12 D15/D18: the skill matcher needs the exact approved names
+        "skills.match",
         # preflight probes a provider; its payload must be exactly as written
         "ops.preflight",
     }

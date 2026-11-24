@@ -56,6 +56,8 @@ urlpatterns = [
     path("api/v1/", include("nodes.urls")),
     # Phase 12 (D3, D5): schedules, notices, pause -- owner-only, web only.
     path("api/v1/", include("proactive.urls")),
+    # Phase 12 D14/D20: SKILL.md instruction skills (owner, web).
+    path("api/v1/", include("skills.urls")),
     # Phase 5 branch 6: `deploys` may not import `accounts` (ADR-010), so the
     # PAT authenticator (which must precede the device session, see
     # accounts/authentication.py) is injected here, in the composition root.

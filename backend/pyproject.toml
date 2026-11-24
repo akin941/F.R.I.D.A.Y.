@@ -324,6 +324,21 @@ ignore_imports = [
     "skills.tests.* -> agents.*",
 ]
 
+# Phase 12 D19 (branch 5): instruction skills are text. `skills` keeps its
+# edges (tools, ai_core, core, workspaces, audit) and never reaches a
+# connector, a node, the chat turn or a proactive run: the chat turn
+# (`assistant`) calls into `skills`, never the reverse.
+[[tool.importlinter.contracts]]
+name = "skills must not import connectors, nodes, assistant, proactive (Phase 12 D19)"
+type = "forbidden"
+source_modules = ["skills"]
+forbidden_modules = ["connectors", "nodes", "assistant", "proactive"]
+# The skills tests drive the chat turn and seed wake aliases end to end.
+ignore_imports = [
+    "skills.tests.** -> assistant.**",
+    "skills.tests.** -> accounts.**",
+]
+
 [[tool.importlinter.contracts]]
 name = "tools must not import skills (direction: skills -> tools)"
 type = "forbidden"
@@ -748,6 +763,11 @@ name = "only assistant, hud, ops may import proactive (Phase 12 D19)"
 type = "forbidden"
 source_modules = ["core", "accounts", "workspaces", "audit", "ai_core", "memory", "knowledge", "tasks", "approvals", "tools", "agents", "skills", "integrations", "harness", "connectors", "deploys", "voice", "nodes"]
 forbidden_modules = ["proactive"]
+# The skills tests drive the chat turn with the assistant's shared wake-route
+# fixtures (which seed digest rows); production `skills` never reaches it.
+ignore_imports = [
+    "skills.tests.** -> assistant.tests.**",
+]
 
 # ... and assistant / hud only through its narrow read surface,
 # `proactive.api` (direct imports; `proactive.api` itself reads the models).
