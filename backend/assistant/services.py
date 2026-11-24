@@ -1087,6 +1087,10 @@ def build_gateway_stream(
     conversation (D5) -- a personal read of this very turn has already set
     it, so the completion that first sees personal content is already
     restricted to allowed providers.
+
+    `skill_turn` (optional, Phase 12 D15) is `select_turn_skill`'s result:
+    its `<skill>` block joins the system context and its outcome the
+    context report (`skills`, `skills_match`). It changes nothing else.
     """
     if connector_turn is not None and connector_turn.error_type:
         return _eager_error_stream(GatewayError(connector_turn.error_type)), {}, [], [], {}
