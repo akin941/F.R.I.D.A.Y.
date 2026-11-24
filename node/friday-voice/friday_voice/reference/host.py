@@ -86,6 +86,7 @@ class HostCore:
         self._ready_at = None
         self._last_state_at = None
         self._seq = 0
+        self.stopping = False
 
     # --- lifecycle ---
 
@@ -134,12 +135,24 @@ class HostCore:
     def child_exited(self, code=0):
         if not self.child_running:
             return
+        if self.stopping:
+            self._stopped()
+            return
         self._fail("child_exit")
 
     def shutdown(self):
+        """The host is quitting: tell the child, release, and treat its
+        exit as expected (no restart)."""
+        self.stopping = True
         if self.link_open:
             self._send({"type": "shutdown"})
         self._release("shutdown")
+        self.indicator = "off"
+
+    def _stopped(self):
+        self.link_open = False
+        self.child_running = False
+        self.child_ready = False
 
     # --- outbound ---
 
@@ -213,6 +226,9 @@ class HostCore:
         if not self.link_open:
             return
         error = self._decoder.close()
+        if self.stopping and not error:
+            self._stopped()
+            return
         self._fail(error or "child_exit")
 
     def _handle(self, header, payload):

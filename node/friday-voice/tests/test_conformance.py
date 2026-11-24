@@ -176,8 +176,9 @@ def test_frames_in_cases_are_base64_of_exact_bytes():
     for case in HOST_CASES + CHILD_CASES:
         for step in case["steps"]:
             if "frame_b64" in step:
-                assert base64.b64encode(base64.b64decode(step["frame_b64"])).decode() == (
-                    step["frame_b64"]
+                assert (
+                    base64.b64encode(base64.b64decode(step["frame_b64"])).decode()
+                    == (step["frame_b64"])
                 )
 
 

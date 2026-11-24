@@ -54,3 +54,5 @@ markers = [
     "real_models: loads the real ONNX detectors (opt-in: -m real_models; never in the default run)",
 ]
 addopts = "-m 'not real_models'"
+# Pipecat 1.15.0 imports the stdlib `audioop` (removed in 3.13; the pin is 3.12).
+filterwarnings = ["ignore:'audioop' is deprecated:DeprecationWarning"]

@@ -6,6 +6,7 @@ import re
 from types import MappingProxyType
 
 import pytest
+from conftest import REPO_ROOT
 
 from friday_voice.protocol.messages import (
     AUDIO_TYPES,
@@ -22,8 +23,6 @@ from friday_voice.protocol.messages import (
     load_schema,
     validate,
 )
-
-from conftest import REPO_ROOT
 
 ALL_TYPES = sorted(HOST_TO_CHILD_TYPES | CHILD_TO_HOST_TYPES)
 
@@ -97,8 +96,8 @@ def test_every_schema_is_closed_and_bounded(message_type):
             assert sub.get("additionalProperties") is False, path
         if "string" in types:
             assert isinstance(sub.get("maxLength"), int), path
-            assert "enum" in sub or "const" in sub or "pattern" in sub or path.endswith(
-                ".detail"
+            assert (
+                "enum" in sub or "const" in sub or "pattern" in sub or path.endswith(".detail")
             ), path
         if "integer" in types:
             assert isinstance(sub.get("minimum"), int), path
