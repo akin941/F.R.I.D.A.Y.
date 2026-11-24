@@ -34,10 +34,12 @@ never calls Friday. Governance: `docs/mcp/n8n.md`; manifest:
    in one reviewed commit, then print the relay's ceiling:
 
    ```bash
-   cd backend && uv run python manage.py n8n_relay_env   # BRIDGE_ALLOWED_TOOLS=wf_...,wf_...
+   cd backend && uv run python manage.py n8n_relay_env   # N8N_RELAY_ALLOWED_TOOLS=wf_...,wf_...
    ```
 
-   and put that line in `deploy/docker/.env`.
+   and put that line in `deploy/docker/.env` (compose hands it to the sidecar
+   as `BRIDGE_ALLOWED_TOOLS`, and to web/worker for `manage.py preflight`'s
+   `n8n_allowlist` row).
 5. Start the relay (`docker compose --profile connectors up -d n8n-relay`),
    set `N8N_MCP_URL=http://n8n-relay:8080/mcp` for web and worker, and
    re-pin each tool against the live trigger: the live `inputSchema` n8n
@@ -50,5 +52,5 @@ never calls Friday. Governance: `docs/mcp/n8n.md`; manifest:
 
 Adding a workflow later is the same reviewed commit: a new
 `N8nWorkflow` entry with its live pin, the twin's table row, a new tool node
-`wf_<id>` in n8n, and a regenerated `BRIDGE_ALLOWED_TOOLS` line. Never a
+`wf_<id>` in n8n, and a regenerated `N8N_RELAY_ALLOWED_TOOLS` line. Never a
 database write.

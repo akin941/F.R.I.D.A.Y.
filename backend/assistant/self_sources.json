@@ -254,7 +254,7 @@
     "line": 988,
     "phase": "12 Reach and proactivity",
     "outcome": "Friday starts useful conversations and uses your automations",
-    "status": "planned — full brief written 2026-11-20 (`docs/p12-brief`), awaiting its Sonnet 5 plan review; no Swift or protocol work (Mac M1 is a verification run)"
+    "status": "server side done (2026-11-20); go/no-go checkpoint in progress — branches 1–7 + closeout implemented (the `proactive` app: `core.probes` registry, the unattended deny guard in every effect's owning service, owner-only web schedules (\"cron…"
   },
-  "content_hash": "e5817370f6e49acd5e9f08a78fbdf26560e08efe7190c911e7ad6ae2cd2c0f5b"
+  "content_hash": "8c95d57dbcf646f0fc355943e8c2adcfce1cce21de507ee7a5050c4249a8bb84"
 }

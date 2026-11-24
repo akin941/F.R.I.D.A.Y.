@@ -148,7 +148,9 @@ def test_n8n_relay_env_prints_exactly_the_allowlist():
     out = StringIO()
     call_command("n8n_relay_env", stdout=out)
     line = out.getvalue().strip()
-    assert line == "BRIDGE_ALLOWED_TOOLS=wf_Ab12Cd34Ef56Gh78,wf_Hb34Kd56Mf78Np90"
+    # The deploy/docker/.env variable compose reads for the sidecar's
+    # BRIDGE_ALLOWED_TOOLS (Phase 12 closeout).
+    assert line == "N8N_RELAY_ALLOWED_TOOLS=wf_Ab12Cd34Ef56Gh78,wf_Hb34Kd56Mf78Np90"
     assert line.split("=", 1)[1].split(",") == [wf.server_tool for wf in n8n.WORKFLOWS]
 
 

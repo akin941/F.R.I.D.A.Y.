@@ -284,3 +284,24 @@ Recorded with `feat/p12-n8n-connector` (Phase 12 brief D9–D12), 2026-11-20.
   `workspaces`, `audit`, `ai_core`, `tools`, `memory`; async completion goes
   through `tools.registry`), nothing moves between gate-class and
   confirm-class, and no node protocol surface is added.
+
+## Implementation note — Phase 12 closeout (`chore/p12-closeout`, 2026-11-20)
+
+The relay mode and async reads are now visible in operations. `manage.py
+preflight` `check_n8n` (read-only; nothing stored on a binding — the pin
+beat stays the one writer of binding health; never a URL or the bearer in a
+detail): `n8n_allowlist` compares the relay ceiling the deployment hands
+the sidecar (`N8N_RELAY_ALLOWED_TOOLS`, which compose maps to the relay's
+`BRIDGE_ALLOWED_TOOLS` and also hands to web/worker — names only) with the
+manifest's `wf_<id>` tools and fails on any difference; `n8n_binding`,
+`n8n_relay` (a read-only `tools/list` through the relay) and `n8n_pins`
+warn while no binding is enabled (the owner's live n8n is an owner step)
+and fail once one is enabled and the relay is unreachable or a pin
+differs. `manage.py n8n_relay_env` now prints the `N8N_RELAY_ALLOWED_TOOLS=`
+line compose actually reads (it printed `BRIDGE_ALLOWED_TOOLS=`, which a
+`deploy/docker/.env` line never reached). The closeout e2e drives an async
+read from a `node_voice` turn to exactly one follow-up and one notice, and
+a voice write from a draft card through web approval to exactly one send
+and one status-word notice, through the in-process relay and the fake n8n
+trigger. No decision changes; nothing moves between gate-class and
+confirm-class.

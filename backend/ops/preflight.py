@@ -78,6 +78,23 @@ files against `conformance.lock`, seam `friday_voice_dir`; a `warn` where
 no checkout exists) and `node_voice_state` (per active node, its last
 `voice.state`; a `warn` while none reports, the Mac session is deferred).
 
+Phase 12 closeout adds the reach checks, read-only (no model call, no run
+started, no tool called, nothing stored): `check_proactive` --
+`proactive_beat` (the heartbeat every <= 60 s and the notice prune on the
+worker beat), `proactive_schedules` (every enabled schedule has a
+`next_run_at` that is not stale; a `warn` while none is enabled, owner
+step), `proactive_last_run` (no schedule's last run `failed`),
+`proactive_digest` (tier, budget and prompt of `proactive.digest`) and
+`proactive_probes` (none slow or failing on the last runs); `check_n8n` --
+`n8n_allowlist` (`N8N_RELAY_ALLOWED_TOOLS`, the relay's
+`BRIDGE_ALLOWED_TOOLS`, equals the manifest, seam
+`n8n_relay_allowed_tools_setting`), `n8n_binding`, `n8n_relay` and
+`n8n_pins` (a read-only `tools/list` through the relay, seam `pin_report`;
+all three `warn` while no binding is enabled, owner step); `check_skills`
+-- `skills_ai` (the three skills purposes' tiers, budgets and prompts),
+`skills_beat` (curator and distiller scheduled) and `skills_parser` (every
+usable skill's current version passes the current SKILL.md parser).
+
 Rules this module keeps:
 
 - Provider calls go through the single door (ADR-003): one minimal
@@ -2627,6 +2644,465 @@ def check_live_voice():
     ]
 
 
+# --- Phase 12: reach and proactivity (closeout) ---------------------------
+
+# D3: the one runner of owner schedules and the notice prune, both on the
+# worker beat (config/celery.py); the heartbeat at least once a minute.
+PROACTIVE_BEAT_TASKS = (
+    ("proactive.tasks.heartbeat", 60),
+    ("proactive.tasks.prune", 24 * 60 * 60),
+)
+# D16/D17: the weekly curator and the nightly playbook distiller (crontabs).
+SKILLS_BEAT_TASKS = (
+    ("skills.tasks.curate", None),
+    ("skills.tasks.distill_playbooks", None),
+)
+PROACTIVE_DIGEST_PURPOSE = "proactive.digest"
+PROACTIVE_DIGEST_PROMPT = "friday_proactive_digest"
+# D15-D18: each skills purpose and its seeded prompt (ai_core 0010/0012/0013).
+SKILLS_PURPOSE_PROMPTS = (
+    ("skills.match", "friday_skills_match"),
+    ("skills.curate", "friday_skills_curate"),
+    ("skills.playbook_distill", "friday_skills_playbook_distill"),
+)
+# An enabled schedule whose `next_run_at` is further in the past than this
+# was not claimed by the heartbeat (which runs every 60 s): the beat or the
+# worker is down.
+PROACTIVE_STALE_SECONDS = 10 * 60
+# A run still `running` after this long lost its worker.
+PROACTIVE_RUN_STUCK_SECONDS = 15 * 60
+PROACTIVE_OWNER_STEP = "owner step: enable morning_digest on /today"
+N8N_CONNECTOR = "n8n"
+N8N_OWNER_STEP = "not configured (Phase 12 owner step 3)"
+
+
+def n8n_relay_allowed_tools_setting():
+    """The relay ceiling the deployment hands the `n8n-relay` sidecar
+    (`N8N_RELAY_ALLOWED_TOOLS`; compose passes the same variable, with the
+    same default, to web and worker -- names only), as a set of server
+    tool names."""
+    value = getattr(settings, "N8N_RELAY_ALLOWED_TOOLS", "") or ""
+    return {name.strip() for name in str(value).split(",") if name.strip()}
+
+
+def _worker_beat_problems(tasks):
+    """`[problem, ...]` for `(task, max_interval_seconds | None)` pairs on
+    the worker beat (None: any schedule, e.g. a crontab)."""
+    schedules, registered = beat_schedules()
+    worker = (schedules or {}).get("worker") or {}
+    if not worker:
+        return ["no worker beat schedule published by the Celery app"]
+    problems = []
+    for task, max_interval in tasks:
+        entries = [entry for entry in worker.values() if entry.get("task") == task]
+        if not entries:
+            problems.append(f"{task} not on the worker beat")
+        elif max_interval is not None:
+            seconds = _schedule_seconds(entries[0].get("schedule"))
+            if seconds is None or seconds > max_interval:
+                problems.append(f"{task} runs less often than every {max_interval}s")
+        if task not in registered:
+            problems.append(f"{task} not registered")
+    return problems
+
+
+def _purpose_seeding(purpose, prompt_name):
+    """`(problems, budgets)` for one gateway purpose: a tier in
+    `AI_PURPOSE_TIERS`, an active budget, a seeded prompt with an active
+    version."""
+    from ai_core.budgets import budgets_for
+    from ai_core.models import PromptTemplate
+
+    problems = []
+    tier = (getattr(settings, "AI_PURPOSE_TIERS", {}) or {}).get(purpose)
+    if not tier:
+        problems.append(f"{purpose} has no tier in AI_PURPOSE_TIERS")
+    budgets = budgets_for(purpose)
+    if not budgets:
+        problems.append(f"no active budget covers {purpose} (run migrate)")
+    template = (
+        PromptTemplate.objects.filter(name=prompt_name).select_related("active_version").first()
+    )
+    if template is None or template.active_version is None:
+        problems.append(f"{prompt_name} is not seeded (run seed_ai_defaults)")
+    return problems, budgets
+
+
+def _seeded_row(name, pairs):
+    """One row over `(purpose, prompt)` pairs: `fail` on a missing tier,
+    budget or prompt, `warn` when a purpose has no monthly cap."""
+    problems, budgets, uncapped = [], {}, []
+    for purpose, prompt_name in pairs:
+        found, covering = _purpose_seeding(purpose, prompt_name)
+        problems.extend(found)
+        budgets.update({b.pk: b for b in covering})
+        if covering and all(b.monthly_limit_usd is None for b in covering):
+            uncapped.append(purpose)
+    if problems:
+        return CheckResult(name, FAIL, "; ".join(problems))
+    described = "; ".join(
+        _describe_budget(b) for b in sorted(budgets.values(), key=lambda b: b.name)
+    )
+    tiers = getattr(settings, "AI_PURPOSE_TIERS", {}) or {}
+    detail = ", ".join(f"{p} ({tiers[p]})" for p, _ in pairs) + f"; {described}"
+    if uncapped:
+        return CheckResult(name, WARN, f"no monthly cap on {', '.join(uncapped)}: {detail}")
+    return CheckResult(name, PASS, detail)
+
+
+def _check_proactive_beat():
+    problems = _worker_beat_problems(PROACTIVE_BEAT_TASKS)
+    if problems:
+        return CheckResult("proactive_beat", FAIL, "; ".join(problems))
+    return CheckResult(
+        "proactive_beat", PASS, "heartbeat every <= 60s and the notice prune on the worker beat"
+    )
+
+
+def _enabled_schedules():
+    from proactive.models import ProactiveSchedule
+
+    return list(
+        ProactiveSchedule.objects.filter(enabled=True)
+        .select_related("workspace")
+        .order_by("workspace__created_at", "kind")
+    )
+
+
+def _schedule_label(schedule):
+    return f"{schedule.kind}@{schedule.workspace.type}"
+
+
+def _check_proactive_schedules(enabled, now):
+    """D3: every enabled schedule has a `next_run_at` the heartbeat will
+    claim; one past `PROACTIVE_STALE_SECONDS` means the beat is not running."""
+    from datetime import timedelta
+
+    from proactive.models import ProactivePause
+
+    if not enabled:
+        return CheckResult(
+            "proactive_schedules", WARN, f"no schedule enabled ({PROACTIVE_OWNER_STEP})"
+        )
+    stale_before = now - timedelta(seconds=PROACTIVE_STALE_SECONDS)
+    incomplete = [_schedule_label(s) for s in enabled if s.next_run_at is None]
+    stale = [_schedule_label(s) for s in enabled if s.next_run_at and s.next_run_at < stale_before]
+    paused = set(
+        ProactivePause.objects.filter(
+            workspace_id__in={s.workspace_id for s in enabled}
+        ).values_list("workspace_id", flat=True)
+    )
+    detail = f"{len(enabled)} enabled: " + ", ".join(_schedule_label(s) for s in enabled)
+    if paused:
+        detail += f" ({len(paused)} workspace(s) paused)"
+    problems = []
+    if incomplete:
+        problems.append(f"no next run (incomplete): {', '.join(incomplete)}")
+    if stale:
+        problems.append(
+            f"next run more than {PROACTIVE_STALE_SECONDS // 60} min overdue "
+            f"(is the heartbeat running?): {', '.join(stale)}"
+        )
+    if problems:
+        return CheckResult("proactive_schedules", FAIL, f"{detail}; " + "; ".join(problems))
+    return CheckResult("proactive_schedules", PASS, detail)
+
+
+def _latest_runs(enabled):
+    from proactive.models import ProactiveRun
+
+    latest = {}
+    for schedule in enabled:
+        run = ProactiveRun.objects.filter(schedule=schedule).order_by("-started_at").first()
+        if run is not None:
+            latest[schedule.pk] = run
+    return latest
+
+
+def _check_proactive_last_run(enabled, latest, now):
+    """The last run of each enabled schedule is not `failed` (`fail`); a
+    run `running` past `PROACTIVE_RUN_STUCK_SECONDS` lost its worker and a
+    schedule with no run yet are a `warn`."""
+    from datetime import timedelta
+
+    from proactive.models import ProactiveRun
+
+    if not enabled:
+        return CheckResult("proactive_last_run", WARN, "no schedule enabled")
+    outcome = ProactiveRun.Outcome
+    stuck_before = now - timedelta(seconds=PROACTIVE_RUN_STUCK_SECONDS)
+    failed, stuck, never, done = [], [], [], []
+    for schedule in enabled:
+        label = _schedule_label(schedule)
+        run = latest.get(schedule.pk)
+        if run is None:
+            never.append(label)
+        elif run.outcome == outcome.FAILED:
+            failed.append(label)
+        elif run.outcome == outcome.RUNNING and run.started_at < stuck_before:
+            stuck.append(label)
+        else:
+            done.append(f"{label} {run.outcome}")
+    if failed:
+        return CheckResult("proactive_last_run", FAIL, f"last run failed: {', '.join(failed)}")
+    notes = []
+    if stuck:
+        notes.append(
+            f"running for more than {PROACTIVE_RUN_STUCK_SECONDS // 60} min: {', '.join(stuck)}"
+        )
+    if never:
+        notes.append(f"no run yet: {', '.join(never)}")
+    if notes:
+        return CheckResult("proactive_last_run", WARN, "; ".join(notes))
+    return CheckResult("proactive_last_run", PASS, ", ".join(done))
+
+
+def _check_proactive_digest():
+    return _seeded_row("proactive_digest", ((PROACTIVE_DIGEST_PURPOSE, PROACTIVE_DIGEST_PROMPT),))
+
+
+def _check_proactive_probes(latest):
+    """The registered probes (boot-validated), and no probe the last run of
+    an enabled schedule reported slow or failed (`warn`: the run degraded
+    gracefully, the probe needs attention; a denial is the guard working)."""
+    from core import probes
+
+    names = [spec.name for spec in probes.list_probes()]
+    if not names:
+        return CheckResult("proactive_probes", FAIL, "no probe registered")
+    slow = sorted({name for run in latest.values() for name in (run.slow_probes or [])})
+    failing = sorted(
+        {
+            f"{name}={code}"
+            for run in latest.values()
+            for name, code in (run.probe_failures or {}).items()
+            if code != "denied"
+        }
+    )
+    detail = f"{len(names)} probes registered"
+    notes = []
+    if slow:
+        notes.append(f"slow on the last run: {', '.join(slow)}")
+    if failing:
+        notes.append(f"failed on the last run: {', '.join(failing)}")
+    if notes:
+        return CheckResult("proactive_probes", WARN, f"{detail}; " + "; ".join(notes))
+    return CheckResult("proactive_probes", PASS, f"{detail}, none slow on the last runs")
+
+
+def check_proactive():
+    """Phase 12 D1-D6 configuration and health, read-only (no model call,
+    no run started, nothing written): `proactive_beat`, `proactive_schedules`,
+    `proactive_last_run`, `proactive_digest` and `proactive_probes`. Details
+    carry schedule kinds, workspace types, probe names, closed codes and
+    counts -- never a title, a label, digest text or a workspace name."""
+    from django.utils import timezone
+
+    now = timezone.now()
+    try:
+        enabled = _enabled_schedules()
+        latest = _latest_runs(enabled)
+    except Exception as exc:
+        crashed = f"check crashed: {_error_label(exc)}"
+        return [
+            _guarded("proactive_beat", _check_proactive_beat),
+            CheckResult("proactive_schedules", FAIL, crashed),
+            CheckResult("proactive_last_run", FAIL, crashed),
+            _guarded("proactive_digest", _check_proactive_digest),
+            CheckResult("proactive_probes", FAIL, crashed),
+        ]
+    return [
+        _guarded("proactive_beat", _check_proactive_beat),
+        _guarded("proactive_schedules", lambda: _check_proactive_schedules(enabled, now)),
+        _guarded("proactive_last_run", lambda: _check_proactive_last_run(enabled, latest, now)),
+        _guarded("proactive_digest", _check_proactive_digest),
+        _guarded("proactive_probes", lambda: _check_proactive_probes(latest)),
+    ]
+
+
+def _check_n8n_allowlist(manifest):
+    """D10: the relay's `BRIDGE_ALLOWED_TOOLS` (`N8N_RELAY_ALLOWED_TOOLS`)
+    equals the manifest's server tools -- the second ceiling lists exactly
+    the first one's workflows."""
+    from connectors.manifests.n8n import relay_allowed_tools
+
+    expected = set(relay_allowed_tools().split(","))
+    registered = {policy.server_tool for policy in manifest.tools}
+    if registered != expected:
+        return CheckResult(
+            "n8n_allowlist", FAIL, "the registered n8n manifest differs from the WORKFLOWS table"
+        )
+    configured = n8n_relay_allowed_tools_setting()
+    if not configured:
+        return CheckResult(
+            "n8n_allowlist", FAIL, "N8N_RELAY_ALLOWED_TOOLS is empty (run n8n_relay_env)"
+        )
+    extra = sorted(configured - expected)
+    missing = sorted(expected - configured)
+    if extra or missing:
+        parts = []
+        if extra:
+            parts.append(f"not in the manifest: {', '.join(extra)}")
+        if missing:
+            parts.append(f"missing: {', '.join(missing)}")
+        return CheckResult(
+            "n8n_allowlist",
+            FAIL,
+            "N8N_RELAY_ALLOWED_TOOLS differs from the manifest (run n8n_relay_env); "
+            + "; ".join(parts),
+        )
+    return CheckResult(
+        "n8n_allowlist", PASS, f"relay ceiling equals the manifest ({len(expected)} workflow(s))"
+    )
+
+
+def _n8n_unreachable(binding_row, relay_row):
+    return [
+        binding_row,
+        relay_row,
+        CheckResult("n8n_pins", WARN, "not checked: the relay is not reachable"),
+    ]
+
+
+def _check_n8n_live(manifest):
+    """`n8n_binding`, `n8n_relay`, `n8n_pins`: `warn` while no binding is
+    enabled (owner step); once one is, the relay must answer a read-only
+    `tools/list` (`pin_report`, nothing stored) and every pin must match."""
+    from connectors.mcp_client import ConnectorError
+    from connectors.models import ConnectorBinding
+
+    bindings = list(
+        ConnectorBinding.objects.filter(connector=N8N_CONNECTOR, enabled=True).select_related(
+            "workspace"
+        )
+    )
+    if not bindings:
+        return [
+            CheckResult("n8n_binding", WARN, f"no enabled n8n binding: {N8N_OWNER_STEP}"),
+            CheckResult("n8n_relay", WARN, "not checked: no enabled n8n binding"),
+            CheckResult("n8n_pins", WARN, "not checked: no enabled n8n binding"),
+        ]
+    misplaced = [b for b in bindings if b.workspace.type not in manifest.workspace_types]
+    if misplaced:
+        binding_row = CheckResult(
+            "n8n_binding", FAIL, f"{len(misplaced)} enabled binding(s) outside a personal workspace"
+        )
+    else:
+        binding_row = CheckResult(
+            "n8n_binding", PASS, f"{len(bindings)} enabled binding(s) in a personal workspace"
+        )
+    if not os.environ.get(manifest.url_env, "").strip():
+        return _n8n_unreachable(
+            binding_row,
+            CheckResult(
+                "n8n_relay", FAIL, f"enabled but {manifest.url_env} is not set (every call refuses)"
+            ),
+        )
+    try:
+        statuses = pin_report(manifest, timeout=_timeout())
+    except ConnectorError as exc:
+        return _n8n_unreachable(
+            binding_row,
+            CheckResult("n8n_relay", FAIL, f"tools/list through the relay failed: {exc.code}"),
+        )
+    except Exception as exc:
+        return _n8n_unreachable(
+            binding_row,
+            CheckResult(
+                "n8n_relay", FAIL, f"tools/list through the relay failed: {_error_label(exc)}"
+            ),
+        )
+    relay_row = CheckResult("n8n_relay", PASS, "the relay answered tools/list")
+    bad = sorted(f"{tool}={state}" for tool, state in statuses.items() if state != "ok")
+    if bad:
+        pins_row = CheckResult("n8n_pins", FAIL, "pins differ: " + ", ".join(bad))
+    else:
+        pins_row = CheckResult("n8n_pins", PASS, f"{len(statuses)} tool pin(s) match")
+    return [binding_row, relay_row, pins_row]
+
+
+def check_n8n():
+    """Phase 12 D9-D12, read-only (no tool call, nothing stored on a
+    binding): `n8n_allowlist`, `n8n_binding`, `n8n_relay`, `n8n_pins`. An
+    unconfigured n8n is a `warn` (owner step), never a `fail`. Details carry
+    tool names, setting names and closed codes -- never a URL or the bearer."""
+    from connectors.manifest import get_manifest
+
+    manifest = get_manifest(N8N_CONNECTOR)
+    if manifest is None or manifest.blocked:
+        return [CheckResult("n8n_allowlist", FAIL, "the n8n manifest is not registered")]
+    return [
+        _guarded("n8n_allowlist", lambda: _check_n8n_allowlist(manifest)),
+        *_guarded_rows("n8n_binding", lambda: _check_n8n_live(manifest)),
+    ]
+
+
+def _check_skills_ai():
+    return _seeded_row("skills_ai", SKILLS_PURPOSE_PROMPTS)
+
+
+def _check_skills_beat():
+    problems = _worker_beat_problems(SKILLS_BEAT_TASKS)
+    if problems:
+        return CheckResult("skills_beat", FAIL, "; ".join(problems))
+    return CheckResult(
+        "skills_beat", PASS, "the weekly curator and the nightly playbook distiller are scheduled"
+    )
+
+
+def _check_skills_parser():
+    """D13: every usable (active or stale) skill's current version still
+    passes the current SKILL.md parser -- a parser tightening surfaces old
+    versions here, by skill name and closed code, before a turn meets them."""
+    from skills.models import InstructionSkill
+    from skills.skill_md import SkillParseError, parse_skill_md, render_skill_md
+
+    usable = list(
+        InstructionSkill.objects.filter(
+            status__in=[InstructionSkill.Status.ACTIVE, InstructionSkill.Status.STALE]
+        )
+        .select_related("current_version")
+        .order_by("workspace_id", "name")
+    )
+    if not usable:
+        return CheckResult("skills_parser", PASS, "no active skill")
+    refused = []
+    for skill in usable:
+        version = skill.current_version
+        if version is None:
+            refused.append(f"{skill.name}=no_version")
+            continue
+        try:
+            parse_skill_md(
+                render_skill_md(version.front_matter or {}, version.body or ""),
+                references=version.references or {},
+            )
+        except SkillParseError as exc:
+            refused.append(f"{skill.name}={exc.code}")
+    if refused:
+        return CheckResult(
+            "skills_parser",
+            FAIL,
+            f"{len(refused)} of {len(usable)} usable skill(s) fail the current parser "
+            f"(archive or re-approve): {', '.join(refused)}",
+        )
+    return CheckResult(
+        "skills_parser", PASS, f"{len(usable)} usable skill(s) pass the current parser"
+    )
+
+
+def check_skills():
+    """Phase 12 D13-D18, read-only (no model call): `skills_ai` (the three
+    purposes' tiers, budgets and prompts), `skills_beat` (curator and
+    distiller scheduled) and `skills_parser`. Details carry purposes, budget
+    names, skill names and closed codes -- never a body."""
+    return [
+        _guarded("skills_ai", _check_skills_ai),
+        _guarded("skills_beat", _check_skills_beat),
+        _guarded("skills_parser", _check_skills_parser),
+    ]
+
+
 CHECKS = (
     ("web", check_web),
     ("bff", check_bff),
@@ -2645,6 +3121,9 @@ CHECKS = (
     ("nodes", check_nodes),
     ("control", check_control),
     ("live_voice", check_live_voice),
+    ("proactive", check_proactive),
+    ("n8n", check_n8n),
+    ("skills", check_skills),
 )
 
 

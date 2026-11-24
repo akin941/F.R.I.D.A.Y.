@@ -118,3 +118,33 @@ supply chain (ClawHub, agentskills.io).
 - **Skills as rows in MVP 8's plan catalog.** The plan catalog names tools
   and steps (capability); merging would let a row name a tool step
   (Phase 12 Q4).
+
+## Implementation note — Phase 12 closeout (`chore/p12-closeout`, 2026-11-20)
+
+Decisions 1–5 landed in branches 1–7 and are now visible in operations:
+- `manage.py preflight` adds three read-only groups (no model call, no run
+  started, nothing written). `check_proactive`: `proactive_beat` (the
+  heartbeat every ≤ 60 s and the notice prune on the worker beat — the only
+  proactive beat literals), `proactive_schedules` (every enabled schedule
+  has a `next_run_at` at most 10 min overdue; a `warn` while none is enabled,
+  owner step), `proactive_last_run` (no schedule's last run `failed`),
+  `proactive_digest` (tier, budget and seeded prompt of the one allowlisted
+  digest purpose) and `proactive_probes` (none slow or failing; a denial is
+  not counted, it is the guard working). `check_skills`: `skills_ai` (the
+  three skills purposes seeded), `skills_beat` (curator and distiller
+  scheduled) and `skills_parser` (every usable skill's current version
+  passes the current parser — decision 4's strictness applies to old
+  versions too, by name and closed code).
+- The closeout e2e (`backend/ops/tests/test_reach_e2e.py`) runs one
+  heartbeat whose probes try every D2 effect of the branch-1 table plus the
+  decision-2 writes (a schedule through its service and through `save()`,
+  the pause, a wake alias, a skill proposal, a digest ack): every one is
+  denied in its owning service, one `proactive.unattended_denied` row each,
+  and nothing is created. The same file drives the digest from the owner's
+  web schedule through the heartbeat to `/today`, a SKILL.md that is never
+  offered to a turn until the owner approves its hash, and three fake
+  harness jobs to one provenance-checked playbook proposal (a step quoted
+  from nowhere the owner wrote is dropped in code).
+
+Status stays **Proposed** until the owner's review (Phase 12 owner step 1);
+no decision changes.

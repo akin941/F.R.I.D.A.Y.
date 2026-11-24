@@ -321,3 +321,20 @@ handler replaces the `router.intent` call. Decision 1 is unchanged:
   sentence may do.
 
 No decision changes; no node protocol or `friday-voice/v1` surface is added.
+
+## Implementation note — Phase 12 closeout (`chore/p12-closeout`, 2026-11-20)
+
+The wake routes are exercised on the Mac path before any Mac exists: the
+closeout e2e (`backend/ops/tests/test_reach_e2e.py`) runs the Phase 11
+reference host and a real `friday-voice run` child against this server
+over HTTP. "günaydın" is answered with the stored digest text, spoken
+sentence by sentence through the host's playback double, with no model
+call besides the speech gateway's STT/TTS, and only the digest's
+`spoken_at` / `spoken_channel=node_voice` telemetry written; "bildirimler"
+reads the unread personal notice titles and marks nothing read (a firm
+notice never reaches the personal session). A spoken n8n write stays a
+draft card decided on screen (decision 1). The real microphone, Whisper
+and TTS run, barge-in during a long digest and Turkish route-phrase
+recognition are the Mac session (Phase 12 M1), pending owner evaluation.
+`node/friday-voice/conformance.lock` and the node conformance suite are
+unchanged by Phase 12. No decision changes.
