@@ -10,6 +10,9 @@ One utterance, from its first frame to its end:
   v3 scores the turn: complete -> end of turn; incomplete -> keep listening
   up to `config.TURN_HARD_SILENCE_MS` (1.5 s) of silence. No speech within
   `config.WAKE_NO_SPEECH_S` (5 s) -> nothing is uploaded.
+- **barge-in** (`mode="vad"`, `preroll=...`, `preroll_speech=True`, D9):
+  the capture opens with the monitor's 300 ms pre-roll and the speech run
+  already heard, from inside the open session only.
 
 Both modes stop at `config.UTTERANCE_MAX_S` (30 s, the ADR-011 upload cap).
 The utterance lives in memory only; the caller uploads it as a WAV or drops
