@@ -2216,3 +2216,46 @@ These review notes were left unresolved at merge. Each one goes to the branch na
    to that note saying the only write a route may make is the digest's own
    `spoken_at` and `spoken_channel` telemetry. Also assert in the test that
    this is the only row the route writes.
+
+### Known follow-ups (LOW) — `feat/p12-morning-digest`, recorded 2026-11-24
+
+These review notes were left unresolved when the branch merged into the
+integration branch.
+
+1. **`compose_digest` holds a transaction across the LLM call
+   (`backend/proactive/runs.py`).** The whole Speak step, including the
+   gateway (LLM) call, runs inside one `transaction.atomic()`. The provider
+   call holds a DB transaction open and is not covered by
+   `_bounded_statements`. If `DigestRun.objects.create` or anything after
+   the call raises, the `ModelUsage` row the gateway wrote rolls back with
+   it, and the run reports only `digest_failed`. A real LLM call is then
+   left without a `ModelUsage` record, which strains CLAUDE.md rule 3.
+   Implementation note 4 sanctions the atomic block, and the failure path
+   is unlikely. Fix: make the gateway call outside `atomic()`, or write
+   `ModelUsage` through the gateway's own autocommit connection. Keep
+   `atomic()` only around the `DigestRun` insert.
+2. **Each "Dinle" player creates a new "Brifing" conversation
+   (`frontend/src/components/proactive/use-digest-player.ts`).** The
+   conversation is created once per hook instance (a `useRef`). Every page
+   load followed by a "Dinle" click, and every HUD `speak_on_open`, creates
+   a new `Conversation` row, and these rows accumulate. The HUD auto-speak
+   also creates one without an owner click, although implementation note 7
+   says the conversation is created on an owner click. Fix: reuse an
+   existing "Brifing" conversation for the workspace, for example by
+   looking it up by title or caching its id in `localStorage`. As an
+   alternative, document that `speak_on_open` is the owner's opt-in to this
+   write.
+3. **The numeral table is closed (`backend/proactive/number_check.py`).**
+   Words such as `yarım`, `çeyrek`, `düzine`, `milyon` and `yüzlerce`, and
+   superscript or other non-ASCII digits, are not detected, so spoken text
+   can carry a quantity that was never checked. This residual is smaller
+   than the already-accepted `bir` residual (R2). Fix: add these words to
+   the numeral or exception table, or list them in the module's documented
+   residuals.
+4. **The e2e spec has not been run against a live stack
+   (`frontend/e2e/digest.e2e.ts`).** The review did not run the frontend
+   vitest suites, because `node_modules` was absent in its container. The
+   vitest suites passed at the integration merge (174 files, 1676 tests),
+   but the e2e has still not been run. Owner step 3 records the e2e run, so
+   this does not block. Fix: run the e2e on the CI stack and record the
+   result.
