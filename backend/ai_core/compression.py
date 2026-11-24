@@ -74,6 +74,9 @@ COMPRESSION_BYPASS = frozenset(
         "proactive.digest",
         # Phase 12 D15/D18: the skill matcher needs the exact approved names
         "skills.match",
+        # Phase 12 D16/D18: the curator's proposals must pass the SKILL.md
+        # parser and name only the skills it was given
+        "skills.curate",
         # preflight probes a provider; its payload must be exactly as written
         "ops.preflight",
     }

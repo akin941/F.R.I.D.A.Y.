@@ -152,3 +152,60 @@ class InstructionSkillVersion(WorkspaceScopedModel, TimestampedModel):
 
     def __str__(self):
         return f"{self.skill_id} v{self.version}"
+
+
+class SkillCuratorRun(WorkspaceScopedModel, TimestampedModel):
+    """One weekly curator pass over a workspace (Phase 12 D16): at most one
+    per workspace per ISO week (`week`, e.g. `2026-W47`).
+
+    Bookkeeping only: counts, the outcome, the one `skills.curate`
+    `ModelUsage` id, and the archive **suggestions** (never applied -- the
+    owner clicks Archive on `/skills`, or dismisses the suggestion). Each
+    suggestion is `{"skill_id", "reason", "dismissed"}` (+ `"into_skill_id"`
+    for a merge), where `reason` is a closed token (`curator.ARCHIVE_REASONS`);
+    no model text is stored here. Edit and merge proposals are
+    `InstructionSkillVersion` rows (`proposed_by=curator`) whose
+    `provenance` names this run."""
+
+    class Outcome(models.TextChoices):
+        RUNNING = "running"
+        PROPOSALS = "proposals"
+        QUIET = "quiet"
+        NO_SKILLS = "no_skills"
+        SKIPPED_CAP = "skipped_cap"
+        SKIPPED_BUDGET = "skipped_budget"
+        NO_PROMPT = "no_prompt"
+        NO_PROVIDER = "no_provider"
+        GATEWAY_ERROR = "gateway_error"
+        PARSE_ERROR = "parse_error"
+        DENIED = "denied"
+        FAILED = "failed"
+
+    week = models.CharField(max_length=10)
+    started_at = models.DateTimeField()
+    finished_at = models.DateTimeField(null=True, blank=True)
+    outcome = models.CharField(max_length=20, choices=Outcome.choices, default=Outcome.RUNNING)
+    stale_marked = models.PositiveIntegerField(default=0)
+    reactivated = models.PositiveIntegerField(default=0)
+    skills_considered = models.PositiveIntegerField(default=0)
+    proposals_created = models.PositiveIntegerField(default=0)
+    proposals_dropped = models.PositiveIntegerField(default=0)
+    drop_reasons = models.JSONField(default=dict, blank=True)
+    proposal_version_ids = models.JSONField(default=list, blank=True)
+    archive_suggestions = models.JSONField(default=list, blank=True)
+    denials = models.PositiveIntegerField(default=0)
+    model_usage_id = models.UUIDField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-started_at"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["workspace", "week"], name="skills_curator_run_once_per_week"
+            )
+        ]
+
+    def __str__(self):
+        return f"curator {self.workspace_id} {self.week} {self.outcome}"
+
+    def open_suggestions(self):
+        return [s for s in (self.archive_suggestions or []) if not s.get("dismissed")]

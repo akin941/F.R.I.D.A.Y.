@@ -559,6 +559,9 @@ AI_PURPOSE_TIERS = {
     # Phase 12 D15/D18: the per-turn instruction-skill matcher (the `skills`
     # budget; a timeout or refusal means "no skill").
     "skills.match": "cheap",
+    # Phase 12 D16/D18: the weekly skill curator's one proposal call (the
+    # `skills` budget plus `skills_curate_weekly`; a refusal skips the run).
+    "skills.curate": "mid",
     "agent.skill_match": "cheap",
     "harness.briefing": "cheap",
     "harness.diff_summary": "cheap",
@@ -658,8 +661,15 @@ AI_BUDGET_PROACTIVE_DAILY_USD = env("AI_BUDGET_PROACTIVE_DAILY_USD", default="0.
 # `seed_ai_defaults`), owner-editable afterwards. Branches 6/7 add the
 # curator and distiller purposes to the row. A refused match means "no
 # skill"; the turn is answered without one.
-AI_SKILLS_PURPOSES = ("skills.match",)
+AI_SKILLS_PURPOSES = ("skills.match", "skills.curate")
 AI_BUDGET_SKILLS_MONTHLY_USD = env("AI_BUDGET_SKILLS_MONTHLY_USD", default="5")
+# Phase 12 D16/D18: the curator's own cap, 0.5 USD a week. The curator runs
+# once per workspace per ISO week, on Sunday, so the weekly cap is a daily
+# window on that day (the 8B reflection pattern; AIBudget has no weekly
+# window). Created once by the ai_core data migration 0011 (and
+# `seed_ai_defaults`) as the `skills_curate_weekly` row; a refusal skips
+# that week's proposals (stale marking still runs).
+AI_BUDGET_SKILLS_CURATE_WEEKLY_USD = env("AI_BUDGET_SKILLS_CURATE_WEEKLY_USD", default="0.5")
 
 # --- Pre-send compression stage (Phase 8B branch 6, brief D11) ---
 # `ai_core/compression.py`: shortens long prior assistant replies through
@@ -1268,6 +1278,17 @@ SKILLS_MATCH_VOICE_TIMEOUT_MS = env.int("SKILLS_MATCH_VOICE_TIMEOUT_MS", default
 # The injected skill block (body plus the references the body names) is
 # bounded to this many characters.
 SKILLS_CONTEXT_MAX_CHARS = env.int("SKILLS_CONTEXT_MAX_CHARS", default=8000)
+# The weekly curator (D16): an active skill unused for this many days (since
+# its last use, or since its version was approved when never used) is marked
+# `stale` -- metadata only, it is still offered to the matcher; a stale skill
+# used again is `active` again.
+SKILLS_STALE_DAYS = env.int("SKILLS_STALE_DAYS", default=45)
+# The curator call's input (names, descriptions, bodies, usage) is bounded:
+# each body is cut to SKILLS_CURATE_BODY_MAX_CHARS and the whole skills block
+# to SKILLS_CURATE_INPUT_MAX_CHARS (skills past it are listed without a body
+# and cannot be the subject of an edit or merge that week).
+SKILLS_CURATE_BODY_MAX_CHARS = env.int("SKILLS_CURATE_BODY_MAX_CHARS", default=4000)
+SKILLS_CURATE_INPUT_MAX_CHARS = env.int("SKILLS_CURATE_INPUT_MAX_CHARS", default=24000)
 
 # A value WE choose and register with Telegram via `setWebhook`
 # (`manage.py register_telegram_webhook`) -- Telegram echoes it back on

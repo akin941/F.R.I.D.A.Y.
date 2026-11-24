@@ -5,6 +5,12 @@ from skills import views
 urlpatterns = [
     path("skills", views.SkillListView.as_view(), name="skills-list"),
     path("skills/upload", views.SkillUploadView.as_view(), name="skills-upload"),
+    path("skills/curator", views.CuratorView.as_view(), name="skills-curator"),
+    path(
+        "skills/curator/dismiss",
+        views.CuratorDismissView.as_view(),
+        name="skills-curator-dismiss",
+    ),
     path(
         "skills/versions/<uuid:version_id>/approve",
         views.VersionApproveView.as_view(),

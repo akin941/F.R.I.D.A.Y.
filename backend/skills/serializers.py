@@ -26,6 +26,45 @@ class EditApproveSerializer(serializers.Serializer):
     text = serializers.CharField(max_length=TEXT_MAX_CHARS, trim_whitespace=False)
 
 
+class DismissSuggestionSerializer(serializers.Serializer):
+    run_id = serializers.UUIDField()
+    skill_id = serializers.UUIDField()
+
+
+def curator_run_payload(run):
+    if run is None:
+        return None
+    return {
+        "id": str(run.pk),
+        "week": run.week,
+        "outcome": run.outcome,
+        "started_at": run.started_at.isoformat(),
+        "finished_at": run.finished_at.isoformat() if run.finished_at else None,
+        "stale_marked": run.stale_marked,
+        "reactivated": run.reactivated,
+        "skills_considered": run.skills_considered,
+        "proposals_created": run.proposals_created,
+        "proposals_dropped": run.proposals_dropped,
+        "drop_reasons": run.drop_reasons,
+        "proposal_version_ids": run.proposal_version_ids,
+    }
+
+
+def suggestion_payload(run, suggestion, skill, names):
+    into = suggestion.get("into_skill_id")
+    return {
+        "run_id": str(run.pk),
+        "skill_id": str(skill.pk),
+        "skill_name": skill.name,
+        "skill_status": skill.status,
+        "use_count": skill.use_count,
+        "last_used_at": skill.last_used_at.isoformat() if skill.last_used_at else None,
+        "reason": suggestion.get("reason", ""),
+        "into_skill_id": into,
+        "into_skill_name": names.get(into) if into else None,
+    }
+
+
 def version_summary(version):
     if version is None:
         return None

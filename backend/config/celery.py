@@ -140,6 +140,14 @@ _BEAT_SCHEDULE = {
         "task": "memory.ingestion.tasks.run_weekly_reflection_task",
         "schedule": crontab(minute=30, hour=3, day_of_week=0),
     },
+    # Phase 12 D16: the weekly skill curator, Sunday 04:15 in the app
+    # timezone (after the reflection above). A fixed system task: it marks
+    # stale skills and proposes at most three changes the owner decides on
+    # `/skills`; it never applies, approves or archives anything.
+    "skills-curator-weekly": {
+        "task": "skills.tasks.curate",
+        "schedule": crontab(minute=15, hour=4, day_of_week=0),
+    },
     "memory-episode-extraction-recovery-scan": {
         "task": "memory.ingestion.tasks.recover_stale_episode_extraction_jobs",
         "schedule": 60.0,
