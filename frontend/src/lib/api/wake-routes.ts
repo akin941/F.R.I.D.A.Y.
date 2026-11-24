@@ -22,6 +22,8 @@ export interface WakeRoute {
   effect: "read" | "proposal";
   phrases: string[];
   aliases: WakeAlias[];
+  /** Phase 12 branch 4: a `tool.*` route's Friday-authored tool label ("" otherwise). */
+  label?: string;
 }
 
 export interface WakeRouteList {
@@ -45,6 +47,27 @@ export const ROUTE_LABELS: Record<string, { title: string; description: string }
     description: "Okunmamış bildirim başlıklarını okur; hiçbirini okundu saymaz.",
   },
 };
+
+/**
+ * Title and description of any route: the code-defined ones above, or a
+ * `tool.*` route (Phase 12 branch 4: an owner alias for one tool, followed
+ * by the request -- "ev yedeği nas"). A read tool's route reads; a write
+ * tool's route only proposes a card the owner approves on screen.
+ */
+export function routeLabel(route: WakeRoute): { title: string; description: string } {
+  const known = ROUTE_LABELS[route.name];
+  if (known) return known;
+  if (route.name.startsWith("tool.")) {
+    return {
+      title: route.label || route.name.slice("tool.".length),
+      description:
+        route.effect === "proposal"
+          ? "Takma adın ardından söylediklerinden bir taslak kart önerir; onay ekranda verilir."
+          : "Takma adın ardından söylediklerinle bu aracı okur; yavaş okumaların sonucu konuşmaya sonradan yazılır.",
+    };
+  }
+  return { title: route.name, description: "" };
+}
 
 const ws = (workspaceId: string) => `workspace=${encodeURIComponent(workspaceId)}`;
 
