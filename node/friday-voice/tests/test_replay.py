@@ -91,3 +91,43 @@ def test_the_fixtures_are_synthetic_and_up_to_date():
 def test_the_fixture_check_catches_drift(tmp_path, monkeypatch):
     monkeypatch.setattr(make_fixtures, "FIXTURES", tmp_path)
     assert make_fixtures.main(["--check"]) == 1
+
+
+# --- barge-in and echo scripts (D9, D10) ---
+
+
+@pytest.fixture(scope="module")
+def barge_in_results():
+    return [replay.run_barge_in_scenario(s) for s in replay.load_barge_in_scenarios()]
+
+
+def test_the_barge_in_scripts_pass_at_every_residual(barge_in_results):
+    by_residual = {}
+    for scenario, result in zip(replay.load_barge_in_scenarios(), barge_in_results, strict=True):
+        assert result["failures"] == [], result["id"]
+        by_residual.setdefault(scenario["residual"], []).append(scenario["id"])
+    assert sorted(by_residual) == [0.0, 0.3, 1.0]
+    assert all(len(ids) == 2 for ids in by_residual.values())  # owner + echo each
+
+
+def test_barge_in_stops_within_the_budget(barge_in_results):
+    stops = [r["stop_ms"] for r in barge_in_results if r["stop_ms"] is not None]
+    assert stops and max(stops) <= config.BARGE_IN_STOP_BUDGET_MS == 100
+    owner = [r for r in barge_in_results if r["id"].startswith("owner_")]
+    assert all(r["interrupted_at_ms"] >= config.BARGE_IN_AEC_GUARD_MS for r in owner)
+
+
+def test_a_missed_expectation_or_a_slow_stop_fails(monkeypatch):
+    scenario = copy.deepcopy(replay.load_barge_in_scenarios()[0])
+    scenario["expect"]["chat_turns"] = 5
+    (failure,) = replay.run_barge_in_scenario(scenario)["failures"]
+    assert "chat_turns" in failure
+    monkeypatch.setattr(config, "BARGE_IN_STOP_BUDGET_MS", -1)
+    scenario = replay.load_barge_in_scenarios()[0]
+    assert any("stop_playback" in f for f in replay.run_barge_in_scenario(scenario)["failures"])
+
+
+def test_replay_cli_fails_on_a_barge_in_failure(monkeypatch, capsys):
+    monkeypatch.setattr(config, "BARGE_IN_STOP_BUDGET_MS", -1)
+    assert cli.main(["replay"]) == 1
+    assert "FAIL owner_r00" in capsys.readouterr().out

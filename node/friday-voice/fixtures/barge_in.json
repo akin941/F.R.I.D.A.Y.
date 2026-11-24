@@ -1,0 +1,377 @@
+{
+  "$comment": "Phase 11 brief D9, D10: barge-in and echo scripts (scripts/make_fixtures.py). Run by `friday-voice replay` with the reference host's paced playback and its EchoDouble at each residual; a run fails when an expectation is not met or the barge-in onset -> stop_playback time exceeds the 100 ms budget.",
+  "scenarios": [
+    {
+      "id": "owner_r00",
+      "wav": "ptt_question.wav",
+      "owner_wav": "barge_in_owner.wav",
+      "owner_after_ms": 600,
+      "residual": 0.0,
+      "echo_delay_ms": 40,
+      "transcripts": [
+        {
+          "text": "bugün ne var",
+          "language": "tr"
+        },
+        {
+          "text": "dur onu değil",
+          "language": "tr"
+        },
+        {
+          "text": "tamam onu bırakıyorum",
+          "language": "tr"
+        }
+      ],
+      "replies": [
+        [
+          {
+            "type": "chunk",
+            "text": "Bugün iki toplantın var, ikisi de öğleden sonra. "
+          },
+          {
+            "type": "chunk",
+            "text": "İlki saat üçte, ikincisi beşte başlıyor. "
+          },
+          [
+            20000,
+            {
+              "type": "done"
+            }
+          ]
+        ],
+        [
+          {
+            "type": "chunk",
+            "text": "Tamam, onu bırakıyorum."
+          },
+          {
+            "type": "done",
+            "message_id": "00000000-0000-4000-8000-00000000000a"
+          }
+        ]
+      ],
+      "latencies": {
+        "session": 30,
+        "stt": 300,
+        "chat_first": 450,
+        "chat_chunk": 40,
+        "tts": 150
+      },
+      "expect": {
+        "stopped": true,
+        "chat_turns": 2,
+        "discarded": 0
+      }
+    },
+    {
+      "id": "owner_r03",
+      "wav": "ptt_question.wav",
+      "owner_wav": "barge_in_owner.wav",
+      "owner_after_ms": 600,
+      "residual": 0.3,
+      "echo_delay_ms": 40,
+      "transcripts": [
+        {
+          "text": "bugün ne var",
+          "language": "tr"
+        },
+        {
+          "text": "dur onu değil",
+          "language": "tr"
+        },
+        {
+          "text": "tamam onu bırakıyorum",
+          "language": "tr"
+        }
+      ],
+      "replies": [
+        [
+          {
+            "type": "chunk",
+            "text": "Bugün iki toplantın var, ikisi de öğleden sonra. "
+          },
+          {
+            "type": "chunk",
+            "text": "İlki saat üçte, ikincisi beşte başlıyor. "
+          },
+          [
+            20000,
+            {
+              "type": "done"
+            }
+          ]
+        ],
+        [
+          {
+            "type": "chunk",
+            "text": "Tamam, onu bırakıyorum."
+          },
+          {
+            "type": "done",
+            "message_id": "00000000-0000-4000-8000-00000000000a"
+          }
+        ]
+      ],
+      "latencies": {
+        "session": 30,
+        "stt": 300,
+        "chat_first": 450,
+        "chat_chunk": 40,
+        "tts": 150
+      },
+      "expect": {
+        "stopped": true,
+        "chat_turns": 2,
+        "discarded": 1
+      }
+    },
+    {
+      "id": "owner_r10",
+      "wav": "ptt_question.wav",
+      "owner_wav": "barge_in_owner.wav",
+      "owner_after_ms": 600,
+      "residual": 1.0,
+      "echo_delay_ms": 40,
+      "transcripts": [
+        {
+          "text": "bugün ne var",
+          "language": "tr"
+        },
+        {
+          "text": "dur onu değil",
+          "language": "tr"
+        },
+        {
+          "text": "tamam onu bırakıyorum",
+          "language": "tr"
+        }
+      ],
+      "replies": [
+        [
+          {
+            "type": "chunk",
+            "text": "Bugün iki toplantın var, ikisi de öğleden sonra. "
+          },
+          {
+            "type": "chunk",
+            "text": "İlki saat üçte, ikincisi beşte başlıyor. "
+          },
+          [
+            20000,
+            {
+              "type": "done"
+            }
+          ]
+        ],
+        [
+          {
+            "type": "chunk",
+            "text": "Tamam, onu bırakıyorum."
+          },
+          {
+            "type": "done",
+            "message_id": "00000000-0000-4000-8000-00000000000a"
+          }
+        ]
+      ],
+      "latencies": {
+        "session": 30,
+        "stt": 300,
+        "chat_first": 450,
+        "chat_chunk": 40,
+        "tts": 150
+      },
+      "expect": {
+        "stopped": true,
+        "chat_turns": 2,
+        "discarded": 1
+      }
+    },
+    {
+      "id": "echo_r00",
+      "wav": "ptt_question.wav",
+      "owner_wav": null,
+      "owner_after_ms": 600,
+      "residual": 0.0,
+      "echo_delay_ms": 40,
+      "transcripts": [
+        {
+          "text": "bugün ne var",
+          "language": "tr"
+        },
+        {
+          "text": "bugün iki toplantın var",
+          "language": "tr"
+        },
+        {
+          "text": "tamam onu bırakıyorum",
+          "language": "tr"
+        }
+      ],
+      "replies": [
+        [
+          {
+            "type": "chunk",
+            "text": "Bugün iki toplantın var, ikisi de öğleden sonra. "
+          },
+          {
+            "type": "chunk",
+            "text": "İlki saat üçte, ikincisi beşte başlıyor. "
+          },
+          [
+            20000,
+            {
+              "type": "done"
+            }
+          ]
+        ],
+        [
+          {
+            "type": "chunk",
+            "text": "Tamam, onu bırakıyorum."
+          },
+          {
+            "type": "done",
+            "message_id": "00000000-0000-4000-8000-00000000000a"
+          }
+        ]
+      ],
+      "latencies": {
+        "session": 30,
+        "stt": 300,
+        "chat_first": 450,
+        "chat_chunk": 40,
+        "tts": 150
+      },
+      "expect": {
+        "stopped": false,
+        "chat_turns": 1,
+        "discarded": 0
+      }
+    },
+    {
+      "id": "echo_r03",
+      "wav": "ptt_question.wav",
+      "owner_wav": null,
+      "owner_after_ms": 600,
+      "residual": 0.3,
+      "echo_delay_ms": 40,
+      "transcripts": [
+        {
+          "text": "bugün ne var",
+          "language": "tr"
+        },
+        {
+          "text": "bugün iki toplantın var",
+          "language": "tr"
+        },
+        {
+          "text": "tamam onu bırakıyorum",
+          "language": "tr"
+        }
+      ],
+      "replies": [
+        [
+          {
+            "type": "chunk",
+            "text": "Bugün iki toplantın var, ikisi de öğleden sonra. "
+          },
+          {
+            "type": "chunk",
+            "text": "İlki saat üçte, ikincisi beşte başlıyor. "
+          },
+          [
+            20000,
+            {
+              "type": "done"
+            }
+          ]
+        ],
+        [
+          {
+            "type": "chunk",
+            "text": "Tamam, onu bırakıyorum."
+          },
+          {
+            "type": "done",
+            "message_id": "00000000-0000-4000-8000-00000000000a"
+          }
+        ]
+      ],
+      "latencies": {
+        "session": 30,
+        "stt": 300,
+        "chat_first": 450,
+        "chat_chunk": 40,
+        "tts": 150
+      },
+      "expect": {
+        "stopped": true,
+        "chat_turns": 1,
+        "discarded": 1
+      }
+    },
+    {
+      "id": "echo_r10",
+      "wav": "ptt_question.wav",
+      "owner_wav": null,
+      "owner_after_ms": 600,
+      "residual": 1.0,
+      "echo_delay_ms": 40,
+      "transcripts": [
+        {
+          "text": "bugün ne var",
+          "language": "tr"
+        },
+        {
+          "text": "bugün iki toplantın var",
+          "language": "tr"
+        },
+        {
+          "text": "tamam onu bırakıyorum",
+          "language": "tr"
+        }
+      ],
+      "replies": [
+        [
+          {
+            "type": "chunk",
+            "text": "Bugün iki toplantın var, ikisi de öğleden sonra. "
+          },
+          {
+            "type": "chunk",
+            "text": "İlki saat üçte, ikincisi beşte başlıyor. "
+          },
+          [
+            20000,
+            {
+              "type": "done"
+            }
+          ]
+        ],
+        [
+          {
+            "type": "chunk",
+            "text": "Tamam, onu bırakıyorum."
+          },
+          {
+            "type": "done",
+            "message_id": "00000000-0000-4000-8000-00000000000a"
+          }
+        ]
+      ],
+      "latencies": {
+        "session": 30,
+        "stt": 300,
+        "chat_first": 450,
+        "chat_chunk": 40,
+        "tts": 150
+      },
+      "expect": {
+        "stopped": true,
+        "chat_turns": 1,
+        "discarded": 1
+      }
+    }
+  ]
+}

@@ -301,6 +301,8 @@ class VoicePipeline:
         self.turn = None
         self.turns = 0
         self.completed = []  # finished turns (the replay report reads their timers)
+        # Every barge-in: {"via", "onset_ms", "fired_ms"} (monotonic; timings only).
+        self.barge_ins = []
         self.conversation_id = None
         self.session_id = None
         self.last_activity_ms = None
@@ -454,13 +456,20 @@ class VoicePipeline:
             # D10: the detector is fed the echo-cancelled signal while
             # Friday speaks; a hit interrupts like a barge-in and is suspect.
             self._count("wake_accepts_today")
+            now = self.clock.monotonic_ms()
+            self._record_barge_in("wake", now, now)
             self._interrupt("wake")
             self.turn.timer.mark("wake")
             self._send({"type": "earcon", "earcon": "wake"})
             return
         event = self.barge_in.feed(pcm)
         if event is not None:
+            self._record_barge_in("vad", event.onset_ms, event.fired_ms)
             self._interrupt("vad", preroll=event.preroll)
+
+    def _record_barge_in(self, via, onset_ms, fired_ms):
+        self.barge_ins.append({"via": via, "onset_ms": onset_ms, "fired_ms": fired_ms})
+        self.barge_ins = self.barge_ins[-50:]
 
     def _interrupt(self, via, *, preroll=b""):
         """Stop the reply now and listen to the owner (D9): stop_playback
