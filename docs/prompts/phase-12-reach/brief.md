@@ -1700,7 +1700,7 @@ updated.
 | # | Branch | Scope | Depends on | Status |
 |---|---|---|---|---|
 | brief | `docs/p12-brief` | This brief (full, from the stub; stub goal, scope, parent decisions and checkpoint kept), MASTER_PLAN §AA row 12 Brief/Status, `backend/assistant/self_sources.json` regenerated for the row's new status (`build_self_sources --check`) | Phase 11 closeout | **implemented 2026-11-20** (docs only; review round 1 findings addressed 2026-11-24: numeral-word number check, notice delta baseline, skill mount exclusion, calendar labels, owner-web helper in `core`, bookkeeping outside the run context, `start_async` guard, matcher ordering/latency, zip limits, quotable fields; review round 2 findings addressed 2026-11-24: denial audit through a required `on_denied` recorder that survives rollback, `/proactive/pause` endpoint with role × endpoint tests and the `/today` toggle, uniform first-run baseline, branches 4/5 sequenced after 3 with migration renumbering at merge, `skills.ports.get_attachable_versions`, trashed-conversation follow-up test; awaits the independent Sonnet 5 plan review to APPROVE) |
-| 1 | `feat/p12-proactive-core` | `core.probes`, `core.unattended` + guards, `proactive` app (schedules, runs, notices, heartbeat), contracts, ADR-016 | brief approved | planned |
+| 1 | `feat/p12-proactive-core` | `core.probes`, `core.unattended` + guards, `proactive` app (schedules, runs, notices, heartbeat), contracts, ADR-016 | brief approved | **implemented 2026-11-20** (`core.probes` / `core.unattended` / `core.owner_web`, `audit.unattended.DenialRecorder`, guards in every D2 service plus `tools.registry.run_read_tool`, the gateway purpose check and the Celery publish/eager-prerun guard; `proactive` app with schedules, pause, runs, notices, probe state, heartbeat + prune beat entries, owner-only web endpoints; D19 contracts; ADR-016 written as Proposed; see "Implementation notes — branch 1"; awaits the independent Sonnet 5 review) |
 | 2 | `feat/p12-morning-digest` | Probes in owner apps, `DigestRun`, number-checked composition + template fallback, `/today`, notice bell, HUD `notices`, "Dinle", `proactive_checkpoint` | 1 | planned |
 | 3 | `feat/p12-wake-routes` | Wake-phrase routes + aliases, `digest.today` / `digest.learning` / `notices.read` on web voice and `node_voice`, vectors, ADR-015 note | 2 | planned (on-Mac verification: deferred: Mac session, M1) |
 | 4 | `feat/p12-n8n-connector` | n8n manifest + workflow-ID allowlist, relay sidecar mode, async reads + follow-ups, gated writes, probes, `tool.*` routes, ADR-010 amendment | 3 (and so 1, 2) | planned (live n8n pins: owner step) |
@@ -1976,6 +1976,74 @@ The stub recorded no owner steps. These cannot happen in a cloud session
    digest length 900 chars, notice retention 30 days, `proactive` budget
    3 USD/month, `skills` budget 5 USD/month, stale after 45 days,
    playbook minimum 3 sources and 3 proposals per week.
+
+### Implementation notes — branch 1 (`feat/p12-proactive-core`), recorded 2026-11-20
+
+Choices made while implementing D1–D5 that the brief left open or that
+later branches build on:
+
+1. **`UnattendedDenied` is a `BaseException`.** Celery's signal dispatch
+   catches `Exception` from a handler and logs it, so an `Exception`
+   raised from the `before_task_publish` guard would let the task publish
+   anyway; several services also wrap best-effort work in `except
+   Exception`. Like `asyncio.CancelledError`, the denial is control flow
+   that must not be swallowed; the runner catches it by name per probe.
+   Recorded in ADR-016 decision 1.
+2. **Eager dispatch is guarded too.** In eager mode (the test suite, the
+   e2e job) no publish happens, so `proactive.apps` also connects the same
+   check to `task_prerun`; in a worker process no context is open when a
+   task starts, so it is a no-op there.
+3. **Guard sites beyond the D2 minimum.** Besides the table's first lines,
+   the guard also sits in `approvals.services.reject_request`,
+   `tasks.services` edit/complete/cancel/reopen/delete/restore,
+   `memory.services` edit, work-log, core-block update / proposal /
+   approval, `memory.graph.services` approve/edit/supersede,
+   `nodes.services.invoke_confirm` / `create_gated_execution` and
+   `harness.services.create_harness_job` / `request_harness_push`; and in
+   `proactive` itself for schedule, pause and notice-state writes.
+4. **`ProbeSpec` carries two more fields**: `link` (the notice link when an
+   item has none, validated against the closed set at registration) and
+   `notice_template` (the Friday-authored title, `{label}` / `{count}`
+   only; required for a notice probe). `validate_result` refuses markup,
+   URLs, Markdown links, control and invisible characters in a label, a
+   label over 120 chars, a link outside the closed set, more than five
+   items, duplicate or non-opaque keys and more than
+   `PROACTIVE_PROBE_MAX_KEYS` keys; a run also refuses a result whose data
+   class does not match the workspace (`probe_invalid:data_class_mismatch`).
+5. **Notices for unlabelled keys.** New keys beyond the five labelled items
+   become one notice with the Friday label "diğer öğeler" and dedupe key
+   `overflow` (the partial unique constraint keeps one unread).
+6. **The morning digest collects only until branch 2.** A
+   `morning_digest` run records its probe counts and calls
+   `proactive.runs.compose_digest`, a branch-2 seam that returns nothing
+   yet, so the run ends `quiet`; `DigestRun`, the composition and the
+   number check land in branch 2.
+7. **`proactive.api` ships the notice reads** (`unread_notices`,
+   `notice_section`); `latest_digest` and `mark_digest_spoken` arrive with
+   `DigestRun` in branch 2. The hud contract still forbids `proactive`
+   until branch 2 widens it (D19); the "only assistant, hud, ops" and
+   "assistant/hud only through `proactive.api`" contracts are in place.
+8. **Skips** are audited as `proactive.schedule.skipped` (reason `paused`
+   or `owner_inactive`) once per transition (`ProactiveSchedule.
+   last_skip_reason`); a heartbeat due inside its quiet hours is skipped
+   without a run row and moved to the end of the quiet window.
+9. **Endpoints**: `GET /api/v1/proactive/schedules`, `PUT
+   /api/v1/proactive/schedules/<kind>`, `GET /api/v1/proactive/notices`,
+   `POST …/notices/<id>/read`, `POST …/notices/dismiss-all`, `GET | POST |
+   DELETE /api/v1/proactive/pause`; each takes `?workspace=` (default: the
+   owner's personal workspace) and runs only for the owner's web session
+   (PATs, node secret, node voice token: 401; member, agent: 403).
+
+### Owner steps (pending) — `feat/p12-proactive-core`, recorded 2026-11-20
+
+1. Run the independent Sonnet 5 review of this branch to APPROVE before
+   merge (the implementing model does not review its own work).
+2. Review ADR-016 and change its status from Proposed to Accepted (and then
+   regenerate `backend/assistant/self_sources.json` with `manage.py
+   build_self_sources`, since an Accepted ADR enters the `self` block).
+3. Nothing on the Mac and no credentials are needed for this branch; the
+   schedule editor UI (`/today`) arrives with branch 2, so no schedule
+   exists until then.
 
 ### Known follow-ups (LOW) — from the `docs/p12-brief` plan review, recorded 2026-11-24
 
