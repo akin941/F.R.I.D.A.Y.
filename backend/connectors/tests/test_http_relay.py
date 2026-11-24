@@ -166,3 +166,35 @@ def test_the_relay_configuration_reads_the_allowlist():
     assert token == fakes.N8N_BEARER
     assert allowed == {fakes.N8N_STATUS_TOOL, fakes.N8N_BACKUP_TOOL}
     assert timeout == 10
+
+
+# --- the sidecar (compose + Dockerfile, plain-text checks) ---
+
+
+def test_the_relay_sidecar_is_hardened_and_alone_holds_the_bearer():
+    from pathlib import Path
+
+    from connectors.manifests.n8n import relay_allowed_tools
+    from connectors.tests.test_github import _service_block
+
+    root = Path(__file__).resolve().parents[3]
+    compose = (root / "deploy" / "docker" / "compose.yml").read_text()
+    block = _service_block(compose, "n8n-relay")
+    assert "<<: *connector-sidecar" in block
+    assert "ports:" not in block
+    assert '["connectors", "connectors-egress"]' in block
+    assert '"connectors.docker.http_relay"' in block
+    assert relay_allowed_tools() in block
+    outside = "\n".join(
+        line
+        for line in compose.replace(block, "").splitlines()
+        if not line.lstrip().startswith("#")
+    )
+    # The bearer and the upstream URL are referenced by this service only;
+    # web and worker get the relay's URL.
+    assert "RELAY_BEARER_TOKEN" not in outside
+    assert "RELAY_UPSTREAM_URL" not in outside
+    assert 'N8N_MCP_URL: "${N8N_MCP_URL:-}"' in outside
+    dockerfile = (root / "backend" / "connectors" / "docker" / "Dockerfile.bridge").read_text()
+    assert "connectors/docker/http_relay.py" in dockerfile
+    assert "USER bridge" in dockerfile
