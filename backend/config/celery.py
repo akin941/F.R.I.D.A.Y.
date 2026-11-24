@@ -167,6 +167,19 @@ _BEAT_SCHEDULE = {
         "task": "voice.tasks.prune_voice_turn_traces_task",
         "schedule": 24 * 60 * 60.0,
     },
+    # Phase 12 (brief D3, ADR-016): the one runner of owner schedules. The
+    # schedules themselves are rows only the owner's web views write; this
+    # entry and the prune below are the only proactive beat literals, and no
+    # task, tool or model writes the beat schedule.
+    "proactive-heartbeat": {
+        "task": "proactive.tasks.heartbeat",
+        "schedule": 60.0,
+    },
+    # Phase 12 D5: read/dismissed notices past PROACTIVE_NOTICE_RETENTION_DAYS.
+    "proactive-notice-prune": {
+        "task": "proactive.tasks.prune",
+        "schedule": 24 * 60 * 60.0,
+    },
 }
 
 # Harness recovery scans (Phase 3 branch 8, review P1): the scans tear down

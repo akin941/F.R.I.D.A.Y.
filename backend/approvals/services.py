@@ -52,6 +52,7 @@ from approvals.models import ApprovalRequest
 from audit.models import AuditLog
 from audit.services import record_audit
 from core.channels import CHANNEL_SYSTEM, CHANNEL_WEB
+from core.unattended import deny_if_unattended
 from tools.registry import ToolDecisionForbidden, ToolValidationError
 from workspaces.models import WorkspaceMember
 
@@ -344,6 +345,7 @@ def create_request(
     HUMAN-origin request for a system-created gate. The HTTP view passes
     False unconditionally; nothing in a request body, header or origin
     value can reach this flag."""
+    deny_if_unattended("approval_request")
     if channel not in ApprovalRequest.RequestedChannel.values:
         raise InvalidTransition(f"Unknown request channel {channel!r}.")
     _require(get_role(actor, workspace) in _WRITER_ROLES, "requesting a gated action")
@@ -461,6 +463,7 @@ def approve_request(*, approval_request, actor, channel):
     (`approvals.views` passes the request's actual channel) -- a default
     would let a future internal caller decide "as web" by accident
     (ADR-008 decision 3; Codex phase-0 plan-review P1)."""
+    deny_if_unattended("gated_dispatch")
     _check_actor_is_human(actor)
     with transaction.atomic():
         approval_request = _locked(approval_request, actor)
@@ -498,6 +501,7 @@ def approve_request(*, approval_request, actor, channel):
 
 
 def reject_request(*, approval_request, actor, channel):
+    deny_if_unattended("gated_dispatch")
     _check_actor_is_human(actor)
     with transaction.atomic():
         approval_request = _locked(approval_request, actor)

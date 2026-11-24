@@ -21,6 +21,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from core.channels import CHANNEL_CLI, CHANNEL_NODE_VOICE, CHANNEL_WEB
+from core.unattended import deny_if_unattended
 
 
 class ToolDecisionForbidden(Exception):
@@ -353,3 +354,12 @@ def list_read_tools(*, workspace, channel) -> list[ReadToolSpec]:
         for name, spec in sorted(_READ_REGISTRY.items())
         if channel in spec.channels and spec.is_available(workspace)
     ]
+
+
+def run_read_tool(spec: ReadToolSpec, *, workspace, actor, args, channel) -> ReadResult:
+    """Execute one read tool (Phase 12 D2). The only sanctioned call site of
+    `ReadToolSpec.execute`: inside an unattended run the read is denied
+    before the spec is touched (no network call, no audit row of its
+    own); outside one, the call is exactly `spec.execute(...)`."""
+    deny_if_unattended("read_tool")
+    return spec.execute(workspace=workspace, actor=actor, args=args, channel=channel)

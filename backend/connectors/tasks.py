@@ -22,6 +22,7 @@ from connectors.writes import (
     fail_unexpected,
     mark_lost_executions,
 )
+from core.unattended import deny_if_unattended
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +37,7 @@ def run_connector_write(execution_id):
     """Claim a `pending` write and send it once. A no-op for anything not
     `pending` -- in particular a second delivery of the same message, or a
     re-dispatch after the row was already claimed, never sends again."""
+    deny_if_unattended("connector_write")
     claim_token = claim_write_execution(execution_id)
     if claim_token is None:
         return

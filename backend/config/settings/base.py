@@ -109,6 +109,9 @@ INSTALLED_APPS = [
     # Phase 9 (ADR-013, brief D2): the Friday Node server side. Only tools,
     # hud, ops and config may import it (import-linter).
     "nodes",
+    # Phase 12 (ADR-016, brief D1-D5): owner schedules, proactive runs and
+    # notices. Only assistant, hud and ops may import it (import-linter).
+    "proactive",
 ]
 
 AUTH_USER_MODEL = "accounts.User"
@@ -1194,6 +1197,31 @@ DEPLOY_PENDING_RECOVERY_GRACE_SECONDS = env.int("DEPLOY_PENDING_RECOVERY_GRACE_S
 # integrations/telegram_client.py to call the Bot API. Never the same
 # value as TELEGRAM_WEBHOOK_SECRET below.
 TELEGRAM_BOT_TOKEN = env("TELEGRAM_BOT_TOKEN", default="")
+
+# --- Proactive runs (Phase 12 D2-D5, ADR-016) ---
+# A probe slower than this is flagged in its run row and in preflight
+# (measured, not interrupted: probes are DB reads).
+PROACTIVE_PROBE_TIMEOUT_MS = env.int("PROACTIVE_PROBE_TIMEOUT_MS", default=2000)
+# The hard bound: every statement of a probe's transaction is cancelled
+# after this long (Postgres `SET LOCAL statement_timeout`); the probe is
+# recorded as `probe_timeout` and the run continues. 0 disables it.
+PROACTIVE_PROBE_STATEMENT_TIMEOUT_MS = env.int(
+    "PROACTIVE_PROBE_STATEMENT_TIMEOUT_MS", default=10000
+)
+# Read or dismissed notices are hard-deleted after this many days
+# (`proactive.tasks.prune`, daily).
+PROACTIVE_NOTICE_RETENTION_DAYS = env.int("PROACTIVE_NOTICE_RETENTION_DAYS", default=30)
+# The D5 delta baseline keeps at most this many item keys per probe.
+PROACTIVE_PROBE_MAX_KEYS = env.int("PROACTIVE_PROBE_MAX_KEYS", default=200)
+# The only Celery tasks an unattended run may dispatch (D2): the proactive
+# tasks themselves. Not a capability allow list -- no setting widens what a
+# run may do.
+PROACTIVE_UNATTENDED_TASKS = tuple(
+    env.list(
+        "PROACTIVE_UNATTENDED_TASKS",
+        default=["proactive.tasks.heartbeat", "proactive.tasks.prune"],
+    )
+)
 
 # A value WE choose and register with Telegram via `setWebhook`
 # (`manage.py register_telegram_webhook`) -- Telegram echoes it back on

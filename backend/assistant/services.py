@@ -627,7 +627,12 @@ def prepare_connector_read(
     `Message.connector_reads` keeps bookkeeping only. `context_report`
     (optional, Phase 6 A5) joins the argument call's ModelUsage report --
     e.g. the voice turn's trace id."""
-    from tools.registry import DATA_CLASS_PERSONAL, ReadToolError, list_read_tools
+    from tools.registry import (
+        DATA_CLASS_PERSONAL,
+        ReadToolError,
+        list_read_tools,
+        run_read_tool,
+    )
 
     spec = next(
         (
@@ -678,8 +683,8 @@ def prepare_connector_read(
             error_type=CONNECTOR_ERROR_INVALID_ARGUMENTS,
         )
     try:
-        result = spec.execute(
-            workspace=conversation.workspace, actor=actor, args=arguments, channel=channel
+        result = run_read_tool(
+            spec, workspace=conversation.workspace, actor=actor, args=arguments, channel=channel
         )
     except ReadToolError as exc:
         if exc.code in _INVALID_ARGUMENT_CODES:

@@ -27,6 +27,7 @@ from approvals.services import create_request, revoke_request
 from audit.services import record_audit
 from core.channels import CHANNEL_SYSTEM
 from core.repo_identity import is_self_repo
+from core.unattended import deny_if_unattended
 from harness import ingestion, policy
 from harness.models import HarnessImplementationJob, HarnessJob, HarnessRepo, HarnessReview
 from memory.graph import ports as graph_ports
@@ -275,6 +276,7 @@ def create_harness_job(*, workspace, actor, repo, goal, agent=None):
     `agent=None` takes the policy default (`agent_routing_reason`
     "policy:default"); a named agent must be policy-selectable for
     discovery ("owner_selected")."""
+    deny_if_unattended("harness_job")
     _require_curator(actor, workspace, "creating a harness job")
     if repo.workspace_id != workspace.id:
         raise HarnessPermissionDenied("Repo does not belong to this workspace.")
@@ -477,6 +479,7 @@ def create_harness_implementation_job(
     its own `validate_request` tier-1 check against the just-created,
     same-transaction-visible row.
     """
+    deny_if_unattended("harness_job")
     _require_curator(actor, workspace, "creating a harness implementation job")
     if repo.workspace_id != workspace.id:
         raise HarnessPermissionDenied("Repo does not belong to this workspace.")
@@ -759,6 +762,7 @@ def request_harness_push(*, job, review):
     branch's own tests call it directly with a manually-constructed
     completed `HarnessReview` fixture, since the real review dispatch
     itself is stubbed/mocked in this branch (brief §boundary)."""
+    deny_if_unattended("harness_job")
     locked = (
         HarnessImplementationJob.objects.select_for_update(of=("self",))
         .filter(pk=job.pk, status=HarnessImplementationJob.Status.PENDING_REVIEW)

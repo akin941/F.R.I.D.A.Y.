@@ -46,6 +46,7 @@ from django.utils import timezone
 from audit.models import AuditLog
 from audit.services import record_audit
 from core.channels import CHANNEL_WEB
+from core.unattended import deny_if_unattended
 from memory.models import Memory
 from memory.services import DuplicateMemory, record_work_log
 from tasks.models import Task
@@ -227,6 +228,7 @@ def create_task(
     `source=ai_suggested`. A second task for the same message violates
     `Task.source_message`'s unique constraint and raises
     `DraftAlreadyConfirmed` -- no second row, no second audit entry."""
+    deny_if_unattended("task_write")
     _require(get_role(actor, workspace) in _WRITER_ROLES, "creating tasks")
     try:
         # A savepoint of its own: the IntegrityError must roll back only the
@@ -256,6 +258,7 @@ def create_task(
 
 @transaction.atomic
 def edit_task(*, task, actor, **fields):
+    deny_if_unattended("task_write")
     task = _locked(task, actor)
     role = get_role(actor, task.workspace)
     _require(
@@ -272,6 +275,7 @@ def edit_task(*, task, actor, **fields):
 
 @transaction.atomic
 def complete_task(*, task, actor):
+    deny_if_unattended("task_write")
     task = _locked(task, actor)
     role = get_role(actor, task.workspace)
     _require(
@@ -291,6 +295,7 @@ def complete_task(*, task, actor):
 
 @transaction.atomic
 def cancel_task(*, task, actor):
+    deny_if_unattended("task_write")
     task = _locked(task, actor)
     role = get_role(actor, task.workspace)
     _require(
@@ -310,6 +315,7 @@ def cancel_task(*, task, actor):
 
 @transaction.atomic
 def reopen_task(*, task, actor):
+    deny_if_unattended("task_write")
     task = _locked(task, actor)
     role = get_role(actor, task.workspace)
     _require(
@@ -330,6 +336,7 @@ def reopen_task(*, task, actor):
 def delete_task(*, task, actor, channel):
     """Move the task to the trash (ADR-009). Idempotent for an already
     trashed row is not reachable: `_locked` only sees live rows."""
+    deny_if_unattended("task_write")
     _require_human_web(actor, channel, "Deleting a task")
     task = _locked(task, actor)
     role = get_role(actor, task.workspace)
@@ -357,6 +364,7 @@ def restore_task(*, task, actor, channel):
     chat-draft back-link (`source_message`) was released at delete time and
     is not re-taken (ADR-009 Consequences), so a restore never collides
     with a draft the owner re-confirmed meanwhile."""
+    deny_if_unattended("task_write")
     _require_human_web(actor, channel, "Restoring a task")
     locked = (
         Task.all_objects.filter(
@@ -383,6 +391,7 @@ def purge_trashed_task(task, *, reason, actor=None, approval_request_id=None):
     retention sweep (`reason="retention"`) or an approved `purge_trash`
     request (`reason="approval"`). Caller holds the transaction. A row
     that is no longer trashed (restored meanwhile) is left alone."""
+    deny_if_unattended("task_write")
     if task.deleted_at is None:
         return False
     record_audit(
