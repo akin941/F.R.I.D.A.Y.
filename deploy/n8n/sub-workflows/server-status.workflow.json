@@ -1,0 +1,54 @@
+{
+  "name": "Friday: server status (sample)",
+  "id": "Ab12Cd34Ef56Gh78",
+  "active": false,
+  "meta": {
+    "note": "Sample sub-workflow called by the Friday tools trigger's wf_Ab12Cd34Ef56Gh78 node. Replace the Code node with the owner's own checks; its output text is what Friday fences as data in the follow-up."
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "nodes": [
+    {
+      "id": "1d2e3f40-0000-4000-8000-000000000001",
+      "name": "When called by Friday tools",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [0, 0],
+      "parameters": {
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "scope",
+              "type": "string"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "1d2e3f40-0000-4000-8000-000000000002",
+      "name": "Collect status",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [240, 0],
+      "parameters": {
+        "jsCode": "// Sample only: replace with real checks (disk, services, last backup).\nreturn [{ json: { response: `scope=${$json.scope}: all services up` } }];"
+      }
+    }
+  ],
+  "connections": {
+    "When called by Friday tools": {
+      "main": [
+        [
+          {
+            "node": "Collect status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}

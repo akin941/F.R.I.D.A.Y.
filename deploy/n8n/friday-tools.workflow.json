@@ -1,0 +1,116 @@
+{
+  "name": "Friday tools",
+  "id": "FridayTools00001",
+  "active": false,
+  "meta": {
+    "templateCredsSetupCompleted": false,
+    "note": "Reference export (Phase 12 D9). Import into the owner's n8n, attach a Bearer Auth credential to the MCP Server Trigger (its value goes ONLY into the n8n-relay sidecar's RELAY_BEARER_TOKEN), point each tool node at the real sub-workflow id, then re-pin each tool's live inputSchema in backend/connectors/manifests/n8n.py (docs/mcp/n8n.md). Every tool node is named wf_<workflowId>; nothing else may be wired to this trigger."
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "nodes": [
+    {
+      "id": "7c1f3f8e-5a2b-4d0c-9b6e-0f1a2b3c4d01",
+      "name": "MCP Server Trigger",
+      "type": "@n8n/n8n-nodes-langchain.mcpTrigger",
+      "typeVersion": 2,
+      "position": [0, 0],
+      "webhookId": "friday-tools",
+      "parameters": {
+        "authentication": "bearerAuth",
+        "path": "friday-tools"
+      },
+      "credentials": {
+        "httpBearerAuth": {
+          "id": "",
+          "name": "Friday relay bearer (set in n8n, never committed)"
+        }
+      }
+    },
+    {
+      "id": "7c1f3f8e-5a2b-4d0c-9b6e-0f1a2b3c4d02",
+      "name": "wf_Ab12Cd34Ef56Gh78",
+      "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
+      "typeVersion": 2.2,
+      "position": [-200, 220],
+      "parameters": {
+        "description": "Home server status: disk, services and the last backup.",
+        "source": "database",
+        "workflowId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "Ab12Cd34Ef56Gh78"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "scope": "={{ $fromAI('scope', 'summary or full', 'string') }}"
+          },
+          "schema": [
+            {
+              "id": "scope",
+              "displayName": "scope",
+              "type": "string",
+              "required": true
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "7c1f3f8e-5a2b-4d0c-9b6e-0f1a2b3c4d03",
+      "name": "wf_Hb34Kd56Mf78Np90",
+      "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
+      "typeVersion": 2.2,
+      "position": [200, 220],
+      "parameters": {
+        "description": "Start the home backup to the NAS or the cloud copy.",
+        "source": "database",
+        "workflowId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "Hb34Kd56Mf78Np90"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "target": "={{ $fromAI('target', 'nas or cloud', 'string') }}"
+          },
+          "schema": [
+            {
+              "id": "target",
+              "displayName": "target",
+              "type": "string",
+              "required": true
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "connections": {
+    "wf_Ab12Cd34Ef56Gh78": {
+      "ai_tool": [
+        [
+          {
+            "node": "MCP Server Trigger",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "wf_Hb34Kd56Mf78Np90": {
+      "ai_tool": [
+        [
+          {
+            "node": "MCP Server Trigger",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}
