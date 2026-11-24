@@ -237,6 +237,46 @@ SELFTRIGGER = {
 }
 
 
+# Branch 6 (D13): a FAR/FRR report as `friday-voice wake-eval` writes it
+# (`friday_voice.wake_eval.build_report`), from scripted per-file results: 24
+# one-hour household files with 3 false accepts in all (FAR 0.125 / h) and 50
+# positives with 4 false rejects (FRR 0.08), for the fixture model at the
+# child's threshold and refractory period. The backend records it with
+# `voice_wake_eval record --from-report` and the policy endpoint honours it
+# (`backend/accounts/tests/test_wake_eval_record.py` reads its byte-identical
+# copy `backend/accounts/tests/fixtures/wake_eval_report.json`).
+REPORT_MODEL_SHA256 = "f" * 64  # friday_voice.replay.FIXTURE_WAKE_MODEL_SHA256
+
+
+def _entry(label, ms, detections):
+    import hashlib
+
+    return {
+        "sha256": hashlib.sha256(label.encode()).hexdigest(),
+        "ms": ms,
+        "detections": detections,
+    }
+
+
+def wake_eval_report():
+    from friday_voice import config, wake_eval
+
+    household = [
+        _entry(f"household-{i}", 3_600_000, 1 if i in (3, 11, 19) else 0) for i in range(24)
+    ]
+    positives = [
+        _entry(f"positive-{i}", 1_800, 0 if i in (5, 17, 33, 41) else 1) for i in range(50)
+    ]
+    report = wake_eval.build_report(
+        model_sha256=REPORT_MODEL_SHA256,
+        threshold=config.WAKE_THRESHOLD,
+        refractory_ms=config.WAKE_REFRACTORY_MS,
+        negative=sorted(household, key=lambda e: e["sha256"]),
+        positives=sorted(positives, key=lambda e: e["sha256"]),
+    )
+    return wake_eval.render(report)
+
+
 def render():
     files = {name: wav_bytes(make()) for name, make in WAVS.items()}
     doc = {
@@ -262,6 +302,7 @@ def render():
     files["barge_in.json"] = text.encode()
     selftrigger = json.dumps(SELFTRIGGER, ensure_ascii=False, indent=2) + "\n"
     files["selftrigger_hey_friday_terminali_ac.json"] = selftrigger.encode()
+    files["wake_eval_report.json"] = wake_eval_report().encode()
     return files
 
 
