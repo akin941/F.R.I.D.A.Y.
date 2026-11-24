@@ -1775,6 +1775,152 @@ the replay harness arms wake mode and completes a wake-initiated turn;
 without either (or at another threshold) it stays in push-to-talk; a
 scripted storm mutes on both sides; `lint-imports` is green.
 
+## Branch 5 implementation notes (`feat/p11-always-on`, 2026-11-20)
+
+Implemented as scoped (D11, D12), with these recorded choices:
+
+1. **Server (`accounts`, D11 placement; no import contract changed).**
+   `accounts.VoiceWakeEvaluation` (append-only: `save()` on an existing row,
+   `delete()` and the bulk queryset `update()`/`delete()` raise) and
+   `accounts.VoiceLiveMute` (partial unique constraint: one unreleased row
+   per device), migration `accounts/0010_voice_live_gate`.
+   `accounts/voice_live.py` holds the single verdict function
+   (`judge` / `policy_verdict`, used by the policy endpoint, the `/voice`
+   panel, the command and — in the closeout — preflight), the recording
+   service, the mute engage/release services, the storm counter and the
+   two guards. Rows are read only through `for_actor(actor,
+   workspace=<personal>)`.
+2. **The verdict.** Latest row per `(model_sha256, kind)` by
+   `recorded_at`, then id (`DISTINCT ON`). `household` counts only with
+   `hours ≥ 24` (a shorter one reads `no_household_eval`); FAR and FRR are
+   compared with `≤` against the budgets (0.2 passes, 0.21 fails;
+   0.10 passes, 0.11 fails); threshold (4 decimals, exact) and
+   refractory period must equal the request's on BOTH latest rows, else
+   `threshold_mismatch` (also for a refractory mismatch — no separate
+   code, the brief lists none). **`model_mismatch`** is reported when the
+   requested model has no household/positives row but another model has
+   (a retrained or swapped `hey_friday`); with no rows at all the reasons
+   are `no_household_eval`, `no_positive_eval`. `negative_set` rows are
+   recorded and shown but never judged. The policy query now **requires**
+   all three parameters (400 otherwise); the response adds
+   `household_eval_id` / `positives_eval_id`.
+3. **The 423.** `NodeVoiceTokenAuthentication.check_token` raises
+   `accounts.voice_live.VoiceLiveMuted` (423 `voice.live_muted`) for a
+   `node_voice` token whose device has an unreleased mute, after the device
+   re-check; `NodeVoicePolicyAuthentication` sets `enforce_live_mute =
+   False` and the policy reports `storm_muted`. A `cli` PAT on the same
+   routes is never affected (tested).
+4. **The guards** come in through `voice.urls.build_urlpatterns`:
+   `node_voice_permissions=(NodeVoiceTriggerGuard,)` on transcriptions and
+   live sessions, and a new `transcription_permissions=(NodeVoiceStormGuard,)`
+   on transcriptions only, after the trigger guard (a refused `wake` is not
+   counted). **Known follow-up 2 of the first merge is fixed:** the trigger
+   guard raises `accounts.voice_live.VoiceTriggerInvalid` (an
+   `APIException`, 400 `voice.trigger_invalid`) rather than a
+   `ValidationError` (whose code the handler would flatten to `invalid`).
+   The three codes (`voice.trigger_invalid`,
+   `voice.always_on_not_permitted`, `voice.live_muted`) are registered in
+   `core.error_codes` (generic: they are `default_code`s of API exceptions)
+   with Turkish messages.
+5. **Storm counter.** One-second buckets per node device in the default
+   cache (`cache.add` + atomic `incr`, one `get_many` over the last 60
+   buckets): an exact sliding window at one-second granularity, keyed by
+   the device so a rotated token does not reset it. The web channel is
+   never counted. A release deletes the device's buckets (review round 1),
+   so the next request after it succeeds at once; a child that keeps
+   storming is muted again by a fresh window's 9th request (tested,
+   without clearing the cache). A bucket evicted between `add` and `incr`
+   is re-created instead of failing the route.
+6. **Release and panel views** (`GET /api/v1/auth/nodes/voice-live`,
+   `DELETE /api/v1/auth/nodes/{device_id}/voice-mute`; web, owner). The
+   device id resolves through the owner's own `kind=node` devices (another
+   user's or a browser device id: 404, the mute stays). **Reading:** a
+   non-owner member (personal or firm) is refused by `IsOwner` with 403
+   before any lookup, so the answer does not depend on the id and confirms
+   nothing; the brief's "→ 404" for a firm member is met in substance (no
+   existence leak), not in the status code. Releasing when nothing is
+   engaged is a 200 with `released: false`.
+7. **The command.** `manage.py voice_wake_eval record` (explicit numbers)
+   and `list`; refuses negative or non-finite numbers, zero hours or
+   positives, rejects above positives, a FAR (FRR) not equal to false
+   accepts / hours (false rejects / positives) within 0.0001, a threshold
+   outside (0, 1] or with more than 4 decimals, a malformed hash, and
+   fields of the other kind. Rows land in the installation owner's
+   personal workspace, `recorded_by` the owner, audited
+   `accounts.voice_wake_eval.recorded`. `--from-report` stays branch 6.
+8. **Child (`node/friday-voice`).** `friday_voice/arming.py`
+   (`ArmingPolicy`: (b) the server's last answer — only a literal `true`
+   permits — and (f) verified models; the pipeline adds (a), (c), (d), (e)
+   from the shell) and `friday_voice/policy.py` (the policy job; the
+   request is still built from `config` at call time). The policy is read
+   on the first credential, when the mode becomes `always_on`, at every
+   live-session start and every `POLICY_POLL_S` (600 s); a refusal, the
+   server's 403 or an unreadable answer disarms at once (a wake utterance
+   still being captured is dropped); a failed read is retried every
+   `POLICY_RETRY_S` (30 s, new constant) and at once on a new credential —
+   not every tick. A policy read's 401 does **not** release the mic (the
+   next real request decides); recorded as a reading.
+9. **Storms, sessions (child).** The wake-storm rule as D12 (the 4th wake
+   in 60 s without a dispatched turn; the count resets on a dispatched
+   turn). Sessions close after `SILENCE_CLOSE_S` without activity or at
+   `SESSION_MAX_MINUTES` (never mid-turn) with the `end` earcon; `link:
+   down` closes the session silently. **Reading:** no wake-free follow-up
+   listening inside an open session in this branch — a follow-up needs the
+   wake word or the hotkey; the session keeps the conversation and its
+   `session_id`, and barge-in (branch 4) is the in-turn case. Two shell
+   fixes came with it: a `state` frame now also goes out when a live
+   session opens or closes (HUD `session_open`), and the keepalive is no
+   longer suppressed by a non-`state` frame in the same tick (an `end`
+   earcon alone tripped the reference host's watchdog).
+10. **`friday-voice run`** loads the detector stack (openWakeWord over the
+    pinned graphs, Silero, smart-turn v3) only when `models.wake_armable`
+    holds, with the real `ArmingPolicy`; any loader failure leaves the
+    child push-to-talk only (logged code, never half-armed).
+11. **Replay.** The wake scenarios now run through the real
+    `ArmingPolicy` against a scripted permitting policy (baseline
+    unchanged); `ReplaySession.start()` settles the credential's calls
+    before the first frame. `friday-voice replay --server <url>
+    --token-file <f> --wake-model-sha256 <sha> [--expect armed|push-to-talk]`
+    plays the wake scenarios against a real server's gate.
+12. **Frontend.** `LiveVoicePanel` on `/voice` (verdict with reasons,
+    budgets, per-model measurements, storm banner with the release button,
+    the last live conversations from the conversation list filtered on
+    `opened_via = node_voice`), BFF routes `GET /api/voice/live` and
+    `DELETE /api/voice/live/{deviceId}/mute`. **Deviation:** there is no
+    `/chat/<id>` route in the app (the chat page selects conversations
+    in-page), so the live conversations link to `/chat`, where they carry
+    the "Canlı ses (Mac)" badge.
+13. **Done when, checked here 2026-11-20:** with the gate permitting
+    (`VOICE_LIVE_ALWAYS_ON_ENABLED=true` and passing rows for the fixture
+    model at the package threshold) the replay wake scenarios arm and
+    complete a wake turn (`tests/test_always_on.py`, `friday-voice replay
+    --check`); without either, or at another threshold, the child stays
+    `armed_ptt` and the server refuses `wake` (`accounts/tests/
+    test_voice_live_policy.py`, `voice/tests/test_live_guards.py`); a
+    scripted storm mutes on both sides (`tests/test_always_on.py`,
+    `accounts/tests/test_voice_storm_backstop.py`); `lint-imports` green
+    with no contract changed.
+
+### Owner steps (pending) — `feat/p11-always-on`, recorded 2026-11-20
+
+1. Run the independent Sonnet 5 review of this branch and fix findings
+   until APPROVE (CLAUDE.md "Reviews").
+2. Confirm the readings in notes 2 (`model_mismatch`, `hours < 24` →
+   `no_household_eval`, refractory → `threshold_mismatch`), 6 (a non-owner
+   member gets 403, not 404), 8 (a policy read's 401 keeps the mic) and 9
+   (no wake-free follow-up listening yet).
+3. **Pending owner evaluation (M4).** Record the 24 h household FAR and the
+   positives FRR for the pinned `hey_friday` at the child's threshold with
+   `manage.py voice_wake_eval record` (or `--from-report` after branch 6),
+   then set `VOICE_LIVE_ALWAYS_ON_ENABLED=true` only if `voice_wake_eval
+   list` says `permitted`. Until then the node is push-to-talk only.
+4. **Mac (deferred: Mac session, M1).** The Swift host must hand the child
+   the local mode, mute (including `unreadable`) and link state exactly as
+   the reference host does, release the mic on `release_mic(storm)` and
+   show `storm_muted` on the menu-bar icon until a mute on → off cycle;
+   check on the real stack that the `/voice` storm banner's release
+   re-enables the Mac within one request.
+
 ### 6. `feat/p11-wake-eval-harness` — self-trigger release gate, nightly selftest, FAR/FRR harness
 
 **Scope.** D13:
@@ -1921,7 +2067,7 @@ is written with the Mac rows pending owner evaluation.
 | 2 | `feat/p11-voice-child-protocol` | `node/friday-voice` package, pins + step 0, `friday-voice/v1` framing/schemas/vectors, reference host + echo double, conformance (host and child families), import/listener guards, CI job, dependency manifest, ADR-013 note | brief approved (parallel with 1) | **implemented 2026-11-20** (step 0 recorded; 28 host + 23 child cases all-pass in process and live; owner steps below) |
 | 3 | `feat/p11-pipecat-pipeline` | Pipecat pipeline, detector ports, gateway STT/chat/TTS clients, segmenter + language routing, push-to-talk, replay harness + baseline, trace fields | 1, 2 | **implemented 2026-11-20** (fixture replay + baseline in CI; `replay --server` turn completed against a local dev server; real-model checks and latencies: deferred: Mac session; see "Branch 3 implementation notes") |
 | 4 | `feat/p11-barge-in` | Session state machine, barge-in, self-trigger window + content rule, shared vectors, echo scenarios, ADR-015 note (d4) | 3 | **implemented 2026-11-20** (barge-in and echo scenarios green at residual 0 / 0.3 / 1.0 in pytest and `friday-voice replay --check`; 144-cell transition table checked against the real child; shared vectors green in pytest and vitest; real AEC, stop time and self barge-in rate: deferred: Mac session (M1, M4); see "Branch 4 implementation notes") |
-| 5 | `feat/p11-always-on` | Arming policy, `accounts.VoiceWakeEvaluation` gate (latest row, threshold match), trigger backstop, storms (client + `accounts.VoiceLiveMute` server backstop, 423 from the authenticator), silence close, fail closed, `/voice` live panel, ADR-015 note (d5, d3) | 3 (parallel with 4) | planned |
+| 5 | `feat/p11-always-on` | Arming policy, `accounts.VoiceWakeEvaluation` gate (latest row, threshold match), trigger backstop, storms (client + `accounts.VoiceLiveMute` server backstop, 423 from the authenticator), silence close, fail closed, `/voice` live panel, ADR-015 note (d5, d3) | 3 (parallel with 4) | **implemented 2026-11-20** (server gate, backstops and the child's arming all green here; the gate stays closed until the owner records evaluations — pending owner evaluation (M4); the Swift host's mute/link/mode inputs are M1, deferred: Mac session; see "Branch 5 implementation notes") |
 | 6 | `feat/p11-wake-eval-harness` | CI self-trigger release gate, `selftest`, `wake-eval` FAR/FRR harness, `--from-report`, eval doc | 4, 5 | planned |
 | 7 | `feat/p11-hud-live-voice` | `voice.state` event kind (v2), node voice fields, HUD mic state, `node_voice` drafts on screen, ADR-013/015 notes | 1 (parallel with 3–6) | **implemented 2026-11-20** (server side, reference relay, 9 node conformance cases, HUD and chat surfaces; the Swift relay is M1, deferred: Mac session; see "Branch 7 implementation notes") |
 | 8 | `chore/p11-closeout` | Preflight live-voice checks, e2e, runbook, ADR notes, MASTER_PLAN row, `self_sources.json`, go/no-go record | 1–7 | planned |
@@ -2551,7 +2697,8 @@ answers them:
    transcriptions, speech and receipt with a voice token while the web
    session still works.
 2. **LOW — `NodeVoiceTriggerGuard` 400 semantics (D11 trigger backstop,
-   branch 5).** A DRF permission class normally signals denial only, so
+   branch 5; fixed in branch 5 on 2026-11-20 — see "Branch 5
+   implementation notes" item 4).** A DRF permission class normally signals denial only, so
    the 400 for a missing or unknown `X-Friday-Voice-Trigger` header needs
    an explicit exception. **Fix in branch 5:** the guard raises a
    `ValidationError` with code `voice.trigger_invalid` from

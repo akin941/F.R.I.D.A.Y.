@@ -38,6 +38,11 @@ GENERIC_ERROR_CODES = frozenset(
         "unsupported_media_type",
         "throttled",
         "throttle_backend_unavailable",
+        # The node voice backstops (Phase 11 D11/D12): `default_code`s of
+        # the `accounts.voice_live` API exceptions.
+        "voice.trigger_invalid",
+        "voice.always_on_not_permitted",
+        "voice.live_muted",
         # simplejwt puts this in the body itself for a bad/expired JWT.
         "token_not_valid",
         "conflict",

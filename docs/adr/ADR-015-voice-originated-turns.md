@@ -184,3 +184,55 @@ speech and nothing is uploaded at all. Branch 6 turns this into the release
 gate over the dedicated fixture; the real-model run is the nightly Mac job
 (M3, pending owner evaluation). Decisions 1–3 and 5–7 are unchanged; a
 barge-in turn is an ordinary voice turn under decision 1's capability cap.
+
+## Implementation note — decision 5 and the d3 gate on the node (Phase 11 branch 5, 2026-11-20)
+
+Decision 5 (wake storms, session close) and roadmap decision d3 ("always-on
+only after the false-activation budget is met") now hold for the Mac node's
+voice child, on both sides of the wire:
+
+- **Client storm rule.** More than 3 wake activations within 60 s without a
+  dispatched turn puts the child in `storm_muted`: it stops consuming audio,
+  sends `release_mic(storm)` and re-arms only after a mute on → off cycle on
+  the Mac (`node/friday-voice/friday_voice/pipeline.py`,
+  `config.WAKE_STORM_MAX` / `WAKE_STORM_WINDOW_S`, the browser's numbers).
+- **Server storm backstop.** The child might be what misbehaves, so the
+  server counts transcription requests per node device in a sliding 60 s
+  window (the shared cache, Redis in production;
+  `accounts.voice_live.NodeVoiceStormGuard`, injected into the `voice`
+  transcription route by `config/urls.py`). Above
+  `VOICE_LIVE_STORM_MAX_STT_PER_MINUTE` (8) it engages
+  `accounts.VoiceLiveMute` (audited) and every route the voice token reaches
+  — the chat turn included — answers 423 `voice.live_muted` from
+  `NodeVoiceTokenAuthentication` until the owner releases the mute on screen
+  (web session, owner, audited). Release also clears the device's window,
+  so the next request succeeds; a new storm mutes again. The policy read
+  stays answerable and reports `storm_muted`.
+- **Session close.** A live session closes after 30 s without activity or
+  15 minutes after it opened (at the end of the turn then running), with the
+  `end` earcon; `link: down` closes it with the mic release.
+- **The d3 gate, mechanical.** The child arms wake mode only when the local
+  mode is `always_on`, link and mute allow it, no storm mute holds, the wake
+  models are hash-verified, and `GET /api/v1/auth/nodes/voice-policy` permits
+  the loaded model at the exact threshold and refractory period it runs at.
+  The server permits only with `VOICE_LIVE_ALWAYS_ON_ENABLED` on and, for
+  that model, the latest `household` evaluation (≥ 24 h, FAR ≤ 0.2/h) and
+  the latest `positives` evaluation (FRR ≤ 0.10) passing at that threshold
+  (`accounts.VoiceWakeEvaluation`, append-only, written only by
+  `manage.py voice_wake_eval record`). A newer failing row closes the gate;
+  a different threshold or model refuses. The policy is re-read at every
+  session start and every 10 minutes; a no, or an unreadable answer,
+  disarms at once.
+- **What the server can and cannot do.** It can only say no (ADR-013
+  decision 5). `X-Friday-Voice-Trigger: wake` on the live-session and
+  transcription routes is refused (403 `voice.always_on_not_permitted`)
+  while no model's latest pair passes — a backstop against an honest but
+  faulty child. The header backstop checks that SOME measured model passes,
+  not the one the child loaded (the request does not name it), so a child
+  that lies about its model, like one that lies `ptt`, is bounded by the
+  storm backstop, decision 1's cap and the on-screen card, not by this
+  header.
+
+Until the owner records passing evaluations (Mac session M4) the gate stays
+closed and the node runs push-to-talk only. Decisions 1–4, 6 and 7 are
+unchanged.

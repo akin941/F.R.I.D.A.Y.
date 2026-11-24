@@ -5,7 +5,7 @@ import { SSEStreamParser } from "@/lib/sse";
 import { VOICE_LANGUAGE } from "@/lib/voice/config";
 import type { ApiUsageReceipt } from "@/lib/voice/receipts";
 import type { StageTimings } from "@/lib/voice/trace";
-import type { ApiMemory, ChatStreamEvent } from "@/types/api";
+import type { ApiMemory, ApiVoiceLive, ChatStreamEvent } from "@/types/api";
 
 /**
  * The voice loop's network edges (Phase 6 D1): same-origin BFF routes only.
@@ -61,6 +61,24 @@ export async function synthesize(
     throw new ApiError(502, { code: "voice.tts_failed" });
   }
   return response.arrayBuffer();
+}
+
+/** The "Canlı ses (Mac)" panel's data (Phase 11 D12/D15). */
+export async function fetchVoiceLive(signal?: AbortSignal): Promise<ApiVoiceLive> {
+  const response = await apiFetch("/api/voice/live", { method: "GET", signal });
+  if (!response.ok) throw await failure(response);
+  return (await response.json()) as ApiVoiceLive;
+}
+
+/** Release a node's storm mute -- the owner's click on screen (D12). */
+export async function releaseVoiceMute(deviceId: string): Promise<boolean> {
+  const response = await apiFetch(`/api/voice/live/${encodeURIComponent(deviceId)}/mute`, {
+    method: "DELETE",
+    headers: { "Content-Type": "application/json" },
+  });
+  if (!response.ok) throw await failure(response);
+  const body = (await response.json().catch(() => ({}))) as { released?: boolean };
+  return body.released === true;
 }
 
 export async function fetchReceipt(

@@ -12,7 +12,7 @@ from rest_framework_simplejwt.settings import api_settings as jwt_settings
 from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.views import TokenRefreshView
 
-from accounts import devices
+from accounts import devices, voice_live
 from accounts.authentication import (
     TOKEN_PREFIX,
     NodeCredentialAuthentication,
@@ -365,10 +365,13 @@ class NodeVoicePolicyView(APIView):
     """`GET /api/v1/auth/nodes/voice-policy` (Phase 11 D3/D11) -- may the
     voice child arm always-on wake mode for the wake model it loaded? Node
     voice token only (`NodeVoicePolicyAuthentication`: a `cli` PAT is a 403
-    `token_kind_forbidden`; mute-tolerant once branch 5 adds the storm
-    mute). The server can only say no. Until branch 5 lands the false-accept
-    gate, the answer is always `always_on_permitted: false` with the reason
-    `disabled`: push-to-talk only."""
+    `token_kind_forbidden`; mute-tolerant: a storm-muted device reads
+    `storm_muted` in the reasons instead of a 423). The server can only say
+    no (ADR-013 decision 5). The verdict (D11, `accounts.voice_live`):
+    `VOICE_LIVE_ALWAYS_ON_ENABLED` on, and for this model sha256 the latest
+    `household` row (>= 24 h, FAR within budget) and the latest `positives`
+    row (FRR within budget), both measured at exactly this threshold and
+    refractory period."""
 
     authentication_classes = [NodeVoicePolicyAuthentication]
     permission_classes = [IsAuthenticated, IsNodeVoiceChannel]
@@ -376,9 +379,120 @@ class NodeVoicePolicyView(APIView):
     def get(self, request):
         serializer = NodeVoicePolicyQuerySerializer(data=request.query_params)
         serializer.is_valid(raise_exception=True)
-        response = Response({"always_on_permitted": False, "reasons": ["disabled"]})
+        token = PersonalAccessToken.objects.filter(pk=request.auth.token_id).first()
+        verdict = voice_live.policy_verdict(
+            request.user,
+            request.auth.bound_workspace_id,
+            serializer.validated_data["model_sha256"],
+            serializer.validated_data["threshold"],
+            serializer.validated_data["refractory_ms"],
+            device_id=token.node_device_id if token else None,
+        )
+        response = Response(verdict.as_dict())
         response["Cache-Control"] = "no-store"
         return response
+
+
+def _evaluation_row(row):
+    if row is None:
+        return None
+    return {
+        "id": str(row.pk),
+        "kind": row.kind,
+        "hours": str(row.hours),
+        "false_accepts": row.false_accepts,
+        "far_per_hour": None if row.far_per_hour is None else str(row.far_per_hour),
+        "positives": row.positives,
+        "false_rejects": row.false_rejects,
+        "frr": None if row.frr is None else str(row.frr),
+        "threshold": str(row.threshold),
+        "refractory_ms": row.refractory_ms,
+        "recorded_at": row.recorded_at,
+    }
+
+
+class NodeVoiceLiveView(APIView):
+    """`GET /api/v1/auth/nodes/voice-live` (Phase 11 D12/D15) -- the `/voice`
+    page's "Canlı ses (Mac)" panel: the always-on setting and budgets, per
+    node device of the owner its engaged storm mute (if any), and per
+    measured wake model its latest evaluation rows with their verdict. Web
+    session, owner only; everything is read through `for_actor()` in the
+    owner's personal workspace, so another user's devices, mutes or rows
+    never appear."""
+
+    permission_classes = _OWNER_WEB_PERMISSIONS
+
+    def get(self, request):
+        workspace_id = voice_live.personal_workspace_id(request.user)
+        nodes = []
+        node_devices = TrustedDevice.objects.filter(
+            user=request.user, kind=TrustedDevice.Kind.NODE, revoked_at__isnull=True
+        ).order_by("created_at")
+        for device in node_devices:
+            mute = voice_live.engaged_mute(request.user, workspace_id, device.pk)
+            nodes.append(
+                {
+                    "device_id": str(device.pk),
+                    "name": device.name,
+                    "mute": None
+                    if mute is None
+                    else {"engaged_at": mute.engaged_at, "reason": mute.reason},
+                }
+            )
+        far_budget, frr_budget = voice_live.budgets()
+        models_out = []
+        for entry in voice_live.model_verdicts(request.user, workspace_id):
+            rows = entry["rows"]
+            models_out.append(
+                {
+                    "model_sha256": entry["model_sha256"],
+                    "threshold": None if entry["threshold"] is None else str(entry["threshold"]),
+                    "refractory_ms": entry["refractory_ms"],
+                    "permitted": entry["verdict"].permitted,
+                    "reasons": entry["verdict"].reasons,
+                    "household": _evaluation_row(rows.get("household")),
+                    "positives": _evaluation_row(rows.get("positives")),
+                    "negative_set": _evaluation_row(rows.get("negative_set")),
+                }
+            )
+        response = Response(
+            {
+                "always_on_enabled": voice_live.always_on_enabled(),
+                "max_far_per_hour": str(far_budget),
+                "max_frr": str(frr_budget),
+                "min_household_hours": str(voice_live.MIN_HOUSEHOLD_HOURS),
+                "storm_max_stt_per_minute": settings.VOICE_LIVE_STORM_MAX_STT_PER_MINUTE,
+                "any_model_permitted": any(m["permitted"] for m in models_out),
+                "nodes": nodes,
+                "models": models_out,
+            }
+        )
+        response["Cache-Control"] = "no-store"
+        return response
+
+
+class NodeVoiceMuteView(APIView):
+    """`DELETE /api/v1/auth/nodes/{device_id}/voice-mute` (Phase 11 D12) --
+    release a node device's storm mute. Only on screen: web session, owner
+    (a `node_voice` token, a PAT or the node secret never reach it). The
+    device is resolved through the owner's own node devices, so another
+    user's device id is a 404 that confirms nothing; audited
+    `accounts.voice_live_mute.released`."""
+
+    permission_classes = _OWNER_WEB_PERMISSIONS
+
+    def delete(self, request, device_id):
+        device = TrustedDevice.objects.filter(
+            pk=device_id, user=request.user, kind=TrustedDevice.Kind.NODE
+        ).first()
+        if device is None:
+            return Response(
+                {"detail": "Not found.", "code": "not_found"}, status=status.HTTP_404_NOT_FOUND
+            )
+        released = voice_live.release_mute(
+            owner=request.user, device=device, via_device_id=str(request_device_id(request) or "")
+        )
+        return Response({"device_id": str(device.pk), "released": released is not None})
 
 
 class NodeKillSwitchView(APIView):

@@ -17,6 +17,9 @@ from accounts.services import register_user
 PASSWORD = "Str0ngDevPass!42"
 MINT_URL = "/api/v1/auth/nodes/voice-token"
 POLICY_URL = "/api/v1/auth/nodes/voice-policy"
+VOICE_LIVE_URL = "/api/v1/auth/nodes/voice-live"
+MUTE_URL = "/api/v1/auth/nodes/{}/voice-mute"
+TRANSCRIPTIONS_URL = "/api/v1/voice/transcriptions"
 SESSIONS_URL = "/api/v1/voice/live/sessions"
 CHAT_URL = "/api/v1/ai/conversations/{}/messages"
 
@@ -26,6 +29,22 @@ def make_owner(email="owner@test.dev"):
     user.is_owner = True
     user.save()
     return user
+
+
+def other_user(email="other@test.dev"):
+    """A second, non-owner user (the installation has one owner) with a
+    node device row of its own."""
+    from accounts.models import TrustedDevice
+
+    user = register_user(email=email, password=PASSWORD, name="Other")
+    device = TrustedDevice.objects.create(
+        user=user,
+        name="Other Mac",
+        kind=TrustedDevice.Kind.NODE,
+        secret_hash=secrets.token_hex(32),
+        enrolled_via=TrustedDevice.EnrolledVia.STRONG_CODE,
+    )
+    return user, device
 
 
 def pair_node(owner, name="MacBook"):
@@ -38,9 +57,16 @@ def pair_node(owner, name="MacBook"):
     return devices.enroll_node_device(raw_code=raw_code, node_name=name, client_ip="10.0.0.2")
 
 
-def bearer(token):
+def bearer(token, *, trigger="ptt"):
+    """A bearer client. Every request carries `X-Friday-Voice-Trigger`
+    (default `ptt`): the node voice channel requires it on the live-session
+    and transcription routes (Phase 11 D11), every other surface ignores it.
+    `trigger=None` sends none."""
     client = APIClient()
-    client.credentials(HTTP_AUTHORIZATION=f"Bearer {token}")
+    headers = {"HTTP_AUTHORIZATION": f"Bearer {token}"}
+    if trigger is not None:
+        headers["HTTP_X_FRIDAY_VOICE_TRIGGER"] = trigger
+    client.credentials(**headers)
     return client
 
 

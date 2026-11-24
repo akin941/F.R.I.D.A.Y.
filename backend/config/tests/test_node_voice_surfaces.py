@@ -86,3 +86,33 @@ def test_the_voice_token_is_accepted_on_its_routes(voice_token):
             assert response.status_code not in (401, 403), (method, url, response.status_code)
     token.refresh_from_db()
     assert token.last_used_at is not None
+
+
+def test_the_storm_mute_reaches_the_chat_turn_and_every_voice_route(voice_token):
+    """Phase 11 D12/D16: the 423 comes from the authenticator, so it reaches
+    every route the token reaches -- including the chat turn on `assistant`
+    (no `assistant -> voice` edge) -- except the mute-tolerant policy read."""
+    from accounts.models import VoiceLiveMute
+    from assistant.services import create_conversation
+
+    raw, token = voice_token
+    live = create_conversation(workspace=token.workspace, actor=token.user, channel="node_voice")
+    VoiceLiveMute.objects.create(workspace=token.workspace, node_device=token.node_device)
+    client = bearer(raw)
+    chat = f"/api/v1/ai/conversations/{live.id}/messages"
+    for method, url in (
+        ("get", chat),
+        ("post", chat),
+        ("post", "/api/v1/voice/transcriptions"),
+        ("post", "/api/v1/voice/speech"),
+        ("get", "/api/v1/voice/receipt"),
+        ("post", "/api/v1/voice/live/sessions"),
+    ):
+        response = getattr(client, method)(url, {}, format="json")
+        assert response.status_code == 423, (method, url)
+        assert response.json()["code"] == "voice.live_muted"
+    policy = client.get(
+        "/api/v1/auth/nodes/voice-policy",
+        {"model_sha256": "a" * 64, "threshold": "0.5", "refractory_ms": 2000},
+    )
+    assert policy.status_code == 200 and "storm_muted" in policy.json()["reasons"]

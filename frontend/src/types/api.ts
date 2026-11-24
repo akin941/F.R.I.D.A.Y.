@@ -192,6 +192,56 @@ export interface ApiNodeKillSwitch {
   released_at: string | null;
 }
 
+/** One wake-model evaluation row (Phase 11 D11): numbers only. */
+export interface ApiVoiceWakeEvaluation {
+  id: string;
+  kind: "household" | "negative_set" | "positives";
+  hours: string;
+  false_accepts: number;
+  far_per_hour: string | null;
+  positives: number;
+  false_rejects: number;
+  frr: string | null;
+  threshold: string;
+  refractory_ms: number;
+  recorded_at: string;
+}
+
+export type ApiVoiceLiveReason =
+  | "disabled"
+  | "no_household_eval"
+  | "far_above_budget"
+  | "no_positive_eval"
+  | "frr_above_budget"
+  | "model_mismatch"
+  | "threshold_mismatch"
+  | "storm_muted";
+
+/** `GET /api/v1/auth/nodes/voice-live` (Phase 11 D12/D15). */
+export interface ApiVoiceLive {
+  always_on_enabled: boolean;
+  max_far_per_hour: string;
+  max_frr: string;
+  min_household_hours: string;
+  storm_max_stt_per_minute: number;
+  any_model_permitted: boolean;
+  nodes: {
+    device_id: string;
+    name: string;
+    mute: { engaged_at: string; reason: string } | null;
+  }[];
+  models: {
+    model_sha256: string;
+    threshold: string | null;
+    refractory_ms: number | null;
+    permitted: boolean;
+    reasons: ApiVoiceLiveReason[];
+    household: ApiVoiceWakeEvaluation | null;
+    positives: ApiVoiceWakeEvaluation | null;
+    negative_set: ApiVoiceWakeEvaluation | null;
+  }[];
+}
+
 export interface ApiRemoteKeyState {
   active: boolean;
   created_at: string | null;

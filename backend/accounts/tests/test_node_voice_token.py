@@ -11,7 +11,8 @@
   back, an inactive owner -> refused on the next request; a voice token on
   any other PAT surface is 403 `token_kind_forbidden`;
 - `accepted_kinds` defaults keep the existing authenticators unchanged;
-- the voice-policy read (always closed in branch 1);
+- the voice-policy read (closed by default; the gate itself is
+  test_voice_live_policy.py);
 - the check constraint (the boot-time TTL cap is in
   config/tests/test_settings.py).
 
@@ -81,8 +82,11 @@ def node(owner):
     return pair_node(owner)
 
 
+POLICY_QUERY = {"model_sha256": "a" * 64, "threshold": "0.5", "refractory_ms": 2000}
+
+
 def policy(token):
-    return bearer(token).get(POLICY_URL)
+    return bearer(token).get(POLICY_URL, POLICY_QUERY)
 
 
 # --- the mint ---------------------------------------------------------------
@@ -382,13 +386,13 @@ def test_accepted_kinds_default_to_the_single_kind():
 # --- the voice-policy read -------------------------------------------------------
 
 
-def test_the_policy_is_closed_in_branch_1(node):
+def test_the_policy_is_closed_by_default(node):
     _, secret = node
-    response = bearer(mint_token(secret)).get(
-        POLICY_URL, {"model_sha256": "a" * 64, "threshold": "0.5", "refractory_ms": 2000}
-    )
+    response = bearer(mint_token(secret)).get(POLICY_URL, POLICY_QUERY)
     assert response.status_code == 200
-    assert response.json() == {"always_on_permitted": False, "reasons": ["disabled"]}
+    body = response.json()
+    assert body["always_on_permitted"] is False
+    assert body["reasons"] == ["disabled", "no_household_eval", "no_positive_eval"]
     assert response["Cache-Control"] == "no-store"
 
 
@@ -398,7 +402,7 @@ def test_the_policy_is_closed_in_branch_1(node):
 )
 def test_a_malformed_policy_query_is_a_400(node, query):
     _, secret = node
-    assert bearer(mint_token(secret)).get(POLICY_URL, query).status_code == 400
+    assert bearer(mint_token(secret)).get(POLICY_URL, POLICY_QUERY | query).status_code == 400
 
 
 @pytest.mark.parametrize(

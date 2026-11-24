@@ -80,14 +80,12 @@ class PersonalAccessTokenSerializer(serializers.ModelSerializer):
 class NodeVoicePolicyQuerySerializer(serializers.Serializer):
     """`GET /api/v1/auth/nodes/voice-policy` query (Phase 11 D11): the wake
     model the child loaded and the threshold / refractory period it runs
-    at. Bounded and optional in branch 1 (the gate is closed regardless);
-    branch 5 judges them against the recorded evaluations."""
+    at. All three are required (branch 5): the verdict is for exactly that
+    model at exactly those values (`accounts.voice_live.policy_verdict`)."""
 
-    model_sha256 = serializers.RegexField(r"^[0-9a-f]{64}$", required=False)
-    threshold = serializers.DecimalField(
-        max_digits=5, decimal_places=4, min_value=0, max_value=1, required=False
-    )
-    refractory_ms = serializers.IntegerField(min_value=0, max_value=60_000, required=False)
+    model_sha256 = serializers.RegexField(r"^[0-9a-f]{64}$")
+    threshold = serializers.DecimalField(max_digits=5, decimal_places=4, min_value=0, max_value=1)
+    refractory_ms = serializers.IntegerField(min_value=0, max_value=60_000)
 
 
 # --- device trust (Phase 4 branch 2) ---

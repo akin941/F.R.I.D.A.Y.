@@ -11,6 +11,8 @@ from accounts.views import (
     MeView,
     NodeCredentialRotateView,
     NodeKillSwitchView,
+    NodeVoiceLiveView,
+    NodeVoiceMuteView,
     NodeVoicePolicyView,
     NodeVoiceTokenMintView,
     PairingCodeCreateView,
@@ -53,6 +55,14 @@ urlpatterns = [
     # always-on policy read (node voice token only).
     path("nodes/voice-token", NodeVoiceTokenMintView.as_view(), name="auth-nodes-voice-token"),
     path("nodes/voice-policy", NodeVoicePolicyView.as_view(), name="auth-nodes-voice-policy"),
+    # Phase 11 D12/D15: the `/voice` live panel and the storm-mute release
+    # (web session, owner only).
+    path("nodes/voice-live", NodeVoiceLiveView.as_view(), name="auth-nodes-voice-live"),
+    path(
+        "nodes/<uuid:device_id>/voice-mute",
+        NodeVoiceMuteView.as_view(),
+        name="auth-nodes-voice-mute",
+    ),
     path("remote-key", RemoteAccessKeyView.as_view(), name="auth-remote-key"),
     path("remote-key/revoke", RemoteAccessKeyRevokeView.as_view(), name="auth-remote-key-revoke"),
     path("tokens", PersonalAccessTokenListCreateView.as_view(), name="auth-tokens"),

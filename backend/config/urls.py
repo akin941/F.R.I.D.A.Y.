@@ -9,6 +9,7 @@ from accounts.authentication import (
     NodeVoiceTokenAuthentication,
     PersonalAccessTokenAuthentication,
 )
+from accounts.voice_live import NodeVoiceStormGuard, NodeVoiceTriggerGuard
 from config.activity import ActivitySummaryView
 from deploys.urls import build_urlpatterns as deploy_urlpatterns
 from hud.urls import build_urlpatterns as hud_urlpatterns
@@ -70,8 +71,10 @@ urlpatterns = [
     # base PAT authenticator, so the node voice credential reaches the
     # voice routes while a `cli` PAT still authenticates as `cli` and gets
     # the views' deliberate 403 (the permission class) and `openai`/`hook`
-    # tokens their `token_kind_forbidden`. `node_voice_permissions` is the
-    # seam for branch 5's `accounts` guards (empty here).
+    # tokens their `token_kind_forbidden`. Phase 11 D11/D12 (branch 5): the
+    # `accounts` guards ride the same seam -- the trigger backstop on the
+    # transcription and live-session routes, the storm backstop on the
+    # transcription route only.
     path(
         "api/v1/",
         include(
@@ -80,7 +83,8 @@ urlpatterns = [
                     NodeVoiceTokenAuthentication,
                     *api_settings.DEFAULT_AUTHENTICATION_CLASSES,
                 ],
-                node_voice_permissions=(),
+                node_voice_permissions=(NodeVoiceTriggerGuard,),
+                transcription_permissions=(NodeVoiceStormGuard,),
             )
         ),
     ),

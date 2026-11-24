@@ -1,6 +1,7 @@
 """Base settings — everything configurable comes from the environment (12-factor)."""
 
 from datetime import timedelta
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 
@@ -707,6 +708,32 @@ if not 0 <= VOICE_LIVE_ROTATION_GRACE_SECONDS <= 300:
 # `POST /api/v1/voice/live/sessions` reuses the latest live conversation
 # whose last activity is younger than this; otherwise it opens a new one.
 VOICE_LIVE_CONVERSATION_REUSE_MINUTES = env.int("VOICE_LIVE_CONVERSATION_REUSE_MINUTES", default=30)
+# Phase 11 D11 (roadmap d3): always-on wake mode on the node is permitted
+# only while this is on AND, for the wake model the child loaded, the latest
+# `household` evaluation (>= 24 h) has a FAR per hour <= the budget and the
+# latest `positives` evaluation an FRR <= the budget, both measured at the
+# threshold and refractory period the child runs at. The server can only
+# say no: it never turns always-on on when the Mac chose push-to-talk.
+VOICE_LIVE_ALWAYS_ON_ENABLED = env.bool("VOICE_LIVE_ALWAYS_ON_ENABLED", default=False)
+VOICE_LIVE_MAX_FAR_PER_HOUR = env("VOICE_LIVE_MAX_FAR_PER_HOUR", default="0.2")
+VOICE_LIVE_MAX_FRR = env("VOICE_LIVE_MAX_FRR", default="0.10")
+try:
+    _far_budget = Decimal(VOICE_LIVE_MAX_FAR_PER_HOUR)
+    _frr_budget = Decimal(VOICE_LIVE_MAX_FRR)
+except InvalidOperation as _exc:
+    raise ImproperlyConfigured(
+        "VOICE_LIVE_MAX_FAR_PER_HOUR / VOICE_LIVE_MAX_FRR: decimals."
+    ) from _exc
+if not (_far_budget.is_finite() and _far_budget >= 0 and _frr_budget.is_finite()):
+    raise ImproperlyConfigured("VOICE_LIVE_MAX_FAR_PER_HOUR / VOICE_LIVE_MAX_FRR: finite, >= 0.")
+if not 0 <= _frr_budget <= 1:
+    raise ImproperlyConfigured("VOICE_LIVE_MAX_FRR must be between 0 and 1.")
+# Phase 11 D12: the storm backstop -- more transcriptions than this per node
+# device in a sliding 60 s window engage `accounts.VoiceLiveMute` (423 on
+# every node voice route until the owner releases it on screen).
+VOICE_LIVE_STORM_MAX_STT_PER_MINUTE = env.int("VOICE_LIVE_STORM_MAX_STT_PER_MINUTE", default=8)
+if VOICE_LIVE_STORM_MAX_STT_PER_MINUTE < 1:
+    raise ImproperlyConfigured("VOICE_LIVE_STORM_MAX_STT_PER_MINUTE must be at least 1.")
 # The voice upload cap (VOICE_MAX_UTTERANCE_SECONDS, 960 KB at 30 s) must
 # stay below FILE_UPLOAD_MAX_MEMORY_SIZE (Django default 2.5 MB, unset
 # here): the transcription view installs only the in-memory upload handler,

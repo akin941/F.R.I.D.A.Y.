@@ -13,16 +13,23 @@ from voice.views import (
 )
 
 
-def build_urlpatterns(*, authentication_classes, node_voice_permissions=()):
-    """`node_voice_permissions` (Phase 11 D11/D16): extra DRF permission
-    classes from `accounts` (the trigger and storm guards of branch 5),
-    appended to the transcription and live-sessions routes. Empty in
-    branch 1."""
+def build_urlpatterns(
+    *, authentication_classes, node_voice_permissions=(), transcription_permissions=()
+):
+    """Phase 11 D11/D12/D16: extra DRF permission classes from `accounts`,
+    injected here because `voice` may not import `accounts`.
+    `node_voice_permissions` (the trigger backstop) is appended to the
+    transcription and live-sessions routes; `transcription_permissions`
+    (the storm backstop) to the transcription route only, after them."""
     auth = {"authentication_classes": list(authentication_classes)}
     extra = list(node_voice_permissions)
     guarded_transcriptions = {
         **auth,
-        "permission_classes": [*TranscriptionCreateView.permission_classes, *extra],
+        "permission_classes": [
+            *TranscriptionCreateView.permission_classes,
+            *extra,
+            *transcription_permissions,
+        ],
     }
     guarded_sessions = {
         **auth,
