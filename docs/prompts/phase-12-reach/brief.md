@@ -1726,7 +1726,7 @@ updated.
 | 5 | `feat/p12-skills-core` | SKILL.md parser + refusals, staged lifecycle, matcher + injection, `/skills`, `skill.*` routes | 3 (and so 1, 2); merges after 4 if both are ready (migration order) | **implemented 2026-11-20** (`skills/skill_md.py` strict parser + bundle reader, `InstructionSkill` / `InstructionSkillVersion` (skills 0001), owner-web lifecycle services, `skills.ports.propose_version`, `skills.proposals` probe, `skills.match` matcher + `<skill>` injection with the `skills` context-report entry, `/skill <name>` prefix and `skill.<name>` wake routes, `skills.match` tier/prompt/budget/compression bypass (ai_core 0010), `/skills` + `/skills/<id>` pages, D19 skills contract, `docs/skills/README.md`; see "Implementation notes — branch 5"; no Mac work; awaits the Sonnet 5 review) |
 | 6 | `feat/p12-skill-curator` | Stale marking, curator proposals, archive suggestions | 5 | **implemented 2026-11-20** (`skills/curator.py` stale pass + one `skills.curate` call + strict closed-set parser, proposals through `skills.ports`, archive suggestions on `SkillCuratorRun` (skills 0002) surfaced by the `skills.proposals` probe, `record_use` reactivation, `skills.tasks.curate` static beat Sunday 04:15 under `unattended_run({"skills.curate"})`, `skills.curate` tier/prompt/`skills` + `skills_curate_weekly` budgets/compression bypass (ai_core 0012, renumbered at merge), curator GET + dismiss endpoints, `/skills` curator panel and curator provenance on pending versions; see "Implementation notes — branch 6"; no Mac work; awaits the Sonnet 5 review) |
 | 7 | `feat/p12-harness-playbooks` | Playbook sources from harness, provenance-checked distillation, attach to implementation jobs, ADR-012 note | 5 (parallel with 6) | **implemented 2026-11-20** (`PlaybookSource` / `PlaybookDistillRun` (skills 0003, renumbered at merge), `skills.ports.record_playbook_source` called beside the harness episode, `skills/playbooks.py` nightly distiller (one unattended `skills.playbook_distill` call per eligible repo, provenance checked in code, weekly/pending caps, every attempt counted), `skills.playbook_distill` tier/prompt/budgets/compression bypass (ai_core 0013, renumbered at merge), `skills.ports.get_attachable_versions`, `HarnessImplementationJob.skill_version_ids` (harness 0016) with Gate A name + hash, read-only mounts outside the clone, `.git/info/exclude`, fail-closed `skill_version_unavailable` / `skill_path_in_commit`, skill picker and `/skills/<id>` provenance, ADR-012 note; see "Implementation notes — branch 7"; real agent pick-up of mounted skills: owner steps; awaits the Sonnet 5 review) |
-| 8 | `chore/p12-closeout` | Preflight rows, reach e2e, runbooks, ADR notes, `self_sources.json`, MASTER_PLAN row, go/no-go record | 1–7 | planned |
+| 8 | `chore/p12-closeout` | Preflight rows, reach e2e, runbooks, ADR notes, `self_sources.json`, MASTER_PLAN row, go/no-go record | 1–7 | **implemented 2026-11-20** (`manage.py preflight` `check_proactive` / `check_n8n` / `check_skills` rows (warn-only for an unconfigured n8n and no enabled schedule), `N8N_RELAY_ALLOWED_TOOLS` handed to web/worker for the allowlist row and `n8n_relay_env` printing that variable, the reach e2e `backend/ops/tests/test_reach_e2e.py` (heartbeat → digest → `/today` ack; "günaydın" / "bildirimler" through the reference host + a real `friday-voice run` child; n8n async read by `node_voice` → follow-up + notice, voice write → draft → web approval → one send → notice; SKILL.md upload → approve → used; three fake jobs → playbook; one unattended run denied every D2 effect), runbooks `proactive.md` / `n8n-connector.md` / `skills.md`, ADR-016 / ADR-010 / ADR-015 closeout notes, MASTER_PLAN row 12, `self_sources.json`, go/no-go rows; see "Implementation notes — branch 8"; the Mac run is M1; awaits the Sonnet 5 review) |
 | M1 | Spoken digest and wake routes on the Mac | Real mic/STT/TTS run of `digest.today`, `notices.read`, `tool.*` drafts, barge-in during a long digest; Turkish route-phrase recognition | 3 merged; Phase 11 M1 | deferred: Mac session (pending owner evaluation) |
 
 **Sequencing and migrations.** Branches 4 and 5 edit
@@ -1809,8 +1809,8 @@ Stub checkpoint: "the owner keeps the morning digest on after two weeks".
 |---|---|---|
 | Digest kept on for 14 consecutive days | `manage.py proactive_checkpoint` (audited enable/disable history) | pending owner evaluation |
 | Digest opened or spoken on ≥ 10 of those days | same command (`opened_at` / `spoken_at`) | pending owner evaluation |
-| Unattended deny suite | Branch 1 guard tests + closeout e2e | to be recorded at closeout |
-| Hostile-skill no-capability gate | Branch 5 release gate | to be recorded at closeout |
+| Unattended deny suite | Branch 1 guard tests + closeout e2e | **pass (2026-11-20, CI)** — `proactive/tests/test_unattended_guard.py` (every effect of the D2 table, every registered `ToolSpec`/`ReadToolSpec`, real and eager Celery dispatch) and `ops/tests/test_reach_e2e.py` (one heartbeat run trying every D2 effect plus the schedule, pause, alias, skill and digest writes: all denied, one audit row each, nothing created) |
+| Hostile-skill no-capability gate | Branch 5 release gate | **pass (2026-11-20, CI)** — `skills/tests/test_no_capability.py`: an approved, matched hostile skill changes no classification, draft, approval, read, router prompt or voice-cap result for any intent, typed or voice; `skills/tests/test_no_network.py` green |
 | n8n allowlist and pins against the owner's live n8n | `check_n8n` preflight on the real stack | pending owner evaluation (owner step 3) |
 | Spoken digest and routes on the Mac | M1 | pending owner evaluation (Mac session) |
 
@@ -2866,3 +2866,85 @@ Choices made while implementing D17 that the brief left open:
    `record_playbook_source` still strips such paths. No change required.
    Fix (optional): say in the ADR-012 note that the exclusion is fail-closed
    only for jobs with attached skills.
+
+### Implementation notes — branch 8 (`chore/p12-closeout`), recorded 2026-11-20
+
+Choices made while implementing the closeout that the brief left open:
+
+1. **Preflight rows.** Three CHECKS groups after `live_voice`, all
+   read-only (no model call, no run started, no tool called, nothing
+   stored): `proactive` → `proactive_beat` (heartbeat ≤ 60 s and the prune
+   on the worker beat), `proactive_schedules` (enabled schedules have a
+   `next_run_at` at most `PROACTIVE_STALE_SECONDS` = 10 min overdue; `warn`
+   while none is enabled), `proactive_last_run` (`fail` on a `failed` last
+   run; `warn` on no run yet or `running` > 15 min), `proactive_digest`
+   (tier, budget, `friday_proactive_digest`), `proactive_probes` (`warn` on
+   slow or failing probes on the last runs; a `denied` step is not
+   counted); `n8n` → `n8n_allowlist`, `n8n_binding`, `n8n_relay`,
+   `n8n_pins`; `skills` → `skills_ai` (the three purposes' tiers, budgets,
+   prompts), `skills_beat` (curator and distiller; not in the brief's list,
+   added because a missing entry silently stops both) and `skills_parser`
+   (active **and stale** skills, since a stale skill can still be matched;
+   the stored version is re-rendered with `render_skill_md` and re-parsed
+   with its references). Details carry schedule kinds with the workspace
+   *type* (`morning_digest@personal`), probe, purpose and skill names and
+   closed codes -- never a title, label, body, workspace name, URL or bearer.
+2. **The relay ceiling preflight can see.** The sidecar's
+   `BRIDGE_ALLOWED_TOOLS` lives in another container, so compose now also
+   hands `N8N_RELAY_ALLOWED_TOOLS` (same expression, same default; names
+   only) to web and worker, and settings read it
+   (`N8N_RELAY_ALLOWED_TOOLS`, default the two reference tools). A test
+   keeps the compose defaults, the settings default and
+   `relay_allowed_tools()` equal. While doing so the closeout found that
+   `manage.py n8n_relay_env` printed `BRIDGE_ALLOWED_TOOLS=…`, a line
+   compose never reads from `deploy/docker/.env` (it interpolates
+   `N8N_RELAY_ALLOWED_TOOLS`); it now prints
+   `N8N_RELAY_ALLOWED_TOOLS=…` (test, `deploy/n8n/README.md` and
+   `docs/mcp/n8n.md` updated).
+3. **n8n live rows.** With no enabled binding all three `warn` ("not
+   configured", owner step 3) -- the documented warnings on the fake stack.
+   With one enabled: `N8N_MCP_URL` unset is a `fail` (every call refuses);
+   the relay check is one read-only `tools/list` through the `pin_report`
+   seam (`live_pin_report`, the pin beat stays the one writer of binding
+   health); `n8n_pins` is `warn` "not checked" when the relay failed, so
+   one outage is one `fail` row.
+4. **The e2e** (`backend/ops/tests/test_reach_e2e.py`) reuses the branch
+   fixtures rather than new doubles: the Phase 11 live-voice harness
+   (`LiveFriday`, `DriverRun`, the `stack` fixture; the `ptt` scenario
+   with the fake STT transcript set to the route phrase -- no
+   `friday-voice` change, `conformance.lock` untouched), the connectors
+   n8n fixtures (in-process relay + fake trigger), the skill-turn
+   recorder, the harness terminal hook and the branch 1 D2 effect table.
+   Notices come from real heartbeat runs after a baseline run (D5: the
+   first run notifies nothing). The voice tests skip where
+   `node/friday-voice` has no environment, like the Phase 11 e2e (the CI
+   `friday-voice` job runs them; they ran green here with
+   `uv sync --frozen` in `node/friday-voice`).
+5. **`self_sources.json`.** Phase 12 is the last scheduled phase, and
+   `build_self_sources` picks the first row whose status says "in
+   progress" (else "planned"). Row 12's status therefore reads "server side
+   done (2026-11-20); go/no-go checkpoint in progress" -- true until the
+   owner records the two-week result -- rather than changing the snapshot
+   builder's rule.
+6. **ADR notes.** ADR-016 gains a closeout implementation note (status
+   stays Proposed until owner step 1); ADR-010 a note on the relay
+   ceiling row and the `n8n_relay_env` fix; ADR-015 a note on the Mac-path
+   e2e of the routes. ADR-012 already carries the branch 7 note.
+
+### Owner steps (pending) — `chore/p12-closeout`, recorded 2026-11-20
+
+1. Run the independent Sonnet 5 review of this branch to APPROVE before
+   merge.
+2. On the real stack: `manage.py preflight` -- the reach rows should pass
+   apart from `proactive_schedules` / `proactive_last_run` (until the
+   digest is enabled, owner step 2) and the three n8n binding rows (until
+   owner step 3). If `deploy/docker/.env` already carries a
+   `BRIDGE_ALLOWED_TOOLS=` line from the old `n8n_relay_env` output,
+   replace it with the `N8N_RELAY_ALLOWED_TOOLS=` line the command prints
+   now (the old line was never read; the compose default applied).
+3. After enabling n8n (owner step 3): `n8n_allowlist`, `n8n_relay` and
+   `n8n_pins` must pass against the live trigger; record the result in the
+   go/no-go row "n8n allowlist and pins".
+4. After two weeks of the digest: `manage.py proactive_checkpoint` and the
+   go/no-go rows (Phase 12 owner step 7); Mac session M1 when Phase 11 M1
+   has merged.
