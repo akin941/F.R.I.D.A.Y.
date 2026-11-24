@@ -71,7 +71,10 @@ class HostCore:
         self.restart_in_ms = None
         self.starts = 0
         self.failures = []  # (code, at) -- protocol codes, "watchdog", "child_exit"
-        self.releases = []  # every reason the host released the mic
+        # Every reason the host released the mic: a local event ("muted"),
+        # "child:<reason>" for the child's release_mic, "failure:<code>" when
+        # the host failed the child closed.
+        self.releases = []
         self.dropped_play = 0
         self.dropped_stop = 0
         self.played = []  # (utterance_id, seq, pcm) accepted for playback
@@ -178,6 +181,7 @@ class HostCore:
     def _maybe_acquire(self):
         if (
             not self.mic_held
+            and not self.stopping
             and self.child_ready
             and self.link_open
             and self.child_state in ACQUIRE_STATES
@@ -189,7 +193,7 @@ class HostCore:
         """Fail closed on the child: release, show off, drop the link,
         schedule a restart with backoff."""
         self.failures.append((code, self.clock.monotonic_ms()))
-        self._release(f"child:{code}")
+        self._release(f"failure:{code}")
         self.indicator = "off"
         self.link_open = False
         self.child_running = False

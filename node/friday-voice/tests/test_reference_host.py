@@ -173,6 +173,23 @@ def test_capture_reaches_the_child_only_while_held(core):
     assert core.releases[-1] == "child:storm"
 
 
+def test_shutdown_releases_and_a_clean_exit_is_not_a_failure(core):
+    core.take_outbound()
+    core.shutdown()
+    assert _types(core) == ["shutdown"]
+    assert not core.mic_held and core.indicator == "off"
+    _send(core, state("armed_ptt"))
+    assert not core.mic_held  # never re-acquired while stopping
+    core.child_exited(0)
+    assert core.failures == [] and core.restart_at is None and not core.link_open
+
+
+def test_a_failure_is_recorded_as_a_host_release(core, clock):
+    clock.advance(WATCHDOG_MS)
+    core.tick()
+    assert core.releases[-1] == "failure:watchdog"
+
+
 def test_earcons_and_logs_are_recorded(core):
     _send(core, {"type": "earcon", "earcon": "wake"})
     _send(core, {"type": "log", "code": "http.status", "detail": "429"})
