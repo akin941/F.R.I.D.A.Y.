@@ -32,7 +32,9 @@ def test_normalize_vectors(text, expected):
 @pytest.mark.parametrize("vector", VECTORS["match"], ids=lambda v: v["id"])
 def test_match_vectors(vector):
     phrase = vector["wake_phrase"] or "Hey Friday"
-    assert matches_recent_speech(vector["transcript"], vector["recent"], phrase) is vector["expected"]
+    assert (
+        matches_recent_speech(vector["transcript"], vector["recent"], phrase) is vector["expected"]
+    )
 
 
 @pytest.mark.parametrize("vector", VECTORS["window"], ids=lambda v: v["id"])

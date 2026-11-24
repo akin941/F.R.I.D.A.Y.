@@ -166,8 +166,17 @@ class ReplaySession:
         self.pump()
 
     def settle(self, limit_ms=120_000):
-        self.worker.run_until_idle(limit_ms=limit_ms, on_tick=self._tick)
-        self._tick()
+        """Run every job to its end and, with paced playback, let the host
+        play out what it holds (the clock moves; no capture is fed)."""
+        start = self.clock.monotonic_ms()
+        while True:
+            self.worker.run_until_idle(limit_ms=limit_ms, on_tick=self._tick)
+            self._tick()
+            if not self.host.playback_pending:
+                return
+            if self.clock.monotonic_ms() - start > limit_ms:
+                raise RuntimeError("playback never ended")
+            self.advance(FRAME_MS)
 
     # --- reading ---
 

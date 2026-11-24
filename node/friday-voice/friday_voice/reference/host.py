@@ -309,6 +309,11 @@ class HostCore:
         else:
             self._utterances[utterance_id] = seq + 1
 
+    @property
+    def playback_pending(self) -> bool:
+        """Paced playback still has audio queued or playing."""
+        return bool(self._queue) and self.link_open
+
     def _queue_play(self, utterance_id, seq, last, payload):
         if seq == 0:
             self._queue.append([utterance_id, 0, False, None])
