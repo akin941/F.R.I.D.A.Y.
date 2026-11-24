@@ -662,7 +662,9 @@ you"). A read tool may be declared `mode="async"`:
    `N8N_ASYNC_READ_TIMEOUT_SECONDS` default 120, the same pin re-check and
    `connector.read` audit with `mode=async`).
 2. The turn's reply is a Friday-authored template ("Başlattım: <tool
-   label>. Sonucu bu konuşmaya yazacağım."), no model call. The assistant
+   label>. Sonucu bu konuşmaya yazacağım."): the router and
+   `router.connector_args` steps run as for any read, but there is no chat
+   completion for this turn. The assistant
    stores `assistant.PendingFollowUp` (conversation, source message,
    tool name, handle, status).
 3. On completion connectors calls `tools.registry.notify_async_read(
