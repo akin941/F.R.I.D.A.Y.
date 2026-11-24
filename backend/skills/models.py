@@ -152,3 +152,92 @@ class InstructionSkillVersion(WorkspaceScopedModel, TimestampedModel):
 
     def __str__(self):
         return f"{self.skill_id} v{self.version}"
+
+
+class PlaybookDistillRun(WorkspaceScopedModel, TimestampedModel):
+    """One distillation attempt for one repo of one workspace (Phase 12
+    D17): what happened and why, counts only (never content). A dropped
+    draft is `dropped` with its reason; a skipped repo (weekly cap, pending
+    cap, budget, no provider) is recorded too, so "dropped and counted" is
+    visible."""
+
+    class Outcome(models.TextChoices):
+        PROPOSED = "proposed"
+        DROPPED = "dropped"
+        SKIPPED_CAP = "skipped_cap"
+        SKIPPED_PENDING = "skipped_pending"
+        BUDGET_REFUSED = "budget_refused"
+        NO_PROVIDER = "no_provider"
+        NO_PROMPT = "no_prompt"
+        MODEL_ERROR = "model_error"
+        DENIED = "denied"
+        FAILED = "failed"
+
+    repo_key = models.CharField(max_length=64)
+    outcome = models.CharField(max_length=20, choices=Outcome.choices)
+    reason = models.CharField(max_length=40, blank=True, default="")
+    counts = models.JSONField(default=dict, blank=True)
+    model_usage_id = models.UUIDField(null=True, blank=True)
+    version = models.ForeignKey(
+        InstructionSkillVersion,
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="+",
+    )
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [models.Index(fields=["workspace", "outcome", "created_at"])]
+
+    def __str__(self):
+        return f"{self.repo_key} {self.outcome}"
+
+
+class PlaybookSource(WorkspaceScopedModel, TimestampedModel):
+    """One successful, reviewed harness implementation job, recorded as
+    distillation input (Phase 12 D17, ADR-012 note).
+
+    Recorded by `skills.ports.record_playbook_source` from `harness` only
+    when the job succeeded, its review approved it, its tests passed and
+    the owner typed its goal; a sensitive repo records nothing. Not an
+    episode: it never reaches memory.
+
+    Quotable fields (a playbook step's verified `quote`) are only `goal`
+    (the owner's own words) and `test_command` (the job's snapshot of the
+    owner-configured `HarnessRepo.test_command`). `changed_paths` are
+    agent-chosen strings (hints, shown fenced, never a verified quote);
+    `context_text` is model-produced (diff and review summaries, fenced as
+    untrusted, never a quote). No file content is ever stored.
+
+    `distill_run` marks the source used: a distillation that got an answer
+    from the model consumes its input sources, whatever the outcome.
+    """
+
+    job_id = models.UUIDField()
+    repo_key = models.CharField(max_length=64)
+    repo_label = models.CharField(max_length=200)
+    goal = models.TextField()
+    test_command = models.TextField()
+    changed_paths = models.JSONField(default=list, blank=True)
+    test_summary = models.JSONField(default=dict, blank=True)
+    context_text = models.TextField(blank=True, default="")
+    distill_run = models.ForeignKey(
+        PlaybookDistillRun,
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="sources",
+    )
+
+    class Meta:
+        ordering = ["-created_at"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["workspace", "job_id"], name="skills_playbook_source_unique_job"
+            )
+        ]
+        indexes = [models.Index(fields=["workspace", "repo_key", "distill_run"])]
+
+    def __str__(self):
+        return f"{self.repo_label} {self.job_id}"

@@ -74,6 +74,9 @@ COMPRESSION_BYPASS = frozenset(
         "proactive.digest",
         # Phase 12 D15/D18: the skill matcher needs the exact approved names
         "skills.match",
+        # Phase 12 D17/D18: the playbook distiller's quotes are checked
+        # verbatim against the exact source fields it was given
+        "skills.playbook_distill",
         # Phase 12 D11/D18: an async read's follow-up answers from the exact
         # fenced result it was given
         "chat.followup",

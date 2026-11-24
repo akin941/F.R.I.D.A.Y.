@@ -20,6 +20,7 @@ from rest_framework import serializers
 
 from core.channels import CHANNEL_WEB
 from harness.models import HarnessImplementationJob, HarnessJob
+from harness.serializers import skills_snapshot
 from harness.services import HarnessPermissionDenied, list_implementation_jobs, list_jobs
 from memory.models import Memory
 from tools.owner_reads import (
@@ -277,6 +278,12 @@ def describe_harness_implement_request(approval_request):
         "branch_name": _text(payload.get("branch_name", job.branch_name), 255),
         "agent": _text(payload.get("agent", job.agent), 50),
         "reviewer_agent": _text(payload.get("reviewer_agent") or _reviewer_for(job.agent), 50),
+        # Phase 12 D17: the attached instruction skills, by name and hash
+        # (owner-approved text mounted read-only into the container).
+        "skills": [
+            {"name": row["name"], "version": row["version"], "sha256": row["sha256"]}
+            for row in skills_snapshot(payload.get("skills"))
+        ],
     }
 
 

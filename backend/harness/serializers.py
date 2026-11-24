@@ -293,6 +293,27 @@ class HarnessReviewSerializer(serializers.ModelSerializer):
         read_only_fields = fields
 
 
+def skills_snapshot(value):
+    """Phase 12 D17: a bounded, whitelisted view of Gate A's `skills`
+    snapshot (id, name, version, sha256)."""
+    if not isinstance(value, list):
+        return []
+    rows = []
+    for item in value[:20]:
+        if not isinstance(item, dict):
+            continue
+        version = item.get("version")
+        rows.append(
+            {
+                "id": str(item.get("id", ""))[:64],
+                "name": str(item.get("name", ""))[:64],
+                "version": version if isinstance(version, int) else None,
+                "sha256": str(item.get("sha256", ""))[:64],
+            }
+        )
+    return rows
+
+
 class HarnessImplementationJobSerializer(serializers.ModelSerializer):
     """List/create/cancel shape. Never exposes `worktree_path` or
     `container_id` (runner-host internals)."""
@@ -301,6 +322,7 @@ class HarnessImplementationJobSerializer(serializers.ModelSerializer):
     reviewer_agent = serializers.SerializerMethodField()
     gate_a = serializers.SerializerMethodField()
     gate_b = serializers.SerializerMethodField()
+    skills = serializers.SerializerMethodField()
 
     class Meta:
         model = HarnessImplementationJob
@@ -325,8 +347,15 @@ class HarnessImplementationJobSerializer(serializers.ModelSerializer):
             "updated_at",
             "gate_a",
             "gate_b",
+            "skills",
         ]
         read_only_fields = fields
+
+    def get_skills(self, obj):
+        """Phase 12 D17: the attached skills as Gate A snapshotted them
+        (id, name, version, content hash) -- never the skill text."""
+        payload = (obj.gate_a_request.payload or {}) if obj.gate_a_request_id else {}
+        return skills_snapshot(payload.get("skills"))
 
     def get_reviewer_agent(self, obj):
         from harness.review_execution import select_review_agent
@@ -397,6 +426,12 @@ class HarnessImplementationJobCreateSerializer(serializers.Serializer):
     repo = serializers.UUIDField()
     goal = serializers.CharField(max_length=_MAX_GOAL_CHARS)
     discovery_job = serializers.UUIDField(required=False, allow_null=True, default=None)
+    # Phase 12 D17: owner-selected instruction-skill versions to mount
+    # read-only; validated (all or none) through `skills.ports` by the
+    # service -- another workspace's or a non-active version is a 400.
+    skill_versions = serializers.ListField(
+        child=serializers.UUIDField(), required=False, default=list, max_length=20
+    )
 
     def validate_goal(self, value):
         if not value.strip():

@@ -69,6 +69,7 @@ DOMAIN_ERROR_CODES = frozenset(
         "deploy.ci_required",
         "harness.permission_denied",
         "harness.invalid_transition",
+        "harness.skill_not_attachable",
         # `github_open_pr` from a pushed job (Phase 5 branch 5).
         "harness.pull_request_not_ready",
         "harness.pull_request_exists",

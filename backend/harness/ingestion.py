@@ -41,9 +41,10 @@ from django.db import transaction
 from django.utils import timezone
 
 from harness import graphify_execution, runner
-from harness.models import HarnessImplementationJob, HarnessJob, HarnessRepo
+from harness.models import HarnessImplementationJob, HarnessJob, HarnessRepo, HarnessReview
 from memory.ingestion import ports
 from memory.models import IngestionSource, Memory
+from skills import ports as skills_ports
 
 logger = logging.getLogger(__name__)
 
@@ -352,7 +353,62 @@ def _record_implementation(job_id):
     )
 
 
+def _record_playbook(job_id):
+    job = (
+        HarnessImplementationJob.objects.select_related("repo", "created_by", "workspace")
+        .filter(pk=job_id)
+        .first()
+    )
+    if job is None or job.status != HarnessImplementationJob.Status.SUCCEEDED:
+        return None
+    # Phase 12 D17: only the owner's own goal is ever a playbook's quote.
+    if not _owner_typed(job):
+        return None
+    # Sensitive repos stay out of playbooks entirely.
+    if job.repo.sensitive or job.sensitivity == Memory.Sensitivity.PRIVATE:
+        return None
+    if (job.test_result or {}).get("passed") is not True:
+        return None
+    review = (
+        job.reviews.filter(status=HarnessReview.Status.SUCCEEDED).order_by("-created_at").first()
+    )
+    if review is None or review.verdict != HarnessReview.Verdict.APPROVED:
+        return None
+    diff_summary = _bounded(job.diff_summary, 500)
+    review_summary = _bounded(review.summary, 450)
+    context = _join(
+        f"Change summary: {diff_summary}" if diff_summary else "",
+        f"Review summary: {review_summary}" if review_summary else "",
+    )
+    return skills_ports.record_playbook_source(
+        workspace=job.workspace,
+        job_id=job.id,
+        repo_key=str(job.repo_id),
+        repo_label=job.repo.name,
+        goal=job.goal,
+        # The job's snapshot of the owner-configured `HarnessRepo.test_command`.
+        test_command=job.repo_test_command,
+        # Paths only (never contents); `.claude/skills/` paths never feed a
+        # playbook (D17 "Exclusion" (4)) -- the port drops them too.
+        changed_paths=skills_ports.strip_skill_paths(job.changed_files),
+        test_passed=True,
+        exit_code=(job.test_result or {}).get("exit_code"),
+        context_text=_bounded(context),
+        sensitive=False,
+    )
+
+
+def record_playbook_outcome(job):
+    """Phase 12 D17: one `skills` playbook source for a succeeded, approved,
+    tested implementation job whose goal the owner typed (sensitive repos
+    record nothing). Never raises; idempotent per job."""
+    return _safely(f"playbook source {job.pk}", _record_playbook, job.pk)
+
+
 def record_implementation_outcome(job):
     """One `harness` episode for a terminal implementation job. Never
-    raises; idempotent through the port's `(source, external_id)` dedupe."""
-    return _safely(f"harness implementation {job.pk}", _record_implementation, job.pk)
+    raises; idempotent through the port's `(source, external_id)` dedupe.
+    Beside it, the Phase 12 playbook source (`record_playbook_outcome`)."""
+    result = _safely(f"harness implementation {job.pk}", _record_implementation, job.pk)
+    record_playbook_outcome(job)
+    return result

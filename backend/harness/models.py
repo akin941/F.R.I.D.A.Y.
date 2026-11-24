@@ -325,6 +325,13 @@ class HarnessImplementationJob(WorkspaceScopedModel, TimestampedModel):
         DRIVER_TOO_MANY_LINES = "driver_too_many_lines"
         DRIVER_PROTOCOL_ERROR = "driver_protocol_error"
         DRIVER_TURN_FAILED = "driver_turn_failed"
+        # Phase 12 D17: an attached skill version is no longer attachable at
+        # run time (archived, superseded, other workspace) -- fails before
+        # the agent starts; or the produced commit touches the mounted
+        # skills' `.claude/skills/` prefix -- fails before review, nothing
+        # is bundled or pushed.
+        SKILL_VERSION_UNAVAILABLE = "skill_version_unavailable"
+        SKILL_PATH_IN_COMMIT = "skill_path_in_commit"
 
     repo = models.ForeignKey(
         HarnessRepo, on_delete=models.PROTECT, related_name="implementation_jobs"
@@ -473,6 +480,11 @@ class HarnessImplementationJob(WorkspaceScopedModel, TimestampedModel):
     # step -- "cli" (the one-shot CLI, default) or a long-lived driver
     # ("app_server"). Empty until the run starts.
     driver = models.CharField(max_length=20, blank=True, default="")
+    # Phase 12 D17: owner-selected instruction-skill versions (ids, as
+    # strings) validated through `skills.ports.get_attachable_versions` at
+    # request time and fetched again through it at run time; mounted
+    # read-only into the container. Gate A's payload snapshots name + hash.
+    skill_version_ids = models.JSONField(default=list, blank=True)
 
     class Meta:
         ordering = ["-created_at"]
