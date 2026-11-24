@@ -46,6 +46,7 @@ from connectors.manifest import ScopeError, get_manifest
 from connectors.models import ConnectorBinding, ConnectorWriteExecution
 from connectors.reads import arguments_sha256, canonical_json, compose_result_text, json_safe
 from connectors.services import TOOL_OK, record_listing, tool_available
+from core.unattended import deny_if_unattended
 from memory.context import strip_invisible_formatting
 from memory.models import Memory
 from tools.registry import ToolSpec, ToolValidationError, register_tool, unregister_tool
@@ -86,6 +87,7 @@ def _display_rows(policy, arguments):
 
 
 def prepare_write_payload(connector, tool, workspace, payload):
+    deny_if_unattended("connector_write")
     manifest, policy = _resolve(connector, tool)
     if policy is None:
         raise ToolValidationError("This connector tool is not available.")

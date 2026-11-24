@@ -33,6 +33,7 @@ from audit.services import record_audit
 from connectors import bridges, mcp_client
 from connectors.manifest import ScopeError
 from connectors.services import enabled_binding, record_listing, tool_available
+from core.unattended import deny_if_unattended
 from tools.registry import (
     DATA_CLASS_PERSONAL,
     READ_CHANNELS,
@@ -109,6 +110,7 @@ def perform_read(manifest, policy, *, workspace, actor, args, channel, as_data=F
     harness PR panel, the deploy snapshot) returns the parsed JSON in
     `ReadResult.structured` instead of bounded text; the same refusals,
     pin check and audit row apply."""
+    deny_if_unattended("connector_read")
     started = time.monotonic()
     binding = enabled_binding(workspace, manifest.name)
     audit = {

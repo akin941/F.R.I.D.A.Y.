@@ -38,6 +38,7 @@ from ai_core.audio import wav_seconds_or_zero
 from ai_core.exceptions import BudgetExceeded, GatewayError, NoProviderAvailable
 from ai_core.models import ModelProvider, ModelUsage
 from core.context import get_request_id
+from core.unattended import deny_purpose_if_unattended
 
 logger = logging.getLogger(__name__)
 
@@ -179,6 +180,7 @@ class InferenceGateway:
         `manage.py preflight`) restricts selection to that one row -- still
         only if it is active, keyed and allowed for `personal_data`; there
         is no fallback. Same single-door accounting: one `ModelUsage` row."""
+        deny_purpose_if_unattended(purpose)
         started = time.monotonic()
         merged_params = dict(prompt_version.model_params) if prompt_version else {}
         merged_params.update(params or {})
@@ -269,6 +271,7 @@ class InferenceGateway:
         exactly one ModelUsage row) -- including `personal_data`'s
         allowed-providers-only, fail-closed selection and the budget check.
         No streaming variant. `only_provider`: as for `complete()`."""
+        deny_purpose_if_unattended(purpose)
         started = time.monotonic()
         base_report = self._base_report(context_report, personal_data, budget_session)
         base_report["item_count"] = len(texts)
@@ -384,6 +387,7 @@ class InferenceGateway:
         streaming variant. `only_provider` pins the call to one row, as in
         `complete()` (Phase 6 closeout: the preflight voice checks) -- the
         personal-data filter still applies to the pinned row."""
+        deny_purpose_if_unattended(purpose)
         params = dict(params or {})
         started = time.monotonic()
         base_report = self._base_report(context_report, True, budget_session)
@@ -437,6 +441,7 @@ class InferenceGateway:
         streaming variant. `only_provider` pins the call to one eligible row
         (no route, no fallback); the route's voice still applies when the
         pinned row is the routed one."""
+        deny_purpose_if_unattended(purpose)
         params = dict(params or {})
         started = time.monotonic()
         language = str(params.get("language") or "")

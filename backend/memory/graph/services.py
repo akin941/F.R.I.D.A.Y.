@@ -29,6 +29,7 @@ from django.utils import timezone
 
 from audit.services import record_audit
 from core.channels import CHANNEL_WEB
+from core.unattended import deny_if_unattended
 from memory.graph.candidates import normalise_name
 from memory.ingestion.scrubber import scrub_text
 from memory.jobs import dispatch_fact_embedding
@@ -327,6 +328,7 @@ def propose_fact(
     target must be a current fact of the same workspace, subject and
     predicate, starting no later than this proposal (D2, D4). Called only by
     the learning jobs through `memory.graph.ports`; never approves."""
+    deny_if_unattended("fact_write")
     if predicate not in LEARNED_PREDICATES:
         raise GraphInvalid("A model may propose only the learned predicate set.")
     if sensitivity not in MemoryFact.Sensitivity.values:
@@ -418,6 +420,7 @@ def approve_fact(*, fact, actor, channel):
     `supersede(old=target, new=proposal)`. A target no longer current ->
     `SupersedeTargetChanged`; an earlier `valid_from` -> `SupersedeOrder`;
     both leave every row unchanged and the proposal pending."""
+    deny_if_unattended("fact_write")
     _require_owner_web(actor, fact.workspace, channel, "Approving a fact")
     _refuse_system(fact)
     if fact.supersedes_id is not None:
@@ -549,6 +552,7 @@ def create_fact(
     sensitivity=MemoryFact.Sensitivity.NORMAL,
 ):
     """An owner-typed fact (D3): born `approved`."""
+    deny_if_unattended("fact_write")
     _require_owner_web(actor, workspace, channel, "Adding a fact")
     if predicate not in LEARNED_PREDICATES:
         raise GraphInvalid("Owner facts use the learned predicate set.")
@@ -620,6 +624,7 @@ def edit_fact(
 
     Subject and predicate never change through an edit (a different subject
     is a different fact)."""
+    deny_if_unattended("fact_write")
     _require_owner_web(actor, fact.workspace, channel, "Editing a fact")
     _refuse_system(fact)
     (fact,) = _locked_facts(fact)
@@ -715,6 +720,7 @@ def supersede_fact(
     """The owner replaces a current fact with a new value from
     `valid_from` (the API's `facts/<id>/supersede`): an `edit_fact` of an
     approved current fact with an explicit date and object."""
+    deny_if_unattended("fact_write")
     _refuse_system(fact)
     if fact.status != Status.APPROVED:
         raise GraphInvalidTransition("Only an approved current fact can be superseded.")

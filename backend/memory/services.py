@@ -39,6 +39,7 @@ from django.utils import timezone
 from audit.models import AuditLog
 from audit.services import record_audit
 from core.channels import CHANNEL_WEB
+from core.unattended import deny_if_unattended
 from memory.core_blocks import (
     CORE_BLOCK_CHAR_BUDGETS,
     OWNER_EDITABLE_LABELS,
@@ -219,6 +220,7 @@ def create_memory(*, workspace, actor, title, content, memory_type, sensitivity,
     `memory.context` both require `approved`). The flag can only make a row
     weaker, never stronger: there is no way to request any other status.
     """
+    deny_if_unattended("memory_write")
     _require(get_role(actor, workspace) in _WRITER_ROLES, "creating memories")
     if memory_type == Memory.Type.WORK_LOG:
         # Codex round-5 P2 on feat/p1-work-log: this function always births
@@ -280,6 +282,7 @@ def record_work_log(*, workspace, title, content, sensitivity=Memory.Sensitivity
     other `private` memory; `_reconcile_embedding` below already handles
     not enqueuing it, no special-casing needed.
     """
+    deny_if_unattended("memory_write")
     fingerprint = compute_fingerprint(content)
     try:
         memory = Memory.objects.create(
@@ -385,6 +388,7 @@ def _save_curated(memory, update_fields):
 
 @transaction.atomic
 def edit_memory(*, memory, actor, **fields):
+    deny_if_unattended("memory_write")
     memory = _locked(memory, actor)
     role = get_role(actor, memory.workspace)
     _require(
@@ -409,6 +413,7 @@ def approve_memory(*, memory, actor, **curated_fields):
     with the transition, so a reviewer can approve a suggestion as private
     in one step.
     """
+    deny_if_unattended("memory_write")
     memory = _locked(memory, actor)
     _require(get_role(actor, memory.workspace) in _CURATOR_ROLES, "approving memories")
     if memory.status == Memory.Status.APPROVED:
@@ -782,6 +787,7 @@ def update_core_block(
     personal workspace, `current_focus`/`active_projects` anywhere.
     `base_version`, when given, must match the current version (optimistic
     concurrency for the editor). A no-op edit writes nothing."""
+    deny_if_unattended("memory_write")
     _require_owner_web(actor=actor, workspace=workspace, channel=channel)
     _check_label(workspace, label)
     if label not in OWNER_EDITABLE_LABELS:
@@ -850,6 +856,7 @@ def create_core_block_proposal(
     Enforces the weekly cap (<= 3 approved-or-pending per owner per ISO
     week, across the owner's workspaces): over it, raises
     `CoreBlockProposalCapReached` and nothing is stored."""
+    deny_if_unattended("memory_write")
     _check_label(workspace, label)
     _check_budget(label, proposed_content)
     quote = (provenance_quote or "").strip()
@@ -909,6 +916,7 @@ def approve_core_block_proposal(*, proposal, actor, channel):
     """Per-item owner approval over the web channel (D7, D10): applies the
     proposed content as a new version (`approved_proposal`). A proposal
     whose base version is stale is refused and left untouched."""
+    deny_if_unattended("memory_write")
     _require_owner_web(actor=actor, workspace=proposal.workspace, channel=channel)
     with transaction.atomic():
         proposal = _locked_proposal(proposal)

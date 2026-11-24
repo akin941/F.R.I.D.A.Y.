@@ -33,6 +33,7 @@ from django.utils import timezone
 
 from accounts.devices import DeviceTrustError, enroll_node_device, node_device_refusal
 from audit.services import record_audit
+from core.unattended import deny_if_unattended
 from nodes import audit_chain, bus
 from nodes.action_rules import actor_is_node_owner, workspace_refusal
 from nodes.capabilities import check_catalogue_entry, get_action_contract, get_contract
@@ -600,6 +601,7 @@ def invoke_read(
 
     The D9 workspace pre-checks live in `tools` (they call `refuse_read`);
     a system-channel read is limited to `SYSTEM_READ_CAPABILITIES`."""
+    deny_if_unattended("node_invocation")
     started = time.monotonic()
     trace_id = _bounded_trace_id(trace_id)
     contract = get_contract(capability) if isinstance(capability, str) else None
@@ -862,6 +864,7 @@ def _finish_locked(pk, *, status, refusal_code="", only_from=None):
 def create_gated_execution(approval_request):
     """`node_action`'s `create_execution` (D6): the `approved` execution
     row, created inside the approval's own transaction. Returns its id."""
+    deny_if_unattended("node_invocation")
     payload = approval_request.payload if isinstance(approval_request.payload, dict) else {}
     node = find_node(payload.get("node_id"))
     if node is None:
@@ -946,6 +949,7 @@ def invoke_confirm(
     key. Otherwise the envelope (`class` confirm, `grant` null, 90 s) is
     signed and pushed to the node's inbox, and the `sent` execution is
     returned."""
+    deny_if_unattended("node_invocation")
     now = int(now if now is not None else time.time())
     node = find_node(node_id)
     if node is None or not actor_is_node_owner(actor, node, node.workspace):
