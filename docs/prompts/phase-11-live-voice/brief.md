@@ -2467,3 +2467,30 @@ answers them:
    recorded in the notes, but it is not listed as an explicit owner step.
    **Fix:** correct the date, and add the FAR indicator to branch 8's
    checklist or to the owner steps.
+
+### Known follow-ups — `feat/p11-pipecat-pipeline` (unresolved review notes, recorded at merge 2026-11-24)
+
+1. **LOW — https credential with a null CA pin skips pin checking
+   (`node/friday-voice/friday_voice/client.py`).** The credential schema
+   says `ca_sha256` may be null only for a loopback http dev server, but
+   the schema pattern allows `https://` with `ca_sha256=null`, and
+   `pin_hook` then silently skips the pin check. The https connection is
+   verified only against certifi (and `--ca-file`), so the D6 pin is not
+   enforced. **Fix:** in `HttpFridayClient.set_credential` (or
+   `ChildCore._on_credential`), treat https with a null pin as a refused
+   credential or an explicit documented mode; or enforce it in the schema
+   with an `allOf`/`if-then` and add a conformance vector.
+2. **LOW — any other 401/403 is treated as `credential_refused`
+   (`node/friday-voice/friday_voice/pipeline.py`).** A 401 or 403 other
+   than the rotation-retry case or `voice.always_on_not_permitted` sets
+   refused and releases the mic, so a 403 with an unrelated code (for
+   example a plain permission denial) is also treated as
+   `credential_refused`. This matches note 5 but is broad. **Fix
+   (optional):** limit `credential_refused` to 401, and treat other 403
+   codes as an error earcon plus hold.
+3. **LOW — brief Files list names `llm.py` and `tts.py`
+   (`docs/prompts/phase-11-live-voice/brief.md`).** The implementation
+   folds the LLM and TTS clients into `client.py` and `pipeline.py`, and
+   the branch 3 notes do not mention the deviation. **Fix:** add one line
+   to the branch 3 notes saying that `FridayChatLLM` and `FridayTTS` live
+   in `client.py` and `pipeline.py`.
