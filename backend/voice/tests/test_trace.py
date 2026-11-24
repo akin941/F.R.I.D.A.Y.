@@ -10,8 +10,10 @@ import pytest
 from django.utils import timezone
 
 from accounts.services import register_user
+from accounts.tests.node_voice_helpers import bearer, mint_token, pair_node
 from ai_core.models import ModelUsage
 from assistant.models import Conversation
+from assistant.services import create_conversation
 from core.tracing import request_trace_id
 from voice.models import STAGES, VoiceTurnTrace
 from voice.services import record_trace
@@ -55,6 +57,7 @@ def test_trace_model_fields_are_an_allow_list():
         "trace_id",
         "conversation",
         "input_mode",
+        "source",
         "created_at",
         "updated_at",
         *STAGES,
@@ -66,7 +69,9 @@ def test_trace_model_fields_are_an_allow_list():
     for field in VoiceTurnTrace._meta.concrete_fields:
         assert field.get_internal_type() not in {"TextField", "BinaryField", "JSONField"}
         if field.get_internal_type() == "CharField":
-            assert field.name == "input_mode" and field.choices
+            assert field.name in {"input_mode", "source"} and field.choices
+    source_choices = VoiceTurnTrace._meta.get_field("source").choices
+    assert {value for value, _ in source_choices} == {"web", "node"}
 
 
 def test_trace_rows_are_workspace_scoped_through_for_actor(owner, workspace, conversation):
@@ -225,3 +230,65 @@ def test_prune_deletes_rows_older_than_retention(conversation, settings):
     assert prune_voice_turn_traces() == 1
     assert list(VoiceTurnTrace.objects.values_list("pk", flat=True)) == [fresh.pk]
     assert prune_voice_turn_traces_task() == 0
+
+
+# --- Phase 11 D14: `source` from the channel, the live stages ---
+
+
+def test_live_stages_are_recorded_from_the_timings_body(
+    owner, conversation, speech_providers, web_client
+):
+    trace = str(uuid.uuid4())
+    response = _speak(
+        web_client(owner),
+        conversation,
+        body={"timings": {"wake_to_listen_ms": 45, "interrupted_at_ms": 800, "total_ms": 1500}},
+        HTTP_X_FRIDAY_TRACE=trace,
+    )
+    assert response.status_code == 200
+    row = VoiceTurnTrace.objects.get(trace_id=trace)
+    assert (row.wake_to_listen_ms, row.interrupted_at_ms, row.total_ms) == (45, 800, 1500)
+
+
+def test_a_web_request_claiming_source_node_records_web(
+    owner, conversation, speech_providers, web_client
+):
+    trace = str(uuid.uuid4())
+    response = _speak(
+        web_client(owner),
+        conversation,
+        body={"timings": {"source": "node", "total_ms": 900}},
+        HTTP_X_FRIDAY_TRACE=trace,
+    )
+    assert response.status_code == 200
+    row = VoiceTurnTrace.objects.get(trace_id=trace)
+    assert row.source == "web" and row.total_ms == 900
+
+
+def test_a_node_voice_request_claiming_source_web_records_node(owner, workspace, speech_providers):
+    _, secret = pair_node(owner)
+    client = bearer(mint_token(secret))
+    live = create_conversation(workspace=workspace, actor=owner, channel="node_voice")
+    trace = str(uuid.uuid4())
+    assert _upload(client, live, HTTP_X_FRIDAY_TRACE=trace).status_code == 200
+    response = _speak(
+        client,
+        live,
+        body={"timings": {"source": "web", "wake_to_listen_ms": 30, "total_ms": 1100}},
+        HTTP_X_FRIDAY_TRACE=trace,
+    )
+    assert response.status_code == 200
+    row = VoiceTurnTrace.objects.get(trace_id=trace)
+    assert row.source == "node"
+    assert row.stt_ms is not None and row.tts_first_ms is not None
+    assert (row.wake_to_listen_ms, row.total_ms) == (30, 1100)
+
+
+def test_record_trace_refuses_an_unknown_source(conversation):
+    row = record_trace(
+        conversation=conversation,
+        trace_id=str(uuid.uuid4()),
+        server_timings={"stt_ms": 3},
+        source="mars",
+    )
+    assert row.source == "web"

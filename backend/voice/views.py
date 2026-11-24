@@ -41,6 +41,7 @@ from core.permissions import IsNodeVoiceChannel, IsOwner, IsWebOrNodeVoiceChanne
 from core.throttling import ScopedRateThrottle
 from core.tracing import request_trace_id
 from core.uploads import MaxSizeUploadHandler
+from voice.models import SOURCE_NODE, SOURCE_WEB
 from voice.serializers import (
     ReceiptQuerySerializer,
     SpeechCreateSerializer,
@@ -73,6 +74,12 @@ def _conversation(request, conversation_id):
     ):
         return None
     return conversation
+
+
+def _trace_source(request):
+    """Phase 11 D14: the trace's `source` comes from the channel, never
+    from the body."""
+    return SOURCE_NODE if request_channel(request) == CHANNEL_NODE_VOICE else SOURCE_WEB
 
 
 def _content_length(request):
@@ -123,6 +130,7 @@ class TranscriptionCreateView(_VoiceView):
                 actor=request.user,
                 audio=audio,
                 trace_id=request_trace_id(request),
+                source=_trace_source(request),
             )
         except VoiceServiceError as exc:
             return _error(exc)
@@ -154,6 +162,7 @@ class SpeechCreateView(_VoiceView):
                 language=data["language"],
                 trace_id=request_trace_id(request),
                 timings=data.get("timings"),
+                source=_trace_source(request),
             )
         except VoiceServiceError as exc:
             return _error(exc)
