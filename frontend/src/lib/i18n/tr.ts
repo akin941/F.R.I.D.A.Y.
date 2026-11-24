@@ -145,6 +145,11 @@ export const ERROR_MESSAGES = {
     message: "Bu harness işi, deposu ya da ajanı artık bu işleme uygun değil.",
     specific: true,
   },
+  "harness.skill_not_attachable": {
+    message:
+      "Seçilen becerilerden biri eklenemez: yalnızca bu çalışma alanının onaylı, etkin beceri sürümleri eklenebilir.",
+    specific: true,
+  },
   "harness.pull_request_not_ready": {
     message: "Bu iş için PR açılamaz: yalnızca başarıyla tamamlanıp dalı gönderilmiş işler PR alabilir.",
     specific: true,
