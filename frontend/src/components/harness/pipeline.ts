@@ -16,6 +16,8 @@ const FAILURE_STAGE: Partial<Record<ImplFailureReason, ImplStatus>> = {
   tests_failed: "implementing",
   no_changes: "implementing",
   secret_leak: "implementing",
+  skill_version_unavailable: "implementing",
+  skill_path_in_commit: "implementing",
   review_changes_requested: "pending_review",
   review_unavailable: "pending_review",
   gate_b_rejected: "pending_gate_b",

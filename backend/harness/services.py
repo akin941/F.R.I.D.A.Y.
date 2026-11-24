@@ -582,16 +582,23 @@ def create_harness_implementation_job(
             "branch_name": job.branch_name,
             "agent": str(job.agent),
             "reviewer_agent": _snapshot_reviewer(job.agent),
-            # Phase 12 D17: the attached skills, by name and content hash.
-            "skills": [
+            # Phase 12 D17: the attached skills, by name and content hash
+            # (present only when skills are attached).
+            **(
                 {
-                    "id": item.id,
-                    "name": item.skill_name,
-                    "version": item.version,
-                    "sha256": item.content_sha256,
+                    "skills": [
+                        {
+                            "id": item.id,
+                            "name": item.skill_name,
+                            "version": item.version,
+                            "sha256": item.content_sha256,
+                        }
+                        for item in attachable
+                    ]
                 }
-                for item in attachable
-            ],
+                if attachable
+                else {}
+            ),
         },
         origin=ApprovalRequest.Origin.HARNESS,
         channel=CHANNEL_SYSTEM,

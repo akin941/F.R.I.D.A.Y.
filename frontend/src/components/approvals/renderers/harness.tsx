@@ -77,6 +77,19 @@ function ImplementSummary({ request }: { request: ApiApprovalRequest }) {
         </SummaryRow>
         <SummaryRow label="Uygulayıcı">{agentLabel(summary.agent)}</SummaryRow>
         <SummaryRow label="İnceleyici">{agentLabel(summary.reviewer_agent)}</SummaryRow>
+        {summary.skills && summary.skills.length > 0 ? (
+          <SummaryRow label="Beceriler">
+            <ul data-testid="gate-a-skills">
+              {summary.skills.map((skill) => (
+                <li key={`${skill.name}-${skill.sha256}`}>
+                  {skill.name}
+                  {skill.version ? ` (sürüm ${skill.version})` : ""} ·{" "}
+                  <code className="font-mono">sha256 {skill.sha256.slice(0, 16)}…</code>
+                </li>
+              ))}
+            </ul>
+          </SummaryRow>
+        ) : null}
       </dl>
       <JobLink request={request} jobId={summary.job_id} />
     </div>

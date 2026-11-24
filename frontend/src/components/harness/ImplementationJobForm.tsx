@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -9,6 +9,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { HarnessRepoPicker } from "@/components/harness/HarnessRepoPicker";
 import { HARNESS_GOAL_MAX_LENGTH } from "@/components/harness/HarnessJobGoalForm";
 import { apiPostJson, errorMessage } from "@/lib/api-client";
+import { fetchSkills, type SkillSummary } from "@/lib/api/skills";
 import type { ApiImplementationJob } from "@/types/api";
 
 export interface ImplementationPrefill {
@@ -42,6 +43,40 @@ export function ImplementationJobForm({
   const [goal, setGoal] = useState(prefill?.goal ?? "");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Phase 12 D17: owner-approved instruction skills the agent may read
+  // (mounted read-only); validated server-side, listed on Gate A.
+  const [skills, setSkills] = useState<SkillSummary[]>([]);
+  const [selectedSkills, setSelectedSkills] = useState<string[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchSkills(workspaceId)
+      .then((list) => {
+        if (!cancelled) {
+          setSkills(
+            list.skills.filter(
+              (skill) =>
+                (skill.status === "active" || skill.status === "stale") &&
+                skill.current_version !== null,
+            ),
+          );
+        }
+      })
+      .catch(() => {
+        // No skills page access (or none yet): the picker stays empty.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [workspaceId]);
+
+  function toggleSkill(versionId: string) {
+    setSelectedSkills((current) =>
+      current.includes(versionId)
+        ? current.filter((id) => id !== versionId)
+        : [...current, versionId],
+    );
+  }
 
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
@@ -53,6 +88,7 @@ export function ImplementationJobForm({
         repo,
         goal,
         ...(prefill?.discoveryJobId ? { discovery_job: prefill.discoveryJobId } : {}),
+        ...(selectedSkills.length > 0 ? { skill_versions: selectedSkills } : {}),
       });
       onCreated(job);
     } catch (err) {
@@ -115,6 +151,32 @@ export function ImplementationJobForm({
               {goal.length}/{HARNESS_GOAL_MAX_LENGTH}
             </p>
           </div>
+          {skills.length > 0 ? (
+            <fieldset className="flex flex-col gap-1" data-testid="impl-job-skills">
+              <legend className="text-sm font-medium">Beceriler (isteğe bağlı)</legend>
+              <p className="text-xs text-muted-foreground">
+                Onayladığın beceriler ajana salt okunur talimat olarak verilir; hiçbir yetki
+                tanımaz ve Kapı A&apos;da adı ve özetiyle listelenir.
+              </p>
+              {skills.map((skill) => {
+                const versionId = skill.current_version!.id;
+                return (
+                  <label key={skill.id} className="flex items-center gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      checked={selectedSkills.includes(versionId)}
+                      onChange={() => toggleSkill(versionId)}
+                      disabled={submitting}
+                    />
+                    {skill.name}
+                    <span className="text-xs text-muted-foreground">
+                      sürüm {skill.current_version!.version}
+                    </span>
+                  </label>
+                );
+              })}
+            </fieldset>
+          ) : null}
         </CardContent>
         <CardFooter className="flex justify-end gap-2">
           <Button type="button" variant="outline" onClick={onCancel} disabled={submitting}>

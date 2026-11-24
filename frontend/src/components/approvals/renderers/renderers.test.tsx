@@ -100,6 +100,27 @@ describe("consequences", () => {
 });
 
 describe("summaries", () => {
+  it("Gate A lists attached skills by name and hash (Phase 12 D17)", () => {
+    renderSummary(
+      approvalRequest({
+        tool_name: "harness_implement",
+        display_summary: implementSummary({
+          skills: [{ name: "acme-api-migration", version: 2, sha256: "d".repeat(64) }],
+        }),
+      }),
+    );
+    const list = screen.getByTestId("gate-a-skills");
+    expect(list).toHaveTextContent("acme-api-migration (sürüm 2)");
+    expect(list).toHaveTextContent(`sha256 ${"d".repeat(16)}…`);
+  });
+
+  it("Gate A without skills shows no skills row", () => {
+    renderSummary(
+      approvalRequest({ tool_name: "harness_implement", display_summary: implementSummary() }),
+    );
+    expect(screen.queryByTestId("gate-a-skills")).toBeNull();
+  });
+
   it("Gate B: first 20 changed files, a remainder count, tests and review", () => {
     const files = Array.from({ length: 25 }, (_, i) => `src/file${i}.ts`);
     renderSummary(

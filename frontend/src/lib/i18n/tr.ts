@@ -1117,6 +1117,8 @@ export const tr = {
       push_failed: "Gönderim (push) başarısız",
       no_changes: "Ajan hiçbir değişiklik üretmedi",
       secret_leak: "Değişikliklerde gizli bilgi sızıntısı tespit edildi",
+      skill_version_unavailable: "Eklenen beceri sürümü artık kullanılamıyor",
+      skill_path_in_commit: "Değişiklikler eklenen becerilerin dosyalarına dokundu",
     } satisfies Record<Exclude<ImplFailureReason, "">, string>,
     // The routed console (Phase 4 branch 5).
     console: {

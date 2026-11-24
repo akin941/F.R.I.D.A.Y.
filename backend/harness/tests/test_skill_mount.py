@@ -447,6 +447,6 @@ def test_without_skills_a_claude_skills_path_is_an_ordinary_change(
         implementation_execution.run_harness_implementation_job(job.id)
     job.refresh_from_db()
     assert job.status == HarnessImplementationJob.Status.PENDING_REVIEW
-    assert job.gate_a_request.payload["skills"] == []
+    assert "skills" not in job.gate_a_request.payload
     assert not (tmp_path / "w" / "skills").exists()
     assert InstructionSkill.objects.count() == 0
