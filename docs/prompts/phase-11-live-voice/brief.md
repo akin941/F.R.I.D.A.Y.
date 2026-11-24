@@ -2215,6 +2215,121 @@ a voice token reaching a forbidden surface); the HUD reads the new check names; 
 documented Mac warnings, the e2e is green in CI, and the go/no-go record
 is written with the Mac rows pending owner evaluation.
 
+## Branch 8 implementation notes (`chore/p11-closeout`, 2026-11-20)
+
+Implemented as scoped (§8), with these recorded choices:
+
+1. **`check_live_voice`** (`backend/ops/preflight.py`, section `live_voice`
+   after `control`; read-only, no model call, no `voice` import, no
+   contract changed — `lint-imports` 50 kept):
+   - `voice_live_channel`: the live URL table walked at runtime through the
+     new seam `drf_routes()`; the views whose authenticators accept
+     `node_voice` are compared **by dotted name** with the six D4 views
+     (`ops` may not import `voice`), plus the kind's channel mapping, that
+     it is not in `MINTABLE_PAT_KINDS`, that `NodeVoiceTokenAuthentication`
+     accepts it, and `VOICE_LIVE_TOKEN_TTL_SECONDS` in 1..3 600.
+   - `voice_live_policy`: `accounts.voice_live.model_verdicts` for the
+     installation owner (the endpoint's own function; a test spies on it).
+     **Reading:** "pass when one does" is judged on the evidence alone —
+     the `disabled` reason is ignored there — so a passing pair with the
+     setting off passes with the note "always-on stays off until the
+     setting is enabled"; with no passing pair it warns (setting off) or
+     fails (setting on).
+   - `voice_live_storm`: one `voice_live_storm:<device name>` warn row per
+     engaged mute, with its age; a pass row when none.
+   - `voice_live_selftest`: the last non-empty line of
+     `VOICE_LIVE_SELFTEST_RESULT_PATH` (new setting, `.env.example`) as a
+     `friday-voice/selftest/v1` document. Pass: `nightly`, `pass`, < 48 h.
+     Warn: unset, missing file, **stale** (≥ 48 h — a sleeping Mac, not a
+     broken gate) or a non-nightly (`ci`) line. Fail: `fail`/`error`, an
+     unparseable line or timestamp, a date > 5 min in the future.
+   - `friday_voice_conformance`: **`node/friday-voice/conformance.lock`**
+     (new, written by `friday-voice conformance --build`, checked by
+     `--check`: `<sha256>  <path>` lines over every case file, `frames.json`
+     and the 16 v1 schemas) hashed with hashlib against the checkout
+     (`PREFLIGHT_FRIDAY_VOICE_DIR`, default `<repo>/node/friday-voice`,
+     seam `friday_voice_dir()`); a changed, missing or unlocked file, a
+     missing or malformed lock (a `..` path included) fail; no checkout →
+     warn "conformance not checkable here (no node/friday-voice)".
+   - `node_voice_state`: per active node a `node_voice_state:<name>` row
+     (pass with the stored state, mode, age and counters; warn when never
+     reported) plus a summary warn when none reports; no node → warn.
+   Each row is guarded (a crash is its own `fail`). The HUD reads the new
+   names (`config/tests/test_preflight_hud_live_voice.py`: names only, no
+   detail, path or view name).
+2. **The e2e** (`backend/ops/tests/test_live_voice_e2e.py`). The server is
+   this test process's Django served by **uvicorn on a loopback port in a
+   thread** (`transaction=True`, so the child's requests see the fixtures;
+   the shared sync thread's DB connections are closed at teardown). The
+   chat SSE under ASGI is consumed whole by Django before sending (a
+   warning, not an error); the child sees the same events. The driver
+   (`friday-voice e2e`, `node/friday-voice/friday_voice/e2e.py`) runs in the
+   child's own environment via `uv run --no-sync --directory
+   node/friday-voice` (the backend imports nothing from it), plays the
+   Swift host with `HostCore` (paced playback; a 20 ms capture pump on the
+   real clock) and spawns `friday-voice run`; JSON lines carry the
+   observations and the two `await` points where the test acts as the
+   owner (kill switch, release on screen). Skipped where
+   `node/friday-voice/.venv` is absent, failed instead with
+   `FRIDAY_VOICE_E2E=1` (the CI step; the `friday-voice` job gains
+   Postgres and Redis services; `make friday-voice-e2e` locally).
+3. **Scenario readings.** (a) push-to-talk: two sentences → `t1s0`,
+   `t1s1` played and ended, one STT and two TTS `ModelUsage` rows, traces
+   `source=node`, the relayed state shows `armed_ptt` on the HUD.
+   (b) node action: the persisted user message carries
+   `channel=node_voice`, `intent=tool_request`, the `node_action` payload —
+   what `drafts.ts` renders as the card on `/chat/<id>`; nothing requested
+   or invoked. (c) **barge-in is the hotkey** (key-down while Friday
+   speaks, R3's fallback and D14's "an interruption too"): `friday-voice
+   run` loads the VAD only with the owner's pinned models, so the VAD
+   barge-in path stays branch 4's replay scripts; a `t1` utterance is
+   stopped, `t2s0` ends, a trace has `interrupted_at_ms`. (d) the
+   self-trigger clip needs a wake detector, so this one scenario runs
+   `python -m friday_voice.e2e_child` — `run`'s loop, HTTP client, thread
+   worker and **real** arming policy with the selftest's scripted detector
+   stack; the server genuinely permits always-on for the scripted model
+   (`VoiceWakeEvaluation` rows + the setting), the fake TTS returns the
+   clip, the fake STT hears what was spoken; result: the wake fired, two
+   STT calls, one user message, nothing spoken in reply,
+   `wake_discards_today` ≥ 1. (e) kill switch: the next turn's request is
+   refused (401), the child releases the mic (`credential_refused`), no STT
+   call; the driver then drops the host's link as the gateway's socket
+   close would, the indicator reads `off`; the HUD's mic state is `off`.
+   (f) storm with `VOICE_LIVE_STORM_MAX_STT_PER_MINUTE=2`: the third upload
+   engages the mute (423, `storm_muted`, `release_mic(storm)`); the owner's
+   `DELETE …/voice-mute` plus a host mute on → off cycle re-enable it and a
+   turn completes. The relay of the child's `state` to the HUD goes through
+   `nodes.events.handle_event` with the reference node's own frame (the
+   socket path is branch 7's test).
+4. **Docs.** `docs/runbooks/live-voice.md` (install, speech server, the
+   gate, storms and release, fail closed, nightly job, traces, preflight
+   rows, the e2e, troubleshooting); closeout notes in ADR-011, ADR-013 and
+   ADR-015; MASTER_PLAN §AA row 11 status; `build_self_sources --check`
+   current; this brief's table and go/no-go record.
+5. **Done when, checked here 2026-11-20:** preflight on the fake stack is
+   green apart from the three documented Mac warnings
+   (`test_a_fresh_stack_is_green_apart_from_the_documented_mac_warnings`);
+   the e2e is green (six scenarios, about 75 s); the go/no-go record is
+   written with the Mac rows pending owner evaluation.
+
+### Owner steps (pending) — `chore/p11-closeout`, recorded 2026-11-20
+
+1. Run the independent Sonnet 5 review of this branch and fix findings
+   until APPROVE (CLAUDE.md "Reviews").
+2. Confirm the readings in notes 1 (`voice_live_policy` passes on evidence
+   with the setting off; a stale or non-nightly selftest line warns), 2
+   (uvicorn in-process, the driver through `uv run --no-sync`) and 3
+   (hotkey barge-in in the e2e; the scripted-detector child for the
+   self-trigger scenario only).
+3. On the real stack: set `VOICE_LIVE_SELFTEST_RESULT_PATH` once the Mac's
+   nightly job (M3) writes its line, run `manage.py preflight` and record
+   the live-voice rows in the go/no-go record.
+4. **Pending owner evaluation (Mac session M1–M4):** the Swift voice host
+   must reproduce the e2e's frames, states and server rows (M1 contract
+   test 4); the MLX speech server (M2); seven green nights (M3); FAR, FRR,
+   latency, barge-in and CPU measurements (M4). Then, only on passing
+   rows, `VOICE_LIVE_ALWAYS_ON_ENABLED=true`.
+
 ## Branch table
 
 | # | Branch | Scope | Depends on | Status |
@@ -2227,7 +2342,7 @@ is written with the Mac rows pending owner evaluation.
 | 5 | `feat/p11-always-on` | Arming policy, `accounts.VoiceWakeEvaluation` gate (latest row, threshold match), trigger backstop, storms (client + `accounts.VoiceLiveMute` server backstop, 423 from the authenticator), silence close, fail closed, `/voice` live panel, ADR-015 note (d5, d3) | 3 (parallel with 4) | **implemented 2026-11-20** (server gate, backstops and the child's arming all green here; the gate stays closed until the owner records evaluations — pending owner evaluation (M4); the Swift host's mute/link/mode inputs are M1, deferred: Mac session; see "Branch 5 implementation notes") |
 | 6 | `feat/p11-wake-eval-harness` | CI self-trigger release gate, `selftest`, `wake-eval` FAR/FRR harness, `--from-report`, eval doc | 4, 5 | **implemented 2026-11-20** (`selftest --ci` a required CI step, green at residual 0.0 / 0.3 / 1.0 with the negative control biting; the node-voice chat-turn case green; `wake-eval` report round-trips through `--from-report` into a row the policy endpoint honours; the real detector ran here with the stand-in `hey_jarvis` head; `selftest --nightly`'s real audio path and the household/positive measurements: deferred: Mac session (M3, M4), pending owner evaluation; see "Branch 6 implementation notes") |
 | 7 | `feat/p11-hud-live-voice` | `voice.state` event kind (v2), node voice fields, HUD mic state, `node_voice` drafts on screen, ADR-013/015 notes | 1 (parallel with 3–6) | **implemented 2026-11-20** (server side, reference relay, 9 node conformance cases, HUD and chat surfaces; the Swift relay is M1, deferred: Mac session; see "Branch 7 implementation notes") |
-| 8 | `chore/p11-closeout` | Preflight live-voice checks, e2e, runbook, ADR notes, MASTER_PLAN row, `self_sources.json`, go/no-go record | 1–7 | planned |
+| 8 | `chore/p11-closeout` | Preflight live-voice checks, e2e, runbook, ADR notes, MASTER_PLAN row, `self_sources.json`, go/no-go record | 1–7 | **implemented 2026-11-20** (six `check_live_voice` rows, `conformance.lock`, the reference host + `friday-voice run` + live uvicorn e2e with six scenarios green here, runbook `live-voice.md`, ADR-011/013/015 notes, MASTER_PLAN row 11; the Mac rows of the go/no-go record pending owner evaluation; see "Branch 8 implementation notes") |
 | M1 | `feat/p11-node-voice-host` | Swift voice host: child spawn + stdio framing, AVAudioEngine voice processing (AEC), playback, menu-bar mic indicator, global hotkey, mute, voice token mint + hand-over, Microphone TCC, `voice.state` relay; conformance host family | 1, 2, 7 merged; Phase 9 M1–M3 | deferred: Mac session |
 | M2 | Speech server spike (MLX Whisper) | MLX Whisper behind an OpenAI-compatible server as a gateway row; Turkish WER spot check, latency; fallback recorded | 1 merged | deferred: Mac session (pending owner evaluation) |
 | M3 | Nightly self-trigger on the Mac | `friday-voice selftest --nightly` with real models, speakers and AEC; launchd job | M1, M2; 6 merged | deferred: Mac session (pending owner evaluation) |
@@ -2431,9 +2546,11 @@ met".
 | FRR ≤ 10 % | M4 item 2 | pending owner evaluation (Mac session) |
 | Latency p50 ≤ 1.5 s, p95 ≤ 2.5 s (local) | M4 item 3 | pending owner evaluation (Mac session) |
 | Replay pipeline overhead within baseline | Branch 3 replay check | baseline recorded 2026-11-20 (overhead p50 200 ms on the fixture set); `friday-voice replay --check` in CI |
-| `friday-voice/v1` conformance, reference host and child | Branch 2 | pending (branch 2) |
+| `friday-voice/v1` conformance, reference host and child | Branch 2 | **green 2026-11-20** (`friday-voice conformance` all-pass in CI; files locked by `conformance.lock`, checked by `--check` and the `friday_voice_conformance` preflight row) |
 | Swift host conformance | M1 | pending owner evaluation (Mac session) |
-| Always-on gate refuses without evidence | Branch 5 tests + `voice_live_policy` preflight | pending (branch 5) |
+| Always-on gate refuses without evidence | Branch 5 tests + `voice_live_policy` preflight | **green 2026-11-20** (branch 5 tests; `voice_live_policy` warns without evidence and fails when the setting is on without a passing latest pair) |
+| Live-voice e2e (reference host + `friday-voice run` + live server) | Closeout e2e | **green 2026-11-20** (`backend/ops/tests/test_live_voice_e2e.py`, six scenarios; the last step of the `friday-voice` CI job) |
+| Preflight on the fake stack | Closeout | **green 2026-11-20** apart from the documented Mac warnings (`voice_live_policy`, `voice_live_selftest`, `node_voice_state`) |
 
 Always-on stays off (the D11 gate closed) until the FAR, FRR and
 nightly rows pass; push-to-talk through the node is usable as soon as

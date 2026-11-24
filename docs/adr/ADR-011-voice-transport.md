@@ -130,3 +130,20 @@ Phase 11 branch 1 (`feat/p11-node-voice-channel`,
   gateway calls on `personal_data_allowed` providers with one `ModelUsage`
   each; no audio is persisted; every draft is still a card clicked on
   screen.
+
+## Implementation note — Phase 11 closeout (`chore/p11-closeout`, 2026-11-20)
+
+The amendment's surface list is now checked at runtime, not only in tests:
+the `voice_live_channel` preflight row walks the live URL table and fails
+when the set of DRF views whose authenticators accept `node_voice` differs
+from the six D4 views, when the kind becomes mintable through
+`/auth/tokens` or maps to another channel, or when
+`VOICE_LIVE_TOKEN_TTL_SECONDS` leaves 1..3 600. The closeout e2e
+(`backend/ops/tests/test_live_voice_e2e.py`) runs the transport end to end
+over real HTTP — the reference host, a real `friday-voice run` child and
+this repository's Django on a loopback uvicorn with FakeAdapter and the
+fake speech provider: a push-to-talk turn is one `voice.stt` and one
+`voice.tts` `ModelUsage` per sentence, the user message is
+`channel=node_voice`, `input_mode=voice`, every trace row `source=node`,
+and no audio is stored. Decisions 1–6 (as amended) are unchanged. Runbook:
+`docs/runbooks/live-voice.md`.

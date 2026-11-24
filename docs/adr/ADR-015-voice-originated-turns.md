@@ -264,3 +264,30 @@ the child's own `WakeGate` and writes a report of hashes and numbers only;
 inconsistent report and turns a valid one into exactly one
 `accounts.VoiceWakeEvaluation` row that the policy endpoint judges. No
 decision changes.
+
+## Implementation note — Phase 11 closeout (`chore/p11-closeout`, 2026-11-20)
+
+Decisions 4–6 and the d3 gate are complete server and child side and now
+visible in operations:
+- `voice_live_policy` (preflight) judges D11 with the policy endpoint's own
+  function (`accounts.voice_live.model_verdicts`: the latest row per model
+  and kind, the pair at the same threshold): `warn` while no model's latest
+  household + positives pair passes (pending owner evaluation), `pass` when
+  one does, `fail` when `VOICE_LIVE_ALWAYS_ON_ENABLED` is on without one —
+  a deployment cannot claim always-on without evidence.
+- `voice_live_storm` warns on an engaged `VoiceLiveMute` with its age;
+  `voice_live_selftest` reads the nightly result line
+  (`VOICE_LIVE_SELFTEST_RESULT_PATH`): pass green and < 48 h old, warn when
+  missing or stale, fail when the last night failed.
+- The closeout e2e, over real HTTP with a real child process: the
+  self-trigger clip at AEC residual 1.0 (always-on genuinely armed by the
+  server for the scripted detector's model) wakes the detector, is uploaded
+  as a barge-in and discarded by the content rule — one chat turn, nothing
+  spoken in reply; a storm engages the server mute (423), the child shows
+  `storm_muted`, and only the owner's release on screen plus a local mute
+  cycle re-enable it; a voice turn naming a node action is a card on
+  `/chat/<id>` and nothing else.
+
+The real-world evidence — FAR on 24 h of household audio, FRR, seven green
+nights of the real self-trigger, latency and barge-in measurements — is
+pending owner evaluation (brief M3, M4). No decision changes.
