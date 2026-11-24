@@ -1,7 +1,9 @@
-"""Voice API (Phase 6 branch 2, brief D1/D2/D9, ADR-011).
+"""Voice API (Phase 6 branch 2, brief D1/D2/D9, ADR-011; Phase 11 D4/D5).
 
-Both endpoints are the owner's trusted-device web session only
-(`IsWebChannel` + `IsOwner`). Authentication classes are injected by the
+The three endpoints are the owner's trusted-device web session or, since
+Phase 11, the node voice credential (`IsWebOrNodeVoiceChannel` +
+`IsOwner`); `POST /voice/live/sessions` is the node voice credential only
+(`IsNodeVoiceChannel` + `IsOwner`). Authentication classes are injected by the
 composition root (`config/urls.py` -> `voice.urls.build_urlpatterns`):
 `voice` may not import `accounts` (D11), yet a PAT must reach these views
 to be refused with a deliberate 403 (`channel_forbidden`, or
@@ -10,11 +12,21 @@ to be refused with a deliberate 403 (`channel_forbidden`, or
 
 The conversation is looked up through `scoped_for_actor` (`for_actor()`):
 another workspace's conversation is a 404 before any audio is read or any
-model is called.
+model is called. Over the node voice channel, a conversation not opened via
+`node_voice` is the same 404 (Phase 11 D4: the token reaches only what a
+live session opened).
 """
 
+import uuid
+from datetime import timedelta
+
+from django.conf import settings
 from django.core.files.uploadhandler import MemoryFileUploadHandler
+from django.db import transaction
+from django.db.models import Max
+from django.db.models.functions import Coalesce
 from django.http import HttpResponse
+from django.utils import timezone
 from rest_framework import status
 from rest_framework.parsers import JSONParser, MultiPartParser
 from rest_framework.permissions import IsAuthenticated
@@ -22,9 +34,10 @@ from rest_framework.renderers import JSONRenderer
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from assistant.models import Conversation
-from core.channels import scoped_for_actor
-from core.permissions import IsOwner, IsWebChannel
+from assistant.models import Conversation, Message
+from assistant.services import create_conversation
+from core.channels import CHANNEL_NODE_VOICE, request_channel, scoped_for_actor
+from core.permissions import IsNodeVoiceChannel, IsOwner, IsWebOrNodeVoiceChannel
 from core.throttling import ScopedRateThrottle
 from core.tracing import request_trace_id
 from core.uploads import MaxSizeUploadHandler
@@ -42,6 +55,7 @@ from voice.services import (
     transcribe_utterance,
     usage_receipt,
 )
+from workspaces.models import Workspace
 
 
 def _error(exc):
@@ -49,7 +63,16 @@ def _error(exc):
 
 
 def _conversation(request, conversation_id):
-    return scoped_for_actor(request, Conversation.objects).filter(id=conversation_id).first()
+    conversation = (
+        scoped_for_actor(request, Conversation.objects).filter(id=conversation_id).first()
+    )
+    if (
+        conversation is not None
+        and request_channel(request) == CHANNEL_NODE_VOICE
+        and conversation.opened_via != Message.Channel.NODE_VOICE
+    ):
+        return None
+    return conversation
 
 
 def _content_length(request):
@@ -60,7 +83,7 @@ def _content_length(request):
 
 
 class _VoiceView(APIView):
-    permission_classes = [IsAuthenticated, IsWebChannel, IsOwner]
+    permission_classes = [IsAuthenticated, IsWebOrNodeVoiceChannel, IsOwner]
     throttle_classes = [ScopedRateThrottle]
 
     def perform_content_negotiation(self, request, force=False):
@@ -159,5 +182,61 @@ class UsageReceiptView(_VoiceView):
         trace = data.get("trace")
         body = usage_receipt(conversation=conversation, trace_id=str(trace) if trace else "")
         response = Response(body, status=status.HTTP_200_OK)
+        response["Cache-Control"] = "no-store"
+        return response
+
+
+class LiveSessionCreateView(_VoiceView):
+    """`POST /api/v1/voice/live/sessions` -> `{conversation_id, session_id,
+    opened_at}` (Phase 11 D5). Node voice credential only. Reuses the most
+    recent conversation of the bound workspace opened via `node_voice`
+    whose last activity (last message, else its creation) is younger than
+    VOICE_LIVE_CONVERSATION_REUSE_MINUTES -- an empty one included, never
+    duplicated -- else opens one (`create_conversation(channel=
+    "node_voice")`, audited by `assistant`). A conversation opened via any
+    other channel is never reused. `session_id` is a fresh UUID the child
+    puts on every trace of the session; no session row exists. Throttled
+    (`node_voice_session`) so a misbehaving child cannot mint empty
+    conversations in a loop. No model call."""
+
+    permission_classes = [IsAuthenticated, IsNodeVoiceChannel, IsOwner]
+    parser_classes = [JSONParser]
+    throttle_scope = "node_voice_session"
+
+    def post(self, request):
+        now = timezone.now()
+        cutoff = now - timedelta(minutes=settings.VOICE_LIVE_CONVERSATION_REUSE_MINUTES)
+        workspace = scoped_for_actor(request, Workspace.objects).first()
+        if workspace is None:
+            return Response(status=status.HTTP_404_NOT_FOUND)
+        with transaction.atomic():
+            # Serializes two concurrent opens of the same workspace, so a
+            # double request cannot create two live conversations. (Locked
+            # by pk: `for_actor` is DISTINCT, which FOR UPDATE refuses.)
+            workspace = Workspace.objects.select_for_update().get(pk=workspace.pk)
+            conversation = (
+                scoped_for_actor(request, Conversation.objects, workspace=workspace)
+                .filter(opened_via=Message.Channel.NODE_VOICE)
+                .annotate(last_activity=Coalesce(Max("messages__created_at"), "created_at"))
+                .filter(last_activity__gte=cutoff)
+                .order_by("-last_activity", "-id")
+                .first()
+            )
+            if conversation is None:
+                local = timezone.localtime(now)
+                conversation = create_conversation(
+                    workspace=workspace,
+                    actor=request.user,
+                    title=f"Canlı ses — {local:%Y-%m-%d %H:%M}",
+                    channel=Message.Channel.NODE_VOICE,
+                )
+        response = Response(
+            {
+                "conversation_id": str(conversation.id),
+                "session_id": str(uuid.uuid4()),
+                "opened_at": now,
+            },
+            status=status.HTTP_201_CREATED,
+        )
         response["Cache-Control"] = "no-store"
         return response

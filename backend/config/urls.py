@@ -4,7 +4,11 @@ from django.http import JsonResponse
 from django.urls import include, path
 from rest_framework.settings import api_settings
 
-from accounts.authentication import HookTokenAuthentication, PersonalAccessTokenAuthentication
+from accounts.authentication import (
+    HookTokenAuthentication,
+    NodeVoiceTokenAuthentication,
+    PersonalAccessTokenAuthentication,
+)
 from config.activity import ActivitySummaryView
 from deploys.urls import build_urlpatterns as deploy_urlpatterns
 from hud.urls import build_urlpatterns as hud_urlpatterns
@@ -62,16 +66,21 @@ urlpatterns = [
         ),
     ),
     # Phase 6 branch 2: same injection for `voice` (D11: it may not import
-    # `accounts`); the PAT authenticator is there only so a PAT gets the
-    # views' deliberate 403 -- both endpoints are web-session only.
+    # `accounts`). Phase 11 D4: `NodeVoiceTokenAuthentication` replaces the
+    # base PAT authenticator, so the node voice credential reaches the
+    # voice routes while a `cli` PAT still authenticates as `cli` and gets
+    # the views' deliberate 403 (the permission class) and `openai`/`hook`
+    # tokens their `token_kind_forbidden`. `node_voice_permissions` is the
+    # seam for branch 5's `accounts` guards (empty here).
     path(
         "api/v1/",
         include(
             voice_urlpatterns(
                 authentication_classes=[
-                    PersonalAccessTokenAuthentication,
+                    NodeVoiceTokenAuthentication,
                     *api_settings.DEFAULT_AUTHENTICATION_CLASSES,
-                ]
+                ],
+                node_voice_permissions=(),
             )
         ),
     ),

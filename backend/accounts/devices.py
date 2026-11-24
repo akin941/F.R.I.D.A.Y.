@@ -59,11 +59,13 @@ from rest_framework_simplejwt.tokens import RefreshToken
 from accounts.authentication import (
     AUTH_FAILURE_AUDIT_LIMIT,
     AUTH_FAILURE_AUDIT_WINDOW_SECONDS,
+    TOKEN_PREFIX,
     hash_token,
 )
 from accounts.models import (
     DevicePairingCode,
     NodeKillSwitch,
+    PersonalAccessToken,
     RemoteAccessKey,
     TrustedDevice,
     User,
@@ -612,12 +614,24 @@ def start_device_session(*, raw_secret, client_ip=None):
 # --- revocation ---
 
 
+def _revoke_node_voice_tokens(queryset, now):
+    """Soft-revoke the live `node_voice` tokens in `queryset` at once, with
+    no rotation grace (Phase 11 D3). Returns how many were revoked."""
+    return queryset.filter(
+        kind=PersonalAccessToken.Kind.NODE_VOICE, revoked_at__isnull=True
+    ).update(revoked_at=now, updated_at=now)
+
+
 def _revoke(device, reason, now):
     if device.revoked_at is not None:
         return False
     device.revoked_at = now
     device.revoke_reason = reason
     device.save(update_fields=["revoked_at", "revoke_reason", "updated_at"])
+    # Phase 11 D3: the device's voice credentials die with it (the
+    # authenticator's per-request device re-check already refuses them;
+    # this makes the token rows say so too).
+    _revoke_node_voice_tokens(PersonalAccessToken.objects.filter(node_device=device), now)
     # Fan-out to the node gateway (Phase 9 D1/D6), once the revoke is
     # committed; best effort, never raises (the heartbeat re-check is the
     # guarantee).
@@ -830,6 +844,87 @@ def rotate_node_secret(*, raw_secret, client_ip=None, now=None):
     return locked, raw_new
 
 
+# --- node voice credential (Phase 11 D3) ---
+
+
+@dataclass(frozen=True)
+class NodeVoiceToken:
+    """A freshly minted `node_voice` token. `raw` exists only here and in
+    the mint response; `previous_valid_until` is the shortened expiry of
+    the token(s) it supersedes (None when there was none)."""
+
+    token: PersonalAccessToken
+    raw: str
+    previous_valid_until: object = None
+
+
+class NodeVoiceMintRefused(DeviceTrustError):
+    """The node may not mint a voice credential (no personal workspace)."""
+
+
+def mint_node_voice_token(*, device, now=None):
+    """Mint the node voice credential of `device` (`POST
+    /api/v1/auth/nodes/voice-token`, node secret only). The token is bound
+    to the owner's personal workspace and to `device`, and expires after
+    VOICE_LIVE_TOKEN_TTL_SECONDS.
+
+    At most one CURRENT token per device: in the same transaction every
+    other live token of the device has its `expires_at` shortened to
+    `min(expires_at, now + VOICE_LIVE_ROTATION_GRACE_SECONDS)` -- not
+    revoked -- so a request already in flight with the old token when the
+    host rotates still succeeds. Audited `node_voice_token.minted` (device
+    and token id; never the token)."""
+    from workspaces.models import Workspace
+
+    now = now or timezone.now()
+    with transaction.atomic():
+        locked = (
+            TrustedDevice.objects.select_for_update()
+            .select_related("user")
+            .filter(pk=device.pk, kind=TrustedDevice.Kind.NODE)
+            .first()
+        )
+        if locked is None or node_device_refusal(locked, now) is not None:
+            raise NodeCredentialRejected("refused")
+        workspace = Workspace.objects.filter(
+            owner=locked.user, type=Workspace.Type.PERSONAL
+        ).first()
+        if workspace is None:
+            raise NodeVoiceMintRefused("The node's owner has no personal workspace.")
+        grace_until = now + timedelta(seconds=settings.VOICE_LIVE_ROTATION_GRACE_SECONDS)
+        shortened = PersonalAccessToken.objects.filter(
+            node_device=locked,
+            kind=PersonalAccessToken.Kind.NODE_VOICE,
+            revoked_at__isnull=True,
+            expires_at__gt=grace_until,
+        ).update(expires_at=grace_until, updated_at=now)
+        raw = TOKEN_PREFIX + secrets.token_urlsafe(32)
+        token = PersonalAccessToken.objects.create(
+            workspace=workspace,
+            user=locked.user,
+            name=f"node voice ({locked.name})"[:255],
+            kind=PersonalAccessToken.Kind.NODE_VOICE,
+            node_device=locked,
+            token_hash=hash_token(raw),
+            expires_at=now + timedelta(seconds=settings.VOICE_LIVE_TOKEN_TTL_SECONDS),
+        )
+        record_audit(
+            action="node_voice_token.minted",
+            actor=locked.user,
+            workspace=workspace,
+            resource=token,
+            metadata={
+                "device_id": str(locked.pk),
+                "token_id": str(token.pk),
+                "expires_at": token.expires_at.isoformat(),
+                "previous_shortened": shortened,
+            },
+        )
+    return NodeVoiceToken(
+        token=token, raw=raw, previous_valid_until=grace_until if shortened else None
+    )
+
+
 @transaction.atomic
 def engage_node_kill_switch(*, owner, via, device=None):
     """Engage the owner's node kill switch: every node authentication of
@@ -839,6 +934,9 @@ def engage_node_kill_switch(*, owner, via, device=None):
     re-announces. Returns the row."""
     _require_owner(owner)
     switch, _ = NodeKillSwitch.objects.select_for_update().get_or_create(user=owner)
+    # Phase 11 D3: every node voice credential of the owner is revoked, no
+    # grace (the host mints a fresh one once the switch is released).
+    _revoke_node_voice_tokens(PersonalAccessToken.objects.filter(user=owner), timezone.now())
     if switch.engaged_at is None:
         switch.engaged_at = timezone.now()
         switch.engaged_via = via

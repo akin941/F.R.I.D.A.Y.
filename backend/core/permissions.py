@@ -2,7 +2,7 @@
 
 from rest_framework.permissions import BasePermission
 
-from core.channels import CHANNEL_NODE, CHANNEL_WEB, request_channel
+from core.channels import CHANNEL_NODE, CHANNEL_NODE_VOICE, CHANNEL_WEB, request_channel
 
 
 class IsWebChannel(BasePermission):
@@ -30,6 +30,30 @@ class IsNodeChannel(BasePermission):
 
     def has_permission(self, request, view):
         return request_channel(request) == CHANNEL_NODE
+
+
+class IsWebOrNodeVoiceChannel(BasePermission):
+    """The owner's web session or the node voice credential (Phase 11 D4):
+    the three voice endpoints. Every other low-trust channel (a `cli` PAT,
+    the facade, a hook token, a node secret) keeps the deliberate 403."""
+
+    message = "This endpoint only accepts a web session or the node voice credential."
+    code = "channel_forbidden"
+
+    def has_permission(self, request, view):
+        return request_channel(request) in (CHANNEL_WEB, CHANNEL_NODE_VOICE)
+
+
+class IsNodeVoiceChannel(BasePermission):
+    """Only the node voice credential (`request_channel` ==
+    CHANNEL_NODE_VOICE, Phase 11 D4/D5): the live-sessions endpoint and the
+    voice-policy read, which exist for the node's voice child alone."""
+
+    message = "This endpoint only accepts the node voice credential."
+    code = "channel_forbidden"
+
+    def has_permission(self, request, view):
+        return request_channel(request) == CHANNEL_NODE_VOICE
 
 
 class IsOwner(BasePermission):

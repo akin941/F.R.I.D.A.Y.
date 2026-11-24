@@ -21,6 +21,8 @@ class ConversationSerializer(serializers.ModelSerializer):
             "private",
             "personal_data",
             "origin_channel",
+            # Phase 11 D5: which non-web channel opened it (read-only).
+            "opened_via",
         ]
         read_only_fields = fields
 

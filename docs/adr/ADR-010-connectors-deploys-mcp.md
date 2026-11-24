@@ -202,3 +202,34 @@ git push/merge). Four things in the kernel as it stood did not fit:
   host; deploys wait while the runner is offline.
 - The external-installation connector ships as a `blocked` manifest that can never bind
   (O-5 unchanged, ADR-006: Friday is only an MCP client of the installation).
+
+## Amendment 2026-11 — reads over the node voice channel
+
+Phase 11 branch 1 (`feat/p11-node-voice-channel`,
+`docs/prompts/phase-11-live-voice/brief.md` D4). Decision 4's "`firm`
+reads run over web and CLI, `personal` reads over web only" becomes:
+`firm` reads over web, CLI **and `node_voice`**; `personal` reads over web
+**and `node_voice`** (`tools.registry.READ_CHANNELS`, changed in the same
+commit as this amendment).
+
+- **Why.** "Hey Friday, bugün ne var?" must be able to read the calendar.
+  The `node_voice` credential (ADR-011 amendment 2026-11) descends from the
+  same owner-paired device trust as a web session (a `kind=node`
+  `TrustedDevice`), lives at most an hour (15 minutes by default), is bound
+  to the owner's personal workspace, and is re-checked against its node
+  device on every request; the read is spoken on the owner's own Mac,
+  exactly as a web voice turn's is.
+- **Accepted risk.** Someone in the room can ask Friday to read personal
+  data aloud. This is ADR-015 decision 7's accepted risk (no speaker
+  verification), unchanged in kind; the owner narrows a single read by its
+  manifest's `read_channels` or a `ReadToolSpec`'s `channels`.
+- **Unchanged.** The two consumers keep their checks: a manifest's
+  `read_channels` must stay a subset of the class's set
+  (`connectors/manifest.py`), and a call is refused with
+  `channel_forbidden` when the connector's own `read_channels` (or the
+  spec's `channels`) omit the channel, or when a call classified personal
+  arrives off the personal set (`connectors/reads.py`). The shipped
+  manifests keep `read_channels` without `node_voice` until the owner opts
+  a connector in (a manifest edit under the MCP governance process).
+  `cli` (for personal reads), `hook`, `openai`, `telegram` and `node` stay
+  refused. Nothing in the gate-class / confirm-class split moves.

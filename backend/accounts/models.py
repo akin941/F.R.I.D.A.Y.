@@ -109,6 +109,15 @@ class PersonalAccessToken(WorkspaceScopedModel, TimestampedModel):
         # their personal workspace (the binding authenticates the principal;
         # D4 mapping rules alone decide where each event lands).
         HOOK = "hook"
+        # Phase 11 D3: the node voice child's short-lived credential. Minted
+        # ONLY by `POST /api/v1/auth/nodes/voice-token` with a node secret
+        # (never by the generic mint, see MINTABLE_PAT_KINDS), bound to the
+        # owner's personal workspace and to the `kind=node` TrustedDevice
+        # that minted it (`node_device`); every request re-checks that
+        # device (`NodeVoiceTokenAuthentication`). Authenticates as
+        # CHANNEL_NODE_VOICE on the chat turn of live conversations and the
+        # voice endpoints only.
+        NODE_VOICE = "node_voice"
 
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="personal_access_tokens"
@@ -125,12 +134,44 @@ class PersonalAccessToken(WorkspaceScopedModel, TimestampedModel):
     # rejects the token from this moment on. Tokens minted before expiry
     # existed were backfilled to migration time + 30 days.
     expires_at = models.DateTimeField(default=default_pat_expiry)
+    # Phase 11 D3: the node device a `node_voice` token descends from; set
+    # iff kind is `node_voice` (check constraint). RESTRICT rather than
+    # PROTECT: a device is never deleted on its own (soft revoke), and
+    # RESTRICT still lets a whole user's cascade (user -> devices, user ->
+    # tokens) go through, which PROTECT would block unconditionally.
+    node_device = models.ForeignKey(
+        "accounts.TrustedDevice",
+        null=True,
+        blank=True,
+        on_delete=models.RESTRICT,
+        related_name="voice_tokens",
+    )
 
     class Meta:
         ordering = ["-created_at"]
+        constraints = [
+            models.CheckConstraint(
+                condition=(
+                    models.Q(kind="node_voice", node_device__isnull=False)
+                    | (~models.Q(kind="node_voice") & models.Q(node_device__isnull=True))
+                ),
+                name="accounts_pat_node_device_iff_node_voice",
+            )
+        ]
 
     def __str__(self):
         return f"{self.name} ({self.user_id})"
+
+
+# Phase 11 D3: the kinds the generic `POST /api/v1/auth/tokens` (and the
+# dev-PAT command) may mint. `node_voice` is minted only by a node secret,
+# so a web-session request for it is a 400 `invalid_choice`, never a
+# device-less row.
+MINTABLE_PAT_KINDS = (
+    PersonalAccessToken.Kind.CLI,
+    PersonalAccessToken.Kind.OPENAI,
+    PersonalAccessToken.Kind.HOOK,
+)
 
 
 # --- Device trust (Phase 4 branch 2, ADR-008 decision 2) ---

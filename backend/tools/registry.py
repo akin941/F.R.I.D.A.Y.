@@ -20,7 +20,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
-from core.channels import CHANNEL_CLI, CHANNEL_WEB
+from core.channels import CHANNEL_CLI, CHANNEL_NODE_VOICE, CHANNEL_WEB
 
 
 class ToolDecisionForbidden(Exception):
@@ -217,10 +217,14 @@ DATA_CLASSES = frozenset({DATA_CLASS_FIRM, DATA_CLASS_PERSONAL})
 # Channels a read may ever run over (brief Q8): `firm` reads web + CLI,
 # `personal` reads web only; Telegram and the OpenAI-compatible facade never.
 # Checked at registration, so a manifest cannot widen it -- only a change
-# here (and to ADR-010) can.
+# here (and to ADR-010) can. Phase 11 D4 (ADR-010 amendment 2026-11, the
+# accepted risk of ADR-015 decision 7): both classes also over the node
+# voice channel ("Hey Friday, bugün ne var?"); a manifest or `ReadToolSpec`
+# that omits `node_voice` still refuses it. `cli` (personal), `hook`,
+# `openai`, `telegram` and `node` stay refused.
 READ_CHANNELS = {
-    DATA_CLASS_FIRM: frozenset({CHANNEL_WEB, CHANNEL_CLI}),
-    DATA_CLASS_PERSONAL: frozenset({CHANNEL_WEB}),
+    DATA_CLASS_FIRM: frozenset({CHANNEL_WEB, CHANNEL_CLI, CHANNEL_NODE_VOICE}),
+    DATA_CLASS_PERSONAL: frozenset({CHANNEL_WEB, CHANNEL_NODE_VOICE}),
 }
 
 
