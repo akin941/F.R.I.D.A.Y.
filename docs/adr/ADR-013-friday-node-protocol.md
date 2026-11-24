@@ -543,3 +543,41 @@ how the child honours them.
   anywhere in the repository. The child holds no provider key and never
   the node secret: only the short-lived `node_voice` token, received on
   stdin (Phase 11 D3).
+
+## Implementation notes — the `voice.state` event kind (Phase 11 branch 7, 2026-11-20)
+
+- **One new node → server event kind, v2 only.** `nodes.protocol.messages`
+  gains `VOICE_STATE_KIND = "voice.state"` and `EVENT_KINDS_BY_VERSION`;
+  `EVENT_KINDS` (v1) is unchanged, so the v1 `event` schema keeps its two
+  kinds and a `voice.state` frame on a v1 session is a schema error (a frame
+  error). The server → node set is untouched (`SERVER_TO_NODE_V2 is
+  SERVER_TO_NODE`): nothing the server sends can arm, mute or change the
+  node's mic (decision 5 holds).
+- **Per-kind item schema.** The v2 `event` schema keeps its opaque per-kind
+  hole for the other kinds and adds `$defs.voice_state_item`, applied by one
+  `allOf: [{if: kind == "voice.state", then: batch = exactly one item,
+  spooled = false}]`. The item is closed and every field bounded and
+  enumerated: `state` (the nine `friday-voice/v1` child states), `mode`
+  (`off` / `push_to_talk` / `always_on`), `session_open`, three daily
+  counters (0–100 000) and `at` (node clock, Unix seconds, ≤ 2100). No
+  audio, no text; the policy-shaped guard walks it. The schema meta-tests
+  now walk `$defs` and conditional branches, and a `$ref` must be local.
+- **Relay rules (the reference node, and the Swift host in Mac session
+  M1).** Validate the item before sending (an unknown state, an
+  out-of-range counter or an extra key is dropped and counted); never on
+  v1; only after `hello.ack`; at most one per second, coalesced with the
+  latest state winning; re-sent with every heartbeat (so a state older
+  than two heartbeats means the node stopped reporting) and after a
+  reconnect; never spooled; never waiting for its `event.ack`.
+- **Server.** `nodes.events.apply_voice_state` stores the item on the
+  `Node` row (`voice_*` fields, migration `nodes.0004`) with the server's
+  receive time as `voice_state_at`, at most once per node per second (a
+  frame inside that second is acked `duplicate` and writes nothing). The
+  kind takes no sink (`SINK_KINDS` unchanged) and never reaches the invoke
+  bus. `hud` reads it through `nodes.selectors.node_health` (no `voice`
+  import, no import contract changed).
+- **Conformance.** Nine cases (`v1_voice_state_never_sent`,
+  `v2_voice_state_*`) use a new hook op `{"op": "voice_state", "state"}`
+  (the scripted child state) and the report key `voice_states_dropped`;
+  negative-control tests prove that a node which relays unchecked items,
+  sends the kind on v1 or does not coalesce fails them.
