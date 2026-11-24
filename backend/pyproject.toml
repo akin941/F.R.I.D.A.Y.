@@ -522,6 +522,8 @@ source_modules = ["accounts", "workspaces", "assistant", "memory", "knowledge", 
 forbidden_modules = ["connectors", "deploys"]
 ignore_imports = [
     "proactive.tests.** -> connectors.**",
+    # The alias walk reads every connector manifest (Phase 12 branch 3).
+    "assistant.tests.** -> connectors.**",
 ]
 
 # harness may import connectors (the `github_open_pr` gate, PR/CI reads)

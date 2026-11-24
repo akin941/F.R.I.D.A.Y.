@@ -23,7 +23,7 @@ from rest_framework.views import APIView
 
 from assistant import wake_routes
 from assistant.models import WakeRouteAlias
-from assistant.services import (
+from assistant.wake_aliases import (
     WakeAliasError,
     WakeAliasPermissionDenied,
     create_wake_alias,
