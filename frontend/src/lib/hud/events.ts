@@ -165,6 +165,24 @@ export interface HudTerminal {
 
 export const EMPTY_TERMINAL: HudTerminal = { items: [], running_count: 0 };
 
+// Phase 12 D5/D20: unread proactive notices -- count and five titles, no body.
+export interface HudNotices {
+  unread: number;
+  latest: { title: string; link: string }[];
+}
+
+export const EMPTY_NOTICES: HudNotices = { unread: 0, latest: [] };
+
+// Phase 12 D7: the newest morning digest's card (null: none yet).
+export interface HudDigest {
+  id: string;
+  created_at: string | null;
+  spoken_text: string;
+  opened: boolean;
+  spoken: boolean;
+  speak_on_open: boolean;
+}
+
 export interface HudData {
   approvals: HudApprovals;
   tasks: HudTasks;
@@ -172,6 +190,9 @@ export interface HudData {
   health: HudHealth;
   /** Optional: absent from a backend predating Phase 10. */
   terminal?: HudTerminal;
+  /** Optional: absent from a backend predating Phase 12 branch 2. */
+  notices?: HudNotices;
+  digest?: HudDigest | null;
 }
 
 export const HUD_SECTIONS = ["approvals", "tasks", "cost", "health"] as const;
@@ -215,6 +236,11 @@ export function parseHudFrame(raw: string): HudFrame | null {
       if (isObject(payload[name])) delta[name] = payload[name];
     }
     if (isObject(payload.terminal)) delta.terminal = payload.terminal;
+    if (isObject(payload.notices)) delta.notices = payload.notices;
+    // The digest section may turn null (no digest): `in`, not isObject.
+    if ("digest" in payload && (payload.digest === null || isObject(payload.digest))) {
+      delta.digest = payload.digest;
+    }
     return delta as HudFrame;
   }
   if (payload.type === "end") {
@@ -232,6 +258,8 @@ export function applyHudFrame(data: HudData | null, frame: HudFrame): HudData | 
       cost: frame.cost,
       health: frame.health,
       terminal: isObject(frame.terminal) ? frame.terminal : EMPTY_TERMINAL,
+      notices: isObject(frame.notices) ? frame.notices : EMPTY_NOTICES,
+      digest: isObject(frame.digest) ? frame.digest : null,
     };
   }
   if (frame.type === "delta") {
@@ -242,6 +270,8 @@ export function applyHudFrame(data: HudData | null, frame: HudFrame): HudData | 
       cost: frame.cost ?? data.cost,
       health: frame.health ?? data.health,
       terminal: frame.terminal ?? data.terminal,
+      notices: frame.notices ?? data.notices,
+      digest: frame.digest !== undefined ? frame.digest : data.digest,
     };
   }
   return data;
