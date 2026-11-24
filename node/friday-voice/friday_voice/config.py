@@ -39,6 +39,9 @@ BARGE_IN_VAD = 700
 BARGE_IN_MIN_MS = 250
 BARGE_IN_AEC_GUARD_MS = 300
 BARGE_IN_PREROLL_MS = 300
+# Onset (the 250 ms persistence met) -> `stop_playback` sent, in the replay
+# harness on the manual clock (D9 budget; the host's own stop is Mac M4).
+BARGE_IN_STOP_BUDGET_MS = 100
 
 # --- self-trigger (D10, branch 4) ---
 SELF_TRIGGER_MS = 1_500

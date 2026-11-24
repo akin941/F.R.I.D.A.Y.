@@ -15,8 +15,10 @@ Scripts:
 - `revoked`: tokens refused with 401 (a rotation test revokes the old one).
 
 It records every request (endpoint, token, trace id, trigger, body fields,
-the uploaded WAV's PCM) and every chat stream closed before its end
-(`aborts`), so the tests can assert what left the child and when.
+the uploaded WAV's PCM), every chat stream closed before its end
+(`aborts`) and every synthesis cancelled while in flight (`speech_aborts`,
+`(trace_id, sentence index)`; barge-in, D9), so the tests can assert what
+left the child and when.
 """
 
 import io
@@ -71,6 +73,7 @@ class FakeFriday:
         self.latencies = {**DEFAULT_LATENCIES, **(latencies or {})}
         self.requests = []
         self.aborts = 0
+        self.speech_aborts = []
         self.revoked = set()
         self.policy = {"always_on_permitted": False, "reasons": ["disabled"]}
         self._failures = {}
@@ -183,6 +186,10 @@ class FakeFriday:
             timings=dict(timings or {}),
         )
         return Reply(tone_wav(text), generation, latency)
+
+    def abort_speech(self, trace_id, index) -> None:
+        """The pipeline cancelled a synthesis still in flight."""
+        self.speech_aborts.append((trace_id, index))
 
     def voice_policy(self, model_sha256, threshold, refractory_ms) -> Reply:
         generation, latency = self._begin(

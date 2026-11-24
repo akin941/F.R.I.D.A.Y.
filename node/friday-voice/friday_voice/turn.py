@@ -10,6 +10,9 @@ One utterance, from its first frame to its end:
   v3 scores the turn: complete -> end of turn; incomplete -> keep listening
   up to `config.TURN_HARD_SILENCE_MS` (1.5 s) of silence. No speech within
   `config.WAKE_NO_SPEECH_S` (5 s) -> nothing is uploaded.
+- **barge-in** (`mode="vad"`, `preroll=...`, `preroll_speech=True`, D9):
+  the capture opens with the monitor's 300 ms pre-roll and the speech run
+  already heard, from inside the open session only.
 
 Both modes stop at `config.UTTERANCE_MAX_S` (30 s, the ADR-011 upload cap).
 The utterance lives in memory only; the caller uploads it as a WAV or drops
@@ -32,7 +35,7 @@ REASON_UTTERANCE_CAP = "utterance_cap"
 
 
 class TurnCapture:
-    def __init__(self, *, mode, vad=None, turn_end=None, preroll=b""):
+    def __init__(self, *, mode, vad=None, turn_end=None, preroll=b"", preroll_speech=False):
         if mode not in ("ptt", "vad"):
             raise ValueError("mode is ptt or vad")
         if mode == "vad" and (vad is None or turn_end is None):
@@ -50,6 +53,12 @@ class TurnCapture:
         self.done = False
         if vad is not None:
             vad.reset()
+        if preroll_speech and self.pcm:
+            # A barge-in (D9): the pre-roll already holds the owner's speech
+            # onset, so the turn has heard speech from its first byte.
+            self.elapsed_ms = config.bytes_to_ms(len(self.pcm))
+            self.heard_speech = True
+            self.last_speech_ms = self.elapsed_ms
 
     @property
     def max_bytes(self) -> int:

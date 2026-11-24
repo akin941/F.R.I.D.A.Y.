@@ -1,0 +1,323 @@
+{
+  "$comment": "Phase 11 brief D10: shared vectors of the self-trigger rule. Run by node/friday-voice/tests/test_self_trigger.py (friday_voice/self_trigger.py) and by frontend/src/lib/voice/self-trigger.vectors.test.ts (self-trigger.ts): the two implementations must give exactly these outputs. `wake_phrase` null means the default (\"Hey Friday\"); `window_ms` null means the 1.5 s default.",
+  "normalize": [
+    {
+      "input": "  İSTANBUL'a, Gidiyorum!  ",
+      "expected": "istanbul a gidiyorum"
+    },
+    {
+      "input": "Hey Friday, terminali aç.",
+      "expected": "hey friday terminali aç"
+    },
+    {
+      "input": "IŞIK ılık",
+      "expected": "ışık ılık"
+    },
+    {
+      "input": "Çiçek ÖĞRENCİ şüphe Ü",
+      "expected": "çiçek öğrenci şüphe ü"
+    },
+    {
+      "input": "DİKKAT: ışıklar AÇIK",
+      "expected": "dikkat ışıklar açık"
+    },
+    {
+      "input": "çay içelim",
+      "expected": "çay içelim"
+    },
+    {
+      "input": "e-posta: test@örnek.com",
+      "expected": "e posta test örnek com"
+    },
+    {
+      "input": "Saat 10:30'da, 3. kat",
+      "expected": "saat 10 30 da 3 kat"
+    },
+    {
+      "input": "Tab\tand\nnewline   here",
+      "expected": "tab and newline here"
+    },
+    {
+      "input": "snake_case ve kebab-case",
+      "expected": "snake case ve kebab case"
+    },
+    {
+      "input": "Tamam 👍 anlaştık",
+      "expected": "tamam anlaştık"
+    },
+    {
+      "input": "Straße",
+      "expected": "straße"
+    },
+    {
+      "input": "«Tırnak» “içinde” — tire",
+      "expected": "tırnak içinde tire"
+    },
+    {
+      "input": "",
+      "expected": ""
+    },
+    {
+      "input": "!!! ... ???",
+      "expected": ""
+    },
+    {
+      "input": "Kart ekranda.",
+      "expected": "kart ekranda"
+    }
+  ],
+  "match": [
+    {
+      "id": "echo_with_wake_phrase",
+      "transcript": "hey friday terminali aç",
+      "recent": [
+        "Hey Friday, terminali aç.",
+        "Takvimin boş görünüyor."
+      ],
+      "wake_phrase": null,
+      "expected": true
+    },
+    {
+      "id": "echo_without_wake_phrase",
+      "transcript": "terminali aç",
+      "recent": [
+        "Hey Friday, terminali aç.",
+        "Takvimin boş görünüyor."
+      ],
+      "wake_phrase": null,
+      "expected": true
+    },
+    {
+      "id": "echo_second_sentence",
+      "transcript": "takvimin boş görünüyor",
+      "recent": [
+        "Hey Friday, terminali aç.",
+        "Takvimin boş görünüyor."
+      ],
+      "wake_phrase": null,
+      "expected": true
+    },
+    {
+      "id": "echo_upper_turkish",
+      "transcript": "TERMİNALİ AÇ",
+      "recent": [
+        "Hey Friday, terminali aç.",
+        "Takvimin boş görünüyor."
+      ],
+      "wake_phrase": null,
+      "expected": true
+    },
+    {
+      "id": "new_request",
+      "transcript": "yarın saat onda diş hekimi",
+      "recent": [
+        "Hey Friday, terminali aç.",
+        "Takvimin boş görünüyor."
+      ],
+      "wake_phrase": null,
+      "expected": false
+    },
+    {
+      "id": "empty_transcript",
+      "transcript": "",
+      "recent": [
+        "Hey Friday, terminali aç.",
+        "Takvimin boş görünüyor."
+      ],
+      "wake_phrase": null,
+      "expected": false
+    },
+    {
+      "id": "only_wake_phrase",
+      "transcript": "hey friday",
+      "recent": [
+        "Hey Friday, terminali aç.",
+        "Takvimin boş görünüyor."
+      ],
+      "wake_phrase": null,
+      "expected": false
+    },
+    {
+      "id": "no_recent",
+      "transcript": "terminali aç",
+      "recent": [],
+      "wake_phrase": null,
+      "expected": false
+    },
+    {
+      "id": "recent_empty_text",
+      "transcript": "terminali aç",
+      "recent": [
+        "",
+        "!!!"
+      ],
+      "wake_phrase": null,
+      "expected": false
+    },
+    {
+      "id": "overlap_four_of_five",
+      "transcript": "bugün iki toplantın var mı",
+      "recent": [
+        "Bugün iki toplantın var, ikisi de öğleden sonra."
+      ],
+      "wake_phrase": null,
+      "expected": true
+    },
+    {
+      "id": "overlap_three_of_five",
+      "transcript": "akşam iki gün kaldı sanırım",
+      "recent": [
+        "Akşam serbestsin, iki gün sonra toplantı var."
+      ],
+      "wake_phrase": null,
+      "expected": true
+    },
+    {
+      "id": "overlap_two_of_five",
+      "transcript": "akşam iki kez kahve içtim",
+      "recent": [
+        "Akşam serbestsin, iki gün sonra toplantı var."
+      ],
+      "wake_phrase": null,
+      "expected": false
+    },
+    {
+      "id": "single_token_contained",
+      "transcript": "toplantı",
+      "recent": [
+        "Saat onda toplantı var."
+      ],
+      "wake_phrase": null,
+      "expected": true
+    },
+    {
+      "id": "single_token_absent",
+      "transcript": "selam",
+      "recent": [
+        "Saat onda toplantı var."
+      ],
+      "wake_phrase": null,
+      "expected": false
+    },
+    {
+      "id": "said_inside_heard",
+      "transcript": "evet kart ekranda dedin",
+      "recent": [
+        "Kart ekranda."
+      ],
+      "wake_phrase": null,
+      "expected": true
+    },
+    {
+      "id": "substring_of_a_word",
+      "transcript": "art",
+      "recent": [
+        "Kart ekranda."
+      ],
+      "wake_phrase": null,
+      "expected": true
+    },
+    {
+      "id": "custom_wake_phrase",
+      "transcript": "hey jarvis saat kaç",
+      "recent": [
+        "Saat kaç diye sordun."
+      ],
+      "wake_phrase": "Hey Jarvis",
+      "expected": true
+    },
+    {
+      "id": "custom_wake_phrase_only",
+      "transcript": "hey jarvis",
+      "recent": [
+        "Hey Jarvis, saat kaç?"
+      ],
+      "wake_phrase": "Hey Jarvis",
+      "expected": false
+    },
+    {
+      "id": "punctuation_only_transcript",
+      "transcript": "...",
+      "recent": [
+        "Hey Friday, terminali aç.",
+        "Takvimin boş görünüyor."
+      ],
+      "wake_phrase": null,
+      "expected": false
+    },
+    {
+      "id": "english_echo",
+      "transcript": "the first one is the quarterly",
+      "recent": [
+        "The first one is the quarterly planning review."
+      ],
+      "wake_phrase": null,
+      "expected": true
+    }
+  ],
+  "window": [
+    {
+      "id": "inside",
+      "detected_at": 10000,
+      "playback_ended_at": 9000,
+      "window_ms": null,
+      "expected": true
+    },
+    {
+      "id": "outside",
+      "detected_at": 10000,
+      "playback_ended_at": 8400,
+      "window_ms": null,
+      "expected": false
+    },
+    {
+      "id": "no_playback_yet",
+      "detected_at": 10000,
+      "playback_ended_at": null,
+      "window_ms": null,
+      "expected": false
+    },
+    {
+      "id": "before_the_end",
+      "detected_at": 9000,
+      "playback_ended_at": 10000,
+      "window_ms": null,
+      "expected": false
+    },
+    {
+      "id": "at_the_end",
+      "detected_at": 10000,
+      "playback_ended_at": 10000,
+      "window_ms": null,
+      "expected": true
+    },
+    {
+      "id": "at_the_window_edge",
+      "detected_at": 11500,
+      "playback_ended_at": 10000,
+      "window_ms": null,
+      "expected": true
+    },
+    {
+      "id": "just_past_the_edge",
+      "detected_at": 11501,
+      "playback_ended_at": 10000,
+      "window_ms": null,
+      "expected": false
+    },
+    {
+      "id": "custom_window_inside",
+      "detected_at": 10400,
+      "playback_ended_at": 10000,
+      "window_ms": 500,
+      "expected": true
+    },
+    {
+      "id": "custom_window_outside",
+      "detected_at": 10600,
+      "playback_ended_at": 10000,
+      "window_ms": 500,
+      "expected": false
+    }
+  ]
+}

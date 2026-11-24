@@ -19,8 +19,11 @@ by a worker (`friday_voice.workers`) whose events come back through
 - **FridaySTT**: the utterance as an in-memory WAV to
   `/api/v1/voice/transcriptions` with `X-Friday-Trace` and
   `X-Friday-Voice-Trigger`; an empty transcript ends the turn silently;
-- **SelfTriggerFilter**: a hook (`self_trigger`), pass-through until
-  branch 4 adds the window and content rules;
+- **SelfTriggerFilter** (`friday_voice.self_trigger`, D10): a transcript
+  that matches what Friday spoke in the last 60 s is discarded (content
+  rule); a wake while playback runs or within 1.5 s after it, and every
+  barge-in, is *suspect* (window rule). Discarded: no chat turn, nothing
+  spoken, `wake_discards_today` + 1, the session stays open;
 - **FridayChatLLM**: the transcript as a voice turn on Friday's ordinary
   chat endpoint (`input_mode: "voice"`), the SSE reply consumed as it
   streams: `chunk` feeds the segmenter, `draft` queues "Kart ekranda."
@@ -30,6 +33,15 @@ by a worker (`friday_voice.workers`) whose events come back through
 - **FridayTTS**: one sentence per request, one in flight plus one
   prefetched (Phase 6 D7); the WAV is normalised to 16 kHz mono PCM16 and
   sent as one `play` utterance per sentence.
+- **BargeInMonitor** (`friday_voice.barge_in`, D9): while Friday speaks,
+  the VAD scores the AEC-cleaned capture; speech >= 0.7 for >= 250 ms,
+  later than 300 ms into playback, stops the reply at once
+  (`stop_playback` for every open utterance, the TTS jobs and the chat
+  stream cancelled), records `interrupted_at_ms` and starts a new
+  utterance (trigger `barge_in`) with a 300 ms pre-roll before the speech
+  onset -- never reaching back before the session. With wake mode armed
+  the wake detector hears the same signal, and a detection while Friday
+  speaks interrupts the same way (suspect, D10).
 
 Errors (D8): a 401 on a request sent before a newer credential arrived is
 retried once with the new one, the mic kept; any other 401/403 releases
@@ -48,8 +60,11 @@ import uuid
 
 from . import config, language, log
 from .audio import encode_wav, play_chunks
+from .barge_in import BargeInMonitor
 from .client import CODE_ALWAYS_ON_NOT_PERMITTED, CODE_LIVE_MUTED, CODE_PIN, FridayError
 from .segmenter import SentenceSegmenter
+from .self_trigger import SelfTriggerFilter
+from .session import derive_state
 from .turn import END, NO_SPEECH, TurnCapture
 from .wake import WakeGate
 from .workers import Closer, Delay
@@ -145,6 +160,11 @@ def chat_job(client, conversation_id, text, trace_id):
 
 
 def tts_job(client, conversation_id, text, lang, trace_id, timings, index):
+    # A cancelled synthesis (barge-in, abort) is reported to a client that
+    # can stop it; the HTTP client simply drops the late response.
+    abort = getattr(client, "abort_speech", None)
+    if abort is not None:
+        yield Closer(lambda: abort(trace_id, index))
     reply = yield from call_with_retries(
         client,
         lambda: client.synthesize(conversation_id, text, lang, trace_id, timings),
@@ -166,6 +186,9 @@ class TurnTimer:
     def __init__(self, clock):
         self.clock = clock
         self.marks = {}
+        # Reported values that are not spans of this turn's marks:
+        # `interrupted_at_ms` (D9, D14).
+        self.extra = {}
 
     def mark(self, name, *, overwrite=False):
         if overwrite or name not in self.marks:
@@ -185,6 +208,7 @@ class TurnTimer:
             "playback_start_ms": self.span("released", "playback_start"),
             "total_ms": self.span("released", "last_request"),
             "wake_to_listen_ms": self.span("wake", "listen"),
+            "interrupted_at_ms": self.extra.get("interrupted_at_ms"),
         }
         return {key: value for key, value in out.items() if value is not None}
 
@@ -228,6 +252,10 @@ class Turn:
         self.draft = False
         self.chat_done = False
         self.playing = False
+        # D10 window rule: a wake while playback ran (or within 1.5 s after
+        # it), and every barge-in.
+        self.suspect = False
+        self.interrupted = False
 
     def utterance_id(self, index):
         return f"t{self.number}s{index}"
@@ -257,13 +285,24 @@ class VoicePipeline:
         self.turn_end = turn_end
         self.wake_gate = WakeGate(wake_detector, clock) if wake_detector is not None else None
         self.arming = arming or RefuseAlwaysOn()
-        self.self_trigger = self_trigger  # branch 4: (transcript, turn) -> True to discard
+        # D10: on unless a test's negative control passes `self_trigger=False`.
+        if isinstance(self_trigger, SelfTriggerFilter):
+            self.self_trigger = self_trigger
+        else:
+            self.self_trigger = SelfTriggerFilter(clock, enabled=self_trigger is not False)
+        # D9: barge-in needs the VAD and the turn-end detector of a
+        # VAD capture (always the case once the detectors are loaded).
+        self.barge_in = (
+            BargeInMonitor(vad, clock) if vad is not None and turn_end is not None else None
+        )
         self.new_trace_id = new_trace_id or (lambda: str(uuid.uuid4()))
         self.log_stream = log_stream
         self.core = None  # set by ChildCore
         self.turn = None
         self.turns = 0
         self.completed = []  # finished turns (the replay report reads their timers)
+        # Every barge-in: {"via", "onset_ms", "fired_ms"} (monotonic; timings only).
+        self.barge_ins = []
         self.conversation_id = None
         self.session_id = None
         self.last_activity_ms = None
@@ -330,23 +369,23 @@ class VoicePipeline:
             and self.arming.permitted()
         )
 
-    def state(self, mode):
-        """The pipeline's part of the `state` message, or None when the
-        shell's blocking rules decide."""
-        if self.storm_muted:
-            return "storm_muted"
-        if self.refused:
-            return "error"
-        if self.error_until is not None and self.clock.monotonic_ms() < self.error_until:
-            return "error"
+    def state_inputs(self, mode) -> dict:
+        """The pipeline's inputs to `friday_voice.session.derive_state`."""
         turn = self.turn
-        if turn is not None:
-            if turn.phase == CAPTURING:
-                return "listening"
-            if turn.playing:
-                return "speaking"
-            return "thinking"
-        return "armed_wake" if self.wake_armed(mode) else "armed_ptt"
+        return {
+            "storm_muted": self.storm_muted,
+            "refused": self.refused,
+            "error_hold": (
+                self.error_until is not None and self.clock.monotonic_ms() < self.error_until
+            ),
+            "turn_phase": turn.phase if turn is not None else None,
+            "playing": bool(turn is not None and turn.playing),
+            "wake_armed": self.wake_armed(mode),
+        }
+
+    def state(self, mode):
+        """The state with no shell blocking rule in force."""
+        return derive_state(**self.state_inputs(mode))
 
     # --- inbound from the shell ---
 
@@ -372,7 +411,8 @@ class VoicePipeline:
                 self._on_wake()
             return self._drain()
         if turn.phase != CAPTURING:
-            return self._drain()  # branch 4: barge-in monitor
+            self._monitor(pcm, mode)
+            return self._drain()
         turn.timer.mark("listen")
         before = turn.capture.last_speech_ms
         result = turn.capture.feed(pcm)
@@ -387,15 +427,102 @@ class VoicePipeline:
             self.turn = None
         return self._drain()
 
-    def _on_wake(self):
+    def _count(self, name):
         if self.core is not None:
-            self.core.counters["wake_accepts_today"] = min(
-                self.core.counters["wake_accepts_today"] + 1, 100_000
-            )
+            self.core.counters[name] = min(self.core.counters[name] + 1, 100_000)
+
+    def _on_wake(self):
+        self._count("wake_accepts_today")
+        suspect = self.self_trigger.suspect_at(self.clock.monotonic_ms())
         capture = TurnCapture(mode="vad", vad=self.vad, turn_end=self.turn_end)
         self._new_turn("wake", capture)
+        self.turn.suspect = suspect
         self.turn.timer.mark("wake")
         self._send({"type": "earcon", "earcon": "wake"})
+
+    # --- barge-in (D9) ---
+
+    def _monitor(self, pcm, mode):
+        """A consumed frame while the turn is past its capture: the reply
+        phase feeds the barge-in monitor (and, with wake mode armed, the
+        wake detector) on the AEC-cleaned signal; other phases drop it."""
+        turn = self.turn
+        if self.barge_in is None or turn.phase != REPLYING:
+            return
+        if not turn.playing:
+            self.barge_in.remember(pcm)
+            return
+        if self.wake_armed(mode) and self.wake_gate.feed(pcm):
+            # D10: the detector is fed the echo-cancelled signal while
+            # Friday speaks; a hit interrupts like a barge-in and is suspect.
+            self._count("wake_accepts_today")
+            now = self.clock.monotonic_ms()
+            self._record_barge_in("wake", now, now)
+            self._interrupt("wake")
+            self.turn.timer.mark("wake")
+            self._send({"type": "earcon", "earcon": "wake"})
+            return
+        event = self.barge_in.feed(pcm)
+        if event is not None:
+            self._record_barge_in("vad", event.onset_ms, event.fired_ms)
+            self._interrupt("vad", preroll=event.preroll)
+
+    def _record_barge_in(self, via, onset_ms, fired_ms):
+        self.barge_ins.append({"via": via, "onset_ms": onset_ms, "fired_ms": fired_ms})
+        self.barge_ins = self.barge_ins[-50:]
+
+    def _interrupt(self, via, *, preroll=b""):
+        """Stop the reply now and listen to the owner (D9): stop_playback
+        first, then the TTS jobs and the chat stream are cancelled; the new
+        utterance (trigger `barge_in`, suspect) starts with the pre-roll."""
+        old = self.turn
+        interrupted_at = self._interrupted_at(old)
+        self._abort_turn(f"barge_in_{via}")
+        old.interrupted = True
+        self.completed.append(old)
+        self.completed = self.completed[-50:]
+        self.last_activity_ms = self.clock.monotonic_ms()
+        capture = TurnCapture(
+            mode="vad",
+            vad=self.vad,
+            turn_end=self.turn_end,
+            preroll=preroll,
+            preroll_speech=bool(preroll),
+        )
+        self._new_turn("barge_in", capture)
+        turn = self.turn
+        turn.suspect = True
+        if interrupted_at is not None:
+            turn.timer.extra["interrupted_at_ms"] = interrupted_at
+        turn.timer.mark("listen")
+        if preroll:
+            turn.timer.mark("released")
+
+    def _interrupted_at(self, turn):
+        """`interrupted_at_ms` (D14): ms after the turn's playback started,
+        recorded on the interrupted turn and carried by the next one (the
+        interrupted turn makes no further request to report it with)."""
+        started = turn.timer.marks.get("playback_start")
+        if started is None:
+            return None
+        value = min(max(0, self.clock.monotonic_ms() - started), TurnTimer.MAX_STAGE_MS)
+        turn.timer.mark("interrupted")
+        turn.timer.extra["interrupted_at_ms"] = value
+        return value
+
+    def _playing(self, turn, playing):
+        """Track the turn's playback edge for the D9 guard and D10 window."""
+        if playing == turn.playing:
+            return
+        turn.playing = playing
+        if playing:
+            self.self_trigger.playback_started()
+            if self.barge_in is not None:
+                self.barge_in.playback_started()
+        else:
+            self.self_trigger.playback_ended()
+            if self.barge_in is not None:
+                self.barge_in.playback_stopped()
 
     def _new_turn(self, trigger, capture):
         self.turns += 1
@@ -403,9 +530,15 @@ class VoicePipeline:
 
     def on_ptt(self, key):
         if key == "down":
+            interrupted_at = None
             if self.turn is not None:
+                old = self.turn
+                if old.playing:  # the hotkey cut a reply: an interruption too (D14)
+                    interrupted_at = self._interrupted_at(old)
                 self._abort_turn("ptt_restart")
             self._new_turn("ptt", TurnCapture(mode="ptt"))
+            if interrupted_at is not None:
+                self.turn.timer.extra["interrupted_at_ms"] = interrupted_at
             self.turn.timer.mark("listen")
         else:
             turn = self.turn
@@ -423,12 +556,12 @@ class VoicePipeline:
             return self._drain()
         index = turn.utterances[utterance_id]
         if state == "started":
-            turn.playing = True
+            self._playing(turn, True)
             turn.timer.mark("playback_start")
         else:
             turn.open_utterances.discard(utterance_id)
             turn.ended.add(index)
-            turn.playing = bool(turn.open_utterances)
+            self._playing(turn, bool(turn.open_utterances))
             self._pump()
             self._maybe_finish()
         return self._drain()
@@ -507,15 +640,17 @@ class VoicePipeline:
             self._log("turn.empty_transcript")
             self._finish_turn()
             return
-        if self.self_trigger is not None and self.self_trigger(text, turn):
-            self._log("turn.self_trigger_discarded")
-            if self.core is not None:
-                counters = self.core.counters
-                counters["wake_discards_today"] = min(counters["wake_discards_today"] + 1, 100_000)
+        reason = self.self_trigger.check(text, suspect=turn.suspect)
+        if reason is not None:
+            # D10: Friday heard itself. No chat turn, nothing spoken.
+            self._log("turn.self_trigger_discarded", reason)
+            self._count("wake_discards_today")
             self._finish_turn()
             return
         turn.transcript_language = language.normalise(event.get("language"))
         turn.phase = REPLYING
+        if self.barge_in is not None:
+            self.barge_in.begin_reply()
         turn.timer.mark("dispatched")
         self._submit(chat_job(self.client, self.conversation_id, text, turn.trace_id))
 
@@ -588,6 +723,7 @@ class VoicePipeline:
             self._on_error(FridayError(200, "bad_audio"))
             return
         turn.timer.mark("first_audio")
+        self.self_trigger.spoken(turn.sentences[index][0])
         utterance_id = turn.utterance_id(index)
         turn.utterances[utterance_id] = index
         turn.open_utterances.add(utterance_id)
@@ -629,6 +765,8 @@ class VoicePipeline:
             self.worker.cancel(job_id)
         for utterance_id in sorted(turn.open_utterances):
             self._send({"type": "stop_playback", "utterance_id": utterance_id})
+        turn.open_utterances.clear()
+        self._playing(turn, False)
         turn.capture.pcm.clear()
         turn.wav = None
         self._log("turn.aborted", reason)

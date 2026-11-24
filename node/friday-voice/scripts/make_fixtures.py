@@ -54,6 +54,8 @@ WAVS = {
     "wake_question.wav": lambda: np.concatenate([silence(0.4), tone(1.2, 240)]),
     "wake_followup.wav": lambda: np.concatenate([silence(0.2), tone(0.9, 200)]),
     "silence_2s.wav": lambda: silence(2.0),
+    # Branch 4 (D9): the owner talking over Friday.
+    "barge_in_owner.wav": lambda: tone(0.8, 300),
 }
 
 
@@ -129,6 +131,53 @@ SCENARIOS = [
 ]
 
 
+# Branch 4 (D9, D10): barge-in and echo scripts. Friday answers a
+# push-to-talk question with two sentences while the reply stream stays
+# open; `owner_wav` (if any) starts `owner_after_ms` after playback started;
+# the reference host's EchoDouble leaks the playback at `residual`. The
+# second transcript is what STT hears of the interruption: the owner's words,
+# or (echo scenarios) the start of Friday's own first sentence.
+FIRST = "Bugün iki toplantın var, ikisi de öğleden sonra."
+SECOND = "İlki saat üçte, ikincisi beşte başlıyor."
+HELD_REPLY = [
+    {"type": "chunk", "text": FIRST + " "},
+    {"type": "chunk", "text": SECOND + " "},
+    [20_000, {"type": "done"}],
+]
+FOLLOWUP = _reply("Tamam, onu bırakıyorum.")
+
+
+def _barge_in(scenario_id, residual, owner, expect):
+    return {
+        "id": scenario_id,
+        "wav": "ptt_question.wav",
+        "owner_wav": "barge_in_owner.wav" if owner else None,
+        "owner_after_ms": 600,
+        "residual": residual,
+        "echo_delay_ms": 40,
+        "transcripts": [
+            {"text": "bugün ne var", "language": "tr"},
+            {"text": "dur onu değil" if owner else "bugün iki toplantın var", "language": "tr"},
+            # With a leaking canceller the follow-up reply's own echo barges
+            # in too: STT hears Friday's words and the filter drops them.
+            {"text": "tamam onu bırakıyorum", "language": "tr"},
+        ],
+        "replies": [HELD_REPLY, FOLLOWUP],
+        "latencies": BUDGET,
+        "expect": expect,
+    }
+
+
+BARGE_IN_SCENARIOS = [
+    _barge_in("owner_r00", 0.0, True, {"stopped": True, "chat_turns": 2, "discarded": 0}),
+    _barge_in("owner_r03", 0.3, True, {"stopped": True, "chat_turns": 2, "discarded": 1}),
+    _barge_in("owner_r10", 1.0, True, {"stopped": True, "chat_turns": 2, "discarded": 1}),
+    _barge_in("echo_r00", 0.0, False, {"stopped": False, "chat_turns": 1, "discarded": 0}),
+    _barge_in("echo_r03", 0.3, False, {"stopped": True, "chat_turns": 1, "discarded": 1}),
+    _barge_in("echo_r10", 1.0, False, {"stopped": True, "chat_turns": 1, "discarded": 1}),
+]
+
+
 def render():
     files = {name: wav_bytes(make()) for name, make in WAVS.items()}
     doc = {
@@ -141,6 +190,17 @@ def render():
         "scenarios": SCENARIOS,
     }
     files["replay.json"] = (json.dumps(doc, ensure_ascii=False, indent=2) + "\n").encode()
+    barge_in = {
+        "$comment": (
+            "Phase 11 brief D9, D10: barge-in and echo scripts (scripts/make_fixtures.py). "
+            "Run by `friday-voice replay` with the reference host's paced playback and its "
+            "EchoDouble at each residual; a run fails when an expectation is not met or "
+            "the barge-in onset -> stop_playback time exceeds the 100 ms budget."
+        ),
+        "scenarios": BARGE_IN_SCENARIOS,
+    }
+    text = json.dumps(barge_in, ensure_ascii=False, indent=2) + "\n"
+    files["barge_in.json"] = text.encode()
     return files
 
 

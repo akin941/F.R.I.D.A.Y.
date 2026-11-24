@@ -1538,6 +1538,148 @@ Implemented as scoped (D7 adapter, D8, D14), with these recorded choices:
 three residuals, and the shared self-trigger vectors pass in both
 languages.
 
+**Status: implemented 2026-11-20** (`feat/p11-barge-in`; see "Branch 4
+implementation notes" below).
+
+## Branch 4 implementation notes (`feat/p11-barge-in`, 2026-11-20)
+
+Implemented as scoped (D9, D10), with these recorded choices:
+
+1. **The state machine is a derivation plus a checked table.**
+   `friday_voice/session.py` holds `derive_state(...)`, the one precedence
+   that turns the shell's blocking rules and the pipeline's turn into the
+   D6 `state` (mute → `muted`; link down / mode off → `off`; missing or
+   expired credential → `error`; then `storm_muted`, `error` after a
+   refused credential or within the error hold, `listening` / `thinking` /
+   `speaking`, else `armed_wake` / `armed_ptt`); `ChildCore.current_state`
+   and `VoicePipeline.state` both call it. `TRANSITIONS` is the exhaustive
+   table: every one of the 9 D6 states × 16 host inputs (the mute, link,
+   mode, push-to-talk, playback and credential frames, `shutdown`, and
+   three audio shapes: 300 ms of speech, one quiet frame, one wake-scored
+   frame) → the next state and the frames sent other than `state`.
+   `tests/test_session.py` drives the **real** child (shell + pipeline
+   behind the reference host, manual clock, `FakeFriday`) into each state,
+   applies each input and compares all 144 cells with the table, so the
+   table is the specification and the code cannot drift from it (a
+   mutated cell fails, checked). Worker events (transcripts, replies,
+   refusals) stay pinned by `tests/test_pipeline.py`.
+2. **`BargeInMonitor`** (`friday_voice/barge_in.py`) runs only while the
+   turn is in its reply phase **and** playing: speech ≥ `BARGE_IN_VAD` on
+   consecutive frames for ≥ `BARGE_IN_MIN_MS` of audio, every frame later
+   than `BARGE_IN_AEC_GUARD_MS` after the playback edge (silent → playing;
+   back-to-back sentences keep one edge). It needs the VAD and the
+   turn-end detector of a VAD capture; without them (today's `friday-voice
+   run`, which loads no detector until branch 5) barge-in is off and the
+   push-to-talk key still cuts a reply (R3 fallback). The pipeline shares
+   one VAD between the monitor and the next capture (never both at once).
+3. **On barge-in**, in one step on the protocol loop: `stop_playback` for
+   every open utterance (the first frame out), every job of the turn
+   cancelled (the chat SSE closed through its `Closer`; a synthesis in
+   flight reported through the client's optional `abort_speech` hook —
+   `FakeFriday` records it, the HTTP client just drops the late response),
+   the interrupted turn kept in `completed` with `interrupted=True`, and a
+   new VAD capture with trigger `barge_in` (D12's header value, already in
+   the client) whose first bytes are the monitor's ring: 300 ms pre-roll
+   before the speech onset plus the speech run itself. The ring is cleared
+   whenever a reply phase begins, so it only ever holds audio from inside
+   the open session (tested with identifiable pre-session frames). The new
+   capture starts as "speech heard", so an owner who stops right at the
+   barge-in still gets a turn end, not a 5 s no-speech timeout.
+4. **Budget reading.** D9's "barge-in onset → `stop_playback` ≤ 100 ms" is
+   measured from the moment the 250 ms persistence rule is met (speech
+   start + 250 ms of audio) — the earliest instant a barge-in can exist;
+   from the first speech frame the floor is 250 ms by construction.
+   `config.BARGE_IN_STOP_BUDGET_MS = 100`; on the manual clock the child
+   sends `stop_playback` in the same frame (0 ms). The pre-roll is anchored
+   at the first speech frame of the run.
+5. **`interrupted_at_ms`** (ms after the interrupted turn's playback
+   start) is recorded on the interrupted turn's timer and **reported on the
+   barge-in turn's trace**: the interrupted turn makes no further request
+   after its streams are cancelled, the speech endpoint is the only one
+   that carries `timings`, and a synthesis request just to deliver one
+   number would be a gateway call. So the row of the turn that interrupted
+   carries "this turn began by cutting the previous reply X ms into its
+   playback" (a hotkey cut during playback reports it the same way). A
+   barge-in whose transcript is discarded makes no speech request, so an
+   echo barge-in leaves no trace row — by design (nothing was answered).
+6. **Self-trigger** (`friday_voice/self_trigger.py`): the port of
+   `self-trigger.ts` (`normalize_speech`, `matches_recent_speech`,
+   `within_self_trigger_window`) plus `SelfTriggerFilter`, which remembers
+   the sentences sent for playback for 60 s (bounded, in memory, never
+   logged), tracks the playback edge, answers `suspect_at(now)` (window
+   rule: during playback or ≤ 1.5 s after it) and `check(transcript,
+   suspect)` → `window` | `content` | None. Every transcript passes the
+   content rule; wake turns are suspect when the window says so; barge-in
+   turns are always suspect. A discard logs `turn.self_trigger_discarded`
+   with the rule name only, increments `wake_discards_today` and keeps the
+   session open. The filter is on by default; `VoicePipeline(self_trigger=
+   False)` disables it for a negative control only.
+7. **Wake on the AEC signal (D10).** With wake mode armed, the wake
+   detector also scores frames while Friday speaks; a detection interrupts
+   exactly like a VAD barge-in (stop, cancel, trigger `barge_in`, suspect),
+   without pre-roll (the utterance starts after the detection frame), with
+   the wake earcon and the accept counter. With a perfect canceller
+   (residual 0.0) nothing reaches the mic after the stop, so no speech is
+   heard within 5 s and nothing is uploaded at all — the D13 release gate
+   (branch 6) should therefore assert "no turn posted" at residual 0.0 and
+   "no turn posted **and** `discarded_self` + 1" at 0.3 and 1.0 (or script
+   the leaked transcript for 0.0).
+8. **Echo with a failing canceller.** At residual 0.3 and 1.0 the leak is
+   speech to the VAD, so Friday's own reply *does* trip the barge-in after
+   the guard (playback stops); the content rule then discards the
+   transcript: no turn, nothing spoken in reply, counter + 1, session open,
+   the owner's next turn answered. "Never barges in on itself" in the
+   branch's test list is read as "never answers itself"; stopping on a
+   leak is the cost of a failing AEC, measured on the Mac (M4 item 4: no
+   self barge-in across 20 replies at normal volume).
+9. **Reference host: paced playback.** `HostCore(paced_playback=True)`
+   plays like the Swift host: utterances queue, `started` when one begins,
+   `ended` once its audio has run for its length on the host clock
+   (`tick()`), `stop_playback` honoured for a queued or playing utterance
+   even after its last frame arrived (`stopped_at` records when).
+   Without the flag playback stays instantaneous, so every branch 2–3
+   test and conformance case is unchanged. `ReplaySession.settle()` lets
+   paced playback drain; `sent_at()` gives frame arrival times.
+10. **Replay scripts.** `fixtures/barge_in.json` + `barge_in_owner.wav`
+    (generated by `scripts/make_fixtures.py`, `--check` in CI): owner
+    barge-in and echo-only scenarios at residual 0.0 / 0.3 / 1.0 with
+    their expectations (stopped, chat turns, discards). `friday-voice
+    replay` (and `--check` in the CI job) runs them after the fixture set
+    and fails on any missed expectation or a stop over the 100 ms budget;
+    the overhead baseline is unchanged.
+11. **Shared vectors.** `vectors/self_trigger.json` (16 normalisation, 20
+    match, 9 window cases) runs in `tests/test_self_trigger.py` and in
+    `frontend/src/lib/voice/self-trigger.vectors.test.ts` over the
+    unchanged `self-trigger.ts`; both green. A test pins the 1.5 s window
+    and the 60 s memory to the browser's constants.
+12. **No server change.** `VoiceTurnTrace.interrupted_at_ms`, the speech
+    endpoint's `timings` allow-list and the `barge_in` trigger value were
+    already in place (branch 3, D12); `backend/` is untouched, so import
+    contracts and migrations are unchanged. The server-side check of the
+    trigger header (`NodeVoiceTriggerGuard`) is branch 5.
+13. **Done when, checked here 2026-11-20:** the barge-in and echo
+    scenarios are green at all three residuals (pytest and `friday-voice
+    replay --check`), and the shared self-trigger vectors pass in pytest
+    and vitest.
+
+### Owner steps (pending) — `feat/p11-barge-in`, recorded 2026-11-20
+
+1. Run the independent Sonnet 5 review of this branch and fix findings
+   until APPROVE (CLAUDE.md "Reviews").
+2. Confirm the readings in note 4 (the 100 ms budget starts when the
+   250 ms persistence rule is met), note 5 (`interrupted_at_ms` rides on
+   the interrupting turn's trace) and note 8 (a failing canceller may stop
+   playback on its own echo; the content rule keeps it from answering).
+3. Branch 5 (or the closeout) must load Silero and smart-turn v3 in
+   `friday-voice run` for barge-in to be live on the Mac (note 2); until
+   then the hotkey is the only way to cut a reply.
+4. **Mac (deferred: Mac session, M1/M4).** The Swift host must pace
+   playback as the reference host does (note 9) and honour
+   `stop_playback` for a queued or playing utterance ≤ 100 ms; measure the
+   real barge-in stop time and the self barge-in rate (M4 item 4) and the
+   real `BARGE_IN_VAD` / guard values against the voice-processing AEC; a
+   threshold change is a code change in `friday_voice/config.py`.
+
 ### 5. `feat/p11-always-on` — arming policy, false-accept gate, storms, fail closed
 
 **Scope.** D11, D12:
@@ -1778,7 +1920,7 @@ is written with the Mac rows pending owner evaluation.
 | 1 | `feat/p11-node-voice-channel` | `node_voice` credential + mint, `CHANNEL_NODE_VOICE`, chat/voice endpoint acceptance, personal reads, node-action proposals, live sessions, route walk, ADR-011 amendment | Phase 10 closeout; brief approved | **implemented 2026-11-20** (server side complete; the Swift host's use of the mint is M1, deferred: Mac session; see "Branch 1 implementation notes") |
 | 2 | `feat/p11-voice-child-protocol` | `node/friday-voice` package, pins + step 0, `friday-voice/v1` framing/schemas/vectors, reference host + echo double, conformance (host and child families), import/listener guards, CI job, dependency manifest, ADR-013 note | brief approved (parallel with 1) | **implemented 2026-11-20** (step 0 recorded; 28 host + 23 child cases all-pass in process and live; owner steps below) |
 | 3 | `feat/p11-pipecat-pipeline` | Pipecat pipeline, detector ports, gateway STT/chat/TTS clients, segmenter + language routing, push-to-talk, replay harness + baseline, trace fields | 1, 2 | **implemented 2026-11-20** (fixture replay + baseline in CI; `replay --server` turn completed against a local dev server; real-model checks and latencies: deferred: Mac session; see "Branch 3 implementation notes") |
-| 4 | `feat/p11-barge-in` | Session state machine, barge-in, self-trigger window + content rule, shared vectors, echo scenarios, ADR-015 note (d4) | 3 | planned |
+| 4 | `feat/p11-barge-in` | Session state machine, barge-in, self-trigger window + content rule, shared vectors, echo scenarios, ADR-015 note (d4) | 3 | **implemented 2026-11-20** (barge-in and echo scenarios green at residual 0 / 0.3 / 1.0 in pytest and `friday-voice replay --check`; 144-cell transition table checked against the real child; shared vectors green in pytest and vitest; real AEC, stop time and self barge-in rate: deferred: Mac session (M1, M4); see "Branch 4 implementation notes") |
 | 5 | `feat/p11-always-on` | Arming policy, `accounts.VoiceWakeEvaluation` gate (latest row, threshold match), trigger backstop, storms (client + `accounts.VoiceLiveMute` server backstop, 423 from the authenticator), silence close, fail closed, `/voice` live panel, ADR-015 note (d5, d3) | 3 (parallel with 4) | planned |
 | 6 | `feat/p11-wake-eval-harness` | CI self-trigger release gate, `selftest`, `wake-eval` FAR/FRR harness, `--from-report`, eval doc | 4, 5 | planned |
 | 7 | `feat/p11-hud-live-voice` | `voice.state` event kind (v2), node voice fields, HUD mic state, `node_voice` drafts on screen, ADR-013/015 notes | 1 (parallel with 3–6) | **implemented 2026-11-20** (server side, reference relay, 9 node conformance cases, HUD and chat surfaces; the Swift relay is M1, deferred: Mac session; see "Branch 7 implementation notes") |
@@ -1897,6 +2039,20 @@ closed), D12 (release on link loss, mute unreadable, child exit), D15
    refused — the flows `backend/ops/tests/test_live_voice_e2e.py` runs
    against the reference host (closeout); the Swift host must produce the
    same frames, states and server rows.
+5. Barge-in and playback (branch 4): `AudioEngine.swift` paces playback
+   exactly as `HostCore(paced_playback=True)` in
+   `node/friday-voice/friday_voice/reference/host.py` does — utterances
+   queue in `play` order, `playback started` when one begins, `ended`
+   when its audio has actually played, `stop_playback` honoured for a
+   queued **or** playing utterance (also after its last frame arrived)
+   with `stopped` ≤ 100 ms after the frame, and `play` audio used as the
+   voice-processing AEC reference. The child's barge-in and echo
+   behaviour is pinned by `node/friday-voice/tests/test_barge_in.py`,
+   `tests/test_session.py` (the 144-cell transition table) and the
+   `fixtures/barge_in.json` scripts; on the Mac, the same scripts' shape
+   is re-run by hand with the real AEC (owner talking over a reply at
+   normal volume; a reply left to play out with nobody speaking) for M4
+   item 4.
 
 ### M2 — Speech server spike: MLX Whisper behind the gateway
 

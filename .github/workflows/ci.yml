@@ -142,7 +142,7 @@ jobs:
       - name: Replay fixtures check
         run: uv run python scripts/make_fixtures.py --check
 
-      - name: Replay (fixture set, manual clock, overhead baseline)
+      - name: Replay (fixture set, manual clock, overhead baseline, barge-in + echo scripts)
         run: uv run friday-voice replay --check
 
       - name: Tests

@@ -120,7 +120,17 @@ def _replay(args) -> int:
     failures = replay.check(current, replay.load_baseline()) if args.check else []
     for failure in failures:
         print(f"FAIL {failure}")
-    return 1 if failed or failures else 0
+    barge_in_failed = 0
+    for scenario in replay.load_barge_in_scenarios():
+        result = replay.run_barge_in_scenario(scenario)
+        print(
+            f"{result['id']}: stopped={result['stopped']} chat_turns={result['chat_turns']} "
+            f"discarded={result['discarded']} stop_ms={result['stop_ms']}"
+        )
+        for failure in result["failures"]:
+            print(f"FAIL {result['id']}: {failure}")
+        barge_in_failed += bool(result["failures"])
+    return 1 if failed or failures or barge_in_failed else 0
 
 
 def _conformance_child(args) -> int:
