@@ -2737,3 +2737,15 @@ Choices made while implementing D17 that the brief left open:
 4. After three real successful, approved, owner-typed jobs on one repo,
    check the first proposal on `/skills` (sources linked, quotes verbatim)
    and decide it.
+
+### Known follow-ups (LOW) — `feat/p12-harness-playbooks`, recorded 2026-11-24
+
+1. **Pre-existing flaky harness episode tests (not caused by this branch).**
+   `harness/tests/test_outcome_ingestion.py` fails at random (about one
+   run in several, a different test each time) because the ingestion
+   scrubber treats the start of some random job UUIDs as a phone number:
+   `scrub_value({"job_id": "50396645-36fd-..."})` yields
+   `"[PII:phone]fd-..."`, so `Episode.metadata.job_id` no longer matches
+   and the test's lookup finds nothing. The same scrub also corrupts real
+   episode metadata ids. Fix: exempt UUID-shaped metadata values (or the
+   id keys) from the PII patterns in `memory/ingestion/scrubber.py`.
