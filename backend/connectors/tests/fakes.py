@@ -498,9 +498,9 @@ def relay_environ(allowed_tools=None):
     return {
         "RELAY_UPSTREAM_URL": N8N_UPSTREAM_URL,
         "RELAY_BEARER_TOKEN": N8N_BEARER,
-        "BRIDGE_ALLOWED_TOOLS": allowed_tools if allowed_tools is not None else (
-            relay_allowed_tools()
-        ),
+        "BRIDGE_ALLOWED_TOOLS": allowed_tools
+        if allowed_tools is not None
+        else (relay_allowed_tools()),
         "RELAY_TIMEOUT_SECONDS": "10",
     }
 

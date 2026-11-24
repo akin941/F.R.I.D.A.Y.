@@ -413,7 +413,9 @@ def get_route(name):
 
 
 def route_names():
-    return [route.name for route in all_routes()]
+    """The code-defined table's route names (the shared vectors cover
+    these); `all_routes()` adds the `tool.*` routes."""
+    return [route.name for route in ROUTES]
 
 
 def aliases_for(workspace):

@@ -131,7 +131,9 @@ def test_resources_and_prompts_are_refused(n8n, method):
 
     with pytest.raises(BaseException):  # noqa: B017,PT011 -- any refusal will do
         anyio.run(ask)
-    assert not any("resources/" in r["body"] or "prompts/" in r["body"] for r in n8n.upstream_requests)
+    assert not any(
+        "resources/" in r["body"] or "prompts/" in r["body"] for r in n8n.upstream_requests
+    )
 
 
 @pytest.mark.parametrize(
