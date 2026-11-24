@@ -21,6 +21,8 @@ from accounts.authentication import (
     FacadeTokenAuthentication,
     HookTokenAuthentication,
     NodeCredentialAuthentication,
+    NodeVoicePolicyAuthentication,
+    NodeVoiceTokenAuthentication,
     PersonalAccessTokenAuthentication,
     hash_token,
 )
@@ -37,6 +39,7 @@ from core.channels import (
     CHANNEL_CLI,
     CHANNEL_HOOK,
     CHANNEL_NODE,
+    CHANNEL_NODE_VOICE,
     CHANNEL_OPENAI,
     CHANNEL_UNKNOWN,
     CHANNEL_WEB,
@@ -57,6 +60,10 @@ KNOWN_AUTHENTICATORS = {
     FacadeTokenAuthentication: CHANNEL_OPENAI,
     HookTokenAuthentication: CHANNEL_HOOK,
     NodeCredentialAuthentication: CHANNEL_NODE,
+    # Phase 11 D3: `node_voice` tokens (and, on the chat turn / voice
+    # routes, `cli` PATs as CHANNEL_CLI exactly as before).
+    NodeVoiceTokenAuthentication: CHANNEL_NODE_VOICE,
+    NodeVoicePolicyAuthentication: CHANNEL_NODE_VOICE,
 }
 
 
@@ -183,6 +190,36 @@ def test_node_secret_yields_node_never_web(owner, workspace):
     assert request.auth == ChannelPrincipal(
         channel=CHANNEL_NODE, bound_workspace_id=str(workspace.pk), token_id=str(device.pk)
     )
+
+
+def test_node_voice_token_yields_node_voice_never_web(owner, workspace):
+    raw, _ = issue_pairing_code(
+        owner=owner,
+        kind=DevicePairingCode.Kind.PIN,
+        issued_via=DevicePairingCode.IssuedVia.MANAGEMENT_COMMAND,
+        device_kind=TrustedDevice.Kind.NODE,
+    )
+    device, _ = enroll_node_device(raw_code=raw, node_name="Mac", client_ip="10.0.0.2")
+    from accounts.devices import mint_node_voice_token
+
+    minted = mint_node_voice_token(device=device)
+    for authenticator in (NodeVoiceTokenAuthentication, NodeVoicePolicyAuthentication):
+        request = _authenticate(authenticator, f"Bearer {minted.raw}")
+        assert request_channel(request) == CHANNEL_NODE_VOICE
+        assert request.auth == ChannelPrincipal(
+            channel=CHANNEL_NODE_VOICE,
+            bound_workspace_id=str(workspace.pk),
+            token_id=str(minted.token.pk),
+        )
+    # A `cli` PAT through the chat-turn authenticator is still CHANNEL_CLI.
+    cli = TOKEN_PREFIX + secrets.token_urlsafe(32)
+    PersonalAccessToken.objects.create(
+        workspace=workspace, user=owner, name="cli", token_hash=hash_token(cli)
+    )
+    request = _authenticate(NodeVoiceTokenAuthentication, f"Bearer {cli}")
+    assert request_channel(request) == CHANNEL_CLI
+    with pytest.raises(PermissionDenied):
+        _authenticate(NodeVoicePolicyAuthentication, f"Bearer {cli}")
 
 
 @pytest.mark.parametrize(

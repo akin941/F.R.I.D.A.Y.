@@ -1,6 +1,7 @@
-"""A Friday Node secret reaches exactly one DRF endpoint (Phase 9 spike
+"""A Friday Node secret reaches exactly two DRF endpoints (Phase 9 spike
 S9.0 criterion 5; release gate "a node credential accepted on any surface
-but its own, or yielding CHANNEL_WEB").
+but its own, or yielding CHANNEL_WEB"): its own rotation and, since Phase
+11 D3, the node voice credential mint.
 
 Walks every routed DRF view with a valid `jnd_` node secret: every route
 whose view authenticates at all answers 401/403, and the node is never
@@ -22,7 +23,7 @@ from accounts.authentication import NodeCredentialAuthentication
 from accounts.devices import enroll_node_device, issue_pairing_code
 from accounts.models import DevicePairingCode, TrustedDevice
 from accounts.services import register_user
-from accounts.views import NodeCredentialRotateView
+from accounts.views import NodeCredentialRotateView, NodeVoiceTokenMintView
 from config.tests.test_hook_token_surfaces import _routes
 
 pytestmark = pytest.mark.django_db
@@ -45,11 +46,15 @@ def node():
     return device, secret
 
 
-def test_the_rotate_view_is_the_only_one_using_the_node_authenticator():
+NODE_SECRET_VIEWS = {NodeCredentialRotateView, NodeVoiceTokenMintView}
+
+
+def test_rotate_and_voice_mint_are_the_only_views_using_the_node_authenticator():
     users = {view for _, view, auth in _routes() if NodeCredentialAuthentication in auth}
-    assert users == {NodeCredentialRotateView}
-    rotate = [auth for _, view, auth in _routes() if view is NodeCredentialRotateView]
-    assert rotate == [[NodeCredentialAuthentication]]
+    assert users == NODE_SECRET_VIEWS
+    for node_view in NODE_SECRET_VIEWS:
+        auths = [auth for _, view, auth in _routes() if view is node_view]
+        assert auths == [[NodeCredentialAuthentication]]
 
 
 def test_a_node_secret_is_refused_on_every_other_route(node):
@@ -62,7 +67,7 @@ def test_a_node_secret_is_refused_on_every_other_route(node):
     client.credentials(HTTP_AUTHORIZATION=f"Bearer {secret}")
     checked = 0
     for url, view_class, auth in _routes():
-        if view_class is NodeCredentialRotateView:
+        if view_class in NODE_SECRET_VIEWS:
             continue
         for method in ("get", "post", "patch", "delete"):
             response = getattr(client, method)(url, {}, format="json")

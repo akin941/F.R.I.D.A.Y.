@@ -10,7 +10,10 @@ from rest_framework.response import Response
 from rest_framework.settings import api_settings
 from rest_framework.views import APIView
 
-from accounts.authentication import PersonalAccessTokenAuthentication
+from accounts.authentication import (
+    NodeVoiceTokenAuthentication,
+    PersonalAccessTokenAuthentication,
+)
 from assistant.models import Conversation, Message
 from assistant.serializers import (
     ConversationCreateSerializer,
@@ -31,7 +34,13 @@ from assistant.services import (
     rename_conversation,
     stream_assistant_reply,
 )
-from core.channels import CHANNEL_WEB, is_low_trust, request_channel, scoped_for_actor
+from core.channels import (
+    CHANNEL_NODE_VOICE,
+    CHANNEL_WEB,
+    is_low_trust,
+    request_channel,
+    scoped_for_actor,
+)
 from core.throttling import ScopedRateThrottle
 from core.tracing import request_trace_id, trace_report
 from knowledge.models import KnowledgeChunk
@@ -45,6 +54,16 @@ from workspaces.models import Workspace
 # every PAT request (see accounts/authentication.py's own docstring).
 _PAT_ALLOWLISTED_AUTHENTICATION_CLASSES = [
     PersonalAccessTokenAuthentication,
+    *api_settings.DEFAULT_AUTHENTICATION_CLASSES,
+]
+# Phase 11 D4: the chat turn alone swaps the base PAT authenticator for
+# `NodeVoiceTokenAuthentication` (`cli` + `node_voice`): a `cli` PAT gets
+# exactly today's result, a `node_voice` token authenticates as
+# CHANNEL_NODE_VOICE, `openai`/`hook` keep their 403. Every other view keeps
+# the shared list above, so a voice token is a 403 `token_kind_forbidden`
+# there.
+_CHAT_TURN_AUTHENTICATION_CLASSES = [
+    NodeVoiceTokenAuthentication,
     *api_settings.DEFAULT_AUTHENTICATION_CLASSES,
 ]
 
@@ -167,9 +186,25 @@ class ConversationDetailView(APIView):
         return Response(ConversationSerializer(_get_conversation(request, conversation.id)).data)
 
 
+def _get_chat_conversation(request, conversation_id):
+    """`_get_conversation` plus the node voice rule (Phase 11 D4): over
+    CHANNEL_NODE_VOICE only a conversation opened via `node_voice` exists --
+    any other one (web, CLI, facade, a legacy row with `opened_via=""`) is
+    the same 404 as another workspace's, so a leaked 15-minute voice token
+    can read or append to nothing but what a live session opened."""
+    conversation = _get_conversation(request, conversation_id)
+    if (
+        conversation is not None
+        and request_channel(request) == CHANNEL_NODE_VOICE
+        and conversation.opened_via != Message.Channel.NODE_VOICE
+    ):
+        return None
+    return conversation
+
+
 class ConversationMessageListView(APIView):
     permission_classes = [IsAuthenticated]
-    authentication_classes = _PAT_ALLOWLISTED_AUTHENTICATION_CLASSES
+    authentication_classes = _CHAT_TURN_AUTHENTICATION_CLASSES
     throttle_classes = [ScopedRateThrottle]
     throttle_scope = "chat"
 
@@ -191,7 +226,7 @@ class ConversationMessageListView(APIView):
         return super().get_throttles()
 
     def get(self, request, conversation_id):
-        conversation = _get_conversation(request, conversation_id)
+        conversation = _get_chat_conversation(request, conversation_id)
         if conversation is None:
             return Response(status=status.HTTP_404_NOT_FOUND)
         messages = list(
@@ -255,7 +290,7 @@ class ConversationMessageListView(APIView):
         return {str(chunk_id): str(document_id) for chunk_id, document_id in rows}
 
     def post(self, request, conversation_id):
-        conversation = _get_conversation(request, conversation_id)
+        conversation = _get_chat_conversation(request, conversation_id)
         if conversation is None:
             return Response(status=status.HTTP_404_NOT_FOUND)
 
@@ -267,9 +302,13 @@ class ConversationMessageListView(APIView):
         # re-derived for the reply, so the two rows can never drift apart.
         channel = request_channel(request)
         # Phase 6 D9: provenance only, client-asserted; a voice turn exists
-        # only on the trusted web session, every other channel is `text`.
+        # only on the trusted web session, every other channel is `text` --
+        # except the node voice channel (Phase 11 D4), which is ALWAYS
+        # `voice` whatever the body says, so the ADR-015 cap always applies.
         input_mode = serializer.validated_data["input_mode"]
-        if channel != CHANNEL_WEB:
+        if channel == CHANNEL_NODE_VOICE:
+            input_mode = Message.InputMode.VOICE
+        elif channel != CHANNEL_WEB:
             input_mode = Message.InputMode.TEXT
         # Phase 6 A5: the client's per-turn trace id (ignored when malformed)
         # and the input mode join every ModelUsage row of this turn.

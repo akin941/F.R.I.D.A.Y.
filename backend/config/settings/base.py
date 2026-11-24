@@ -298,6 +298,12 @@ REST_FRAMEWORK = {
         # (one owner, one or two Macs); it bounds code guessing on top of
         # the per-code PIN attempt burn. Fails closed when Redis is down.
         "node_pair": env("NODE_PAIR_RATE", default="10/hour"),
+        # Phase 11 D3: node voice credential mints, per node owner (the host
+        # mints one per child start and <= 60 s before each expiry).
+        "node_voice_mint": env("NODE_VOICE_MINT_RATE", default="30/hour"),
+        # Phase 11 D5: live-session opens, per owner, so a misbehaving voice
+        # child cannot mint empty conversations in a loop.
+        "node_voice_session": env("NODE_VOICE_SESSION_RATE", default="60/hour"),
     },
 }
 
@@ -686,6 +692,21 @@ VOICE_TTS_PROVIDER_PARAMS = {
 # A5: `voice.VoiceTurnTrace` rows (stage timings only) are pruned daily
 # after this many days (config/celery.py).
 VOICE_TRACE_RETENTION_DAYS = env.int("VOICE_TRACE_RETENTION_DAYS", default=30)
+# --- Live voice on the node (Phase 11 D3/D5) ---
+# Hard lifetime of a `node_voice` token (minted by the node secret, handed
+# to the voice child). Refused at boot above one hour: a leaked child
+# credential must stay short-lived.
+VOICE_LIVE_TOKEN_TTL_SECONDS = env.int("VOICE_LIVE_TOKEN_TTL_SECONDS", default=900)
+if not 60 <= VOICE_LIVE_TOKEN_TTL_SECONDS <= 3600:
+    raise ImproperlyConfigured("VOICE_LIVE_TOKEN_TTL_SECONDS must be between 60 and 3600.")
+# A newer mint shortens the device's previous token to now + this grace
+# (instead of revoking it), so a request in flight during rotation succeeds.
+VOICE_LIVE_ROTATION_GRACE_SECONDS = env.int("VOICE_LIVE_ROTATION_GRACE_SECONDS", default=30)
+if not 0 <= VOICE_LIVE_ROTATION_GRACE_SECONDS <= 300:
+    raise ImproperlyConfigured("VOICE_LIVE_ROTATION_GRACE_SECONDS must be between 0 and 300.")
+# `POST /api/v1/voice/live/sessions` reuses the latest live conversation
+# whose last activity is younger than this; otherwise it opens a new one.
+VOICE_LIVE_CONVERSATION_REUSE_MINUTES = env.int("VOICE_LIVE_CONVERSATION_REUSE_MINUTES", default=30)
 # The voice upload cap (VOICE_MAX_UTTERANCE_SECONDS, 960 KB at 30 s) must
 # stay below FILE_UPLOAD_MAX_MEMORY_SIZE (Django default 2.5 MB, unset
 # here): the transcription view installs only the in-memory upload handler,

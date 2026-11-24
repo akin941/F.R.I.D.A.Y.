@@ -11,6 +11,8 @@ from accounts.views import (
     MeView,
     NodeCredentialRotateView,
     NodeKillSwitchView,
+    NodeVoicePolicyView,
+    NodeVoiceTokenMintView,
     PairingCodeCreateView,
     PersonalAccessTokenListCreateView,
     PersonalAccessTokenRevokeView,
@@ -47,6 +49,10 @@ urlpatterns = [
         name="auth-nodes-credential-rotate",
     ),
     path("nodes/kill-switch", NodeKillSwitchView.as_view(), name="auth-nodes-kill-switch"),
+    # Phase 11 D3/D11: the node voice credential (node secret only) and the
+    # always-on policy read (node voice token only).
+    path("nodes/voice-token", NodeVoiceTokenMintView.as_view(), name="auth-nodes-voice-token"),
+    path("nodes/voice-policy", NodeVoicePolicyView.as_view(), name="auth-nodes-voice-policy"),
     path("remote-key", RemoteAccessKeyView.as_view(), name="auth-remote-key"),
     path("remote-key/revoke", RemoteAccessKeyRevokeView.as_view(), name="auth-remote-key-revoke"),
     path("tokens", PersonalAccessTokenListCreateView.as_view(), name="auth-tokens"),

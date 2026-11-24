@@ -5,6 +5,19 @@ from core.db import WorkspaceScopedModel
 from core.models import TimestampedModel
 
 
+class MessageChannel(models.TextChoices):
+    """The channel a message (and, Phase 11 D5, a conversation's opening)
+    arrived over; `Message.Channel` is this class."""
+
+    WEB = "web"
+    CLI = "cli"
+    TELEGRAM = "telegram"
+    # The OpenAI-compatible facade (Phase 4 branch 6).
+    OPENAI = "openai"
+    # The node's voice child (Phase 11 D4): a live voice turn.
+    NODE_VOICE = "node_voice"
+
+
 class Conversation(WorkspaceScopedModel, TimestampedModel):
     title = models.CharField(max_length=255, blank=True, default="")
     created_by = models.ForeignKey(
@@ -59,6 +72,15 @@ class Conversation(WorkspaceScopedModel, TimestampedModel):
     # `personal_data=True` (read fresh off this row before each call), so
     # only providers with `personal_data_allowed` can ever see it.
     personal_data = models.BooleanField(default=False)
+    # Phase 11 D5: the non-web channel that opened this conversation
+    # (`node_voice` for a live voice session, `openai` for the facade), ""
+    # for the web, the CLI and every row older than the column. Written once
+    # by `assistant.services.create_conversation(channel=...)`, never
+    # updated, never writable through a serializer. The node voice channel
+    # reaches only conversations it opened (404 otherwise, D4).
+    opened_via = models.CharField(
+        max_length=20, blank=True, default="", choices=MessageChannel.choices
+    )
 
     class Meta:
         ordering = ["-created_at"]
@@ -90,12 +112,7 @@ class Message(WorkspaceScopedModel, TimestampedModel):
         # Phase 5 branch 4 (brief D4): one connector read this turn.
         CONNECTOR_READ = "connector_read"
 
-    class Channel(models.TextChoices):
-        WEB = "web"
-        CLI = "cli"
-        TELEGRAM = "telegram"
-        # The OpenAI-compatible facade (Phase 4 branch 6).
-        OPENAI = "openai"
+    Channel = MessageChannel
 
     class InputMode(models.TextChoices):
         # Phase 6 D9: how the owner produced this turn's text -- typed, or

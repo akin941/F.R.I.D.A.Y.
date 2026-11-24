@@ -14,7 +14,9 @@ added to `DEFAULT_AUTHENTICATION_CLASSES`: only the specific view classes
 MVP 9 allowlists (assistant/agents/approvals) set the PAT class explicitly
 in their own `authentication_classes`, ordered BEFORE
 `DeviceJWTAuthentication`; the facade views use `FacadeTokenAuthentication`
-alone. `HookTokenAuthentication` (Phase 8A D6) is the same check for the
+alone. `NodeVoiceTokenAuthentication` (Phase 11 D3) accepts `cli` and
+`node_voice` tokens and replaces the PAT class on the chat turn and the
+voice routes. `HookTokenAuthentication` (Phase 8A D6) is the same check for the
 Claude Code hook relay and accepts only `hook`-kind tokens; only the
 hook-event ingest view uses it. `NodeCredentialAuthentication` (Phase 9
 spike S9.0) accepts only `jnd_` Friday Node secrets -> CHANNEL_NODE; only
@@ -44,6 +46,7 @@ from core.channels import (
     CHANNEL_CLI,
     CHANNEL_HOOK,
     CHANNEL_NODE,
+    CHANNEL_NODE_VOICE,
     CHANNEL_OPENAI,
     ChannelPrincipal,
     WebSessionPrincipal,
@@ -74,6 +77,7 @@ KIND_CHANNELS = {
     PersonalAccessToken.Kind.CLI: CHANNEL_CLI,
     PersonalAccessToken.Kind.OPENAI: CHANNEL_OPENAI,
     PersonalAccessToken.Kind.HOOK: CHANNEL_HOOK,
+    PersonalAccessToken.Kind.NODE_VOICE: CHANNEL_NODE_VOICE,
 }
 
 
@@ -98,6 +102,19 @@ class PersonalAccessTokenAuthentication(BaseAuthentication):
     # audit log records for a failure against it.
     accepted_kind = PersonalAccessToken.Kind.CLI
     surface = "cli"
+    # Phase 11 D3: the kinds accepted, each authenticating as its own
+    # `KIND_CHANNELS` channel. None = `{accepted_kind}`, so every existing
+    # single-kind subclass behaves exactly as before.
+    accepted_kinds = None
+
+    def get_accepted_kinds(self):
+        if self.accepted_kinds is not None:
+            return frozenset(self.accepted_kinds)
+        return frozenset({self.accepted_kind})
+
+    def check_token(self, token, raw_token, now):
+        """Kind-specific re-checks after the generic ones (Phase 11 D3);
+        raise to refuse. The base class has none."""
 
     def authenticate_header(self, request):
         # DRF's `get_authenticate_header` only ever consults the FIRST
@@ -140,7 +157,7 @@ class PersonalAccessTokenAuthentication(BaseAuthentication):
         if reason is not None:
             _audit_auth_failure(raw_token, reason, self.surface)
             raise AuthenticationFailed("Invalid, expired or revoked token.")
-        if token.kind != self.accepted_kind:
+        if token.kind not in self.get_accepted_kinds():
             # A genuine token presented to the wrong surface: 403, not 401 --
             # the credential is fine, this surface is not for its kind. Never
             # touches `last_used_at`.
@@ -148,6 +165,8 @@ class PersonalAccessTokenAuthentication(BaseAuthentication):
             raise PermissionDenied(
                 "This token's kind cannot be used on this endpoint.", code="token_kind_forbidden"
             )
+
+        self.check_token(token, raw_token, now)
 
         token.last_used_at = now
         token.save(update_fields=["last_used_at"])
@@ -181,6 +200,53 @@ class HookTokenAuthentication(PersonalAccessTokenAuthentication):
 
     accepted_kind = PersonalAccessToken.Kind.HOOK
     surface = "hook"
+
+
+class NodeVoiceTokenAuthentication(PersonalAccessTokenAuthentication):
+    """Phase 11 D3/D4: the PAT authenticator of the routes the node voice
+    credential reaches -- the chat turn (`ConversationMessageListView`
+    only) and the `voice` routes (injected by `config/urls.py`). It
+    REPLACES the base PAT authenticator there (the base one claims every
+    `jpat_` token and 403s a foreign kind, so it could not sit next to
+    this one): a `cli` PAT keeps authenticating as CHANNEL_CLI exactly as
+    before, a `node_voice` token authenticates as CHANNEL_NODE_VOICE, and
+    `openai`/`hook` tokens keep their 403 `token_kind_forbidden`.
+
+    For a `node_voice` token only, the minting node device is re-checked on
+    EVERY request (`accounts.devices.node_device_refusal`): revoking the
+    node, engaging the kill switch or `revoke_all_devices` kills the voice
+    credential on its next request even before the token row itself is
+    revoked."""
+
+    accepted_kinds = frozenset({PersonalAccessToken.Kind.CLI, PersonalAccessToken.Kind.NODE_VOICE})
+    surface = "node_voice"
+
+    def check_token(self, token, raw_token, now):
+        if token.kind != PersonalAccessToken.Kind.NODE_VOICE:
+            return
+        from accounts.devices import node_device_refusal
+
+        device = (
+            TrustedDevice.objects.select_related("user").filter(pk=token.node_device_id).first()
+        )
+        reason = node_device_refusal(device, now)
+        if reason is None and device.user_id != token.user_id:
+            reason = "device_owner_mismatch"
+        if reason is not None:
+            _audit_auth_failure(raw_token, f"node_{reason}", self.surface)
+            raise AuthenticationFailed("Invalid, expired or revoked token.")
+
+
+class NodeVoicePolicyAuthentication(NodeVoiceTokenAuthentication):
+    """`GET /api/v1/auth/nodes/voice-policy` only (Phase 11 D3/D11):
+    `node_voice` tokens alone (a `cli` PAT is a deliberate 403
+    `token_kind_forbidden`). Mute-tolerant by design: once branch 5 adds
+    the storm mute's 423 to `NodeVoiceTokenAuthentication`, this subclass
+    keeps answering so the policy can report `storm_muted` in its
+    reasons."""
+
+    accepted_kinds = frozenset({PersonalAccessToken.Kind.NODE_VOICE})
+    surface = "node_voice_policy"
 
 
 class DeviceJWTAuthentication(JWTAuthentication):

@@ -10,7 +10,7 @@ from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError
 
 from accounts.authentication import TOKEN_PREFIX, hash_token
-from accounts.models import PersonalAccessToken, User
+from accounts.models import MINTABLE_PAT_KINDS, PersonalAccessToken, User
 from audit.services import record_audit
 from workspaces.models import Workspace
 
@@ -23,7 +23,7 @@ class Command(BaseCommand):
         parser.add_argument("workspace_name")
         parser.add_argument(
             "--kind",
-            choices=PersonalAccessToken.Kind.values,
+            choices=[str(kind) for kind in MINTABLE_PAT_KINDS],
             default=PersonalAccessToken.Kind.CLI,
             help=(
                 "Token kind: cli (default), openai (the OpenAI-compatible facade) or "

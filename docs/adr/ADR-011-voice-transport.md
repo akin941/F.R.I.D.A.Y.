@@ -103,3 +103,30 @@ silent (`frontend/e2e/voice-mute.e2e.ts`). The CI e2e
 microphone through fake STT/TTS to a task draft confirmed by click
 (decision 5), and the HUD showing the voice state and a pending approval
 deep link.
+
+## Amendment 2026-11 — the node voice channel
+
+Phase 11 branch 1 (`feat/p11-node-voice-channel`,
+`docs/prompts/phase-11-live-voice/brief.md` D3–D5).
+
+- **Decision 1** "Web channel only (a trusted device's web session,
+  owner)" becomes "**the owner's web session or the node voice
+  credential**". The node voice credential is a `node_voice`
+  `PersonalAccessToken`, minted only by a Friday Node's secret
+  (`POST /api/v1/auth/nodes/voice-token`), bound to the owner's personal
+  workspace and to the minting node device, hard-expiring after
+  `VOICE_LIVE_TOKEN_TTL_SECONDS` (default 900, refused at boot above
+  3 600), re-checked against the node device on every request (revoke,
+  kill switch, `revoke_all_devices` refuse it at once). It authenticates
+  as `CHANNEL_NODE_VOICE` (low-trust) and reaches exactly: the three voice
+  endpoints, `POST /api/v1/voice/live/sessions`, the voice-policy read and
+  the chat turn of a conversation opened via `node_voice`
+  (`Conversation.opened_via`; any other conversation is a 404). PATs of
+  every other kind, the facade and Telegram stay refused.
+- On the node voice channel `input_mode` is **forced to `voice`** whatever
+  the request body says, so ADR-015's capability cap always applies.
+- Decisions 2–6 are unchanged: the node's voice child holds no provider
+  key and makes no model call (ADR-013 decision 8); STT and TTS stay
+  gateway calls on `personal_data_allowed` providers with one `ModelUsage`
+  each; no audio is persisted; every draft is still a card clicked on
+  screen.

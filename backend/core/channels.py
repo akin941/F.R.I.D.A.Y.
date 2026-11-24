@@ -34,6 +34,14 @@ CHANNEL_HOOK = "hook"
 # node credential rotation endpoint and (through `nodes`) the node
 # WebSocket. Never mints a JWT, never decides or confirms anything.
 CHANNEL_NODE = "node"
+# Low-trust: a `node_voice` PAT (Phase 11 D3/D4), minted only by a node
+# secret and handed to the node's voice child. Produced only by
+# `accounts.authentication.NodeVoiceTokenAuthentication` (and its policy
+# subclass). Reaches exactly: the chat turn of a conversation opened via
+# `node_voice` (input_mode forced to `voice`, so the ADR-015 cap always
+# applies), the three voice endpoints, the live-sessions endpoint and the
+# voice-policy read. Never decides, confirms or approves anything.
+CHANNEL_NODE_VOICE = "node_voice"
 CHANNEL_TELEGRAM = "telegram"  # low-trust: relayed, no direct request at all
 # Not a request channel: machine-originated actions (agent engine, harness
 # gates, sweeps) that record "which channel" in audit metadata or on
@@ -64,8 +72,9 @@ class ChannelPrincipal:
     """Set as `request.auth` by a low-trust authenticator (accounts'
     `PersonalAccessTokenAuthentication` / `FacadeTokenAuthentication`).
 
-    `channel` is CHANNEL_CLI, CHANNEL_OPENAI or CHANNEL_HOOK (the token's
-    `kind`), or CHANNEL_NODE (a node credential);
+    `channel` is CHANNEL_CLI, CHANNEL_OPENAI, CHANNEL_HOOK or
+    CHANNEL_NODE_VOICE (the token's `kind`), or CHANNEL_NODE (a node
+    credential);
     `token_id` names the PersonalAccessToken, for per-token limits (the
     facade's throttle and stream cap) -- for CHANNEL_NODE it names the
     node's TrustedDevice. CHANNEL_TELEGRAM never appears here --

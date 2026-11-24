@@ -13,7 +13,12 @@ from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.views import TokenRefreshView
 
 from accounts import devices
-from accounts.authentication import TOKEN_PREFIX, NodeCredentialAuthentication, hash_token
+from accounts.authentication import (
+    TOKEN_PREFIX,
+    NodeCredentialAuthentication,
+    NodeVoicePolicyAuthentication,
+    hash_token,
+)
 from accounts.models import (
     DevicePairingCode,
     NodeKillSwitch,
@@ -26,6 +31,7 @@ from accounts.serializers import (
     DeviceSessionStartSerializer,
     EnrollSerializer,
     LogoutSerializer,
+    NodeVoicePolicyQuerySerializer,
     PairingCodeCreateSerializer,
     PersonalAccessTokenCreateSerializer,
     PersonalAccessTokenSerializer,
@@ -36,7 +42,7 @@ from accounts.serializers import (
 from audit.services import record_audit
 from core.channels import request_device_id
 from core.client_ip import trusted_client_ip
-from core.permissions import IsNodeChannel, IsOwner, IsWebChannel
+from core.permissions import IsNodeChannel, IsNodeVoiceChannel, IsOwner, IsWebChannel
 from core.throttling import EnrollGlobalThrottle, EnrollPerSourceThrottle, ScopedRateThrottle
 from workspaces.models import Workspace, WorkspaceMember
 
@@ -309,6 +315,70 @@ class NodeCredentialRotateView(APIView):
                 "rotate_after_days": settings.NODE_CREDENTIAL_ROTATE_AFTER_DAYS,
             }
         )
+
+
+class NodeVoiceTokenMintView(APIView):
+    """`POST /api/v1/auth/nodes/voice-token` (Phase 11 D3) -- the node mints
+    the short-lived credential it hands its voice child over the stdin
+    control pipe. Authenticated ONLY by the node secret
+    (`NodeCredentialAuthentication` + `IsNodeChannel`, the rotation
+    endpoint's pattern): a web session, a PAT of any kind or a voice token
+    is refused. A revoked node or an engaged kill switch never gets here
+    (the authenticator refuses it). Returns the raw token exactly once; the
+    device's previous token keeps only the rotation grace."""
+
+    authentication_classes = [NodeCredentialAuthentication]
+    permission_classes = [IsAuthenticated, IsNodeChannel]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "node_voice_mint"
+
+    def post(self, request):
+        device = TrustedDevice.objects.filter(
+            pk=request.auth.token_id, user=request.user, kind=TrustedDevice.Kind.NODE
+        ).first()
+        try:
+            if device is None:
+                raise devices.NodeCredentialRejected("unknown")
+            minted = devices.mint_node_voice_token(device=device)
+        except (devices.NodeCredentialRejected, devices.NodeVoiceMintRefused):
+            return Response(
+                {
+                    "detail": "Invalid, expired or revoked node credential.",
+                    "code": "not_authenticated",
+                },
+                status=status.HTTP_401_UNAUTHORIZED,
+            )
+        response = Response(
+            {
+                "token": minted.raw,  # only ever appears in this response
+                "token_id": str(minted.token.pk),
+                "expires_at": minted.token.expires_at,
+                "previous_valid_until": minted.previous_valid_until,
+            },
+            status=status.HTTP_201_CREATED,
+        )
+        response["Cache-Control"] = "no-store"
+        return response
+
+
+class NodeVoicePolicyView(APIView):
+    """`GET /api/v1/auth/nodes/voice-policy` (Phase 11 D3/D11) -- may the
+    voice child arm always-on wake mode for the wake model it loaded? Node
+    voice token only (`NodeVoicePolicyAuthentication`: a `cli` PAT is a 403
+    `token_kind_forbidden`; mute-tolerant once branch 5 adds the storm
+    mute). The server can only say no. Until branch 5 lands the false-accept
+    gate, the answer is always `always_on_permitted: false` with the reason
+    `disabled`: push-to-talk only."""
+
+    authentication_classes = [NodeVoicePolicyAuthentication]
+    permission_classes = [IsAuthenticated, IsNodeVoiceChannel]
+
+    def get(self, request):
+        serializer = NodeVoicePolicyQuerySerializer(data=request.query_params)
+        serializer.is_valid(raise_exception=True)
+        response = Response({"always_on_permitted": False, "reasons": ["disabled"]})
+        response["Cache-Control"] = "no-store"
+        return response
 
 
 class NodeKillSwitchView(APIView):

@@ -132,7 +132,8 @@ def perform_read(manifest, policy, *, workspace, actor, args, channel, as_data=F
         if data_class:
             audit["data_class"] = data_class
         # A call classified personal is held to the personal channel set
-        # (web only), whatever the connector's own channels (D5).
+        # (web, and node voice since Phase 11), whatever the connector's own
+        # channels (D5).
         if data_class == DATA_CLASS_PERSONAL and channel not in READ_CHANNELS[data_class]:
             raise ReadToolError("channel_forbidden")
         try:

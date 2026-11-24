@@ -6,7 +6,13 @@ from rest_framework.exceptions import AuthenticationFailed
 from rest_framework_simplejwt.serializers import TokenRefreshSerializer
 from rest_framework_simplejwt.settings import api_settings as jwt_settings
 
-from accounts.models import DevicePairingCode, PersonalAccessToken, TrustedDevice, User
+from accounts.models import (
+    MINTABLE_PAT_KINDS,
+    DevicePairingCode,
+    PersonalAccessToken,
+    TrustedDevice,
+    User,
+)
 
 
 class UserSerializer(serializers.ModelSerializer):
@@ -33,8 +39,11 @@ class PersonalAccessTokenCreateSerializer(serializers.Serializer):
     # Optional lifetime chosen at mint; omitted -> PAT_DEFAULT_TTL_DAYS.
     expires_in_days = serializers.IntegerField(required=False, min_value=1)
     # Phase 4 branch 6: which surface the token reaches (fixed at mint).
+    # Phase 11 D3: `node_voice` is not mintable here (only a node secret
+    # mints it, bound to its device) -> 400 `invalid_choice`.
     kind = serializers.ChoiceField(
-        choices=PersonalAccessToken.Kind.choices, default=PersonalAccessToken.Kind.CLI
+        choices=[(kind.value, kind.label) for kind in MINTABLE_PAT_KINDS],
+        default=PersonalAccessToken.Kind.CLI,
     )
 
     def validate_expires_in_days(self, value):
@@ -61,8 +70,24 @@ class PersonalAccessTokenSerializer(serializers.ModelSerializer):
             "revoked_at",
             "expires_at",
             "created_at",
+            # Phase 11 D3: the node device a `node_voice` token descends
+            # from (null for every other kind). Read-only.
+            "node_device",
         ]
         read_only_fields = fields
+
+
+class NodeVoicePolicyQuerySerializer(serializers.Serializer):
+    """`GET /api/v1/auth/nodes/voice-policy` query (Phase 11 D11): the wake
+    model the child loaded and the threshold / refractory period it runs
+    at. Bounded and optional in branch 1 (the gate is closed regardless);
+    branch 5 judges them against the recorded evaluations."""
+
+    model_sha256 = serializers.RegexField(r"^[0-9a-f]{64}$", required=False)
+    threshold = serializers.DecimalField(
+        max_digits=5, decimal_places=4, min_value=0, max_value=1, required=False
+    )
+    refractory_ms = serializers.IntegerField(min_value=0, max_value=60_000, required=False)
 
 
 # --- device trust (Phase 4 branch 2) ---

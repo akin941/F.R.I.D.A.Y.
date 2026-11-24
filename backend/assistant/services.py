@@ -446,14 +446,17 @@ def propose_node_action(
     over its untrusted output (`tools.node_actions.validate_proposal`
     through the proposal port). Returns `{"payload": {node_id, capability,
     args, source_message_id}, "action_class"}` or None -- the turn then
-    degrades to plain chat. Web channel only: the card click that requests
+    degrades to plain chat. Web (and node voice) channel only: the card click that requests
     (or, for confirm class, invokes) the action exists only there. Creates
     nothing: the card click goes through `create_request` (gate class) or
-    the actions view (confirm class), which re-validate everything."""
-    from core.channels import CHANNEL_WEB
+    the actions view (confirm class), which re-validate everything.
+    Phase 11 D4: the node voice channel proposes too ("testleri çalıştır"
+    said to the Mac) -- still a draft card, clicked on screen; the trust
+    check caps it at `warn` (`voice_evidence`)."""
+    from core.channels import CHANNEL_NODE_VOICE, CHANNEL_WEB
     from tools.node_action_ports import proposal_source, proposal_validator
 
-    if channel != CHANNEL_WEB:
+    if channel not in (CHANNEL_WEB, CHANNEL_NODE_VOICE):
         return None
     source, validator = proposal_source(), proposal_validator()
     if source is None or validator is None:
@@ -765,13 +768,15 @@ def create_conversation(*, workspace, actor, title="", private=False, channel=""
     exchange could already be extraction-eligible before the PATCH landed.
 
     `channel` (optional) names the non-web channel that created it (the
-    OpenAI-compatible facade) in the audit row.
+    OpenAI-compatible facade, Phase 11's node voice session) in the audit
+    row and, once and for good, in `Conversation.opened_via` (D5).
     """
     conversation = Conversation.objects.create(
         workspace=workspace,
         title=title,
         created_by=actor,
         private=private,
+        opened_via=channel or "",
     )
     metadata = {"private": private}
     if channel:

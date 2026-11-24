@@ -1649,7 +1649,7 @@ is written with the Mac rows pending owner evaluation.
 | # | Branch | Scope | Depends on | Status |
 |---|---|---|---|---|
 | brief | `docs/p11-brief` | This brief (full, from the stub; stub goal, scope, checkpoint and owner step kept), MASTER_PLAN §AA row 11 Brief/Status | Phase 10 closeout; Phase 10 brief | **implemented 2026-11-23** (docs only; plan-review rounds 1 and 2 findings addressed 2026-11-23; awaits re-review to APPROVE) |
-| 1 | `feat/p11-node-voice-channel` | `node_voice` credential + mint, `CHANNEL_NODE_VOICE`, chat/voice endpoint acceptance, personal reads, node-action proposals, live sessions, route walk, ADR-011 amendment | Phase 10 closeout; brief approved | planned |
+| 1 | `feat/p11-node-voice-channel` | `node_voice` credential + mint, `CHANNEL_NODE_VOICE`, chat/voice endpoint acceptance, personal reads, node-action proposals, live sessions, route walk, ADR-011 amendment | Phase 10 closeout; brief approved | **implemented 2026-11-20** (server side complete; the Swift host's use of the mint is M1, deferred: Mac session; see "Branch 1 implementation notes") |
 | 2 | `feat/p11-voice-child-protocol` | `node/friday-voice` package, pins + step 0, `friday-voice/v1` framing/schemas/vectors, reference host + echo double, conformance (host and child families), import/listener guards, CI job, dependency manifest, ADR-013 note | brief approved (parallel with 1) | **implemented 2026-11-20** (step 0 recorded; 28 host + 23 child cases all-pass in process and live; owner steps below) |
 | 3 | `feat/p11-pipecat-pipeline` | Pipecat pipeline, detector ports, gateway STT/chat/TTS clients, segmenter + language routing, push-to-talk, replay harness + baseline, trace fields | 1, 2 | planned |
 | 4 | `feat/p11-barge-in` | Session state machine, barge-in, self-trigger window + content rule, shared vectors, echo scenarios, ADR-015 note (d4) | 3 | planned |
@@ -1730,6 +1730,16 @@ closed), D12 (release on link loss, mute unreadable, child exit), D15
 (event shape), ADR-013 decisions 1, 5, 6.
 
 **Server-side contract tests it must pass:**
+0. Credential (branch 1): `VoiceCredential.swift` mints with
+   `POST /api/v1/auth/nodes/voice-token` exactly as the Python test
+   double in `backend/accounts/tests/node_voice_helpers.py` does (node
+   secret as `Authorization: Bearer jnd_…`, `201 {token, token_id,
+   expires_at, previous_valid_until}`, `Cache-Control: no-store`), treats
+   a 401 as "release the mic and back off", and re-mints ≤ 60 s before
+   `expires_at` relying on the 30 s grace of the superseded token; the
+   server half is pinned by `backend/accounts/tests/test_node_voice_token.py`
+   and `backend/config/tests/test_node_voice_surfaces.py`, which must stay
+   green against the real host's traffic.
 1. Offline conformance: every *host* case in
    `node/friday-voice/friday_voice/conformance/cases/` passes in
    `VoiceConformanceTests.swift` with the reference verdicts, none
@@ -1955,6 +1965,79 @@ member.
   Yes (D4), with the accepted risk recorded; the owner can narrow a
   single read tool's channels if one proves too sensitive aloud.
 
+## Branch 1 implementation notes (`feat/p11-node-voice-channel`, 2026-11-20)
+
+Implemented as scoped (D3, D4, D5), with these recorded choices:
+
+1. **`node_device` is `on_delete=RESTRICT`, not `PROTECT`.** Same
+   guarantee for a standalone device delete (devices are soft-revoked and
+   never deleted; a delete with voice tokens raises `RestrictedError`,
+   tested), but unlike `PROTECT` it does not block a whole-user cascade
+   (the repository's `Conversation.last_extracted_message` argument).
+2. **TTL bounds.** `VOICE_LIVE_TOKEN_TTL_SECONDS` is refused at boot
+   outside 60..3600 (the brief named only the upper bound) and
+   `VOICE_LIVE_ROTATION_GRACE_SECONDS` outside 0..300.
+3. **Kill switch.** Engaging it soft-revokes every `node_voice` token of
+   the owner (no grace); releasing it does not resurrect them — the host
+   mints a new one. Device revoke and `revoke_all_devices` revoke the
+   device's tokens the same way. Independently, the authenticator re-checks
+   the device on every request (`node_device_refusal`), audited as
+   `accounts.pat.auth_failed` with reason `node_<refusal>`.
+4. **Known follow-up 1 is fixed here.** `voice._conversation` returns 404
+   over `CHANNEL_NODE_VOICE` unless `opened_via == "node_voice"`, so
+   transcriptions, speech and the receipt reach only live conversations
+   (tests in `voice/tests/test_live_endpoints.py`).
+5. **Shipped manifests unchanged.** `READ_CHANNELS` widens (ADR-010
+   amendment), but Google and Home Assistant keep `read_channels={web}`:
+   opting a connector into `node_voice` is a manifest edit under the MCP
+   governance process (owner step below). Until then "bugün ne var?"
+   over the node answers without a calendar read; the executor path is
+   proven with a fake personal manifest that opts in
+   (`connectors/tests/test_read_channels_node_voice.py`).
+6. **Policy endpoint.** `GET /api/v1/auth/nodes/voice-policy` validates
+   its optional query (`model_sha256` 64 hex, `threshold` 0..1 with 4
+   decimals, `refractory_ms` 0..60000; 400 otherwise) and answers
+   `{"always_on_permitted": false, "reasons": ["disabled"]}` until
+   branch 5. `NodeVoicePolicyAuthentication` exists (accepts only
+   `node_voice`); its mute tolerance becomes meaningful when branch 5
+   adds the 423.
+7. **Live sessions** lock the workspace row while choosing/creating, so a
+   double open cannot create two live conversations; the title is
+   "Canlı ses — YYYY-MM-DD HH:MM" (local time).
+8. **`Message.Channel`** is now the module-level `MessageChannel` (same
+   values plus `node_voice`) so `Conversation.opened_via` can share its
+   choices; `create_dev_pat --kind` also uses `MINTABLE_PAT_KINDS`.
+9. **Contract tests updated deliberately:** the node-secret route walk
+   (`config/tests/test_node_credential_surfaces.py`) now allows exactly
+   two node-secret views (rotation and the voice mint), and the channel
+   matrix (`config/tests/test_channel_matrix.py`) maps both new
+   authenticators to `CHANNEL_NODE_VOICE`.
+
+The "done when" is `voice/tests/test_live_endpoints.py::
+test_a_live_turn_end_to_end_with_a_rotation_mid_turn` (a token minted with
+a paired node's secret opens a session, transcribes a fixture WAV, posts
+the voice turn with a re-minted token, and synthesizes the reply while the
+old token is still inside its grace — FakeAdapter and the fake speech
+providers) plus the route walk and `lint-imports` (no contract edited).
+The Phase 10 node-action voice regression over the new channel is
+`tools/tests/test_node_action_node_voice.py` (draft only; the voice token
+cannot click the card; the owner's click yields `warn`/`voice_evidence`).
+
+### Owner steps (pending) — `feat/p11-node-voice-channel`, recorded 2026-11-20
+
+1. **Independent review.** Run the Sonnet 5 review of this branch and fix
+   findings until APPROVE (CLAUDE.md "Reviews").
+2. **Opt connectors into `node_voice` (optional).** If spoken calendar
+   reads are wanted, add `node_voice` to the Google manifest's
+   `read_channels` (and any other connector) through the MCP governance
+   process; note that the Google manifest also covers mail, so a mail
+   read becomes speakable too (ADR-015 decision 7's accepted risk).
+3. **Mac (deferred: Mac session, M1).** The Swift host's
+   `VoiceCredential.swift` uses the mint endpoint against the real
+   server with the Keychain node secret; no real credential exists in
+   this container, so the flow is exercised here only with a paired test
+   node and the reference credential path.
+
 ## Owner steps (pending) — recorded 2026-11-20
 
 The first one is from the stub and is kept.
@@ -2087,7 +2170,8 @@ answers them:
 
 ## Known follow-ups (unresolved review notes, recorded at merge 2026-11-24)
 
-1. **LOW — voice endpoints and `opened_via` (D4, branch 1 Tests,
+1. **LOW — voice endpoints and `opened_via` (D4, branch 1 Tests, fixed in
+   branch 1 on 2026-11-20 — see "Branch 1 implementation notes" item 4;
    "Release-gate regressions").** The `opened_via == node_voice`
    restriction is applied only to the chat turn (GET and POST messages).
    The three voice endpoints (transcriptions, speech, receipt) still
@@ -2140,3 +2224,17 @@ answers them:
    in `_on_state`, call `_release("child_state:<state>")` when the child
    state is not in `ACQUIRE_STATES` and `mic_held` is true, and add a
    host conformance case for it.
+
+### Known follow-ups — `feat/p11-node-voice-channel` (unresolved review notes, recorded at merge 2026-11-24)
+
+1. **LOW — review step still pending in the brief
+   (`docs/prompts/phase-11-live-voice/brief.md`).** Owner step 1 under
+   "Branch 1 implementation notes" still lists the independent review as
+   pending while the branch table row says implemented. Expected for
+   round 1, not a defect. **Fix:** after APPROVE, mark the review step
+   done in the same docs commit.
+2. **LOW — `PersonalAccessToken.kind` has no headroom
+   (`backend/accounts/models.py`).** `max_length=10` and `node_voice` is
+   exactly 10 characters. The migration is consistent and tests pass,
+   but a longer kind later would not fit. **Fix (optional):** widen
+   `max_length` in a later migration when a new kind is added.
