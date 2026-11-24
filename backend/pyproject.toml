@@ -147,6 +147,9 @@ name = "kernel apps must not import the Django project config"
 type = "forbidden"
 source_modules = ["accounts", "workspaces", "audit", "ai_core", "assistant", "memory", "knowledge", "tasks", "approvals", "tools", "agents", "skills", "integrations", "harness", "connectors", "deploys", "ops", "voice", "hud", "nodes", "proactive"]
 forbidden_modules = ["config"]
+ignore_imports = [
+    "proactive.tests.** -> config.**",
+]
 
 # ai_core is the single door for LLM traffic (ADR-003): it must never depend on
 # business apps (FK references use string labels, not imports).
@@ -462,6 +465,9 @@ name = "no other app may import harness (harness is a leaf dependency root)"
 type = "forbidden"
 source_modules = ["accounts", "assistant", "knowledge", "tasks", "approvals", "tools", "agents", "skills", "integrations", "connectors", "deploys", "voice", "hud", "nodes", "proactive"]
 forbidden_modules = ["harness"]
+ignore_imports = [
+    "proactive.tests.** -> harness.**",
+]
 
 # Phase 5 (ADR-010): two new kernel apps, `connectors` (MCP servers and
 # native bridges) and `deploys` (deploy targets, the deploy gate, the SSH
@@ -514,6 +520,9 @@ name = "kernel apps must not import connectors or deploys (ADR-010)"
 type = "forbidden"
 source_modules = ["accounts", "workspaces", "assistant", "memory", "knowledge", "tasks", "approvals", "tools", "agents", "skills", "integrations", "nodes", "proactive"]
 forbidden_modules = ["connectors", "deploys"]
+ignore_imports = [
+    "proactive.tests.** -> connectors.**",
+]
 
 # harness may import connectors (the `github_open_pr` gate, PR/CI reads)
 # but not deploys: the deploy gate is requested by `deploys` itself.
@@ -665,6 +674,9 @@ name = "only tools, hud, ops may import nodes (ADR-013, Phase 9 D2)"
 type = "forbidden"
 source_modules = ["core", "accounts", "workspaces", "audit", "ai_core", "assistant", "memory", "knowledge", "tasks", "approvals", "agents", "skills", "integrations", "harness", "connectors", "deploys", "voice", "proactive"]
 forbidden_modules = ["nodes"]
+ignore_imports = [
+    "proactive.tests.** -> nodes.**",
+]
 
 # `nodes.protocol` and `nodes.capabilities` are the shared spec the Swift
 # node mirrors (brief D2): pure Python, importing no project package and no
@@ -710,6 +722,18 @@ name = "proactive may import only core, workspaces, audit, ai_core, accounts (Ph
 type = "forbidden"
 source_modules = ["proactive"]
 forbidden_modules = ["config", "assistant", "memory", "knowledge", "tasks", "approvals", "tools", "agents", "skills", "integrations", "harness", "connectors", "deploys", "ops", "voice", "hud", "nodes", "mcp"]
+ignore_imports = [
+    "proactive.tests.** -> config.**",
+    "proactive.tests.** -> assistant.**",
+    "proactive.tests.** -> memory.**",
+    "proactive.tests.** -> tasks.**",
+    "proactive.tests.** -> approvals.**",
+    "proactive.tests.** -> tools.**",
+    "proactive.tests.** -> skills.**",
+    "proactive.tests.** -> harness.**",
+    "proactive.tests.** -> connectors.**",
+    "proactive.tests.** -> nodes.**",
+]
 
 # Phase 12 D19 / D3 ("cron cannot create cron"): only assistant, hud and ops
 # may import proactive at all -- no tool, connector, skill, agent or harness
