@@ -3014,3 +3014,14 @@ answers them:
    were read but not executed. At merge the frontend lint, typecheck and the
    full vitest suite (including these files) ran green on the integration
    branch. **Fix:** confirm `make test` stays green for the frontend in CI.
+
+### Known follow-ups — `feat/p11-wake-eval-harness` (unresolved review notes, recorded at merge 2026-11-24)
+
+1. **LOW — report hashes prove consistency, not authenticity
+   (`backend/accounts/wake_eval_report.py`).** `report_sha256` and the
+   manifest hashes only show that a wake-eval report is internally
+   consistent. Anyone with shell access who recomputes the hashes can forge
+   a passing report. The owner-shell trust model makes this acceptable, and
+   tests cover reports that were rehashed but are inconsistent. **Fix:**
+   optional. State in `docs/voice/live-eval.md` that the hashes detect
+   accidental or hand edits only, not a deliberate forgery by the owner.
