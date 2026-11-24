@@ -127,7 +127,9 @@ def test_status_kill_switch_revoked_and_expiring(owner, node, make_node, cleanup
 
 def test_node_health_blocks(owner, node):
     other = other_user()
-    assert selectors.node_health(other) == {"status": "never_paired"}
+    never = selectors.node_health(other)
+    assert never["status"] == "never_paired" and set(never) == {"status", "voice"}
+    assert never["voice"]["state"] == "unknown"
     health = selectors.node_health(owner)
     assert health["status"] == "disconnected" and health["node_id"] == str(node.pk)
     assert health["advertised_count"] == 9

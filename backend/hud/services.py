@@ -1,6 +1,8 @@
 """HUD read model (Phase 6 branch 5, brief A8): the four server-side
 sections of the `/hud` event stream -- approvals, today's tasks, live cost
-and health. Voice state is client-side and never crosses this boundary.
+and health. The browser's voice state is client-side and never crosses this
+boundary; the Mac node's mic state (Phase 11 D15) arrives as a node event
+and is read here through `nodes` like the rest of the node line.
 
 Rules this module keeps:
 
@@ -229,6 +231,23 @@ def node_section(actor):
         "advertised_count": block.get("advertised_count", 0),
         "spool_depth": block.get("spool_depth", 0),
         "node_version": block.get("node_version", ""),
+        "voice": _voice_line(block.get("voice") or {}),
+    }
+
+
+def _voice_line(voice):
+    """Phase 11 D15: the node's mic state (`nodes.selectors.voice_summary`,
+    read through the `nodes` edge, never `voice`): a state word (`unknown`
+    when stale or offline), the local mode, the session flag and the voice
+    child's daily counters. No audio, no transcript, no draft list."""
+    return {
+        "state": voice.get("state", "unknown"),
+        "mode": voice.get("mode", ""),
+        "session_open": bool(voice.get("session_open", False)),
+        "wake_accepts_today": int(voice.get("wake_accepts_today", 0)),
+        "wake_discards_today": int(voice.get("wake_discards_today", 0)),
+        "storm_mutes_today": int(voice.get("storm_mutes_today", 0)),
+        "at": _iso(voice.get("at")),
     }
 
 

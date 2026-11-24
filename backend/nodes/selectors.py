@@ -11,6 +11,15 @@ times only -- never a path, a schema's content or any read output.
   `NODE_CREDENTIAL_ROTATE_AFTER_DAYS` (the node should have rotated);
   reported instead of `connected`/`disconnected`.
 `node_health(owner)` adds `never_paired` for an owner without nodes.
+
+Phase 11 D15: `node_health` also carries `voice`, the node's mic state as
+its last `voice.state` event reported it (`voice_summary`). It reads
+`unknown` when the node is offline or the state is older than two
+heartbeats (`VOICE_STATE_STALE_SECONDS`, the server's receive time), and
+`off` while the node is revoked or its kill switch is engaged: the node's
+credential is then refused, and the protocol obliges a cut-off node to
+release the mic (ADR-013 decision 6) -- "off" there is the server's
+fail-closed reading, not an observation.
 """
 
 from datetime import timedelta
@@ -21,6 +30,7 @@ from django.utils import timezone
 from accounts.devices import node_device_refusal
 from nodes import presence
 from nodes.models import CapabilitySnapshot, Node, NodeInvocation
+from nodes.protocol.messages import VOICE_STATE_STALE_SECONDS
 
 STATUSES = (
     "connected",
@@ -131,26 +141,68 @@ def node_detail(node, *, now=None) -> dict:
     return summary
 
 
+VOICE_UNKNOWN = "unknown"
+_VOICE_CUT_OFF = frozenset({"kill_switch", "revoked"})
+
+
+def voice_summary(node, *, status, online, now=None) -> dict:
+    """The node's mic state for the HUD (D15): state, mode, session flag,
+    the three daily counters and when the server last heard it. Codes and
+    counts only."""
+    now = now or timezone.now()
+    reported_at = node.voice_state_at if node is not None else None
+    blank = {
+        "state": VOICE_UNKNOWN,
+        "mode": "",
+        "session_open": False,
+        "wake_accepts_today": 0,
+        "wake_discards_today": 0,
+        "storm_mutes_today": 0,
+        "at": reported_at,
+    }
+    if node is None:
+        return blank
+    if status in _VOICE_CUT_OFF:
+        return {**blank, "state": "off"}
+    fresh = (
+        bool(node.voice_state)
+        and reported_at is not None
+        and now - reported_at <= timedelta(seconds=VOICE_STATE_STALE_SECONDS)
+    )
+    if not online or not fresh:
+        return blank
+    return {
+        "state": node.voice_state,
+        "mode": node.voice_mode,
+        "session_open": node.voice_session_open,
+        "wake_accepts_today": node.voice_wake_accepts_today,
+        "wake_discards_today": node.voice_wake_discards_today,
+        "storm_mutes_today": node.voice_storm_mutes_today,
+        "at": reported_at,
+    }
+
+
 def node_health(owner, *, now=None) -> dict:
     """The HUD health panel's `node` block (D11; `hud.services.node_section`
     since branch 7), read through `nodes_for()` (`for_actor()`): the
     most relevant of the owner's nodes -- a connected one first, else the
     most recently paired non-revoked one, else the latest. No path, no
     content."""
+    never = {"status": "never_paired", "voice": voice_summary(None, status=None, online=False)}
     if owner is None or getattr(owner, "pk", None) is None:
-        return {"status": "never_paired"}
+        return never
     nodes = list(nodes_for(owner))
     if not nodes:
-        return {"status": "never_paired"}
-    summaries = [node_summary(node, now=now) for node in nodes]
+        return never
+    pairs = [(node_summary(node, now=now), node) for node in nodes]
     ranked = sorted(
-        summaries,
-        key=lambda item: (
-            item["status"] != "connected",
-            item["status"] == "revoked",
+        pairs,
+        key=lambda pair: (
+            pair[0]["status"] != "connected",
+            pair[0]["status"] == "revoked",
         ),
     )
-    best = ranked[0]
+    best, best_node = ranked[0]
     return {
         "status": best["status"],
         "node_id": best["id"],
@@ -160,6 +212,7 @@ def node_health(owner, *, now=None) -> dict:
         "advertised_count": best["advertised_count"],
         "spool_depth": best["spool_count"],
         "node_version": best["node_version"],
+        "voice": voice_summary(best_node, status=best["status"], online=best["online"], now=now),
     }
 
 

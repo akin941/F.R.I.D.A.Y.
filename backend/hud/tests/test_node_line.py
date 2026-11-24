@@ -32,6 +32,7 @@ NODE_KEYS = {
     "advertised_count",
     "spool_depth",
     "node_version",
+    "voice",
 }
 
 
@@ -78,6 +79,15 @@ def test_never_paired(stream, workspace):
         "advertised_count": 0,
         "spool_depth": 0,
         "node_version": "",
+        "voice": {
+            "state": "unknown",
+            "mode": "",
+            "session_open": False,
+            "wake_accepts_today": 0,
+            "wake_discards_today": 0,
+            "storm_mutes_today": 0,
+            "at": None,
+        },
     }
 
 
