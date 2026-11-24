@@ -90,6 +90,7 @@ class MessageSerializer(serializers.ModelSerializer):
             "connector_reads",
             "input_mode",
             "route",
+            "followup_of",
             "confirmed_task",
         ]
         read_only_fields = fields

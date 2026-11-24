@@ -163,6 +163,29 @@ class ToolSpec:
     approval_ttl_seconds: int | None = None
     precheck_request: Callable[[Any, Any, dict], Any] | None = None
     authorize_decision: Callable[[Any, Any], None] | None = None
+    # Phase 12 D12 (branch 4): a gated tool whose draft card carries its
+    # arguments (`{"arguments": {...}}`, the connector-write payload shape).
+    # When set, the router (and a `tool.*` wake route) extracts them with
+    # `router.connector_args` from the owner's own words, validates them
+    # with this strict serializer and puts them on the draft; the owner
+    # still sees, and decides, the exact arguments on /approvals. `None`
+    # (default): the draft carries an empty payload, as before.
+    draft_arguments: "DraftArguments | None" = None
+    # A short Friday-authored label ("Ev yedeği") for the wake-route list;
+    # empty = the tool name.
+    label: str = ""
+
+
+@dataclass(frozen=True)
+class DraftArguments:
+    """What the router needs to propose a gated tool's arguments (Phase 12
+    D12): a Friday-authored description, the strict DRF serializer the
+    request is validated by, and the tool's data class (a `personal` tool's
+    argument call carries `personal_data=True`). Never server text."""
+
+    description: str
+    argument_serializer: Any
+    data_class: str
 
 
 _REGISTRY: dict[str, ToolSpec] = {}
@@ -301,6 +324,62 @@ class ReadToolSpec:
     execute: Callable[..., ReadResult]
     is_available: Callable[[Any], bool]
     source: str = ""
+    # Phase 12 D11 (branch 4): an `async` read is started in the turn and
+    # finishes later in a worker; its result reaches the conversation as one
+    # follow-up message (`assistant.followups`). `start_async(*, workspace,
+    # actor, args, channel) -> AsyncReadHandle` runs the same refusals as
+    # `execute` and never waits for the result; `fetch_async(handle) ->
+    # AsyncReadOutcome` reads where it stands. Both required for `async`.
+    mode: str = "sync"
+    start_async: Callable[..., "AsyncReadHandle"] | None = None
+    fetch_async: Callable[["AsyncReadHandle"], "AsyncReadOutcome"] | None = None
+    # A short Friday-authored label ("Sunucu durumu") for templates and
+    # notices; empty = the tool name.
+    label: str = ""
+
+    @property
+    def display_label(self) -> str:
+        return self.label or self.name
+
+
+READ_MODE_SYNC = "sync"
+READ_MODE_ASYNC = "async"
+READ_MODES = frozenset({READ_MODE_SYNC, READ_MODE_ASYNC})
+
+# `AsyncReadOutcome.status` (Phase 12 D11): the closed lifecycle of one
+# async read. The last three are terminal.
+ASYNC_PENDING = "pending"
+ASYNC_RUNNING = "running"
+ASYNC_OK = "ok"
+ASYNC_FAILED = "failed"
+ASYNC_TIMED_OUT = "timed_out"
+ASYNC_TERMINAL = frozenset({ASYNC_OK, ASYNC_FAILED, ASYNC_TIMED_OUT})
+
+
+@dataclass(frozen=True)
+class AsyncReadHandle:
+    """An opaque reference to one started async read: the id of the row
+    its owner keeps (`connectors.ConnectorAsyncRead`) and the read tool's
+    name. Holds no arguments and no result."""
+
+    id: str
+    tool: str
+
+
+@dataclass(frozen=True)
+class AsyncReadOutcome:
+    """Where one async read stands. `result` only when `status == "ok"`
+    (bounded, still low-trust text the caller fences); `error_code` a
+    closed-vocabulary token otherwise. `data_class` as on `ReadResult`."""
+
+    status: str
+    result: ReadResult | None = None
+    error_code: str = ""
+    data_class: str = ""
+
+    @property
+    def terminal(self) -> bool:
+        return self.status in ASYNC_TERMINAL
 
 
 _READ_REGISTRY: dict[str, ReadToolSpec] = {}
@@ -325,6 +404,12 @@ def register_read_tool(spec: ReadToolSpec) -> None:
         )
     if spec.name in _REGISTRY:
         raise ValueError(f"{spec.name!r} is already registered as a gated tool.")
+    if spec.mode not in READ_MODES:
+        raise ValueError(f"{spec.name!r}: unknown read mode {spec.mode!r}.")
+    if spec.mode == READ_MODE_ASYNC and not (
+        callable(spec.start_async) and callable(spec.fetch_async)
+    ):
+        raise ValueError(f"{spec.name!r}: an async read needs start_async and fetch_async.")
     _READ_REGISTRY[spec.name] = spec
 
 
@@ -363,3 +448,60 @@ def run_read_tool(spec: ReadToolSpec, *, workspace, actor, args, channel) -> Rea
     own); outside one, the call is exactly `spec.execute(...)`."""
     deny_if_unattended("read_tool")
     return spec.execute(workspace=workspace, actor=actor, args=args, channel=channel)
+
+
+# --- Async reads (Phase 12 D11, branch 4) ---
+#
+# The owner of the read (`connectors`) runs it in a worker and, once it is
+# terminal, calls `notify_async_read(handle)`; whoever waits for it
+# (`assistant`, the follow-up) registered a listener at startup. `tools`
+# imports neither side -- the same pattern as the read registry itself.
+
+_ASYNC_LISTENERS: list[Callable[[AsyncReadHandle], None]] = []
+
+
+def start_async_read(spec: ReadToolSpec, *, workspace, actor, args, channel) -> AsyncReadHandle:
+    """Start one async read (Phase 12 D11). Like `run_read_tool`, the only
+    sanctioned call site of `ReadToolSpec.start_async`: inside an unattended
+    run it is denied before the spec is touched (no row, no dispatch)."""
+    deny_if_unattended("read_tool")
+    if spec.mode != READ_MODE_ASYNC or spec.start_async is None:
+        raise ReadToolError("not_available")
+    return spec.start_async(workspace=workspace, actor=actor, args=args, channel=channel)
+
+
+def fetch_async_read(handle: AsyncReadHandle) -> AsyncReadOutcome:
+    """Where the read behind `handle` stands. A tool that is no longer
+    registered (or not async) reads as `failed`/`not_available`."""
+    spec = _READ_REGISTRY.get(handle.tool)
+    if spec is None or spec.fetch_async is None:
+        return AsyncReadOutcome(status=ASYNC_FAILED, error_code="not_available")
+    return spec.fetch_async(handle)
+
+
+def register_async_read_listener(listener: Callable[[AsyncReadHandle], None]) -> None:
+    """Called once per process at startup by the app that waits for async
+    reads. Idempotent for the same callable."""
+    if listener not in _ASYNC_LISTENERS:
+        _ASYNC_LISTENERS.append(listener)
+
+
+def unregister_async_read_listener(listener: Callable[[AsyncReadHandle], None]) -> None:
+    """Test-only."""
+    if listener in _ASYNC_LISTENERS:
+        _ASYNC_LISTENERS.remove(listener)
+
+
+def notify_async_read(handle: AsyncReadHandle) -> None:
+    """An async read reached a terminal state: tell every listener. A
+    listener failure is logged by class name and never propagates (the
+    read's own row is already final; the follow-up's recovery picks it up)."""
+    import logging
+
+    for listener in list(_ASYNC_LISTENERS):
+        try:
+            listener(handle)
+        except Exception as exc:  # noqa: BLE001 -- one listener never blocks another
+            logging.getLogger(__name__).warning(
+                "async read listener failed for %s: %s", handle.tool, type(exc).__name__
+            )

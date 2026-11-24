@@ -99,14 +99,18 @@ def routes_payload(workspace):
             "min_chars": wake_routes.ALIAS_MIN_CHARS,
             "max_chars": wake_routes.ALIAS_MAX_CHARS,
         },
+        # Phase 12 branch 4: the `tool.*` routes follow the code-defined
+        # table, each with its tool's Friday-authored label (alias only, no
+        # default phrase).
         "routes": [
             {
                 "name": route.name,
                 "effect": route.effect,
                 "phrases": list(route.default_phrases),
                 "aliases": aliases.get(route.name, []),
+                "label": wake_routes.tool_route_label(route.name),
             }
-            for route in wake_routes.ROUTES
+            for route in wake_routes.all_routes()
         ],
     }
 

@@ -88,6 +88,19 @@ _BEAT_SCHEDULE = {
         "task": "connectors.tasks.check_connector_pins",
         "schedule": 15 * 60.0,
     },
+    # Phase 12 D11 (branch 4): async reads -- lost dispatches re-published
+    # (never sent yet), lost workers failed (never re-sent), old result text
+    # cleared.
+    "connector-async-read-recovery-scan": {
+        "task": "connectors.tasks.recover_async_reads",
+        "schedule": 60.0,
+    },
+    # ... and their follow-ups: a lost notification re-dispatched, a lost
+    # composer failed (never a second completion).
+    "assistant-followup-recovery-scan": {
+        "task": "assistant.tasks.recover_followups_task",
+        "schedule": 60.0,
+    },
     # Phase 5 branch 6 (brief D10): lost deploy runs; runner beat only.
     "deploy-run-recovery-scan": {
         "task": "deploys.tasks.recover_stale_deploy_runs",

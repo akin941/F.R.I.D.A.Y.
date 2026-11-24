@@ -11,7 +11,11 @@ RUN useradd --system --uid 10001 --home-dir /nonexistent --shell /usr/sbin/nolog
 RUN pip install --no-cache-dir "mcp>=2.2,<2.3" "uvicorn>=0.31"
 COPY backend/connectors/__init__.py /app/connectors/__init__.py
 COPY backend/connectors/docker/__init__.py /app/connectors/docker/__init__.py
+COPY backend/connectors/docker/common.py /app/connectors/docker/common.py
 COPY backend/connectors/docker/stdio_bridge.py /app/connectors/docker/stdio_bridge.py
+# Phase 12 D9: the HTTP relay mode (compose `n8n-relay` overrides the
+# entrypoint with `python -m connectors.docker.http_relay`).
+COPY backend/connectors/docker/http_relay.py /app/connectors/docker/http_relay.py
 
 WORKDIR /app
 USER bridge

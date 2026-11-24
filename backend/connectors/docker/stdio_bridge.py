@@ -36,11 +36,11 @@ from mcp.client.stdio import StdioServerParameters, stdio_client
 from mcp.server import Server
 from mcp.types import CallToolResult, ListToolsResult, PaginatedRequestParams, TextContent
 
+from connectors.docker.common import allowed_tool_set, csv_list
+
 _BASE_CHILD_ENV = ("PATH", "HOME")
-
-
-def _csv(value):
-    return [item.strip() for item in (value or "").split(",") if item.strip()]
+# Kept for callers of the pre-Phase-12 name.
+_csv = csv_list
 
 
 def child_parameters(environ):
@@ -66,9 +66,7 @@ def build_bridge(child_factory, *, allowed_tools, name="friday-stdio-bridge"):
     """The bridge server. `child_factory()` is an async context manager
     yielding a `ClientSession` to the stdio server (in tests: to an
     in-process server)."""
-    allowed = frozenset(allowed_tools)
-    if not allowed:
-        raise ValueError("BRIDGE_ALLOWED_TOOLS must name at least one tool.")
+    allowed = allowed_tool_set(allowed_tools)
 
     @asynccontextmanager
     async def lifespan(_server):

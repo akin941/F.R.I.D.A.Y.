@@ -14,6 +14,7 @@ from accounts.authentication import (
     NodeVoiceTokenAuthentication,
     PersonalAccessTokenAuthentication,
 )
+from assistant.followups import create_followup
 from assistant.models import Conversation, Message
 from assistant.serializers import (
     ConversationCreateSerializer,
@@ -358,7 +359,9 @@ class ConversationMessageListView(APIView):
             connector_turn = prepare_connector_read(
                 conversation,
                 actor=request.user,
-                content=content,
+                # Phase 12 D8: a `tool.*` route extracts the arguments from
+                # the words after the owner's alias.
+                content=(routed.args_text if routed is not None and routed.args_text else content),
                 channel=channel,
                 tool_name=classification["intent_payload"]["tool_name"],
                 context_report=turn_report or None,
@@ -368,10 +371,17 @@ class ConversationMessageListView(APIView):
                 "outcome": connector_turn.outcome,
             }
 
+        async_started = connector_turn is not None and connector_turn.async_handle is not None
         if routed is not None and routed.reply_text is not None:
             # The route's stored text is the reply: no gateway call, no
             # ModelUsage (there is no call), no context assembly.
             gateway_stream, usage_holder = static_reply_stream(routed.reply_text), {}
+            memory_ids, chunk_ids, overlay_source_workspaces = [], [], {}
+        elif async_started:
+            # Phase 12 D11: an async read was started -- the reply is
+            # Friday's template, no chat completion this turn; the result
+            # arrives later as one follow-up message.
+            gateway_stream, usage_holder = static_reply_stream(connector_turn.reply_text), {}
             memory_ids, chunk_ids, overlay_source_workspaces = [], [], {}
         else:
             gateway_stream, usage_holder, memory_ids, chunk_ids, overlay_source_workspaces = (
@@ -409,6 +419,17 @@ class ConversationMessageListView(APIView):
             input_mode=input_mode,
             route=route_name,
         )
+        if async_started:
+            create_followup(
+                conversation=conversation,
+                source_message=user_message,
+                actor=request.user,
+                channel=channel,
+                handle=connector_turn.async_handle,
+                tool_label=connector_turn.tool_label,
+                source=connector_turn.source,
+                data_class=connector_turn.data_class,
+            )
 
         # `draft` SSE event (MVP 6 §3/§4/§5): non-terminal, emitted only for
         # a task_draft/tool_request turn with a usable payload -- `done`'s

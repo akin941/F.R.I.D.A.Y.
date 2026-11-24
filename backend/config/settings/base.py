@@ -563,6 +563,9 @@ AI_PURPOSE_TIERS = {
     "facade.ephemeral": "cheap",
     # mid: conversation, extraction, retrieval-grounded steps
     "chat": "mid",
+    # Phase 12 D11/D18: the one completion of an async read's follow-up
+    # (fenced result, no tools; personal per the read tool's data class).
+    "chat.followup": "mid",
     "memory.extraction": "mid",
     "agent.read_step": "mid",
     # Phase 8A learning loop (brief D9/D10): owner-text episode extraction is
@@ -887,6 +890,12 @@ CONNECTOR_HEALTH_TIMEOUT_SECONDS = env.int("CONNECTOR_HEALTH_TIMEOUT_SECONDS", d
 # a live worker never loses its lease mid-call. A lease that expires anyway
 # means the worker was lost -> `unknown_outcome`, never a re-send (D6).
 CONNECTOR_WRITE_LEASE_SECONDS = env.int("CONNECTOR_WRITE_LEASE_SECONDS", default=120)
+# n8n (Phase 12 D9-D12, docs/mcp/n8n.md). The relay sidecar's internal URL is
+# NOT a setting: the manifest names `N8N_MCP_URL`, read from the environment
+# at call time; the bearer lives only in the `n8n-relay` sidecar
+# (`RELAY_BEARER_TOKEN`). The one tunable: how long an async read's one
+# call may take (D11; the worker never retries it).
+N8N_ASYNC_READ_TIMEOUT_SECONDS = env.int("N8N_ASYNC_READ_TIMEOUT_SECONDS", default=120)
 # Google bridge (Phase 5 branch 8, brief D9). Credentials are NOT settings:
 # `GOOGLE_OAUTH_CLIENT_ID` / `_CLIENT_SECRET` / `_REFRESH_TOKEN` are read from
 # the environment at call time by `connectors.bridges.google` only (never

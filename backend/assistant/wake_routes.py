@@ -25,6 +25,11 @@ normal router runs. Typed turns are never routed.
   `digest.today`'s own `spoken_at` / `spoken_channel` telemetry on the
   digest it answered with (`proactive.api.mark_digest_spoken`, ADR-015
   implementation note), made only after the cap has kept the route.
+- **Tool routes (branch 4).** `tool.<name>` routes exist for every
+  registered read tool and user-invocable gated tool, with owner aliases
+  only, matched as the leading words of the utterance; they yield exactly
+  what the router would (a `connector_read` turn, or a `tool_request` draft
+  card) and make exactly the router's argument call, nothing more.
 - **Scope.** Routes answer only the owner of the conversation's workspace,
   from that workspace's rows (`for_actor()` through `proactive.api` and
   `memory.probes`): a firm digest never answers a personal conversation.
@@ -148,11 +153,14 @@ class WakeRoute:
 
 @dataclass(frozen=True)
 class RoutedTurn:
-    """`route_voice_turn`'s answer to the chat turn."""
+    """`route_voice_turn`'s answer to the chat turn. `args_text` (a
+    `tool.*` route): the words after the alias, from which the read's
+    arguments are extracted."""
 
     route: str
     classification: dict
     reply_text: str | None
+    args_text: str = ""
 
 
 # --- handlers -----------------------------------------------------------------
@@ -298,15 +306,114 @@ def validate_routes(routes=None) -> None:
             owned.append((route.name, phrase))
 
 
+# --- tool routes (branch 4) -----------------------------------------------------
+#
+# `tool.<name>`: an owner alias for one read tool or one user-invocable gated
+# tool. No default phrases (aliases only); the alias is matched as the
+# leading words of the utterance and the rest is the request. A read tool
+# yields exactly the router's `connector_read` turn (arguments from the
+# remainder through `router.connector_args`, then the same read path, sync
+# or async); a gated tool yields exactly the router's `tool_request` draft
+# (D12: with router-extracted arguments for a tool that declares them) --
+# a card, never an approval or an execution. Built from the registries at
+# call time, so a tool that is no longer registered has no route.
+
+TOOL_ROUTE_PREFIX = "tool."
+# Phase 10 D13: the node action draft needs its own proposal step and the
+# trust check's evidence; the router path stays its only door.
+_TOOL_ROUTE_EXCLUDED = frozenset({"node_action"})
+
+
+def _tool_read_handler(tool_name):
+    def handler(turn: WakeTurn) -> RouteResult:
+        return RouteResult(
+            intent=Message.Intent.CONNECTOR_READ, intent_payload={"tool_name": tool_name}
+        )
+
+    return handler
+
+
+def _tool_write_handler(tool_name):
+    def handler(turn: WakeTurn) -> RouteResult:
+        from assistant.services import draft_tool_payload
+
+        payload = draft_tool_payload(
+            turn.conversation,
+            actor=turn.actor,
+            content=turn.remainder or turn.content,
+            tool_name=tool_name,
+        )
+        if payload is None:
+            return RouteResult()
+        return RouteResult(
+            intent=Message.Intent.TOOL_REQUEST,
+            intent_payload={"tool_name": tool_name, "payload": payload},
+        )
+
+    return handler
+
+
+def tool_route_label(name):
+    """The Friday-authored label of a `tool.*` route's tool (its manifest
+    label), else the tool name; "" for a non-tool route."""
+    from tools.registry import get_read_tool, get_tool
+
+    if not name.startswith(TOOL_ROUTE_PREFIX):
+        return ""
+    tool_name = name[len(TOOL_ROUTE_PREFIX) :]
+    read = get_read_tool(tool_name)
+    if read is not None:
+        return read.display_label
+    gated = get_tool(tool_name)
+    return (getattr(gated, "label", "") or tool_name) if gated is not None else tool_name
+
+
+def tool_routes():
+    """Every `tool.*` route of the tools registered now, sorted by name."""
+    from tools.registry import list_read_tool_names, list_tool_names
+
+    routes = [
+        WakeRoute(
+            name=f"{TOOL_ROUTE_PREFIX}{name}",
+            effect=EFFECT_READ,
+            default_phrases=(),
+            handler=_tool_read_handler(name),
+        )
+        for name in list_read_tool_names()
+    ]
+    routes += [
+        WakeRoute(
+            name=f"{TOOL_ROUTE_PREFIX}{name}",
+            effect=EFFECT_PROPOSAL,
+            default_phrases=(),
+            handler=_tool_write_handler(name),
+        )
+        for name in list_tool_names()
+        if name not in _TOOL_ROUTE_EXCLUDED
+    ]
+    return sorted(
+        (route for route in routes if _ROUTE_NAME.match(route.name)), key=lambda r: r.name
+    )
+
+
+def all_routes():
+    """The code-defined table, then the `tool.*` routes."""
+    return (*ROUTES, *tool_routes())
+
+
 def get_route(name):
     for route in ROUTES:
         if route.name == name:
             return route
+    if isinstance(name, str) and name.startswith(TOOL_ROUTE_PREFIX):
+        for route in tool_routes():
+            if route.name == name:
+                return route
     return None
 
 
 def route_names():
-    return [route.name for route in ROUTES]
+    return [route.name for route in all_routes()]
 
 
 def aliases_for(workspace):
@@ -330,6 +437,35 @@ def match_utterance(text, *, aliases=None):
         if any(utterance == match_key(phrase) for phrase in phrases):
             return route
     return None
+
+
+def match_turn(text, *, aliases=None):
+    """`(route, remainder)` for an utterance, or `(None, "")`. The
+    zero-argument routes first (whole utterance, `match_utterance`); then
+    the `tool.*` aliases as leading words (longest alias first), the
+    remainder being the normalized words after it."""
+    route = match_utterance(text, aliases=aliases)
+    if route is not None:
+        return route, ""
+    utterance = normalize_utterance(text)
+    key = match_key(utterance)
+    if not key:
+        return None, ""
+    candidates = [
+        (phrase, name)
+        for name, phrases in (aliases or {}).items()
+        if name.startswith(TOOL_ROUTE_PREFIX)
+        for phrase in phrases
+    ]
+    for phrase, name in sorted(candidates, key=lambda item: -len(item[0])):
+        alias_key = match_key(phrase)
+        if key == alias_key or key.startswith(alias_key + " "):
+            tool_route = get_route(name)
+            if tool_route is None:
+                continue
+            remainder = " ".join(utterance.split()[len(alias_key.split()) :])
+            return tool_route, remainder
+    return None, ""
 
 
 def _is_workspace_owner(actor, workspace):
@@ -359,7 +495,7 @@ def route_voice_turn(conversation, *, actor, content, channel, input_mode, now=N
     workspace = conversation.workspace
     if not _is_workspace_owner(actor, workspace):
         return None
-    route = match_utterance(content, aliases=aliases_for(workspace))
+    route, remainder = match_turn(content, aliases=aliases_for(workspace))
     if route is None:
         return None
     turn = WakeTurn(
@@ -368,6 +504,7 @@ def route_voice_turn(conversation, *, actor, content, channel, input_mode, now=N
         workspace=workspace,
         channel=channel,
         content=content,
+        remainder=remainder,
         now=now or timezone.now(),
     )
     result = route.handler(turn)
@@ -381,4 +518,9 @@ def route_voice_turn(conversation, *, actor, content, channel, input_mode, now=N
         )
     if result.commit is not None:
         result.commit()
-    return RoutedTurn(route=route.name, classification=capped, reply_text=result.reply_text)
+    return RoutedTurn(
+        route=route.name,
+        classification=capped,
+        reply_text=result.reply_text,
+        args_text=remainder,
+    )

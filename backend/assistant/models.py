@@ -198,6 +198,16 @@ class Message(WorkspaceScopedModel, TimestampedModel):
     # of a routed turn; null for every turn the normal router handled.
     # Audit and test bookkeeping only, immutable once written.
     route = models.CharField(max_length=64, null=True, blank=True, default=None)  # noqa: DJ001
+    # Phase 12 D11: on an async read's follow-up reply, the user message whose
+    # turn started the read; null for every other row. Written once by
+    # `assistant.followups`, never through a serializer.
+    followup_of = models.ForeignKey(
+        "self",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="followups",
+    )
 
     class Meta:
         ordering = ["created_at"]
@@ -245,3 +255,85 @@ class WakeRouteAlias(WorkspaceScopedModel, TimestampedModel):
 
     def __str__(self):
         return f"{self.route}: {self.phrase}"
+
+
+class PendingFollowUp(WorkspaceScopedModel, TimestampedModel):
+    """Phase 12 D11: an owner's turn started an async read; when the read
+    ends, one follow-up message is appended to the conversation.
+
+    Created only by the chat turn that started the read (`assistant.
+    followups.create_followup`), never by a view, tool or model. `handle_id`
+    / `tool_name` are the read's opaque `tools.registry.AsyncReadHandle`
+    (assistant never imports the connector that owns it). Life:
+    `pending` -> `done` (one `chat.followup` completion appended) /
+    `failed` (the read failed or timed out, or the completion was refused:
+    a Friday template appended, no model text) / `dropped` (the
+    conversation is gone: nothing appended, no model call). Every state but
+    `pending` is final: a follow-up is never replayed.
+
+    `conversation` and `source_message` are `SET_NULL` so a deleted
+    conversation leaves its follow-up behind as `dropped`, never a
+    cascade that would let a late result look for a new home."""
+
+    class Status(models.TextChoices):
+        PENDING = "pending"
+        DONE = "done"
+        FAILED = "failed"
+        DROPPED = "dropped"
+
+    TERMINAL = frozenset({Status.DONE, Status.FAILED, Status.DROPPED})
+
+    conversation = models.ForeignKey(
+        Conversation,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="pending_followups",
+    )
+    source_message = models.ForeignKey(
+        Message,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="pending_followups",
+    )
+    followup_message = models.ForeignKey(
+        Message,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="+",
+    )
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="+",
+    )
+    channel = models.CharField(max_length=20, choices=MessageChannel.choices)
+    tool_name = models.CharField(max_length=64)
+    # Friday-authored label of the read tool ("Sunucu durumu"), for the
+    # template replies and the `assistant.followups_ready` notice.
+    tool_label = models.CharField(max_length=60)
+    source = models.CharField(max_length=40, blank=True, default="")
+    data_class = models.CharField(max_length=10)
+    handle_id = models.CharField(max_length=64, unique=True)
+    status = models.CharField(max_length=10, choices=Status.choices, default=Status.PENDING)
+    # A closed code when the follow-up is a template (`timed_out`,
+    # `budget_refused`, ...), never server or exception text.
+    outcome = models.CharField(max_length=40, blank=True, default="")
+    # Set (atomically, `pending` and unclaimed only) by the one composer that
+    # may make the follow-up's completion: a second dispatch never makes a
+    # second call. A claim older than the recovery window ends `failed`.
+    claimed_at = models.DateTimeField(null=True, blank=True)
+    finished_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["workspace", "status"]),
+            models.Index(fields=["status", "created_at"]),
+        ]
+
+    def __str__(self):
+        return f"follow-up {self.id} ({self.tool_name}, {self.status})"

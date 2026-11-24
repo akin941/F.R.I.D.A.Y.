@@ -49,7 +49,13 @@ from connectors.services import TOOL_OK, record_listing, tool_available
 from core.unattended import deny_if_unattended
 from memory.context import strip_invisible_formatting
 from memory.models import Memory
-from tools.registry import ToolSpec, ToolValidationError, register_tool, unregister_tool
+from tools.registry import (
+    DraftArguments,
+    ToolSpec,
+    ToolValidationError,
+    register_tool,
+    unregister_tool,
+)
 from tools.work_log import record_tool_outcome
 
 logger = logging.getLogger(__name__)
@@ -480,6 +486,16 @@ def build_write_tool(manifest, policy):
         describe_execution=describe_write_execution,
         user_invocable=policy.user_invocable,
         records_work_log=policy.records_work_log,
+        label=policy.label,
+        draft_arguments=(
+            DraftArguments(
+                description=policy.description,
+                argument_serializer=policy.argument_serializer,
+                data_class=manifest.data_class,
+            )
+            if policy.draft_arguments
+            else None
+        ),
     )
 
 

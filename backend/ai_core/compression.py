@@ -72,6 +72,9 @@ COMPRESSION_BYPASS = frozenset(
         # Phase 12 D18: the morning digest's number check needs the exact
         # facts it was given
         "proactive.digest",
+        # Phase 12 D11/D18: an async read's follow-up answers from the exact
+        # fenced result it was given
+        "chat.followup",
         # preflight probes a provider; its payload must be exactly as written
         "ops.preflight",
     }
