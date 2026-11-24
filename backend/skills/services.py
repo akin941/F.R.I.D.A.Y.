@@ -279,6 +279,7 @@ def _approve_locked(*, actor, version, now):
     skill.current_version = version
     skill.status = Status.ACTIVE
     skill.save(update_fields=["current_version", "status", "updated_at"])
+    version.skill = skill
     _audit(
         "skills.version.approved",
         actor=actor,

@@ -105,7 +105,7 @@ def test_unknown_key():
         "name: ab\ndescription: a #comment",
         "name: ab\ndescription: x\n  continued",
         "name: ab\ndescription: x\nmetadata: {a: b}",
-        "name: ab\ndescription: \"x\\n\"",
+        'name: ab\ndescription: "x\\n"',
         "? name\n: ab",
     ],
 )
