@@ -995,6 +995,35 @@ reviewed branch was already merged into the integration branch (merge
   it is a behaviour the owner UI should explain. Fix: document it in the
   runbook or UI confirmation text. No code change needed.
 
+### Branch 1 (`feat/p8-ingestion-core`) review fixes, third pass — known follow-ups (from review, unresolved at merge)
+
+- **LOW — merge-order note (process, not a code defect)**
+  (`backend/memory/migrations/0006_ingestion_core.py`). The branch tip
+  `162ce55` was already an ancestor of the integration branch when this pass
+  was merged, where the migration had been renumbered to
+  `0007_ingestion_core`, so the three-dot diff against the integration branch
+  is empty. The review covered the branch against its base `5b56721`. No fix
+  required.
+- **LOW — re-enabling a forgotten source**
+  (`backend/memory/ingestion/services.py`). `update_source` lets the owner set
+  `enabled=True` or `paused=False` on a source whose `forgotten_at` is set,
+  with no warning, so ingestion resumes while the forget operation is still
+  pending. `restore_source` still works and only touches episodes trashed by
+  that operation, so this is not a leak. Fix (optional): refuse those updates
+  while `forgotten_at` is set until `restore_source` has run, or return a 400
+  with a clear message.
+- **LOW — colliding scrubbed metadata keys**
+  (`backend/memory/ingestion/scrubber.py`). `scrub_value` scrubs and truncates
+  dict keys independently, so two distinct keys can collapse to the same
+  placeholder or truncated key and one value silently overwrites the other.
+  Bounded, no security impact. Fix (optional): disambiguate colliding keys
+  with a numeric suffix.
+- **LOW — scrub-term list returns raw literals**
+  (`backend/memory/ingestion/serializers.py`). The scrub-term list API returns
+  the sensitive term strings themselves. Accepted: the endpoint is owner-only,
+  web-channel-only and `for_actor`-scoped, and audit metadata records only the
+  length. Worth revisiting in a future log-redaction review. No change needed.
+
 ### Branch 2 (`feat/p8-core-blocks`) — known follow-ups (from review, unresolved at merge)
 
 - **LOW — stale Tests line (PAT status code).** The brief's Tests list says an
