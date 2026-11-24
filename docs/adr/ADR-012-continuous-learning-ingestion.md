@@ -332,3 +332,34 @@ D4, D8, D13, D14 and the branch 8 and 10 records.
   reference node double to an approved fact used in a hybrid chat turn,
   mirrored as an entity note, forgotten (fact archived, note pruned) and
   restored.
+
+## Note 2026-11-20 — Phase 12 playbooks (branch `feat/p12-harness-playbooks`)
+
+Phase 12 D17 distils procedural playbooks (SKILL.md instruction skills,
+ADR-016 decision 5) from successful harness implementation jobs. This note
+records how they relate to this ADR:
+
+- **Playbook sources are not episodes.** `skills.PlaybookSource` rows are
+  recorded beside the `harness` episode (`harness.ingestion`, through
+  `skills.ports.record_playbook_source`) but never pass through the
+  ingestion port, the learning queue or memory. They hold the owner-typed
+  goal, the job's `repo_test_command` snapshot, the changed-file **paths**
+  (no contents), test counts and the model-produced diff/review summaries
+  as bounded context text. A job is recorded only when it `succeeded`, its
+  review approved it, its tests passed and the installation owner typed its
+  goal; sensitive repos record nothing.
+- **Decision 7/8 applied to skills.** Model output is never the provenance
+  of a learned item: a playbook step is kept only when its `quote` is a
+  verbatim span (after whitespace normalisation) of its source job's
+  owner-typed goal or its test command, checked in code
+  (`skills.playbooks.verify_steps`). Agent-chosen paths are shown as
+  unverified hints; the context text can never be a quote. Fewer than two
+  verified steps drop the draft (counted on `PlaybookDistillRun`).
+- **Proposed, never promoted.** The draft becomes a `proposed` skill
+  version (origin `playbook`); only the owner approves it, by content
+  hash, over the web (ADR-016 decision 4). The distiller runs unattended
+  with one allowed purpose (`skills.playbook_distill`) and may write only
+  the proposal and its own run rows.
+- **No feedback loop.** Skills mounted into a later job live outside the
+  clone; a produced commit touching `.claude/skills/` fails closed, and
+  such paths never reach a playbook source.

@@ -300,6 +300,9 @@ class HarnessImplementationJobListCreateView(APIView):
                 repo=repo,
                 goal=serializer.validated_data["goal"],
                 discovery_job=discovery_job,
+                skill_version_ids=[
+                    str(item) for item in serializer.validated_data.get("skill_versions") or []
+                ],
             )
         except (HarnessPermissionDenied, HarnessInvalidTransition) as exc:
             return _service_error_response(exc)

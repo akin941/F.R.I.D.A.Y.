@@ -82,6 +82,11 @@ def test_seed_ai_defaults_seeds_the_prompt_and_both_budgets():
     call_command("seed_ai_defaults", stdout=StringIO())
     template = PromptTemplate.objects.get(name="friday_skills_curate")
     assert template.active_version.content == seed_ai_defaults.FRIDAY_SKILLS_CURATE_V1
-    assert AIBudget.objects.get(name="skills").purposes == ["skills.match", PURPOSE]
+    # Branch 7 adds the playbook distiller's purpose to the same row.
+    assert AIBudget.objects.get(name="skills").purposes == [
+        "skills.match",
+        PURPOSE,
+        "skills.playbook_distill",
+    ]
     weekly = AIBudget.objects.get(name="skills_curate_weekly")
     assert weekly.purposes == [PURPOSE] and weekly.daily_limit_usd == Decimal("0.5")

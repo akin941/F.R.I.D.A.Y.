@@ -154,6 +154,7 @@ export function SkillDetailView({ skillId }: { skillId: string }) {
           </CardHeader>
           <CardContent className="flex flex-col gap-3">
             <pre className="whitespace-pre-wrap rounded-md bg-muted p-3 text-xs">{current.text}</pre>
+            <PlaybookProvenance provenance={current.provenance} />
             {skill.status !== "archived" ? (
               <NewVersionForm
                 initial={current.text}
@@ -237,6 +238,7 @@ function PendingVersion({
         {references.length > 0 ? (
           <p className="text-xs text-muted-foreground">Ekler: {references.join(", ")}</p>
         ) : null}
+        <PlaybookProvenance provenance={version.provenance} />
         {editing ? (
           <>
             <label htmlFor={`edit-${version.id}`} className="sr-only">
@@ -270,6 +272,87 @@ function PendingVersion({
         </div>
       </CardContent>
     </Card>
+  );
+}
+
+const FIELD_LABELS: Record<string, string> = {
+  goal: "sahibin hedefi",
+  test_command: "test komutu",
+};
+
+interface PlaybookStep {
+  index: number;
+  source: string;
+  field: string;
+  quote: string;
+  paths: string[];
+}
+
+function playbookSteps(provenance: Record<string, unknown> | undefined): PlaybookStep[] | null {
+  if (!provenance || provenance.kind !== "playbook" || !Array.isArray(provenance.steps)) {
+    return null;
+  }
+  return (provenance.steps as unknown[]).flatMap((raw) => {
+    if (!raw || typeof raw !== "object") return [];
+    const step = raw as Record<string, unknown>;
+    if (typeof step.source !== "string" || typeof step.quote !== "string") return [];
+    return [
+      {
+        index: typeof step.index === "number" ? step.index : 0,
+        source: step.source,
+        field: typeof step.field === "string" ? step.field : "",
+        quote: step.quote,
+        paths: Array.isArray(step.paths)
+          ? (step.paths as unknown[]).filter((p): p is string => typeof p === "string")
+          : [],
+      },
+    ];
+  });
+}
+
+/**
+ * Phase 12 D17: a playbook version's provenance -- each step's source
+ * harness job (linked) and the verbatim quote of that job's owner-typed
+ * goal or test command that the server verified. File paths were chosen
+ * by the coding agent and are shown as unverified.
+ */
+export function PlaybookProvenance({
+  provenance,
+}: {
+  provenance: Record<string, unknown> | undefined;
+}) {
+  const steps = playbookSteps(provenance);
+  if (!steps) return null;
+  const unverified = Array.isArray(provenance?.unverified_paths)
+    ? (provenance!.unverified_paths as unknown[]).filter((p): p is string => typeof p === "string")
+    : [];
+  return (
+    <section aria-label="Playbook kaynakları" data-testid="playbook-provenance" className="text-sm">
+      <h3 className="font-medium">Kaynaklar (harness işleri)</h3>
+      <ol className="list-decimal pl-5">
+        {steps.map((step) => (
+          <li key={`${step.index}-${step.source}`}>
+            <Link
+              href={`/harness/implementations/${step.source}`}
+              className="underline underline-offset-2"
+            >
+              İş {step.source.slice(0, 8)}
+            </Link>{" "}
+            · {FIELD_LABELS[step.field] ?? step.field}: “{step.quote}”
+            {step.paths.length > 0 ? (
+              <span className="block text-xs text-muted-foreground">
+                Dosya ipuçları (doğrulanmamış): {step.paths.join(", ")}
+              </span>
+            ) : null}
+          </li>
+        ))}
+      </ol>
+      {unverified.length > 0 ? (
+        <p className="text-xs text-muted-foreground">
+          Doğrulanmamış dosya ipuçları: {unverified.join(", ")}
+        </p>
+      ) : null}
+    </section>
   );
 }
 

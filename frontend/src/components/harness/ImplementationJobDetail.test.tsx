@@ -178,8 +178,8 @@ describe("ImplementationJobDetail", () => {
     },
   );
 
-  it("covers all 16 non-empty failure reasons from the contract", () => {
-    expect(Object.keys(HARNESS_FAILURE_REASON_LABELS)).toHaveLength(16);
+  it("covers all 18 non-empty failure reasons from the contract", () => {
+    expect(Object.keys(HARNESS_FAILURE_REASON_LABELS)).toHaveLength(18);
   });
 
   it("polls silently while non-terminal and stops once terminal", async () => {

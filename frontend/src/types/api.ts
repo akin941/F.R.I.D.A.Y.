@@ -521,6 +521,7 @@ export interface ApiHarnessImplementDisplaySummary {
   branch_name: string;
   agent: string;
   reviewer_agent: string;
+  skills?: ApiAttachedSkill[];
 }
 
 export interface ApiHarnessPushDisplaySummary {
@@ -836,7 +837,20 @@ export type ImplFailureReason =
   | "worktree_expired"
   | "push_failed"
   | "no_changes"
-  | "secret_leak";
+  | "secret_leak"
+  // Phase 12 D17: an attached skill version became unavailable before the
+  // run, or the produced commit touched the mounted skills' prefix.
+  | "skill_version_unavailable"
+  | "skill_path_in_commit";
+
+// Phase 12 D17: an instruction skill attached to an implementation job, as
+// Gate A snapshotted it (name + content hash, never the text).
+export interface ApiAttachedSkill {
+  id?: string;
+  name: string;
+  version: number | null;
+  sha256: string;
+}
 
 // A gate revoked by cancel/worktree expiry shows status "expired".
 export type ApiGateSummary = {
@@ -867,6 +881,7 @@ export interface ApiImplementationJob {
   updated_at: string;
   gate_a: ApiGateSummary;
   gate_b: ApiGateSummary;
+  skills?: ApiAttachedSkill[];
 }
 
 export interface ApiImplementationReview {

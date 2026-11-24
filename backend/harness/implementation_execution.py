@@ -61,6 +61,7 @@ from harness.execution import (
 from harness.models import HarnessImplementationJob, HarnessReview
 from memory.context import neutralize_fence, strip_invisible_formatting
 from memory.services import DuplicateMemory, record_work_log
+from skills import ports as skills_ports
 
 logger = logging.getLogger(__name__)
 
@@ -256,8 +257,64 @@ def build_driver(driver_name, *, deadline, test_command=""):
     raise drivers.DriverConfigurationError(f"no driver implementation for {driver_name!r}")
 
 
+class _SkillsUnavailable(Exception):
+    """An attached skill version cannot be mounted (Phase 12 D17)."""
+
+
+def _gate_a_skill_hashes(job):
+    payload = {}
+    if job.gate_a_request_id:
+        from approvals.models import ApprovalRequest
+
+        payload = (
+            ApprovalRequest.objects.filter(pk=job.gate_a_request_id)
+            .values_list("payload", flat=True)
+            .first()
+            or {}
+        )
+    snapshot = payload.get("skills") if isinstance(payload, dict) else None
+    if not isinstance(snapshot, list):
+        return {}
+    return {
+        str(item.get("id")): str(item.get("sha256")) for item in snapshot if isinstance(item, dict)
+    }
+
+
+def prepare_skills(job, workspace_dir):
+    """Phase 12 D17: fetch the job's attached skill versions again through
+    `skills.ports` (contents at run time), check each against the hash Gate
+    A showed, write them outside the clone and add the `.claude/skills/`
+    exclude line -- all before the agent starts. Returns the skills
+    directory (None without skills). Raises `_SkillsUnavailable` when a
+    version is no longer attachable or its hash differs from Gate A."""
+    if not job.skill_version_ids:
+        return None
+    try:
+        versions = skills_ports.get_attachable_versions(
+            workspace=job.workspace, version_ids=job.skill_version_ids
+        )
+    except skills_ports.SkillVersionNotAttachable as exc:
+        raise _SkillsUnavailable(exc.version_id) from None
+    approved = _gate_a_skill_hashes(job)
+    for version in versions:
+        if approved.get(version.id) != version.content_sha256:
+            raise _SkillsUnavailable(version.id)
+    skills_dir = runner.write_skill_files(workspace_dir, versions)
+    runner.exclude_skill_paths(f"{workspace_dir}/repo")
+    return skills_dir
+
+
 def _run_with_driver(
-    job, driver_name, *, image, workspace_dir, base_sha, cli_env, container_name, started_monotonic
+    job,
+    driver_name,
+    *,
+    image,
+    workspace_dir,
+    base_sha,
+    cli_env,
+    container_name,
+    started_monotonic,
+    skills_dir=None,
 ):
     """Phase 10 D10: launch the interactive container, run the driver
     session (handshake, one turn with the goal, escalations through
@@ -281,6 +338,7 @@ def _run_with_driver(
         cli_env=cli_env,
         name=container_name,
         driver=driver_name,
+        skills_dir=skills_dir,
     )
     session = DriverSession(
         job=job,
@@ -497,6 +555,9 @@ def run_harness_implementation_job(job_id):
         HarnessImplementationJob.objects.filter(pk=job.pk).update(worktree_path=workspace_dir)
         repo_dir = f"{workspace_dir}/repo"
         base_sha = runner.resolve_commit_sha(repo_dir, "HEAD")
+        # Phase 12 D17: attached skills are written outside the clone and
+        # mounted read-only, before the agent starts.
+        skills_dir = prepare_skills(job, workspace_dir)
         image = runner.image_for_agent(job.agent)
         cli_env = _resolve_cli_env(job.agent)
         if driver_name == drivers.DRIVER_CLI:
@@ -515,6 +576,7 @@ def run_harness_implementation_job(job_id):
                 base_sha=base_sha,
                 cli_env=cli_env,
                 name=container_name,
+                skills_dir=skills_dir,
             )
             status, failure_reason = _wait_for_implementation_container(
                 job.pk, container_name, started_monotonic
@@ -541,6 +603,7 @@ def run_harness_implementation_job(job_id):
                 cli_env=cli_env,
                 container_name=container_name,
                 started_monotonic=started_monotonic,
+                skills_dir=skills_dir,
             )
             raw_output = driver_report.transcript
         # Cost accounting reads the same capture (mirrors
@@ -554,6 +617,12 @@ def run_harness_implementation_job(job_id):
     except drivers.DriverConfigurationError:
         logger.exception("Harness implementation job %s driver refused", job_id)
         status, failure_reason = "failed", HarnessImplementationJob.FailureReason.RUNNER_ERROR
+    except _SkillsUnavailable:
+        logger.warning("Harness implementation job %s: attached skill unavailable", job_id)
+        status, failure_reason = (
+            "failed",
+            HarnessImplementationJob.FailureReason.SKILL_VERSION_UNAVAILABLE,
+        )
     finally:
         removal_confirmed = _safe_remove_container(container_name)
 
@@ -667,6 +736,21 @@ def run_harness_implementation_job(job_id):
         _fail_and_cleanup(
             job,
             HarnessImplementationJob.FailureReason.TEST_RESULT_UNAVAILABLE,
+            workspace_dir=workspace_dir,
+            removal_confirmed=removal_confirmed,
+            started_monotonic=started_monotonic,
+            **cost_kwargs,
+        )
+        return
+
+    # Phase 12 D17 "Exclusion" (3): a job with mounted skills whose produced
+    # commit nevertheless touches a `.claude/skills/` path (an agent copied
+    # the skills into the tree) fails closed here -- before review, the
+    # bundle, Gate B or any push.
+    if job.skill_version_ids and any(skills_ports.is_skill_path(p) for p in changed_files):
+        _fail_and_cleanup(
+            job,
+            HarnessImplementationJob.FailureReason.SKILL_PATH_IN_COMMIT,
             workspace_dir=workspace_dir,
             removal_confirmed=removal_confirmed,
             started_monotonic=started_monotonic,

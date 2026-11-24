@@ -212,6 +212,9 @@ FAKE_TASK_DRAFT_RESPONSE = '{"title": "Fake extracted task", "due_date": null}'
 FAKE_SKILLS_MATCH_RESPONSE = '{"skill": null}'
 # Phase 12 D16: the curator suggests nothing by default; tests set the text.
 FAKE_SKILLS_CURATE_RESPONSE = '{"proposals": []}'
+# Phase 12 D17: the playbook distiller -- "no playbook" unless a test sets a
+# draft (`skills.playbooks.parse_draft` / `verify_steps` check it in code).
+FAKE_SKILLS_PLAYBOOK_DISTILL_RESPONSE = '{"playbook": null}'
 FAKE_PROACTIVE_DIGEST_RESPONSE = (
     "Günaydın! Bugün seni bekleyen birkaç şey var; ayrıntılar Bugün sayfasında."
 )
@@ -329,6 +332,8 @@ class FakeAdapter(BaseAdapter):
             return FAKE_SKILLS_MATCH_RESPONSE
         if purpose == "skills.curate":
             return FAKE_SKILLS_CURATE_RESPONSE
+        if purpose == "skills.playbook_distill":
+            return FAKE_SKILLS_PLAYBOOK_DISTILL_RESPONSE
         if purpose == "agent.plan":
             latest = _latest_user_content(messages)
             if _AGENT_MULTI_STEP_PLAN_TRIGGER in latest:

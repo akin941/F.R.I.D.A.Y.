@@ -32,6 +32,7 @@ from harness import ingestion, policy
 from harness.models import HarnessImplementationJob, HarnessJob, HarnessRepo, HarnessReview
 from memory.graph import ports as graph_ports
 from memory.models import Memory
+from skills import ports as skills_ports
 from workspaces.models import WorkspaceMember
 
 logger = logging.getLogger(__name__)
@@ -75,6 +76,18 @@ class HarnessInvalidTransition(HarnessServiceError):
     -> 400."""
 
     code = "harness.invalid_transition"
+
+
+class HarnessSkillNotAttachable(HarnessInvalidTransition):
+    """Phase 12 D17: a named skill version is not an approved current
+    version of an active skill of the job's workspace -> 400. `version_id`
+    names the first offending id; nothing is created."""
+
+    code = "harness.skill_not_attachable"
+
+    def __init__(self, message, *, version_id=""):
+        self.version_id = version_id
+        super().__init__(message)
 
 
 def get_role(actor, workspace):
@@ -453,6 +466,7 @@ def create_harness_implementation_job(
     goal,
     agent=None,
     discovery_job=None,
+    skill_version_ids=None,
 ):
     """The only sanctioned creation path for `HarnessImplementationJob`
     rows. Mirrors `create_harness_job`'s own lock-then-authorize
@@ -478,6 +492,11 @@ def create_harness_implementation_job(
     (durable-before-request) -- `approvals.services.create_request` runs
     its own `validate_request` tier-1 check against the just-created,
     same-transaction-visible row.
+
+    Phase 12 D17: `skill_version_ids` (owner-selected) are validated
+    through `skills.ports.get_attachable_versions` -- all or none; the
+    names and hashes are snapshotted into Gate A's payload so the decider
+    sees exactly which instructions the agent will be given.
     """
     deny_if_unattended("harness_job")
     _require_curator(actor, workspace, "creating a harness implementation job")
@@ -527,6 +546,15 @@ def create_harness_implementation_job(
         raise HarnessPermissionDenied("discovery_job does not belong to this workspace.")
     if discovery_job is not None and discovery_job.repo_id != locked_repo.id:
         raise HarnessInvalidTransition("discovery_job was run against a different repo.")
+    try:
+        attachable = skills_ports.get_attachable_versions(
+            workspace=workspace, version_ids=skill_version_ids or []
+        )
+    except skills_ports.SkillVersionNotAttachable as exc:
+        raise HarnessSkillNotAttachable(
+            f"Skill version {exc.version_id} cannot be attached to this job.",
+            version_id=exc.version_id,
+        ) from None
     sensitivity = Memory.Sensitivity.PRIVATE if locked_repo.sensitive else Memory.Sensitivity.NORMAL
     job = HarnessImplementationJob.objects.create(
         workspace=workspace,
@@ -537,6 +565,7 @@ def create_harness_implementation_job(
         agent_routing_reason=routing_reason,
         sensitivity=sensitivity,
         created_by=actor,
+        skill_version_ids=[item.id for item in attachable],
     )
     approval_request = create_request(
         workspace=workspace,
@@ -553,6 +582,23 @@ def create_harness_implementation_job(
             "branch_name": job.branch_name,
             "agent": str(job.agent),
             "reviewer_agent": _snapshot_reviewer(job.agent),
+            # Phase 12 D17: the attached skills, by name and content hash
+            # (present only when skills are attached).
+            **(
+                {
+                    "skills": [
+                        {
+                            "id": item.id,
+                            "name": item.skill_name,
+                            "version": item.version,
+                            "sha256": item.content_sha256,
+                        }
+                        for item in attachable
+                    ]
+                }
+                if attachable
+                else {}
+            ),
         },
         origin=ApprovalRequest.Origin.HARNESS,
         channel=CHANNEL_SYSTEM,

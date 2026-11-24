@@ -343,6 +343,20 @@ ignore_imports = [
     "skills.tests.test_curator_unattended -> connectors.**",
 ]
 
+# Phase 12 D17 (branch 7): `harness` reaches skills only through
+# `skills.ports` (playbook sources, attachable versions) -- never the models,
+# selectors or services directly. Indirect imports through the port are
+# allowed (the port itself uses the services and models).
+[[tool.importlinter.contracts]]
+name = "harness imports only skills.ports from skills (Phase 12 D17)"
+type = "forbidden"
+source_modules = ["harness"]
+forbidden_modules = ["skills.models", "skills.services", "skills.selectors", "skills.match", "skills.playbooks", "skills.skill_md", "skills.probes", "skills.views", "skills.serializers", "skills.urls", "skills.tasks", "skills.catalog", "skills.apps", "skills.definitions", "skills.migrations"]
+allow_indirect_imports = true
+ignore_imports = [
+    "harness.tests.** -> skills.**",
+]
+
 [[tool.importlinter.contracts]]
 name = "tools must not import skills (direction: skills -> tools)"
 type = "forbidden"

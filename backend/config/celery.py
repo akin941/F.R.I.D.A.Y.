@@ -196,6 +196,12 @@ _BEAT_SCHEDULE = {
         "task": "proactive.tasks.heartbeat",
         "schedule": 60.0,
     },
+    # Phase 12 D17: the nightly playbook distiller (after the 8A run), a fixed
+    # system task; each repo's call runs unattended with one allowed purpose.
+    "skills-playbook-distill-nightly": {
+        "task": "skills.tasks.distill_playbooks",
+        "schedule": crontab(minute=45, hour=4),
+    },
     # Phase 12 D5: read/dismissed notices past PROACTIVE_NOTICE_RETENTION_DAYS.
     "proactive-notice-prune": {
         "task": "proactive.tasks.prune",

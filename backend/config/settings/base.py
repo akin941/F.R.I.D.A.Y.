@@ -562,6 +562,9 @@ AI_PURPOSE_TIERS = {
     # Phase 12 D16/D18: the weekly skill curator's one proposal call (the
     # `skills` budget plus `skills_curate_weekly`; a refusal skips the run).
     "skills.curate": "mid",
+    # Phase 12 D17/D18: the nightly playbook distillation (one call per repo
+    # with enough unused sources; provenance is checked in code).
+    "skills.playbook_distill": "mid",
     "agent.skill_match": "cheap",
     "harness.briefing": "cheap",
     "harness.diff_summary": "cheap",
@@ -664,7 +667,7 @@ AI_BUDGET_PROACTIVE_DAILY_USD = env("AI_BUDGET_PROACTIVE_DAILY_USD", default="0.
 # `seed_ai_defaults`), owner-editable afterwards. Branches 6/7 add the
 # curator and distiller purposes to the row. A refused match means "no
 # skill"; the turn is answered without one.
-AI_SKILLS_PURPOSES = ("skills.match", "skills.curate")
+AI_SKILLS_PURPOSES = ("skills.match", "skills.curate", "skills.playbook_distill")
 AI_BUDGET_SKILLS_MONTHLY_USD = env("AI_BUDGET_SKILLS_MONTHLY_USD", default="5")
 # Phase 12 D16/D18: the curator's own cap, 0.5 USD a week. The curator runs
 # once per workspace per ISO week, on Sunday, so the weekly cap is a daily
@@ -673,6 +676,10 @@ AI_BUDGET_SKILLS_MONTHLY_USD = env("AI_BUDGET_SKILLS_MONTHLY_USD", default="5")
 # `seed_ai_defaults`) as the `skills_curate_weekly` row; a refusal skips
 # that week's proposals (stale marking still runs).
 AI_BUDGET_SKILLS_CURATE_WEEKLY_USD = env("AI_BUDGET_SKILLS_CURATE_WEEKLY_USD", default="0.5")
+# Phase 12 D17/D18: the playbook distiller's own daily cap inside the
+# `skills` cap (the `skills_playbook_daily` row, ai_core migration 0013).
+# A refused call skips that repo for the night (counted on the run row).
+AI_BUDGET_SKILLS_PLAYBOOK_DAILY_USD = env("AI_BUDGET_SKILLS_PLAYBOOK_DAILY_USD", default="0.5")
 
 # --- Pre-send compression stage (Phase 8B branch 6, brief D11) ---
 # `ai_core/compression.py`: shortens long prior assistant replies through
@@ -1164,6 +1171,13 @@ HARNESS_AGENT_POLICY = {
 # reached a terminal state -- a backstop, not the primary cleanup path
 # (every terminal transition cleans up its own worktree immediately).
 HARNESS_WORKTREE_RETENTION_HOURS = env.int("HARNESS_WORKTREE_RETENTION_HOURS", default=72)
+# Phase 12 D17: where attached skill versions appear inside an
+# implementation container -- the agent's user-level skills directory
+# (`HOME=/home/harness` in both wrapper images), mounted read-only from
+# `{workspace_dir}/skills` (outside the clone).
+HARNESS_CONTAINER_SKILLS_PATH = env(
+    "HARNESS_CONTAINER_SKILLS_PATH", default="/home/harness/.claude/skills"
+)
 
 # --- Harness v3 drivers (Phase 10 brief D10, branch 6) ---
 #
@@ -1298,6 +1312,22 @@ SKILLS_STALE_DAYS = env.int("SKILLS_STALE_DAYS", default=45)
 # and cannot be the subject of an edit or merge that week).
 SKILLS_CURATE_BODY_MAX_CHARS = env.int("SKILLS_CURATE_BODY_MAX_CHARS", default=4000)
 SKILLS_CURATE_INPUT_MAX_CHARS = env.int("SKILLS_CURATE_INPUT_MAX_CHARS", default=24000)
+# Procedural playbooks from harness runs (D17). A repo needs at least this
+# many unused playbook sources (successful, approved, tested, owner-typed
+# jobs) before the nightly distiller makes its one call; at most
+# SKILLS_PLAYBOOK_MAX_SOURCES (the most recent) go into one call.
+SKILLS_PLAYBOOK_MIN_SOURCES = env.int("SKILLS_PLAYBOOK_MIN_SOURCES", default=3)
+SKILLS_PLAYBOOK_MAX_SOURCES = env.int("SKILLS_PLAYBOOK_MAX_SOURCES", default=10)
+# At most this many playbook proposals per workspace per rolling week.
+SKILLS_PLAYBOOK_WEEKLY_CAP = env.int("SKILLS_PLAYBOOK_WEEKLY_CAP", default=3)
+# A draft needs at least this many provenance-verified steps (and keeps at
+# most SKILLS_PLAYBOOK_MAX_STEPS); a verified quote is at least
+# SKILLS_PLAYBOOK_MIN_QUOTE_CHARS long (or the whole quoted field).
+SKILLS_PLAYBOOK_MIN_STEPS = env.int("SKILLS_PLAYBOOK_MIN_STEPS", default=2)
+SKILLS_PLAYBOOK_MAX_STEPS = env.int("SKILLS_PLAYBOOK_MAX_STEPS", default=12)
+SKILLS_PLAYBOOK_MIN_QUOTE_CHARS = env.int("SKILLS_PLAYBOOK_MIN_QUOTE_CHARS", default=8)
+# At most this many skill versions attached to one implementation job.
+SKILLS_ATTACH_MAX = env.int("SKILLS_ATTACH_MAX", default=5)
 
 # A value WE choose and register with Telegram via `setWebhook`
 # (`manage.py register_telegram_webhook`) -- Telegram echoes it back on

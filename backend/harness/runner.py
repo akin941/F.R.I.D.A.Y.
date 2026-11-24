@@ -950,8 +950,88 @@ def launch_container(*, image, clone_dir, goal, cli_env, name):
     return result.stdout.strip()
 
 
+# --- Phase 12 D17: attached instruction skills -------------------------------
+
+SKILLS_DIR_NAME = "skills"
+SKILL_EXCLUDE_LINE = ".claude/skills/"
+_SKILL_NAME_RE = re.compile(r"[a-z][a-z0-9-]{1,63}")
+_SKILL_FILE_RE = re.compile(r"SKILL\.md|references/[A-Za-z0-9][A-Za-z0-9_-]{0,63}\.md")
+
+
+def write_skill_files(workspace_dir, versions):
+    """Write each attached skill version's `SKILL.md` and reference files to
+    `{workspace_dir}/skills/<name>/` -- a sibling of `{workspace_dir}/repo`,
+    never inside the clone, so the agent's commit, the bundle and the push
+    cannot contain them. Files are 0444 and directories 0555 (the
+    container also gets the directory only through read-only mounts, see
+    `skill_mount_args`). Nothing here is ever executed: a skill is text.
+    Returns the skills directory, or None when nothing is attached."""
+    if not versions:
+        return None
+    skills_dir = os.path.join(workspace_dir, SKILLS_DIR_NAME)
+    repo_dir = os.path.realpath(os.path.join(workspace_dir, "repo"))
+    os.makedirs(skills_dir, mode=0o755, exist_ok=False)
+    try:
+        for version in versions:
+            name = version.skill_name
+            if not _SKILL_NAME_RE.fullmatch(name or ""):
+                raise RunnerError("refusing an invalid skill name")
+            skill_dir = os.path.join(skills_dir, name)
+            os.makedirs(skill_dir, mode=0o755, exist_ok=False)
+            files = [("SKILL.md", version.skill_md), *list(version.references)]
+            for relative, text in files:
+                if not _SKILL_FILE_RE.fullmatch(relative):
+                    raise RunnerError("refusing an invalid skill file path")
+                path = os.path.join(skill_dir, relative)
+                real = os.path.realpath(path)
+                if real.startswith(repo_dir + os.sep) or not real.startswith(
+                    os.path.realpath(skill_dir) + os.sep
+                ):
+                    raise RunnerError("refusing a skill file outside its directory")
+                os.makedirs(os.path.dirname(path), mode=0o755, exist_ok=True)
+                with open(path, "x", encoding="utf-8") as handle:
+                    handle.write(text)
+                os.chmod(path, 0o444)
+        for current, dirs, _files in os.walk(skills_dir, topdown=False):
+            for directory in dirs:
+                os.chmod(os.path.join(current, directory), 0o555)
+        os.chmod(skills_dir, 0o555)
+    except OSError as exc:
+        raise RunnerError(f"writing skill files failed: {exc}") from exc
+    return skills_dir
+
+
+def exclude_skill_paths(repo_dir):
+    """Append `.claude/skills/` to the clone's `.git/info/exclude` before the
+    agent starts (D17 "Exclusion" (2): in case an agent copies the mounted
+    skills into the tree). Belt and braces only -- the wrapper rebuilds
+    `.git/info` before its own commit, so the host's fail-closed check on
+    the produced commit's changed files is what actually holds."""
+    info_dir = os.path.join(repo_dir, ".git", "info")
+    try:
+        os.makedirs(info_dir, exist_ok=True)
+        with open(os.path.join(info_dir, "exclude"), "a", encoding="utf-8") as handle:
+            handle.write(f"\n{SKILL_EXCLUDE_LINE}\n")
+    except OSError as exc:
+        raise RunnerError(f"writing .git/info/exclude failed: {exc}") from exc
+
+
+def skill_mount_args(skills_dir):
+    """Read-only mounts for the attached skills: the agent's user-level
+    skills directory, and the same directory over `/workspace/skills` so
+    the read-write `/workspace` mount cannot reach it either."""
+    if not skills_dir:
+        return []
+    return [
+        "--mount",
+        f"type=bind,source={skills_dir},target=/workspace/{SKILLS_DIR_NAME},readonly",
+        "--mount",
+        f"type=bind,source={skills_dir},target={settings.HARNESS_CONTAINER_SKILLS_PATH},readonly",
+    ]
+
+
 def launch_implementation_container(
-    *, image, workspace_dir, goal, test_command, base_sha, cli_env, name
+    *, image, workspace_dir, goal, test_command, base_sha, cli_env, name, skills_dir=None
 ):
     """The read-write counterpart to `launch_container` above -- the ONLY
     harness container launch that gets a writable mount, and only for
@@ -1010,6 +1090,7 @@ def launch_implementation_container(
         str(settings.HARNESS_CONTAINER_PIDS_LIMIT),
         "--mount",
         f"type=bind,source={workspace_dir},target=/workspace",
+        *skill_mount_args(skills_dir),
         "--workdir",
         "/workspace/repo",
     ]
@@ -1098,7 +1179,7 @@ _DOCKER_CLIENT_ENV_KEYS = ("PATH", "HOME", "DOCKER_HOST", "DOCKER_CONFIG", "DOCK
 
 
 def launch_interactive_container(
-    *, image, workspace_dir, goal, test_command, base_sha, cli_env, name, driver
+    *, image, workspace_dir, goal, test_command, base_sha, cli_env, name, driver, skills_dir=None
 ):
     """Phase 10 brief D10: the driver counterpart of
     `launch_implementation_container`. The same hardening flags (`--pull
@@ -1146,6 +1227,7 @@ def launch_interactive_container(
         str(settings.HARNESS_CONTAINER_PIDS_LIMIT),
         "--mount",
         f"type=bind,source={workspace_dir},target=/workspace",
+        *skill_mount_args(skills_dir),
         "--workdir",
         "/workspace/repo",
     ]

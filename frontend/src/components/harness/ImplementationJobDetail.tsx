@@ -223,6 +223,14 @@ export function ImplementationJobDetail({
                 Depo: {job.repo_name} · Uygulayıcı: {HARNESS_AGENT_LABELS[job.agent]} · İnceleyici:{" "}
                 {(job.reviewer_agent && HARNESS_AGENT_LABELS[job.reviewer_agent]) || "—"}
               </p>
+              {job.skills && job.skills.length > 0 ? (
+                <p className="text-sm text-muted-foreground" data-testid="impl-job-skills">
+                  Beceriler (salt okunur):{" "}
+                  {job.skills
+                    .map((skill) => `${skill.name} · sha256 ${skill.sha256.slice(0, 12)}…`)
+                    .join(", ")}
+                </p>
+              ) : null}
               {job.cancel_requested && !isImplTerminal(job.status) ? (
                 <p className="text-sm text-muted-foreground">
                   İptal istendi — çalışan adım durduruluyor…
