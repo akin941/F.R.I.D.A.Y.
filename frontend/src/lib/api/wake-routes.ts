@@ -46,6 +46,24 @@ export const ROUTE_LABELS: Record<string, { title: string; description: string }
   },
 };
 
+/**
+ * Phase 12 branch 5: one `skill.<name>` route per usable instruction skill.
+ * It has no default phrase; an utterance that starts with one of its
+ * aliases uses that skill for the turn (the normal router still decides).
+ */
+export function routeLabel(name: string): { title: string; description: string } {
+  const known = ROUTE_LABELS[name];
+  if (known) return known;
+  if (name.startsWith("skill.")) {
+    return {
+      title: `Beceri: ${name.slice("skill.".length)}`,
+      description:
+        "Takma adla başlayan cümle bu beceriyi kullanır. Yalnızca talimat metnidir; hiçbir aracı açmaz.",
+    };
+  }
+  return { title: name, description: "" };
+}
+
 const ws = (workspaceId: string) => `workspace=${encodeURIComponent(workspaceId)}`;
 
 export function fetchWakeRoutes(workspaceId: string): Promise<WakeRouteList> {

@@ -10,7 +10,7 @@ import { VIEW_SCROLL_ROOT } from "@/components/shell/view-scroll";
 import { useWorkspace } from "@/contexts/workspace-context";
 import { errorMessage } from "@/lib/api-client";
 import {
-  ROUTE_LABELS,
+  routeLabel,
   createWakeAlias,
   deleteWakeAlias,
   fetchWakeRoutes,
@@ -102,7 +102,7 @@ export function WakeRoutesSettings() {
       ) : null}
       {data === null && !error ? <p className="text-sm text-muted-foreground">Yükleniyor…</p> : null}
       {data?.routes.map((route) => {
-        const label = ROUTE_LABELS[route.name] ?? { title: route.name, description: "" };
+        const label = routeLabel(route.name);
         const full = route.aliases.length >= data.limits.aliases_per_route;
         const inputId = `alias-${route.name}`;
         return (

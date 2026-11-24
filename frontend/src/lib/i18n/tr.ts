@@ -365,6 +365,7 @@ export const tr = {
       ingestion: "Öğrenme kaynakları",
       coreBlocks: "Çekirdek bloklar",
       graph: "Bilgi grafiği",
+      skills: "Beceriler",
     },
     pendingApprovals: (count: number) => `${count} bekleyen onay`,
     pendingElsewhere: (count: number) => `Diğer çalışma alanlarında ${count} bekleyen onay`,

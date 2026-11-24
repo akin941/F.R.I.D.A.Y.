@@ -13,6 +13,7 @@ import {
   Mic,
   Plug,
   Rocket,
+  ScrollText,
   ShieldCheck,
   Sunrise,
   Terminal,
@@ -81,7 +82,10 @@ export const NAV_GROUPS: NavGroup[] = [
   {
     id: "automation",
     label: groups.automation,
-    items: [{ href: "/agents", label: items.agents, icon: Bot, badge: "agents" }],
+    items: [
+      { href: "/agents", label: items.agents, icon: Bot, badge: "agents" },
+      { href: "/skills", label: items.skills, icon: ScrollText },
+    ],
   },
   {
     id: "settings",
