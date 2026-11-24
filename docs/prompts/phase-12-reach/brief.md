@@ -1720,7 +1720,7 @@ updated.
 |---|---|---|---|---|
 | brief | `docs/p12-brief` | This brief (full, from the stub; stub goal, scope, parent decisions and checkpoint kept), MASTER_PLAN §AA row 12 Brief/Status, `backend/assistant/self_sources.json` regenerated for the row's new status (`build_self_sources --check`) | Phase 11 closeout | **implemented 2026-11-20** (docs only; review round 1 findings addressed 2026-11-24: numeral-word number check, notice delta baseline, skill mount exclusion, calendar labels, owner-web helper in `core`, bookkeeping outside the run context, `start_async` guard, matcher ordering/latency, zip limits, quotable fields; review round 2 findings addressed 2026-11-24: denial audit through a required `on_denied` recorder that survives rollback, `/proactive/pause` endpoint with role × endpoint tests and the `/today` toggle, uniform first-run baseline, branches 4/5 sequenced after 3 with migration renumbering at merge, `skills.ports.get_attachable_versions`, trashed-conversation follow-up test; awaits the independent Sonnet 5 plan review to APPROVE) |
 | 1 | `feat/p12-proactive-core` | `core.probes`, `core.unattended` + guards, `proactive` app (schedules, runs, notices, heartbeat), contracts, ADR-016 | brief approved | **implemented 2026-11-20** (`core.probes` / `core.unattended` / `core.owner_web`, `audit.unattended.DenialRecorder`, guards in every D2 service plus `tools.registry.run_read_tool`, the gateway purpose check and the Celery publish/eager-prerun guard; `proactive` app with schedules, pause, runs, notices, probe state, heartbeat + prune beat entries, owner-only web endpoints; D19 contracts; ADR-016 written as Proposed; see "Implementation notes — branch 1"; review round 1 findings addressed 2026-11-24, see "Review round 1 fixes"; awaits the Sonnet 5 re-review) |
-| 2 | `feat/p12-morning-digest` | Probes in owner apps, `DigestRun`, number-checked composition + template fallback, `/today`, notice bell, HUD `notices`, "Dinle", `proactive_checkpoint` | 1 | planned |
+| 2 | `feat/p12-morning-digest` | Probes in owner apps, `DigestRun`, number-checked composition + template fallback, `/today`, notice bell, HUD `notices`, "Dinle", `proactive_checkpoint` | 1 | **implemented 2026-11-20** (nine probes in their owner apps, `DigestRun` + one number-checked `proactive.digest` call with template fallback, `proactive.digest` tier/prompt/budget/compression bypass, digest `latest`/detail/`ack` endpoints, HUD `notices` + `digest` sections, `/today` digest card + schedule editor + pause toggle, shell bell + `/notices`, "Dinle" and `speak_on_open`, `proactive_checkpoint`, `proactive_heartbeat`; see "Implementation notes — branch 2"; the on-Mac spoken route is branch 3 / M1; awaits the Sonnet 5 review) |
 | 3 | `feat/p12-wake-routes` | Wake-phrase routes + aliases, `digest.today` / `digest.learning` / `notices.read` on web voice and `node_voice`, vectors, ADR-015 note | 2 | planned (on-Mac verification: deferred: Mac session, M1) |
 | 4 | `feat/p12-n8n-connector` | n8n manifest + workflow-ID allowlist, relay sidecar mode, async reads + follow-ups, gated writes, probes, `tool.*` routes, ADR-010 amendment | 3 (and so 1, 2) | planned (live n8n pins: owner step) |
 | 5 | `feat/p12-skills-core` | SKILL.md parser + refusals, staged lifecycle, matcher + injection, `/skills`, `skill.*` routes | 3 (and so 1, 2); merges after 4 if both are ready (migration order) | planned |
@@ -2086,6 +2086,102 @@ later branches build on:
 3. Nothing on the Mac and no credentials are needed for this branch; the
    schedule editor UI (`/today`) arrives with branch 2, so no schedule
    exists until then.
+
+### Implementation notes — branch 2 (`feat/p12-morning-digest`), recorded 2026-11-20
+
+Choices made while implementing D1 (probes), D6, D7 (web), D18 and D20
+that the brief left open or that later branches build on:
+
+1. **Probes and their labels.** `approvals.pending` ("Onay: <tool code
+   name>", the HUD freshness rule, link `/approvals/<id>`, notices),
+   `tasks.due_today` (task title, notices) and `tasks.overdue` (digest
+   only), `memory.calendar_today` (digest only; "HH:MM <owner-organised
+   title>" or "HH:MM takvim öğesi", "tüm gün" for all-day events; the
+   third-party title in `context_text` is never read),
+   `memory.learning_card` (digest only; counts by kind as "N anı önerisi",
+   "N çekirdek blok önerisi", "N olgu önerisi" -- kind keys, no item
+   text), `memory.sessions_waiting` ("Oturum: <project>", never
+   `last_notification`; stale and forgotten-source sessions excluded,
+   notices), `harness.waiting_gates` ("Gate A|B: <repo name>", never the
+   goal, notices), `nodes.link` (Friday words only -- offline, kill switch,
+   revoked; key `<node id>:<status>`; never the node's self-reported name
+   or versions; notices) and `ai_core.budgets` (registered by
+   `proactive.apps` over the new read `ai_core.budgets.usage_at_or_above`;
+   "Bütçe <name> (günlük|aylık): %N" for windows at or above
+   `PROACTIVE_BUDGET_WARN_PERCENT`, default 80; installation-wide numbers
+   reported as the workspace's data class; notices). Owner fields pass
+   through the new `core.probes.safe_label`, which falls back to a Friday
+   word ("görev", "depo", ...) when a title has a shape `validate_label`
+   refuses, so one odd task title never fails a whole probe.
+2. **Closed link set widened by two** (`core.probes.LINK_PATTERNS`):
+   `/harness` and `/harness/implementations/<id>` (the existing
+   implementation-job page; `/harness/<id>` is the discovery-job page).
+   The frontend mirrors the set (`lib/api/proactive.ts` `safeLink`) and
+   renders any other link as plain text.
+3. **Number check rules beyond the brief's table.** `yüzde` ("percent") is
+   on the exception list (the number after it is checked), because budget
+   facts are "%N" and the model says "yüzde N"; for an `HH:MM` fact past
+   noon its twelve-hour hour is also allowed ("saat üçte" for 15:00); the
+   facts block carries the local date ("tarih: YYYY-MM-DD (Gün)") so a
+   spoken date passes. Ordinals combine with a preceding cardinal
+   ("yirmi birinci" = 21); groups combine across whitespace or a hyphen
+   only. All pinned by `proactive/tests/test_number_check.py`.
+4. **Fallback order.** No prompt row → template (`no_prompt`); no
+   personal-data provider → template with **no call and no `ModelUsage`
+   row** (`InferenceGateway.has_eligible_provider` is asked first); budget
+   refusal → template, the gateway's one `budget_exceeded` row is the
+   digest's `model_usage_id`; provider error → `model_error`; empty text →
+   `empty`; failed check → `number_check_failed`. The reason is stored on
+   `DigestRun.fallback_reason` and in the run's `probe_failures["digest"]`;
+   the run outcome is `digest` either way. The Speak step runs in its own
+   `atomic()` block inside the run's context, under the `digest` step name.
+5. **`proactive.api` gains** `digest_payload`, `latest_digest`,
+   `latest_digest_row`, `digest_section` (the HUD card: id, text, time,
+   opened/spoken flags, `speak_on_open`; no sections) and
+   `mark_digest_spoken` (sets `spoken_at`/`spoken_channel` once, refuses
+   inside an unattended context, `web`/`node_voice` only) for branch 3's
+   `digest.today` route. The "assistant and hud only through
+   `proactive.api`" contract now also forbids `proactive.digest`,
+   `.templates`, `.number_check`, `.checkpoint`, `.probes`, `.management`
+   (hud tests may seed rows: `hud.tests.** -> proactive.**` ignored).
+6. **HUD**: two sections, `notices` (unread count, five latest titles and
+   links) and `digest` (the card above, or null; a delta may turn it
+   null). The HUD digest card speaks once on open when the schedule's
+   `speak_on_open` is set, the digest is not yet spoken (any channel), the
+   tab is not muted, and this device has not spoken that digest on open
+   (a per-device `localStorage` marker). "Dinle" acks `spoken` (web);
+   `/today` acks `opened` once.
+7. **"Dinle" needs a conversation.** `POST /voice/speech` is scoped by a
+   conversation (its budget session), so the player creates one "Brifing"
+   conversation lazily on the first play (an owner click, web), never
+   before. No new speech endpoint.
+8. **`manage.py proactive_heartbeat [--at ISO]`** runs one beat tick (what
+   the 60 s beat does: due schedules only, claimed and run inside their
+   contexts); it creates and edits no schedule. Used by
+   `frontend/e2e/digest.e2e.ts` and by operators.
+9. **`/notices`** is a new shell route (bell in the sidebar header, polled
+   every 60 s); `/today` hosts the digest card, the schedule editor and the
+   pause toggle above the existing task list.
+10. **Prompt pack**: `docs/prompts/phase-12-reach/digest.md` quotes the v1
+    prompt verbatim; seed, migration `ai_core/0009` and pack are kept equal
+    by `ai_core/tests/test_proactive_digest_prompt.py`.
+
+### Owner steps (pending) — `feat/p12-morning-digest`, recorded 2026-11-20
+
+1. Run the independent Sonnet 5 review of this branch to APPROVE before
+   merge (the implementing model does not review its own work).
+2. After merge: run `manage.py migrate` (ai_core 0009 seeds the
+   `friday_proactive_digest` prompt and the `proactive` budget; proactive
+   0002 adds `DigestRun`), make sure a local, `personal_data_allowed` chat
+   provider is active (otherwise every digest is the template text), then
+   enable the `morning_digest` schedule on `/today` (time, days, optionally
+   "HUD açılınca bir kez sesli oku"). The two-week checkpoint starts that
+   day; read it with `manage.py proactive_checkpoint`.
+3. Run `frontend/e2e/digest.e2e.ts` on the live e2e stack (CI); it was
+   written here but not run against a live stack in this container.
+4. Listening on the owner's real speakers ("Dinle" with the real TTS
+   provider) is owner evaluation; no Mac work is needed for this branch
+   (the Mac's spoken route is branch 3 and Mac session M1).
 
 ### Known follow-ups (LOW) — from the `docs/p12-brief` plan review, recorded 2026-11-24
 
