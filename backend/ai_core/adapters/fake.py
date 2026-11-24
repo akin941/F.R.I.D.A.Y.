@@ -210,6 +210,9 @@ FAKE_TASK_DRAFT_RESPONSE = '{"title": "Fake extracted task", "due_date": null}'
 # Phase 12 D15: the instruction-skill matcher's default answer is "no
 # skill"; tests that need a match patch the adapter's text for the purpose.
 FAKE_SKILLS_MATCH_RESPONSE = '{"skill": null}'
+# Phase 12 D17: the playbook distiller -- "no playbook" unless a test sets a
+# draft (`skills.playbooks.parse_draft` / `verify_steps` check it in code).
+FAKE_SKILLS_PLAYBOOK_DISTILL_RESPONSE = '{"playbook": null}'
 FAKE_PROACTIVE_DIGEST_RESPONSE = (
     "Günaydın! Bugün seni bekleyen birkaç şey var; ayrıntılar Bugün sayfasında."
 )
@@ -325,6 +328,8 @@ class FakeAdapter(BaseAdapter):
             return FAKE_PROACTIVE_DIGEST_RESPONSE
         if purpose == "skills.match":
             return FAKE_SKILLS_MATCH_RESPONSE
+        if purpose == "skills.playbook_distill":
+            return FAKE_SKILLS_PLAYBOOK_DISTILL_RESPONSE
         if purpose == "agent.plan":
             latest = _latest_user_content(messages)
             if _AGENT_MULTI_STEP_PLAN_TRIGGER in latest:

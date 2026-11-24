@@ -45,7 +45,7 @@ def test_the_migration_creates_prompt_and_budget_once_and_never_overwrites():
     assert template.purpose == PURPOSE
     assert template.active_version.content == MIGRATION.PROMPT_V1
     budget = AIBudget.objects.get(name="skills")
-    assert budget.purposes == [PURPOSE]
+    assert PURPOSE in budget.purposes
     assert budget.monthly_limit_usd == Decimal("5")
 
     AIBudget.objects.filter(pk=budget.pk).update(monthly_limit_usd=Decimal("9"))
@@ -62,4 +62,4 @@ def test_seed_ai_defaults_seeds_the_prompt_and_the_budget():
     template = PromptTemplate.objects.get(name="friday_skills_match")
     assert template.active_version.content == seed_ai_defaults.FRIDAY_SKILLS_MATCH_V1
     budget = AIBudget.objects.get(name="skills")
-    assert budget.purposes == [PURPOSE]
+    assert PURPOSE in budget.purposes

@@ -390,6 +390,7 @@ def eligible_repos(workspace):
     minimum = int(settings.SKILLS_PLAYBOOK_MIN_SOURCES)
     keys = (
         PlaybookSource.objects.filter(workspace=workspace, distill_run__isnull=True)
+        .order_by()
         .values_list("repo_key", flat=True)
         .distinct()
     )
@@ -633,6 +634,7 @@ def distill_playbooks(*, now=None):
     totals = {}
     workspace_ids = (
         PlaybookSource.objects.filter(distill_run__isnull=True)
+        .order_by()
         .values_list("workspace_id", flat=True)
         .distinct()
     )

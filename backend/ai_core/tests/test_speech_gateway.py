@@ -576,6 +576,8 @@ def test_seed_local_speech_rows_with_voice_key_and_idempotent(monkeypatch):
         "control",
         "proactive",
         "skills",
+        # Phase 12 D17 (ai_core 0012): the playbook distiller's daily cap.
+        "skills_playbook_daily",
     }
 
 
