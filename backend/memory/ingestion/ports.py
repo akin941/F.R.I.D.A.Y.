@@ -32,7 +32,7 @@ from django.utils import timezone
 
 from memory.ingestion import services
 from memory.ingestion.mapping import owner_of, resolve_workspace, unmapped_entry
-from memory.ingestion.scrubber import merge_reports, scrub_text, scrub_value
+from memory.ingestion.scrubber import merge_reports, scrub_text, scrub_value, truncate_scrubbed
 from memory.models import Episode, IngestionSource
 from workspaces.models import Workspace
 
@@ -96,7 +96,7 @@ def _safe_external_id(external_id):
 
 def _bounded(text, terms):
     result = scrub_text(text or "", terms=terms)
-    return result.text[: Episode.MAX_TEXT_CHARS], result.report
+    return truncate_scrubbed(result.text, Episode.MAX_TEXT_CHARS), result.report
 
 
 def record_episode(
@@ -131,7 +131,11 @@ def record_episode(
 
     workspace = resolve_workspace(source, mapping_key)
     if workspace is None:
-        services.record_unmapped(source, unmapped_entry(mapping_key))
+        # The source workspace's terms (the owner's personal workspace): a
+        # customer or code name inside an unmapped path is not kept either.
+        services.record_unmapped(
+            source, unmapped_entry(mapping_key, services.scrub_terms_for(source.workspace))
+        )
         return EpisodeResult(DROPPED_UNMAPPED)
 
     if Episode.all_objects.filter(source=source, external_id=external_id).exists():
@@ -141,7 +145,7 @@ def record_episode(
     terms = services.scrub_terms_for(workspace)
     if owner_of(source).pk != workspace.owner_id:
         # Defence in depth: resolve_workspace already re-checked ownership.
-        services.record_unmapped(source, unmapped_entry(mapping_key))
+        services.record_unmapped(source, unmapped_entry(mapping_key, terms))
         return EpisodeResult(DROPPED_UNMAPPED)
     owner_clean, owner_report = _bounded(owner_text, terms)
     context_clean, context_report = _bounded(context_text, terms)

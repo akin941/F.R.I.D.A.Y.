@@ -724,7 +724,7 @@ from yesterday".
 | # | Status |
 |---|---|
 | brief (`docs/friday-3-roadmap`) | **implemented 2026-11-20** (draft brief; awaits Sonnet 5 plan review) |
-| 1 `feat/p8-ingestion-core` | **implemented 2026-11-20** (sources, mapping, scrubber + corpus gate, episodes, port, TTL beat, forget/restore (episodes), counters, owner API, contract, ADR-012 note; awaits Sonnet 5 review) |
+| 1 `feat/p8-ingestion-core` | **implemented 2026-11-20** (sources, mapping, scrubber + corpus gate, episodes, port, TTL beat, forget/restore (episodes), counters, owner API, contract, ADR-012 note; review fixes applied 2026-11-24; awaits Sonnet 5 re-review) |
 | 2–7 | not started |
 
 ## Out of scope (explicit)
@@ -863,6 +863,20 @@ are consumed up to their closing quote (`"password": "hunter two three"` is
 fully replaced; corpus rows added). `path:~/../x` (a key climbing above `~`)
 is now an invalid key, hence unmapped, instead of normalising to `~/x`. The
 PAT wording in this section and branch 2's matrix now says 401.
+
+Review fixes, second pass (branch 1, 2026-11-24): `forget_source` is
+idempotent — a repeat forget while the source is still forgotten (double
+click, retry, or a forget after the owner resumed it) reuses the pending
+operation id instead of minting a new one, so `restore_source` brings back
+every episode either call trashed (audit metadata gains `repeat`). All
+post-scrub caps (episode text, metadata strings and keys, the unmapped short
+form) go through `scrubber.truncate_scrubbed`, which drops a placeholder
+straddling the cap whole instead of leaving a `[SECRET:aws_k` fragment. The
+unmapped short form applies the source (personal) workspace's scrub terms.
+The audit view lists episodes only from workspaces the actor still owns
+(`owner_workspaces`), not every workspace `for_actor()` admits. Note: the
+reviewed branch was already merged into the integration branch (merge
+92a7303); these fixes land on top of it.
 
 ## Known follow-ups (from review, unresolved at merge)
 

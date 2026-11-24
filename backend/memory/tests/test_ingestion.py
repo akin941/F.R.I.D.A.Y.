@@ -330,7 +330,8 @@ def test_text_over_the_cap_is_truncated_after_scrubbing(hooks, personal):
     text = "a " * 1995 + FAKE_KEY + " tail"
     result = _record(hooks, owner_text=text, context_text="b" * 9000)
     episode = Episode.objects.get(id=result.episode_id)
-    assert len(episode.owner_text) == Episode.MAX_TEXT_CHARS
+    # The placeholder straddling the cap is dropped whole, never cut.
+    assert episode.owner_text == "a " * 1995
     assert len(episode.context_text) == Episode.MAX_TEXT_CHARS
     assert "sk-" not in episode.owner_text and "NEVERSTORED" not in episode.owner_text
 
@@ -443,6 +444,7 @@ def test_forget_pauses_trashes_and_is_audited_with_counts_only(owner, hooks, per
         "kind": "claude_code_hooks",
         "operation_id": result["operation_id"],
         "episodes": 3,
+        "repeat": False,
     }
     # Paused: new items are dropped.
     assert _record(hooks, mapping_key="path:/p/1", external_id="d").status == ports.DROPPED_PAUSED
@@ -463,6 +465,54 @@ def test_restore_undoes_exactly_the_forget_operation(owner, hooks, personal, fir
     assert AuditLog.objects.get(action="memory.source_restored").metadata["episodes"] == 2
     with pytest.raises(services.IngestionInvalid):
         services.restore_source(hooks, actor=owner, channel=CHANNEL_WEB)
+
+
+def test_forget_twice_then_restore_brings_back_every_episode(owner, hooks, personal, firm):
+    # ADR-009 reversibility: a double click or a retry must not orphan the
+    # first call's episodes in the trash.
+    _three_episodes(hooks, personal, firm)
+    first = services.forget_source(hooks, actor=owner, channel=CHANNEL_WEB)
+    hooks.refresh_from_db()
+    forgotten_at = hooks.forgotten_at
+    second = services.forget_source(hooks, actor=owner, channel=CHANNEL_WEB)
+    assert second["operation_id"] == first["operation_id"] and second["episodes"] == 0
+    hooks.refresh_from_db()
+    assert hooks.forgotten_at == forgotten_at
+    audits = AuditLog.objects.filter(action="memory.source_forgotten").order_by("created_at")
+    assert [a.metadata["repeat"] for a in audits] == [False, True]
+    result = services.restore_source(hooks, actor=owner, channel=CHANNEL_WEB)
+    assert result["episodes"] == 3
+    assert set(Episode.objects.values_list("external_id", flat=True)) == {"a", "b", "c"}
+
+
+def test_repeat_forget_after_resume_joins_the_pending_operation(owner, hooks, personal, firm):
+    _three_episodes(hooks, personal, firm)
+    first = services.forget_source(hooks, actor=owner, channel=CHANNEL_WEB)
+    services.update_source(hooks, actor=owner, channel=CHANNEL_WEB, paused=False)
+    _record(hooks, mapping_key="path:/p/1", external_id="d")
+    second = services.forget_source(hooks, actor=owner, channel=CHANNEL_WEB)
+    assert second == {"operation_id": first["operation_id"], "episodes": 1}
+    assert not Episode.objects.exists()
+    assert services.restore_source(hooks, actor=owner, channel=CHANNEL_WEB)["episodes"] == 4
+    assert Episode.objects.count() == 4
+
+
+def test_unmapped_short_form_applies_the_source_workspace_scrub_terms(owner, hooks, personal):
+    term = services.create_scrub_term(
+        workspace=personal, actor=owner, channel=CHANNEL_WEB, term="Initech"
+    )
+    _record(hooks, mapping_key="path:/Users/o/code/initech-billing")
+    [entry] = _counter(hooks).unmapped_keys
+    name = str(term.id).replace("-", "")[:12]
+    assert entry["short"] == f"path:/Users/o/code/[TERM:{name}]-billing"
+    assert "initech" not in json.dumps(entry).lower()
+
+
+def test_unmapped_short_form_never_cuts_a_placeholder(hooks):
+    key = "path:/" + "a" * 70 + "/" + FAKE_KEY
+    _record(hooks, mapping_key=key)
+    [entry] = _counter(hooks).unmapped_keys
+    assert entry["short"] == "path:/" + "a" * 70 + "/"
 
 
 @pytest.mark.parametrize("channel", [CHANNEL_CLI, CHANNEL_OPENAI, CHANNEL_SYSTEM, "telegram"])

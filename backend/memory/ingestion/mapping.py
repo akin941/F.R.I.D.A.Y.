@@ -19,7 +19,7 @@ of ownership cannot route items into a workspace the owner no longer owns.
 import hashlib
 import posixpath
 
-from memory.ingestion.scrubber import scrub_text
+from memory.ingestion.scrubber import scrub_text, truncate_scrubbed
 from memory.models import IngestionSource, WorkspaceMappingRule
 from workspaces.models import Workspace, WorkspaceMember
 
@@ -124,10 +124,12 @@ def resolve_workspace(source: IngestionSource, mapping_key) -> Workspace | None:
     return target
 
 
-def unmapped_entry(mapping_key):
+def unmapped_entry(mapping_key, terms=()):
     """What the audit view keeps of an unmapped key (D4): a hash plus a
-    scrubbed short form -- never the item."""
+    scrubbed short form -- never the item. `terms` are the source
+    workspace's ScrubTerms, so a customer or code name in a path or repo key
+    is replaced as it would be in an episode."""
     raw = str(mapping_key)[:MAX_KEY_CHARS]
     digest = hashlib.sha256(raw.encode("utf-8", "replace")).hexdigest()
-    short = scrub_text(raw).text[:UNMAPPED_SHORT_CHARS]
+    short = truncate_scrubbed(scrub_text(raw, terms=terms).text, UNMAPPED_SHORT_CHARS)
     return {"hash": digest, "short": short}
