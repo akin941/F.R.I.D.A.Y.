@@ -56,7 +56,7 @@ from accounts.voice_live import record_evaluation
 from ai_core.adapters.base import SynthesizeAdapterResult, TranscribeAdapterResult
 from ai_core.adapters.fake import FakeAdapter
 from ai_core.models import ModelUsage
-from hud.services import node_section
+from nodes.selectors import node_health
 from tools.tests.conftest import make_link, node_home, node_world  # noqa: F401 -- fixtures
 from tools.tests.test_node_action_trust import (  # noqa: F401 -- fixtures
     Conversation,
@@ -269,7 +269,10 @@ def _relay(stack, state):
 
 
 def _hud_voice(world):
-    return node_section(world.owner)["voice"]["state"]
+    """The HUD's node mic state: `hud.services.node_section` forwards
+    `nodes.selectors.node_health`'s voice block (`hud` is a leaf `ops` may
+    not import, so this reads the same block one layer down)."""
+    return node_health(world.owner)["voice"]["state"]
 
 
 # --- 1. push-to-talk ---------------------------------------------------------
