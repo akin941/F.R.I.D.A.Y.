@@ -1976,3 +1976,37 @@ The stub recorded no owner steps. These cannot happen in a cloud session
    digest length 900 chars, notice retention 30 days, `proactive` budget
    3 USD/month, `skills` budget 5 USD/month, stale after 45 days,
    playbook minimum 3 sources and 3 proposals per week.
+
+### Known follow-ups (LOW) — from the `docs/p12-brief` plan review, recorded 2026-11-24
+
+These review notes were left unresolved at merge. Each one goes to the branch named:
+
+1. **D17 skill mount has a read-write alias (branch 5).** D17 mounts
+   `{workspace_dir}/skills/<name>/` read-only at `~/.claude/skills/<name>/`.
+   The real runner (`harness/runner.py`) also bind-mounts the whole
+   `workspace_dir` read-write at `/workspace`, so the same files can be
+   written at `/workspace/skills/<name>/`. The effect stays inside the job,
+   because the directory is discarded and the four-layer rule excludes it
+   from the commit. Fix: place the skills directory outside `workspace_dir`
+   in a sibling temp dir, and add a test that the container has no
+   writable path to the skill files. If that is not done, state in D17 and
+   in `test_skill_mount` that the read-only mount is a convention and that
+   the read-write alias is accepted.
+2. **The D17 provenance check is weaker than the brief claims (branch 5).**
+   The check only verifies that each step carries a verbatim quote from
+   the owner goal or from `repo_test_command`. The step's instruction text
+   is free-form model output, and fenced diff summaries and agent-chosen
+   paths can steer it. Per-item owner approval and showing the body reduce
+   the risk, but the code does not verify that each step is traced. Fix:
+   in the approval view, show each step's verified quote next to the model
+   text and label the model text "model-written, unverified". As an
+   alternative, build each step line from a Friday template plus the
+   verified quote, so the quote is the only free text carried.
+3. **The `digest.today` route writes during a voice turn (branch 3).**
+   On a `node_voice` turn this route sets `spoken_at` and `spoken_channel`.
+   That is a write, and ADR-015 says a voice turn "reads and proposes
+   only". The write only touches the digest's own telemetry, but the
+   branch 3 ADR-015 note does not list it as an exception. Fix: add a line
+   to that note saying the only write a route may make is the digest's own
+   `spoken_at` and `spoken_channel` telemetry. Also assert in the test that
+   this is the only row the route writes.
