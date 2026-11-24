@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "friday-voice/v1/mode",
+  "title": "mode",
+  "description": "The owner changed the local mic mode in the node UI.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "type",
+    "mode"
+  ],
+  "properties": {
+    "type": {
+      "type": "string",
+      "maxLength": 16,
+      "const": "mode"
+    },
+    "mode": {
+      "type": "string",
+      "maxLength": 16,
+      "enum": [
+        "off",
+        "push_to_talk",
+        "always_on"
+      ]
+    }
+  }
+}

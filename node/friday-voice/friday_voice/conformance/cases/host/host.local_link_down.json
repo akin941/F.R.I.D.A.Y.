@@ -1,0 +1,85 @@
+{
+  "format": 1,
+  "protocol": "friday-voice/v1",
+  "family": "host",
+  "id": "host.local_link_down",
+  "title": "The node WebSocket going down releases the mic at once, whatever the child says",
+  "clock": "any",
+  "host": {
+    "mode": "push_to_talk",
+    "muted": false,
+    "link_up": true
+  },
+  "steps": [
+    {
+      "op": "expect",
+      "mic": "released",
+      "link": "open",
+      "to_child": [
+        "hello",
+        "credential"
+      ]
+    },
+    {
+      "op": "child_send",
+      "frame_b64": "AAAARnsiY2hpbGRfdmVyc2lvbiI6IjAuMS4wIiwicHJvdG9jb2wiOiJmcmlkYXktdm9pY2UvdjEiLCJ0eXBlIjoicmVhZHkifQo="
+    },
+    {
+      "op": "child_send",
+      "frame_b64": "AAAAq3siYXRfbXMiOjE4MDAwMDAwMDAwMDAsIm1vZGUiOiJwdXNoX3RvX3RhbGsiLCJzZXNzaW9uX29wZW4iOmZhbHNlLCJzdGF0ZSI6ImFybWVkX3B0dCIsInN0b3JtX211dGVzX3RvZGF5IjowLCJ0eXBlIjoic3RhdGUiLCJ3YWtlX2FjY2VwdHNfdG9kYXkiOjAsIndha2VfZGlzY2FyZHNfdG9kYXkiOjB9Cg=="
+    },
+    {
+      "op": "expect",
+      "mic": "held",
+      "link": "open",
+      "indicator": "armed_ptt",
+      "to_child": []
+    },
+    {
+      "op": "host_local",
+      "event": "link",
+      "value": "down"
+    },
+    {
+      "op": "expect",
+      "mic": "released",
+      "link": "open",
+      "indicator": "off",
+      "to_child": [
+        "link"
+      ]
+    },
+    {
+      "op": "child_send",
+      "frame_b64": "AAAAq3siYXRfbXMiOjE4MDAwMDAwMDAwMDAsIm1vZGUiOiJwdXNoX3RvX3RhbGsiLCJzZXNzaW9uX29wZW4iOmZhbHNlLCJzdGF0ZSI6ImFybWVkX3B0dCIsInN0b3JtX211dGVzX3RvZGF5IjowLCJ0eXBlIjoic3RhdGUiLCJ3YWtlX2FjY2VwdHNfdG9kYXkiOjAsIndha2VfZGlzY2FyZHNfdG9kYXkiOjB9Cg=="
+    },
+    {
+      "op": "expect",
+      "mic": "released",
+      "indicator": "off",
+      "to_child": []
+    },
+    {
+      "op": "host_local",
+      "event": "link",
+      "value": "up"
+    },
+    {
+      "op": "expect",
+      "mic": "released",
+      "to_child": [
+        "link"
+      ]
+    },
+    {
+      "op": "child_send",
+      "frame_b64": "AAAAq3siYXRfbXMiOjE4MDAwMDAwMDAwMDAsIm1vZGUiOiJwdXNoX3RvX3RhbGsiLCJzZXNzaW9uX29wZW4iOmZhbHNlLCJzdGF0ZSI6ImFybWVkX3B0dCIsInN0b3JtX211dGVzX3RvZGF5IjowLCJ0eXBlIjoic3RhdGUiLCJ3YWtlX2FjY2VwdHNfdG9kYXkiOjAsIndha2VfZGlzY2FyZHNfdG9kYXkiOjB9Cg=="
+    },
+    {
+      "op": "expect",
+      "mic": "held",
+      "indicator": "armed_ptt",
+      "to_child": []
+    }
+  ]
+}

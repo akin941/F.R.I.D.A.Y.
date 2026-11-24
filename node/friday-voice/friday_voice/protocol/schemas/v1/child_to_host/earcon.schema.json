@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "friday-voice/v1/earcon",
+  "title": "earcon",
+  "description": "Play one of the host's own bundled earcons.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "type",
+    "earcon"
+  ],
+  "properties": {
+    "type": {
+      "type": "string",
+      "maxLength": 16,
+      "const": "earcon"
+    },
+    "earcon": {
+      "type": "string",
+      "maxLength": 8,
+      "enum": [
+        "wake",
+        "end",
+        "error"
+      ]
+    }
+  }
+}

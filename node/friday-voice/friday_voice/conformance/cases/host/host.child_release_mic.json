@@ -1,0 +1,70 @@
+{
+  "format": 1,
+  "protocol": "friday-voice/v1",
+  "family": "host",
+  "id": "host.child_release_mic",
+  "title": "release_mic from the child releases the mic; the link stays up",
+  "clock": "any",
+  "host": {
+    "mode": "push_to_talk",
+    "muted": false,
+    "link_up": true
+  },
+  "steps": [
+    {
+      "op": "expect",
+      "mic": "released",
+      "link": "open",
+      "to_child": [
+        "hello",
+        "credential"
+      ]
+    },
+    {
+      "op": "child_send",
+      "frame_b64": "AAAARnsiY2hpbGRfdmVyc2lvbiI6IjAuMS4wIiwicHJvdG9jb2wiOiJmcmlkYXktdm9pY2UvdjEiLCJ0eXBlIjoicmVhZHkifQo="
+    },
+    {
+      "op": "child_send",
+      "frame_b64": "AAAAq3siYXRfbXMiOjE4MDAwMDAwMDAwMDAsIm1vZGUiOiJwdXNoX3RvX3RhbGsiLCJzZXNzaW9uX29wZW4iOmZhbHNlLCJzdGF0ZSI6ImFybWVkX3B0dCIsInN0b3JtX211dGVzX3RvZGF5IjowLCJ0eXBlIjoic3RhdGUiLCJ3YWtlX2FjY2VwdHNfdG9kYXkiOjAsIndha2VfZGlzY2FyZHNfdG9kYXkiOjB9Cg=="
+    },
+    {
+      "op": "expect",
+      "mic": "held",
+      "link": "open",
+      "indicator": "armed_ptt",
+      "to_child": []
+    },
+    {
+      "op": "child_send",
+      "frame_b64": "AAAAKHsicmVhc29uIjoic3Rvcm0iLCJ0eXBlIjoicmVsZWFzZV9taWMifQo="
+    },
+    {
+      "op": "expect",
+      "mic": "released",
+      "link": "open",
+      "to_child": []
+    },
+    {
+      "op": "child_send",
+      "frame_b64": "AAAArXsiYXRfbXMiOjE4MDAwMDAwMDAwMDAsIm1vZGUiOiJwdXNoX3RvX3RhbGsiLCJzZXNzaW9uX29wZW4iOmZhbHNlLCJzdGF0ZSI6InN0b3JtX211dGVkIiwic3Rvcm1fbXV0ZXNfdG9kYXkiOjAsInR5cGUiOiJzdGF0ZSIsIndha2VfYWNjZXB0c190b2RheSI6MCwid2FrZV9kaXNjYXJkc190b2RheSI6MH0K"
+    },
+    {
+      "op": "expect",
+      "mic": "released",
+      "link": "open",
+      "indicator": "storm_muted",
+      "to_child": []
+    },
+    {
+      "op": "child_send",
+      "frame_b64": "AAAAq3siYXRfbXMiOjE4MDAwMDAwMDAwMDAsIm1vZGUiOiJwdXNoX3RvX3RhbGsiLCJzZXNzaW9uX29wZW4iOmZhbHNlLCJzdGF0ZSI6ImFybWVkX3B0dCIsInN0b3JtX211dGVzX3RvZGF5IjowLCJ0eXBlIjoic3RhdGUiLCJ3YWtlX2FjY2VwdHNfdG9kYXkiOjAsIndha2VfZGlzY2FyZHNfdG9kYXkiOjB9Cg=="
+    },
+    {
+      "op": "expect",
+      "mic": "held",
+      "indicator": "armed_ptt",
+      "to_child": []
+    }
+  ]
+}

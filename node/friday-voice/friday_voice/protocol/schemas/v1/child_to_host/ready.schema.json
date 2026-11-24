@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "friday-voice/v1/ready",
+  "title": "ready",
+  "description": "Sent once, after hello and the first valid credential; never before.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "type",
+    "protocol",
+    "child_version"
+  ],
+  "properties": {
+    "type": {
+      "type": "string",
+      "maxLength": 16,
+      "const": "ready"
+    },
+    "protocol": {
+      "type": "string",
+      "maxLength": 16,
+      "const": "friday-voice/v1"
+    },
+    "child_version": {
+      "type": "string",
+      "maxLength": 32,
+      "pattern": "[0-9A-Za-z.+_-]{1,32}"
+    }
+  }
+}

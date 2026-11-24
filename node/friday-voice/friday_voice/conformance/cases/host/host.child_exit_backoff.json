@@ -1,0 +1,311 @@
+{
+  "format": 1,
+  "protocol": "friday-voice/v1",
+  "family": "host",
+  "id": "host.child_exit_backoff",
+  "title": "Child exit releases the mic and restarts it with backoff 1 s doubling to 60 s",
+  "clock": "manual",
+  "host": {
+    "mode": "push_to_talk",
+    "muted": false,
+    "link_up": true
+  },
+  "steps": [
+    {
+      "op": "expect",
+      "mic": "released",
+      "link": "open",
+      "to_child": [
+        "hello",
+        "credential"
+      ]
+    },
+    {
+      "op": "child_send",
+      "frame_b64": "AAAARnsiY2hpbGRfdmVyc2lvbiI6IjAuMS4wIiwicHJvdG9jb2wiOiJmcmlkYXktdm9pY2UvdjEiLCJ0eXBlIjoicmVhZHkifQo="
+    },
+    {
+      "op": "child_send",
+      "frame_b64": "AAAAq3siYXRfbXMiOjE4MDAwMDAwMDAwMDAsIm1vZGUiOiJwdXNoX3RvX3RhbGsiLCJzZXNzaW9uX29wZW4iOmZhbHNlLCJzdGF0ZSI6ImFybWVkX3B0dCIsInN0b3JtX211dGVzX3RvZGF5IjowLCJ0eXBlIjoic3RhdGUiLCJ3YWtlX2FjY2VwdHNfdG9kYXkiOjAsIndha2VfZGlzY2FyZHNfdG9kYXkiOjB9Cg=="
+    },
+    {
+      "op": "expect",
+      "mic": "held",
+      "link": "open",
+      "indicator": "armed_ptt",
+      "to_child": []
+    },
+    {
+      "op": "child_exit",
+      "code": 1
+    },
+    {
+      "op": "expect",
+      "mic": "released",
+      "link": "dropped",
+      "indicator": "off",
+      "failure": "child_exit",
+      "restart_in_ms": 1000
+    },
+    {
+      "op": "advance_ms",
+      "ms": 999
+    },
+    {
+      "op": "expect",
+      "link": "dropped",
+      "to_child": []
+    },
+    {
+      "op": "advance_ms",
+      "ms": 1
+    },
+    {
+      "op": "expect",
+      "mic": "released",
+      "link": "open",
+      "to_child": [
+        "hello",
+        "credential"
+      ]
+    },
+    {
+      "op": "child_exit",
+      "code": 1
+    },
+    {
+      "op": "expect",
+      "mic": "released",
+      "link": "dropped",
+      "indicator": "off",
+      "failure": "child_exit",
+      "restart_in_ms": 2000
+    },
+    {
+      "op": "advance_ms",
+      "ms": 1999
+    },
+    {
+      "op": "expect",
+      "link": "dropped",
+      "to_child": []
+    },
+    {
+      "op": "advance_ms",
+      "ms": 1
+    },
+    {
+      "op": "expect",
+      "mic": "released",
+      "link": "open",
+      "to_child": [
+        "hello",
+        "credential"
+      ]
+    },
+    {
+      "op": "child_exit",
+      "code": 1
+    },
+    {
+      "op": "expect",
+      "mic": "released",
+      "link": "dropped",
+      "indicator": "off",
+      "failure": "child_exit",
+      "restart_in_ms": 4000
+    },
+    {
+      "op": "advance_ms",
+      "ms": 3999
+    },
+    {
+      "op": "expect",
+      "link": "dropped",
+      "to_child": []
+    },
+    {
+      "op": "advance_ms",
+      "ms": 1
+    },
+    {
+      "op": "expect",
+      "mic": "released",
+      "link": "open",
+      "to_child": [
+        "hello",
+        "credential"
+      ]
+    },
+    {
+      "op": "child_exit",
+      "code": 1
+    },
+    {
+      "op": "expect",
+      "mic": "released",
+      "link": "dropped",
+      "indicator": "off",
+      "failure": "child_exit",
+      "restart_in_ms": 8000
+    },
+    {
+      "op": "advance_ms",
+      "ms": 7999
+    },
+    {
+      "op": "expect",
+      "link": "dropped",
+      "to_child": []
+    },
+    {
+      "op": "advance_ms",
+      "ms": 1
+    },
+    {
+      "op": "expect",
+      "mic": "released",
+      "link": "open",
+      "to_child": [
+        "hello",
+        "credential"
+      ]
+    },
+    {
+      "op": "child_exit",
+      "code": 1
+    },
+    {
+      "op": "expect",
+      "mic": "released",
+      "link": "dropped",
+      "indicator": "off",
+      "failure": "child_exit",
+      "restart_in_ms": 16000
+    },
+    {
+      "op": "advance_ms",
+      "ms": 15999
+    },
+    {
+      "op": "expect",
+      "link": "dropped",
+      "to_child": []
+    },
+    {
+      "op": "advance_ms",
+      "ms": 1
+    },
+    {
+      "op": "expect",
+      "mic": "released",
+      "link": "open",
+      "to_child": [
+        "hello",
+        "credential"
+      ]
+    },
+    {
+      "op": "child_exit",
+      "code": 1
+    },
+    {
+      "op": "expect",
+      "mic": "released",
+      "link": "dropped",
+      "indicator": "off",
+      "failure": "child_exit",
+      "restart_in_ms": 32000
+    },
+    {
+      "op": "advance_ms",
+      "ms": 31999
+    },
+    {
+      "op": "expect",
+      "link": "dropped",
+      "to_child": []
+    },
+    {
+      "op": "advance_ms",
+      "ms": 1
+    },
+    {
+      "op": "expect",
+      "mic": "released",
+      "link": "open",
+      "to_child": [
+        "hello",
+        "credential"
+      ]
+    },
+    {
+      "op": "child_exit",
+      "code": 1
+    },
+    {
+      "op": "expect",
+      "mic": "released",
+      "link": "dropped",
+      "indicator": "off",
+      "failure": "child_exit",
+      "restart_in_ms": 60000
+    },
+    {
+      "op": "advance_ms",
+      "ms": 59999
+    },
+    {
+      "op": "expect",
+      "link": "dropped",
+      "to_child": []
+    },
+    {
+      "op": "advance_ms",
+      "ms": 1
+    },
+    {
+      "op": "expect",
+      "mic": "released",
+      "link": "open",
+      "to_child": [
+        "hello",
+        "credential"
+      ]
+    },
+    {
+      "op": "child_exit",
+      "code": 1
+    },
+    {
+      "op": "expect",
+      "mic": "released",
+      "link": "dropped",
+      "indicator": "off",
+      "failure": "child_exit",
+      "restart_in_ms": 60000
+    },
+    {
+      "op": "advance_ms",
+      "ms": 59999
+    },
+    {
+      "op": "expect",
+      "link": "dropped",
+      "to_child": []
+    },
+    {
+      "op": "advance_ms",
+      "ms": 1
+    },
+    {
+      "op": "expect",
+      "mic": "released",
+      "link": "open",
+      "to_child": [
+        "hello",
+        "credential"
+      ]
+    }
+  ]
+}

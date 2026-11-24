@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "friday-voice/v1/hello",
+  "title": "hello",
+  "description": "The first frame the host sends: protocol version, host version, the capture format and the host's local state (mode, mute, node WebSocket link). Mode and mute are set only in the node's own UI (ADR-013 decision 5).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "type",
+    "protocol",
+    "host_version",
+    "sample_rate",
+    "mode",
+    "muted",
+    "link_up"
+  ],
+  "properties": {
+    "type": {
+      "type": "string",
+      "maxLength": 16,
+      "const": "hello"
+    },
+    "protocol": {
+      "type": "string",
+      "maxLength": 16,
+      "const": "friday-voice/v1"
+    },
+    "host_version": {
+      "type": "string",
+      "maxLength": 32,
+      "pattern": "[0-9A-Za-z.+_-]{1,32}"
+    },
+    "sample_rate": {
+      "type": "integer",
+      "minimum": 16000,
+      "maximum": 16000
+    },
+    "mode": {
+      "type": "string",
+      "maxLength": 16,
+      "enum": [
+        "off",
+        "push_to_talk",
+        "always_on"
+      ]
+    },
+    "muted": {
+      "enum": [
+        true,
+        false,
+        "unreadable"
+      ]
+    },
+    "link_up": {
+      "type": "boolean"
+    }
+  }
+}

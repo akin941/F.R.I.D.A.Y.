@@ -1,0 +1,37 @@
+{
+  "format": 1,
+  "protocol": "friday-voice/v1",
+  "family": "host",
+  "id": "host.version_unsupported",
+  "title": "A ready for another protocol version is refused",
+  "clock": "any",
+  "host": {
+    "mode": "push_to_talk",
+    "muted": false,
+    "link_up": true
+  },
+  "steps": [
+    {
+      "op": "expect",
+      "mic": "released",
+      "link": "open",
+      "to_child": [
+        "hello",
+        "credential"
+      ]
+    },
+    {
+      "op": "child_send",
+      "frame_b64": "AAAARnsiY2hpbGRfdmVyc2lvbiI6IjAuMS4wIiwicHJvdG9jb2wiOiJmcmlkYXktdm9pY2UvdjIiLCJ0eXBlIjoicmVhZHkifQo="
+    },
+    {
+      "op": "expect",
+      "mic": "released",
+      "link": "dropped",
+      "indicator": "off",
+      "failure": "version_unsupported",
+      "restart_in_ms": 1000,
+      "to_child": []
+    }
+  ]
+}

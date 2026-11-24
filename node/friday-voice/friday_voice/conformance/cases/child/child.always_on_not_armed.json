@@ -1,0 +1,32 @@
+{
+  "format": 1,
+  "protocol": "friday-voice/v1",
+  "family": "child",
+  "id": "child.always_on_not_armed",
+  "title": "Always-on is not armed in this protocol shell: the arming policy is not passed",
+  "clock": "any",
+  "steps": [
+    {
+      "op": "host_send",
+      "frame_b64": "AAAAiXsiaG9zdF92ZXJzaW9uIjoiMS4wLjAiLCJsaW5rX3VwIjp0cnVlLCJtb2RlIjoiYWx3YXlzX29uIiwibXV0ZWQiOmZhbHNlLCJwcm90b2NvbCI6ImZyaWRheS12b2ljZS92MSIsInNhbXBsZV9yYXRlIjoxNjAwMCwidHlwZSI6ImhlbGxvIn0K"
+    },
+    {
+      "op": "host_send",
+      "frame_b64": "AAAA33siY2Ffc2hhMjU2IjoiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYiIsImV4cGlyZXNfYXQiOiIyMDk5LTAxLTAxVDAwOjAwOjAwWiIsInNlcnZlcl91cmwiOiJodHRwczovL2ZyaWRheS5leGFtcGxlIiwidG9rZW4iOiJqcGF0X2MwbmYwcm1hbmNlVDBrZW5jMG5mMHJtYW5jZVQwa2VuIiwidHlwZSI6ImNyZWRlbnRpYWwifQo="
+    },
+    {
+      "op": "expect_frames",
+      "frames": [
+        {
+          "type": "ready",
+          "protocol": "friday-voice/v1"
+        },
+        {
+          "type": "state",
+          "state": "armed_ptt",
+          "mode": "always_on"
+        }
+      ]
+    }
+  ]
+}

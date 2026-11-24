@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "friday-voice/v1/play",
+  "title": "play",
+  "description": "Synthesized audio to play: 16 kHz mono PCM16; seq 0 opens the utterance, seq grows by one, last closes it.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "type",
+    "utterance_id",
+    "seq",
+    "last",
+    "pcm_bytes"
+  ],
+  "properties": {
+    "type": {
+      "type": "string",
+      "maxLength": 16,
+      "const": "play"
+    },
+    "utterance_id": {
+      "type": "string",
+      "maxLength": 64,
+      "pattern": "[A-Za-z0-9_-]{1,64}"
+    },
+    "seq": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 65535
+    },
+    "last": {
+      "type": "boolean"
+    },
+    "pcm_bytes": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 65536
+    }
+  }
+}

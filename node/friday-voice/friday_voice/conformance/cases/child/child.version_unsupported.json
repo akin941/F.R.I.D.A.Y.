@@ -1,0 +1,22 @@
+{
+  "format": 1,
+  "protocol": "friday-voice/v1",
+  "family": "child",
+  "id": "child.version_unsupported",
+  "title": "A hello for another protocol version stops the child silently",
+  "clock": "any",
+  "steps": [
+    {
+      "op": "host_send",
+      "frame_b64": "AAAAjHsiaG9zdF92ZXJzaW9uIjoiMS4wLjAiLCJsaW5rX3VwIjp0cnVlLCJtb2RlIjoicHVzaF90b190YWxrIiwibXV0ZWQiOmZhbHNlLCJwcm90b2NvbCI6ImZyaWRheS12b2ljZS92MiIsInNhbXBsZV9yYXRlIjoxNjAwMCwidHlwZSI6ImhlbGxvIn0K"
+    },
+    {
+      "op": "expect_frames",
+      "frames": []
+    },
+    {
+      "op": "expect_exit",
+      "code": 2
+    }
+  ]
+}

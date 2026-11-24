@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "friday-voice/v1/ptt",
+  "title": "ptt",
+  "description": "The global push-to-talk hotkey.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "type",
+    "key"
+  ],
+  "properties": {
+    "type": {
+      "type": "string",
+      "maxLength": 16,
+      "const": "ptt"
+    },
+    "key": {
+      "type": "string",
+      "maxLength": 4,
+      "enum": [
+        "down",
+        "up"
+      ]
+    }
+  }
+}

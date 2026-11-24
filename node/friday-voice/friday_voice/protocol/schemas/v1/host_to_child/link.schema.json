@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "friday-voice/v1/link",
+  "title": "link",
+  "description": "The node WebSocket's state (ADR-013 decision 6: down releases the mic).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "type",
+    "state"
+  ],
+  "properties": {
+    "type": {
+      "type": "string",
+      "maxLength": 16,
+      "const": "link"
+    },
+    "state": {
+      "type": "string",
+      "maxLength": 4,
+      "enum": [
+        "up",
+        "down"
+      ]
+    }
+  }
+}

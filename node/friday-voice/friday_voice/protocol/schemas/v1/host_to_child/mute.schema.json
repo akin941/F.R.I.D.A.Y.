@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "friday-voice/v1/mute",
+  "title": "mute",
+  "description": "The local mute switch; unreadable means fail closed (treated as muted).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "type",
+    "muted"
+  ],
+  "properties": {
+    "type": {
+      "type": "string",
+      "maxLength": 16,
+      "const": "mute"
+    },
+    "muted": {
+      "enum": [
+        true,
+        false,
+        "unreadable"
+      ]
+    }
+  }
+}
