@@ -2318,3 +2318,26 @@ answers them:
    exactly 10 characters. The migration is consistent and tests pass,
    but a longer kind later would not fit. **Fix (optional):** widen
    `max_length` in a later migration when a new kind is added.
+
+### Known follow-ups — `feat/p11-hud-live-voice` (unresolved review notes, recorded at merge 2026-11-24)
+
+1. **LOW — voice frames coalesce on the server receive time
+   (`backend/nodes/events.py`).** `apply_voice_state` coalesces on the
+   server receive time. The reference node spaces voice frames at least
+   1 s apart by its own clock, but network jitter can bring two honest
+   frames in under 1 s at the server. The later (latest) state is then
+   acked as a duplicate and not written. The docstring claim that an
+   honest node's latest state is always the one written is therefore not
+   strictly true. The 15 s heartbeat re-send repairs it, so the HUD can
+   show a stale mic state for up to about 15 s. **Fix:** use a small
+   tolerance on the server window (for example 0.8 s), or on a coalesced
+   frame store the state but skip only the counter or `at` update, or
+   soften the docstring and note the 15 s self-heal.
+2. **LOW — branch 7 date and the FAR indicator
+   (`docs/prompts/phase-11-live-voice/brief.md`).** The branch-table
+   status row says implemented 2026-11-20, but the branch was built and
+   migrated on 2026-11-24 (the migration header says 2026-11-24). The
+   D15 FAR-estimate indicator is deferred to the closeout. That is
+   recorded in the notes, but it is not listed as an explicit owner step.
+   **Fix:** correct the date, and add the FAR indicator to branch 8's
+   checklist or to the owner steps.
