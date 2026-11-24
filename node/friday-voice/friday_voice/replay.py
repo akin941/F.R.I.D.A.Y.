@@ -29,9 +29,10 @@ import uuid
 from pathlib import Path
 
 from . import config
+from .arming import ArmingPolicy, RefuseAlwaysOn
 from .child import ChildCore, ChildLink
 from .fakes import FakeFriday
-from .pipeline import AllowAlwaysOn, RefuseAlwaysOn, VoicePipeline
+from .pipeline import VoicePipeline
 from .ports import ManualClock
 from .reference.host import FRAME_MS, HostCore, wav_frames
 from .turn import EnergyVad, ScriptedTurnEnd
@@ -128,6 +129,9 @@ class ReplaySession:
     def start(self):
         self.host.start_child()
         self.pump()
+        # Let the calls the credential started (the D11 policy read) land
+        # before the first frame, as they would on a real clock.
+        self.advance(0)
         return self
 
     # --- driving ---
@@ -178,19 +182,28 @@ def load_scenarios(path=SCENARIOS_PATH):
     return json.loads(Path(path).read_text(encoding="utf-8"))["scenarios"]
 
 
+FIXTURE_WAKE_MODEL_SHA256 = "f" * 64  # the scripted detector's "model"
+
+
+def wake_session(scenario, client, *, credential=None, model_sha256=FIXTURE_WAKE_MODEL_SHA256):
+    """A wake scenario's session: the scripted detector fires after
+    `wake_after_frames`, and the REAL arming policy (D11) decides from the
+    client's voice-policy answer for `model_sha256`."""
+    frames_before = scenario.get("wake_after_frames", 0)
+    return ReplaySession(
+        client=client,
+        mode="always_on",
+        credential=credential,
+        vad=EnergyVad(),
+        turn_end=ScriptedTurnEnd([True]),
+        wake_detector=ScriptedWakeDetector({frames_before: 900}, model_sha256=model_sha256),
+        arming=ArmingPolicy(models_verified=True),
+    )
+
+
 def _session_for(scenario, client):
     if scenario["trigger"] == "wake":
-        frames_before = scenario.get("wake_after_frames", 0)
-        return ReplaySession(
-            client=client,
-            mode="always_on",
-            vad=EnergyVad(),
-            turn_end=ScriptedTurnEnd([True]),
-            wake_detector=ScriptedWakeDetector({frames_before: 900}),
-            # Scripted arming: the replay measures the wake path's stages;
-            # the real arming policy refuses always-on until branch 5.
-            arming=AllowAlwaysOn(),
-        )
+        return wake_session(scenario, client)
     return ReplaySession(client=client, mode="push_to_talk", arming=RefuseAlwaysOn())
 
 
@@ -202,6 +215,9 @@ def run_scenario(scenario, *, client=None, fixtures_dir=FIXTURES_DIR):
             replies=[scenario["reply"]],
             latencies=scenario.get("latencies"),
         )
+        # The fixture model passes the gate (the replay measures the wake
+        # path's stages; tests/test_always_on.py covers every refusal).
+        client.policy = {"always_on_permitted": True, "reasons": []}
     session = _session_for(scenario, client).start()
     frames = wav_frames(fixtures_dir / scenario["wav"])
     started = time.perf_counter()
@@ -273,15 +289,62 @@ def render_baseline(current) -> str:
     return json.dumps(doc, indent=2, sort_keys=True) + "\n"
 
 
+def _run_wake_on_server(scenario, client, credential, model_sha256, out):
+    """One wake scenario against a real server with the real arming policy:
+    'armed' when the policy permitted the loaded model and a wake turn
+    completed with audio, else 'push-to-talk' with the policy's reasons."""
+    session = wake_session(scenario, client, credential=credential, model_sha256=model_sha256)
+    session.pipeline.new_trace_id = lambda: str(uuid.uuid4())
+    session.start()
+    armed = session.states()[-1] == "armed_wake"
+    session.frames(wav_frames(FIXTURES_DIR / scenario["wav"]))
+    session.silence(scenario.get("trailing_silence_ms", 2_000))
+    session.settle()
+    played = len({f["utterance_id"] for f in session.sent("play")})
+    completed = armed and played > 0 and len(session.pipeline.completed) == 1
+    reasons = ",".join(session.pipeline.arming.server_reasons) or "-"
+    state = "armed" if completed else f"push-to-talk (policy: {reasons})"
+    out(f"{scenario['id']}: {state} ({played} sentence(s) played)")
+    return completed
+
+
 def run_server(
-    server_url, token, *, ca_file=None, ca_sha256=None, scenarios=None, out=print
+    server_url,
+    token,
+    *,
+    ca_file=None,
+    ca_sha256=None,
+    scenarios=None,
+    out=print,
+    wake_model_sha256=None,
+    expect_armed=None,
 ) -> int:
     """Play the push-to-talk scenarios against a running Friday (real HTTP,
-    the node voice token). Exit code 0 when every turn produced audio."""
+    the node voice token). Exit code 0 when every turn produced audio.
+
+    With `wake_model_sha256` the wake scenarios run too, with a scripted
+    detector reporting that model hash and the real arming policy (D11):
+    they arm and complete only when the server permits always-on for that
+    model at the package threshold. `expect_armed` (True/False) turns that
+    outcome into the exit code (the branch 5 "done when")."""
     from .client import HttpFridayClient
 
     failures = 0
     for scenario in scenarios or load_scenarios():
+        if scenario["trigger"] == "wake":
+            if wake_model_sha256 is None:
+                continue
+            client = HttpFridayClient(ca_file=ca_file)
+            credential = {
+                **DEV_CREDENTIAL,
+                "token": token,
+                "server_url": server_url.rstrip("/"),
+                "ca_sha256": ca_sha256,
+            }
+            armed = _run_wake_on_server(scenario, client, credential, wake_model_sha256, out)
+            failures += expect_armed is not None and armed != expect_armed
+            client.close()
+            continue
         if scenario["trigger"] != "ptt":
             continue
         client = HttpFridayClient(ca_file=ca_file)

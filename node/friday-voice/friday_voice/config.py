@@ -48,6 +48,7 @@ SILENCE_CLOSE_S = 30
 SESSION_MAX_MINUTES = 15
 WAKE_STORM_MAX = 3
 WAKE_STORM_WINDOW_S = 60
+POLICY_POLL_S = 600  # the always-on policy is re-read every 10 minutes (D11)
 
 # --- replies (D8) ---
 TTS_PREFETCH = 1  # one sentence synthesized ahead of the one playing (Phase 6 D7)

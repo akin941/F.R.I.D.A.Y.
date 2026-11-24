@@ -13,8 +13,14 @@ threaded. It never blocks on the network: each call to Friday is a job run
 by a worker (`friday_voice.workers`) whose events come back through
 `on_worker`. The stages:
 
-- **WakeGate** (wired; the arming policy refuses always-on until branch
-  5): the utterance starts at the first frame after the detection frame;
+- **WakeGate**, armed only under the D11 arming policy
+  (`friday_voice.arming`: local mode `always_on`, the server's policy for
+  the loaded model at the package threshold, link up, mute readable and
+  off, no storm mute, verified models): the utterance starts at the first
+  frame after the detection frame. More than `WAKE_STORM_MAX` wakes in
+  `WAKE_STORM_WINDOW_S` without a dispatched turn is a wake storm:
+  `storm_muted`, `release_mic`, re-armed only by a mute on -> off cycle
+  (D12);
 - **TurnCapture**: push-to-talk (key down -> key up) or VAD + smart-turn;
 - **FridaySTT**: the utterance as an in-memory WAV to
   `/api/v1/voice/transcriptions` with `X-Friday-Trace` and
@@ -41,46 +47,39 @@ and any other failure -> the error earcon, nothing spoken; a network error
 is retried once for STT and TTS and never for the chat turn (a turn is
 never sent twice).
 
+Sessions (D12): a live session opens with the first turn's
+`POST /voice/live/sessions` and closes after `SILENCE_CLOSE_S` without
+activity or `SESSION_MAX_MINUTES` after it opened (at the end of the turn
+then running), with the `end` earcon; the conversation id is kept for
+reuse (D5). `link: down` closes it silently with the mic release.
+
 Nothing here logs a transcript, reply text, audio or the token.
 """
 
 import uuid
 
 from . import config, language, log
+from .arming import AllowAlwaysOn, ArmingPolicy, RefuseAlwaysOn
 from .audio import encode_wav, play_chunks
 from .client import CODE_ALWAYS_ON_NOT_PERMITTED, CODE_LIVE_MUTED, CODE_PIN, FridayError
+from .policy import policy_job, poll_due, request_policy
 from .segmenter import SentenceSegmenter
 from .turn import END, NO_SPEECH, TurnCapture
 from .wake import WakeGate
 from .workers import Closer, Delay
 
+__all__ = [
+    "AllowAlwaysOn",
+    "ArmingPolicy",
+    "RefuseAlwaysOn",
+    "VoicePipeline",
+    "request_policy",
+]
+
 CAPTURING = "capturing"
 SESSION = "session"
 TRANSCRIBING = "transcribing"
 REPLYING = "replying"
-
-
-class RefuseAlwaysOn:
-    """The arming policy until branch 5 (D11): always-on is never armed;
-    `always_on` runs as push-to-talk."""
-
-    def permitted(self) -> bool:
-        return False
-
-
-class AllowAlwaysOn:
-    """Test double for the wake path (never used by `friday-voice run`)."""
-
-    def permitted(self) -> bool:
-        return True
-
-
-def request_policy(client, model_sha256):
-    """`GET /auth/nodes/voice-policy` for the loaded wake model at the
-    threshold and refractory period the detector runs at -- read from
-    `config` at call time, never from a copy (D8, D11; polled by the
-    arming policy in branch 5)."""
-    return client.voice_policy(model_sha256, config.WAKE_THRESHOLD, config.WAKE_REFRACTORY_MS)
 
 
 # --- jobs (run by a worker; see friday_voice.workers) ---
@@ -272,6 +271,10 @@ class VoicePipeline:
         self._storm_unmute_seen = False
         self.wake_refused = False  # the server's 403 voice.always_on_not_permitted
         self.error_until = None
+        self.policy_job = None  # the in-flight voice-policy read (D11)
+        self._policy_failed = False
+        self.wake_times = []  # monotonic ms of recent wakes without a dispatched turn (D12)
+        self.session_started_ms = None  # the open live session's start (D12)
         self._outbox = []
 
     # --- wiring ---
@@ -304,31 +307,109 @@ class VoicePipeline:
 
     # --- what the shell asks ---
 
+    def _session_expired(self) -> bool:
+        """D12: `SILENCE_CLOSE_S` without activity, or `SESSION_MAX_MINUTES`
+        since the session opened."""
+        if self.session_started_ms is None or self.last_activity_ms is None:
+            return True
+        now = self.clock.monotonic_ms()
+        if now - self.last_activity_ms >= config.SILENCE_CLOSE_S * 1000:
+            return True
+        return now - self.session_started_ms >= config.SESSION_MAX_MINUTES * 60_000
+
     @property
     def session_open(self) -> bool:
-        """A live session is open while a turn runs and for
-        `SILENCE_CLOSE_S` after the last activity (D12; the close itself,
-        with its earcon, is branch 5). The conversation id is kept for
-        reuse either way (D5)."""
-        if self.conversation_id is None or self.last_activity_ms is None:
+        """A live session is open while a turn runs and until it expires
+        (D12). The conversation id is kept for reuse either way (D5)."""
+        if self.conversation_id is None or self.session_started_ms is None:
             return False
         if self.turn is not None:
             return True
-        idle = self.clock.monotonic_ms() - self.last_activity_ms
-        return idle < config.SILENCE_CLOSE_S * 1000
+        return not self._session_expired()
 
     def accepting(self) -> bool:
         return not (self.refused or self.storm_muted)
 
+    # --- the arming policy (D11) ---
+
+    def _host(self, name, default):
+        return getattr(self.core, name) if self.core is not None else default
+
+    def wake_capable(self) -> bool:
+        return self.wake_gate is not None and self.vad is not None and self.turn_end is not None
+
     def wake_armed(self, mode) -> bool:
+        """D11 (a)-(f): local mode `always_on`, the server's policy for the
+        loaded model, link up, mute readable and off, no storm mute, the
+        models verified (the arming policy's `permitted()` holds (b) and
+        (f))."""
         return (
             mode == "always_on"
-            and self.wake_gate is not None
-            and self.vad is not None
-            and self.turn_end is not None
+            and self.wake_capable()
             and not self.wake_refused
+            and not self.storm_muted
+            and self._host("link_up", True) is True
+            and self._host("muted", False) is False
             and self.arming.permitted()
         )
+
+    def _maybe_poll(self, *, force=False):
+        """Read the voice policy when wake mode could arm: a wake detector
+        is loaded, the arming policy polls, the local mode is `always_on`
+        and a credential is held. `force` at a session start and a mode
+        change to `always_on`; after a failed read at the next chance;
+        otherwise every `POLICY_POLL_S`."""
+        if not getattr(self.arming, "polls", False) or not self.wake_capable():
+            return
+        if self.policy_job is not None or self.refused:
+            return
+        if self._host("mode", None) != "always_on":
+            return
+        if self.core is not None and not self.core.credential_valid():
+            return
+        due = poll_due(self.arming.checked_at_ms, self.clock.monotonic_ms())
+        if not (force or due or self._policy_failed):
+            return
+        self.policy_job = self.worker.submit(
+            policy_job(self.client, self.wake_gate.detector.model_sha256)
+        )
+
+    def _disarm(self, reason):
+        """The policy said no (or could not be read): wake mode is off at
+        once; a wake utterance still being captured is dropped."""
+        if self.wake_gate is not None:
+            self.wake_gate.reset()
+        turn = self.turn
+        if turn is not None and turn.trigger == "wake" and turn.phase == CAPTURING:
+            self._abort_turn(reason)
+
+    def _on_policy(self, event):
+        now = self.clock.monotonic_ms()
+        if event["kind"] == "policy":
+            self._policy_failed = False
+            if self.arming.record(event["data"], now):
+                self.wake_refused = False
+                self._log("policy.permitted")
+            else:
+                self._log("policy.refused", ",".join(self.arming.server_reasons)[:80])
+                self._disarm("policy_refused")
+            return
+        error = event.get("error")
+        code = error.code if isinstance(error, FridayError) else type(error).__name__
+        self._log("policy.read_failed", str(code)[:40])
+        self._policy_failed = True
+        self.arming.refuse("read_failed", now)
+        self._disarm("policy_unreadable")
+
+    def on_mode(self, mode):
+        """The host's local mode changed (ADR-013 decision 5: only the Mac
+        sets it). To `always_on`: read the policy now; away from it: a wake
+        utterance still being captured is dropped."""
+        if mode == "always_on":
+            self._maybe_poll(force=True)
+        else:
+            self._disarm("mode_changed")
+        return self._drain()
 
     def state(self, mode):
         """The pipeline's part of the `state` message, or None when the
@@ -353,6 +434,7 @@ class VoicePipeline:
     def on_credential(self, token, server_url, ca_sha256):
         self.client.set_credential(token, server_url, ca_sha256)
         self.refused = False
+        self._maybe_poll()
         return self._drain()
 
     def on_mute(self, muted):
@@ -388,6 +470,12 @@ class VoicePipeline:
         return self._drain()
 
     def _on_wake(self):
+        now = self.clock.monotonic_ms()
+        window = config.WAKE_STORM_WINDOW_S * 1000
+        self.wake_times = [t for t in self.wake_times if now - t < window] + [now]
+        if len(self.wake_times) > config.WAKE_STORM_MAX:
+            self._wake_storm()
+            return
         if self.core is not None:
             self.core.counters["wake_accepts_today"] = min(
                 self.core.counters["wake_accepts_today"] + 1, 100_000
@@ -434,13 +522,32 @@ class VoicePipeline:
         return self._drain()
 
     def tick(self):
+        self._close_expired_session()
+        self._maybe_poll()
         return self._drain()
+
+    def _close_expired_session(self):
+        """D12: close the session after `SILENCE_CLOSE_S` of silence or at
+        the `SESSION_MAX_MINUTES` cap (never in the middle of a turn), with
+        the `end` earcon. The conversation id stays for reuse."""
+        if self.session_started_ms is None or self.turn is not None:
+            return
+        if not self._session_expired():
+            return
+        self.session_started_ms = None
+        self._log("session.closed")
+        if self.core is None or self.core.consuming():
+            self._send({"type": "earcon", "earcon": "end"})
 
     def abort(self, reason):
         """A fail-closed input (link down, mute, mode off, shutdown, EOF,
-        a protocol error, expiry): cancel the turn, stop its playback."""
+        a protocol error, expiry): cancel the turn, stop its playback.
+        `link_down` also closes the session (ADR-013 decision 6), silently:
+        the mic is already released."""
         if self.turn is not None:
             self._abort_turn(reason)
+        if reason == "link_down":
+            self.session_started_ms = None
         return self._drain()
 
     # --- the turn's steps ---
@@ -455,7 +562,7 @@ class VoicePipeline:
             if self.last_activity_ms is None
             else self.clock.monotonic_ms() - self.last_activity_ms
         )
-        if self.conversation_id is None or idle is None or idle >= config.SILENCE_CLOSE_S * 1000:
+        if self.conversation_id is None or idle is None or self._session_expired():
             turn.phase = SESSION
             turn.timer.mark("session_sent")
             self._submit(session_job(self.client, turn.trigger))
@@ -470,6 +577,10 @@ class VoicePipeline:
         self._submit(stt_job(self.client, self.conversation_id, wav, turn.trace_id, turn.trigger))
 
     def on_worker(self, job_id, event):
+        if job_id is not None and job_id == self.policy_job:
+            self.policy_job = None
+            self._on_policy(event)
+            return self._drain()
         turn = self.turn
         if turn is None or job_id not in turn.jobs:
             return self._drain()  # a cancelled or finished turn's late event
@@ -483,6 +594,8 @@ class VoicePipeline:
             self.conversation_id = str(event["conversation_id"])
             self.session_id = event.get("session_id")
             self.last_activity_ms = self.clock.monotonic_ms()
+            self.session_started_ms = self.last_activity_ms
+            self._maybe_poll(force=True)  # D11: the policy is re-read at session start
             self._start_stt()
         elif kind == "transcript":
             turn.jobs.discard(job_id)
@@ -517,6 +630,7 @@ class VoicePipeline:
         turn.transcript_language = language.normalise(event.get("language"))
         turn.phase = REPLYING
         turn.timer.mark("dispatched")
+        self.wake_times.clear()  # a dispatched turn ends any wake-storm count (D12)
         self._submit(chat_job(self.client, self.conversation_id, text, turn.trace_id))
 
     def _queue_sentences(self, sentences):
@@ -649,7 +763,12 @@ class VoicePipeline:
                 counters["storm_mutes_today"] = min(counters["storm_mutes_today"] + 1, 100_000)
             self._release("storm")
         elif error.status == 403 and error.code == CODE_ALWAYS_ON_NOT_PERMITTED:
+            # The server's backstop (D11): disarm to push-to-talk until a
+            # later policy read permits again.
             self.wake_refused = True
+            self.arming.refuse("server_refused_wake", self.clock.monotonic_ms())
+            if self.wake_gate is not None:
+                self.wake_gate.reset()
         elif error.status in (401, 403):
             self.refused = True
             self._release("credential_refused")
@@ -660,6 +779,22 @@ class VoicePipeline:
         else:  # 429 (budget, throttle), 5xx, network: the earcon only
             self.error_until = self.clock.monotonic_ms() + config.ERROR_HOLD_MS
             self._send({"type": "earcon", "earcon": "error"})
+
+    def _wake_storm(self):
+        """D12 client rule: more than `WAKE_STORM_MAX` wakes within
+        `WAKE_STORM_WINDOW_S` without a dispatched turn. Stop consuming
+        audio, release the mic, show `storm_muted` until a mute on -> off
+        cycle on the Mac."""
+        self.wake_times.clear()
+        self.storm_muted = True
+        self._storm_unmute_seen = False
+        if self.wake_gate is not None:
+            self.wake_gate.reset()
+        if self.core is not None:
+            counters = self.core.counters
+            counters["storm_mutes_today"] = min(counters["storm_mutes_today"] + 1, 100_000)
+        self._log("storm.wake")
+        self._release("storm")
 
     def _release(self, reason):
         if self.core is not None:

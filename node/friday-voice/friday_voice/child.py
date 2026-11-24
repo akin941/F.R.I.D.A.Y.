@@ -18,8 +18,9 @@ Rules (D6, D12), each pinned by a child conformance case:
 - a `state` frame goes out on every change and at least every
   STATE_KEEPALIVE_MS, so a healthy child never trips the host's 10 s
   watchdog;
-- always-on is wired but not armed: the arming policy (server gate, D11)
-  lands in branch 5, so `always_on` runs as push-to-talk (`armed_ptt`).
+- always-on arms only under the D11 arming policy (`friday_voice.arming`,
+  checked by the pipeline); without a pipeline, or without a loaded and
+  verified wake detector, `always_on` runs as push-to-talk (`armed_ptt`).
 
 With a `VoicePipeline` attached (branch 3, `friday_voice.pipeline`) the
 shell hands it every consumed frame, the push-to-talk key, the host's
@@ -265,7 +266,10 @@ class ChildCore:
             self._log("credential.expired")
             out += self._release("credential_expired")
         out += self._state_if_changed()
-        if not out and self.clock.monotonic_ms() - self._last_state_at >= STATE_KEEPALIVE_MS:
+        # Only a `state` frame feeds the host's watchdog: an earcon or a
+        # play frame in this tick must not suppress the keepalive.
+        sent_state = any(header["type"] == "state" for header, _ in out)
+        if not sent_state and self.clock.monotonic_ms() - self._last_state_at >= STATE_KEEPALIVE_MS:
             out.append(self._state_frame())
         return out
 
@@ -315,9 +319,12 @@ class ChildCore:
 
     def _on_mode(self, header, _payload):
         self.mode = header["mode"]
+        out = []
+        if self.pipeline is not None:
+            out = self.pipeline.on_mode(self.mode)
         if self.mode == "off":
-            return [*self._release("mode_off"), *self._state_if_changed()]
-        return self._state_if_changed()
+            return [*out, *self._release("mode_off"), *self._state_if_changed()]
+        return [*out, *self._state_if_changed()]
 
     def _on_mute(self, header, _payload):
         self.muted = header["muted"]

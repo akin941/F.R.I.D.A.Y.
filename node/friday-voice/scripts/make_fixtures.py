@@ -135,8 +135,8 @@ def render():
         "$comment": (
             "Phase 11 brief D14: the replay fixture set. Synthetic WAVs only (tones and "
             "silence, scripts/make_fixtures.py); transcripts, replies and latencies are "
-            "scripted (FakeFriday). Wake scenarios use a scripted detector and scripted "
-            "arming: the real arming policy refuses always-on until branch 5."
+            "scripted (FakeFriday). Wake scenarios use a scripted detector and the real "
+            "arming policy (friday_voice.arming) against a scripted permitting voice policy."
         ),
         "scenarios": SCENARIOS,
     }
