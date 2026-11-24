@@ -172,7 +172,9 @@ def test_item_keys_default_to_the_labelled_items():
 
 
 def test_notice_titles_fill_the_template_and_are_bounded():
-    title = probes.render_notice_title(spec(notice_template="{count} iş: {label}"), label="X", count=3)
+    title = probes.render_notice_title(
+        spec(notice_template="{count} iş: {label}"), label="X", count=3
+    )
     assert title == "3 iş: X"
     long = probes.render_notice_title(spec(), label="y" * 120, count=1, max_chars=20)
     assert len(long) == 20

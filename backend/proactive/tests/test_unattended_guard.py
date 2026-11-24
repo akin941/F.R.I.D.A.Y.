@@ -133,9 +133,7 @@ EFFECTS = {
         "chat", [{"role": "user", "content": "x"}], workspace=ws
     ),
     "gateway_call:embed": lambda ws, owner: InferenceGateway().embed("memory.embed", ["x"]),
-    "gateway_call:transcribe": lambda ws, owner: InferenceGateway().transcribe(
-        "voice.stt", b""
-    ),
+    "gateway_call:transcribe": lambda ws, owner: InferenceGateway().transcribe("voice.stt", b""),
     "gateway_call:synthesize": lambda ws, owner: InferenceGateway().synthesize(
         "voice.tts", "Merhaba."
     ),
