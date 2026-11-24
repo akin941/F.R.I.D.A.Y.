@@ -763,6 +763,11 @@ name = "only assistant, hud, ops may import proactive (Phase 12 D19)"
 type = "forbidden"
 source_modules = ["core", "accounts", "workspaces", "audit", "ai_core", "memory", "knowledge", "tasks", "approvals", "tools", "agents", "skills", "integrations", "harness", "connectors", "deploys", "voice", "nodes"]
 forbidden_modules = ["proactive"]
+# The skills tests drive the chat turn with the assistant's shared wake-route
+# fixtures (which seed digest rows); production `skills` never reaches it.
+ignore_imports = [
+    "skills.tests.** -> assistant.tests.**",
+]
 
 # ... and assistant / hud only through its narrow read surface,
 # `proactive.api` (direct imports; `proactive.api` itself reads the models).
