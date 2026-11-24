@@ -1258,6 +1258,25 @@ Nothing moves between gate-class and confirm-class.
 heartbeat on the worker beat, every D2 effect is denied inside a run,
 `lint-imports` is green with the new contracts, and ADR-016 is written.
 
+**Known follow-ups (LOW) — from the branch 1 code review, recorded 2026-11-24 at merge.**
+
+1. **First-run `ProactiveProbeState` create has no race guard
+   (`backend/proactive/runs.py`).** `_notify_delta` creates the first-run
+   state row for a (schedule, probe) pair without catching a race. Two
+   concurrent first runs for the same pair would hit the unique constraint
+   `proactive_probe_state_one`; the `IntegrityError` is not caught there,
+   so that run records the probe as `probe_failed`. The effect is benign
+   and heals on the next run, and the heartbeat claim uses `skip_locked`,
+   so concurrent runs of one schedule are unlikely. Fix: use
+   `get_or_create`, or catch `IntegrityError` around the create and treat
+   it as a baseline already recorded.
+2. **`compose_digest` is a stub that returns `None`
+   (`backend/proactive/runs.py`).** A `morning_digest` run only collects
+   in branch 1. This matches the brief (the Speak step is branch 2), but
+   the branch 1 "Done when" wording does not mention it. No code change
+   needed; keep the ADR-016 and brief status note saying digest
+   composition lands in branch 2.
+
 ### 2. `feat/p12-morning-digest` — probes, digest, `/today`, HUD notices, "Dinle"
 
 **Scope.** D1 probes, D6, D7 (web), D18 (`proactive.digest`), D20:
