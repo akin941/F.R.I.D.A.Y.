@@ -2358,3 +2358,34 @@ half) that the brief left open or that branches 4 and 5 build on:
    and barge-in as M1 describes. Add aliases for misrecognized phrases
    rather than fuzzy matching.
 
+
+### Known follow-ups (LOW) — `feat/p12-wake-routes`, recorded 2026-11-24
+
+These review notes were left unresolved when the branch merged into the
+integration branch.
+
+1. **The digest is marked spoken before the turn persists
+   (`backend/assistant/wake_routes.py`).** `route_voice_turn` runs the
+   `digest.today` `commit()` (`mark_digest_spoken`) before the user
+   `Message` and the reply are persisted. If the stream or the persist then
+   fails, `spoken_at` is already set although nothing was delivered. This
+   is telemetry only, and a failed delivery is rare. Fix: run the commit
+   after the assistant reply persists, for example as a callback on the
+   done event. As an alternative, document that `spoken_at` means
+   "offered", not "delivered".
+2. **The reference-host playback check is deferred to the closeout e2e
+   (`docs/prompts/phase-12-reach/brief.md`).** The Done-when item (a
+   `node_voice` turn from the Phase 11 reference host, spoken in the
+   reference host's playback double) is covered on this branch only by a
+   token-minted `node_voice` turn in `test_wake_routes_node_voice.py`.
+   Implementation note 12 defers the full reference-host and playback run
+   to the branch 8 closeout e2e, and records the deferral. One test was
+   skipped in the review run, which is likely the `friday-voice` child's
+   conformance check when its environment is absent. Fix: make sure branch
+   8's `test_reach_e2e.py` includes the "Hey Friday, günaydın"
+   playback-double assertion, and confirm that the child's
+   `conformance --check` runs in CI rather than being skipped.
+3. **`Message.route` is not enforced as immutable
+   (`backend/assistant/models.py`).** The field comment says "immutable
+   once written", but only code review enforces it. Fix: guard it in
+   `Message.save`, or drop the word "immutable" from the comment.
