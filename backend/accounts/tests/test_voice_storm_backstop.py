@@ -190,8 +190,8 @@ def test_the_owner_releases_the_mute_on_screen(muted, node, voice, owner, web_cl
     assert muted.released_at is not None and muted.released_by == owner
     audit = AuditLog.objects.get(action="accounts.voice_live_mute.released")
     assert audit.actor == owner and audit.resource_id == str(muted.pk)
-    # The window still holds the storm's requests; the next minute is clean.
-    cache.clear()
+    # Release resets the device's window: the very next request succeeds,
+    # in the same second as the storm (no cache.clear(), no clock advance).
     assert transcribe(voice).status_code != 423
     assert voice.get(POLICY_URL, QUERY).json()["reasons"] != ["storm_muted"]
     # Releasing again is a no-op, not an error.
@@ -204,6 +204,39 @@ def test_a_new_storm_after_release_mutes_again(muted, node, voice, owner, web_cl
     clock["now"] += 120
     assert storm(voice)[-1] == 423
     assert VoiceLiveMute.objects.filter(node_device=node[0]).count() == 2
+
+
+def test_a_new_storm_right_after_release_mutes_again(muted, node, voice, owner, web_client):
+    # Same second as the release: the fresh window still counts.
+    web_client(owner).delete(MUTE_URL.format(node[0].pk))
+    codes = storm(voice)
+    assert 423 not in codes[:8] and codes[8] == 423
+    assert VoiceLiveMute.objects.filter(node_device=node[0]).count() == 2
+
+
+def test_release_resets_only_the_released_device(clock, owner, voice, node, web_client):
+    _, other_secret = pair_node(owner, name="Mac mini")
+    other = bearer(mint_token(other_secret))
+    assert 423 not in storm(other, 8)
+    storm(voice)
+    web_client(owner).delete(MUTE_URL.format(node[0].pk))
+    assert transcribe(other).status_code == 423  # its window was not reset
+
+
+def test_a_bucket_evicted_between_add_and_incr_does_not_fail(clock, monkeypatch):
+    real_incr = cache.incr
+    calls = {"n": 0}
+
+    def flaky_incr(key, delta=1, version=None):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            cache.delete(key)
+            raise ValueError(f"Key '{key}' not found")
+        return real_incr(key, delta, version=version)
+
+    monkeypatch.setattr(cache, "incr", flaky_incr)
+    assert voice_live.count_transcription("device-x") == 1
+    assert voice_live.count_transcription("device-x") == 2
 
 
 @pytest.mark.parametrize(

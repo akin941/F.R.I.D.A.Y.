@@ -1684,9 +1684,11 @@ Implemented as scoped (D11, D12), with these recorded choices:
    cache (`cache.add` + atomic `incr`, one `get_many` over the last 60
    buckets): an exact sliding window at one-second granularity, keyed by
    the device so a rotated token does not reset it. The web channel is
-   never counted. After a release the window still holds the storm's
-   requests, so a child that keeps storming is muted again on its next
-   request; an honest one resumes after the minute (tested).
+   never counted. A release deletes the device's buckets (review round 1),
+   so the next request after it succeeds at once; a child that keeps
+   storming is muted again by a fresh window's 9th request (tested,
+   without clearing the cache). A bucket evicted between `add` and `incr`
+   is re-created instead of failing the route.
 6. **Release and panel views** (`GET /api/v1/auth/nodes/voice-live`,
    `DELETE /api/v1/auth/nodes/{device_id}/voice-mute`; web, owner). The
    device id resolves through the owner's own `kind=node` devices (another

@@ -458,6 +458,9 @@ def release_mute(*, owner, device, via_device_id=""):
             resource=mute,
             metadata={"node_device_id": str(device.pk), "released_by_device_id": via_device_id},
         )
+    # The owner released the mute: the storm's own requests must not re-mute
+    # the very next utterance, so the device starts a fresh window.
+    reset_transcription_window(device.pk)
     return mute
 
 
@@ -477,10 +480,31 @@ def count_transcription(device_id) -> int:
     production), keyed by the DEVICE so a rotated token does not reset it."""
     now = _now_seconds()
     key = _bucket_key(device_id, now)
-    cache.add(key, 0, timeout=STORM_WINDOW_SECONDS + 10)
-    cache.incr(key)
+    timeout = STORM_WINDOW_SECONDS + 10
+    cache.add(key, 0, timeout=timeout)
+    try:
+        cache.incr(key)
+    except ValueError:
+        # The bucket expired or was evicted between add and incr: start it
+        # again at 1 -- with add, so a concurrent request that recreated it
+        # first is counted on top of, not clobbered.
+        if not cache.add(key, 1, timeout=timeout):
+            try:
+                cache.incr(key)
+            except ValueError:
+                cache.set(key, 1, timeout=timeout)
     keys = [_bucket_key(device_id, now - offset) for offset in range(STORM_WINDOW_SECONDS)]
     return sum(int(value) for value in cache.get_many(keys).values())
+
+
+def reset_transcription_window(device_id) -> None:
+    """Forget the device's counted transcriptions (every bucket of the current
+    window): called when the owner releases a storm mute, so the next request
+    after the release succeeds instead of re-engaging the mute at once."""
+    now = _now_seconds()
+    cache.delete_many(
+        [_bucket_key(device_id, now - offset) for offset in range(STORM_WINDOW_SECONDS + 1)]
+    )
 
 
 # --- the guards injected into the `voice` routes ---

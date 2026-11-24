@@ -168,8 +168,9 @@ voice child, on both sides of the wire:
   `accounts.VoiceLiveMute` (audited) and every route the voice token reaches
   — the chat turn included — answers 423 `voice.live_muted` from
   `NodeVoiceTokenAuthentication` until the owner releases the mute on screen
-  (web session, owner, audited). The policy read stays answerable and
-  reports `storm_muted`.
+  (web session, owner, audited). Release also clears the device's window,
+  so the next request succeeds; a new storm mutes again. The policy read
+  stays answerable and reports `storm_muted`.
 - **Session close.** A live session closes after 30 s without activity or
   15 minutes after it opened (at the end of the turn then running), with the
   `end` earcon; `link: down` closes it with the mic release.
@@ -189,8 +190,11 @@ voice child, on both sides of the wire:
   decision 5). `X-Friday-Voice-Trigger: wake` on the live-session and
   transcription routes is refused (403 `voice.always_on_not_permitted`)
   while no model's latest pair passes — a backstop against an honest but
-  faulty child. A child that lies `ptt` is bounded by the storm backstop,
-  decision 1's cap and the on-screen card, not by this header.
+  faulty child. The header backstop checks that SOME measured model passes,
+  not the one the child loaded (the request does not name it), so a child
+  that lies about its model, like one that lies `ptt`, is bounded by the
+  storm backstop, decision 1's cap and the on-screen card, not by this
+  header.
 
 Until the owner records passing evaluations (Mac session M4) the gate stays
 closed and the node runs push-to-talk only. Decisions 1–4, 6 and 7 are
