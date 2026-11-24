@@ -25,6 +25,7 @@ import io
 import json
 import math
 import time
+import uuid
 from pathlib import Path
 
 from . import config
@@ -291,6 +292,7 @@ def run_server(
             "ca_sha256": ca_sha256,
         }
         session = ReplaySession(client=client, mode="push_to_talk", credential=credential)
+        session.pipeline.new_trace_id = lambda: str(uuid.uuid4())  # real rows on a real server
         session.start()
         session.ptt("down")
         session.frames(wav_frames(FIXTURES_DIR / scenario["wav"]))
