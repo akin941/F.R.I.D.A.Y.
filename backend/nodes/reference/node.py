@@ -50,6 +50,19 @@ each deleted only after its `event.ack`. A live event not acked before the
 socket drops is spooled. An `event.ack` is never answered and can only
 delete the batch it names. Heartbeats carry the spool depth.
 
+Voice state (Phase 11 D15, v2 only) comes from the voice child through
+`relay_voice_state` (the Swift host derives it from the child's
+`friday-voice/v1` `state` frame): the item is checked against the v2 event
+schema's `$defs.voice_state_item` before anything is sent -- an unknown
+state, an out-of-range counter or an extra key is dropped and counted
+(`voice_states_dropped`), and a v1 session never sends the kind. Relayed
+live as `event{kind: voice.state, spooled: false}` once the session is up,
+at most one per second (coalesced: the latest state wins and goes out when
+the second has passed), re-sent with every heartbeat so the server can tell
+a silent node from an idle one, re-sent after a reconnect, never spooled
+(a stale mic state has no value) and never waiting for its `event.ack`
+(it does not occupy the hook events' in-flight slot).
+
 Every frame the node sends is validated against the session version's
 schema before it leaves (a bug here is a test failure, never a malformed
 frame on the wire).
@@ -66,7 +79,15 @@ from dataclasses import dataclass, field
 
 from nodes.capabilities import get_any_contract, load_action_contracts, load_contracts
 from nodes.protocol.canonical import sha256_hex
-from nodes.protocol.messages import HEARTBEAT_SECONDS, catalogue_sha256, validate
+from nodes.protocol.messages import (
+    HEARTBEAT_SECONDS,
+    VOICE_STATE_ITEM_KEYS,
+    VOICE_STATE_KIND,
+    VOICE_STATE_MIN_INTERVAL_SECONDS,
+    ProtocolError,
+    catalogue_sha256,
+    validate,
+)
 from nodes.protocol.verify import NonceCache, Refusal
 from nodes.reference.confirm import ConfirmationWindowDouble, WindowBusy, render_confirmation
 from nodes.reference.executor import ActionRequest
@@ -83,6 +104,8 @@ SILENCE_SECONDS = 45
 BACKOFF_MIN_SECONDS = 1
 BACKOFF_MAX_SECONDS = 60
 NO_RECONNECT_REASONS = frozenset({"revoked", "kill_switch", "credential_expired"})
+# Voice-state frame ids remembered so their acks are not counted as stray.
+VOICE_ACK_MEMORY = 64
 
 # Fixed read outputs for a node built without `readers` (unit tests of the
 # v2 session); a node with `readers` (the conformance suite, Phase 9 branch
@@ -183,6 +206,12 @@ class ReferenceNode:
         self._event_inflight: _EventInFlight | None = None
         self.events_dropped = 0
         self.stray_event_acks = 0
+        self._voice_current: dict | None = None
+        self._voice_pending = False
+        self._voice_sent_at = None
+        self._voice_frame_ids: deque = deque(maxlen=VOICE_ACK_MEMORY)
+        self.voice_states_dropped = 0
+        self.voice_states_sent = 0
 
     # --- session ---------------------------------------------------------
 
@@ -209,6 +238,9 @@ class ReferenceNode:
         self.next_reconnect_delay = None
         self._session_ready = False
         self._event_inflight = None
+        # A reconnect re-sends the current mic state once the session is up.
+        self._voice_sent_at = None
+        self._voice_pending = self._voice_current is not None
         return self._send([self.hello()])
 
     def hello(self) -> dict:
@@ -396,7 +428,7 @@ class ReferenceNode:
             return []
         if kind == "hello.ack":
             self._session_ready = True
-            return self._send(self._next_upload())
+            return self._send(self._next_upload() + self._voice_flush())
         if kind == "event.ack":
             return self._send(self._event_acked(envelope))
         if kind != "invoke":
@@ -485,6 +517,8 @@ class ReferenceNode:
         return [frame]
 
     def _event_acked(self, ack) -> list:
+        if ack["event_id"] in self._voice_frame_ids:
+            return []  # a voice state's ack: nothing waits for it
         inflight = self._event_inflight
         if inflight is None or ack["event_id"] != inflight.frame_id:
             self.stray_event_acks += 1  # never deletes anything
@@ -493,6 +527,60 @@ class ReferenceNode:
         if inflight.batch_id is not None:
             self.spool.ack(inflight.batch_id)
         return self._next_upload()
+
+    # --- voice state (Phase 11 D15) ----------------------------------------
+
+    def relay_voice_state(self, state) -> list:
+        """One mic state from the voice child: `state`, `mode`,
+        `session_open` and the three daily counters (the host adds `at`, its
+        clock). Returns the frames to send now (none while coalescing)."""
+        if self.version != 2 or not isinstance(state, dict):
+            self.voice_states_dropped += 1
+            return []
+        item = {**state, "at": self.clock.now()}
+        if set(item) != VOICE_STATE_ITEM_KEYS or not self._voice_item_valid(item):
+            self.voice_states_dropped += 1
+            return []
+        self._voice_current = item
+        self._voice_pending = True
+        return self._send(self._voice_flush())
+
+    def _voice_frame(self, item) -> dict:
+        return {
+            "v": self.version,
+            "type": "event",
+            "id": self.id_factory(),
+            "kind": VOICE_STATE_KIND,
+            "batch": [item],
+            "spooled": False,
+        }
+
+    def _voice_item_valid(self, item) -> bool:
+        try:
+            validate(self._voice_frame(item), "node_to_server", self.version)
+        except ProtocolError:
+            return False
+        return True
+
+    def _voice_flush(self) -> list:
+        """The pending (latest) state, when the session is up and the last
+        voice frame left at least a second ago."""
+        if not (self.connected and self._session_ready and self.version == 2):
+            return []
+        if not self._voice_pending or self._voice_current is None:
+            return []
+        now = self.clock.now()
+        if (
+            self._voice_sent_at is not None
+            and now - self._voice_sent_at < VOICE_STATE_MIN_INTERVAL_SECONDS
+        ):
+            return []
+        frame = self._voice_frame(dict(self._voice_current))
+        self._voice_pending = False
+        self._voice_sent_at = now
+        self._voice_frame_ids.append(frame["id"])
+        self.voice_states_sent += 1
+        return [frame]
 
     # --- the clock moved -------------------------------------------------
 
@@ -510,6 +598,11 @@ class ReferenceNode:
         if now - self._last_heartbeat_at >= HEARTBEAT_SECONDS:
             self._last_heartbeat_at = now
             frames += self._heartbeat_frames()
+            if self._voice_current is not None and self._session_ready:
+                # The keep-alive: the current mic state, as of now.
+                self._voice_current = {**self._voice_current, "at": now}
+                self._voice_pending = True
+        frames += self._voice_flush()
         frames = self._send(frames)
         if (
             self.last_server_frame_at is not None

@@ -23,6 +23,18 @@ never content, and never with anything else: there is no path from an
   policy: availability is what the owner chose on the Mac (ADR-013
   decision 5), and the node still refuses an ungranted read itself (D5
   check 16).
+- **`voice.state`** (Phase 11 D15, protocol v2 only): the node's mic state
+  as its voice child reports it (one item: `state`, `mode`,
+  `session_open`, three daily counters, `at`; the v2 event schema's
+  `$defs.voice_state_item`). It is `nodes`' own data, like availability:
+  stored on the `Node` row (`voice_*` fields, the server's receive time in
+  `voice_state_at`), never handed to a sink, never touching `voice`.
+  **Coalesced and rate-limited per node**: at most one write per node per
+  `VOICE_STATE_MIN_INTERVAL_SECONDS`; a frame inside that second is acked
+  `duplicate` (detail `voice_state_coalesced`) and writes nothing. The
+  node itself coalesces to <= 1/s with the latest state winning, so an
+  honest node's latest state is always the one written. Nothing here can
+  arm, mute or change the node: the server -> node set is frozen.
 
 Spooled uploads (`spooled: true`, after a reconnect) are paced by
 `SpoolThrottle` (10 batches/s per node); the gateway handles one socket's
@@ -34,16 +46,32 @@ import logging
 import time
 from collections import deque
 from dataclasses import dataclass, field
+from datetime import timedelta
 
-from nodes.models import CapabilitySnapshot
-from nodes.protocol.messages import AVAILABILITY, MAX_EVENT_BATCH
+from django.db.models import Q
+from django.utils import timezone
+
+from nodes.models import CapabilitySnapshot, Node
+from nodes.protocol.messages import (
+    AVAILABILITY,
+    MAX_EVENT_BATCH,
+    MAX_VOICE_COUNTER,
+    MAX_VOICE_STATE_AT,
+    VOICE_MODES,
+    VOICE_STATE_COUNTERS,
+    VOICE_STATE_ITEM_KEYS,
+    VOICE_STATE_KIND,
+    VOICE_STATE_MIN_INTERVAL_SECONDS,
+    VOICE_STATES,
+)
 
 logger = logging.getLogger(__name__)
 
 HOOK_EVENTS = "claude_code.hook"
 AVAILABILITY_CHANGED = "grant.availability_changed"
-# Kinds a composition root may register a sink for. Availability changes are
-# `nodes`' own data and never leave it.
+VOICE_STATE = VOICE_STATE_KIND
+# Kinds a composition root may register a sink for. Availability changes and
+# voice states are `nodes`' own data and never leave it.
 SINK_KINDS = frozenset({HOOK_EVENTS})
 
 SPOOLED_BATCHES_PER_SECOND = 10
@@ -109,6 +137,8 @@ def handle_event(*, node, frame) -> EventOutcome:
         return _hook_events(node, batch)
     if kind == AVAILABILITY_CHANGED:
         return apply_availability_change(node, batch)
+    if kind == VOICE_STATE:
+        return apply_voice_state(node, batch)
     return EventOutcome(dropped=len(batch), detail={"unknown_kind": len(batch)})
 
 
@@ -203,6 +233,53 @@ def apply_availability_change(node, batch) -> EventOutcome:
         dropped=dropped,
         detail={"availability_changed": stored},
     )
+
+
+def _voice_state_item(item):
+    """The item when it is exactly a valid `voice.state` item, else None
+    (the schema already checked it; this is the defensive second look)."""
+    if not isinstance(item, dict) or set(item) != VOICE_STATE_ITEM_KEYS:
+        return None
+    if item["state"] not in VOICE_STATES or item["mode"] not in VOICE_MODES:
+        return None
+    if not isinstance(item["session_open"], bool):
+        return None
+    for key in (*VOICE_STATE_COUNTERS, "at"):
+        value = item[key]
+        ceiling = MAX_VOICE_STATE_AT if key == "at" else MAX_VOICE_COUNTER
+        if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= ceiling:
+            return None
+    return item
+
+
+def apply_voice_state(node, batch, *, now=None) -> EventOutcome:
+    """D15 `voice.state`: store the (single) item on the node row, at most
+    once per node per second. `stored` 1 when written, `duplicate` 1 when
+    coalesced into the write of the same second, `dropped` for an invalid
+    item or a batch of more than one (the schema allows exactly one)."""
+    if len(batch) != 1:
+        return EventOutcome(dropped=len(batch), detail={"voice_state_invalid": len(batch)})
+    item = _voice_state_item(batch[0])
+    if item is None:
+        return EventOutcome(dropped=1, detail={"voice_state_invalid": 1})
+    now = now or timezone.now()
+    since = now - timedelta(seconds=VOICE_STATE_MIN_INTERVAL_SECONDS)
+    written = (
+        Node.objects.filter(pk=node.pk)
+        .filter(Q(voice_state_at__isnull=True) | Q(voice_state_at__lte=since))
+        .update(
+            voice_state=item["state"],
+            voice_mode=item["mode"],
+            voice_session_open=item["session_open"],
+            voice_state_at=now,
+            voice_wake_accepts_today=item["wake_accepts_today"],
+            voice_wake_discards_today=item["wake_discards_today"],
+            voice_storm_mutes_today=item["storm_mutes_today"],
+        )
+    )
+    if not written:
+        return EventOutcome(duplicate=1, detail={"voice_state_coalesced": 1})
+    return EventOutcome(stored=1, detail={"voice_state": 1})
 
 
 class SpoolThrottle:

@@ -1,0 +1,41 @@
+{
+  "check": null,
+  "description": "A v1 session has no voice.state kind: the node never sends it.",
+  "expect": {
+    "frames": [],
+    "voice_states_dropped": 1
+  },
+  "name": "v1_voice_state_never_sent",
+  "setup": {
+    "now": 1796000005
+  },
+  "steps": [
+    {
+      "frame": {
+        "accepted": [
+          "apps.frontmost"
+        ],
+        "heartbeat_seconds": 15,
+        "id": "cc50b21c-532f-48bf-9a63-afa3ecbcff56",
+        "node_id": "6f1e2d3c-4b5a-4987-8a6b-5c4d3e2f1a0b",
+        "rotate_after_days": 30,
+        "server_time": 1796000005,
+        "type": "hello.ack",
+        "v": 1
+      },
+      "op": "send"
+    },
+    {
+      "op": "voice_state",
+      "state": {
+        "mode": "always_on",
+        "session_open": true,
+        "state": "listening",
+        "storm_mutes_today": 0,
+        "wake_accepts_today": 3,
+        "wake_discards_today": 1
+      }
+    }
+  ],
+  "version": 1
+}

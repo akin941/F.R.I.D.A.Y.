@@ -1,0 +1,77 @@
+{
+  "check": null,
+  "description": "The current mic state is re-sent with every heartbeat, as of now, so the server can tell an idle node from a silent one.",
+  "expect": {
+    "frames": [
+      {
+        "batch": [
+          {
+            "at": 1796000005,
+            "mode": "always_on",
+            "session_open": true,
+            "state": "listening",
+            "storm_mutes_today": 0,
+            "wake_accepts_today": 3,
+            "wake_discards_today": 1
+          }
+        ],
+        "kind": "voice.state",
+        "spooled": false,
+        "type": "event"
+      },
+      {
+        "batch": [
+          {
+            "at": 1796000020,
+            "mode": "always_on",
+            "session_open": true,
+            "state": "listening",
+            "storm_mutes_today": 0,
+            "wake_accepts_today": 3,
+            "wake_discards_today": 1
+          }
+        ],
+        "kind": "voice.state",
+        "spooled": false,
+        "type": "event"
+      }
+    ]
+  },
+  "name": "v2_voice_state_refreshed_with_the_heartbeat",
+  "setup": {
+    "now": 1796000005
+  },
+  "steps": [
+    {
+      "frame": {
+        "accepted": [
+          "apps.frontmost"
+        ],
+        "heartbeat_seconds": 15,
+        "id": "a092ff8f-750a-4f2c-9e3a-0a273941e18d",
+        "node_id": "6f1e2d3c-4b5a-4987-8a6b-5c4d3e2f1a0b",
+        "rotate_after_days": 30,
+        "server_time": 1796000005,
+        "type": "hello.ack",
+        "v": 2
+      },
+      "op": "send"
+    },
+    {
+      "op": "voice_state",
+      "state": {
+        "mode": "always_on",
+        "session_open": true,
+        "state": "listening",
+        "storm_mutes_today": 0,
+        "wake_accepts_today": 3,
+        "wake_discards_today": 1
+      }
+    },
+    {
+      "op": "advance",
+      "seconds": 15
+    }
+  ],
+  "version": 2
+}

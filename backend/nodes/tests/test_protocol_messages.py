@@ -99,7 +99,16 @@ def _walk(schema, path="$"):
         yield from _walk(schema["items"], f"{path}[]")
     for keyword in ("anyOf", "oneOf", "allOf", "prefixItems"):
         for index, sub in enumerate(schema.get(keyword) or []):
+            if isinstance(sub, dict) and "if" in sub:
+                # Phase 11 D15: a conditional is structure, not a value
+                # schema; the sub-schemas its branches constrain are walked.
+                for branch in ("if", "then", "else"):
+                    for name, inner in ((sub.get(branch) or {}).get("properties") or {}).items():
+                        yield from _walk(inner, f"{path}.{keyword}[{index}].{branch}.{name}")
+                continue
             yield from _walk(sub, f"{path}.{keyword}[{index}]")
+    for name, sub in (schema.get("$defs") or {}).items():
+        yield from _walk(sub, f"{path}.$defs.{name}")
 
 
 def _all_schemas():

@@ -33,6 +33,13 @@ or an event sink), and the frame-size limit bounds it.
 v2 adds one keyword, `"x-friday-max-bytes": N`: the UTF-8 encoding of the
 string is at most N bytes (`maxLength` counts code points, so a 4 096
 character tail could otherwise be 16 KiB). The Swift port mirrors it.
+
+Phase 11 (D15) uses three more standard keywords in exactly one place, the
+v2 `event` schema: a local `$ref` into its own `$defs` and one
+`allOf: [{if: {kind == "voice.state"}, then: {batch: one voice item}}]`.
+The opaque per-kind hole stays for the other kinds; the Swift port must
+apply the conditional (its validator supports `if`/`then` and `$ref`, or
+it validates `$defs.voice_state_item` itself before sending).
 """
 
 import json
@@ -169,6 +176,38 @@ NODE_REFUSAL_CODES_BY_VERSION = MappingProxyType({1: NODE_REFUSAL_CODES, 2: NODE
 CAPABILITY_CLASSES = ("read", "confirm", "gate")
 AVAILABILITY = ("granted", "not_granted", "unsupported")
 EVENT_KINDS = ("claude_code.hook", "grant.availability_changed")
+# Phase 11 D15: the node -> server `voice.state` kind, **v2 only** (the v1
+# event schema keeps its two kinds, so a v1 `voice.state` is a schema error,
+# a frame error). One item per frame, every field bounded and enumerated:
+# the mic state the voice child reports (`friday-voice/v1` `state`), the
+# node's local mode, the session flag, three daily counters and `at` (the
+# node clock, Unix seconds). No audio, no text. The v2 event schema carries
+# the per-kind item schema (`$defs.voice_state_item`, applied by an
+# `allOf`/`if`/`then` on `kind`), so a bad item is a schema error.
+VOICE_STATE_KIND = "voice.state"
+EVENT_KINDS_BY_VERSION = MappingProxyType({1: EVENT_KINDS, 2: (*EVENT_KINDS, VOICE_STATE_KIND)})
+VOICE_STATES = (
+    "off",
+    "armed_ptt",
+    "armed_wake",
+    "listening",
+    "thinking",
+    "speaking",
+    "muted",
+    "storm_muted",
+    "error",
+)
+VOICE_MODES = ("off", "push_to_talk", "always_on")
+VOICE_STATE_COUNTERS = ("wake_accepts_today", "wake_discards_today", "storm_mutes_today")
+MAX_VOICE_COUNTER = 100_000
+MAX_VOICE_STATE_AT = 4_102_444_800  # 2100-01-01T00:00:00Z
+VOICE_STATE_ITEM_KEYS = frozenset({"state", "mode", "session_open", *VOICE_STATE_COUNTERS, "at"})
+# The node relays at most one `voice.state` per second (coalesced: the
+# latest state wins) and re-sends its current state with every heartbeat;
+# the server writes at most one per node per second. A stored state older
+# than two heartbeats means the node stopped reporting (`unknown`).
+VOICE_STATE_MIN_INTERVAL_SECONDS = 1
+VOICE_STATE_STALE_SECONDS = 2 * HEARTBEAT_SECONDS
 RESULT_STATUSES = ("ok", "refused", "error", "timeout")
 # v2 (D1): the states a `confirmation` frame reports, and a result's
 # `confirm_state` (which adds `not_required` for read invokes).

@@ -1,0 +1,100 @@
+{
+  "check": null,
+  "description": "At most one voice.state a second: states reported inside the same second coalesce and only the latest goes out once the second has passed.",
+  "expect": {
+    "frames": [
+      {
+        "batch": [
+          {
+            "at": 1796000005,
+            "mode": "always_on",
+            "session_open": true,
+            "state": "listening",
+            "storm_mutes_today": 0,
+            "wake_accepts_today": 3,
+            "wake_discards_today": 1
+          }
+        ],
+        "kind": "voice.state",
+        "spooled": false,
+        "type": "event"
+      },
+      {
+        "batch": [
+          {
+            "at": 1796000005,
+            "mode": "always_on",
+            "session_open": true,
+            "state": "speaking",
+            "storm_mutes_today": 0,
+            "wake_accepts_today": 3,
+            "wake_discards_today": 1
+          }
+        ],
+        "kind": "voice.state",
+        "spooled": false,
+        "type": "event"
+      }
+    ],
+    "voice_states_dropped": 0
+  },
+  "name": "v2_voice_state_coalesced",
+  "setup": {
+    "now": 1796000005
+  },
+  "steps": [
+    {
+      "frame": {
+        "accepted": [
+          "apps.frontmost"
+        ],
+        "heartbeat_seconds": 15,
+        "id": "a092ff8f-750a-4f2c-9e3a-0a273941e18d",
+        "node_id": "6f1e2d3c-4b5a-4987-8a6b-5c4d3e2f1a0b",
+        "rotate_after_days": 30,
+        "server_time": 1796000005,
+        "type": "hello.ack",
+        "v": 2
+      },
+      "op": "send"
+    },
+    {
+      "op": "voice_state",
+      "state": {
+        "mode": "always_on",
+        "session_open": true,
+        "state": "listening",
+        "storm_mutes_today": 0,
+        "wake_accepts_today": 3,
+        "wake_discards_today": 1
+      }
+    },
+    {
+      "op": "voice_state",
+      "state": {
+        "mode": "always_on",
+        "session_open": true,
+        "state": "thinking",
+        "storm_mutes_today": 0,
+        "wake_accepts_today": 3,
+        "wake_discards_today": 1
+      }
+    },
+    {
+      "op": "voice_state",
+      "state": {
+        "mode": "always_on",
+        "session_open": true,
+        "state": "speaking",
+        "storm_mutes_today": 0,
+        "wake_accepts_today": 3,
+        "wake_discards_today": 1
+      }
+    },
+    {
+      "op": "advance",
+      "seconds": 1
+    }
+  ],
+  "version": 2
+}

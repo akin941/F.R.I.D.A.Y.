@@ -178,6 +178,9 @@ class InProcessDriver:
     def kill_switch(self):
         self._handle(self.node.engage_kill_switch())
 
+    def voice_state(self, state):
+        self._handle(self.node.relay_voice_state(state))
+
     def report(self):
         return node_report(self.node)
 
@@ -198,6 +201,8 @@ def node_report(node) -> dict:
         "reconnect_allowed": node.reconnect_allowed,
         "policy_fingerprint": node.policy.fingerprint(),
         "next_reconnect_delay": node.next_reconnect_delay,
+        # Phase 11 D15: voice states the node refused to relay.
+        "voice_states_dropped": getattr(node, "voice_states_dropped", 0),
     }
 
 
@@ -232,6 +237,8 @@ def play(case, driver) -> None:
             driver.disconnect()
         elif op == "kill_switch":
             driver.kill_switch()
+        elif op == "voice_state":
+            driver.voice_state(step["state"])
         else:
             raise ValueError(f"unknown step {op!r}")
 
@@ -258,6 +265,7 @@ def check(case, frames, report, checker, *, policy_fingerprint, home=None) -> li
         "windows_shown",
         "closed_reason",
         "reconnect_allowed",
+        "voice_states_dropped",
     ):
         if key in expect and report.get(key) != expect[key]:
             failures.append(f"{key}: expected {expect[key]!r}, got {report.get(key)!r}")
