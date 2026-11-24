@@ -48,6 +48,7 @@ from .protocol.messages import (
     ProtocolError,
     validate,
 )
+from .session import derive_state
 
 BYTES_PER_SECOND = SAMPLE_RATE * 2  # 16 kHz mono PCM16
 RING_BUFFER_BYTES = 2 * BYTES_PER_SECOND  # D8: at most 2 s of pre-wake audio
@@ -129,18 +130,12 @@ class ChildCore:
         )
 
     def current_state(self) -> str:
+        """`friday_voice.session.derive_state` over the shell's blocking
+        rules and the pipeline's turn (one precedence, one place)."""
         reason = self.blocking_reason()
-        if reason in ("muted", "mute_unreadable"):
-            return "muted"
-        if reason in ("link_down", "mode_off"):
-            return "off"
-        if reason is not None:
-            return "error"
-        if self.pipeline is not None:
-            return self.pipeline.state(self.mode)
-        if self.ptt_down:
-            return "listening"
-        return "armed_ptt"
+        if reason is not None or self.pipeline is None:
+            return derive_state(blocking_reason=reason, ptt_down=self.ptt_down)
+        return derive_state(**self.pipeline.state_inputs(self.mode))
 
     def buffered_bytes(self) -> int:
         size = len(self.ring) + len(self.utterance)

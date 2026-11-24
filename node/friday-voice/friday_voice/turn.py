@@ -32,7 +32,7 @@ REASON_UTTERANCE_CAP = "utterance_cap"
 
 
 class TurnCapture:
-    def __init__(self, *, mode, vad=None, turn_end=None, preroll=b""):
+    def __init__(self, *, mode, vad=None, turn_end=None, preroll=b"", preroll_speech=False):
         if mode not in ("ptt", "vad"):
             raise ValueError("mode is ptt or vad")
         if mode == "vad" and (vad is None or turn_end is None):
@@ -50,6 +50,12 @@ class TurnCapture:
         self.done = False
         if vad is not None:
             vad.reset()
+        if preroll_speech and self.pcm:
+            # A barge-in (D9): the pre-roll already holds the owner's speech
+            # onset, so the turn has heard speech from its first byte.
+            self.elapsed_ms = config.bytes_to_ms(len(self.pcm))
+            self.heard_speech = True
+            self.last_speech_ms = self.elapsed_ms
 
     @property
     def max_bytes(self) -> int:

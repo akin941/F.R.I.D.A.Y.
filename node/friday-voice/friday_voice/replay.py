@@ -75,6 +75,7 @@ class ReplaySession:
         arming=None,
         echo=None,
         self_trigger=None,
+        paced_playback=False,
         clock=None,
     ):
         self.clock = clock or ManualClock()
@@ -97,9 +98,14 @@ class ReplaySession:
         self.core = ChildCore(self.clock, log_stream=self.log, pipeline=self.pipeline)
         self.link = ChildLink(self.core)
         self.host = HostCore(
-            self.clock, credential=credential or dict(DEV_CREDENTIAL), mode=mode, echo=echo
+            self.clock,
+            credential=credential or dict(DEV_CREDENTIAL),
+            mode=mode,
+            echo=echo,
+            paced_playback=paced_playback,
         )
         self.frames_to_host = []  # every child frame header, in order
+        self.frame_times = []  # the monotonic ms each of them reached the host
 
     # --- moving bytes ---
 
@@ -108,6 +114,7 @@ class ReplaySession:
 
         for frame in encoded:
             self.frames_to_host.append(decode_frame(frame)[0])
+            self.frame_times.append(self.clock.monotonic_ms())
             self.host.child_bytes(frame)
 
     def pump(self):
@@ -166,6 +173,14 @@ class ReplaySession:
 
     def sent(self, message_type):
         return [frame for frame in self.frames_to_host if frame["type"] == message_type]
+
+    def sent_at(self, message_type):
+        """`(monotonic ms, header)` of every child frame of that type."""
+        return [
+            (at, frame)
+            for at, frame in zip(self.frame_times, self.frames_to_host, strict=True)
+            if frame["type"] == message_type
+        ]
 
     def states(self):
         return [frame["state"] for frame in self.sent("state")]

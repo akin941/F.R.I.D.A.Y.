@@ -23,6 +23,14 @@ Host rules (D6, D12), each pinned by a host conformance case:
   only (re)acquires it when the child reports an armed or listening state
   while the local mode, mute and link allow it;
 - capture frames reach the child only while the mic is held.
+
+With `paced_playback=True` (the barge-in and echo scenarios, branch 4) the
+host plays like the Swift host does: utterances queue in order, each
+reports `started` when it begins and `ended` once its audio has run for
+its length on the host's clock (`tick()`), and `stop_playback` stops an
+utterance that is still queued or playing even after its last frame
+arrived. Without it, playback is instantaneous (`started` and `ended` as
+the frames arrive), which keeps the protocol cases short.
 """
 
 import subprocess
@@ -52,6 +60,7 @@ class HostCore:
         link_up=True,
         host_version="0.1.0-reference",
         echo=None,
+        paced_playback=False,
     ):
         self.clock = clock
         self.credential = credential
@@ -60,6 +69,10 @@ class HostCore:
         self.link_up = link_up
         self.host_version = host_version
         self.echo = echo
+        self.paced_playback = bool(paced_playback)
+        # Paced playback: [utterance_id, ms of audio, last received, started_at].
+        self._queue = []
+        self.stopped_at = []  # (utterance_id, monotonic ms) of every stop_playback honoured
         self.mic_held = False
         self.indicator = "off"
         self.child_running = False
@@ -109,6 +122,7 @@ class HostCore:
         self._decoder = FrameDecoder()
         self._utterances.clear()
         self._closed.clear()
+        self._queue.clear()
         self._last_state_at = self.clock.monotonic_ms()
         self._send(
             {
@@ -199,6 +213,7 @@ class HostCore:
         self.child_running = False
         self.child_ready = False
         self._outbound.clear()
+        self._queue.clear()
         if self.echo is not None:
             self.echo.stopped()
         self.restart_in_ms = self.backoff_ms
@@ -268,6 +283,9 @@ class HostCore:
         self.played.append((utterance_id, seq, payload))
         if self.echo is not None and payload:
             self.echo.played(payload)
+        if self.paced_playback:
+            self._queue_play(utterance_id, seq, header["last"], payload)
+            return
         if seq == 0:
             self._send(
                 {
@@ -291,12 +309,56 @@ class HostCore:
         else:
             self._utterances[utterance_id] = seq + 1
 
+    def _queue_play(self, utterance_id, seq, last, payload):
+        if seq == 0:
+            self._queue.append([utterance_id, 0, False, None])
+        entry = next(item for item in self._queue if item[0] == utterance_id)
+        entry[1] += len(payload) * 1000 // (16000 * 2)
+        if last:
+            entry[2] = True
+            self._utterances.pop(utterance_id, None)
+            self._closed.add(utterance_id)
+        else:
+            self._utterances[utterance_id] = seq + 1
+        self._advance_playback()
+
+    def _advance_playback(self):
+        """Paced playback: start the head of the queue, end it once its
+        audio has run for its length."""
+        now = self.clock.monotonic_ms()
+        while self._queue:
+            head = self._queue[0]
+            if head[3] is None:
+                head[3] = now
+                self._send(
+                    {
+                        "type": "playback",
+                        "utterance_id": head[0],
+                        "state": "started",
+                        "at_ms": self.clock.now_ms(),
+                    }
+                )
+            if not (head[2] and now >= head[3] + head[1]):
+                return
+            self._queue.pop(0)
+            self._send(
+                {
+                    "type": "playback",
+                    "utterance_id": head[0],
+                    "state": "ended",
+                    "at_ms": self.clock.now_ms(),
+                }
+            )
+
     def _on_stop_playback(self, header, _payload):
         utterance_id = header["utterance_id"]
-        if utterance_id not in self._utterances:
+        queued = [item for item in self._queue if item[0] == utterance_id]
+        if utterance_id not in self._utterances and not queued:
             self.dropped_stop += 1
             return
-        del self._utterances[utterance_id]
+        self._utterances.pop(utterance_id, None)
+        self._queue = [item for item in self._queue if item[0] != utterance_id]
+        self.stopped_at.append((utterance_id, self.clock.monotonic_ms()))
         self._closed.add(utterance_id)
         if self.echo is not None:
             self.echo.stopped()
@@ -373,6 +435,8 @@ class HostCore:
         if self.child_running and now - self._last_state_at >= WATCHDOG_MS:
             self._fail("watchdog")
             return
+        if self.paced_playback and self.link_open:
+            self._advance_playback()
         if (
             self.child_ready
             and self._ready_at is not None
