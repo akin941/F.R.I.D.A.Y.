@@ -10,6 +10,7 @@ import type {
   HudCost,
   HudHealth,
   HudNodeLine,
+  HudNodeVoice,
   HudProviderStatus,
   HudStreamStatus,
   HudTasks,
@@ -213,7 +214,50 @@ export function HudNodeLineView({ node }: { node: HudNodeLine }) {
           {node.node_version ? ` · v${node.node_version}` : null}
         </p>
       ) : null}
+      {paired && node.voice ? <HudNodeMicLine voice={node.voice} /> : null}
     </div>
+  );
+}
+
+// Phase 11 D15: the mic line's colour per state -- checked HUD text tokens
+// only; the state word carries the meaning.
+export const NODE_MIC_HUD_TOKENS: Record<HudNodeVoice["state"], string> = {
+  off: "text-hud-caption-muted",
+  armed_ptt: "text-hud-caption",
+  armed_wake: "text-hud-caption",
+  listening: "text-hud-speaking",
+  thinking: "text-hud-speaking",
+  speaking: "text-hud-speaking",
+  muted: "text-hud-caption-muted",
+  storm_muted: "text-hud-error",
+  error: "text-hud-error",
+  unknown: "text-hud-caption-muted",
+};
+
+/** The Mac's mic state (D15): state word, mode, session flag, counters. */
+export function HudNodeMicLine({ voice }: { voice: HudNodeVoice }) {
+  const copy = tr.hud.health;
+  const known = voice.state !== "unknown" && voice.state !== "off";
+  return (
+    <p
+      className={NODE_MIC_HUD_TOKENS[voice.state] ?? "text-hud-caption"}
+      data-testid="hud-node-mic"
+      data-state={voice.state}
+    >
+      {copy.nodeMic}: {copy.nodeMicStates[voice.state] ?? voice.state}
+      {known && voice.mode ? ` · ${copy.nodeMicModes[voice.mode] ?? voice.mode}` : null}
+      {known && voice.session_open ? ` · ${copy.nodeMicSession}` : null}
+      {known ? (
+        <span className="text-hud-caption-muted" data-testid="hud-node-mic-counts">
+          {" · "}
+          {copy.nodeMicCounts(
+            voice.wake_accepts_today,
+            voice.wake_discards_today,
+            voice.storm_mutes_today,
+          )}
+        </span>
+      ) : null}
+    </p>
   );
 }
 

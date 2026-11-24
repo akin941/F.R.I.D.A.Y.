@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { HealthPanel } from "@/components/hud/HudPanels";
-import type { HudHealth, HudNodeLine } from "@/lib/hud/events";
+import type { HudHealth, HudNodeLine, HudNodeVoice } from "@/lib/hud/events";
 
 function health(node?: HudNodeLine | null): HudHealth {
   return { providers: [], providers_down: 0, budgets: [], budgets_exhausted: 0, preflight: null, node };
@@ -59,5 +59,73 @@ describe("HUD health panel node line (Phase 9 D11)", () => {
   it("renders nothing for a backend without the node block", () => {
     render(<HealthPanel health={health(undefined)} mic="closed" stream="open" />);
     expect(screen.queryByTestId("hud-node")).not.toBeInTheDocument();
+  });
+});
+
+function voice(overrides: Partial<HudNodeVoice> = {}): HudNodeVoice {
+  return {
+    state: "listening",
+    mode: "always_on",
+    session_open: true,
+    wake_accepts_today: 5,
+    wake_discards_today: 2,
+    storm_mutes_today: 0,
+    at: new Date().toISOString(),
+    ...overrides,
+  };
+}
+
+describe("HUD node line mic state (Phase 11 D15)", () => {
+  it.each([
+    ["off", "kapalı"],
+    ["armed_ptt", "bas-konuş bekliyor"],
+    ["armed_wake", "uyandırma kelimesini bekliyor"],
+    ["listening", "dinliyor"],
+    ["thinking", "düşünüyor"],
+    ["speaking", "konuşuyor"],
+    ["muted", "susturuldu"],
+    ["storm_muted", "uyandırma fırtınası"],
+    ["error", "hata"],
+    ["unknown", "bilinmiyor"],
+  ] as const)("shows %s as text", (state, label) => {
+    render(<HealthPanel health={health(line({ voice: voice({ state }) }))} mic="closed" stream="open" />);
+    const mic = screen.getByTestId("hud-node-mic");
+    expect(mic).toHaveAttribute("data-state", state);
+    expect(mic).toHaveTextContent(`Mac mikrofonu: ${label}`);
+  });
+
+  it("shows mode, session and the daily counters for a live state", () => {
+    render(
+      <HealthPanel health={health(line({ voice: voice({ storm_mutes_today: 1 }) }))} mic="closed" stream="open" />,
+    );
+    const mic = screen.getByTestId("hud-node-mic");
+    expect(mic).toHaveTextContent("her zaman açık");
+    expect(mic).toHaveTextContent("oturum açık");
+    expect(screen.getByTestId("hud-node-mic-counts")).toHaveTextContent("bugün 5 uyanma · 2 elendi · 1 fırtına");
+  });
+
+  it("shows no mode or counters when the state is unknown or off", () => {
+    for (const state of ["unknown", "off"] as const) {
+      const { unmount } = render(
+        <HealthPanel health={health(line({ voice: voice({ state }) }))} mic="closed" stream="open" />,
+      );
+      expect(screen.queryByTestId("hud-node-mic-counts")).not.toBeInTheDocument();
+      expect(screen.getByTestId("hud-node-mic")).not.toHaveTextContent("her zaman açık");
+      unmount();
+    }
+  });
+
+  it("renders no mic line for a never-paired node or an older backend", () => {
+    const { unmount } = render(
+      <HealthPanel
+        health={health(line({ status: "never_paired", voice: voice({ state: "unknown" }) }))}
+        mic="closed"
+        stream="open"
+      />,
+    );
+    expect(screen.queryByTestId("hud-node-mic")).not.toBeInTheDocument();
+    unmount();
+    render(<HealthPanel health={health(line())} mic="closed" stream="open" />);
+    expect(screen.queryByTestId("hud-node-mic")).not.toBeInTheDocument();
   });
 });

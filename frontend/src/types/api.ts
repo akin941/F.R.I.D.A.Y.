@@ -201,7 +201,8 @@ export interface ApiRemoteKeyState {
 
 // Which channel a turn arrived over (backend Message.Channel, MVP 9 §1).
 // `openai`: the OpenAI-compatible facade (Phase 4 branch 6), e.g. Open WebUI.
-export type MessageChannel = "web" | "cli" | "telegram" | "openai";
+// `node_voice` (Phase 11 D4): a live voice turn from the Mac's voice child.
+export type MessageChannel = "web" | "cli" | "telegram" | "openai" | "node_voice";
 
 // backend Message.InputMode (Phase 6 D9).
 export type MessageInputMode = "text" | "voice";
@@ -247,6 +248,10 @@ export interface ApiConversation {
   // The first message's channel (Phase 4 branch 4 channel badge); null
   // until the conversation has a message.
   origin_channel: MessageChannel | null;
+  // Phase 11 D5: the channel that opened the conversation ("" for rows
+  // predating it); `node_voice` marks a live Mac voice conversation, so it
+  // is badged even while still empty. Optional for older backends.
+  opened_via?: MessageChannel | "";
 }
 
 export type MessageRole = "user" | "assistant" | "system";

@@ -461,6 +461,28 @@ export const tr = {
       nodeSpool: (count: number) => `kuyrukta ${count} olay`,
       nodeHeartbeat: "son sinyal",
       nodeManage: "Yönet",
+      // Phase 11 D15: the Mac's mic state (from the node's voice.state event).
+      nodeMic: "Mac mikrofonu",
+      nodeMicStates: {
+        off: "kapalı",
+        armed_ptt: "bas-konuş bekliyor",
+        armed_wake: "uyandırma kelimesini bekliyor",
+        listening: "dinliyor",
+        thinking: "düşünüyor",
+        speaking: "konuşuyor",
+        muted: "susturuldu",
+        storm_muted: "uyandırma fırtınası — ekrandan aç",
+        error: "hata",
+        unknown: "bilinmiyor",
+      } as Record<string, string>,
+      nodeMicModes: {
+        off: "kapalı",
+        push_to_talk: "bas-konuş",
+        always_on: "her zaman açık",
+      } as Record<string, string>,
+      nodeMicSession: "oturum açık",
+      nodeMicCounts: (accepts: number, discards: number, storms: number) =>
+        `bugün ${accepts} uyanma · ${discards} elendi` + (storms > 0 ? ` · ${storms} fırtına` : ""),
     },
     settings: {
       heading: "Bu cihazda",
@@ -468,6 +490,8 @@ export const tr = {
       earcons: "Durum sesleri",
     },
     noWorkspace: "Önce bir çalışma alanı seç.",
+    // Phase 11 D15: the ring shows the Mac's live voice when the browser is idle.
+    fromNode: "(Mac)",
     miniOrb: (label: string) => `Friday: ${label} — HUD'u aç`,
     // Phase 8A branch 6: read-only HUD cards; decisions happen on their pages (D8).
     sessions: {
@@ -638,6 +662,7 @@ export const tr = {
       cli: "CLI",
       telegram: "Telegram",
       openai: "OpenAI uyumlu istemci",
+      node_voice: "Canlı ses (Mac)",
     } satisfies Record<MessageChannel, string> as Record<string, string>,
     viaChannel: (label: string) => `${label} üzerinden`,
     // Connector reads (Phase 5 branch 9): where a reply's context came from.

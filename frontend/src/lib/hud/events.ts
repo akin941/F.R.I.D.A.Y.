@@ -93,6 +93,33 @@ export type HudNodeStatus =
   | "credential_expiring"
   | "never_paired";
 
+// Phase 11 D15: the Mac's mic state from the node's `voice.state` event.
+// `unknown` when the node is offline or its last report is older than two
+// heartbeats; `off` while the node is cut off (kill switch, revoked).
+export type HudNodeVoiceState =
+  | "off"
+  | "armed_ptt"
+  | "armed_wake"
+  | "listening"
+  | "thinking"
+  | "speaking"
+  | "muted"
+  | "storm_muted"
+  | "error"
+  | "unknown";
+
+export type HudNodeVoiceMode = "" | "off" | "push_to_talk" | "always_on";
+
+export interface HudNodeVoice {
+  state: HudNodeVoiceState;
+  mode: HudNodeVoiceMode;
+  session_open: boolean;
+  wake_accepts_today: number;
+  wake_discards_today: number;
+  storm_mutes_today: number;
+  at: string | null;
+}
+
 export interface HudNodeLine {
   status: HudNodeStatus;
   last_heartbeat_at: string | null;
@@ -101,6 +128,8 @@ export interface HudNodeLine {
   advertised_count: number;
   spool_depth: number;
   node_version: string;
+  /** Optional: absent from a backend predating Phase 11 branch 7. */
+  voice?: HudNodeVoice | null;
 }
 
 export interface HudHealth {

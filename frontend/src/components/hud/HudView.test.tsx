@@ -347,6 +347,47 @@ describe("HudView (A8)", () => {
     );
   });
 
+  it("the ring shows the Mac's live voice while the browser is idle (Phase 11 D15)", () => {
+    const h = setup();
+    const node = (state: string) =>
+      data({
+        health: {
+          providers: [],
+          providers_down: 0,
+          budgets: [],
+          budgets_exhausted: 0,
+          preflight: null,
+          node: {
+            status: "connected",
+            last_heartbeat_at: null,
+            catalogue_sha256: "0123456789ab",
+            invocable_count: 1,
+            advertised_count: 1,
+            spool_depth: 0,
+            node_version: "0.1.0",
+            voice: {
+              state: state as "listening",
+              mode: "push_to_talk",
+              session_open: true,
+              wake_accepts_today: 0,
+              wake_discards_today: 0,
+              storm_mutes_today: 0,
+              at: null,
+            },
+          },
+        },
+      });
+    h.push(node("speaking"));
+    expect(stateOf()).toBe("speaking");
+    expect(screen.getByTestId("hud-orb")).toHaveAttribute("data-source", "node");
+    expect(screen.getByTestId("hud-state-source")).toHaveTextContent("(Mac)");
+    expect(screen.getByTestId("hud-node-mic")).toHaveAttribute("data-state", "speaking");
+    h.push(node("armed_ptt"));
+    expect(stateOf()).toBe("idle");
+    expect(screen.getByTestId("hud-orb")).toHaveAttribute("data-source", "browser");
+    expect(screen.queryByTestId("hud-state-source")).not.toBeInTheDocument();
+  });
+
   it("frame caps: 30 fps while active, 5 at rest", () => {
     setup();
     expect(screen.getByTestId("hud")).toHaveAttribute("data-fps", "5");

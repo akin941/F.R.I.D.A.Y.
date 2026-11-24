@@ -16,11 +16,19 @@ export interface ToolRequestDraft {
 /**
  * Persisted draft reconstruction (Phase 4 branch 4, carried forward from
  * MVP 9): a reloaded chat re-renders a task/tool draft from the persisted
- * USER message's `intent`/`intent_payload`. Only web-channel turns: a
- * CLI/Telegram turn's draft was offered (or not) on that channel.
+ * USER message's `intent`/`intent_payload`. Only web-channel turns and (Phase
+ * 11 D4) live voice turns from the Mac (`node_voice`): voice proposes, the
+ * screen approves -- the card click here is the only path to a task or an
+ * approval. A CLI/Telegram turn's draft was offered (or not) on that channel.
  */
+export const DRAFT_CHANNELS: ReadonlySet<string> = new Set(["web", "node_voice"]);
+
+function draftable(message: ChatMessageView): boolean {
+  return !message.local && message.role === "user" && DRAFT_CHANNELS.has(message.channel ?? "");
+}
+
 export function taskDraftFromMessage(message: ChatMessageView): TaskDraft | null {
-  if (message.local || message.role !== "user" || message.channel !== "web") return null;
+  if (!draftable(message)) return null;
   if (message.intent !== "task_draft") return null;
   const title = message.intentPayload?.title;
   if (typeof title !== "string" || !title.trim()) return null;
@@ -33,7 +41,7 @@ export function taskDraftFromMessage(message: ChatMessageView): TaskDraft | null
 }
 
 export function toolDraftFromMessage(message: ChatMessageView): ToolRequestDraft | null {
-  if (message.local || message.role !== "user" || message.channel !== "web") return null;
+  if (!draftable(message)) return null;
   if (message.intent !== "tool_request") return null;
   const toolName = message.intentPayload?.tool_name;
   if (typeof toolName !== "string" || !toolName) return null;

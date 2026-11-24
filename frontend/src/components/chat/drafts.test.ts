@@ -29,6 +29,25 @@ describe("draft reconstruction", () => {
     expect(taskDraftFromMessage(user({ intent: "task_draft", intentPayload: { title: "  " } }))).toBeNull();
   });
 
+  it("rebuilds drafts from a live Mac voice turn (node_voice, Phase 11 D4), not from cli/openai", () => {
+    const payload = { title: "Annemi ara", due_date: null };
+    expect(
+      taskDraftFromMessage(user({ intent: "task_draft", intentPayload: payload, channel: "node_voice" })),
+    ).toEqual({ sourceMessageId: "u1", title: "Annemi ara", dueDate: null });
+    expect(
+      toolDraftFromMessage(
+        user({ intent: "tool_request", intentPayload: { tool_name: "node_action", payload: {} }, channel: "node_voice" }),
+      ),
+    ).toEqual({ sourceMessageId: "u1", toolName: "node_action", payload: {} });
+    for (const channel of ["cli", "openai"] as const) {
+      expect(taskDraftFromMessage(user({ intent: "task_draft", intentPayload: payload, channel }))).toBeNull();
+      expect(
+        toolDraftFromMessage(user({ intent: "tool_request", intentPayload: { tool_name: "x" }, channel })),
+      ).toBeNull();
+    }
+    expect(taskDraftFromMessage(user({ intent: "task_draft", intentPayload: payload, channel: undefined }))).toBeNull();
+  });
+
   it("rebuilds a tool request draft, defaulting a malformed payload to {}", () => {
     expect(
       toolDraftFromMessage(

@@ -946,6 +946,72 @@ describe("ChatView", () => {
     expect(reply.compareDocumentPosition(card) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
+  it("shows a live Mac voice turn's drafts as cards, confirmed only by click; a cli draft stays hidden", async () => {
+    // Phase 11 D4/D15: voice proposes, the screen approves.
+    const live = conversation({ title: "Canlı ses", origin_channel: null, opened_via: "node_voice" });
+    let creates = 0;
+    mockFetch((input, init) => {
+      if (input.startsWith("/api/conversations?")) return json([live]);
+      if (input === "/api/conversations/c1/messages" && isGet(init)) {
+        return json([
+          msg({
+            id: "u1",
+            content: "yarın annemi ara",
+            channel: "node_voice",
+            input_mode: "voice",
+            intent: "task_draft",
+            intent_payload: { title: "Annemi ara", due_date: null },
+          }),
+          msg({ id: "a1", role: "assistant", content: "Kart ekranda.", channel: "node_voice" }),
+          msg({
+            id: "u2",
+            content: "kasayı dışa aktar",
+            channel: "node_voice",
+            input_mode: "voice",
+            intent: "tool_request",
+            intent_payload: { tool_name: "vault_export", payload: {} },
+          }),
+          msg({ id: "a2", role: "assistant", content: "Kart ekranda.", channel: "node_voice" }),
+          msg({
+            id: "u3",
+            content: "cli görevi",
+            channel: "cli",
+            intent: "task_draft",
+            intent_payload: { title: "CLI görevi", due_date: null },
+          }),
+        ]);
+      }
+      if (input === "/api/tasks" && init?.method === "POST") {
+        creates += 1;
+        expect(JSON.parse(init.body as string)).toMatchObject({
+          workspace: "w1",
+          title: "Annemi ara",
+          draft_message_id: "u1",
+        });
+        return json({ id: "t1", workspace: "w1", title: "Annemi ara" }, 201);
+      }
+      if (input.startsWith("/api/approvals")) throw new Error("a persisted voice draft never creates an approval");
+    });
+
+    renderWithClient(<ChatView />);
+    // The empty-or-not live conversation is badged in the list.
+    expect(await column().findByText("Canlı ses (Mac)")).toBeInTheDocument();
+    await userEvent.click(column().getByRole("button", { name: /^Canlı ses\s*Canlı ses \(Mac\)$/ }));
+    await screen.findByPlaceholderText("Friday'ye yaz…");
+    const card = await screen.findByTestId("task-draft-card");
+    expect(within(card).getByText("Annemi ara")).toBeInTheDocument();
+    expect(within(card).getByRole("button", { name: "Görevi onayla" })).toBeInTheDocument();
+    // The persisted tool request is the read-only notice pointing to /approvals.
+    expect(screen.getByTestId("tool-request-notice")).toBeInTheDocument();
+    expect(screen.getAllByTestId("task-draft-card")).toHaveLength(1);
+    expect(screen.queryByText("CLI görevi")).not.toBeInTheDocument();
+    expect(creates).toBe(0);
+
+    await userEvent.click(within(card).getByRole("button", { name: "Görevi onayla" }));
+    await waitFor(() => expect(creates).toBe(1));
+    expect(screen.queryByRole("button", { name: "Onayla" })).not.toBeInTheDocument();
+  });
+
   it("treats a second confirm (already confirmed elsewhere) as confirmed after a refresh", async () => {
     let gets = 0;
     mockFetch((input, init) => {

@@ -27,6 +27,11 @@ export interface HudOrbProps {
   size?: number;
   /** Test seam: WebGL detection. */
   webglAvailable?: () => boolean;
+  /**
+   * Phase 11 D15: whose voice the state is -- the browser's, or the Mac
+   * node's (`voice.state`) while the browser is idle.
+   */
+  source?: "browser" | "node";
 }
 
 export function detectWebGL(): boolean {
@@ -62,6 +67,7 @@ export function HudOrb({
   level,
   size = 260,
   webglAvailable = detectWebGL,
+  source = "browser",
 }: HudOrbProps) {
   // Detected after mount: the server render (and the first client render)
   // is always the canvas orb, so hydration never mismatches.
@@ -74,13 +80,13 @@ export function HudOrb({
   const fallback = <HudCanvasOrb state={state} fps={fps} level={level} size={size} />;
   if (!gl || failed || reducedMotion) {
     return (
-      <div data-testid="hud-orb" data-renderer="canvas" data-state={state}>
+      <div data-testid="hud-orb" data-renderer="canvas" data-state={state} data-source={source}>
         {fallback}
       </div>
     );
   }
   return (
-    <div data-testid="hud-orb" data-renderer="webgl" data-state={state}>
+    <div data-testid="hud-orb" data-renderer="webgl" data-state={state} data-source={source}>
       <GLBoundary fallback={fallback} onError={() => setFailed(true)}>
         <HudOrbGL state={state} fps={fps} level={level} size={size} onFailure={() => setFailed(true)} />
       </GLBoundary>
