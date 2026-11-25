@@ -168,6 +168,20 @@ _PHONE_TR = re.compile(
 )
 _PHONE_E164 = re.compile(r"(?<![\w+])\+[1-9](?:[\s.\-]?\d){7,14}(?!\d)")
 
+# A whole metadata string that is exactly one canonical RFC 4122 UUID (e.g. a
+# `job_id`) is an identifier, not prose: its random digit runs used to be read
+# as a phone/card/TCKN and corrupt the id. Free text gets no such exemption --
+# a UUID inside prose is scrubbed like any other text (over-scrubbing is the
+# safe side). Encoding data on purpose (UUID-shaped, base64, ...) is outside
+# what a pattern scrubber can stop; see ADR-012.
+# Lowercase or uppercase only: a mixed-case 32-hex value keeps going through
+# the secret rules (`high_entropy`), as before. The exemption skips the whole
+# scrub (secret rules and scrub terms too) for a uniform-case UUID value.
+_UUID_VALUE = re.compile(
+    r"[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}"
+    r"|[0-9A-F]{8}-[0-9A-F]{4}-[1-8][0-9A-F]{3}-[89AB][0-9A-F]{3}-[0-9A-F]{12}"
+)
+
 
 def iban_is_valid(candidate):
     compact = candidate.replace(" ", "").upper()
@@ -409,6 +423,8 @@ def scrub_value(value, *, terms=(), _depth=0):
             return None, {}
         return value, {}
     if isinstance(value, str):
+        if _UUID_VALUE.fullmatch(value):
+            return value, {}
         result = scrub_text(value, terms=terms)
         return truncate_scrubbed(result.text, METADATA_MAX_STRING), result.report
     if _depth >= METADATA_MAX_DEPTH:
