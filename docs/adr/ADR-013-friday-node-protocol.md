@@ -645,7 +645,17 @@ Developer ID Application identity and notarization are **not required**.
   App Sandbox requirement); (b) the certificate's validity and expiry, and
   what happens on renewal; (c) TCC grants persist across two rebuilds
   signed with the same identity; (d) Keychain items written by build N are
-  readable by build N+1.
+  readable by build N+1. The shipped build uses Xcode automatic signing,
+  so the entitlements Xcode adds (application identifier, team identifier,
+  keychain access groups) are kept; a manual re-sign uses that full set.
+- **Keychain variant.** The node credential belongs in the data
+  protection keychain, the only macOS keychain that honours
+  `kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly`. If the spike shows
+  it is unavailable to a Personal Team build, the outcome is PARTIAL: the
+  file-based keychain would protect the secret only by the login keychain
+  lock and an ACL bound to the designated requirement. Using it needs a
+  dated, owner-acknowledged residual note in this ADR before Phase 9 M1;
+  otherwise the paid fallback applies.
 - **Fallback.** If the spike fails (a needed entitlement is unavailable to
   a Personal Team, or grants or Keychain items do not persist), the
   original path applies: enrol in the paid program, sign with Developer ID

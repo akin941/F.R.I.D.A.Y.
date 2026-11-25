@@ -1674,22 +1674,37 @@ Apple frameworks unless one goes through the governance manifest
     `URLSessionDelegate`, subprotocol `friday-node.v1`, no `Origin`);
   - `Backoff.swift`;
   - `Credential.swift` (Keychain `kSecClassGenericPassword`, service
-    `friday-node`, `kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly`,
-    no iCloud sync; holds the secret, the TLS SPKI pin and the pinned
-    server keys);
+    `friday-node`, `kSecUseDataProtectionKeychain`,
+    `kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly`, no iCloud sync;
+    holds the secret, the TLS SPKI pin and the pinned server keys).
+    *(2026-11-25, d9 revised)* The file-based (legacy) keychain ignores
+    `kSecAttrAccessible…`; it is used only if the Personal Team spike
+    ended PARTIAL (data protection keychain unavailable) **and** the owner
+    acknowledged a dated ADR-013 residual note (protection is then only
+    the login keychain lock and the ACL bound to the designated
+    requirement);
   - `Pairing.swift` (calls `POST /api/v1/nodes/pair`);
   - `Rotation.swift` (calls `POST /api/v1/auth/nodes/credential/rotate`);
 - `Tests/NodeCoreTests/`;
 - `scripts/build-sign-local.sh` (`Release` configuration only;
-  conformance-marker check on the binary, see contract test 2; then
-  `codesign --force --options runtime --entitlements … --sign "Apple
-  Development: …"` with the Personal Team identity, `codesign --verify
-  --strict`; no notarization, no stapling — revised 2026-11-25, was
-  `scripts/build-sign-notarize.sh`);
-- a `Conformance` build configuration (unsigned, debug, compilation
-  condition `CONFORMANCE`) used only for contract test 2;
-- entitlements: hardened runtime, `com.apple.security.network.client`
-  only. No server entitlement, no microphone.
+  conformance-marker check on the binary before CodeSign, see contract
+  test 2; Xcode automatic signing with the Personal Team "Apple
+  Development" identity and hardened runtime (`xcodebuild
+  -allowProvisioningUpdates CODE_SIGN_STYLE=Automatic`), so the
+  entitlements Xcode adds are kept; `codesign --verify --strict`; no
+  ad-hoc, no notarization, no stapling — revised 2026-11-25, was
+  `scripts/build-sign-notarize.sh`; any manual re-sign uses the full
+  entitlement set extracted from the Xcode-signed build);
+- a `Conformance` build configuration (unsigned — `CODE_SIGNING_ALLOWED =
+  NO` set explicitly — debug, compilation condition `CONFORMANCE`) used
+  only for contract test 2;
+- entitlements: hardened runtime only, plus what Xcode adds for signing
+  and the keychain. M1 is a deliberate subset: no App Sandbox (so no
+  `com.apple.security.network.client`, which has no effect unsandboxed),
+  no server entitlement, no microphone, no Apple Events
+  (`com.apple.security.automation.apple-events` arrives with Phase 10,
+  `com.apple.security.device.audio-input` with Phase 11; the Personal
+  Team spike checks both up front).
 
 **Must satisfy:**
 - **Canonical JSON:** `backend/nodes/protocol/vectors/canonical.json`.

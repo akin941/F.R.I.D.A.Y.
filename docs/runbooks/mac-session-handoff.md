@@ -147,14 +147,22 @@ spike's grants and Keychain items do not leak into `friday-node`.
 
   ```bash
   security find-identity -v -p codesigning | grep "Apple Development"
-  security find-certificate -c "Apple Development" -p \
+  # the identity's SHA-1 (first column); select *that* certificate, not just
+  # the first "Apple Development" one (old or renewed certs may coexist):
+  HASH=$(security find-identity -v -p codesigning | grep -m1 "Apple Development" | awk '{print $2}')
+  security find-certificate -a -Z -c "Apple Development" -p \
+    | awk -v h="$HASH" '/^SHA-1 hash:/ {keep = ($3 == h); next} /^SHA-256 hash:/ {next} keep' \
     | openssl x509 -noout -subject -startdate -enddate
   ```
 
+  If `find-identity` lists more than one valid Apple Development identity,
+  pick the Personal Team's by its SHA-1 and use that hash everywhere
+  below (`codesign --sign "$HASH"` accepts it).
+
   Never copy the certificate, its private key or a `.p12` off this Mac,
   and never put the identity name or Team ID in a committed file (it names
-  the owner); the scripts read it from the Keychain or from the untracked
-  env var `FRIDAY_NODE_SIGN_IDENTITY`.
+  the owner); the scripts read the Team ID from the untracked env var
+  `FRIDAY_NODE_TEAM_ID` and the identity from the Keychain.
 
 **A1.1 — (a) Signing works with hardened runtime and the needed entitlements.**
 
@@ -162,8 +170,9 @@ spike's grants and Keychain items do not leak into `friday-node`.
       product `PTSpike`). Signing & Capabilities: Team = the Personal
       Team, "Automatically manage signing" on, **Hardened Runtime** on
       with *Audio Input* and *Apple Events* ticked, **no App Sandbox**
-      (remove the capability if Xcode added it). `PTSpike.entitlements`
-      must hold exactly:
+      (remove the capability if Xcode added it). The source
+      `PTSpike.entitlements` holds these two keys (Xcode adds its own
+      signing entitlements at build time — see below):
 
   ```xml
   <key>com.apple.security.device.audio-input</key><true/>
@@ -190,23 +199,47 @@ spike's grants and Keychain items do not leak into `friday-node`.
     same with true, or `NSAppleScript` `tell application "System Events"
     to get name of first process`);
   - Keychain: see A1.4.
-- [ ] Build Release and re-sign explicitly with the Apple Development
-      identity and hardened runtime, the way `scripts/build-sign-local.sh`
-      will (B1):
+- [ ] **Shipped path: Xcode automatic signing.** Build Release with
+      Xcode's automatic signing for the Personal Team and hardened
+      runtime, exactly the way `scripts/build-sign-local.sh` will (B1).
+      Do **not** re-sign the result with a hand-written entitlements
+      file: `codesign --force --entitlements <source file>` replaces the
+      entitlements Xcode added (`com.apple.application-identifier`,
+      `com.apple.developer.team-identifier`, `keychain-access-groups`),
+      which would break the data protection keychain test (A1.4) for a
+      reason that has nothing to do with the Personal Team.
 
   ```bash
   cd ~/FridaySpike/PTSpike
+  TEAM=<Personal Team ID from A1.0>          # shell variable only, never committed
   xcodebuild -project PTSpike.xcodeproj -scheme PTSpike -configuration Release \
-    -derivedDataPath build build
+    -derivedDataPath build -allowProvisioningUpdates \
+    CODE_SIGN_STYLE=Automatic DEVELOPMENT_TEAM="$TEAM" ENABLE_HARDENED_RUNTIME=YES build
   APP=build/Build/Products/Release/PTSpike.app
-  IDENTITY=$(security find-identity -v -p codesigning | grep -m1 "Apple Development" | awk -F'"' '{print $2}')
-  codesign --force --options runtime --entitlements PTSpike/PTSpike.entitlements \
-    --sign "$IDENTITY" "$APP"
   codesign --verify --strict --verbose=2 "$APP"                 # "valid on disk", "satisfies its Designated Requirement"
   codesign -dv --verbose=4 "$APP" 2>&1 | grep -E "Identifier|Authority|TeamIdentifier|flags|Runtime"
-  codesign -d --entitlements - "$APP"                           # exactly the two entitlements above (plus any Xcode adds — record them)
+  codesign -d --entitlements - "$APP"                           # the two source keys plus whatever Xcode added — record the full list
   codesign -d -r- "$APP"                                        # the designated requirement
   ```
+
+  Expected entitlements: the two source keys, plus — if Xcode provisioned
+  the app — `com.apple.application-identifier`,
+  `com.apple.developer.team-identifier` and possibly
+  `keychain-access-groups`. Record the full list; it is the entitlement
+  set B1 ships with.
+- [ ] **Manual re-sign only if needed** (for example, a step Xcode cannot
+      do). Re-sign with the **full** entitlement set extracted from the
+      Xcode-signed build, never with the source file:
+
+  ```bash
+  codesign -d --entitlements :- "$APP" > ~/FridaySpike/full.entitlements   # from the Xcode-signed build
+  codesign --force --options runtime --entitlements ~/FridaySpike/full.entitlements \
+    --sign "$HASH" "$APP"
+  ```
+
+  Then re-run the four checks above. If restricted entitlements are
+  present (`application-identifier`, `keychain-access-groups`), the
+  embedded provisioning profile must stay in the bundle and valid.
 
   Expect `flags=0x10000(runtime)`, `Authority=Apple Development: …`,
   `Authority=Apple Worldwide Developer Relations Certification Authority`,
@@ -231,8 +264,9 @@ spike's grants and Keychain items do not leak into `friday-node`.
       (`ls "$APP/Contents/embedded.provisionprofile"`). If it did, record
       its expiry:
       `security cms -D -i "$APP/Contents/embedded.provisionprofile" | plutil -p - | grep -E 'Name|ExpirationDate|TeamIdentifier'`.
-      The two hardened-runtime entitlements above should not need one; if
-      a profile is required, record why.
+      The two hardened-runtime entitlements alone do not need one; Xcode
+      embeds one when it adds `application-identifier` /
+      `keychain-access-groups`. Record whether it did and why.
 
 **A1.2 — (b) Certificate validity, expiry and renewal.**
 
@@ -272,6 +306,14 @@ spike's grants and Keychain items do not leak into `friday-node`.
       prompt**, and `status-<N+1>.txt` shows all five still granted.
 - [ ] Build N+2: the same again. Two consecutive rebuilds must keep every
       grant.
+- [ ] **Do not misread Sequoia re-prompts.** macOS 15 (Sequoia) and later
+      periodically ask again whether an app may keep recording the screen
+      (and after some updates), regardless of how the app is signed. Such
+      a prompt is not a lost grant: the check is whether
+      `CGPreflightScreenCaptureAccess()` is still true right after a
+      rebuild and whether the app stays listed and switched on in System
+      Settings. Record any periodic prompt with its date, separately from
+      the rebuild result.
 - [ ] Inspect the grants in System Settings → Privacy & Security (each
       pane lists `PTSpike` switched on). Do not read `TCC.db` directly.
       Use `tccutil reset <Service> <bundle id>` (services `Microphone`,
@@ -282,20 +324,41 @@ spike's grants and Keychain items do not leak into `friday-node`.
 
 **A1.4 — (d) Keychain items written by build N are readable by build N+1.**
 
-- [ ] Build N writes a `kSecClassGenericPassword` item with service
-      `friday-node-spike`, account `spike`, and the same attributes
+- [ ] Build N — the **Xcode-signed** build from A1.1 with its full
+      entitlement set, never a build re-signed with the source
+      entitlements file — writes a `kSecClassGenericPassword` item with
+      service `friday-node-spike`, account `spike`, and the same attributes
       `Credential.swift` will use (B1:
       `kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly`, no iCloud sync).
-      Try it twice: with the default (file-based) keychain, and with
-      `kSecUseDataProtectionKeychain: true`. Record the `OSStatus` of each
-      (`-34018` `errSecMissingEntitlement` on the second means the data
-      protection keychain is not available to this Personal Team build —
-      `Credential.swift` then uses the file-based keychain; record that in
-      the B1 notes).
+      Try it twice:
+      1. **Data protection keychain** (`kSecUseDataProtectionKeychain:
+         true`) — the preferred path, because only this keychain honours
+         `kSecAttrAccessible…` (`AfterFirstUnlockThisDeviceOnly`: not
+         readable before first unlock, never migrated to another device).
+      2. **File-based (legacy) keychain** (the default on macOS).
+
+      Record the `OSStatus` of each. `-34018` (`errSecMissingEntitlement`)
+      on the first **may** mean a missing `keychain-access-groups` /
+      `application-identifier` entitlement or provisioning profile (for
+      example, Xcode did not provision the app, or it was re-signed without
+      them) rather than a Personal Team limit: check
+      `codesign -d --entitlements -` and the embedded profile first, fix
+      the build, and retry before concluding anything.
 - [ ] Builds N+1 and N+2 read the item back **without** a Keychain access
       prompt ("PTSpike wants to use your confidential information…"). A
       prompt means the item's access control no longer matches the
       designated requirement: a failure.
+- [ ] **If only the file-based keychain works**, the outcome is
+      **PARTIAL**, not a pass: the legacy file-based keychain ignores
+      `kSecAttrAccessible…`, so `AfterFirstUnlockThisDeviceOnly` is lost.
+      The node secret is then protected only by the login keychain (locked
+      with the owner's login) and the item's ACL bound to the designated
+      requirement; nothing stops it being part of a keychain backup or
+      migration. B1 may start on this path only after the owner
+      acknowledges it in a dated **residual note in ADR-013** (on the same
+      `docs/p9-personal-team-spike` branch) — not as a silent B1 note —
+      or the owner chooses the paid fallback (A1-F) to get the data
+      protection keychain.
 - [ ] Clean up: delete the spike items from the app (or Keychain Access),
       `tccutil reset All <spike bundle id>`, remove
       `/Applications/PTSpike.app`. Keep `~/FridaySpike/` notes until the
@@ -303,10 +366,14 @@ spike's grants and Keychain items do not leak into `friday-node`.
 
 **A1.5 — Result and fallback.**
 
-- [ ] **Pass** = (a) signs with hardened runtime and both entitlements, no
-      sandbox; (b) dates recorded (renewal tested or reminded); (c) all
-      five grants survive two rebuilds; (d) the item is read without a
-      prompt by N+1 and N+2. Record the result (macOS and Xcode versions,
+- [ ] **Pass** = (a) the Xcode-signed build has hardened runtime and both
+      entitlements, no sandbox; (b) dates recorded (renewal tested or
+      reminded); (c) all five grants survive two rebuilds; (d) the item,
+      in the **data protection keychain**, is read without a prompt by
+      N+1 and N+2.
+- [ ] **Partial** = everything passes but (d) works only with the
+      file-based keychain (A1.4): record it, and B1 waits for the
+      owner-acknowledged ADR-013 residual note (or A1-F). Record the result (macOS and Xcode versions,
       date, the requirement's *form* without the owner's name, cert and
       profile expiry, keychain variant used, per-check pass/fail) as a
       dated implementation note in ADR-013 ("Implementation notes —
@@ -341,7 +408,7 @@ d9 path:
 
   ```bash
   xcrun notarytool store-credentials friday-notary \
-    --apple-id <owner apple id> --team-id <TEAMID> --password <app-specific password>
+    --apple-id <owner apple id> --team-id <TEAMID>   # no --password: it prompts, so the secret stays out of shell history
   xcrun notarytool history --keychain-profile friday-notary   # must list without error
   ```
 
@@ -557,7 +624,7 @@ Common commands for every B branch:
 cd node/friday-node
 swift build
 swift test                                            # NodeCoreTests, Debug
-xcodebuild -scheme FridayNode -configuration Conformance build   # unsigned, CONFORMANCE condition
+xcodebuild -scheme FridayNode -configuration Conformance CODE_SIGNING_ALLOWED=NO build   # unsigned, CONFORMANCE condition
 xcodebuild -scheme FridayNode -configuration Release test \
   -only-testing:NodeCoreTests/ReleaseHygieneTests      # the conformance pin type is not compiled in
 scripts/build-sign-local.sh                            # Release only; refuses conformance markers; Personal Team signing + hardened runtime
@@ -573,9 +640,11 @@ uv run python manage.py build_node_conformance --check
 **The conformance build rule (ADR-013 decisions 2 and 4).** Everything
 that pins the fake server's self-signed SPKI or the conformance key sits
 inside `#if CONFORMANCE … #endif` in the separate, unsigned `Conformance`
-configuration. The release build has **no** environment variable, user
-default or launch argument that changes the TLS pin, the pinned signing
-keys or the server URL. The conformance build is never signed with the
+configuration (`CODE_SIGNING_ALLOWED = NO` set explicitly in that
+configuration's build settings, and on the command line above). The
+release build has **no** environment variable, user default or launch
+argument that changes the TLS pin, the pinned signing keys or the server
+URL. The conformance build is never signed with the
 Personal Team identity (or any Developer ID), never notarised and never a
 login item. `scripts/build-sign-local.sh` fails before `codesign` if
 `strings` on the release Mach-O finds `FRIDAY_NODE_CONFORMANCE`,
@@ -584,24 +653,36 @@ login item. `scripts/build-sign-local.sh` fails before `codesign` if
 
 **`scripts/build-sign-local.sh` (d9 revised 2026-11-25; replaces
 `build-sign-notarize.sh`).** It builds the `Release` configuration only,
-runs the conformance-marker refusal above, then signs with the Personal
-Team identity and hardened runtime and verifies:
+with Xcode automatic signing for the Personal Team and hardened runtime
+(the path A1.1 proved), so the app keeps the full entitlement set Xcode
+adds. The conformance-marker refusal above still runs **before
+`codesign`**: it is a Release-only "Run Script" build phase placed after
+linking, which Xcode runs before its CodeSign step, and the script
+repeats it on the final Mach-O before installing anything:
 
 ```bash
-IDENTITY=${FRIDAY_NODE_SIGN_IDENTITY:-$(security find-identity -v -p codesigning   | grep -m1 "Apple Development" | awk -F'"' '{print $2}')}
-[ -n "$IDENTITY" ] && [ "$IDENTITY" != "-" ] || { echo "no Apple Development identity (A1)"; exit 1; }
-codesign --force --options runtime --entitlements FridayNode/FridayNode.entitlements   --sign "$IDENTITY" "$APP"
+TEAM=${FRIDAY_NODE_TEAM_ID:?set FRIDAY_NODE_TEAM_ID (untracked env, A1.0)}
+xcodebuild -scheme FridayNode -configuration Release -derivedDataPath build \
+  -allowProvisioningUpdates CODE_SIGN_STYLE=Automatic DEVELOPMENT_TEAM="$TEAM" \
+  ENABLE_HARDENED_RUNTIME=YES build          # the Run Script phase fails the build on a marker
+APP=build/Build/Products/Release/FridayNode.app
+# repeat the marker check on the final binary (same strings check as the build phase)
 codesign --verify --strict --verbose=2 "$APP"
+codesign -dv --verbose=4 "$APP" 2>&1 | grep -q "Authority=Apple Development" \
+  || { echo "not signed with an Apple Development identity (A1)"; exit 1; }
 codesign -d -r- "$APP" 2>&1 | grep -q cdhash && { echo "ad-hoc requirement: refusing"; exit 1; }
 ```
 
-It refuses ad-hoc signing (`-`, or a requirement with `cdhash`), warns if
-the designated requirement differs from the one recorded in the untracked
+It refuses ad-hoc signing (a requirement with `cdhash`) or any identity
+other than Apple Development, warns if the designated requirement differs
+from the one recorded in the untracked
 `~/.config/friday-node/designated-requirement.txt` (a change means every
-TCC grant and Keychain item is lost), and installs with `ditto` to
-`/Applications/FridayNode.app`. No notarization and no stapling. Nested
-code (helpers, frameworks) is signed inside-out before the app; never
-`--deep`. The identity name and Team ID are never committed.
+TCC grant and Keychain item is lost), and only then installs with `ditto`
+to `/Applications/FridayNode.app`. No notarization and no stapling. A
+manual re-sign, if ever needed, uses the full entitlement set extracted
+from the Xcode-signed build (A1.1), never the source entitlements file;
+nested code (helpers, frameworks) is signed inside-out before the app,
+never `--deep`. The Team ID and identity name are never committed.
 
 ### B1. Phase 9 M1 — `feat/p9-node-app`: shell, identity, session, verifier
 
@@ -616,16 +697,26 @@ and 9; ADR-013.
       `friday-node.v2, friday-node.v1` as the v2 work lands, **no
       `Origin`**), `Backoff.swift`, `Credential.swift` (Keychain
       `kSecClassGenericPassword`, service `friday-node`,
+      `kSecUseDataProtectionKeychain`,
       `kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly`, no iCloud sync;
-      the secret, the TLS SPKI pin and the pinned server keys),
+      the secret, the TLS SPKI pin and the pinned server keys; the
+      file-based keychain, which drops the `kSecAttrAccessible…`
+      protection, only if A1 ended PARTIAL and the owner acknowledged the
+      ADR-013 residual note),
       `Pairing.swift` (`POST /api/v1/nodes/pair`), `Rotation.swift`
       (`POST /api/v1/auth/nodes/credential/rotate`; persist the new secret
       **before** finishing the call — ADR-013 residual);
       `scripts/build-sign-local.sh` (Release only, conformance-marker
-      refusal, `codesign --force --options runtime` with the Personal Team
-      "Apple Development" identity, `codesign --verify --strict`, no
-      ad-hoc, no notarization — see Part B intro); entitlements: hardened
-      runtime and `com.apple.security.network.client` only.
+      refusal before CodeSign, Xcode automatic signing with the Personal
+      Team "Apple Development" identity and hardened runtime,
+      `codesign --verify --strict`, no ad-hoc, no notarization — see
+      Part B intro); entitlements: hardened runtime only, plus whatever
+      Xcode adds for signing and the keychain (A1.1). M1 is a deliberate
+      subset: no App Sandbox (so no `com.apple.security.network.client`,
+      which has no effect unsandboxed), no microphone, no Apple Events.
+      `com.apple.security.automation.apple-events` arrives with Phase 10
+      M2 (B6) and `com.apple.security.device.audio-input` with Phase 11
+      M1 (B7); A1 already proved both.
 - [ ] Gateway behaviour (Phase 9 branch 4 owner step 6): `Authorization:
       Bearer <jnd_…>`, `hello` within 10 s, heartbeat every 15 s (45 s of
       silence closes 4408), ≤ 20 frames/s and ≤ 256 KiB per frame, one
@@ -1038,7 +1129,7 @@ in the record, with the dominant stage named.
 
 Needs: A7, A8, A11.
 
-- [ ] **A1 spike (paid):** one real OpenRouter STT call (30 s WAV) and one
+- [ ] **Phase 6 OpenRouter audio spike (paid; Phase 6 "A1"):** one real OpenRouter STT call (30 s WAV) and one
       TTS call; confirm `usage.cost`, the PCM `Content-Type` rate,
       `/generation?id=` `total_cost`, and which voices speak Turkish;
       correct seeded prices/model ids if needed.

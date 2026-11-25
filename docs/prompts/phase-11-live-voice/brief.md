@@ -87,8 +87,8 @@
 >   through the same engine, the menu-bar mic indicator, the global
 >   hotkey, the Microphone TCC grant, passing the voice credential from
 >   the Keychain-held node secret), the MLX Whisper speech server on the
->   Mac, re-signing the updated app with the Personal Team identity (d9
->   revised 2026-11-25; no notarization), the nightly self-trigger run
+>   Mac, rebuilding and signing the updated app with the Personal Team
+>   identity (d9 revised 2026-11-25; no notarization), the nightly self-trigger run
 >   with real models and real speakers, and every real-world measurement
 >   (FAR on 24 h of household audio, FRR, latency, barge-in stop time,
 >   CPU). These are listed under "Mac session (deferred)" and marked
