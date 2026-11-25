@@ -163,6 +163,14 @@ _PHONE_TR = re.compile(
     r"(?<![\w+])(?:(?:\+|00)90[\s.\-]?|0)?\(?[2-5]\d{2}\)?[\s.\-]?\d{3}[\s.\-]?\d{2}[\s.\-]?\d{2}(?!\d)"
 )
 _PHONE_E164 = re.compile(r"(?<![\w+])\+[1-9](?:[\s.\-]?\d){7,14}(?!\d)")
+# A canonical UUID (8-4-4-4-12 hex). Its digit runs are random, so a PII rule
+# could read "23932636-83..." as a phone or card number and corrupt an id
+# (e.g. a `job_id` in episode metadata). PII rules skip matches overlapping
+# one; secret rules still run over it first.
+_UUID = re.compile(
+    r"(?<![0-9A-Fa-f\-])[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}"
+    r"(?![0-9A-Fa-f\-])"
+)
 
 
 def iban_is_valid(candidate):
@@ -252,10 +260,14 @@ class _Scrubber:
             return None
         return match.span(group)
 
-    def _apply(self, text, pattern, kind, name, group=None, validate=None):
+    def _apply(self, text, pattern, kind, name, group=None, validate=None, shield=None):
         out = []
         last = 0
         spans = [m.span() for m in PLACEHOLDER_RE.finditer(text)]
+        if shield is not None:
+            # Placeholders and shielded tokens never overlap (a placeholder
+            # holds "[", a shield token does not), so the merge stays disjoint.
+            spans = sorted(spans + [m.span() for m in shield.finditer(text)])
         for match in pattern.finditer(text):
             span = self._span(match, group)
             if span is None:
@@ -289,16 +301,29 @@ class _Scrubber:
         )
 
     def pii(self, text):
-        text = self._apply(text, _IBAN_CANDIDATE, PII, "iban", validate=_longest_valid_iban)
+        shield = _UUID
         text = self._apply(
-            text, _CARD_CANDIDATE, PII, "card", validate=lambda v: v if luhn_is_valid(v) else None
+            text, _IBAN_CANDIDATE, PII, "iban", validate=_longest_valid_iban, shield=shield
         )
         text = self._apply(
-            text, _TCKN_CANDIDATE, PII, "tckn", validate=lambda v: v if tckn_is_valid(v) else None
+            text,
+            _CARD_CANDIDATE,
+            PII,
+            "card",
+            validate=lambda v: v if luhn_is_valid(v) else None,
+            shield=shield,
+        )
+        text = self._apply(
+            text,
+            _TCKN_CANDIDATE,
+            PII,
+            "tckn",
+            validate=lambda v: v if tckn_is_valid(v) else None,
+            shield=shield,
         )
         text = self._apply(text, _EMAIL, PII, "email")
-        text = self._apply(text, _PHONE_TR, PII, "phone")
-        return self._apply(text, _PHONE_E164, PII, "phone")
+        text = self._apply(text, _PHONE_TR, PII, "phone", shield=shield)
+        return self._apply(text, _PHONE_E164, PII, "phone", shield=shield)
 
     def term_rules(self, text):
         for term_id, term in self.terms:

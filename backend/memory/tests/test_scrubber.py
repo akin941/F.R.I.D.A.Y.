@@ -286,3 +286,36 @@ def test_metadata_string_and_key_caps_never_split_a_placeholder():
     assert out_value == "x" * (scrubber.METADATA_MAX_STRING - 5) + " "
     assert out_key == "k" * (scrubber.METADATA_MAX_KEY - 5) + " "
     assert report == {"SECRET:aws_key": 2}
+
+
+# --- UUIDs are not PII (regression: flaky harness outcome ingestion) ---------
+
+# Real uuid4 values whose digit runs a PII rule used to read as a phone or a
+# card number, corrupting a `job_id` in episode metadata.
+_UUIDS_THAT_LOOK_LIKE_PII = [
+    "23932636-83e3-4882-9336-af7bbc1efa76",
+    "39028399-98fb-4577-bae1-ac182c54de0b",
+    "17970375-8783-4471-a1fa-aec062311d6c",
+]
+
+
+@pytest.mark.parametrize("value", _UUIDS_THAT_LOOK_LIKE_PII)
+def test_uuid_is_never_read_as_pii(value):
+    assert scrubber.scrub_text(value).text == value
+    assert scrubber.scrub_value({"job_id": value})[0] == {"job_id": value}
+
+
+def test_random_uuids_survive_scrubbing():
+    import uuid
+
+    for _ in range(5000):
+        value = str(uuid.uuid4())
+        assert scrubber.scrub_text(value).text == value
+
+
+def test_pii_next_to_a_uuid_is_still_scrubbed():
+    text = f"job {_UUIDS_THAT_LOOK_LIKE_PII[0]} called 0532 123 45 67"
+    result = scrubber.scrub_text(text)
+    assert _UUIDS_THAT_LOOK_LIKE_PII[0] in result.text
+    assert "[PII:phone]" in result.text
+    assert "0532" not in result.text
