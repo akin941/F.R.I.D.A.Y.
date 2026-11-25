@@ -363,3 +363,16 @@ records how they relate to this ADR:
 - **No feedback loop.** Skills mounted into a later job live outside the
   clone; a produced commit touching `.claude/skills/` fails closed, and
   such paths never reach a playbook source.
+
+## Note 2026-11-25 — UUID-valued metadata (scrubber threat model)
+
+Random uuid4 identifiers in episode metadata (e.g. `job_id`) were sometimes
+read as a phone, card or TCKN and corrupted. `scrub_value` now keeps a
+metadata string that is **exactly one** canonical RFC 4122 UUID unchanged.
+Free text gets no exemption: a UUID inside prose is scrubbed like any other
+text, so over-scrubbing stays the failure mode. Threat model: the scrubber
+stops *accidental* secrets and third-party PII in the owner's own sources; it
+cannot stop deliberate encoding (a number hidden in a UUID-shaped value,
+base64, spelled-out digits). That residual is accepted here. An earlier
+in-text "UUID shield" was rejected in review because it opened PII bypasses
+(IBAN followed by a UUID; a number inside a UUID-shaped token).

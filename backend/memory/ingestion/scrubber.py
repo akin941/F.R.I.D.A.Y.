@@ -163,21 +163,16 @@ _PHONE_TR = re.compile(
     r"(?<![\w+])(?:(?:\+|00)90[\s.\-]?|0)?\(?[2-5]\d{2}\)?[\s.\-]?\d{3}[\s.\-]?\d{2}[\s.\-]?\d{2}(?!\d)"
 )
 _PHONE_E164 = re.compile(r"(?<![\w+])\+[1-9](?:[\s.\-]?\d){7,14}(?!\d)")
-# An RFC 4122 UUID (8-4-4-4-12 hex, version 1-8, variant 8/9/a/b). Its digit
-# runs are random, so the phone and card rules could read "23932636-83..." as
-# a number and corrupt an id (e.g. a `job_id` in episode metadata). Only those
-# two rules consult the shield, only for a UUID that holds at least one hex
-# letter (an all-digit "UUID" could be a smuggled number), and only after the
-# candidate was validated and trimmed. IBAN and TCKN carry strict checksums and
-# stay unshielded; secret rules run first and are unaffected.
-_UUID = re.compile(
-    r"(?<![0-9A-Fa-f\-])[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[1-8][0-9A-Fa-f]{3}-[89ABab][0-9A-Fa-f]{3}-"
-    r"[0-9A-Fa-f]{12}(?![0-9A-Fa-f\-])"
+
+# A whole metadata string that is exactly one canonical RFC 4122 UUID (e.g. a
+# `job_id`) is an identifier, not prose: its random digit runs used to be read
+# as a phone/card/TCKN and corrupt the id. Free text gets no such exemption --
+# a UUID inside prose is scrubbed like any other text (over-scrubbing is the
+# safe side). Encoding data on purpose (UUID-shaped, base64, ...) is outside
+# what a pattern scrubber can stop; see ADR-012.
+_UUID_VALUE = re.compile(
+    r"[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[1-8][0-9A-Fa-f]{3}-[89ABab][0-9A-Fa-f]{3}-[0-9A-Fa-f]{12}"
 )
-
-
-def _uuid_spans(text):
-    return [m.span() for m in _UUID.finditer(text) if re.search(r"[A-Fa-f]", m.group())]
 
 
 def iban_is_valid(candidate):
@@ -267,11 +262,10 @@ class _Scrubber:
             return None
         return match.span(group)
 
-    def _apply(self, text, pattern, kind, name, group=None, validate=None, shield=False):
+    def _apply(self, text, pattern, kind, name, group=None, validate=None):
         out = []
         last = 0
         spans = [m.span() for m in PLACEHOLDER_RE.finditer(text)]
-        shielded = _uuid_spans(text) if shield else []
         for match in pattern.finditer(text):
             span = self._span(match, group)
             if span is None:
@@ -287,9 +281,6 @@ class _Scrubber:
                 if trimmed is None:
                     continue
                 end = start + len(trimmed)
-            # The shield is checked on the final (validated, trimmed) span.
-            if any(start < s_end and s_start < end for s_start, s_end in shielded):
-                continue
             out.append(text[last:start])
             out.append(self._hit(kind, name))
             last = end
@@ -310,19 +301,14 @@ class _Scrubber:
     def pii(self, text):
         text = self._apply(text, _IBAN_CANDIDATE, PII, "iban", validate=_longest_valid_iban)
         text = self._apply(
-            text,
-            _CARD_CANDIDATE,
-            PII,
-            "card",
-            validate=lambda v: v if luhn_is_valid(v) else None,
-            shield=True,
+            text, _CARD_CANDIDATE, PII, "card", validate=lambda v: v if luhn_is_valid(v) else None
         )
         text = self._apply(
             text, _TCKN_CANDIDATE, PII, "tckn", validate=lambda v: v if tckn_is_valid(v) else None
         )
         text = self._apply(text, _EMAIL, PII, "email")
-        text = self._apply(text, _PHONE_TR, PII, "phone", shield=True)
-        return self._apply(text, _PHONE_E164, PII, "phone", shield=True)
+        text = self._apply(text, _PHONE_TR, PII, "phone")
+        return self._apply(text, _PHONE_E164, PII, "phone")
 
     def term_rules(self, text):
         for term_id, term in self.terms:
@@ -429,6 +415,8 @@ def scrub_value(value, *, terms=(), _depth=0):
             return None, {}
         return value, {}
     if isinstance(value, str):
+        if _UUID_VALUE.fullmatch(value):
+            return value, {}
         result = scrub_text(value, terms=terms)
         return truncate_scrubbed(result.text, METADATA_MAX_STRING), result.report
     if _depth >= METADATA_MAX_DEPTH:

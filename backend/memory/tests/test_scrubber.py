@@ -11,6 +11,7 @@ reported; benign items must come through unchanged.
 """
 
 import json
+import random
 import re
 import time
 from pathlib import Path
@@ -288,66 +289,53 @@ def test_metadata_string_and_key_caps_never_split_a_placeholder():
     assert report == {"SECRET:aws_key": 2}
 
 
-# --- UUIDs are not PII (regression: flaky harness outcome ingestion) ---------
+# --- UUID-valued metadata is not PII (regression: flaky outcome ingestion) --
 
-# Real uuid4 values whose digit runs a PII rule used to read as a phone or a
-# card number, corrupting a `job_id` in episode metadata.
+# Real uuid4 values whose digit runs a PII rule reads as a phone, card or TCKN.
 _UUIDS_THAT_LOOK_LIKE_PII = [
     "23932636-83e3-4882-9336-af7bbc1efa76",
     "39028399-98fb-4577-bae1-ac182c54de0b",
     "17970375-8783-4471-a1fa-aec062311d6c",
+    "bf7ed1d8-5dfd-40ee-bf54-c47750906176",
 ]
 
 
 @pytest.mark.parametrize("value", _UUIDS_THAT_LOOK_LIKE_PII)
-def test_uuid_is_never_read_as_pii(value):
-    assert scrubber.scrub_text(value).text == value
-    assert scrubber.scrub_value({"job_id": value})[0] == {"job_id": value}
+def test_uuid_metadata_value_is_kept(value):
+    assert scrubber.scrub_value({"job_id": value}) == ({"job_id": value}, {})
+    assert scrubber.scrub_value([value.upper()])[0] == [value.upper()]
 
 
-def test_random_uuids_survive_scrubbing():
+def test_random_uuid_metadata_values_survive():
     import uuid
 
-    for _ in range(5000):
-        value = str(uuid.uuid4())
-        assert scrubber.scrub_text(value).text == value
+    rng = random.Random(20261125)
+    for _ in range(50000):
+        value = str(uuid.UUID(int=rng.getrandbits(128), version=4))
+        assert scrubber.scrub_value({"id": value})[0] == {"id": value}
 
 
-def test_pii_next_to_a_uuid_is_still_scrubbed():
-    text = f"job {_UUIDS_THAT_LOOK_LIKE_PII[0]} called 0532 123 45 67"
-    result = scrubber.scrub_text(text)
-    assert _UUIDS_THAT_LOOK_LIKE_PII[0] in result.text
-    assert "[PII:phone]" in result.text
-    assert "0532" not in result.text
+@pytest.mark.parametrize(
+    "text, kind",
+    [
+        ("TR33 0006 1005 1978 6457 8413 26 23932636-83e3-4882-9336-af7bbc1efa76", "iban"),
+        ("00000000-0000-0000-0000-a10000000146", "tckn"),
+        ("12345678-1234-4123-8123-05321234567a", "phone"),
+        ("call 12345678-1234-4123-8123-05321234567a now", "phone"),
+        ("job 23932636-83e3-4882-9336-af7bbc1efa76 called 0532 123 45 67", "phone"),
+    ],
+)
+def test_pii_in_or_near_uuid_shaped_text_is_scrubbed(text, kind):
+    assert f"[PII:{kind}]" in scrubber.scrub_text(text).text
+    if not scrubber._UUID_VALUE.fullmatch(text):
+        # A metadata value that IS one RFC 4122 UUID is exempt by design
+        # (deliberate encoding is out of scope, ADR-012); everything else is not.
+        assert f"[PII:{kind}]" in scrubber.scrub_value({"note": text})[0]["note"]
 
 
-# --- UUID shield cannot be used to smuggle PII (review 2026-11-25) ----------
-
-_UUID_A = "23932636-83e3-4882-9336-af7bbc1efa76"
-
-
-def test_iban_followed_by_a_uuid_is_still_scrubbed():
-    for uuid_value in (_UUID_A, _UUID_A.upper()):
-        result = scrubber.scrub_text(f"TR33 0006 1005 1978 6457 8413 26 {uuid_value}")
-        assert "[PII:iban]" in result.text
-        assert "6457" not in result.text
-
-
-def test_tckn_inside_a_uuid_shaped_token_is_still_scrubbed():
-    result = scrubber.scrub_text("00000000-0000-0000-0000-a10000000146")
-    assert "[PII:tckn]" in result.text
-
-
-def test_all_digit_uuid_shape_is_not_shielded():
-    # A crafted, RFC-4122-valid but all-digit token gets no shield.
-    value = "41111111-1111-4111-8111-111111111111"
-    assert _uuid_shield_spans(value) == []
-
-
-def test_non_rfc4122_uuid_shape_is_not_shielded():
-    assert _uuid_shield_spans("23932636-83e3-0882-9336-af7bbc1efa76") == []  # version 0
-    assert _uuid_shield_spans("23932636-83e3-4882-c336-af7bbc1efa76") == []  # variant c
-
-
-def _uuid_shield_spans(text):
-    return scrubber._uuid_spans(text)
+def test_uuid_exemption_needs_the_whole_value():
+    value = "x 23932636-83e3-4882-9336-af7bbc1efa76"
+    assert scrubber.scrub_value({"id": value})[0]["id"] != value  # prose: scrubbed as text
+    assert scrubber.scrub_value({"id": "00000000-0000-0000-0000-a10000000146"})[0] != {
+        "id": "00000000-0000-0000-0000-a10000000146"
+    }  # not RFC 4122 (version 0): no exemption
