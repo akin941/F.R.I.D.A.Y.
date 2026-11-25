@@ -70,7 +70,9 @@ Not done yet:
   - 6 `feat/p10-codex-app-server`: implemented, not yet reviewed. It is in the bundle.
   - 7 `feat/p10-claude-agent-sdk` and 8 `chore/p10-closeout`.
 - **Phases 11 and 12:** briefs and branches not started.
-- **Final step:** `docs/mac-session-handoff`.
+- **Final step:** `docs/mac-session-handoff` -- implemented 2026-11-20:
+  `docs/runbooks/mac-session-handoff.md` (the ordered Mac checklist; MASTER_PLAN §AA
+  status rows point to it).
 
 Known issues the swarm must fix first:
 
