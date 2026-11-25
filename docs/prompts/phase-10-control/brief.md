@@ -1,5 +1,16 @@
 # Phase 10 — Control, with approval (server side + Mac session)
 
+> **Amendment 2026-11-25 (d9 revised).** Apple signing no longer requires
+> the paid Apple Developer Program, Developer ID or notarization:
+> `friday-node` runs only on the owner's own Mac and is signed with the
+> free Apple ID Personal Team "Apple Development" identity (hardened
+> runtime, stable across rebuilds; never ad-hoc for builds holding TCC
+> grants). Read "notarized build" below as "Personal Team signed build" and
+> "TCC across updates … same Developer ID" as "TCC across rebuilds signed
+> by the same Personal Team identity". The paid path is only the fallback
+> if the Personal Team spike (`docs/runbooks/mac-session-handoff.md` A1)
+> fails. See MASTER_PLAN §O d9 and the ADR-013 amendment of 2026-11-25.
+
 > Status: **Draft (2026-11-20). Written on `docs/p10-brief` from the stub of
 > the same date, which was taken from the owner-approved Friday 3.0
 > roadmap. It needs its independent Sonnet 5 plan review before branch 1,
@@ -56,7 +67,8 @@
 > - **Not built here:** everything that must be built, signed or run on
 >   macOS: the Swift confirmation window, the `srt` executor under macOS
 >   Seatbelt, AppleScript recipes, AX primitives, the Automation and
->   Accessibility TCC grants, Touch ID for policy edits, notarization, and
+>   Accessibility TCC grants, Touch ID for policy edits, local Personal
+>   Team signing (d9 revised 2026-11-25; no notarization), and
 >   the ADR-014 evidence run on the real Mac. These are listed under
 >   "Mac session (deferred)" and marked "deferred: Mac session" in the
 >   branch table. They must pass the conformance, fuzz and escape suites
@@ -1371,8 +1383,8 @@ session starts from this section, the merged branches 1–5 and the files
 they name.
 
 **Preconditions:**
-- Phase 9 M1–M3 merged (signed, notarized app; Keychain credential; WSS
-  session; v1 verifier; readers; local policy UI behind
+- Phase 9 M1–M3 merged (Personal Team signed app, d9 revised 2026-11-25;
+  Keychain credential; WSS session; v1 verifier; readers; local policy UI behind
   LocalAuthentication);
 - branches 1–3 merged here (v2 schemas, grant vectors, capability
   contracts, conformance cases v2, sandbox vectors, escape suite);
@@ -1485,8 +1497,9 @@ amendment.
    runs).
 2. Kill switch and socket loss close an open window ≤ 2 s; a running
    command is stopped ≤ 6 s.
-3. TCC: Accessibility and Automation grants survive an update signed by
-   the same Developer ID (Phase 9 M4 item 1 pattern).
+3. TCC: Accessibility and Automation grants survive a rebuild signed by
+   the same Personal Team identity (Phase 9 M4 item 1 pattern; d9
+   revised 2026-11-25).
 4. A real `pytest` run of a registered repo under `srt` with network
    denied completes and streams; a test that opens a socket fails.
 
@@ -1505,7 +1518,7 @@ decision recorded".
 | Preflight green with the reference node (v2) paired | `config/tests/test_reference_node_preflight.py` (uvicorn gateway process, `run_reference_node` on v2) | **pass in process (2026-11-20)**: every node and control row passes except the documented warnings (`node_tls_pin` unset, `node_escape_suite` Mac evidence pending); the run on the owner's dev stack is an owner step |
 | Conformance v2 and fuzz, Swift app | M1/M2 contract tests | pending owner evaluation (Mac session) |
 | Escape suite under macOS `srt` | M3 | pending owner evaluation (Mac session) |
-| Window latency, close-on-loss, TCC across updates | M4 | pending owner evaluation (Mac session) |
+| Window latency, close-on-loss, TCC across rebuilds (same Personal Team identity) | M4 | pending owner evaluation (Mac session) |
 | Drivers enabled after d4 | Owner step 1 + `harness_drivers` preflight | pending owner evaluation — both drivers off; `harness_drivers` passes while disabled and fails for an enabled driver without d4, on a provisional snapshot or with disagreeing pins |
 
 **Checkpoint verdict (server half, 2026-11-20): go.** The stub checkpoint

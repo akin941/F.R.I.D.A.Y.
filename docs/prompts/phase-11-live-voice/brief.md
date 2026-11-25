@@ -1,5 +1,16 @@
 # Phase 11 — Local live voice (server side + Mac session)
 
+> **Amendment 2026-11-25 (d9 revised).** Apple signing no longer requires
+> the paid Apple Developer Program, Developer ID or notarization:
+> `friday-node` runs only on the owner's own Mac and is signed with the
+> free Apple ID Personal Team "Apple Development" identity (hardened
+> runtime, stable across rebuilds; never ad-hoc for builds holding TCC
+> grants). Read "notarized build" below as "Personal Team signed build" and
+> "TCC across updates … same Developer ID" as "TCC across rebuilds signed
+> by the same Personal Team identity". The paid path is only the fallback
+> if the Personal Team spike (`docs/runbooks/mac-session-handoff.md` A1)
+> fails. See MASTER_PLAN §O d9 and the ADR-013 amendment of 2026-11-25.
+
 > Status: **Draft (2026-11-23). Written on `docs/p11-brief` from the stub of
 > 2026-11-20, which was taken from the owner-approved Friday 3.0
 > roadmap; plan-review rounds 1 and 2 findings addressed 2026-11-23 (see
@@ -76,7 +87,8 @@
 >   through the same engine, the menu-bar mic indicator, the global
 >   hotkey, the Microphone TCC grant, passing the voice credential from
 >   the Keychain-held node secret), the MLX Whisper speech server on the
->   Mac, notarization of the updated app, the nightly self-trigger run
+>   Mac, re-signing the updated app with the Personal Team identity (d9
+>   revised 2026-11-25; no notarization), the nightly self-trigger run
 >   with real models and real speakers, and every real-world measurement
 >   (FAR on 24 h of household audio, FRR, latency, barge-in stop time,
 >   CPU). These are listed under "Mac session (deferred)" and marked
@@ -99,7 +111,8 @@
 >   harness (branch 6). The browser-side 3a stays a Phase 6 owner step.
 > - The Mac half of Phases 9 and 10 (Swift app, Keychain, signing) is
 >   pending owner evaluation; Phase 11's Mac session needs Phase 9 M1–M3
->   (the app exists, is notarized, holds the node secret).
+>   (the app exists, is signed with the Personal Team identity, holds the
+>   node secret).
 >
 > **Branches.** Phase 11 branches are cut from the integration branch and
 > use `feat/p11-…` names, under the MASTER_PLAN stable-numbering rule.
@@ -2346,7 +2359,7 @@ Implemented as scoped (§8), with these recorded choices:
 | M1 | `feat/p11-node-voice-host` | Swift voice host: child spawn + stdio framing, AVAudioEngine voice processing (AEC), playback, menu-bar mic indicator, global hotkey, mute, voice token mint + hand-over, Microphone TCC, `voice.state` relay; conformance host family | 1, 2, 7 merged; Phase 9 M1–M3 | deferred: Mac session |
 | M2 | Speech server spike (MLX Whisper) | MLX Whisper behind an OpenAI-compatible server as a gateway row; Turkish WER spot check, latency; fallback recorded | 1 merged | deferred: Mac session (pending owner evaluation) |
 | M3 | Nightly self-trigger on the Mac | `friday-voice selftest --nightly` with real models, speakers and AEC; launchd job | M1, M2; 6 merged | deferred: Mac session (pending owner evaluation) |
-| M4 | Mac evaluation (go/no-go measurements) | FAR on 24 h household audio, FRR, latency p50/p95, barge-in stop time, CPU, TCC across updates | M1–M3 | deferred: Mac session (pending owner evaluation) |
+| M4 | Mac evaluation (go/no-go measurements) | FAR on 24 h household audio, FRR, latency p50/p95, barge-in stop time, CPU, TCC across rebuilds | M1–M3 | deferred: Mac session (pending owner evaluation) |
 
 **Minimum usable cut** if the phase runs long: 1, 2, 3, 7 and M1 —
 push-to-talk on the Mac (hotkey) through the node child, spoken replies,
@@ -2363,7 +2376,8 @@ merged its M1. They are self-contained: a fresh session starts from this
 section, the merged branches 1–7 and the files they name.
 
 **Preconditions:**
-- Phase 9 M1–M3 merged (signed, notarized app; Keychain node secret; WSS
+- Phase 9 M1–M3 merged (Personal Team signed app, d9 revised 2026-11-25;
+  Keychain node secret; WSS
   session on protocol v2 at least for events);
 - branches 1, 2, 3 and 7 merged here (credential mint endpoint,
   `friday-voice/v1` schemas, vectors and conformance cases, the working
@@ -2417,7 +2431,8 @@ section, the merged branches 1–7 and the files they name.
   `event.ack`. The Conformance build implements the hook op
   `{"op": "voice_state", "state": {...}}` and reports
   `voice_states_dropped`;
-- the Microphone entitlement and TCC usage string; notarized build;
+- the Microphone entitlement and TCC usage string; a new build signed
+  with the same Personal Team identity (d9 revised 2026-11-25);
 - tests in `Tests/NodeCoreTests/Voice*`.
 
 **Must satisfy:** `node/friday-voice/friday_voice/protocol/schemas/v1/`,
@@ -2529,8 +2544,9 @@ Contract the Mac side must satisfy (branch 6, `node/friday-voice/friday_voice/se
    stopped); D9's two 100 ms figures are its components (onset →
    `stop_playback` sent by the child, then frame → host stop).
 5. **CPU**: the child with always-on wake < 10 % of one core at rest.
-6. **TCC**: the Microphone grant survives an update signed by the same
-   Developer ID (Phase 9 M4 item 1 pattern).
+6. **TCC**: the Microphone grant survives a rebuild signed by the same
+   Personal Team identity (Phase 9 M4 item 1 pattern; d9 revised
+   2026-11-25).
 
 ## Go/no-go record (Phase 11 checkpoint)
 

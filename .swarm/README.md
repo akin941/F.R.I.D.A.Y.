@@ -27,6 +27,10 @@ from a cloud session. This folder keeps the swarm durable across sessions.
    - Server-side work happens in the cloud. It is tested against a Python reference node.
    - Swift `friday-node`, Touch ID, Keychain, TCC, AppleScript/AX, notarization and
      real-mic work go to each brief's "Mac session (deferred)" section.
+   - *Note 2026-11-25:* d9 was revised — no paid Apple Developer Program,
+     Developer ID or notarization; `friday-node` is signed with a free
+     Personal Team identity (MASTER_PLAN §O d9, ADR-013 amendment).
+     "Notarization" above is historical.
    - The final `docs/runbooks/mac-session-handoff.md` is for the MacBook session.
 6. **Owner steps** go under a dated "Owner steps (pending)" list in each
    brief. Go/no-go checkpoints that need real data are recorded as

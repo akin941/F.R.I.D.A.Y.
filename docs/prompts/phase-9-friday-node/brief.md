@@ -1,5 +1,19 @@
 # Phase 9 — Friday Node v1, read-only (server side + Mac session)
 
+> **Amendment 2026-11-25 (d9 revised).** `friday-node` runs only on the
+> owner's own Mac, so the paid Apple Developer Program, Developer ID and
+> notarization are **not required**. The app is signed with the free Apple
+> ID Personal Team "Apple Development" identity (hardened runtime), a stable
+> identity that keeps TCC grants and Keychain items across rebuilds; never
+> ad-hoc "Sign to Run Locally" for a build that holds TCC grants. The first
+> Mac-session step is the Personal Team spike
+> (`docs/runbooks/mac-session-handoff.md` A1); if it fails, the original
+> paid path (enrolment + Developer ID + notarization) is the fallback.
+> `scripts/build-sign-notarize.sh` below becomes `scripts/build-sign-local.sh`
+> with the same conformance-marker check. See MASTER_PLAN §O d9 and the
+> ADR-013 amendment of 2026-11-25. Older wording below is kept where it is
+> history; requirement lines are updated.
+
 > Status: **Draft (2026-11-20). Written on `docs/p9-brief` from the stub of
 > the same date, which was taken from the owner-approved Friday 3.0 roadmap.
 > It needs its independent Sonnet 5 plan review before branch 1, because
@@ -37,7 +51,8 @@
 >   Swift app must pass later.
 > - **Not built here:** everything that must be built, signed or run on
 >   macOS. That means the Swift `friday-node` app, Keychain, Touch ID, TCC
->   grants, notarization and real-hardware measurements. These are listed
+>   grants, Personal Team code signing (d9 revised 2026-11-25) and
+>   real-hardware measurements. These are listed
 >   under "Mac session (deferred)" and marked "deferred: Mac session" in
 >   the branch table.
 >
@@ -50,8 +65,10 @@
 > - the Phase 6 HUD health panel.
 >
 > The server branches need nothing else. The Mac session also needs:
-> - the owner's Apple Developer enrolment (d9);
-> - a Developer ID identity on the Mac.
+> - ~~the owner's Apple Developer enrolment (d9); a Developer ID identity
+>   on the Mac~~ *(revised 2026-11-25)* a free Apple ID Personal Team
+>   "Apple Development" identity on the Mac and a passed Personal Team
+>   spike (d9 revised).
 >
 > **Branches.** Phase 9 branches are cut from the integration branch that
 > holds the merged Phase 8A closeout, and they integrate on the phase
@@ -1609,7 +1626,7 @@ node paired, the e2e test is green, and the go/no-go record is written.
 | 6 | `feat/p9-node-events` | `event` sink wiring into `ingest_hook_events`, cross-relay dedupe, spool upload acks, availability events | 4 (parallel with 5) | **implemented 2026-11-20** (done criterion met: `config/tests/test_hooks_via_node.py::test_the_done_criterion` — an event written to the reference relay's Unix socket reaches `GET /memory/sessions` through the node, and a `friday-hook` replay is a `duplicate`; `nodes/events.py` sink registry + availability successor snapshots, spooled-batch pacing, `config.asgi_nodes` registration; awaits independent Sonnet 5 review) |
 | 7 | `feat/p9-node-ui` | `/devices` node section, invocation log page, HUD node line, `hud → nodes` contract | 4, 5 (6 for availability) | **implemented 2026-11-20** (done criterion met server- and UI-side: pair (node code shown once), inspect (status, heartbeat, credential age, capability availability as text, invocation log), kill-switch and revoke behind confirmations on `/devices`; the HUD health panel's node line from `health.node` — `hud/tests/test_node_line.py`, `components/nodes/*.test.tsx`, `HudNodeLine.test.tsx`; the `hud → nodes` edge already existed (Phase 10 D12), only its comment changed; awaits independent Sonnet 5 review) |
 | 8 | `chore/p9-closeout` | Preflight node checks, e2e, runbook, ADR-013 notes, MASTER_PLAN row, go/no-go record | 1–7 | **implemented 2026-11-20** (done criterion met in process: `config/tests/test_reference_node_preflight.py::test_preflight_is_green_with_the_reference_node_paired` — the reference node paired by the new `run_reference_node` command and connected to the real gateway process, every node check `pass` (TLS pin `warn`, not configured); e2e `ops/tests/test_node_e2e.py` green; go/no-go record written; preflight on the owner's real dev stack is an owner step below; awaits independent Sonnet 5 review) |
-| M1 | `feat/p9-node-app` | Swift menu-bar app: signing/notarization, Keychain credential + TLS pin, pairing, WSS client, D5 verifier, conformance pass | 1–4 merged; owner's Apple Developer ID (d9) | deferred: Mac session |
+| M1 | `feat/p9-node-app` | Swift menu-bar app: Personal Team signing (no notarization), Keychain credential + TLS pin, pairing, WSS client, D5 verifier, conformance pass | 1–4 merged; Personal Team signing spike passed (d9 revised 2026-11-25) | deferred: Mac session |
 | M2 | `feat/p9-node-readers` | Swift readers for the eight capabilities, per-directory Touch ID grants, local policy UI, scrubber port + corpus | M1 | deferred: Mac session |
 | M3 | `feat/p9-node-hook-relay` | `friday-node hook` CLI, 0600 Unix socket + peer uid, spool, Claude Code hook switch-over | M1; 6 merged | deferred: Mac session |
 | M4 | Mac evaluation | Go/no-go measurements on the real Mac (below) | M1–M3 | deferred: Mac session (pending owner evaluation) |
@@ -1626,10 +1643,13 @@ MacBook**. They are self-contained: a fresh session starts from this
 section, the merged branches 1–7 and the files they name.
 
 **Preconditions:**
-- the owner's Apple Developer enrolment and a Developer ID Application
-  identity in the login Keychain (d9);
-- Xcode (current stable) and `notarytool` credentials stored as a
-  Keychain profile (`xcrun notarytool store-credentials friday-notary`);
+- *(revised 2026-11-25, d9)* the owner's free Apple ID added in Xcode →
+  Settings → Accounts, with its Personal Team "Apple Development"
+  identity in the login Keychain, and the Personal Team spike passed
+  (`docs/runbooks/mac-session-handoff.md` A1). No paid enrolment, no
+  Developer ID, no `notarytool` profile (those return only on the spike's
+  fallback path);
+- Xcode (current stable);
 - a running Friday stack reachable over the owner's overlay or TLS
   proxy, with `node-gateway` exposed at `/ws/node/v1` and
   `NODE_SIGNING_KEY` set;
@@ -1660,10 +1680,12 @@ Apple frameworks unless one goes through the governance manifest
   - `Pairing.swift` (calls `POST /api/v1/nodes/pair`);
   - `Rotation.swift` (calls `POST /api/v1/auth/nodes/credential/rotate`);
 - `Tests/NodeCoreTests/`;
-- `scripts/build-sign-notarize.sh` (`Release` configuration only;
+- `scripts/build-sign-local.sh` (`Release` configuration only;
   conformance-marker check on the binary, see contract test 2; then
-  `codesign --options runtime --timestamp`, `notarytool submit --wait`,
-  `stapler staple`);
+  `codesign --force --options runtime --entitlements … --sign "Apple
+  Development: …"` with the Personal Team identity, `codesign --verify
+  --strict`; no notarization, no stapling — revised 2026-11-25, was
+  `scripts/build-sign-notarize.sh`);
 - a `Conformance` build configuration (unsigned, debug, compilation
   condition `CONFORMANCE`) used only for contract test 2;
 - entitlements: hardened runtime, `com.apple.security.network.client`
@@ -1695,11 +1717,12 @@ Apple frameworks unless one goes through the governance manifest
    - There is **no environment variable, user default or launch
      argument in the release build** that changes the TLS pin, the
      pinned signing keys or the server URL. A runtime switch in the
-     notarized binary would be a backdoor that any local process or
+     signed release binary would be a backdoor that any local process or
      launch agent could flip, defeating ADR-013 decisions 2 and 4.
-   - The conformance build is never signed with the Developer ID
-     identity, never notarized and never installed as a login item.
-   - `scripts/build-sign-notarize.sh` builds the `Release`
+   - The conformance build is never signed with the Personal Team
+     identity (or any Developer ID), never notarized and never installed
+     as a login item.
+   - `scripts/build-sign-local.sh` builds the `Release`
      configuration only and, before `codesign`, fails if the release
      binary contains any conformance marker: `strings` over the Mach-O
      must not find `FRIDAY_NODE_CONFORMANCE`, `conformance`, or the
@@ -1833,9 +1856,11 @@ installed as the fallback.
 
 Recorded in this brief's "Go/no-go record" by the owner or by the Mac
 session:
-1. **TCC across updates.** Install notarized build N and grant Screen
-   Recording (window titles). Install build N+1, signed by the same
-   Developer ID, so the designated requirement is unchanged. The grant
+1. **TCC across rebuilds.** Install Personal Team signed build N and
+   grant Screen Recording (window titles). Install build N+1, signed by
+   the same Personal Team identity, so the designated requirement is
+   unchanged (revised 2026-11-25; was "notarized build … same Developer
+   ID"). The grant
    must still be present and titles still returned.
 2. **Spike Keychain half.** The secret survives reboot. Rotation updates
    the Keychain item in place. Deleting the item forces re-pair. No
@@ -1854,7 +1879,7 @@ session:
 | Spike S9.0, Keychain half | M4 item 2 | pending owner evaluation (Mac session) |
 | Compromised-server suite, reference node | Branch 3 conformance run | **passed 2026-11-20** (`node_conformance_server --protocol 1` all-pass, `test_every_v1_case_passes_through_the_command_over_a_socket`; `build_node_conformance --check` in CI and as the `node_conformance` preflight check) |
 | Compromised-server suite, Swift app | M1 contract tests 1–2 | pending owner evaluation (Mac session) |
-| Notarized build keeps TCC grants across updates | M4 item 1 | pending owner evaluation (Mac session) |
+| Personal Team signed build keeps TCC grants across rebuilds (d9 revised 2026-11-25) | M4 item 1 | pending owner evaluation (Mac session) |
 | Server half end to end (closeout) | `ops/tests/test_node_e2e.py`: pair through the endpoint → connect → `hello` → chat turn → fenced rows of the workspace → chain rows → revoke → `bye{revoked}` → tools unavailable | **passed 2026-11-20** (CI, fakes) |
 | Preflight green with a node paired | `config/tests/test_reference_node_preflight.py` (in process, real gateway process); `make preflight` on the owner's dev stack with `run_reference_node` | **passed 2026-11-20** in process; on the real dev stack: pending owner evaluation (owner step 2 of the closeout) |
 | Kill-switch latency, heartbeat/backoff, no TCP listener on the Mac | M4 items 3–5 | pending owner evaluation (Mac session); server side: socket closed within 2 s of revoke / kill switch (`nodes/tests/test_gateway_handshake.py`) |
@@ -1986,7 +2011,8 @@ confusion, generated per schema.
   could diverge from Python. The shared vectors and case files, loaded
   from the repo by the Swift test target, plus the live fake server,
   bound it. Any case change must pass both.
-- **R6 — Mac work slips.** Apple enrolment, notarization friction or TCC
+- **R6 — Mac work slips.** Personal Team signing limits (or, on the
+  fallback path, Apple enrolment and notarization friction) or TCC
   quirks can delay it. The server half is complete and conformance-tested
   without it, `friday-hook` keeps the sessions panel alive, and the
   go/no-go Mac rows are pending owner evaluation without blocking 8B's
@@ -2038,10 +2064,12 @@ confusion, generated per schema.
 
 The first three are from the stub and are kept.
 
-1. **Apple Developer enrolment (d9).** Enrol in the Apple Developer
-   Program (99 USD/year) and create a Developer ID signing identity on
-   the Mac. The key never leaves the Mac and CI never holds it. This
-   blocks M1 only.
+1. **Personal Team signing (d9, revised 2026-11-25).** Add the owner's
+   free Apple ID in Xcode → Settings → Accounts and run the Personal Team
+   spike (`docs/runbooks/mac-session-handoff.md` A1). No paid enrolment,
+   Developer ID or notarization; those are the fallback only if the spike
+   fails, or an optional later step for distribution. The key never leaves
+   the Mac and CI never holds it. This blocks M1 only.
 2. **Spike S9.0 on the real Mac.** Run the pairing and revocation checks
    on the real Mac. In this brief that is M1 contract test 3 and M4
    item 2.

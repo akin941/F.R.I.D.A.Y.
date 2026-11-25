@@ -5,6 +5,11 @@
 > every "Owner steps (pending)" list of the phase briefs 5, 6, 8A, 9, 8B,
 > 10, 11 and 12 into **one ordered checklist**. A future Claude Code
 > session on the owner's MacBook starts here.
+>
+> **Revised 2026-11-25 (d9):** A1 is now the Personal Team signing spike;
+> the paid Apple Developer Program, Developer ID and notarization are not
+> required (fallback / optional later: A1-F). `scripts/build-sign-notarize.sh`
+> is replaced by `scripts/build-sign-local.sh`.
 
 ## How to use this file
 
@@ -18,8 +23,9 @@ and accounts.
 Work top to bottom:
 
 1. **Part A — prerequisites.** Accounts, tools, the running stack. Do
-   these first. Some of them (Apple enrolment, 24 h of audio) take days, so
-   start them early.
+   these first. Some of them (24 h of audio, `hey_friday`
+   training) take days, so start them early. A1, the Personal Team
+   signing spike (d9 revised 2026-11-25), comes first and takes hours.
 2. **Part B — Swift `friday-node` tasks.** One branch per task, in the
    order given. Each one names the server-side conformance and contract
    tests it must pass, with the exact commands.
@@ -44,7 +50,9 @@ branch.
 - `ruff`, `pytest` and CI must be green before work is declared done. For
   Swift branches, `swift test` must also be green on the Mac (CI has no
   macOS runner unless the owner decides otherwise, step D9).
-- **The Developer ID signing key never leaves the Mac. CI never holds it.**
+- **The Personal Team ("Apple Development") signing key never leaves the
+  Mac. CI never holds it.** (d9 revised 2026-11-25: no paid Developer
+  Program, no Developer ID, no notarization unless A1 falls back.)
   No `NODE_SIGNING_KEY`, node secret (`jnd_…`), PAT or provider key in any
   file in the repo.
 - **Recordings never enter the repo or the database.** Household audio,
@@ -103,13 +111,225 @@ and green in CI against reference doubles (`MASTER_PLAN.md` §AA).
 
 ## Part A — Prerequisites (do these first, in this order)
 
-### A1. Apple Developer enrolment and signing identity (Phase 9 d9) — blocks B1
+### A1. Personal Team signing spike (Phase 9 d9, revised 2026-11-25) — blocks B1
 
-- [ ] Enrol in the Apple Developer Program (99 USD/year). This takes days:
-      start it first.
+> **Owner decision 2026-11-25 (d9 revised).** `friday-node` runs only on
+> this Mac. It is built and installed locally from Xcode and never
+> distributed, so the paid Apple Developer Program (99 USD/year), the
+> Developer ID identity and notarization are **not required**. The app is
+> signed with the free Apple ID **Personal Team** "Apple Development"
+> identity, with hardened runtime. That identity is stable, so TCC grants
+> and Keychain items should survive rebuilds. **Never** use ad-hoc signing
+> ("Sign to Run Locally", `codesign -s -`) for a build that holds TCC
+> grants: an ad-hoc designated requirement is the code hash, so every
+> rebuild loses its grants. The signing key never leaves this Mac; CI never
+> holds it. This spike proves the decision on the real Mac **before** any
+> Swift branch; it takes hours, not days. Needs only Xcode (install it
+> first: A2's first bullet). Sources: MASTER_PLAN §O d9; ADR-013
+> "Amendment 2026-11-25 (d9 revised)".
+
+The spike app is throwaway and lives **outside the repo**, in
+`~/FridaySpike/PTSpike/` (an Xcode macOS App project, Swift, no tests).
+It must be a real `.app` bundle launched with `open`: TCC attributes a
+bare command-line binary started from Terminal to Terminal, which would
+make the test meaningless. Use a spike bundle id
+(`<your reverse domain>.friday-node-spike`), never the real app's, so the
+spike's grants and Keychain items do not leak into `friday-node`.
+
+**A1.0 — Identity.**
+
+- [ ] Xcode → Settings → Accounts → "+" → Apple ID: sign in with the
+      owner's free Apple ID. The team shows as "<Name> (Personal Team)".
+      Select it → Manage Certificates → "+" → **Apple Development** if no
+      certificate is listed yet.
+- [ ] Check that the identity is in the login Keychain and note its Team ID
+      (the `OU` of the subject):
+
+  ```bash
+  security find-identity -v -p codesigning | grep "Apple Development"
+  security find-certificate -c "Apple Development" -p \
+    | openssl x509 -noout -subject -startdate -enddate
+  ```
+
+  Never copy the certificate, its private key or a `.p12` off this Mac,
+  and never put the identity name or Team ID in a committed file (it names
+  the owner); the scripts read it from the Keychain or from the untracked
+  env var `FRIDAY_NODE_SIGN_IDENTITY`.
+
+**A1.1 — (a) Signing works with hardened runtime and the needed entitlements.**
+
+- [ ] Create the spike project (Xcode → New → Project → macOS → App,
+      product `PTSpike`). Signing & Capabilities: Team = the Personal
+      Team, "Automatically manage signing" on, **Hardened Runtime** on
+      with *Audio Input* and *Apple Events* ticked, **no App Sandbox**
+      (remove the capability if Xcode added it). `PTSpike.entitlements`
+      must hold exactly:
+
+  ```xml
+  <key>com.apple.security.device.audio-input</key><true/>
+  <key>com.apple.security.automation.apple-events</key><true/>
+  ```
+
+  Info.plist: `NSMicrophoneUsageDescription` and
+  `NSAppleEventsUsageDescription` strings.
+- [ ] On launch the app writes one line per check to
+      `~/FridaySpike/status-<CFBundleVersion>.txt` and shows the same in a
+      window (no prompts are triggered from a background loop; each
+      request is a button):
+  - Microphone: `AVCaptureDevice.authorizationStatus(for: .audio)`
+    (button: `requestAccess(for: .audio)`);
+  - Accessibility: `AXIsProcessTrusted()` (button:
+    `AXIsProcessTrustedWithOptions` with the prompt option);
+  - Screen Recording: `CGPreflightScreenCaptureAccess()` (button:
+    `CGRequestScreenCaptureAccess()`);
+  - Full Disk Access: whether `FileManager` can list
+    `~/Library/Safari` (or another FDA-protected directory) — added by
+    hand in System Settings;
+  - Automation: `AEDeterminePermissionToAutomateTarget` for
+    `com.apple.systemevents` with `askUserIfNeeded` false (button: the
+    same with true, or `NSAppleScript` `tell application "System Events"
+    to get name of first process`);
+  - Keychain: see A1.4.
+- [ ] Build Release and re-sign explicitly with the Apple Development
+      identity and hardened runtime, the way `scripts/build-sign-local.sh`
+      will (B1):
+
+  ```bash
+  cd ~/FridaySpike/PTSpike
+  xcodebuild -project PTSpike.xcodeproj -scheme PTSpike -configuration Release \
+    -derivedDataPath build build
+  APP=build/Build/Products/Release/PTSpike.app
+  IDENTITY=$(security find-identity -v -p codesigning | grep -m1 "Apple Development" | awk -F'"' '{print $2}')
+  codesign --force --options runtime --entitlements PTSpike/PTSpike.entitlements \
+    --sign "$IDENTITY" "$APP"
+  codesign --verify --strict --verbose=2 "$APP"                 # "valid on disk", "satisfies its Designated Requirement"
+  codesign -dv --verbose=4 "$APP" 2>&1 | grep -E "Identifier|Authority|TeamIdentifier|flags|Runtime"
+  codesign -d --entitlements - "$APP"                           # exactly the two entitlements above (plus any Xcode adds — record them)
+  codesign -d -r- "$APP"                                        # the designated requirement
+  ```
+
+  Expect `flags=0x10000(runtime)`, `Authority=Apple Development: …`,
+  `Authority=Apple Worldwide Developer Relations Certification Authority`,
+  `Authority=Apple Root CA`, a `TeamIdentifier` (not `not set`), and a
+  designated requirement of the form `identifier "…" and anchor apple
+  generic and certificate leaf[subject.CN] = "Apple Development: …" and
+  certificate 1[field.1.2.840.113635.100.6.2.1] /* exists */`. A
+  requirement containing `cdhash` means the build is ad-hoc: stop and fix
+  the signing. Save the requirement to the untracked file
+  `~/FridaySpike/designated-requirement.txt`.
+- [ ] Gatekeeper, for the record only:
+
+  ```bash
+  spctl --assess --type execute -vv "$APP"     # expected: rejected / not notarized — accepted, the app is never downloaded
+  xattr -p com.apple.quarantine "$APP"         # expected: no such xattr (local build)
+  ```
+
+  A local build carries no quarantine attribute and launches without a
+  Gatekeeper prompt. Never clear quarantine on anything downloaded and
+  never disable Gatekeeper (`spctl --master-disable`) for this.
+- [ ] Check whether Xcode embedded a provisioning profile
+      (`ls "$APP/Contents/embedded.provisionprofile"`). If it did, record
+      its expiry:
+      `security cms -D -i "$APP/Contents/embedded.provisionprofile" | plutil -p - | grep -E 'Name|ExpirationDate|TeamIdentifier'`.
+      The two hardened-runtime entitlements above should not need one; if
+      a profile is required, record why.
+
+**A1.2 — (b) Certificate validity, expiry and renewal.**
+
+- [ ] Record the certificate's `notBefore` / `notAfter` (A1.0) and, if
+      any, the profile's `ExpirationDate` (A1.1). Free-account
+      certificates and profiles are short-lived compared with paid ones;
+      record the actual dates, do not assume them.
+- [ ] Renewal: in Xcode → Settings → Accounts → Manage Certificates,
+      create a new Apple Development certificate (only with the owner's
+      OK; the old one can be left to expire), rebuild with it and compare
+      `codesign -d -r-` against `~/FridaySpike/designated-requirement.txt`.
+      The requirement pins the leaf's **common name**, not its serial, so
+      it is expected to stay equal; record whether it did and whether the
+      A1.3 grants and A1.4 item survived. If the owner prefers not to
+      renew now, record "renewal untested" and put a reminder two weeks
+      before `notAfter` to run this check then.
+- [ ] What happens at expiry. Expected, to be confirmed and recorded:
+      an already-installed local build without an embedded profile keeps
+      launching (a local, non-quarantined app is not assessed for
+      notarization), new builds need the renewed identity, and an app
+      whose embedded profile has expired may refuse to launch. If a
+      profile was embedded (A1.1), its expiry is the binding date: record
+      how often the app must be rebuilt, and that the rebuild keeps the
+      grants (A1.3).
+
+**A1.3 — (c) TCC grants persist across two rebuilds.**
+
+- [ ] Install build N: `ditto "$APP" /Applications/PTSpike.app && open /Applications/PTSpike.app`.
+      Grant all five: Microphone and Automation (System Events) through
+      the prompts; Accessibility, Screen Recording and Full Disk Access in
+      System Settings → Privacy & Security (add `PTSpike` with "+" where
+      needed). Relaunch; `status-<N>.txt` must show all five granted.
+- [ ] Build N+1: bump `CFBundleVersion` (and change a visible string so
+      the binary really differs), build and sign exactly as in A1.1,
+      `codesign -d -r-` must equal the saved requirement, quit the app,
+      `ditto` over `/Applications/PTSpike.app`, `open` it. **No new
+      prompt**, and `status-<N+1>.txt` shows all five still granted.
+- [ ] Build N+2: the same again. Two consecutive rebuilds must keep every
+      grant.
+- [ ] Inspect the grants in System Settings → Privacy & Security (each
+      pane lists `PTSpike` switched on). Do not read `TCC.db` directly.
+      Use `tccutil reset <Service> <bundle id>` (services `Microphone`,
+      `AppleEvents`, `Accessibility`, `ScreenCapture`,
+      `SystemPolicyAllFiles`) **only** to clean up after the spike or to
+      retry a confused state, always with the spike's bundle id, never
+      without one.
+
+**A1.4 — (d) Keychain items written by build N are readable by build N+1.**
+
+- [ ] Build N writes a `kSecClassGenericPassword` item with service
+      `friday-node-spike`, account `spike`, and the same attributes
+      `Credential.swift` will use (B1:
+      `kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly`, no iCloud sync).
+      Try it twice: with the default (file-based) keychain, and with
+      `kSecUseDataProtectionKeychain: true`. Record the `OSStatus` of each
+      (`-34018` `errSecMissingEntitlement` on the second means the data
+      protection keychain is not available to this Personal Team build —
+      `Credential.swift` then uses the file-based keychain; record that in
+      the B1 notes).
+- [ ] Builds N+1 and N+2 read the item back **without** a Keychain access
+      prompt ("PTSpike wants to use your confidential information…"). A
+      prompt means the item's access control no longer matches the
+      designated requirement: a failure.
+- [ ] Clean up: delete the spike items from the app (or Keychain Access),
+      `tccutil reset All <spike bundle id>`, remove
+      `/Applications/PTSpike.app`. Keep `~/FridaySpike/` notes until the
+      result is recorded.
+
+**A1.5 — Result and fallback.**
+
+- [ ] **Pass** = (a) signs with hardened runtime and both entitlements, no
+      sandbox; (b) dates recorded (renewal tested or reminded); (c) all
+      five grants survive two rebuilds; (d) the item is read without a
+      prompt by N+1 and N+2. Record the result (macOS and Xcode versions,
+      date, the requirement's *form* without the owner's name, cert and
+      profile expiry, keychain variant used, per-check pass/fail) as a
+      dated implementation note in ADR-013 ("Implementation notes —
+      Personal Team spike") on a `docs/p9-personal-team-spike` branch,
+      reviewed like any brief change, and tick this item. Then B1 may
+      start.
+- [ ] **Fail** (a needed entitlement is unavailable to a Personal Team, a
+      grant or the Keychain item does not survive a rebuild, or a
+      profile's expiry would break the installed app): record which check
+      failed and why in the same note and in MASTER_PLAN §O d9, and switch
+      to the **fallback**, the original paid path (A1-F below). B1 waits
+      for A1-F.
+
+### A1-F. Fallback / optional later: the paid Apple Developer Program
+
+Not required by the 2026-11-25 decision. Do this **only** if A1.5 fails
+(fallback), or later if the owner wants to distribute `friday-node` to
+other Macs or use Sparkle-style auto-update (optional). It is the original
+d9 path:
+
+- [ ] Enrol in the Apple Developer Program (99 USD/year). This takes days.
 - [ ] Create a **Developer ID Application** certificate in Xcode
-      (Settings → Accounts → Manage Certificates → "+") so the identity is
-      in the login Keychain. Check:
+      (Settings → Accounts → Manage Certificates → "+"). Check:
 
   ```bash
   security find-identity -v -p codesigning | grep "Developer ID Application"
@@ -125,7 +345,14 @@ and green in CI against reference doubles (`MASTER_PLAN.md` §AA).
   xcrun notarytool history --keychain-profile friday-notary   # must list without error
   ```
 
-The key never leaves this Mac and CI never holds it.
+- [ ] `scripts/build-sign-local.sh` then gains a `--notarize` mode
+      (`codesign --options runtime --timestamp` with the Developer ID,
+      `notarytool submit --wait --keychain-profile friday-notary`,
+      `stapler staple`), keeping the same conformance-marker refusal.
+      Switching identity changes the designated requirement, so every TCC
+      grant and Keychain item has to be granted / re-paired once more.
+
+The key never leaves this Mac and CI never holds it, on either path.
 
 ### A2. Tools on the Mac
 
@@ -333,7 +560,7 @@ swift test                                            # NodeCoreTests, Debug
 xcodebuild -scheme FridayNode -configuration Conformance build   # unsigned, CONFORMANCE condition
 xcodebuild -scheme FridayNode -configuration Release test \
   -only-testing:NodeCoreTests/ReleaseHygieneTests      # the conformance pin type is not compiled in
-scripts/build-sign-notarize.sh                         # Release only; refuses conformance markers
+scripts/build-sign-local.sh                            # Release only; refuses conformance markers; Personal Team signing + hardened runtime
 ```
 
 and on the server side (Part A4 environment, from `backend/`):
@@ -349,10 +576,32 @@ inside `#if CONFORMANCE … #endif` in the separate, unsigned `Conformance`
 configuration. The release build has **no** environment variable, user
 default or launch argument that changes the TLS pin, the pinned signing
 keys or the server URL. The conformance build is never signed with the
-Developer ID, never notarised and never a login item.
-`scripts/build-sign-notarize.sh` fails before `codesign` if `strings` on
-the release Mach-O finds `FRIDAY_NODE_CONFORMANCE`, `conformance` or the
-conformance public key's base64 (from `backend/nodes/conformance/keys/`).
+Personal Team identity (or any Developer ID), never notarised and never a
+login item. `scripts/build-sign-local.sh` fails before `codesign` if
+`strings` on the release Mach-O finds `FRIDAY_NODE_CONFORMANCE`,
+`conformance` or the conformance public key's base64 (from
+`backend/nodes/conformance/keys/`).
+
+**`scripts/build-sign-local.sh` (d9 revised 2026-11-25; replaces
+`build-sign-notarize.sh`).** It builds the `Release` configuration only,
+runs the conformance-marker refusal above, then signs with the Personal
+Team identity and hardened runtime and verifies:
+
+```bash
+IDENTITY=${FRIDAY_NODE_SIGN_IDENTITY:-$(security find-identity -v -p codesigning   | grep -m1 "Apple Development" | awk -F'"' '{print $2}')}
+[ -n "$IDENTITY" ] && [ "$IDENTITY" != "-" ] || { echo "no Apple Development identity (A1)"; exit 1; }
+codesign --force --options runtime --entitlements FridayNode/FridayNode.entitlements   --sign "$IDENTITY" "$APP"
+codesign --verify --strict --verbose=2 "$APP"
+codesign -d -r- "$APP" 2>&1 | grep -q cdhash && { echo "ad-hoc requirement: refusing"; exit 1; }
+```
+
+It refuses ad-hoc signing (`-`, or a requirement with `cdhash`), warns if
+the designated requirement differs from the one recorded in the untracked
+`~/.config/friday-node/designated-requirement.txt` (a change means every
+TCC grant and Keychain item is lost), and installs with `ditto` to
+`/Applications/FridayNode.app`. No notarization and no stapling. Nested
+code (helpers, frameworks) is signed inside-out before the app; never
+`--deep`. The identity name and Team ID are never committed.
 
 ### B1. Phase 9 M1 — `feat/p9-node-app`: shell, identity, session, verifier
 
@@ -372,10 +621,11 @@ and 9; ADR-013.
       `Pairing.swift` (`POST /api/v1/nodes/pair`), `Rotation.swift`
       (`POST /api/v1/auth/nodes/credential/rotate`; persist the new secret
       **before** finishing the call — ADR-013 residual);
-      `scripts/build-sign-notarize.sh` (`codesign --options runtime
-      --timestamp`, `notarytool submit --wait --keychain-profile
-      friday-notary`, `stapler staple`); entitlements: hardened runtime and
-      `com.apple.security.network.client` only.
+      `scripts/build-sign-local.sh` (Release only, conformance-marker
+      refusal, `codesign --force --options runtime` with the Personal Team
+      "Apple Development" identity, `codesign --verify --strict`, no
+      ad-hoc, no notarization — see Part B intro); entitlements: hardened
+      runtime and `com.apple.security.network.client` only.
 - [ ] Gateway behaviour (Phase 9 branch 4 owner step 6): `Authorization:
       Bearer <jnd_…>`, `hello` within 10 s, heartbeat every 15 s (45 s of
       silence closes 4408), ≤ 20 frames/s and ≤ 256 KiB per frame, one
@@ -509,8 +759,8 @@ uv run pytest -q config/tests/test_hooks_via_node.py nodes/tests/test_node_event
 Manual pass: stop the stack, run a Claude Code session, restart; the
 spooled events arrive **once** in `/sessions`.
 
-**After B1–B3: build, sign, notarise and install release build N** with
-`scripts/build-sign-notarize.sh`, then do C4.
+**After B1–B3: build, sign (Personal Team identity) and install release
+build N** with `scripts/build-sign-local.sh`, then do C4.
 
 ### B4. Phase 8B M1 — `feat/p8-node-transcript-readers`: owner-turn readers
 
@@ -680,7 +930,9 @@ Needs: B1–B3, B5 merged; A7, A8, A10. Spec: Phase 11 brief "Mac session
       `voice_states_dropped` report key.
 - [ ] `release_mic(storm)` releases the mic and shows `storm_muted` until a
       mute on → off cycle.
-- [ ] Microphone entitlement and TCC usage string; a new notarised build.
+- [ ] Microphone entitlement (`com.apple.security.device.audio-input`,
+      checked in A1) and TCC usage string; a new build signed with the same
+      Personal Team identity (`scripts/build-sign-local.sh`).
 
 **Server-side contract tests it must pass:**
 
@@ -858,9 +1110,10 @@ Needs: A7, A8, A11.
 
 ### C4. Phase 9 M4 — node measurements (after B1–B3)
 
-- [ ] **TCC across updates:** install notarised build N, grant Screen
-      Recording; install build N+1 signed by the same Developer ID; the
-      grant stays and titles are still returned.
+- [ ] **TCC across rebuilds:** install build N signed with the Personal
+      Team identity, grant Screen Recording; install build N+1 signed by
+      the same Personal Team identity (same designated requirement as
+      recorded in A1); the grant stays and titles are still returned.
 - [ ] **Keychain half of spike S9.0:** the secret survives a reboot;
       rotation updates the Keychain item in place; deleting the item forces
       re-pair; `grep -r jnd_ ~/Library` finds nothing.
@@ -935,7 +1188,7 @@ Commands: `docs/runbooks/memory-eval.md` §4–§6.
 - [ ] **M4:** confirmation window latency invoke → shown ≤ 1 s (p95 over
       20 runs); kill switch and socket loss close an open window ≤ 2 s and
       stop a running command ≤ 6 s; Accessibility and Automation grants
-      survive an update signed by the same Developer ID; a real `pytest` of
+      survive a rebuild signed by the same Personal Team identity; a real `pytest` of
       a registered repo under `srt` with network denied completes and
       streams, and a test that opens a socket fails.
 - [ ] `make preflight` on the dev stack with the Mac node: every control
@@ -984,8 +1237,8 @@ Commands: `docs/runbooks/memory-eval.md` §4–§6.
       `BARGE_IN_VAD` / guard values against the voice-processing AEC (a
       change is a code change in `friday_voice/config.py`).
 - [ ] **CPU:** the child with always-on wake < 10% of one core at rest.
-- [ ] **TCC:** the Microphone grant survives an update signed by the same
-      Developer ID.
+- [ ] **TCC:** the Microphone grant survives a rebuild signed by the same
+      Personal Team identity.
 - [ ] `manage.py preflight`: record the live-voice rows.
 
 ### C8. Phase 12 M1 — spoken digest and wake routes on the Mac (after B7)
@@ -1103,7 +1356,8 @@ Mac. They are collected here from the same briefs.
 1. Run the independent Sonnet 5 review of this branch (CLAUDE.md
    "Reviews") and fix findings until APPROVE.
 2. Start the Mac session with this file as its task list (Parts A → B →
-   C), once A1 (Apple Developer enrolment) is complete.
+   C), starting with A1, the Personal Team signing spike (d9 revised
+   2026-11-25; no paid enrolment unless the spike falls back to A1-F).
 3. Close the three server-side gaps found while writing this handoff
    (A10 `make voice-models --node` has no implementation, A11 Phase 6
    branch 3a, A12 the `nodes`-backed transcript port). None needs the Mac;

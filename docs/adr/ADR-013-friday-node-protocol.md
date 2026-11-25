@@ -9,6 +9,9 @@ Phase 9 branch 1; if the spike fails, Phase 9 does not start and this ADR is
 revisited before any node code lands. Extends ADR-002 (new kernel app
 `nodes`), ADR-004/ADR-008 decision 3 (gated node actions, classified by
 ADR-014). Amends nothing.
+**Amended 2026-11-25 (d9 revised):** signing uses a free Apple ID Personal
+Team identity, not a notarized Developer ID build — see "Amendment
+2026-11-25 (d9 revised)" at the end.
 
 Numbering note: the proposal called this "ADR-012". ADR-011 is reserved by
 the Phase 6 brief for "voice transport", so the proposal's ADRs are
@@ -26,11 +29,15 @@ WebSocket was exploited. The repo already has device trust
 cookie, idle expiry).
 
 ## Decision
-1. **Shape (d1, d9).** One signed and notarized Swift macOS menu-bar app,
+1. **Shape (d1, d9).** One signed Swift macOS menu-bar app,
    `friday-node`, with the Python voice pipeline as a child process from
    Phase 11. It opens one **outbound-only** WSS connection to the server and
-   has **no TCP listener**. Signing uses the owner's Apple Developer ID; the
-   signing key stays on the owner's Mac and CI never holds it.
+   has **no TCP listener**. ~~Signing uses the owner's Apple Developer ID~~
+   *(amended 2026-11-25)* Signing uses the owner's free Apple ID Personal
+   Team "Apple Development" identity with hardened runtime; the app is not
+   notarized and not distributed (paid Developer ID + notarization is an
+   optional later path). The signing key stays on the owner's Mac and CI
+   never holds it.
 2. **Identity.** A `kind=node` principal: a long-lived node credential kept
    in the macOS Keychain, rotation without re-pairing, immediate revocation,
    an owner kill switch (web UI and `manage.py`), covered by
@@ -89,8 +96,11 @@ cookie, idle expiry).
 ## Consequences
 - A compromised server can sign grants but cannot change node policy, run
   anything outside the catalogue, or get past the local click.
-- The owner pays for an Apple Developer membership (99 USD/year, d9) and
-  keeps a signing key on the Mac.
+- ~~The owner pays for an Apple Developer membership (99 USD/year, d9)~~
+  *(amended 2026-11-25)* The owner needs no paid Apple Developer membership
+  while the node runs only on their own Mac; they keep a Personal Team
+  signing key on the Mac. Paid membership returns only if the Personal Team
+  spike fails or the owner later wants distribution or auto-update.
 - Phase 9 is read-only; gated execution and its classification arrive with
   ADR-014 in Phase 10.
 - A compromised-server test suite (unknown capability, out-of-schema args,
@@ -397,7 +407,8 @@ checks the chain and audit rows, revokes the node over the web
 refuses its reconnect (4401). The Swift app must pass the offline and live
 conformance runs and the server-side contract tests listed in the brief's
 "Mac session (deferred)" (M1–M3) before it is used; the Keychain half of
-the spike, the Swift conformance pass and TCC across notarized updates are
+the spike, the Swift conformance pass and TCC across notarized updates (since
+2026-11-25: across rebuilds signed by the same Personal Team identity) are
 **pending owner evaluation** (brief "Go/no-go record").
 
 ## Implementation note — Phase 8B closeout (`chore/p8b-closeout`, 2026-11-20)
@@ -602,3 +613,49 @@ how the child honours them.
   dropped, shows `off` with the mic released (decision 6).
 - Decisions 1, 6 and 8 are unchanged: the child stays a stdio-only,
   model-free, keyless process; the server→node message set is untouched.
+
+## Amendment 2026-11-25 (d9 revised)
+
+**Owner decision 2026-11-25.** `friday-node` runs only on the owner's own
+Mac. It is never distributed to other Macs and is installed from a local
+Xcode build. So the paid Apple Developer Program (99 USD/year), the
+Developer ID Application identity and notarization are **not required**.
+
+- **Signing identity.** The app is signed with the free Apple ID **Personal
+  Team** "Apple Development" identity (Xcode → Settings → Accounts), with
+  hardened runtime. That identity is stable: the designated requirement
+  stays the same from build to build, so TCC grants (Accessibility, Screen
+  Recording, Full Disk Access, Microphone, Automation) and Keychain items
+  written by build N should survive build N+1. Ad-hoc signing ("Sign to Run
+  Locally") is **never** used for a build that holds TCC grants: its
+  designated requirement is the code hash, so every rebuild loses them.
+- **No notarization, no Developer ID, no distribution.** Gatekeeper
+  assessment (`spctl`) of a Personal Team build is expected to report it as
+  not notarized; that is accepted because the app is never downloaded from
+  elsewhere.
+- **Unchanged.** The signing key never leaves the Mac; CI never holds it.
+  The conformance build stays a separate, unsigned debug configuration,
+  never signed with the Personal Team identity and never installed as a
+  login item, and the local build script still refuses conformance markers
+  in a release build.
+- **Verification first.** The first step of the Mac session is a spike
+  (`docs/runbooks/mac-session-handoff.md` A1) that checks on the real Mac:
+  (a) Personal Team signing works with hardened runtime and the needed
+  entitlements (microphone, Apple Events/automation, keychain access, no
+  App Sandbox requirement); (b) the certificate's validity and expiry, and
+  what happens on renewal; (c) TCC grants persist across two rebuilds
+  signed with the same identity; (d) Keychain items written by build N are
+  readable by build N+1.
+- **Fallback.** If the spike fails (a needed entitlement is unavailable to
+  a Personal Team, or grants or Keychain items do not persist), the
+  original path applies: enrol in the paid program, sign with Developer ID
+  and notarize. The failure is recorded in the runbook and in MASTER_PLAN
+  §O d9.
+- **Optional later.** Paid enrolment + Developer ID + notarization is an
+  optional later step, only if the owner wants to distribute the app to
+  other Macs or use Sparkle-style auto-update.
+
+Where earlier sections of this ADR or the briefs say "notarized build" or
+"Developer ID", read "Personal Team signed build" and "the Personal Team
+signing identity", and read "TCC across updates" as "TCC across rebuilds
+signed by the same Personal Team identity".
