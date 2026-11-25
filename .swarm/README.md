@@ -73,6 +73,16 @@ Not done yet:
 - **Final step:** `docs/mac-session-handoff` -- implemented 2026-11-20:
   `docs/runbooks/mac-session-handoff.md` (the ordered Mac checklist; MASTER_PLAN §AA
   status rows point to it).
+  - Known follow-ups (LOW, from review, not blocking):
+    - `docs/runbooks/mac-session-handoff.md` Part D (D1, D2) points to each brief's
+      per-branch "Owner steps (pending)" lists instead of enumerating them. The
+      phase-level lists for 9, 11 and 12 are fully covered; the per-branch lists were
+      not diffed exhaustively, so some small confirmations may exist only in the
+      briefs. Optional: add a table in Part D mapping each brief's branch-level
+      owner-step headings to the D item or section that covers them.
+    - The handoff and MASTER_PLAN say "implemented 2026-11-20" while it merged
+      2026-11-25. Harmless; no fix required. Review found no credentials, the signing
+      key stays on the Mac, and the three server-side gaps it reports match the tree.
 
 Known issues the swarm must fix first:
 
