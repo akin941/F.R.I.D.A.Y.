@@ -343,7 +343,11 @@ spike's grants and Keychain items do not leak into `friday-node`.
       example, Xcode did not provision the app, or it was re-signed without
       them) rather than a Personal Team limit: check
       `codesign -d --entitlements -` and the embedded profile first, fix
-      the build, and retry before concluding anything.
+      the build, and retry before concluding anything. A plain
+      non-sandboxed app may get neither entitlement by default: add the
+      **Keychain Sharing** capability (Signing & Capabilities, one group =
+      the app's bundle id) so Xcode provisions `keychain-access-groups` and
+      `application-identifier`, rebuild, and rerun this check.
 - [ ] Builds N+1 and N+2 read the item back **without** a Keychain access
       prompt ("PTSpike wants to use your confidential information…"). A
       prompt means the item's access control no longer matches the
@@ -373,13 +377,14 @@ spike's grants and Keychain items do not leak into `friday-node`.
       N+1 and N+2.
 - [ ] **Partial** = everything passes but (d) works only with the
       file-based keychain (A1.4): record it, and B1 waits for the
-      owner-acknowledged ADR-013 residual note (or A1-F). Record the result (macOS and Xcode versions,
-      date, the requirement's *form* without the owner's name, cert and
-      profile expiry, keychain variant used, per-check pass/fail) as a
-      dated implementation note in ADR-013 ("Implementation notes —
+      owner-acknowledged ADR-013 residual note (or A1-F).
+- [ ] **Record the result (Pass, Partial or Fail):** macOS and Xcode
+      versions, date, the requirement's *form* without the owner's name,
+      cert and profile expiry, keychain variant used, per-check pass/fail,
+      as a dated implementation note in ADR-013 ("Implementation notes —
       Personal Team spike") on a `docs/p9-personal-team-spike` branch,
-      reviewed like any brief change, and tick this item. Then B1 may
-      start.
+      reviewed like any brief change. On **Pass**, B1 may start now; on
+      **Partial**, only after the residual note above.
 - [ ] **Fail** (a needed entitlement is unavailable to a Personal Team, a
       grant or the Keychain item does not survive a rebuild, or a
       profile's expiry would break the installed app): record which check
@@ -666,7 +671,13 @@ xcodebuild -scheme FridayNode -configuration Release -derivedDataPath build \
   -allowProvisioningUpdates CODE_SIGN_STYLE=Automatic DEVELOPMENT_TEAM="$TEAM" \
   ENABLE_HARDENED_RUNTIME=YES build          # the Run Script phase fails the build on a marker
 APP=build/Build/Products/Release/FridayNode.app
-# repeat the marker check on the final binary (same strings check as the build phase)
+# repeat the marker check on the final binary (same check as the build phase)
+CONF_KEY_B64=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["signing"]["public_key_b64"])' \
+  ../backend/nodes/conformance/keys/conformance_keys.json)
+if strings "$APP/Contents/MacOS/FridayNode" \
+   | grep -qiE -e "FRIDAY_NODE_CONFORMANCE|conformance" -e "$CONF_KEY_B64"; then
+  echo "conformance marker in the release binary: refusing"; exit 1
+fi
 codesign --verify --strict --verbose=2 "$APP"
 codesign -dv --verbose=4 "$APP" 2>&1 | grep -q "Authority=Apple Development" \
   || { echo "not signed with an Apple Development identity (A1)"; exit 1; }
