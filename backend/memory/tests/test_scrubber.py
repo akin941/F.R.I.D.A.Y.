@@ -339,3 +339,8 @@ def test_uuid_exemption_needs_the_whole_value():
     assert scrubber.scrub_value({"id": "00000000-0000-0000-0000-a10000000146"})[0] != {
         "id": "00000000-0000-0000-0000-a10000000146"
     }  # not RFC 4122 (version 0): no exemption
+
+
+def test_mixed_case_uuid_value_is_not_exempt():
+    value = "aBcDeF12-3456-4789-8AbC-dEf012345678"
+    assert scrubber._UUID_VALUE.fullmatch(value) is None

@@ -170,8 +170,12 @@ _PHONE_E164 = re.compile(r"(?<![\w+])\+[1-9](?:[\s.\-]?\d){7,14}(?!\d)")
 # a UUID inside prose is scrubbed like any other text (over-scrubbing is the
 # safe side). Encoding data on purpose (UUID-shaped, base64, ...) is outside
 # what a pattern scrubber can stop; see ADR-012.
+# Lowercase or uppercase only: a mixed-case 32-hex value keeps going through
+# the secret rules (`high_entropy`), as before. The exemption skips the whole
+# scrub (secret rules and scrub terms too) for a uniform-case UUID value.
 _UUID_VALUE = re.compile(
-    r"[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[1-8][0-9A-Fa-f]{3}-[89ABab][0-9A-Fa-f]{3}-[0-9A-Fa-f]{12}"
+    r"[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}"
+    r"|[0-9A-F]{8}-[0-9A-F]{4}-[1-8][0-9A-F]{3}-[89AB][0-9A-F]{3}-[0-9A-F]{12}"
 )
 
 

@@ -368,7 +368,7 @@ records how they relate to this ADR:
 
 Random uuid4 identifiers in episode metadata (e.g. `job_id`) were sometimes
 read as a phone, card or TCKN and corrupted. `scrub_value` now keeps a
-metadata string that is **exactly one** canonical RFC 4122 UUID unchanged.
+metadata string that is **exactly one** canonical RFC 4122 UUID (all lowercase or all uppercase) unchanged; that value skips the whole scrub, secret rules and scrub terms included (a mixed-case value is still scrubbed as text).
 Free text gets no exemption: a UUID inside prose is scrubbed like any other
 text, so over-scrubbing stays the failure mode. Threat model: the scrubber
 stops *accidental* secrets and third-party PII in the owner's own sources; it
