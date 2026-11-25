@@ -319,3 +319,35 @@ def test_pii_next_to_a_uuid_is_still_scrubbed():
     assert _UUIDS_THAT_LOOK_LIKE_PII[0] in result.text
     assert "[PII:phone]" in result.text
     assert "0532" not in result.text
+
+
+# --- UUID shield cannot be used to smuggle PII (review 2026-11-25) ----------
+
+_UUID_A = "23932636-83e3-4882-9336-af7bbc1efa76"
+
+
+def test_iban_followed_by_a_uuid_is_still_scrubbed():
+    for uuid_value in (_UUID_A, _UUID_A.upper()):
+        result = scrubber.scrub_text(f"TR33 0006 1005 1978 6457 8413 26 {uuid_value}")
+        assert "[PII:iban]" in result.text
+        assert "6457" not in result.text
+
+
+def test_tckn_inside_a_uuid_shaped_token_is_still_scrubbed():
+    result = scrubber.scrub_text("00000000-0000-0000-0000-a10000000146")
+    assert "[PII:tckn]" in result.text
+
+
+def test_all_digit_uuid_shape_is_not_shielded():
+    # A crafted, RFC-4122-valid but all-digit token gets no shield.
+    value = "41111111-1111-4111-8111-111111111111"
+    assert _uuid_shield_spans(value) == []
+
+
+def test_non_rfc4122_uuid_shape_is_not_shielded():
+    assert _uuid_shield_spans("23932636-83e3-0882-9336-af7bbc1efa76") == []  # version 0
+    assert _uuid_shield_spans("23932636-83e3-4882-c336-af7bbc1efa76") == []  # variant c
+
+
+def _uuid_shield_spans(text):
+    return scrubber._uuid_spans(text)
