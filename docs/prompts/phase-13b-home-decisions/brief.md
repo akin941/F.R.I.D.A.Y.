@@ -591,7 +591,8 @@ allows.
   rule holds for everything but this one class).
 - The chat view, after the cap: `run_home_direct(...)` through the port
   (`tools.home_ports.register_direct_executor`), which calls
-  `connectors.home_direct.execute(...)`:
+  `connectors.home_direct.execute(...)` with the saved user `Message`, not
+  the payload's arguments (D10a lock 3 re-resolves them first):
   1. `deny_if_unattended("ha_direct_call")`;
   2. lock the `HomeDirectSettings` row; re-run `classify` (the payload is
      never trusted); if not direct → return `fallback(reason)`;
