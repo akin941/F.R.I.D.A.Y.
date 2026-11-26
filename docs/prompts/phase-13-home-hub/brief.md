@@ -1213,6 +1213,27 @@ Owner steps (pending) — `feat/p13-node-registry`, recorded 2026-11-20:
    pairing (optional — absent already means macOS); the server contract is
    pinned by `nodes/tests/test_pairing_platform.py`.
 
+Known follow-ups — `feat/p13-node-registry` (unresolved LOW review notes,
+recorded at merge into `integ/phase-13` 2026-11-26):
+1. **Revoked nodes keep their room (`workspaces.Room` / `Node.room`
+   PROTECT).** A revoked or expired node keeps its room FK, so the room
+   reports `room.in_use` (409) forever: the owner cannot delete it, and the
+   `PATCH` that clears `room_id` may not be usable on a revoked node. Fix:
+   clear `Node.room` on revocation, or leave revoked/expired nodes out of
+   the in-use check; at least document it and allow `PATCH room_id=null`
+   on revoked nodes.
+2. **`relabel_node` re-checks unchanged labels.** An aliases-only or
+   name-only `PATCH` checks the node's own existing name and aliases
+   against `taken_label_keys`, so a legacy node that collides only with a
+   kill-switch-held node gets 409 on an unrelated alias edit (edge case).
+   Fix: check only the keys that changed (new name key, newly added alias
+   keys).
+3. **`node_audit_events` scans AuditLog metadata.** The query ORs
+   `metadata__node_id`, `metadata__device_id` and `metadata__node_device_id`
+   with no index, which becomes a scan as AuditLog grows. Fix: add a GIN or
+   expression index on `AuditLog.metadata`, or narrow by a time window or
+   `resource_id` before the OR (the closeout measurement under D8).
+
 **Minimum usable cut** if the phase runs long: 7 (the home server is safe
 and backed up), 1 and 2 (several PCs, the right one each time). 3 adds
 presence, 4 the Linux node, 5–6 the TV.
