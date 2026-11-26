@@ -307,6 +307,8 @@ _READERS = {
     "connectors/views.py",
     "connectors/serializers.py",
     "connectors/home_entities.py",
+    # Branch 6: read-only resolver over the enabled allowlist (for_actor).
+    "connectors/home_phrases.py",
 }
 _WRITER = "connectors/home_entities.py"
 
