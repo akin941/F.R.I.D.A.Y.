@@ -849,6 +849,11 @@ HOME_DRILL_FAIL_DAYS = env.int("HOME_DRILL_FAIL_DAYS", default=90)
 # encrypted (runbook step 1); a container cannot see the host's disks.
 # Empty = `home_disk_encryption` warns.
 HOME_FDE_CONFIRMED_ON = env("HOME_FDE_CONFIRMED_ON", default="")
+# Phase 13 closeout (brief D15): the `node/friday-node-linux` checkout
+# `linux_node_vendor` hashes against its `vendor.lock`. Empty =
+# `<repo>/node/friday-node-linux` next to the backend; absent (the backend
+# image ships no `node/`) = a warning.
+PREFLIGHT_LINUX_NODE_DIR = env("PREFLIGHT_LINUX_NODE_DIR", default="")
 
 # --- Knowledge/RAG (MVP 3) ---
 
