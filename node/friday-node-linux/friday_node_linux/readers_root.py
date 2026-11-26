@@ -36,9 +36,11 @@ import tempfile
 from pathlib import Path
 from types import MappingProxyType
 
+from jsonschema import Draft202012Validator
+
 from friday_node_linux._vendor.integrations.node_reference import owner_turns
 from friday_node_linux._vendor.nodes import capabilities
-from friday_node_linux._vendor.nodes.protocol.messages import ProtocolError, validate_instance
+from friday_node_linux._vendor.nodes.protocol.messages import _has_float
 from friday_node_linux._vendor.nodes.reference.readers import MAX_FILES, Readers, ReadOutcome
 
 DESKTOP_CAPABILITIES = ("apps.frontmost", "windows.list")
@@ -67,8 +69,8 @@ def vetted_files(home, family) -> list:
     only, never through a symlink, inside the real root, at most MAX_FILES."""
     source, _target, pattern = TRANSCRIPT_DIRS[family]
     root = Path(home) / source
-    if not root.is_dir() or root.is_symlink() or (Path(home) / source.parts[0]).is_symlink():
-        return []
+    if not root.is_dir() or root.is_symlink():
+        return []  # the reference rule: the family root itself is never a symlink
     real_root = os.path.realpath(root)
     out = []
     for path in sorted(root.glob(pattern)):
@@ -177,8 +179,13 @@ class LinuxReaders:
         if reply.get("status") != "ok":
             return ReadOutcome("error")
         contract = self.owner_turn_contracts[capability]
-        try:
-            validate_instance(contract.result_schema, reply["output"], code="result")
-        except ProtocolError:
+        # The staged 8B contracts are written for jsonschema's search
+        # semantics (their `cwd` pattern is a prefix, `^(/|~$|~/)`), which
+        # is how the 8B reader's own tests check them; the protocol's strict
+        # full-match validator would refuse every absolute cwd (a known
+        # follow-up: the contracts move into nodes/capabilities/v1 with
+        # full-match patterns). Integers only, as on the wire.
+        output = reply["output"]
+        if _has_float(output) or not Draft202012Validator(contract.result_schema).is_valid(output):
             return ReadOutcome("error")
-        return ReadOutcome("ok", reply["output"], bool(reply["output"].get("truncated")))
+        return ReadOutcome("ok", output, bool(output.get("truncated")))
