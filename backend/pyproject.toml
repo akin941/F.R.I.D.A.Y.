@@ -150,6 +150,9 @@ source_modules = ["accounts", "workspaces", "audit", "ai_core", "assistant", "me
 forbidden_modules = ["config"]
 ignore_imports = [
     "proactive.tests.** -> config.**",
+    # The Phase 13 closeout e2e serves Django + the node gateway's composition
+    # root (`config.asgi_nodes`) on one TLS port, as the home box's Caddy does.
+    "ops.tests.test_home_hub_e2e -> config.asgi_nodes",
 ]
 
 # ai_core is the single door for LLM traffic (ADR-003): it must never depend on
