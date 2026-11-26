@@ -5,37 +5,13 @@
 // A Swift port of backend/nodes/conformance/runner.py's `InProcessDriver`,
 // `GatewayChecker` and `check`.
 //
-// The read cases that need the M2 readers (Claude Code / Codex transcripts,
-// git, usage, window titles and the scrubber) cannot pass in M1. They are
-// listed in `pendingM2` and the test fails both when a case outside the list
-// does not pass and when a listed case starts passing (so M2 must empty the
-// list; nothing is skipped silently).
+// Readers run over the reference fixture home (FixtureHome.swift, built like
+// nodes/reference/fixtures/factory.py), with the case's local grants and
+// window-titles toggle; `usage.ccusage` follows the reference rule.
 
 import Foundation
 import NodeCore
 import XCTest
-
-/// The M1 test reader: `apps.frontmost` over the reference fixture desktop
-/// (backend/nodes/reference/fixtures/desktop.json). Every other capability
-/// is an M2 reader and fails here.
-final class FixtureDesktopReader: ReadProvider {
-    private(set) var calls: [String] = []
-    let desktop: JSONValue
-
-    init() throws {
-        desktop = try Repo.json("backend/nodes/reference/fixtures/desktop.json")
-    }
-
-    func read(capability: String, args: JSONValue, now: Int64) -> ReadOutcome {
-        calls.append(capability)
-        guard capability == "apps.frontmost" else { return .failure }
-        let frontmost = desktop["frontmost"] ?? [:]
-        return .success([
-            "bundle_id": frontmost["bundle_id"] ?? .null,
-            "app_name": frontmost["app_name"] ?? .null,
-        ])
-    }
-}
 
 /// The fake gateway's view of the node's frames.
 struct GatewayChecker {
@@ -63,16 +39,32 @@ final class ConformanceDriver {
     static let advanceStepSeconds: Int64 = 5
     let session: NodeSession
     let clock: ManualClock
-    let reader: FixtureDesktopReader
+    let reader: NodeReaders
     var frames: [JSONValue] = []
     var checker = GatewayChecker()
     var silent = false
 
+    /// One fixture home for the whole run (the cases only read it).
+    nonisolated(unsafe) static var sharedHome: String?
+    static func home() throws -> String {
+        if let home = sharedHome { return home }
+        let home = try FixtureHome.build()
+        sharedHome = home
+        return home
+    }
+
     init(case document: JSONValue) throws {
         let setup = document["setup"] ?? [:]
         clock = ManualClock(setup["now"]?.intValue ?? 0)
-        reader = try FixtureDesktopReader()
-        var availability: [String: String] = [:]
+        let home = try ConformanceDriver.home()
+        var grants = ReaderGrants(claude: true, codex: true)
+        if let claude = setup["reader_grants"]?["claude"]?.boolValue { grants.claude = claude }
+        if let codex = setup["reader_grants"]?["codex"]?.boolValue { grants.codex = codex }
+        reader = NodeReaders(
+            home: home, repos: try FixtureHome.repos(home: home), grants: grants,
+            windowTitles: setup["window_titles"]?.boolValue ?? false,
+            desktop: try FixtureDesktop(fixturesDirectory: FixtureHome.fixtures), usage: .transcripts)
+        var availability = reader.availability()
         for (name, value) in setup["availability"]?.objectValue ?? [:] {
             availability[name] = value.stringValue
         }
@@ -199,21 +191,10 @@ enum ConformanceCase {
 }
 
 final class ConformanceTests: XCTestCase {
-    /// Read cases that need the M2 readers and scrubber (Phase 9 brief M2,
-    /// runbook B2). M2 empties this list.
-    static let pendingM2: Set<String> = [
-        "v1_read_codex_thread_detail_scrubbed",
-        "v1_read_codex_threads_list_cwd_prefixes",
-        "v1_read_directory_not_granted",
-        "v1_read_git_status",
-        "v1_read_session_detail_last_turns",
-        "v1_read_session_detail_scrubbed",
-        "v1_read_sessions_list_cwd_prefixes",
-        "v1_read_sessions_list_since_hours",
-        "v1_read_usage_cwd_prefixes",
-        "v1_read_windows_titles_off",
-        "v1_read_windows_titles_on_scrubbed",
-    ]
+    /// Every v1 case runs; none is pending since M2 (readers, grants,
+    /// scrubber). Kept as an explicit, empty list so a future gap must be
+    /// named here rather than skipped silently.
+    static let pendingM2: Set<String> = []
 
     func testEveryV1CaseMatchesTheReferenceNode() throws {
         let cases = try ConformanceCase.all()
@@ -237,6 +218,6 @@ final class ConformanceTests: XCTestCase {
             }
         }
         XCTAssertEqual(Set(stillPending), Self.pendingM2, "pendingM2 names a case that does not exist")
-        print("conformance v1: \(passed) passed, \(stillPending.count) pending M2 readers, of \(cases.count)")
+        print("conformance v1: \(passed) passed, \(stillPending.count) pending, of \(cases.count)")
     }
 }

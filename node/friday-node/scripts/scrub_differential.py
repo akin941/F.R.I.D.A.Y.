@@ -24,13 +24,24 @@ from memory.ingestion.scrubber import scrub_text  # noqa: E402
 CLI = REPO / "node/friday-node/.build/debug/friday-node"
 POOL = list("İıſKßŞşĞğÜüÖöÇç\u001c\u001d\u000b\u0085  　٣٤٥۷०१２３́‍😀_-.:=@/+ \t\n\"'")
 SEEDS = [
-    "token: abcdefghijklmnopqrstuvwxyz0123", "API_KEY=sk-proj-Ab3dEf6hIj9kLm2nOp5qRs8tUv1wXy4zAB7CD0",
+    "token: abcdefghijklmnopqrstuvwxyz0123",
+    "API_KEY=sk-proj-Ab3dEf6hIj9kLm2nOp5qRs8tUv1wXy4zAB7CD0",
     "Bearer eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.sflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV",
-    "https://user:p4ss@host.example.com/x", "mail ayse.yilmaz@firma.com.tr now", "+90 532 123 45 67",
-    "TR33 0006 1005 1978 6457 8413 26", "4111 1111 1111 1111", "10000000146", "ghp_" + "A1b2C3d4" * 4,
-    "AKIAIOSFODNN7EXAMPLE", "-----BEGIN RSA PRIVATE KEY-----\nMIIB\n-----END RSA PRIVATE KEY-----",
-    "password = \"correct horse battery\"", "AIzaSyA1234567890abcdefghijklmnopqrstu", "xoxb-1234567890-abc",
-    "Q2xhdWRlIENvZGUgc2Vzc2lvbiBpbiAvVXNlcnMvb3du", "/Users/owner/code/friday", "commit 3f2a9c1e7b2d4f6a0e5c9b8d7a6f4e3c2b1a0f9e",
+    "https://user:p4ss@host.example.com/x",
+    "mail ayse.yilmaz@firma.com.tr now",
+    "+90 532 123 45 67",
+    "TR33 0006 1005 1978 6457 8413 26",
+    "4111 1111 1111 1111",
+    "10000000146",
+    "ghp_" + "A1b2C3d4" * 4,
+    "AKIAIOSFODNN7EXAMPLE",
+    "-----BEGIN RSA PRIVATE KEY-----\nMIIB\n-----END RSA PRIVATE KEY-----",
+    'password = "correct horse battery"',
+    "AIzaSyA1234567890abcdefghijklmnopqrstu",
+    "xoxb-1234567890-abc",
+    "Q2xhdWRlIENvZGUgc2Vzc2lvbiBpbiAvVXNlcnMvb3du",
+    "/Users/owner/code/friday",
+    "commit 3f2a9c1e7b2d4f6a0e5c9b8d7a6f4e3c2b1a0f9e",
 ]
 
 
@@ -57,7 +68,11 @@ def mutate(rng, text):
         elif op < 0.55 and chars:
             i = min(index, len(chars) - 1)
             c = chars[i]
-            chars[i] = c.swapcase() if rng.random() < 0.5 else {"i": "ı", "I": "İ", "s": "ſ", "k": "K"}.get(c, c)
+            chars[i] = (
+                c.swapcase()
+                if rng.random() < 0.5
+                else {"i": "ı", "I": "İ", "s": "ſ", "k": "K"}.get(c, c)
+            )
         elif op < 0.7 and chars:
             del chars[min(index, len(chars) - 1)]
         elif op < 0.85:
@@ -73,13 +88,20 @@ def main():
     base = corpus_texts()
     inputs = base + [mutate(rng, rng.choice(base)) for _ in range(count)]
     payload = "".join(json.dumps(text) + "\n" for text in inputs)
-    swift = subprocess.run([str(CLI), "scrub", "--jsonl"], input=payload.encode(), capture_output=True, check=True)
+    swift = subprocess.run(
+        [str(CLI), "scrub", "--jsonl"], input=payload.encode(), capture_output=True, check=True
+    )
     outputs = [json.loads(line) for line in swift.stdout.decode().split("\n") if line]
     assert len(outputs) == len(inputs)
     diffs = [(i, t) for i, t in enumerate(inputs) if scrub_text(t).text != outputs[i]]
     print(f"{len(inputs)} inputs, {len(diffs)} differ")
     for index, text in diffs[:15]:
-        print(json.dumps({"input": text, "python": scrub_text(text).text, "swift": outputs[index]}, ensure_ascii=False))
+        print(
+            json.dumps(
+                {"input": text, "python": scrub_text(text).text, "swift": outputs[index]},
+                ensure_ascii=False,
+            )
+        )
     return 1 if diffs else 0
 
 

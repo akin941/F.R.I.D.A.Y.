@@ -13,7 +13,7 @@ final class ReconnectBackoffTests: XCTestCase {
 
     func makeSession() -> NodeSession {
         NodeSession(
-            nodeID: "6f1e2d3c-4b5a-4987-8a6b-5c4d3e2f1a0b", pinned: [:], catalogue: NodeCatalogue.current(),
+            nodeID: "6f1e2d3c-4b5a-4987-8a6b-5c4d3e2f1a0b", pinned: [:], catalogue: NodeCatalogue.defaultPolicy(),
             readers: Reader(), clock: ManualClock(1_796_000_000), nodeVersion: "friday-node test",
             osVersion: "macOS test", backoff: Backoff(random: { 0.999_999 }))
     }

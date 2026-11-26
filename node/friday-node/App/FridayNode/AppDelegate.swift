@@ -6,8 +6,13 @@
 // - "Resume" is the owner's local action after a `bye` that stops
 //   reconnecting (revoked, kill switch, credential expired).
 // - "Pair..." opens the pairing window; "Unpair" forgets the credential.
+// - "İzinler" (M2): the local grants for ~/.claude/projects and
+//   ~/.codex/sessions, the window-titles toggle and the git repo list. Every
+//   change asks for Touch ID or the password first (PolicyEditor); the node
+//   then advertises the new availability at once.
 
 import AppKit
+import CoreGraphics
 import NodeCore
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
@@ -18,7 +23,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var pairItem: NSMenuItem!
     private var unpairItem: NSMenuItem!
     private var pairingWindow: PairingWindowController?
-    let runner = NodeRunner(store: KeychainCredentialStore(), readers: NoReaders())
+    private let permissionsMenu = NSMenu(title: "İzinler")
+    let policyStore = KeychainLocalPolicyStore()
+    lazy var runner = NodeRunner(
+        store: KeychainCredentialStore(), policyStore: policyStore, desktop: SystemDesktop(),
+        home: NSHomeDirectory(), usage: .unsupported)
+    lazy var editor = PolicyEditor(store: policyStore, authentication: DeviceOwnerAuthentication())
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
@@ -37,11 +47,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             item.target = self
             menu.addItem(item)
         }
+        let permissions = NSMenuItem(title: "İzinler", action: nil, keyEquivalent: "")
+        permissions.submenu = permissionsMenu
+        permissionsMenu.autoenablesItems = false
+        menu.addItem(.separator())
+        menu.addItem(permissions)
         menu.addItem(.separator())
         menu.addItem(NSMenuItem(title: "Çık", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
         menu.autoenablesItems = false
         statusItem.menu = menu
 
+        editor.onChange = { [weak self] policy in
+            self?.runner.policyChanged(policy)
+            DispatchQueue.main.async { self?.rebuildPermissions() }
+        }
+        rebuildPermissions()
         runner.onStatus = { [weak self] status in self?.show(status) }
         show(.connecting)
         runner.start()
@@ -79,6 +99,87 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case "bye:kill_switch": return "acil durdurma"
         case "bye:credential_expired": return "kimlik süresi doldu"
         default: return reason
+        }
+    }
+
+    // MARK: Permissions (local policy)
+
+    private func rebuildPermissions() {
+        permissionsMenu.removeAllItems()
+        let policy = (try? editor.current()) ?? LocalPolicy()
+        func toggle(_ title: String, _ on: Bool, _ action: Selector) {
+            let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
+            item.state = on ? .on : .off
+            item.target = self
+            permissionsMenu.addItem(item)
+        }
+        toggle("Claude Code oturumları (~/.claude/projects)", policy.grants.claude, #selector(toggleClaude))
+        toggle("Codex oturumları (~/.codex/sessions)", policy.grants.codex, #selector(toggleCodex))
+        toggle("Pencere başlıkları", policy.windowTitles, #selector(toggleTitles))
+        permissionsMenu.addItem(.separator())
+        let header = NSMenuItem(title: "Git depoları (yalnızca sayılar)", action: nil, keyEquivalent: "")
+        header.isEnabled = false
+        permissionsMenu.addItem(header)
+        for (index, repo) in policy.repos.enumerated() {
+            let item = NSMenuItem(title: "Kaldır: \(repo.root)", action: #selector(removeRepo(_:)), keyEquivalent: "")
+            item.tag = index
+            item.target = self
+            permissionsMenu.addItem(item)
+        }
+        let add = NSMenuItem(title: "Depo ekle…", action: #selector(addRepo), keyEquivalent: "")
+        add.target = self
+        permissionsMenu.addItem(add)
+    }
+
+    private func changePolicy(_ reason: String, _ change: @escaping (inout LocalPolicy) -> Void) {
+        Task {
+            do {
+                try await editor.change(reason: reason, change)
+            } catch PolicyChangeError.notAuthenticated {
+                // The owner cancelled or failed authentication: nothing changed.
+            } catch {
+                await MainActor.run { self.statusLine.title = "Friday Node: izinler kaydedilemedi" }
+            }
+        }
+    }
+
+    @objc private func toggleClaude() {
+        changePolicy("Friday Node'un Claude Code oturum iznini değiştir") { $0.grants.claude.toggle() }
+    }
+
+    @objc private func toggleCodex() {
+        changePolicy("Friday Node'un Codex oturum iznini değiştir") { $0.grants.codex.toggle() }
+    }
+
+    @objc private func toggleTitles() {
+        let turningOn = !((try? editor.current())?.windowTitles ?? false)
+        if turningOn && !CGPreflightScreenCaptureAccess() { _ = CGRequestScreenCaptureAccess() }
+        changePolicy("Friday Node'un pencere başlıklarını okumasına izin ver") { $0.windowTitles.toggle() }
+    }
+
+    @objc private func addRepo() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = false
+        panel.prompt = "Ekle"
+        NSApp.activate(ignoringOtherApps: true)
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        let home = NSHomeDirectory()
+        var root = url.path
+        if root == home { root = "~" } else if root.hasPrefix(home + "/") { root = "~/" + root.dropFirst(home.count + 1) }
+        let name = url.lastPathComponent
+        changePolicy("Friday Node'a git deposu ekle: \(name)") { policy in
+            guard !policy.repos.contains(where: { $0.root == root }) else { return }
+            policy.repos.append(LocalPolicy.Repo(name: name, root: root))
+        }
+    }
+
+    @objc private func removeRepo(_ sender: NSMenuItem) {
+        let index = sender.tag
+        changePolicy("Friday Node'dan git deposunu kaldır") { policy in
+            guard policy.repos.indices.contains(index) else { return }
+            policy.repos.remove(at: index)
         }
     }
 

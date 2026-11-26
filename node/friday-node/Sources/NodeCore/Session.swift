@@ -164,6 +164,13 @@ public final class NodeConnection: NSObject, URLSessionWebSocketDelegate, @unche
 
     public var isFinished: Bool { finished }
 
+    /// Send frames the session produced outside a receive or tick (an
+    /// availability change). Call on `queue`.
+    public func sendSessionFrames(_ frames: [JSONValue]) {
+        guard !finished, !closing else { return }
+        sendThenCloseIfDone(frames)
+    }
+
     /// Send `frames`; when the session has just closed itself (a stopping
     /// bye, the third frame error, server silence), close the socket only
     /// after the last of them left, so a final error result is not lost.
@@ -293,7 +300,11 @@ public final class NodeRunner: @unchecked Sendable {
     private let store: CredentialStore
     private let clock: NodeClock
     private let queue = DispatchQueue(label: "friday-node.runner")
-    private let readers: ReadProvider
+    private let policyStore: LocalPolicyStore
+    private let desktop: DesktopSource
+    private let usage: UsageSource
+    private let home: String
+    private var policy = LocalPolicy()
     private var credential: NodeCredential?
     private var session: NodeSession?
     private var connection: NodeConnection?
@@ -316,16 +327,49 @@ public final class NodeRunner: @unchecked Sendable {
     }
     private static let log = Logger(subsystem: "dev.friday.friday-node", category: "runner")
 
-    public init(store: CredentialStore, readers: ReadProvider, clock: NodeClock = SystemClock()) {
+    /// `home`: the owner's home (the readers' `~`); `usage`: how
+    /// `usage.ccusage` is answered (`.unsupported` until a vetted ccusage
+    /// binary is configured).
+    public init(
+        store: CredentialStore, policyStore: LocalPolicyStore, desktop: DesktopSource, home: String,
+        usage: UsageSource = .unsupported, clock: NodeClock = SystemClock()
+    ) {
         self.store = store
-        self.readers = readers
+        self.policyStore = policyStore
+        self.desktop = desktop
+        self.home = home
+        self.usage = usage
         self.clock = clock
+    }
+
+    /// The owner changed the local policy (after LocalAuthentication): the
+    /// readers and the advertised catalogue follow at once, and a connected
+    /// session tells the server what changed.
+    public func policyChanged(_ policy: LocalPolicy) {
+        queue.async {
+            self.policy = policy
+            guard let session = self.session else { return }
+            let (catalogue, readers) = self.readersAndCatalogue()
+            let frames = session.update(catalogue: catalogue, readers: readers)
+            if !frames.isEmpty { self.connection?.sendSessionFrames(frames) }
+        }
+    }
+
+    private func readersAndCatalogue() -> (Catalogue, NodeReaders) {
+        let readers = policy.readers(home: home, desktop: desktop, usage: usage)
+        return (.standard(availability: readers.availability()), readers)
     }
 
     /// Load the credential and connect.
     public func start() {
         queue.async {
             self.reset(running: true)
+            do {
+                self.policy = try self.policyStore.load()
+            } catch {
+                Self.log.error("local policy: unreadable; everything stays off")
+                self.policy = LocalPolicy()
+            }
             do {
                 self.credential = try self.store.load()
                 Self.log.info("credential: \(self.credential == nil ? "none" : "present", privacy: .public)")
@@ -398,8 +442,9 @@ public final class NodeRunner: @unchecked Sendable {
     }
 
     private func makeSession(_ credential: NodeCredential) -> NodeSession {
-        NodeSession(
-            nodeID: credential.nodeID, pinned: credential.pinnedKeys, catalogue: NodeCatalogue.current(),
+        let (catalogue, readers) = readersAndCatalogue()
+        return NodeSession(
+            nodeID: credential.nodeID, pinned: credential.pinnedKeys, catalogue: catalogue,
             readers: readers, clock: clock, nodeVersion: NodeInfo.nodeVersion, osVersion: NodeInfo.osVersion)
     }
 
@@ -500,20 +545,12 @@ enum RunnerError: Error {
     case superseded
 }
 
-/// The catalogue the app advertises. M1 has no readers that touch owner
-/// data, so every capability is `not_granted` until M2 adds readers and the
-/// owner's local grants.
+/// The catalogue a node with the default local policy advertises: no
+/// transcript grant, no repo, titles off, ccusage unsupported (the desktop
+/// readers are available, as in the reference node).
 public enum NodeCatalogue {
-    public static func current() -> Catalogue {
-        var availability: [String: String] = [:]
-        for contract in CapabilityContract.all { availability[contract.name] = "not_granted" }
-        return .standard(availability: availability)
+    public static func defaultPolicy(home: String = NSHomeDirectory()) -> Catalogue {
+        let readers = LocalPolicy().readers(home: home, desktop: SystemDesktop(), usage: .unsupported)
+        return .standard(availability: readers.availability())
     }
-}
-
-/// M1's reader: none. Every read fails closed (and with every capability
-/// `not_granted`, the verifier refuses first).
-public final class NoReaders: ReadProvider {
-    public init() {}
-    public func read(capability: String, args: JSONValue, now: Int64) -> ReadOutcome { .failure }
 }

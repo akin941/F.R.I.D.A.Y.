@@ -66,13 +66,13 @@ public final class NodeSession: @unchecked Sendable {
 
     public let nodeID: String
     public let pinned: [String: Data]
-    public let catalogue: Catalogue
+    public private(set) var catalogue: Catalogue
     public let clock: NodeClock
     public let nodeVersion: String
     public let osVersion: String
     public var readDelaySeconds: Int64
 
-    private let readers: ReadProvider
+    private var readers: ReadProvider
     private let makeID: () -> String
     private let nonceCache = NonceCache()
     private var backoff: Backoff
@@ -173,6 +173,31 @@ public final class NodeSession: @unchecked Sendable {
         reconnectAllowed = true
         backoff.reset()
         nextReconnectDelay = 0
+    }
+
+    /// The owner changed the local policy: from now on the node answers
+    /// with `readers` and advertises `catalogue` (a revoked grant is
+    /// `not_granted` at once, so check 16 refuses before any reader runs).
+    /// Returns the `grant.availability_changed` event to send, if the
+    /// session is up and anything changed (items exactly `{name, version,
+    /// availability}`). A node that is not connected sends nothing: its next
+    /// `hello` carries the new catalogue.
+    public func update(catalogue newCatalogue: Catalogue, readers newReaders: ReadProvider) -> [JSONValue] {
+        let items = AvailabilityChange.items(from: catalogue, to: newCatalogue)
+        catalogue = newCatalogue
+        readers = newReaders
+        guard connected, sessionReady, !items.isEmpty else { return [] }
+        let frames: [JSONValue] = stride(from: 0, to: items.count, by: 50).map { start in
+            [
+                "v": .int(NodeProtocol.version),
+                "type": "event",
+                "id": .string(makeID()),
+                "kind": "grant.availability_changed",
+                "batch": .array(Array(items[start..<min(start + 50, items.count)])),
+                "spooled": false,
+            ]
+        }
+        return send(frames)
     }
 
     /// A mic state from the voice host. v1 never relays one.
