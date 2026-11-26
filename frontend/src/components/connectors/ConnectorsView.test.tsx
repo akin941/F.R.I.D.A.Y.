@@ -49,6 +49,12 @@ function stub(
       const current = bindings[body.workspace]![0]!;
       return jsonResponse({ ...current, enabled: body.enabled });
     }
+    if (method === "GET" && url.startsWith("/api/connectors/home-assistant/entities?")) {
+      return jsonResponse({ workspace: ws, limits: {}, services: {}, results: [] });
+    }
+    if (method === "GET" && url.startsWith("/api/workspaces/")) {
+      return jsonResponse({ workspace: "w1", limits: {}, results: [] });
+    }
     throw new Error(`Unexpected fetch ${method} ${url}`);
   });
   vi.stubGlobal("fetch", fetchMock);
@@ -165,6 +171,20 @@ describe("ConnectorsView", () => {
     expect(screen.queryByTestId("connector-github")).not.toBeInTheDocument();
     expect(await screen.findByTestId("connector-external_installation")).toBeInTheDocument();
     expect(screen.queryByTestId("connector-github")).not.toBeInTheDocument();
+  });
+
+  it("shows the Home Assistant entity allowlist editor only where HA can bind (Phase 13 D11)", async () => {
+    stub({
+      w1: [binding({ connector: "home_assistant", display_name: "Home Assistant", data_class: "personal" })],
+      w2: [binding({ connector: "home_assistant", display_name: "Home Assistant", bindable: false })],
+    });
+    const { rerender } = renderWithClient(<ConnectorsView />);
+    expect(await screen.findByTestId("ha-entities-editor")).toBeInTheDocument();
+    expect(await screen.findByTestId("ha-entities-empty")).toBeInTheDocument();
+    holder.current = { id: "w2", name: "Acme", type: "company", role: "owner" };
+    rerender(<ConnectorsView />);
+    await screen.findByTestId("connector-home_assistant");
+    expect(screen.queryByTestId("ha-entities-editor")).not.toBeInTheDocument();
   });
 
   it("shows the owner-only refusal as an error state", async () => {

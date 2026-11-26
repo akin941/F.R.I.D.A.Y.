@@ -193,3 +193,73 @@ class ConnectorAsyncRead(WorkspaceScopedModel, TimestampedModel):
 
     def __str__(self):
         return f"{self.connector}.{self.tool} async read {self.id} ({self.status})"
+
+
+HOME_ENTITY_ID_MAX_CHARS = 141
+HOME_ENTITY_LABEL_MAX_CHARS = 60
+
+
+class HomeEntity(WorkspaceScopedModel, TimestampedModel):
+    """One Home Assistant entity the owner allowlisted (Phase 13 D11).
+
+    `ha_call_service` is refused unless its `entity_id` is an **enabled**
+    `HomeEntity` of the request's workspace and its `service` is in
+    `services` -- at request time, as the execution precondition and in the
+    bridge's own pre-send read. An empty allowlist means no entity call is
+    possible (fail closed; Wake-on-LAN, which has no entity, stays governed
+    by `HA_WOL_ALLOWED_MACS`). Rows of the owner's **personal** workspace
+    only; created, changed and removed only by the installation owner over
+    the web (`connectors.home_entities`, audited `ha.entity_allowed` /
+    `ha.entity_changed` / `ha.entity_removed`). No tool, route, schedule or
+    connector writes this table (CLAUDE.md rule 4; a registry walk test
+    pins it).
+
+    `services` is a subset of the bridge's code maximum for the entity's
+    domain (`connectors.bridges.home_assistant.SERVICES`), never of a
+    `NEVER_DOMAINS` or read-only domain: `save()` re-checks it, so not even
+    a direct ORM write can widen the maximum. `HA_ALLOWED_DOMAINS` narrows
+    further at call time. `label` / `aliases` follow the shared label rules
+    (`workspaces.rooms.clean_label` / `clean_aliases`); `key` is the
+    label's `core.speech.phrase_key` (what the home routes resolve on)."""
+
+    entity_id = models.CharField(max_length=HOME_ENTITY_ID_MAX_CHARS)
+    room = models.ForeignKey(
+        "workspaces.Room",
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="home_entities",
+    )
+    label = models.CharField(max_length=HOME_ENTITY_LABEL_MAX_CHARS)
+    key = models.CharField(max_length=HOME_ENTITY_LABEL_MAX_CHARS)
+    aliases = models.JSONField(default=list, blank=True)
+    services = models.JSONField(default=list, blank=True)
+    enabled = models.BooleanField(default=True)
+
+    class Meta:
+        ordering = ["entity_id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["workspace", "entity_id"], name="connectors_home_entity_unique"
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.entity_id} ({self.label})"
+
+    @property
+    def domain(self):
+        return self.entity_id.split(".", 1)[0]
+
+    def save(self, *args, **kwargs):
+        # The code maximum holds on every write path, not only the
+        # owner-web service. Lazy import: the bridge loads the connector
+        # framework, which must not run during app-registry setup.
+        from django.core.exceptions import ValidationError
+
+        from connectors.bridges.home_assistant import code_maximum_refusal
+
+        refusal = code_maximum_refusal(self.entity_id, self.services)
+        if refusal is not None:
+            raise ValidationError(refusal, code=refusal)
+        super().save(*args, **kwargs)

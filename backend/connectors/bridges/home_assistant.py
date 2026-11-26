@@ -16,6 +16,14 @@ LAN additionally needs the MAC in `HA_WOL_ALLOWED_MACS` (empty: refused).
 No domain is confirm-class or ungated (Q7): every call is the gated
 `ha_call_service` tool.
 
+**The entity allowlist (Phase 13 D11).** On top of the code maximum, every
+entity call needs an enabled `connectors.HomeEntity` of the request's
+workspace whose `services` include the service -- checked at request time
+(`check_allowlist`, the policy's scope check) and as the execution
+precondition (`target_present`); an empty allowlist allows no entity call.
+Rows are written only by the owner over the web (`connectors.home_entities`).
+Wake-on-LAN has no entity and stays on `HA_WOL_ALLOWED_MACS`.
+
 **The pin.** There is no remote `inputSchema` to pin: the "schema" of each
 tool is this module's own request contract (`tool_schemas()`, derived from
 the serializers), and the manifest pins its sha256. Widening the allowlist
@@ -102,10 +110,21 @@ ATTRIBUTE_WHITELIST = frozenset(
         "current_position",
         "volume_level",
         "is_volume_muted",
+        # Phase 13 D12: a media player's current input and the inputs it
+        # offers -- what `select_source` may name (an exact-match argument,
+        # never an instruction). `source_list` is bounded (`public_state`).
+        "source",
+        "source_list",
     }
 )
 MAX_STATES = 200
 TEXT_MAX_CHARS = 200
+# `source_list` bounds (D12): at most this many inputs, each at most this
+# long. An input that is longer, not text, or carries invisible formatting is
+# dropped rather than altered, so every listed value is one HA itself sent
+# verbatim -- `select_source` then names exactly what HA knows.
+SOURCE_LIST_MAX_ITEMS = 30
+SOURCE_MAX_CHARS = 60
 HVAC_MODES = ("off", "heat", "cool", "heat_cool", "auto", "dry", "fan_only")
 
 ENTITY_RE = re.compile(r"^([a-z][a-z0-9_]{0,39})\.([a-z0-9_]{1,100})$")
@@ -143,6 +162,16 @@ class FiniteFloatField(serializers.FloatField):
         return value
 
 
+class StrictBooleanField(serializers.BooleanField):
+    """Only a JSON `true` / `false`: DRF's own field also takes "yes", 1,
+    "on" ... -- a mute argument says exactly what happens."""
+
+    def to_internal_value(self, data):
+        if not isinstance(data, bool):
+            self.fail("invalid", input=data)
+        return data
+
+
 class NoData(StrictSerializer):
     pass
 
@@ -172,6 +201,29 @@ class VolumeSetData(StrictSerializer):
     volume_level = FiniteFloatField(min_value=0, max_value=1)
 
 
+class VolumeMuteData(StrictSerializer):
+    is_volume_muted = StrictBooleanField()
+
+
+class SelectSourceData(StrictSerializer):
+    """`media_player.select_source`: one input by its exact name. The value
+    must equal one of the entity's live `source_list` entries -- read at
+    request time (`request_rows`), re-checked as the execution precondition
+    (`target_present`) and once more right before the send."""
+
+    source = serializers.CharField(max_length=SOURCE_MAX_CHARS, trim_whitespace=False)
+
+    def to_internal_value(self, data):
+        if isinstance(data, dict) and "source" in data and not isinstance(data["source"], str):
+            raise serializers.ValidationError({"source": ["Must be text."]})
+        return super().to_internal_value(data)
+
+    def validate_source(self, value):
+        if not value.strip() or strip_invisible_formatting(value) != value:
+            raise serializers.ValidationError("Not a source name.")
+        return value
+
+
 class WakeOnLanData(StrictSerializer):
     mac = serializers.CharField(max_length=17)
 
@@ -197,7 +249,19 @@ SERVICES = {
         "set_cover_position": CoverPositionData,
     },
     "climate": {"set_temperature": ClimateTemperatureData, "set_hvac_mode": ClimateHvacModeData},
-    "media_player": {"media_play": NoData, "media_pause": NoData, "volume_set": VolumeSetData},
+    # Phase 13 D12: power, input, mute and volume steps join play / pause /
+    # set. `media_play_pause` and `toggle` stay absent (state-dependent).
+    "media_player": {
+        "turn_on": NoData,
+        "turn_off": NoData,
+        "media_play": NoData,
+        "media_pause": NoData,
+        "select_source": SelectSourceData,
+        "volume_set": VolumeSetData,
+        "volume_mute": VolumeMuteData,
+        "volume_up": NoData,
+        "volume_down": NoData,
+    },
     # A scene is an owner-configured intent HA resolves at activation time;
     # its effects cannot be previewed and may touch NEVER_DOMAINS entities
     # (residual risk, docs/mcp/home-assistant.md). Narrow it away with
@@ -240,8 +304,136 @@ def read_domains():
 
 
 def entity_domain(entity_id):
-    match = ENTITY_RE.match(entity_id or "")
+    match = ENTITY_RE.match(entity_id or "") if isinstance(entity_id, str) else None
     return match.group(1) if match else None
+
+
+# --- the entity allowlist (Phase 13 D11) ---
+
+ENTITY_NOT_ALLOWED = "entity_not_allowed"
+SERVICE_NOT_ALLOWED = "service_not_allowed"
+SOURCE_NOT_AVAILABLE = "source_not_available"
+
+
+def entity_domains():
+    """The domains a `HomeEntity` may belong to: the code maximum minus
+    Wake-on-LAN (no entity) -- `NEVER_DOMAINS` and the read-only sensors
+    are never in `SERVICES`, and a test pins that."""
+    return frozenset(SERVICES) - NEVER_DOMAINS - READ_ONLY_DOMAINS - {WAKE_ON_LAN}
+
+
+def code_maximum_refusal(entity_id, services):
+    """Why `(entity_id, services)` can never be an allowlist row, or `None`.
+    The code maximum only (`HomeEntity.save` runs this on every write);
+    `HA_ALLOWED_DOMAINS` narrows separately (`allowlist_refusal`, and the
+    owner-web service at create/update time)."""
+    domain = entity_domain(entity_id)
+    if domain is None:
+        return "entity_invalid"
+    if domain not in entity_domains():
+        return "domain_not_allowed"
+    if not isinstance(services, list | tuple) or not services:
+        return "service_not_allowed"
+    allowed = SERVICES[domain]
+    if len(set(services)) != len(services):
+        return "service_not_allowed"
+    for service in services:
+        if not isinstance(service, str) or service not in allowed:
+            return "service_not_allowed"
+    return None
+
+
+def allowed_services(domain):
+    """The services the allowlist editor may offer for `domain` now: the
+    code maximum, empty when `HA_ALLOWED_DOMAINS` narrows the domain away."""
+    if domain not in entity_domains() or domain not in service_domains():
+        return []
+    return sorted(SERVICES[domain])
+
+
+def allowlisted_entity(workspace, entity_id):
+    """The workspace's **enabled** `HomeEntity` for `entity_id`, or `None`.
+    Scoped by the request's own workspace (the caller resolved it through
+    `for_actor()`); a disabled row allows nothing."""
+    from connectors.models import HomeEntity
+
+    if workspace is None or not isinstance(entity_id, str):
+        return None
+    return (
+        HomeEntity.objects.select_related("room")
+        .filter(workspace=workspace, entity_id=entity_id, enabled=True)
+        .first()
+    )
+
+
+def allowlist_refusal(workspace, arguments):
+    """`None` when the call is inside the owner's entity allowlist, else
+    `entity_not_allowed` / `service_not_allowed`. Wake-on-LAN has no entity:
+    it stays governed by `HA_WOL_ALLOWED_MACS` alone (its serializer)."""
+    arguments = arguments or {}
+    if arguments.get("domain") == WAKE_ON_LAN:
+        return None
+    entity = allowlisted_entity(workspace, arguments.get("entity_id"))
+    if entity is None:
+        return ENTITY_NOT_ALLOWED
+    if arguments.get("service") not in (entity.services or []):
+        return SERVICE_NOT_ALLOWED
+    return None
+
+
+_REFUSAL_TEXT = {
+    ENTITY_NOT_ALLOWED: "The entity is not on the owner's Home Assistant allowlist.",
+    SERVICE_NOT_ALLOWED: "The service is not allowed for this entity.",
+    SOURCE_NOT_AVAILABLE: "The source is not one the media player offers now.",
+}
+
+
+def check_allowlist(workspace, arguments):
+    """`ToolPolicy.scope_check` of `ha_call_service` (request time, before
+    any network traffic). Raises `ToolValidationError` with the closed code
+    first, so the API's 400 names why."""
+    refusal = allowlist_refusal(workspace, arguments)
+    if refusal is not None:
+        raise ToolValidationError(f"{refusal}: {_REFUSAL_TEXT[refusal]}")
+
+
+def source_refusal(arguments, state):
+    """`select_source` only: `source_not_available` unless the requested
+    source is one of the entity's live (bounded) `source_list` values."""
+    if (arguments or {}).get("service") != "select_source":
+        return None
+    source = ((arguments or {}).get("data") or {}).get("source")
+    offered = ((state or {}).get("attributes") or {}).get("source_list")
+    if not isinstance(offered, list) or source not in offered:
+        return SOURCE_NOT_AVAILABLE
+    return None
+
+
+def annotate_states(workspace, structured):
+    """`ToolPolicy.annotate` of `ha_states`: each allowlisted entity gains
+    the owner's own `room` / `label` / `allowed_services` (Friday rows,
+    never HA text); others are marked `allowlisted: false`. Scope is
+    unchanged -- the read still covers the allowed domains."""
+    from connectors.models import HomeEntity
+
+    if not isinstance(structured, dict) or not isinstance(structured.get("entities"), list):
+        return structured
+    rows = {
+        row.entity_id: row
+        for row in HomeEntity.objects.select_related("room").filter(
+            workspace=workspace, enabled=True
+        )
+    }
+    for entity in structured["entities"]:
+        row = rows.get(entity.get("entity_id"))
+        if row is None:
+            entity["allowlisted"] = False
+            continue
+        entity["allowlisted"] = True
+        entity["label"] = row.label
+        entity["room"] = row.room.name if row.room_id else None
+        entity["allowed_services"] = list(row.services)
+    return structured
 
 
 class StatesArguments(StrictSerializer):
@@ -318,6 +510,7 @@ def tool_schemas():
             "arguments": {name: _describe(f) for name, f in StatesArguments().fields.items()},
             "read_only_domains": sorted(READ_ONLY_DOMAINS),
             "attributes": sorted(ATTRIBUTE_WHITELIST),
+            "source_list": {"max_items": SOURCE_LIST_MAX_ITEMS, "max_chars": SOURCE_MAX_CHARS},
         },
         SERVER_TOOL_CALL: {
             "never": sorted(NEVER_DOMAINS),
@@ -434,6 +627,28 @@ def _text(value):
     return strip_invisible_formatting(str(value))[:TEXT_MAX_CHARS]
 
 
+def _source_list(value):
+    """A media player's `source_list`, bounded (D12): at most
+    `SOURCE_LIST_MAX_ITEMS` distinct inputs, each a non-blank string of at
+    most `SOURCE_MAX_CHARS` without invisible formatting. Anything else is
+    dropped, never rewritten (a rewritten name would not be HA's)."""
+    if not isinstance(value, list):
+        return []
+    kept = []
+    for item in value:
+        if len(kept) >= SOURCE_LIST_MAX_ITEMS:
+            break
+        if (
+            isinstance(item, str)
+            and item.strip()
+            and len(item) <= SOURCE_MAX_CHARS
+            and strip_invisible_formatting(item) == item
+            and item not in kept
+        ):
+            kept.append(item)
+    return kept
+
+
 def public_state(raw, domains):
     """An HA state object reduced to what may leave the bridge, or `None`
     when it is malformed or outside `domains`."""
@@ -446,7 +661,9 @@ def public_state(raw, domains):
     kept = {}
     for key in sorted(ATTRIBUTE_WHITELIST & set(attributes)):
         value = attributes[key]
-        if isinstance(value, bool) or value is None:
+        if key == "source_list":
+            kept[key] = _source_list(value)
+        elif isinstance(value, bool) or value is None:
             kept[key] = value
         elif isinstance(value, int | float):
             kept[key] = value if math.isfinite(value) else None
@@ -557,6 +774,10 @@ def _call_service(arguments, timeout):
     body = {"entity_id": entity_id, **clean["data"]} if entity_id else dict(clean["data"])
     with _client(timeout) as client:
         before = _read_entity(client, entity_id, operation="pre_check") if entity_id else None
+        if source_refusal(clean, before) is not None:
+            # The input vanished from the live `source_list` since the
+            # precondition (D12): refused, unsent -> `connector_changed`.
+            raise ConnectorError("not_allowed")
         try:
             status, _ = _request(
                 client,
@@ -629,13 +850,28 @@ def render_call(arguments):
     return rows
 
 
+# Owner-set rows of the decision dialog (D12): the approval card's header
+# (`connector-write.tsx`) shows these two, then the exact service.
+ROOM_ROW = "Oda"
+LABEL_ROW = "Etiket"
+
+
 def request_rows(workspace, arguments):
-    """Request-time read of the target (D8): the entity's HA-supplied name
-    and its current state, labelled as such. A missing entity or an
-    unreachable HA refuses the request (400) -- nothing is decided blind."""
+    """Request-time rows of the decision dialog (D8, D12): the owner's own
+    room and label of the allowlisted entity (Friday rows), then the
+    entity's HA-supplied name and its current state, labelled as such. A
+    missing entity, an unreachable HA or (for `select_source`) a source the
+    player does not offer now refuses the request (400) -- nothing is
+    decided blind."""
     entity_id = arguments.get("entity_id")
     if not entity_id:
         return []
+    rows = []
+    entity = allowlisted_entity(workspace, entity_id)
+    if entity is not None:
+        if entity.room_id:
+            rows.append({"label": ROOM_ROW, "value": entity.room.name})
+        rows.append({"label": LABEL_ROW, "value": entity.label})
     try:
         with _client(settings.CONNECTOR_READ_TIMEOUT_SECONDS) as client:
             state = _read_entity(client, entity_id, operation="request_state")
@@ -645,8 +881,10 @@ def request_rows(workspace, arguments):
         raise ToolValidationError(
             "Home Assistant could not be read to show the entity's current state."
         ) from None
+    refusal = source_refusal(arguments, state)
+    if refusal is not None:
+        raise ToolValidationError(f"{refusal}: {_REFUSAL_TEXT[refusal]}")
     attributes = state["attributes"]
-    rows = []
     if "friendly_name" in attributes:
         rows.append(
             {"label": "Ad (Home Assistant'tan gelen metin)", "value": attributes["friendly_name"]}
@@ -675,24 +913,33 @@ _PRECONDITION_ERRORS = {
 
 def target_present(manifest, binding, payload):
     """`ToolPolicy.precondition` of `ha_call_service`, run by the write task
-    after the claim and before the one send: the approved call must still be
-    inside the allowlist as it is *now* (`HA_ALLOWED_DOMAINS` or the MAC
-    allowlist narrowed -> `connector_changed`) and the entity must still
-    exist (`target_missing`). Any failure to confirm either refuses the send
-    -- nothing reaches Home Assistant. `_call_service` re-checks both
-    (defence in depth: the entity can vanish between the two reads)."""
+    after the claim and before the one send. The approved call must still be
+    inside the allowlist as it is *now*: the code maximum and
+    `HA_ALLOWED_DOMAINS` (or the MAC allowlist), and -- Phase 13 D11 -- the
+    owner's entity allowlist of the binding's workspace (the entity removed
+    or disabled, or the service unticked, while the approval was pending ->
+    `connector_changed`). The entity must still exist (`target_missing`)
+    and, for `select_source`, still offer the approved input
+    (`connector_changed`). Any failure to confirm refuses the send --
+    nothing reaches Home Assistant. `_call_service` re-reads the entity and
+    the source right before the POST (defence in depth: the entity can
+    vanish between the two reads)."""
     arguments = (payload or {}).get("arguments") or {}
     serializer = CallServiceArguments(data=arguments)
     if not serializer.is_valid() or serializer.validated_data != arguments:
+        return "connector_changed"
+    if binding is None or allowlist_refusal(binding.workspace, arguments) is not None:
         return "connector_changed"
     entity_id = arguments.get("entity_id")
     if not entity_id:
         return None
     try:
         with _client(settings.CONNECTOR_READ_TIMEOUT_SECONDS) as client:
-            _read_entity(client, entity_id, operation="precondition")
+            state = _read_entity(client, entity_id, operation="precondition")
     except ConnectorError as exc:
         return _PRECONDITION_ERRORS.get(exc.code, "unknown")
+    if source_refusal(arguments, state) is not None:
+        return "connector_changed"
     return None
 
 

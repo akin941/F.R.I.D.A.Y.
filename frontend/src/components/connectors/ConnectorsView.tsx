@@ -2,6 +2,7 @@
 
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Plug } from "lucide-react";
+import { HomeEntitiesEditor } from "@/components/connectors/HomeEntitiesEditor";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -242,6 +243,9 @@ function ConnectorsForWorkspace({ workspaceId }: { workspaceId: string }) {
           ))}
         </div>
       )}
+      {query.data?.some((b) => b.connector === "home_assistant" && b.bindable) ? (
+        <HomeEntitiesEditor workspaceId={workspaceId} />
+      ) : null}
       <RecentReads workspaceId={workspaceId} />
     </>
   );

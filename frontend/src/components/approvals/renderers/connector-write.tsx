@@ -34,6 +34,31 @@ function row(summary: ApiConnectorWriteDisplaySummary, label: string): string {
  * the task checks, and the exact canonical JSON that will be sent with its
  * sha256. Values are rendered as text (React escapes them), pre-wrapped.
  */
+/**
+ * A Home Assistant call's header (Phase 13 D12): the owner's own room and
+ * label of the allowlisted entity (Friday rows `Oda` / `Etiket`), then the
+ * exact service -- "Salon · TV · media_player.turn_on". Nothing for any
+ * other connector, or when the rows are absent (e.g. Wake-on-LAN).
+ */
+export function HomeTargetHeader({ summary }: { summary: ApiConnectorWriteDisplaySummary }) {
+  if (summary.tool !== "ha_call_service") return null;
+  const label = row(summary, "Etiket");
+  if (!label) return null;
+  const room = row(summary, "Oda");
+  const service = row(summary, "Hizmet");
+  return (
+    <p className="text-base font-semibold break-words" data-testid="ha-target-header">
+      {[room, label].filter(Boolean).join(" · ")}
+      {service ? (
+        <>
+          {" · "}
+          <code className="font-mono text-sm">{service}</code>
+        </>
+      ) : null}
+    </p>
+  );
+}
+
 function ConnectorWriteSummary({ request }: { request: ApiApprovalRequest }) {
   const summary = connectorWriteSummary(request);
   if (!summary) return <NoSummary />;
@@ -48,6 +73,7 @@ function ConnectorWriteSummary({ request }: { request: ApiApprovalRequest }) {
           </Badge>
         ) : null}
       </p>
+      <HomeTargetHeader summary={summary} />
       {summary.tool_description ? (
         <p className="text-sm text-muted-foreground">{summary.tool_description}</p>
       ) : null}

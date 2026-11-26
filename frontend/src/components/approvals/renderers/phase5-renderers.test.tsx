@@ -163,6 +163,44 @@ describe("connector write renderers", () => {
     renderRequest(request);
     expect(screen.getByText("light.salon")).toBeInTheDocument();
     expect(screen.getByText("data.brightness_pct")).toBeInTheDocument();
+    // No owner-set rows (a pre-v2 snapshot): no room/label header.
+    expect(screen.queryByTestId("ha-target-header")).toBeNull();
+  });
+
+  it("ha_call_service: the header names the owner's room and label, then the exact service", () => {
+    const request = approvalRequest({
+      tool_name: "ha_call_service",
+      display_summary: writeSummary({
+        connector: "home_assistant",
+        tool: "ha_call_service",
+        rows: [
+          { label: "Hizmet", value: "media_player.turn_on" },
+          { label: "Varlık (entity_id)", value: "media_player.salon_tv" },
+          { label: "Veri", value: "{}" },
+          { label: "Oda", value: "Salon" },
+          { label: "Etiket", value: "TV" },
+          { label: "Ad (Home Assistant'tan gelen metin)", value: "Samsung QE55" },
+        ],
+      }),
+    });
+    renderRequest(request);
+    const header = screen.getByTestId("ha-target-header");
+    expect(header.textContent?.replace(/\s+/g, " ").trim()).toBe("Salon · TV · media_player.turn_on");
+    // The exact entity id is still shown in the rows.
+    expect(screen.getByText("media_player.salon_tv")).toBeInTheDocument();
+  });
+
+  it("the room/label header is Home Assistant only", () => {
+    const request = approvalRequest({
+      tool_name: "mail_send",
+      display_summary: writeSummary({
+        connector: "google",
+        tool: "mail_send",
+        rows: [{ label: "Etiket", value: "TV" }],
+      }),
+    });
+    renderRequest(request);
+    expect(screen.queryByTestId("ha-target-header")).toBeNull();
   });
 
   it("github_open_pr: the consequence names repo, head and base; context rows are shown", () => {

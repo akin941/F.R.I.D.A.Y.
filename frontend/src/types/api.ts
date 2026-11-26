@@ -176,6 +176,45 @@ export interface ApiRoomList {
   results: ApiRoom[];
 }
 
+/** One allowlisted Home Assistant entity (Phase 13 D11). */
+export interface ApiHomeEntity {
+  id: string;
+  entity_id: string;
+  domain: string;
+  label: string;
+  key: string;
+  aliases: string[];
+  services: string[];
+  enabled: boolean;
+  room: ApiRoomRef | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/** `GET /api/v1/connectors/home-assistant/entities`. `services`: the code maximum per domain, narrowed. */
+export interface ApiHomeEntityList {
+  workspace: string;
+  limits: { aliases: number; alias_min_chars: number; alias_max_chars: number; label_max_chars: number };
+  services: Record<string, string[]>;
+  results: ApiHomeEntity[];
+}
+
+/** One row of the editor's pick list (a live `ha_states` read; HA text is display-only). */
+export interface ApiHomeEntityCandidate {
+  entity_id: string;
+  domain: string;
+  friendly_name: string;
+  state: string;
+  source_list: string[];
+  services: string[];
+  allowlisted: boolean;
+}
+
+export interface ApiHomeEntityCandidates {
+  results: ApiHomeEntityCandidate[];
+  omitted: number;
+}
+
 /** One row of `GET /api/v1/nodes/<id>/audit` (Phase 13 D8): a chain row or an event. */
 export type ApiNodeAuditRow =
   | ({ kind: "invocation" } & ApiNodeInvocation)

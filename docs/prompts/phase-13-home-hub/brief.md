@@ -1124,7 +1124,7 @@ evaluation".
 | 2 | `feat/p13-node-targeting` | `nodes.targeting.resolve_target`, `last_active_at`, `ToolCallContext`, read tools and node-action proposals on the resolver, ask template, one-node invariant, approval card node header, ADR-013 note | 1 | **implemented 2026-11-20** (swarm date stamp; see "Branch 2 notes"; awaits the independent Sonnet 5 review) |
 | 3 | `feat/p13-hud-presence` | `node_presence`, HUD `nodes` section + `HudNodesPanel`, `/devices` overview columns | 1 (parallel with 2) | **implemented 2026-11-20** (swarm date stamp; see "Branch 3 notes"; server and web only, nothing needs the Mac; the real two-PC HUD run is part of M2, pending owner evaluation; awaits the independent Sonnet 5 review) |
 | 4 | `feat/p13-linux-node` | `node/friday-node-linux` (vendored + locked, read-only, local policy CLI, credential file, systemd user unit, re-point), CI conformance job, Windows stub README | 1 (pairing `platform`) | **implemented 2026-11-20** (`node/friday-node-linux`: vendored reference node + `vendor.lock`, v1 read-only daemon, 0600 policy + TTY-confirmed CLI, 0600 credential + TLS pins + rotation, re-point, hook relay + spool, systemd user unit; 50/50 v1 conformance cases over real localhost TLS; `linux-node` CI job; Windows stub; see "Branch notes and owner steps (pending) — `feat/p13-linux-node`"; real Linux PC: M2, pending owner evaluation) |
-| 5 | `feat/p13-ha-home-control` | `connectors.HomeEntity` allowlist, media_player power/source/mute/volume steps, `source_list`, manifest v2 pins, entity editor, governance docs | 1 (rooms) | planned |
+| 5 | `feat/p13-ha-home-control` | `connectors.HomeEntity` allowlist, media_player power/source/mute/volume steps, `source_list`, manifest v2 pins, entity editor, governance docs | 1 (rooms) | **implemented 2026-11-20** (see "Branch 5 notes"; fail closed: no HA entity call until the owner allowlists entities; awaits the independent Sonnet 5 review) |
 | 6 | `feat/p13-home-voice-routes` | `connectors.home_phrases`, `home.control` wake route (proposal only), typed-turn mismatch check, vectors, ADR-015 note | 2, 5 | planned |
 | 7 | `feat/p13-home-server-ops` | `compose.home.yml`, `deploy/home/` backup/drill/timer/Caddy, `home_*` preflight rows and settings | brief approved (independent) | **implemented 2026-11-20** (compose override + `make up-home`, `deploy/home/` scripts/units/Caddyfile, `check_home` five rows, settings + `.env.example`, `home-ops` CI job, runbook updated; real hardware: M3, pending owner evaluation) |
 | 8 | `chore/p13-closeout` | `nodes_labels` / `ha_entities` / `linux_node_vendor` rows, no-protocol-change check, home-hub e2e, runbooks, ADR-017 note, MASTER_PLAN row, `self_sources.json`, go/no-go record | 1–7 | planned |
@@ -1464,6 +1464,127 @@ recorded at merge into `integ/phase-13` 2026-11-26):
   to `nodes/tests/presence_nodes.py` (same content; its two importers,
   `nodes/tests/test_node_presence.py` and `hud/tests/test_nodes_section.py`,
   updated). Unifying the two helpers is a later cleanup.
+
+### Branch 5 notes — `feat/p13-ha-home-control` (implemented 2026-11-20)
+
+What landed (all server side and web; nothing needs the Mac or a real HA —
+every test runs against the `httpx.MockTransport` fake):
+- `connectors.HomeEntity` (migration `connectors/0005_home_entity`):
+  `entity_id` (unique per workspace), `room` (PROTECT → `workspaces.Room`,
+  so a room with an entity answers `room.in_use`), `label` + `key`
+  (`phrase_key`), `aliases` (≤ 5, shared label rules), `services`,
+  `enabled`. `HomeEntity.save()` re-checks the code maximum on **every**
+  write path (`bridge.code_maximum_refusal`: no `NEVER_DOMAINS`, read-only
+  or Wake-on-LAN entity, no service outside `SERVICES[domain]`, no repeats,
+  never empty).
+- `connectors/home_entities.py` (the brief's `services.py` content, in its
+  own module like branch 1's `workspaces/rooms.py`): owner-web CRUD
+  (`require_owner_web`, personal workspace only), `HA_ALLOWED_DOMAINS`
+  narrows what can be added, workspace-row lock for uniqueness, audit
+  `ha.entity_allowed` / `ha.entity_changed` (field names) /
+  `ha.entity_removed` (ids, keys, domain, service names only), and
+  `entity_candidates` (the editor's pick list = one normal, audited
+  `ha_states` read; nothing auto-applied). API:
+  `GET/POST /api/v1/connectors/home-assistant/entities?workspace=`,
+  `PATCH/DELETE …/entities/<id>`, `GET …/candidates?workspace=`. Error codes
+  `ha_entity.invalid` / `.not_allowed` / `.conflict` (409) /
+  `.read_failed` (502) plus the shared `label.*`.
+- Bridge: `media_player` gains `turn_on`, `turn_off`, `select_source`
+  (`SelectSourceData{source}`, text ≤ 60, no invisible formatting),
+  `volume_mute` (`VolumeMuteData{is_volume_muted}`, JSON boolean only),
+  `volume_up`, `volume_down`; toggles stay absent. `ATTRIBUTE_WHITELIST` +
+  `source`, `source_list` (≤ 30 distinct items ≤ 60 chars).
+  The allowlist is checked at request time (`ToolPolicy.scope_check =
+  check_allowlist`, 400 `entity_not_allowed` / `service_not_allowed`
+  before any network traffic), as the precondition (`target_present`, using
+  the binding's workspace; removed / disabled / unticked while pending →
+  `connector_changed`, nothing sent) and is exposed as
+  `bridge.allowlist_refusal(workspace, arguments)` for branch 6's draft
+  path. `select_source` must name a live `source_list` value: request time
+  (400 `source_not_available`), precondition and the bridge's own pre-POST
+  read (`connector_changed`, unsent). The dialog gains the owner's `Oda` /
+  `Etiket` rows.
+- `ha_states` scope unchanged; allowlisted entities are annotated with
+  `allowlisted`, `label`, `room`, `allowed_services` through a new, small
+  framework hook `ToolPolicy.annotate(workspace, structured)` (sync reads
+  of native bridges only, validated at boot).
+- Manifest version 2, new pins (`STATES_PIN 772b49f1…`, `CALL_SERVICE_PIN
+  a3487095…`); `docs/mcp/home-assistant.md` (entity allowlist, sources,
+  dialog, v2 review line) and `docs/mcp/allowlist.md` updated in the same
+  commit series.
+- Frontend: `HomeEntitiesEditor` under the Home Assistant card on
+  `/connectors` (live pick list, label, room, aliases, services checkboxes
+  limited to the code maximum, nothing ticked by default, enable/disable,
+  remove behind a confirmation); `connector-write.tsx` header "Salon · TV ·
+  media_player.turn_on" from the `Oda` / `Etiket` / `Hizmet` rows; BFF
+  routes under `/api/connectors/home-assistant/`; Turkish messages for the
+  new codes.
+
+Tests: `connectors/tests/test_ha_entities.py` (service, code maximum on the
+model, labels, rooms, scoping), `test_ha_entities_api.py` (CRUD, codes,
+candidates, role × endpoint over the 12 principals of branch 1's list),
+`test_ha_media.py` (D12 services, strict serializers, `source_list` bounds,
+the done-when "turn on the salon TV" drafted → approved → executed once →
+read back, timeout → `unknown_outcome` never re-sent), and
+`test_ha_allowlist_gate.py` (refusals at request / precondition, narrowing
+while pending, empty allowlist, Wake-on-LAN with an empty allowlist still on
+`HA_WOL_ALLOWED_MACS` — the plan review's follow-up 1 — v2 pins, a
+serializer change without the pin fails, and the registry walk: a source
+scan proves only `connectors/home_entities.py` writes `HomeEntity`, and no
+registered tool / read tool / manifest hook lives in that module). The
+Phase 5 HA tests allowlist the fake's entities in their `bound` fixture.
+
+Deviations recorded:
+- Service module `connectors/home_entities.py` instead of
+  `connectors/services.py` (the existing module is the binding service).
+- The draft-time check: `ha_call_service` still has no `draft_arguments`
+  in this branch (no typed-turn argument extraction yet); branch 6 calls
+  `allowlist_refusal` from its resolver and decides whether to switch
+  `draft_arguments` on together with the typed-turn mismatch check.
+- `source_list` entries that are too long, not text or carry invisible
+  formatting are **dropped, not stripped**, so every offered source is a
+  value HA sent verbatim (a stripped name might not match on HA's side).
+- The registry walk is a source scan plus a tool-registry walk inside
+  `connectors/tests` (an `assistant` import from there would break the
+  import contracts; wake `tool.*` routes are built from the same tool
+  registry and are covered by it).
+
+Owner steps (pending) — `feat/p13-ha-home-control`, recorded 2026-11-20:
+1. Have the independent Sonnet 5 review of this branch reach APPROVE
+   (it widens the HA contract: manifest v2, new pins).
+2. After merge and `migrate`: **every HA entity call is refused until the
+   allowlist is filled** (fail closed, intended). On `/connectors` →
+   Home Assistant izin listesi: read the entities, add e.g.
+   `media_player.salon_tv` (room *Salon*, label "TV", the services wanted)
+   and `scene.film_gecesi` (label "film gecesi"). Wake-on-LAN keeps working
+   through `HA_WOL_ALLOWED_MACS`.
+3. On the real HA: confirm the TV's `source_list` names (they must match
+   exactly for `select_source`) and that the dedicated non-admin HA user
+   can call the new `media_player` services; nothing here ran against a
+   real HA.
+
+Known follow-ups (LOW, from the independent review; recorded at the
+integration merge 2026-11-26):
+1. **Frontend vitest suites not run in the review worktree**
+   (`frontend/src/components/connectors/HomeEntitiesEditor.tsx`). The
+   HomeEntitiesEditor, connector-write renderer and ha-entity-routes suites
+   were not executed during review (no `node_modules` in the review
+   sandbox); backend only was verified there. Fix: run `make test`
+   (vitest) in CI or locally to confirm them green.
+2. **Allowlist removal is a hard delete**
+   (`backend/connectors/home_entities.py` `delete_entity`). The row is
+   owner-re-addable configuration, not user content, and is audited as
+   `ha.entity_removed`; ADR-009's reversible-trash rule is arguably out of
+   scope. Fix: note in `docs/mcp/home-assistant.md` that allowlist removal
+   is intentionally a hard delete (fail-closed config), or switch to
+   `enabled=False` semantics.
+3. **`HomeEntity.save()` maximum bypassable by bulk ORM writes**
+   (`backend/connectors/models.py`). `bulk_create` / `QuerySet.update`
+   skip the code maximum; call-time checks (request, precondition, the
+   bridge's pre-send read) and serializer validation against `SERVICES`
+   still enforce the allowlist. Residual risk is a direct ORM write. No
+   action needed: the registry-walk test pins that only `home_entities`
+   writes the table.
 
 **Minimum usable cut** if the phase runs long: 7 (the home server is safe
 and backed up), 1 and 2 (several PCs, the right one each time). 3 adds
