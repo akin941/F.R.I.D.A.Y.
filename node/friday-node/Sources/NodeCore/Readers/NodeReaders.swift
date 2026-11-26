@@ -1,4 +1,4 @@
-// The node's readers for the eight v1 read capabilities (Phase 9 brief M2,
+// The node's readers for eight of the ten v1 read capabilities (Phase 9 brief M2,
 // D7, D13 items 5-6): a port of backend/nodes/reference/readers.py
 // `Readers`, whose module docstring states the normative rules:
 //
@@ -16,6 +16,13 @@
 // Directory grants are local and off by default; a family without its
 // grant is advertised `not_granted` (check 16 refuses before any reader
 // runs) and the reader refuses too (defence in depth).
+//
+// The two Phase 8B owner-turn reads (`claude.transcripts.owner_turns`,
+// `codex.transcripts.owner_turns`, server contracts since runbook A12) have
+// no Swift reader yet (runbook B4 ports
+// backend/nodes/reference/owner_turns.py). Their family, "owner_turns", is
+// always advertised `not_granted`, whatever the directory grants, so the
+// node never claims a capability it cannot serve; `read` refuses them too.
 
 import Foundation
 
@@ -34,6 +41,8 @@ public final class NodeReaders: ReadProvider, @unchecked Sendable {
         "claude.sessions.list": "claude", "claude.sessions.read": "claude", "usage.ccusage": "claude",
         "codex.threads.list": "codex", "codex.threads.read": "codex", "git.status": "git",
         "apps.frontmost": "desktop", "windows.list": "desktop",
+        // No reader until runbook B4: always `not_granted` (see the header).
+        "claude.transcripts.owner_turns": "owner_turns", "codex.transcripts.owner_turns": "owner_turns",
     ]
 
     let home: String
@@ -72,6 +81,7 @@ public final class NodeReaders: ReadProvider, @unchecked Sendable {
             case "claude": out[name] = grants.claude ? "granted" : "not_granted"
             case "codex": out[name] = grants.codex ? "granted" : "not_granted"
             case "git": out[name] = (repos?.isEmpty == false) ? "granted" : "not_granted"
+            case "owner_turns": out[name] = "not_granted"  // runbook B4 adds the readers
             default: out[name] = "granted"
             }
         }

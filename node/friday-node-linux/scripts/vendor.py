@@ -53,7 +53,6 @@ TREES = (
     "nodes/protocol",
     "nodes/capabilities",
     "nodes/reference/fixtures",
-    "integrations/node_reference/contracts",
 )
 FILES = (
     "nodes/reference/__init__.py",
@@ -63,6 +62,7 @@ FILES = (
     "nodes/reference/hook_relay.py",
     "nodes/reference/local_policy.py",
     "nodes/reference/node.py",
+    "nodes/reference/owner_turns.py",
     "nodes/reference/readers.py",
     "nodes/reference/sandbox.py",
     "nodes/reference/spool.py",
@@ -71,9 +71,6 @@ FILES = (
     "nodes/reference/verifier_v2.py",
     "nodes/reference/worktree.py",
     "nodes/conformance/keys/conformance_keys.json",
-    "integrations/node_reference/__init__.py",
-    "integrations/node_reference/owner_turns.py",
-    "integrations/cli/_scrubber_vendored.py",
 )
 # Generated (empty) package markers: these backend `__init__`s are not
 # vendored (Django app / CLI packages).
@@ -81,8 +78,6 @@ GENERATED_INITS = (
     "__init__.py",
     "nodes/__init__.py",
     "nodes/conformance/__init__.py",
-    "integrations/__init__.py",
-    "integrations/cli/__init__.py",
 )
 SKIP_PARTS = {"__pycache__", ".pytest_cache"}
 # The conformance node id is a constant in both places (the cases module is

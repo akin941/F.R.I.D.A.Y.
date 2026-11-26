@@ -476,15 +476,15 @@ source_modules = ["integrations.cli.friday_hook", "integrations.cli._scrubber_ve
 forbidden_modules = ["config", "core", "accounts", "workspaces", "audit", "ai_core", "assistant", "memory", "knowledge", "tasks", "approvals", "tools", "agents", "skills", "harness", "connectors", "deploys", "ops", "voice", "hud", "nodes", "mcp", "proactive"]
 
 # Phase 8B branch 8 (brief D17): the reference owner-turn readers are the
-# executable spec of the node side (the Swift app ports them), so like
-# friday-hook they import nothing of ours but the vendored scrubber. They
-# move under the `nodes` reference node with Phase 9 branch 5 (branch 3 left them
-# here; see the Phase 9 brief, known follow-ups of `feat/p9-reference-node`).
+# executable spec of the node side (the Swift app ports them), so they
+# import nothing of ours but the vendored scrubber. Runbook A12 moved them
+# from `integrations/node_reference/` under the `nodes` reference node
+# (`nodes.reference.owner_turns`, which the reference readers dispatch to).
 [[tool.importlinter.contracts]]
 name = "the owner-turn reference readers import no project package (Phase 8B D17)"
 type = "forbidden"
-source_modules = ["integrations.node_reference.owner_turns", "integrations.node_reference.build_conformance"]
-forbidden_modules = ["config", "core", "accounts", "workspaces", "audit", "ai_core", "assistant", "memory", "knowledge", "tasks", "approvals", "tools", "agents", "skills", "harness", "connectors", "deploys", "ops", "voice", "hud", "mcp", "proactive"]
+source_modules = ["nodes.reference.owner_turns"]
+forbidden_modules = ["config", "core", "accounts", "workspaces", "audit", "ai_core", "assistant", "memory", "knowledge", "tasks", "approvals", "tools", "agents", "skills", "integrations", "harness", "connectors", "deploys", "ops", "voice", "hud", "mcp", "proactive", "nodes.protocol", "nodes.capabilities", "nodes.reference.readers", "nodes.reference.node"]
 
 # The remaining apps have no stated relationship with harness at all in
 # this phase (brief §"Boundary vs. existing systems": "nothing may import

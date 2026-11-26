@@ -27,10 +27,13 @@ purity test enforce it).
 - `node`: `ReferenceNode`, the session state machine (D5 checks 23-24, fail
   closed on disconnect).
 - `transport`: the `wsproto` client over a localhost socket.
-- `readers` (Phase 9 branch 3): the eight v1 read capabilities over the
+- `readers` (Phase 9 branch 3): the ten v1 read capabilities over the
   fixture home's synthetic Claude Code / Codex transcripts, git repos and
   desktop fixture; bounded, scrubbed, `cwd_prefixes` honoured, never tool
-  results or file contents (the spec of the Swift readers, M2).
+  results or file contents (the spec of the Swift readers, M2; the two
+  owner-turn reads dispatch to `owner_turns`, runbook A12, Swift B4).
+- `owner_turns` (Phase 8B D13/D17, moved here by runbook A12): the
+  owner-turn rules over a transcript root or the readers' vetted files.
 - `spool` and `hook_relay` (Phase 9 branch 3): the bounded event spool
   (10 MiB, 24 h, 0600, deleted after ack) and the 0600 Unix-socket hook
   relay with its peer-uid check (the spec of M3).

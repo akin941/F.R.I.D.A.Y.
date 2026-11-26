@@ -15,6 +15,7 @@ class ToolsConfig(AppConfig):
         from tools.node_actions import _register as _register_node_action
         from tools.node_reads import _register as _register_node_reads
         from tools.purge import _register as _register_purge
+        from tools.transcript_node_port import install as _install_transcript_port
 
         _register()
         _register_purge()
@@ -28,3 +29,6 @@ class ToolsConfig(AppConfig):
         _register_node_action_read()
         # Phase 9 D9: the five ungated, web-only Friday Node read tools.
         _register_node_reads()
+        # Phase 8B D13 / runbook A12: the transcript pull reaches the owner's
+        # node through `nodes.services.invoke_read` (the default port).
+        _install_transcript_port()

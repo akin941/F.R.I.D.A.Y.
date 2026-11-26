@@ -32,14 +32,13 @@ makes **one** read invoke with exactly that workspace's prefixes:
   same beat. A truncated result whose last `at` equals `since` (one
   timestamp filled the cap) moves it on by 1 ms and counts `tie_overflow`.
 
-**The node seam.** Phase 9 branches 3-5 (`nodes.services.invoke_read`, the
-gateway and the reference node) have not merged yet, so the node layer is
-reached through `NodeReadPort`. The default port (`UnavailableNodePort`)
-has no node, so the beat is a no-op; tests install the Python reference
-node double (`tools/tests/transcript_nodes.py`). When Phase 9 lands, a
-`nodes`-backed port (signed, chain-audited `invoke_read` with the
-`channel` keyword and the actor check of the recorded D7/D9 amendment)
-replaces the default -- see the brief's owner steps.
+**The node seam.** The node layer is reached through `NodeReadPort`. The
+default port is `tools.transcript_node_port.NodesTranscriptPort` (signed,
+chain-audited `nodes.services.invoke_read` with the `channel` keyword and
+the actor check of the recorded D7/D9 amendment), installed at app start
+by `ToolsConfig.ready` (runbook A12). `UnavailableNodePort` (no node, the
+beat is a no-op) is only the placeholder before that install; tests also
+install the Python reference node double (`tools/tests/transcript_nodes.py`).
 """
 
 import logging
@@ -126,8 +125,8 @@ class NodeReadPort(Protocol):
 
 
 class UnavailableNodePort:
-    """The default until Phase 9 branches 3-5 merge: no node is reachable,
-    so nothing is invoked."""
+    """The placeholder until `ToolsConfig.ready` installs the `nodes`-backed
+    port: no node is reachable, so nothing is invoked."""
 
     def owner_node(self, owner):
         return None

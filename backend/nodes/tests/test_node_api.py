@@ -80,7 +80,7 @@ def test_the_list_shows_status_counts_and_no_content(owner, node, web_client):
     (item,) = response.json()
     assert item["id"] == str(node.pk)
     assert item["status"] == "disconnected"
-    assert item["advertised_count"] == 9 and item["invocable_count"] == 8
+    assert item["advertised_count"] == 11 and item["invocable_count"] == 10
     assert len(item["catalogue_sha256"]) == 12
     assert item["credential_age_days"] == 0
     body = json.dumps(response.json())
@@ -132,7 +132,7 @@ def test_node_health_blocks(owner, node):
     assert never["voice"]["state"] == "unknown"
     health = selectors.node_health(owner)
     assert health["status"] == "disconnected" and health["node_id"] == str(node.pk)
-    assert health["advertised_count"] == 9
+    assert health["advertised_count"] == 11
     bus.mark_present(node.pk)
     assert selectors.node_health(owner)["status"] == "connected"
     bus.clear_presence(node.pk)
