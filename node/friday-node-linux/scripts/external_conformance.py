@@ -48,6 +48,7 @@ def main() -> int:
     port = free_port()
     hook = Path(tempfile.mkdtemp(prefix="friday-linux-conformance-")) / "hook.sock"
     env = {**os.environ, "PYTHONUNBUFFERED": "1"}
+    env.pop("VIRTUAL_ENV", None)  # each `uv run --directory` uses its own project env
     env.setdefault("DJANGO_SETTINGS_MODULE", "config.settings.dev")
     gateway = subprocess.Popen(  # noqa: S603 - fixed argv
         [
