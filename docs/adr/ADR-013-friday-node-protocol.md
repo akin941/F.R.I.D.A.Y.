@@ -669,3 +669,46 @@ Where earlier sections of this ADR or the briefs say "notarized build" or
 "Developer ID", read "Personal Team signed build" and "the Personal Team
 signing identity", and read "TCC across updates" as "TCC across rebuilds
 signed by the same Personal Team identity".
+
+## Implementation note — "which PC" and one node per call (Phase 13 branch 2, 2026-11-20)
+
+`feat/p13-node-targeting` (Phase 13 brief D5–D7, D9). **No protocol
+change**: no WS message, schema field, capability contract or
+`friday-voice/v1` change; `build_node_conformance --check` and the
+conformance locks are untouched. What changed is server-side only:
+
+- **One resolver.** `nodes.targeting.resolve_target(owner, *, capabilities,
+  source_text, origin_node_id, requested_node_id, requested_label)` decides
+  the one node of every node read and node-action proposal, in this order:
+  the owner's own words (a node name or alias, a room in locative form, a
+  role or platform word; a named node that is offline, lacks the capability
+  or is cut off is refused *naming it*, never replaced by another node);
+  the speaking node of a `node_voice` turn (the voice token's
+  `node_device_id`, now also on `ChannelPrincipal.node_device_id`); the only
+  eligible node; the eligible node used last within
+  `NODE_LAST_ACTIVE_WINDOW_SECONDS` (900), strictly later than the others;
+  otherwise Friday asks ("Hangi bilgisayar: MacBook mu, Masaüstü mü?") and
+  calls no node. The model's `node_id` / `node` argument is untrusted: it
+  is only checked against that resolution (`target_mismatch`,
+  `node_unknown`) and can neither decide nor settle an ambiguity. It
+  replaced Phase 9's `nodes.selectors.read_node_for`.
+- **`last_active_at`** is written (at most once a minute per node) by a
+  relayed hook batch, a `node_voice` transcription request (injected into
+  `voice` by `config/urls.py`) and a click on the node's own confirmation
+  window (`approved` / `denied`); never by a heartbeat. It is node-
+  influenced, so it only ranks candidates nobody named: an explicit mention
+  and the speaking node always win, and the approval card plus the target
+  node's own window still name the PC (ADR-014 unchanged).
+- **One node per invocation.** `invoke_read`, `invoke_confirm` and
+  `dispatch_gated` keep their single `node`; `NodeInvocation` and
+  `NodeActionExecution` keep one `node` FK; `node_action` takes exactly one
+  string `node_id`. `tools/tests/test_one_node_invariant.py` walks every
+  registered node-reaching read tool with two online reference nodes and
+  asserts every chain row of a call is the named node's and the other node
+  receives nothing. The grant stays bound to its `node_id` (protocol v2):
+  an approval for node A dispatched while node B is the active one still
+  goes to A only.
+- **Labels stay server-side.** The router's targets block carries each
+  node's name, room, role and platform as data (prompt text, purpose and
+  prompt version unchanged); the approval summary adds `node_room` and
+  `node_platform`. Nothing is sent to a node.
