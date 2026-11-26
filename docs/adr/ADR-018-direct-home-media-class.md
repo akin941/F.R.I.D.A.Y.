@@ -86,6 +86,12 @@ minute, never louder than the owner's maximum".
    (ADR-016, `deny_if_unattended`), and the low-trust channels (CLI, the
    OpenAI-compatible facade, Telegram, hooks, node reads) are never
    direct. The route stays model-free: no gateway call, no `ModelUsage`.
+   The direct classification is **code-only**: the model router can never
+   emit it (its intent parser refuses the value and degrades the turn to
+   chat), only the home route may return it, and the executor never trusts
+   the classification's arguments — it re-resolves the stored text of the
+   owner's message through the matcher and sends nothing unless the
+   result is identical (Phase 13b brief D10a).
 5. **Rate limits.** At most `HA_DIRECT_RATE_GLOBAL_PER_MINUTE` (default
    30) direct calls per minute for the owner and
    `HA_DIRECT_RATE_ENTITY_PER_MINUTE` (default 10) per entity. A call over
@@ -100,7 +106,7 @@ minute, never louder than the owner's maximum".
    maximum does not apply to a gate-class call, whose exact value the
    owner reads in the dialog.
 7. **One owner kill switch.** `HA_DIRECT_MEDIA_KILL_SWITCH=true` in the
-   environment **or** the "Doğrudan medya kapalı" toggle on `/connectors`
+   environment **or** the "Doğrudan medyayı kapat" toggle on `/connectors`
    (`HomeDirectSettings.kill_switch`) turns every would-be direct call
    back into a gate-class draft card, from the next classification on.
    Both are checked when the call is classified and again immediately

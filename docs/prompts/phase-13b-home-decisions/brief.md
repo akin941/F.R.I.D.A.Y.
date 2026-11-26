@@ -1,9 +1,10 @@
 # Phase 13b — Owner decisions 2026-11-26: interim Mac server, R2, TPM, direct home-media class (server side + Mac session)
 
-> Status: **Draft (2026-11-26). Written on `docs/p13b-brief` for the owner
-> decisions of 2026-11-26, a follow-up to Phase 13 ("Home hub",
+> Status: **Brief implemented 2026-11-26 on `docs/p13b-brief` (docs only;
+> review round 1 findings addressed 2026-11-26) for the owner decisions of
+> 2026-11-26, a follow-up to Phase 13 ("Home hub",
 > `docs/prompts/phase-13-home-hub/brief.md`). It needs its independent
-> Sonnet 5 plan review to reach APPROVE before branch 1, because the
+> Sonnet 5 plan review to reach APPROVE before branch 1a, because the
 > implementing model never reviews its own brief.**
 > Sources: the owner decisions of 2026-11-26 (recorded below as "Owner
 > decisions kept"); the Phase 13 brief (D11–D15, "Open questions" Q1, Q5,
@@ -99,7 +100,7 @@
 >
 > **Platform boundary (owner decision 2026-11-20).** The implementation
 > container is Linux, with no macOS and no Xcode.
-> - **In scope now, with full branches (1, 2 and the closeout):** the
+> - **In scope now, with full branches (1a–1d, 2 and the closeout):** the
 >   direct media class end to end on the server (model flag, classifier,
 >   rate limits, kill switch, audit, the voice, `node_voice` and typed
 >   paths, the `/connectors` UI and the HUD line), tested against the fake
@@ -402,7 +403,7 @@ DIRECT_MEDIA_SERVICES = frozenset({
 
 - `DIRECT_MEDIA_DIGEST` = sha256 of the sorted names joined by `\n`; a
   test and the closeout's `ha_direct_media` preflight row compare it with
-  the value recorded in ADR-018's implementation note (branch 1 writes the
+  the value recorded in ADR-018's implementation note (branch 1b writes the
   note). Changing the set without an ADR amendment fails CI and preflight.
 - Only these eight; the domain is fixed; `data` is whatever the bridge's
   strict serializer for that service accepts (`NoData`, `VolumeSetData`,
@@ -510,7 +511,10 @@ the problem.
      last, only for a call that is otherwise direct.
 - **Only resolver output reaches the classifier.** The `home.control`
   route (voice, `node_voice`) and a new typed pre-router step (D10) pass
-  the `HomeResolution` draft's exact arguments. Router-extracted
+  the `HomeResolution` draft's exact arguments, and D10a makes that
+  enforceable rather than a convention: the model router cannot emit the
+  direct intent, only `home.control` may return it, and the executor
+  re-derives the arguments from the stored message text. Router-extracted
   arguments (`router.connector_args`), a draft card the owner taps
   (`POST /approvals`), schedules, proactive runs, agents, the harness, CLI,
   the OpenAI facade, Telegram and hooks never call `classify`.
@@ -622,6 +626,69 @@ the executor makes the kill switch and the flag authoritative at send
 time; running synchronously in the turn is what makes "TV'yi duraklat"
 feel instant, and the recovery scan covers a lost worker.
 
+### D10a — `home_direct` is a code-only classification with server-side provenance
+
+Adding `Message.Intent.HOME_DIRECT` to the choices would, on today's code,
+make it a value the model router may return:
+`assistant/intent.py` builds `_ALLOWED_INTENTS = frozenset(
+Message.Intent.values)`, and `parse_intent` accepts any member. A
+router reply `{"intent": "home_direct", "tool_name": "ha_call_service"}`
+(a model error or an injected instruction in the conversation) would then
+pass the D10 cap clause on a voice turn and reach the view's direct
+branch. Three independent locks close that, each tested on its own:
+
+1. **The router cannot emit it.** `assistant/intent.py` gains
+   `CODE_ONLY_INTENTS = frozenset({Message.Intent.HOME_DIRECT})` and
+   `_ALLOWED_INTENTS = frozenset(Message.Intent.values) -
+   CODE_ONLY_INTENTS`; `parse_intent` therefore raises `IntentParseError`
+   ("unrecognized intent value") for `home_direct`, and the caller
+   degrades the turn to chat exactly like any parse failure (the
+   module's existing rule). The seeded `friday_router_intent` prompt
+   (`ai_core/management/commands/seed_ai_defaults.py`) does not list the
+   value; a test asserts the prompt text never names it. The chat view
+   also re-checks: a classification that reaches the direct branch must
+   carry the in-process marker of lock 2, else it is chat.
+2. **Only `home.control` may return it.** `wake_routes._finish` today
+   compares the capped classification with the original and the route's
+   declared `effect` with `ALLOWED_EFFECTS`, but never checks the
+   *result's* intent against the route. It gains: the effect of
+   `result.intent` (`INTENT_EFFECTS`) must be in `{route.effect} ∪
+   route.extra_effects`, else the turn degrades to chat with no reply. As
+   `validate_routes` allows `extra_effects` only on `home.control`
+   (D10), no other route — phrase, `tool.*`, skill — can return
+   `home_direct`. The typed step (`route_typed_home_direct`) is the one
+   other constructor; both build the classification through a single
+   `assistant.services.home_direct_classification(resolution, origin,
+   node_id)` factory that attaches a module-private sentinel object
+   (`_CODE_ORIGIN`) under a key that JSON cannot carry
+   (`classification["_provenance"] is _CODE_ORIGIN`, identity check, never
+   serialised, stripped before the `Message` row is saved). Router output
+   is a parsed JSON dict and can never hold that object.
+3. **The executor never trusts the payload's arguments.**
+   `run_home_direct(*, workspace, actor, message, origin, channel,
+   node_id)` takes the saved user `Message` (not arguments) and
+   `connectors.home_direct.execute` re-runs `resolve_home_command(
+   workspace, actor, message.content)` — the same text `_home_control`
+   and the typed step resolved (`WakeTurn.content`, the whole utterance)
+   — and requires outcome `draft`, the same `tool_name`, and arguments
+   equal (canonical JSON) to the classification's. A mismatch, or a
+   resolution that is now `ask`/`refuse`/`None`, sends nothing, writes
+   no `HomeDirectCall`, audits `ha.direct_provenance_refused`
+   (`{source_message_id, origin, reason}` — never the arguments' free
+   text), and the turn answers with the matcher's own current result (its
+   draft card, ask or refusal), never a card built from the refused
+   arguments. `provenance_mismatch` joins the closed reason set as an
+   executor-only reason (it is not one of `classify`'s D7 conditions).
+   Only then does `execute` re-run `classify` on the re-resolved
+   arguments (D10 step 2).
+
+*Justification:* each lock alone would close the hole; together they mean
+a future change to one of them (a new intent in the parser, a new route,
+a new caller of the executor) cannot silently reopen it. Re-resolving is
+cheap (the matcher is a pure function over the allowlist, no model) and
+makes "the owner's words decided the arguments" a property of the send,
+not of whoever built the classification.
+
 ### D11 — The audit trail and what the owner sees
 
 - `HomeDirectCall(WorkspaceScopedModel, TimestampedModel)`: `entity` FK
@@ -633,8 +700,8 @@ feel instant, and the recovery scan covers a lost worker.
   except workspace deletion.
 - Audit actions: `ha.direct_call` (ids, origin, node id, entity id,
   service, data, requested data when clamped, status, error type — never
-  HA free text), `ha.direct_rate_limited`, `ha.entity_direct_changed`,
-  `ha.direct_settings_changed`.
+  HA free text), `ha.direct_rate_limited`, `ha.direct_provenance_refused`
+  (D10a), `ha.entity_direct_changed`, `ha.direct_settings_changed`.
 - `GET /api/v1/connectors/home-assistant/direct/calls?limit=` (owner web,
   `for_actor()`, newest first, ≤ 100).
 - HUD: `health_section` gains a `home_direct` block `{state, flagged,
@@ -673,8 +740,9 @@ the list and the HUD line are how he still sees every call.
 
 - **ADR-018 (new, Accepted 2026-11-26, owner decision): "Direct-Execute
   Home Media Class"** (`docs/adr/ADR-018-direct-home-media-class.md`),
-  written in this branch. Branch 1 adds its implementation note (the
-  digest, file names); the closeout its closeout note.
+  written in this branch. Branch 1b adds its implementation note (the
+  digest, file names), 1c extends it with the D10a locks; the closeout
+  adds its closeout note.
 - **ADR-017 amended 2026-11-26** in this branch (interim Mac server, R2,
   TPM residual, ADR-018 cross reference).
 - **ADR-014 and ADR-015:** cross-reference notes to ADR-018 in this
@@ -687,126 +755,237 @@ the list and the HUD line are how he still sees every call.
 
 ## Scope (one branch each)
 
-### 1. `feat/p13-direct-media-class` — direct flag, classifier, limits, kill switch, audit, voice/typed paths, UI
+### Branch 1 series (1a–1d) — the direct media class, in four reviewable units
 
-**Scope.** D4–D11:
+The direct class is the safety-critical part of the phase (the single
+CLAUDE.md rule 4 exception), so it ships as four sequenced branches, each
+merged (full suite green, independent Sonnet 5 review APPROVE) before the
+next is cut from the updated integration branch. **Nothing is direct until
+1c merges**: 1a only adds two gate-class services, 1b only stores and
+admits (no executor is registered, so the port answers "never direct"),
+and 1d is presentation. "Branch 1" elsewhere in this brief means the
+series as a whole.
+
+### 1a. `feat/p13-media-play-pause-stop` — two gate-class services, manifest v3, phrases
+
+**Scope.** D4 (the bridge half), D7 (the matcher verbs):
 - bridge: `media_play_pause`, `media_stop` in `SERVICES["media_player"]`
-  (`NoData`), the play_pause dialog row; manifest version 3 and new pins;
-  governance docs;
-- `connectors.home_phrases`: `STOP`, `PLAY_PAUSE`; vectors;
-- models + migration: `HomeEntity.direct`, `HomeDirectSettings`,
-  `HomeDirectCall`;
-- `connectors/home_direct.py`: the closed set and digest, `classify`,
-  `execute`, the rate windows, the clamp, the settings service, the calls
-  selector; `connectors.home_entities` (`direct` on create/update, the
-  separate audit); recovery scan in `connectors/tasks.py`;
+  (`NoData`); the `media_play_pause` decision-dialog row showing the live
+  state and the outcome it implies; both are **gate-class** like every
+  service (no direct code exists yet);
+- manifest `version` 2 → 3, new `CALL_SERVICE_PIN` (and `STATES_PIN` if
+  its listing changes) in the same commit; `docs/mcp/home-assistant.md`
+  and `docs/mcp/allowlist.md` (MCP governance);
+- `connectors.home_phrases`: `STOP` (`durdur`/`stop` → `media_stop`;
+  `durdur` moves off `media_pause`), `PLAY_PAUSE` (`oynat duraklat`,
+  `play pause`, `toggle play` → `media_play_pause`); an entity without
+  the service → the existing "izin yok" refusal; vectors in
+  `docs/voice/home-route-vectors.json`.
+
+**Files.** `backend/connectors/bridges/home_assistant.py`,
+`backend/connectors/manifests/home_assistant.py`,
+`backend/connectors/home_phrases.py`,
+`backend/connectors/tests/test_ha_media.py` (+ `test_home_phrases.py`,
+the manifest pin tests, the HA dialog tests updated),
+`docs/voice/home-route-vectors.json`, `docs/mcp/home-assistant.md`,
+`docs/mcp/allowlist.md`; frontend only if the dialog row needs a label
+(the approvals dialog component + its test).
+
+**Tests.** The two services validate with `NoData` and refuse any data;
+a voice "durdur" on an allowlisted TV → a `media_stop` **card**, approve →
+one POST to the fake HA; "oynat duraklat" → `media_play_pause` card whose
+dialog shows "şu an oynatılıyor → duraklatılır"; an entity whose
+`services` lacks `media_stop` → refusal, no card; the pins match
+`tool_schemas()`; the Phase 13 home tests green except the `durdur`
+vector.
+
+**Done when:** the two services exist as ordinary gate-class HA services
+under manifest v3, and the matcher maps "durdur" and "oynat duraklat" to
+them.
+
+### 1b. `feat/p13-direct-media-model` — flag, settings, call log, closed set, classifier, rate limits, owner API
+
+**Scope.** D4 (closed set + digest), D5, D6, D7 (`classify`), D8, D9
+(the classification half), D11 (models, owner endpoints):
+- models + migration `connectors` 0006: `HomeEntity.direct` (with the
+  `save()` refusal), `HomeDirectSettings`, `HomeDirectCall` (model only;
+  no writer yet but the tests' factory);
+- `connectors/home_direct.py`: `DIRECT_MEDIA_DOMAIN`,
+  `DIRECT_MEDIA_SERVICES`, `DIRECT_MEDIA_DIGEST`, the closed reason set,
+  `classify` (D7 order), the rate windows (`count_direct_call`, D8), the
+  volume rules on a given state (D9), the settings service
+  (`get_settings`/`update_settings`, owner web, audited), the calls
+  selector;
+- `connectors.home_entities`: `direct` on create/update, the separate
+  `ha.entity_direct_changed` audit, the clear-on-last-eligible-service
+  rule;
 - `tools/home_ports.py`: `register_direct_classifier`,
-  `register_direct_executor`, `classify_home_direct`, `run_home_direct`
-  (unregistered → never direct; a raising port → never direct);
-  `connectors/apps.py` registers them;
-- `assistant`: `Message.Intent.HOME_DIRECT` + migration, the effect, the
-  cap clause, `WakeRoute.extra_effects` + `validate_routes`,
-  `_home_control`, `route_typed_home_direct`, the view branch, the reply
-  templates;
-- views/urls/serializers: `direct` on the entity endpoints;
-  `/home-assistant/direct`, `/home-assistant/direct/calls`;
-- settings + `.env.example`: the four `HA_DIRECT_*` variables;
-- HUD `home_direct` block; frontend: `HomeEntitiesEditor` switch,
-  `HomeDirectSettings` panel, `HudPanels` line, API client types;
-- docs: `docs/mcp/home-assistant.md` (the direct class, v3 pins),
-  `docs/mcp/allowlist.md`, ADR-018 implementation note.
+  `classify_home_direct` (unregistered or raising → never direct);
+  `register_direct_executor`/`run_home_direct` are declared with the
+  same rule but **nothing registers an executor in 1b**;
+  `connectors/apps.py` registers the classifier only;
+- serializers/views/urls: `direct` on the entity endpoints;
+  `GET/PATCH /api/v1/connectors/home-assistant/direct`,
+  `GET /api/v1/connectors/home-assistant/direct/calls`;
+- settings + `.env.example`: the four `HA_DIRECT_*` variables with
+  comments (0 disables; kill switch default false);
+- ADR-018 implementation note (digest, file names).
 
 **Files.**
-- `backend/connectors/{models,home_direct,home_entities,home_phrases,serializers,views,urls,tasks,apps}.py`,
+- `backend/connectors/{models,home_direct,home_entities,serializers,views,urls,apps}.py`,
   `backend/connectors/migrations/0006_home_direct.py`,
-  `backend/connectors/bridges/home_assistant.py`,
-  `backend/connectors/manifests/home_assistant.py`,
-  `backend/connectors/tests/{test_home_direct_classifier,test_home_direct_execution,test_home_direct_rate_limit,test_home_direct_api,test_home_direct_flag,test_ha_media}.py`
-  (+ `test_ha_allowlist_gate.py`, `test_home_phrases.py`, pin tests
-  updated);
+  `backend/connectors/tests/{test_home_direct_classifier,test_home_direct_rate_limit,test_home_direct_api,test_home_direct_flag}.py`
+  (+ `test_ha_allowlist_gate.py` extended);
 - `backend/tools/home_ports.py`, `backend/tools/tests/test_home_ports.py`;
-- `backend/assistant/{models,services,views,wake_routes}.py`,
-  `backend/assistant/migrations/0015_home_direct_intent.py`,
-  `backend/assistant/tests/{test_home_direct_routes,test_home_direct_node_voice,test_home_direct_typed,test_voice_cap_home_direct}.py`;
-- `backend/hud/services.py`, `backend/hud/tests/test_home_direct_line.py`;
 - `backend/config/settings/base.py`, `.env.example`;
-- `docs/voice/home-route-vectors.json`, `docs/mcp/home-assistant.md`,
-  `docs/mcp/allowlist.md`, `docs/adr/ADR-018-direct-home-media-class.md`
-  (implementation note);
-- `frontend/src/components/connectors/{HomeEntitiesEditor,HomeDirectSettings}.tsx`
-  (+ tests), `frontend/src/components/hud/HudPanels.tsx` (+ test), the
-  connectors API client module.
+- `docs/adr/ADR-018-direct-home-media-class.md` (implementation note).
 
-**Tests.** (fake HA via `httpx.MockTransport`; never a real HA; the
-Phase 11 reference voice host and the real `friday-voice run` child for
-`node_voice`.)
+**Tests.**
 - **Closed allowlist:** `DIRECT_MEDIA_SERVICES` equals the eight names
   and its digest equals the ADR-018 note's value; every name is in
-  `SERVICES["media_player"]`; adding a name without updating the pin
-  fails.
-- **Still gate-class (the owner's required proofs):** a non-media domain
-  (`light.salon` allowlisted, `turn_off` by voice) → card; a non-flagged
-  `media_player` → card; a flagged entity with `turn_on`, `turn_off` or
-  `select_source` → card; a scene, Wake-on-LAN → card; **an agent
-  attempting to set the flag** — a PAT of every kind (`cli`, `hook`,
-  `node`, `node_voice`, `openai`), a harness/agent principal, a Telegram
-  relay, a firm-workspace member, another owner → 401/403/404 and the row
-  unchanged; a model draft carrying `"direct": true` → serializer
-  refusal; the registry walk finds no other writer of `direct`,
-  `HomeDirectSettings` or `HomeDirectCall`; **kill switch on** (env, and
-  owner toggle, each alone) → card, nothing sent; the kill switch flipped
-  between classification and send → nothing sent, card.
+  `SERVICES["media_player"]` (needs 1a); adding a name without updating
+  the pin fails.
 - **Classifier table:** each closed reason produced by exactly its
-  condition, in the D7 order; unattended run → `unattended` (and
-  `deny_if_unattended` raised first); origins: web typed `chat`, web voice
-  `voice`, `node_voice` `node` direct; CLI, OpenAI facade, Telegram, hook,
-  `system` → never classified.
-- **Execution:** one `POST /api/services/media_player/media_pause` to the
-  fake HA, no `ApprovalRequest`, no `ConnectorWriteExecution`, one
-  `HomeDirectCall(succeeded)` and one `ha.direct_call` with origin,
-  node id (for `node`) and entity; state read back; timeout after the POST
-  → `unknown_outcome`, never re-sent; HA 4xx → `failed`; binding disabled
+  condition, in the D7 order; unattended run → `unattended`; origins
+  `chat`/`voice`/`node` each only with their channel; CLI, OpenAI facade,
+  Telegram, hook, `system` channels → `origin_not_direct`; a non-media
+  domain, a non-flagged entity, a flagged entity with `turn_on`,
+  `turn_off` or `select_source`, a scene, Wake-on-LAN → not direct; kill
+  switch on (env, owner, each alone) → `kill_switch_*`.
+- **Rate limits** (frozen clock): 10 per entity then the 11th →
+  `rate_limited` + `ha.direct_rate_limited`; 30 across entities then the
+  31st; the window slides (61 s later direct again); the cache raising →
+  `rate_store_unavailable`; env limits honoured; 0 disables.
+- **Volume (classification):** `volume_up` at 0.45 / max 0.6 → direct;
+  at 0.55 → `volume_at_max`; no `volume_level` → `volume_unknown`.
+- **Model:** `HomeEntity(direct=True)` on `light.*`, or on a media player
+  without a direct-eligible service → `ValidationError`; unticking the
+  last eligible service clears `direct` with an audit row.
+- **An agent attempting to set the flag:** a PAT of every kind (`cli`,
+  `hook`, `node`, `node_voice`, `openai`), a harness/agent principal, a
+  Telegram relay, a firm-workspace member, another owner → 401/403/404
+  and the row unchanged; a model draft carrying `"direct": true` in
+  `ha_call_service` arguments → serializer refusal; the registry walk
+  finds no writer of `direct` or `HomeDirectSettings` but the owner-web
+  services and no writer of `HomeDirectCall` at all (1c adds exactly one).
+- **Role × endpoint:** `GET/POST/PATCH` entities (`direct` field), `GET/
+  PATCH /direct`, `GET /direct/calls` × {owner web session, owner PATs of
+  every kind, agent principal, firm member, other owner, anonymous}.
+- **Isolation:** two owners, each with a flagged TV: neither classifies,
+  lists or toggles the other's; the firm workspace has no direct
+  settings.
+- **Port:** no executor registered → `run_home_direct` reports "not
+  direct" and sends nothing (so 1b alone changes no turn).
+
+**Done when:** the owner can flag an entity and set the kill switch and
+volume maximum through the API with full role × endpoint coverage, and
+`classify` answers every D7 case — while no turn behaves differently yet.
+
+### 1c. `feat/p13-direct-media-exec` — executor, assistant intent, cap, wake route, typed path, provenance
+
+**Scope.** D9 (executor re-check), D10, D10a, the recovery scan:
+- `connectors.home_direct.execute` (D10 steps 1–6 with the D10a
+  re-resolution first), `HomeDirectCall` lifecycle, `ha.direct_call` /
+  `ha.direct_provenance_refused`; `connectors/apps.py` registers the
+  executor; `connectors/tasks.py` recovery of stale `running` rows;
+- `assistant`: `Message.Intent.HOME_DIRECT` + migration `assistant`
+  0015 (choices only), `EFFECT_DIRECT_HOME`, the cap clause,
+  `CODE_ONLY_INTENTS` in `intent.py` (D10a lock 1),
+  `WakeRoute.extra_effects` + `validate_routes` + the `_finish` effect
+  check (lock 2), the `home_direct_classification` factory and sentinel,
+  `_home_control`, `route_typed_home_direct`, the view branch, the reply
+  templates.
+
+**Files.**
+- `backend/connectors/{home_direct,tasks,apps}.py`,
+  `backend/connectors/tests/test_home_direct_execution.py`;
+- `backend/assistant/{models,intent,services,views,wake_routes}.py`,
+  `backend/assistant/migrations/0015_home_direct_intent.py`,
+  `backend/assistant/tests/{test_home_direct_routes,test_home_direct_node_voice,test_home_direct_typed,test_voice_cap_home_direct,test_home_direct_provenance}.py`
+  (+ the intent-parser tests and the router-prompt seed test);
+- `docs/adr/ADR-018-direct-home-media-class.md` (implementation note:
+  the three locks).
+
+**Tests.** (fake HA via `httpx.MockTransport`; the Phase 11 reference
+voice host and the real `friday-voice run` child for `node_voice`.)
+- **Execution:** one `POST /api/services/media_player/media_pause`, no
+  `ApprovalRequest`, no `ConnectorWriteExecution`, one
+  `HomeDirectCall(succeeded)` and one `ha.direct_call` with origin, node
+  id (for `node`) and entity; state read back; timeout after the POST →
+  `unknown_outcome`, never re-sent; HA 4xx → `failed`; binding disabled
   or pin mismatch → nothing sent, card; entity removed between turns →
   card; `running` row recovered to `unknown_outcome`.
-- **Volume:** `volume_set 0.9` with max 0.6 → sent 0.6, requested 0.9
-  stored, reply says so; owner max 0.3 → 0.3; `volume_up` at 0.45 / max
-  0.6 → direct; at 0.55 → card (`volume_at_max`); no `volume_level` →
-  card; the pre-send read disagreeing with the classification → nothing
-  sent, card.
-- **Rate limits** (frozen clock): 10 per entity then the 11th → card +
-  `ha.direct_rate_limited`; 30 across entities then the 31st → card; the
-  window slides (61 s later direct again); the cache raising → card;
-  limits from env honoured; 0 disables.
+- **Volume (execution):** `volume_set 0.9` with max 0.6 → sent 0.6,
+  requested 0.9 stored, reply says so; owner max 0.3 → 0.3; the pre-send
+  read disagreeing with the classification → nothing sent, card.
+- **Still gate-class end to end (the owner's required proofs):** the
+  parametrised table of the test strategy over web voice, `node_voice`
+  and typed: a non-media domain, a non-flagged entity, a flagged entity
+  with a non-direct service, a scene, Wake-on-LAN, kill switch on (env;
+  owner) and flipped between classification and send, over the limit →
+  a card (voice) or the router path (typed), no HA request, no
+  `HomeDirectCall`.
+- **Router cannot emit it (D10a lock 1):** `parse_intent` on
+  `{"intent":"home_direct","tool_name":"ha_call_service"}` raises
+  `IntentParseError`; a stubbed `router.intent` returning that payload
+  on a **voice** turn whose text the matcher does not resolve and on a
+  **typed** turn → the turn is chat, no HA request, no `HomeDirectCall`,
+  no card; the seeded router prompt never names `home_direct`.
+- **Only `home.control` (lock 2):** a test route (phrase, `tool.*`)
+  whose handler returns `HOME_DIRECT` → chat, no reply; `validate_routes`
+  refuses `extra_effects` on any route but `home.control` and any extra
+  effect but `direct_home`; a `HOME_DIRECT` classification without the
+  sentinel (a plain dict, e.g. round-tripped through JSON) reaching the
+  view → chat.
+- **Provenance (lock 3):** a hand-built `HOME_DIRECT` classification with
+  the sentinel but arguments that differ from the resolver's output for
+  the stored text (another flagged entity, `volume_set 1.0` instead of
+  the spoken value, a different service) → refused
+  (`provenance_mismatch`), no HA request, no `HomeDirectCall`,
+  `ha.direct_provenance_refused` written, the reply is the matcher's own
+  current result; stored text that now resolves to `ask` (a second TV
+  flagged since) → no call, the ask.
+- **Cap:** a `HOME_DIRECT` classification naming another tool on a voice
+  turn → chat.
 - **Voice/typed paths:** web voice "TV'yi duraklat" → no `draft` event, a
   fixed reply, `ModelUsage` count unchanged; `node_voice` through the
   reference voice host → origin `node`, the speaking node's id; typed web
   "TV'yi duraklat" → direct with **no** `router.intent` call; typed
   "salondaki TV'yi aç" or any non-direct text → the Phase 13 router path
-  unchanged (its tests green); "durdur" → `media_stop`; "oynat duraklat"
-  → `media_play_pause`; ambiguous ("TV'yi duraklat" with two flagged TVs)
-  → the ask template, no call.
-- **Cap:** a `HOME_DIRECT` classification naming another tool on a voice
-  turn → chat; `validate_routes` refuses `extra_effects` on any route but
-  `home.control` and any extra effect but `direct_home`.
-- **Model:** `HomeEntity(direct=True)` on `light.*`, or on a media player
-  without a direct-eligible service → `ValidationError`; unticking the
-  last eligible service clears `direct` with an audit row.
-- **Role × endpoint:** `GET/POST/PATCH` entities (`direct` field), `GET/
-  PATCH /direct`, `GET /direct/calls` × {owner web session, owner PATs of
-  every kind, agent principal, firm member, other owner, anonymous}.
-- **Isolation:** two owners, each with a flagged TV: one's voice turn never
-  classifies, calls or lists the other's entity; firm workspace has no
-  direct settings.
-- **HUD:** `home_direct` states `on` / `off_owner` / `off_env` /
-  `not_configured`, counts.
-- **Frontend (vitest):** the switch only on eligible rows, its PATCH, the
-  kill switch and volume panel, the env-kill notice disabling the toggle,
-  the calls list, the HUD line.
+  unchanged (its tests green); ambiguous ("TV'yi duraklat" with two
+  flagged TVs) → the ask template, no call.
 
 **Done when:** "TV'yi duraklat" by web voice, `node_voice` and typed chat
 pauses a flagged TV against the fake HA with one call, no card and an
-audit row naming the origin and the entity — and every case in "Still
-gate-class" demonstrably reaches the approval gate.
+audit row naming the origin and the entity — every case in "Still
+gate-class" demonstrably reaches the approval gate, and no model output
+or hand-built payload can produce a direct call.
+
+### 1d. `feat/p13-direct-media-ui` — HUD line and `/connectors` controls
+
+**Scope.** D11 (presentation):
+- HUD: `health_section` gains the `home_direct` block `{state, flagged,
+  calls_last_hour}` (DB only, no HA call);
+- frontend: `HomeEntitiesEditor` "Doğrudan (onaysız)" switch (only on
+  eligible rows, disabled with the reason elsewhere), the
+  `HomeDirectSettings` panel ("Doğrudan medyayı kapat", volume maximum
+  0–100 %, env-kill notice, the closed list, the limits, the last 20
+  calls), the `HudPanels` line, API client types.
+
+**Files.** `backend/hud/services.py`,
+`backend/hud/tests/test_home_direct_line.py`;
+`frontend/src/components/connectors/{HomeEntitiesEditor,HomeDirectSettings}.tsx`
+(+ tests), `frontend/src/components/hud/HudPanels.tsx` (+ test), the
+connectors API client module.
+
+**Tests.** HUD `home_direct` states `on` / `off_owner` / `off_env` /
+`not_configured`, counts, no HA request; vitest: the switch only on
+eligible rows and its PATCH, the kill switch and volume panel, the
+env-kill notice disabling the toggle, the calls list, the HUD line; the
+HUD offers no toggle.
+
+**Done when:** the owner sees and controls the direct class on
+`/connectors` and sees its state and call count on the HUD.
 
 ### 2. `feat/p13-interim-mac-server` — macOS-tolerant preflight, R2 destination check, portable scripts, launchd
 
@@ -926,21 +1105,27 @@ says "server side done; go/no-go pending owner evaluation".
 | # | Branch | Scope | Depends on | Status |
 |---|---|---|---|---|
 | brief | `docs/p13b-brief` | This brief (no stub existed; the owner decisions of 2026-11-26 kept as goal, scope and boundary), ADR-018 (Accepted 2026-11-26), ADR-017 amendment, ADR-014/ADR-015 cross references, CLAUDE.md rule 4 sentence, runbook "Interim: server on the MacBook" + R2 + TPM, housekeeping (handoff branch names, `feat/mac-a1-spike`, "(former repository)" notes, Phase 13 follow-ups 1–3, Q1/Q5/Q6 notes), MASTER_PLAN §AA row 9b + §O d12, `self_sources.json` regenerated | Phase 13 closeout | **implemented 2026-11-26** (docs only; awaits the independent Sonnet 5 plan review to APPROVE) |
-| 1 | `feat/p13-direct-media-class` | `HomeEntity.direct`, `HomeDirectSettings`, `HomeDirectCall`, closed allowlist + digest, `classify`/`execute`, rate windows, kill switch, volume clamp, audit, `HOME_DIRECT` intent + cap clause, voice/`node_voice`/typed paths, `play_pause`/`stop` in the code maximum (manifest v3), entity/direct/calls endpoints, HUD line, `/connectors` UI | brief approved | not started |
+| 1a | `feat/p13-media-play-pause-stop` | `media_play_pause`/`media_stop` in the code maximum as gate-class services (manifest v3, pins, governance docs), the play_pause dialog row, `STOP`/`PLAY_PAUSE` verbs and vectors | brief approved | not started |
+| 1b | `feat/p13-direct-media-model` | `HomeEntity.direct`, `HomeDirectSettings`, `HomeDirectCall` (`connectors` 0006), closed allowlist + digest, `classify`, rate windows, volume rules, settings service, entity `direct` field + `/direct` + `/direct/calls` endpoints with role × endpoint, registry walk, the classifier port, `HA_DIRECT_*` settings, ADR-018 implementation note | 1a | not started |
+| 1c | `feat/p13-direct-media-exec` | `execute` (re-resolution, kill-switch re-check, clamp, one send, audit), recovery scan, executor port, `HOME_DIRECT` intent (`assistant` 0015) + code-only parser lock, cap clause, `extra_effects` + `_finish` check, sentinel factory, voice/`node_voice`/typed paths, provenance tests | 1b | not started |
+| 1d | `feat/p13-direct-media-ui` | HUD `home_direct` line, `/connectors` direct switch and settings panel, vitest | 1b (merges after 1c, so nothing is shown as "on" before it can run) | not started |
 | 2 | `feat/p13-interim-mac-server` | `HOME_SERVER_PLATFORM`, `home_server_platform`, macOS-aware `home_disk_encryption`, `HOME_BACKUP_OFFSITE_REPOSITORY` + the R2 destination check, R2 names in `.env.example`, portable backup/drill scripts, `restic.env.example`, launchd plist, `compose.mac.yml`, `make up-mac-server` | brief approved (independent of 1) | not started |
-| 3 | `chore/p13b-closeout` | `ha_direct_media` preflight row, home-direct e2e, handoff Part F, MASTER_PLAN row, ADR-018 closeout note, `self_sources.json`, runbook step 12 | 1, 2 | not started |
+| 3 | `chore/p13b-closeout` | `ha_direct_media` preflight row, home-direct e2e, handoff Part F, MASTER_PLAN row, ADR-018 closeout note, `self_sources.json`, runbook step 12 | 1a–1d, 2 | not started |
 | M1 | Interim server on the real MacBook | Runbook "Interim" I1–I5: OrbStack/Docker Desktop, `make up-mac-server`, FileVault attestation, the R2 bucket, the LaunchAgent, the first backup and restore drill, one drill from R2 | 2 merged | deferred: Mac session (pending owner evaluation) |
-| M2 | Mac node on the same machine + the real TV | Loopback pairing (I3) of the existing Swift app; flag the TV; direct pause/volume by voice; kill switch; rate limit; unflagged → card | 1, 2 merged; M1; Phase 9 B1 | deferred: Mac session (pending owner evaluation) |
+| M2 | Mac node on the same machine + the real TV | Loopback pairing (I3) of the existing Swift app; flag the TV; direct pause/volume by voice; kill switch; rate limit; unflagged → card | 1a–1d, 2 merged; M1; Phase 9 B1 | deferred: Mac session (pending owner evaluation) |
 | M3 | Home PC with TPM unlock; move off the Mac | Runbook step 1 (TPM, recovery key, dracut) and "Interim" I6 (restore + re-point) on the real home PC | M1; the owner buys the PC | deferred: owner hardware (pending owner evaluation) |
 
-**Sequencing and migrations.** Branch 1 adds `connectors` 0006 and
-`assistant` 0015; branch 2 adds none. Migration numbers are placeholders:
-each branch runs `makemigrations` on the latest integration branch and,
-before merge, rebases and renumbers onto the newest leaf of every app it
-touches (`makemigrations --check --dry-run` green, no merge migrations).
-Branches 1 and 2 are independent and may be developed concurrently; both
-touch `.env.example` and `config/settings/base.py` (separate blocks), so
-the second to merge resolves that trivially. Neither touches
+**Sequencing and migrations.** 1a → 1b → 1c → 1d, each cut from the
+integration branch after its predecessor merged (1d may be developed in
+parallel with 1c once 1b is merged, but merges after 1c). 1a adds no
+migration; 1b adds `connectors` 0006; 1c adds `assistant` 0015; 1d and 2
+add none. Migration numbers are placeholders: each branch runs
+`makemigrations` on the latest integration branch and, before merge,
+rebases and renumbers onto the newest leaf of every app it touches
+(`makemigrations --check --dry-run` green, no merge migrations). Branch 2
+is independent of the 1-series and may be developed concurrently; 1b and
+2 both touch `.env.example` and `config/settings/base.py` (separate
+blocks), so the second to merge resolves that trivially. None touches
 `node/friday-node/**`.
 
 ## Mac session (deferred)
@@ -951,7 +1136,7 @@ The closeout appends this list to `docs/runbooks/mac-session-handoff.md`
 as **Part F**. Check out `integ/phase-13` (or `main` after the owner's
 merge).
 
-**Preconditions:** branches 1 and 2 merged; Phase 9 B1 (the Swift app
+**Preconditions:** branches 1a–1d and 2 merged; Phase 9 B1 (the Swift app
 pairs and holds a session) for M2; Phase 11 B7 (the voice host) for the
 voice half of M2.
 
@@ -1001,8 +1186,9 @@ macOS preflight run.
 6. Review `/connectors` "Son doğrudan çağrılar" and the audit log: every
    row has origin `node` and the right entity.
 
-**Contract (already enforced here):** branch 1
-`assistant/tests/test_home_direct_node_voice.py`,
+**Contract (already enforced here):** branch 1c
+`assistant/tests/test_home_direct_node_voice.py` and
+`test_home_direct_provenance.py`, branch 1b
 `connectors/tests/test_home_direct_rate_limit.py`, the closeout
 `ops/tests/test_home_direct_e2e.py`.
 
@@ -1028,9 +1214,10 @@ R2 with a passing drill from the R2 copy."
 
 | Item | How it is measured | Result |
 |---|---|---|
-| Closed class; non-media, non-flagged, agent flag attempts and kill switch reach the gate | branch 1 tests | pending (branch 1) |
-| Direct calls audited with origin and entity; no `ApprovalRequest` | branch 1 + closeout e2e | pending (branch 1, closeout) |
-| Rate limits and volume clamp fail closed to the card | branch 1 tests | pending (branch 1) |
+| Closed class; non-media, non-flagged, agent flag attempts and kill switch reach the gate | branch 1b + 1c tests | pending (branches 1b, 1c) |
+| The router cannot emit `home_direct`; forged payloads refused | branch 1c tests (D10a) | pending (branch 1c) |
+| Direct calls audited with origin and entity; no `ApprovalRequest` | branch 1c + closeout e2e | pending (branch 1c, closeout) |
+| Rate limits and volume clamp fail closed to the card | branch 1b + 1c tests | pending (branches 1b, 1c) |
 | No macOS-caused preflight failure; R2 destination checked | branch 2 tests + closeout e2e | pending (branch 2, closeout) |
 | No protocol change | `node_protocol_frozen` | pending (closeout) |
 | Interim server on the real Mac, backups to R2, drill from R2 | M1 | pending owner evaluation |
@@ -1078,6 +1265,11 @@ VPS, DNS, bucket or hardware in tests.
   `sha256sum`, no GNU `stat`, a `shasum` double, a fake old `bash`) for
   the macOS script run; a local restic repository and throwaway age keys
   (the existing round trip); `plistlib` for the LaunchAgent.
+- **Code-only provenance (D10a).** Each lock has its own test: the parser
+  refuses `home_direct`; a non-`home.control` route returning it is chat;
+  a sentinel-less classification is chat; a payload whose arguments
+  differ from the re-resolved stored text is refused with no HA request.
+  These run on voice, `node_voice` and typed turns with a stubbed router.
 - **"Still gate-class" as a parametrised table.** One test module walks
   every negative condition of D7 for each origin and asserts: no HA
   request, a `draft` event (voice) or the router path (typed), and no
@@ -1102,7 +1294,9 @@ VPS, DNS, bucket or hardware in tests.
 | Risk | Mitigation |
 |---|---|
 | A TV, a video or a guest triggers direct calls (no speaker verification) | Only eight media services on owner-flagged entities; volume clamp; 10/min per entity, 30/min global, fail closed to the card; every call audited and listed; kill switch in the UI and env; owner-accepted residual in ADR-018 |
-| An agent or model output widens the class | Closed set in code with a pinned digest (test + preflight); the flag and settings writable only by owner-web services (registry walk, role × endpoint); strict serializers refuse unknown fields; model-extracted arguments never reach the classifier |
+| An agent or model output widens the class | Closed set in code with a pinned digest (test + preflight); the flag and settings writable only by owner-web services (registry walk, role × endpoint); strict serializers refuse unknown fields; model-extracted arguments never reach the classifier (enforced by D10a) |
+| The model router (or text injected into the conversation) returns `home_direct` | D10a: the parser refuses the code-only intent (→ chat); only `home.control` may return its effect; the classification needs an in-process sentinel JSON cannot carry; the executor re-resolves the stored message text and refuses any argument mismatch (branch 1c tests on voice and typed turns) |
+| A large safety-critical change is hard to review | Split into 1a–1d, nothing direct until 1c, each with its own independent review |
 | The direct path silently drifts into other domains | `classify` checks the domain and the closed set first; the parametrised "still gate-class" table; `ha_direct_media` fails on a flagged non-media entity |
 | `volume_up` overshoots the maximum on a device with a large step | Headroom rule (0.1) on the live read; the overshoot is at most one device step; recorded as residual in ADR-018; owners with such a device can untick `volume_up` |
 | Kill switch toggled while a call is in flight | Re-checked under a row lock right before the send; there is no queue; a call already sent completes and is audited |
@@ -1139,7 +1333,7 @@ VPS, DNS, bucket or hardware in tests.
 These cannot happen in a cloud session (they need the owner's hardware,
 accounts or judgement):
 
-1. Before branch 1: have the independent Sonnet 5 plan review of this
+1. Before branch 1a: have the independent Sonnet 5 plan review of this
    brief (with ADR-018, the ADR-017 amendment, the CLAUDE.md sentence and
    the runbook changes) reach APPROVE.
 2. Confirm ADR-018 as written (Accepted 2026-11-26) and the one-sentence
@@ -1158,7 +1352,7 @@ accounts or judgement):
 6. **Still pending from Phase 13:** the node-pairing route through the
    home Caddy (Phase 13 closeout owner step 2) — it now also decides how
    LAN PCs pair with the interim Mac server (runbook I4).
-7. After branch 1: flag the TV(s) "Doğrudan" on `/connectors` and set the
+7. After branches 1c and 1d: flag the TV(s) "Doğrudan" on `/connectors` and set the
    volume maximum (nothing is direct until then).
 8. Create the R2 bucket and a bucket-scoped token; fill the host restic
    environment file; set `HOME_BACKUP_OFFSITE_REPOSITORY` (after branch
@@ -1174,7 +1368,10 @@ accounts or judgement):
    documents written in the same branch (ADR-018, ADR-017 amendment,
    ADR-014/ADR-015 notes, CLAUDE.md rule 4, `home-server-setup.md`
    "Interim", step 1 TPM, step 8 R2, the handoff and MASTER_PLAN edits);
-   branch 1 does not start before APPROVE.
+   branch 1a does not start before APPROVE. Review round 1 (2026-11-26):
+   the HIGH router-provenance finding is addressed by D10a, the
+   branch-size finding by the 1a–1d split, the kill-switch label is
+   unified ("Doğrudan medyayı kapat") in ADR-018.
 2. Note that the runbook's macOS and TPM commands were written in a Linux
    container and never run on a Mac or the home PC: M1 and M3 exercise
    them; fix any step that differs in a docs branch.
