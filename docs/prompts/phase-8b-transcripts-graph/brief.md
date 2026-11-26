@@ -1331,11 +1331,47 @@ episodes.
       `<local-command-stdout>`, `<local-command-stderr>`,
       `<system-reminder>`, `<user-prompt-submit-hook>`,
       `Caveat: The messages below were generated`, or
-      `[Request interrupted`.
+      `[Request interrupted`; and (added 2026-11-27 after the M1
+      real-file run) `<local-command-caveat>`, `<bash-input>`,
+      `<bash-stdout`, `<bash-stderr`, `<bash-exit-code>`,
+      `<task-notification>`, `<tick>`, `<user-memory-input>`,
+      `<fork-boilerplate>`, `<teammate-message`,
+      `<cross-session-message`, `<agent-message`, `<channel source="`,
+      `<mcp-resource-update`, `<mcp-polling-update`, or
+      `Another Claude session sent a message`.
   - **Codex rollout JSONL:** a `response_item` of payload type
     `message` with `role == "user"` and `input_text` parts only, whose
     text does not start with `<environment_context>`,
-    `<user_instructions>` or `<user_shell_command>`.
+    `<user_instructions>` or `<user_shell_command>`, or (added
+    2026-11-27) `# AGENTS.md instructions`, `<skill>`, `<turn_aborted>`
+    or `<subagent_notification>`.
+  - **How a marker matches.** Leading whitespace is stripped (Python's
+    `str.lstrip()`), then the text must **start with** the marker string
+    exactly (case-sensitive, a plain prefix; never "anywhere in the
+    text"). An owner turn that names a tag later on is kept. A marker
+    without its closing `>` (`<teammate-message`, `<bash-stdout`) is a tag
+    Claude Code writes with attributes, or one its own check matches
+    without the `>`.
+  - **Where the 2026-11-27 markers come from.** The tag constants and the
+    "not a human prompt" checks in the Claude Code CLI (2.1.201) and the
+    contextual user fragments of the Codex CLI (0.142.5), read from the
+    installed programs, never from a transcript. They are harness text the
+    owner did not type: background-task results (`<task-notification>`),
+    shell-mode output, the loop tick, peer, teammate, channel and MCP
+    messages, fork boilerplate, and Codex's AGENTS.md, skill, abort and
+    sub-agent injections. Two are typed by the owner and still excluded,
+    because they are commands, not prompts to the assistant: shell-mode
+    input (`! cmd`, stored as `<bash-input>`) and the `#` memory note
+    (`<user-memory-input>`).
+  - **Known gaps (fail open, counted by the M1 preview).** A peer
+    message that starts with "A message arrived from " (the next line is
+    a `<channel` or `<teammate-message` tag) is not a prefix marker: the
+    words are too common to exclude by prefix. Channel messages are
+    written `isMeta`, which already skips them. IDE context tags
+    (`<ide_opened_file>`, `<ide_selection>`) are not markers either:
+    there is no evidence of them in the CLI, and as a prefix they would
+    drop the owner's prompt that follows them. The debug preview names
+    all of these tags when an accepted turn starts with one.
   - **Every returned text** is scrubbed on the node with the 8A rules
     (Phase 9 D13 item 6: the vendored copy in the reference node, the
     Swift port in the app) and truncated to 4000 characters.
@@ -4047,7 +4083,7 @@ migration renumbering needed).
 | 8 | `feat/p8-transcript-ingestion` | Owner-turn capabilities, reference readers + conformance, pull job in `tools`, port, cursor, personal-class sources, transcript corpus | 2; **Phase 9 branches 2–5 merged** | **implemented 2026-11-20** (awaits the Sonnet 5 review; see "Implementation record" under branch 8). Phase 9 branches 2–5 were not merged, so the contracts, readers and conformance files are staged in `integrations/node_reference/` and the node is reached through a `NodeReadPort` seam. The `nodes` wiring is owner steps 3–5 of branch 8. Swift readers: deferred: Mac session (M1) |
 | 9 | `feat/p8-graph-ui` | `/memory/graph`, timeline, sources/Graphify/conflict/eval views | 2, 4 (5, 7, 8 for their panels) | **implemented 2026-11-20** (awaits the Sonnet 5 review; see "Implementation record" under branch 9; the real-phone and screen-reader check is pending owner evaluation) |
 | 10 | `chore/p8b-closeout` | Preflight checks, e2e, retrieval default decision, runbooks, ADR notes, MASTER_PLAN row, go/no-go record | 1–9 | **implemented 2026-11-20** (awaits the Sonnet 5 review; see "Implementation record" under branch 10; `MEMORY_RETRIEVAL_MODE` kept `legacy`; the `nodes`-backed transcript port is a follow-up branch; preflight on the dev stack with a paired node and the Mac rows are owner steps, pending owner evaluation) |
-| M1 | `feat/p8-node-transcript-readers` | Swift readers for the two owner-turn capabilities, grant wiring, real-file rule verification, conformance pass | 8 merged; Phase 9 M2 | **implemented 2026-11-27** (awaits the Sonnet 5 review; 86/86 offline and live): real-file verification found unmarked `<task-notification>` / `<bash-input>` turns, so a D13 marker server branch and the owner skim are open (see "Implementation record" under M1) |
+| M1 | `feat/p8-node-transcript-readers` | Swift readers for the two owner-turn capabilities, grant wiring, real-file rule verification, conformance pass | 8 merged; Phase 9 M2 | **implemented 2026-11-27** (awaits the Sonnet 5 review; 86/86 offline and live): real-file verification found unmarked `<task-notification>` / `<bash-input>` turns; the D13 marker fix is implemented on `feat/p8-d13-harness-markers` (awaits review; re-run: no accepted turn starts with a harness tag); the owner skim is open (see "Implementation record" under M1) |
 | M2 | Mac and owner evaluation | Private eval baseline, Headroom compare, real transcript run, go/no-go measurements | 3, 4, 6, M1 | deferred: Mac session (pending owner evaluation) |
 
 **Branch count.** Ten rows against the roughly 4–8 target: eight
@@ -4178,8 +4214,9 @@ Sonnet 5 review.
   Python parses it (a surrogate in a returned text then fails the read when
   the canonical form refuses it; one elsewhere in the line leaves the turn
   returned, where Swift skips it). (3) `scrub-preview` also counts accepted turns that start
-  with a tag and names the tag when it is a markup word (`<name>`), so a
-  harness format no marker covers is visible without any text.
+  with a tag and names the tag when it is a known harness tag (a fixed
+  list since the D13 marker fix; anything else is `(other)`), so a harness
+  format no marker covers is visible without any text.
 - **Real-file verification (counts only, nothing committed).** Run once on
   2026-11-27 on this repo's Claude project directory and on
   `~/.codex/sessions`. Codex: 35 accepted turns, the only exclusions are
@@ -4191,6 +4228,40 @@ Sonnet 5 review.
   the cases need one server branch adding these markers (and whatever the
   owner's skim finds), then a re-run. The owner skim of the first 20
   accepted turns is still open (the session never prints transcript text).
+- **The D13 marker fix (2026-11-27, `feat/p8-d13-harness-markers`, awaiting
+  the Sonnet 5 review).** D13 gains 16 Claude Code markers and 4 Codex
+  markers, taken from the installed CLIs' own tag constants (see D13,
+  "Where the 2026-11-27 markers come from"); the matching rule is unchanged
+  (`lstrip`, then a plain prefix). One list per side, kept identical in
+  `nodes/reference/owner_turns.py`, `nodes/reference/readers.py` (the
+  `claude.sessions` / `codex.threads` walks), the server re-check
+  `memory.ingestion.transcripts.INJECTED_MARKERS`, the Linux node's vendored
+  copy and the Swift `TranscriptText`. The owner-turn fixtures gain one line
+  per new marker (plus an indented one); the conformance fixture home
+  gains two Claude marker lines and one Codex one, absent from the
+  `*_owner_turns_only` results. `vectors/owner_turns.json` is unchanged
+  (every new line is excluded); `scrub.json` gains the new fixture
+  strings; only the two `*_owner_turns_only` cases change, by their absent
+  phrases (86 v1 cases, offline and live). The prefix-only rule (a tag
+  named later in an owner turn is kept; case-sensitive) is pinned by a
+  reference unit test. In the same branch, the B4
+  review findings: the Swift readers drop a turn before `since` as it
+  streams by, as the reference's comprehension does (output unchanged); the
+  preview names a leading tag only from a fixed list of known harness tags
+  and echoes line kinds, roles and block or part types only from fixed
+  lists (anything else is `(other)`); `check-release-markers.sh` also
+  refuses `scrub-preview` / `OwnerTurnPreview` in a Release binary (the
+  Conformance and debug builds are its positive controls).
+- **Real-file re-run (2026-11-27, counts only).** Claude (this repo's
+  project directory): 17 accepted turns, none starting with any tag;
+  excluded as markers: 17 `<task-notification>`, 1 `<bash-input>`; 2 186
+  lines of a line kind outside the preview's list (`kind.(other)`; not
+  `user` lines, so they never reach the owner-turn rules). Codex: 35
+  accepted turns, none starting with a tag; 6 `<environment_context>`
+  exclusions; `(other)` line or payload kinds: 136 + 36 + 7, none of them
+  user messages. Expected from a correct reader from here on: no accepted
+  turn names a harness tag, and M2 item 4's `dropped_not_owner` stays 0.
+  The owner skim of the first 20 accepted turns remains open.
 
 ### M2 — Mac and owner evaluation (go/no-go measurements)
 

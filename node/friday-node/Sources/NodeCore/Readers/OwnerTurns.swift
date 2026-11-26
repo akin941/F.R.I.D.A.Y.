@@ -287,10 +287,10 @@ extension NodeReaders {
         let rows: [OwnerTurnRow]
         let hashedIDs: Bool
         if capability == "claude.transcripts.owner_turns" {
-            rows = try claudeOwnerTurnRows(match: match)
+            rows = try claudeOwnerTurnRows(match: match, since: parsed.since)
             hashedIDs = false
         } else {
-            rows = try codexOwnerTurnRows(match: match)
+            rows = try codexOwnerTurnRows(match: match, since: parsed.since)
             hashedIDs = true
         }
         return Self.collectOwnerTurns(rows, args: parsed, hashedIDs: hashedIDs)
@@ -300,7 +300,9 @@ extension NodeReaders {
     /// canonical form has the same bytes, only the key order differs).
     static func compactSize(_ value: JSONValue) -> Int { (try? JSON.canonical(value).count) ?? Int.max }
 
-    /// `collect_files` over rows already matched. `hashedIDs`: a Codex
+    /// `collect_files` over rows already matched (the readers already drop
+    /// rows before `since` while streaming; the check here keeps the
+    /// function exact for any caller). `hashedIDs`: a Codex
     /// `turn_id` is the node's own hash, exempt from the identifier check.
     static func collectOwnerTurns(_ rows: [OwnerTurnRow], args: OwnerTurnArgs, hashedIDs: Bool) -> JSONValue {
         func kept(_ value: String) -> Bool { Scalars.equal(Scrubber.scrub(value), value) }

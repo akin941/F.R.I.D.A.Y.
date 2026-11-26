@@ -27,8 +27,16 @@ enum TranscriptText {
         "<command-name>", "<command-message>", "<command-args>", "<local-command-stdout>",
         "<local-command-stderr>", "<system-reminder>", "<user-prompt-submit-hook>",
         "Caveat: The messages below were generated", "[Request interrupted",
+        // The 2026-11-27 additions (brief D13), in the reference's order.
+        "<local-command-caveat>", "<bash-input>", "<bash-stdout", "<bash-stderr", "<bash-exit-code>",
+        "<task-notification>", "<tick>", "<user-memory-input>", "<fork-boilerplate>", "<teammate-message",
+        "<cross-session-message", "<agent-message", "<channel source=\"", "<mcp-resource-update",
+        "<mcp-polling-update", "Another Claude session sent a message",
     ]
-    static let codexMarkers = ["<environment_context>", "<user_instructions>", "<user_shell_command>"]
+    static let codexMarkers = [
+        "<environment_context>", "<user_instructions>", "<user_shell_command>", "# AGENTS.md instructions",
+        "<skill>", "<turn_aborted>", "<subagent_notification>",
+    ]
 
     /// `text.lstrip().startswith(markers)` with Python's whitespace.
     static func startsWithMarker(_ text: String, _ markers: [String]) -> Bool {

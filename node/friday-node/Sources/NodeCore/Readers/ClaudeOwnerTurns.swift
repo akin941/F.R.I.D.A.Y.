@@ -70,8 +70,10 @@ enum ClaudeOwnerTurn {
 
 extension NodeReaders {
     /// `_claude_turns` over `claudeFiles`; `match(cwd)` is the cwd to report
-    /// or nil outside the prefixes.
-    func claudeOwnerTurnRows(match: (String) -> String?) throws -> [OwnerTurnRow] {
+    /// or nil outside the prefixes. A turn before `since` is dropped as it
+    /// streams by, as `collect_files`'s comprehension drops it, so only the
+    /// candidates are ever held.
+    func claudeOwnerTurnRows(match: (String) -> String?, since: Int64) throws -> [OwnerTurnRow] {
         var rows: [OwnerTurnRow] = []
         var failure: Error?
         for path in claudeFiles {
@@ -79,7 +81,9 @@ extension NodeReaders {
                 // Rule 2: the row's cwd first, before anything else of the line.
                 guard let cwd = OwnerTurnText.normalisePath(line["cwd"]), let shown = match(cwd) else { return true }
                 do {
-                    if case .turn(let sessionID, let turnID, let at, let text) = try ClaudeOwnerTurn.verdict(line) {
+                    if case .turn(let sessionID, let turnID, let at, let text) = try ClaudeOwnerTurn.verdict(line),
+                        at >= since
+                    {
                         rows.append(OwnerTurnRow(sessionID: sessionID, cwd: shown, turnID: turnID, at: at, text: text))
                     }
                 } catch {

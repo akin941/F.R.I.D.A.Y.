@@ -28,13 +28,15 @@ transcripts`):
 - **Claude Code JSONL**: a line is a turn only if `type == "user"`,
   `isMeta`, `isSidechain` and `isCompactSummary` are not true,
   `message.content` is a string or text blocks only (any `tool_result`
-  block skips the whole line), and the text does not start with a
-  harness-injected marker. `turn_id` is the line's own `uuid`.
+  block skips the whole line), and the text, after leading whitespace is
+  stripped, does not start with a harness-injected marker
+  (`CLAUDE_MARKERS`, a plain prefix match). `turn_id` is the line's own
+  `uuid`.
 - **Codex rollout JSONL**: the `session_meta` line names the thread
   (`payload.id`) and its `cwd`; a turn is a `response_item` whose payload
   is a `message` with `role == "user"` and `input_text` parts only, whose
-  text does not start with `<environment_context>`, `<user_instructions>`
-  or `<user_shell_command>`. `turn_id` is a stable hash of the file's path
+  text does not start with a Codex marker (`CODEX_MARKERS`, the same
+  match). `turn_id` is a stable hash of the file's path
   relative to the transcript root (`codex/sessions/...`) and the line's
   byte offset.
 - Unknown line kinds are skipped (fail closed). Rows whose `cwd` is outside
@@ -80,8 +82,35 @@ CLAUDE_MARKERS = (
     "<user-prompt-submit-hook>",
     "Caveat: The messages below were generated",
     "[Request interrupted",
+    # The 2026-11-27 additions (brief D13): the rest of the family that
+    # Claude Code's own "not a human prompt" checks name. Shell-mode input
+    # (`<bash-input>`) and the `#` memory note are commands, not prompts.
+    "<local-command-caveat>",
+    "<bash-input>",
+    "<bash-stdout",
+    "<bash-stderr",
+    "<bash-exit-code>",
+    "<task-notification>",
+    "<tick>",
+    "<user-memory-input>",
+    "<fork-boilerplate>",
+    "<teammate-message",
+    "<cross-session-message",
+    "<agent-message",
+    '<channel source="',
+    "<mcp-resource-update",
+    "<mcp-polling-update",
+    "Another Claude session sent a message",
 )
-CODEX_MARKERS = ("<environment_context>", "<user_instructions>", "<user_shell_command>")
+CODEX_MARKERS = (
+    "<environment_context>",
+    "<user_instructions>",
+    "<user_shell_command>",
+    "# AGENTS.md instructions",
+    "<skill>",
+    "<turn_aborted>",
+    "<subagent_notification>",
+)
 
 MAX_TEXT_CHARS = 4000
 MAX_SINCE_AGE = timedelta(days=7)

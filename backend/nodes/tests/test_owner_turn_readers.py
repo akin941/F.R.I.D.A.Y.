@@ -199,6 +199,28 @@ def test_every_claude_marker_is_excluded():
         assert owner_turns.claude_line_turn(line) is None, marker
 
 
+def test_a_marker_counts_only_at_the_start():
+    # D13: lstrip, then a plain prefix; a tag named later is owner text.
+    def line(text):
+        return {
+            "type": "user",
+            "uuid": "u",
+            "sessionId": "s",
+            "cwd": "/a",
+            "timestamp": "2026-11-20T00:00:00.000Z",
+            "message": {"role": "user", "content": text},
+        }
+
+    kept = "Why does the reader skip a <task-notification> line?"
+    assert owner_turns.claude_line_turn(line(kept))[4] == kept
+    assert owner_turns.claude_line_turn(line("\n\t <bash-input>ls</bash-input>")) is None
+    assert owner_turns.claude_line_turn(line("<Task-Notification>x")) is not None  # case-sensitive
+    part = {"type": "input_text", "text": "see <skill>"}
+    payload = {"type": "message", "role": "user", "content": [part]}
+    item = {"type": "response_item", "payload": payload}
+    assert owner_turns.codex_line_text(item) == "see <skill>"
+
+
 def test_every_codex_marker_is_excluded():
     for marker in owner_turns.CODEX_MARKERS:
         line = {

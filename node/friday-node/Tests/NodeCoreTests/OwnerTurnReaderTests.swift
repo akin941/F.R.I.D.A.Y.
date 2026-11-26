@@ -401,22 +401,21 @@ final class OwnerTurnReaderTests: XCTestCase {
         let claude = Dictionary(uniqueKeysWithValues: OwnerTurnPreview.claude(
             directory: root.appendingPathComponent("claude/projects/-Users-owner-code-friday").path))
         XCTAssertEqual(claude["files"], 1)
-        XCTAssertEqual(claude["lines"], 24)
+        XCTAssertEqual(claude["lines"], 41)
         XCTAssertEqual(claude["accepted"], 4)  // the vector's four cc-sess-1 turns
-        XCTAssertEqual(claude["kind.user"], 20)
-        for marker in [
-            "<command-name>", "<command-message>", "<command-args>", "<local-command-stdout>",
-            "<local-command-stderr>", "<system-reminder>", "<user-prompt-submit-hook>",
-            "Caveat: The messages below were generated", "[Request interrupted",
-        ] {
-            XCTAssertEqual(claude["user.excluded.marker.\(marker)"], 1, marker)
+        XCTAssertEqual(claude["kind.user"], 37)
+        XCTAssertEqual(claude["kind.(other)"], nil)
+        XCTAssertEqual(claude["accepted.starts_with_a_tag"], nil)
+        for marker in OwnerTurnPreview.claudeMarkers {
+            // The fixture's indented `<task-notification>` line counts twice.
+            XCTAssertEqual(claude["user.excluded.marker.\(marker)"], marker == "<task-notification>" ? 2 : 1, marker)
         }
         XCTAssertEqual(claude["user.excluded.non_text_content.block.tool_result"], 2)
         let codex = Dictionary(uniqueKeysWithValues: OwnerTurnPreview.codex(
             directory: root.appendingPathComponent("codex/sessions").path))
         XCTAssertEqual(codex["files"], 3)
         XCTAssertEqual(codex["accepted"], 4)  // the vector's three plus /tmp/scratch's one
-        for marker in ["<environment_context>", "<user_instructions>", "<user_shell_command>"] {
+        for marker in OwnerTurnPreview.codexMarkers {
             XCTAssertEqual(codex["user.excluded.marker.\(marker)"], 1, marker)
         }
         // Counts only: no fixture text, identifier or file name in any key.
@@ -426,6 +425,27 @@ final class OwnerTurnReaderTests: XCTestCase {
             "SECRET", "token", "reconciliation",
         ] {
             XCTAssertFalse(keys.contains(phrase), phrase)
+        }
+    }
+
+    func testThePreviewEchoesOnlyFixedWords() {
+        // A leading tag is named only when it is a known harness tag.
+        XCTAssertEqual(OwnerTurnPreview.tagName(" <teammate-message teammate_id=\"x\">"), "<teammate-message>")
+        XCTAssertEqual(OwnerTurnPreview.tagName("<ide_selection>a</ide_selection>"), "<ide_selection>")
+        XCTAssertEqual(OwnerTurnPreview.tagName("<channel/>"), "<channel>")
+        for text in ["<project-falcon>plan", "<b>bold</b>", "<task-notificationx>", "<a", "<"] {
+            XCTAssertEqual(OwnerTurnPreview.tagName(text), "(other)", text)
+        }
+        // Line kinds, roles and block types come from fixed lists too.
+        XCTAssertEqual(OwnerTurnPreview.echo("user", OwnerTurnPreview.claudeLineTypes), "user")
+        XCTAssertEqual(OwnerTurnPreview.echo("my-secret-word", OwnerTurnPreview.claudeLineTypes), "(other)")
+        XCTAssertEqual(OwnerTurnPreview.echo("tool_result", OwnerTurnPreview.claudeBlockTypes), "tool_result")
+        XCTAssertEqual(OwnerTurnPreview.echo("user", OwnerTurnPreview.claudeBlockTypes), "(other)")
+        XCTAssertEqual(OwnerTurnPreview.echo("developer", OwnerTurnPreview.codexRoles), "developer")
+        XCTAssertEqual(OwnerTurnPreview.echo(nil, OwnerTurnPreview.codexRoles), "(other)")
+        // Every marker tag is a known harness tag, so a regression shows by name.
+        for marker in OwnerTurnPreview.claudeMarkers + OwnerTurnPreview.codexMarkers where marker.hasPrefix("<") {
+            XCTAssertNotEqual(OwnerTurnPreview.tagName(marker + ">"), "(other)", marker)
         }
     }
     #endif

@@ -3,6 +3,9 @@
 # M1 contract test 2; runbook Part B "The conformance build rule"): the
 # strings FRIDAY_NODE_CONFORMANCE or "conformance" (any case), or the
 # conformance public key's base64 from backend/nodes/conformance/keys/.
+# It also refuses the debug-only owner-turn preview (Phase 8B brief M1,
+# runbook B4: `scrub-preview` and its `OwnerTurnPreview` type, `#if DEBUG`),
+# which reads real transcripts and must never ship.
 # Run by the Release-only build phase (before CodeSign) and again by
 # build-sign-local.sh on the final binary.
 set -euo pipefail
@@ -28,4 +31,9 @@ if grep -qiE "FRIDAY_NODE_CONFORMANCE|conformance" "$TEXT" || grep -qF -- "$CONF
   echo "conformance marker in $(basename "$BIN"): refusing" >&2
   exit 1
 fi
-echo "no conformance marker in $(basename "$BIN")"
+# Case-sensitive: the CLI word and the Swift type name as compiled in.
+if grep -qE "scrub-preview|OwnerTurnPreview" "$TEXT"; then
+  echo "debug-only scrub-preview marker in $(basename "$BIN"): refusing" >&2
+  exit 1
+fi
+echo "no conformance or debug-preview marker in $(basename "$BIN")"

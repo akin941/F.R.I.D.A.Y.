@@ -916,6 +916,10 @@ Needs: B2, A12 (for the live half). Spec: Phase 8B brief "Mac session
       that start with `<task-notification>` (14) and `<bash-input>` (1),
       which no D13 marker covers: the server branch and the owner skim
       are still open (Phase 8B brief, M1 implementation record).**
+      **2026-11-27, later: the D13 marker fix is implemented on
+      `feat/p8-d13-harness-markers` (awaits the Sonnet 5 review); the
+      re-run shows no accepted turn starting with a harness tag (Claude
+      17 accepted, Codex 35). The owner skim is still open.**
 
 **Server-side contract tests it must pass:** every case in
 `backend/nodes/conformance/cases/v1/` (with the owner-turn cases) offline

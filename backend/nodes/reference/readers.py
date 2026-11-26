@@ -102,8 +102,35 @@ CLAUDE_MARKERS = (
     "<user-prompt-submit-hook>",
     "Caveat: The messages below were generated",
     "[Request interrupted",
+    # The 2026-11-27 additions (brief D13): the rest of the family that
+    # Claude Code's own "not a human prompt" checks name. Shell-mode input
+    # (`<bash-input>`) and the `#` memory note are commands, not prompts.
+    "<local-command-caveat>",
+    "<bash-input>",
+    "<bash-stdout",
+    "<bash-stderr",
+    "<bash-exit-code>",
+    "<task-notification>",
+    "<tick>",
+    "<user-memory-input>",
+    "<fork-boilerplate>",
+    "<teammate-message",
+    "<cross-session-message",
+    "<agent-message",
+    '<channel source="',
+    "<mcp-resource-update",
+    "<mcp-polling-update",
+    "Another Claude session sent a message",
 )
-CODEX_MARKERS = ("<environment_context>", "<user_instructions>", "<user_shell_command>")
+CODEX_MARKERS = (
+    "<environment_context>",
+    "<user_instructions>",
+    "<user_shell_command>",
+    "# AGENTS.md instructions",
+    "<skill>",
+    "<turn_aborted>",
+    "<subagent_notification>",
+)
 
 FAMILY = {
     "claude.sessions.list": "claude",
