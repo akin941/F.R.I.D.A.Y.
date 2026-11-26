@@ -34,6 +34,12 @@ final class SpikeModel: ObservableObject {
     init() {
         Task { @MainActor in
             await Self.ensureSystemEventsRunning()
+            // `open PTSpike.app --args --write-keychain`: (re)write both items from
+            // this build, the same as pressing both Write buttons.
+            if CommandLine.arguments.contains("--write-keychain") {
+                self.writeKeychain(dataProtection: true)
+                self.writeKeychain(dataProtection: false)
+            }
             self.refresh()
         }
     }
@@ -192,13 +198,18 @@ final class SpikeModel: ObservableObject {
     // MARK: - Keychain (A1.4)
 
     private static let service = "friday-node-spike"
-    private static let account = "spike"
+    // Separate accounts per variant: on macOS a query without
+    // kSecUseDataProtectionKeychain can also match data-protection items, so a
+    // shared account would let the file-based delete remove the other item.
+    private static func account(_ dataProtection: Bool) -> String {
+        dataProtection ? "spike-dp" : "spike-file"
+    }
 
     private static func baseQuery(dataProtection: Bool) -> [String: Any] {
         var query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
-            kSecAttrAccount as String: account,
+            kSecAttrAccount as String: account(dataProtection),
         ]
         if dataProtection {
             query[kSecUseDataProtectionKeychain as String] = true

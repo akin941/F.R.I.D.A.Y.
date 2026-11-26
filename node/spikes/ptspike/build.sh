@@ -46,7 +46,7 @@ EOF
 
 DERIVED="$SPIKE_HOME/build"
 xcodebuild -project "$HERE/PTSpike.xcodeproj" -scheme PTSpike -configuration Release \
-  -derivedDataPath "$DERIVED" -allowProvisioningUpdates \
+  -derivedDataPath "$DERIVED" -allowProvisioningUpdates -allowProvisioningDeviceRegistration \
   CODE_SIGN_STYLE=Automatic DEVELOPMENT_TEAM="$FRIDAY_NODE_TEAM_ID" ENABLE_HARDENED_RUNTIME=YES \
   PRODUCT_BUNDLE_IDENTIFIER="$BUNDLE_ID" CURRENT_PROJECT_VERSION="$BUILD_NUMBER" \
   build | tail -n 5
