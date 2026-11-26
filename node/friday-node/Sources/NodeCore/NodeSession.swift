@@ -93,6 +93,9 @@ public final class NodeSession: @unchecked Sendable {
     private var connectedAt: Int64 = 0
     private var heartbeatSeq: Int64 = 0
     private var pendingReads: [(envelope: JSONValue, dueAt: Int64, receivedAt: Int64)] = []
+    /// The catalogue the current socket's `hello` carried: a policy change
+    /// before `hello.ack` is announced once the session is up.
+    private var catalogueAtHello: Catalogue?
 
     public init(
         nodeID: String, pinned: [String: Data], catalogue: Catalogue, readers: ReadProvider,
@@ -131,6 +134,7 @@ public final class NodeSession: @unchecked Sendable {
         lastHeartbeatAt = now
         connectedAt = now
         nextReconnectDelay = nil
+        catalogueAtHello = catalogue
         return send([hello()])
     }
 
@@ -186,8 +190,15 @@ public final class NodeSession: @unchecked Sendable {
         let items = AvailabilityChange.items(from: catalogue, to: newCatalogue)
         catalogue = newCatalogue
         readers = newReaders
-        guard connected, sessionReady, !items.isEmpty else { return [] }
-        let frames: [JSONValue] = stride(from: 0, to: items.count, by: 50).map { start in
+        // Before `hello.ack`, `catalogueAtHello` holds what the server saw:
+        // the difference is sent when the ack arrives.
+        guard connected, sessionReady else { return [] }
+        return send(availabilityEvents(items))
+    }
+
+    private func availabilityEvents(_ items: [JSONValue]) -> [JSONValue] {
+        guard !items.isEmpty else { return [] }
+        return stride(from: 0, to: items.count, by: 50).map { start in
             [
                 "v": .int(NodeProtocol.version),
                 "type": "event",
@@ -197,7 +208,6 @@ public final class NodeSession: @unchecked Sendable {
                 "spooled": false,
             ]
         }
-        return send(frames)
     }
 
     /// A mic state from the voice host. v1 never relays one.
@@ -241,7 +251,10 @@ public final class NodeSession: @unchecked Sendable {
                 rotateAfterDays: message["rotate_after_days"]?.intValue ?? 0,
                 serverTime: message["server_time"]?.intValue ?? 0,
                 accepted: (message["accepted"]?.arrayValue ?? []).compactMap(\.stringValue))
-            return []
+            // A policy change between `hello` and `hello.ack` goes out now.
+            let items = catalogueAtHello.map { AvailabilityChange.items(from: $0, to: catalogue) } ?? []
+            catalogueAtHello = nil
+            return send(availabilityEvents(items))
         case "invoke":
             if readDelaySeconds > 0 {
                 pendingReads.append((message, now + readDelaySeconds, now))

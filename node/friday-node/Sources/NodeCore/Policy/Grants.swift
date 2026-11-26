@@ -32,6 +32,8 @@ public enum PolicyChangeError: Error, Equatable {
 public final class PolicyEditor: @unchecked Sendable {
     private let store: LocalPolicyStore
     private let authentication: OwnerAuthentication
+    /// Serialises load-modify-save, so two changes never lose one another.
+    private let lock = NSLock()
     /// Called after a change was saved (the runner rebuilds its readers and
     /// tells the server what changed).
     public var onChange: ((LocalPolicy) -> Void)?
@@ -47,10 +49,17 @@ public final class PolicyEditor: @unchecked Sendable {
     @discardableResult
     public func change(reason: String, _ change: (inout LocalPolicy) -> Void) async throws -> LocalPolicy {
         guard await authentication.authenticate(reason: reason) else { throw PolicyChangeError.notAuthenticated }
+        let policy = try apply(change)
+        onChange?(policy)
+        return policy
+    }
+
+    private func apply(_ change: (inout LocalPolicy) -> Void) throws -> LocalPolicy {
+        lock.lock()
+        defer { lock.unlock() }
         var policy = try store.load()
         change(&policy)
         try store.save(policy)
-        onChange?(policy)
         return policy
     }
 }

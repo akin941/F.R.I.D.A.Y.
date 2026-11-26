@@ -62,7 +62,12 @@ enum Git {
             done.signal()
         }
         if done.wait(timeout: .now() + ReaderLimits.gitTimeoutSeconds) == .timedOut || Date() > deadline {
+            // SIGTERM, then SIGKILL if git ignores it; reap it either way.
             process.terminate()
+            if done.wait(timeout: .now() + 1) == .timedOut, process.isRunning {
+                kill(process.processIdentifier, SIGKILL)
+            }
+            process.waitUntilExit()
             throw ReaderError()
         }
         process.waitUntilExit()

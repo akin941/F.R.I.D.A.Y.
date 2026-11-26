@@ -370,25 +370,49 @@ private struct LooseParser {
 // MARK: - Files
 
 enum ReaderFiles {
-    /// The JSON objects of a JSONL file, bounded; malformed or oversized
-    /// lines are skipped.
-    static func lines(_ path: String) -> [LooseJSON] {
+    static let chunkBytes = 64 * 1024
+
+    /// Streams the JSON objects of a JSONL file to `body`, one line at a
+    /// time, read in bounded chunks (never the whole file); malformed lines
+    /// and lines over MAX_LINE_BYTES are skipped (an oversized line is
+    /// discarded as it streams, never held). `body` returns false to stop:
+    /// a transcript outside `cwd_prefixes` stops at its first `cwd` line
+    /// (rule 2), so the rest of the file is never read or parsed.
+    static func forEachLine(_ path: String, _ body: (LooseJSON) -> Bool) {
         guard let attributes = try? FileManager.default.attributesOfItem(atPath: path),
             let size = attributes[.size] as? Int, size <= ReaderLimits.maxFileBytes,
-            let data = FileManager.default.contents(atPath: path)
-        else { return [] }
-        var out: [LooseJSON] = []
-        var start = data.startIndex
-        while start < data.endIndex {
-            let end = data[start...].firstIndex(of: 0x0A).map { $0 + 1 } ?? data.endIndex
-            let raw = data[start..<end]
-            start = end
-            guard raw.count <= ReaderLimits.maxLineBytes, let value = LooseJSON.parse(Data(raw)),
-                case .object = value
-            else { continue }
-            out.append(value)
+            let handle = FileHandle(forReadingAtPath: path)
+        else { return }
+        defer { try? handle.close() }
+        var line = Data()
+        var oversized = false
+        func finish() -> Bool {
+            defer {
+                line.removeAll(keepingCapacity: true)
+                oversized = false
+            }
+            guard !oversized, let value = LooseJSON.parse(line), case .object = value else { return true }
+            return body(value)
         }
-        return out
+        while true {
+            guard let chunk = try? handle.read(upToCount: chunkBytes), !chunk.isEmpty else { break }
+            var start = chunk.startIndex
+            while start < chunk.endIndex {
+                let newline = chunk[start...].firstIndex(of: 0x0A)
+                let end = newline.map { $0 + 1 } ?? chunk.endIndex
+                if !oversized {
+                    if line.count + (end - start) > ReaderLimits.maxLineBytes {
+                        oversized = true
+                        line.removeAll(keepingCapacity: true)
+                    } else {
+                        line.append(chunk[start..<end])
+                    }
+                }
+                start = end
+                if newline != nil, !finish() { return }
+            }
+        }
+        if !line.isEmpty || oversized { _ = finish() }
     }
 
     private static func isDirectory(_ path: String) -> Bool {

@@ -12,45 +12,46 @@ extension NodeReaders {
     func codexTranscript(_ path: String, prefixes: [String]?, wantTurns: Bool = false) -> Transcript? {
         var transcript: Transcript?
         var pending: (Int64, Int64) = (0, 0)
-        for line in ReaderFiles.lines(path) {
+        var outsidePrefixes = false
+        ReaderFiles.forEachLine(path) { line in
             let kind = line["type"]?.string
-            guard let payload = line["payload"], payload.object != nil else { continue }
+            guard let payload = line["payload"], payload.object != nil else { return true }
             if transcript == nil {
-                guard kind == "session_meta" else { continue }
+                guard kind == "session_meta" else { return true }
                 guard let threadID = payload["id"]?.string.flatMap(ident), let cwd = payload["cwd"]?.string else {
-                    return nil
+                    outsidePrefixes = true; return false
                 }
                 guard let forms = ReaderPaths.pathForms(cwd, home: home),
                     ReaderPaths.matchesPrefixes(prefixes, forms.forms)
-                else { return nil }  // rule 2
+                else { outsidePrefixes = true; return false }  // rule 2
                 transcript = Transcript(ident: threadID, cwd: forms.display, forms: forms.forms)
                 // Python `a or b`: a 0 timestamp falls through to the next.
                 let fromPayload = payload["timestamp"]?.string.flatMap(ReaderTime.parse)
                 transcript!.startedAt = (fromPayload ?? 0) != 0
                     ? fromPayload : line["timestamp"]?.string.flatMap(ReaderTime.parse)
-                continue
+                return true
             }
             let at = line["timestamp"]?.string.flatMap(ReaderTime.parse)
             if kind == "turn_context" {
                 if let model = payload["model"]?.string { transcript!.model = model }
-                continue
+                return true
             }
-            guard kind == "response_item", let at else { continue }
+            guard kind == "response_item", let at else { return true }
             let item = payload["type"]?.string
             if ["function_call", "local_shell_call", "custom_tool_call"].contains(item) {
                 pending.0 += 1
-                continue
+                return true
             }
             if ["function_call_output", "local_shell_call_output", "custom_tool_call_output"].contains(item) {
                 pending.1 += 1
-                continue
+                return true
             }
             guard item == "message", let role = payload["role"]?.string, role == "user" || role == "assistant" else {
-                continue
+                return true
             }
             let text = TranscriptText.codexText(payload["content"], role: role)
             if text.isEmpty || (role == "user" && TranscriptText.startsWithMarker(text, TranscriptText.codexMarkers)) {
-                continue
+                return true
             }
             if transcript!.startedAt == nil { transcript!.startedAt = at }
             transcript!.lastActivityAt = max(transcript!.lastActivityAt ?? at, at)
@@ -66,7 +67,9 @@ extension NodeReaders {
                 ])
                 if role == "assistant" { pending = (0, 0) }
             }
+            return true
         }
+        if outsidePrefixes { return nil }
         if var found = transcript, wantTurns, !found.turns.isEmpty, pending.0 != 0 || pending.1 != 0 {
             let last = found.turns.count - 1
             found.turns[last]["tool_calls"] = .int((found.turns[last]["tool_calls"]?.intValue ?? 0) + pending.0)

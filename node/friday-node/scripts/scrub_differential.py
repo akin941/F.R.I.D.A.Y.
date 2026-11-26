@@ -22,7 +22,7 @@ sys.path.insert(0, str(REPO / "backend"))
 from memory.ingestion.scrubber import scrub_text  # noqa: E402
 
 CLI = REPO / "node/friday-node/.build/debug/friday-node"
-POOL = list("İıſKßŞşĞğÜüÖöÇç\u001c\u001d\u000b\u0085  　٣٤٥۷०१２３́‍😀_-.:=@/+ \t\n\"'")
+POOL = list("İıſKßŞşĞğÜüÖöÇç\u088f\uf882\U00010d40\U0001e5f1\u001c\u001d\u000b\u0085  　٣٤٥۷०१２３́‍😀_-.:=@/+ \t\n\"'")
 SEEDS = [
     "token: abcdefghijklmnopqrstuvwxyz0123",
     "API_KEY=sk-proj-Ab3dEf6hIj9kLm2nOp5qRs8tUv1wXy4zAB7CD0",

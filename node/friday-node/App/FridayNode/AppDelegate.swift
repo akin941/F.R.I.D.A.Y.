@@ -131,10 +131,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         permissionsMenu.addItem(add)
     }
 
-    private func changePolicy(_ reason: String, _ change: @escaping (inout LocalPolicy) -> Void) {
+    private func changePolicy(
+        _ reason: String, then: ((LocalPolicy) -> Void)? = nil, _ change: @escaping (inout LocalPolicy) -> Void
+    ) {
         Task {
             do {
-                try await editor.change(reason: reason, change)
+                let policy = try await editor.change(reason: reason, change)
+                await MainActor.run { then?(policy) }
             } catch PolicyChangeError.notAuthenticated {
                 // The owner cancelled or failed authentication: nothing changed.
             } catch {
@@ -152,9 +155,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func toggleTitles() {
-        let turningOn = !((try? editor.current())?.windowTitles ?? false)
-        if turningOn && !CGPreflightScreenCaptureAccess() { _ = CGRequestScreenCaptureAccess() }
-        changePolicy("Friday Node'un pencere başlıklarını okumasına izin ver") { $0.windowTitles.toggle() }
+        // The Screen Recording prompt comes only after the owner authenticated
+        // and the toggle is on.
+        changePolicy(
+            "Friday Node'un pencere başlıklarını okuma iznini değiştir",
+            then: { policy in
+                if policy.windowTitles && !CGPreflightScreenCaptureAccess() { _ = CGRequestScreenCaptureAccess() }
+            }
+        ) { $0.windowTitles.toggle() }
     }
 
     @objc private func addRepo() {

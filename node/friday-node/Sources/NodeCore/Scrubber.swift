@@ -39,6 +39,10 @@ public enum Scrubber {
         return value
     }
 
+    /// The ICU sets equal to CPython 3.12's `\\w` and `\\d` (tests pin them).
+    public static var pythonWordSet: String { Rules.w }
+    public static var pythonDigitSet: String { Rules.d }
+
     /// The node's scrub as the readers use it: "" for an empty string.
     public static func scrubIdentifierUnchanged(_ text: String) -> Bool {
         !text.isEmpty && scrub(text) == text
@@ -142,18 +146,38 @@ enum PythonChars {
 
     /// The decimal value of a `\d` (Unicode Nd) scalar, as Python's int(c).
     static func digitValue(_ scalar: Unicode.Scalar) -> Int? {
-        guard scalar.properties.numericType == .decimal, let value = scalar.properties.numericValue else {
-            return nil
-        }
+        guard scalar.properties.numericType == .decimal, let value = scalar.properties.numericValue,
+            isPythonDecimal(scalar)
+        else { return nil }
         return Int(value)
+    }
+
+    private static let decimalSet = try! NSRegularExpression(pattern: "^" + Rules.d + "\\z")
+
+    /// Python's `\d` (CPython 3.12), not ICU's newer Nd.
+    static func isPythonDecimal(_ scalar: Unicode.Scalar) -> Bool {
+        let text = String(scalar)
+        return decimalSet.firstMatch(in: text, range: NSRange(location: 0, length: (text as NSString).length)) != nil
     }
 }
 
 // MARK: - The rules (scrubber.py, translated)
 
 enum Rules {
-    /// Python `\w`.
-    static let w = "[\\p{L}\\p{N}_]"
+    // CPython 3.12 uses Unicode 15.0; this Mac's ICU is newer and also counts
+    // some Apple private-use letters. These are the exact code points ICU
+    // puts in `[\p{L}\p{N}_]` / `\p{Nd}` that Python's `\w` / `\d` do not
+    // (measured over U+0000..U+10FFFF; nothing is missing the other way).
+    // ScrubberUnicodeTests fingerprints both sets against CPython 3.12, so an
+    // ICU update that moves them fails a test instead of drifting silently.
+    static let wOnlyICU =
+        "\\x{88F}\\x{C5C}\\x{CDC}\\x{1C89}-\\x{1C8A}\\x{A7CB}-\\x{A7CF}\\x{A7D2}\\x{A7D4}\\x{A7DA}-\\x{A7DC}\\x{A7F1}\\x{F882}\\x{F89A}-\\x{F89E}\\x{F8A1}-\\x{F8A7}\\x{F8B8}\\x{F8C1}-\\x{F8D6}\\x{105C0}-\\x{105F3}\\x{10940}-\\x{10959}\\x{10D40}-\\x{10D65}\\x{10D6F}-\\x{10D85}\\x{10EC2}-\\x{10EC7}\\x{11380}-\\x{11389}\\x{1138B}\\x{1138E}\\x{11390}-\\x{113B5}\\x{113B7}\\x{113D1}\\x{113D3}\\x{116D0}-\\x{116E3}\\x{11BC0}-\\x{11BE0}\\x{11BF0}-\\x{11BF9}\\x{11DB0}-\\x{11DDB}\\x{11DE0}-\\x{11DE9}\\x{13460}-\\x{143FA}\\x{16100}-\\x{1611D}\\x{16130}-\\x{16139}\\x{16D40}-\\x{16D6C}\\x{16D70}-\\x{16D79}\\x{16EA0}-\\x{16EB8}\\x{16EBB}-\\x{16ED3}\\x{16FF2}-\\x{16FF6}\\x{187F8}-\\x{187FF}\\x{18CFF}\\x{18D09}-\\x{18D1E}\\x{18D80}-\\x{18DF2}\\x{1CCF0}-\\x{1CCF9}\\x{1E5D0}-\\x{1E5ED}\\x{1E5F0}-\\x{1E5FA}\\x{1E6C0}-\\x{1E6DE}\\x{1E6E0}-\\x{1E6E2}\\x{1E6E4}-\\x{1E6E5}\\x{1E6E7}-\\x{1E6ED}\\x{1E6F0}-\\x{1E6F4}\\x{1E6FE}-\\x{1E6FF}\\x{2B73A}-\\x{2B73F}\\x{2CEA2}-\\x{2CEAD}\\x{2EBF0}-\\x{2EE5D}\\x{323B0}-\\x{33479}"
+    static let dOnlyICU =
+        "\\x{10D40}-\\x{10D49}\\x{116D0}-\\x{116E3}\\x{11BF0}-\\x{11BF9}\\x{11DE0}-\\x{11DE9}\\x{16130}-\\x{16139}\\x{16D70}-\\x{16D79}\\x{1CCF0}-\\x{1CCF9}\\x{1E5F1}-\\x{1E5FA}"
+    /// Python `\w`, a set usable alone or nested in another class.
+    static let w = "[[\\p{L}\\p{N}_]--[\(wOnlyICU)]]"
+    /// Python `\d`.
+    static let d = "[[\\p{Nd}]--[\(dOnlyICU)]]"
     /// Python `\b`.
     static let b = "(?:(?<=\(w))(?!\(w))|(?<!\(w))(?=\(w)))"
     /// Python `\s`, for use inside a character class.
@@ -236,17 +260,17 @@ enum Rules {
         validate: { looksLikeSecretRun($0) ? $0 : nil })
 
     static let pii: [Scrubber.Rule] = [
-        .init("PII", "iban", b + "[A-Z]{2}\\p{Nd}{2}(?:[ ]?[A-Z0-9]){11,30}" + b, validate: longestValidIBAN),
-        .init("PII", "card", "(?<![\\p{Nd}\\-])\\p{Nd}(?:[ \\-]?\\p{Nd}){12,18}(?![\\p{Nd}])",
+        .init("PII", "iban", b + "[A-Z]{2}\(d){2}(?:[ ]?[A-Z0-9]){11,30}" + b, validate: longestValidIBAN),
+        .init("PII", "card", "(?<![\\-\(d)])\(d)(?:[ \\-]?\(d)){12,18}(?!\(d))",
               validate: { luhnIsValid($0) ? $0 : nil }),
-        .init("PII", "tckn", "(?<!\\p{Nd})[1-9]\\p{Nd}{10}(?!\\p{Nd})", validate: { tcknIsValid($0) ? $0 : nil }),
+        .init("PII", "tckn", "(?<!\(d))[1-9]\(d){10}(?!\(d))", validate: { tcknIsValid($0) ? $0 : nil }),
         .init("PII", "email",
               b + "[\(lettersCI)0-9._%+\\-]{1,64}@[\(lettersCI)0-9\\-]{1,63}(?:\\.[\(lettersCI)0-9\\-]{1,63}){0,8}"
                 + "\\.[\(lettersCI)]{2,24}" + b),
         .init("PII", "phone",
-              "(?<![\\p{L}\\p{N}_+])(?:(?:\\+|00)90[\(sInner).\\-]?|0)?\\(?[2-5]\\p{Nd}{2}\\)?"
-                + "[\(sInner).\\-]?\\p{Nd}{3}[\(sInner).\\-]?\\p{Nd}{2}[\(sInner).\\-]?\\p{Nd}{2}(?!\\p{Nd})"),
-        .init("PII", "phone", "(?<![\\p{L}\\p{N}_+])\\+[1-9](?:[\(sInner).\\-]?\\p{Nd}){7,14}(?!\\p{Nd})"),
+              "(?<![+\(w)])(?:(?:\\+|00)90[\(sInner).\\-]?|0)?\\(?[2-5]\(d){2}\\)?"
+                + "[\(sInner).\\-]?\(d){3}[\(sInner).\\-]?\(d){2}[\(sInner).\\-]?\(d){2}(?!\(d))"),
+        .init("PII", "phone", "(?<![+\(w)])\\+[1-9](?:[\(sInner).\\-]?\(d)){7,14}(?!\(d))"),
     ]
 
     // MARK: Validators (scrubber.py)

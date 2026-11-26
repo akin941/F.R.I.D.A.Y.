@@ -68,8 +68,10 @@ enum TranscriptText {
 extension NodeReaders {
     var claudeFiles: [String] { ReaderFiles.transcripts(root: claudeRoot, recursive: false) }
 
+    /// pathlib's `stem` of a `*.jsonl` name (a bare ".jsonl" has no suffix).
     static func stem(_ path: String) -> String {
         let name = (path as NSString).lastPathComponent
+        if Scalars.equal(name, ".jsonl") { return name }
         return Scalars.prefix(name, Scalars.count(name) - Scalars.count(".jsonl"))
     }
 
@@ -79,21 +81,22 @@ extension NodeReaders {
         guard let sessionID = ident(Self.stem(path)) else { return nil }
         var transcript: Transcript?
         var pending: (Int64, Int64) = (0, 0)
-        for line in ReaderFiles.lines(path) {
+        var outsidePrefixes = false
+        ReaderFiles.forEachLine(path) { line in
             if transcript == nil {
-                guard let cwd = line["cwd"]?.string else { continue }
+                guard let cwd = line["cwd"]?.string else { return true }
                 guard let forms = ReaderPaths.pathForms(cwd, home: home),
                     ReaderPaths.matchesPrefixes(prefixes, forms.forms)
-                else { return nil }  // rule 2: skipped before its turns are parsed
+                else { outsidePrefixes = true; return false }  // rule 2: skipped before its turns are parsed
                 transcript = Transcript(ident: sessionID, cwd: forms.display, forms: forms.forms)
             }
-            guard let kind = line["type"]?.string, kind == "user" || kind == "assistant" else { continue }
-            if line["isMeta"]?.isTrue == true || line["isSidechain"]?.isTrue == true { continue }
-            if line["isCompactSummary"]?.isTrue == true { continue }
-            guard let at = line["timestamp"]?.string.flatMap(ReaderTime.parse) else { continue }
-            guard let message = line["message"], message.object != nil else { continue }
+            guard let kind = line["type"]?.string, kind == "user" || kind == "assistant" else { return true }
+            if line["isMeta"]?.isTrue == true || line["isSidechain"]?.isTrue == true { return true }
+            if line["isCompactSummary"]?.isTrue == true { return true }
+            guard let at = line["timestamp"]?.string.flatMap(ReaderTime.parse) else { return true }
+            guard let message = line["message"], message.object != nil else { return true }
             let (text, calls, results) = TranscriptText.claudeContent(message["content"])
-            if !text.isEmpty && TranscriptText.startsWithMarker(text, TranscriptText.claudeMarkers) { continue }
+            if !text.isEmpty && TranscriptText.startsWithMarker(text, TranscriptText.claudeMarkers) { return true }
             if transcript!.startedAt == nil { transcript!.startedAt = at }
             transcript!.lastActivityAt = max(transcript!.lastActivityAt ?? at, at)
             if kind == "assistant" {
@@ -114,7 +117,7 @@ extension NodeReaders {
                     pending.0 += calls
                     pending.1 += results
                 }
-                continue
+                return true
             }
             transcript!.messageCount += 1
             if wantTurns {
@@ -127,7 +130,9 @@ extension NodeReaders {
                 ])
                 pending = (0, 0)
             }
+            return true
         }
+        if outsidePrefixes { return nil }
         return transcript
     }
 
