@@ -127,3 +127,51 @@ gateway at home, and the owner's personal memory outside the house.
   documented later path (decision 7).
 - **One server per PC, synchronised.** Rejected: two primary copies of
   memory and approvals contradict ADR-005 and the single audit chain.
+
+## Implementation notes — Phase 13 closeout (`chore/p13-closeout`, 2026-11-20)
+
+What the server side of this ADR now consists of (branches 1–7 and the
+closeout, all on the integration branch). Nothing here was run on the
+owner's home PC or a Mac (M2/M3, pending owner evaluation).
+
+- **Decision 1 (one server, many nodes).** Rooms, node labels (name,
+  room, role, platform, aliases), per-node presence (the HUD `nodes`
+  section, `/devices`), per-node audit (`GET /api/v1/nodes/<id>/audit`) and
+  the deterministic "which PC" resolver (`nodes.targeting`: explicit name
+  → speaking node → last active → ask; exactly one node per invocation).
+  The closeout e2e (`backend/ops/tests/test_home_hub_e2e.py`) runs this on
+  one live TLS server with two PCs: the Python reference node v2
+  ("MacBook") and the packaged `friday-node-linux` daemon ("Masaüstü", v1,
+  read-only).
+- **Decisions 3 (LAN only) and 4 (TLS with a pin).** `compose.home.yml`
+  publishes nothing, and a test checks that every compose `ports:` entry
+  is loopback. `make preflight` reports `home_lan_only` and `home_tls_pin`.
+- **Decision 6 (encrypted off-site backups, tested restore).**
+  `deploy/home/friday-backup.sh` and `friday-restore-drill.sh` round-trip
+  on the CI Postgres with a local restic repository and a throwaway age
+  key (branch 7 and the closeout e2e). The rows are `home_backup_fresh`,
+  `home_restore_drill_age` and `home_disk_encryption`.
+- **Decision 7 (VPS later without a protocol change).** Phase 13 changed
+  no protocol surface, and the closeout pins that. The preflight row
+  `node_protocol_frozen` hashes the node protocol files (schemas, vectors,
+  capability contracts, conformance cases and vectors: 196 files) and
+  `node/friday-voice/conformance.lock`, and compares them with the values
+  at the Phase 12 closeout merge (`7d2dee5`). A later protocol change
+  updates those digests in the branch that carries its ADR.
+- **Home Assistant (ADR-010).** The owner's entity allowlist
+  (`connectors.HomeEntity`) fails closed. Media and scene services are
+  gate-class. Home voice routes only propose (ADR-015 unchanged).
+  `ha_entities` checks the allowlist against the bridge's code maximum and
+  makes one read-only `ha_states` read.
+- **Closeout preflight rows** (`check_home_control`): `nodes_labels`,
+  `ha_entities`, `linux_node_vendor` and `node_protocol_frozen`. D15 put
+  `nodes_labels` and `linux_node_vendor` in `check_nodes`. They are grouped
+  with the HA row instead, so the Phase 9 `check_nodes` row set stays
+  unchanged (its own tests and the HUD health test pin it).
+- **Still open** (recorded in the brief, not decided here): pairing and
+  credential rotation through the home Caddy. `Caddyfile.example` sends
+  every path except `/ws/node/v1` to the BFF, and the BFF has no node
+  pairing route. Routing `/api/v1/nodes/pair` and
+  `/api/v1/auth/nodes/credential/rotate` straight to Django would change
+  which client IP PIN pairing trusts, so it is an owner decision (brief
+  "Owner steps (pending)").

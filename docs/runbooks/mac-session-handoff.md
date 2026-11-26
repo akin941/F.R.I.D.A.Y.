@@ -112,6 +112,7 @@ and green in CI against reference doubles (`MASTER_PLAN.md` §AA).
 | 10 Control | protocol v2 + invocation grants, capability contracts v2, reference executor + `srt` policy generator, 32-case escape suite (fake executor), `node_action` gate, trust check, HUD terminal, Codex/Agent SDK drivers (off), preflight | Swift confirmation window + executors M1–M2 (B5–B6), macOS `srt` evidence M3 and measurements M4 (C6), driver pins on the Linux runner (D6) |
 | 11 Local live voice | `node_voice` credential and channel, `friday-voice/v1` + reference host, Pipecat pipeline, barge-in, always-on gate (closed), storm backstop, CI self-trigger gate, FAR/FRR harness, `voice.state`, preflight | Swift voice host M1 (B7), loopback + nightly M3 (B8, C7), MLX speech server M2 (C7), FAR/FRR/latency/barge-in/CPU M4 (C7) |
 | 12 Reach | `proactive` app, digest, `/today`, wake routes, n8n connector (relay, allowlist, gated writes), SKILL.md skills + curator, playbooks, preflight | spoken digest and wake routes on the Mac M1 (C8), live n8n, two-week digest checkpoint (C9, D7) |
+| 13 Home hub | rooms + node labels, "which PC" resolver (one node per call), HUD `nodes` panel + `/devices` overview, per-node audit, `friday-node-linux` (read-only, v1, 50/50 conformance), HA entity allowlist + media/scene services (gate-class), home voice routes (propose only), `compose.home.yml` + backup/drill scripts, `check_home` + `check_home_control` preflight, home-hub e2e (`chore/p13-closeout`) | Swift pairing `platform` + server re-point (E1), real-hardware multi-node and home routes (E2), the home server on the owner's PC (E3), owner steps (E4) |
 
 ---
 
@@ -1455,6 +1456,20 @@ capability contract, no `friday-voice/v1` change. The node conformance
 suite and `node/friday-voice/conformance.lock` stay as they are; every
 item below must leave them unchanged.
 
+- [x] **E0 Phase 13 server side (`chore/p13-closeout`, 2026-11-20).**
+      Branches 1–7 and the closeout are on the integration branch, and the
+      contract tests E1–E3 name are committed and green here:
+      `nodes/tests/test_pairing_platform.py`,
+      `assistant/tests/test_which_pc.py`,
+      `assistant/tests/test_home_routes_node_voice.py`,
+      `ops/tests/test_home_hub_e2e.py` (reference node v2 as the MacBook +
+      the packaged Linux node on one live TLS server; voice origin; the TV
+      approved once; backup → drill), `ops/tests/test_home_backup_restore.py`.
+      The protocol is unchanged: `node_protocol_frozen` (preflight) hashes
+      the node protocol files and `node/friday-voice/conformance.lock`
+      against the Phase 12 closeout. Open for the owner before E2/E3: how
+      `/api/v1/nodes/pair` and `/api/v1/auth/nodes/credential/rotate` reach
+      Django through the home Caddy (Phase 13 brief, closeout owner steps).
 - [ ] **E1 Phase 13 M1 — `feat/p13-node-app-pairing-platform` (Swift,
       after B1).** In `node/friday-node/`:
       `Pairing/PairingRequest.swift` sends `"platform": "macos"` in the

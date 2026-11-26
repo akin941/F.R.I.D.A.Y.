@@ -168,6 +168,67 @@ The secret rotates every `NODE_CREDENTIAL_ROTATE_AFTER_DAYS` (30) through
 `NODE_CREDENTIAL_MAX_AGE_DAYS` (90) or unused for `NODE_IDLE_EXPIRY_DAYS`
 (30) stops working and the node must re-pair.
 
+## Several nodes, one server (Phase 13)
+
+Phase 13 (`docs/prompts/phase-13-home-hub/brief.md`, ADR-017) makes several
+nodes per owner a supported setup: every PC in the home is a node of the
+one home server (`docs/runbooks/home-server-setup.md`). The protocol is
+unchanged (the `node_protocol_frozen` preflight row checks it).
+
+**Labels.** Each node has a unique name, a room, a role and up to five
+aliases, set on `/devices` (the node edit dialog; rooms on
+`/settings/home`). The node's `platform` (`macos`, `linux`, `windows`)
+comes from pairing and cannot be edited. Labels are server data: nothing
+is sent to the node. Pairing a second node with a name already in use adds
+a suffix ("MacBook 2"); rename it on `/devices`. `nodes_labels` (preflight)
+warns while a node in a multi-node home has no room.
+
+**Which PC.** Every node call goes to exactly one node, chosen in this
+order (`nodes.targeting`, no model call):
+1. the PC named in your own words (name, alias, a room in locative form
+   such as "salondaki", a role word such as "dizüstü", a platform word such
+   as "Mac'te"). A named PC that is offline or lacks the capability is
+   refused by name ("Masaüstü bu işlemi sunmuyor; başka bir bilgisayarda
+   çalıştırmadım."), never replaced by another PC;
+2. on a voice turn from a node, that node (the speaking PC);
+3. the only eligible PC, or the one active in the last
+   `NODE_LAST_ACTIVE_WINDOW_SECONDS` (15 min) and later than every other;
+4. otherwise Friday asks: "Hangi bilgisayar: MacBook mu, Masaüstü mü?",
+   and calls nothing.
+The model's own `node_id` choice is checked against this and never wins.
+Read tools stay web-only; the speaking-node rule applies to node-action
+proposals from voice turns. The approval card names the PC, its room and
+its platform, and a gate-class action still needs a click in **that** PC's
+own window (ADR-014). Nothing is ever sent to several PCs at once.
+
+**Presence and audit.** The HUD's **Düğümler** panel and `/devices` show
+each node's status (connected, last heartbeat, voice state, invocable
+reads and actions). `/devices/nodes/<id>` → "Denetim" lists that node's
+own chain rows (`GET /api/v1/nodes/<id>/audit`).
+
+**The Linux node.** `node/friday-node-linux` (README there) is a read-only
+node for a Linux PC: protocol v1, no action capabilities, local policy in
+`~/.config/friday-node/policy.json` changed only from a terminal with a
+typed confirmation, a 0600 credential, a systemd **user** unit. It pairs
+with `platform: linux` and must pin the server's TLS (`--ca` or
+`--tls-pin-sha256`). Its vendored copy of the reference node is checked by
+`scripts/vendor.py --check` in CI and by the `linux_node_vendor` preflight
+row. A Windows node is not built (stub README only).
+
+**Re-pointing a node** (moving the server, ADR-017 decision 7). The new
+server URL is entered on the node itself, never sent by the server. Linux:
+`friday-node-linux config set server-url https://<new>` as the node's user
+(the stored CA / SPKI pins and the signing-key pin are kept; a server that
+fails them is refused before any secret is sent). Mac: "Sunucu adresini
+değiştir" behind Touch ID (Mac session M1, Phase 13 Part E). Keep the same
+`NODE_SIGNING_KEY` and TLS key on the new server, or every node re-pairs.
+
+**Pairing through the home server's Caddy** does not work yet:
+`Caddyfile.example` sends `/api/v1/nodes/pair` and
+`/api/v1/auth/nodes/credential/rotate` to the BFF, which has no such
+routes. How they reach Django is an open owner decision (Phase 13 brief,
+`chore/p13-closeout` owner steps).
+
 ## Kill switch
 
 Cuts off **every** node of the owner at once, without forgetting them:

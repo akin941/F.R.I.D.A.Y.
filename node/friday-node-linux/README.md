@@ -86,6 +86,14 @@ server's signing key in the 0600 credential. Nothing prints the secret or
 the code. On `/devices` the node shows as *Linux*; set its room and role
 there.
 
+**Through the home server's Caddy** (`deploy/home/Caddyfile.example`):
+pairing and `rotate` need `/api/v1/nodes/pair` and
+`/api/v1/auth/nodes/credential/rotate` to reach Django, and the example
+sends them to the BFF, which has no such routes. Until the owner decides
+how those two paths are routed (Phase 13 brief, `chore/p13-closeout` owner
+steps), pairing through Caddy fails; the backend tests pair
+against Django directly.
+
 ## Grant
 
 Nothing is readable until you grant it, at an interactive terminal:
@@ -174,4 +182,8 @@ run `uv run python scripts/vendor.py` and commit the regenerated
 `backend/nodes/tests/test_linux_node_external.py` and
 `backend/config/tests/test_linux_node_gateway.py` run this package as a
 process (they skip where its `.venv` is missing; `FRIDAY_LINUX_NODE=1`
-makes that a failure).
+makes that a failure). The Phase 13 closeout adds two more: the home-hub
+e2e (`backend/ops/tests/test_home_hub_e2e.py`, this daemon as
+"Masaüstü" next to the reference node as "MacBook" on one live TLS
+server) and the `linux_node_vendor` preflight row, which hashes
+`vendor.lock` against the backend (`make preflight`).

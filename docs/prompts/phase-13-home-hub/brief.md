@@ -1127,7 +1127,7 @@ evaluation".
 | 5 | `feat/p13-ha-home-control` | `connectors.HomeEntity` allowlist, media_player power/source/mute/volume steps, `source_list`, manifest v2 pins, entity editor, governance docs | 1 (rooms) | **implemented 2026-11-20** (see "Branch 5 notes"; fail closed: no HA entity call until the owner allowlists entities; awaits the independent Sonnet 5 review) |
 | 6 | `feat/p13-home-voice-routes` | `connectors.home_phrases`, `home.control` wake route (proposal only), typed-turn mismatch check, vectors, ADR-015 note | 2, 5 | **implemented 2026-11-20** (see "Branch 6 notes"; no model call, no HA request, no approval from the route; typed `target_mismatch`; e2e with the reference voice host + real `friday-voice run` child; real mic/Whisper: M2, pending owner evaluation; awaits the independent Sonnet 5 review) |
 | 7 | `feat/p13-home-server-ops` | `compose.home.yml`, `deploy/home/` backup/drill/timer/Caddy, `home_*` preflight rows and settings | brief approved (independent) | **implemented 2026-11-20** (compose override + `make up-home`, `deploy/home/` scripts/units/Caddyfile, `check_home` five rows, settings + `.env.example`, `home-ops` CI job, runbook updated; real hardware: M3, pending owner evaluation) |
-| 8 | `chore/p13-closeout` | `nodes_labels` / `ha_entities` / `linux_node_vendor` rows, no-protocol-change check, home-hub e2e, runbooks, ADR-017 note, MASTER_PLAN row, `self_sources.json`, go/no-go record | 1–7 | planned |
+| 8 | `chore/p13-closeout` | `nodes_labels` / `ha_entities` / `linux_node_vendor` rows, no-protocol-change check, home-hub e2e, runbooks, ADR-017 note, MASTER_PLAN row, `self_sources.json`, go/no-go record | 1–7 | **implemented 2026-11-20** (`check_home_control`: `nodes_labels`, `ha_entities`, `linux_node_vendor`, `node_protocol_frozen`; `ops/tests/test_home_hub_e2e.py` on one live TLS server with the reference node v2 and the packaged Linux node; runbooks final; ADR-017 closeout note; MASTER_PLAN row 13 "server side done; go/no-go pending owner evaluation"; see "Branch notes and owner steps (pending) — `chore/p13-closeout`"; awaits the independent Sonnet 5 review) |
 | M1 | Swift `friday-node`: pairing `platform`, server re-point | Send `platform: "macos"` at pairing; "Sunucu adresini değiştir" behind Touch ID keeping the pins; conformance unchanged | 1 merged; Phase 9 B1 | deferred: Mac session |
 | M2 | Multi-node and home-route run on real hardware | Real mic "which PC" and "salondaki TV'yi aç" on the Mac; Mac + real Linux PC paired to the real home server; HUD presence | 2, 3, 4, 6 merged; M1; Phase 11 B7 | deferred: Mac session (pending owner evaluation) |
 | M3 | Home server on the owner's home PC | Runbook steps 1–9 on real hardware: LUKS, reservation, Caddy + private CA, ufw, backup to the chosen off-site target, first restore drill (and one from off-site) | 7 merged | deferred: owner hardware (pending owner evaluation) |
@@ -1787,12 +1787,13 @@ wrong PC; a restore drill from the off-site backup has passed."
 
 | Item | How it is measured | Result |
 |---|---|---|
-| Resolution rules (explicit, origin, last active, ask) | branch 2 resolver table | pending (branch 2) |
-| One node per invocation; no broadcast | branch 2 invariant test + closeout e2e | pending (branch 2, closeout) |
-| Linux node conformance | branch 4 CI job | pending (branch 4) |
-| HA entity allowlist fail-closed; media/scene gate-class | branch 5 tests | pending (branch 5) |
-| Home voice routes propose only | branch 6 tests + closeout e2e | pending (branch 6) |
+| Resolution rules (explicit, origin, last active, ask) | branch 2 resolver table | pass in CI (branch 2 `nodes/tests/test_targeting.py`; the closeout e2e runs explicit, ask and origin against a live server and the real `friday-voice` child, 2026-11-20); real mic is M2 |
+| One node per invocation; no broadcast | branch 2 invariant test + closeout e2e | pass in CI (`tools/tests/test_one_node_invariant.py`; closeout e2e: each named read reaches that PC only, the MacBook action runs on the MacBook only while the Linux node is connected, 2026-11-20) |
+| Linux node conformance | branch 4 CI job | pass in CI (branch 4: 50/50 v1 cases over real localhost TLS, `linux-node` job; the closeout e2e pairs and runs the packaged daemon); the real Linux PC is M2 |
+| HA entity allowlist fail-closed; media/scene gate-class | branch 5 tests | pass in CI (branch 5 `connectors/tests/test_ha_allowlist_gate.py`, `test_ha_media.py`; closeout e2e: a non-allowlisted entity is never drafted or called; `ha_entities` preflight row); the real TV is M2 |
+| Home voice routes propose only | branch 6 tests + closeout e2e | pass in CI (branch 6; closeout e2e: "salondaki TV'yi aç" by voice is a card only, then one HA call after the web approval, state read back, 2026-11-20); real mic is M2 |
 | Backup → restore round trip; no public port in any compose file | branch 7 tests | pass in CI (branch 7, 2026-11-20: `ops/tests/test_home_backup_restore.py` against a scratch Postgres + local restic repo, `test_compose_no_public_ports.py`); the real box is M3 |
+| No protocol change in Phase 13 | `node_protocol_frozen` (closeout) | pass (2026-11-20: the 196 node protocol files and `node/friday-voice/conformance.lock` hash to the Phase 12 closeout values, merge `7d2dee5`) |
 | Two weeks on the home server, ≥ 2 PCs, zero wrong-node chain rows | M2 + `verify_node_audit_chain` + owner review of `/devices` audit | pending owner evaluation |
 | Restore drill from off-site passed | M3 `drill.json` | pending owner evaluation |
 | Real-mic "which PC" and home routes | M2 | pending owner evaluation (Mac session) |
@@ -2175,6 +2176,120 @@ recorded at merge into `integ/phase-13` 2026-11-26):
    verified in CI (locally, with the `jarvis` credentials, the 5 backend
    tests passed). Fix: confirm the first CI run on the branch is green; no
    code change unless it fails.
+
+### Branch notes and owner steps (pending) — `chore/p13-closeout`, recorded 2026-11-20
+
+**What landed.**
+- **Preflight** (`ops/preflight.py`, `check_home_control`, registered
+  after `check_home`; read-only, no model call, nothing sent to a node):
+  `nodes_labels` (per owner: unique `name_key` among non-revoked nodes,
+  rooms set once there is more than one node), `ha_entities` (every
+  enabled `HomeEntity` inside the bridge's code maximum, else `fail`; each
+  present in HA through one read-only `ha_states` read under the
+  manifest's pin, seam `ha_state_ids`; none allowlisted / HA not
+  configured / missing in HA / narrowed by `HA_ALLOWED_DOMAINS` = `warn`;
+  HA unreachable = `fail`), `linux_node_vendor` (`vendor.lock` against
+  this backend: every locked source and vendored copy by sha256, and no
+  file of a vendored tree left out; seam `linux_node_dir` /
+  `PREFLIGHT_LINUX_NODE_DIR`; no checkout = `warn`) and
+  `node_protocol_frozen` (the boundary's "no protocol change": the node
+  protocol files — schemas, vectors, capability contracts, conformance
+  cases and vectors, 196 files — and `node/friday-voice/conformance.lock`
+  hash to the values at the Phase 12 closeout merge `7d2dee5`; no
+  `friday-voice` checkout = `warn`). Tests:
+  `ops/tests/test_preflight_home_control.py`.
+- **E2E** `ops/tests/test_home_hub_e2e.py`:
+  1. one live TLS server (Django + the real `config.asgi_nodes` gateway on
+     one port, as Caddy serves them): "MacBook" = the reference node v2
+     over `NodeClient` with the served certificate pinned, paired through
+     the endpoint with `platform: macos`; "Masaüstü" = the packaged
+     `friday-node-linux` daemon, paired over HTTPS with its `--ca`; rooms
+     and labels through `PATCH /api/v1/nodes/<id>`; the HUD `nodes`
+     snapshot shows both connected; unnamed typed read with both online →
+     the ask template, zero invocations, only the router's two model
+     calls; each named read reaches that PC only; a `node_action` for the
+     MacBook drafted, tapped, approved on the web, clicked in the
+     MacBook's window → `ok` on the MacBook only (the Linux node's chain
+     rows unchanged), the card naming the PC and room; "Masaüstünde
+     testleri çalıştır" → `target_mismatch` while the model still picks
+     the MacBook, `node_lacks_capability` ("Masaüstü bu işlemi sunmuyor")
+     when it agrees — never moved; `nodes_labels` pass; revocation ends
+     the daemon;
+  2. a `node_voice` turn through the Phase 11 reference voice host and a
+     real `friday-voice run` child: unnamed → `resolve_target` reason
+     `origin` (the MacBook), naming "Masaüstü" → `node_lacks_capability`;
+     drafts only;
+  3. "Hey Friday, salondaki TV'yi aç" by voice → the card (no router
+     call, no request) → tap + web approval → exactly one
+     `media_player.turn_on` POST to the fake HA, the state read back
+     (`on`); deciding again calls nothing; `light.salon` (in HA, not
+     allowlisted) proposed by the model on a typed turn → no draft ("izin
+     listende yok"), a hand-made request → 400 `entity_not_allowed`;
+  4. backup → drill round trip on the test Postgres (local restic, a
+     throwaway age key), then all nine Phase 13 rows evaluated in order,
+     none failing.
+- **Docs:** `docs/runbooks/home-server-setup.md` final (step 7 multi-node
+  labels and the Caddy pairing gap, step 12 the closeout rows),
+  `docs/runbooks/friday-node.md` "Several nodes, one server (Phase 13)"
+  (labels, which PC, presence/audit, the Linux node, re-point),
+  `node/friday-node-linux/README.md` reviewed (Caddy gap, closeout tests),
+  ADR-017 closeout note, MASTER_PLAN §AA row 13, the handoff's Part E
+  (E0 ticked, Phase 13 row in the server-side table), `self_sources.json`
+  regenerated (no change: `build_self_sources --check` passes), `PREFLIGHT_LINUX_NODE_DIR` in settings and `.env.example`.
+
+**Decisions and deviations taken in the branch.**
+- **Row placement.** D15 put `nodes_labels` and `linux_node_vendor` into
+  `check_nodes`. They are in `check_home_control` with `ha_entities` and
+  `node_protocol_frozen` instead, so the Phase 9 `check_nodes` row set
+  (pinned by `test_preflight_nodes.py`, `test_reference_node_preflight.py`
+  and the HUD health test) is unchanged.
+- **"No protocol change" pinned by digest.** `build_node_conformance
+  --check` and `friday_voice_conformance` only prove the committed files
+  are current; `node_protocol_frozen` proves they did not move since the
+  Phase 12 closeout. A later phase that changes the protocol updates the
+  two digests in the branch that carries its ADR.
+- **Fake HA.** The e2e uses the bridge's `httpx.MockTransport` seam (as
+  branches 5 and 6 do), not a localhost ASGI fake; the bridge code path is
+  the same.
+- **Read tools stay web-only** (branch 2): the voice part proves the origin
+  rule on a node-action proposal, not on a read.
+- **Import contract.** `ops.tests.test_home_hub_e2e -> config.asgi_nodes`
+  is an explicit `ignore_imports` entry (the test serves the node
+  gateway's composition root; `ops` production code still never imports
+  `config`).
+- The backup round-trip test's `home` / `scratch_db` fixture bodies became
+  plain functions (`make_backup_home`, `create_scratch_db`,
+  `drop_scratch_db`) shared with the e2e.
+- **Caddy pairing route (branch 4 follow-up 2) not changed.** Routing
+  `/api/v1/nodes/pair` and `/api/v1/auth/nodes/credential/rotate` from
+  Caddy straight to Django would make Django see Caddy's loopback address
+  as the client IP (it trusts `TRUSTED_CLIENT_IP_HEADER` only from the
+  BFF), so a node **PIN** would pass the LAN gate for any client Caddy
+  admits. That is a security decision for the owner (owner step 2 below),
+  documented in the runbooks; nothing in the repo pretends it works.
+
+**Owner steps (pending) — `chore/p13-closeout`, recorded 2026-11-20.**
+1. Have the independent Sonnet 5 review of this branch reach APPROVE.
+2. Decide how node pairing and credential rotation reach Django through
+   the home Caddy before pairing the first node on the real box. Options:
+   (a) add a BFF route for the two paths (keeps the BFF's client-IP trust;
+   frontend work in a later branch); (b) route the two paths in Caddy to
+   `127.0.0.1:8001` and pair nodes with **strong** codes only (a PIN
+   would pass the LAN gate as loopback; ufw and the LAN-bound Caddy are
+   then the only network gate); (c) pair from a PC by SSH port-forward to
+   the server's loopback. Recommended: (a). Record the choice in a docs/ops
+   branch and update `Caddyfile.example`.
+3. On the real home server (M3): `make preflight` from the repository
+   checkout (or with `PREFLIGHT_LINUX_NODE_DIR` / `PREFLIGHT_FRIDAY_VOICE_DIR`
+   set) so `linux_node_vendor` and `node_protocol_frozen` pass instead of
+   warning in the container; `nodes_labels` and `ha_entities` pass once
+   the PCs are labelled and the TV is allowlisted.
+4. M2 on real hardware (Mac session, pending owner evaluation): the
+   closeout e2e's scenarios with the Swift app, the real Linux PC, the
+   real mic and the real TV; record the go/no-go rows.
+
+Nothing in this branch needs the Mac to be built or tested here; its
+Mac-side items are the existing M1–M3 (Part E), unchanged.
 
 ### Known follow-ups (unresolved LOW review notes, recorded at merge 2026-11-26)
 
