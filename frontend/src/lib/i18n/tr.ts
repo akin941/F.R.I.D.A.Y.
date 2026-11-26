@@ -1222,7 +1222,7 @@ export const tr = {
     // Phase 10 D6/D12: the `node_action` card summary.
     nodeAction: {
       capability: "İşlem",
-      node: "Mac",
+      node: "Bilgisayar",
       repo: "Depo",
       command: "Komut",
       recipe: "Tarif",

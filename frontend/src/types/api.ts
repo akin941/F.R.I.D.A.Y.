@@ -599,6 +599,9 @@ export interface ApiNodeActionDisplaySummary {
   title: string;
   capability: string;
   node_name: string;
+  // Phase 13 D9: the target PC's room and platform (absent on older rows).
+  node_room?: string;
+  node_platform?: string;
   repo_name: string;
   trust_verdict: string;
   trust_reason: string;
