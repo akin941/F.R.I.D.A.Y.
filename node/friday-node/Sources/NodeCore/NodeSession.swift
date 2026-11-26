@@ -66,13 +66,13 @@ public final class NodeSession: @unchecked Sendable {
 
     public let nodeID: String
     public let pinned: [String: Data]
-    public let catalogue: Catalogue
+    public private(set) var catalogue: Catalogue
     public let clock: NodeClock
     public let nodeVersion: String
     public let osVersion: String
     public var readDelaySeconds: Int64
 
-    private let readers: ReadProvider
+    private var readers: ReadProvider
     private let makeID: () -> String
     private let nonceCache = NonceCache()
     private var backoff: Backoff
@@ -93,6 +93,9 @@ public final class NodeSession: @unchecked Sendable {
     private var connectedAt: Int64 = 0
     private var heartbeatSeq: Int64 = 0
     private var pendingReads: [(envelope: JSONValue, dueAt: Int64, receivedAt: Int64)] = []
+    /// The catalogue the current socket's `hello` carried: a policy change
+    /// before `hello.ack` is announced once the session is up.
+    private var catalogueAtHello: Catalogue?
 
     public init(
         nodeID: String, pinned: [String: Data], catalogue: Catalogue, readers: ReadProvider,
@@ -131,6 +134,7 @@ public final class NodeSession: @unchecked Sendable {
         lastHeartbeatAt = now
         connectedAt = now
         nextReconnectDelay = nil
+        catalogueAtHello = catalogue
         return send([hello()])
     }
 
@@ -175,6 +179,37 @@ public final class NodeSession: @unchecked Sendable {
         nextReconnectDelay = 0
     }
 
+    /// The owner changed the local policy: from now on the node answers
+    /// with `readers` and advertises `catalogue` (a revoked grant is
+    /// `not_granted` at once, so check 16 refuses before any reader runs).
+    /// Returns the `grant.availability_changed` event to send, if the
+    /// session is up and anything changed (items exactly `{name, version,
+    /// availability}`). A node that is not connected sends nothing: its next
+    /// `hello` carries the new catalogue.
+    public func update(catalogue newCatalogue: Catalogue, readers newReaders: ReadProvider) -> [JSONValue] {
+        let items = AvailabilityChange.items(from: catalogue, to: newCatalogue)
+        catalogue = newCatalogue
+        readers = newReaders
+        // Before `hello.ack`, `catalogueAtHello` holds what the server saw:
+        // the difference is sent when the ack arrives.
+        guard connected, sessionReady else { return [] }
+        return send(availabilityEvents(items))
+    }
+
+    private func availabilityEvents(_ items: [JSONValue]) -> [JSONValue] {
+        guard !items.isEmpty else { return [] }
+        return stride(from: 0, to: items.count, by: 50).map { start in
+            [
+                "v": .int(NodeProtocol.version),
+                "type": "event",
+                "id": .string(makeID()),
+                "kind": "grant.availability_changed",
+                "batch": .array(Array(items[start..<min(start + 50, items.count)])),
+                "spooled": false,
+            ]
+        }
+    }
+
     /// A mic state from the voice host. v1 never relays one.
     public func relayVoiceState(_ state: JSONValue) -> [JSONValue] {
         voiceStatesDropped += 1
@@ -216,7 +251,10 @@ public final class NodeSession: @unchecked Sendable {
                 rotateAfterDays: message["rotate_after_days"]?.intValue ?? 0,
                 serverTime: message["server_time"]?.intValue ?? 0,
                 accepted: (message["accepted"]?.arrayValue ?? []).compactMap(\.stringValue))
-            return []
+            // A policy change between `hello` and `hello.ack` goes out now.
+            let items = catalogueAtHello.map { AvailabilityChange.items(from: $0, to: catalogue) } ?? []
+            catalogueAtHello = nil
+            return send(availabilityEvents(items))
         case "invoke":
             if readDelaySeconds > 0 {
                 pendingReads.append((message, now + readDelaySeconds, now))

@@ -152,7 +152,7 @@ final class NodeSessionTests: XCTestCase {
 
     func makeSession(_ clock: ManualClock) -> NodeSession {
         NodeSession(
-            nodeID: "6f1e2d3c-4b5a-4987-8a6b-5c4d3e2f1a0b", pinned: [:], catalogue: NodeCatalogue.current(),
+            nodeID: "6f1e2d3c-4b5a-4987-8a6b-5c4d3e2f1a0b", pinned: [:], catalogue: NodeCatalogue.defaultPolicy(),
             readers: Reader(), clock: clock, nodeVersion: NodeInfo.nodeVersion, osVersion: NodeInfo.osVersion)
     }
 
@@ -217,7 +217,16 @@ final class NodeSessionTests: XCTestCase {
         XCTAssertTrue(session.receive(Data("{}".utf8)).isEmpty)
     }
 
-    func testTheAppCatalogueGrantsNothingInM1() {
-        XCTAssertTrue(NodeCatalogue.current().entries.allSatisfy { $0["availability"] == "not_granted" })
+    func testTheDefaultPolicyGrantsNoOwnerData() {
+        var availability: [String: String] = [:]
+        for entry in NodeCatalogue.defaultPolicy().entries {
+            availability[entry["name"]!.stringValue!] = entry["availability"]!.stringValue!
+        }
+        XCTAssertEqual(availability, [
+            "claude.sessions.list": "not_granted", "claude.sessions.read": "not_granted",
+            "codex.threads.list": "not_granted", "codex.threads.read": "not_granted",
+            "git.status": "not_granted", "usage.ccusage": "unsupported",
+            "apps.frontmost": "granted", "windows.list": "granted",
+        ])
     }
 }
