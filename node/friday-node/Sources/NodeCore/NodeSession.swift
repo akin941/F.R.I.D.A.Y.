@@ -97,6 +97,17 @@ public final class NodeSession: @unchecked Sendable {
     /// before `hello.ack` is announced once the session is up.
     private var catalogueAtHello: Catalogue?
 
+    // Hook events (M3): sent live when the session is up and nothing is in
+    // flight or spooled; otherwise spooled and uploaded after `hello.ack`,
+    // in order, one batch in flight, each deleted only on the `event.ack`
+    // naming that frame's id.
+    public var spool: Spool?
+    private var eventInFlight: (frameID: String, events: [JSONValue], batchID: String?)?
+    public private(set) var eventsDropped = 0
+    public private(set) var strayEventAcks = 0
+    /// Frame ids of availability events (their acks wait on nothing).
+    private var availabilityFrameIDs: [String] = []
+
     public init(
         nodeID: String, pinned: [String: Data], catalogue: Catalogue, readers: ReadProvider,
         clock: NodeClock, nodeVersion: String, osVersion: String, readDelaySeconds: Int64 = 0,
@@ -157,6 +168,10 @@ public final class NodeSession: @unchecked Sendable {
         connected = false
         sessionReady = false
         pendingReads.removeAll()
+        if let inFlight = eventInFlight, inFlight.batchID == nil {
+            spoolEvents(inFlight.events)  // a live event never acked
+        }
+        eventInFlight = nil
         if closedReason == nil { closedReason = reason }
         if reconnectAllowed { nextReconnectDelay = backoff.nextDelay() }
     }
@@ -196,13 +211,71 @@ public final class NodeSession: @unchecked Sendable {
         return send(availabilityEvents(items))
     }
 
+    // MARK: Hook events and the spool
+
+    /// One hook event from the relay: sent live when the session is up and
+    /// nothing is in flight or spooled; otherwise spooled (and the oldest
+    /// spooled batch uploaded when the session is up).
+    public func relayHookEvent(_ event: JSONValue) -> [JSONValue] {
+        if canUpload && (spool == nil || spool?.first() == nil) {
+            let frame = eventFrame([event], spooled: false)
+            eventInFlight = (frame["id"]?.stringValue ?? "", [event], nil)
+            return send([frame])
+        }
+        spoolEvents([event])
+        return send(nextUpload())
+    }
+
+    private var canUpload: Bool { connected && sessionReady && eventInFlight == nil }
+
+    private func spoolEvents(_ events: [JSONValue]) {
+        if spool?.append(events) == nil { eventsDropped += events.count }
+    }
+
+    private func eventFrame(_ events: [JSONValue], spooled: Bool) -> JSONValue {
+        [
+            "v": .int(NodeProtocol.version),
+            "type": "event",
+            "id": .string(makeID()),
+            "kind": "claude_code.hook",
+            "batch": .array(events),
+            "spooled": .bool(spooled),
+        ]
+    }
+
+    private func nextUpload() -> [JSONValue] {
+        guard canUpload, let spool, let batch = spool.first() else { return [] }
+        let frame = eventFrame(batch.events, spooled: true)
+        eventInFlight = (frame["id"]?.stringValue ?? "", batch.events, batch.batchID)
+        return [frame]
+    }
+
+    /// An `event.ack` can only delete the batch it names; it is never
+    /// answered.
+    private func eventAcked(_ eventID: String) -> [JSONValue] {
+        if let index = availabilityFrameIDs.firstIndex(of: eventID) {
+            availabilityFrameIDs.remove(at: index)
+            return []
+        }
+        guard let inFlight = eventInFlight, inFlight.frameID == eventID else {
+            strayEventAcks += 1  // never deletes anything
+            return []
+        }
+        eventInFlight = nil
+        if let batchID = inFlight.batchID { spool?.ack(batchID) }
+        return nextUpload()
+    }
+
     private func availabilityEvents(_ items: [JSONValue]) -> [JSONValue] {
         guard !items.isEmpty else { return [] }
         return stride(from: 0, to: items.count, by: 50).map { start in
-            [
+            let id = makeID()
+            availabilityFrameIDs.append(id)
+            if availabilityFrameIDs.count > 64 { availabilityFrameIDs.removeFirst() }
+            return [
                 "v": .int(NodeProtocol.version),
                 "type": "event",
-                "id": .string(makeID()),
+                "id": .string(id),
                 "kind": "grant.availability_changed",
                 "batch": .array(Array(items[start..<min(start + 50, items.count)])),
                 "spooled": false,
@@ -251,10 +324,13 @@ public final class NodeSession: @unchecked Sendable {
                 rotateAfterDays: message["rotate_after_days"]?.intValue ?? 0,
                 serverTime: message["server_time"]?.intValue ?? 0,
                 accepted: (message["accepted"]?.arrayValue ?? []).compactMap(\.stringValue))
-            // A policy change between `hello` and `hello.ack` goes out now.
+            // A policy change between `hello` and `hello.ack` goes out now,
+            // and the spooled backlog starts uploading.
             let items = catalogueAtHello.map { AvailabilityChange.items(from: $0, to: catalogue) } ?? []
             catalogueAtHello = nil
-            return send(availabilityEvents(items))
+            return send(nextUpload() + availabilityEvents(items))
+        case "event.ack":
+            return send(eventAcked(message["event_id"]?.stringValue ?? ""))
         case "invoke":
             if readDelaySeconds > 0 {
                 pendingReads.append((message, now + readDelaySeconds, now))
@@ -288,14 +364,15 @@ public final class NodeSession: @unchecked Sendable {
 
     private func heartbeat(now: Int64) -> JSONValue {
         heartbeatSeq += 1
+        let depth = spool?.depth() ?? (count: 0, bytes: 0)
         return [
             "v": .int(NodeProtocol.version),
             "type": "heartbeat",
             "id": .string(makeID()),
             "seq": .int(heartbeatSeq),
             "uptime_seconds": .int(max(now - connectedAt, 0)),
-            "spool_count": 0,
-            "spool_bytes": 0,
+            "spool_count": .int(Int64(depth.count)),
+            "spool_bytes": .int(Int64(depth.bytes)),
         ]
     }
 

@@ -5,12 +5,26 @@
 // - `scrub --jsonl`: each stdin line is one JSON string; each output line
 //   is its scrubbed JSON string (node/scripts/scrubber-corpus.sh and the
 //   differential check against the Python scrubber use it).
-// `hook` arrives with M3. No model calls, no provider keys, no network.
+// - `hook`: Claude Code's command hook (Phase 9 brief M3): stdin (at most
+//   256 KiB) goes to the app's Unix socket; always exits 0, within 3 s,
+//   prints nothing (a down node only loses the event).
+// No model calls, no provider keys, no network.
 
 import Foundation
 import NodeCore
 
 let arguments = Array(CommandLine.arguments.dropFirst())
+
+if arguments.first == "hook" {
+    // The hard deadline: whatever blocks (a stdin that never closes, a stuck
+    // socket), the process exits 0 after 3 s.
+    signal(SIGALRM) { _ in _exit(0) }
+    alarm(UInt32(HookClient.deadlineSeconds))
+    let input = FileHandle.standardInput.readData(ofLength: HookEvent.maxInputBytes + 1)
+    HookClient.relay(input, to: HookSocket.defaultPath)
+    exit(0)
+}
+
 switch arguments.first {
 case "version", "--version":
     print("friday-node \(NodeInfo.version) (protocol v\(NodeProtocol.version))")
@@ -35,6 +49,6 @@ case "scrub" where arguments.dropFirst() == ["--jsonl"]:
     }
     FileHandle.standardOutput.write(out)
 default:
-    FileHandle.standardError.write(Data("usage: friday-node version | friday-node scrub --stdin | --jsonl\n".utf8))
+    FileHandle.standardError.write(Data("usage: friday-node version | hook | scrub --stdin | scrub --jsonl\n".utf8))
     exit(arguments.isEmpty ? 0 : 2)
 }

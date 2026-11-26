@@ -64,10 +64,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         rebuildPermissions()
         runner.onStatus = { [weak self] status in self?.show(status) }
         show(.connecting)
+        // The hook relay (M3): Claude Code's `friday-node hook` writes here.
+        do {
+            try runner.startHookRelay()
+        } catch {
+            statusLine.title = "Friday Node: hook soketi açılamadı"
+        }
         runner.start()
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        runner.stopHookRelay()
         runner.stop()
     }
 

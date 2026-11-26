@@ -1891,13 +1891,13 @@ session:
 | Item | How it is measured | Result |
 |---|---|---|
 | Spike S9.0, server half | Branch 1 tests (six criteria) | **passed 2026-11-20** (branch 1 tests; ADR-013 "Implementation notes — spike S9.0") |
-| Spike S9.0, Keychain half | M4 item 2 | pending owner evaluation (Mac session) |
+| Spike S9.0, Keychain half | M4 item 2 | **partly measured 2026-11-26.** No secret on disk outside the Keychain: a `grep -rlI 'jnd_[A-Za-z0-9_-]{20,}'` search (2026-11-26) of `~/Library/Application Support/Friday`, `Preferences`, `Caches`, `Logs`, `Saved Application State`, `HTTPStorages`, `WebKit`, `CrashReporter` and `Containers`, and of the app's unified log (24 h), finds nothing (the literal `grep -r jnd_ ~/Library` was not run: it walks TCC-protected folders and raises permission prompts). A server-revoked credential got 4401 and the menu asked to pair again (M1 contract test 3); deleting the Keychain item itself was not exercised. **Pending owner:** the secret survives a reboot; a rotation updates the item in place (due after `rotate_after_days`; `RotationTests` pin persist-before-success); deleting the Keychain item (menu "Eşleştirmeyi kaldır") forces re-pairing. |
 | Compromised-server suite, reference node | Branch 3 conformance run | **passed 2026-11-20** (`node_conformance_server --protocol 1` all-pass, `test_every_v1_case_passes_through_the_command_over_a_socket`; `build_node_conformance --check` in CI and as the `node_conformance` preflight check) |
-| Compromised-server suite, Swift app | M1 contract tests 1–2 | pending owner evaluation (Mac session) |
-| Personal Team signed build keeps TCC grants across rebuilds (d9 revised 2026-11-25) | M4 item 1 | pending owner evaluation (Mac session) |
+| Compromised-server suite, Swift app | M1 contract tests 1–2 | **passed 2026-11-26**: offline 50/50 and live `node_conformance_server --external --tls-self-signed --protocol 1` 50/50 ALL PASS (M1 + M2 implementation notes). |
+| Personal Team signed build keeps TCC grants across rebuilds (d9 revised 2026-11-25) | M4 item 1 | **passed for the signing identity** (A1 spike: five grants and a data-protection item survived two rebuilds; and every app build since went through `scripts/build-sign-local.sh`, which compares the designated requirement with the one recorded at the first build and refuses an install when it differs: no build was refused). **Pending owner** for the app itself: grant Screen Recording with window titles on, rebuild, and check titles are still returned. |
 | Server half end to end (closeout) | `ops/tests/test_node_e2e.py`: pair through the endpoint → connect → `hello` → chat turn → fenced rows of the workspace → chain rows → revoke → `bye{revoked}` → tools unavailable | **passed 2026-11-20** (CI, fakes) |
-| Preflight green with a node paired | `config/tests/test_reference_node_preflight.py` (in process, real gateway process); `make preflight` on the owner's dev stack with `run_reference_node` | **passed 2026-11-20** in process; on the real dev stack: pending owner evaluation (owner step 2 of the closeout) |
-| Kill-switch latency, heartbeat/backoff, no TCP listener on the Mac | M4 items 3–5 | pending owner evaluation (Mac session); server side: socket closed within 2 s of revoke / kill switch (`nodes/tests/test_gateway_handshake.py`) |
+| Preflight green with a node paired | `config/tests/test_reference_node_preflight.py` (in process, real gateway process); `make preflight` on the owner's dev stack with `run_reference_node` | **passed 2026-11-20** in process; **passed 2026-11-26** on the owner's loopback dev stack, with the reference node (41 pass / 0 fail) and then with the Swift node (44 pass / 0 fail: `node_gateway`, `node_signing_key`, `node_link:<the Mac>`, `node_audit_chain`, `node_conformance`, `node_tls_pin`) |
+| Kill-switch latency, heartbeat/backoff, no TCP listener on the Mac | M4 items 3–5 | **Kill switch: 0.24 s** from the command to the closed socket on the Mac (revoke: 0.04 s); **no TCP listener** (`lsof -iTCP -sTCP:LISTEN` prints nothing while paired; unpaired, `lsof -i` shows no socket at all); backoff unit-tested (1 → 60 s full jitter, failed handshakes included). **Pending owner:** heartbeat and backoff over sleep/wake and a network change. |
 
 **Verdict (2026-11-20): continue.** Every server-side item passed. The Mac
 rows are pending owner evaluation and, as decided, do not block Phase 8B's
@@ -2975,3 +2975,26 @@ Decisions and deviations:
 1. Wire a vetted `ccusage` binary (owner step 2).
 2. Run `scrub_differential.py` again whenever `memory/ingestion/scrubber.py` changes (the vectors pin the corpus, not every pattern edge); consider a CI job on a macOS runner if the owner decides A5 that way.
 3. A reader differential (the reference `Readers` and `NodeReaders` over generated homes), like the scrubber one: the review's ad-hoc version found the timestamp and money edges above.
+
+
+### Implementation notes — `feat/p9-node-hook-relay` (Mac session M3, 2026-11-26)
+
+| Contract test | Status |
+|---|---|
+| Reference tests in Swift | **Pass**: `SpoolTests`, `SessionEventTests`, `HookRelayTests` re-express `test_reference_spool.py` and `test_reference_hook_relay.py` (with the CLI's 3 s exit both when the node is down and when stdin never closes); 72 NodeCore tests pass in all. |
+| Server side (branch 6) | `nodes/tests/test_node_events.py` passes on this Mac; `config/tests/test_hooks_via_node.py::test_the_done_criterion` fails here as it did before this branch: the Python **reference** relay reads the peer uid with Linux `SO_PEERCRED`, absent on macOS, so it refuses (fail closed); it passes on the Linux CI. The Swift relay uses `getpeereid`, tested over a real socket. |
+| Live, real stack | `friday-node hook` → socket → app → WSS → gateway: a live event arrives (`spooled=False`); with the gateway stopped three events were spooled (three 0600 batch files), and after the restart each was uploaded exactly once (`spooled=True`), acked and deleted (spool empty after 11 s). The server **dropped** them, by design: the owner's `claude_code_hooks` source is disabled and has no mapping rule. |
+| Manual pass "arrive once in /sessions" | **Pending owner step**: enable the source and add a `path_prefix` rule on the web (below). |
+
+Decisions and deviations:
+
+- **The event is built in the app, not the CLI**, as the reference relay does (`hook_relay.py`: the CLI relays stdin, `HookRelay` builds the event): one place scrubs, and the CLI stays a minimal relay that always exits 0 within 3 s (`SIGALRM` backstop). The brief text puts `build_event` in `Hook.swift`; the event shape is the same (`HookEvent.build`, checked against `build_hook_event`'s output).
+- **The CLI lives at `~/Library/Application Support/Friday/bin/friday-node`** (`scripts/install-hook-cli.sh`), a release SwiftPM build; the app bundle does not carry it.
+- **Switch-over done**: `~/.claude/settings.json` gained `friday-node hook` entries for `SessionStart`, `Notification`, `Stop`, `SessionEnd` (backup `settings.json.bak-before-friday-node-hook-20261126`). There were no `friday-hook` entries on this Mac and `friday-hook` is not installed, so there is no fallback entry to keep.
+- **Not done on purpose:** enabling the `claude_code_hooks` source and adding a mapping rule from a shell. `memory/ingestion/services.py` accepts both only from the owner on the web channel; a direct database update made during the live pass was reverted the same minute (no event had been stored).
+
+### Owner steps (pending) — `feat/p9-node-hook-relay`, recorded 2026-11-26
+
+1. On the web (once the front end runs, see the M2 owner step): enable the `claude_code_hooks` source and add a `path_prefix` rule for the directories whose sessions Friday may record (absolute paths, e.g. the project folder) to the personal workspace.
+2. Then the manual pass: stop the stack, run a Claude Code session, restart; the spooled events arrive once in `/sessions`.
+3. To fall back: restore `~/.claude/settings.json` from the backup (or delete the four `friday-node hook` entries).
