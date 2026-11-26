@@ -12,6 +12,9 @@ ADR-014). Amends nothing.
 **Amended 2026-11-25 (d9 revised):** signing uses a free Apple ID Personal
 Team identity, not a notarized Developer ID build — see "Amendment
 2026-11-25 (d9 revised)" at the end.
+**Personal Team spike PASS 2026-11-26** (data protection keychain; the
+profile is valid 7 days) — see "Implementation notes — Personal Team
+spike" at the end.
 
 Numbering note: the proposal called this "ADR-012". ADR-011 is reserved by
 the Phase 6 brief for "voice transport", so the proposal's ADRs are
@@ -712,3 +715,98 @@ conformance locks are untouched. What changed is server-side only:
   node's name, room, role and platform as data (prompt text, purpose and
   prompt version unchanged); the approval summary adds `node_room` and
   `node_platform`. Nothing is sent to a node.
+
+## Implementation notes — Personal Team spike (runbook A1, `feat/mac-a1-spike`, 2026-11-26)
+
+**Result: PASS, conditional on the 2026-12-04 expiry check** — (a) to (d)
+of "Amendment 2026-11-25 (d9 revised)" hold on the owner's Mac, with the
+node credential in the **data protection keychain**. The runbook's Fail
+criterion "a profile's expiry would break the installed app" cannot be
+tested before the 7-day profile expires (see below); B1 starts on this
+basis, and if the check fails this note is changed to FAIL and A1-F
+applies. Run on macOS 27.2 (build `26B123` as `sw_vers` reports it), Xcode
+27.2 (27B52),
+Apple silicon, on 2026-11-26. The spike app and its build script are in
+`node/spikes/ptspike/` (owner decision 2026-11-26: the spike, its script
+and this note live on one branch, instead of the runbook's out-of-repo
+spike and separate `docs/p9-personal-team-spike` branch). Build outputs,
+status files and the saved requirement stay in `~/FridaySpike/` (0700),
+outside the repo. No identity name, Team ID or certificate is committed.
+
+| Check | Result |
+|---|---|
+| (a) Signing | PASS. Xcode automatic signing, Release, `flags=0x10000(runtime)`, no App Sandbox, chain Apple Development → Apple Worldwide Developer Relations CA (G3) → Apple Root CA, `TeamIdentifier` set, `codesign --verify --strict` valid. Never re-signed by hand. |
+| (b) Dates | Certificate valid one year (notBefore 2026-11-26, notAfter 2027-11-26; read from the signing certificate by `build.sh`, `inspect-6.txt`). Xcode-managed profile valid **7 days** (created 2026-11-26, expires 2026-12-03). Renewal untested. |
+| (c) TCC across two rebuilds | PASS. Build 3 (N) held Microphone, Accessibility, Screen Recording, Full Disk Access and Automation (System Events); builds 4 and 5, each with a different binary (a per-build marker string) and `CFBundleVersion`, kept all five, with no prompt. |
+| (d) Keychain across two rebuilds | PASS, data protection keychain. Build 3 wrote a `kSecClassGenericPassword` item with `kSecUseDataProtectionKeychain` (the code sets `kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly` and not synchronizable; the attributes were not read back); builds 4 and 5 read it with no prompt. A data-protection read never shows an ACL prompt, so for this variant the evidence is the successful read by a different build, not the absence of a prompt. The file-based variant also passed. |
+
+- **Designated requirement form:** `identifier "<spike bundle id>" and
+  anchor apple generic and certificate leaf[subject.CN] = "Apple
+  Development: <owner> (<cert id>)" and certificate
+  1[field.1.2.840.113635.100.6.2.1] /* exists */`. No `cdhash`. It was
+  equal for every build (1–6; build 6 was built after review, not installed) and did not change when the entitlements or
+  the embedded profile changed.
+- **Entitlement set B1 ships with** (as Xcode signed it):
+  `com.apple.security.device.audio-input`,
+  `com.apple.security.automation.apple-events`, `keychain-access-groups`
+  (one group: `<team id>.<bundle id>`), `com.apple.application-identifier`,
+  `com.apple.developer.team-identifier` and
+  `com.apple.security.get-task-allow`. Xcode adds `get-task-allow` to every
+  Apple Development build; it lets a debugger attach to the process. B1
+  must decide whether to keep it (and test whether a Personal Team build
+  still launches with it removed, `CODE_SIGN_INJECT_BASE_ENTITLEMENTS=NO`)
+  before the node holds its credential.
+- **Data protection needs Keychain Sharing.** With only the two
+  hardened-runtime keys, Xcode embedded no profile and added no
+  `application-identifier`, and a data-protection `SecItemAdd` returned
+  `-34018` (`errSecMissingEntitlement`). With the **Keychain Sharing**
+  capability (one group = the bundle id) and
+  `xcodebuild -allowProvisioningUpdates -allowProvisioningDeviceRegistration`
+  (registers this Mac for the free team), Xcode embedded a "Mac Team
+  Provisioning Profile" and the item was written and read. So
+  `scripts/build-sign-local.sh` (B1) needs both the capability and the
+  device-registration flag.
+- **The 7-day profile is the binding date.** Because data protection needs
+  the embedded profile, every installed build carries a profile that
+  expires a week after it was made. Builds 2–6 all embedded the **same**
+  profile (created 2026-11-26 15:48 UTC, expires 2026-12-03 15:48 UTC):
+  rebuilds before expiry reuse it, so a rebuild today does not extend it.
+  Shown: grants and the item survive rebuilds. **Untested:** (1) whether an
+  installed build with an expired profile still launches and reads its
+  item; (2) whether a rebuild after (or near) expiry gets a new 7-day
+  profile and still keeps the grants and the item. B1's operating plan
+  ("rebuild at least weekly") rests on (2), so it is not settled yet.
+  **Check on 2026-12-04:** launch the installed build 5 and record whether
+  it starts and reads the item; then rebuild with `build.sh <next>
+  --install`, read the new profile's `CreationDate` / `ExpirationDate`
+  (`inspect-<next>.txt`, from `security cms -D -i … | plutil -p -`), and
+  record whether the grants and the item survived; record both here. Certificate renewal (same CN is expected to keep the requirement
+  equal): reminder for **2027-11-12**, two weeks before notAfter.
+- **Gatekeeper, for the record:** `spctl --assess` rejects the app (not
+  notarized), as accepted by the amendment; a local build has no
+  `com.apple.quarantine` attribute and launched with no Gatekeeper prompt.
+- **Things that would have looked like failures but were not:**
+  1. This Mac lacked the Apple Worldwide Developer Relations CA **G3**
+     intermediate (only the expired 2023 G1 was present), so
+     `security find-identity -v` listed the new identity as invalid. Fixed by
+     importing Apple's `AppleWWDRCAG3.cer` (SHA-256 `DC:F2:18:78:…:60:1F`)
+     into the login keychain.
+  2. A query without `kSecUseDataProtectionKeychain` can also match
+     data-protection items, so a file-based `SecItemDelete` removed the
+     data-protection item when both used the same account (observed on
+     build 2; that status file was overwritten, so it is not kept as
+     evidence). The spike uses
+     one account per variant; `Credential.swift` must always pass
+     `kSecUseDataProtectionKeychain: true`, on delete too.
+  3. `AEDeterminePermissionToAutomateTarget` with `typeWildCard` never
+     prompts, and nothing prompts while System Events is not running
+     (`-600`; it quits when idle). A real Apple event (`NSAppleScript`,
+     `tell application "System Events" …`) launched it and asked once.
+  4. Screen Recording took effect only after the app was relaunched. No
+     periodic Sequoia-style re-prompt was seen on 2026-11-26.
+- **Cleanup deferred to the expiry check.** Build 5 stays installed in
+  `/Applications/PTSpike.app` with its five grants and both Keychain items
+  until the 2026-12-04 check, which needs them. After that check: delete
+  the items (the app's "Delete spike Keychain items" button), run
+  `tccutil reset All <spike bundle id>`, remove `/Applications/PTSpike.app`,
+  and keep `~/FridaySpike/` only until the result is recorded here.

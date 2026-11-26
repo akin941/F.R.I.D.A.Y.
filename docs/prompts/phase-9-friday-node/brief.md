@@ -2815,3 +2815,124 @@ Implementation notes (branch 5):
    user-chosen node name reaches the HUD. Fix: none required; optionally
    emit a generic `node_link` name in the HUD's failing list if node names
    are ever considered sensitive.
+
+
+### Implementation notes — `feat/p9-node-app` (Mac session M1, 2026-11-26)
+
+Built on the owner's Mac (macOS 27.2, Xcode 27.2) after the A1 Personal
+Team spike passed (ADR-013 "Implementation notes — Personal Team spike").
+Package `node/friday-node/` (README there). Contract test status:
+
+| Contract test | Status |
+|---|---|
+| 1. Offline conformance | `swift test`: every `cases/v1` file is played; **39 of 50 match the reference node**. The 11 read cases that need the M2 readers and the scrubber (Claude Code / Codex transcripts, git, usage, window titles) are listed in `ConformanceTests.pendingM2`; the test fails when a listed case starts passing, so M2 must empty the list. Nothing is skipped silently. |
+| 2. Live conformance | `node_conformance_server --external --tls-self-signed --protocol 1` with the unsigned `Conformance` build: **39/39 ALL PASS** for the same M1 case set over real WSS with the self-signed certificate pinned. The full `--protocol 1` run waits for M2's readers. |
+| 3. Real stack | **Pending owner steps** (below): no owner account and no TLS exposure of `node-gateway` on this Mac yet. |
+| 4. No listener | **Pass**: `lsof -nP -iTCP -sTCP:LISTEN -a -p $(pgrep FridayNode)` prints nothing; `lsof -i` shows no socket at all while unpaired. |
+| 5. `make preflight` | Pending with 3. |
+
+Decisions and deviations, each kept within the brief's rules:
+
+- **Two build systems, one source tree.** `Package.swift` builds `NodeCore`,
+  the CLI and the tests (`swift test`); `FridayNode.xcodeproj` compiles the
+  same `Sources/NodeCore` as a static library for the app and the test
+  bundle, because SwiftPM has no custom `Conformance` configuration and
+  cannot sign an app. `CONFORMANCE` is defined only in the Xcode
+  `Conformance` configuration (`CODE_SIGNING_ALLOWED = NO`, debug).
+- **Vendored protocol files.** The node needs the v1 schemas and the
+  capability contracts at run time; they are copied byte for byte (base64)
+  into `Generated/VendoredProtocol.swift` by `scripts/vendor_protocol.py`.
+  `VendoredProtocolTests` (Mac) and a new CI step (`vendor_protocol.py
+  --check`, stdlib, Linux) fail on drift.
+- **Conformance mode** lives entirely in `NodeCore/ConformanceSupport.swift`
+  inside `#if CONFORMANCE`, with its inputs (hook socket, gateway, the
+  self-signed certificate, the conformance key file, the fixture directory)
+  read from launch arguments only in that block. `ReleaseHygieneTests`
+  asserts the pin type is absent outside that configuration **and present in
+  it** (a positive control): the test bundle links with `-ObjC`, otherwise
+  the static library's unused object file is dropped and the check would
+  pass vacuously.
+- **The release marker check** (`scripts/check-release-markers.sh`) scans
+  every Mach-O section with `strings -a` (21 hits in the Conformance build,
+  0 in Release). Two findings: (1) the runbook's `strings … | grep -q`
+  pattern under `set -o pipefail` reports "no marker" whenever grep exits at
+  the first match (strings dies of SIGPIPE), so the check could never fail;
+  the script collects first, then searches. (2) Scanning every byte of the
+  file would hit the symbol table, where every Swift binary names
+  compiler-generated `associated conformance` symbols; those are not a
+  marker of conformance mode. `build-sign-local.sh` runs the check on every
+  Mach-O in the bundle (Xcode's debug-dylib split put the code outside the
+  main executable until `ENABLE_DEBUG_DYLIB = NO`).
+- **Entitlements shipped by M1** (as Xcode signs Release): `keychain-access-
+  groups` (one group, the bundle id), `com.apple.application-identifier`,
+  `com.apple.developer.team-identifier`. **No `get-task-allow`** in Release
+  (`CODE_SIGN_INJECT_BASE_ENTITLEMENTS = NO`), deciding ADR-013's open
+  point: the app still launches and the data protection keychain query still
+  answers (`credential: none`, not `-34018`). No sandbox, no microphone, no
+  Apple Events, no server entitlement: `build-sign-local.sh` requires the
+  signed entitlement keys to be exactly those three.
+- **Bundle id** `dev.friday.friday-node.n<random>`, generated once into
+  `~/.config/friday-node/bundle-id` (a Personal Team App ID must be globally
+  unique; the suffix names no one). It is part of the designated
+  requirement, so it must stay stable.
+- **TLS pin** = sha256 of the leaf's DER SubjectPublicKeyInfo (the runbook's
+  openssl value; tested against openssl for P-256, P-384, RSA 2048/3072/4096).
+  Pairing requires the system trust evaluation and captures the pin from
+  that connection; later connections check the pin instead of CA trust.
+  A server whose certificate the Mac does not trust (a private CA, a
+  self-signed home server) cannot pair in M1: follow-up below.
+- **Parser differences on hostile input only** (all frame errors or
+  refusals either way; no conformance case exercises them): a lone
+  surrogate escape is `malformed` at parse time (Swift strings cannot hold
+  one; Python answers later); two keys differing only in Unicode
+  normalization are a duplicate here (Swift compares by canonical
+  equivalence; every protocol key is ASCII); nesting deeper than 128 is
+  `malformed` (Python ~1000), which keeps the parser well inside a 512 KiB
+  dispatch-thread stack in unoptimized builds (tested on such a thread).
+- **Backoff** (review finding): a connection attempt that never opens a
+  session (server down, pin mismatch, refused upgrade) counts as a failed
+  attempt, so the delay grows 1 → 60 s; the backoff resets only on
+  `hello.ack`, not when a socket merely opens (so 4408/4429 loops grow too).
+- **`NodeRunner`** confines everything to one queue and moves to a new
+  generation on start, stop, re-pair and unpair, so a late socket close or
+  an in-flight rotation of an older generation changes nothing (a rotation
+  cannot write its secret back after an unpair). At most one rotation runs.
+  A 4401 close is read whichever callback reports the close first. HTTPS
+  and WSS refuse redirects. `NodeRunner` itself has no unit test: contract
+  test 3 on the real stack covers it (owner step below).
+- **Live-mode `next_reconnect_delay`** is reported to the gateway in whole
+  seconds rounded up (the node's JSON has no floats); the first backoff
+  ceiling is 1 s, so the check's bound still holds.
+
+### Owner steps (pending) — `feat/p9-node-app`, recorded 2026-11-26
+
+1. Create the installation owner (needs your password, typed by you):
+   `docker compose -f deploy/docker/compose.yml exec web uv run python
+   manage.py bootstrap_owner --email <you>`; then `seed_ingestion_sources`.
+2. Expose only `/ws/node/v1` (and the API's `/api/v1/nodes/pair` and
+   `/api/v1/auth/nodes/credential/rotate`) over the overlay or a TLS proxy
+   with a certificate this Mac trusts (runbook A3; `friday-node.md`
+   "Expose `/ws/node/v1`"). Optionally set `NODE_TLS_PIN_SHA256`.
+3. Pair: `/devices` → "Mac düğümü eşle" (or `issue_pairing_code --node
+   --strong`), FridayNode menu → "Eşleştir…"; then run contract test 3
+   (hello.ack, `/devices` Bağlı, kill switch closes within 2 s and stops
+   reconnecting until "Devam et", revoke requires re-pairing) and
+   `make preflight` (contract test 5).
+4. The Personal Team profile is valid for 7 days: rebuild with
+   `scripts/build-sign-local.sh --install` at least weekly until the
+   2026-12-04 expiry check (ADR-013) is recorded.
+
+### Known follow-ups (from `feat/p9-node-app`)
+
+1. **M2** empties `ConformanceTests.pendingM2` (readers, grants, local
+   policy, scrubber parity), then the full `--protocol 1` live run.
+2. **Pairing to a server the Mac does not trust.** Done in
+   `feat/p9-node-local-pairing` (2026-11-26): the pairing window takes an
+   optional owner-typed SPKI pin (an explicit local owner action, stored
+   with the credential, never a runtime switch); with it the connection is
+   accepted only on a key match, with no CA trust. Used for the loopback
+   proxy of `deploy/docker/compose.local-tls.yml` (runbook `friday-node.md`
+   "A node on this Mac only"). Probed live: wrong pin refused, right pin
+   reaches the server, no pin requires system trust.
+3. **macOS CI** (runbook A5): until the owner decides, `swift test` and the
+   two `xcodebuild` checks run on the Mac before each merge.

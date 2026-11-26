@@ -55,6 +55,12 @@ jobs:
       - name: Self sources snapshot check
         run: uv run python manage.py build_self_sources --check
 
+      # Phase 9 M1: the Swift node's vendored copy of the protocol schemas
+      # and capability contracts must equal backend/nodes byte for byte
+      # (stdlib only; the Swift tests run on the Mac, no macOS runner here).
+      - name: Swift node vendored protocol check
+        run: python3 -I ../node/friday-node/scripts/vendor_protocol.py --check
+
       # Phase 10 branch 2: the node conformance cases (v1, v2), the sandbox
       # and streaming-scrub vectors and the vendored node scrubber must match
       # their definitions (the Swift node loads these files), and the escape
