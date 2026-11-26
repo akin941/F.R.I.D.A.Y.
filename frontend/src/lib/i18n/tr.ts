@@ -553,6 +553,16 @@ export const tr = {
       nodeMicCounts: (accepts: number, discards: number, storms: number) =>
         `bugün ${accepts} uyanma · ${discards} elendi` + (storms > 0 ? ` · ${storms} fırtına` : ""),
     },
+    // Phase 13 D4: the per-node presence panel.
+    nodes: {
+      heading: (online: number, total: number) => `Düğümler (${online}/${total} bağlı)`,
+      rowLabel: (name: string, status: string) => `${name}: ${status} — ayrıntıları aç`,
+      counts: (reads: number, actions: number) => `${reads} okuma · ${actions} eylem`,
+      mic: "Mikrofon",
+      more: (count: number) => `+${count} düğüm daha (Cihazlar sayfasında)`,
+      connectedNow: (name: string) => `${name} bağlandı`,
+      disconnectedNow: (name: string) => `${name} bağlantısı kesildi`,
+    },
     settings: {
       heading: "Bu cihazda",
       animateOnBattery: "Pilde boşta animasyon",
@@ -2152,6 +2162,18 @@ export const tr = {
       "Friday Node, Mac'indeki Claude Code / Codex oturumlarını, git durumunu ve öndeki uygulamayı yalnızca okur. İzinler Mac'te verilir; buradan değiştirilemez.",
     loadFailed: "Mac düğümleri yüklenemedi.",
     empty: "Henüz eşleştirilmiş Mac düğümü yok.",
+    // Phase 13 D4/D5: the overview table above the node cards.
+    overview: {
+      caption: "Düğümlere genel bakış",
+      name: "Ad",
+      status: "Durum",
+      room: "Oda",
+      role: "Rol",
+      platform: "Platform",
+      can: "Yapabildikleri",
+      noRoom: "—",
+      canCounts: (reads: number, actions: number) => `${reads} okuma · ${actions} eylem`,
+    },
     pairPin: "Mac eşleştir",
     pairStrong: "Ağ dışı Mac için güçlü kod",
     pairFailed: "Düğüm eşleştirme kodu üretilemedi.",

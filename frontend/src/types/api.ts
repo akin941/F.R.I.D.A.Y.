@@ -147,6 +147,9 @@ export interface ApiNodeSummary {
   platform?: ApiNodePlatform;
   aliases?: string[];
   last_active_at?: string | null;
+  /** Phase 13 D5: what the node can do, as two counts (never names). */
+  invocable_read_count?: number;
+  invocable_action_count?: number;
 }
 
 export type ApiNodeRole = "workstation" | "laptop" | "media" | "server" | "other";

@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { X } from "lucide-react";
 import { HudLearningPanel, HudSessionsPanel } from "@/components/hud/HudLearningPanels";
+import { HudNodesPanel, showNodesPanel } from "@/components/hud/HudNodesPanel";
 import { HudNoticesPanel } from "@/components/hud/HudNoticesPanel";
 import { HudOrb } from "@/components/hud/HudOrb";
 import { DigestCard } from "@/components/proactive/DigestCard";
@@ -144,6 +145,7 @@ export function HudView({
   }, [player]);
 
   const label = tr.hud.states[state];
+  const multiNode = showNodesPanel(data?.nodes);
   const mic = micState(muted, presence.phase, wake.snapshot.state);
   const level = useMemo(() => () => readVoiceLevel(), []);
 
@@ -223,7 +225,9 @@ export function HudView({
           />
           <HudNoticesPanel notices={data?.notices ?? null} />
           <CostPanel cost={data?.cost ?? null} />
-          <HealthPanel health={data?.health ?? null} mic={mic} stream={status} />
+          {/* Phase 13 D4: one row per node when there is more than one; the line otherwise. */}
+          {multiNode && data?.nodes ? <HudNodesPanel nodes={data.nodes} /> : null}
+          <HealthPanel health={data?.health ?? null} mic={mic} stream={status} hideNodeLine={multiNode} />
           {/* Phase 8A branch 6: the sessions panel and the morning-card summary. */}
           <HudSessionsPanel />
           <HudLearningPanel />

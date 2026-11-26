@@ -258,3 +258,64 @@ describe("NodesSection (Phase 9 D11)", () => {
     expect(JSON.parse(patch[1]!.body as string)).toMatchObject({ name: "Masaüstü", room_id: "r1" });
   });
 });
+
+describe("NodesSection overview (Phase 13 D4/D5)", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("lists every node with room, role, platform (icon + label) and can-counts", async () => {
+    const SECOND = "44444444-4444-4444-8444-444444444444";
+    stubBackend({
+      nodes: [
+        node({
+          room: { id: "r1", name: "Çalışma odası", key: "calisma odasi" },
+          role: "laptop",
+          platform: "macos",
+          invocable_read_count: 8,
+          invocable_action_count: 5,
+        }),
+        node({
+          id: SECOND,
+          name: "Masaüstü",
+          status: "disconnected",
+          role: "workstation",
+          platform: "linux",
+          invocable_read_count: 8,
+          invocable_action_count: 0,
+        }),
+      ],
+    });
+    render(<NodesSection />);
+    const table = await screen.findByTestId("nodes-overview");
+    expect(within(table).getAllByRole("columnheader").map((cell) => cell.textContent)).toEqual([
+      "Ad",
+      "Durum",
+      "Oda",
+      "Rol",
+      "Platform",
+      "Yapabildikleri",
+    ]);
+    const rows = within(table).getAllByTestId("nodes-overview-row");
+    expect(rows).toHaveLength(2);
+    const [mac, desk] = rows as [HTMLElement, HTMLElement];
+    expect(within(mac).getByRole("link", { name: "MacBook Pro" })).toHaveAttribute("href", `/devices/nodes/${ID}`);
+    expect(mac).toHaveTextContent("Bağlı");
+    expect(mac).toHaveTextContent("Çalışma odası");
+    expect(mac).toHaveTextContent("Dizüstü");
+    expect(mac).toHaveTextContent("macOS");
+    expect(within(mac).getByTestId("nodes-overview-can")).toHaveTextContent("8 okuma · 5 eylem");
+    expect(desk).toHaveTextContent("Bağlı değil");
+    expect(desk).toHaveTextContent("Linux");
+    expect(within(desk).getByTestId("nodes-overview-can")).toHaveTextContent("8 okuma · 0 eylem");
+    // The overview has no control besides the detail links.
+    expect(table.querySelectorAll("input, button, select, textarea")).toHaveLength(0);
+  });
+
+  it("reads zero counts from an older backend without them", async () => {
+    stubBackend();
+    render(<NodesSection />);
+    const table = await screen.findByTestId("nodes-overview");
+    expect(within(table).getByTestId("nodes-overview-can")).toHaveTextContent("0 okuma · 0 eylem");
+  });
+});
