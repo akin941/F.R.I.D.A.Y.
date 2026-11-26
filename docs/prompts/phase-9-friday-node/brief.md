@@ -2939,3 +2939,33 @@ no exposure beyond the Mac, owner decision); step 4 stays.
    reaches the server, no pin requires system trust.
 3. **macOS CI** (runbook A5): until the owner decides, `swift test` and the
    two `xcodebuild` checks run on the Mac before each merge.
+
+
+### Implementation notes — `feat/p9-node-readers` (Mac session M2, 2026-11-26)
+
+| Contract test | Status |
+|---|---|
+| 1. Scrub parity | **Pass**: `ScrubParityTests` reproduces all 190 vectors of `vectors/scrub.json` byte for byte (and idempotently). Beyond the vectors, `node/friday-node/scripts/scrub_differential.py` compares the two scrubbers on mutated corpus and fixture strings (Turkish dotted/dotless i, long s, Kelvin sign, sharp s, U+000B/U+001C/U+0085, non-ASCII digits, marks, emoji): about 220 000 inputs over five seeds, 0 differ. |
+| 2. Corpus recall | **Pass**: `node/scripts/scrubber-corpus.sh` runs `friday-node scrub --stdin` over every corpus item: 46 secrets and 20 PII at 100% recall with the typed placeholder, 14 benign unchanged. |
+| 3. Offline conformance | **Pass, 50/50** (`ConformanceTests.pendingM2` is empty), over a fixture home the tests build like `factory.py` (the pinned `git.status` commit sha reproduces). |
+| 4. Live conformance | **Pass**: `node_conformance_server --external --tls-self-signed --protocol 1`, no case filter, against the `Conformance` build reading a home built by `factory.build_fixture_home` (`--conformance-home`): **50/50 ALL PASS**. |
+| 5. Real stack (manual) | **Partly done** on the loopback stack: with the default policy the server's snapshot shows transcripts and git `not_granted`, `usage.ccusage` `unsupported`; the owner turned on "Claude Code oturumları" with Touch ID and the snapshot turned `granted` at once (the `grant.availability_changed` event); a server-side `invoke_read` of `claude.sessions.list` over the owner's real sessions returned `ok` (rows in `~/` form; texts not inspected). **Not done:** the `/devices` wording and the web-chat question, because the web front end is not running on this Mac yet (owner step). |
+
+Decisions and deviations:
+
+- **Regex translation.** The scrubber's Python patterns are written for ICU so they match what CPython 3.12's `re` matches: `\w`/`\d`/`\b` as `[\p{L}\p{N}_]`/`\p{Nd}`/lookarounds, `\s` as Python's exact isspace set, `re.IGNORECASE` as explicit classes (ASCII cases plus U+0130, U+0131, U+017F, U+212A, measured on 3.12), never ICU case folding (which would match `ss` to `ß`); `\Z` as `\z`.
+- **Transcripts parse like `json.loads`** (floats, NaN, duplicate keys), not with the protocol's strict parser; files are listed and ordered like pathlib on 3.12 (`*/` follows a symlinked directory, `**/` does not, dot files included, component order); paths and identifiers compare by code point (Swift's `String` would compare by canonical equivalence).
+- **The local policy lives in the data protection keychain** (service `friday-node`, account `local-policy`), not a file in the app's container: the app is not sandboxed, so another process of the same user could rewrite a file; the keychain item is writable only with this app's access group. Every change goes through `LAContext .deviceOwnerAuthentication`.
+- **`usage.ccusage` is `unsupported` in the app.** The brief's release path runs a pinned `ccusage` binary (path and hash in the local policy, governance manifest entry); none is installed or vetted, so the app advertises `unsupported` as the brief prescribes for a missing binary. The reference rule (transcripts' usage and `costUSD`) runs in the tests and the Conformance build.
+- **`git.status`** runs `log -1 --format=%H %ct` like the reference node (the brief's `%cI` form is not what the reference parses).
+- **Desktop readers** are available by default, as in the reference node; titles need the local toggle and the Screen Recording grant (`CGPreflightScreenCaptureAccess`), and the toggle asks for that grant when turned on.
+
+### Owner steps (pending) — `feat/p9-node-readers`, recorded 2026-11-26
+
+1. Run the web front end against the loopback stack, then finish contract test 5: on `/devices` an ungranted directory reads "Mac'te izin verilmedi" and a granted one "Kullanılabilir"; in a web chat with the local model, "Claude Code oturumlarım ne yapıyor?" is answered from local detail and rows of unmapped directories never appear.
+2. Decide on `ccusage`: install a pinned binary through the governance manifest (then a follow-up branch wires it), or keep `usage.ccusage` unsupported.
+
+### Known follow-ups (from `feat/p9-node-readers`)
+
+1. Wire a vetted `ccusage` binary (owner step 2).
+2. Run `scrub_differential.py` again whenever `memory/ingestion/scrubber.py` changes (the vectors pin the corpus, not every pattern edge); consider a CI job on a macOS runner if the owner decides A5 that way.

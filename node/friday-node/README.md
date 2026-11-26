@@ -4,8 +4,9 @@ The Swift node of ADR-013 (Phase 9 brief "Mac session"; runbook
 `docs/runbooks/mac-session-handoff.md` Part B). It runs only on the owner's
 Mac, is built and installed locally, and is never distributed.
 
-Status: **M1** (`feat/p9-node-app`) — shell, identity, session, verifier.
-Readers, grants and the scrubber are M2; the hook relay is M3.
+Status: **M1** (`feat/p9-node-app`) — shell, identity, session, verifier;
+**M2** (`feat/p9-node-readers`) — readers, local policy and grants, the
+scrubber. The hook relay is M3.
 
 ## Layout
 
@@ -19,13 +20,17 @@ Readers, grants and the scrubber are M2; the hook relay is M3.
 | `FridayNode.xcodeproj` | Debug / Release / unsigned **Conformance** configurations |
 | `scripts/build-sign-local.sh` | Release build, Personal Team signing, checks, install |
 | `scripts/check-release-markers.sh` | Refuses a binary carrying a conformance marker |
+| `Sources/NodeCore/Scrubber.swift` | The 8A scrubber, byte-identical (`ScrubParityTests`, `scripts/scrub_differential.py`) |
+| `Sources/NodeCore/Readers/`, `Policy/` | The eight readers; the local policy (keychain) and grants (Touch ID) |
+| `../scripts/scrubber-corpus.sh` | Corpus recall gate over `friday-node scrub` |
 
 ## Commands
 
 ```bash
 cd node/friday-node
 swift build
-swift test                                   # vectors, vendored files, 39 conformance cases, units
+swift test                                   # vectors, vendored files, scrub parity, 50 conformance cases, units
+../scripts/scrubber-corpus.sh                # corpus recall via friday-node scrub
 xcodebuild -project FridayNode.xcodeproj -scheme FridayNode -configuration Conformance \
   -derivedDataPath build CODE_SIGNING_ALLOWED=NO build
 xcodebuild -project FridayNode.xcodeproj -scheme FridayNode -configuration Release \
@@ -49,9 +54,11 @@ node/friday-node/build/Build/Products/Conformance/FridayNode.app/Contents/MacOS/
 ```
 
 The hook socket path must be short (macOS limits Unix socket paths to 104
-bytes). The M1 case set is every `cases/v1` case except the eleven read
-cases in `ConformanceTests.pendingM2`; the readers that make those pass are
-M2.
+bytes). Since M2 the Conformance build also needs `--conformance-home`, a
+fixture home built by `nodes.reference.fixtures.factory.build_fixture_home`
+(for example `uv run python -c "from nodes.reference.fixtures.factory import
+build_fixture_home; print(build_fixture_home('/tmp/fx'))"` from `backend/`),
+and every `cases/v1` case runs.
 
 ## Rules this package keeps
 
