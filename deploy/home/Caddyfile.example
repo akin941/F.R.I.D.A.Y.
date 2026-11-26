@@ -1,0 +1,36 @@
+# Friday home server -- Caddy on the HOST, bound to the LAN address only
+# (Phase 13 D14, ADR-017 decisions 3-4; docs/runbooks/home-server-setup.md
+# step 5). Copy to /etc/caddy/Caddyfile and replace the placeholders:
+#   192.168.1.20        the server's reserved LAN address
+#   friday-home.local   its mDNS name
+# The certificate comes from your private CA (its root key never lives on
+# the server); the server key is REUSED on every renewal so the SPKI every
+# node pins (NODE_TLS_PIN_SHA256) never changes.
+#
+# Never bind Caddy to 0.0.0.0, never forward a router port to it, never put
+# a public certificate or a tunnel in front of it: Friday is home-only.
+{
+	auto_https off
+	admin off
+}
+
+https://friday-home.local:443, https://192.168.1.20:443 {
+	bind 192.168.1.20
+	tls /etc/caddy/tls/friday-home.crt /etc/caddy/tls/friday-home.key
+
+	# The node gateway (ADR-013): WSS, published on 127.0.0.1:8002 only.
+	@node path /ws/node/v1
+	handle @node {
+		reverse_proxy 127.0.0.1:8002
+	}
+
+	# Everything else: the frontend (BFF), published on 127.0.0.1:3001 only.
+	# The BFF trusts the client IP only from this header, which Caddy
+	# overwrites (PIN pairing stays LAN-gated):
+	# TRUSTED_CLIENT_IP_HEADER=X-Real-IP in deploy/docker/.env.
+	handle {
+		reverse_proxy 127.0.0.1:3001 {
+			header_up X-Real-IP {remote_host}
+		}
+	}
+}
