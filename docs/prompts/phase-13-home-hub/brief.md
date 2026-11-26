@@ -1125,7 +1125,7 @@ evaluation".
 | 3 | `feat/p13-hud-presence` | `node_presence`, HUD `nodes` section + `HudNodesPanel`, `/devices` overview columns | 1 (parallel with 2) | **implemented 2026-11-20** (swarm date stamp; see "Branch 3 notes"; server and web only, nothing needs the Mac; the real two-PC HUD run is part of M2, pending owner evaluation; awaits the independent Sonnet 5 review) |
 | 4 | `feat/p13-linux-node` | `node/friday-node-linux` (vendored + locked, read-only, local policy CLI, credential file, systemd user unit, re-point), CI conformance job, Windows stub README | 1 (pairing `platform`) | **implemented 2026-11-20** (`node/friday-node-linux`: vendored reference node + `vendor.lock`, v1 read-only daemon, 0600 policy + TTY-confirmed CLI, 0600 credential + TLS pins + rotation, re-point, hook relay + spool, systemd user unit; 50/50 v1 conformance cases over real localhost TLS; `linux-node` CI job; Windows stub; see "Branch notes and owner steps (pending) — `feat/p13-linux-node`"; real Linux PC: M2, pending owner evaluation) |
 | 5 | `feat/p13-ha-home-control` | `connectors.HomeEntity` allowlist, media_player power/source/mute/volume steps, `source_list`, manifest v2 pins, entity editor, governance docs | 1 (rooms) | **implemented 2026-11-20** (see "Branch 5 notes"; fail closed: no HA entity call until the owner allowlists entities; awaits the independent Sonnet 5 review) |
-| 6 | `feat/p13-home-voice-routes` | `connectors.home_phrases`, `home.control` wake route (proposal only), typed-turn mismatch check, vectors, ADR-015 note | 2, 5 | planned |
+| 6 | `feat/p13-home-voice-routes` | `connectors.home_phrases`, `home.control` wake route (proposal only), typed-turn mismatch check, vectors, ADR-015 note | 2, 5 | **implemented 2026-11-20** (see "Branch 6 notes"; no model call, no HA request, no approval from the route; typed `target_mismatch`; e2e with the reference voice host + real `friday-voice run` child; real mic/Whisper: M2, pending owner evaluation; awaits the independent Sonnet 5 review) |
 | 7 | `feat/p13-home-server-ops` | `compose.home.yml`, `deploy/home/` backup/drill/timer/Caddy, `home_*` preflight rows and settings | brief approved (independent) | **implemented 2026-11-20** (compose override + `make up-home`, `deploy/home/` scripts/units/Caddyfile, `check_home` five rows, settings + `.env.example`, `home-ops` CI job, runbook updated; real hardware: M3, pending owner evaluation) |
 | 8 | `chore/p13-closeout` | `nodes_labels` / `ha_entities` / `linux_node_vendor` rows, no-protocol-change check, home-hub e2e, runbooks, ADR-017 note, MASTER_PLAN row, `self_sources.json`, go/no-go record | 1–7 | planned |
 | M1 | Swift `friday-node`: pairing `platform`, server re-point | Send `platform: "macos"` at pairing; "Sunucu adresini değiştir" behind Touch ID keeping the pins; conformance unchanged | 1 merged; Phase 9 B1 | deferred: Mac session |
@@ -1585,6 +1585,96 @@ integration merge 2026-11-26):
    still enforce the allowlist. Residual risk is a direct ORM write. No
    action needed: the registry-walk test pins that only `home_entities`
    writes the table.
+
+### Branch 6 notes — `feat/p13-home-voice-routes` (implemented 2026-11-20)
+
+What landed (server side and a shared-vector vitest; nothing needs the Mac,
+a real HA or a real model):
+- `backend/connectors/home_phrases.py`: the pure parser
+  (`parse_home_command`, Turkish first, English second, over the owner's
+  `HomeEntity` labels/aliases -- plus their -lar/-ler and -s plurals -- and
+  `Room` names/aliases through `core.speech.find_mentions`; one leading
+  wake phrase and trailing fillers stripped with tables pinned equal to
+  `assistant.wake_routes`); the verb table maps each verb to exactly one
+  action (`on`, `off`, `mute`, `unmute`, `volume_up/down`, `play`, `pause`,
+  `source`, `volume`, `level`), numbers only 0–100 where a serializer bounds
+  one (volume → 0–1, light brightness 1–100, fan/cover 0–100); `service_for`
+  maps (action, domain) to one code-maximum service. The read-only resolver
+  (`resolve_home_command`) over the enabled allowlist of the **personal**
+  workspace through `for_actor()`: one entity → `draft` (arguments validated
+  by `CallServiceArguments` and `allowlist_refusal`), several → `ask`
+  ("2 cihaz eşleşti: Salon Projeksiyon, Salon TV. Hangisi?"), unknown
+  locative room / device not in the named room / service not ticked /
+  `HA_ALLOWED_DOMAINS` narrowed / HA binding off → a fixed refusal
+  ("Bunu yapmaya iznim yok: Salon TV için 'kapat' açık değil."). An empty
+  allowlist or an unparsed utterance is a miss (normal router).
+  `check_call_draft` (typed draft check) and `call_vocabulary` (allowlist
+  rows as data for the argument step).
+- `backend/tools/home_ports.py`: the three ports (`register_home_resolver`,
+  `register_draft_check`, `register_draft_vocabulary`), registered by
+  `ConnectorsConfig.ready`; `assistant` reaches them through `tools` only
+  (import contracts unchanged and green). A raising resolver is a miss, a
+  raising check refuses (fail closed).
+- `assistant/wake_routes.py`: `WakeRoute.matched_by_code`, `CODE_ROUTES =
+  (home.control,)` (effect `proposal`), tried after the phrase and `tool.*`
+  routes and before `skill.*` aliases; `validate_routes` validates it at
+  boot (no phrases, effect read/proposal). A draft is the `tool_request`
+  intent with `{"arguments": ...}` and a fixed spoken confirmation ("Onay
+  kartı hazır: Salon TV · aç. Kararı ekranda verirsin."), so the turn makes
+  no model call at all; the cap (`apply_voice_capability_cap`) still runs.
+  `home.control` is not listed for aliases and refuses one.
+- Typed turns: `ha_call_service` sets `draft_arguments` (a Friday-side flag,
+  not in `tool_schemas()`; pins and manifest version unchanged). In
+  `assistant.services.draft_tool_payload` the argument step's description
+  gains the allowlist rows as data, and after the serializer the port's
+  draft check runs: outside the allowlist or a different entity than the
+  owner's room/label mention → `DraftRefused` → plain chat with Friday's
+  `target_mismatch` text, no card. The same check covers a `tool.ha_call_service`
+  alias route.
+- `docs/voice/home-route-vectors.json` (vocabulary, `normalize` rows checked
+  by pytest and `frontend/src/lib/voice/home-route-vectors.test.ts`, `parse`
+  rows incl. the brief's examples and non-matches); ADR-015 implementation
+  note; `docs/mcp/home-assistant.md` "Home routes and typed drafts" + review line.
+
+Tests: `connectors/tests/test_home_phrases.py` (vectors, `service_for`
+inside the code maximum, resolver draft/ask/refusals, no rows / HA requests
+/ ModelUsage, scoping, firm workspace, the typed check, ports),
+`assistant/tests/test_home_routes.py` (through the chat view: draft card
+with exact arguments and zero model calls, ask, refusals, miss → router,
+member never routed, card → pending `ApprovalRequest` only via web, cap
+degradation, typed turn not routed, typed `target_mismatch`, typed match
+with the allowlist in the argument prompt, boot check),
+`assistant/tests/test_home_routes_node_voice.py` (node voice draft only,
+only the two messages written, body cannot opt out, a node voice token can
+neither create nor approve the request) and `ops/tests/test_home_voice_e2e.py`
+(the reference voice host + a real `friday-voice run` child over HTTP:
+"salondaki TV'yi aç" → card on screen, no router/chat call, no approval, no
+HA request; skipped without `node/friday-voice/.venv` unless
+`FRIDAY_VOICE_E2E=1`).
+
+Deviations recorded:
+- Parser and resolver in one module (`connectors/home_phrases.py`); the
+  port module is `tools/home_ports.py` as the brief names it.
+- The ask template is "N cihaz eşleşti: A, B. Hangisi?" (no room-locative
+  inflection in templates: vowel harmony on owner-set names is not
+  guessed).
+- A spoken source is drafted as transcribed (case kept, dative ending
+  removed); exactness is enforced by the existing request-time
+  `source_list` check, never fuzzy-matched.
+- The draft reply is Friday's fixed text (no chat completion), unlike the
+  `tool.*` routes, so the home route costs no model call.
+
+Owner steps (pending) — `feat/p13-home-voice-routes`, recorded 2026-11-20:
+1. Have the independent Sonnet 5 review of this branch reach APPROVE.
+2. After branch 5's allowlist is filled (labels/aliases the way you speak:
+   e.g. TV with alias "televizyon", the ceiling light with "ışık"; rooms
+   with aliases such as "living room"), try "salondaki TV'yi aç" by web
+   voice and on the Mac (M2): a card only; decide on `/approvals`.
+3. Confirm the TV's `source_list` spelling matches what Whisper writes
+   ("HDMI 2"); if not, the card is refused at tap time (`source_not_available`)
+   — record which inputs need a different spoken form.
+4. Real microphone / Whisper Turkish recognition of the home vectors is part
+   of M2 (pending owner evaluation; does not block branch 8).
 
 **Minimum usable cut** if the phase runs long: 7 (the home server is safe
 and backed up), 1 and 2 (several PCs, the right one each time). 3 adds

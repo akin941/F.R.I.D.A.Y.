@@ -104,6 +104,27 @@ re-checks it on every write path), and `enabled`.
   are annotated with the owner's `room` / `label` / `allowed_services`
   (Friday rows, `ToolPolicy.annotate`).
 
+### Home routes and typed drafts (Phase 13 D13, branch 6)
+- **Voice:** the `home.control` wake route (`connectors.home_phrases`,
+  reached by `assistant` through `tools.home_ports`) parses a home command
+  against the owner's enabled allowlist rows and rooms and yields at most a
+  `ha_call_service` draft card with exact arguments (or the ask / a fixed
+  refusal). No model call, no HA request, no approval; the owner still taps
+  the card and decides on `/approvals`. An empty allowlist means no home
+  command matches (the turn goes to the router).
+- **Typed:** `ha_call_service` now sets `draft_arguments`: the router drafts
+  the card's arguments with `router.connector_args` (personal-data routed;
+  the allowlist rows -- id, room, label, aliases, services -- are shown to
+  it as data). Before the card exists, `check_call_draft` refuses a draft
+  outside the allowlist or for another entity than the room/label the
+  owner named (`target_mismatch`). `draft_arguments` is not part of the
+  pinned request contract (`tool_schemas()`); pins and version unchanged.
+- **Sources by voice:** "HDMI 2'ye geç" drafts `select_source` with the
+  source as transcribed (case kept, Turkish dative ending removed); it must
+  still equal a live `source_list` value at request time
+  (`source_not_available`), so a misheard source is refused when the owner
+  taps the card, never guessed.
+
 ### `source` / `source_list` (D12)
 `source` and `source_list` survive a state read; `source_list` is bounded
 to 30 distinct inputs of ≤ 60 characters, and an input that is longer, not
@@ -199,3 +220,7 @@ argument, never an instruction.
   the entity allowlist, `media_player` power/input/mute/volume steps,
   `source`/`source_list`, new pins (this widening is the reviewed commit;
   the independent Sonnet 5 review is pending).
+- Phase 13 branch 6 (`feat/p13-home-voice-routes`), 2026-11-20 — the
+  `home.control` voice route and `draft_arguments` with the typed
+  `target_mismatch` check; no pin, schema or domain change (independent
+  Sonnet 5 review pending).
