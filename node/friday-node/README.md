@@ -9,7 +9,17 @@ Status: **M1** (`feat/p9-node-app`) — shell, identity, session, verifier;
 scrubber; **M3** (`feat/p9-node-hook-relay`) — the hook relay
 (`friday-node hook`, the app's Unix socket) and the bounded spool;
 **Phase 8B M1** (`feat/p8-node-transcript-readers`, runbook B4) — the two
-owner-turn readers and the debug-only `friday-node scrub-preview`.
+owner-turn readers and the debug-only `friday-node scrub-preview`;
+**Phase 10 M1** (`feat/p10-node-confirm`, runbook B5) — protocol v2 (the
+`friday-node.v2, friday-node.v1` offer), the v2 verifier (D5 checks 13-24),
+grants, the confirmation window, output streaming with the D12 carry-over
+scrub, and the `voice.state` relay the v2 cases need.
+
+Until runbook B6 the app has **no executor and no command mappings**: every
+confirm- and gate-class contract is advertised `unsupported` (check 21
+refuses before any window opens) and the action policy is empty
+(`not_configured`). B6 adds `Exec/SrtExecutor.swift`, `SandboxPolicy.swift`,
+`Policy/CommandMappings.swift`, the recipes, AX and open/focus.
 
 ## Layout
 
@@ -17,7 +27,13 @@ owner-turn readers and the debug-only `friday-node scrub-preview`.
 |---|---|
 | `Package.swift` | SwiftPM: `NodeCore`, the `friday-node` CLI, `NodeCoreTests` (`swift build`, `swift test`) |
 | `Sources/NodeCore/` | Protocol v1: strict JSON + canonical JSON, the schema subset, Ed25519 verification, the D5 order, `NodeSession` (the state machine), the WSS transport and `NodeRunner`, Keychain credential, TLS pin, pairing, rotation |
-| `Sources/NodeCore/Generated/VendoredProtocol.swift` | Byte copies of `backend/nodes/protocol/schemas/v1` and `capabilities/v1` (`scripts/vendor_protocol.py`; CI checks it) |
+| `Sources/NodeCore/Generated/VendoredProtocol.swift` | Byte copies of `backend/nodes/protocol/schemas/v1`, `schemas/v2`, `capabilities/v1`, `capabilities/v2` and `capabilities/v2/recipes` (`scripts/vendor_protocol.py`; CI checks it) |
+| `Sources/NodeCore/VerifierV2.swift`, `GrantVerifier.swift` | The v2 order, checks 1-22, same codes at the same checks as `nodes.protocol.verify` / `reference/verifier_v2.py`; the grant's domain-separated signature, field binding and TTL (`grants.json`, `signing_v2.json`) |
+| `Sources/NodeCore/Confirmation.swift` | The window's rules (one at a time, 60 s, first click before the deadline), the text rendered from the node's own args and `confirm_template`, and `ConfirmationPanelView` (what the panel draws) |
+| `Sources/NodeCore/OutputStreamer.swift` | `StreamScrubber` (D12 carry-over), the incremental UTF-8 decoder, 8 KiB pieces, `seq`, the 1 MiB cap, the 4 KiB tail (`scrub_stream.json`) |
+| `Sources/NodeCore/Policy/ActionPolicy.swift` | Check 22: repo realpath equality, mapped kinds, enabled recipes, the bundle-id list (read side; editing is B6) |
+| `Sources/NodeCore/Exec/` | The executor port, the throwaway-worktree mode, and (DEBUG only) `ScriptedExecutor` and `CaseSetup` that the offline suite and the Conformance hook drive |
+| `App/FridayNode/ConfirmationWindow.swift` | The non-activating floating `NSPanel` ("Çalıştır" / "Reddet", 60 s countdown, "Durdur") |
 | `Sources/NodeCore/ConformanceSupport.swift` | Live conformance mode, compiled only with `CONFORMANCE` |
 | `App/FridayNode/` | The `LSUIElement` menu-bar app |
 | `FridayNode.xcodeproj` | Debug / Release / unsigned **Conformance** configurations |
@@ -34,7 +50,7 @@ owner-turn readers and the debug-only `friday-node scrub-preview`.
 ```bash
 cd node/friday-node
 swift build
-swift test                                   # vectors, vendored files, scrub parity, all 86 v1 conformance cases, owner-turn vector, units
+swift test                                   # vectors (v1, signing_v2, grants, scrub_stream), vendored files, scrub parity, all 86 v1 and 99 v2 conformance cases, owner-turn vector, the args fuzz families and a CPython differential, units
 ../scripts/scrubber-corpus.sh                # corpus recall via friday-node scrub
 xcodebuild -project FridayNode.xcodeproj -scheme FridayNode -configuration Conformance \
   -derivedDataPath build CODE_SIGNING_ALLOWED=NO build
@@ -81,6 +97,40 @@ fixture home built by `nodes.reference.fixtures.factory.build_fixture_home`
 (for example `uv run python -c "from nodes.reference.fixtures.factory import
 build_fixture_home; print(build_fixture_home('/tmp/fx'))"` from `backend/`),
 and every `cases/v1` case runs.
+
+Since Phase 10 M1 run it for both protocols (the node offers v2 and v1;
+the gateway picks the case's version), every case, no `--case` filter:
+
+```bash
+# backend/: unbuffered, logged; prints the certificate path
+PYTHONUNBUFFERED=1 DJANGO_SETTINGS_MODULE=config.settings.test DATABASE_URL=postgres://x:x@localhost:1/x \
+  uv run python -u manage.py node_conformance_server --external --port 8766 --tls-self-signed \
+  --protocol 2 --hook-socket ~/.friday-conformance/hookb5.sock    # then again with --protocol 1
+# repo root: the same Conformance binary and flags as above, plus
+#   --conformance-home <fixture home>
+```
+
+`prepare` builds the case's scripted owner (`setup.window`, the seam through
+which the server's scripted owner answers the confirmation window), the
+scripted executor (`setup.executor`) and the action policy of
+`fixtures/local_policy.json`; `kill_switch` engages the session's kill
+switch. All of it is `#if CONFORMANCE` (the hook) or `#if DEBUG` (the
+doubles), and `scripts/check-release-markers.sh` refuses a binary carrying
+the hook's op and report words or the doubles' type names.
+
+### The confirmation window (Phase 10 M1)
+
+A non-activating floating panel (`App/FridayNode/ConfirmationWindow.swift`)
+draws `ConfirmationPanelView` only: the sentence filled from the
+capability's (or recipe's) `confirm_template` with the node's own validated
+args, the recipe label, the repo's local name, the exact argv and network
+setting, and the approval id's first 8 characters for gate class. Buttons
+"Çalıştır" / "Reddet" (no default button), a 60 s countdown, "Durdur" while
+the approved command runs. It closes on socket loss, the kill switch or the
+timeout; one window at a time (a second invoke is `busy_confirming`). The
+menu's "Acil durdur" is the node's local kill switch (later clicks are
+refused `expired_after_confirm`); releasing it asks for Touch ID or the
+password.
 
 ## Rules this package keeps
 

@@ -3190,3 +3190,155 @@ These were left unresolved at APPROVE. They are LOW and do not block the merge.
    `test_typed_voice_confirm_and_kill_switch`, so a failure in an early step
    hides the later scenarios. Fix (optional): split it into per-scenario tests
    that share the fixtures.
+
+## Implementation record — `feat/p10-node-confirm` (Mac session M1, runbook B5, implemented 2026-11-27)
+
+Cut from `integ/phase-13` (contains `bd46cf9`). Spec: M1 above, D5 checks
+13–24, D12, ADR-013 decision 6, ADR-014; runbook B5.
+
+**What landed (`node/friday-node/`).**
+- `Sources/NodeCore/VerifierV2.swift` — the v2 order, checks 1–22, with the
+  reference codes at the reference check numbers (`nodes.protocol.verify`
+  v2 and `reference/verifier_v2.py`); recipe `params` are check 20's extra
+  check against the node's own recipe catalogue. Checks 23–24 live in
+  `NodeSession`, as in `reference/node.py`.
+- `Sources/NodeCore/GrantVerifier.swift` — grant/v2-domain signature
+  (15 `unknown_key`, 16 `bad_grant_signature`), type-strict binding of the
+  eight shared fields plus `v`/`class` (17 `grant_mismatch`), TTL ≤ 120 s
+  (18 `ttl_too_long`). `Signing` gained the invoke/v2 domain and
+  `verify(…, version:)`.
+- `Sources/NodeCore/OutputStreamer.swift` — `StreamScrubber` (the D12
+  carry-over algorithm, scalar indices and scalar comparisons, the
+  placeholder-at-end rule with Python `\s`), an incremental UTF-8 decoder
+  matching CPython's `replace` decoder, `OutputStreamer` (8 KiB pieces never
+  inside a code point, shared `seq`, 1 MiB cap → `truncated`, 4 KiB scrubbed
+  tail).
+- `Sources/NodeCore/Confirmation.swift` — `ConfirmationRenderer` (the
+  reference `render_confirmation` text, line for line), the window model
+  (one at a time → `busy_confirming`, 60 s, only the first click before the
+  deadline counts, forced close on socket loss / kill switch),
+  `ConfirmationObserver`, and `ConfirmationPanelView` (the pure view the
+  panel draws: countdown, "Çalıştır" / "Reddet", "Durdur").
+- `Sources/NodeCore/NodeSession.swift` — version-aware (`connect(version:)`),
+  the window flow (23), the post-click re-check (24), the executor flow,
+  `output` frames, the v2 result fields, the local kill switch, "Durdur",
+  fail closed on socket loss, and the `voice.state` relay (v2 only).
+- `Sources/NodeCore/Session.swift` — offers `friday-node.v2, friday-node.v1`
+  and runs the version the gateway picked; `NodeRunner` exposes the panel's
+  state and clicks, "Durdur" and the kill switch.
+- `Sources/NodeCore/Policy/ActionPolicy.swift` (check 22, the read side of
+  `reference/local_policy.py`), `Exec/ExecutorPort.swift` (the port,
+  `UnavailableExecutor`), `Exec/Worktree.swift` (the throwaway worktree,
+  `posix_spawn`ed git with hooks off), and DEBUG-only
+  `Exec/ScriptedExecutor.swift` / `Exec/CaseSetup.swift` (the
+  `FakeExecutor` port and the case `setup` the offline suite and the hook
+  share).
+- `App/FridayNode/ConfirmationWindow.swift` — the non-activating floating
+  `NSPanel` (no default button, plain-text labels, drawn only from
+  `ConfirmationPanelView`); `AppDelegate` wires it and adds "Acil durdur"
+  (release behind LocalAuthentication).
+- `ConformanceSupport.swift` (`#if CONFORMANCE`) — `prepare` builds the
+  scripted owner, the scripted executor, the action policy and the `narrow`
+  catalogue; `kill_switch` engages the session's kill switch; `voice_state`
+  sends what the session relays; `report` adds `executor_calls`,
+  `executor_terminated`, `windows_shown` and the session's own policy
+  fingerprint.
+- `scripts/vendor_protocol.py` vendors `schemas/v2`, `capabilities/v2` and
+  the recipes; `Schema.swift` supports the `$ref` / `allOf` / `if`-`then`
+  the v2 `event` schema uses; `scripts/check-release-markers.sh` also
+  refuses the hook's own words (`wait_disconnected`, `executor_terminated`,
+  `windows_shown`) and the doubles' type names.
+
+**Contract tests.**
+1. Offline — PASS. `swift test`: 130 tests, 0 failures; `ConformanceTests`
+   plays 86/86 `cases/v1` and 99/99 `cases/v2` with the reference verdicts
+   and codes (`pendingB6` is empty: every v2 case passes against the
+   scripted executor the reference node's own suites use; no case needs a
+   B6 executor to be satisfied). `GrantVectorTests` gives all 29
+   `grants.json` refusals the same code at the same check;
+   `SigningV2VectorTests` reproduces both signed messages and refuses the
+   three `must_not_verify` envelopes; `ScrubStreamVectorTests` reproduces
+   all 75 text and 3 pipeline cases of `scrub_stream.json` piece for piece.
+   `ArgsValidationTests` replays the `test_capabilities_v2.py` fuzz families
+   (every capability and recipe schema refuses each; the lone-surrogate,
+   float and 2⁶³ families are refused by the strict parser before check 20)
+   and checks, against CPython `re.fullmatch` over every code point, that
+   the five free-string patterns accept exactly the same set.
+2. Live — PASS. `node_conformance_server --external --port 8766
+   --tls-self-signed --protocol 2` 99/99 ALL PASS and `--protocol 1` 86/86
+   ALL PASS against the `Conformance` build (window cases answered by the
+   server's scripted owner through `prepare`). Release hygiene:
+   `-configuration Release … test -only-testing:NodeCoreTests/ReleaseHygieneTests`
+   3/3 pass; a Release app build passes `check-release-markers.sh`, the
+   Conformance binary is refused by it.
+3. Real stack — NOT RUN (owner step below). It needs runbook B6 first.
+
+**Deviations (with reasons).**
+- The window file is `App/FridayNode/ConfirmationWindow.swift`, not
+  `Sources/FridayNode/…`: the app target's sources are `App/FridayNode/`.
+- The release app has no executor and no command mappings until B6
+  (`UnavailableExecutor`, an empty `ActionPolicy`): every action contract is
+  advertised `unsupported`, so check 21 refuses before any window opens. B5
+  ships the port the B6 executors plug into; nothing in B5 can run a
+  command on the owner's Mac.
+- `CommandSpec` carries argv, cwd, the write root, the private temp dir,
+  PATH, network domains and the wall cap (min of mapping, contract, 900 s),
+  but not the `srt` settings document or the stripped environment: those are
+  B6's `SandboxPolicy.swift` (byte parity with `sandbox.json`).
+- The `voice.state` relay (runbook B7's checkbox) is ported here, because
+  B5's contract test 1 plays every `cases/v2` file; B7 only has to feed it
+  from the voice host.
+- "Durdur" has no reference counterpart: it terminates the command and
+  reports `result{status: error, exit_code: null}`, exactly what the
+  reference kill switch reports for a running command.
+- The local kill switch (menu "Acil durdur") follows the reference
+  `engage_kill_switch`; releasing it is new (Touch ID or the password). It
+  lives on the session, so a re-pair starts released.
+- Any socket close is recorded as `closed_reason = "socket_lost"` (was
+  `closed:<code>`), as the reference transport does
+  (`v2_socket_dropped_window_open` checks it); the close code still reaches
+  the runner (4401 → pair again).
+- The worktree mode runs git through `posix_spawn` + `waitpid`: Foundation
+  `Process.waitUntilExit` added ~90 ms per call, enough to push the
+  worktree case's frames past the gateway's 100 ms settle.
+- A result's `exit_code` is clamped to −255…255 (the schema bound) instead
+  of producing an unsendable frame.
+- `ConformanceTests.swift` and the session-flow tests compile only in DEBUG
+  (the scripted doubles do not exist in Release; the Release test build is
+  only for `ReleaseHygieneTests`).
+- CryptoKit's Ed25519 signatures are randomized, so the grant vector test
+  checks that a re-signature verifies (and that the invoke/v2 domain or no
+  domain does not) instead of comparing `sig` bytes.
+
+### Owner steps (pending) — `feat/p10-node-confirm`, recorded 2026-11-27
+
+1. Run the independent Sonnet 5 review of this branch (CLAUDE.md
+   "Reviews") and fix findings until APPROVE.
+2. After runbook B6 (`feat/p10-node-executors`) is merged and the repo and
+   its `test` command are mapped in the node's policy UI (B6 owner step),
+   build and install the signed app yourself
+   (`FRIDAY_NODE_TEAM_ID=<Personal Team ID> node/friday-node/scripts/build-sign-local.sh --install`),
+   then run contract test 3 on the real stack:
+   1. in the web chat, type "testleri çalıştır" in a conversation whose
+      workspace maps that repo; approve the card on `/approvals` and note
+      the approval id's first 8 characters;
+   2. the panel appears without taking focus and shows the same 8
+      characters, the repo's local name, the exact argv and "Ağ: kapalı"
+      (or the mapped domains); click "Reddet" → `denied` on `/approvals`
+      and in the HUD;
+   3. repeat and click "Çalıştır" → output in the HUD terminal panel; a
+      long `uv run pytest` streams within a second per line; "Durdur"
+      stops it (`error`, no exit code);
+   4. repeat and, with the panel open, engage the kill switch on
+      `/devices` → the panel closes within 2 s and nothing runs; let one
+      panel time out (60 s) → `timed_out`;
+   5. compare the frames, statuses and chain rows with the reference node's
+      in `backend/ops/tests/test_control_e2e.py`,
+      `backend/tools/tests/test_node_actions.py` and
+      `test_node_action_endpoints.py` (`confirmation{shown}` then
+      `{approved|denied|timed_out}`, one `result` with `confirm_state`,
+      `exit_code`, scrubbed `tail`, nothing after a socket loss); then
+      `docker compose -f deploy/docker/compose.yml exec web uv run python manage.py verify_node_audit_chain`.
+   Record the result here and tick runbook B5 contract test 3.
+3. M4 (pending owner evaluation): the window latency and close-on-loss
+   measurements on the installed app, in the go/no-go table.
