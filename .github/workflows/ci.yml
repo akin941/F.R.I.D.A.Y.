@@ -263,6 +263,87 @@ jobs:
           uv sync --frozen
           uv run pytest ops/tests/test_live_voice_e2e.py
 
+  # Phase 13 branch 4 (brief D10): the read-only Linux node. Its own
+  # pyproject/uv.lock; imports nothing from backend/ (the reference node is
+  # vendored and `vendor.lock` fails on drift). The conformance run is the
+  # backend's hostile gateway (`node_conformance_server --external
+  # --tls-self-signed --protocol 1`) against the packaged node over real
+  # localhost TLS. No real server, credential or network beyond localhost.
+  linux-node:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: node/friday-node-linux
+    # The last step runs the backend tests that pair the packaged node with
+    # a live test server and the real gateway process: Postgres + Redis.
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: friday
+          POSTGRES_PASSWORD: friday
+          POSTGRES_DB: friday
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U friday -d friday"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgres://friday:friday@localhost:5432/friday
+      REDIS_URL: redis://localhost:6379/0
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: |
+            node/friday-node-linux/uv.lock
+            backend/uv.lock
+
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      - name: Ruff lint
+        run: uv run ruff check .
+
+      - name: Ruff format check
+        run: uv run ruff format --check .
+
+      - name: Vendored reference node matches backend/ (vendor.lock)
+        run: uv run python scripts/vendor.py --check
+
+      - name: Tests
+        run: uv run pytest
+
+      - name: Backend environment (the hostile gateway runs there)
+        working-directory: backend
+        run: uv sync --frozen
+
+      - name: External conformance (node_conformance_server --external --tls-self-signed --protocol 1)
+        run: uv run python scripts/external_conformance.py
+
+      # FRIDAY_LINUX_NODE=1 makes a missing node environment a failure.
+      - name: Server side (pairing platform=linux, real gateway, node_sessions, policy unchanged)
+        working-directory: backend
+        env:
+          FRIDAY_LINUX_NODE: "1"
+        run: >-
+          uv run pytest nodes/tests/test_linux_node_external.py
+          config/tests/test_linux_node_gateway.py
+
   frontend:
     runs-on: ubuntu-latest
     defaults:

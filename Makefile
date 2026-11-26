@@ -15,7 +15,8 @@ FRONTEND := cd frontend &&
 	harness-images harness-smoke harness-runner deploy-smoke preflight \
 	test-backend test-frontend test-e2e lint-backend lint-frontend \
 	frontend-install frontend-dev frontend-build e2e-install voice-models \
-	friday-voice-test friday-voice-e2e friday-voice-install
+	friday-voice-test friday-voice-e2e friday-voice-install \
+	linux-node-test linux-node-conformance linux-node-install
 
 # Generates any missing secret into the gitignored deploy/docker/.env
 # (never overwrites an existing key). `make up` runs it first, so a fresh
@@ -130,6 +131,35 @@ friday-voice-install:
 		--exclude .ruff_cache --exclude tests $(FRIDAY_VOICE_DIR)/ "$(FRIDAY_VOICE_HOME)/"
 	cd "$(FRIDAY_VOICE_HOME)" && uv sync --frozen --no-dev
 	shasum -a 256 "$(FRIDAY_VOICE_HOME)/uv.lock"
+
+# --- Linux node (Phase 13 branch 4, brief D10) ---
+# node/friday-node-linux is its own uv project; it imports nothing from
+# backend/ (the reference node is vendored, `vendor.lock` guards drift).
+# `linux-node-test` is the CI `linux-node` job locally (the backend tests
+# that run the packaged node need the dev Postgres and Redis: `make up`).
+# `linux-node-install` runs on the Linux PC as the desktop user: the locked
+# environment under ~/.local/share/friday-node-linux and the systemd user unit.
+LINUX_NODE_DIR := node/friday-node-linux
+LINUX_NODE_HOME ?= $(HOME)/.local/share/friday-node-linux
+SYSTEMD_USER_DIR ?= $(HOME)/.config/systemd/user
+
+linux-node-test:
+	cd $(LINUX_NODE_DIR) && uv sync --frozen && uv run ruff check . && \
+		uv run ruff format --check . && uv run python scripts/vendor.py --check && \
+		uv run pytest && uv run python scripts/external_conformance.py
+	cd backend && FRIDAY_LINUX_NODE=1 uv run pytest nodes/tests/test_linux_node_external.py \
+		config/tests/test_linux_node_gateway.py
+
+linux-node-conformance:
+	cd $(LINUX_NODE_DIR) && uv sync --frozen && uv run python scripts/external_conformance.py
+
+linux-node-install:
+	mkdir -p "$(LINUX_NODE_HOME)" "$(SYSTEMD_USER_DIR)"
+	rsync -a --delete --exclude .venv --exclude __pycache__ --exclude .pytest_cache \
+		--exclude .ruff_cache --exclude tests $(LINUX_NODE_DIR)/ "$(LINUX_NODE_HOME)/"
+	cd "$(LINUX_NODE_HOME)" && uv sync --frozen --no-dev
+	install -m 0644 deploy/home/friday-node-linux.service "$(SYSTEMD_USER_DIR)/"
+	@echo "next: friday-node-linux pair ..., grant, then systemctl --user enable --now friday-node-linux"
 
 # --- Harness runner (Phase 3 branch 8; docs/runbooks/harness-first-run.md) ---
 # Builds both CLI images. Pin the real base-image digest and CLI versions in
