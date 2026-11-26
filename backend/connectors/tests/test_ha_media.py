@@ -119,7 +119,11 @@ def test_every_new_service_is_the_one_gated_tool():
     spec = get_tool(GATE)
     assert spec.gated is True and spec.user_invocable is True
     # No confirm-class / ungated path exists for any HA service (Q7, D12).
-    assert spec.draft_arguments is None
+    # Branch 6 (D13) adds only the typed-turn argument step: it proposes the
+    # arguments for this same gated tool (a card), never an ungated call.
+    assert spec.draft_arguments is not None
+    assert spec.draft_arguments.argument_serializer is bridge.CallServiceArguments
+    assert spec.draft_arguments.data_class == "personal"
     assert MANIFEST.version == 2
 
 
