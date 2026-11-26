@@ -1,11 +1,13 @@
 // The node's outbound WebSocket (Phase 9 brief D6, D13 items 1-4; ADR-013
 // decision 1: outbound only, no listener of any kind).
 //
-// `NodeConnection` is one socket: `wss://<server>/ws/node/v1`, subprotocol
-// `friday-node.v1`, `Authorization: Bearer <jnd_...>`, no `Origin`, the TLS
-// SPKI pin enforced in place of CA validation. It feeds every received frame
-// to `NodeSession` and sends what the session answers; it never decides
-// protocol behaviour itself.
+// `NodeConnection` is one socket: `wss://<server>/ws/node/v1`, subprotocols
+// `friday-node.v2, friday-node.v1` offered (Phase 10 D1: the gateway picks
+// the highest it supports, and the session runs the version it picked),
+// `Authorization: Bearer <jnd_...>`, no `Origin`, the TLS SPKI pin enforced
+// in place of CA validation. It feeds every received frame to `NodeSession`
+// and sends what the session answers; it never decides protocol behaviour
+// itself.
 //
 // `NodeRunner` keeps the node connected: it reconnects after the session's
 // full-jitter backoff, stops for good after `bye{revoked|kill_switch|
@@ -36,6 +38,8 @@ public final class NodeConnection: NSObject, URLSessionWebSocketDelegate, @unche
     private let session: NodeSession
     private let queue: DispatchQueue
     private let autoTick: Bool
+    /// The subprotocols offered, highest first.
+    public let offered: [String]
     private var urlSession: URLSession?
     private var task: URLSessionWebSocketTask?
     private var timer: DispatchSourceTimer?
@@ -51,13 +55,18 @@ public final class NodeConnection: NSObject, URLSessionWebSocketDelegate, @unche
 
     /// `autoTick` drives `session.tick()` once a second from the system
     /// clock (the app); the conformance hook ticks the session itself.
-    public init(url: URL, secret: String, pin: Data, session: NodeSession, queue: DispatchQueue, autoTick: Bool) {
+    /// `offered`: `friday-node.v2, friday-node.v1` unless a caller narrows it.
+    public init(
+        url: URL, secret: String, pin: Data, session: NodeSession, queue: DispatchQueue, autoTick: Bool,
+        offered: [String] = NodeProtocol.offeredSubprotocols
+    ) {
         self.url = url
         self.secret = secret
         self.pin = pin
         self.session = session
         self.queue = queue
         self.autoTick = autoTick
+        self.offered = offered.filter { NodeProtocol.version(ofSubprotocol: $0) != nil }
     }
 
     public func start() {
@@ -82,7 +91,7 @@ public final class NodeConnection: NSObject, URLSessionWebSocketDelegate, @unche
             configuration: configuration, delegate: Forwarder(self, pinning), delegateQueue: delegateQueue)
         var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalAndRemoteCacheData, timeoutInterval: 15)
         request.setValue("Bearer \(secret)", forHTTPHeaderField: "Authorization")
-        request.setValue(NodeProtocol.subprotocol, forHTTPHeaderField: "Sec-WebSocket-Protocol")
+        request.setValue(offered.joined(separator: ", "), forHTTPHeaderField: "Sec-WebSocket-Protocol")
         let task = urlSession.webSocketTask(with: request)
         // Larger than the protocol's 256 KiB so an oversized frame reaches
         // the session (check 1, `too_large`) instead of killing the socket.
@@ -98,12 +107,15 @@ public final class NodeConnection: NSObject, URLSessionWebSocketDelegate, @unche
         _ session: URLSession, webSocketTask: URLSessionWebSocketTask, didOpenWithProtocol protocol: String?
     ) {
         guard webSocketTask === task, !finished else { return }
-        guard `protocol` == NodeProtocol.subprotocol else {
+        // Only a subprotocol the node offered; its version is the session's.
+        guard let picked = `protocol`, offered.contains(picked),
+            let version = NodeProtocol.version(ofSubprotocol: picked)
+        else {
             finish(code: nil, cancel: true)
             return
         }
         opened = true
-        send(self.session.connect())
+        send(self.session.connect(version: version))
         receiveNext()
         if autoTick { startTimer() }
     }
@@ -215,7 +227,10 @@ public final class NodeConnection: NSObject, URLSessionWebSocketDelegate, @unche
         timer?.cancel()
         timer = nil
         if opened {
-            session.disconnect(reason: code.map { "closed:\($0)" } ?? "socket_lost")
+            // Whichever side closed, with whatever code: `socket_lost`, as the
+            // reference transport (transport.py) records it; the code itself
+            // reaches the runner through `onClose` (4401 => pair again).
+            session.disconnect(reason: "socket_lost")
         } else {
             // The handshake never completed (server down, TLS pin mismatch,
             // refused upgrade): still one failed attempt for the backoff.
@@ -305,6 +320,11 @@ public final class NodeRunner: @unchecked Sendable {
     private let usage: UsageSource
     private let home: String
     private var policy = LocalPolicy()
+    /// Phase 10: the action policy (check 22) and the executor. Empty and
+    /// `UnavailableExecutor` until runbook B6 adds the command mappings UI
+    /// and the real executors, so every action is advertised `unsupported`.
+    private let actionPolicy: ActionPolicy
+    private let executor: ActionExecutor
     private var credential: NodeCredential?
     private var session: NodeSession?
     private var connection: NodeConnection?
@@ -332,7 +352,8 @@ public final class NodeRunner: @unchecked Sendable {
     /// binary is configured).
     public init(
         store: CredentialStore, policyStore: LocalPolicyStore, desktop: DesktopSource, home: String,
-        usage: UsageSource = .unsupported, clock: NodeClock = SystemClock()
+        usage: UsageSource = .unsupported, clock: NodeClock = SystemClock(), actionPolicy: ActionPolicy? = nil,
+        executor: ActionExecutor = UnavailableExecutor()
     ) {
         self.store = store
         self.policyStore = policyStore
@@ -340,6 +361,8 @@ public final class NodeRunner: @unchecked Sendable {
         self.home = home
         self.usage = usage
         self.clock = clock
+        self.actionPolicy = actionPolicy ?? .empty(home: home)
+        self.executor = executor
     }
 
     // MARK: The hook relay (M3)
@@ -396,8 +419,66 @@ public final class NodeRunner: @unchecked Sendable {
 
     private func readersAndCatalogue() -> (Catalogue, NodeReaders) {
         let readers = policy.readers(home: home, desktop: desktop, usage: usage)
-        return (.standard(availability: readers.availability()), readers)
+        var availability = readers.availability()
+        for contract in CapabilityContract.actions {
+            availability[contract.name] = executor.availability(for: contract.name)
+        }
+        return (.standard(availability: availability, actions: true), readers)
     }
+
+    // MARK: The confirmation window (Phase 10 M1)
+
+    /// The app's panel; called on the runner queue.
+    public weak var confirmationObserver: ConfirmationObserver? {
+        didSet {
+            let observer = confirmationObserver
+            queue.async { self.session?.confirmationObserver = observer }
+        }
+    }
+
+    /// The panel's content now (the panel polls it once a second for the
+    /// countdown).
+    public func panelView() -> ConfirmationPanelView {
+        queue.sync {
+            guard let session else { return .hidden }
+            return ConfirmationPanelView.make(
+                prompt: session.openPrompt, running: session.runningPrompt, now: clock.now())
+        }
+    }
+
+    /// The owner clicked "Çalıştır" or "Reddet" (or closed the panel).
+    public func decide(_ action: ConfirmationAction, invocationID: String) {
+        queue.async {
+            guard let session = self.session, session.decide(action, invocationID: invocationID) else { return }
+            self.connection?.tick()
+        }
+    }
+
+    /// The owner clicked "Durdur".
+    public func stop(invocationID: String) {
+        queue.async {
+            guard let session = self.session else { return }
+            let frames = session.stop(invocationID: invocationID)
+            if !frames.isEmpty { self.connection?.sendSessionFrames(frames) }
+        }
+    }
+
+    /// The owner's local kill switch: closes the open window, stops what
+    /// runs, and refuses every later click until released.
+    public func engageKillSwitch() {
+        queue.async {
+            guard let session = self.session else { return }
+            let frames = session.engageKillSwitch()
+            if !frames.isEmpty { self.connection?.sendSessionFrames(frames) }
+        }
+    }
+
+    /// Release the local kill switch (the app authenticates the owner first).
+    public func releaseKillSwitch() {
+        queue.async { self.session?.releaseKillSwitch() }
+    }
+
+    public var killSwitchEngaged: Bool { queue.sync { session?.killSwitchEngaged ?? false } }
 
     /// Load the credential and connect.
     public func start() {
@@ -484,8 +565,10 @@ public final class NodeRunner: @unchecked Sendable {
         let (catalogue, readers) = readersAndCatalogue()
         let session = NodeSession(
             nodeID: credential.nodeID, pinned: credential.pinnedKeys, catalogue: catalogue,
-            readers: readers, clock: clock, nodeVersion: NodeInfo.nodeVersion, osVersion: NodeInfo.osVersion)
+            readers: readers, clock: clock, nodeVersion: NodeInfo.nodeVersion, osVersion: NodeInfo.osVersion,
+            policy: actionPolicy, executor: executor)
         session.spool = spool
+        session.confirmationObserver = confirmationObserver
         return session
     }
 

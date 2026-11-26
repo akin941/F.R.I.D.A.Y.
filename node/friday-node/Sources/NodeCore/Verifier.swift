@@ -51,22 +51,56 @@ public enum Signing {
         return raw
     }
 
+    /// The v2 signature domains (Phase 10 D1): an envelope is signed over
+    /// `invokeDomainV2 + canonical(envelope - sig)`, a grant over
+    /// `grantDomainV2 + canonical(grant - sig)`; v1 envelopes have none.
+    public static let invokeDomainV2 = Data("friday-node/invoke/v2\n".utf8)
+    public static let grantDomainV2 = Data("friday-node/grant/v2\n".utf8)
+
+    /// The signature domain of an envelope of protocol `version`; nil for an
+    /// unknown version (which never verifies).
+    public static func envelopeDomain(_ version: JSONValue?) -> Data? {
+        switch version {
+        case .int(1): return Data()
+        case .int(2): return invokeDomainV2
+        default: return nil
+        }
+    }
+
     /// D5 checks 5 and 6 for an envelope against the pinned keys
     /// (`[key_id: raw public key]`). Throws `unknown_key` / `bad_signature`.
-    public static func verify(_ envelope: JSONValue, pinned: [String: Data]) throws {
-        guard let fields = envelope.objectValue, let keyID = fields["key_id"]?.stringValue,
+    /// `version` is the session's negotiated version: an envelope of another
+    /// `v` is `bad_signature`; the envelope's own `v` picks the domain
+    /// (signing.py `verify_envelope`).
+    public static func verify(_ envelope: JSONValue, pinned: [String: Data], version: Int64 = 1) throws {
+        guard let keyID = envelope["key_id"]?.stringValue, pinned[keyID] != nil else {
+            throw ProtocolError("unknown_key")
+        }
+        guard envelope["v"] == .int(version), let domain = envelopeDomain(envelope["v"]) else {
+            throw ProtocolError("bad_signature")
+        }
+        try verify(envelope, pinned: pinned, domain: domain)
+    }
+
+    /// `signed["sig"]` over `domain + canonical(signed without sig)` against
+    /// the pinned keys (signing.py `verify_with_domain`). Throws
+    /// `unknownKey` / `badSignature`.
+    public static func verify(
+        _ signed: JSONValue, pinned: [String: Data], domain: Data, unknownKey: String = "unknown_key",
+        badSignature: String = "bad_signature"
+    ) throws {
+        guard let fields = signed.objectValue, let keyID = fields["key_id"]?.stringValue,
             let raw = pinned[keyID]
-        else { throw ProtocolError("unknown_key") }
-        guard envelope["v"] == .int(NodeProtocol.version),
-            let sigText = fields["sig"]?.stringValue, let signature = Base64URL.decode(sigText),
+        else { throw ProtocolError(unknownKey) }
+        guard let sigText = fields["sig"]?.stringValue, let signature = Base64URL.decode(sigText),
             signature.count == signatureBytes
-        else { throw ProtocolError("bad_signature") }
+        else { throw ProtocolError(badSignature) }
         var body = fields
         body.removeValue(forKey: "sig")
-        guard let message = try? JSON.canonical(.object(body)),
+        guard let canonical = try? JSON.canonical(.object(body)),
             let key = try? Curve25519.Signing.PublicKey(rawRepresentation: raw),
-            key.isValidSignature(signature, for: message)
-        else { throw ProtocolError("bad_signature") }
+            key.isValidSignature(signature, for: domain + canonical)
+        else { throw ProtocolError(badSignature) }
     }
 }
 
@@ -109,6 +143,12 @@ public final class NonceCache {
 public struct Refusal: Error, Equatable {
     public let code: String
     public let check: Int
+
+    public init(code: String, check: Int) {
+        self.code = code
+        self.check = check
+    }
+
     /// Checks 1-4 are frame errors (an `error` result, not `refused`).
     public var isFrameError: Bool { check <= 4 }
 }

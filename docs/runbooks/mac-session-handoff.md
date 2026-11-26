@@ -935,27 +935,42 @@ place of the reference node.
 Needs: B1–B3. Spec: Phase 10 brief "Mac session (deferred)" M1, D5 checks
 13–24, D12; ADR-013 decision 6; ADR-014.
 
-- [ ] `GrantVerifier.swift` (domain-separated Ed25519 over the canonical
+- [x] `GrantVerifier.swift` (domain-separated Ed25519 over the canonical
       grant, field binding, TTL ≤ 120 s); `VerifierV2.swift` (D5 checks
       13–24 in order, same codes); `OutputStreamer.swift` (8 KiB chunks,
       seq, D12 carry-over scrub so a split secret is still removed, 1 MiB
-      cap, tail ≤ 4 KiB); v2 subprotocol offer in `Session.swift`.
-- [ ] `Sources/FridayNode/ConfirmationWindow.swift`: non-activating
+      cap, tail ≤ 4 KiB); v2 subprotocol offer in `Session.swift`. Done
+      2026-11-27 (`VerifierV2` runs 1–22; 23–24 are in `NodeSession`, as in
+      the reference node).
+- [x] `Sources/FridayNode/ConfirmationWindow.swift`: non-activating
       floating `NSPanel`, rendered from the node's **own** validated args
       and the capability's `confirm_template` (never server text); shows
       the approval id's first 8 characters for gate-class, the repo's local
       name and the exact argv and network setting for `repo.command.run`;
       buttons "Çalıştır" / "Reddet"; 60 s countdown; closes on socket loss,
       kill switch or timeout; one window at a time; "Durdur" while running.
-- [ ] Validate `text`, `title` and `repo_path` with the **identical**
+      Done 2026-11-27: the file is `App/FridayNode/ConfirmationWindow.swift`
+      (the app target; there is no `Sources/FridayNode/`); the decision
+      logic is NodeCore `Confirmation.swift` and `NodeSession`, unit-tested.
+- [x] Validate `text`, `title` and `repo_path` with the **identical**
       pattern strings from the v2 contract files (no `CharacterSet`
       approximation); replay the hostile-insert families of
       `backend/nodes/tests/test_capabilities_v2.py`; mirror
-      `x-friday-max-bytes`.
-- [ ] The `Conformance` build implements the external JSON-lines hook of
+      `x-friday-max-bytes`. Done 2026-11-27 (`ArgsValidationTests`, plus a
+      CPython `re.fullmatch` differential over every code point).
+- [x] The `Conformance` build implements the external JSON-lines hook of
       `backend/nodes/conformance/gateway.py` (ops `prepare`, `advance`,
       `tick`, `kill_switch`, `report`, `wait_disconnected`), compiled only
-      under `#if CONFORMANCE`.
+      under `#if CONFORMANCE`. Done 2026-11-27 (plus `voice_state`; the
+      scripted owner and executor are `#if DEBUG`).
+
+**Status 2026-11-27 (`feat/p10-node-confirm`):** contract test 1 passes
+(86/86 v1, 99/99 v2 offline, none pending; `grants.json`, `signing_v2.json`,
+`scrub_stream.json`); contract test 2 passes live (`--protocol 2` 99/99,
+`--protocol 1` 86/86, port 8766); contract test 3 is an owner step that
+needs runbook B6 first (until then every action is advertised
+`unsupported` and no repo is mapped). Details: the Phase 10 brief, M1
+implementation record.
 
 **Server-side contract tests it must pass:**
 
@@ -1060,7 +1075,11 @@ Needs: B1–B3, B5 merged; A7, A8, A10. Spec: Phase 11 brief "Mac session
       validated against `$defs.voice_state_item`, re-sent with every
       heartbeat and after reconnect, never spooled); the `Conformance`
       build's `{"op": "voice_state", …}` hook op and the
-      `voice_states_dropped` report key.
+      `voice_states_dropped` report key. **2026-11-27: the session-side
+      relay (`NodeSession.relayVoiceState`), the hook op and the report key
+      landed with B5, because B5's contract test 1 plays every `cases/v2`
+      file (the nine voice-state cases pass offline and live); what is left
+      here is feeding it from `VoiceChildHost`.**
 - [ ] `release_mic(storm)` releases the mic and shows `storm_muted` until a
       mute on → off cycle.
 - [ ] Microphone entitlement (`com.apple.security.device.audio-input`,

@@ -22,4 +22,26 @@ final class ReleaseHygieneTests: XCTestCase {
                      "the conformance pin type is compiled into a non-Conformance build")
         #endif
     }
+
+    /// Runbook B5: the scripted window owner and the scripted executor (the
+    /// seams the conformance hook and the offline suite drive) exist only in
+    /// DEBUG builds; Release has neither (a public probe: no `@testable`).
+    func testTheScriptedDoublesAreNotCompiledIntoRelease() {
+        #if DEBUG
+        XCTAssertTrue(ReleaseProbe.scriptedDoublesCompiledIn)
+        #else
+        XCTAssertFalse(ReleaseProbe.scriptedDoublesCompiledIn,
+                       "the scripted window owner or executor is compiled into a Release build")
+        #endif
+    }
+
+    /// Whatever the build, the protocol offer is v2 then v1, and the release
+    /// executor runs nothing: every action contract is `unsupported`.
+    func testTheReleaseExecutorRunsNothing() {
+        XCTAssertEqual(NodeProtocol.offeredSubprotocols, ["friday-node.v2", "friday-node.v1"])
+        let executor = UnavailableExecutor()
+        for contract in CapabilityContract.actions {
+            XCTAssertEqual(executor.availability(for: contract.name), "unsupported", contract.name)
+        }
+    }
 }
