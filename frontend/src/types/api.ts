@@ -140,6 +140,54 @@ export interface ApiNodeSummary {
   advertised_count: number;
   invocable_count: number;
   snapshot_at: string | null;
+  /** Phase 13 D3: the owner's labels (server-side data; never sent to the node). */
+  name_key?: string;
+  room?: ApiRoomRef | null;
+  role?: ApiNodeRole;
+  platform?: ApiNodePlatform;
+  aliases?: string[];
+  last_active_at?: string | null;
+}
+
+export type ApiNodeRole = "workstation" | "laptop" | "media" | "server" | "other";
+export type ApiNodePlatform = "macos" | "linux" | "windows";
+
+/** A room as a node carries it (Phase 13 D2). */
+export interface ApiRoomRef {
+  id: string;
+  name: string;
+  key: string;
+}
+
+/** `GET/POST /api/v1/workspaces/<id>/rooms` row (Phase 13 D2). */
+export interface ApiRoom extends ApiRoomRef {
+  aliases: string[];
+  sort_order: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ApiRoomList {
+  workspace: string;
+  limits: { aliases: number; alias_min_chars: number; alias_max_chars: number; name_max_chars: number };
+  results: ApiRoom[];
+}
+
+/** One row of `GET /api/v1/nodes/<id>/audit` (Phase 13 D8): a chain row or an event. */
+export type ApiNodeAuditRow =
+  | ({ kind: "invocation" } & ApiNodeInvocation)
+  | {
+      kind: "event";
+      id: string;
+      created_at: string;
+      action: string;
+      actor_type: string;
+      details: Record<string, string | number | boolean | null | string[]>;
+    };
+
+export interface ApiNodeAuditPage {
+  results: ApiNodeAuditRow[];
+  next_cursor: string | null;
 }
 
 /** One snapshot entry: availability is the Mac's own (read-only here). */

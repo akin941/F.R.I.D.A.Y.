@@ -226,4 +226,35 @@ describe("NodesSection (Phase 9 D11)", () => {
     render(<NodesSection />);
     expect(await screen.findByText("Mac düğümleri yüklenemedi.")).toBeInTheDocument();
   });
+
+  it("shows the owner's labels and edits them in a dialog (Phase 13 D3)", async () => {
+    const labelled = node({
+      room: { id: "r1", name: "Çalışma odası", key: "çalişma odasi" },
+      role: "workstation",
+      platform: "linux",
+      aliases: ["masa"],
+    });
+    const fetchMock = stubBackend({
+      nodes: [labelled],
+      extra: (url, init) =>
+        url === `/api/nodes/${ID}` && init?.method === "PATCH"
+          ? jsonResponse({ ...labelled, name: "Masaüstü" })
+          : undefined,
+    });
+    const user = userEvent.setup();
+    render(<NodesSection />);
+    const card = await screen.findByTestId("node-card");
+    expect(within(card).getByTestId("node-labels")).toHaveTextContent(
+      "Çalışma odası · Masaüstü iş istasyonu · Linux · takma adlar: masa",
+    );
+    await user.click(within(card).getByRole("button", { name: "Düzenle" }));
+    const dialog = await screen.findByRole("dialog");
+    const name = within(dialog).getByLabelText("Ad");
+    await user.clear(name);
+    await user.type(name, "Masaüstü");
+    await user.click(within(dialog).getByRole("button", { name: "Kaydet" }));
+    await waitFor(() => expect(within(card).getByText("Masaüstü")).toBeInTheDocument());
+    const patch = fetchMock.mock.calls.find(([, init]) => init?.method === "PATCH")!;
+    expect(JSON.parse(patch[1]!.body as string)).toMatchObject({ name: "Masaüstü", room_id: "r1" });
+  });
 });

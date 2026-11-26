@@ -174,6 +174,11 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
   return <WorkspaceContext.Provider value={value}>{children}</WorkspaceContext.Provider>;
 }
 
+/** The workspace context, or null outside a WorkspaceProvider (optional consumers). */
+export function useOptionalWorkspace(): WorkspaceContextValue | null {
+  return useContext(WorkspaceContext);
+}
+
 export function useWorkspace(): WorkspaceContextValue {
   const ctx = useContext(WorkspaceContext);
   if (!ctx) {

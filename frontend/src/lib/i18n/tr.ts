@@ -302,6 +302,18 @@ export const ERROR_MESSAGES = {
     specific: true,
   },
   "wake_alias.limit": { message: "Bir komutun en fazla 5 takma adı olabilir.", specific: true },
+  // Rooms and node labels (Phase 13 D2/D3).
+  "label.invalid": {
+    message: "Ad harf ya da rakam içermeli (oda 60, düğüm 100 karaktere kadar); takma ad 2-40 karakter olmalı.",
+    specific: true,
+  },
+  "label.limit": { message: "En fazla 5 takma ad eklenebilir.", specific: true },
+  "label.conflict": { message: "Bu ad ya da takma ad zaten kullanılıyor.", specific: true },
+  "label.unknown_room": { message: "Böyle bir oda yok.", specific: true },
+  "room.in_use": {
+    message: "Bu oda hâlâ bir düğüme atanmış; önce düğümün odasını değiştir.",
+    specific: true,
+  },
   // Workspaces
   "workspace.permission_denied": {
     message: "Rolün bu çalışma alanını düzenlemeye yetmiyor.",

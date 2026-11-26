@@ -46,9 +46,11 @@ describe("node BFF routes (Phase 9 D11)", () => {
     const list = await import("@/app/api/nodes/route");
     const detail = await import("@/app/api/nodes/[nodeId]/route");
     const log = await import("@/app/api/nodes/[nodeId]/invocations/route");
-    for (const route of [list, detail, log]) {
+    for (const route of [list, log]) {
       expect(Object.keys(route).filter((k) => /^[A-Z]+$/.test(k))).toEqual(["GET"]);
     }
+    // Phase 13 D3: the detail route also takes the owner's label PATCH.
+    expect(Object.keys(detail).filter((k) => /^[A-Z]+$/.test(k)).sort()).toEqual(["GET", "PATCH"]);
     expect((await list.GET()).status).toBe(200);
     expect((await detail.GET(req(`/api/nodes/${NODE}`), params(NODE))).status).toBe(200);
     expect((await log.GET(req(`/api/nodes/${NODE}/invocations?cursor=58`), params(NODE))).status).toBe(200);
@@ -130,6 +132,38 @@ describe("node BFF routes (Phase 9 D11)", () => {
     expect(bodies).toEqual([
       { kind: "strong", device_kind: "node" },
       { kind: "pin", device_kind: "node" },
+    ]);
+  });
+
+  it("PATCH labels is origin-checked and forwards the body (Phase 13 D3)", async () => {
+    cookiesMock.mockResolvedValue(cookieStore("token"));
+    const fetchMock = stubFetch(200, { id: NODE });
+    const detail = await import("@/app/api/nodes/[nodeId]/route");
+    expect(
+      (await detail.PATCH(req(`/api/nodes/${NODE}`, "PATCH", { origin: "https://evil.example" }, {}), params(NODE)))
+        .status,
+    ).toBe(403);
+    expect((await detail.PATCH(req(`/api/nodes/x`, "PATCH", {}, {}), params("../x"))).status).toBe(404);
+    expect(fetchMock).not.toHaveBeenCalled();
+    const body = { name: "Masaüstü", role: "workstation" };
+    expect((await detail.PATCH(req(`/api/nodes/${NODE}`, "PATCH", {}, body), params(NODE))).status).toBe(200);
+    const [url, init] = fetchMock.mock.calls[0]!;
+    expect(url).toBe(`${BACKEND}/nodes/${NODE}`);
+    expect(init!.method).toBe("PATCH");
+    expect(JSON.parse(init!.body as string)).toEqual(body);
+  });
+
+  it("GET audit forwards only a well-formed cursor (Phase 13 D8)", async () => {
+    cookiesMock.mockResolvedValue(cookieStore("token"));
+    const fetchMock = stubFetch(200, { results: [], next_cursor: null });
+    const audit = await import("@/app/api/nodes/[nodeId]/audit/route");
+    expect(Object.keys(audit).filter((k) => /^[A-Z]+$/.test(k))).toEqual(["GET"]);
+    const cursor = `1764000000000000.${NODE}`;
+    expect((await audit.GET(req(`/api/nodes/${NODE}/audit?before=${cursor}`), params(NODE))).status).toBe(200);
+    expect((await audit.GET(req(`/api/nodes/${NODE}/audit?before=1%26x`), params(NODE))).status).toBe(400);
+    expect((await audit.GET(req(`/api/nodes/x/audit`), params("x"))).status).toBe(404);
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
+      `${BACKEND}/nodes/${NODE}/audit?before=${cursor}`,
     ]);
   });
 });
