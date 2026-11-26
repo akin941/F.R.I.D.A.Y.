@@ -1,6 +1,8 @@
 // PTSpike — throwaway Personal Team signing spike (runbook mac-session-handoff A1).
 // Not friday-node. Shows whether TCC grants and a Keychain item survive rebuilds
 // signed with the free Apple ID "Apple Development" identity.
+// Build only through ../build.sh: it generates the gitignored BuildMarker.swift
+// (`buildMarker`), so a fresh clone does not compile from Xcode until it has run.
 
 import SwiftUI
 
