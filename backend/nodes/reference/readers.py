@@ -52,8 +52,10 @@ pin them):
 4. **Bounded.** At most `MAX_FILES` transcript files, `MAX_FILE_BYTES` per
    file and `MAX_LINE_BYTES` per line are read. A row that does not match
    the capability's `result_schema` is dropped. The output is cut to the
-   contract's `max_result_bytes` (oldest turns, or last rows, first) and
-   marked `truncated`.
+   contract's `max_result_bytes` (oldest turns, or last rows, first; an
+   owner-turn result loses its newest turns first and its `next_since` is
+   recomputed from the turns left, `_fit_owner_turns`) and marked
+   `truncated`.
 5. `cwd` is returned in `~/` form under the node's home, absolute
    elsewhere. Times are integer Unix seconds.
 6. Nothing is cached, copied or logged: every call re-reads the files.
@@ -752,10 +754,13 @@ class Readers:
 
     def _fit(self, capability, output):
         """Cut `output` to the contract's `max_result_bytes`: turns from the
-        oldest, other rows from the end (usage totals recomputed)."""
+        oldest, other rows from the end (usage totals recomputed); an
+        owner-turn result by `_fit_owner_turns`."""
         limit = self.contracts[capability].max_result_bytes
         if len(canonicalize(output)) <= limit:
             return output, False
+        if capability in owner_turns.CAPABILITIES:
+            return _fit_owner_turns(output, limit), True
         key = next(
             (k for k in ("turns", "sessions", "threads", "by_project", "windows") if k in output),
             None,
@@ -772,6 +777,44 @@ class Readers:
                 return candidate, True
         candidate = _usage_totals([]) if key == "by_project" else {**output, key: []}
         return candidate, True
+
+
+def _fit_owner_turns(output, limit):
+    """An owner-turn result cut to `limit` canonical bytes: the newest turns
+    go first, in the reader's own `(at, turn_id)` order (sessions left
+    without a turn go too), and `next_since` is recomputed as the `at` of
+    the last surviving turn. Every dropped turn is then at or after
+    `next_since`, and `since` is inclusive, so the next call returns it: the
+    cursor never skips a turn this cut dropped. (Dropping whole sessions
+    from the end, as for other lists, could drop a turn older than one that
+    survives and leave a `next_since` past it.) With no turn left,
+    `next_since` is the earliest dropped turn's `at`. `at` strings share one
+    fixed format, so they order as instants; two turns in the same
+    millisecond both sit at or after a `next_since` of that millisecond.
+    Unreachable with the reader's own 60 KiB budget (owner_turns.py), kept
+    as defence in depth."""
+    sessions = output["sessions"]
+    order = sorted(
+        (turn["at"], turn["turn_id"], i, j)
+        for i, session in enumerate(sessions)
+        for j, turn in enumerate(session["turns"])
+    )
+    keep = len(order)
+    while True:
+        keep = max(keep - 1, 0)
+        kept = {(i, j) for _at, _turn_id, i, j in order[:keep]}
+        rows = []
+        for i, session in enumerate(sessions):
+            turns = [turn for j, turn in enumerate(session["turns"]) if (i, j) in kept]
+            if turns:
+                rows.append({**session, "turns": turns})
+        if keep:
+            next_since = order[keep - 1][0]
+        else:
+            next_since = order[0][0] if order else output["next_since"]
+        candidate = {**output, "sessions": rows, "next_since": next_since, "truncated": True}
+        if keep == 0 or len(canonicalize(candidate)) <= limit:
+            return candidate
 
 
 def _usage_totals(rows):
