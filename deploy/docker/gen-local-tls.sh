@@ -37,12 +37,11 @@ extendedKeyUsage = serverAuth
 CNF
   openssl ecparam -name prime256v1 -genkey -param_enc named_curve -noout -out "$DIR/key.pem"
   openssl req -new -x509 -key "$DIR/key.pem" -out "$DIR/cert.pem" -days 3650 -config "$CONF" -sha256
-  chmod 600 "$DIR/key.pem"
-  # Caddy runs as root in its container with all capabilities dropped; a
-  # 0600 key owned by the host user is readable there only through the bind
-  # mount's own permissions, so make it readable to the container's user.
-  chmod 644 "$DIR/key.pem"
-  chmod 644 "$DIR/cert.pem"
+  # 0644 files inside the 0700 directory: on the host only the owner can
+  # reach the key (the directory gates it); inside the container Caddy runs
+  # with every capability but NET_BIND_SERVICE dropped (no DAC override),
+  # so the files themselves must be world-readable for it to load them.
+  chmod 644 "$DIR/key.pem" "$DIR/cert.pem"
 fi
 PIN=$(openssl x509 -in "$DIR/cert.pem" -pubkey -noout | openssl pkey -pubin -outform der | openssl dgst -sha256 -binary | base64)
 echo "certificate: $DIR/cert.pem"
