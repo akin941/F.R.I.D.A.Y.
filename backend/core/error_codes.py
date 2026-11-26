@@ -121,6 +121,11 @@ DOMAIN_ERROR_CODES = frozenset(
         "label.conflict",
         "label.unknown_room",
         "room.in_use",
+        # The Home Assistant entity allowlist (Phase 13 branch 5, D11).
+        "ha_entity.invalid",
+        "ha_entity.not_allowed",
+        "ha_entity.conflict",
+        "ha_entity.read_failed",
         "workspace.permission_denied",
     }
 )

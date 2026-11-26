@@ -1,5 +1,76 @@
 from rest_framework import serializers
 
+# Transport bounds only; the service applies the real label rules
+# (`workspaces.rooms.clean_label`) and the code maximum.
+_LABEL_TRANSPORT_MAX = 200
+
+
+class HomeEntityQuerySerializer(serializers.Serializer):
+    workspace = serializers.UUIDField()
+
+
+class HomeEntityWriteSerializer(serializers.Serializer):
+    """`POST` (workspace, entity_id, label, services required) and `PATCH`
+    (partial; `workspace` and `entity_id` not accepted) body of an
+    allowlisted Home Assistant entity (Phase 13 D11). Unknown keys are
+    refused."""
+
+    workspace = serializers.UUIDField()
+    entity_id = serializers.CharField(max_length=141, trim_whitespace=False)
+    label = serializers.CharField(
+        max_length=_LABEL_TRANSPORT_MAX, trim_whitespace=False, allow_blank=True
+    )
+    room_id = serializers.UUIDField(allow_null=True, required=False)
+    aliases = serializers.ListField(
+        child=serializers.CharField(
+            max_length=_LABEL_TRANSPORT_MAX, trim_whitespace=False, allow_blank=True
+        ),
+        max_length=20,
+        required=False,
+    )
+    services = serializers.ListField(
+        child=serializers.CharField(max_length=40), max_length=40, allow_empty=True
+    )
+    enabled = serializers.BooleanField(required=False)
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        if self.partial:
+            # The entity id never changes and the row names its workspace.
+            self.fields.pop("workspace")
+            self.fields.pop("entity_id")
+
+    def to_internal_value(self, data):
+        if isinstance(data, dict):
+            unknown = sorted(set(data) - set(self.fields))
+            if unknown:
+                raise serializers.ValidationError({key: ["Unknown field."] for key in unknown})
+        return super().to_internal_value(data)
+
+    def validate(self, attrs):
+        if self.partial and not attrs:
+            raise serializers.ValidationError("Provide at least one field to change.")
+        return attrs
+
+
+class HomeEntitySerializer(serializers.Serializer):
+    id = serializers.UUIDField(read_only=True)
+    entity_id = serializers.CharField(read_only=True)
+    domain = serializers.CharField(read_only=True)
+    label = serializers.CharField(read_only=True)
+    key = serializers.CharField(read_only=True)
+    aliases = serializers.ListField(child=serializers.CharField(), read_only=True)
+    services = serializers.ListField(child=serializers.CharField(), read_only=True)
+    enabled = serializers.BooleanField(read_only=True)
+    room = serializers.SerializerMethodField()
+    created_at = serializers.DateTimeField(read_only=True)
+    updated_at = serializers.DateTimeField(read_only=True)
+
+    def get_room(self, entity):
+        if entity.room_id is None:
+            return None
+        return {"id": str(entity.room_id), "name": entity.room.name, "key": entity.room.key}
+
 
 class BindingQuerySerializer(serializers.Serializer):
     workspace = serializers.UUIDField()
