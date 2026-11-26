@@ -13,7 +13,6 @@ from django.utils import timezone
 
 from accounts.models import NodeKillSwitch
 from accounts.services import register_user
-from ai_core.models import ModelUsage
 from nodes import bus, targeting
 from nodes.activity import mark_node_active
 from nodes.models import Node
@@ -334,11 +333,16 @@ def test_a_node_bumping_last_active_cannot_change_an_explicit_or_origin_resoluti
 # --- no model call; replies ---------------------------------------------------
 
 
-def test_resolution_makes_no_model_call(world):
-    before = ModelUsage.objects.count()
+def test_resolution_is_code_only(world):
+    """No model call: `nodes` cannot reach `ai_core` at all (import
+    contract), so the resolver cannot make one; the turn-level ModelUsage
+    counts are pinned in `tools/tests/test_node_targeting_actions.py` and
+    `assistant/tests/test_which_pc.py`."""
+    import nodes.targeting as module
+
+    assert "ai_core" not in module.__dict__
     for text in ("MacBook'ta", "oturumlar", "çalışma odasındaki", ""):
         resolve(world, text)
-    assert ModelUsage.objects.count() == before
 
 
 def test_the_ask_template_lists_the_candidates_with_vowel_harmony(world):
