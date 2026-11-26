@@ -9,10 +9,13 @@ chain-audited), with the caller's `channel` and `actor` passed through.
 
 - **Which node.** `owner_node(owner)` picks among the owner's own nodes
   (`nodes.selectors.nodes_for`, `for_actor()`), usable ones only (not
-  revoked, killed or expired): first a node whose latest
-  `CapabilitySnapshot` offers an owner-turn read, then an online one, then
-  the most recently active, then the newest. A node that is not online is
-  `None` (the pull skips it as `no_node`, nothing is sent). One node per
+  revoked, killed or expired), ranked by, in this order: online (a live
+  presence key) first; then a node whose latest `CapabilitySnapshot`
+  offers an owner-turn read; then the most recently active; then the
+  newest. Online comes first so an offline node that offers the reads
+  never hides an online one (the pull reaches the online node and its
+  `capability_granted` decides). When no usable node is online the answer
+  is `None` (the pull skips it as `no_node`, nothing is sent). One node per
   owner: the pull's seam has one node per owner (the cursor is keyed by
   the node's id, `NodeHandle.ref`).
 - **Granted.** `capability_granted(node, capability)` is true only when
@@ -69,9 +72,10 @@ class NodesTranscriptPort:
 
         def rank(node):
             last_active = node.last_active_at.timestamp() if node.last_active_at else 0.0
+            # The order is documented in the module docstring ("Which node").
             return (
-                _offers_owner_turns(node),
                 presence.is_online(node),
+                _offers_owner_turns(node),
                 last_active,
                 node.created_at.timestamp(),
             )

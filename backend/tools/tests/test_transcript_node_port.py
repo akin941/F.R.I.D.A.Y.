@@ -142,6 +142,61 @@ def test_another_owners_node_is_never_picked(world, link, port):
     assert port.owner_node(stranger) is None
 
 
+class _FakeNode:
+    def __init__(self, name, *, online, offers, active_minutes_ago=None, created_minutes_ago=60):
+        self.pk = name
+        self.name = name
+        self.owner = object()
+        self.online = online
+        self.offers = offers
+        self.last_active_at = (
+            None if active_minutes_ago is None else NOW - timedelta(minutes=active_minutes_ago)
+        )
+        self.created_at = NOW - timedelta(minutes=created_minutes_ago)
+
+
+def _pick(monkeypatch, nodes):
+    from tools import transcript_node_port as module
+
+    monkeypatch.setattr(module, "nodes_for", lambda owner: list(nodes))
+    monkeypatch.setattr(module, "is_usable", lambda node: True)
+    monkeypatch.setattr(module.presence, "is_online", lambda node: node.online)
+    monkeypatch.setattr(module, "_offers_owner_turns", lambda node: node.offers)
+    owner = type("Owner", (), {"pk": 1})()
+    picked = NodesTranscriptPort().owner_node(owner)
+    return None if picked is None else picked.ref
+
+
+def test_an_online_node_wins_over_an_offline_one_that_offers_the_reads(monkeypatch):
+    """Review follow-up (A12): online first, then offering the reads."""
+    offline_offering = _FakeNode(
+        "offline-offering", online=False, offers=True, active_minutes_ago=1
+    )
+    online_plain = _FakeNode("online-plain", online=True, offers=False, active_minutes_ago=30)
+    assert _pick(monkeypatch, [offline_offering, online_plain]) == "online-plain"
+    assert _pick(monkeypatch, [online_plain, offline_offering]) == "online-plain"
+
+
+def test_among_online_nodes_the_one_offering_the_reads_wins(monkeypatch):
+    plain = _FakeNode("online-plain", online=True, offers=False, active_minutes_ago=1)
+    offering = _FakeNode("online-offering", online=True, offers=True, active_minutes_ago=30)
+    assert _pick(monkeypatch, [plain, offering]) == "online-offering"
+
+
+def test_then_the_most_recently_active_then_the_newest(monkeypatch):
+    older = _FakeNode("older", online=True, offers=True, active_minutes_ago=10)
+    recent = _FakeNode("recent", online=True, offers=True, active_minutes_ago=2)
+    assert _pick(monkeypatch, [recent, older]) == "recent"
+    first = _FakeNode("first", online=True, offers=True, created_minutes_ago=90)
+    newest = _FakeNode("newest", online=True, offers=True, created_minutes_ago=5)
+    assert _pick(monkeypatch, [newest, first]) == "newest"
+
+
+def test_no_online_node_is_no_node_even_when_an_offline_one_offers(monkeypatch):
+    offline = _FakeNode("offline-offering", online=False, offers=True, active_minutes_ago=1)
+    assert _pick(monkeypatch, [offline]) is None
+
+
 def test_capability_granted_follows_the_latest_snapshot(world, link, port):
     link()
     assert port.capability_granted(handle(world), CLAUDE)
