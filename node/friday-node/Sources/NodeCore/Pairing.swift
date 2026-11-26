@@ -27,11 +27,17 @@ public struct PairingRequest: Sendable {
     public var serverURL: URL
     public var code: String
     public var nodeName: String
+    /// The SPKI pin the owner typed into the pairing window (a server whose
+    /// certificate this Mac does not trust: the loopback proxy of
+    /// deploy/docker/compose.local-tls.yml). nil: the system must trust the
+    /// server, and the pin is captured from that connection.
+    public var expectedPin: Data?
 
-    public init(serverURL: URL, code: String, nodeName: String) {
+    public init(serverURL: URL, code: String, nodeName: String, expectedPin: Data? = nil) {
         self.serverURL = serverURL
         self.code = code
         self.nodeName = nodeName
+        self.expectedPin = expectedPin
     }
 }
 
@@ -97,11 +103,15 @@ public enum Pairing {
             "protocol_versions": [.int(NodeProtocol.version)],
             "platform": "macos",
         ]
-        let (status, response, observedPin) = try await HTTP.post(url, body: body, bearer: nil, pin: nil)
+        // With an owner-typed pin the connection is accepted only if the
+        // served key matches it (no CA trust involved); without one, only if
+        // the system trusts the server.
+        let (status, response, observedPin) = try await HTTP.post(
+            url, body: body, bearer: nil, pin: request.expectedPin)
         guard status == 200 || status == 201 else {
             throw NodeHTTPError.status(status, code: response?["code"]?.stringValue)
         }
-        guard let pin = observedPin else { throw NodeHTTPError.tlsPinMissing }
+        guard let pin = request.expectedPin ?? observedPin else { throw NodeHTTPError.tlsPinMissing }
         return try credential(from: response, serverURL: request.serverURL, tlsPin: pin, now: now)
     }
 
