@@ -2827,9 +2827,9 @@ Package `node/friday-node/` (README there). Contract test status:
 |---|---|
 | 1. Offline conformance | `swift test`: every `cases/v1` file is played; **39 of 50 match the reference node**. The 11 read cases that need the M2 readers and the scrubber (Claude Code / Codex transcripts, git, usage, window titles) are listed in `ConformanceTests.pendingM2`; the test fails when a listed case starts passing, so M2 must empty the list. Nothing is skipped silently. |
 | 2. Live conformance | `node_conformance_server --external --tls-self-signed --protocol 1` with the unsigned `Conformance` build: **39/39 ALL PASS** for the same M1 case set over real WSS with the self-signed certificate pinned. The full `--protocol 1` run waits for M2's readers. |
-| 3. Real stack | **Pending owner steps** (below): no owner account and no TLS exposure of `node-gateway` on this Mac yet. |
+| 3. Real stack | **Pass** (2026-11-26, loopback stack on the owner's Mac, `feat/p9-node-local-pairing`): paired from the menu with a strong code and the typed pin; `hello.ack` arrived and the gateway counts the node connected; kill switch on → socket closed **0.24 s** after the command returned, `stopped(bye:kill_switch)`, no reconnect for 20 s, still none 15 s after release; owner "Devam et" → connected in 0.15 s; revoke → socket closed **0.04 s** after the call, `stopped(bye:revoked)`, no reconnect; "Devam et" then → 4401 → `needsPairing`; re-paired with a new code → connected. |
 | 4. No listener | **Pass**: `lsof -nP -iTCP -sTCP:LISTEN -a -p $(pgrep FridayNode)` prints nothing; `lsof -i` shows no socket at all while unpaired. |
-| 5. `make preflight` | Pending with 3. |
+| 5. `make preflight` | **Pass**: `node_link:<the Mac>` connected (heartbeat seconds ago, protocol v1, 0/8 invocable as M1 grants nothing), `node_signing_key` the same key id in web, worker and gateway, `node_tls_pin` the served SPKI matches; 44 pass / 0 fail / 29 warn (every warn an owner step or a pending Mac evaluation). |
 
 Decisions and deviations, each kept within the brief's rules:
 
@@ -2905,6 +2905,9 @@ Decisions and deviations, each kept within the brief's rules:
   ceiling is 1 s, so the check's bound still holds.
 
 ### Owner steps (pending) — `feat/p9-node-app`, recorded 2026-11-26
+
+**Steps 1-3 done 2026-11-26** on the loopback stack (`make up-local-tls`,
+no exposure beyond the Mac, owner decision); step 4 stays.
 
 1. Create the installation owner (needs your password, typed by you):
    `docker compose -f deploy/docker/compose.yml exec web uv run python
