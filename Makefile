@@ -1,6 +1,7 @@
 # Friday OS — development commands
 COMPOSE := docker compose -f deploy/docker/compose.yml
 COMPOSE_DAILY := $(COMPOSE) -f deploy/docker/compose.daily.yml
+COMPOSE_LOCAL_TLS := $(COMPOSE) -f deploy/docker/compose.local-tls.yml
 COMPOSE_HOME := $(COMPOSE_DAILY) -f deploy/docker/compose.home.yml
 BACKEND := cd backend &&
 # The WSGI/ASGI/Celery entry points default to config.settings.prod (fail
@@ -11,7 +12,7 @@ BACKEND := cd backend &&
 DEV_SETTINGS := DJANGO_SETTINGS_MODULE=$${DJANGO_SETTINGS_MODULE:-config.settings.dev}
 FRONTEND := cd frontend &&
 
-.PHONY: up up-daily up-home down logs secrets test lint fmt shell migrate makemigrations \
+.PHONY: up up-daily up-home up-local-tls local-tls down logs secrets test lint fmt shell migrate makemigrations \
 	harness-images harness-smoke harness-runner deploy-smoke preflight \
 	test-backend test-frontend test-e2e lint-backend lint-frontend \
 	frontend-install frontend-dev frontend-build e2e-install voice-models \
@@ -31,6 +32,14 @@ up: secrets
 # deploy/docker/compose.daily.yml).
 up-daily: secrets
 	$(COMPOSE_DAILY) up -d --build
+
+# A Friday Node on THIS Mac only (Phase 9 M1): the dev stack plus a
+# loopback-only TLS proxy on 127.0.0.1:8443 (deploy/docker/compose.local-tls.yml).
+local-tls:
+	@sh deploy/docker/gen-local-tls.sh
+
+up-local-tls: secrets local-tls
+	$(COMPOSE_LOCAL_TLS) up -d --build
 
 # Home server (Phase 13, ADR-017): the daily stack plus the home override
 # (deploy/docker/compose.home.yml: home_* preflight settings, the backup and

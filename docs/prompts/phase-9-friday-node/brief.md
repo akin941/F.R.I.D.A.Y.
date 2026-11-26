@@ -2926,9 +2926,13 @@ Decisions and deviations, each kept within the brief's rules:
 
 1. **M2** empties `ConformanceTests.pendingM2` (readers, grants, local
    policy, scrubber parity), then the full `--protocol 1` live run.
-2. **Pairing to a server the Mac does not trust.** Either the owner trusts
-   the server's CA in the Keychain, or a later branch adds an owner-typed
-   SPKI pin to the pairing window (an explicit local owner action, stored
-   with the credential, never a runtime switch).
+2. **Pairing to a server the Mac does not trust.** Done in
+   `feat/p9-node-local-pairing` (2026-11-26): the pairing window takes an
+   optional owner-typed SPKI pin (an explicit local owner action, stored
+   with the credential, never a runtime switch); with it the connection is
+   accepted only on a key match, with no CA trust. Used for the loopback
+   proxy of `deploy/docker/compose.local-tls.yml` (runbook `friday-node.md`
+   "A node on this Mac only"). Probed live: wrong pin refused, right pin
+   reaches the server, no pin requires system trust.
 3. **macOS CI** (runbook A5): until the owner decides, `swift test` and the
    two `xcodebuild` checks run on the Mac before each merge.

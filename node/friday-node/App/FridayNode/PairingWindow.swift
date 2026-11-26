@@ -12,13 +12,17 @@ final class PairingWindowController: NSWindowController {
     private let serverField = NSTextField(string: "https://")
     private let codeField = NSSecureTextField(string: "")
     private let nameField = NSTextField(string: Host.current().localizedName ?? "Mac")
+    /// Optional: the server certificate's SPKI pin (base64 or hex), for a
+    /// server this Mac does not trust, such as the loopback proxy
+    /// (`make local-tls` prints it). Empty = the system must trust it.
+    private let pinField = NSTextField(string: "")
     private let message = NSTextField(labelWithString: "")
     private let pairButton = NSButton(title: "Eşleştir", target: nil, action: nil)
 
     init(runner: NodeRunner) {
         self.runner = runner
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 440, height: 210), styleMask: [.titled, .closable],
+            contentRect: NSRect(x: 0, y: 0, width: 480, height: 240), styleMask: [.titled, .closable],
             backing: .buffered, defer: false)
         window.title = "Friday Node — Eşleştir"
         super.init(window: window)
@@ -26,7 +30,9 @@ final class PairingWindowController: NSWindowController {
             [NSTextField(labelWithString: "Sunucu"), serverField],
             [NSTextField(labelWithString: "Eşleştirme kodu"), codeField],
             [NSTextField(labelWithString: "Bu Mac'in adı"), nameField],
+            [NSTextField(labelWithString: "Sertifika pini"), pinField],
         ])
+        pinField.placeholderString = "isteğe bağlı (make local-tls çıktısı)"
         grid.column(at: 1).width = 280
         pairButton.target = self
         pairButton.action = #selector(pair)
@@ -50,7 +56,17 @@ final class PairingWindowController: NSWindowController {
             message.stringValue = "Sunucu adresi https:// ile başlamalı."
             return
         }
-        let request = PairingRequest(serverURL: server, code: codeField.stringValue, nodeName: nameField.stringValue)
+        let pinText = pinField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        var pin: Data?
+        if !pinText.isEmpty {
+            guard let parsed = TLSPin.parse(pinText) else {
+                message.stringValue = "Sertifika pini geçersiz (base64 ya da hex, 32 bayt)."
+                return
+            }
+            pin = parsed
+        }
+        let request = PairingRequest(
+            serverURL: server, code: codeField.stringValue, nodeName: nameField.stringValue, expectedPin: pin)
         pairButton.isEnabled = false
         message.stringValue = "Eşleştiriliyor…"
         Task {
@@ -62,7 +78,9 @@ final class PairingWindowController: NSWindowController {
             } catch NodeHTTPError.status(let code, let reason) {
                 outcome = "Sunucu reddetti (\(code)\(reason.map { ", \($0)" } ?? ""))."
             } catch NodeHTTPError.transport {
-                outcome = "Sunucuya güvenli bağlantı kurulamadı (sertifika sistemce güvenilir olmalı)."
+                outcome = pin == nil
+                    ? "Sunucuya güvenli bağlantı kurulamadı (sertifika sistemce güvenilir olmalı ya da pini girilmeli)."
+                    : "Sunucuya bağlanılamadı ya da sertifikası girilen pine uymuyor."
             } catch {
                 outcome = "Eşleştirme başarısız: \(error)"
             }

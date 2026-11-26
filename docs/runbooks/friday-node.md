@@ -77,6 +77,33 @@ friday.example.net {
   Optionally set `NODE_TLS_PIN_SHA256` (next section) so preflight fails
   when the served certificate key changes.
 
+### A node on this Mac only (loopback TLS, nothing exposed)
+
+When the stack and the node run on the same Mac and nothing may be reachable
+from outside it (owner decision 2026-11-26), skip the overlay and the public
+proxy:
+
+```bash
+make up-local-tls     # the dev stack + a Caddy proxy on 127.0.0.1:8443 only
+```
+
+`make local-tls` (run by `up-local-tls`) creates a self-signed P-256
+certificate in `deploy/docker/local-tls/` (gitignored) once and prints its
+SPKI pin. The proxy (`deploy/docker/compose.local-tls.yml`,
+`Caddyfile.local`) forwards only `/api/v1/nodes/pair`,
+`/api/v1/auth/nodes/credential/rotate` and `/ws/node/v1`; every other path
+is 404, and it never installs a certificate into any trust store. Put the
+printed `NODE_TLS_PIN_SHA256=...` line into `deploy/docker/.env` so
+preflight's `node_tls_pin` checks the served key (the overlay sets
+`PREFLIGHT_NODE_TLS_URL` to the proxy).
+
+Pair from the FridayNode menu ("Eşleştir…"): server `https://127.0.0.1:8443`,
+a strong node code (`manage.py issue_pairing_code --node --strong`; PIN codes
+are refused because the proxy is not the BFF), and the printed pin in
+"Sertifika pini". With a pin the node accepts the server only if its key
+matches; the certificate is never trusted system-wide. `make local-tls
+--force`-style key replacement (`gen-local-tls.sh --force`) means re-pairing.
+
 ### Pinning the served certificate (`NODE_TLS_PIN_SHA256`)
 
 The node pins the TLS key it paired over. If the proxy's certificate key

@@ -45,3 +45,6 @@ coverage/
 # PTSpike (runbook A1): generated per build by build.sh
 node/spikes/ptspike/PTSpike/BuildMarker.swift
 node/spikes/ptspike/**/xcuserdata/
+
+# Loopback TLS certificate for compose.local-tls.yml (gen-local-tls.sh)
+deploy/docker/local-tls/
