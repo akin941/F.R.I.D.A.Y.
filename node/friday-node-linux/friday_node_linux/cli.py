@@ -10,6 +10,7 @@
     friday-node-linux policy show
     friday-node-linux config set server-url https://<new host>   # re-point, keeps pins
     friday-node-linux status
+    friday-node-linux rotate                   # rotate the node secret now
     friday-node-linux unpair                   # forget the local credential
     friday-node-linux conformance --hook-socket <sock> --gateway <host:port> --ca <cert>
 
@@ -21,17 +22,15 @@ pairing code.
 """
 
 import argparse
-import http.client
-import json
 import logging
 import os
 import sys
 import time
 from pathlib import Path
-from urllib.parse import urlsplit
 
-from friday_node_linux import __version__, paths
+from friday_node_linux import paths
 from friday_node_linux._vendor.nodes.reference.hook_relay import MAX_INPUT_BYTES, relay_stdin
+from friday_node_linux.api import PAIR_PATH, USER_AGENT, RotationError, post_json, rotate
 from friday_node_linux.credential import (
     Credential,
     CredentialError,
@@ -49,8 +48,6 @@ from friday_node_linux.policy import (
 )
 from friday_node_linux.tls import PinError, Pins, check_ca_pem, parse_spki_pin
 
-PAIR_PATH = "/api/v1/nodes/pair"
-USER_AGENT = f"friday-node-linux/{__version__}"
 DEFAULT_NODE_NAME = ""  # the server names a blank node "Linux düğümü"
 
 
@@ -208,38 +205,6 @@ def _pins(args) -> Pins:
     return Pins(ca_pem=ca, spki_sha256=spki)
 
 
-def post_json(server_url, path, body, *, pins: Pins, timeout=15.0):
-    """POST `body` over a pinned TLS connection; the pins are checked before
-    the request (and so the pairing code) is written. Returns (status, json)."""
-    parts = urlsplit(server_url)
-    host, port = parts.hostname, parts.port or 443
-    sock = pins.connect(host, port, timeout=timeout)
-    connection = http.client.HTTPConnection(host, port, timeout=timeout)
-    connection.sock = sock
-    try:
-        payload = json.dumps(body).encode("utf-8")
-        connection.request(
-            "POST",
-            path,
-            body=payload,
-            headers={
-                "Content-Type": "application/json",
-                "Accept": "application/json",
-                "User-Agent": USER_AGENT,
-                "Host": parts.netloc,
-            },
-        )
-        response = connection.getresponse()
-        raw = response.read(1024 * 1024)
-    finally:
-        connection.close()
-    try:
-        data = json.loads(raw.decode("utf-8")) if raw else {}
-    except (UnicodeDecodeError, ValueError):
-        data = {}
-    return response.status, data
-
-
 def cmd_pair(args, io: Io, *, now=None) -> int:
     target = paths.credential_path(io.env)
     if os.path.lexists(target):
@@ -291,6 +256,23 @@ def cmd_unpair(args, io: Io) -> int:
         return 0
     os.unlink(target)
     io.out("local credential removed; revoke the node on /devices too")
+    return 0
+
+
+def cmd_rotate(args, io: Io) -> int:
+    """Rotate the node secret now (the daemon also does it when due)."""
+    target = paths.credential_path(io.env)
+    try:
+        credential = load_credential(target)
+        rotated = rotate(credential)
+    except CredentialError as exc:
+        io.err(f"refused: {exc}")
+        return 1
+    except (RotationError, PinError) as exc:
+        io.err(f"rotation failed: {exc}")
+        return 1
+    save_credential(target, rotated)
+    io.out(f"rotated: node {rotated.node_id}; restart the node to use the new secret")
     return 0
 
 
@@ -346,6 +328,7 @@ def cmd_run(args, io: Io) -> int:
         return 1
     daemon = Daemon(
         credential=credential,
+        credential_path=paths.credential_path(io.env),
         policy_path=paths.policy_path(io.env),
         home=io.home,
         spool_dir=paths.spool_dir(io.env),
@@ -394,6 +377,7 @@ def parser() -> argparse.ArgumentParser:
     sub.add_parser("run", help="run the node (the systemd user unit)")
     sub.add_parser("hook", help="relay a Claude Code hook event from stdin")
     sub.add_parser("unpair", help="forget the local credential")
+    sub.add_parser("rotate", help="rotate the node secret now")
     sub.add_parser("status", help="show the pairing and the local policy")
 
     for name in ("grant", "revoke"):
@@ -436,6 +420,8 @@ def main(argv=None, io: Io | None = None) -> int:
         return cmd_run(args, io)
     if command == "hook":
         return cmd_hook(args, io)
+    if command == "rotate":
+        return cmd_rotate(args, io)
     if command == "unpair":
         return cmd_unpair(args, io)
     if command == "status":

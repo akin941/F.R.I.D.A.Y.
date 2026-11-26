@@ -40,12 +40,13 @@ from dataclasses import dataclass, field
 from wsproto import ConnectionType, WSConnection
 from wsproto.events import Request
 
-from friday_node_linux import __version__, paths
+from friday_node_linux import __version__, api, paths
 from friday_node_linux._vendor.nodes.protocol.messages import HEARTBEAT_SECONDS, SUBPROTOCOLS
 from friday_node_linux._vendor.nodes.reference.hook_relay import HookRelay, RelayError
 from friday_node_linux._vendor.nodes.reference.node import ReferenceNode
 from friday_node_linux._vendor.nodes.reference.spool import Spool
 from friday_node_linux._vendor.nodes.reference.transport import NodeClient
+from friday_node_linux.credential import CredentialError, save_credential
 from friday_node_linux.policy import LinuxPolicy, PolicyError
 from friday_node_linux.readers_root import LinuxReaders
 
@@ -57,6 +58,7 @@ BACKOFF_MIN_SECONDS = 1
 BACKOFF_MAX_SECONDS = 60
 STABLE_SESSION_SECONDS = 2 * HEARTBEAT_SECONDS
 POLL_SECONDS = 0.2
+ROTATION_RETRY_SECONDS = 3600
 EXIT_OK = 0
 EXIT_ERROR = 1
 _OS_CHARS = re.compile(r"[^A-Za-z0-9 ._+()-]")
@@ -182,8 +184,13 @@ class Daemon:
         client_factory=None,
         which=None,
         max_sessions=None,
+        credential_path=None,
+        rotate=None,
     ):
         self.credential = credential
+        self.credential_path = credential_path
+        self.rotate = rotate or api.rotate
+        self.rotation_retry_at = None
         self.policy_path = policy_path
         self.home = home
         self.spool_dir = spool_dir
@@ -286,7 +293,35 @@ class Daemon:
             secret=self.credential.node_secret,
         )
 
+    def maybe_rotate(self):
+        """Rotate the node secret when it is `rotate_after_days` old (Phase 9
+        D1). The new credential is saved before it is first used (the old
+        secret stays valid for the server's grace period, so a crash in
+        between loses nothing). A failure keeps the current secret and is
+        retried after `ROTATION_RETRY_SECONDS`; an expired secret ends in
+        `bye{credential_expired}` and re-pairing."""
+        now = self.clock.now()
+        if self.credential_path is None or not self.credential.rotation_due(now):
+            return
+        if self.rotation_retry_at is not None and now < self.rotation_retry_at:
+            return
+        try:
+            rotated = self.rotate(self.credential, now=now)
+        except api.RotationError as exc:
+            logger.warning("credential rotation failed: %s", exc)
+            self.rotation_retry_at = now + ROTATION_RETRY_SECONDS
+            return
+        except CredentialError as exc:
+            logger.warning("credential rotation failed: %s", exc)
+            self.rotation_retry_at = now + ROTATION_RETRY_SECONDS
+            return
+        save_credential(self.credential_path, rotated)
+        self.credential = rotated
+        self.rotation_retry_at = None
+        logger.info("node secret rotated (next in %d days)", rotated.rotate_after_days)
+
     def _session(self):
+        self.maybe_rotate()
         with self._node_lock:
             self.client = self.client_factory(self.node)
             self.client.start()

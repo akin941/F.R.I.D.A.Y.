@@ -146,6 +146,8 @@ def test_no_protocol_frame_changes_the_daemons_local_policy(tmp_path):
             ],
             "tls": {"ca_pem": Path(cert_path).read_text(), "spki_sha256": None},
             "paired_at": int(time.time()),
+            "secret_issued_at": int(time.time()),
+            "rotate_after_days": 30,
         },
     )
     policy_before = _fingerprint(policy)

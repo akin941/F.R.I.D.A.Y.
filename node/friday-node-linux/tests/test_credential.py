@@ -62,16 +62,21 @@ def make_credential(tls, *, url="https://127.0.0.1:8443"):
 class FakeFriday:
     """A localhost HTTPS server answering `POST /api/v1/nodes/pair`."""
 
-    def __init__(self, tls, *, status=201, body=None):
+    def __init__(self, tls, *, status=201, body=None, routes=None):
         self.requests = []
+        self.authorization = []
         outer = self
 
         class Handler(BaseHTTPRequestHandler):
             def do_POST(self):  # noqa: N802
                 length = int(self.headers.get("Content-Length", 0))
                 outer.requests.append((self.path, json.loads(self.rfile.read(length))))
-                payload = json.dumps(body if body is not None else pairing_response()).encode()
-                self.send_response(status)
+                outer.authorization.append(self.headers.get("Authorization"))
+                answer_status, answer = (routes or {}).get(
+                    self.path, (status, body if body is not None else pairing_response())
+                )
+                payload = json.dumps(answer).encode()
+                self.send_response(answer_status)
                 self.send_header("Content-Type", "application/json")
                 self.send_header("Content-Length", str(len(payload)))
                 self.end_headers()
