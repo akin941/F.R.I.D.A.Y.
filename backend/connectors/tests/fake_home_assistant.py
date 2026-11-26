@@ -137,9 +137,9 @@ def allow(workspace, entity_id, services=None, *, label=None, room=None, aliases
         key=phrase_key(label),
         room=room,
         aliases=list(aliases),
-        services=list(services) if services is not None else sorted(
-            bridge.SERVICES[entity_id.split(".", 1)[0]]
-        ),
+        services=list(services)
+        if services is not None
+        else sorted(bridge.SERVICES[entity_id.split(".", 1)[0]]),
         enabled=enabled,
     )
 

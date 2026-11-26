@@ -239,9 +239,7 @@ OK = {"list": 200, "create": 201, "patch": 200, "delete": 204, "candidates": 200
 
 @pytest.mark.parametrize(("principal", "expected"), MATRIX)
 @pytest.mark.parametrize("endpoint", sorted(OK))
-def test_role_matrix(
-    bound, principals, owner, workspace, firm_ws, endpoint, principal, expected
-):
+def test_role_matrix(bound, principals, owner, workspace, firm_ws, endpoint, principal, expected):
     entity = home_entities.create_entity(
         actor=owner,
         workspace=workspace,

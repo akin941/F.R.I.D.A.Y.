@@ -236,9 +236,7 @@ def test_only_the_owner_over_the_web_in_the_personal_workspace(owner, workspace,
         _create(member, workspace)
     entity = _create(owner, workspace)
     with pytest.raises(home_entities.HomeEntityPermissionDenied):
-        home_entities.update_entity(
-            actor=owner, entity=entity, channel=CHANNEL_CLI, enabled=False
-        )
+        home_entities.update_entity(actor=owner, entity=entity, channel=CHANNEL_CLI, enabled=False)
     with pytest.raises(home_entities.HomeEntityPermissionDenied):
         home_entities.delete_entity(actor=member, entity=entity, channel=CHANNEL_WEB)
     entity.refresh_from_db()

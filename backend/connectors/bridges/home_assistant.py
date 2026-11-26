@@ -213,6 +213,11 @@ class SelectSourceData(StrictSerializer):
 
     source = serializers.CharField(max_length=SOURCE_MAX_CHARS, trim_whitespace=False)
 
+    def to_internal_value(self, data):
+        if isinstance(data, dict) and "source" in data and not isinstance(data["source"], str):
+            raise serializers.ValidationError({"source": ["Must be text."]})
+        return super().to_internal_value(data)
+
     def validate_source(self, value):
         if not value.strip() or strip_invisible_formatting(value) != value:
             raise serializers.ValidationError("Not a source name.")
