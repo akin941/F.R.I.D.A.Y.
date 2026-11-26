@@ -75,7 +75,47 @@ The gateway's full dependency surface is in this table.
 - **Invocation:** `srt --settings <file> -- <argv...>`
   (`SRT_ARGV_TEMPLATE`); the exact flags are verified against the pinned
   version on the Mac (owner step, Phase 10 branch 2 record).
-- **Pinned version:** _not yet recorded_ (pending owner step).
+- **Pinned version:** `@anthropic-ai/sandbox-runtime` **0.0.83** (npm,
+  published 2026-11-13; `dist.integrity`
+  `sha512-yEusORnVJrNseF/9fvjVYyk6tr79/aFbIB3T/X8p2puLZdaaiGNeYN50v0CE+1DT70v7XuzKOAnTivh1f5cksA==`;
+  source `github.com/anthropics/sandbox-runtime`). Installed 2026-11-27 on
+  the owner's Mac (runbook A6) into a private prefix,
+  `~/Library/Application Support/Friday/srt`, with
+  `npm install --prefix … --ignore-scripts --save-exact` (the package has
+  no install-time scripts; 4 runtime dependencies: `zod`, `commander`,
+  `node-forge`, `@pondwader/socks5-server`). Needs Node ≥ 22.12 (the Mac has
+  24). Not on the global PATH; the node app (B6) calls it by absolute path.
+- **Verification against the pin (2026-11-27, runbook A6):**
+  - CLI: `srt --version` → `0.0.83`; `srt [options] [command...]` with
+    `-s, --settings <path>`, so `SRT_ARGV_TEMPLATE`
+    (`srt --settings <file> -- <argv...>`) holds unchanged.
+  - Settings keys: all six `settings` documents of
+    `backend/nodes/conformance/vectors/sandbox.json` pass the package's own
+    `SandboxRuntimeConfigSchema` (zod) — `network.allowedDomains`,
+    `deniedDomains`, `allowUnixSockets`, `allowLocalBinding`,
+    `filesystem.denyRead`, `allowWrite`, `denyWrite` all exist with these
+    names and shapes. **No generator change, no vector regeneration.**
+  - Smoke run of a vector document with real paths: a write in the
+    worktree succeeds; a write beside it, a read of a `denyRead` path and an
+    HTTPS fetch (network off) are all refused.
+- **macOS findings for B6 (the Swift `SrtExecutor`):**
+  1. `srt` on macOS runs the argv through a shell it finds on the child's
+     `PATH` (`binShell`, default `bash`, resolved with `which`), quoting the
+     argv itself; the mapped `PATH` must therefore contain `/bin`.
+  2. `RLIMIT_NPROC` on macOS counts **every process of the user**, not the
+     command's: with about 290 owner processes running, the reference
+     executor's `RLIMIT_NPROC = 256` (`_set_limits`) makes every fork fail
+     (`srt` exits 1, "Shell 'bash' not found in PATH"). The opt-in
+     `pytest -m srt` run passes once that one limit is skipped on darwin. B6
+     must enforce `max_processes` another way on macOS (for example a
+     process-group count, or `RLIMIT_NPROC` relative to the current count)
+     and document it; the reference executor stays Linux-targeted.
+  3. `manage.py node_escape_suite --executor srt` on the Mac: 30/32
+     contained, with `limit_output` and `limit_runtime` not exercised — the
+     escape scripts do not run on macOS even unsandboxed
+     (`test_without_a_sandbox_the_scripts_really_escape` is a known
+     macOS failure). The ADR-014 evidence run (Mac session M3) has to make
+     the escape scripts macOS-capable first; 30/32 is not evidence.
 
 ## `cryptography` 50.0.1
 
