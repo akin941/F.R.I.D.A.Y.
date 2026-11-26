@@ -195,6 +195,17 @@ final class ConformanceTests: XCTestCase {
     /// scrubber). Kept as an explicit, empty list so a future gap must be
     /// named here rather than skipped silently.
     static let pendingM2: Set<String> = []
+    /// B4 owner-turn readers: the folded 8B owner-turn cases that need a
+    /// reader (runbook A12 added the two contracts; this node advertises
+    /// them `not_granted` until runbook B4). Their schema and `not_granted`
+    /// cases already pass and are not listed.
+    static let pendingB4: Set<String> = Set(["claude", "codex"].flatMap { tool in
+        [
+            "only", "since_exactly_7_days", "since_older_than_7_days", "max_turns_truncates",
+            "max_sessions_truncates",
+        ].map { "v1_read_\(tool)_owner_turns_\($0)" }
+    })
+    static var pending: Set<String> { pendingM2.union(pendingB4) }
 
     func testEveryV1CaseMatchesTheReferenceNode() throws {
         let cases = try ConformanceCase.all()
@@ -206,8 +217,8 @@ final class ConformanceTests: XCTestCase {
             let driver = try ConformanceDriver(case: document)
             try driver.play(document)
             let failures = driver.failures(document)
-            if Self.pendingM2.contains(name) {
-                if failures.isEmpty { XCTFail("\(name) passes now: remove it from pendingM2") }
+            if Self.pending.contains(name) {
+                if failures.isEmpty { XCTFail("\(name) passes now: remove it from its pending set") }
                 stillPending.append(name)
                 continue
             }
@@ -217,7 +228,7 @@ final class ConformanceTests: XCTestCase {
                 XCTFail("\(name): \(failures.joined(separator: "; "))")
             }
         }
-        XCTAssertEqual(Set(stillPending), Self.pendingM2, "pendingM2 names a case that does not exist")
+        XCTAssertEqual(Set(stillPending), Self.pending, "a pending set names a case that does not exist")
         print("conformance v1: \(passed) passed, \(stillPending.count) pending, of \(cases.count)")
     }
 }

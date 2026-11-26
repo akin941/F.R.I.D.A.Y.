@@ -1471,8 +1471,10 @@ def _check_transcripts():
     enabled source: the owner's node is reachable through the pull's port,
     the capability is granted, and the last pull's status (`ok` passes,
     `node_refused` warns, `failed`/`server_refused` fail). No port, no node
-    or no grant is a `warn`: the `nodes`-backed port is a pending follow-up
-    and the Swift readers and the Touch ID grant are the Mac session (M1).
+    or no grant is a `warn`: the `nodes`-backed port is installed at app
+    start (runbook A12), so "no node port" means the install did not run;
+    no reachable node or no grant waits on the Swift owner-turn readers
+    and the Touch ID grant (runbook B4, Mac session M1).
     Codes and counts only, never a path or a turn."""
     from memory.ingestion.transcript_audit import CAPABILITY_BY_SOURCE_KIND
     from memory.models import IngestionSource
@@ -1492,7 +1494,9 @@ def _check_transcripts():
     port = transcript_node_port()
     if isinstance(port, UnavailableNodePort):
         return CheckResult(
-            name, WARN, "no node port installed (nodes-backed port pending; the pull is a no-op)"
+            name,
+            WARN,
+            "no node port installed (the nodes-backed port did not install; the pull is a no-op)",
         )
     node = port.owner_node(workspace.owner)
     if node is None:

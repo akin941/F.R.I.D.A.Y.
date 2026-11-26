@@ -1,0 +1,52 @@
+{
+  "check": null,
+  "description": "The first turn of a session max_sessions cannot take ends the result.",
+  "expect": {
+    "frames": [
+      {
+        "status": "ok",
+        "truncated": true,
+        "type": "result"
+      }
+    ],
+    "reader_calls": 1
+  },
+  "name": "v1_read_codex_owner_turns_max_sessions_truncates",
+  "setup": {
+    "now": 1796000005
+  },
+  "steps": [
+    {
+      "frame": {
+        "args": {
+          "cwd_prefixes": [
+            "~/work/acme",
+            "~/code/friday"
+          ],
+          "max_sessions": 1,
+          "max_turns": 200,
+          "since": "2026-11-29T00:00:00.000Z"
+        },
+        "args_sha256": "bb586060297fcd5f9bcf71aa305206f8f7ef23e92edd6c5386aab0bad2930b1a",
+        "capability": "codex.transcripts.owner_turns",
+        "capability_version": 1,
+        "class": "read",
+        "expires_at": 1796000030,
+        "grant": null,
+        "id": "dc85b31d-30b6-4cfd-8e9b-141f43f3c638",
+        "invocation_id": "9350ed9b-2289-4bd1-a894-fc0898c393e8",
+        "issued_at": 1796000000,
+        "key_id": "03396219237f75a6",
+        "node_id": "6f1e2d3c-4b5a-4987-8a6b-5c4d3e2f1a0b",
+        "nonce": "X5fPQQm-bu2Qgv2Aa9mDKAhNEqXeqpr0eeSNjwHoVSg",
+        "sig": "CavNAszs4T0c1dG-s2VTqhwmxtI6q8EM2H2XFmsT4cxyTWyEfmBiCvG4zR5JHSDLd_KTOJCm7yI5Oq1Qly3rCw",
+        "trace_id": "conformance-v1-read-codex_owner_turns_max_sessions_truncates",
+        "type": "invoke",
+        "v": 1,
+        "workspace_id": "2a3b4c5d-6e7f-4a8b-9c0d-1e2f3a4b5c6d"
+      },
+      "op": "send"
+    }
+  ],
+  "version": 1
+}

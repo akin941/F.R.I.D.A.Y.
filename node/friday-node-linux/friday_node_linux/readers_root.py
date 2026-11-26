@@ -19,28 +19,24 @@ platform-specific:
   special case). Only `friday-node-linux conformance` hands in the fixture
   desktop, standing in for the platform as the Swift Conformance build does;
 - the 8B owner-turn reads (`claude.transcripts.owner_turns`,
-  `codex.transcripts.owner_turns`) run the vendored `owner_turns` reader
-  over a **vetted view**: a private temporary directory of symlinks to the
-  transcript files that are regular files (not symlinks) whose realpath lies
-  under the real `~/.claude/projects` / `~/.codex/sessions`, at most
-  `MAX_FILES`, rebuilt per call and removed after it (nothing is copied or
-  cached). The view keeps each file's relative path, so Codex turn ids are
-  the same as a direct read's.
+  `codex.transcripts.owner_turns`, server contracts since runbook A12) run
+  the vendored reference readers' dispatch (`nodes.reference.owner_turns`
+  over the readers' own vetted files: regular files only, never through a
+  symlink, inside the real `~/.claude/projects` / `~/.codex/sessions`, at
+  most `MAX_FILES`, re-read per call; home-aware `cwd_prefixes`), behind the
+  same directory grants. `vetted_files` states the same file rule for the
+  tests.
 
 No v2 (action) capability exists on this node.
 """
 
 import os
 import shutil
-import tempfile
 from pathlib import Path
 from types import MappingProxyType
 
-from jsonschema import Draft202012Validator
-
-from friday_node_linux._vendor.integrations.node_reference import owner_turns
 from friday_node_linux._vendor.nodes import capabilities
-from friday_node_linux._vendor.nodes.protocol.messages import _has_float
+from friday_node_linux._vendor.nodes.reference import owner_turns
 from friday_node_linux._vendor.nodes.reference.readers import MAX_FILES, Readers, ReadOutcome
 
 DESKTOP_CAPABILITIES = ("apps.frontmost", "windows.list")
@@ -55,13 +51,11 @@ TRANSCRIPT_DIRS = MappingProxyType(
 
 
 def owner_turn_contracts():
-    """`{name: CapabilityContract}` for the two 8B owner-turn reads (their
-    contracts are vendored from `integrations/node_reference/contracts/v1`,
-    in the Phase 9 contract format)."""
-    return {
-        name: capabilities._load(owner_turns.CONTRACT_DIR / f"{name}.json")
-        for name in owner_turns.CAPABILITIES
-    }
+    """`{name: CapabilityContract}` for the two 8B owner-turn reads (server
+    contracts in `nodes/capabilities/v1` since runbook A12, vendored with the
+    rest)."""
+    contracts = capabilities.load_contracts()
+    return {name: contracts[name] for name in owner_turns.CAPABILITIES}
 
 
 def vetted_files(home, family) -> list:
@@ -106,7 +100,7 @@ class LinuxReaders:
         self.grants = dict(policy.grants)
         self.desktop_supported = desktop is not None
         self.ccusage_on_path = which("ccusage") is not None
-        self.scratch_dir = scratch_dir
+        self.scratch_dir = scratch_dir  # unused since runbook A12 (no owner-turn view)
         self.availability_overrides = dict(availability_overrides or {})
         self.inner = Readers(
             home=self.home,
@@ -150,42 +144,4 @@ class LinuxReaders:
         if self.availability().get(capability) != "granted":
             self.calls.append(capability)
             return ReadOutcome("error")
-        if capability in OWNER_TURN_FAMILY:
-            self.calls.append(capability)
-            return self._owner_turns(capability, args, now)
         return self.inner.read(capability, args, now=now)
-
-    def _owner_turns(self, capability, args, now) -> ReadOutcome:
-        from datetime import UTC, datetime
-
-        family = OWNER_TURN_FAMILY[capability]
-        view = tempfile.mkdtemp(prefix="friday-node-turns-", dir=self.scratch_dir)
-        try:
-            os.chmod(view, 0o700)
-            _source, target, _pattern = TRANSCRIPT_DIRS[family]
-            for relative, real in vetted_files(self.home, family):
-                link = Path(view) / target / relative
-                link.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-                os.symlink(real, link)
-            reply = owner_turns.read_owner_turns(
-                capability,
-                args,
-                root=view,
-                granted=True,
-                now=datetime.fromtimestamp(now, UTC),
-            )
-        finally:
-            shutil.rmtree(view, ignore_errors=True)
-        if reply.get("status") != "ok":
-            return ReadOutcome("error")
-        contract = self.owner_turn_contracts[capability]
-        # The staged 8B contracts are written for jsonschema's search
-        # semantics (their `cwd` pattern is a prefix, `^(/|~$|~/)`), which
-        # is how the 8B reader's own tests check them; the protocol's strict
-        # full-match validator would refuse every absolute cwd (a known
-        # follow-up: the contracts move into nodes/capabilities/v1 with
-        # full-match patterns). Integers only, as on the wire.
-        output = reply["output"]
-        if _has_float(output) or not Draft202012Validator(contract.result_schema).is_valid(output):
-            return ReadOutcome("error")
-        return ReadOutcome("ok", output, bool(output.get("truncated")))

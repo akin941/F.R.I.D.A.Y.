@@ -145,7 +145,7 @@ final class VendoredProtocolTests: XCTestCase {
         for type in NodeProtocol.nodeToServer.union(NodeProtocol.serverToNode) {
             XCTAssertNotNil(NodeProtocol.schema(for: type), type)
         }
-        XCTAssertEqual(CapabilityContract.all.count, 8)
+        XCTAssertEqual(CapabilityContract.all.count, 10)
         XCTAssertTrue(CapabilityContract.all.allSatisfy { $0.capabilityClass == "read" && $0.version == 1 })
     }
 }

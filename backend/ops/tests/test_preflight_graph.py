@@ -485,10 +485,21 @@ def test_transcripts_are_off_while_both_sources_are_disabled(sources, monkeypatc
     assert (result.status, result.detail) == (PASS, "off (both transcript sources disabled)")
 
 
-def test_transcripts_warn_while_no_node_port_is_installed(wired):
-    # the real default port: the nodes-backed port is a pending follow-up
+def test_transcripts_warn_while_no_node_port_is_installed(wired, monkeypatch):
+    # only when the app-start install did not run (the placeholder port)
+    _port(monkeypatch, UnavailableNodePort())
     result = _graph()["transcripts"]
     assert result.status == WARN and "no node port installed" in result.detail
+
+
+def test_the_default_port_is_the_nodes_backed_port_and_warns_without_a_node(wired):
+    """Runbook A12: `ToolsConfig.ready` installed the nodes-backed port; with
+    no paired node the check warns that the node is not reachable."""
+    from tools.transcript_node_port import NodesTranscriptPort
+
+    assert isinstance(preflight.transcript_node_port(), NodesTranscriptPort)
+    result = _graph()["transcripts"]
+    assert result.status == WARN and "not reachable" in result.detail
 
 
 def test_transcripts_warn_when_the_node_is_offline_or_not_granted(wired, owner, monkeypatch):

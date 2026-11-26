@@ -1,0 +1,69 @@
+{
+  "check": null,
+  "description": "The first turn max_turns cannot take ends the result, truncated.",
+  "expect": {
+    "frames": [
+      {
+        "output": {
+          "next_since": "2026-11-29T20:00:00.000Z",
+          "sessions": [
+            {
+              "cwd": "~/work/acme",
+              "session_id": "cc-acme-1",
+              "turns": [
+                {
+                  "at": "2026-11-29T20:00:00.000Z",
+                  "text": "Fix the flaky invoice test in acme.",
+                  "turn_id": "u-1"
+                }
+              ]
+            }
+          ],
+          "truncated": true
+        },
+        "status": "ok",
+        "truncated": true,
+        "type": "result"
+      }
+    ],
+    "reader_calls": 1
+  },
+  "name": "v1_read_claude_owner_turns_max_turns_truncates",
+  "setup": {
+    "now": 1796000005
+  },
+  "steps": [
+    {
+      "frame": {
+        "args": {
+          "cwd_prefixes": [
+            "~/work/acme",
+            "~/code/friday"
+          ],
+          "max_sessions": 50,
+          "max_turns": 1,
+          "since": "2026-11-29T00:00:00.000Z"
+        },
+        "args_sha256": "c71a9046a06a0b181725c4831348d96c36ce5ed09cb7aa6bf6cd0a865313dd3f",
+        "capability": "claude.transcripts.owner_turns",
+        "capability_version": 1,
+        "class": "read",
+        "expires_at": 1796000030,
+        "grant": null,
+        "id": "4fc551c7-981e-4960-b51f-ff9cb568f8ae",
+        "invocation_id": "54eb536f-fbb8-4d13-8860-146dae9ad9e9",
+        "issued_at": 1796000000,
+        "key_id": "03396219237f75a6",
+        "node_id": "6f1e2d3c-4b5a-4987-8a6b-5c4d3e2f1a0b",
+        "nonce": "weefc5JrWSryStvFGyzg9evFQBIhYAwKEeRc8WLtTwM",
+        "sig": "ubltEouTDPEJQi9kqhyqI-xpQyZ89z080V8jPuBJeP8r0jVe-Tkrs7EOFDb7IDfJuCVi8krbxiiFY0GRyg6CBQ",
+        "trace_id": "conformance-v1-read-claude_owner_turns_max_turns_truncates",
+        "type": "invoke",
+        "v": 1,
+        "workspace_id": "2a3b4c5d-6e7f-4a8b-9c0d-1e2f3a4b5c6d"
+      },
+      "op": "send"
+    }
+  ],
+  "version": 1
+}

@@ -78,7 +78,8 @@ def test_the_lock_names_the_backend_source_and_the_copy():
     lines = [line for line in module.LOCK.read_text().splitlines() if not line.startswith("#")]
     entries = {line.split("  ")[2]: line.split("  ")[:2] for line in lines}
     assert "nodes/reference/node.py" in entries
-    assert "integrations/node_reference/owner_turns.py" in entries
+    assert "nodes/reference/owner_turns.py" in entries
+    assert not any(path.startswith("integrations/") for path in entries)
     source, copy = entries["nodes/protocol/schemas/v1/hello.schema.json"]
     assert source == copy  # data files are byte-identical
     source, copy = entries["nodes/reference/node.py"]

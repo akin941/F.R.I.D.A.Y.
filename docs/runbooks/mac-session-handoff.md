@@ -619,6 +619,20 @@ the transcript pull is a no-op. It needs no Mac:
       install it in `tools.transcript_ingest`, and re-run
       `tools/tests/test_transcript_ingest.py` and the 8B e2e against the
       in-process gateway transport.
+      **Implemented 2026-11-26 on this branch (awaits the independent
+      Sonnet 5 review; tick the box when it merges).** The contracts now
+      sit in `backend/nodes/capabilities/v1/` with full-match path patterns
+      and the protocol's 64 KiB result bound; the readers moved to
+      `backend/nodes/reference/owner_turns.py`; the 36 folded cases are
+      `v1_read_{claude,codex}_owner_turns_*`, and the 8B expected file is
+      `backend/nodes/conformance/vectors/owner_turns.json`; the port is
+      `backend/tools/transcript_node_port.py`, installed by
+      `ToolsConfig.ready`; the gateway runs are
+      `tools/tests/test_transcript_node_port.py` and
+      `ops/tests/test_transcripts_gateway_e2e.py`. Preflight `transcripts`
+      now warns "not reachable" (no connected node) or "not granted" until
+      the Swift owner-turn readers (B4) and the Touch ID grant (M1); the
+      Swift node advertises both reads `not_granted` until B4.
 
 ---
 

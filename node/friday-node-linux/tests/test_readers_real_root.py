@@ -101,8 +101,9 @@ def test_a_symlinked_grant_root_is_refused(home, tmp_path):
 
 def test_owner_turns_over_the_vetted_view(home, tmp_path):
     r = readers(home, claude=True, codex=True, scratch_dir=tmp_path)
-    # Owner-turn prefixes are compared with the transcripts' literal cwd
-    # (the 8B reader's rule): Claude Code and Codex record absolute paths.
+    # The reference dispatch (runbook A12): an absolute prefix matches the
+    # transcripts' absolute cwd and reports it absolute; a `~/` prefix
+    # reports the `~/` form.
     args = {
         "since": "2026-11-28T00:00:00Z",
         "cwd_prefixes": [str(home / "work" / "acme")],
@@ -118,6 +119,10 @@ def test_owner_turns_over_the_vetted_view(home, tmp_path):
     codex = r.read("codex.transcripts.owner_turns", args, now=NOW)
     assert codex.status == "ok"
     assert "Bump the acme client." in json.dumps(codex.output)
+    tilde_args = {**args, "cwd_prefixes": ["~/work/acme"]}
+    tilde = r.read("claude.transcripts.owner_turns", tilde_args, now=NOW)
+    assert [s["cwd"] for s in tilde.output["sessions"]] == ["~/work/acme"]
+    assert [s["cwd"] for s in sessions] == [str(home / "work" / "acme")]
     # The view is removed after every call: nothing is copied or cached.
     assert list(tmp_path.glob("friday-node-turns-*")) == []
 

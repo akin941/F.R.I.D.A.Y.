@@ -34,6 +34,7 @@ from django.utils import timezone
 from accounts.devices import DeviceTrustError, enroll_node_device, node_device_refusal
 from accounts.models import TrustedDevice
 from audit.services import record_audit
+from core.channels import CHANNEL_SYSTEM
 from core.owner_web import OwnerWebRequired, require_owner_web
 from core.speech import phrase_key
 from core.unattended import deny_if_unattended
@@ -584,10 +585,15 @@ def _human(actor):
 
 READ_CHANNEL = "web"
 # Capabilities a system-initiated read (`channel` other than web) may
-# invoke (Phase 8B D13 amendment to D7). Empty until branch 5 moves the two
-# owner-turn contracts into `nodes/capabilities/v1/`: until then every
-# non-web read is refused `not_invocable`.
-SYSTEM_READ_CAPABILITIES = frozenset()
+# invoke (Phase 8B D13 amendment to D7): the two owner-turn reads of the
+# transcript pull (`tools.transcript_ingest`), whose contracts live in
+# `nodes/capabilities/v1/` since runbook A12. Every other non-web read is
+# refused `not_invocable`. This limits capabilities, not callers: the
+# import-linter contract (only `tools`, `hud`, `ops` import `nodes`) and
+# `tools/tests/test_transcript_ingest.py` keep `CHANNEL_SYSTEM` to the pull.
+SYSTEM_READ_CAPABILITIES = frozenset(
+    {"claude.transcripts.owner_turns", "codex.transcripts.owner_turns"}
+)
 # The gateway's own verdicts on the result key -> (status, refusal_code);
 # the node's result frames are mapped by `_read_outcome`.
 GATEWAY_READ_VERDICTS = {
@@ -806,7 +812,8 @@ def invoke_read(
     output is returned).
 
     The D9 workspace pre-checks live in `tools` (they call `refuse_read`);
-    a system-channel read is limited to `SYSTEM_READ_CAPABILITIES`."""
+    a non-web read must be `channel=system` and name one of
+    `SYSTEM_READ_CAPABILITIES` (`server_refused:not_invocable` otherwise)."""
     deny_if_unattended("node_invocation")
     started = time.monotonic()
     trace_id = _bounded_trace_id(trace_id)
@@ -850,7 +857,9 @@ def invoke_read(
         return finish("server_refused", "not_invocable")
     if contract.data_class == "personal" and not actor_is_node_owner(actor, node, workspace):
         return finish("server_refused", "actor_not_owner")
-    if channel != READ_CHANNEL and contract.name not in SYSTEM_READ_CAPABILITIES:
+    if channel != READ_CHANNEL and (
+        channel != CHANNEL_SYSTEM or contract.name not in SYSTEM_READ_CAPABILITIES
+    ):
         return finish("server_refused", "not_invocable")
     if invocable_entry(latest_snapshot(node), contract) is None:
         return finish("server_refused", "not_invocable")

@@ -1,8 +1,9 @@
 """Node doubles for the transcript pull tests (Phase 8B branch 8).
 
-`ReferenceNodePort` stands in for the Phase 9 `nodes`-backed port until
-branches 3-5 merge: it re-runs the D13 amendment checks the way
-`nodes.services.invoke_read` will (step 0, before anything is "sent"),
+`ReferenceNodePort` stands in for the `nodes`-backed port
+(`tools.transcript_node_port`, tested over the in-process gateway in
+`test_transcript_node_port.py`): it re-runs the D13 amendment checks the
+way `nodes.services.invoke_read` does (step 0, before anything is "sent"),
 records one chain row per invoke (sent or refused), records every frame the
 node "received", and answers with the reference owner-turn readers over a
 fixture root, validating the result against the capability contract.
@@ -15,7 +16,7 @@ from datetime import UTC
 
 import jsonschema
 
-from integrations.node_reference import owner_turns
+from nodes.reference import owner_turns
 from tools.transcript_ingest import (
     SERVER_REFUSED,
     NodeHandle,

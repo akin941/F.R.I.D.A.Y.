@@ -3439,7 +3439,9 @@ What was built:
     `job: transcript_pull`, counts only).
 - The node seam is `NodeReadPort`. Its default `UnavailableNodePort` has
   no node, so the beat is a no-op in production until the `nodes`-backed
-  port exists.
+  port exists. (Since runbook A12 the default is the `nodes`-backed
+  `tools.transcript_node_port.NodesTranscriptPort`, installed by
+  `ToolsConfig.ready`.)
 - `integrations/node_reference/`:
   - `owner_turns.py`: the D13/D17 readers;
   - `contracts/v1/{claude,codex}.transcripts.owner_turns.json`;
@@ -3571,6 +3573,16 @@ Tests:
      in-process gateway transport instead of the double.
 
    Until then the pull is a no-op.
+   Steps 3-5 are implemented on `feat/p8-node-transcript-port` (runbook
+   A12, 2026-11-26, awaits review). Deviations: the readers moved to
+   `nodes/reference/owner_turns.py` (the reference node may not import
+   `integrations`), the staged `owner_turns_cases.json` became 36 v1
+   frame-level cases (Codex results pinned by status and `truncated` only:
+   their turn ids hash byte offsets that depend on the fixture home's path
+   length; the exact Codex output is `vectors/owner_turns.json`), the
+   contracts' `max_result_bytes` is the protocol's 64 KiB (the reader's
+   budget 60 KiB) instead of 1 MiB, and the double-based tests stay, with
+   the gateway runs added beside them.
 6. After deploy, run `manage.py migrate` and then `manage.py
    seed_ingestion_sources` once, so both transcript sources exist.
    Preflight's `learning_sources` fails until they do.
@@ -3968,15 +3980,18 @@ Tests:
    over `nodes.services.invoke_read(channel=CHANNEL_SYSTEM, actor=owner)`
    and install it, then re-run `tools/tests/test_transcript_ingest.py` and
    this e2e against the in-process gateway transport. Until then preflight
-   `transcripts` warns and the pull is a no-op.
+   `transcripts` warns and the pull is a no-op. **Implemented 2026-11-26 on `feat/p8-node-transcript-port` (runbook A12; awaits the Sonnet 5 review):** contracts in `nodes/capabilities/v1/` (full-match path patterns, 64 KiB result bound), readers in `nodes/reference/owner_turns.py` dispatched by `readers.py`, 36 folded v1 cases plus `vectors/owner_turns.json`, `SYSTEM_READ_CAPABILITIES` set, and `tools/transcript_node_port.py` installed by `ToolsConfig.ready`; the pull and this e2e run over the in-process gateway in `tools/tests/test_transcript_node_port.py` and `ops/tests/test_transcripts_gateway_e2e.py`.
 3. After deploy: `manage.py migrate`, `seed_ai_defaults`,
    `seed_ingestion_sources` and `build_vector_indexes` (preflight
    `retrieval_indexes` fails on a provider without its index).
 4. Run `manage.py preflight` on the dev stack with the reference node
    paired (`run_reference_node`, `docs/runbooks/friday-node.md`) and
    confirm no `fail` line. The expected warns until the Mac session and the
-   owner evaluations: `graphify` (no repo enabled), `transcripts` (no node
-   port, or not granted), `eval_baseline` (no private baseline).
+   owner evaluations: `graphify` (no repo enabled), `transcripts` (no
+   reachable node, or not granted: since the nodes-backed port (step 2) the
+   "no node port" warn appears only if the app-start install did not run;
+   the Swift node advertises the owner-turn reads `not_granted` until
+   runbook B4), `eval_baseline` (no private baseline).
 5. On the runner host: build the Graphify image (`docker build -f
    graphify.Dockerfile -t friday-harness-graphify:0.9.103 .` in
    `backend/harness/docker/`), enable `graphify_enabled` for the Friday
@@ -4007,7 +4022,10 @@ migration renumbering needed).
    the seam, not the in-process gateway. MASTER_PLAN row 8B says "server
    half done" while that port is outstanding. Fix: keep the follow-up
    branch (`feat/p9-node-reads` follow-up 1) visible in the MASTER_PLAN
-   go/no-go table.
+   go/no-go table. **The port is implemented 2026-11-26 on
+   `feat/p8-node-transcript-port` (runbook A12, awaits review); the e2e
+   also runs over the in-process gateway
+   (`ops/tests/test_transcripts_gateway_e2e.py`).**
 3. **`test_headroom_compresses_with_litellm_blocked` fails where headroom
    is absent** (`deploy/compressor/test_no_litellm.py`). It raises
    `ModuleNotFoundError: headroom` outside the sidecar image; environmental,
