@@ -30,6 +30,14 @@ normal router runs. Typed turns are never routed.
   only, matched as the leading words of the utterance; they yield exactly
   what the router would (a `connector_read` turn, or a `tool_request` draft
   card) and make exactly the router's argument call, nothing more.
+- **Home route (Phase 13 D13).** `home.control` has no phrase table: its
+  matcher is code (`connectors.home_phrases`, reached through
+  `tools.home_ports`) over the owner's own room and device rows. Tried after
+  the phrase and `tool.*` routes, before `skill.*` aliases. Effect
+  `proposal`: one allowlisted entity -> the `ha_call_service` draft card
+  (the exact arguments, a fixed spoken confirmation, no model call);
+  several -> the ask template; nothing allowed -> a fixed refusal. It never
+  approves or executes; the card goes the normal gated path.
 - **Scope.** Routes answer only the owner of the conversation's workspace,
   from that workspace's rows (`for_actor()` through `proactive.api` and
   `memory.probes`): a firm digest never answers a personal conversation.
@@ -116,10 +124,15 @@ class RouteResult:
 
 @dataclass(frozen=True)
 class WakeRoute:
+    """One route. A phrase route matches its `default_phrases` (and owner
+    aliases); a `matched_by_code` route (Phase 13 `home.control`) has none:
+    its handler is also its matcher and returns None on a miss."""
+
     name: str
     effect: str
     default_phrases: tuple
-    handler: Callable[[WakeTurn], RouteResult]
+    handler: Callable[[WakeTurn], RouteResult | None]
+    matched_by_code: bool = False
 
 
 @dataclass(frozen=True)
@@ -232,6 +245,51 @@ ROUTES: tuple[WakeRoute, ...] = (
 )
 
 
+# --- home.control (Phase 13 D13, branch 6) -------------------------------------
+#
+# The deterministic home route: "salondaki TV'yi aç" -> the `ha_call_service`
+# draft card for the one allowlisted entity the owner named, with a fixed
+# spoken confirmation. The matcher and resolver live in `connectors`
+# (`connectors.home_phrases`), reached through `tools.home_ports`. No model
+# call, no Home Assistant request, no `ApprovalRequest`.
+
+HOME_ROUTE_NAME = "home.control"
+
+
+def _home_control(turn: WakeTurn) -> RouteResult | None:
+    from tools.home_ports import OUTCOME_DRAFT, resolve_home_command
+    from tools.registry import list_tool_names
+
+    resolution = resolve_home_command(workspace=turn.workspace, actor=turn.actor, text=turn.content)
+    if resolution is None:
+        return None
+    if resolution.outcome != OUTCOME_DRAFT:
+        # The ask or the refusal: Friday's own text, no card.
+        return RouteResult(reply_text=resolution.reply)
+    if resolution.tool_name not in list_tool_names():
+        return None
+    return RouteResult(
+        intent=Message.Intent.TOOL_REQUEST,
+        intent_payload={
+            "tool_name": resolution.tool_name,
+            "payload": {"arguments": dict(resolution.arguments)},
+        },
+        reply_text=resolution.reply,
+    )
+
+
+# Routes whose matcher is code, tried after the phrase and `tool.*` routes.
+CODE_ROUTES: tuple[WakeRoute, ...] = (
+    WakeRoute(
+        name=HOME_ROUTE_NAME,
+        effect=EFFECT_PROPOSAL,
+        default_phrases=(),
+        handler=_home_control,
+        matched_by_code=True,
+    ),
+)
+
+
 # --- the table ------------------------------------------------------------------
 
 
@@ -251,7 +309,7 @@ def validate_routes(routes=None) -> None:
     non-empty, and no phrase equal to or a word-prefix of another route's.
     Anything else raises `ImproperlyConfigured` -- the app refuses to
     start."""
-    routes = ROUTES if routes is None else routes
+    routes = (*ROUTES, *CODE_ROUTES) if routes is None else routes
     names = set()
     owned = []
     for route in routes:
@@ -264,6 +322,14 @@ def validate_routes(routes=None) -> None:
             )
         if not callable(route.handler):
             raise ImproperlyConfigured(f"wake route {route.name} has no handler")
+        if route.matched_by_code:
+            # Phase 13 D13: a code matcher, never a phrase an alias could
+            # shadow or that could shadow another route.
+            if route.default_phrases:
+                raise ImproperlyConfigured(
+                    f"wake route {route.name} is matched by code and takes no phrase"
+                )
+            continue
         if not route.default_phrases:
             raise ImproperlyConfigured(f"wake route {route.name} has no phrase")
         for phrase in route.default_phrases:
@@ -309,14 +375,20 @@ def _tool_read_handler(tool_name):
 
 def _tool_write_handler(tool_name):
     def handler(turn: WakeTurn) -> RouteResult:
-        from assistant.services import draft_tool_payload
+        from assistant.services import DraftRefused, draft_tool_payload
 
-        payload = draft_tool_payload(
-            turn.conversation,
-            actor=turn.actor,
-            content=turn.remainder or turn.content,
-            tool_name=tool_name,
-        )
+        try:
+            payload = draft_tool_payload(
+                turn.conversation,
+                actor=turn.actor,
+                content=turn.remainder or turn.content,
+                tool_name=tool_name,
+                source_text=turn.content,
+            )
+        except DraftRefused as refused:
+            # Phase 13 D13: the draft check refused (e.g. a device other
+            # than the one the owner named) -- no card.
+            return RouteResult(reply_text=refused.reply)
         if payload is None:
             return RouteResult()
         return RouteResult(
@@ -529,8 +601,6 @@ def route_voice_turn(conversation, *, actor, content, channel, input_mode, now=N
     the route's capped classification and its reply text (None when the
     cap degraded the route: the turn is then answered as plain chat).
     Makes no model call."""
-    from assistant.services import apply_voice_capability_cap
-
     if input_mode != Message.InputMode.VOICE:
         return None
     workspace = conversation.workspace
@@ -538,8 +608,6 @@ def route_voice_turn(conversation, *, actor, content, channel, input_mode, now=N
         return None
     aliases = aliases_for(workspace)
     route, remainder = match_turn(content, aliases=aliases)
-    if route is None:
-        return _route_skill(actor, workspace, content, aliases)
     turn = WakeTurn(
         conversation=conversation,
         actor=actor,
@@ -549,7 +617,21 @@ def route_voice_turn(conversation, *, actor, content, channel, input_mode, now=N
         remainder=remainder,
         now=now or timezone.now(),
     )
-    result = route.handler(turn)
+    if route is None:
+        # Phase 13 D13: the code-matched routes (`home.control`).
+        for code_route in CODE_ROUTES:
+            result = code_route.handler(turn)
+            if result is not None:
+                return _finish(code_route, result, input_mode=input_mode, remainder="")
+        return _route_skill(actor, workspace, content, aliases)
+    return _finish(route, route.handler(turn), input_mode=input_mode, remainder=remainder)
+
+
+def _finish(route, result, *, input_mode, remainder):
+    """The route's capped classification (ADR-015): degraded to plain chat
+    with no reply when the cap changes it; else its commit runs."""
+    from assistant.services import apply_voice_capability_cap
+
     classification = {"intent": result.intent, "intent_payload": dict(result.intent_payload)}
     capped = apply_voice_capability_cap(classification, input_mode=input_mode)
     if capped != classification or route.effect not in ALLOWED_EFFECTS:

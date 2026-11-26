@@ -19,6 +19,11 @@ allowlist allows no entity call -- Wake-on-LAN stays on the MAC allowlist);
 `ha_states` keeps `source` / `source_list` (bounded) and annotates
 allowlisted entities with their room and label. Every call stays gate-class.
 
+Phase 13 D13 (branch 6): `draft_arguments` -- the router (typed turns) and
+the `home.control` wake route (voice) draft the card with exact arguments;
+`draft_arguments` is a Friday-side flag, not part of the pinned request
+contract, so the pins and the version are unchanged.
+
 The pins are the sha256 of the bridge's own request contract
 (`connectors.bridges.home_assistant.tool_schemas()`); widening the
 allowlist means updating them and bumping `version` in the same reviewed
@@ -87,6 +92,11 @@ MANIFEST = ConnectorManifest(
             request_rows=bridge.request_rows,
             precondition=bridge.target_present,
             records_work_log=False,
+            # Phase 13 D13 (branch 6): a typed turn's draft carries the
+            # router-extracted arguments, checked against the allowlist and
+            # the owner's room/label mention before the card exists
+            # (`connectors.home_phrases.check_call_draft`).
+            draft_arguments=True,
         ),
     ),
 )
