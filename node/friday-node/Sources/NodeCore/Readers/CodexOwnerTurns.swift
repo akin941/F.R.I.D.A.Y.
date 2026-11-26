@@ -71,8 +71,9 @@ extension NodeReaders {
         "codex/sessions/" + Scalars.dropFirst(path, Scalars.count(codexRoot) + 1)
     }
 
-    /// `_codex_turns` over `codexFiles`.
-    func codexOwnerTurnRows(match: (String) -> String?) throws -> [OwnerTurnRow] {
+    /// `_codex_turns` over `codexFiles`; a turn before `since` is dropped as
+    /// it streams by (`collect_files`'s comprehension).
+    func codexOwnerTurnRows(match: (String) -> String?, since: Int64) throws -> [OwnerTurnRow] {
         var rows: [OwnerTurnRow] = []
         var failure: Error?
         for path in codexFiles {
@@ -91,7 +92,7 @@ extension NodeReaders {
                 if case .turn(let value) = CodexOwnerTurn.verdict(line) { text = value }
                 do {
                     // The reference parses every line's timestamp, turn or not.
-                    guard let at = try OwnerInstant.parse(line["timestamp"]), let text else { return true }
+                    guard let at = try OwnerInstant.parse(line["timestamp"]), let text, at >= since else { return true }
                     rows.append(OwnerTurnRow(
                         sessionID: current.id, cwd: current.cwd,
                         turnID: CodexOwnerTurn.turnID(relative: relative, offset: offset), at: at, text: text))
