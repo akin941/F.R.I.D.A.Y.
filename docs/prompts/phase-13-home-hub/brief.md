@@ -1676,6 +1676,28 @@ Owner steps (pending) — `feat/p13-home-voice-routes`, recorded 2026-11-20:
 4. Real microphone / Whisper Turkish recognition of the home vectors is part
    of M2 (pending owner evaluation; does not block branch 8).
 
+Known follow-ups — `feat/p13-home-voice-routes` (unresolved LOW review notes,
+recorded at the integration merge 2026-11-26):
+1. **Typed-turn mismatch check is permissive for vague messages**
+   (`backend/connectors/home_phrases.py` `check_call_draft` /
+   `mentioned_targets`). The check returns None (card allowed) whenever the
+   owner's message names no known device or room, and skips the mismatch
+   check entirely for the Wake-on-LAN domain, so a model-chosen allowlisted
+   entity or MAC can be drafted for a vague message. The owner still sees
+   and approves the exact arguments on the card, so this is not a gate
+   bypass. Fix: optionally add a test that pins this behavior; if a
+   stricter rule is wanted, require that the drafted entity's label, alias
+   or room appear in the message when the message is a home-domain
+   utterance.
+2. **Bare media verbs are claimed by `home.control`**
+   (`backend/connectors/home_phrases.py` `_command` / `MEDIA_ONLY`). A bare
+   "pause", "mute" or "play" is claimed once the owner has any allowlisted
+   entity, even if the owner meant something else. It resolves to a draft
+   only, or to a refusal when no media player is allowed or HA is not
+   connected, so impact is low. Fix: consider requiring a media player in
+   the allowlist before treating a bare media verb as a home command, or
+   document this here.
+
 **Minimum usable cut** if the phase runs long: 7 (the home server is safe
 and backed up), 1 and 2 (several PCs, the right one each time). 3 adds
 presence, 4 the Linux node, 5–6 the TV.
