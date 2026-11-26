@@ -29,7 +29,7 @@ final class SpikeModel: ObservableObject {
     let spikeDir = NSHomeDirectory() + "/FridaySpike"
     var statusPath: String { spikeDir + "/status-\(buildVersion).txt" }
 
-    private var lastWrite: [String: String] = [:]
+    fileprivate var lastWrite: [String: String] = [:]
 
     init() {
         Task { @MainActor in
@@ -57,7 +57,19 @@ final class SpikeModel: ObservableObject {
             keychainCheck(dataProtection: false),
         ]
         writeStatusFile()
+        // System Events quits when idle; relaunch it once and re-check, so the
+        // status shows the grant instead of "-600 not running".
+        if Self.automationStatus(ask: false) == OSStatus(procNotFound), !relaunchingSystemEvents {
+            relaunchingSystemEvents = true
+            Task { @MainActor in
+                await Self.ensureSystemEventsRunning()
+                self.refresh()
+                self.relaunchingSystemEvents = false
+            }
+        }
     }
+
+    private var relaunchingSystemEvents = false
 
     private func writeStatusFile() {
         try? FileManager.default.createDirectory(
@@ -100,11 +112,18 @@ final class SpikeModel: ObservableObject {
         case "fda":
             return [settingsAction("Privacy_AllFiles")]
         case "automation":
+            // A wildcard AEDeterminePermissionToAutomateTarget never prompts, and
+            // nothing prompts while System Events is not running. A real Apple
+            // event does both: it launches System Events and asks once.
             return [CheckAction(title: "Request") { [weak self] in
-                DispatchQueue.global().async {
-                    _ = Self.automationStatus(ask: true)
-                    Task { @MainActor in self?.refresh() }
+                var error: NSDictionary?
+                let script = NSAppleScript(
+                    source: "tell application \"System Events\" to get name of first process")
+                _ = script?.executeAndReturnError(&error)
+                if let number = error?[NSAppleScript.errorNumber] {
+                    self?.lastWrite["automation request"] = "AppleScript error \(number)"
                 }
+                self?.refresh()
             }]
         case "kc-dp":
             return [CheckAction(title: "Write") { [weak self] in self?.writeKeychain(dataProtection: true) }]
