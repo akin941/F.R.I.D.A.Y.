@@ -827,6 +827,24 @@ VOICE_LIVE_SELFTEST_RESULT_PATH = env("VOICE_LIVE_SELFTEST_RESULT_PATH", default
 # its `conformance.lock`. Empty = `<repo>/node/friday-voice` next to the
 # backend; absent (the backend image ships no `node/`) = a warning.
 PREFLIGHT_FRIDAY_VOICE_DIR = env("PREFLIGHT_FRIDAY_VOICE_DIR", default="")
+# Phase 13 branch 7 (ADR-017, brief D14/D15): the home-server rows
+# (`check_home`). The two status files the host's backup and drill scripts
+# write (deploy/home/; deploy/docker/compose.home.yml binds them read-only
+# into web). Empty = the row warns (not configured); a configured path with
+# no readable file fails. Preflight reads only these files, never a dump.
+HOME_BACKUP_STATUS_PATH = env("HOME_BACKUP_STATUS_PATH", default="")
+HOME_RESTORE_DRILL_STATUS_PATH = env("HOME_RESTORE_DRILL_STATUS_PATH", default="")
+# `home_backup_fresh`: pass <= warn hours, warn up to fail hours, then fail.
+HOME_BACKUP_WARN_HOURS = env.int("HOME_BACKUP_WARN_HOURS", default=26)
+HOME_BACKUP_FAIL_HOURS = env.int("HOME_BACKUP_FAIL_HOURS", default=72)
+# `home_restore_drill_age`: pass <= warn days with `result: pass`, warn up to
+# fail days, then fail (or at once when the last drill failed).
+HOME_DRILL_WARN_DAYS = env.int("HOME_DRILL_WARN_DAYS", default=35)
+HOME_DRILL_FAIL_DAYS = env.int("HOME_DRILL_FAIL_DAYS", default=90)
+# The owner's attestation (ISO date) that the server's disk is LUKS
+# encrypted (runbook step 1); a container cannot see the host's disks.
+# Empty = `home_disk_encryption` warns.
+HOME_FDE_CONFIRMED_ON = env("HOME_FDE_CONFIRMED_ON", default="")
 
 # --- Knowledge/RAG (MVP 3) ---
 

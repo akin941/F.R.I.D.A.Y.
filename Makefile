@@ -1,6 +1,7 @@
 # Friday OS — development commands
 COMPOSE := docker compose -f deploy/docker/compose.yml
 COMPOSE_DAILY := $(COMPOSE) -f deploy/docker/compose.daily.yml
+COMPOSE_HOME := $(COMPOSE_DAILY) -f deploy/docker/compose.home.yml
 BACKEND := cd backend &&
 # The WSGI/ASGI/Celery entry points default to config.settings.prod (fail
 # hard on a missing env) since Phase 4 branch 1, so host-side Celery runs
@@ -10,7 +11,7 @@ BACKEND := cd backend &&
 DEV_SETTINGS := DJANGO_SETTINGS_MODULE=$${DJANGO_SETTINGS_MODULE:-config.settings.dev}
 FRONTEND := cd frontend &&
 
-.PHONY: up up-daily down logs secrets test lint fmt shell migrate makemigrations \
+.PHONY: up up-daily up-home down logs secrets test lint fmt shell migrate makemigrations \
 	harness-images harness-smoke harness-runner deploy-smoke preflight \
 	test-backend test-frontend test-e2e lint-backend lint-frontend \
 	frontend-install frontend-dev frontend-build e2e-install voice-models \
@@ -29,6 +30,14 @@ up: secrets
 # deploy/docker/compose.daily.yml).
 up-daily: secrets
 	$(COMPOSE_DAILY) up -d --build
+
+# Home server (Phase 13, ADR-017): the daily stack plus the home override
+# (deploy/docker/compose.home.yml: home_* preflight settings, the backup and
+# drill status files bound read-only; still nothing on 0.0.0.0). Run the
+# backup and the first restore drill before the first `up-home`
+# (docs/runbooks/home-server-setup.md steps 8-9).
+up-home: secrets
+	$(COMPOSE_HOME) up -d --build
 
 down:
 	$(COMPOSE) down

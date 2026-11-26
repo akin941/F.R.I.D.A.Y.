@@ -683,7 +683,8 @@ rows (not HA's friendly names) keeps the vocabulary owner-set.
 
 - `deploy/docker/compose.home.yml` (override on top of `compose.yml` +
   `compose.daily.yml`): `HOME_*` settings into web/worker, read-only bind
-  of `/var/backups/friday/status.json` and `drill.json` into web, nothing
+  of the status directory `/var/backups/friday/status/` (holding only
+  `status.json` and `drill.json`) into web, nothing
   published on `0.0.0.0` (a test parses every compose file and fails on a
   non-loopback `ports:` entry).
 - `deploy/home/friday-backup.sh`, `friday-restore-drill.sh`,
@@ -1125,7 +1126,7 @@ evaluation".
 | 4 | `feat/p13-linux-node` | `node/friday-node-linux` (vendored + locked, read-only, local policy CLI, credential file, systemd user unit, re-point), CI conformance job, Windows stub README | 1 (pairing `platform`) | planned |
 | 5 | `feat/p13-ha-home-control` | `connectors.HomeEntity` allowlist, media_player power/source/mute/volume steps, `source_list`, manifest v2 pins, entity editor, governance docs | 1 (rooms) | planned |
 | 6 | `feat/p13-home-voice-routes` | `connectors.home_phrases`, `home.control` wake route (proposal only), typed-turn mismatch check, vectors, ADR-015 note | 2, 5 | planned |
-| 7 | `feat/p13-home-server-ops` | `compose.home.yml`, `deploy/home/` backup/drill/timer/Caddy, `home_*` preflight rows and settings | brief approved (independent) | planned |
+| 7 | `feat/p13-home-server-ops` | `compose.home.yml`, `deploy/home/` backup/drill/timer/Caddy, `home_*` preflight rows and settings | brief approved (independent) | **implemented 2026-11-20** (compose override + `make up-home`, `deploy/home/` scripts/units/Caddyfile, `check_home` five rows, settings + `.env.example`, `home-ops` CI job, runbook updated; real hardware: M3, pending owner evaluation) |
 | 8 | `chore/p13-closeout` | `nodes_labels` / `ha_entities` / `linux_node_vendor` rows, no-protocol-change check, home-hub e2e, runbooks, ADR-017 note, MASTER_PLAN row, `self_sources.json`, go/no-go record | 1–7 | planned |
 | M1 | Swift `friday-node`: pairing `platform`, server re-point | Send `platform: "macos"` at pairing; "Sunucu adresini değiştir" behind Touch ID keeping the pins; conformance unchanged | 1 merged; Phase 9 B1 | deferred: Mac session |
 | M2 | Multi-node and home-route run on real hardware | Real mic "which PC" and "salondaki TV'yi aç" on the Mac; Mac + real Linux PC paired to the real home server; HUD presence | 2, 3, 4, 6 merged; M1; Phase 11 B7 | deferred: Mac session (pending owner evaluation) |
@@ -1328,7 +1329,7 @@ wrong PC; a restore drill from the off-site backup has passed."
 | Linux node conformance | branch 4 CI job | pending (branch 4) |
 | HA entity allowlist fail-closed; media/scene gate-class | branch 5 tests | pending (branch 5) |
 | Home voice routes propose only | branch 6 tests + closeout e2e | pending (branch 6) |
-| Backup → restore round trip; no public port in any compose file | branch 7 tests | pending (branch 7) |
+| Backup → restore round trip; no public port in any compose file | branch 7 tests | pass in CI (branch 7, 2026-11-20: `ops/tests/test_home_backup_restore.py` against a scratch Postgres + local restic repo, `test_compose_no_public_ports.py`); the real box is M3 |
 | Two weeks on the home server, ≥ 2 PCs, zero wrong-node chain rows | M2 + `verify_node_audit_chain` + owner review of `/devices` audit | pending owner evaluation |
 | Restore drill from off-site passed | M3 `drill.json` | pending owner evaluation |
 | Real-mic "which PC" and home routes | M2 | pending owner evaluation (Mac session) |
@@ -1466,6 +1467,70 @@ accounts or judgement):
 
 Nothing in this branch needs the Mac, real credentials, paid calls or real
 hardware: it is documentation only.
+
+### Branch notes and owner steps (pending) — `feat/p13-home-server-ops`, recorded 2026-11-20
+
+**What landed.** `deploy/docker/compose.home.yml` (HOME_* settings into
+web and worker; the `status/` subdirectory of the backup directory, which
+holds only `status.json` / `drill.json`, bound read-only into web as a
+directory, `create_host_path: false`; publishes nothing) and `make up-home`;
+`deploy/home/friday-backup.sh`, `friday-restore-drill.sh`,
+`friday-backup.{service,timer}`, `Caddyfile.example` (shellcheck-clean;
+every location an env var with the runbook default; `FRIDAY_PG_DUMP_MODE=
+direct` / `FRIDAY_DRILL_MODE=direct` are the seams the tests use instead of
+Docker); `ops/preflight.py` `check_home` (`home_lan_only` with the
+`resolve_host` seam, `home_tls_pin` = `node_tls_pin`'s comparison,
+`home_backup_fresh`, `home_restore_drill_age`, `home_disk_encryption`),
+registered last in `CHECKS`; the seven `HOME_*` settings in `base.py`,
+`.env.example` and `deploy/docker/.env.example`; the runbook points at the
+shipped files.
+
+**Decisions taken in the branch.**
+- Tests live in `backend/ops/tests/` (the brief allowed it):
+  `test_preflight_home.py`, `test_compose_no_public_ports.py`,
+  `test_home_backup_restore.py`. The round trip needs `age`, `restic` and
+  the pg16 client: it skips where they are missing and runs in the new
+  `home-ops` CI job (apt-installed, `FRIDAY_HOME_OPS=1` makes a missing
+  tool a failure), which also runs `shellcheck`. Local run in this
+  container: all green with apt's age 1.1.1 / restic 0.16.4.
+- `pyyaml` is added to the backend **dev** group only (the compose guard
+  parses YAML; no runtime dependency).
+- A configured status path whose file is missing **fails** (a backup that
+  never ran must not look "not configured"); only an empty setting warns.
+- `home_lan_only` treats an unresolvable `.local` name as link-local (mDNS
+  does not resolve in a container) and warns on other unresolvable names;
+  a leading-dot host (`.example.net`) counts as a wildcard and fails.
+- The drill checks the dump's sha256 against `status.json` before
+  decrypting (age's MAC also refuses a tampered file) and, in direct mode,
+  refuses a scratch database that already has tables. When `status.json`
+  does not name the dump (an older or off-site one) it logs that the
+  comparison was skipped.
+- Review round 1 (2026-11-26): the status files live in
+  `$FRIDAY_BACKUP_DIR/status/` (`FRIDAY_STATUS_DIR`) and compose binds that
+  **directory**, not each file: the scripts replace the files atomically
+  (rename), and a single-file bind mount pins the old inode, so web would
+  have read a stale status forever. A compose test fails on any bind
+  source ending in `.json`. `home_lan_only`'s warn detail for an
+  unresolvable non-`.local` name now says it was not verified LAN-only.
+- Caddy forwards `X-Real-IP` (overwritten by the proxy); the runbook's
+  `TRUSTED_CLIENT_IP_HEADER` changed from `X-Forwarded-For` to `X-Real-IP`.
+
+**Owner steps (pending).**
+1. On the real home PC (M3): install the scripts and units as the runbook
+   steps 8–9 say, run the first backup and the first drill (and later one
+   from the off-site copy), then `make up-home` and `make preflight` — every
+   `home_*` row pass. The docker-mode paths of both scripts (`docker compose
+   exec postgres pg_dump`, the throwaway drill container on
+   `friday_default`, the one-off `web` check) and the systemd hardening
+   (`ProtectSystem=strict`, `ProtectHome`, `CacheDirectory`) were not run
+   here (no Docker daemon / systemd in this container); fix any difference
+   in a docs/ops branch.
+2. Set `HOME_FDE_CONFIRMED_ON` in `deploy/docker/.env` after checking LUKS
+   (runbook step 1).
+3. Set `NODE_TLS_PIN_SHA256` + `PREFLIGHT_NODE_TLS_URL` to the LAN URL so
+   `home_tls_pin` and `home_lan_only` pass instead of warn.
+4. Choose the off-site restic target (Q5); until then a second disk,
+   recorded as "off-site pending".
 
 ### Known follow-ups (unresolved LOW review notes, recorded at merge 2026-11-26)
 

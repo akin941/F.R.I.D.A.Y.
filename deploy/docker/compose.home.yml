@@ -1,0 +1,59 @@
+# Friday OS -- home server override (Phase 13 D14, ADR-017). Layered on top
+# of the daily-driver stack on the one always-on home PC:
+#
+#   make up-home
+#   # = docker compose -f deploy/docker/compose.yml \
+#   #     -f deploy/docker/compose.daily.yml \
+#   #     -f deploy/docker/compose.home.yml up -d --build
+#
+# What it adds (docs/runbooks/home-server-setup.md):
+# - the `home_*` preflight settings into web and worker (backup and drill
+#   thresholds, the full-disk-encryption attestation date);
+# - the status directory the host's backup and drill scripts write their two
+#   status files into (deploy/home/friday-backup.sh, friday-restore-drill.sh:
+#   $HOME_BACKUP_HOST_DIR/status/status.json and drill.json), bound
+#   READ-ONLY into web -- never the backup directory itself, so no container
+#   can see a dump or the encrypted secrets file. A DIRECTORY mount, not one
+#   per file: the scripts replace each file atomically (rename), and a
+#   single-file bind mount pins the old inode, so web would keep reading a
+#   stale status after the first nightly run. The directory must exist
+#   before the first `up` (the first backup creates it, runbook step 8):
+#   `create_host_path: false` refuses to start rather than letting Docker
+#   create an empty root-owned one.
+#
+# It publishes NOTHING. Every port of the stack stays on 127.0.0.1 (the base
+# and daily files); the only LAN-facing listener is Caddy on the host, bound
+# to the LAN address (deploy/home/Caddyfile.example). Docker-published ports
+# bypass ufw, so a test (backend/ops/tests/test_compose_no_public_ports.py)
+# fails on any `ports:` entry in any compose file that is not 127.0.0.1.
+x-home-env: &home_env
+  HOME_BACKUP_STATUS_PATH: /run/friday-home/status.json
+  HOME_RESTORE_DRILL_STATUS_PATH: /run/friday-home/drill.json
+  HOME_BACKUP_WARN_HOURS: "${HOME_BACKUP_WARN_HOURS:-26}"
+  HOME_BACKUP_FAIL_HOURS: "${HOME_BACKUP_FAIL_HOURS:-72}"
+  HOME_DRILL_WARN_DAYS: "${HOME_DRILL_WARN_DAYS:-35}"
+  HOME_DRILL_FAIL_DAYS: "${HOME_DRILL_FAIL_DAYS:-90}"
+  # The owner's attestation (YYYY-MM-DD) that the host disk is LUKS
+  # encrypted (runbook step 1): a container cannot see the host's disks.
+  HOME_FDE_CONFIRMED_ON: "${HOME_FDE_CONFIRMED_ON:-}"
+
+services:
+  web:
+    environment:
+      <<: *home_env
+    volumes:
+      - type: bind
+        source: "${HOME_BACKUP_HOST_DIR:-/var/backups/friday}/status"
+        target: /run/friday-home
+        read_only: true
+        bind:
+          create_host_path: false
+
+  # The worker runs no home check; it gets the same settings so a
+  # `manage.py preflight` run there reports the same thresholds (and the
+  # status rows as not configured, since nothing is mounted there).
+  worker:
+    environment:
+      <<: *home_env
+      HOME_BACKUP_STATUS_PATH: ""
+      HOME_RESTORE_DRILL_STATUS_PATH: ""

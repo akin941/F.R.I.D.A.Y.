@@ -1,0 +1,14 @@
+# Friday home server -- nightly backup timer (Phase 13 D14). 03:10 local
+# time; `Persistent=true` runs a missed backup at the next boot, so a box
+# that was off at 03:10 still backs up (preflight `home_backup_fresh` warns
+# after 26 h and fails after 72 h if it does not).
+[Unit]
+Description=Friday nightly backup
+
+[Timer]
+OnCalendar=*-*-* 03:10:00
+Persistent=true
+RandomizedDelaySec=10m
+
+[Install]
+WantedBy=timers.target
