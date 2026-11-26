@@ -718,9 +718,14 @@ conformance locks are untouched. What changed is server-side only:
 
 ## Implementation notes — Personal Team spike (runbook A1, `feat/mac-a1-spike`, 2026-11-26)
 
-**Result: PASS** — (a) to (d) of "Amendment 2026-11-25 (d9 revised)" hold
-on the owner's Mac, with the node credential in the **data protection
-keychain**. B1 may start. Run on macOS 27.2 (26B123), Xcode 27.2 (27B52),
+**Result: PASS, conditional on the 2026-12-04 expiry check** — (a) to (d)
+of "Amendment 2026-11-25 (d9 revised)" hold on the owner's Mac, with the
+node credential in the **data protection keychain**. The runbook's Fail
+criterion "a profile's expiry would break the installed app" cannot be
+tested before the 7-day profile expires (see below); B1 starts on this
+basis, and if the check fails this note is changed to FAIL and A1-F
+applies. Run on macOS 27.2 (build `26B123` as `sw_vers` reports it), Xcode
+27.2 (27B52),
 Apple silicon, on 2026-11-26. The spike app and its build script are in
 `node/spikes/ptspike/` (owner decision 2026-11-26: the spike, its script
 and this note live on one branch, instead of the runbook's out-of-repo
@@ -731,15 +736,15 @@ outside the repo. No identity name, Team ID or certificate is committed.
 | Check | Result |
 |---|---|
 | (a) Signing | PASS. Xcode automatic signing, Release, `flags=0x10000(runtime)`, no App Sandbox, chain Apple Development → Apple Worldwide Developer Relations CA (G3) → Apple Root CA, `TeamIdentifier` set, `codesign --verify --strict` valid. Never re-signed by hand. |
-| (b) Dates | Certificate valid one year (notBefore 2026-11-26, notAfter 2027-11-26). Xcode-managed profile valid **7 days** (created 2026-11-26, expires 2026-12-03). Renewal untested. |
+| (b) Dates | Certificate valid one year (notBefore 2026-11-26, notAfter 2027-11-26; read from the signing certificate by `build.sh`, `inspect-6.txt`). Xcode-managed profile valid **7 days** (created 2026-11-26, expires 2026-12-03). Renewal untested. |
 | (c) TCC across two rebuilds | PASS. Build 3 (N) held Microphone, Accessibility, Screen Recording, Full Disk Access and Automation (System Events); builds 4 and 5, each with a different binary (a per-build marker string) and `CFBundleVersion`, kept all five, with no prompt. |
-| (d) Keychain across two rebuilds | PASS, data protection keychain. Build 3 wrote a `kSecClassGenericPassword` item (`kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly`, not synchronizable) with `kSecUseDataProtectionKeychain`; builds 4 and 5 read it with no prompt. The file-based variant also passed. |
+| (d) Keychain across two rebuilds | PASS, data protection keychain. Build 3 wrote a `kSecClassGenericPassword` item with `kSecUseDataProtectionKeychain` (the code sets `kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly` and not synchronizable; the attributes were not read back); builds 4 and 5 read it with no prompt. A data-protection read never shows an ACL prompt, so for this variant the evidence is the successful read by a different build, not the absence of a prompt. The file-based variant also passed. |
 
 - **Designated requirement form:** `identifier "<spike bundle id>" and
   anchor apple generic and certificate leaf[subject.CN] = "Apple
   Development: <owner> (<cert id>)" and certificate
   1[field.1.2.840.113635.100.6.2.1] /* exists */`. No `cdhash`. It was
-  equal for every build (1–5) and did not change when the entitlements or
+  equal for every build (1–6; build 6 was built after review, not installed) and did not change when the entitlements or
   the embedded profile changed.
 - **Entitlement set B1 ships with** (as Xcode signed it):
   `com.apple.security.device.audio-input`,
@@ -763,13 +768,19 @@ outside the repo. No identity name, Team ID or certificate is committed.
   device-registration flag.
 - **The 7-day profile is the binding date.** Because data protection needs
   the embedded profile, every installed build carries a profile that
-  expires a week after it was made. Untested today: whether an installed
-  build with an expired profile still launches and keeps reading its item.
-  Until that is checked, plan on rebuilding (and reinstalling) the node at
-  least weekly; a rebuild refreshes the profile and keeps grants and the
-  item (shown above). **Check on 2026-12-04**, with the spike still installed
-  from build 5, whether it launches and reads the item; record the result
-  here. Certificate renewal (same CN is expected to keep the requirement
+  expires a week after it was made. Builds 2–6 all embedded the **same**
+  profile (created 2026-11-26 15:48 UTC, expires 2026-12-03 15:48 UTC):
+  rebuilds before expiry reuse it, so a rebuild today does not extend it.
+  Shown: grants and the item survive rebuilds. **Untested:** (1) whether an
+  installed build with an expired profile still launches and reads its
+  item; (2) whether a rebuild after (or near) expiry gets a new 7-day
+  profile and still keeps the grants and the item. B1's operating plan
+  ("rebuild at least weekly") rests on (2), so it is not settled yet.
+  **Check on 2026-12-04:** launch the installed build 5 and record whether
+  it starts and reads the item; then rebuild with `build.sh <next>
+  --install`, read the new profile's `CreationDate` / `ExpirationDate`
+  (`inspect-<next>.txt`, from `security cms -D -i … | plutil -p -`), and
+  record whether the grants and the item survived; record both here. Certificate renewal (same CN is expected to keep the requirement
   equal): reminder for **2027-11-12**, two weeks before notAfter.
 - **Gatekeeper, for the record:** `spctl --assess` rejects the app (not
   notarized), as accepted by the amendment; a local build has no
@@ -782,7 +793,9 @@ outside the repo. No identity name, Team ID or certificate is committed.
      into the login keychain.
   2. A query without `kSecUseDataProtectionKeychain` can also match
      data-protection items, so a file-based `SecItemDelete` removed the
-     data-protection item when both used the same account. The spike uses
+     data-protection item when both used the same account (observed on
+     build 2; that status file was overwritten, so it is not kept as
+     evidence). The spike uses
      one account per variant; `Credential.swift` must always pass
      `kSecUseDataProtectionKeychain: true`, on delete too.
   3. `AEDeterminePermissionToAutomateTarget` with `typeWildCard` never
