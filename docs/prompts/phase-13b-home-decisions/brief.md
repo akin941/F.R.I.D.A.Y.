@@ -1381,3 +1381,18 @@ accounts or judgement):
 
 Nothing in this branch needs the Mac, real credentials, paid calls or real
 hardware: it is documentation only.
+
+### Known follow-ups — review notes left open at the `docs/p13b-brief` merge (2026-11-26)
+
+1. **LOW — rate-limit counting is ambiguous** (this brief, D7/D8/D10).
+   D7 step 8 says classify counts the rate windows last; D8 says a call is
+   counted only when it is about to be sent; D10 has the executor re-run
+   classify (step 2) and then count (step 3). If classify itself
+   increments, a voice turn is counted at route time, again in the
+   executor's classify and again at step 3 (effective limits ≈ 15/min
+   global, 5/min per entity), and a call that falls back to a card also
+   spends quota. Fix: state in D7 and D8 that classify only reads (peeks)
+   the windows and that a single `count_direct_call` increment happens in
+   execute step 3, immediately before the send; add a 1b/1c test that one
+   direct call increments each window exactly once and that a fallback
+   increments none.
