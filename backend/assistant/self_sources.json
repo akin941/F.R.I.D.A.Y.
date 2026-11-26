@@ -28,27 +28,27 @@
     },
     {
       "file": "CLAUDE.md",
-      "line": 28,
+      "line": 31,
       "text": "LLM-calling code must be mockable."
     },
     {
       "file": "CLAUDE.md",
-      "line": 30,
+      "line": 33,
       "text": "Modular monolith dependencies are one-way:"
     },
     {
       "file": "CLAUDE.md",
-      "line": 33,
+      "line": 36,
       "text": "No feature without tests."
     },
     {
       "file": "CLAUDE.md",
-      "line": 35,
+      "line": 38,
       "text": "Ruff, pytest and CI must be green"
     },
     {
       "file": "CLAUDE.md",
-      "line": 36,
+      "line": 39,
       "text": "Obsidian vault is a mirror, never the primary store."
     }
   ],
@@ -257,17 +257,30 @@
         "text": "Accepted 2026-11-26 — owner decision of 2026-11-26 (MASTER_PLAN §O,"
       },
       "decision": {
-        "line": 35,
+        "line": 39,
         "text": "One always-on Friday server on a home PC."
+      }
+    },
+    {
+      "id": "ADR-018",
+      "title": "Direct-Execute Home Media Class",
+      "file": "docs/adr/ADR-018-direct-home-media-class.md",
+      "status": {
+        "line": 4,
+        "text": "Accepted 2026-11-26 — owner decision of 2026-11-26, recorded in the cloud"
+      },
+      "decision": {
+        "line": 38,
+        "text": "A closed allowlist of services, in code."
       }
     }
   ],
   "phase": {
     "file": "docs/MASTER_PLAN.md",
-    "line": 1024,
+    "line": 1045,
     "phase": "12 Reach and proactivity",
     "outcome": "Friday starts useful conversations and uses your automations",
     "status": "server side done (2026-11-20); go/no-go checkpoint in progress — branches 1–7 + closeout implemented (the `proactive` app: `core.probes` registry, the unattended deny guard in every effect's owning service, owner-only web schedules (\"cron…"
   },
-  "content_hash": "d91dbc95a03ca46a769a5093fc8b56b9cabafe809460fb5ad9157ddaa1d2f808"
+  "content_hash": "0bb43ead8ea039d381c73361358a74b9a5648e74eb31dbf9dbf87d5234d60896"
 }

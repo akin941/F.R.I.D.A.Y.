@@ -8,6 +8,10 @@ Builds on ADR-001 (workspace axis), ADR-005 (Postgres is the source of
 truth), ADR-010 (connectors, Home Assistant bridge), ADR-013 (Friday Node
 protocol, unchanged), ADR-014 (node action classes, unchanged) and ADR-015
 (voice-originated turns, unchanged). Amends nothing.
+**Amended 2026-11-26 (Phase 13b owner decisions):** interim server on the
+owner's MacBook, Cloudflare R2 as the off-site target, TPM auto-unlock with
+an owner-accepted residual, and the ADR-018 cross-reference — see
+"Amendment — owner decisions 2026-11-26 (Phase 13b)" at the end.
 
 Numbering note: the Phase 13 task text named this ADR "ADR-016". ADR-016 is
 already taken by Phase 12 ("Proactive Runs, Schedules and Instruction
@@ -128,7 +132,7 @@ gateway at home, and the owner's personal memory outside the house.
 - **One server per PC, synchronised.** Rejected: two primary copies of
   memory and approvals contradict ADR-005 and the single audit chain.
 
-## Implementation notes — Phase 13 closeout (`chore/p13-closeout`, 2026-11-20)
+## Implementation notes — Phase 13 closeout (`chore/p13-closeout`, 2026-11-26)
 
 What the server side of this ADR now consists of (branches 1–7 and the
 closeout, all on the integration branch). Nothing here was run on the
@@ -175,3 +179,62 @@ owner's home PC or a Mac (M2/M3, pending owner evaluation).
   `/api/v1/auth/nodes/credential/rotate` straight to Django would change
   which client IP PIN pairing trusts, so it is an owner decision (brief
   "Owner steps (pending)").
+
+## Amendment — owner decisions 2026-11-26 (Phase 13b)
+
+Recorded with `docs/prompts/phase-13b-home-decisions/brief.md` (branch
+`docs/p13b-brief`), owner decisions of 2026-11-26. Decisions 1–8 above
+keep their text; this section narrows how they are met until the home PC
+exists, fixes two choices they left open, and records one residual.
+
+1. **Interim server on the owner's MacBook (narrows decision 1 and the
+   "server on one of the Macs" alternative, for a bounded period).** Until
+   a home PC is bought, the same Compose stack runs on the owner's MacBook
+   under Docker Desktop or OrbStack. Friday is down while the Mac sleeps,
+   travels or is off, and the other PCs lose Friday with it — the cost the
+   alternative named, accepted by the owner as temporary. Everything else
+   holds: LAN-only reach (no public exposure), node WSS over TLS with a
+   pinned key or the private CA (decision 4), nightly encrypted backups
+   (they run while the Mac is awake; a missed run catches up on wake),
+   Postgres as the only source of truth. The Mac's own `friday-node`
+   pairs with the server on the same machine through the existing
+   loopback-only TLS path (`compose.local-tls.yml`, Caddy on
+   `127.0.0.1:8443`, from `feat/p9-node-local-pairing`); other PCs reach it
+   through a LAN-bound proxy with the private CA. Disk encryption on the
+   Mac is FileVault, which a container cannot see: preflight reports it as
+   an owner-confirmed **warning**, never a failure, while
+   `HOME_SERVER_PLATFORM=macos`. The move to the home PC is the decision 7
+   path: restore the latest backup, carry over `NODE_SIGNING_KEY` and the
+   CA (or the TLS key), re-point every node. The runbook section
+   "Interim: server on the MacBook" (`docs/runbooks/home-server-setup.md`)
+   is the checklist.
+2. **Off-site backup target = Cloudflare R2 (fixes decision 6's open
+   choice, Phase 13 Q5).** `restic` with the S3 backend to an R2 bucket,
+   the dumps `age`-encrypted before they leave the host, a bucket-scoped
+   API token. The bucket credentials live only in the host's restic
+   environment file, never in the stack's `.env` or any container; the
+   stack knows only the non-secret repository identifier
+   (`HOME_BACKUP_OFFSITE_REPOSITORY`), against which preflight checks that
+   the last backup went to R2. A second local disk remains acceptable only
+   as "off-site pending".
+3. **Disk unlock = TPM auto-unlock on the future home PC (fixes decision
+   5's open choice, Phase 13 Q6).** LUKS with
+   `systemd-cryptenroll --tpm2-device=auto --tpm2-pcrs=7`, so the box
+   comes back after a power cut without a person; a recovery key is
+   enrolled as a second slot and kept **off the server** (password manager
+   plus an offline copy); the passphrase slot may stay as a third.
+   **Owner-accepted residual:** a thief who takes the *whole machine* and
+   boots it with Secure Boot state unchanged gets an unlocked disk up to
+   the login prompt — the disk is protected against a removed or
+   discarded drive and against a changed boot chain (PCR 7), not against
+   the stolen running box. Mitigations that remain: the stack's secrets
+   and the database sit behind the OS login and Docker's root-owned data
+   directory, the server holds no age private key (old backups stay
+   unreadable), and the owner can revoke every node and rotate
+   `NODE_SIGNING_KEY` from another PC. The owner accepted this on
+   2026-11-26 in exchange for unattended reboots.
+4. **Direct-execute home media class.** Home Assistant calls stay
+   gate-class as decided with Phase 13, except the closed `media_player`
+   class of ADR-018 (play, pause, play_pause, stop, volume up/down/set,
+   mute on owner-flagged entities, rate-limited, volume-clamped, with an
+   owner kill switch). See ADR-018.

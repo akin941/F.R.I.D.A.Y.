@@ -134,3 +134,15 @@ owner evaluation (Phase 10 brief, Mac session M3).
   record, may move worktree-mode test/lint to confirm-class (the Mac session
   does not write that amendment). An escape found at any time keeps — or
   moves back — test/lint in gate-class with no further decision.
+
+## Cross-reference — ADR-018 (2026-11-26)
+
+ADR-018 (Direct-Execute Home Media Class, Accepted 2026-11-26, owner
+decision) is a deliberate, owner-approved, narrowing exception to
+decision 4's principle that a voice-originated turn only proposes:
+owner-flagged Home Assistant `media_player` entities may run play, pause,
+play_pause, stop, volume_up, volume_down, volume_set (clamped) and
+volume_mute without a card, also from voice and `node_voice` turns. Those
+are Home Assistant calls through the connector bridge, **not node
+actions**: this ADR's classes, its decision 4 for node actions, the
+confirm-class list and every node capability contract are unchanged.

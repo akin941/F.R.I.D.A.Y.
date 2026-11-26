@@ -377,3 +377,16 @@ allowlist shown as data) is checked before the card exists: outside the
 allowlist, or a different entity than the room/label the owner named ->
 `target_mismatch`, no draft. No decision changes; no node protocol or
 `friday-voice/v1` surface is added.
+
+## Cross-reference — ADR-018 (2026-11-26)
+
+ADR-018 (Direct-Execute Home Media Class, Accepted 2026-11-26, owner
+decision) is the single exception to decision 1: a voice or `node_voice`
+turn whose words the deterministic home matcher resolves to one of
+ADR-018's closed `media_player` services on an owner-flagged entity runs
+that call without an on-screen act (rate-limited, volume-clamped, behind
+the owner's kill switch, audited with its origin). `apply_voice_capability_cap`
+admits exactly that one intent (`home_direct`) and nothing else; every
+other voice effect is still read or proposal only, and decision 7's
+accepted risk now includes "a person or a TV in the room can pause or
+change the volume of a flagged media player".

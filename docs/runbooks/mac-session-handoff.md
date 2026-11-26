@@ -99,8 +99,9 @@ Runbooks the Mac session uses: `friday-node.md`, `claude-code-hooks.md`,
 
 ## What is implemented server-side (as of 2026-11-20)
 
-All of this is on the integration branch `claude/inspiring-franklin-pw7avo`
-and green in CI against reference doubles (`MASTER_PLAN.md` §AA).
+All of this is on the integration branch `integ/phase-13` (in this
+repository; it was `claude/inspiring-franklin-pw7avo` in the former
+repository) and green in CI against reference doubles (`MASTER_PLAN.md` §AA).
 
 | Phase | Server side (done) | Left for the Mac session / owner |
 |---|---|---|
@@ -367,7 +368,7 @@ spike's grants and Keychain items do not leak into `friday-node`.
       requirement; nothing stops it being part of a keychain backup or
       migration. B1 may start on this path only after the owner
       acknowledges it in a dated **residual note in ADR-013** (on the same
-      `docs/p9-personal-team-spike` branch) — not as a silent B1 note —
+      `feat/mac-a1-spike` branch) — not as a silent B1 note —
       or the owner chooses the paid fallback (A1-F) to get the data
       protection keychain.
 - [ ] Clean up: delete the spike items from the app (or Keychain Access),
@@ -389,7 +390,7 @@ spike's grants and Keychain items do not leak into `friday-node`.
       versions, date, the requirement's *form* without the owner's name,
       cert and profile expiry, keychain variant used, per-check pass/fail,
       as a dated implementation note in ADR-013 ("Implementation notes —
-      Personal Team spike") on a `docs/p9-personal-team-spike` branch,
+      Personal Team spike") on the `feat/mac-a1-spike` branch,
       reviewed like any brief change. On **Pass**, B1 may start now; on
       **Partial**, only after the residual note above.
 - [ ] **Fail** (a needed entitlement is unavailable to a Personal Team, a
@@ -442,12 +443,12 @@ The key never leaves this Mac and CI never holds it, on either path.
       `git` ≥ 2.27 (`git --version`). `rsync` and `shasum` ship with macOS
       (needed by `make friday-voice-install`).
 - [ ] `sox` for recordings (`brew install sox`), optional.
-- [ ] Clone and check out the integration branch (or `main` once D4 has
-      merged it):
+- [ ] Clone and check out the integration branch `integ/phase-13` (or
+      `main` once the owner has merged it, D4):
 
   ```bash
   git clone <repo url> ~/code/friday && cd ~/code/friday
-  git checkout claude/inspiring-franklin-pw7avo
+  git checkout integ/phase-13      # after the owner's merge (D4): git checkout main
   (cd backend && uv sync --frozen)
   (cd frontend && npm ci)
   (cd node/friday-voice && uv sync --frozen)
@@ -1409,7 +1410,7 @@ Mac. They are collected here from the same briefs.
       regenerate the `self` snapshot:
       `cd backend && uv run python manage.py build_self_sources`.
 - [ ] **D4 Merge to `main`.** After the integration branch's review and a
-      green CI, merge `claude/inspiring-franklin-pw7avo` to `main`; close
+      green CI, merge `integ/phase-13` to `main`; close
       the former repository's PR #29 with a pointer to the Phase 5 brief
       §10. Then the history rewrite and the move described in
       `.swarm/README.md` and `docs/runbooks/rename-jarvis-to-friday.md`.

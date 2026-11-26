@@ -5,7 +5,7 @@
 > is retired)**. Precondition met 2026-09-27 (Phase 4 merged to `main`,
 > former repository, PR #27); step-0 spikes recorded below.
 > **Closeout (2026-11-20): all ten branches implemented** on the
-> integration branch `claude/inspiring-franklin-pw7avo`, which supersedes
+> integration branch `claude/inspiring-franklin-pw7avo` (former repository), which supersedes
 > the former repository's `integ/phase-5` PR #29 (§10); owner steps
 > pending per branch.
 > Parent decisions: ADR-001, ADR-002 (import contracts), ADR-003
@@ -831,13 +831,13 @@ preflight`, (b) a seeded OpenRouter provider row, (c) a record that the
 former repository's Phase 5 PR is superseded.
 
 **Status: implemented 2026-11-20** (branch `chore/p5-closeout`, cut from
-the integration branch `claude/inspiring-franklin-pw7avo` with branches
+the integration branch `claude/inspiring-franklin-pw7avo` (former repository) with branches
 1–9 merged).
 
 - **Superseded PR (c).** The former repository's Phase 5 integration PR
   (`integ/phase-5` → `main`, PR #29, opened 2026-09-28 with branches 1–6
   and 8) is **superseded** by the integration branch
-  `claude/inspiring-franklin-pw7avo` in this repository, which carries all
+  `claude/inspiring-franklin-pw7avo` (the integration branch of that time; former repository), which carries all
   ten Phase 5 branches. PR #29 is not merged and not updated; it should be
   closed with a pointer here (owner step 6). "`integ/phase-5`" elsewhere in
   this brief means this integration branch from now on.

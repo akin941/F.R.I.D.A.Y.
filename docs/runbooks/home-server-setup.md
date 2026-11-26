@@ -9,7 +9,7 @@ firewall, nightly encrypted off-site backups with a restore drill,
 upgrades, and the later move to a VPS.
 
 **What the repo ships (Phase 13 branch 7, `feat/p13-home-server-ops`,
-2026-11-20).** The stack (`deploy/docker/compose.yml` + `compose.daily.yml`)
+2026-11-26).** The stack (`deploy/docker/compose.yml` + `compose.daily.yml`)
 plus the home override `deploy/docker/compose.home.yml` (`make up-home`);
 the host-side scripts and units in `deploy/home/` --
 `friday-backup.sh`, `friday-restore-drill.sh`,
@@ -22,7 +22,7 @@ local restic repository: backup, restore drill into a scratch database,
 must fail the drill. Nothing here was run on real home hardware yet
 (owner step, Mac session M3).
 
-**Final for Phase 13 (`chore/p13-closeout`, 2026-11-20).** Branches 1–7
+**Final for Phase 13 (`chore/p13-closeout`, 2026-11-26).** Branches 1–7
 and the closeout are on the integration branch: rooms and node labels,
 "which PC" resolution, per-node presence on the HUD and `/devices`, the
 Linux node (`node/friday-node-linux`), the Home Assistant entity
@@ -33,6 +33,15 @@ TLS server: the Python reference node standing in for the Mac, and the
 packaged Linux node. Your real box, your real PCs and a real restore from
 the off-site copy are still the owner's runs (M2/M3, pending owner
 evaluation).
+
+**Owner decisions of 2026-11-26 (Phase 13b,
+`docs/prompts/phase-13b-home-decisions/brief.md`; ADR-017 amendment,
+ADR-018).** Until the home PC is bought, the stack runs on the owner's
+MacBook: see **"Interim: server on the MacBook"** at the end of this
+runbook. The off-site target is **Cloudflare R2** (step 8). The future home
+PC unlocks its disk with the **TPM** (step 1). Items marked *(ships with
+`feat/p13-interim-mac-server`)* name files and settings that branch adds;
+until it is merged, use the Linux steps as written.
 
 Placeholders used throughout: home subnet `192.168.1.0/24`, server address
 `192.168.1.20`, mDNS name `friday-home.local`, user `friday`. Replace them
@@ -48,9 +57,9 @@ with your own values.
 - Ubuntu Server LTS (24.04 or newer LTS) installation USB.
 - A second machine (one of your PCs) for the private CA's root key and the
   backup decryption key — neither lives on the server.
-- Optional: an off-site backup target (a Cloudflare R2 bucket, any
-  S3-compatible bucket, or an SFTP host). A second local disk is acceptable
-  until you choose one; record that as "off-site pending" in step 8.
+- A Cloudflare R2 bucket for the off-site backups (the decided target,
+  owner decision 2026-11-26; step 8). A second local disk is acceptable
+  only until the bucket exists; record that as "off-site pending" in step 8.
 
 ## 1. Install Ubuntu with full-disk encryption (LUKS)
 
@@ -65,12 +74,42 @@ with your own values.
    sudo cryptsetup status dm_crypt-0 2>/dev/null || sudo dmsetup ls --target crypt
    ```
 
-4. Unattended reboot (optional): the passphrase is asked at every boot. If
-   the box must come back after a power cut without you, bind the LUKS key
-   to the TPM (`systemd-cryptenroll --tpm2-device=auto /dev/<luks-partition>`)
-   and keep the passphrase as the fallback slot. This trades some
-   protection (a stolen machine that boots unlocks itself) for
-   availability; decide consciously and write it down.
+4. **TPM auto-unlock (owner decision 2026-11-26, ADR-017 amendment 3).**
+   The box must come back after a power cut without you, so the LUKS
+   volume is unlocked by the TPM, bound to PCR 7 (the Secure Boot state),
+   with a recovery key that never lives on the server:
+
+   ```bash
+   lsblk -f                                    # find the LUKS partition, e.g. /dev/nvme0n1p3
+   # 1. A recovery key slot first. It prints the key ONCE: put it in your
+   #    password manager and on paper; never save it on this machine.
+   sudo systemd-cryptenroll /dev/nvme0n1p3 --recovery-key
+   # 2. The TPM slot, bound to PCR 7 only.
+   sudo systemd-cryptenroll /dev/nvme0n1p3 --tpm2-device=auto --tpm2-pcrs=7
+   sudo systemd-cryptenroll /dev/nvme0n1p3     # lists slots: password, recovery, tpm2
+   ```
+
+   Ubuntu's default initramfs (`initramfs-tools`) does not read
+   `systemd-cryptenroll` TPM2 tokens. Switch the initramfs generator to
+   `dracut` and tell it to use the token: `sudo apt install dracut
+   tpm2-tools` (this replaces `initramfs-tools`), add `tpm2-device=auto`
+   to the root volume's options in `/etc/crypttab`, then `sudo dracut -f`
+   and reboot. The disk must unlock with no prompt; if it asks, the
+   passphrase (or the recovery key) still works — fix the TPM slot before
+   relying on it. A firmware update or a Secure Boot change alters PCR 7:
+   the next boot asks for the passphrase or recovery key; re-enrol the TPM
+   slot afterwards (`--wipe-slot=tpm2`, then step 2 again). Keep the
+   passphrase slot as well, or remove it once the recovery key is safely
+   stored (`--wipe-slot=password`).
+
+   **Residual you accepted (ADR-017 amendment 3):** a thief who takes the
+   whole machine and boots it unchanged gets an unlocked disk up to the
+   login prompt. The TPM unlock protects a removed or discarded disk and
+   a changed boot chain, not the stolen box. Keep the OS login strong,
+   the age private key off the server (step 8) and, after a theft, revoke
+   every node and rotate `NODE_SIGNING_KEY` from another PC.
+   *These commands are written for Ubuntu 24.04 LTS and were not run on
+   real hardware here; verify each on the box (Phase 13b owner step).*
 5. Updates: `sudo apt update && sudo apt full-upgrade -y`, then enable
    unattended security updates: `sudo dpkg-reconfigure -plow unattended-upgrades`.
 
@@ -325,23 +364,39 @@ openssl rand -base64 32 | sudo tee /etc/friday-backup/restic.pass >/dev/null
 sudo chmod 600 /etc/friday-backup/restic.pass; sudo chown -R friday: /etc/friday-backup
 ```
 
-Off-site target, e.g. Cloudflare R2 (S3-compatible; create a bucket and an
-API token scoped to that bucket only):
+**Off-site target: Cloudflare R2 (the default, owner decision 2026-11-26,
+ADR-017 amendment 2).** In the Cloudflare dashboard: R2 → create a bucket
+(`friday-backup`, no public access, no custom domain) → "Manage API
+tokens" → an **Object Read & Write** token **scoped to that bucket only**.
+Note the account id, the access key id and the secret; the secret goes
+only into the host's restic environment file below — never into
+`deploy/docker/.env`, never into any container (Friday cannot read its
+backups, ADR-017 decision 6).
 
 ```bash
-# /etc/friday-backup/restic.env  (0600, owner friday)
+# /etc/friday-backup/restic.env  (0600, owner friday) -- names as in .env.example
 RESTIC_REPOSITORY=s3:https://<account-id>.r2.cloudflarestorage.com/friday-backup
 RESTIC_PASSWORD_FILE=/etc/friday-backup/restic.pass
-AWS_ACCESS_KEY_ID=<r2 key id>
-AWS_SECRET_ACCESS_KEY=<r2 secret>
+AWS_ACCESS_KEY_ID=<r2 access key id>
+AWS_SECRET_ACCESS_KEY=<r2 secret access key>
+AWS_DEFAULT_REGION=auto
 ```
+
+So preflight can check that the last backup really went to R2, put the
+**non-secret** repository identifier (the same `s3:https://…/friday-backup`
+string, no key) into `deploy/docker/.env` as
+`HOME_BACKUP_OFFSITE_REPOSITORY=` *(ships with
+`feat/p13-interim-mac-server`: the backup script records the repository in
+`status.json`, and `home_backup_fresh` fails when the last backup went
+elsewhere)*.
 
 ```bash
 set -a; . /etc/friday-backup/restic.env; set +a; restic init
 ```
 
-(No off-site target yet: `RESTIC_REPOSITORY=/mnt/backup-disk/friday-restic`
-on a second disk, and record "off-site pending".)
+(R2 not set up yet: `RESTIC_REPOSITORY=/mnt/backup-disk/friday-restic`
+on a second disk, leave `HOME_BACKUP_OFFSITE_REPOSITORY` empty, and record
+"off-site pending" — R2 is still the decided target.)
 
 **The nightly script and timer** ship in the repo
 (`deploy/home/friday-backup.sh`, `friday-backup.service`,
@@ -458,7 +513,9 @@ Preflight reads `status/status.json` and `status/drill.json`, mounted at
 
 OS and Docker updates: unattended security updates (step 1); reboot when
 `/var/run/reboot-required` exists, at a time nobody is talking to Friday.
-The LUKS passphrase is asked at boot unless you chose TPM unlock.
+The TPM unlocks the disk at boot (step 1); after a firmware or Secure Boot
+update it asks for the passphrase or recovery key once — re-enrol the TPM
+slot then.
 
 ## 11. Later: moving the server to a VPS (checklist)
 
@@ -525,3 +582,169 @@ The backend image ships no `node/` directory, so in the container
 `linux_node_vendor` and half of `node_protocol_frozen` warn. Set
 `PREFLIGHT_LINUX_NODE_DIR` / `PREFLIGHT_FRIDAY_VOICE_DIR` to a checkout to
 check them there, or run `make preflight` from the repository checkout.
+
+---
+
+## Interim: server on the MacBook
+
+Owner decision of 2026-11-26 (Phase 13b D1, ADR-017 amendment 1): until the
+home PC exists, the same Compose stack runs on the owner's MacBook. **Friday
+is down whenever the Mac sleeps, travels or is off**, and every other PC
+loses Friday with it; nodes fail closed (ADR-013 decision 6) and nothing is
+queued. Everything else in ADR-017 holds: LAN only, TLS with a pin or the
+private CA for every node, nightly encrypted backups to R2, Postgres as the
+only source of truth. Items marked *(ships with
+`feat/p13-interim-mac-server`)* are added by that branch.
+
+### I1. Prerequisites on the Mac
+
+- macOS on Apple silicon, at least 16 GB RAM, 50 GB free disk.
+- **FileVault on** (System Settings → Privacy & Security → FileVault).
+  This is the Mac's full-disk encryption; a container cannot see it, so
+  you attest it: `HOME_FDE_CONFIRMED_ON=YYYY-MM-DD` in
+  `deploy/docker/.env` once `fdesetup status` says "FileVault is On". With
+  `HOME_SERVER_PLATFORM=macos` *(ships with `feat/p13-interim-mac-server`)*
+  the `home_disk_encryption` row reports this as an **owner-confirmed
+  warning**, never a failure: there is no LUKS or TPM on a Mac, and the
+  interim server is meant to be replaced.
+- A container runtime: **OrbStack** or **Docker Desktop** (either runs the
+  stack unchanged; give it at least 8 GB RAM). In Docker Desktop's
+  Settings → Resources → File sharing, share the repository and the backup
+  directory (I5).
+- Homebrew: `brew install bash age restic caddy` (`bash` ≥ 4.4 for the
+  backup scripts; macOS ships 3.2), plus `uv` and Node as in
+  `docs/runbooks/mac-session-handoff.md` A2.
+- Energy settings: on mains power, "Prevent automatic sleeping when the
+  display is off" (System Settings → Displays/Battery → Options) keeps
+  Friday up while the lid is open. A closed lid without an external
+  display sleeps the Mac: Friday is then down by design.
+
+### I2. The stack
+
+```bash
+git clone <your Friday repository URL> ~/code/friday && cd ~/code/friday
+git checkout main                       # or integ/phase-13 before the owner's merge
+make secrets                            # deploy/docker/.env (0600)
+```
+
+`deploy/docker/.env`, in addition to step 4's settings:
+
+- `DJANGO_ALLOWED_HOSTS=<mac-name>.local,<mac LAN IP>,localhost,127.0.0.1,web`
+  (System Settings → General → Sharing shows the `.local` name; give the
+  Mac a DHCP reservation on the router as in step 2).
+- `HOME_SERVER_PLATFORM=macos` and
+  `HOME_BACKUP_HOST_DIR=/Users/<you>/FridayBackups` *(ships with
+  `feat/p13-interim-mac-server`)*.
+- `HOME_FDE_CONFIRMED_ON=` (I1) and, once R2 is set up,
+  `HOME_BACKUP_OFFSITE_REPOSITORY=` (step 8).
+
+Start it with the Mac server target *(ships with
+`feat/p13-interim-mac-server`: `make up-mac-server` = the daily stack, the
+home override, the loopback TLS overlay and `compose.mac.yml`)*; before
+that branch, `make up-daily` plus `make up-local-tls` gives the same
+services without the `home_*` settings. Every port stays on `127.0.0.1`
+(the compose test enforces it): with Docker Desktop and OrbStack a
+`127.0.0.1:` mapping is reachable from the Mac only.
+
+### I3. This Mac's own node: the loopback TLS path
+
+The Mac's `friday-node` pairs with the server **on the same machine**
+through the loopback-only TLS proxy from `feat/p9-node-local-pairing`
+(`deploy/docker/compose.local-tls.yml`, `Caddyfile.local`): Caddy listens
+on `127.0.0.1:8443` only, forwards exactly `/api/v1/nodes/pair`,
+`/api/v1/auth/nodes/credential/rotate` and `/ws/node/v1`, answers 404 to
+everything else, and installs nothing into any trust store.
+
+1. `make local-tls` once: a self-signed P-256 certificate in
+   `deploy/docker/local-tls/` (gitignored); it prints the SPKI pin. Put the
+   printed `NODE_TLS_PIN_SHA256=…` line into `deploy/docker/.env`.
+2. Issue a **strong** node code (PIN codes are refused on this path; the
+   proxy is not the BFF): `docker compose -f deploy/docker/compose.yml exec
+   web python manage.py issue_pairing_code --node --strong`.
+3. FridayNode menu → "Eşleştir…": server `https://127.0.0.1:8443`, the
+   code, and the printed pin in "Sertifika pini"
+   (`docs/runbooks/friday-node.md`, "A node on this Mac only").
+4. `make preflight`: `node_link` shows the Mac node connected and
+   `node_tls_pin` passes against the loopback proxy.
+
+### I4. Other PCs on the LAN (optional while the server is a Mac)
+
+Other PCs reach the Mac through a LAN-bound proxy with the private CA, the
+same as step 5 on the home PC:
+
+- Make the CA and a server key and certificate as in step 5, with
+  `subjectAltName=DNS:<mac-name>.local,IP:<mac LAN IP>`; keep the CA root
+  key off the Mac (another PC or an encrypted USB stick).
+- Run Homebrew's Caddy on the **host** (not in Docker) with
+  `deploy/home/Caddyfile.example`, `bind <mac LAN IP>`, the TLS files under
+  `$(brew --prefix)/etc/caddy/tls/`, and `brew services start caddy`.
+  The node-pairing route through this proxy is the open Phase 13 owner
+  decision (step 7 "Known gap"); until it is decided, pair a LAN PC through
+  an SSH port-forward to the Mac's loopback (`ssh -L 8443:127.0.0.1:8443
+  <mac>`) and the loopback path of I3.
+- Firewall: System Settings → Network → Firewall on; allow incoming
+  connections for Caddy only. No port forwarding on the router, no UPnP,
+  no tunnel (ADR-017 decision 3). From another PC,
+  `nc -vz <mac LAN IP> 8001` and `… 8002` must fail; `… 443` succeeds.
+- Set `PREFLIGHT_NODE_TLS_URL=https://<mac-name>.local/ws/node/v1` and its
+  `NODE_TLS_PIN_SHA256` so `home_tls_pin` checks the LAN listener (the
+  loopback node keeps the pin it paired with).
+
+### I5. Backups while the Mac is awake
+
+The same scripts as steps 8–9, run by `launchd` instead of systemd:
+
+- Keys and R2 exactly as step 8 (the age key made on another PC; only the
+  public key on the Mac). Keep the restic environment file and the age
+  public key under `/Users/<you>/.config/friday-backup/` (directory 0700,
+  files 0600) and point the script at them with `FRIDAY_RESTIC_ENV` and
+  `FRIDAY_AGE_RECIPIENTS`; the backup directory is
+  `FRIDAY_BACKUP_DIR=/Users/<you>/FridayBackups` (shared with the
+  container runtime, I1) and `FRIDAY_REPO_DIR=/Users/<you>/code/friday`.
+- Schedule it with the LaunchAgent *(ships with
+  `feat/p13-interim-mac-server`: `deploy/home/macos/com.friday.backup.plist`,
+  03:10 daily, loaded with `launchctl bootstrap gui/$(id -u) …`)*. launchd
+  runs a calendar job that was missed while the Mac slept **once, at the
+  next wake**, so a night with the lid closed becomes a morning backup.
+  `home_backup_fresh` still warns after 26 h and fails after 72 h: a long
+  trip with the Mac off shows up as a stale backup, on purpose.
+- The scripts need Homebrew `bash` (≥ 4.4) and must work with the macOS
+  tools (`shasum`, BSD `stat`, no `flock`) *(the portability changes ship
+  with `feat/p13-interim-mac-server`; before them, install GNU coreutils
+  and `flock` from Homebrew)*.
+- Restore drill: monthly, as step 9, with the age private key brought in
+  only for the drill (a file under `$TMPDIR`, removed afterwards).
+
+### I6. Later: moving from the Mac to the home PC
+
+The same path as the VPS move (step 11), but onto the home PC:
+
+- [ ] Set up the home PC with steps 0–6 (Ubuntu, LUKS with the TPM unlock
+      of step 1, a fixed address, Docker, the stack, Caddy with the
+      private CA, ufw).
+- [ ] Final backup on the Mac (run `friday-backup` by hand); stop web,
+      worker and node-gateway there.
+- [ ] Restore the dump into the home PC's Postgres (the drill procedure,
+      into the live database of the new stack) and the `.env` from its
+      age file — the **same `NODE_SIGNING_KEY`** keeps every node's
+      signing pin.
+- [ ] TLS: certificates for the home PC from the **same private CA**
+      (LAN PCs that pin the CA keep working). The Mac's own node paired
+      over the loopback self-signed pin of I3: it must be **re-pointed**
+      to `https://friday-home.local` with the new pin, or re-paired (Mac
+      session, Phase 13 M1 re-point).
+- [ ] Re-point each LAN node to the home PC in its own local settings
+      (Linux: `friday-node-linux config set server-url …`). Nothing is sent
+      from the server to change it.
+- [ ] Move the backup schedule to the home PC (systemd timer, step 8) and
+      unload the LaunchAgent on the Mac (`launchctl bootout …`).
+- [ ] `make preflight` on the home PC; every node `connected`;
+      `verify_node_audit_chain` passes; set `HOME_SERVER_PLATFORM=linux`
+      (or remove it) and `HOME_FDE_CONFIRMED_ON` to the LUKS date.
+- [ ] Stop the stack on the Mac for good (`make down`) and delete its
+      Docker volumes once the home PC has a passing restore drill — never
+      run two Friday servers against copies of one database.
+
+*Nothing in this section was run on a real Mac here (the implementation
+container is Linux): the Mac session runs it (Phase 13b, "Mac session
+(deferred)" M1–M2) and fixes any step that differs.*
