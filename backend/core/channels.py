@@ -86,6 +86,10 @@ class ChannelPrincipal:
     channel: str
     bound_workspace_id: str
     token_id: str | None = None
+    # Phase 13 D6: for a `node_voice` token, the node device that minted it
+    # (`PersonalAccessToken.node_device_id`): the node the owner spoke to.
+    # None for every other principal.
+    node_device_id: str | None = None
 
 
 def request_channel(request) -> str:

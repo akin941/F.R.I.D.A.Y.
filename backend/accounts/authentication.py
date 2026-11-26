@@ -177,6 +177,9 @@ class PersonalAccessTokenAuthentication(BaseAuthentication):
                 channel=KIND_CHANNELS[token.kind],
                 bound_workspace_id=str(token.workspace_id),
                 token_id=str(token.pk),
+                node_device_id=(
+                    str(token.node_device_id) if token.node_device_id is not None else None
+                ),
             ),
         )
 
