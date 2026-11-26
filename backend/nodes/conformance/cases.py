@@ -818,6 +818,7 @@ NOT_OWNER_TURNS = (
     "Bumped the client to 2.1.",
     "Two strings need Turkish plurals.",
     "NESTED-SIBLING-PHRASE",
+    "HARNESS-MARKER-PHRASE",
     "SCRATCH-PHRASE",
     "acme-secret",
 )
