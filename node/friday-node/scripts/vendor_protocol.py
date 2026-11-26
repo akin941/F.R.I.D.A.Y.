@@ -22,7 +22,7 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[3]
 NODES = REPO / "backend" / "nodes"
-OUTPUT = REPO / "node" / "friday-node" / "Sources" / "NodeCore" / "Generated" / "VendoredProtocol.swift"
+OUTPUT = REPO / "node/friday-node/Sources/NodeCore/Generated/VendoredProtocol.swift"
 GLOBS = (
     "protocol/schemas/v1/*.schema.json",
     "capabilities/v1/*.json",

@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Phase 9 M1 entitlements (brief M1; the A1 Personal Team spike):
+  hardened runtime only (a build setting, not a key), plus Keychain Sharing
+  with one group = the app's own bundle id, which makes Xcode provision
+  application-identifier / keychain-access-groups so the credential can
+  live in the data protection keychain. No App Sandbox, no network
+  entitlement (no effect unsandboxed), no server entitlement, no
+  microphone (Phase 11), no Apple Events (Phase 10).
+-->
+<plist version="1.0">
+<dict>
+	<key>keychain-access-groups</key>
+	<array>
+		<string>$(AppIdentifierPrefix)$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+	</array>
+</dict>
+</plist>
