@@ -245,6 +245,7 @@ def classify_intent(
     allowed_intents=None,
     context_report=None,
     channel=None,
+    call_context=None,
 ):
     """Classify a user's chat message into a router intent (MVP 6 §1).
 
@@ -305,7 +306,15 @@ def classify_intent(
     precedes a first personal read runs without it -- it carries only the
     owner's message and tool names, never connector content.
 
-    Returns `{"intent": Message.Intent, "intent_payload": dict}`.
+    `call_context` (Phase 13 D6, a `tools.registry.ToolCallContext`): the
+    owner's own message and, for a `node_voice` turn, the speaking node --
+    what the "which PC" resolver of a node action proposal decides by. When
+    it cannot decide (or the model's node disagrees with the owner's words)
+    the result is plain `chat` carrying `reply_text`, the Friday-authored
+    ask/refusal the view answers with (no chat completion, no draft).
+
+    Returns `{"intent": Message.Intent, "intent_payload": dict}` (plus
+    `reply_text` in that one case).
     """
     from tools.registry import list_read_tools, list_tool_names
 
@@ -369,9 +378,17 @@ def classify_intent(
                 channel=channel,
                 context_report=context_report,
                 personal_data=personal_data,
+                call_context=call_context,
             )
             if proposal is None:
                 return {"intent": Message.Intent.CHAT, "intent_payload": {}}
+            if proposal.get("reply_text"):
+                # Phase 13 D6: "which PC" could not be decided -- no draft.
+                return {
+                    "intent": Message.Intent.CHAT,
+                    "intent_payload": {},
+                    "reply_text": proposal["reply_text"],
+                }
             return {
                 "intent": Message.Intent.TOOL_REQUEST,
                 "intent_payload": {
@@ -447,7 +464,14 @@ def _node_action_targets_block(targets):
 
 
 def propose_node_action(
-    conversation, *, actor, content, channel, context_report=None, personal_data=False
+    conversation,
+    *,
+    actor,
+    content,
+    channel,
+    context_report=None,
+    personal_data=False,
+    call_context=None,
 ):
     """The D13 argument step of a `node_action` tool request: one cheap
     `router.node_action_args` call that sees only the owner's message and
@@ -462,7 +486,14 @@ def propose_node_action(
     the actions view (confirm class), which re-validate everything.
     Phase 11 D4: the node voice channel proposes too ("testleri çalıştır"
     said to the Mac) -- still a draft card, clicked on screen; the trust
-    check caps it at `warn` (`voice_evidence`)."""
+    check caps it at `warn` (`voice_evidence`).
+
+    Phase 13 D6: the validator also resolves "which PC" from `call_context`
+    (the owner's message, the speaking node); the targets block names each
+    node's name, room, role and platform as data (the prompt text, purpose
+    and prompt version are unchanged). A validator refusal returns
+    `{"reply_text": ..., "refusal": code}`: no draft, the turn answers with
+    that Friday-authored text."""
     from core.channels import CHANNEL_NODE_VOICE, CHANNEL_WEB
     from tools.node_action_ports import proposal_source, proposal_validator
 
@@ -501,9 +532,15 @@ def propose_node_action(
         return None
     if proposal is None:
         return None
-    cleaned = validator(workspace=workspace, actor=actor, proposal=proposal)
+    if call_context is None:
+        from tools.registry import ToolCallContext
+
+        call_context = ToolCallContext(source_text=content)
+    cleaned = validator(workspace=workspace, actor=actor, proposal=proposal, context=call_context)
     if not cleaned:
         return None
+    if "refusal" in cleaned:
+        return {"reply_text": str(cleaned.get("reply") or ""), "refusal": cleaned["refusal"]}
     return {
         "payload": {
             "node_id": cleaned["node_id"],
@@ -666,7 +703,14 @@ class ConnectorTurn:
 
 
 def prepare_connector_read(
-    conversation, *, actor, content, channel, tool_name, context_report=None
+    conversation,
+    *,
+    actor,
+    content,
+    channel,
+    tool_name,
+    context_report=None,
+    call_context=None,
 ):
     """Run the one connector read of a `connector_read` turn (D4/D5), in
     this order:
@@ -689,7 +733,13 @@ def prepare_connector_read(
     The result is fenced here (`render_connector_block`) and never stored:
     `Message.connector_reads` keeps bookkeeping only. `context_report`
     (optional, Phase 6 A5) joins the argument call's ModelUsage report --
-    e.g. the voice turn's trace id."""
+    e.g. the voice turn's trace id.
+
+    `call_context` (Phase 13 D6, a `tools.registry.ToolCallContext`) reaches
+    the read tools that accept it (the node reads' "which PC"). A refusal
+    carrying a Friday-authored `reply` (the ask template, a refusal naming
+    the PC) ends the turn with that text as its reply (`reply_text`), not an
+    error: no chat completion, nothing read."""
     from tools.registry import (
         DATA_CLASS_PERSONAL,
         READ_MODE_ASYNC,
@@ -702,7 +752,9 @@ def prepare_connector_read(
     spec = next(
         (
             candidate
-            for candidate in list_read_tools(workspace=conversation.workspace, channel=channel)
+            for candidate in list_read_tools(
+                workspace=conversation.workspace, channel=channel, context=call_context
+            )
             if candidate.name == tool_name
         ),
         None,
@@ -764,9 +816,24 @@ def prepare_connector_read(
             )
         else:
             result = run_read_tool(
-                spec, workspace=conversation.workspace, actor=actor, args=arguments, channel=channel
+                spec,
+                workspace=conversation.workspace,
+                actor=actor,
+                args=arguments,
+                channel=channel,
+                context=call_context,
             )
     except ReadToolError as exc:
+        if getattr(exc, "reply", ""):
+            # Phase 13 D6: "which PC?" (or a refusal naming the PC) -- the
+            # turn's reply is Friday's fixed text, nothing was read.
+            return ConnectorTurn(
+                tool_name=tool_name,
+                outcome=exc.code,
+                reply_text=exc.reply,
+                tool_label=spec.display_label,
+                source=spec.source,
+            )
         if exc.code in _INVALID_ARGUMENT_CODES:
             error_type = CONNECTOR_ERROR_INVALID_ARGUMENTS
         elif exc.code == "reconnect_required":

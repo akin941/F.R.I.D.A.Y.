@@ -39,6 +39,7 @@ from core.speech import phrase_key
 from core.unattended import deny_if_unattended
 from nodes import audit_chain, bus
 from nodes.action_rules import actor_is_node_owner, workspace_refusal
+from nodes.activity import mark_node_active
 from nodes.capabilities import check_catalogue_entry, get_action_contract, get_contract
 from nodes.keys import SigningKeyUnavailable, signing_keyring
 from nodes.models import (
@@ -496,6 +497,10 @@ GATEWAY_TERMINALS = frozenset({"timeout", "node_disconnected"})
 _REFUSAL_STATUS = {"owner_denied": "denied", "confirm_timeout": "confirm_timeout"}
 # The node's `confirmation.state` -> the execution status it moves to.
 _CONFIRMATION_STATUS = {"shown": "confirming", "approved": "running"}
+# Phase 13 D6: a click on the node's own confirmation window (either way)
+# shows the owner at that PC -> `last_active_at`. `shown`, `timed_out` and
+# `closed` are not clicks.
+_CLICK_STATES = frozenset({"approved", "denied"})
 
 
 _terminal_hook = None
@@ -1284,6 +1289,8 @@ def record_gated_progress(
         if execution.status == Status.APPROVED:
             return None  # nothing was sent for it yet
         if confirmation is not None:
+            if confirmation in _CLICK_STATES:
+                mark_node_active(execution.node_id)
             target = _CONFIRMATION_STATUS.get(confirmation)
             if target is not None:
                 execution.status = target
@@ -1297,6 +1304,8 @@ def record_gated_progress(
         if terminal is not None:
             return finish_execution(execution, status=terminal, output_bytes=output_bytes)
         status, code = _result_outcome(result)
+        if result.get("confirm_state") in _CLICK_STATES:
+            mark_node_active(execution.node_id)
         exit_code = result.get("exit_code")
         return finish_execution(
             execution,

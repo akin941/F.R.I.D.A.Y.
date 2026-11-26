@@ -14,17 +14,25 @@ from voice.views import (
 
 
 def build_urlpatterns(
-    *, authentication_classes, node_voice_permissions=(), transcription_permissions=()
+    *,
+    authentication_classes,
+    node_voice_permissions=(),
+    transcription_permissions=(),
+    on_node_activity=None,
 ):
     """Phase 11 D11/D12/D16: extra DRF permission classes from `accounts`,
     injected here because `voice` may not import `accounts`.
     `node_voice_permissions` (the trigger backstop) is appended to the
     transcription and live-sessions routes; `transcription_permissions`
-    (the storm backstop) to the transcription route only, after them."""
+    (the storm backstop) to the transcription route only, after them.
+    Phase 13 D6: `on_node_activity(device_id)` (from `nodes`, injected for
+    the same reason) is called by the transcription route for a
+    `node_voice` request."""
     auth = {"authentication_classes": list(authentication_classes)}
     extra = list(node_voice_permissions)
     guarded_transcriptions = {
         **auth,
+        "on_node_activity": on_node_activity,
         "permission_classes": [
             *TranscriptionCreateView.permission_classes,
             *extra,

@@ -105,10 +105,16 @@ class TranscriptionCreateView(_VoiceView):
     language}` (D1). The upload never touches disk (D2): only an in-memory
     handler is installed -- no `TemporaryFileUploadHandler` -- behind the
     streaming size guard, and the cap sits below Django's in-memory
-    threshold. Over the cap -> 413 before parsing completes."""
+    threshold. Over the cap -> 413 before parsing completes.
+
+    Phase 13 D6: a `node_voice` request (once its conversation is found)
+    marks the token's node as the owner's last active PC through
+    `on_node_activity(device_id)`, a callable the composition root injects
+    (`voice` may not import `nodes`); unset = nothing happens."""
 
     parser_classes = [MultiPartParser]
     throttle_scope = "voice_stt"
+    on_node_activity = None
 
     def post(self, request):
         if _content_length(request) > max_request_bytes():
@@ -123,6 +129,7 @@ class TranscriptionCreateView(_VoiceView):
         conversation = _conversation(request, serializer.validated_data["conversation"])
         if conversation is None:
             return Response(status=status.HTTP_404_NOT_FOUND)
+        self._note_node_activity(request)
         audio = serializer.validated_data["audio"].read()
         try:
             body = transcribe_utterance(
@@ -139,6 +146,16 @@ class TranscriptionCreateView(_VoiceView):
         response = Response(body, status=status.HTTP_200_OK)
         response["Cache-Control"] = "no-store"
         return response
+
+    def _note_node_activity(self, request):
+        device_id = getattr(request.auth, "node_device_id", None)
+        hook = self.on_node_activity
+        if hook is None or device_id is None or request_channel(request) != CHANNEL_NODE_VOICE:
+            return
+        try:
+            hook(device_id)
+        except Exception:  # noqa: BLE001 -- bookkeeping never fails a transcription
+            pass
 
 
 class SpeechCreateView(_VoiceView):

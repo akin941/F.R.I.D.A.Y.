@@ -49,6 +49,17 @@ router (`assistant.services.classify_intent`) can name the actor's own
 nodes, their invocable action capabilities and the workspace's 8A repo
 prefixes, and re-validate its argument step's untrusted output against the
 server contract before a draft card is shown.
+
+Which PC (Phase 13 D6): the targets block names each node (name, room,
+role, platform) as data; `validate_proposal` runs `nodes.targeting.
+resolve_target` with the model's `node_id` as an untrusted
+`requested_node_id` and the owner's own message (and, for a `node_voice`
+turn, the speaking node) from the turn's `ToolCallContext`. A different
+node than the resolver's (`target_mismatch`), an ambiguous request or a
+refusal naming the PC yields no draft: `{"refusal": code, "reply": text}`,
+the Friday-authored text the turn answers with. The approval payload keeps
+exactly one `node_id`; `describe_request` shows the node's name, room and
+platform so the owner approves "Masaüstü (Çalışma odası, Linux)".
 """
 
 import logging
@@ -57,7 +68,7 @@ from dataclasses import dataclass, field
 
 from memory.ingestion.mapping import workspace_for_path
 from memory.models import IngestionSource, WorkspaceMappingRule
-from nodes import action_rules
+from nodes import action_rules, targeting
 from nodes import services as node_services
 from nodes.capabilities import (
     RECIPE_CATALOGUE_KEYWORD,
@@ -286,11 +297,15 @@ def describe_request(approval_request):
     args = payload.get("args") if isinstance(payload.get("args"), dict) else {}
     trust = payload.get("trust") if isinstance(payload.get("trust"), dict) else {}
     node = node_services.find_node(payload.get("node_id"))
+    room = node.room if node is not None else None
     summary = {
         "kind": TOOL_NAME,
         "title": contract.label,
         "capability": contract.name,
         "node_name": node.name if node is not None else "",
+        # Phase 13 D9: the owner approves a named PC, not an id.
+        "node_room": room.name if room is not None else "",
+        "node_platform": node.platform if node is not None else "",
         "repo_name": _repo_name(contract, args, approval_request.workspace),
         "trust_verdict": trust.get("verdict", ""),
         "trust_reason": trust.get("reason_code", ""),
@@ -399,11 +414,16 @@ def _owned_nodes(workspace, actor):
     if actor is None or not getattr(actor, "is_authenticated", False):
         return []
     nodes = (
-        Node.objects.select_related("owner", "device")
+        Node.objects.select_related("owner", "device", "room")
         .filter(owner_id=actor.pk, device__revoked_at__isnull=True)
-        .order_by("-created_at")[:MAX_PROPOSAL_NODES]
+        .order_by("-created_at")
     )
-    return [node for node in nodes if action_rules.actor_is_node_owner(actor, node, workspace)]
+    owned = [
+        node
+        for node in nodes
+        if targeting.is_usable(node) and action_rules.actor_is_node_owner(actor, node, workspace)
+    ]
+    return owned[:MAX_PROPOSAL_NODES]
 
 
 def repo_prefixes(workspace, owner):
@@ -442,7 +462,15 @@ def proposal_targets(*, workspace, actor):
             capabilities.append(_capability_hint(contract))
         if capabilities:
             targets.append(
-                {"node_id": str(node.pk), "node_name": node.name, "capabilities": capabilities}
+                {
+                    "node_id": str(node.pk),
+                    "node_name": node.name,
+                    # Phase 13 D6: labels as data (the prompt is unchanged).
+                    "node_room": node.room.name if node.room is not None else "",
+                    "node_role": node.role,
+                    "node_platform": node.platform,
+                    "capabilities": capabilities,
+                }
             )
     if not targets:
         return []
@@ -452,13 +480,22 @@ def proposal_targets(*, workspace, actor):
     return targets
 
 
-def validate_proposal(*, workspace, actor, proposal):
+def _target_refusal(target):
+    return {"refusal": target.code, "reply": targeting.reply_text(target)}
+
+
+def validate_proposal(*, workspace, actor, proposal, context=None):
     """The server contract applied to the router's untrusted argument output
     (D13): the D6 actor check, a known invocable action capability, args
-    inside the contract and the D3 workspace rule. Returns the cleaned draft
-    payload `{node_id, capability, args, class}`, or None (the turn degrades
-    to plain chat). Writes nothing: the card click's `create_request` (or
-    the actions view) re-runs every check."""
+    inside the contract and the D3 workspace rule -- and (Phase 13 D6) the
+    "which PC" resolver over the owner's own words (`context.source_text`)
+    and the speaking node (`context.origin_node_id`), the model's `node_id`
+    only checked against it. Returns the cleaned draft payload `{node_id,
+    capability, args, class}`; `{"refusal", "reply"}` when the resolver
+    picked another node, could not decide or refused the named one (no
+    draft: the turn answers with `reply`); or None (the turn degrades to
+    plain chat). Writes nothing: the card click's `create_request` (or the
+    actions view) re-runs every check."""
     if not isinstance(proposal, dict):
         return None
     node_id = proposal.get("node_id")
@@ -476,6 +513,15 @@ def validate_proposal(*, workspace, actor, proposal):
     contract = get_action_contract(capability)
     if contract is None:
         return None
+    target = targeting.resolve_target(
+        actor,
+        capabilities={contract.name},
+        source_text=getattr(context, "source_text", "") or "",
+        origin_node_id=getattr(context, "origin_node_id", None),
+        requested_node_id=str(node.pk),
+    )
+    if not isinstance(target, targeting.Resolved):
+        return _target_refusal(target)
     if node_services.invocable_entry(node_services.latest_snapshot(node), contract) is None:
         return None
     try:
