@@ -2869,7 +2869,8 @@ Decisions and deviations, each kept within the brief's rules:
   (`CODE_SIGN_INJECT_BASE_ENTITLEMENTS = NO`), deciding ADR-013's open
   point: the app still launches and the data protection keychain query still
   answers (`credential: none`, not `-34018`). No sandbox, no microphone, no
-  Apple Events, no server entitlement; `build-sign-local.sh` refuses them.
+  Apple Events, no server entitlement: `build-sign-local.sh` requires the
+  signed entitlement keys to be exactly those three.
 - **Bundle id** `dev.friday.friday-node.n<random>`, generated once into
   `~/.config/friday-node/bundle-id` (a Personal Team App ID must be globally
   unique; the suffix names no one). It is part of the designated
@@ -2880,10 +2881,25 @@ Decisions and deviations, each kept within the brief's rules:
   that connection; later connections check the pin instead of CA trust.
   A server whose certificate the Mac does not trust (a private CA, a
   self-signed home server) cannot pair in M1: follow-up below.
-- **Swift strings cannot hold a lone surrogate**, so a `\ud800` escape
-  without its pair is refused at parse time (`malformed`, a frame error)
-  where the Python parser accepts it and the signature step later answers
-  `bad_signature`. No conformance case exercises it.
+- **Parser differences on hostile input only** (all frame errors or
+  refusals either way; no conformance case exercises them): a lone
+  surrogate escape is `malformed` at parse time (Swift strings cannot hold
+  one; Python answers later); two keys differing only in Unicode
+  normalization are a duplicate here (Swift compares by canonical
+  equivalence; every protocol key is ASCII); nesting deeper than 128 is
+  `malformed` (Python ~1000), which keeps the parser well inside a 512 KiB
+  dispatch-thread stack in unoptimized builds (tested on such a thread).
+- **Backoff** (review finding): a connection attempt that never opens a
+  session (server down, pin mismatch, refused upgrade) counts as a failed
+  attempt, so the delay grows 1 → 60 s; the backoff resets only on
+  `hello.ack`, not when a socket merely opens (so 4408/4429 loops grow too).
+- **`NodeRunner`** confines everything to one queue and moves to a new
+  generation on start, stop, re-pair and unpair, so a late socket close or
+  an in-flight rotation of an older generation changes nothing (a rotation
+  cannot write its secret back after an unpair). At most one rotation runs.
+  A 4401 close is read whichever callback reports the close first. HTTPS
+  and WSS refuse redirects. `NodeRunner` itself has no unit test: contract
+  test 3 on the real stack covers it (owner step below).
 - **Live-mode `next_reconnect_delay`** is reported to the gateway in whole
   seconds rounded up (the node's JSON has no floats); the first backoff
   ceiling is 1 s, so the check's bound still holds.

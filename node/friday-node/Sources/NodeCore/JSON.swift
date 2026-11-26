@@ -8,9 +8,13 @@
 //   schemas allow — keys sorted by UTF-16 code units, no whitespace,
 //   integers in plain decimal, JCS string escapes, everything else literal.
 //
-// One unavoidable difference: a Swift `String` cannot hold a lone surrogate,
-// so a `\ud800` escape without its pair is refused here, at parse time
-// (`malformed`), where Python refuses it later, at canonicalization.
+// Two unavoidable differences, both on hostile input only:
+// - a Swift `String` cannot hold a lone surrogate, so a `\ud800` escape
+//   without its pair is refused here, at parse time (`malformed`), where
+//   Python refuses it later (canonicalization / signature);
+// - Swift compares strings by canonical equivalence, so two keys that differ
+//   only in Unicode normalization ("é" vs "e" + U+0301) are a duplicate key
+//   here and two keys in Python. Every protocol key and enum value is ASCII.
 
 import CryptoKit
 import Foundation
@@ -79,9 +83,11 @@ public struct JSONError: Error, Equatable, CustomStringConvertible {
 
 public enum JSON {
     public static let maxSafeInteger: Int64 = 9_007_199_254_740_991
-    /// Python's json module raises RecursionError near this depth; deeper
-    /// documents are refused the same way (as malformed).
-    public static let maxDepth = 900
+    /// Deeper documents are refused as malformed. Valid frames nest about a
+    /// dozen levels; 128 stays far inside a 512 KiB dispatch-thread stack in
+    /// an unoptimized build (Python's limit is ~1000: a frame nested 129-999
+    /// deep is `malformed` here and `schema` there, both frame errors).
+    public static let maxDepth = 128
 
     // MARK: Parsing
 

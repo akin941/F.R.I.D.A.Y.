@@ -64,7 +64,7 @@ APP="$DERIVED/Build/Products/Release/FridayNode.app"
 
 # 1. No conformance marker in any Mach-O of the bundle.
 while IFS= read -r -d '' file; do
-  if file -b "$file" | grep -q "Mach-O"; then
+  if [[ $(file -b "$file") == *Mach-O* ]]; then
     "$HERE/check-release-markers.sh" "$file"
   fi
 done < <(find "$APP" -type f -print0)
@@ -76,14 +76,18 @@ grep -q "^Authority=Apple Development: " <<<"$SIGNING" || { echo "not signed wit
 grep -qx "TeamIdentifier=$TEAM" <<<"$SIGNING" || { echo "signed by another team than FRIDAY_NODE_TEAM_ID" >&2; exit 1; }
 grep -q "flags=0x10000(runtime)" <<<"$SIGNING" || { echo "hardened runtime flag missing" >&2; exit 1; }
 
-# 3. The entitlement set M1 ships: keychain access groups yes; no sandbox,
-#    no microphone (Phase 11), no Apple Events (Phase 10), no server.
-ENTITLEMENTS=$(codesign -d --entitlements - --xml "$APP" 2>/dev/null | plutil -p - 2>/dev/null)
-grep -q '"keychain-access-groups"' <<<"$ENTITLEMENTS" || { echo "keychain-access-groups missing: the data protection keychain needs it (A1)" >&2; exit 1; }
-for forbidden in com.apple.security.app-sandbox com.apple.security.device.audio-input \
-                 com.apple.security.automation.apple-events com.apple.security.network.server; do
-  if grep -q "\"$forbidden\"" <<<"$ENTITLEMENTS"; then echo "unexpected entitlement $forbidden in M1" >&2; exit 1; fi
-done
+# 3. Exactly the entitlement set M1 ships (an allowlist, not a denylist):
+#    keychain access groups, application identifier, team identifier. No
+#    get-task-allow (Release is signed without it), no sandbox, no
+#    microphone (Phase 11), no Apple Events (Phase 10), no cs.* relaxation.
+ENTITLEMENT_KEYS=$(codesign -d --entitlements - --xml "$APP" 2>/dev/null \
+  | python3 -I -c 'import plistlib,sys; print("\n".join(sorted(plistlib.loads(sys.stdin.buffer.read()))))')
+EXPECTED=$'com.apple.application-identifier\ncom.apple.developer.team-identifier\nkeychain-access-groups'
+if [[ $ENTITLEMENT_KEYS != "$EXPECTED" ]]; then
+  echo "unexpected entitlement set for M1:" >&2
+  echo "$ENTITLEMENT_KEYS" >&2
+  exit 1
+fi
 
 # 4. A stable, non-ad-hoc designated requirement.
 DR=$(codesign -d -r- "$APP" 2>&1 | sed -n 's/^designated => //p')

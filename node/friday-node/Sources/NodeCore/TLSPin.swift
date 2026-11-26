@@ -17,12 +17,21 @@ import Foundation
 import Security
 
 public enum TLSPin {
-    private static func hex(_ text: String) -> Data {
-        Data(stride(from: 0, to: text.count, by: 2).map {
-            let start = text.index(text.startIndex, offsetBy: $0)
-            return UInt8(text[start..<text.index(start, offsetBy: 2)], radix: 16)!
-        })
+    /// Hex (ASCII digits only) to bytes; nil on anything else.
+    private static func hexBytes(_ text: String) -> Data? {
+        let bytes = Array(text.utf8)
+        guard bytes.count % 2 == 0 else { return nil }
+        var out = Data()
+        for index in stride(from: 0, to: bytes.count, by: 2) {
+            guard let pair = String(bytes: bytes[index...index + 1], encoding: .ascii),
+                let byte = UInt8(pair, radix: 16)
+            else { return nil }
+            out.append(byte)
+        }
+        return out
     }
+
+    private static func hex(_ text: String) -> Data { hexBytes(text)! }  // constant headers only
 
     private static let ecP256Header = hex("3059301306072a8648ce3d020106082a8648ce3d030107034200")
     private static let ecP384Header = hex("3076301006072a8648ce3d020106052b81040022036200")
@@ -69,7 +78,7 @@ public enum TLSPin {
     public static func parse(_ text: String) -> Data? {
         var value = text.trimmingCharacters(in: .whitespacesAndNewlines)
         if value.lowercased().hasPrefix("sha256/") { value = String(value.dropFirst(7)) }
-        if value.count == 64, value.allSatisfy(\.isHexDigit) { return hex(value.lowercased()) }
+        if value.utf8.count == 64, let raw = hexBytes(value) { return raw }
         if let data = Data(base64Encoded: value), data.count == 32 { return data }
         return nil
     }
@@ -109,6 +118,15 @@ public final class PinningDelegate: NSObject, URLSessionDelegate, URLSessionTask
         completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void
     ) {
         handle(challenge, completionHandler)
+    }
+
+    /// Never follow a redirect: the pin (and, for rotation, the bearer)
+    /// belongs to the server the node paired with.
+    public func urlSession(
+        _ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
+        newRequest request: URLRequest, completionHandler: @escaping (URLRequest?) -> Void
+    ) {
+        completionHandler(nil)
     }
 
     private func handle(

@@ -39,12 +39,14 @@ public final class NodeConnection: NSObject, URLSessionWebSocketDelegate, @unche
     private var urlSession: URLSession?
     private var task: URLSessionWebSocketTask?
     private var timer: DispatchSourceTimer?
+    private var opened = false
+    private var closing = false
     private var finished = false
 
     /// Called once on `queue` when the socket is gone, with the close code
     /// the server sent (nil when the connection failed or was dropped).
     public var onClose: ((Int?) -> Void)?
-    /// Called on `queue` after every frame the node sent (status display).
+    /// Called on `queue` after every frame received or sent (status display).
     public var onActivity: (() -> Void)?
 
     /// `autoTick` drives `session.tick()` once a second from the system
@@ -76,7 +78,8 @@ public final class NodeConnection: NSObject, URLSessionWebSocketDelegate, @unche
         configuration.urlCache = nil
         configuration.httpShouldSetCookies = false
         let pinning = PinningDelegate(pin: pin)
-        let urlSession = URLSession(configuration: configuration, delegate: Forwarder(self, pinning), delegateQueue: delegateQueue)
+        let urlSession = URLSession(
+            configuration: configuration, delegate: Forwarder(self, pinning), delegateQueue: delegateQueue)
         var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalAndRemoteCacheData, timeoutInterval: 15)
         request.setValue("Bearer \(secret)", forHTTPHeaderField: "Authorization")
         request.setValue(NodeProtocol.subprotocol, forHTTPHeaderField: "Sec-WebSocket-Protocol")
@@ -99,6 +102,7 @@ public final class NodeConnection: NSObject, URLSessionWebSocketDelegate, @unche
             finish(code: nil, cancel: true)
             return
         }
+        opened = true
         send(self.session.connect())
         receiveNext()
         if autoTick { startTimer() }
@@ -114,8 +118,16 @@ public final class NodeConnection: NSObject, URLSessionWebSocketDelegate, @unche
 
     func didComplete(_ task: URLSessionTask) {
         guard task === self.task else { return }
-        let code = self.task?.closeCode.rawValue
-        finish(code: code == URLSessionWebSocketTask.CloseCode.invalid.rawValue ? nil : code, cancel: false)
+        finish(code: serverCloseCode, cancel: false)
+    }
+
+    /// The close code the server sent, if any (4401 must never be missed,
+    /// whichever callback reports the close first).
+    private var serverCloseCode: Int? {
+        guard let code = task?.closeCode.rawValue, code != URLSessionWebSocketTask.CloseCode.invalid.rawValue else {
+            return nil
+        }
+        return code
     }
 
     // MARK: Frames
@@ -124,40 +136,62 @@ public final class NodeConnection: NSObject, URLSessionWebSocketDelegate, @unche
         task?.receive { [weak self] result in
             guard let self else { return }
             self.queue.async {
-                guard !self.finished else { return }
+                guard !self.finished, !self.closing else { return }
                 switch result {
                 case .success(.string(let text)): self.deliver(Data(text.utf8))
                 case .success(.data(let data)): self.deliver(data)
                 case .success: self.deliver(Data())
                 case .failure:
-                    self.finish(code: nil, cancel: true)
+                    self.finish(code: self.serverCloseCode, cancel: true)
                     return
                 }
-                self.receiveNext()
+                if !self.closing { self.receiveNext() }
             }
         }
     }
 
     private func deliver(_ raw: Data) {
-        send(session.receive(raw))
-        if !session.connected { finish(code: nil, cancel: true) }
+        let frames = session.receive(raw)
+        onActivity?()
+        sendThenCloseIfDone(frames)
     }
 
     /// The conformance hook and the timer call this on `queue`.
     public func tick() {
-        guard !finished else { return }
-        send(session.tick())
-        if !session.connected { finish(code: nil, cancel: true) }
+        guard !finished, !closing else { return }
+        sendThenCloseIfDone(session.tick())
     }
 
     public var isFinished: Bool { finished }
 
-    private func send(_ frames: [JSONValue]) {
-        for frame in frames {
-            guard let text = try? JSON.encode(frame) else { continue }
-            task?.send(.string(text)) { _ in }
+    /// Send `frames`; when the session has just closed itself (a stopping
+    /// bye, the third frame error, server silence), close the socket only
+    /// after the last of them left, so a final error result is not lost.
+    private func sendThenCloseIfDone(_ frames: [JSONValue]) {
+        guard !session.connected else {
+            send(frames)
+            return
         }
-        if !frames.isEmpty { onActivity?() }
+        closing = true
+        timer?.cancel()
+        timer = nil
+        send(frames) { [weak self] in
+            guard let self else { return }
+            self.queue.async { self.finish(code: nil, cancel: true) }
+        }
+    }
+
+    private func send(_ frames: [JSONValue], then done: (() -> Void)? = nil) {
+        let texts = frames.compactMap { try? JSON.encode($0) }
+        guard let task, !texts.isEmpty else {
+            done?()
+            return
+        }
+        for (index, text) in texts.enumerated() {
+            let last = index == texts.count - 1
+            task.send(.string(text)) { _ in if last { done?() } }
+        }
+        onActivity?()
     }
 
     private func startTimer() {
@@ -173,7 +207,13 @@ public final class NodeConnection: NSObject, URLSessionWebSocketDelegate, @unche
         finished = true
         timer?.cancel()
         timer = nil
-        session.disconnect(reason: code.map { "closed:\($0)" } ?? "socket_lost")
+        if opened {
+            session.disconnect(reason: code.map { "closed:\($0)" } ?? "socket_lost")
+        } else {
+            // The handshake never completed (server down, TLS pin mismatch,
+            // refused upgrade): still one failed attempt for the backoff.
+            session.connectionFailed(reason: code.map { "closed:\($0)" } ?? "connect_failed")
+        }
         if cancel { task?.cancel(with: .normalClosure, reason: nil) }
         urlSession?.invalidateAndCancel()
         task = nil
@@ -221,6 +261,15 @@ private final class Forwarder: NSObject, URLSessionWebSocketDelegate, @unchecked
         connection?.urlSession(session, webSocketTask: webSocketTask, didCloseWith: closeCode, reason: reason)
     }
 
+    /// Never follow a redirect: the pin and the bearer belong to the server
+    /// the node paired with.
+    func urlSession(
+        _ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
+        newRequest request: URLRequest, completionHandler: @escaping (URLRequest?) -> Void
+    ) {
+        completionHandler(nil)
+    }
+
     func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
         connection?.didComplete(task)
     }
@@ -250,6 +299,10 @@ public final class NodeRunner: @unchecked Sendable {
     private var connection: NodeConnection?
     private var reconnectWork: DispatchWorkItem?
     private var running = false
+    private var rotating = false
+    /// Bumped by start, stop, adopt and unpair: a late callback of an older
+    /// connection or rotation sees another generation and changes nothing.
+    private var generation = 0
 
     public var onStatus: ((Status) -> Void)?
     public private(set) var status: Status = .notPaired {
@@ -272,7 +325,7 @@ public final class NodeRunner: @unchecked Sendable {
     /// Load the credential and connect.
     public func start() {
         queue.async {
-            self.running = true
+            self.reset(running: true)
             do {
                 self.credential = try self.store.load()
                 Self.log.info("credential: \(self.credential == nil ? "none" : "present", privacy: .public)")
@@ -295,30 +348,24 @@ public final class NodeRunner: @unchecked Sendable {
     }
 
     public func stop() {
-        queue.async {
-            self.running = false
-            self.reconnectWork?.cancel()
-            self.connection?.stop()
-            self.connection = nil
-        }
+        queue.async { self.reset(running: false) }
     }
 
     /// Store a freshly paired credential and connect with it.
     public func adopt(_ credential: NodeCredential) throws {
-        try store.save(credential)
-        queue.async {
-            self.connection?.stop()
+        try queue.sync {
+            try store.save(credential)
+            reset(running: true)
             self.credential = credential
-            self.session = self.makeSession(credential)
-            self.running = true
-            self.connect()
+            session = makeSession(credential)
+            connect()
         }
     }
 
     /// The owner's local action after a stop (menu "Resume").
     public func ownerResume() {
         queue.async {
-            guard let session = self.session else { return }
+            guard let session = self.session, self.credential != nil else { return }
             session.ownerResume()
             self.running = true
             self.connect()
@@ -327,15 +374,27 @@ public final class NodeRunner: @unchecked Sendable {
 
     /// Forget the credential (menu "Unpair"): the node must pair again.
     public func unpair() throws {
-        try store.delete()
-        queue.async {
-            self.reconnectWork?.cancel()
-            self.connection?.stop()
-            self.connection = nil
-            self.credential = nil
-            self.session = nil
-            self.status = .notPaired
+        try queue.sync {
+            reset(running: false)
+            try store.delete()
+            credential = nil
+            session = nil
+            status = .notPaired
         }
+    }
+
+    /// On `queue`: drop the connection, any pending reconnect and any
+    /// rotation in flight (by moving to a new generation).
+    private func reset(running: Bool) {
+        generation += 1
+        self.running = running
+        rotating = false
+        reconnectWork?.cancel()
+        reconnectWork = nil
+        connection?.onClose = nil
+        connection?.onActivity = nil
+        connection?.stop()
+        connection = nil
     }
 
     private func makeSession(_ credential: NodeCredential) -> NodeSession {
@@ -345,45 +404,64 @@ public final class NodeRunner: @unchecked Sendable {
     }
 
     private func connect() {
-        guard running, var credential, let session, connection == nil else { return }
+        guard running, !rotating, connection == nil, let credential, let session else { return }
         guard session.reconnectAllowed else {
             status = .stopped(reason: session.closedReason ?? "stopped")
             return
         }
         status = .connecting
-        if credential.rotationDue(now: clock.now()) {
-            let store = self.store
-            let now = clock.now()
-            Task {
-                do {
-                    let rotated = try await Rotation.rotate(credential, store: store, now: now)
-                    self.queue.async {
-                        self.credential = rotated
-                        self.openSocket(rotated, session)
-                    }
-                } catch NodeHTTPError.status(401, _) {
-                    self.queue.async { self.status = .needsPairing }
-                } catch {
-                    self.queue.async { self.scheduleReconnect(session) }
-                }
-            }
+        guard credential.rotationDue(now: clock.now()) else {
+            openSocket(credential, session)
             return
         }
-        credential = self.credential!
-        openSocket(credential, session)
+        rotating = true
+        let generation = self.generation
+        let now = clock.now()
+        // Persisted on `queue`, and only while this generation is current: an
+        // unpair or re-pair meanwhile wins, and the rotated secret is dropped.
+        let persist: (NodeCredential) throws -> Void = { [weak self] rotated in
+            guard let self else { throw RunnerError.superseded }
+            try self.queue.sync {
+                guard self.generation == generation else { throw RunnerError.superseded }
+                try self.store.save(rotated)
+            }
+        }
+        Task {
+            let outcome: Result<NodeCredential, Error>
+            do {
+                outcome = .success(try await Rotation.rotate(credential, now: now, persist: persist))
+            } catch {
+                outcome = .failure(error)
+            }
+            self.queue.async {
+                guard self.generation == generation else { return }
+                self.rotating = false
+                switch outcome {
+                case .success(let rotated):
+                    self.credential = rotated
+                    self.openSocket(rotated, session)
+                case .failure(NodeHTTPError.status(401, _)):
+                    self.status = .needsPairing
+                case .failure:
+                    session.connectionFailed(reason: "rotation_failed")
+                    self.scheduleReconnect(session)
+                }
+            }
+        }
     }
 
     private func openSocket(_ credential: NodeCredential, _ session: NodeSession) {
         guard running, connection == nil, let url = credential.gatewayURL else { return }
+        let generation = self.generation
         let connection = NodeConnection(
             url: url, secret: credential.secret, pin: credential.tlsPinSHA256, session: session, queue: queue,
             autoTick: true)
         connection.onActivity = { [weak self] in
-            guard let self, session.sessionReady else { return }
+            guard let self, self.generation == generation, session.sessionReady else { return }
             self.status = .connected
         }
         connection.onClose = { [weak self] code in
-            guard let self else { return }
+            guard let self, self.generation == generation else { return }
             self.connection = nil
             self.handleClose(code, session)
         }
@@ -407,10 +485,19 @@ public final class NodeRunner: @unchecked Sendable {
         guard running else { return }
         let delay = session.nextReconnectDelay ?? Backoff.minimumSeconds
         status = .waiting(seconds: Int(delay.rounded(.up)))
-        let work = DispatchWorkItem { [weak self] in self?.connect() }
+        let generation = self.generation
+        let work = DispatchWorkItem { [weak self] in
+            guard let self, self.generation == generation else { return }
+            self.connect()
+        }
         reconnectWork = work
         queue.asyncAfter(deadline: .now() + delay, execute: work)
     }
+}
+
+enum RunnerError: Error {
+    /// The runner moved on (unpaired, re-paired, stopped) while this ran.
+    case superseded
 }
 
 /// The catalogue the app advertises. M1 has no readers that touch owner

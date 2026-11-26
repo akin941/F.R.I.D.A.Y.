@@ -24,7 +24,7 @@ CONF_KEY_B64=$(python3 -I -c 'import json,sys; print(json.load(open(sys.argv[1])
 TEXT=$(mktemp)
 trap 'rm -f "$TEXT"' EXIT
 strings -a "$BIN" > "$TEXT"
-if grep -qiE -e "FRIDAY_NODE_CONFORMANCE|conformance" -e "$CONF_KEY_B64" "$TEXT"; then
+if grep -qiE "FRIDAY_NODE_CONFORMANCE|conformance" "$TEXT" || grep -qF -- "$CONF_KEY_B64" "$TEXT"; then
   echo "conformance marker in $(basename "$BIN"): refusing" >&2
   exit 1
 fi

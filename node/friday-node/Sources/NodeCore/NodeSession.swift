@@ -131,7 +131,6 @@ public final class NodeSession: @unchecked Sendable {
         lastHeartbeatAt = now
         connectedAt = now
         nextReconnectDelay = nil
-        backoff.reset()
         return send([hello()])
     }
 
@@ -155,6 +154,16 @@ public final class NodeSession: @unchecked Sendable {
         sessionReady = false
         pendingReads.removeAll()
         if closedReason == nil { closedReason = reason }
+        if reconnectAllowed { nextReconnectDelay = backoff.nextDelay() }
+    }
+
+    /// A connection attempt that never opened a session (server down, TLS
+    /// pin mismatch, refused upgrade): one more failed attempt, so the
+    /// backoff keeps growing (1 s -> 60 s) instead of retrying at the first
+    /// delay forever.
+    public func connectionFailed(reason: String = "connect_failed") {
+        guard !connected else { return }
+        closedReason = reason
         if reconnectAllowed { nextReconnectDelay = backoff.nextDelay() }
     }
 
@@ -197,6 +206,10 @@ public final class NodeSession: @unchecked Sendable {
             return []
         case "hello.ack":
             sessionReady = true
+            // The backoff restarts only once the server accepted the session:
+            // a server that opens the socket and closes it again (4408, 4429)
+            // keeps growing the delay.
+            backoff.reset()
             helloAck = HelloAck(
                 nodeID: message["node_id"]?.stringValue ?? "",
                 heartbeatSeconds: message["heartbeat_seconds"]?.intValue ?? NodeProtocol.heartbeatSeconds,
