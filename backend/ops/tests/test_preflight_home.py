@@ -266,6 +266,8 @@ def test_an_unresolvable_ordinary_name_warns(settings, resolver):
     row = _row("home_lan_only")
     assert row.status == WARN
     assert "could not resolve here: friday-home.lan (DJANGO_ALLOWED_HOSTS)" in row.detail
+    # The warn says plainly the name was not proven LAN-only.
+    assert "not verified LAN-only" in row.detail
 
 
 def test_a_bracketed_ipv6_host_is_parsed(settings, resolver):

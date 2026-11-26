@@ -3240,7 +3240,12 @@ def _check_home_lan_only():
         summary += f" ({len(found['mdns'])} mDNS name(s) taken as link-local)"
     if found["unresolved"]:
         return CheckResult(
-            name, WARN, f"{summary}; could not resolve here: " + ", ".join(found["unresolved"])
+            name,
+            WARN,
+            f"{summary}; could not resolve here: "
+            + ", ".join(found["unresolved"])
+            + " (not verified LAN-only: a name this container cannot resolve may still"
+            " be public; check it resolves only to a LAN address)",
         )
     if not url:
         return CheckResult(name, WARN, f"{summary}; PREFLIGHT_NODE_TLS_URL not set (dev)")

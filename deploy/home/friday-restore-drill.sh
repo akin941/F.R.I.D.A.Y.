@@ -8,8 +8,8 @@
 # off-site copy) into a SCRATCH Postgres -- never the live one -- and proves
 # it: the schema matches the code (`migrate --check`) and the node audit
 # chain is intact (`verify_node_audit_chain`). Then it writes the status
-# file preflight reads (`home_restore_drill_age`):
-#   drill.json {v:1, drilled_at, dump, result}     result: pass | fail
+# file preflight reads (`home_restore_drill_age`) into the status directory:
+#   status/drill.json {v:1, drilled_at, dump, result}     result: pass | fail
 # Any failure (a dump whose sha256 differs from status.json, an age MAC
 # error on a tampered file, a pg_restore error, a schema or chain check)
 # writes `result: fail` and exits non-zero.
@@ -20,6 +20,8 @@
 # Environment (runbook defaults):
 #   FRIDAY_REPO_DIR            /srv/friday/friday
 #   FRIDAY_BACKUP_DIR          /var/backups/friday
+#   FRIDAY_STATUS_DIR          $FRIDAY_BACKUP_DIR/status (reads status.json,
+#                              writes drill.json)
 #   FRIDAY_DRILL_MODE          docker (a throwaway pgvector container on the
 #                              stack's network, no published port, and a
 #                              one-off `web` container for the checks) |
@@ -74,6 +76,10 @@ fi
 
 # Absolute paths: the docker mode changes into the checkout.
 BACKUP_DIR=$(cd "$BACKUP_DIR" && pwd)
+STATUS_DIR=${FRIDAY_STATUS_DIR:-$BACKUP_DIR/status}
+mkdir -p "$STATUS_DIR"
+chmod 0755 "$STATUS_DIR"
+STATUS_DIR=$(cd "$STATUS_DIR" && pwd)
 KEY=$(realpath "$KEY")
 [[ -z $DUMP ]] || DUMP=$(realpath -m "$DUMP")
 
@@ -91,9 +97,9 @@ finish() {
 		[[ $code == 0 ]] && code=1
 	fi
 	printf '{"v":1,"drilled_at":"%s","dump":"%s","result":"%s"}\n' \
-		"$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$DUMP_NAME" "$RESULT" >"$BACKUP_DIR/drill.json.part"
-	chmod 0644 "$BACKUP_DIR/drill.json.part"
-	mv "$BACKUP_DIR/drill.json.part" "$BACKUP_DIR/drill.json"
+		"$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$DUMP_NAME" "$RESULT" >"$STATUS_DIR/drill.json.part"
+	chmod 0644 "$STATUS_DIR/drill.json.part"
+	mv "$STATUS_DIR/drill.json.part" "$STATUS_DIR/drill.json"
 	echo "friday-restore-drill: ${DUMP_NAME:-no dump}: $RESULT" >&2
 	exit "$code"
 }
@@ -116,11 +122,15 @@ fi
 DUMP_NAME=$(basename "$DUMP")
 
 # 2. The dump is the one the backup recorded (when status.json names it).
-STATUS="$BACKUP_DIR/status.json"
+#    Otherwise (an older dump, one restored from the off-site copy) the
+#    comparison is skipped -- said so -- and age's MAC is the tamper check.
+STATUS="$STATUS_DIR/status.json"
 if [[ -r $STATUS ]] && grep -q "\"dump\":\"$DUMP_NAME\"" "$STATUS"; then
 	want=$(grep -o '"sha256":"[0-9a-f]*"' "$STATUS" | cut -d'"' -f4)
 	have=$(sha256sum "$DUMP" | cut -d' ' -f1)
 	[[ $want == "$have" ]] || fail "sha256 of $DUMP_NAME differs from status.json"
+else
+	echo "friday-restore-drill: status.json does not name $DUMP_NAME; sha256 comparison skipped (age's MAC still checks it)" >&2
 fi
 
 # 3. Restore into the scratch database, streaming: no plaintext on disk.

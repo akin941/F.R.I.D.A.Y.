@@ -1,7 +1,7 @@
 """Phase 13 branch 7 (brief D14, Risks "LAN exposure creeps"): every port
 any compose file in the repository publishes is bound to 127.0.0.1, no
 service uses the host network, and `compose.home.yml` publishes nothing and
-binds only the two status files, read-only. Docker-published ports bypass
+binds only the status directory (never a single file), read-only. Docker-published ports bypass
 `ufw`, so this test is the guard; the only LAN-facing listener is Caddy on
 the host (`deploy/home/Caddyfile.example`). Parsed YAML, no Docker."""
 
@@ -125,23 +125,53 @@ def test_the_home_override_publishes_nothing():
         assert (spec or {}).get("network_mode") is None, service
 
 
-def test_the_home_override_binds_only_the_two_status_files_read_only():
+def test_the_home_override_binds_only_the_status_directory_read_only():
     document = _load(HOME_COMPOSE)
     services = document["services"]
     assert set(services) == {"web", "worker"}
     volumes = services["web"]["volumes"]
-    assert [v["target"] for v in volumes] == [
-        "/run/friday-home/status.json",
-        "/run/friday-home/drill.json",
-    ]
-    for volume in volumes:
-        assert volume["type"] == "bind"
-        assert volume["read_only"] is True
-        # Never a directory created by Docker in place of a missing file.
-        assert volume["bind"]["create_host_path"] is False
-        # One file each, never the backup directory (dumps, the env file).
-        assert volume["source"].endswith(("/status.json", "/drill.json"))
+    assert [v["target"] for v in volumes] == ["/run/friday-home"]
+    (volume,) = volumes
+    assert volume["type"] == "bind"
+    assert volume["read_only"] is True
+    # The stack refuses to start without it; Docker never creates it.
+    assert volume["bind"]["create_host_path"] is False
+    # The status subdirectory, never the backup directory (dumps, env file).
+    assert volume["source"].endswith("/status")
     assert "volumes" not in services["worker"]
+
+
+def test_no_compose_file_bind_mounts_a_single_json_file():
+    """The scripts replace status.json / drill.json atomically (rename); a
+    single-file bind mount pins the old inode, so the container would read
+    a stale status forever. Only directories are bound."""
+    for path in compose_files():
+        for service, spec in (_load(path).get("services") or {}).items():
+            for volume in (spec or {}).get("volumes") or []:
+                if isinstance(volume, dict):
+                    source = str(volume.get("source", ""))
+                else:  # short syntax: SOURCE:TARGET[:MODE]
+                    source = str(volume).split(":", 1)[0]
+                assert not source.endswith(".json"), (path, service, volume)
+
+
+def test_the_status_paths_live_in_the_mounted_directory():
+    services = _load(HOME_COMPOSE)["services"]
+    target = services["web"]["volumes"][0]["target"]
+    web = services["web"]["environment"]
+    for name in ("HOME_BACKUP_STATUS_PATH", "HOME_RESTORE_DRILL_STATUS_PATH"):
+        assert Path(web[name]).parent == Path(target), name
+
+
+def test_the_scripts_write_the_status_files_into_the_status_directory():
+    backup = (HOME_DIR / "friday-backup.sh").read_text(encoding="utf-8")
+    drill = (HOME_DIR / "friday-restore-drill.sh").read_text(encoding="utf-8")
+    for script in (backup, drill):
+        assert "STATUS_DIR=${FRIDAY_STATUS_DIR:-$BACKUP_DIR/status}" in script
+        assert "$BACKUP_DIR/status.json" not in script
+        assert "$BACKUP_DIR/drill.json" not in script
+    assert 'mv "$STATUS_DIR/status.json.part" "$STATUS_DIR/status.json"' in backup
+    assert 'mv "$STATUS_DIR/drill.json.part" "$STATUS_DIR/drill.json"' in drill
 
 
 def test_the_home_override_sets_every_home_setting_in_web_and_worker():

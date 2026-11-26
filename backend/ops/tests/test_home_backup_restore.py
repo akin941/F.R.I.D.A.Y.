@@ -20,6 +20,7 @@ import os
 import re
 import shutil
 import subprocess
+import time
 import uuid
 from pathlib import Path
 
@@ -232,16 +233,16 @@ def _drill(home, scratch_name, *, dump=None, check=True):
 
 
 def _status(home):
-    return json.loads((home["dir"] / "status.json").read_text())
+    return json.loads((home["dir"] / "status" / "status.json").read_text())
 
 
 def _drill_status(home):
-    return json.loads((home["dir"] / "drill.json").read_text())
+    return json.loads((home["dir"] / "status" / "drill.json").read_text())
 
 
 def _rows(settings, home):
-    settings.HOME_BACKUP_STATUS_PATH = str(home["dir"] / "status.json")
-    settings.HOME_RESTORE_DRILL_STATUS_PATH = str(home["dir"] / "drill.json")
+    settings.HOME_BACKUP_STATUS_PATH = str(home["dir"] / "status" / "status.json")
+    settings.HOME_RESTORE_DRILL_STATUS_PATH = str(home["dir"] / "status" / "drill.json")
     return {row.name: row for row in preflight.check_home()}
 
 
@@ -264,7 +265,9 @@ def test_backup_then_drill_round_trip(home, chain, scratch_db, settings):
     # Encrypted before it touched the disk: an age file, no pg_dump header.
     assert raw.startswith(b"age-encryption.org/v1\n")
     assert b"PGDMP" not in raw
-    for path in home["dir"].iterdir():
+    for path in home["dir"].rglob("*"):
+        if path.is_dir():
+            continue
         assert b"PGDMP" not in path.read_bytes(), path.name
         assert not path.name.endswith(".part"), path.name
     # The secrets file was encrypted too; its plaintext is nowhere here.
@@ -283,7 +286,12 @@ def test_backup_then_drill_round_trip(home, chain, scratch_db, settings):
     listed = _run(["restic", "ls", "--json", "latest"], restic_env).stdout
     assert status["dump"] in listed
     # No secret and no path in the status file.
-    text = (home["dir"] / "status.json").read_text()
+    # The status directory (the only part web mounts) holds no dump and no
+    # secret, and is readable by the container's user.
+    status_dir = home["dir"] / "status"
+    assert sorted(p.name for p in status_dir.iterdir()) == ["status.json"]
+    assert status_dir.stat().st_mode & 0o777 == 0o755
+    text = (home["dir"] / "status" / "status.json").read_text()
     assert str(home["dir"]) not in text
     assert "not-a-real-key" not in text
 
@@ -316,7 +324,7 @@ def test_a_tampered_dump_fails_the_drill(home, chain, scratch_db, settings, keep
     if keep_status_sha:
         # The status file is rewritten to match: age's MAC still refuses it.
         status["sha256"] = hashlib.sha256(bytes(raw)).hexdigest()
-        (home["dir"] / "status.json").write_text(json.dumps(status))
+        (home["dir"] / "status" / "status.json").write_text(json.dumps(status))
     scratch = scratch_db()
     completed = _drill(home, scratch, check=False)
     assert completed.returncode != 0
@@ -370,20 +378,38 @@ def test_the_drill_restores_an_explicit_dump_from_the_off_site_copy(home, chain,
     assert _drill_status(home)["result"] == "pass"
 
 
+def test_a_drill_of_a_dump_status_json_does_not_name_logs_the_skipped_check(
+    home, chain, scratch_db
+):
+    _backup(home)
+    older = home["dir"] / _status(home)["dump"]
+    time.sleep(1.1)  # a distinct UTC stamp for the second dump
+    _backup(home)
+    assert _status(home)["dump"] != older.name
+    completed = _drill(home, scratch_db(), dump=older)
+    assert "sha256 comparison skipped" in completed.stderr
+    assert _drill_status(home) | {"drilled_at": "x"} == {
+        "v": 1,
+        "drilled_at": "x",
+        "dump": older.name,
+        "result": "pass",
+    }
+
+
 def test_the_backup_refuses_a_private_key_on_the_server(home):
     (home["config"] / "age.pub").write_text(home["key"].read_text())
     completed = _backup(home, check=False)
     assert completed.returncode != 0
     assert "PRIVATE key" in completed.stderr
     assert not list(home["dir"].glob("*.age"))
-    assert not (home["dir"] / "status.json").exists()
+    assert not (home["dir"] / "status" / "status.json").exists()
 
 
 def test_a_failed_dump_leaves_no_status_and_no_partial_file(home):
     home["backup_env"]["PGDATABASE"] = "friday_no_such_database"
     completed = _backup(home, check=False)
     assert completed.returncode != 0
-    assert not (home["dir"] / "status.json").exists()
+    assert not (home["dir"] / "status" / "status.json").exists()
     assert not [p.name for p in home["dir"].iterdir() if p.suffix in (".age", ".part")]
 
 

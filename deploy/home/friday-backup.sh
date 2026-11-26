@@ -10,8 +10,11 @@
 #    (a restore needs NODE_SIGNING_KEY and the rest);
 # 3. `restic backup` of the backup directory to the off-site repository,
 #    then retention (`restic forget --prune`) and local pruning;
-# 4. the status file preflight reads (`home_backup_fresh`):
-#      status.json {v:1, finished_at, dump, bytes, sha256, restic_snapshot}
+# 4. the status file preflight reads (`home_backup_fresh`), in its own
+#    status/ subdirectory (the only part of the backup directory the web
+#    container sees: a directory bind mount, so the atomic replace below is
+#    visible there -- a single-file mount would pin the old inode):
+#      status/status.json {v:1, finished_at, dump, bytes, sha256, restic_snapshot}
 #    -- no secret, no path beyond the dump's file name.
 #
 # A host operation the owner configures: no Friday agent, tool, schedule or
@@ -23,6 +26,8 @@
 # repository (backend/ops/tests/test_home_backup_restore.py):
 #   FRIDAY_REPO_DIR         /srv/friday/friday
 #   FRIDAY_BACKUP_DIR       /var/backups/friday
+#   FRIDAY_STATUS_DIR       $FRIDAY_BACKUP_DIR/status (status.json, drill.json;
+#                           never a dump -- bound read-only into web)
 #   FRIDAY_AGE_RECIPIENTS   /etc/friday-backup/age.pub   (age public key(s))
 #   FRIDAY_RESTIC_ENV       /etc/friday-backup/restic.env (RESTIC_REPOSITORY,
 #                           RESTIC_PASSWORD_FILE, the bucket's credentials)
@@ -38,6 +43,7 @@ umask 077
 
 REPO_DIR=${FRIDAY_REPO_DIR:-/srv/friday/friday}
 BACKUP_DIR=${FRIDAY_BACKUP_DIR:-/var/backups/friday}
+STATUS_DIR=${FRIDAY_STATUS_DIR:-$BACKUP_DIR/status}
 AGE_RECIPIENTS=${FRIDAY_AGE_RECIPIENTS:-/etc/friday-backup/age.pub}
 RESTIC_ENV=${FRIDAY_RESTIC_ENV:-/etc/friday-backup/restic.env}
 ENV_FILE=${FRIDAY_ENV_FILE:-$REPO_DIR/deploy/docker/.env}
@@ -64,13 +70,18 @@ command -v restic >/dev/null || die "restic is not installed"
 exec 9>"$BACKUP_DIR/.friday-backup.lock"
 flock -n 9 || die "another backup is running"
 
+# The status directory holds only the two status files (no dump, no
+# secret); it is world-readable so the web container's bind mount can read it.
+mkdir -p "$STATUS_DIR"
+chmod 0755 "$STATUS_DIR"
+
 STAMP=$(date -u +%Y%m%dT%H%M%SZ)
 DUMP_NAME="friday-$STAMP.dump.age"
 OUT="$BACKUP_DIR/$DUMP_NAME"
 ENV_OUT="$BACKUP_DIR/env-$STAMP.age"
 
 cleanup() {
-	rm -f "$OUT.part" "$ENV_OUT.part" "$BACKUP_DIR/status.json.part"
+	rm -f "$OUT.part" "$ENV_OUT.part" "$STATUS_DIR/status.json.part"
 }
 trap cleanup EXIT
 
@@ -122,8 +133,9 @@ BYTES=$(stat -c %s "$OUT")
 SHA=$(sha256sum "$OUT" | cut -d' ' -f1)
 FINISHED=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 printf '{"v":1,"finished_at":"%s","dump":"%s","bytes":%s,"sha256":"%s","restic_snapshot":"%s"}\n' \
-	"$FINISHED" "$DUMP_NAME" "$BYTES" "$SHA" "$SNAPSHOT" >"$BACKUP_DIR/status.json.part"
-# Readable by the web container's bind mount (it holds no secret).
-chmod 0644 "$BACKUP_DIR/status.json.part"
-mv "$BACKUP_DIR/status.json.part" "$BACKUP_DIR/status.json"
+	"$FINISHED" "$DUMP_NAME" "$BYTES" "$SHA" "$SNAPSHOT" >"$STATUS_DIR/status.json.part"
+# Readable by the web container's bind mount (it holds no secret). The
+# rename replaces the directory entry; the directory mount sees the new file.
+chmod 0644 "$STATUS_DIR/status.json.part"
+mv "$STATUS_DIR/status.json.part" "$STATUS_DIR/status.json"
 echo "friday-backup: $DUMP_NAME ($BYTES bytes), restic snapshot $SNAPSHOT"

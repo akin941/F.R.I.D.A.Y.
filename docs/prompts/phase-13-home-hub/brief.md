@@ -683,7 +683,8 @@ rows (not HA's friendly names) keeps the vocabulary owner-set.
 
 - `deploy/docker/compose.home.yml` (override on top of `compose.yml` +
   `compose.daily.yml`): `HOME_*` settings into web/worker, read-only bind
-  of `/var/backups/friday/status.json` and `drill.json` into web, nothing
+  of the status directory `/var/backups/friday/status/` (holding only
+  `status.json` and `drill.json`) into web, nothing
   published on `0.0.0.0` (a test parses every compose file and fails on a
   non-loopback `ports:` entry).
 - `deploy/home/friday-backup.sh`, `friday-restore-drill.sh`,
@@ -1376,8 +1377,9 @@ hardware: it is documentation only.
 ### Branch notes and owner steps (pending) — `feat/p13-home-server-ops`, recorded 2026-11-20
 
 **What landed.** `deploy/docker/compose.home.yml` (HOME_* settings into
-web and worker; `status.json` / `drill.json` bound read-only into web, one
-file each, `create_host_path: false`; publishes nothing) and `make up-home`;
+web and worker; the `status/` subdirectory of the backup directory, which
+holds only `status.json` / `drill.json`, bound read-only into web as a
+directory, `create_host_path: false`; publishes nothing) and `make up-home`;
 `deploy/home/friday-backup.sh`, `friday-restore-drill.sh`,
 `friday-backup.{service,timer}`, `Caddyfile.example` (shellcheck-clean;
 every location an env var with the runbook default; `FRIDAY_PG_DUMP_MODE=
@@ -1406,7 +1408,16 @@ shipped files.
   a leading-dot host (`.example.net`) counts as a wildcard and fails.
 - The drill checks the dump's sha256 against `status.json` before
   decrypting (age's MAC also refuses a tampered file) and, in direct mode,
-  refuses a scratch database that already has tables.
+  refuses a scratch database that already has tables. When `status.json`
+  does not name the dump (an older or off-site one) it logs that the
+  comparison was skipped.
+- Review round 1 (2026-11-26): the status files live in
+  `$FRIDAY_BACKUP_DIR/status/` (`FRIDAY_STATUS_DIR`) and compose binds that
+  **directory**, not each file: the scripts replace the files atomically
+  (rename), and a single-file bind mount pins the old inode, so web would
+  have read a stale status forever. A compose test fails on any bind
+  source ending in `.json`. `home_lan_only`'s warn detail for an
+  unresolvable non-`.local` name now says it was not verified LAN-only.
 - Caddy forwards `X-Real-IP` (overwritten by the proxy); the runbook's
   `TRUSTED_CLIENT_IP_HEADER` changed from `X-Forwarded-For` to `X-Real-IP`.
 

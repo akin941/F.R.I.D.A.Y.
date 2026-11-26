@@ -9,13 +9,17 @@
 # What it adds (docs/runbooks/home-server-setup.md):
 # - the `home_*` preflight settings into web and worker (backup and drill
 #   thresholds, the full-disk-encryption attestation date);
-# - the two status files the host's backup and drill scripts write
-#   (deploy/home/friday-backup.sh, friday-restore-drill.sh), bound READ-ONLY
-#   into web, one file each -- never the backup directory, so no container
-#   can see a dump or the encrypted secrets file. Both files must exist
-#   before the first `up` (run the backup and the first drill, runbook steps
-#   8-9): `create_host_path: false` refuses to start rather than letting
-#   Docker create a directory in their place.
+# - the status directory the host's backup and drill scripts write their two
+#   status files into (deploy/home/friday-backup.sh, friday-restore-drill.sh:
+#   $HOME_BACKUP_HOST_DIR/status/status.json and drill.json), bound
+#   READ-ONLY into web -- never the backup directory itself, so no container
+#   can see a dump or the encrypted secrets file. A DIRECTORY mount, not one
+#   per file: the scripts replace each file atomically (rename), and a
+#   single-file bind mount pins the old inode, so web would keep reading a
+#   stale status after the first nightly run. The directory must exist
+#   before the first `up` (the first backup creates it, runbook step 8):
+#   `create_host_path: false` refuses to start rather than letting Docker
+#   create an empty root-owned one.
 #
 # It publishes NOTHING. Every port of the stack stays on 127.0.0.1 (the base
 # and daily files); the only LAN-facing listener is Caddy on the host, bound
@@ -39,14 +43,8 @@ services:
       <<: *home_env
     volumes:
       - type: bind
-        source: "${HOME_BACKUP_HOST_DIR:-/var/backups/friday}/status.json"
-        target: /run/friday-home/status.json
-        read_only: true
-        bind:
-          create_host_path: false
-      - type: bind
-        source: "${HOME_BACKUP_HOST_DIR:-/var/backups/friday}/drill.json"
-        target: /run/friday-home/drill.json
+        source: "${HOME_BACKUP_HOST_DIR:-/var/backups/friday}/status"
+        target: /run/friday-home
         read_only: true
         bind:
           create_host_path: false

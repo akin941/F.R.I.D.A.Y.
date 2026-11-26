@@ -154,10 +154,14 @@ Once the first backup and the first restore drill have written their
 status files (steps 8 and 9), switch to the home override and keep using
 it: `make up-home` (= the two files above plus
 `-f deploy/docker/compose.home.yml`). It adds the `home_*` settings and
-binds `/var/backups/friday/status.json` and `drill.json` read-only into
-`web` -- one file each, never the backup directory -- and publishes
-nothing. It refuses to start while either file is missing
-(`create_host_path: false`), so Docker never creates a directory in their
+binds the status directory `/var/backups/friday/status/` (only
+`status.json` and `drill.json`, never a dump -- not the backup directory
+itself) read-only into `web` at `/run/friday-home`, and publishes nothing.
+It is a directory mount on purpose: the scripts replace each status file
+atomically (rename), and a single-file bind mount would pin the old inode,
+so `web` would keep reading a stale status without a restart. It refuses
+to start while the directory is missing (`create_host_path: false`; the
+first backup creates it), so Docker never creates an empty one in its
 place.
 
 ## 5. TLS for the frontend and the node gateway (private CA)
@@ -324,7 +328,7 @@ sudo install -m 0644 deploy/home/friday-backup.service deploy/home/friday-backup
   /etc/systemd/system/
 sudo systemctl daemon-reload && sudo systemctl enable --now friday-backup.timer
 sudo systemctl start friday-backup.service && journalctl -u friday-backup -n 50
-cat /var/backups/friday/status.json
+cat /var/backups/friday/status/status.json
 ```
 
 What one run does (`friday-backup.sh`):
@@ -337,7 +341,8 @@ What one run does (`friday-backup.sh`):
 3. `restic backup --tag friday` of `/var/backups/friday`, then
    `restic forget --keep-daily 14 --keep-weekly 8 --keep-monthly 12
    --prune`, then local `*.age` files older than 3 days are removed;
-4. `status.json` for preflight, written atomically:
+4. `status/status.json` for preflight, written atomically (temp file,
+   then rename, in the `status/` subdirectory `web` mounts read-only):
    `{"v":1,"finished_at":…,"dump":…,"bytes":…,"sha256":…,"restic_snapshot":…}`
    -- no secret, no path beyond the dump's file name.
 
@@ -346,7 +351,7 @@ takes a `flock` so a manual start and the timer never overlap, and leaves
 neither a partial file nor a new `status.json` when any step fails (so
 `home_backup_fresh` ages into warn and fail). Every location is an
 environment variable with the defaults above (`FRIDAY_REPO_DIR`,
-`FRIDAY_BACKUP_DIR`, `FRIDAY_AGE_RECIPIENTS`, `FRIDAY_RESTIC_ENV`,
+`FRIDAY_BACKUP_DIR`, `FRIDAY_STATUS_DIR` (default `$FRIDAY_BACKUP_DIR/status`), `FRIDAY_AGE_RECIPIENTS`, `FRIDAY_RESTIC_ENV`,
 `FRIDAY_ENV_FILE`, `FRIDAY_KEEP_LOCAL_DAYS`, `FRIDAY_RESTIC_KEEP`; change
 them with `sudo systemctl edit friday-backup.service`). The timer runs at
 03:10 local time with `Persistent=true` (a missed run happens at the next
@@ -371,17 +376,19 @@ sudo install -m 0755 deploy/home/friday-restore-drill.sh /usr/local/bin/friday-r
 install -m 0600 /dev/null /run/user/$(id -u)/friday-backup.agekey   # then paste the key in
 friday-restore-drill /run/user/$(id -u)/friday-backup.agekey
 shred -u /run/user/$(id -u)/friday-backup.agekey
-cat /var/backups/friday/drill.json
+cat /var/backups/friday/status/drill.json
 ```
 
 What it does (`friday-restore-drill.sh`): picks the newest
 `friday-*.dump.age` (or the file given as the second argument); when
-`status.json` names that dump, its sha256 must match; starts a throwaway
+`status/status.json` names that dump, its sha256 must match (otherwise --
+an older dump, one from the off-site copy -- it logs that the comparison
+was skipped, and age's MAC is the tamper check); starts a throwaway
 `pgvector/pgvector:pg16` container on the stack's network (`friday_default`,
 no published port, a random password); streams `age -d | pg_restore
 --exit-on-error` into it; runs `migrate --check` and
 `verify_node_audit_chain` in a one-off `web` container pointed at it; stops
-the container and writes `drill.json`
+the container and writes `status/drill.json`
 (`{"v":1,"drilled_at":…,"dump":…,"result":"pass"|"fail"}`). Any failure --
 a sha256 mismatch, an age MAC error on a tampered file, a restore error, a
 schema or chain check -- writes `result: fail` and exits non-zero, and
@@ -404,7 +411,8 @@ friday-restore-drill /run/user/$(id -u)/friday-backup.agekey \
 rm -rf /tmp/friday-offsite
 ```
 
-Preflight reads `status.json` and `drill.json` (`HOME_BACKUP_STATUS_PATH`,
+Preflight reads `status/status.json` and `status/drill.json`, mounted at
+`/run/friday-home/` (`HOME_BACKUP_STATUS_PATH`,
 `HOME_RESTORE_DRILL_STATUS_PATH`, set by `compose.home.yml`):
 `home_backup_fresh` warns after 26 h and fails after 72 h;
 `home_restore_drill_age` warns after 35 days and fails after 90 days.
