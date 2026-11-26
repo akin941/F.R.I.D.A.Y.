@@ -195,9 +195,7 @@ def test_the_approval_card_names_the_node_room_and_platform(
     propose_on(friday, mini)
     (draft,) = drafts(turn(client, conversation, "Mac mini'de acme testlerini çalıştır"))
     assert click_card(client, node_world.firm, draft).status_code == 201
-    listed = client.get(
-        "/api/v1/approvals/requests", {"workspace": str(node_world.firm.pk)}
-    ).json()
+    listed = client.get("/api/v1/approvals/requests", {"workspace": str(node_world.firm.pk)}).json()
     rows = listed["results"] if isinstance(listed, dict) else listed
     (summary,) = [row["display_summary"] for row in rows]
     assert summary["node_name"] == "Mac mini"
