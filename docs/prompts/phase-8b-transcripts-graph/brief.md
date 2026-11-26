@@ -4047,7 +4047,7 @@ migration renumbering needed).
 | 8 | `feat/p8-transcript-ingestion` | Owner-turn capabilities, reference readers + conformance, pull job in `tools`, port, cursor, personal-class sources, transcript corpus | 2; **Phase 9 branches 2–5 merged** | **implemented 2026-11-20** (awaits the Sonnet 5 review; see "Implementation record" under branch 8). Phase 9 branches 2–5 were not merged, so the contracts, readers and conformance files are staged in `integrations/node_reference/` and the node is reached through a `NodeReadPort` seam. The `nodes` wiring is owner steps 3–5 of branch 8. Swift readers: deferred: Mac session (M1) |
 | 9 | `feat/p8-graph-ui` | `/memory/graph`, timeline, sources/Graphify/conflict/eval views | 2, 4 (5, 7, 8 for their panels) | **implemented 2026-11-20** (awaits the Sonnet 5 review; see "Implementation record" under branch 9; the real-phone and screen-reader check is pending owner evaluation) |
 | 10 | `chore/p8b-closeout` | Preflight checks, e2e, retrieval default decision, runbooks, ADR notes, MASTER_PLAN row, go/no-go record | 1–9 | **implemented 2026-11-20** (awaits the Sonnet 5 review; see "Implementation record" under branch 10; `MEMORY_RETRIEVAL_MODE` kept `legacy`; the `nodes`-backed transcript port is a follow-up branch; preflight on the dev stack with a paired node and the Mac rows are owner steps, pending owner evaluation) |
-| M1 | `feat/p8-node-transcript-readers` | Swift readers for the two owner-turn capabilities, grant wiring, real-file rule verification, conformance pass | 8 merged; Phase 9 M2 | deferred: Mac session |
+| M1 | `feat/p8-node-transcript-readers` | Swift readers for the two owner-turn capabilities, grant wiring, real-file rule verification, conformance pass | 8 merged; Phase 9 M2 | **implemented 2026-11-27** (awaits the Sonnet 5 review; 86/86 offline and live): real-file verification found unmarked `<task-notification>` / `<bash-input>` turns, so a D13 marker server branch and the owner skim are open (see "Implementation record" under M1) |
 | M2 | Mac and owner evaluation | Private eval baseline, Headroom compare, real transcript run, go/no-go measurements | 3, 4, 6, M1 | deferred: Mac session (pending owner evaluation) |
 
 **Branch count.** Ten rows against the roughly 4–8 target: eight
@@ -4130,6 +4130,67 @@ they name.
   session);
 - the e2e of the closeout, with the live node in place of the reference
   node.
+
+**Implementation record (2026-11-27).** Status: implemented on
+`feat/p8-node-transcript-readers` (runbook B4), awaiting the independent
+Sonnet 5 review.
+
+- **Files.** `node/friday-node/Sources/NodeCore/Readers/ClaudeOwnerTurns.swift`,
+  `CodexOwnerTurns.swift` and a shared `OwnerTurns.swift` (args, the
+  reference's instant parser and formatter, `collect_files`, the
+  canonical-size cut); `OwnerTurnPreview.swift` and the CLI's
+  `scrub-preview`, both `#if DEBUG`; `Tests/NodeCoreTests/OwnerTurnReaderTests.swift`.
+  The A12 placeholder (an `owner_turns` family always `not_granted`) is
+  gone: both reads follow the `claude` / `codex` directory grants.
+- **Contract tests.** Offline: every `cases/v1` case passes in
+  `ConformanceTests.swift` (86/86, `pendingB4` empty); the readers
+  reproduce `conformance/vectors/owner_turns.json` exactly (the A12 name
+  of `fixtures/expected_owner_turns.json`, over `fixtures/owner_turns/`
+  laid out as a node home); scrub parity with `scrub.json` unchanged
+  (`ScrubParityTests`). Live: the Conformance build against
+  `node_conformance_server --external --port 8766 --tls-self-signed
+  --protocol 1`, 86/86 PASS. The pull-job re-run against the live Mac node
+  and the closeout e2e with it are owner steps (they need the paired node
+  and the running stack).
+- **Python-exact details, pinned in tests with values measured on CPython
+  3.12.** Times keep microseconds (ordering, `at >= since`) and format with
+  milliseconds cut; `fromisoformat` quirks (offset minutes not
+  range-checked, the whole offset under 24 h, `24:00` and `:60` refused);
+  Codex turn ids hash byte offsets with malformed, multi-byte and oversized
+  lines counted; the 60 KiB budget is measured as compact JSON, the cut at
+  4 000 scalars after the scrub; the sort is stable on `(at, turn_id)`; a
+  synthetic home (ten turns cut by the budget, tied and sub-millisecond
+  times, one 6 000-character turn) matches the reference byte for byte.
+- **Server follow-ups from the A12 review (same branch, `fix(p8)`).**
+  `readers.py` `_fit` no longer cuts an owner-turn result by whole
+  sessions: `_fit_owner_turns` drops the newest turns first in
+  `(at, turn_id)` order and recomputes `next_since` from the turns left,
+  so the cursor never skips a dropped turn (the Swift `fit` mirrors it;
+  unreachable with the 60 KiB budget, kept as defence in depth).
+  `transcript_node_port.owner_node` ranks online first, then offering the
+  reads, so an offline node that offers them never hides an online one.
+- **Deviations.** (1) A time the reference's `datetime` cannot hold (year
+  1 or 9999 pushed past the range by its offset) makes the reference's read
+  raise `OverflowError`; the Swift read fails as a whole too (`result`
+  `error`), at the same points (Claude: candidate lines only; Codex: every
+  line after `session_meta`). (2) Inherited from M2: a transcript line with
+  a lone-surrogate `\u` escape is skipped by the Swift parser, while
+  Python parses it (a surrogate in a returned text then fails the read when
+  the canonical form refuses it; one elsewhere in the line leaves the turn
+  returned, where Swift skips it). (3) `scrub-preview` also counts accepted turns that start
+  with a tag and names the tag when it is a markup word (`<name>`), so a
+  harness format no marker covers is visible without any text.
+- **Real-file verification (counts only, nothing committed).** Run once on
+  2026-11-27 on this repo's Claude project directory and on
+  `~/.codex/sessions`. Codex: 35 accepted turns, the only exclusions are
+  `<environment_context>` markers; no unknown user content part. Claude:
+  32 accepted turns, of which 14 start with `<task-notification>` and 1
+  with `<bash-input>`: harness-injected or shell-mode text that no D13
+  marker (nor the server's `INJECTED_MARKERS`) covers. Per step 2 this
+  stops M1's real-file half: D13, the fixtures, the reference readers and
+  the cases need one server branch adding these markers (and whatever the
+  owner's skim finds), then a re-run. The owner skim of the first 20
+  accepted turns is still open (the session never prints transcript text).
 
 ### M2 — Mac and owner evaluation (go/no-go measurements)
 
