@@ -2,12 +2,54 @@
 
 import { apiDelete, apiGetJson, apiPatchJson, apiPostJson } from "@/lib/api-client";
 import type {
+  ApiHomeEntity,
+  ApiHomeEntityCandidates,
+  ApiHomeEntityList,
   ApiNodeAuditPage,
   ApiNodeDetail,
   ApiNodeRole,
   ApiRoom,
   ApiRoomList,
 } from "@/types/api";
+
+/**
+ * The owner's Home Assistant entity allowlist (Phase 13 D11). Owner, web
+ * session only on the backend; an empty allowlist means no HA entity call
+ * is possible. Adding an entity is always the owner's own act.
+ */
+const HA = "/api/connectors/home-assistant";
+
+export function fetchHomeEntities(workspaceId: string): Promise<ApiHomeEntityList> {
+  return apiGetJson(`${HA}/entities?workspace=${encodeURIComponent(workspaceId)}`);
+}
+
+export function fetchHomeEntityCandidates(workspaceId: string): Promise<ApiHomeEntityCandidates> {
+  return apiGetJson(`${HA}/candidates?workspace=${encodeURIComponent(workspaceId)}`);
+}
+
+export interface HomeEntityInput {
+  label?: string;
+  room_id?: string | null;
+  aliases?: string[];
+  services?: string[];
+  enabled?: boolean;
+}
+
+export function createHomeEntity(
+  workspaceId: string,
+  entityId: string,
+  input: HomeEntityInput,
+): Promise<ApiHomeEntity> {
+  return apiPostJson(`${HA}/entities`, { workspace: workspaceId, entity_id: entityId, ...input });
+}
+
+export function updateHomeEntity(id: string, input: HomeEntityInput): Promise<ApiHomeEntity> {
+  return apiPatchJson(`${HA}/entities/${encodeURIComponent(id)}`, input);
+}
+
+export function deleteHomeEntity(id: string): Promise<void> {
+  return apiDelete(`${HA}/entities/${encodeURIComponent(id)}`);
+}
 
 /**
  * Rooms and node labels (Phase 13 D2/D3, D8) over the same-origin BFF

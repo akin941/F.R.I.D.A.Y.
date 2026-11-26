@@ -311,7 +311,18 @@ export const ERROR_MESSAGES = {
   "label.conflict": { message: "Bu ad ya da takma ad zaten kullanılıyor.", specific: true },
   "label.unknown_room": { message: "Böyle bir oda yok.", specific: true },
   "room.in_use": {
-    message: "Bu oda hâlâ bir düğüme atanmış; önce düğümün odasını değiştir.",
+    message: "Bu oda hâlâ bir düğüme ya da bir Home Assistant varlığına atanmış; önce onu değiştir.",
+    specific: true,
+  },
+  // The Home Assistant entity allowlist (Phase 13 D11).
+  "ha_entity.invalid": { message: "Bu bir Home Assistant varlık kimliği değil.", specific: true },
+  "ha_entity.not_allowed": {
+    message: "Bu varlık türü ya da hizmet hiçbir zaman izin listesine eklenemez.",
+    specific: true,
+  },
+  "ha_entity.conflict": { message: "Bu varlık zaten izin listesinde.", specific: true },
+  "ha_entity.read_failed": {
+    message: "Home Assistant okunamadı; bağlantının açık ve sağlıklı olduğundan emin ol.",
     specific: true,
   },
   // Workspaces
