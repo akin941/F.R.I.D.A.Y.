@@ -36,6 +36,13 @@ the Redis stream the node gateway writes (`nodes.output`).
 Phase 12 branch 2 (brief D5/D7/D20) adds `notices` (unread count and the
 five latest notice titles and links) and `digest` (the newest morning
 digest's card), both read through `proactive.api` only (D19).
+
+Phase 13 branch 3 (brief D4) adds `nodes`: one row per non-revoked node of
+the actor (`nodes.selectors.node_presence`, `for_actor()` plus
+`owner=actor`) -- name, room, role, platform, status, heartbeat, last use,
+invocable read/action counts and the mic state; never a path, capability
+name, argument or output. `health.node` (the single "most relevant node"
+line) is kept unchanged for the compact HUD and older clients.
 """
 
 import posixpath
@@ -53,7 +60,7 @@ from approvals.models import ApprovalRequest
 from nodes.action_rules import repo_path_of
 from nodes.capabilities import get_action_contract
 from nodes.models import EXECUTION_TERMINAL_STATUSES, NodeActionExecution
-from nodes.selectors import node_health
+from nodes.selectors import node_health, node_presence_page
 from proactive import api as proactive_api
 from tasks.models import Task
 
@@ -67,7 +74,16 @@ _HEALTH_CAPABILITIES = (
     ModelProvider.Capability.STT,
     ModelProvider.Capability.TTS,
 )
-SECTIONS = ("approvals", "tasks", "cost", "health", "terminal", "notices", "digest")
+SECTIONS = (
+    "approvals",
+    "tasks",
+    "cost",
+    "health",
+    "terminal",
+    "notices",
+    "digest",
+    "nodes",
+)
 # Phase 10 D12: the terminal section lists the actor's last five executions.
 TERMINAL_SECTION_LIMIT = 5
 
@@ -240,6 +256,40 @@ def node_section(actor):
     }
 
 
+def _presence_row(entry):
+    return {
+        "id": entry["id"],
+        "name": entry["name"],
+        "room": entry["room"],
+        "role": entry["role"],
+        "platform": entry["platform"],
+        "status": entry["status"],
+        "online": bool(entry["online"]),
+        "last_heartbeat_at": _iso(entry["last_heartbeat_at"]),
+        "last_active_at": _iso(entry["last_active_at"]),
+        "invocable_read_count": int(entry["invocable_read_count"]),
+        "invocable_action_count": int(entry["invocable_action_count"]),
+        "voice": _voice_line(entry["voice"] or {}),
+    }
+
+
+def nodes_section(actor):
+    """Phase 13 D4: the per-node presence panel. `items` is the actor's own
+    non-revoked nodes (at most `NODE_PRESENCE_MAX`, connected first, then
+    room order, then name), `total` how many there are and `online` how many
+    of the listed ones are connected. The same rows show in each of the
+    owner's workspace streams (the nodes are the owner's, like the Phase 9
+    line) and never another user's node. Reads only; Redis down reads every
+    node offline."""
+    entries, total = node_presence_page(actor)
+    items = [_presence_row(entry) for entry in entries]
+    return {
+        "items": items,
+        "total": total,
+        "online": sum(1 for item in items if item["online"]),
+    }
+
+
 def _voice_line(voice):
     """Phase 11 D15: the node's mic state (`nodes.selectors.voice_summary`,
     read through the `nodes` edge, never `voice`): a state word (`unknown`
@@ -383,6 +433,7 @@ def build_sections(actor, workspace, *, today=None):
         "terminal": terminal_section(actor, workspace),
         "notices": notices_section(actor, workspace),
         "digest": digest_section(actor, workspace),
+        "nodes": nodes_section(actor),
     }
 
 

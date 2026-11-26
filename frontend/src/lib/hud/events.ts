@@ -183,6 +183,35 @@ export interface HudDigest {
   speak_on_open: boolean;
 }
 
+// Phase 13 D4: one row per non-revoked node of the owner (codes, labels,
+// times and counts; never a path or a capability name).
+export type HudNodePlatform = "macos" | "linux" | "windows";
+export type HudNodeRole = "workstation" | "laptop" | "media" | "server" | "other";
+
+export interface HudNodePresence {
+  id: string;
+  name: string;
+  room: { id: string; name: string } | null;
+  role: HudNodeRole | string;
+  platform: HudNodePlatform | string;
+  status: Exclude<HudNodeStatus, "never_paired">;
+  online: boolean;
+  last_heartbeat_at: string | null;
+  last_active_at: string | null;
+  invocable_read_count: number;
+  invocable_action_count: number;
+  voice: HudNodeVoice;
+}
+
+export interface HudNodes {
+  items: HudNodePresence[];
+  /** How many non-revoked nodes the owner has (the list is capped at 16). */
+  total: number;
+  online: number;
+}
+
+export const EMPTY_NODES: HudNodes = { items: [], total: 0, online: 0 };
+
 export interface HudData {
   approvals: HudApprovals;
   tasks: HudTasks;
@@ -193,6 +222,8 @@ export interface HudData {
   /** Optional: absent from a backend predating Phase 12 branch 2. */
   notices?: HudNotices;
   digest?: HudDigest | null;
+  /** Optional: absent from a backend predating Phase 13 branch 3. */
+  nodes?: HudNodes;
 }
 
 export const HUD_SECTIONS = ["approvals", "tasks", "cost", "health"] as const;
@@ -237,6 +268,7 @@ export function parseHudFrame(raw: string): HudFrame | null {
     }
     if (isObject(payload.terminal)) delta.terminal = payload.terminal;
     if (isObject(payload.notices)) delta.notices = payload.notices;
+    if (isObject(payload.nodes)) delta.nodes = payload.nodes;
     // The digest section may turn null (no digest): `in`, not isObject.
     if ("digest" in payload && (payload.digest === null || isObject(payload.digest))) {
       delta.digest = payload.digest;
@@ -260,6 +292,7 @@ export function applyHudFrame(data: HudData | null, frame: HudFrame): HudData | 
       terminal: isObject(frame.terminal) ? frame.terminal : EMPTY_TERMINAL,
       notices: isObject(frame.notices) ? frame.notices : EMPTY_NOTICES,
       digest: isObject(frame.digest) ? frame.digest : null,
+      nodes: isObject(frame.nodes) ? frame.nodes : EMPTY_NODES,
     };
   }
   if (frame.type === "delta") {
@@ -272,6 +305,7 @@ export function applyHudFrame(data: HudData | null, frame: HudFrame): HudData | 
       terminal: frame.terminal ?? data.terminal,
       notices: frame.notices ?? data.notices,
       digest: frame.digest !== undefined ? frame.digest : data.digest,
+      nodes: frame.nodes ?? data.nodes,
     };
   }
   return data;

@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
+import { AppWindow, Command, Monitor, Terminal } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -94,6 +95,66 @@ export function NodeCapabilityList({ capabilities }: { capabilities: ApiNodeCapa
         </li>
       ))}
     </ul>
+  );
+}
+
+const PLATFORM_ICONS: Record<string, typeof Command> = {
+  macos: Command,
+  linux: Terminal,
+  windows: AppWindow,
+};
+
+/**
+ * Phase 13 D4/D5: one row per node -- name, status (text), room, role,
+ * platform (icon plus its label) and "can": the invocable read / action
+ * counts of its latest catalogue. Read-only; the cards below hold the
+ * controls.
+ */
+export function NodesOverview({ nodes }: { nodes: ApiNodeSummary[] }) {
+  const overview = copy.overview;
+  return (
+    <div className="overflow-x-auto rounded-lg border" data-testid="nodes-overview">
+      <table className="w-full text-left text-xs">
+        <caption className="sr-only">{overview.caption}</caption>
+        <thead className="text-muted-foreground">
+          <tr>
+            <th scope="col" className="px-2 py-1.5 font-medium">{overview.name}</th>
+            <th scope="col" className="px-2 py-1.5 font-medium">{overview.status}</th>
+            <th scope="col" className="px-2 py-1.5 font-medium">{overview.room}</th>
+            <th scope="col" className="px-2 py-1.5 font-medium">{overview.role}</th>
+            <th scope="col" className="px-2 py-1.5 font-medium">{overview.platform}</th>
+            <th scope="col" className="px-2 py-1.5 font-medium">{overview.can}</th>
+          </tr>
+        </thead>
+        <tbody>
+          {nodes.map((node) => {
+            const platform = node.platform ?? "macos";
+            const Icon = PLATFORM_ICONS[platform] ?? Monitor;
+            return (
+              <tr key={node.id} className="border-t" data-testid="nodes-overview-row" data-status={node.status}>
+                <th scope="row" className="px-2 py-1.5 font-medium">
+                  <Link href={`/devices/nodes/${node.id}`} className="underline-offset-2 hover:underline">
+                    {node.name}
+                  </Link>
+                </th>
+                <td className="px-2 py-1.5">{nodeStatusLabel(node.status)}</td>
+                <td className="px-2 py-1.5">{node.room ? node.room.name : overview.noRoom}</td>
+                <td className="px-2 py-1.5">{node.role ? ROLE_LABELS[node.role] : overview.noRoom}</td>
+                <td className="px-2 py-1.5">
+                  <span className="inline-flex items-center gap-1">
+                    <Icon aria-hidden className="size-3.5 shrink-0" />
+                    {PLATFORM_LABELS[platform] ?? platform}
+                  </span>
+                </td>
+                <td className="px-2 py-1.5" data-testid="nodes-overview-can">
+                  {overview.canCounts(node.invocable_read_count ?? 0, node.invocable_action_count ?? 0)}
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
   );
 }
 
@@ -377,6 +438,7 @@ export function NodesSection() {
             <p className="text-sm text-muted-foreground">{copy.empty}</p>
           ) : (
             <div className="flex flex-col gap-3">
+              <NodesOverview nodes={nodes} />
               {nodes.map((node) => (
                 <NodeCard key={node.id} node={node} rooms={rooms} onChanged={handleChanged} />
               ))}

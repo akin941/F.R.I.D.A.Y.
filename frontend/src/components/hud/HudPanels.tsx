@@ -267,10 +267,13 @@ export function HealthPanel({
   health,
   mic,
   stream,
+  hideNodeLine = false,
 }: {
   health: HudHealth | null;
   mic: MicState;
   stream: HudStreamStatus;
+  /** Phase 13 D4: with more than one node the HUD shows `HudNodesPanel` instead. */
+  hideNodeLine?: boolean;
 }) {
   const providers = health?.providers ?? [];
   const budgets = health?.budgets ?? [];
@@ -348,7 +351,7 @@ export function HealthPanel({
         )}
       </div>
 
-      {health?.node ? <HudNodeLineView node={health.node} /> : null}
+      {health?.node && !hideNodeLine ? <HudNodeLineView node={health.node} /> : null}
 
       <div className="flex flex-col gap-0.5 text-xs" data-testid="hud-preflight">
         <h3 className="text-hud-caption-muted">{tr.hud.health.preflight}</h3>

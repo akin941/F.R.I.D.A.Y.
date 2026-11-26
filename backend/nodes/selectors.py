@@ -82,12 +82,31 @@ def node_status(node, *, online=None, now=None) -> str:
     return "connected" if online else "disconnected"
 
 
+# Phase 13 D4/D5: the capability classes that count as "actions" for the
+# per-node "can" counts (ADR-014: confirm- and gate-class).
+ACTION_CLASSES = frozenset({"confirm", "gate"})
+
+
+def invocable_counts(snapshot) -> dict:
+    """How many read and action capabilities the snapshot marks invocable
+    (Phase 13 D5: the per-node catalogue as two numbers, never names)."""
+    entries = list(snapshot.entries or ()) if snapshot is not None else []
+    invocable = [entry for entry in entries if entry.get("invocable")]
+    return {
+        "invocable_read_count": sum(1 for entry in invocable if entry.get("class") == "read"),
+        "invocable_action_count": sum(
+            1 for entry in invocable if entry.get("class") in ACTION_CLASSES
+        ),
+    }
+
+
 def _snapshot_summary(snapshot) -> dict:
     entries = list(snapshot.entries or ()) if snapshot is not None else []
     return {
         "catalogue_sha256": snapshot.catalogue_sha256[:12] if snapshot is not None else "",
         "advertised_count": len(entries),
         "invocable_count": sum(1 for entry in entries if entry.get("invocable")),
+        **invocable_counts(snapshot),
         "snapshot_at": snapshot.created_at if snapshot is not None else None,
     }
 
@@ -234,6 +253,85 @@ def node_health(owner, *, now=None) -> dict:
         "node_version": best["node_version"],
         "voice": voice_summary(best_node, status=best["status"], online=best["online"], now=now),
     }
+
+
+# --- per-node presence (Phase 13 D4) ---
+
+# The HUD `nodes` section lists at most this many nodes.
+NODE_PRESENCE_MAX = 16
+# The only keys of a presence entry (a key allowlist test pins it): codes,
+# labels, times and counts -- never a path, a capability name or argument,
+# or any read output.
+PRESENCE_KEYS = (
+    "id",
+    "name",
+    "room",
+    "role",
+    "platform",
+    "status",
+    "online",
+    "last_heartbeat_at",
+    "last_active_at",
+    "invocable_read_count",
+    "invocable_action_count",
+    "voice",
+)
+
+
+def _presence_sort_key(item):
+    node, online = item
+    room = node.room
+    return (
+        not online,
+        room is None,
+        room.sort_order if room is not None else 0,
+        room.key if room is not None else "",
+        node.name_key or node.name.casefold(),
+        str(node.pk),
+    )
+
+
+def node_presence_page(owner, *, now=None, limit=NODE_PRESENCE_MAX) -> tuple[list, int]:
+    """`(entries, total)`: `node_presence` plus how many non-revoked nodes
+    the owner has in all (the HUD says "+N more" past the cap)."""
+    if owner is None or getattr(owner, "pk", None) is None:
+        return [], 0
+    now = now or timezone.now()
+    live = [
+        node for node in nodes_for(owner) if node_status(node, online=False, now=now) != "revoked"
+    ]
+    # One presence read per node; Redis down reads every node offline
+    # (`presence.is_online` fails closed).
+    ranked = sorted(((node, presence.is_online(node)) for node in live), key=_presence_sort_key)
+    entries = []
+    for node, online in ranked[: max(0, int(limit))]:
+        status = node_status(node, online=online, now=now)
+        room = node.room
+        entries.append(
+            {
+                "id": str(node.pk),
+                "name": node.name,
+                "room": None if room is None else {"id": str(room.pk), "name": room.name},
+                "role": node.role,
+                "platform": node.platform,
+                "status": status,
+                "online": online,
+                "last_heartbeat_at": node.last_heartbeat_at,
+                "last_active_at": node.last_active_at,
+                **invocable_counts(latest_snapshot(node)),
+                "voice": voice_summary(node, status=status, online=online, now=now),
+            }
+        )
+    return entries, len(live)
+
+
+def node_presence(owner, *, now=None) -> list[dict]:
+    """Phase 13 D4: one entry per non-revoked node of `owner` (revoked and
+    expired nodes are listed on `/devices` only), read through `nodes_for()`
+    (`for_actor()` plus `owner=`), connected first, then by room order
+    (nodes without a room last), then name; at most `NODE_PRESENCE_MAX`.
+    Each entry has exactly `PRESENCE_KEYS`."""
+    return node_presence_page(owner, now=now)[0]
 
 
 # --- the invocation log (Phase 9 D11, branch 5) ---

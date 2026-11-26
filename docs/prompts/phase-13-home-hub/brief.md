@@ -1122,7 +1122,7 @@ evaluation".
 | brief | `docs/p13-brief` | This brief (full; the owner decision of 2026-11-26 kept as goal, scope and boundary; no stub existed), ADR-017 (Accepted 2026-11-26; numbered 017 because ADR-016 is taken), `docs/runbooks/home-server-setup.md`, MASTER_PLAN §AA row 13 + §O d11, `docs/runbooks/mac-session-handoff.md` Part E, `backend/assistant/self_sources.json` regenerated (`build_self_sources --check`) | Phase 12 closeout | **implemented 2026-11-20** (swarm date stamp; content per the owner decision of 2026-11-26; docs only; awaits the independent Sonnet 5 plan review to APPROVE) |
 | 1 | `feat/p13-node-registry` | `workspaces.Room`, node name/room/role/platform/aliases, pairing `platform`, node `PATCH`, per-node audit API, `core.speech`, `/settings/home`, `/devices` edit + audit tab | brief approved | **implemented 2026-11-20** (swarm date stamp; see "Branch 1 notes"; awaits the independent Sonnet 5 review) |
 | 2 | `feat/p13-node-targeting` | `nodes.targeting.resolve_target`, `last_active_at`, `ToolCallContext`, read tools and node-action proposals on the resolver, ask template, one-node invariant, approval card node header, ADR-013 note | 1 | **implemented 2026-11-20** (swarm date stamp; see "Branch 2 notes"; awaits the independent Sonnet 5 review) |
-| 3 | `feat/p13-hud-presence` | `node_presence`, HUD `nodes` section + `HudNodesPanel`, `/devices` overview columns | 1 (parallel with 2) | planned |
+| 3 | `feat/p13-hud-presence` | `node_presence`, HUD `nodes` section + `HudNodesPanel`, `/devices` overview columns | 1 (parallel with 2) | **implemented 2026-11-20** (swarm date stamp; see "Branch 3 notes"; server and web only, nothing needs the Mac; the real two-PC HUD run is part of M2, pending owner evaluation; awaits the independent Sonnet 5 review) |
 | 4 | `feat/p13-linux-node` | `node/friday-node-linux` (vendored + locked, read-only, local policy CLI, credential file, systemd user unit, re-point), CI conformance job, Windows stub README | 1 (pairing `platform`) | planned |
 | 5 | `feat/p13-ha-home-control` | `connectors.HomeEntity` allowlist, media_player power/source/mute/volume steps, `source_list`, manifest v2 pins, entity editor, governance docs | 1 (rooms) | planned |
 | 6 | `feat/p13-home-voice-routes` | `connectors.home_phrases`, `home.control` wake route (proposal only), typed-turn mismatch check, vectors, ADR-015 note | 2, 5 | planned |
@@ -1358,6 +1358,112 @@ recorded at merge into `integ/phase-13` 2026-11-26):
    `Refused` (the documented deviation above; safe: that node only, no
    fall-through). Keep it; add a one-line comment next to `_SENT_ANYWAY`
    (`backend/tools/node_reads.py`) pointing at the test that pins it.
+
+### Branch 3 notes — `feat/p13-hud-presence` (implemented 2026-11-20)
+
+What landed (server side and web; nothing needs the Mac, no migration):
+- `nodes.selectors.node_presence(owner, *, now=None)` (and
+  `node_presence_page`, which also returns the total): through `nodes_for()`
+  (`for_actor()` plus `owner=`), one entry per non-revoked node (revoked and
+  expired nodes stay on `/devices` only; a kill-switched node stays listed
+  with `kill_switch` and voice `off`), ordered online first, then room
+  `sort_order` (nodes without a room last), then name key; capped at
+  `NODE_PRESENCE_MAX = 16` **after** ordering (an online node is never cut);
+  exactly the keys `PRESENCE_KEYS` (`id, name, room{id,name}, role,
+  platform, status, online, last_heartbeat_at, last_active_at,
+  invocable_read_count, invocable_action_count, voice`). One presence read
+  per node; Redis down reads every node `disconnected` (fail closed); the
+  voice block is `voice_summary` (stale or offline → `unknown`).
+- `nodes.selectors.invocable_counts(snapshot)`: invocable read vs action
+  (confirm + gate) counts; `node_summary` (the `/devices` list and detail)
+  carries both too (D5 "which nodes can" column).
+- `hud.services.nodes_section(actor)` → `{items, total, online}`;
+  `SECTIONS += ("nodes",)`; in every snapshot and in deltas when it changes;
+  the owner's own nodes in each of the owner's workspace streams (firm too),
+  never another user's. `health.node` is unchanged (payload pinned by
+  `hud/tests/test_nodes_section.py::test_the_health_node_line_is_unchanged`).
+- Frontend: `HudNodesPanel` (row = link to `/devices/nodes/<id>`; room
+  badge; platform icon + label; status icon + word, never colour alone; role
+  and "N okuma · M eylem"; mic state; "+N düğüm daha" past the cap; one
+  `aria-live="polite"` region that announces only connect/disconnect
+  transitions), shown by `HudView` when `nodes.total > 1`, in which case
+  `HealthPanel` hides its single node line (`hideNodeLine`); with one node,
+  or a backend without the section, the line stays. `/devices` gains the
+  `NodesOverview` table (name, status, room, role, platform icon + label,
+  "Yapabildikleri" counts) above the node cards. HUD stream client:
+  `nodes` parsed in snapshots and deltas (`EMPTY_NODES` default).
+- Tests: `nodes/tests/test_node_presence.py` (ordering, revoked excluded,
+  kill switch, cap 16 + total, Redis down, voice stale, credential
+  expiring, two-owner isolation, key allowlist, no writes),
+  `nodes/tests/test_node_presence_live.py` (two reference nodes paired
+  through the service and connected to the gateway harness → two rows with
+  live status; one drops → only its row flips), `hud/tests/
+  test_nodes_section.py` (section in every stream, firm stream, deltas,
+  isolation, health line unchanged, role × endpoint of `/hud/events` with the
+  section), the two-node helper `nodes/tests/presence_nodes.py`
+  (`make_two_nodes`: "Çalışma odası", v2 macOS "MacBook" with actions, v1
+  Linux "Masaüstü" read-only — the brief's `two_nodes` fixture, a plain
+  helper so branch 2 and the closeout can import it without a conftest
+  clash); vitest `HudNodesPanel.test.tsx` (rows, text status, cap, live
+  announcements, axe), `HudView.test.tsx` (panel vs line), `events.test.ts`,
+  `NodesSection.test.tsx` (overview columns).
+
+Deviations recorded:
+- Two existing HUD tests changed one assertion each
+  (`hud/tests/test_node_line.py::test_the_section_changes_when_presence_flips`,
+  `hud/tests/test_node_voice_line.py::test_a_state_change_is_a_delta`): their
+  delta key set is now `{"type", "health", "nodes"}`, because a presence or
+  mic change now legitimately changes the new section too. The `health.node`
+  payload itself is unchanged; the brief's "existing HUD tests are
+  unchanged" holds for every other assertion.
+- "Connected first" orders by the live presence key (`online`), so a
+  connected node whose credential is due for rotation
+  (`credential_expiring`) also sorts first.
+- The section is a dict (`{items, total, online}`), not a bare list, so the
+  client's object-section delta parsing applies and the panel can say
+  "+N more" past the cap.
+- `axe-core` 4.12.1 (already in the lockfile as a dependency of
+  `eslint-plugin-jsx-a11y`) is now a pinned direct dev dependency for the
+  panel's axe check (`color-contrast` disabled in jsdom; the HUD tokens are
+  checked by `tokens.test.ts`). No new package is downloaded.
+
+Owner steps (pending) — `feat/p13-hud-presence`, recorded 2026-11-20:
+1. Have the independent Sonnet 5 review of this branch reach APPROVE.
+2. M2 (pending owner evaluation): with the MacBook and the Linux desktop
+   paired to the real home server, open `/hud` and check the "Düğümler"
+   panel shows both rows with the right live status, room, platform and mic
+   state, that unplugging one flips only its row within one stream tick, and
+   that VoiceOver announces only the connect/disconnect; check `/devices`'
+   overview counts against each node's detail.
+3. Nothing in this branch needs the Mac: the Swift app sends nothing new
+   (presence is server-side); the server contract is pinned by
+   `nodes/tests/test_node_presence_live.py` against the Python reference
+   node.
+
+Known follow-ups — `feat/p13-hud-presence` (unresolved LOW review notes,
+recorded at merge into `integ/phase-13` 2026-11-26):
+1. **Two existing HUD tests adapted (`backend/hud/tests/test_node_line.py`,
+   `backend/hud/tests/test_node_voice_line.py`).** The Done-when says
+   existing HUD tests stay unchanged; both had their delta key set extended
+   with `nodes` (a forced consequence of the new section; `health.node`
+   payload unchanged). Fix: none in code; note the two adapted assertions in
+   the PR description (recorded under "Deviations recorded" above).
+2. **Per-node queries before the cap (`backend/nodes/selectors.py`).**
+   `node_presence_page` reads `latest_snapshot`, `presence.is_online` and
+   `voice_summary` for every live node before capping at 16, on every HUD
+   tick (N+1, bounded by the owner's node count). Fix (optional): sort,
+   slice to the cap, then fetch per-node data only for the listed nodes;
+   consider batching the presence reads.
+3. **Liveness hidden for `credential_expiring` (`backend/nodes/selectors.py`).**
+   A connected node whose credential is expiring reports status
+   `credential_expiring` (its `online` flag stays true); the panel shows
+   only the status word. Acceptable as is; optionally show the online flag
+   in the row text.
+- Merge note: branch 2 and branch 3 each added a `nodes/tests/two_nodes.py`
+  with a different `make_two_nodes`; at the merge branch 3's helper moved
+  to `nodes/tests/presence_nodes.py` (same content; its two importers,
+  `nodes/tests/test_node_presence.py` and `hud/tests/test_nodes_section.py`,
+  updated). Unifying the two helpers is a later cleanup.
 
 **Minimum usable cut** if the phase runs long: 7 (the home server is safe
 and backed up), 1 and 2 (several PCs, the right one each time). 3 adds
