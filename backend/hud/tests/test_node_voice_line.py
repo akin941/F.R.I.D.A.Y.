@@ -135,7 +135,8 @@ def test_a_state_change_is_a_delta(stream, workspace, node, fake_clock):
     frames = stream(workspace.id)
     assert frames[1]["health"]["node"]["voice"]["state"] == "armed_wake"
     delta = frames[2]
-    assert delta["type"] == "delta" and set(delta) == {"type", "health"}
+    # Phase 13 D4: the per-node panel carries the mic state too.
+    assert delta["type"] == "delta" and set(delta) == {"type", "health", "nodes"}
     assert delta["health"]["node"]["voice"]["state"] == "listening"
     assert delta["health"]["node"]["voice"]["session_open"] is True
 

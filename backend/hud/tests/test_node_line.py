@@ -161,7 +161,8 @@ def test_the_section_changes_when_presence_flips(stream, workspace, node, fake_c
     frames = stream(workspace.id)
     assert frames[1]["health"]["node"]["status"] == "disconnected"
     up, down = frames[2], frames[3]
-    assert up["type"] == "delta" and set(up) == {"type", "health"}
+    # Phase 13 D4: the per-node panel follows presence too.
+    assert up["type"] == "delta" and set(up) == {"type", "health", "nodes"}
     assert up["health"]["node"]["status"] == "connected"
     assert down["type"] == "delta" and down["health"]["node"]["status"] == "disconnected"
 
