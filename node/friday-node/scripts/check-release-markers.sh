@@ -36,4 +36,13 @@ if grep -qE "scrub-preview|OwnerTurnPreview" "$TEXT"; then
   echo "debug-only scrub-preview marker in $(basename "$BIN"): refusing" >&2
   exit 1
 fi
+# Runbook B5 (Phase 10 M1): the conformance hook's own words (the
+# `wait_disconnected` op and the report keys `executor_terminated` /
+# `windows_shown`, which nothing outside `#if CONFORMANCE` spells), and the
+# DEBUG-only scripted doubles the hook and the offline suite drive (the
+# window owner's `script`, `ScriptedExecutor`, `CaseSetup`).
+if grep -qE "wait_disconnected|executor_terminated|windows_shown|ScriptedExecutor|ScriptedRun|CaseSetup|CommandScript" "$TEXT"; then
+  echo "conformance hook or scripted-double marker in $(basename "$BIN"): refusing" >&2
+  exit 1
+fi
 echo "no conformance or debug-preview marker in $(basename "$BIN")"

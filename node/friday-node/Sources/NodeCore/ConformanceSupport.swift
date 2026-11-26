@@ -9,13 +9,22 @@
 // marker of it.
 //
 // The fake gateway (`manage.py node_conformance_server --external
-// --tls-self-signed --protocol 1 --hook-socket PATH`) drives the node over a
-// JSON-lines Unix socket (backend/nodes/conformance/gateway.py
+// --tls-self-signed --protocol 1|2 --hook-socket PATH`) drives the node over
+// a JSON-lines Unix socket (backend/nodes/conformance/gateway.py
 // `ExternalHook`): for each case it sends `prepare` (the node builds a fresh
-// session for the case and connects to the gateway), then `advance`,
-// `tick`, `kill_switch`, `voice_state`, `report` and `wait_disconnected`.
-// The node's clock is the case's manual clock; frames go over the real WSS
-// socket with the self-signed certificate pinned.
+// session for the case and connects to the gateway, offering
+// `friday-node.v2, friday-node.v1`; the gateway picks the case's version),
+// then `advance`, `tick`, `kill_switch`, `voice_state`, `report` and
+// `wait_disconnected`. The node's clock is the case's manual clock; frames
+// go over the real WSS socket with the self-signed certificate pinned.
+//
+// Phase 10 M1 (runbook B5): `prepare` also builds the case's scripted window
+// owner (`setup.window`: the seam through which the server's scripted owner
+// answers the confirmation window), the scripted executor
+// (`setup.executor`), the action policy of `local_policy.json` over the
+// fixture home and the `narrow` catalogue (NodeCore `CaseSetup`, shared with
+// the offline suite); `kill_switch` engages the session's kill switch, and
+// `report` adds `executor_calls`, `executor_terminated` and `windows_shown`.
 //
 // Launch arguments (read only here):
 //   --conformance-hook PATH         the hook socket
@@ -68,13 +77,16 @@ public final class ConformanceHookClient {
     let home: String
     let repos: [LocalRepo]
     let desktop: FixtureDesktop
-    /// sha256 of the fixture policy document: the same before and after
-    /// every case (nothing in the protocol can change the local policy).
-    let policyFingerprint: String
+    /// The action policy of the fixture policy document over the fixture
+    /// home (check 22); its fingerprint is the same before and after every
+    /// case (nothing in the protocol can change the local policy).
+    let actionPolicy: ActionPolicy
+    var policyFingerprint: String { actionPolicy.fingerprint }
     private let queue = DispatchQueue(label: "friday-node.conformance")
     private var session: NodeSession?
     private var clock: ManualClock?
     private var reader: NodeReaders?
+    private var executor: ScriptedExecutor?
     private var connection: NodeConnection?
 
     /// Parse the launch arguments; nil when the app was not started in
@@ -108,7 +120,7 @@ public final class ConformanceHookClient {
             return LocalRepo(name: name, root: root, home: ReaderPaths.realpathC(home))
         }
         desktop = try FixtureDesktop(fixturesDirectory: fixtures)
-        policyFingerprint = JSON.hexDigest(policyData)
+        actionPolicy = try ActionPolicy.load(policy, home: self.home)
     }
 
     /// Serve the hook until the gateway closes it. Returns the exit status.
@@ -166,9 +178,15 @@ public final class ConformanceHookClient {
         case "tick":
             queue.sync { connection?.tick() }
         case "kill_switch":
-            break  // v1: no window or executor to stop
+            queue.sync {
+                guard let session else { return }
+                connection?.sendSessionFrames(session.engageKillSwitch())
+            }
         case "voice_state":
-            queue.sync { _ = session?.relayVoiceState(op["state"] ?? .null) }
+            queue.sync {
+                guard let session else { return }
+                connection?.sendSessionFrames(session.relayVoiceState(op["state"] ?? .null))
+            }
         case "report":
             return queue.sync { report() }
         case "wait_disconnected":
@@ -194,12 +212,14 @@ public final class ConformanceHookClient {
         let reader = NodeReaders(
             home: home, repos: repos, grants: grants, windowTitles: setup["window_titles"]?.boolValue ?? false,
             desktop: desktop, usage: .transcripts)
-        var availability = reader.availability()
-        for (name, value) in setup["availability"]?.objectValue ?? [:] { availability[name] = value.stringValue }
+        // The scripted owner, the scripted executor, the availability
+        // overrides and the `narrow` catalogue, exactly as the offline suite.
+        let caseSetup = CaseSetup(setup: setup, clock: clock, readerAvailability: reader.availability())
         let session = NodeSession(
-            nodeID: Self.nodeID, pinned: pins.signingKeys, catalogue: .standard(availability: availability),
+            nodeID: Self.nodeID, pinned: pins.signingKeys, catalogue: caseSetup.catalogue,
             readers: reader, clock: clock, nodeVersion: NodeInfo.nodeVersion, osVersion: NodeInfo.osVersion,
-            readDelaySeconds: setup["read_delay"]?.intValue ?? 0)
+            readDelaySeconds: setup["read_delay"]?.intValue ?? 0, policy: actionPolicy,
+            executor: caseSetup.executor, window: caseSetup.window)
         guard let url = URL(string: "wss://\(gateway)\(NodeProtocol.gatewayPath)") else {
             throw ConformanceError("bad --conformance-gateway")
         }
@@ -208,6 +228,7 @@ public final class ConformanceHookClient {
             autoTick: false)
         self.clock = clock
         self.reader = reader
+        self.executor = caseSetup.executor
         self.session = session
         self.connection = connection
         connection.start()
@@ -217,12 +238,14 @@ public final class ConformanceHookClient {
         guard let session else { return ["ok": false] }
         return [
             "reader_calls": .int(Int64(reader?.calls.count ?? 0)),
-            "executor_calls": 0,
-            "executor_terminated": 0,
-            "windows_shown": 0,
+            "executor_calls": .int(Int64(executor?.calls.count ?? 0)),
+            "executor_terminated": .int(Int64(executor?.terminatedCount ?? 0)),
+            "windows_shown": .int(Int64(session.window.shown.count)),
             "closed_reason": session.closedReason.map(JSONValue.string) ?? .null,
             "reconnect_allowed": .bool(session.reconnectAllowed),
-            "policy_fingerprint": .string(policyFingerprint),
+            // The session's own policy, as of now: a change by any frame
+            // would show here.
+            "policy_fingerprint": .string(session.policy.fingerprint),
             // Seconds as an integer number of milliseconds would change the
             // check; the gateway compares 0 <= delay <= max, so whole seconds,
             // rounded up, keep the bound honest.

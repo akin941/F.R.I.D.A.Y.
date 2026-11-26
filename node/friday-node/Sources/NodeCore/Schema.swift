@@ -6,32 +6,76 @@
 // - `pattern` is a full match of the whole string (a trailing newline never
 //   slips past a `$` anchor);
 // - numbers are integers only (the strict parser already refuses any other).
-// Plus the v2 keyword `x-friday-max-bytes` (UTF-8 byte bound of a string).
+// Plus the v2 keyword `x-friday-max-bytes` (UTF-8 byte bound of a string),
+// and the three standard keywords the v2 `event` schema uses in exactly one
+// place (Phase 11 D15; messages.py docstring): a local `$ref` into the root
+// schema's `$defs`, `allOf`, and `if`/`then`/`else`.
 //
 // Supported: type, enum, const, properties, required, additionalProperties,
 // minProperties, maxProperties, items, minItems, maxItems, uniqueItems,
 // minLength, maxLength (code points), pattern, minimum, maximum,
-// x-friday-max-bytes, boolean schemas. Unknown keywords (title,
-// description, x-friday-opaque, ...) are ignored, as in JSON Schema: an
-// `x-friday-opaque` hole is validated elsewhere.
+// x-friday-max-bytes, $ref (`#...` JSON pointers into the root only; any
+// other reference fails closed), allOf, if/then/else, boolean schemas.
+// Unknown keywords (title, description, x-friday-opaque, ...) are ignored,
+// as in JSON Schema: an `x-friday-opaque` hole is validated elsewhere.
 
 import Foundation
 
 public enum Schema {
     /// True when `instance` is valid against `schema`.
     public static func isValid(_ instance: JSONValue, against schema: JSONValue) -> Bool {
-        validate(instance, schema)
+        validate(instance, schema, root: schema, depth: 0)
     }
 
-    private static func validate(_ instance: JSONValue, _ schema: JSONValue) -> Bool {
+    /// Nesting (and `$ref` chains) deeper than this fail closed: no schema
+    /// here comes close, and a reference cycle can never loop.
+    private static let maxDepth = 64
+
+    private static func validate(_ instance: JSONValue, _ schema: JSONValue, root: JSONValue, depth: Int) -> Bool {
+        guard depth < maxDepth else { return false }
         switch schema {
         case .bool(let allowed): return allowed
-        case .object(let keywords): return validate(instance, keywords)
+        case .object(let keywords): return validate(instance, keywords, root: root, depth: depth)
         default: return false  // not a schema: fail closed
         }
     }
 
-    private static func validate(_ instance: JSONValue, _ s: [String: JSONValue]) -> Bool {
+    /// A local reference (`#`, `#/$defs/name`), resolved in `root`.
+    private static func resolve(_ reference: String, in root: JSONValue) -> JSONValue? {
+        guard reference.hasPrefix("#") else { return nil }
+        let pointer = reference.dropFirst()
+        if pointer.isEmpty { return root }
+        guard pointer.hasPrefix("/") else { return nil }
+        var node = root
+        for token in pointer.dropFirst().split(separator: "/", omittingEmptySubsequences: false) {
+            let key = token.replacingOccurrences(of: "~1", with: "/").replacingOccurrences(of: "~0", with: "~")
+            guard let next = node[key] else { return nil }
+            node = next
+        }
+        return node
+    }
+
+    private static func validate(
+        _ instance: JSONValue, _ s: [String: JSONValue], root: JSONValue, depth: Int
+    ) -> Bool {
+        func valid(_ value: JSONValue, _ schema: JSONValue) -> Bool {
+            validate(value, schema, root: root, depth: depth + 1)
+        }
+        if let reference = s["$ref"] {
+            guard let text = reference.stringValue, let target = resolve(text, in: root), valid(instance, target)
+            else { return false }
+        }
+        if let all = s["allOf"] {
+            guard let schemas = all.arrayValue, !schemas.isEmpty else { return false }
+            for schema in schemas where !valid(instance, schema) { return false }
+        }
+        if let condition = s["if"] {
+            if valid(instance, condition) {
+                if let then = s["then"], !valid(instance, then) { return false }
+            } else if let otherwise = s["else"], !valid(instance, otherwise) {
+                return false
+            }
+        }
         if let type = s["type"], !matchesType(instance, type) { return false }
         if let options = s["enum"]?.arrayValue, !options.contains(instance) { return false }
         if let constant = s["const"], constant != instance { return false }
@@ -55,7 +99,7 @@ public enum Schema {
                 }
             }
             if let itemSchema = s["items"] {
-                for item in items where !validate(item, itemSchema) { return false }
+                for item in items where !valid(item, itemSchema) { return false }
             }
         case .object(let fields):
             if let minimum = s["minProperties"]?.intValue, fields.count < minimum { return false }
@@ -68,9 +112,9 @@ public enum Schema {
             let properties = s["properties"]?.objectValue ?? [:]
             for (key, value) in fields {
                 if let propertySchema = properties[key] {
-                    if !validate(value, propertySchema) { return false }
+                    if !valid(value, propertySchema) { return false }
                 } else if let additional = s["additionalProperties"] {
-                    if !validate(value, additional) { return false }
+                    if !valid(value, additional) { return false }
                 }
             }
         default:
