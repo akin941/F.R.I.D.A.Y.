@@ -1,0 +1,14 @@
+{
+  "name": "music.next_track",
+  "version": 1,
+  "label": "Müzik: sonraki parça",
+  "description": "Music uygulamasında sonraki parçaya geçer.",
+  "params_schema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "additionalProperties": false,
+    "required": [],
+    "properties": {}
+  },
+  "confirm_template": "Sonraki parçaya geçilsin mi?"
+}

@@ -1,0 +1,13 @@
+{
+  "description": "Friday Node conformance key pair (Phase 9 brief D5 / Phase 10 branch 2). TEST KEYS ONLY: both private keys are public and every server refuses them as NODE_SIGNING_KEY (nodes.keys.published_test_key_ids). The hostile fake gateway signs every case with signing; unpinned is never pinned by a conforming node.",
+  "signing": {
+    "private_key_b64": "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8=",
+    "public_key_b64": "JUO5L/EJVRFHatyDadtt3JM2ZaEZeN2hQE7hBmypVZ0=",
+    "key_id": "03396219237f75a6"
+  },
+  "unpinned": {
+    "private_key_b64": "YGFiY2RlZmdoaWprbG1ub3BxcnN0dXZ3eHl6e3x9fn8=",
+    "public_key_b64": "F0VTtFbd38aQjsqxwQH+arIeK6oGF3lbfUOmNIKZP9U=",
+    "key_id": "68894d58f18f2c34"
+  }
+}

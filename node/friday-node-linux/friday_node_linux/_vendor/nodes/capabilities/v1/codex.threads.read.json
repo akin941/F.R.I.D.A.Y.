@@ -1,0 +1,93 @@
+{
+  "name": "codex.threads.read",
+  "version": 1,
+  "class": "read",
+  "data_class": "personal",
+  "description": "The last turns of one Codex thread; text only, tool calls as counts.",
+  "path_args": [],
+  "workspace_resolution": "session_lookup",
+  "max_result_bytes": 65536,
+  "args_schema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "last_turns",
+      "thread_id"
+    ],
+    "properties": {
+      "thread_id": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 128,
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+      },
+      "last_turns": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 20
+      }
+    }
+  },
+  "result_schema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "thread_id",
+      "turns"
+    ],
+    "properties": {
+      "thread_id": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 128,
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+      },
+      "turns": {
+        "type": "array",
+        "maxItems": 20,
+        "items": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "at",
+            "role",
+            "text",
+            "tool_calls",
+            "tool_results"
+          ],
+          "properties": {
+            "role": {
+              "type": "string",
+              "enum": [
+                "user",
+                "assistant"
+              ],
+              "maxLength": 16
+            },
+            "at": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 253402300799
+            },
+            "text": {
+              "type": "string",
+              "maxLength": 2000
+            },
+            "tool_calls": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 1000000
+            },
+            "tool_results": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 1000000
+            }
+          }
+        }
+      }
+    }
+  }
+}

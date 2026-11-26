@@ -1,0 +1,163 @@
+{
+  "description": "Friday Node protocol v1 canonical JSON vectors (RFC 8785 subset, brief D5). `valid`: canonicalize(input) must equal `canonical` byte for byte (UTF-8) and sha256 of it must equal `sha256`. `invalid`: the strict parser or the canonicalizer must refuse `json` (text) / `hex` (raw bytes).",
+  "valid": [
+    {
+      "name": "empty object",
+      "input": {},
+      "canonical": "{}",
+      "sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+    },
+    {
+      "name": "empty array",
+      "input": [],
+      "canonical": "[]",
+      "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    },
+    {
+      "name": "literals",
+      "input": [
+        null,
+        true,
+        false
+      ],
+      "canonical": "[null,true,false]",
+      "sha256": "37257214f22b92121c5ff4d7e29ed2d31b3f1129ee698e96e581ec05cb2e3cf7"
+    },
+    {
+      "name": "integers",
+      "input": [
+        0,
+        -1,
+        1,
+        42,
+        -9007199254740991,
+        9007199254740991
+      ],
+      "canonical": "[0,-1,1,42,-9007199254740991,9007199254740991]",
+      "sha256": "014f3dcfec824f941779c08f2c99a853b1f86b06235c404b355b5fa033737f0d"
+    },
+    {
+      "name": "nested key order",
+      "input": {
+        "b": 1,
+        "a": {
+          "d": [
+            3,
+            2,
+            1
+          ],
+          "c": null
+        }
+      },
+      "canonical": "{\"a\":{\"c\":null,\"d\":[3,2,1]},\"b\":1}",
+      "sha256": "99292fc65b1416433c73754bd2133c24f100c4da791e825377abb6756eeb69ae"
+    },
+    {
+      "name": "keys sorted by UTF-16 code units (RFC 8785 3.2.3 example)",
+      "input": {
+        "€": "Euro Sign",
+        "\r": "Carriage Return",
+        "דּ": "Hebrew Letter Dalet With Dagesh",
+        "1": "One",
+        "😀": "Emoji: Grinning Face",
+        "": "Control",
+        "ö": "Latin Small Letter O With Diaeresis"
+      },
+      "canonical": "{\"\\r\":\"Carriage Return\",\"1\":\"One\",\"\":\"Control\",\"ö\":\"Latin Small Letter O With Diaeresis\",\"€\":\"Euro Sign\",\"😀\":\"Emoji: Grinning Face\",\"דּ\":\"Hebrew Letter Dalet With Dagesh\"}",
+      "sha256": "5e321556d22018a9656991a9e94f77ec175fa193e52a2429d312f8419ec8b08c"
+    },
+    {
+      "name": "short escapes",
+      "input": "\"\\\b\f\n\r\t",
+      "canonical": "\"\\\"\\\\\\b\\f\\n\\r\\t\"",
+      "sha256": "ab6086922349fae3725e57bfecd541f125f3f9abce67c98b28f3c5d6281cd2eb"
+    },
+    {
+      "name": "other controls as lower-case \\u00xx",
+      "input": "\u0000\u0001\u001f\u000b",
+      "canonical": "\"\\u0000\\u0001\\u001f\\u000b\"",
+      "sha256": "ed1f7d55744f5e1a97e7abf6d1d6a92976a2800a73f69ab566201f78d05c142a"
+    },
+    {
+      "name": "DEL and U+2028 stay literal",
+      "input": "  ",
+      "canonical": "\"  \"",
+      "sha256": "95df0b63167be5cce73c768a4dd6b0005aa196870fdc24ca85e0a03c1dd7a6c0"
+    },
+    {
+      "name": "non-ASCII literal",
+      "input": "Çalışma günü — ğüşiöç 日本 😀",
+      "canonical": "\"Çalışma günü — ğüşiöç 日本 😀\"",
+      "sha256": "971041d382e9dabf8688347d4c796642dc7de977add89cb589a8cbfc0afcd64b"
+    },
+    {
+      "name": "solidus is not escaped",
+      "input": "a/b",
+      "canonical": "\"a/b\"",
+      "sha256": "f5effa31772a3689cb116700c569f4b72d765290968f099016a899ab6c1e4ee3"
+    },
+    {
+      "name": "envelope-shaped",
+      "input": {
+        "v": 1,
+        "type": "invoke",
+        "args": {
+          "limit": 10,
+          "since_hours": 24,
+          "cwd_prefixes": [
+            "~/work"
+          ]
+        },
+        "grant": null
+      },
+      "canonical": "{\"args\":{\"cwd_prefixes\":[\"~/work\"],\"limit\":10,\"since_hours\":24},\"grant\":null,\"type\":\"invoke\",\"v\":1}",
+      "sha256": "ea042f310c969b9a792243f4bfbc865cc0366eef03d6d871497f0daa3624950c"
+    }
+  ],
+  "invalid": [
+    {
+      "name": "float",
+      "json": "{\"a\":1.5}"
+    },
+    {
+      "name": "exponent",
+      "json": "{\"a\":1e3}"
+    },
+    {
+      "name": "integer-valued float",
+      "json": "{\"a\":1.0}"
+    },
+    {
+      "name": "NaN",
+      "json": "{\"a\":NaN}"
+    },
+    {
+      "name": "Infinity",
+      "json": "[Infinity]"
+    },
+    {
+      "name": "duplicate key",
+      "json": "{\"a\":1,\"a\":2}"
+    },
+    {
+      "name": "integer above 2**53-1",
+      "json": "[9007199254740992]"
+    },
+    {
+      "name": "integer below -(2**53-1)",
+      "json": "[-9007199254740992]"
+    },
+    {
+      "name": "lone surrogate",
+      "json": "[\"\\ud800\"]"
+    },
+    {
+      "name": "trailing garbage",
+      "json": "{}x"
+    },
+    {
+      "name": "not UTF-8 (latin-1 bytes, hex)",
+      "hex": "5b22e7225d"
+    }
+  ]
+}

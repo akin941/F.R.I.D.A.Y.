@@ -1,0 +1,23 @@
+{
+  "name": "terminal.open_repo",
+  "version": 1,
+  "label": "Terminalde aç",
+  "description": "Yerel listedeki bir repoyu Terminal'de açar.",
+  "params_schema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "repo_path"
+    ],
+    "properties": {
+      "repo_path": {
+        "type": "string",
+        "minLength": 2,
+        "maxLength": 1024,
+        "pattern": "^~?(?:/(?!\\.+(?:/|$))[^/\\x00-\\x1f\\x7f-\\x9f\\xad\\u034f\\u0600-\\u0605\\u061c\\u06dd\\u070f\\u0890-\\u0891\\u08e2\\u115f-\\u1160\\u17b4-\\u17b5\\u180b-\\u180f\\u200b-\\u200f\\u2028-\\u202e\\u2060-\\u206f\\u2800\\u3164\\ud800-\\udfff\\ue000-\\uf8ff\\ufdd0-\\ufdef\\ufe00-\\ufe0f\\ufeff\\uffa0\\ufff0-\\ufffb\\ufffe-\\uffff\\U000110bd\\U000110cd\\U00013430-\\U0001343f\\U0001bca0-\\U0001bca3\\U0001d173-\\U0001d17a\\U0001fffe-\\U0001ffff\\U0002fffe-\\U0002ffff\\U0003fffe-\\U0003ffff\\U00040000-\\U0010ffff;|&$`<>\\\\*?\"'{}\\[\\]!]{1,255})+$"
+      }
+    }
+  },
+  "confirm_template": "{repo_path} Terminal'de açılsın mı?"
+}
