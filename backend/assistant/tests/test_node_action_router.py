@@ -106,7 +106,8 @@ def ports():
         seen["source"].append((workspace.pk, actor.pk))
         return seen.get("targets", TARGETS)
 
-    def validator(*, workspace, actor, proposal):
+    def validator(*, workspace, actor, proposal, context=None):
+        seen.setdefault("contexts", []).append(context)
         seen["validator"].append(proposal)
         if (
             proposal.get("node_id") == NODE_ID

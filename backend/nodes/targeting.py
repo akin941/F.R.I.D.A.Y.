@@ -32,10 +32,11 @@ Rule order (the first rule that decides wins):
    `Ambiguous` among them. Without a name: a room in locative form
    ("salondaki", "çalışma odasındaki", `core.speech.match_room`), a role
    word ("medya bilgisayarı", "dizüstü") or a platform word ("Mac'te",
-   "Linux'ta") narrows the usable nodes; one left -> as a named node; several
-   -> the eligible ones among them (one -> it, several -> `Ambiguous`). A
-   room no node is in -> `Refused(no_node_in_room)`; a role or platform word
-   no node has is ignored (they are common words).
+   "Linux'ta") narrows the labelled nodes; one left -> as a named node;
+   several -> the eligible ones among them (one -> it, several ->
+   `Ambiguous`, none -> `not_available`). A room of the owner with no node
+   in it -> `Refused(no_node_in_room)`; a role or platform word no node has
+   is ignored (they are common words).
 2. **The speaking node.** `origin_node_id` (a `node_voice` turn: the
    token's `node_device_id`) when that node is eligible.
 3. **Last active.** Among the eligible nodes: exactly one -> it
@@ -66,6 +67,7 @@ from core.speech import find_mentions, match_room, phrase_key
 from nodes import presence
 from nodes.models import Node
 from nodes.selectors import latest_snapshot, nodes_for
+from workspaces.models import Room, Workspace
 
 # Reasons of a `Resolved` / `Ambiguous` result.
 REASON_MENTION = "mention"
@@ -150,6 +152,7 @@ class _World:
     """The owner's nodes for one resolution, with the per-node facts
     computed at most once (presence is a Redis call)."""
 
+    owner: object
     labelled: list
     usable: list
     capabilities: frozenset
@@ -224,7 +227,13 @@ def _world(owner, capabilities, now):
             labelled.append(node)
         elif refusal == "kill_switch":
             labelled.append(node)
-    return _World(labelled=labelled, usable=usable, capabilities=frozenset(capabilities), now=now)
+    return _World(
+        owner=owner,
+        labelled=labelled,
+        usable=usable,
+        capabilities=frozenset(capabilities),
+        now=now,
+    )
 
 
 def _aliases(row) -> list:
@@ -239,10 +248,14 @@ def _label_vocabulary(nodes):
     return vocabulary
 
 
-def _room_vocabulary(nodes):
-    rooms = {node.room.pk: node.room for node in nodes if node.room is not None}
+def _room_vocabulary(owner):
+    """Every room of the owner's personal workspace (`for_actor()`), with or
+    without a node: a room the owner names is never ignored."""
+    rooms = Room.objects.for_actor(owner).filter(
+        workspace__owner=owner, workspace__type=Workspace.Type.PERSONAL
+    )
     vocabulary = []
-    for room in rooms.values():
+    for room in rooms:
         vocabulary.append((room.name, room.pk))
         vocabulary.extend((alias, room.pk) for alias in _aliases(room))
     return vocabulary
@@ -273,7 +286,7 @@ def _by_mention(world, text):
 
     candidates = list(world.labelled)
     qualified = False
-    room_ids = {mention.target for mention in match_room(text, _room_vocabulary(world.labelled))}
+    room_ids = {mention.target for mention in match_room(text, _room_vocabulary(world.owner))}
     if room_ids:
         qualified = True
         candidates = [node for node in candidates if node.room_id in room_ids]
