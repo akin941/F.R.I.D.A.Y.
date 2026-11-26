@@ -342,6 +342,44 @@ public final class NodeRunner: @unchecked Sendable {
         self.clock = clock
     }
 
+    // MARK: The hook relay (M3)
+
+    private var hookSocket: HookSocket?
+    private var spool: Spool?
+
+    /// Start the hook relay: the spool under `directory` and the Unix socket
+    /// at `socketPath`. An event arrives on the socket's thread and is handed
+    /// to the session on the runner queue: live when the session is up,
+    /// spooled otherwise (also when the node is not paired yet).
+    public func startHookRelay(
+        socketPath: String = HookSocket.defaultPath,
+        spoolDirectory: String = NSHomeDirectory() + "/Library/Application Support/Friday/spool"
+    ) throws {
+        let spool = try Spool(directory: spoolDirectory, clock: clock)
+        let socket = HookSocket(path: socketPath, clock: clock) { [weak self] event in
+            guard let self else { return }
+            self.queue.async {
+                if let session = self.session {
+                    let frames = session.relayHookEvent(event)
+                    if !frames.isEmpty { self.connection?.sendSessionFrames(frames) }
+                } else {
+                    spool.append([event])
+                }
+            }
+        }
+        try socket.start()
+        queue.sync {
+            self.spool = spool
+            self.session?.spool = spool
+        }
+        hookSocket = socket
+    }
+
+    public func stopHookRelay() {
+        hookSocket?.stop()
+        hookSocket = nil
+    }
+
     /// The owner changed the local policy (after LocalAuthentication): the
     /// readers and the advertised catalogue follow at once, and a connected
     /// session tells the server what changed.
@@ -443,9 +481,11 @@ public final class NodeRunner: @unchecked Sendable {
 
     private func makeSession(_ credential: NodeCredential) -> NodeSession {
         let (catalogue, readers) = readersAndCatalogue()
-        return NodeSession(
+        let session = NodeSession(
             nodeID: credential.nodeID, pinned: credential.pinnedKeys, catalogue: catalogue,
             readers: readers, clock: clock, nodeVersion: NodeInfo.nodeVersion, osVersion: NodeInfo.osVersion)
+        session.spool = spool
+        return session
     }
 
     private func connect() {
