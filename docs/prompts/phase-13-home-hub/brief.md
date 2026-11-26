@@ -1119,7 +1119,7 @@ evaluation".
 | # | Branch | Scope | Depends on | Status |
 |---|---|---|---|---|
 | brief | `docs/p13-brief` | This brief (full; the owner decision of 2026-11-26 kept as goal, scope and boundary; no stub existed), ADR-017 (Accepted 2026-11-26; numbered 017 because ADR-016 is taken), `docs/runbooks/home-server-setup.md`, MASTER_PLAN §AA row 13 + §O d11, `docs/runbooks/mac-session-handoff.md` Part E, `backend/assistant/self_sources.json` regenerated (`build_self_sources --check`) | Phase 12 closeout | **implemented 2026-11-20** (swarm date stamp; content per the owner decision of 2026-11-26; docs only; awaits the independent Sonnet 5 plan review to APPROVE) |
-| 1 | `feat/p13-node-registry` | `workspaces.Room`, node name/room/role/platform/aliases, pairing `platform`, node `PATCH`, per-node audit API, `core.speech`, `/settings/home`, `/devices` edit + audit tab | brief approved | planned |
+| 1 | `feat/p13-node-registry` | `workspaces.Room`, node name/room/role/platform/aliases, pairing `platform`, node `PATCH`, per-node audit API, `core.speech`, `/settings/home`, `/devices` edit + audit tab | brief approved | **implemented 2026-11-20** (swarm date stamp; see "Branch 1 notes"; awaits the independent Sonnet 5 review) |
 | 2 | `feat/p13-node-targeting` | `nodes.targeting.resolve_target`, `last_active_at`, `ToolCallContext`, read tools and node-action proposals on the resolver, ask template, one-node invariant, approval card node header, ADR-013 note | 1 | planned |
 | 3 | `feat/p13-hud-presence` | `node_presence`, HUD `nodes` section + `HudNodesPanel`, `/devices` overview columns | 1 (parallel with 2) | planned |
 | 4 | `feat/p13-linux-node` | `node/friday-node-linux` (vendored + locked, read-only, local policy CLI, credential file, systemd user unit, re-point), CI conformance job, Windows stub README | 1 (pairing `platform`) | planned |
@@ -1139,6 +1139,79 @@ branch and, before merge, rebases and renumbers onto the newest leaf of
 every app it touches (`makemigrations --check --dry-run` green, no merge
 migrations). 2 and 3 may be developed concurrently but merge one at a
 time (both touch `nodes/selectors.py`). 4 and 7 are independent of 2/3/5.
+
+### Branch 1 notes — `feat/p13-node-registry` (implemented 2026-11-20)
+
+What landed (all server side and web; nothing needs the Mac):
+- `core/speech.py` (stdlib only): `normalize_speech`, `match_key` (moved;
+  `assistant.wake_routes` re-exports them, the shared vectors pass through
+  both paths), `phrase_key`, `find_mentions(text, vocabulary)` (whole words,
+  longest phrase first, the last word may carry one closed-set Turkish case
+  suffix incl. buffer `n`, `-ki`, final-consonant softening and the
+  apostrophe split "Mac'te") and `match_room(text, rooms)` (locative forms
+  only: "salonda", "salondaki", "çalışma odasındaki", "Salon'daki").
+- `workspaces.Room` (migration `workspaces/0003_room`) and
+  `workspaces/rooms.py` (the brief's `services.py` content lives in its own
+  module next to it): owner-web CRUD, keys unique across names and aliases
+  under the workspace-row lock, audit `home.room_created` /
+  `home.room_renamed` / `home.room_changed` (aliases / order; not in the
+  brief's list, added so an alias change is audited too) /
+  `home.room_deleted`; `GET/POST /api/v1/workspaces/<id>/rooms`,
+  `PATCH/DELETE …/rooms/<room_id>`; a firm or another user's workspace is
+  404. The shared label rules (`clean_label`, `clean_aliases`) are reused
+  by `nodes` for node names and aliases.
+- `nodes.Node` fields `name_key`, `room` (PROTECT), `role`, `platform`,
+  `aliases`, `last_active_at` (migration `nodes/0005_node_labels`, data
+  step keys every name and suffixes duplicates among an owner's
+  non-revoked nodes, oldest first, renaming the device row too; tested by
+  running the step over upgraded-shaped rows). `last_active_at` is only
+  stored here; branch 2 writes it.
+- Pairing: optional `platform` (absent = `macos`; invalid = 400 before any
+  code is consumed), a blank name gets the platform's default ("Linux
+  düğümü"), a duplicate gets " 2", " 3" … (never refused); `nodes.node.paired`
+  now carries `node_id`, `name_key`, `platform`.
+- `PATCH /api/v1/nodes/<id>` (`nodes.services.relabel_node`): owner, web,
+  human; unknown fields (incl. `platform`) are 400; nothing is published on
+  the bus and the node's next `hello` is unchanged (gateway-harness test);
+  audit `nodes.relabelled` with fields, old/new keys, room ids, roles.
+- `GET /api/v1/nodes/<id>/audit?before=<cursor>`: chain rows (`kind:
+  invocation`) merged with AuditLog rows about the node (`kind: event`:
+  resource = the node, or `node_id` / `device_id` / `node_device_id` in the
+  metadata, plus the owner's kill-switch rows), newest first, 50 a page,
+  cursor `<µs since epoch>.<uuid>`; details are an allowlist of codes, keys
+  and ids (no client IP, no args, no output); `nodes.invoke` twins and
+  "viewed" rows are left out; every view is audited `nodes.audit.viewed`.
+  No metadata index was added: the per-node row counts are small; revisit
+  if the closeout measures a need (D8 allows it).
+- Frontend: `/settings/home` (`RoomsEditor`), the `/devices` node card
+  shows room · role · platform · aliases and a "Düzenle" dialog
+  (`NodeLabelDialog`), `/devices/nodes/<id>` has "Çağrılar" / "Denetim"
+  tabs; BFF routes for rooms, node `PATCH` and the audit; Turkish messages
+  for the new codes.
+
+Deviations recorded:
+- Error codes are dotted like the rest of the registry: `label.invalid`,
+  `label.limit`, `label.conflict` (409), `label.unknown_room`, and
+  `room.in_use` (409) for the brief's `room_in_use`.
+- "Usable" for label uniqueness: a node cut off **only by the kill switch**
+  keeps its name and aliases reserved (the switch is released without
+  re-pairing, so a name freed meanwhile would come back as a duplicate);
+  revoked and expired nodes free theirs. Pairing is refused while the switch
+  is engaged anyway.
+- The label lock is the owner's personal-workspace row (then the owner's
+  node rows): it exists before the first node does, so two concurrent
+  first pairings cannot both take "MacBook".
+- An alias may not repeat the node's (or room's) own name.
+
+Owner steps (pending) — `feat/p13-node-registry`, recorded 2026-11-20:
+1. Have the independent Sonnet 5 review of this branch reach APPROVE.
+2. After merge and `migrate` on the real server: check `/devices` for any
+   node the data step renamed ("MacBook 2") and relabel it as wanted;
+   create the rooms on `/settings/home` and assign each node a room and
+   role (branch 2's resolution uses them).
+3. Mac session M1: the Swift app should send `platform: "macos"` at
+   pairing (optional — absent already means macOS); the server contract is
+   pinned by `nodes/tests/test_pairing_platform.py`.
 
 **Minimum usable cut** if the phase runs long: 7 (the home server is safe
 and backed up), 1 and 2 (several PCs, the right one each time). 3 adds
