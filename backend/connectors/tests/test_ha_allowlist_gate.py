@@ -309,6 +309,8 @@ _READERS = {
     "connectors/home_entities.py",
     # Branch 6: read-only resolver over the enabled allowlist (for_actor).
     "connectors/home_phrases.py",
+    # Phase 13 closeout: the read-only `ha_entities` preflight row.
+    "ops/preflight.py",
 }
 _WRITER = "connectors/home_entities.py"
 
