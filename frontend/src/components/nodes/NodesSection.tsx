@@ -8,7 +8,10 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { StatusPill } from "@/components/ui/status-pill";
+import { NodeLabelDialog, PLATFORM_LABELS, ROLE_LABELS } from "@/components/nodes/NodeLabelDialog";
+import { useOptionalWorkspace } from "@/contexts/workspace-context";
 import { ApiError, apiDelete, apiGetJson, apiPostJson } from "@/lib/api-client";
+import { fetchRooms } from "@/lib/api/home";
 import { tr } from "@/lib/i18n/tr";
 import type {
   ApiNodeCapability,
@@ -16,6 +19,7 @@ import type {
   ApiNodeKillSwitch,
   ApiNodeSummary,
   ApiPairingCode,
+  ApiRoom,
 } from "@/types/api";
 import {
   capabilityAvailabilityText,
@@ -95,9 +99,11 @@ export function NodeCapabilityList({ capabilities }: { capabilities: ApiNodeCapa
 
 function NodeCard({
   node,
+  rooms,
   onChanged,
 }: {
   node: ApiNodeDetail;
+  rooms: ApiRoom[];
   onChanged: (node: ApiNodeSummary) => void;
 }) {
   const revoked = node.status === "revoked" && node.revoked_at !== null;
@@ -106,6 +112,12 @@ function NodeCard({
     onChanged(await apiPostJson<ApiNodeSummary>(`/api/nodes/${node.id}/revoke`));
   }
 
+  const labels = [
+    node.room ? node.room.name : null,
+    node.role ? ROLE_LABELS[node.role] : null,
+    node.platform ? (PLATFORM_LABELS[node.platform] ?? node.platform) : null,
+  ].filter(Boolean);
+
   return (
     <Card data-testid="node-card" data-status={node.status}>
       <CardHeader>
@@ -113,6 +125,12 @@ function NodeCard({
           <span className="min-w-0 break-words">{node.name}</span>
           <StatusPill domain="node" status={node.status} label={nodeStatusLabel(node.status)} />
         </CardTitle>
+        {labels.length > 0 ? (
+          <p className="text-xs text-muted-foreground" data-testid="node-labels">
+            {labels.join(" · ")}
+            {node.aliases && node.aliases.length > 0 ? ` · takma adlar: ${node.aliases.join(", ")}` : null}
+          </p>
+        ) : null}
       </CardHeader>
       <CardContent className="flex flex-col gap-3">
         <dl className="grid grid-cols-1 gap-x-3 gap-y-1 text-xs text-muted-foreground sm:grid-cols-[auto_1fr]">
@@ -147,6 +165,9 @@ function NodeCard({
           <Button asChild variant="outline" size="sm">
             <Link href={`/devices/nodes/${node.id}`}>{copy.invocations}</Link>
           </Button>
+          {node.revoked_at ? null : (
+            <NodeLabelDialog node={node} rooms={rooms} onSaved={onChanged} />
+          )}
           {revoked || node.revoked_at ? null : (
             <ConfirmDialog
               trigger={
@@ -240,6 +261,25 @@ export function NodesSection() {
   const [error, setError] = useState<string | null>(null);
   const [pairingCode, setPairingCode] = useState<ApiPairingCode | null>(null);
   const [busy, setBusy] = useState(false);
+  // Phase 13 D2: the personal workspace's rooms for the label dialog
+  // (best effort: without them the dialog offers "Oda yok" only).
+  const [rooms, setRooms] = useState<ApiRoom[]>([]);
+  const workspaceContext = useOptionalWorkspace();
+  const personalId =
+    workspaceContext?.workspaces.find((workspace) => workspace.type === "personal")?.id ?? null;
+
+  useEffect(() => {
+    if (!personalId) return;
+    let live = true;
+    fetchRooms(personalId)
+      .then((list) => {
+        if (live) setRooms(list.results);
+      })
+      .catch(() => undefined);
+    return () => {
+      live = false;
+    };
+  }, [personalId]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -338,7 +378,7 @@ export function NodesSection() {
           ) : (
             <div className="flex flex-col gap-3">
               {nodes.map((node) => (
-                <NodeCard key={node.id} node={node} onChanged={handleChanged} />
+                <NodeCard key={node.id} node={node} rooms={rooms} onChanged={handleChanged} />
               ))}
             </div>
           )}

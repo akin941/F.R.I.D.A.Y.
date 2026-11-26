@@ -38,7 +38,6 @@ normal router runs. Typed turns are never routed.
 from __future__ import annotations
 
 import re
-import unicodedata
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
@@ -48,6 +47,10 @@ from django.core.exceptions import ImproperlyConfigured
 from django.utils import timezone
 
 from assistant.models import Message, WakeRouteAlias
+
+# Phase 13 D16: the normalizer moved to `core.speech` (stdlib only) so
+# `nodes` and `connectors` share it; re-exported here for every caller.
+from core.speech import match_key, normalize_speech  # noqa: F401
 
 EFFECT_READ = "read"
 EFFECT_PROPOSAL = "proposal"
@@ -68,38 +71,6 @@ NO_DIGEST_TEXT = "Bugün için brifing yok."
 NO_NOTICES_TEXT = "Okunmamış bildirim yok."
 NO_LEARNING_TEXT = "Öğrenme kartında bekleyen öneri yok."
 NOTICES_READ_LIMIT = 5
-
-
-def _turkish_lower(text: str) -> str:
-    # `toLocaleLowerCase("tr-TR")`: dotted capital I -> i, dotless capital
-    # I -> dotless ı, then the ordinary lower-casing.
-    return text.replace("İ", "i").replace("I", "ı").lower()
-
-
-def normalize_speech(text: str) -> str:
-    """`self-trigger.ts` `normalizeSpeech`, ported: NFC, Turkish lower
-    case, NFC again, non-letter/digit/space characters to spaces,
-    whitespace collapsed."""
-    text = unicodedata.normalize("NFC", str(text or ""))
-    text = unicodedata.normalize("NFC", _turkish_lower(text))
-    kept = []
-    for char in text:
-        if char.isspace():
-            kept.append(" ")
-        elif unicodedata.category(char)[0] in ("L", "N"):
-            kept.append(char)
-        else:
-            kept.append(" ")
-    return " ".join("".join(kept).split())
-
-
-def match_key(text: str) -> str:
-    """The comparison form of a normalized phrase: dotless ı folded to i.
-    An all-caps transcript ("HEY FRIDAY", "BRIEFING") lower-cases the
-    Turkish way to "frıday" / "brıefıng"; the closed phrase table is small
-    enough that folding costs no real collision, and every comparison
-    (wake phrase, fillers, routes, aliases, clashes) uses it."""
-    return text.replace("ı", "i")
 
 
 def normalize_utterance(text: str) -> str:

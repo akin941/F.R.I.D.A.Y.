@@ -14,10 +14,17 @@ import { Button } from "@/components/ui/button";
 import { ErrorState } from "@/components/ui/error-state";
 import { Skeleton } from "@/components/ui/skeleton";
 import { StatusPill } from "@/components/ui/status-pill";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { apiGetJson } from "@/lib/api-client";
+import { fetchNodeAudit } from "@/lib/api/home";
 import { tr } from "@/lib/i18n/tr";
 import { cn } from "@/lib/utils";
-import type { ApiNodeDetail, ApiNodeInvocation, ApiNodeInvocationPage } from "@/types/api";
+import type {
+  ApiNodeAuditRow,
+  ApiNodeDetail,
+  ApiNodeInvocation,
+  ApiNodeInvocationPage,
+} from "@/types/api";
 
 const copy = tr.nodes;
 const cols = copy.logColumns;
@@ -75,6 +82,124 @@ export function NodeInvocationLog({ rows }: { rows: ApiNodeInvocation[] }) {
         </li>
       ))}
     </ul>
+  );
+}
+
+const AUDIT_ACTIONS: Record<string, string> = {
+  "nodes.node.paired": "Eşleştirildi",
+  "accounts.node.enrolled": "Kimlik kaydedildi",
+  "nodes.relabelled": "Etiketler değişti",
+  "accounts.device.revoked": "İptal edildi",
+  "accounts.node.rotated": "Kimlik bilgisi yenilendi",
+  "accounts.node.rotation_refused": "Kimlik yenileme reddedildi",
+  "accounts.node.kill_switch.engaged": "Acil durdurma açıldı",
+  "accounts.node.kill_switch.released": "Acil durdurma kapatıldı",
+  "nodes.refused": "Çağrı reddedildi",
+  "node_voice_token.minted": "Ses kimliği verildi",
+  "accounts.voice_live_mute.engaged": "Mikrofon susturuldu",
+  "accounts.voice_live_mute.released": "Mikrofon susturması kaldırıldı",
+};
+
+function auditDetailText(details: Record<string, unknown>): string {
+  return Object.entries(details)
+    .map(([key, value]) => `${key}: ${Array.isArray(value) ? value.join(", ") : String(value)}`)
+    .join(" · ");
+}
+
+/**
+ * The node's audit (Phase 13 D8): its chain rows and its audit events
+ * (paired, relabelled, revoked, kill switch, rotation, refusals, mutes),
+ * newest first. Codes, keys and hashes only -- the API carries no args,
+ * output or address, and this view renders only the fields it names.
+ */
+export function NodeAuditLog({ rows }: { rows: ApiNodeAuditRow[] }) {
+  if (rows.length === 0) {
+    return <p className="text-sm text-muted-foreground">Denetim kaydı yok.</p>;
+  }
+  return (
+    <ul className="flex flex-col gap-2" data-testid="node-audit-log">
+      {rows.map((row) =>
+        row.kind === "invocation" ? (
+          <li
+            key={row.id}
+            className="flex flex-wrap items-center gap-2 rounded-lg border p-3 text-xs"
+            data-testid="node-audit-invocation"
+          >
+            <code className="break-all">{row.capability}</code>
+            <StatusPill
+              domain="nodeInvocation"
+              status={row.status}
+              label={invocationStatusLabel(row.status) + (row.refusal_code ? ` · ${row.refusal_code}` : "")}
+            />
+            <span className="text-muted-foreground">
+              #{row.seq} · {formatWhen(row.created_at)} · {row.workspace_name}
+            </span>
+          </li>
+        ) : (
+          <li
+            key={row.id}
+            className="flex flex-col gap-1 rounded-lg border p-3 text-xs"
+            data-testid="node-audit-event"
+          >
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-sm font-medium">{AUDIT_ACTIONS[row.action] ?? row.action}</span>
+              <span className="text-muted-foreground">{formatWhen(row.created_at)}</span>
+            </div>
+            {Object.keys(row.details).length > 0 ? (
+              <span className="break-all text-muted-foreground">{auditDetailText(row.details)}</span>
+            ) : null}
+          </li>
+        ),
+      )}
+    </ul>
+  );
+}
+
+function NodeAuditTab({ nodeId }: { nodeId: string }) {
+  const [rows, setRows] = useState<ApiNodeAuditRow[] | null>(null);
+  const [cursor, setCursor] = useState<string | null>(null);
+  const [error, setError] = useState<unknown>(null);
+  const [busy, setBusy] = useState(false);
+
+  const loadPage = useCallback(
+    async (before: string | null) => {
+      setBusy(true);
+      setError(null);
+      try {
+        const page = await fetchNodeAudit(nodeId, before);
+        setRows((prev) => (before && prev ? [...prev, ...page.results] : page.results));
+        setCursor(page.next_cursor);
+      } catch (err) {
+        setError(err);
+      } finally {
+        setBusy(false);
+      }
+    },
+    [nodeId],
+  );
+
+  /* eslint-disable react-hooks/set-state-in-effect -- fetch-on-mount */
+  useEffect(() => {
+    void loadPage(null);
+  }, [loadPage]);
+  /* eslint-enable react-hooks/set-state-in-effect */
+
+  return (
+    <div className="flex flex-col gap-2">
+      <p className="text-xs text-muted-foreground">
+        Bu düğümün çağrıları ve olayları; yalnızca kodlar ve özetler, hiçbir içerik yok.
+      </p>
+      {rows === null && !error ? <Skeleton className="h-24 w-full" /> : null}
+      {rows ? <NodeAuditLog rows={rows} /> : null}
+      {error ? <ErrorState error={error} title="Denetim kaydı yüklenemedi." /> : null}
+      {cursor !== null ? (
+        <div>
+          <Button variant="outline" size="sm" onClick={() => void loadPage(cursor)} disabled={busy}>
+            {copy.logMore}
+          </Button>
+        </div>
+      ) : null}
+    </div>
   );
 }
 
@@ -163,21 +288,32 @@ export function NodeDetailPage({ nodeId }: { nodeId: string }) {
             <NodeCapabilityList capabilities={node.capabilities} />
             <p className="text-xs text-muted-foreground">{copy.policyNote}</p>
           </section>
-          <section className="flex flex-col gap-2" aria-labelledby="node-log-heading">
-            <h2 id="node-log-heading" className="text-sm font-medium">
-              {copy.logHeading}
-            </h2>
-            <p className="text-xs text-muted-foreground">{copy.logIntro}</p>
-            <NodeInvocationLog rows={rows} />
-            {logError ? <ErrorState error={logError} title={copy.logFailed} /> : null}
-            {cursor !== null ? (
-              <div>
-                <Button variant="outline" size="sm" onClick={() => void loadMore()} disabled={loadingMore}>
-                  {copy.logMore}
-                </Button>
-              </div>
-            ) : null}
-          </section>
+          <Tabs defaultValue="log">
+            <TabsList>
+              <TabsTrigger value="log">{copy.logHeading}</TabsTrigger>
+              <TabsTrigger value="audit">Denetim</TabsTrigger>
+            </TabsList>
+            <TabsContent value="log">
+              <section className="flex flex-col gap-2" aria-labelledby="node-log-heading">
+                <h2 id="node-log-heading" className="text-sm font-medium">
+                  {copy.logHeading}
+                </h2>
+                <p className="text-xs text-muted-foreground">{copy.logIntro}</p>
+                <NodeInvocationLog rows={rows} />
+                {logError ? <ErrorState error={logError} title={copy.logFailed} /> : null}
+                {cursor !== null ? (
+                  <div>
+                    <Button variant="outline" size="sm" onClick={() => void loadMore()} disabled={loadingMore}>
+                      {copy.logMore}
+                    </Button>
+                  </div>
+                ) : null}
+              </section>
+            </TabsContent>
+            <TabsContent value="audit">
+              <NodeAuditTab nodeId={nodeId} />
+            </TabsContent>
+          </Tabs>
         </>
       )}
     </div>

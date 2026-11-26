@@ -1,7 +1,7 @@
 from django.conf import settings
 from django.db import models
 
-from core.db import WorkspaceScopedManager
+from core.db import WorkspaceScopedManager, WorkspaceScopedModel
 from core.models import TimestampedModel
 
 
@@ -66,3 +66,33 @@ class WorkspaceMember(TimestampedModel):
 
     def __str__(self):
         return f"{self.user} @ {self.workspace} ({self.role})"
+
+
+ROOM_NAME_MAX_CHARS = 60
+LABEL_ALIAS_MIN_CHARS = 2
+LABEL_ALIAS_MAX_CHARS = 40
+MAX_LABEL_ALIASES = 5
+
+
+class Room(WorkspaceScopedModel, TimestampedModel):
+    """A room of the owner's home (Phase 13 D2): "Salon", "Çalışma odası".
+    Rows of a **personal** workspace only (`workspaces.rooms` refuses a
+    firm). `key` is `core.speech.phrase_key(name)`; it and every alias key
+    are unique across the workspace's rooms (names and aliases together),
+    checked in `workspaces.rooms` under a lock on the workspace row; the
+    DB constraint backs the name key. Nodes (`nodes.Node.room`) and, later,
+    home entities point at a room with PROTECT, so a room in use is not
+    deletable (`room_in_use`). Changed only by the owner over the web."""
+
+    workspace = models.ForeignKey(Workspace, on_delete=models.PROTECT, related_name="rooms")
+    name = models.CharField(max_length=ROOM_NAME_MAX_CHARS)
+    key = models.CharField(max_length=ROOM_NAME_MAX_CHARS)
+    aliases = models.JSONField(default=list, blank=True)
+    sort_order = models.PositiveSmallIntegerField(default=0)
+
+    class Meta:
+        ordering = ["sort_order", "name"]
+        constraints = [models.UniqueConstraint(fields=["workspace", "key"], name="unique_room_key")]
+
+    def __str__(self):
+        return self.name
