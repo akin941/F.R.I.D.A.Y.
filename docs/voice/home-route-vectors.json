@@ -1,0 +1,62 @@
+{
+  "version": 1,
+  "description": "Phase 13 D13 shared vectors for the home.control wake route. `vocabulary` is the owner's rooms and allowlisted HomeEntity rows (labels and aliases) the parser matches against. `normalize` rows are normalizeSpeech (frontend/src/lib/voice/self-trigger.ts) and its Python port core.speech.normalize_speech of each home utterance. `parse` rows give what connectors.home_phrases.parse_home_command makes of an utterance: the action, the entity ids its label matched (all equally good matches), the room it named, an unknown locative room word, and the (service, data) the action means on the matched entity's domain (connectors.home_phrases.service_for); `match: null` means not a home command (the turn goes to the normal router). Checked by backend/connectors/tests/test_home_phrases.py and frontend/src/lib/voice/home-route-vectors.test.ts (normalize rows).",
+  "vocabulary": {
+    "rooms": [
+      {"name": "Salon", "aliases": ["living room"]},
+      {"name": "Çalışma odası", "aliases": ["study"]},
+      {"name": "Yatak odası", "aliases": []}
+    ],
+    "entities": [
+      {"entity_id": "media_player.salon_tv", "label": "TV", "aliases": ["televizyon"], "room": "Salon"},
+      {"entity_id": "light.salon_tavan", "label": "Tavan lambası", "aliases": ["ışık", "light"], "room": "Salon"},
+      {"entity_id": "scene.film_gecesi", "label": "film gecesi", "aliases": ["movie night"], "room": null},
+      {"entity_id": "media_player.yatak_hoparlor", "label": "hoparlör", "aliases": ["speaker"], "room": "Yatak odası"}
+    ]
+  },
+  "normalize": [
+    {"input": "Hey Friday, salondaki TV'yi aç", "speech": "hey friday salondaki tv yi aç"},
+    {"input": "salon tv'yi kapat", "speech": "salon tv yi kapat"},
+    {"input": "TV'nin sesini kıs", "speech": "tv nin sesini kıs"},
+    {"input": "televizyonu HDMI 2'ye geç", "speech": "televizyonu hdmı 2 ye geç"},
+    {"input": "sesi yüzde 30'a ayarla", "speech": "sesi yüzde 30 a ayarla"},
+    {"input": "Film gecesi modunu aç.", "speech": "film gecesi modunu aç"},
+    {"input": "Turn off the living room lights", "speech": "turn off the living room lights"},
+    {"input": "SALONDAKİ TV'Yİ AÇ", "speech": "salondaki tv yi aç"}
+  ],
+  "parse": [
+    {"input": "Hey Friday, salondaki TV'yi aç", "action": "on", "entities": ["media_player.salon_tv"], "room": "Salon", "service": "turn_on", "data": {}},
+    {"input": "salon tv'yi kapat", "action": "off", "entities": ["media_player.salon_tv"], "room": "Salon", "service": "turn_off", "data": {}},
+    {"input": "TV'nin sesini kıs", "action": "volume_down", "entities": ["media_player.salon_tv"], "room": null, "service": "volume_down", "data": {}},
+    {"input": "TV'nin sesini yükselt lütfen", "action": "volume_up", "entities": ["media_player.salon_tv"], "room": null, "service": "volume_up", "data": {}},
+    {"input": "televizyonun sesini kapat", "action": "mute", "entities": ["media_player.salon_tv"], "room": null, "service": "volume_mute", "data": {"is_volume_muted": true}},
+    {"input": "televizyonun sesini aç", "action": "unmute", "entities": ["media_player.salon_tv"], "room": null, "service": "volume_mute", "data": {"is_volume_muted": false}},
+    {"input": "televizyonu HDMI 2'ye geç", "action": "source", "value": "HDMI 2", "entities": ["media_player.salon_tv"], "room": null, "service": "select_source", "data": {"source": "HDMI 2"}},
+    {"input": "sesi yüzde 30'a ayarla", "action": "volume", "value": 30, "entities": [], "room": null, "service": "volume_set", "data": {"volume_level": 0.3}},
+    {"input": "TV'yi duraklat", "action": "pause", "entities": ["media_player.salon_tv"], "room": null, "service": "media_pause", "data": {}},
+    {"input": "televizyonu devam ettir", "action": "play", "entities": ["media_player.salon_tv"], "room": null, "service": "media_play", "data": {}},
+    {"input": "film gecesi modunu aç", "action": "on", "entities": ["scene.film_gecesi"], "room": null, "service": "turn_on", "data": {}},
+    {"input": "Friday, film gecesi sahnesini aç lütfen", "action": "on", "entities": ["scene.film_gecesi"], "room": null, "service": "turn_on", "data": {}},
+    {"input": "salondaki ışıkları kapat", "action": "off", "entities": ["light.salon_tavan"], "room": "Salon", "service": "turn_off", "data": {}},
+    {"input": "tavan lambasını yüzde 40'a ayarla", "action": "level", "value": 40, "entities": ["light.salon_tavan"], "room": null, "service": "turn_on", "data": {"brightness_pct": 40}},
+    {"input": "yatak odasındaki hoparlörü kapat", "action": "off", "entities": ["media_player.yatak_hoparlor"], "room": "Yatak odası", "service": "turn_off", "data": {}},
+    {"input": "SALONDAKİ TV'Yİ AÇ", "action": "on", "entities": ["media_player.salon_tv"], "room": "Salon", "service": "turn_on", "data": {}},
+    {"input": "turn off the living room lights", "action": "off", "entities": ["light.salon_tavan"], "room": "Salon", "service": "turn_off", "data": {}},
+    {"input": "Hey Friday, turn on the living room TV please", "action": "on", "entities": ["media_player.salon_tv"], "room": "Salon", "service": "turn_on", "data": {}},
+    {"input": "turn the TV off", "action": "off", "entities": ["media_player.salon_tv"], "room": null, "service": "turn_off", "data": {}},
+    {"input": "mute the TV", "action": "mute", "entities": ["media_player.salon_tv"], "room": null, "service": "volume_mute", "data": {"is_volume_muted": true}},
+    {"input": "switch the TV to HDMI 1", "action": "source", "value": "HDMI 1", "entities": ["media_player.salon_tv"], "room": null, "service": "select_source", "data": {"source": "HDMI 1"}},
+    {"input": "set the volume to 25 percent", "action": "volume", "value": 25, "entities": [], "room": null, "service": "volume_set", "data": {"volume_level": 0.25}},
+    {"input": "activate movie night", "action": "on", "entities": ["scene.film_gecesi"], "room": null, "service": "turn_on", "data": {}},
+    {"input": "mutfaktaki TV'yi aç", "action": "on", "entities": ["media_player.salon_tv"], "room": null, "unknown_room": "mutfaktaki", "service": "turn_on", "data": {}},
+    {"input": "bugün hava nasıl", "match": null},
+    {"input": "salonu kapat", "match": null},
+    {"input": "TV'yi aç bakalım", "match": null},
+    {"input": "buzdolabını kapat", "match": null},
+    {"input": "sesi yüzde 130'a ayarla", "match": null},
+    {"input": "çalışma odasındaki Mac'te testleri çalıştır", "match": null},
+    {"input": "günaydın", "match": null},
+    {"input": "hey friday", "match": null},
+    {"input": "", "match": null}
+  ]
+}
