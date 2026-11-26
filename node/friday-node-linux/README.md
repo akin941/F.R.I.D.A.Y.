@@ -27,7 +27,8 @@ What it does:
 
 | Path | What |
 |---|---|
-| `friday_node_linux/cli.py` | the console script (`pair`, `run`, `hook`, `grant`/`revoke`, `repo`, `policy show`, `config set server-url`, `status`, `unpair`, `conformance`) |
+| `friday_node_linux/cli.py` | the console script (`pair`, `run`, `hook`, `grant`/`revoke`, `repo`, `policy show`, `config set server-url`, `rotate`, `status`, `unpair`, `conformance`) |
+| `friday_node_linux/api.py` | the two HTTPS calls over pinned TLS: pairing and secret rotation |
 | `friday_node_linux/daemon.py` | `LinuxNode` (the vendored `ReferenceNode` with this node's `hello` identity), `PinnedNodeClient`, `Backoff`, `Daemon` (sessions, SIGHUP reload, hook relay, pid file) |
 | `friday_node_linux/readers_root.py` | `LinuxReaders`: the vendored readers over `$HOME`, availability, the owner-turn vetted view, the catalogue |
 | `friday_node_linux/policy.py` | `policy.json` (directory grants, registered repos): strict, 0600, atomic writes |
@@ -123,6 +124,17 @@ the command hook to `~/.claude/settings.json` (the events `SessionStart`,
 ```
 
 `friday-node-linux hook` always exits 0 within 3 s and prints nothing.
+
+## Secret rotation
+
+The daemon rotates its node secret when it is `rotate_after_days` old (30
+by default, from the pairing response) before opening a session:
+`POST /api/v1/auth/nodes/credential/rotate` with the current secret, over
+the same pinned TLS; the new secret is saved (0600) before it is used. A
+failed rotation keeps the current secret and is retried after an hour; a
+secret past the server's hard cap (90 days) ends in
+`bye{credential_expired}` and a re-pair. `friday-node-linux rotate` does it
+by hand (restart the unit afterwards).
 
 ## Re-point (the VPS move, ADR-017 decision 7)
 
