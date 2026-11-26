@@ -9,6 +9,13 @@ ENV PYTHONUNBUFFERED=1 \
     UV_PROJECT_ENVIRONMENT=/opt/venv \
     UV_LINK_MODE=copy
 
+# git: the reference node's fixture home (`nodes.reference.fixtures.factory`)
+# creates git repos, so `run_reference_node` (runbook A3 baseline preflight)
+# and preflight's `node_escape_suite` check crash without it in this image.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends git \
+    && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
 
 # Install dependencies first for layer caching.

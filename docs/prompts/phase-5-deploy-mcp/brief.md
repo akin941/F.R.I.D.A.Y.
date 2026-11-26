@@ -960,6 +960,21 @@ Mac, real credentials, paid calls or real hardware:
   and acceptable). Record the real-stack preflight summary line after
   owner step 1.
 
+**Preflight baseline — dev stack on the owner's Mac (runbook A3,
+`fix/p9-dev-image-git`, 2026-11-26).** `make up`, migrate, `seed_ai_defaults`,
+`bootstrap_owner` (by the owner), `seed_ingestion_sources`, local Ollama
+(`llama3.1:8b`, `nomic-embed-text`) opted in, reference node paired:
+**`41 pass / 0 fail / 34 warn`**. Every `warn` is an owner step or a pending
+Mac evaluation (BFF/frontend URLs, OpenRouter rows, MCP bindings, the
+learning sources, `graphify`, `eval_baseline`, `node_tls_pin`,
+`node_escape_suite` Mac evidence, voice live rows, proactive schedules, n8n,
+the five `home_*` rows). The first run had one `fail`, `node_escape_suite:
+check crashed: RuntimeError`: the dev image had no `git`, which the
+reference node's fixture home needs (so `run_reference_node` crashed too);
+`Dockerfile.dev` now installs it. Both reference nodes were revoked after the
+run. This is not the real-stack line above: no real provider or connector
+credentials are configured yet.
+
 ## Branch table
 
 | # | Branch | Scope | Depends on |
