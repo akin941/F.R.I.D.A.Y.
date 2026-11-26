@@ -218,7 +218,7 @@
         "text": "Accepted 2026-11-20 — owner approval of the Friday 3.0 roadmap"
       },
       "decision": {
-        "line": 32,
+        "line": 35,
         "text": "Shape (d1, d9)."
       }
     },
@@ -269,5 +269,5 @@
     "outcome": "Friday starts useful conversations and uses your automations",
     "status": "server side done (2026-11-20); go/no-go checkpoint in progress — branches 1–7 + closeout implemented (the `proactive` app: `core.probes` registry, the unattended deny guard in every effect's owning service, owner-only web schedules (\"cron…"
   },
-  "content_hash": "ccbf5cad4b84525d939bb2271b3893a694aeb96878b0bc35380676069c82a669"
+  "content_hash": "d91dbc95a03ca46a769a5093fc8b56b9cabafe809460fb5ad9157ddaa1d2f808"
 }
