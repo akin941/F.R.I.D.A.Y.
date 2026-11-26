@@ -1,0 +1,31 @@
+{
+  "frontmost": {
+    "app_name": "Terminal",
+    "bundle_id": "com.apple.Terminal"
+  },
+  "windows": [
+    {
+      "app_name": "Terminal",
+      "bundle_id": "com.apple.Terminal",
+      "on_screen": true,
+      "titles": [
+        "acme - pytest",
+        "friday - zsh"
+      ]
+    },
+    {
+      "app_name": "Safari",
+      "bundle_id": "com.apple.Safari",
+      "on_screen": true,
+      "titles": [
+        "Invoice - owner.fixture@example.com"
+      ]
+    },
+    {
+      "app_name": "Notes",
+      "bundle_id": "com.apple.Notes",
+      "on_screen": false,
+      "titles": []
+    }
+  ]
+}

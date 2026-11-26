@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "node -> server: one scrubbed chunk of a running command's output (untrusted data)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "data",
+    "id",
+    "invocation_id",
+    "seq",
+    "stream",
+    "truncated",
+    "type",
+    "v"
+  ],
+  "properties": {
+    "v": {
+      "type": "integer",
+      "const": 2
+    },
+    "type": {
+      "type": "string",
+      "const": "output",
+      "maxLength": 32
+    },
+    "id": {
+      "type": "string",
+      "minLength": 36,
+      "maxLength": 36,
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "invocation_id": {
+      "type": "string",
+      "minLength": 36,
+      "maxLength": 36,
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "seq": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 65535
+    },
+    "stream": {
+      "type": "string",
+      "enum": [
+        "stdout",
+        "stderr"
+      ],
+      "maxLength": 16
+    },
+    "data": {
+      "type": "string",
+      "maxLength": 8192,
+      "x-friday-max-bytes": 8192
+    },
+    "truncated": {
+      "type": "boolean"
+    }
+  }
+}

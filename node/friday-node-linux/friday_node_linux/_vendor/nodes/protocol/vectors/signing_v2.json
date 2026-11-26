@@ -1,0 +1,147 @@
+{
+  "description": "Friday Node protocol v2 signing vectors (Phase 10 brief D1). TEST VECTOR ONLY: the private key is the published v1 vector key. A v2 envelope's sig is base64url-no-pad(Ed25519(invoke_domain + canonical JSON of the envelope without sig)); the domain bytes are the UTF-8 of invoke_domain, ending in one newline. `must_not_verify` signatures are over the same body in another domain.",
+  "private_key_b64": "npH/YyXIQBm4jSN8qtpg4OCMs8nbVl2Nwwm7g6lvINo=",
+  "public_key_b64": "SzkDu8JY+tp1eUyfIdDeEVxx9Qds9GlDzUROPqZ+Ltw=",
+  "key_id": "a7e5d104662896f5",
+  "invoke_domain": "friday-node/invoke/v2\n",
+  "grant_domain": "friday-node/grant/v2\n",
+  "read_envelope": {
+    "v": 2,
+    "type": "invoke",
+    "id": "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d",
+    "invocation_id": "5f6e7d8c-9b0a-4c1d-8e2f-3a4b5c6d7e8f",
+    "node_id": "7d0f2b8e-1c4a-4f5e-9b6d-2a3c4d5e6f70",
+    "workspace_id": "0b1c2d3e-4f50-4617-8a9b-0c1d2e3f4a5b",
+    "capability": "claude.sessions.list",
+    "capability_version": 1,
+    "class": "read",
+    "args": {
+      "since_hours": 24,
+      "limit": 10,
+      "cwd_prefixes": [
+        "~/work/acme"
+      ]
+    },
+    "args_sha256": "fd529657f34c00b5aba6aa5b07300d6982d11fd819e6e238948a7a20cb2aae1e",
+    "nonce": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+    "issued_at": 1795000000,
+    "expires_at": 1795000030,
+    "trace_id": "trace-0001",
+    "grant": null,
+    "key_id": "a7e5d104662896f5",
+    "sig": "UljviNxdXTxA8NS7igrJgCviZE3Nle4VDKAw0Q3n0oe1lWhBztcIFJBol9FYYIU3rPdBEaERqa1zdHAAoAEkCg"
+  },
+  "read_envelope_signed_message": "friday-node/invoke/v2\n{\"args\":{\"cwd_prefixes\":[\"~/work/acme\"],\"limit\":10,\"since_hours\":24},\"args_sha256\":\"fd529657f34c00b5aba6aa5b07300d6982d11fd819e6e238948a7a20cb2aae1e\",\"capability\":\"claude.sessions.list\",\"capability_version\":1,\"class\":\"read\",\"expires_at\":1795000030,\"grant\":null,\"id\":\"1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d\",\"invocation_id\":\"5f6e7d8c-9b0a-4c1d-8e2f-3a4b5c6d7e8f\",\"issued_at\":1795000000,\"key_id\":\"a7e5d104662896f5\",\"node_id\":\"7d0f2b8e-1c4a-4f5e-9b6d-2a3c4d5e6f70\",\"nonce\":\"AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8\",\"trace_id\":\"trace-0001\",\"type\":\"invoke\",\"v\":2,\"workspace_id\":\"0b1c2d3e-4f50-4617-8a9b-0c1d2e3f4a5b\"}",
+  "confirm_envelope": {
+    "v": 2,
+    "type": "invoke",
+    "id": "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d",
+    "invocation_id": "5f6e7d8c-9b0a-4c1d-8e2f-3a4b5c6d7e8f",
+    "node_id": "7d0f2b8e-1c4a-4f5e-9b6d-2a3c4d5e6f70",
+    "workspace_id": "0b1c2d3e-4f50-4617-8a9b-0c1d2e3f4a5b",
+    "capability": "apps.open",
+    "capability_version": 1,
+    "class": "confirm",
+    "args": {
+      "bundle_id": "com.apple.Terminal"
+    },
+    "args_sha256": "0721584e95f3607ad9ede76d6c5fe680dc92fb624b282ccb2bda65b9ea234df5",
+    "nonce": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+    "issued_at": 1795000000,
+    "expires_at": 1795000090,
+    "trace_id": "trace-0001",
+    "grant": null,
+    "key_id": "a7e5d104662896f5",
+    "sig": "odr-18nK4cGX1DI50BlY6yBfKx_l-9aAfAJUM7uUZXaHLA8ENvxeNsJNguQRK-lsA2jhWnYGpnOEZIxPeGzgDQ"
+  },
+  "confirm_envelope_signed_message": "friday-node/invoke/v2\n{\"args\":{\"bundle_id\":\"com.apple.Terminal\"},\"args_sha256\":\"0721584e95f3607ad9ede76d6c5fe680dc92fb624b282ccb2bda65b9ea234df5\",\"capability\":\"apps.open\",\"capability_version\":1,\"class\":\"confirm\",\"expires_at\":1795000090,\"grant\":null,\"id\":\"1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d\",\"invocation_id\":\"5f6e7d8c-9b0a-4c1d-8e2f-3a4b5c6d7e8f\",\"issued_at\":1795000000,\"key_id\":\"a7e5d104662896f5\",\"node_id\":\"7d0f2b8e-1c4a-4f5e-9b6d-2a3c4d5e6f70\",\"nonce\":\"AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8\",\"trace_id\":\"trace-0001\",\"type\":\"invoke\",\"v\":2,\"workspace_id\":\"0b1c2d3e-4f50-4617-8a9b-0c1d2e3f4a5b\"}",
+  "must_not_verify": [
+    {
+      "name": "v2 read envelope signed without a domain (v1 style)",
+      "envelope": {
+        "v": 2,
+        "type": "invoke",
+        "id": "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d",
+        "invocation_id": "5f6e7d8c-9b0a-4c1d-8e2f-3a4b5c6d7e8f",
+        "node_id": "7d0f2b8e-1c4a-4f5e-9b6d-2a3c4d5e6f70",
+        "workspace_id": "0b1c2d3e-4f50-4617-8a9b-0c1d2e3f4a5b",
+        "capability": "claude.sessions.list",
+        "capability_version": 1,
+        "class": "read",
+        "args": {
+          "since_hours": 24,
+          "limit": 10,
+          "cwd_prefixes": [
+            "~/work/acme"
+          ]
+        },
+        "args_sha256": "fd529657f34c00b5aba6aa5b07300d6982d11fd819e6e238948a7a20cb2aae1e",
+        "nonce": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+        "issued_at": 1795000000,
+        "expires_at": 1795000030,
+        "trace_id": "trace-0001",
+        "grant": null,
+        "key_id": "a7e5d104662896f5",
+        "sig": "U5anKQxKCisaifcGgLdKxfa8bKbQ5Zttz2szHrit9CrDwOOartb-Vpnn3agfkKc_Dc7wQgjUb6mr4XhlHZI-BA"
+      }
+    },
+    {
+      "name": "v2 read envelope signed in the grant domain",
+      "envelope": {
+        "v": 2,
+        "type": "invoke",
+        "id": "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d",
+        "invocation_id": "5f6e7d8c-9b0a-4c1d-8e2f-3a4b5c6d7e8f",
+        "node_id": "7d0f2b8e-1c4a-4f5e-9b6d-2a3c4d5e6f70",
+        "workspace_id": "0b1c2d3e-4f50-4617-8a9b-0c1d2e3f4a5b",
+        "capability": "claude.sessions.list",
+        "capability_version": 1,
+        "class": "read",
+        "args": {
+          "since_hours": 24,
+          "limit": 10,
+          "cwd_prefixes": [
+            "~/work/acme"
+          ]
+        },
+        "args_sha256": "fd529657f34c00b5aba6aa5b07300d6982d11fd819e6e238948a7a20cb2aae1e",
+        "nonce": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+        "issued_at": 1795000000,
+        "expires_at": 1795000030,
+        "trace_id": "trace-0001",
+        "grant": null,
+        "key_id": "a7e5d104662896f5",
+        "sig": "aKOMUd2wSb4vGlGhCkS-x_-FtyOlUqpippJ6XSQ0WQLRlii5aUqsKOc2QAYH0JHrLe17IFsphMoR_UNK8LdgCA"
+      }
+    },
+    {
+      "name": "the v1 vector envelope relabelled v: 2",
+      "envelope": {
+        "v": 2,
+        "type": "invoke",
+        "id": "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d",
+        "invocation_id": "5f6e7d8c-9b0a-4c1d-8e2f-3a4b5c6d7e8f",
+        "node_id": "7d0f2b8e-1c4a-4f5e-9b6d-2a3c4d5e6f70",
+        "workspace_id": "0b1c2d3e-4f50-4617-8a9b-0c1d2e3f4a5b",
+        "capability": "claude.sessions.list",
+        "capability_version": 1,
+        "class": "read",
+        "args": {
+          "since_hours": 24,
+          "limit": 10,
+          "cwd_prefixes": [
+            "~/work/acme"
+          ]
+        },
+        "args_sha256": "fd529657f34c00b5aba6aa5b07300d6982d11fd819e6e238948a7a20cb2aae1e",
+        "nonce": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+        "issued_at": 1795000000,
+        "expires_at": 1795000030,
+        "trace_id": "trace-0001",
+        "grant": null,
+        "key_id": "a7e5d104662896f5",
+        "sig": "7lfEy9VYQ7B_9xhm9UdqQhriOknGU9YUewx8bUIq1xkT5LqSKh0tBH7X09ywp9C9KKqaGHy7dfRtriSrflWLAA"
+      }
+    }
+  ]
+}

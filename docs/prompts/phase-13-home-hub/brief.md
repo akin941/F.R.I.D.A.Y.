@@ -1123,7 +1123,7 @@ evaluation".
 | 1 | `feat/p13-node-registry` | `workspaces.Room`, node name/room/role/platform/aliases, pairing `platform`, node `PATCH`, per-node audit API, `core.speech`, `/settings/home`, `/devices` edit + audit tab | brief approved | **implemented 2026-11-20** (swarm date stamp; see "Branch 1 notes"; awaits the independent Sonnet 5 review) |
 | 2 | `feat/p13-node-targeting` | `nodes.targeting.resolve_target`, `last_active_at`, `ToolCallContext`, read tools and node-action proposals on the resolver, ask template, one-node invariant, approval card node header, ADR-013 note | 1 | **implemented 2026-11-20** (swarm date stamp; see "Branch 2 notes"; awaits the independent Sonnet 5 review) |
 | 3 | `feat/p13-hud-presence` | `node_presence`, HUD `nodes` section + `HudNodesPanel`, `/devices` overview columns | 1 (parallel with 2) | **implemented 2026-11-20** (swarm date stamp; see "Branch 3 notes"; server and web only, nothing needs the Mac; the real two-PC HUD run is part of M2, pending owner evaluation; awaits the independent Sonnet 5 review) |
-| 4 | `feat/p13-linux-node` | `node/friday-node-linux` (vendored + locked, read-only, local policy CLI, credential file, systemd user unit, re-point), CI conformance job, Windows stub README | 1 (pairing `platform`) | planned |
+| 4 | `feat/p13-linux-node` | `node/friday-node-linux` (vendored + locked, read-only, local policy CLI, credential file, systemd user unit, re-point), CI conformance job, Windows stub README | 1 (pairing `platform`) | **implemented 2026-11-20** (`node/friday-node-linux`: vendored reference node + `vendor.lock`, v1 read-only daemon, 0600 policy + TTY-confirmed CLI, 0600 credential + TLS pins + rotation, re-point, hook relay + spool, systemd user unit; 50/50 v1 conformance cases over real localhost TLS; `linux-node` CI job; Windows stub; see "Branch notes and owner steps (pending) — `feat/p13-linux-node`"; real Linux PC: M2, pending owner evaluation) |
 | 5 | `feat/p13-ha-home-control` | `connectors.HomeEntity` allowlist, media_player power/source/mute/volume steps, `source_list`, manifest v2 pins, entity editor, governance docs | 1 (rooms) | planned |
 | 6 | `feat/p13-home-voice-routes` | `connectors.home_phrases`, `home.control` wake route (proposal only), typed-turn mismatch check, vectors, ADR-015 note | 2, 5 | planned |
 | 7 | `feat/p13-home-server-ops` | `compose.home.yml`, `deploy/home/` backup/drill/timer/Caddy, `home_*` preflight rows and settings | brief approved (independent) | **implemented 2026-11-20** (compose override + `make up-home`, `deploy/home/` scripts/units/Caddyfile, `check_home` five rows, settings + `.env.example`, `home-ops` CI job, runbook updated; real hardware: M3, pending owner evaluation) |
@@ -1777,6 +1777,171 @@ recorded at merge into `integ/phase-13` 2026-11-26):
    that does not resolve here passes as a warn (the warn text says it was
    not verified). Acceptable as is; optionally fail on unresolved names
    once the home box is running.
+
+### Branch notes and owner steps (pending) — `feat/p13-linux-node`, recorded 2026-11-20
+
+**What landed.** `node/friday-node-linux/` (own uv project, Python 3.12,
+exact pins `cryptography==50.0.1`, `jsonschema==4.26.0`, `wsproto==1.3.2` —
+the backend's — plus dev `pytest`/`ruff`; console script
+`friday-node-linux`):
+- `scripts/vendor.py` copies the backend's node code into
+  `friday_node_linux/_vendor/` (imports rewritten to the vendored package,
+  a generated header line on each `.py`, data files byte for byte) and
+  writes `vendor.lock` (sha256 of each backend source and of its copy);
+  `--check` fails on a one-byte change, a missing/extra file, a stale lock
+  or a conformance node id that differs from `nodes/conformance/cases.py`;
+- `daemon.py`: `LinuxNode` (the vendored `ReferenceNode` with
+  `friday-node-linux 0.1.0` / `Linux <release>` in `hello`), offering
+  **`friday-node.v1` only**, no executor (`NoExecutor`);
+  `PinnedNodeClient` (TLS handshake + pin check before the WebSocket
+  request, i.e. before the Bearer secret); `Backoff` (uniform in
+  [1, min(60, 2^n)] s, reset after a session of ≥ 30 s); `Daemon`
+  (sessions, `SIGHUP` reload between sessions, hook relay thread into the
+  vendored spool, pid file, `bye{revoked|kill_switch|credential_expired}` →
+  exit 0, no reconnect);
+- `readers_root.py`: `LinuxReaders` over the real `$HOME` (the vendored
+  `Readers` + availability rules + the 8B owner-turn reads over a vetted
+  symlink view, removed after each call) and the read-only catalogue;
+- `policy.py` (`~/.config/friday-node/policy.json`, `{v, grants: {claude,
+  codex}, repos: [{name, root}]}`, strict, 0600, atomic) and the CLI's
+  `grant|revoke|repo add|repo remove` (interactive TTY, the exact change
+  printed, the directory's basename typed; the running daemon gets
+  `SIGHUP`); `policy show`, `status`;
+- `credential.py` / `tls.py` / `api.py`: the 0600 credential, pins = the
+  private CA (`--ca`) and/or the SPKI sha256 (`--tls-pin-sha256`, hex or
+  base64), `pair` (`platform: linux`, `protocol_versions: [1]`, the pin
+  checked before the code is sent), `config set server-url` (the new
+  server must pass the existing pins; all pins kept), `rotate` and the
+  daemon's automatic rotation when `rotate_after_days` is reached
+  (`POST /api/v1/auth/nodes/credential/rotate`, saved before use, retried
+  hourly on failure), `unpair`;
+- `conformance.py`: `friday-node-linux conformance --hook-socket … --gateway
+  host:port --ca …`, the external-hook client building each case's node
+  with the daemon's own `build_node`; `scripts/external_conformance.py` runs
+  `manage.py node_conformance_server --external --tls-self-signed
+  --protocol 1` against it (**50/50 v1 cases pass**, including the
+  compromised-server family);
+- `deploy/home/friday-node-linux.service` (systemd **user** unit:
+  `NoNewPrivileges`, `ProtectSystem=strict`, `StateDirectory` /
+  `RuntimeDirectory` the only writable paths, `Restart=on-failure`,
+  `ExecReload` = `SIGHUP`); `node/friday-node-windows/README.md` (stub);
+  `make linux-node-test|linux-node-conformance|linux-node-install`; the CI
+  job `linux-node` (ruff, format, `vendor.py --check`, pytest, external
+  conformance, then the backend tests with `FRIDAY_LINUX_NODE=1`);
+  `docs/mcp/dependencies/friday-node-linux.md` and an allowlist row.
+- Tests: `node/friday-node-linux/tests/` (`test_policy`, `test_cli_grant`,
+  `test_credential` (file, pairing, re-point, log scan), `test_rotation`,
+  `test_readers_real_root`, `test_daemon_failclosed`, `test_purity`,
+  `test_vendor_lock`, `test_systemd_unit`; 103 tests); backend
+  `nodes/tests/test_linux_node_external.py` (every v1 case through the
+  external hook; the real daemon receives every policy-shaped and every
+  non-frame-error v1 frame: `policy.json` bytes/mtime and the credential
+  unchanged, reconnect after the frame-error close, `bye{revoked}` ends it)
+  and `config/tests/test_linux_node_gateway.py` (a live TLS server: Django
+  + the real gateway process on one port; the packaged node pairs over
+  HTTPS with `platform=linux`, its `hello` yields a v1 snapshot with **zero
+  invocable action capabilities**, `claude.sessions.list` and the
+  `node_sessions` tool are served from a real temporary `$HOME`, revocation
+  ends the daemon). Both backend files run the package as a subprocess from
+  its own `.venv` and skip where it is missing. `backend/nodes/conformance/`
+  and every protocol surface are unchanged.
+
+**Decisions and deviations taken in the branch.**
+- **Vendored closure.** D10 listed `node, transport, readers, local_policy,
+  spool, hook_relay, _scrubber_vendored`; `node.py` itself imports
+  `confirm`, `executor`, `sandbox`, `stream_scrub`, `verifier_v2` and
+  `worktree`, and `capabilities/__init__.py` loads `v2/` too, so the whole
+  closure is vendored (the v2 paths are unreachable on a v1-only session);
+  `nodes/reference/fixtures/` and `nodes/conformance/keys/` are vendored
+  for the `conformance` command only; `owner_turns.py` needs
+  `integrations/cli/_scrubber_vendored.py`.
+- **`unavailable` → `unsupported`.** The protocol's availability enum is
+  `granted | not_granted | unsupported`; `apps.frontmost`, `windows.list`
+  and (without `ccusage` on `PATH`) `usage.ccusage` are `unsupported`.
+  `git.status` is `not_granted` until a repo is registered.
+- **`usage.ccusage`** is gated on `ccusage` being on `PATH` (as D10 says)
+  but the amounts come from the vendored reference reader over the granted
+  transcripts (the spec the server recomputes); `ccusage` is never run.
+- **Symlinks.** A symlinked `~/.claude` / `~/.codex` (the owner's own
+  layout) is followed; a symlinked `projects/` / `sessions/` root and any
+  symlinked file or directory inside it is refused (the reference rule;
+  the owner-turn view applies the same vetting).
+- **Conformance stand-ins.** The `conformance` command uses the case clock,
+  the vendored fixture home, the fixture desktop (so `apps.frontmost` /
+  `windows.list` cases run), `ccusage` treated as present, and the
+  conformance node id / signing key; everything else is the daemon's code.
+- **No TOFU.** `pair` refuses without `--ca` or `--tls-pin-sha256`; there
+  is no system trust store and no plaintext mode.
+- **Policy reload** closes the current session and reconnects with the new
+  catalogue (the policy never changes during a session, so the
+  conformance fingerprint rule holds on the real daemon too).
+- **Credential rotation** was not in D10 but the server caps a secret at
+  90 days (`NODE_CREDENTIAL_MAX_AGE_DAYS`); without it the daemon would need
+  a re-pair every quarter, so it rotates like the Swift node will.
+
+**Known follow-ups (for the closeout or a later branch).**
+1. **The 8B owner-turn contracts are not servable yet.** They are still
+   staged in `integrations/node_reference/contracts/v1/` (the server
+   classifies them `unknown_capability`), and their `cwd` /
+   `cwd_prefixes` patterns (`^(/|~$|~/)`) are prefix patterns: under the
+   protocol's strict full-match validator the node's own check 15 refuses
+   every absolute prefix. The Linux node advertises and implements both
+   reads (its reader checks the result with jsonschema's search semantics,
+   as the 8B tests do); moving the contracts into `nodes/capabilities/v1/`
+   with full-match patterns (`^(/|~$|~/).*`) and re-vendoring makes them
+   work end to end.
+2. **Pairing and rotation through the home Caddy.** `Caddyfile.example`
+   sends everything except `/ws/node/v1` to the BFF (port 3001), which has
+   no `/api/v1/nodes/pair` or `/api/v1/auth/nodes/credential/rotate`
+   route; the node (and the Swift app, M1) needs those two paths routed to
+   Django (`127.0.0.1:8001`). Not changed here because it decides how the
+   client IP is trusted for PIN pairing (`TRUSTED_CLIENT_IP_HEADER` /
+   `FRIDAY_BFF_SHARED_SECRET`); decide it in the closeout or a docs/ops
+   branch. Until then, pairing a node through the home Caddy is expected to
+   fail (the BFF has no such route); the tests here pair against Django
+   directly.
+3. The `linux_node_vendor` preflight row (D15) is the closeout's; it can
+   call `scripts/vendor.py --check` (text only, no import).
+
+**Owner steps (pending).**
+1. Have the independent Sonnet 5 review of this branch reach APPROVE.
+2. Confirm the TTY + typed-basename confirmation as the Linux stand-in for
+   Touch ID (brief Q4 / Risks; also `docs/p13-brief` owner step 3).
+3. On the real Linux desktop (M2, pending owner evaluation): `make
+   linux-node-install`, `pair` against the home server with its private CA,
+   `grant claude`, enable the user unit, and check `/devices` shows it as
+   *Linux* with the read capabilities invocable; check that the unit's
+   sandboxing (`ProtectSystem=strict`, `PrivateDevices`,
+   `RestrictNamespaces` in a **user** manager) works on that distribution —
+   none of it was run here (no systemd in this container) — and drop a
+   directive that the user manager refuses, in a docs/ops branch.
+4. Add the `friday-node-linux hook` command hook to `~/.claude/settings.json`
+   on that PC (README) once the node is paired.
+
+Nothing in this branch needs the Mac: there is no "Mac session" item for it
+(the Swift app's pairing `platform` is M1, unchanged).
+
+Known follow-ups — `feat/p13-linux-node` (unresolved LOW review notes,
+recorded at merge into `integ/phase-13` 2026-11-26):
+1. **`node/friday-node-linux/friday_node_linux/readers_root.py` — owner-turn
+   output validation.** The owner-turn reads validate output with plain
+   `jsonschema` search semantics because the staged 8B contracts use prefix
+   patterns; documented in a code comment, not fixed here. Fix: track the
+   follow-up that moves these contracts into `nodes/capabilities/v1` with
+   full-match patterns, then drop the `jsonschema` special case.
+2. **`node/friday-node-linux/friday_node_linux/daemon.py` — `signal_daemon`
+   process match.** The daemon is identified by a substring match of
+   `friday-node-linux` / `friday_node_linux` in `/proc/<pid>/cmdline`. This
+   guards against a recycled pid but could match another process of the
+   same user with that string in its arguments; the pid file is 0600 and the
+   signal is only `SIGHUP`, so the impact is negligible. Fix (optional):
+   compare `argv[0]` and the `run` subcommand exactly.
+3. **`.github/workflows/ci.yml` — `linux-node` job database.** The job
+   starts Postgres and Redis with `friday`/`friday` credentials; the backend
+   tests need a database created with the job's `DATABASE_URL`. Not
+   verified in CI (locally, with the `jarvis` credentials, the 5 backend
+   tests passed). Fix: confirm the first CI run on the branch is green; no
+   code change unless it fails.
 
 ### Known follow-ups (unresolved LOW review notes, recorded at merge 2026-11-26)
 
