@@ -285,7 +285,7 @@ The server is one home Linux PC running the existing Compose stack
 (ADR-017 decisions 1–7). The repo provides what makes that box repeatable
 and checkable: `docs/runbooks/home-server-setup.md` (written in this
 branch), `deploy/docker/compose.home.yml`, `deploy/home/` scripts and the
-`home_*` preflight rows (branch 6). Buying, installing and encrypting the
+`home_*` preflight rows (branch 7). Buying, installing and encrypting the
 box is an owner step.
 
 *Justification:* the stack already runs on any Docker host; what was
@@ -330,7 +330,7 @@ New `Node` fields (nodes migration 0005):
 | Field | Type | Set by |
 |---|---|---|
 | `name` | existing; now unique per owner on `name_key` | pairing (`node_name`), then the owner on `/devices` |
-| `name_key` | `CharField(100)`, `core.speech.match_key(name)`; `UniqueConstraint(owner, name_key)` among non-revoked nodes (partial) | server |
+| `name_key` | `CharField(100)`, `core.speech.match_key(name)`, indexed; unique per owner **among usable nodes** (not revoked, killed or expired, `accounts.devices.node_device_refusal`), checked in `nodes.services` under `select_for_update` on the owner's nodes at pairing and at relabel. No DB constraint: revocation lives on `TrustedDevice` (also flipped by `accounts.revoke_all_devices`, which may not import `nodes`), so a partial index cannot express it; `nodes_labels` (D15) catches a duplicate | server |
 | `room` | FK `workspaces.Room`, `PROTECT`, nullable (a room in use is not deletable, D2) | the owner |
 | `role` | `workstation` / `laptop` / `media` / `server` / `other` (default `other`) | the owner |
 | `platform` | `macos` / `linux` / `windows` (default `macos`) | pairing (`platform`, optional), never edited afterwards |
@@ -585,8 +585,8 @@ HomeEntity(WorkspaceScopedModel, TimestampedModel)       # connectors
   precondition (`target_present` grows the allowlist check), so removing
   an entity cancels a pending approval's execution (`connector_changed`).
 - **Fail closed for existing installs:** an empty allowlist means no HA
-  call is possible. `check_connectors`/the new `ha_entities` preflight row
-  warns "no entity allowlisted"; the branch notes and
+  call is possible. The `ha_entities` preflight row (D15, closeout) warns
+  "no entity allowlisted"; the branch notes and
   `docs/mcp/home-assistant.md` say so.
 - Owner-web CRUD at `/api/v1/connectors/home-assistant/entities`
   (`require_owner_web`; agents, tokens, members, low-trust channels
@@ -696,8 +696,8 @@ rows (not HA's friendly names) keeps the vocabulary owner-set.
 
 ### D15 — Preflight rows for the phase
 
-Added to `ops/preflight.py` (`check_home`, `check_nodes` extended,
-`check_connectors`/HA):
+Added to `ops/preflight.py` (`check_home` in branch 7; `check_nodes`
+extended and a `check_home_control` for HA in the closeout):
 
 | Row | Pass | Warn | Fail |
 |---|---|---|---|
@@ -811,9 +811,10 @@ is listed, and every role × endpoint test is green.
 - `tools/node_actions.py` `proposal_targets` (names, rooms, platform) and
   `validate_proposal` (resolver check), `describe_request` adding
   `node_name`, `node_room`, `node_platform`;
-- the `friday_router_node_action_args` / connector-args prompt data blocks
-  include names and rooms (data only; prompt version bump through the
-  seeded prompt rows, no new purpose);
+- the targets block the router call already appends as data
+  (`assistant/services.py` `_node_action_targets_block`) carries each
+  node's name, room and platform; the prompt text, purpose and prompt
+  version are unchanged (data, not instructions);
 - ADR-013 implementation note.
 
 **Files.**
@@ -826,8 +827,6 @@ is listed, and every role × endpoint test is green.
   `backend/assistant/tests/test_which_pc.py`;
 - `backend/voice/views.py` (port call only), `backend/config/urls.py`
   (injection);
-- `backend/ai_core/migrations/00xx_node_targets_prompts.py` (prompt
-  version rows);
 - `frontend/src/components/approvals/renderers/node-action.tsx` (+ test);
 - `docs/adr/ADR-013-friday-node-protocol.md` (note).
 
@@ -1128,8 +1127,7 @@ evaluation".
 | W | Windows node | Not built; own brief later (d1: Tauri v2), must pass the same conformance suite | — | deferred (out of Phase 13) |
 
 **Sequencing and migrations.** Branch 1 adds `workspaces` 0003 and
-`nodes` 0005; branches 2 and 3 add none (2 adds an `ai_core` prompt
-data migration); 5 adds `connectors` 0005. Migration numbers here are
+`nodes` 0005; branches 2 and 3 add none; 5 adds `connectors` 0005. Migration numbers here are
 placeholders: each branch runs `makemigrations` on the latest integration
 branch and, before merge, rebases and renumbers onto the newest leaf of
 every app it touches (`makemigrations --check --dry-run` green, no merge

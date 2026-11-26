@@ -11,11 +11,11 @@ upgrades, and the later move to a VPS.
 **What exists today and what Phase 13 adds.** Steps 1–7 use only what is
 on the integration branch now (`deploy/docker/compose.yml` +
 `compose.daily.yml`, `make up-daily`, `manage.py preflight`,
-`verify_node_audit_chain`). Phase 13 branch 6 (`feat/p13-home-server-ops`)
+`verify_node_audit_chain`). Phase 13 branch 7 (`feat/p13-home-server-ops`)
 moves the backup and drill scripts below into `deploy/home/`, adds
 `deploy/docker/compose.home.yml` and the `home_*` preflight rows that read
 the status files these scripts write. Until it merges, use the scripts as
-written here; their status-file format is the one branch 6 pins.
+written here; their status-file format is the one branch 7 pins.
 
 Placeholders used throughout: home subnet `192.168.1.0/24`, server address
 `192.168.1.20`, mDNS name `friday-home.local`, user `friday`. Replace them
@@ -59,7 +59,7 @@ with your own values.
 
 Record the date in `deploy/docker/.env` once the stack exists (step 4):
 `HOME_FDE_CONFIRMED_ON=YYYY-MM-DD` (read by the `home_disk_encryption`
-preflight row after branch 6; the container cannot see the host's disk
+preflight row after branch 7; the container cannot see the host's disk
 layout, so this is your attestation).
 
 ## 2. A fixed LAN address and an mDNS name
@@ -144,7 +144,7 @@ docker compose -f deploy/docker/compose.yml -f deploy/docker/compose.daily.yml p
 make preflight                          # every row pass or a known warn
 ```
 
-After Phase 13 branch 6 merges, start with the home override instead:
+After Phase 13 branch 7 merges, start with the home override instead:
 `docker compose -f deploy/docker/compose.yml -f deploy/docker/compose.daily.yml
 -f deploy/docker/compose.home.yml up -d --build` (adds the backup status
 volume mounts and the `home_*` settings; still nothing on `0.0.0.0`).
@@ -300,7 +300,7 @@ set -a; . /etc/friday-backup/restic.env; set +a; restic init
 on a second disk, and record "off-site pending".)
 
 **The nightly script** — `/usr/local/bin/friday-backup` (0755). Phase 13
-branch 6 ships the same script as `deploy/home/friday-backup.sh`:
+branch 7 ships the same script as `deploy/home/friday-backup.sh`:
 
 ```bash
 #!/usr/bin/env bash
@@ -370,7 +370,7 @@ manager into a tmpfs file), and remove it afterwards.
 
 ```bash
 #!/usr/bin/env bash
-# /usr/local/bin/friday-restore-drill  (branch 6: deploy/home/friday-restore-drill.sh)
+# /usr/local/bin/friday-restore-drill  (branch 7: deploy/home/friday-restore-drill.sh)
 set -euo pipefail
 KEY=${1:?path to friday-backup.agekey (on tmpfs)}
 cd /srv/friday/friday
@@ -394,7 +394,7 @@ Also restore one dump from the **off-site** copy at least once a quarter
 (`restic restore latest --tag friday --target /tmp/friday-offsite` and run
 the drill against the restored file) so the remote copy is proven too.
 
-After branch 6, preflight reads `status.json` and `drill.json`
+After branch 7, preflight reads `status.json` and `drill.json`
 (`HOME_BACKUP_STATUS_PATH`, `HOME_RESTORE_DRILL_STATUS_PATH`):
 `home_backup_fresh` warns after 26 h and fails after 72 h;
 `home_restore_drill_age` warns after 35 days and fails after 90 days.
@@ -449,7 +449,7 @@ re-pointed, not redesigned.
       spare) — never run two Friday servers against copies of one
       database.
 
-## 12. What preflight checks for the home server (after Phase 13 branch 6)
+## 12. What preflight checks for the home server (after Phase 13 branch 7)
 
 | Row | Pass | Warn | Fail |
 |---|---|---|---|
