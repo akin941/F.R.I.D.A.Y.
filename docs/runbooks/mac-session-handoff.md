@@ -34,6 +34,10 @@ Work top to bottom:
 4. **Part D — owner-only steps that are not Swift work** (credentials,
    reviews, merges, decisions). Most of them do not need the Mac. They are
    listed so nothing is lost.
+5. **Part E — Phase 13 home hub** (added 2026-11-26, after the Phase 12
+   items): the small Swift change for pairing `platform` and server
+   re-point, the real-hardware multi-node and home-route run, and the home
+   server on the owner's PC. Start E1 after B1; E3 needs no Mac.
 
 Each item has a checkbox. The **brief** named in each item is the full
 specification; this file is the order, the commands and the acceptance
@@ -77,17 +81,19 @@ branch.
 | 10 | `docs/prompts/phase-10-control/brief.md` | "Mac session (deferred)" M1–M4 | phase list + nine branch lists; "Go/no-go record" |
 | 11 | `docs/prompts/phase-11-live-voice/brief.md` | "Mac session (deferred)" M1–M4 | phase list + nine branch lists; "Go/no-go record" |
 | 12 | `docs/prompts/phase-12-reach/brief.md` | "Mac session (deferred)" M1 (verification only) | phase list + nine branch lists; "Go/no-go record" |
+| 13 | `docs/prompts/phase-13-home-hub/brief.md` | "Mac session (deferred)" M1–M3 (Part E) | "Owner steps (pending)" + the branch lists; "Go/no-go record" |
 
 ADRs these tasks implement: **ADR-013** (Friday Node protocol: identity,
 pinning, no listener, owner-away rules), **ADR-014** (node action
 classes; the M3 evidence run), **ADR-015** (voice-originated turns
 only propose), **ADR-012** (ingestion privacy pipeline: scrubber parity),
-**ADR-011** (voice transport) and **ADR-016** (proactive, Proposed).
+**ADR-011** (voice transport), **ADR-016** (proactive, Proposed) and
+**ADR-017** (home hub topology, Accepted 2026-11-26; Part E).
 
 Runbooks the Mac session uses: `friday-node.md`, `claude-code-hooks.md`,
 `live-voice.md`, `voice-setup.md`, `memory-eval.md`, `learning-memory.md`,
-`harness-drivers.md`, `proactive.md`, `n8n-connector.md`, `skills.md`, and
-`docs/voice/live-eval.md`.
+`harness-drivers.md`, `proactive.md`, `n8n-connector.md`, `skills.md`,
+`home-server-setup.md` (Part E), and `docs/voice/live-eval.md`.
 
 ---
 
@@ -1437,6 +1443,74 @@ Mac. They are collected here from the same briefs.
 - [ ] **D9 Optional follow-ups recorded in the briefs.**
       `friday_router_intent` v2 naming `node_action`; move the self-trigger
       regression onto the replay clip when Phase 6 branch 3a merges.
+
+---
+
+## Part E — Phase 13 home hub (added 2026-11-26)
+
+Source: `docs/prompts/phase-13-home-hub/brief.md` ("Mac session
+(deferred)" M1–M3), ADR-017, `docs/runbooks/home-server-setup.md`.
+Phase 13 adds **no protocol surface**: no WS message, no schema field, no
+capability contract, no `friday-voice/v1` change. The node conformance
+suite and `node/friday-voice/conformance.lock` stay as they are; every
+item below must leave them unchanged.
+
+- [ ] **E1 Phase 13 M1 — `feat/p13-node-app-pairing-platform` (Swift,
+      after B1).** In `node/friday-node/`:
+      `Pairing/PairingRequest.swift` sends `"platform": "macos"` in the
+      pairing body; `Settings/ServerAddress.swift` +
+      `Settings/ServerAddressView.swift` add "Sunucu adresini değiştir"
+      behind LocalAuthentication (Touch ID / macOS password) — the new base
+      URL is stored locally, the signing-key pin and the TLS pin (SPKI or
+      private CA) are **kept**, and a server whose pins differ is refused
+      before `hello` ("Sunucu kimliği değişti — yeniden eşleştirin"); the
+      menu shows the connected server host from local settings only. No
+      server message may change the address (ADR-013 decision 5).
+      **Must pass:** `cd backend && uv run pytest -q
+      nodes/tests/test_pairing_platform.py` (Phase 13 branch 1);
+      `uv run python manage.py node_conformance_server --external
+      --tls-self-signed --protocol 2 --hook-socket /tmp/friday-conformance-hook.sock`
+      all green (policy-mutation family included);
+      `uv run python manage.py build_node_conformance --check` unchanged;
+      behaviour identical to `friday-node-linux config set server-url`
+      (`node/friday-node-linux/tests/test_daemon_failclosed.py`, branch 4);
+      `swift test` green.
+- [ ] **E2 Phase 13 M2 — multi-node and home routes on real hardware
+      (after E1, B2–B3, B7 and Phase 13 branches 2, 3, 4, 6).** Pair the
+      MacBook and one real Linux PC (`friday-node-linux`) to the home
+      server; set names, rooms and roles on `/devices`; HUD shows both,
+      a disconnected PC goes `offline` within 45 s; by voice on the Mac,
+      ten un-named reads resolve to the MacBook and ten naming the Linux
+      PC resolve to it — **zero wrong-node chain rows**; typed with both
+      idle → the ask template, nothing invoked; "Hey Friday, salondaki
+      TV'yi aç", "TV'nin sesini kıs", "film gecesi modunu aç" → draft
+      cards only, one HA call each after on-screen approval; STT misses
+      recorded as text, fixed with owner aliases. **Contract:**
+      `assistant/tests/test_which_pc.py`,
+      `assistant/tests/test_home_routes_node_voice.py`,
+      `ops/tests/test_home_hub_e2e.py`. Record in the Phase 13 brief's
+      "Go/no-go record".
+- [ ] **E3 Phase 13 M3 — the home server on the owner's PC (owner
+      hardware, not the Mac; after Phase 13 branch 7).** Run
+      `docs/runbooks/home-server-setup.md` steps 1–9: LUKS, DHCP
+      reservation, `friday-home.local`, the stack with `compose.home.yml`,
+      Caddy with the private CA bound to the LAN address, `ufw` LAN-only,
+      nightly age + restic backups to the chosen off-site target (or a
+      second disk recorded as "off-site pending"), the first restore drill
+      and one drill from the off-site copy. Keep the CA root key and the
+      age private key **off** the server. Then re-pair (or re-point with
+      E1) the Mac node to the home server. `make preflight`: every
+      `home_*` row pass.
+- [ ] **E4 Phase 13 owner steps.** The brief's "Owner steps (pending)":
+      the Sonnet 5 plan review, the ADR-017 numbering confirmation (the
+      task text said ADR-016, which is Phase 12's), the defaults, the
+      off-site target and LUKS unlock choices, allowlisting the HA
+      entities after branch 5 (no HA call is possible before that), and
+      the two-week go/no-go record.
+
+A **Windows node** is not part of Phase 13 (stub README only,
+`node/friday-node-windows/README.md` after branch 4); it needs its own
+brief (d1: Tauri v2) and must pass the same conformance suite.
 
 ---
 
