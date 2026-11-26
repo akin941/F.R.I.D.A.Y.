@@ -210,6 +210,7 @@ def test_node_voice_token_yields_node_voice_never_web(owner, workspace):
             channel=CHANNEL_NODE_VOICE,
             bound_workspace_id=str(workspace.pk),
             token_id=str(minted.token.pk),
+            node_device_id=str(device.pk),
         )
     # A `cli` PAT through the chat-turn authenticator is still CHANNEL_CLI.
     cli = TOKEN_PREFIX + secrets.token_urlsafe(32)
