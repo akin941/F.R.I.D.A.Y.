@@ -367,11 +367,12 @@ public final class NodeRunner: @unchecked Sendable {
                 }
             }
         }
-        try socket.start()
+        // The spool is in place before the socket accepts its first event.
         queue.sync {
             self.spool = spool
             self.session?.spool = spool
         }
+        try socket.start()
         hookSocket = socket
     }
 

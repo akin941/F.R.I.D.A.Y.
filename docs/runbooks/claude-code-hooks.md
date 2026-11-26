@@ -146,8 +146,11 @@ Hook entries (`~/.claude/settings.json`), one per event: `SessionStart`,
 directory, peer uid checked) and exits 0 within 3 s whatever happens; the
 app builds the same allow-listed, scrubbed event as `friday-hook` and sends
 it live or spools it (≤ 10 MiB, ≤ 24 h) until the next `hello.ack`.
-`friday-hook` keeps working as the fallback: both paths dedupe on the event
-id, so running both stores each event once.
+`friday-hook` keeps working as the fallback, but use **one path at a time**:
+each relay mints its own random `event_id`, and the server dedupes on
+`hook:<session>:<event_id>` (re-uploads of the same event, such as a spooled
+batch sent again), not across the two relays, so configuring both stores
+every event twice.
 
 The server stores the events only when the owner's `claude_code_hooks`
 source is enabled and a `path_prefix` rule maps the session's `cwd` (an

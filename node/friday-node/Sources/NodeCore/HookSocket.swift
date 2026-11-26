@@ -133,6 +133,10 @@ public final class HookSocket: @unchecked Sendable {
     // MARK: Lifecycle
 
     public func start() throws {
+        lock.lock()
+        let running = fd >= 0
+        lock.unlock()
+        guard !running else { return }  // already listening
         let directory = (path as NSString).deletingLastPathComponent
         try? FileManager.default.createDirectory(
             atPath: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
@@ -231,9 +235,13 @@ public final class HookSocket: @unchecked Sendable {
     static func readBounded(_ connection: Int32, limit: Int) -> Data? {
         var timeout = timeval(tv_sec: readTimeoutSeconds, tv_usec: 0)
         setsockopt(connection, SOL_SOCKET, SO_RCVTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size))
+        // SO_RCVTIMEO bounds one recv; the whole read is bounded too, so a
+        // client trickling a byte at a time cannot hold the accept thread.
+        let deadline = Date().addingTimeInterval(TimeInterval(readTimeoutSeconds))
         var data = Data()
         var buffer = [UInt8](repeating: 0, count: 65_536)
         while true {
+            if Date() > deadline { return nil }
             let count = recv(connection, &buffer, buffer.count, 0)
             if count == 0 { break }
             if count < 0 { return nil }

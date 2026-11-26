@@ -364,14 +364,15 @@ public final class NodeSession: @unchecked Sendable {
 
     private func heartbeat(now: Int64) -> JSONValue {
         heartbeatSeq += 1
+        let depth = spool?.depth() ?? (0, 0)
         return [
             "v": .int(NodeProtocol.version),
             "type": "heartbeat",
             "id": .string(makeID()),
             "seq": .int(heartbeatSeq),
             "uptime_seconds": .int(max(now - connectedAt, 0)),
-            "spool_count": .int(Int64(spool?.depth().count ?? 0)),
-            "spool_bytes": .int(Int64(spool?.depth().bytes ?? 0)),
+            "spool_count": .int(Int64(depth.count)),
+            "spool_bytes": .int(Int64(depth.bytes)),
         ]
     }
 
