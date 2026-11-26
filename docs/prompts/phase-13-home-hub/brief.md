@@ -1532,6 +1532,21 @@ shipped files.
 4. Choose the off-site restic target (Q5); until then a second disk,
    recorded as "off-site pending".
 
+Known follow-ups — `feat/p13-home-server-ops` (unresolved LOW review notes,
+recorded at merge into `integ/phase-13` 2026-11-26):
+1. **`deploy/home/friday-restore-drill.sh` — drill network name.** The
+   docker-mode drill defaults `FRIDAY_DRILL_NETWORK` to `friday_default`.
+   `compose.yml` sets `name: friday`, so this should resolve, but the
+   docker path was not run here (no Docker daemon); recorded as owner step
+   M3. Fix: confirm on the real box that the network name matches, and fix
+   it in a docs/ops branch if not.
+2. **`backend/ops/preflight.py` — `home_lan_only` only warns on an
+   unresolvable name.** A non-`.local` host in `DJANGO_ALLOWED_HOSTS` that
+   this container cannot resolve is a warn, not a failure, so a public name
+   that does not resolve here passes as a warn (the warn text says it was
+   not verified). Acceptable as is; optionally fail on unresolved names
+   once the home box is running.
+
 ### Known follow-ups (unresolved LOW review notes, recorded at merge 2026-11-26)
 
 These came out of the plan review and were not fixed before merge into
