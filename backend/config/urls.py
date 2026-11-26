@@ -14,6 +14,7 @@ from config.activity import ActivitySummaryView
 from deploys.urls import build_urlpatterns as deploy_urlpatterns
 from hud.urls import build_urlpatterns as hud_urlpatterns
 from memory.urls import build_hook_urlpatterns
+from nodes.activity import mark_node_active
 from voice.urls import build_urlpatterns as voice_urlpatterns
 
 
@@ -91,6 +92,9 @@ urlpatterns = [
                 ],
                 node_voice_permissions=(NodeVoiceTriggerGuard,),
                 transcription_permissions=(NodeVoiceStormGuard,),
+                # Phase 13 D6: a node voice transcription marks its node as
+                # the owner's last active PC (`voice` may not import `nodes`).
+                on_node_activity=mark_node_active,
             )
         ),
     ),

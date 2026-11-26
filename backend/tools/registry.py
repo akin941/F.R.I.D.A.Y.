@@ -257,11 +257,33 @@ class ReadToolError(Exception):
     `code` is a closed-vocabulary token (e.g. `invalid_arguments`,
     `out_of_scope`, `not_available`, `timeout`, `tool_error`) -- never
     server or exception text. A tools-local type, like `ToolValidationError`,
-    so `assistant` can handle it without importing `connectors`."""
+    so `assistant` can handle it without importing `connectors`.
 
-    def __init__(self, code):
+    `reply` (Phase 13 D6): an optional Friday-authored text the turn answers
+    with instead of an error -- the "which PC" ask template ("Hangi
+    bilgisayar: MacBook mu, Masaüstü mü?") or a refusal naming the PC. Never
+    server, node or model text."""
+
+    def __init__(self, code, *, reply=""):
         self.code = code
+        self.reply = reply
         super().__init__(code)
+
+
+@dataclass(frozen=True)
+class ToolCallContext:
+    """What one chat turn knows about a tool call beyond its arguments
+    (Phase 13 D6), handed only to a `ReadToolSpec` with `accepts_context`:
+
+    - `source_text`: the owner's own message of the turn -- never connector,
+      transcript or node text (those are fenced data);
+    - `origin_node_id`: the node a `node_voice` turn was spoken to (the
+      token's `node_device_id`), else None;
+    - `input_mode`: `text` / `voice` / "" (unknown)."""
+
+    source_text: str = ""
+    origin_node_id: str | None = None
+    input_mode: str = ""
 
 
 @dataclass(frozen=True)
@@ -336,6 +358,10 @@ class ReadToolSpec:
     # A short Friday-authored label ("Sunucu durumu") for templates and
     # notices; empty = the tool name.
     label: str = ""
+    # Phase 13 D6: `execute` and `is_available` also take the optional
+    # keyword `context=` (a `ToolCallContext` or None). Off by default, so
+    # every other read tool's callables are called exactly as before.
+    accepts_context: bool = False
 
     @property
     def display_label(self) -> str:
@@ -429,24 +455,38 @@ def list_read_tool_names() -> list[str]:
     return sorted(_READ_REGISTRY)
 
 
-def list_read_tools(*, workspace, channel) -> list[ReadToolSpec]:
+def _is_available(spec: ReadToolSpec, workspace, context) -> bool:
+    if spec.accepts_context:
+        return spec.is_available(workspace, context=context)
+    return spec.is_available(workspace)
+
+
+def list_read_tools(*, workspace, channel, context=None) -> list[ReadToolSpec]:
     """The read tools the router may offer for one turn: those allowed over
     `channel` whose connector has an enabled binding in `workspace`. Both
     arguments are required -- there is no "any channel" or "any workspace"
-    listing. Sorted by name for a deterministic prompt/test ordering."""
+    listing. Sorted by name for a deterministic prompt/test ordering.
+    `context` (Phase 13 D6) reaches only the specs that accept it."""
     return [
         spec
         for name, spec in sorted(_READ_REGISTRY.items())
-        if channel in spec.channels and spec.is_available(workspace)
+        if channel in spec.channels and _is_available(spec, workspace, context)
     ]
 
 
-def run_read_tool(spec: ReadToolSpec, *, workspace, actor, args, channel) -> ReadResult:
+def run_read_tool(
+    spec: ReadToolSpec, *, workspace, actor, args, channel, context=None
+) -> ReadResult:
     """Execute one read tool (Phase 12 D2). The only sanctioned call site of
     `ReadToolSpec.execute`: inside an unattended run the read is denied
     before the spec is touched (no network call, no audit row of its
-    own); outside one, the call is exactly `spec.execute(...)`."""
+    own); outside one, the call is exactly `spec.execute(...)` -- plus
+    `context=` for a spec with `accepts_context` (Phase 13 D6)."""
     deny_if_unattended("read_tool")
+    if spec.accepts_context:
+        return spec.execute(
+            workspace=workspace, actor=actor, args=args, channel=channel, context=context
+        )
     return spec.execute(workspace=workspace, actor=actor, args=args, channel=channel)
 
 

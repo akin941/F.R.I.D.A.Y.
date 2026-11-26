@@ -36,6 +36,10 @@ never content, and never with anything else: there is no path from an
   honest node's latest state is always the one written. Nothing here can
   arm, mute or change the node: the server -> node set is frozen.
 
+Phase 13 D6: a non-empty hook batch the sink accepted also bumps the node's
+`last_active_at` (`nodes.activity`, at most once a minute); no other kind
+does.
+
 Spooled uploads (`spooled: true`, after a reconnect) are paced by
 `SpoolThrottle` (10 batches/s per node); the gateway handles one socket's
 frames in order and acks each before reading the next, so batches are
@@ -51,6 +55,7 @@ from datetime import timedelta
 from django.db.models import Q
 from django.utils import timezone
 
+from nodes.activity import mark_node_active
 from nodes.models import CapabilitySnapshot, Node
 from nodes.protocol.messages import (
     AVAILABILITY,
@@ -153,6 +158,11 @@ def _hook_events(node, batch) -> EventOutcome:
         raise SinkFailed(HOOK_EVENTS) from exc
     counts = counts if isinstance(counts, dict) else {}
     size = len(batch)
+    if size:
+        # Phase 13 D6: the owner's Claude Code activity on this PC makes it
+        # the "last active" one (at most one write a minute; a heartbeat
+        # never does).
+        mark_node_active(node.pk)
     stored = _bounded(counts.get("stored"), size)
     duplicate = _bounded(counts.get("duplicate"), size - stored)
     detail = {

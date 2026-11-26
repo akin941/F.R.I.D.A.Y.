@@ -53,6 +53,28 @@ Every call (shared rules in `tools.owner_reads`):
 
 No model call happens here or in `nodes`: the normal `chat` completion
 answers from the fenced result (Q1).
+
+**Which PC (Phase 13 D6).** Every call goes to exactly one node, chosen by
+`nodes.targeting.resolve_target` (it replaced Phase 9's single
+`read_node_for` pick): the owner's own words in the turn
+(`ToolCallContext.source_text`: a node name or alias, a room in locative
+form, a role or platform word), then the speaking node, then the only or
+last-active online node that offers one of the tool's capabilities. The
+router may add an optional `node` argument (a label it read in the owner's
+message); it is untrusted and only checked against that resolution
+(`target_mismatch`, `node_unknown`). Outcomes:
+
+- resolved -> the read runs on that node only;
+- ambiguous -> `ReadToolError("node_ambiguous")` carrying the ask template
+  ("Hangi bilgisayar: MacBook mu, Masaüstü mü?") as its `reply`; no node is
+  called, the audit row records `node_ambiguous` and the candidate ids;
+- a refusal naming an offline node or one lacking the capability -> the
+  read is sent to THAT node only, whose own chain row records the outcome
+  (`node_offline`, `server_refused`/`not_invocable`), as before Phase 13:
+  never a fall-through to another node;
+- any other refusal (`node_unusable`, `target_mismatch`, `node_unknown`,
+  `no_node_in_room`) -> `ReadToolError(code)` with a Friday-authored reply
+  and no node call; `not_available` stays the plain error it always was.
 """
 
 import json
@@ -71,7 +93,7 @@ from memory.ingestion.mapping import (
 )
 from memory.ingestion.scrubber import scrub_text
 from memory.ingestion.services import scrub_terms_for
-from nodes import presence, selectors, services
+from nodes import selectors, services, targeting
 from nodes.action_rules import is_owners_personal_workspace
 from tools.owner_reads import record_read, require_owner_web_reader, validate_args
 from tools.registry import (
@@ -134,7 +156,19 @@ REFUSAL_MESSAGES = {
 # --- arguments -----------------------------------------------------------------
 
 
-class NodeSessionsArgs(serializers.Serializer):
+class _NodeArgs(serializers.Serializer):
+    """Phase 13 D6: the PC the owner named, as the router read it from the
+    owner's message (optional, untrusted; checked by the resolver)."""
+
+    node = serializers.CharField(
+        max_length=100,
+        required=False,
+        allow_blank=True,
+        help_text="the PC's name only if the owner named one, else omit",
+    )
+
+
+class NodeSessionsArgs(_NodeArgs):
     tool = serializers.ChoiceField(
         choices=["claude", "codex", "all"], required=False, default="all"
     )
@@ -142,23 +176,23 @@ class NodeSessionsArgs(serializers.Serializer):
     limit = serializers.IntegerField(required=False, min_value=1, max_value=50, default=20)
 
 
-class NodeSessionDetailArgs(serializers.Serializer):
+class NodeSessionDetailArgs(_NodeArgs):
     tool = serializers.ChoiceField(choices=["claude", "codex"], required=False, default="claude")
     session_id = serializers.RegexField(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$", max_length=128)
     last_turns = serializers.IntegerField(required=False, min_value=1, max_value=20, default=10)
 
 
-class NodeUsageArgs(serializers.Serializer):
+class NodeUsageArgs(_NodeArgs):
     period = serializers.ChoiceField(
         choices=["today", "week", "month"], required=False, default="today"
     )
 
 
-class NodeGitStatusArgs(serializers.Serializer):
+class NodeGitStatusArgs(_NodeArgs):
     repo_path = serializers.CharField(max_length=1024, trim_whitespace=True)
 
 
-class NodeDesktopArgs(serializers.Serializer):
+class NodeDesktopArgs(_NodeArgs):
     view = serializers.ChoiceField(choices=list(DESKTOP_VIEWS), required=False, default="all")
     limit = serializers.IntegerField(required=False, min_value=1, max_value=30, default=30)
 
@@ -518,15 +552,48 @@ def _desktop(report, *, workspace, actor, data, terms):
         report.add(capability, outcome, lines=lines)
 
 
-def _execute(tool, body, serializer_class):
-    def execute(*, workspace, actor, args, channel):
+# Refusals that still go to the one named node: its own chain row says why.
+_SENT_ANYWAY = frozenset({targeting.NODE_OFFLINE, targeting.NODE_LACKS_CAPABILITY})
+
+
+def target_node(actor, capabilities, data, context, audit):
+    """The one node this call goes to (Phase 13 D6), or ReadToolError."""
+    label = (data.get("node") or "").strip() or None
+    target = targeting.resolve_target(
+        actor,
+        capabilities=capabilities,
+        source_text=getattr(context, "source_text", "") or "",
+        origin_node_id=getattr(context, "origin_node_id", None),
+        requested_label=label,
+    )
+    if isinstance(target, targeting.Resolved):
+        audit["target_reason"] = target.reason
+        return target.node
+    if isinstance(target, targeting.Ambiguous):
+        audit["candidates"] = target.candidate_ids
+        raise ReadToolError(targeting.NODE_AMBIGUOUS, reply=targeting.reply_text(target))
+    if target.node is not None:
+        audit["node_id"] = str(target.node.pk)
+        if target.code in _SENT_ANYWAY:
+            audit["target_reason"] = target.code
+            return target.node
+    if target.code == targeting.NOT_AVAILABLE:
+        raise ReadToolError("not_available")
+    raise ReadToolError(target.code, reply=targeting.reply_text(target))
+
+
+def _node_line(node) -> str:
+    name = neutralize_fence(strip_invisible_formatting(" ".join(node.name.split())), *FENCE_WORDS)
+    return f"\n\nnode: {name[:40]}"
+
+
+def _execute(tool, body, serializer_class, capabilities):
+    def execute(*, workspace, actor, args, channel, context=None):
         audit = {"outcome": "ok", "size": 0}
         try:
             require_owner_web_reader(workspace=workspace, actor=actor, channel=channel)
             data = validate_args(serializer_class, args)
-            node = selectors.read_node_for(actor)
-            if node is None:
-                raise ReadToolError("not_available")
+            node = target_node(actor, capabilities, data, context, audit)
             report = _Report(node, uuid.uuid4().hex)
             audit.update({"node_id": str(node.pk), "trace_id": report.trace_id})
             try:
@@ -540,6 +607,8 @@ def _execute(tool, body, serializer_class):
             finally:
                 audit["calls"] = report.calls
             text, size, truncated = report.render()
+            # Which PC answered (Phase 13): owner-set label, bounded, fenced.
+            text += _node_line(node)
             audit.update({"size": size, "truncated": truncated})
             return ReadResult(text=text, size=size, truncated=truncated)
         except ReadToolError as exc:
@@ -557,20 +626,18 @@ def _execute(tool, body, serializer_class):
 
 
 def _available(capabilities, *, needs_rules):
-    """D9: the workspace's owner has a node with a live presence key, one of
-    `capabilities` is invocable in its latest snapshot and -- for the
-    path-resolved capabilities -- at least one 8A path rule targets the
-    workspace. Database checks first: no Redis call without a usable
-    node."""
+    """D9 / Phase 13 D5: at least one of the workspace owner's usable nodes
+    is online and offers one of `capabilities` as invocable in its latest
+    snapshot, and -- for the path-resolved capabilities -- at least one 8A
+    path rule targets the workspace. Database checks first: no Redis call
+    for a node that cannot serve. Which node a call then goes to is the
+    resolver's decision (`target_node`), not availability's."""
 
-    def is_available(workspace):
+    def is_available(workspace, context=None):
         owner = getattr(workspace, "owner", None)
         if getattr(workspace, "pk", None) is None or owner is None:
             return False
-        node = selectors.read_node_for(owner)
-        if node is None or not presence.is_online(node):
-            return False
-        if not set(capabilities) & selectors.invocable_capabilities(node):
+        if not targeting.eligible_nodes(owner, capabilities=capabilities):
             return False
         return not needs_rules or bool(prefixes_for_workspace(owner, workspace))
 
@@ -584,9 +651,10 @@ def _spec(name, description, serializer_class, data_class, body, capabilities, n
         argument_serializer=serializer_class,
         data_class=data_class,
         channels=frozenset({CHANNEL_WEB}),
-        execute=_execute(name, body, serializer_class),
+        execute=_execute(name, body, serializer_class, frozenset(capabilities)),
         is_available=_available(capabilities, needs_rules=needs_rules),
         source=SOURCE_LABEL,
+        accepts_context=True,
     )
 
 

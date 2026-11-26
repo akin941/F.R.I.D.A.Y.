@@ -1121,7 +1121,7 @@ evaluation".
 |---|---|---|---|---|
 | brief | `docs/p13-brief` | This brief (full; the owner decision of 2026-11-26 kept as goal, scope and boundary; no stub existed), ADR-017 (Accepted 2026-11-26; numbered 017 because ADR-016 is taken), `docs/runbooks/home-server-setup.md`, MASTER_PLAN §AA row 13 + §O d11, `docs/runbooks/mac-session-handoff.md` Part E, `backend/assistant/self_sources.json` regenerated (`build_self_sources --check`) | Phase 12 closeout | **implemented 2026-11-20** (swarm date stamp; content per the owner decision of 2026-11-26; docs only; awaits the independent Sonnet 5 plan review to APPROVE) |
 | 1 | `feat/p13-node-registry` | `workspaces.Room`, node name/room/role/platform/aliases, pairing `platform`, node `PATCH`, per-node audit API, `core.speech`, `/settings/home`, `/devices` edit + audit tab | brief approved | **implemented 2026-11-20** (swarm date stamp; see "Branch 1 notes"; awaits the independent Sonnet 5 review) |
-| 2 | `feat/p13-node-targeting` | `nodes.targeting.resolve_target`, `last_active_at`, `ToolCallContext`, read tools and node-action proposals on the resolver, ask template, one-node invariant, approval card node header, ADR-013 note | 1 | planned |
+| 2 | `feat/p13-node-targeting` | `nodes.targeting.resolve_target`, `last_active_at`, `ToolCallContext`, read tools and node-action proposals on the resolver, ask template, one-node invariant, approval card node header, ADR-013 note | 1 | **implemented 2026-11-20** (swarm date stamp; see "Branch 2 notes"; awaits the independent Sonnet 5 review) |
 | 3 | `feat/p13-hud-presence` | `node_presence`, HUD `nodes` section + `HudNodesPanel`, `/devices` overview columns | 1 (parallel with 2) | planned |
 | 4 | `feat/p13-linux-node` | `node/friday-node-linux` (vendored + locked, read-only, local policy CLI, credential file, systemd user unit, re-point), CI conformance job, Windows stub README | 1 (pairing `platform`) | planned |
 | 5 | `feat/p13-ha-home-control` | `connectors.HomeEntity` allowlist, media_player power/source/mute/volume steps, `source_list`, manifest v2 pins, entity editor, governance docs | 1 (rooms) | planned |
@@ -1234,6 +1234,109 @@ recorded at merge into `integ/phase-13` 2026-11-26):
    with no index, which becomes a scan as AuditLog grows. Fix: add a GIN or
    expression index on `AuditLog.metadata`, or narrow by a time window or
    `resource_id` before the OR (the closeout measurement under D8).
+
+### Branch 2 notes — `feat/p13-node-targeting` (implemented 2026-11-20)
+
+What landed (all server side and web; nothing needs the Mac, no protocol
+change):
+- `nodes/targeting.py`: `resolve_target` (`Resolved` / `Ambiguous` /
+  `Refused`), `eligible_nodes`, `is_usable`, `invocable_names`, the ask
+  template (`ask_text`, Turkish question-particle vowel harmony: "MacBook
+  mu, Masaüstü mü?") and the refusal texts (`reply_text`). Vocabulary: the
+  labelled nodes' names and aliases (usable and kill-switched ones;
+  revoked/expired names are free and never matched), every room of the
+  owner's personal workspace in locative form, role words
+  (`ROLE_WORDS`) and platform words ("Mac'te", "Linux'ta").
+  `nodes.selectors.read_node_for` is gone.
+- `nodes/activity.py` `mark_node_active` (one write a minute per node),
+  called from `nodes.events` (a non-empty hook batch the sink accepted),
+  `nodes.services.record_gated_progress` (a confirmation `approved` /
+  `denied`, or a result whose `confirm_state` is one of them) and the
+  `voice` transcription route (`on_node_activity`, injected by
+  `config/urls.py` next to the existing guards). Heartbeats, hellos and
+  other event kinds never write it.
+- `tools.registry.ToolCallContext(source_text, origin_node_id,
+  input_mode)`, `ReadToolSpec.accepts_context` (default False: every other
+  read tool is called exactly as before), `ReadToolError.reply`;
+  `run_read_tool` / `list_read_tools` pass `context=` only to specs that
+  accept it. `assistant.views` builds the context from the turn's own
+  words (never history, connector, transcript or node text) and, on a
+  `node_voice` turn, the token's node device; `classify_intent` /
+  `propose_node_action` / `prepare_connector_read` carry it; a fixed
+  reply ends the turn through `static_reply_stream` (no chat completion,
+  no `ModelUsage` beyond the router's own calls).
+- `tools/node_reads.py`: every read on `resolve_target`; the optional
+  untrusted `node` argument on every argument serializer; the result text
+  ends with `node: <name>`; the `read_tool.read` audit row carries
+  `node_id`, `target_reason` or `candidates`.
+- `tools/node_actions.py`: `proposal_targets` lists usable nodes only (not
+  killed or expired either) with `node_room`, `node_role`,
+  `node_platform`; `validate_proposal(..., context=)` runs the resolver
+  with the model's `node_id` as `requested_node_id` and returns
+  `{"refusal", "reply"}` for a mismatch, an ambiguity or a refusal naming
+  the PC; `describe_request` adds `node_room`, `node_platform`. The
+  approval card (`node-action.tsx`) renders "Masaüstü (Çalışma odası,
+  Linux)"; its row label is now "Bilgisayar" (was "Mac").
+- `core.channels.ChannelPrincipal.node_device_id` (set by the PAT
+  authenticator for a `node_voice` token, None otherwise): the speaking
+  node, readable by `assistant` and `voice` without a new import edge.
+- Tests: `nodes/tests/test_targeting.py` (the D6 table with two and three
+  nodes), `nodes/tests/test_last_active.py`, `nodes/tests/two_nodes.py`
+  (the shared `make_two_nodes` world), `config/tests/test_node_voice_last_active.py`,
+  `tools/tests/test_node_targeting_reads.py`,
+  `tools/tests/test_node_targeting_actions.py`,
+  `tools/tests/test_one_node_invariant.py` (registry walk),
+  `assistant/tests/test_which_pc.py`, `node-action.test.tsx`.
+- ADR-013 implementation note.
+
+Deviations recorded:
+- **The model's node never decides.** The brief lists `requested_node_id`
+  under rule 1; implemented as an untrusted *check* instead: the
+  resolution runs without it and it must agree (`target_mismatch`), else
+  an unnamed pick among two online nodes would still be the model's
+  choice. A node id the owner picked himself (a card click) does not go
+  through the resolver at all (`create_request` / the actions view).
+- **A named offline (or lacking) node on a read** is still sent the read,
+  to that node only, so its own chain row records `node_offline` /
+  `server_refused:not_invocable` (Phase 9's "every call writes its chain
+  row"); never another node. For a node-action proposal it is a refusal
+  naming the PC and no draft. The owner's only node, offline, is named the
+  same way (`Refused(node_offline, node)`), not `not_available`.
+- **Room / role / platform matching several nodes** narrows to the
+  eligible ones first: exactly one online → that node; several → ask;
+  none → `not_available`. A room of the owner with no node in it is
+  `no_node_in_room` (never another PC); a role or platform word that no
+  node has is ignored (common words). A bare "masaüstü" is not a role word
+  (it also means the screen); "masaüstü bilgisayar" is.
+- **Two node names in one message** → ask among them.
+- **Read tools stay web-only** (Phase 9 Q4): the origin rule applies to
+  node-action proposals of `node_voice` turns; a `node_voice` turn is not
+  offered node reads, unchanged.
+- **The ask follow-up.** The router sees only the current message, not the
+  history, so the ask template tells the owner to repeat the request with
+  the PC's name ("Bilgisayarın adını söyleyerek isteğini yeniden iletir
+  misin?").
+- **Audit.** Read refusals are recorded on the tool's `read_tool.read` row
+  (`outcome`, `candidates`, `node_id`); `validate_proposal` still writes
+  nothing (unchanged contract), so a proposal-time refusal leaves no row.
+- **`voice` writer** fires once the transcription's conversation is
+  found (the request is the evidence), before the STT call; a failing
+  writer never fails the transcription.
+
+Owner steps (pending) — `feat/p13-node-targeting`, recorded 2026-11-20:
+1. Have the independent Sonnet 5 review of this branch reach APPROVE.
+2. After merge on the real server: give each PC a room and, where a short
+   word is natural, an alias on `/devices` (e.g. "medya bilgisayarı"
+   as the media PC's alias); confirm the 15-minute last-active window
+   (`NODE_LAST_ACTIVE_WINDOW_SECONDS`, Q2) or change it.
+3. Mac session M2 (deferred: Mac session, pending owner evaluation): real
+   microphone "which PC" runs against the real home server — "Masaüstünde
+   testleri çalıştır" spoken to the Mac proposes for the desktop; an
+   unnamed request spoken to the Mac proposes for the Mac (origin rule);
+   record misses. The Swift app needs no change for this branch: the
+   server contract it must keep passing is the unchanged conformance suite
+   plus `nodes/tests/test_targeting.py` and
+   `tools/tests/test_one_node_invariant.py` (server side).
 
 **Minimum usable cut** if the phase runs long: 7 (the home server is safe
 and backed up), 1 and 2 (several PCs, the right one each time). 3 adds
@@ -1396,6 +1499,7 @@ DNS, bucket or hardware in tests.
 | Risk | Mitigation |
 |---|---|
 | The wrong PC runs a command | Explicit mention beats everything and never falls through (D6 rule 1); the model's `node_id` cannot override the owner's words; the approval card names the node and room; the target node's own window must be clicked (ADR-014); M2's zero-wrong-node bar |
+| A compromised node keeps itself "last active" (`last_active_at` is bumped by node-relayed hook events) | It only ranks candidates nobody named: an explicit mention and the speaking node always win (pinned by `nodes/tests/test_targeting.py::test_a_node_bumping_last_active_cannot_change_an_explicit_or_origin_resolution`); the approval card names the PC; the target node's own confirmation window must be clicked; one write a minute |
 | Ambiguity asks too often and annoys | Origin node for voice, a single candidate, and the 15-minute last-active rule decide most turns; the window is a setting; aliases make naming short |
 | Home server disk dies or is stolen | LUKS; nightly age-encrypted off-site backups; monthly drill; preflight freshness and drill age |
 | Backup key lost | The age private key is in the password manager and an offline copy (runbook step 8); the drill proves it is usable monthly |
@@ -1561,7 +1665,9 @@ that implements the affected decision.
    stays governed by `HA_WOL_ALLOWED_MACS` (no `HomeEntity`), gate-class and
    unchanged; add a test that WoL still works with an empty entity
    allowlist and still needs an allowlisted MAC.
-2. **D6 / Risks — `last_active_at` is node-controlled.** It is bumped from
+2. **D6 / Risks — `last_active_at` is node-controlled.** (Resolved in
+   branch 2: Risks row added; pinned by `nodes/tests/test_targeting.py`.)
+   It is bumped from
    node-relayed hook events, so a compromised node could keep itself "last
    active" and win rule 3 for un-named requests. The mitigations hold
    (approval card names the node, the node's own confirmation window,

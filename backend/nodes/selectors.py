@@ -432,31 +432,10 @@ def node_audit_page(actor, node, *, before=None, limit=AUDIT_PAGE_SIZE):
     return rows, next_cursor
 
 
-# --- the read tools' node (Phase 9 D9, branch 5) ---
-
-
-def read_node_for(owner, *, now=None):
-    """The node the read tools (`tools.node_reads`) read from for `owner`:
-    a usable one (not revoked, killed or expired, D1), a live one first,
-    else the most recently paired usable one (a direct call then ends
-    `node_offline`, with its chain row). None when the owner has no usable
-    node. A system lookup by owner: the callers have already checked that
-    the actor is that owner (or, for `is_available`, offer nothing more
-    than a tool name)."""
-    if owner is None or getattr(owner, "pk", None) is None:
-        return None
-    now = now or timezone.now()
-    usable = [
-        node
-        for node in Node.objects.filter(owner=owner)
-        .select_related("device", "device__user", "workspace", "owner")
-        .order_by("-created_at")
-        if node_device_refusal(node.device, now) is None
-    ]
-    for node in usable:
-        if presence.is_online(node):
-            return node
-    return usable[0] if usable else None
+# --- the read tools' capabilities (Phase 9 D9; Phase 13 D5) ---
+#
+# Which node a read goes to is `nodes.targeting.resolve_target` (Phase 13
+# D6); it replaced Phase 9's single `read_node_for(owner)` pick.
 
 
 def invocable_capabilities(node) -> frozenset:

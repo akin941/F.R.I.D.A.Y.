@@ -363,6 +363,10 @@ NODE_IDLE_EXPIRY_DAYS = env.int("NODE_IDLE_EXPIRY_DAYS", default=30)
 # - after a rotation the previous secret stays valid this long, or until the
 #   new secret is first used, whichever comes first.
 NODE_ROTATION_GRACE_SECONDS = env.int("NODE_ROTATION_GRACE_SECONDS", default=600)
+# Phase 13 D6 ("which PC"): among several online nodes that can serve a
+# request nobody named, the one the owner used last wins only if that use
+# is this recent (seconds); otherwise Friday asks which PC.
+NODE_LAST_ACTIVE_WINDOW_SECONDS = env.int("NODE_LAST_ACTIVE_WINDOW_SECONDS", default=900)
 
 # Friday Node protocol signing (Phase 9 brief D4). NODE_SIGNING_KEY is an
 # Ed25519 private key, base64 of its raw 32 bytes, from the environment only

@@ -48,6 +48,7 @@ from core.channels import (
 from core.throttling import ScopedRateThrottle
 from core.tracing import request_trace_id, trace_report
 from knowledge.models import KnowledgeChunk
+from tools.registry import ToolCallContext
 from workspaces.models import Workspace
 
 # Allowlisted for PAT auth (MVP 9 §1/§2). PersonalAccessTokenAuthentication
@@ -206,6 +207,16 @@ def _get_chat_conversation(request, conversation_id):
     return conversation
 
 
+def _origin_node_id(request, channel):
+    """The node a `node_voice` turn was spoken to: the voice token's
+    `node_device_id` (a node's id is its device id). None for every other
+    channel -- a web turn says nothing about which PC the browser runs on."""
+    if channel != CHANNEL_NODE_VOICE:
+        return None
+    device_id = getattr(request.auth, "node_device_id", None)
+    return str(device_id) if device_id is not None else None
+
+
 class ConversationMessageListView(APIView):
     permission_classes = [IsAuthenticated]
     authentication_classes = _CHAT_TURN_AUTHENTICATION_CLASSES
@@ -349,6 +360,15 @@ class ConversationMessageListView(APIView):
             turn_content = content
         if not turn_content.strip():
             turn_content = content
+        # Phase 13 D6: what the "which PC" resolver decides by -- the
+        # owner's own words of this turn and, for a `node_voice` turn, the
+        # node the owner spoke to (the token's device). Never connector,
+        # transcript or node text.
+        call_context = ToolCallContext(
+            source_text=turn_content,
+            origin_node_id=_origin_node_id(request, channel),
+            input_mode=input_mode,
+        )
         if routed is not None and routed.classification is not None:
             classification = dict(routed.classification)
         else:
@@ -359,7 +379,9 @@ class ConversationMessageListView(APIView):
                 client_local_date=serializer.validated_data["client_local_date"],
                 channel=channel,
                 context_report=turn_report or None,
+                call_context=call_context,
             )
+        target_reply = classification.pop("reply_text", None)
         # ADR-015 decision 1 (Phase 6 A6): a voice turn reads and proposes
         # only -- capped here, before any of the turn's paths run.
         classification = apply_voice_capability_cap(classification, input_mode=input_mode)
@@ -381,6 +403,7 @@ class ConversationMessageListView(APIView):
                 channel=channel,
                 tool_name=classification["intent_payload"]["tool_name"],
                 context_report=turn_report or None,
+                call_context=call_context,
             )
             classification["intent_payload"] = {
                 "tool_name": connector_turn.tool_name,
@@ -388,10 +411,17 @@ class ConversationMessageListView(APIView):
             }
 
         async_started = connector_turn is not None and connector_turn.async_handle is not None
+        if target_reply is None and connector_turn is not None and not async_started:
+            target_reply = connector_turn.reply_text or None
         if routed is not None and routed.reply_text is not None:
             # The route's stored text is the reply: no gateway call, no
             # ModelUsage (there is no call), no context assembly.
             gateway_stream, usage_holder = static_reply_stream(routed.reply_text), {}
+            memory_ids, chunk_ids, overlay_source_workspaces = [], [], {}
+        elif target_reply is not None:
+            # Phase 13 D6: "which PC?" (or a refusal naming the PC) -- the
+            # reply is Friday's fixed text: no chat completion, no node call.
+            gateway_stream, usage_holder = static_reply_stream(target_reply), {}
             memory_ids, chunk_ids, overlay_source_workspaces = [], [], {}
         elif async_started:
             # Phase 12 D11: an async read was started -- the reply is
