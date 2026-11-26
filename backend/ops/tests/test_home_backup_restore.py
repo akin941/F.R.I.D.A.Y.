@@ -103,11 +103,11 @@ def _base_env(tmp_path):
     return env
 
 
-@pytest.fixture
-def home(tmp_path):
+def make_backup_home(tmp_path):
     """The runbook's layout under tmp_path: backup dir, an age key pair (the
     PUBLIC key in the server's config, the private one kept aside like the
-    owner's password manager), a local restic repository, a secrets file."""
+    owner's password manager), a local restic repository, a secrets file.
+    Shared with the closeout e2e (`test_home_hub_e2e.py`)."""
     backup_dir = tmp_path / "backups"
     config = tmp_path / "etc"
     backup_dir.mkdir()
@@ -161,6 +161,11 @@ def home(tmp_path):
 
 
 @pytest.fixture
+def home(tmp_path):
+    return make_backup_home(tmp_path)
+
+
+@pytest.fixture
 def chain():
     """An owner, a paired node and committed chain rows in the test DB."""
     owner = register_user(email="owner@test.dev", password="Str0ngDevPass!42", name="Owner")
@@ -193,22 +198,32 @@ def chain():
     bus.clear_presence(node.pk)
 
 
+def create_scratch_db():
+    """An empty scratch database on the same server (drop it with
+    `drop_scratch_db`)."""
+    name = f"{_db()['NAME']}_drill_{uuid.uuid4().hex[:8]}"
+    with psycopg.connect(_url(_db()["NAME"]), autocommit=True) as conn:
+        conn.execute(f'CREATE DATABASE "{name}"')
+    return name
+
+
+def drop_scratch_db(name):
+    with psycopg.connect(_url(_db()["NAME"]), autocommit=True) as conn:
+        conn.execute(f'DROP DATABASE IF EXISTS "{name}" WITH (FORCE)')
+
+
 @pytest.fixture
 def scratch_db():
     """Empty scratch databases on the same server, dropped afterwards."""
     made = []
 
     def make():
-        name = f"{_db()['NAME']}_drill_{uuid.uuid4().hex[:8]}"
-        with psycopg.connect(_url(_db()["NAME"]), autocommit=True) as conn:
-            conn.execute(f'CREATE DATABASE "{name}"')
-        made.append(name)
-        return name
+        made.append(create_scratch_db())
+        return made[-1]
 
     yield make
     for name in made:
-        with psycopg.connect(_url(_db()["NAME"]), autocommit=True) as conn:
-            conn.execute(f'DROP DATABASE IF EXISTS "{name}" WITH (FORCE)')
+        drop_scratch_db(name)
 
 
 def _backup(home, *, check=True):

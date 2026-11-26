@@ -22,6 +22,18 @@ local restic repository: backup, restore drill into a scratch database,
 must fail the drill. Nothing here was run on real home hardware yet
 (owner step, Mac session M3).
 
+**Final for Phase 13 (`chore/p13-closeout`, 2026-11-20).** Branches 1–7
+and the closeout are on the integration branch: rooms and node labels,
+"which PC" resolution, per-node presence on the HUD and `/devices`, the
+Linux node (`node/friday-node-linux`), the Home Assistant entity
+allowlist with media and scene services, the home voice routes, and the
+four closeout preflight rows in step 12. The closeout e2e
+(`backend/ops/tests/test_home_hub_e2e.py`) runs two PCs against one live
+TLS server: the Python reference node standing in for the Mac, and the
+packaged Linux node. Your real box, your real PCs and a real restore from
+the off-site copy are still the owner's runs (M2/M3, pending owner
+evaluation).
+
 Placeholders used throughout: home subnet `192.168.1.0/24`, server address
 `192.168.1.20`, mDNS name `friday-home.local`, user `friday`. Replace them
 with your own values.
@@ -270,14 +282,28 @@ Every PC becomes a node of this server; none runs its own Friday.
 
 1. Open `https://friday-home.local/devices` on the PC, sign in as the
    owner.
-2. Mac: "Mac eşleştir" issues a LAN-only PIN; follow
+2. Mac: "Mac eşleştir" issues a LAN-only PIN (or, on the host,
+   `manage.py issue_pairing_code --node --strong`); follow
    `docs/runbooks/friday-node.md` (the Swift `friday-node`, Mac session).
-   Linux PC: after Phase 13 branch 4, follow
-   `node/friday-node-linux/README.md` (`friday-node-linux pair`).
-3. After Phase 13 branch 1: give each node a name, a room and a role on
-   `/devices` ("Çalışma odası MacBook", room `çalışma odası`, role
-   `workstation`). Names are what you say ("çalışma odasındaki Mac'te").
-4. `make preflight`: `node_link` lists every paired node.
+   Linux PC: follow `node/friday-node-linux/README.md`
+   (`friday-node-linux pair --server https://friday-home.local --ca
+   <your CA root> --code …`).
+   **Known gap:** `Caddyfile.example` sends every path except
+   `/ws/node/v1` to the BFF, and the BFF has no `/api/v1/nodes/pair` or
+   `/api/v1/auth/nodes/credential/rotate` route, so pairing and credential
+   rotation through the home Caddy fail until those two paths reach Django.
+   How they do (and which client IP PIN pairing then trusts) is an open
+   owner decision recorded in the Phase 13 brief (`chore/p13-closeout`
+   owner steps); decide it before pairing the first node on the real box.
+3. On `/settings/home`, create the rooms ("Çalışma odası", "Salon"). On
+   `/devices`, give each node a unique name, a room and a role, and add
+   aliases for short words you will really say ("iş bilgisayarı"). Names
+   and aliases are what "which PC" matches ("Masaüstünde testleri
+   çalıştır"). A bare "masaüstü" is not a role word; if you call a PC
+   that, make it the PC's name or alias.
+4. `make preflight`: `node_link` lists every paired node, and
+   `nodes_labels` passes once every node has a unique name and, with more
+   than one node, a room.
 
 ## 8. Nightly encrypted backups (pg_dump + age + restic)
 
@@ -484,3 +510,18 @@ timestamp that is not UTC or lies in the future, a dump name that is not
 warns on any other name it cannot resolve; the thresholds are the
 `HOME_BACKUP_*_HOURS` / `HOME_DRILL_*_DAYS` settings
 (`deploy/docker/.env.example`).
+
+The Phase 13 closeout adds `check_home_control` (read-only; one read of
+Home Assistant's states is its only outside contact):
+
+| Row | Pass | Warn | Fail |
+|---|---|---|---|
+| `nodes_labels` | every non-revoked node has a unique name; rooms are set when there is more than one node | no node paired, or a node without a room in a multi-node home | two nodes with the same name |
+| `ha_entities` | at least one enabled allowlisted entity, each inside the bridge's code maximum and present in Home Assistant | none allowlisted, HA not configured, an entity missing in HA or narrowed away by `HA_ALLOWED_DOMAINS` | an allowlisted entity outside the code maximum (a `NEVER_DOMAINS` or read-only domain, or a service the bridge does not offer), or HA unreachable |
+| `linux_node_vendor` | `node/friday-node-linux/vendor.lock` matches this backend's sources and the vendored copies | no `node/friday-node-linux` checkout on this host | drift (run `scripts/vendor.py` there) |
+| `node_protocol_frozen` | the node protocol files and `node/friday-voice/conformance.lock` hash to the Phase 12 closeout values (Phase 13 changes no protocol) | no `node/friday-voice` checkout (only the node half is checked) | any change since the Phase 12 closeout |
+
+The backend image ships no `node/` directory, so in the container
+`linux_node_vendor` and half of `node_protocol_frozen` warn. Set
+`PREFLIGHT_LINUX_NODE_DIR` / `PREFLIGHT_FRIDAY_VOICE_DIR` to a checkout to
+check them there, or run `make preflight` from the repository checkout.

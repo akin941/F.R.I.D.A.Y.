@@ -105,6 +105,16 @@ resolve only to loopback, RFC 1918, ULA or Tailscale CGNAT addresses, seam
 `friday-restore-drill.sh` write on the host) and `home_disk_encryption` (the
 owner's `HOME_FDE_CONFIRMED_ON` attestation).
 
+Phase 13 closeout adds `check_home_control` (read-only, no model call,
+nothing sent to a node): `nodes_labels` (unique node names per owner, rooms
+set in a multi-node home), `ha_entities` (every allowlisted Home Assistant
+entity inside the bridge's code maximum and still present in HA -- one
+read-only `ha_states` read, seam `ha_state_ids`), `linux_node_vendor`
+(`node/friday-node-linux/vendor.lock` against this backend, seam
+`linux_node_dir`) and `node_protocol_frozen` (the node protocol files and
+the `friday-voice` conformance lock hash to the Phase 12 closeout values:
+Phase 13 adds no protocol surface).
+
 Rules this module keeps:
 
 - Provider calls go through the single door (ADR-003): one minimal
@@ -3445,6 +3455,297 @@ def check_home():
     ]
 
 
+# --- Phase 13 closeout: labels, the HA allowlist, the Linux node, no protocol change
+
+# Boundary "no new protocol surface" (`node_protocol_frozen`): Phase 13 adds
+# no WS message, schema field or capability contract (ADR-013 and ADR-015
+# unchanged, ADR-017). The node protocol surface (schemas, vectors,
+# capability contracts, conformance cases and vectors) and
+# `node/friday-voice/conformance.lock`, hashed at the Phase 12 closeout
+# merge (7d2dee5, `chore/p12-closeout`). A later protocol change updates
+# these digests in the same branch as its ADR.
+NODE_PROTOCOL_GLOBS = (
+    "nodes/protocol/schemas/**/*.json",
+    "nodes/protocol/vectors/**/*.json",
+    "nodes/capabilities/**/*.json",
+    "nodes/conformance/cases/**/*.json",
+    "nodes/conformance/vectors/**/*.json",
+)
+PHASE12_NODE_PROTOCOL_SHA256 = "c30e06b779f660c9f5c06c51a3dac1b7d86b8ed45729f9c8a7d8259a4cd9b0fb"
+PHASE12_NODE_PROTOCOL_FILES = 196
+PHASE12_FRIDAY_VOICE_LOCK_SHA256 = (
+    "a9be6508206d1d779036119ddaf3ef2453f2333bb46166a6d9f093c0eae1ef29"
+)
+# D15 `linux_node_vendor`: the trees `node/friday-node-linux/scripts/
+# vendor.py` vendors whole (a test pins that both lists agree; the backend
+# imports nothing from the package, this check reads hashes only).
+LINUX_NODE_LOCK = "vendor.lock"
+LINUX_NODE_VENDOR = "friday_node_linux/_vendor"
+LINUX_NODE_VENDORED_TREES = (
+    "nodes/protocol",
+    "nodes/capabilities",
+    "nodes/reference/fixtures",
+    "integrations/node_reference/contracts",
+)
+_VENDOR_LOCK_LINE = re.compile(r"^([0-9a-f]{64})  ([0-9a-f]{64})  ([A-Za-z0-9_./-]+)$")
+_VENDOR_SKIP_PARTS = frozenset({"__pycache__", ".pytest_cache"})
+HA_OWNER_STEP = "owner step 5: allowlist entities on /connectors/home-assistant"
+
+
+def node_protocol_digest(backend=None):
+    """`(sha256, file count)` of the node protocol surface under `backend`
+    (default: this checkout's backend): sha256 over the sorted
+    `<sha256 of file>  <path>` lines of every `NODE_PROTOCOL_GLOBS` file."""
+    import hashlib
+
+    backend = Path(backend) if backend is not None else Path(settings.BASE_DIR).resolve()
+    files = sorted(
+        {
+            path.relative_to(backend).as_posix()
+            for pattern in NODE_PROTOCOL_GLOBS
+            for path in backend.glob(pattern)
+            if path.is_file()
+        }
+    )
+    digest = hashlib.sha256()
+    for relative in files:
+        digest.update(f"{_sha256_file(backend / relative)}  {relative}\n".encode())
+    return digest.hexdigest(), len(files)
+
+
+def linux_node_dir():
+    """The `node/friday-node-linux` checkout preflight hashes, or None when
+    this host has none (the backend image does not ship `node/`)."""
+    configured = getattr(settings, "PREFLIGHT_LINUX_NODE_DIR", "") or ""
+    path = (
+        Path(configured)
+        if configured
+        else Path(settings.BASE_DIR).resolve().parent / "node" / "friday-node-linux"
+    )
+    return path if path.is_dir() else None
+
+
+def ha_state_ids():
+    """The entity ids of one read-only `ha_states` read (the bridge's
+    `get_states` under the manifest's own pin, every domain the deployment
+    may read). Raises the bridge's `ConnectorError` (`not_configured`
+    without `HA_BASE_URL` / `HA_TOKEN`)."""
+    from connectors.bridges import home_assistant as bridge
+    from connectors.manifest import get_manifest
+
+    manifest = get_manifest("home_assistant")
+    (policy,) = [p for p in manifest.tools if p.server_tool == bridge.SERVER_TOOL_STATES]
+    result = bridge.call_tool(
+        manifest,
+        server_tool=bridge.SERVER_TOOL_STATES,
+        arguments={},
+        schema_sha256=policy.schema_sha256,
+        timeout=_timeout(),
+    )
+    return {entity["entity_id"] for entity in (result.structured or {}).get("entities", [])}
+
+
+def _label_list(values, limit=5):
+    values = sorted(values)
+    shown = ", ".join(values[:limit])
+    return shown + (f" (+{len(values) - limit} more)" if len(values) > limit else "")
+
+
+def _check_nodes_labels():
+    """D3/D15: per owner, every non-revoked node has a unique name (its
+    `name_key`), and rooms are set once the owner has more than one node --
+    what "which PC" resolves on. A node without a room in a multi-node home
+    is a `warn`; a duplicate `name_key` (pairing and `PATCH` prevent it) a
+    `fail`. Details carry node names and counts only."""
+    name = "nodes_labels"
+    active = _active_nodes()
+    if not active:
+        return CheckResult(name, WARN, "no node paired (pending owner evaluation, M2)")
+    by_owner = {}
+    for node, _status in active:
+        by_owner.setdefault(node.owner_id, []).append(node)
+    duplicates, roomless = [], []
+    for nodes in by_owner.values():
+        keys = Counter(node.name_key or node.name for node in nodes)
+        duplicates += [n.name for n in nodes if keys[n.name_key or n.name] > 1]
+        if len(nodes) > 1:
+            roomless += [n.name for n in nodes if n.room_id is None]
+    detail = f"{len(active)} node(s) of {len(by_owner)} owner(s)"
+    if duplicates:
+        return CheckResult(
+            name,
+            FAIL,
+            f"{detail}; duplicate names: {_label_list(duplicates)} "
+            "(rename on /devices: 'which PC' cannot tell them apart)",
+        )
+    if roomless:
+        return CheckResult(
+            name, WARN, f"{detail}; no room set: {_label_list(roomless)} (set it on /devices)"
+        )
+    return CheckResult(name, PASS, f"{detail}, names unique, rooms set")
+
+
+def _check_ha_entities():
+    """D11/D15: the owner's entity allowlist. Every enabled `HomeEntity`
+    stays inside the bridge's code maximum (never a `NEVER_DOMAINS` or
+    read-only domain, services a subset of `SERVICES`) -- else `fail` --
+    and still exists in Home Assistant (one read-only `ha_states` read,
+    seam `ha_state_ids`). None allowlisted, or HA not configured, is a
+    `warn`: no entity call is possible then (fail closed). Details carry
+    entity ids, codes and counts -- never a state, a token or a URL."""
+    from connectors.bridges import home_assistant as bridge
+    from connectors.mcp_client import ConnectorError
+    from connectors.models import HomeEntity
+
+    name = "ha_entities"
+    rows = list(HomeEntity.objects.filter(enabled=True).order_by("entity_id"))
+    if not rows:
+        return CheckResult(name, WARN, f"no entity allowlisted ({HA_OWNER_STEP})")
+    outside = [
+        f"{row.entity_id}={refusal}"
+        for row in rows
+        if (refusal := bridge.code_maximum_refusal(row.entity_id, row.services)) is not None
+    ]
+    if outside:
+        return CheckResult(
+            name, FAIL, f"outside the code maximum: {_label_list(outside)} (remove them)"
+        )
+    readable = bridge.read_domains()
+    narrowed = [r.entity_id for r in rows if bridge.entity_domain(r.entity_id) not in readable]
+    checked = [r.entity_id for r in rows if r.entity_id not in narrowed]
+    detail = f"{len(rows)} enabled entit{'y' if len(rows) == 1 else 'ies'}"
+    notes = []
+    if narrowed:
+        notes.append(f"narrowed away by HA_ALLOWED_DOMAINS: {_label_list(narrowed)}")
+    if checked:
+        try:
+            present = ha_state_ids()
+        except ConnectorError as exc:
+            status = WARN if exc.code == "not_configured" else FAIL
+            return CheckResult(name, status, f"{detail}; ha_states read failed: {exc.code}")
+        missing = [entity_id for entity_id in checked if entity_id not in present]
+        if missing:
+            notes.append(f"not found in Home Assistant: {_label_list(missing)}")
+    if notes:
+        return CheckResult(name, WARN, f"{detail}; " + "; ".join(notes))
+    return CheckResult(name, PASS, f"{detail}, each inside the code maximum and present in HA")
+
+
+def _read_vendor_lock(path):
+    """`{relative path: (source sha256, vendored sha256)}`, or None when a
+    line is malformed."""
+    entries = {}
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if not line.strip() or line.startswith("#"):
+            continue
+        match = _VENDOR_LOCK_LINE.match(line)
+        if match is None or ".." in match.group(3).split("/"):
+            return None
+        entries[match.group(3)] = (match.group(1), match.group(2))
+    return entries
+
+
+def _vendored_tree_files(backend):
+    return {
+        path.relative_to(backend).as_posix()
+        for tree in LINUX_NODE_VENDORED_TREES
+        for path in (backend / tree).rglob("*")
+        if path.is_file() and not _VENDOR_SKIP_PARTS & set(path.parts) and path.suffix != ".pyc"
+    }
+
+
+def _check_linux_node_vendor():
+    """D10/D15: `node/friday-node-linux/vendor.lock` against this backend --
+    every locked backend source unchanged, every vendored copy as locked,
+    no file of a vendored tree left out. Hashes only (the backend imports
+    nothing from the package; `scripts/vendor.py --check` is the CI step).
+    No checkout here is a `warn`."""
+    name = "linux_node_vendor"
+    root = linux_node_dir()
+    if root is None:
+        return CheckResult(name, WARN, "not checkable here (no node/friday-node-linux)")
+    lock = root / LINUX_NODE_LOCK
+    if not lock.is_file():
+        return CheckResult(name, FAIL, f"{LINUX_NODE_LOCK} missing (run scripts/vendor.py)")
+    entries = _read_vendor_lock(lock)
+    if not entries:
+        return CheckResult(name, FAIL, f"{LINUX_NODE_LOCK} is malformed or empty")
+    backend = Path(settings.BASE_DIR).resolve()
+    vendor = root / LINUX_NODE_VENDOR
+    drift = []
+    for relative, (source_sha, copy_sha) in entries.items():
+        source = backend / relative
+        if not source.is_file() or _sha256_file(source) != source_sha:
+            drift.append(f"backend/{relative}")
+        copy = vendor / relative
+        if not copy.is_file() or _sha256_file(copy) != copy_sha:
+            drift.append(f"_vendor/{relative}")
+    left_out = _vendored_tree_files(backend) - set(entries)
+    drift += [f"backend/{relative} (not vendored)" for relative in left_out]
+    if drift:
+        return CheckResult(
+            name,
+            FAIL,
+            f"drift against {LINUX_NODE_LOCK}: {_label_list(drift)} (run scripts/vendor.py)",
+        )
+    return CheckResult(name, PASS, f"{len(entries)} vendored file(s) match {LINUX_NODE_LOCK}")
+
+
+def _check_node_protocol_frozen():
+    """Boundary "no new protocol surface": the node protocol files and the
+    `friday-voice` conformance lock hash to the Phase 12 closeout values
+    (`node_conformance` and `friday_voice_conformance` prove the files are
+    current; this row proves they did not move). Without a
+    `node/friday-voice` checkout its half is skipped (a `warn`)."""
+    name = "node_protocol_frozen"
+    digest, count = node_protocol_digest()
+    problems = []
+    if digest != PHASE12_NODE_PROTOCOL_SHA256:
+        problems.append(
+            f"the node protocol surface changed ({count} files, was "
+            f"{PHASE12_NODE_PROTOCOL_FILES}; sha256 {digest[:12]})"
+        )
+    root = friday_voice_dir()
+    if root is not None:
+        lock = root / FRIDAY_VOICE_LOCK
+        if not lock.is_file():
+            problems.append(f"node/friday-voice/{FRIDAY_VOICE_LOCK} missing")
+        elif _sha256_file(lock) != PHASE12_FRIDAY_VOICE_LOCK_SHA256:
+            problems.append(f"node/friday-voice/{FRIDAY_VOICE_LOCK} changed")
+    if problems:
+        return CheckResult(
+            name,
+            FAIL,
+            "; ".join(problems) + " since the Phase 12 closeout (a protocol change needs an ADR)",
+        )
+    if root is None:
+        return CheckResult(
+            name,
+            WARN,
+            f"{count} node protocol files unchanged since the Phase 12 closeout; "
+            "friday-voice lock not checkable here (no node/friday-voice)",
+        )
+    return CheckResult(
+        name,
+        PASS,
+        f"{count} node protocol files and the friday-voice lock unchanged since the "
+        "Phase 12 closeout",
+    )
+
+
+def check_home_control():
+    """Phase 13 closeout (D15), read-only: `nodes_labels`, `ha_entities`,
+    `linux_node_vendor` and `node_protocol_frozen`. One `ha_states` read is
+    the only outside contact; nothing is sent to a node, no model is called
+    and nothing is written."""
+    return [
+        _guarded("nodes_labels", _check_nodes_labels),
+        _guarded("ha_entities", _check_ha_entities),
+        _guarded("linux_node_vendor", _check_linux_node_vendor),
+        _guarded("node_protocol_frozen", _check_node_protocol_frozen),
+    ]
+
+
 CHECKS = (
     ("web", check_web),
     ("bff", check_bff),
@@ -3467,6 +3768,7 @@ CHECKS = (
     ("n8n", check_n8n),
     ("skills", check_skills),
     ("home", check_home),
+    ("home_control", check_home_control),
 )
 
 

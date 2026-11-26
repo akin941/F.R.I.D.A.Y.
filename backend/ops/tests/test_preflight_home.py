@@ -116,11 +116,12 @@ def _row(name):
 # --- registration -----------------------------------------------------------
 
 
-def test_the_home_checks_are_registered_last_and_report_five_rows(home, resolver):
+def test_the_home_checks_are_registered_after_skills_and_report_five_rows(home, resolver):
     resolver["table"]["web"] = ["172.18.0.5"]
     resolver["table"]["localhost"] = ["127.0.0.1", "::1"]
     names = [name for name, _ in preflight.CHECKS]
-    assert names[-1] == "home"
+    # The closeout's `home_control` rows follow (test_preflight_home_control).
+    assert names[-2:] == ["home", "home_control"]
     assert ("home", preflight.check_home) in preflight.CHECKS
     results = preflight.run_preflight(checks=(("home", preflight.check_home),))
     assert [r.name for r in results] == HOME_ROWS
