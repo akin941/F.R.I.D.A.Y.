@@ -1338,6 +1338,27 @@ Owner steps (pending) — `feat/p13-node-targeting`, recorded 2026-11-20:
    plus `nodes/tests/test_targeting.py` and
    `tools/tests/test_one_node_invariant.py` (server side).
 
+Known follow-ups — `feat/p13-node-targeting` (unresolved LOW review notes,
+recorded at merge into `integ/phase-13` 2026-11-26):
+1. **Formatter reflow churn in `node-action.tsx`.** The diff of
+   `frontend/src/components/approvals/renderers/node-action.tsx` carries
+   large prettier-style reflow hunks (import lists, JSX wrapping) next to
+   the semantic change (`nodeHeader`, the node row). Harmless, but it makes
+   review harder. Fix: revert the reflow-only hunks, or confirm the repo's
+   frontend formatter produces this output so later diffs stay minimal.
+2. **`node: <name>` footer outside the size accounting
+   (`backend/tools/node_reads.py`).** The line is appended after
+   `report.render()` applied its size and truncation accounting, so
+   `audit.size` and `truncated` exclude it (by at most about 50 bytes).
+   Fix: add the line before rendering, or document that the size excludes
+   the footer.
+3. **Named node read sent anyway (`backend/nodes/targeting.py`).** A named
+   node that is offline or lacks the capability is still sent the read so
+   its own chain row records the outcome, while the resolver returns
+   `Refused` (the documented deviation above; safe: that node only, no
+   fall-through). Keep it; add a one-line comment next to `_SENT_ANYWAY`
+   (`backend/tools/node_reads.py`) pointing at the test that pins it.
+
 **Minimum usable cut** if the phase runs long: 7 (the home server is safe
 and backed up), 1 and 2 (several PCs, the right one each time). 3 adds
 presence, 4 the Linux node, 5–6 the TV.
