@@ -17,6 +17,7 @@
 // another thread.
 
 import Foundation
+import os
 
 public enum CloseCode {
     public static let normal = 1000
@@ -252,8 +253,15 @@ public final class NodeRunner: @unchecked Sendable {
 
     public var onStatus: ((Status) -> Void)?
     public private(set) var status: Status = .notPaired {
-        didSet { if status != oldValue { let s = status; DispatchQueue.main.async { self.onStatus?(s) } } }
+        didSet {
+            guard status != oldValue else { return }
+            let s = status
+            // Local, never uploaded, no secret or frame content (D13 item 8).
+            Self.log.info("status: \(String(describing: s), privacy: .public)")
+            DispatchQueue.main.async { self.onStatus?(s) }
+        }
     }
+    private static let log = Logger(subsystem: "dev.friday.friday-node", category: "runner")
 
     public init(store: CredentialStore, readers: ReadProvider, clock: NodeClock = SystemClock()) {
         self.store = store
@@ -267,8 +275,14 @@ public final class NodeRunner: @unchecked Sendable {
             self.running = true
             do {
                 self.credential = try self.store.load()
+                Self.log.info("credential: \(self.credential == nil ? "none" : "present", privacy: .public)")
+            } catch CredentialError.keychain(let code) {
+                Self.log.error("credential: keychain error \(code, privacy: .public)")
+                self.status = .error("keychain \(code)")
+                return
             } catch {
-                self.status = .error("keychain")
+                Self.log.error("credential: unreadable")
+                self.status = .error("credential")
                 return
             }
             guard let credential = self.credential else {
