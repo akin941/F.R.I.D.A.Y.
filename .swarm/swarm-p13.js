@@ -1,6 +1,6 @@
 export const meta = {
   name: 'friday-swarm-p13-home-hub',
-  description: 'Friday 3.0 phases 9, 8B, 10, 11, 12 (server side; Mac/Swift parts deferred to a Mac session): brief per phase, Sonnet review loop per branch, serialized merge+test+push',
+  description: 'Phase 13 home hub (ADR-016, home server runbook, multi-node, Linux node, Home Assistant media control): brief, Sonnet review loop per branch, serialized merge+test+push',
   phases: [
     { title: 'Implement', detail: 'brief writer, then one worktree agent per branch' },
     { title: 'Review', detail: 'independent Sonnet reviewer until APPROVE (max 3 rounds)' },
