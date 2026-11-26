@@ -101,6 +101,71 @@ jobs:
           uv run python manage.py seed_ai_defaults
           uv run python manage.py memory_eval baseline --set public --retrieval-only
 
+  # Phase 13 branch 7 (brief D14): the home server's backup and restore
+  # drill scripts, shellcheck-clean, run for real against this job's
+  # Postgres with a throwaway age key and a LOCAL restic repository (no
+  # network, never a bucket). FRIDAY_HOME_OPS=1 turns the module's
+  # "tools missing" skip into a failure.
+  home-ops:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: friday
+          POSTGRES_PASSWORD: friday
+          POSTGRES_DB: friday
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U friday -d friday"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgres://friday:friday@localhost:5432/friday
+      REDIS_URL: redis://localhost:6379/0
+      FRIDAY_HOME_OPS: "1"
+    steps:
+      - uses: actions/checkout@v4
+
+      # Ubuntu 24.04's own packages: postgresql-client is 16 (the service's
+      # major version), age 1.1, restic 0.16.
+      - name: Install age, restic, shellcheck and the Postgres client
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q age restic shellcheck postgresql-client-16
+          pg_dump --version
+
+      - name: Shellcheck the home scripts
+        working-directory: deploy/home
+        run: shellcheck -x friday-backup.sh friday-restore-drill.sh
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      - name: Backup -> restore drill round trip, compose guard, home preflight rows
+        run: >-
+          uv run pytest ops/tests/test_home_backup_restore.py
+          ops/tests/test_compose_no_public_ports.py ops/tests/test_preflight_home.py
+
   # Phase 11 branch 2 (brief D6, D7, D16): the node voice child. Its own
   # pyproject/uv.lock; imports nothing from backend/. No real model, mic,
   # server or network beyond localhost in any step.
