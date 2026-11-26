@@ -260,9 +260,7 @@ def _home_control(turn: WakeTurn) -> RouteResult | None:
     from tools.home_ports import OUTCOME_DRAFT, resolve_home_command
     from tools.registry import list_tool_names
 
-    resolution = resolve_home_command(
-        workspace=turn.workspace, actor=turn.actor, text=turn.content
-    )
+    resolution = resolve_home_command(workspace=turn.workspace, actor=turn.actor, text=turn.content)
     if resolution is None:
         return None
     if resolution.outcome != OUTCOME_DRAFT:

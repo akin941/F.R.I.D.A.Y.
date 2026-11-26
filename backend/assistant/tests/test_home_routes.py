@@ -19,6 +19,7 @@ import json
 from types import SimpleNamespace
 
 import pytest
+from django.core.exceptions import ImproperlyConfigured
 
 from ai_core.models import ModelUsage
 from approvals.models import ApprovalRequest
@@ -40,7 +41,6 @@ from connectors.tests.n8n_chat_fixtures import (  # noqa: F401 -- fixtures
     voice,
 )
 from core.speech import phrase_key
-from django.core.exceptions import ImproperlyConfigured
 from workspaces.models import Room, Workspace, WorkspaceMember
 
 pytestmark = pytest.mark.django_db
@@ -394,3 +394,10 @@ def test_home_control_takes_no_alias(owner, workspace):
         create_wake_alias(
             actor=owner, channel="web", workspace=workspace, route=HOME_ROUTE_NAME, phrase="ev"
         )
+
+
+def test_the_home_parsers_wake_strip_tables_equal_the_wake_routes():
+    from connectors import home_phrases
+
+    assert home_phrases.WAKE_PHRASES == wake_routes.WAKE_PHRASES
+    assert home_phrases.TRAILING_FILLERS == wake_routes.TRAILING_FILLERS

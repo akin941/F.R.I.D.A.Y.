@@ -93,13 +93,6 @@ def test_the_vectors_cover_the_briefs_examples():
         assert example in inputs
 
 
-def test_the_wake_strip_tables_equal_the_assistants():
-    from assistant import wake_routes
-
-    assert home_phrases.WAKE_PHRASES == wake_routes.WAKE_PHRASES
-    assert home_phrases.TRAILING_FILLERS == wake_routes.TRAILING_FILLERS
-
-
 def test_a_source_keeps_the_owners_spelling_without_its_ending():
     entities, rooms = _vector_vocabulary()
     for text, source in (
@@ -160,6 +153,7 @@ def test_every_mapped_service_is_inside_the_code_maximum():
 
 
 # --- the resolver (DB) --------------------------------------------------------
+
 
 @pytest.fixture(autouse=True)
 def ha_settings(settings):

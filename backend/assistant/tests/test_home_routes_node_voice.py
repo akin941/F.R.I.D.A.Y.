@@ -27,7 +27,12 @@ from ai_core.models import ModelUsage
 from approvals.models import ApprovalRequest
 from assistant.models import Message
 from assistant.services import create_conversation
-from assistant.tests.test_home_routes import DRAFT_REPLY, TURN_ON_TV, ha_settings, home  # noqa: F401
+from assistant.tests.test_home_routes import (  # noqa: F401
+    DRAFT_REPLY,
+    TURN_ON_TV,
+    ha_settings,
+    home,
+)
 from connectors.tests.conftest import committed, enable  # noqa: F401
 from connectors.tests.fake_home_assistant import allow, ha  # noqa: F401
 from connectors.tests.n8n_chat_fixtures import (  # noqa: F401 -- fixtures

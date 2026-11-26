@@ -120,9 +120,7 @@ def check_draft(tool_name, *, workspace, actor, arguments, source_text):
     if fn is None:
         return None
     try:
-        refusal = fn(
-            workspace=workspace, actor=actor, arguments=arguments, source_text=source_text
-        )
+        refusal = fn(workspace=workspace, actor=actor, arguments=arguments, source_text=source_text)
     except Exception as exc:  # noqa: BLE001 -- fail closed: no draft
         logger.warning("draft check for %s failed: %s", tool_name, type(exc).__name__)
         return CHECK_FAILED_REPLY
