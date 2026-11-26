@@ -32,7 +32,10 @@ from django.db import transaction
 from django.utils import timezone
 
 from accounts.devices import DeviceTrustError, enroll_node_device, node_device_refusal
+from accounts.models import TrustedDevice
 from audit.services import record_audit
+from core.owner_web import OwnerWebRequired, require_owner_web
+from core.speech import phrase_key
 from core.unattended import deny_if_unattended
 from nodes import audit_chain, bus
 from nodes.action_rules import actor_is_node_owner, workspace_refusal
@@ -59,7 +62,15 @@ from nodes.protocol.messages import (
     ProtocolError,
 )
 from nodes.protocol.signing import KeyRing, build_invoke
-from workspaces.models import Workspace
+from workspaces.models import Room, Workspace
+from workspaces.rooms import (
+    LabelConflict,
+    LabelInvalid,
+    LabelUnknownRoom,
+    clean_aliases,
+    clean_label,
+    label_keys,
+)
 
 SUPPORTED_PROTOCOL_VERSIONS = frozenset({PROTOCOL_VERSION})
 logger = logging.getLogger(__name__)
@@ -89,9 +100,177 @@ class PairingResult:
         }
 
 
-def pair_node(*, raw_code, node_name, protocol_versions, client_ip=None, user_agent=""):
+# --- node labels (Phase 13 D3) ---
+
+NODE_NAME_MAX_CHARS = 100
+DEFAULT_NODE_NAMES = {
+    Node.Platform.MACOS: "Mac düğümü",
+    Node.Platform.LINUX: "Linux düğümü",
+    Node.Platform.WINDOWS: "Windows düğümü",
+}
+NODE_RELABELLED_EVENT = "nodes.relabelled"
+# A node whose device is refused for one of these reasons keeps its labels
+# reserved: the kill switch is released without re-pairing, so a name freed
+# while it is engaged would come back as a duplicate. Revoked and expired
+# nodes (re-pairing is the only way back) free their labels.
+_LABEL_HOLDING_REFUSALS = frozenset({None, "kill_switch"})
+
+
+class NodeLabelPermissionDenied(Exception):
+    """Not the node's owner over the web (`core.owner_web` codes)."""
+
+    def __init__(self, message, code="owner_required"):
+        self.code = code
+        super().__init__(message)
+
+
+def holds_labels(node, now=None) -> bool:
+    """Whether `node`'s name and aliases are reserved: it is usable, or cut
+    off only by the kill switch."""
+    return node_device_refusal(node.device, now) in _LABEL_HOLDING_REFUSALS
+
+
+def _lock_owner_nodes(owner):
+    """Lock the owner's node rows (after the personal workspace row, which
+    is what actually serializes label writes: it exists before the first
+    node does)."""
+    list(Node.objects.select_for_update().filter(owner=owner).values_list("pk", flat=True))
+
+
+def taken_label_keys(owner, *, exclude_pk=None, now=None) -> set:
+    """Every name and alias key of `owner`'s label-holding nodes."""
+    now = now or timezone.now()
+    keys = set()
+    nodes = Node.objects.filter(owner=owner).select_related("device", "device__user")
+    for node in nodes.exclude(pk=exclude_pk):
+        if holds_labels(node, now):
+            keys |= label_keys(node.name_key or phrase_key(node.name), node.aliases)
+    return keys
+
+
+def _suffixed(name, n):
+    tail = f" {n}"
+    return name[: NODE_NAME_MAX_CHARS - len(tail)].rstrip() + tail
+
+
+def unique_node_name(name, taken) -> tuple[str, str]:
+    """`(name, key)`: `name`, or "name 2", "name 3", ... -- the first whose
+    key is not in `taken`."""
+    key = phrase_key(name)
+    base, n = name, 2
+    while key in taken:
+        name = _suffixed(base, n)
+        key = phrase_key(name)
+        n += 1
+    return name, key
+
+
+_UNSET = object()
+
+
+def relabel_node(*, actor, node, channel, name=_UNSET, room_id=_UNSET, role=_UNSET, aliases=_UNSET):
+    """Set a node's owner labels (Phase 13 D3): name, room, role, aliases.
+    The node's owner over the web only (`require_owner_web` on the node's
+    personal workspace). Labels are server-side data: **nothing is sent to
+    the node** (no bus message; its next `hello` is unaffected).
+
+    Rules: the name is 1-100 characters with a non-empty key; aliases as
+    `workspaces.rooms.clean_aliases`; the name key and every alias key are
+    unique across the owner's label-holding nodes (names and aliases
+    together; an alias may not repeat this node's own name), checked under
+    the personal-workspace lock pairing also takes; the room must be a room
+    of the node's workspace (None clears it); the role one of `Node.Role`;
+    `platform` is never editable. Audited `nodes.relabelled` with the
+    changed fields and old/new keys and ids (never free text beyond keys).
+    A no-op writes nothing. Returns the fresh node."""
+    try:
+        require_owner_web(actor=actor, workspace=node.workspace, channel=channel)
+    except OwnerWebRequired as exc:
+        raise NodeLabelPermissionDenied(str(exc), code=exc.code) from exc
+    if str(node.owner_id) != str(getattr(actor, "pk", "")):
+        raise NodeLabelPermissionDenied("Only the node's owner can label it.")
+    with transaction.atomic():
+        Workspace.objects.select_for_update().filter(pk=node.workspace_id).first()
+        _lock_owner_nodes(node.owner)
+        locked = Node.objects.select_related("device", "room", "workspace").get(pk=node.pk)
+        new_name, new_key = locked.name, locked.name_key or phrase_key(locked.name)
+        if name is not _UNSET:
+            new_name, new_key = clean_label(name, max_chars=NODE_NAME_MAX_CHARS)
+        new_aliases = list(locked.aliases or [])
+        if aliases is not _UNSET:
+            new_aliases, _ = clean_aliases(aliases)
+        alias_keys = [phrase_key(alias) for alias in new_aliases]
+        if new_key in alias_keys:
+            raise LabelConflict("An alias repeats the node's name.")
+        if name is not _UNSET or aliases is not _UNSET:
+            taken = taken_label_keys(locked.owner, exclude_pk=locked.pk)
+            if taken & {new_key, *alias_keys}:
+                raise LabelConflict("Another node already uses this name or alias.")
+        new_room = locked.room
+        if room_id is not _UNSET:
+            new_room = None
+            if room_id is not None:
+                new_room = Room.objects.filter(pk=room_id, workspace=locked.workspace).first()
+                if new_room is None:
+                    raise LabelUnknownRoom("Unknown room.")
+        new_role = locked.role
+        if role is not _UNSET:
+            if role not in Node.Role.values:
+                raise LabelInvalid("Unknown role.")
+            new_role = role
+
+        changed, metadata = [], {"node_id": str(locked.pk)}
+        if new_name != locked.name:
+            metadata.update(old_key=locked.name_key, new_key=new_key)
+            locked.name, locked.name_key = new_name, new_key
+            changed += ["name", "name_key"]
+        if new_aliases != list(locked.aliases or []):
+            metadata["alias_keys"] = alias_keys
+            locked.aliases = new_aliases
+            changed.append("aliases")
+        if new_room != locked.room:
+            metadata.update(
+                old_room_id=str(locked.room_id) if locked.room_id else "",
+                new_room_id=str(new_room.pk) if new_room else "",
+            )
+            locked.room = new_room
+            changed.append("room")
+        if new_role != locked.role:
+            metadata.update(old_role=locked.role, new_role=new_role)
+            locked.role = new_role
+            changed.append("role")
+        if not changed:
+            return locked
+        locked.save(update_fields=[*changed, "updated_at"])
+        if "name" in changed:
+            TrustedDevice.objects.filter(pk=locked.device_id).update(name=locked.name)
+        metadata["fields"] = sorted(set(changed) - {"name_key"})
+        record_audit(
+            action=NODE_RELABELLED_EVENT,
+            actor=actor,
+            workspace=locked.workspace,
+            resource=locked,
+            metadata=metadata,
+        )
+    return locked
+
+
+def pair_node(
+    *,
+    raw_code,
+    node_name,
+    protocol_versions,
+    client_ip=None,
+    user_agent="",
+    platform=Node.Platform.MACOS,
+):
     """Pair a Friday Node with a node pairing code (D4). Returns a
     PairingResult (the `jnd_` secret is in it once and stored nowhere).
+
+    Phase 13 D3: `platform` (macos / linux / windows, default macos so the
+    Swift app pairs unchanged) is recorded once; a name that another
+    label-holding node of the owner already answers to is suffixed
+    ("MacBook 2"), never refused.
 
     Order: the signing key and the protocol version are checked first, so a
     server that could not sign (or speak v1) consumes no code. Then
@@ -104,6 +283,12 @@ def pair_node(*, raw_code, node_name, protocol_versions, client_ip=None, user_ag
     keyring = signing_keyring()
     if not SUPPORTED_PROTOCOL_VERSIONS & set(protocol_versions or ()):
         raise UnsupportedProtocolVersion()
+    if platform not in Node.Platform.values:
+        raise ValueError(f"unknown node platform {platform!r}")
+    # Phase 13 D3: a blank or key-less name gets the platform's default.
+    node_name = " ".join(str(node_name or "").split())
+    if not phrase_key(node_name):
+        node_name = DEFAULT_NODE_NAMES[platform]
 
     refusal = None
     with transaction.atomic():
@@ -120,13 +305,26 @@ def pair_node(*, raw_code, node_name, protocol_versions, client_ip=None, user_ag
             # commit, not roll back with this transaction.
             refusal = exc
         else:
-            workspace = Workspace.objects.get(owner=device.user, type=Workspace.Type.PERSONAL)
+            workspace = Workspace.objects.select_for_update().get(
+                owner=device.user, type=Workspace.Type.PERSONAL
+            )
+            _lock_owner_nodes(device.user)
+            # Phase 13 D3: a duplicate name is suffixed ("MacBook 2"),
+            # never refused (pairing must not fail on a label).
+            name, name_key = unique_node_name(
+                device.name[:NODE_NAME_MAX_CHARS], taken_label_keys(device.user)
+            )
+            if name != device.name:
+                TrustedDevice.objects.filter(pk=device.pk).update(name=name)
+                device.name = name
             node = Node.objects.create(
                 id=device.pk,
                 device=device,
                 owner=device.user,
                 workspace=workspace,
-                name=device.name,
+                name=name,
+                name_key=name_key,
+                platform=platform,
                 protocol_version=PROTOCOL_VERSION,
                 pinned_key_id=keyring.key_id,
             )
@@ -136,6 +334,9 @@ def pair_node(*, raw_code, node_name, protocol_versions, client_ip=None, user_ag
                 workspace=workspace,
                 resource=node,
                 metadata={
+                    "node_id": str(node.pk),
+                    "name_key": name_key,
+                    "platform": platform,
                     "pinned_key_id": keyring.key_id,
                     "protocol_version": PROTOCOL_VERSION,
                     "client_ip": client_ip or "",

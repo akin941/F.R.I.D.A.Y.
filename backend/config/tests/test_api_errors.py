@@ -46,12 +46,14 @@ from skills.services import SkillServiceError
 from tasks.services import TaskServiceError
 from voice.services import VoiceServiceError
 from workspaces.models import Workspace, WorkspaceMember
+from workspaces.rooms import LabelError
 from workspaces.services import WorkspacePermissionDenied
 
 PASSWORD = "Str0ngDevPass!42"
 
 _DOMAIN_BASES = [
     AgentServiceError,
+    LabelError,
     ApprovalServiceError,
     ConnectorServiceError,
     DeployServiceError,

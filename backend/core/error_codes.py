@@ -115,6 +115,12 @@ DOMAIN_ERROR_CODES = frozenset(
         "wake_alias.invalid_length",
         "wake_alias.conflict",
         "wake_alias.limit",
+        # Rooms and node labels (Phase 13 branch 1, D2/D3).
+        "label.invalid",
+        "label.limit",
+        "label.conflict",
+        "label.unknown_room",
+        "room.in_use",
         "workspace.permission_denied",
     }
 )
