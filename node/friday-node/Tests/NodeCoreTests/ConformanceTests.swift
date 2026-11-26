@@ -195,16 +195,10 @@ final class ConformanceTests: XCTestCase {
     /// scrubber). Kept as an explicit, empty list so a future gap must be
     /// named here rather than skipped silently.
     static let pendingM2: Set<String> = []
-    /// B4 owner-turn readers: the folded 8B owner-turn cases that need a
-    /// reader (runbook A12 added the two contracts; this node advertises
-    /// them `not_granted` until runbook B4). Their schema and `not_granted`
-    /// cases already pass and are not listed.
-    static let pendingB4: Set<String> = Set(["claude", "codex"].flatMap { tool in
-        [
-            "only", "since_exactly_7_days", "since_older_than_7_days", "max_turns_truncates",
-            "max_sessions_truncates",
-        ].map { "v1_read_\(tool)_owner_turns_\($0)" }
-    })
+    /// B4 owner-turn readers: none pending since runbook B4 (the Swift
+    /// owner-turn readers serve every folded 8B case). Kept as an explicit,
+    /// empty list like `pendingM2`.
+    static let pendingB4: Set<String> = []
     static var pending: Set<String> { pendingM2.union(pendingB4) }
 
     func testEveryV1CaseMatchesTheReferenceNode() throws {

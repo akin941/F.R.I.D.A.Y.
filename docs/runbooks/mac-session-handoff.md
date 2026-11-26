@@ -890,26 +890,32 @@ build N** with `scripts/build-sign-local.sh`, then do C4.
 Needs: B2, A12 (for the live half). Spec: Phase 8B brief "Mac session
 (deferred)" M1, D13 (owner-turn rules), D17.
 
-- [ ] `Sources/NodeCore/Readers/ClaudeOwnerTurns.swift` and
-      `CodexOwnerTurns.swift` (streaming JSONL, D13 rules); catalogue
-      entries `claude.transcripts.owner_turns` and
-      `codex.transcripts.owner_turns` with schemas loaded from, or checked
-      byte-identical to, `backend/nodes/capabilities/v1/` (before A12 they
-      are in `backend/integrations/node_reference/contracts/v1/`; use
-      whichever the merged tree has).
-- [ ] `Tests/NodeCoreTests/OwnerTurnReaderTests.swift` over the reference
-      fixtures (`backend/nodes/reference/fixtures/{claude,codex}/`, or
-      `backend/integrations/node_reference/fixtures/` before A12), output
-      compared to `expected_owner_turns.json`.
-- [ ] Availability `not_granted` until the Touch ID grant; revoke gives
-      `not_granted` at once plus `grant.availability_changed`.
+- [x] `Sources/NodeCore/Readers/ClaudeOwnerTurns.swift` and
+      `CodexOwnerTurns.swift` (streaming JSONL, D13 rules; shared half in
+      `OwnerTurns.swift`); catalogue entries `claude.transcripts.owner_turns`
+      and `codex.transcripts.owner_turns` with schemas byte-identical to
+      `backend/nodes/capabilities/v1/` (the vendored copies,
+      `vendor_protocol.py --check`). Done 2026-11-27.
+- [x] `Tests/NodeCoreTests/OwnerTurnReaderTests.swift` over the reference
+      fixtures (`backend/nodes/reference/fixtures/owner_turns/`), output
+      compared to `backend/nodes/conformance/vectors/owner_turns.json` (the
+      A12 name of `expected_owner_turns.json`), plus a synthetic home pinned
+      against the Python reference. Done 2026-11-27.
+- [x] Availability `not_granted` until the Touch ID grant; revoke gives
+      `not_granted` at once plus `grant.availability_changed` (the reads
+      follow the `claude` / `codex` directory grants). Done 2026-11-27.
 - [ ] Real-file verification, never committed: the debug-only
       `friday-node scrub-preview --owner-turns ~/.claude/projects/<one project>`
-      (and the Codex equivalent) prints counts per line kind and per
-      excluded marker, never text. A line kind not covered by D13 → stop,
+      (and `--codex <dir>`) prints counts per line kind and per excluded
+      marker, never text. A line kind not covered by D13 → stop,
       update D13 + fixtures + reference readers + cases in one server
       branch, re-run. The owner skims the first 20 accepted turns and
-      confirms they are text the owner typed.
+      confirms they are text the owner typed. **2026-11-27: the command
+      exists and was run once on this repo's Claude project and on
+      `~/.codex/sessions` (counts only); it found accepted Claude turns
+      that start with `<task-notification>` (14) and `<bash-input>` (1),
+      which no D13 marker covers: the server branch and the owner skim
+      are still open (Phase 8B brief, M1 implementation record).**
 
 **Server-side contract tests it must pass:** every case in
 `backend/nodes/conformance/cases/v1/` (with the owner-turn cases) offline

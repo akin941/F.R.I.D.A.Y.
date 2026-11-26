@@ -573,6 +573,92 @@ def test_a_canonical_size_cut_marks_the_owner_turn_result_truncated(home):
     assert len(outcome.output["sessions"]) < 2
 
 
+def _interleaved_output():
+    """Two sessions whose turns interleave in time: dropping the last
+    session whole would drop `b-1` (09:01) and keep `a-2` (09:02)."""
+    return {
+        "sessions": [
+            {
+                "session_id": "cc-a",
+                "cwd": "~/work/acme",
+                "turns": [
+                    {"turn_id": "a-1", "at": "2026-11-29T09:00:00.000Z", "text": "x" * 40},
+                    {"turn_id": "a-2", "at": "2026-11-29T09:02:00.000Z", "text": "x" * 40},
+                ],
+            },
+            {
+                "session_id": "cc-b",
+                "cwd": "~/work/acme",
+                "turns": [
+                    {"turn_id": "b-1", "at": "2026-11-29T09:01:00.000Z", "text": "x" * 40},
+                    {"turn_id": "b-2", "at": "2026-11-29T09:03:00.000Z", "text": "x" * 40},
+                ],
+            },
+        ],
+        "next_since": "2026-11-29T09:03:00.000Z",
+        "truncated": False,
+    }
+
+
+def _dropped_and_kept(original, fitted):
+    kept = {t["turn_id"] for s in fitted["sessions"] for t in s["turns"]}
+    every = [t for s in original["sessions"] for t in s["turns"]]
+    dropped = [t for t in every if t["turn_id"] not in kept]
+    return dropped, [t for t in every if t["turn_id"] in kept]
+
+
+@pytest.mark.parametrize("limit", [200, 300, 400, 500])
+def test_a_canonical_size_cut_never_moves_the_cursor_past_a_dropped_turn(home, limit):
+    """Review follow-up (A12): `_fit` drops the newest turns first and
+    recomputes `next_since` from the turns left, so every dropped turn is
+    at or after it (the next pull, `at >= since`, returns it again)."""
+    from nodes.protocol.canonical import canonicalize
+    from nodes.reference.readers import _fit_owner_turns
+
+    readers = _readers(home)
+    original = _interleaved_output()
+    small = dataclasses.replace(readers.contracts[CLAUDE], max_result_bytes=limit)
+    readers.contracts = {**readers.contracts, CLAUDE: small}
+    fitted, truncated = readers._fit(CLAUDE, original)
+    assert truncated is True and fitted["truncated"] is True
+    assert len(canonicalize(fitted)) <= limit or not fitted["sessions"]
+    dropped, kept = _dropped_and_kept(original, fitted)
+    assert dropped, "the limit must force a cut"
+    assert all(t["at"] >= fitted["next_since"] for t in dropped)
+    if kept:
+        assert fitted["next_since"] == max(t["at"] for t in kept)
+    assert all(s["turns"] for s in fitted["sessions"])
+    assert fitted == _fit_owner_turns(original, limit)
+
+
+def test_the_canonical_cut_keeps_the_oldest_turns_across_sessions(home):
+    from nodes.protocol.canonical import canonicalize
+
+    original = _interleaved_output()
+    readers = _readers(home)
+    # Room for exactly the three oldest turns (a-1, b-1, a-2).
+    three = {
+        **original,
+        "sessions": [
+            {**original["sessions"][0]},
+            {**original["sessions"][1], "turns": original["sessions"][1]["turns"][:1]},
+        ],
+        "next_since": "2026-11-29T09:02:00.000Z",
+        "truncated": True,
+    }
+    limit = len(canonicalize(three))
+    small = dataclasses.replace(readers.contracts[CLAUDE], max_result_bytes=limit)
+    readers.contracts = {**readers.contracts, CLAUDE: small}
+    fitted, _ = readers._fit(CLAUDE, original)
+    assert fitted == three
+
+
+def test_an_owner_turn_result_within_the_bound_is_not_cut(home):
+    readers = _readers(home)
+    original = _interleaved_output()
+    assert readers._fit(CLAUDE, original) == (original, False)
+
+
 # --- scrub ----------------------------------------------------------------------------------
 
 

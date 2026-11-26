@@ -1,5 +1,6 @@
-// The node's readers for eight of the ten v1 read capabilities (Phase 9 brief M2,
-// D7, D13 items 5-6): a port of backend/nodes/reference/readers.py
+// The node's readers for the ten v1 read capabilities (Phase 9 brief M2, D7,
+// D13 items 5-6; Phase 8B brief D13, D17 for the two owner-turn reads,
+// runbook B4): a port of backend/nodes/reference/readers.py
 // `Readers`, whose module docstring states the normative rules:
 //
 // 1. never tool results or file contents (counts only);
@@ -9,7 +10,8 @@
 //    not returned (its row dropped, a `model` nulled);
 // 4. bounded (files, bytes per file and line, rows not matching the
 //    result schema dropped, output cut to `max_result_bytes`, oldest turns
-//    or last rows first, marked `truncated`);
+//    or last rows first, marked `truncated`; an owner-turn result loses its
+//    newest turns first and its `next_since` is recomputed, OwnerTurns.swift);
 // 5. `cwd` in `~/` form under the home, absolute elsewhere; Unix seconds;
 // 6. nothing cached, copied or logged: every call re-reads.
 //
@@ -18,11 +20,15 @@
 // runs) and the reader refuses too (defence in depth).
 //
 // The two Phase 8B owner-turn reads (`claude.transcripts.owner_turns`,
-// `codex.transcripts.owner_turns`, server contracts since runbook A12) have
-// no Swift reader yet (runbook B4 ports
-// backend/nodes/reference/owner_turns.py). Their family, "owner_turns", is
-// always advertised `not_granted`, whatever the directory grants, so the
-// node never claims a capability it cannot serve; `read` refuses them too.
+// `codex.transcripts.owner_turns`; ClaudeOwnerTurns.swift,
+// CodexOwnerTurns.swift, OwnerTurns.swift port
+// backend/nodes/reference/owner_turns.py) follow the `claude` / `codex`
+// directory grants like the other transcript reads: `not_granted` until the
+// owner's Touch ID grant, and a revoke is `not_granted` at once (the policy
+// change rebuilds the readers and `NodeSession.update` sends
+// `grant.availability_changed`). Their `cwd` is reported in the form of the
+// prefix that matched and their times are RFC 3339 strings, not rules 2
+// and 5's display form and Unix seconds.
 
 import Foundation
 
@@ -41,9 +47,11 @@ public final class NodeReaders: ReadProvider, @unchecked Sendable {
         "claude.sessions.list": "claude", "claude.sessions.read": "claude", "usage.ccusage": "claude",
         "codex.threads.list": "codex", "codex.threads.read": "codex", "git.status": "git",
         "apps.frontmost": "desktop", "windows.list": "desktop",
-        // No reader until runbook B4: always `not_granted` (see the header).
-        "claude.transcripts.owner_turns": "owner_turns", "codex.transcripts.owner_turns": "owner_turns",
+        // Phase 8B D13: the owner-turn reads, behind the same directory grants.
+        "claude.transcripts.owner_turns": "claude", "codex.transcripts.owner_turns": "codex",
     ]
+
+    static let ownerTurnCapabilities: Set<String> = ["claude.transcripts.owner_turns", "codex.transcripts.owner_turns"]
 
     let home: String
     let claudeRoot: String
@@ -81,7 +89,6 @@ public final class NodeReaders: ReadProvider, @unchecked Sendable {
             case "claude": out[name] = grants.claude ? "granted" : "not_granted"
             case "codex": out[name] = grants.codex ? "granted" : "not_granted"
             case "git": out[name] = (repos?.isEmpty == false) ? "granted" : "not_granted"
-            case "owner_turns": out[name] = "not_granted"  // runbook B4 adds the readers
             default: out[name] = "granted"
             }
         }
@@ -105,15 +112,24 @@ public final class NodeReaders: ReadProvider, @unchecked Sendable {
             case "git.status": output = try gitStatus(args, now: now)
             case "apps.frontmost": output = try appsFrontmost(args, now: now)
             case "windows.list": output = try windowsList(args, now: now)
+            case "claude.transcripts.owner_turns", "codex.transcripts.owner_turns":
+                output = try ownerTurns(capability, args, now: now)
             default: return .failure
             }
         } catch {
             return .failure
         }
-        guard let (fitted, truncated) = try? fit(capability, output),
-            let contract = CapabilityContract.all.first(where: { $0.name == capability }),
-            Schema.isValid(fitted, against: contract.resultSchema)
+        guard var (fitted, truncated) = try? fit(capability, output),
+            let contract = CapabilityContract.all.first(where: { $0.name == capability })
         else { return .failure }
+        if Self.ownerTurnCapabilities.contains(capability), var fields = fitted.objectValue {
+            // The owner-turn result carries its own flag; a cut by `fit` (a
+            // canonical size over the reader's own budget) sets it too.
+            truncated = truncated || fields["truncated"] == .bool(true)
+            fields["truncated"] = .bool(truncated)
+            fitted = .object(fields)
+        }
+        guard Schema.isValid(fitted, against: contract.resultSchema) else { return .failure }
         return .success(fitted, truncated: truncated)
     }
 
@@ -140,11 +156,15 @@ public final class NodeReaders: ReadProvider, @unchecked Sendable {
     // MARK: Bounding
 
     /// Cut `output` to the contract's `max_result_bytes`: turns from the
-    /// oldest, other rows from the end (usage totals recomputed).
+    /// oldest, other rows from the end (usage totals recomputed); an
+    /// owner-turn result by `fitOwnerTurns`.
     func fit(_ capability: String, _ output: JSONValue) throws -> (JSONValue, Bool) {
         guard let contract = CapabilityContract.all.first(where: { $0.name == capability }) else { throw ReaderError() }
         let limit = Int(contract.maxResultBytes)
         if try JSON.canonical(output).count <= limit { return (output, false) }
+        if Self.ownerTurnCapabilities.contains(capability) {
+            return (try Self.fitOwnerTurns(output, limit: limit), true)
+        }
         guard let key = ["turns", "sessions", "threads", "by_project", "windows"].first(where: { output[$0] != nil }),
             var rows = output[key]?.arrayValue, var fields = output.objectValue
         else { throw ReaderError() }
