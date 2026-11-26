@@ -1470,7 +1470,7 @@ showing the voice state and a pending approval deep link.
 
 ### Closeout — implementation notes (2026-11-20, `chore/p6-closeout`)
 
-Cut from the local integration branch `claude/inspiring-franklin-pw7avo`
+Cut from the local integration branch `claude/inspiring-franklin-pw7avo` (former repository)
 (branches 1, 2, 3, 4 and 5 merged; **branch 3a is not on it** -- see A9).
 
 - **Preflight voice checks (A7)** in `backend/ops/preflight.py`:

@@ -589,6 +589,13 @@ HomeEntity(WorkspaceScopedModel, TimestampedModel)       # connectors
   time (`validate`), at request time and again as the execution
   precondition (`target_present` grows the allowlist check), so removing
   an entity cancels a pending approval's execution (`connector_changed`).
+- **Wake-on-LAN is not an entity call.** `wake_on_lan.send_magic_packet`
+  takes no `entity_id` (`CallServiceArguments` rejects one); it stays
+  governed by `HA_WOL_ALLOWED_MACS` alone, needs no `HomeEntity`, and is
+  gate-class and otherwise unchanged. An empty entity allowlist therefore
+  does not disable WoL, and an allowlisted entity never widens the MAC
+  list (pinned by branch 5's `test_ha_allowlist_gate.py`; resolved
+  follow-up 1, 2026-11-26).
 - **Fail closed for existing installs:** an empty allowlist means no HA
   call is possible. The `ha_entities` preflight row (D15, closeout) warns
   "no entity allowlisted"; the branch notes and
@@ -631,7 +638,11 @@ plug.
   `STATES_PIN` and the manifest `version` (1 → 2) change in the same
   reviewed commit; `docs/mcp/home-assistant.md` and the allowlist doc are
   updated (MCP governance).
-- **Classification: every call stays gate-class** — an `ApprovalRequest`
+- **Classification: every call stays gate-class** (superseded for one
+  narrow class on 2026-11-26: ADR-018 lets owner-flagged `media_player`
+  entities run play/pause/stop/volume calls directly — Phase 13b,
+  `docs/prompts/phase-13b-home-decisions/brief.md`; everything else below
+  is unchanged) — an `ApprovalRequest`
   decided on `/approvals`, executed at most once, state read back. The
   approval dialog (`request_rows`) shows room, label, entity id, service
   and data, plus the live current state.
@@ -1119,15 +1130,15 @@ evaluation".
 
 | # | Branch | Scope | Depends on | Status |
 |---|---|---|---|---|
-| brief | `docs/p13-brief` | This brief (full; the owner decision of 2026-11-26 kept as goal, scope and boundary; no stub existed), ADR-017 (Accepted 2026-11-26; numbered 017 because ADR-016 is taken), `docs/runbooks/home-server-setup.md`, MASTER_PLAN §AA row 13 + §O d11, `docs/runbooks/mac-session-handoff.md` Part E, `backend/assistant/self_sources.json` regenerated (`build_self_sources --check`) | Phase 12 closeout | **implemented 2026-11-20** (swarm date stamp; content per the owner decision of 2026-11-26; docs only; awaits the independent Sonnet 5 plan review to APPROVE) |
-| 1 | `feat/p13-node-registry` | `workspaces.Room`, node name/room/role/platform/aliases, pairing `platform`, node `PATCH`, per-node audit API, `core.speech`, `/settings/home`, `/devices` edit + audit tab | brief approved | **implemented 2026-11-20** (swarm date stamp; see "Branch 1 notes"; awaits the independent Sonnet 5 review) |
-| 2 | `feat/p13-node-targeting` | `nodes.targeting.resolve_target`, `last_active_at`, `ToolCallContext`, read tools and node-action proposals on the resolver, ask template, one-node invariant, approval card node header, ADR-013 note | 1 | **implemented 2026-11-20** (swarm date stamp; see "Branch 2 notes"; awaits the independent Sonnet 5 review) |
-| 3 | `feat/p13-hud-presence` | `node_presence`, HUD `nodes` section + `HudNodesPanel`, `/devices` overview columns | 1 (parallel with 2) | **implemented 2026-11-20** (swarm date stamp; see "Branch 3 notes"; server and web only, nothing needs the Mac; the real two-PC HUD run is part of M2, pending owner evaluation; awaits the independent Sonnet 5 review) |
-| 4 | `feat/p13-linux-node` | `node/friday-node-linux` (vendored + locked, read-only, local policy CLI, credential file, systemd user unit, re-point), CI conformance job, Windows stub README | 1 (pairing `platform`) | **implemented 2026-11-20** (`node/friday-node-linux`: vendored reference node + `vendor.lock`, v1 read-only daemon, 0600 policy + TTY-confirmed CLI, 0600 credential + TLS pins + rotation, re-point, hook relay + spool, systemd user unit; 50/50 v1 conformance cases over real localhost TLS; `linux-node` CI job; Windows stub; see "Branch notes and owner steps (pending) — `feat/p13-linux-node`"; real Linux PC: M2, pending owner evaluation) |
-| 5 | `feat/p13-ha-home-control` | `connectors.HomeEntity` allowlist, media_player power/source/mute/volume steps, `source_list`, manifest v2 pins, entity editor, governance docs | 1 (rooms) | **implemented 2026-11-20** (see "Branch 5 notes"; fail closed: no HA entity call until the owner allowlists entities; awaits the independent Sonnet 5 review) |
-| 6 | `feat/p13-home-voice-routes` | `connectors.home_phrases`, `home.control` wake route (proposal only), typed-turn mismatch check, vectors, ADR-015 note | 2, 5 | **implemented 2026-11-20** (see "Branch 6 notes"; no model call, no HA request, no approval from the route; typed `target_mismatch`; e2e with the reference voice host + real `friday-voice run` child; real mic/Whisper: M2, pending owner evaluation; awaits the independent Sonnet 5 review) |
-| 7 | `feat/p13-home-server-ops` | `compose.home.yml`, `deploy/home/` backup/drill/timer/Caddy, `home_*` preflight rows and settings | brief approved (independent) | **implemented 2026-11-20** (compose override + `make up-home`, `deploy/home/` scripts/units/Caddyfile, `check_home` five rows, settings + `.env.example`, `home-ops` CI job, runbook updated; real hardware: M3, pending owner evaluation) |
-| 8 | `chore/p13-closeout` | `nodes_labels` / `ha_entities` / `linux_node_vendor` rows, no-protocol-change check, home-hub e2e, runbooks, ADR-017 note, MASTER_PLAN row, `self_sources.json`, go/no-go record | 1–7 | **implemented 2026-11-20** (`check_home_control`: `nodes_labels`, `ha_entities`, `linux_node_vendor`, `node_protocol_frozen`; `ops/tests/test_home_hub_e2e.py` on one live TLS server with the reference node v2 and the packaged Linux node; runbooks final; ADR-017 closeout note; MASTER_PLAN row 13 "server side done; go/no-go pending owner evaluation"; see "Branch notes and owner steps (pending) — `chore/p13-closeout`"; awaits the independent Sonnet 5 review) |
+| brief | `docs/p13-brief` | This brief (full; the owner decision of 2026-11-26 kept as goal, scope and boundary; no stub existed), ADR-017 (Accepted 2026-11-26; numbered 017 because ADR-016 is taken), `docs/runbooks/home-server-setup.md`, MASTER_PLAN §AA row 13 + §O d11, `docs/runbooks/mac-session-handoff.md` Part E, `backend/assistant/self_sources.json` regenerated (`build_self_sources --check`) | Phase 12 closeout | **implemented 2026-11-26** (content per the owner decision of 2026-11-26; docs only; awaits the independent Sonnet 5 plan review to APPROVE) |
+| 1 | `feat/p13-node-registry` | `workspaces.Room`, node name/room/role/platform/aliases, pairing `platform`, node `PATCH`, per-node audit API, `core.speech`, `/settings/home`, `/devices` edit + audit tab | brief approved | **implemented 2026-11-26** (see "Branch 1 notes"; awaits the independent Sonnet 5 review) |
+| 2 | `feat/p13-node-targeting` | `nodes.targeting.resolve_target`, `last_active_at`, `ToolCallContext`, read tools and node-action proposals on the resolver, ask template, one-node invariant, approval card node header, ADR-013 note | 1 | **implemented 2026-11-26** (see "Branch 2 notes"; awaits the independent Sonnet 5 review) |
+| 3 | `feat/p13-hud-presence` | `node_presence`, HUD `nodes` section + `HudNodesPanel`, `/devices` overview columns | 1 (parallel with 2) | **implemented 2026-11-26** (see "Branch 3 notes"; server and web only, nothing needs the Mac; the real two-PC HUD run is part of M2, pending owner evaluation; awaits the independent Sonnet 5 review) |
+| 4 | `feat/p13-linux-node` | `node/friday-node-linux` (vendored + locked, read-only, local policy CLI, credential file, systemd user unit, re-point), CI conformance job, Windows stub README | 1 (pairing `platform`) | **implemented 2026-11-26** (`node/friday-node-linux`: vendored reference node + `vendor.lock`, v1 read-only daemon, 0600 policy + TTY-confirmed CLI, 0600 credential + TLS pins + rotation, re-point, hook relay + spool, systemd user unit; 50/50 v1 conformance cases over real localhost TLS; `linux-node` CI job; Windows stub; see "Branch notes and owner steps (pending) — `feat/p13-linux-node`"; real Linux PC: M2, pending owner evaluation) |
+| 5 | `feat/p13-ha-home-control` | `connectors.HomeEntity` allowlist, media_player power/source/mute/volume steps, `source_list`, manifest v2 pins, entity editor, governance docs | 1 (rooms) | **implemented 2026-11-26** (see "Branch 5 notes"; fail closed: no HA entity call until the owner allowlists entities; awaits the independent Sonnet 5 review) |
+| 6 | `feat/p13-home-voice-routes` | `connectors.home_phrases`, `home.control` wake route (proposal only), typed-turn mismatch check, vectors, ADR-015 note | 2, 5 | **implemented 2026-11-26** (see "Branch 6 notes"; no model call, no HA request, no approval from the route; typed `target_mismatch`; e2e with the reference voice host + real `friday-voice run` child; real mic/Whisper: M2, pending owner evaluation; awaits the independent Sonnet 5 review) |
+| 7 | `feat/p13-home-server-ops` | `compose.home.yml`, `deploy/home/` backup/drill/timer/Caddy, `home_*` preflight rows and settings | brief approved (independent) | **implemented 2026-11-26** (compose override + `make up-home`, `deploy/home/` scripts/units/Caddyfile, `check_home` five rows, settings + `.env.example`, `home-ops` CI job, runbook updated; real hardware: M3, pending owner evaluation) |
+| 8 | `chore/p13-closeout` | `nodes_labels` / `ha_entities` / `linux_node_vendor` rows, no-protocol-change check, home-hub e2e, runbooks, ADR-017 note, MASTER_PLAN row, `self_sources.json`, go/no-go record | 1–7 | **implemented 2026-11-26** (`check_home_control`: `nodes_labels`, `ha_entities`, `linux_node_vendor`, `node_protocol_frozen`; `ops/tests/test_home_hub_e2e.py` on one live TLS server with the reference node v2 and the packaged Linux node; runbooks final; ADR-017 closeout note; MASTER_PLAN row 13 "server side done; go/no-go pending owner evaluation"; see "Branch notes and owner steps (pending) — `chore/p13-closeout`"; awaits the independent Sonnet 5 review) |
 | M1 | Swift `friday-node`: pairing `platform`, server re-point | Send `platform: "macos"` at pairing; "Sunucu adresini değiştir" behind Touch ID keeping the pins; conformance unchanged | 1 merged; Phase 9 B1 | deferred: Mac session |
 | M2 | Multi-node and home-route run on real hardware | Real mic "which PC" and "salondaki TV'yi aç" on the Mac; Mac + real Linux PC paired to the real home server; HUD presence | 2, 3, 4, 6 merged; M1; Phase 11 B7 | deferred: Mac session (pending owner evaluation) |
 | M3 | Home server on the owner's home PC | Runbook steps 1–9 on real hardware: LUKS, reservation, Caddy + private CA, ufw, backup to the chosen off-site target, first restore drill (and one from off-site) | 7 merged | deferred: owner hardware (pending owner evaluation) |
@@ -1141,7 +1152,7 @@ every app it touches (`makemigrations --check --dry-run` green, no merge
 migrations). 2 and 3 may be developed concurrently but merge one at a
 time (both touch `nodes/selectors.py`). 4 and 7 are independent of 2/3/5.
 
-### Branch 1 notes — `feat/p13-node-registry` (implemented 2026-11-20)
+### Branch 1 notes — `feat/p13-node-registry` (implemented 2026-11-26)
 
 What landed (all server side and web; nothing needs the Mac):
 - `core/speech.py` (stdlib only): `normalize_speech`, `match_key` (moved;
@@ -1204,7 +1215,7 @@ Deviations recorded:
   first pairings cannot both take "MacBook".
 - An alias may not repeat the node's (or room's) own name.
 
-Owner steps (pending) — `feat/p13-node-registry`, recorded 2026-11-20:
+Owner steps (pending) — `feat/p13-node-registry`, recorded 2026-11-26:
 1. Have the independent Sonnet 5 review of this branch reach APPROVE.
 2. After merge and `migrate` on the real server: check `/devices` for any
    node the data step renamed ("MacBook 2") and relabel it as wanted;
@@ -1235,7 +1246,7 @@ recorded at merge into `integ/phase-13` 2026-11-26):
    expression index on `AuditLog.metadata`, or narrow by a time window or
    `resource_id` before the OR (the closeout measurement under D8).
 
-### Branch 2 notes — `feat/p13-node-targeting` (implemented 2026-11-20)
+### Branch 2 notes — `feat/p13-node-targeting` (implemented 2026-11-26)
 
 What landed (all server side and web; nothing needs the Mac, no protocol
 change):
@@ -1323,7 +1334,7 @@ Deviations recorded:
   found (the request is the evidence), before the STT call; a failing
   writer never fails the transcription.
 
-Owner steps (pending) — `feat/p13-node-targeting`, recorded 2026-11-20:
+Owner steps (pending) — `feat/p13-node-targeting`, recorded 2026-11-26:
 1. Have the independent Sonnet 5 review of this branch reach APPROVE.
 2. After merge on the real server: give each PC a room and, where a short
    word is natural, an alias on `/devices` (e.g. "medya bilgisayarı"
@@ -1359,7 +1370,7 @@ recorded at merge into `integ/phase-13` 2026-11-26):
    fall-through). Keep it; add a one-line comment next to `_SENT_ANYWAY`
    (`backend/tools/node_reads.py`) pointing at the test that pins it.
 
-### Branch 3 notes — `feat/p13-hud-presence` (implemented 2026-11-20)
+### Branch 3 notes — `feat/p13-hud-presence` (implemented 2026-11-26)
 
 What landed (server side and web; nothing needs the Mac, no migration):
 - `nodes.selectors.node_presence(owner, *, now=None)` (and
@@ -1427,7 +1438,7 @@ Deviations recorded:
   panel's axe check (`color-contrast` disabled in jsdom; the HUD tokens are
   checked by `tokens.test.ts`). No new package is downloaded.
 
-Owner steps (pending) — `feat/p13-hud-presence`, recorded 2026-11-20:
+Owner steps (pending) — `feat/p13-hud-presence`, recorded 2026-11-26:
 1. Have the independent Sonnet 5 review of this branch reach APPROVE.
 2. M2 (pending owner evaluation): with the MacBook and the Linux desktop
    paired to the real home server, open `/hud` and check the "Düğümler"
@@ -1465,7 +1476,7 @@ recorded at merge into `integ/phase-13` 2026-11-26):
   `nodes/tests/test_node_presence.py` and `hud/tests/test_nodes_section.py`,
   updated). Unifying the two helpers is a later cleanup.
 
-### Branch 5 notes — `feat/p13-ha-home-control` (implemented 2026-11-20)
+### Branch 5 notes — `feat/p13-ha-home-control` (implemented 2026-11-26)
 
 What landed (all server side and web; nothing needs the Mac or a real HA —
 every test runs against the `httpx.MockTransport` fake):
@@ -1549,7 +1560,7 @@ Deviations recorded:
   import contracts; wake `tool.*` routes are built from the same tool
   registry and are covered by it).
 
-Owner steps (pending) — `feat/p13-ha-home-control`, recorded 2026-11-20:
+Owner steps (pending) — `feat/p13-ha-home-control`, recorded 2026-11-26:
 1. Have the independent Sonnet 5 review of this branch reach APPROVE
    (it widens the HA contract: manifest v2, new pins).
 2. After merge and `migrate`: **every HA entity call is refused until the
@@ -1586,7 +1597,7 @@ integration merge 2026-11-26):
    action needed: the registry-walk test pins that only `home_entities`
    writes the table.
 
-### Branch 6 notes — `feat/p13-home-voice-routes` (implemented 2026-11-20)
+### Branch 6 notes — `feat/p13-home-voice-routes` (implemented 2026-11-26)
 
 What landed (server side and a shared-vector vitest; nothing needs the Mac,
 a real HA or a real model):
@@ -1664,7 +1675,7 @@ Deviations recorded:
 - The draft reply is Friday's fixed text (no chat completion), unlike the
   `tool.*` routes, so the home route costs no model call.
 
-Owner steps (pending) — `feat/p13-home-voice-routes`, recorded 2026-11-20:
+Owner steps (pending) — `feat/p13-home-voice-routes`, recorded 2026-11-26:
 1. Have the independent Sonnet 5 review of this branch reach APPROVE.
 2. After branch 5's allowlist is filled (labels/aliases the way you speak:
    e.g. TV with alias "televizyon", the ceiling light with "ışık"; rooms
@@ -1787,13 +1798,13 @@ wrong PC; a restore drill from the off-site backup has passed."
 
 | Item | How it is measured | Result |
 |---|---|---|
-| Resolution rules (explicit, origin, last active, ask) | branch 2 resolver table | pass in CI (branch 2 `nodes/tests/test_targeting.py`; the closeout e2e runs explicit, ask and origin against a live server and the real `friday-voice` child, 2026-11-20); real mic is M2 |
-| One node per invocation; no broadcast | branch 2 invariant test + closeout e2e | pass in CI (`tools/tests/test_one_node_invariant.py`; closeout e2e: each named read reaches that PC only, the MacBook action runs on the MacBook only while the Linux node is connected, 2026-11-20) |
+| Resolution rules (explicit, origin, last active, ask) | branch 2 resolver table | pass in CI (branch 2 `nodes/tests/test_targeting.py`; the closeout e2e runs explicit, ask and origin against a live server and the real `friday-voice` child, 2026-11-26); real mic is M2 |
+| One node per invocation; no broadcast | branch 2 invariant test + closeout e2e | pass in CI (`tools/tests/test_one_node_invariant.py`; closeout e2e: each named read reaches that PC only, the MacBook action runs on the MacBook only while the Linux node is connected, 2026-11-26) |
 | Linux node conformance | branch 4 CI job | pass in CI (branch 4: 50/50 v1 cases over real localhost TLS, `linux-node` job; the closeout e2e pairs and runs the packaged daemon); the real Linux PC is M2 |
 | HA entity allowlist fail-closed; media/scene gate-class | branch 5 tests | pass in CI (branch 5 `connectors/tests/test_ha_allowlist_gate.py`, `test_ha_media.py`; closeout e2e: a non-allowlisted entity is never drafted or called; `ha_entities` preflight row); the real TV is M2 |
-| Home voice routes propose only | branch 6 tests + closeout e2e | pass in CI (branch 6; closeout e2e: "salondaki TV'yi aç" by voice is a card only, then one HA call after the web approval, state read back, 2026-11-20); real mic is M2 |
-| Backup → restore round trip; no public port in any compose file | branch 7 tests | pass in CI (branch 7, 2026-11-20: `ops/tests/test_home_backup_restore.py` against a scratch Postgres + local restic repo, `test_compose_no_public_ports.py`); the real box is M3 |
-| No protocol change in Phase 13 | `node_protocol_frozen` (closeout) | pass (2026-11-20: the 196 node protocol files and `node/friday-voice/conformance.lock` hash to the Phase 12 closeout values, merge `7d2dee5`) |
+| Home voice routes propose only | branch 6 tests + closeout e2e | pass in CI (branch 6; closeout e2e: "salondaki TV'yi aç" by voice is a card only, then one HA call after the web approval, state read back, 2026-11-26); real mic is M2 |
+| Backup → restore round trip; no public port in any compose file | branch 7 tests | pass in CI (branch 7, 2026-11-26: `ops/tests/test_home_backup_restore.py` against a scratch Postgres + local restic repo, `test_compose_no_public_ports.py`); the real box is M3 |
+| No protocol change in Phase 13 | `node_protocol_frozen` (closeout) | pass (2026-11-26: the 196 node protocol files and `node/friday-voice/conformance.lock` hash to the Phase 12 closeout values, merge `7d2dee5`) |
 | Two weeks on the home server, ≥ 2 PCs, zero wrong-node chain rows | M2 + `verify_node_audit_chain` + owner review of `/devices` audit | pending owner evaluation |
 | Restore drill from off-site passed | M3 `drill.json` | pending owner evaluation |
 | Real-mic "which PC" and home routes | M2 | pending owner evaluation (Mac session) |
@@ -1880,6 +1891,12 @@ DNS, bucket or hardware in tests.
   Recommended: **no** for Phase 13. Gate-class per ADR-008 decision 3 /
   ADR-009; revisit after two weeks of real use with the approval count
   from `/approvals` history, and only through an ADR amendment.
+  **Decided by the owner on 2026-11-26, overriding the recommendation:**
+  a direct-execute class (no card, no click) for `media_player`
+  play/pause/play_pause/stop/volume services on entities the owner flags
+  "direct" — ADR-018, Phase 13b
+  (`docs/prompts/phase-13b-home-decisions/brief.md`). Every other HA call
+  stays gate-class as decided here.
 - **Q2 — Last-active window?** Recommended: 15 minutes
   (`NODE_LAST_ACTIVE_WINDOW_SECONDS=900`), confirmed by the owner in the
   plan review.
@@ -1889,11 +1906,15 @@ DNS, bucket or hardware in tests.
 - **Q4 — Linux credential storage: file vs Secret Service?** Recommended:
   0600 file now (works headless, testable here); Secret Service as a later
   option if the owner runs the node on a desktop session.
-- **Q5 — Off-site target?** Recommended: Cloudflare R2 (S3 API, no egress
+- **Q5 — Off-site target?** *(Resolved 2026-11-26: Cloudflare R2 is the
+  default — Phase 13b D2.)* Recommended: Cloudflare R2 (S3 API, no egress
   fees for restores) but any restic backend works; a second local disk is
   acceptable until chosen, recorded as "off-site pending".
-- **Q6 — TPM auto-unlock for LUKS?** Recommended: the owner decides; the
-  runbook documents the trade-off. Default: passphrase at boot.
+- **Q6 — TPM auto-unlock for LUKS?** *(Resolved 2026-11-26: TPM
+  auto-unlock with PCR 7 and an off-server recovery key; the residual is
+  owner-accepted in ADR-017 — Phase 13b D3.)* Recommended: the owner
+  decides; the runbook documents the trade-off. Default: passphrase at
+  boot.
 
 ## Owner steps (pending) — recorded 2026-11-26
 
@@ -1914,7 +1935,7 @@ accounts or judgement):
 7. After two weeks on the home server with two PCs: record the go/no-go
    rows.
 
-### Owner steps (pending) — `docs/p13-brief`, recorded 2026-11-20
+### Owner steps (pending) — `docs/p13-brief`, recorded 2026-11-26
 
 1. Start the independent Sonnet 5 plan review of this brief (and of
    ADR-017 and `docs/runbooks/home-server-setup.md`, written in the same
@@ -1933,7 +1954,7 @@ accounts or judgement):
 Nothing in this branch needs the Mac, real credentials, paid calls or real
 hardware: it is documentation only.
 
-### Branch notes and owner steps (pending) — `feat/p13-home-server-ops`, recorded 2026-11-20
+### Branch notes and owner steps (pending) — `feat/p13-home-server-ops`, recorded 2026-11-26
 
 **What landed.** `deploy/docker/compose.home.yml` (HOME_* settings into
 web and worker; the `status/` subdirectory of the backup directory, which
@@ -2012,7 +2033,7 @@ recorded at merge into `integ/phase-13` 2026-11-26):
    not verified). Acceptable as is; optionally fail on unresolved names
    once the home box is running.
 
-### Branch notes and owner steps (pending) — `feat/p13-linux-node`, recorded 2026-11-20
+### Branch notes and owner steps (pending) — `feat/p13-linux-node`, recorded 2026-11-26
 
 **What landed.** `node/friday-node-linux/` (own uv project, Python 3.12,
 exact pins `cryptography==50.0.1`, `jsonschema==4.26.0`, `wsproto==1.3.2` —
@@ -2177,7 +2198,7 @@ recorded at merge into `integ/phase-13` 2026-11-26):
    tests passed). Fix: confirm the first CI run on the branch is green; no
    code change unless it fails.
 
-### Branch notes and owner steps (pending) — `chore/p13-closeout`, recorded 2026-11-20
+### Branch notes and owner steps (pending) — `chore/p13-closeout`, recorded 2026-11-26
 
 **What landed.**
 - **Preflight** (`ops/preflight.py`, `check_home_control`, registered
@@ -2268,7 +2289,7 @@ recorded at merge into `integ/phase-13` 2026-11-26):
   admits. That is a security decision for the owner (owner step 2 below),
   documented in the runbooks; nothing in the repo pretends it works.
 
-**Owner steps (pending) — `chore/p13-closeout`, recorded 2026-11-20.**
+**Owner steps (pending) — `chore/p13-closeout`, recorded 2026-11-26.**
 1. Have the independent Sonnet 5 review of this branch reach APPROVE.
 2. Decide how node pairing and credential rotation reach Django through
    the home Caddy before pairing the first node on the real box. Options:
@@ -2297,30 +2318,22 @@ These came out of the plan review and were not fixed before merge into
 `integ/phase-13`. Each is to be resolved in a docs branch or by the branch
 that implements the affected decision.
 
-1. **D11 / branch 5 — Wake-on-LAN vs the entity allowlist.** D11 says
-   `ha_call_service` is refused unless `entity_id` is an enabled
-   `HomeEntity`, but the existing bridge's `wake_on_lan` service takes no
-   entity (`CallServiceArguments` rejects `entity_id` for WoL and uses
-   `HA_WOL_ALLOWED_MACS`). Fix: state in D11 and the branch 5 tests that WoL
-   stays governed by `HA_WOL_ALLOWED_MACS` (no `HomeEntity`), gate-class and
-   unchanged; add a test that WoL still works with an empty entity
-   allowlist and still needs an allowlisted MAC.
-2. **D6 / Risks — `last_active_at` is node-controlled.** (Resolved in
-   branch 2: Risks row added; pinned by `nodes/tests/test_targeting.py`.)
-   It is bumped from
-   node-relayed hook events, so a compromised node could keep itself "last
-   active" and win rule 3 for un-named requests. The mitigations hold
-   (approval card names the node, the node's own confirmation window,
-   explicit mention beats everything) but are not listed in Risks and no
-   test covers them. Fix: add a Risks row; add a test that a node bumping
-   `last_active_at` cannot change an explicit or origin resolution;
-   optionally cap hook-driven bumps to nodes whose catalogue has the
-   capability.
-3. **Branch table / MASTER_PLAN row — mixed dates.** The brief row says
-   "implemented 2026-11-20 (swarm date stamp)" and the owner steps are
-   headed "recorded 2026-11-20", while the owner decision and ADR are dated
-   2026-11-26. Fix: use 2026-11-26 consistently, or drop the "swarm date
-   stamp" remark.
+1. **D11 / branch 5 — Wake-on-LAN vs the entity allowlist.** *(Resolved
+   2026-11-26 on `docs/p13b-brief`: D11 now states that WoL takes no entity,
+   stays on `HA_WOL_ALLOWED_MACS`, is gate-class and unchanged, and works
+   with an empty entity allowlist; branch 5 already pins it in
+   `connectors/tests/test_ha_allowlist_gate.py`.)*
+2. **D6 / Risks — `last_active_at` is node-controlled.** *(Resolved: the
+   Risks row "A compromised node keeps itself 'last active'" was added in
+   branch 2 and is pinned by `nodes/tests/test_targeting.py::test_a_node_bumping_last_active_cannot_change_an_explicit_or_origin_resolution`;
+   confirmed present on 2026-11-26 on `docs/p13b-brief`.)* The optional
+   cap of hook-driven bumps is not taken.
+3. **Branch table / owner steps — mixed dates.** *(Resolved 2026-11-26 on
+   `docs/p13b-brief`: every Phase 13 status and owner-step stamp in this
+   brief, ADR-017's closeout note, the runbook and the MASTER_PLAN row now
+   say 2026-11-26, and the "swarm date stamp" remarks are dropped. Dates
+   of other phases and of the 2026-11-20 platform-boundary decision are
+   unchanged.)*
 4. **ADR number.** The task spec asked for ADR-016, but ADR-016 already
    exists (Phase 12 proactive runs), so this is ADR-017; the deviation is
    documented in the ADR, this brief, MASTER_PLAN d11 and the handoff, and

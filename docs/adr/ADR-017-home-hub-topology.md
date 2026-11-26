@@ -128,7 +128,7 @@ gateway at home, and the owner's personal memory outside the house.
 - **One server per PC, synchronised.** Rejected: two primary copies of
   memory and approvals contradict ADR-005 and the single audit chain.
 
-## Implementation notes — Phase 13 closeout (`chore/p13-closeout`, 2026-11-20)
+## Implementation notes — Phase 13 closeout (`chore/p13-closeout`, 2026-11-26)
 
 What the server side of this ADR now consists of (branches 1–7 and the
 closeout, all on the integration branch). Nothing here was run on the

@@ -9,7 +9,7 @@ firewall, nightly encrypted off-site backups with a restore drill,
 upgrades, and the later move to a VPS.
 
 **What the repo ships (Phase 13 branch 7, `feat/p13-home-server-ops`,
-2026-11-20).** The stack (`deploy/docker/compose.yml` + `compose.daily.yml`)
+2026-11-26).** The stack (`deploy/docker/compose.yml` + `compose.daily.yml`)
 plus the home override `deploy/docker/compose.home.yml` (`make up-home`);
 the host-side scripts and units in `deploy/home/` --
 `friday-backup.sh`, `friday-restore-drill.sh`,
@@ -22,7 +22,7 @@ local restic repository: backup, restore drill into a scratch database,
 must fail the drill. Nothing here was run on real home hardware yet
 (owner step, Mac session M3).
 
-**Final for Phase 13 (`chore/p13-closeout`, 2026-11-20).** Branches 1–7
+**Final for Phase 13 (`chore/p13-closeout`, 2026-11-26).** Branches 1–7
 and the closeout are on the integration branch: rooms and node labels,
 "which PC" resolution, per-node presence on the HUD and `/devices`, the
 Linux node (`node/friday-node-linux`), the Home Assistant entity

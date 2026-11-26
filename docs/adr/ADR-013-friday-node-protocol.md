@@ -729,7 +729,8 @@ applies. Run on macOS 27.2 (build `26B123` as `sw_vers` reports it), Xcode
 Apple silicon, on 2026-11-26. The spike app and its build script are in
 `node/spikes/ptspike/` (owner decision 2026-11-26: the spike, its script
 and this note live on one branch, instead of the runbook's out-of-repo
-spike and separate `docs/p9-personal-team-spike` branch). Build outputs,
+spike and separate `docs/p9-personal-team-spike` branch; the branch is
+`feat/mac-a1-spike`, the name the handoff now uses). Build outputs,
 status files and the saved requirement stay in `~/FridaySpike/` (0700),
 outside the repo. No identity name, Team ID or certificate is committed.
 
