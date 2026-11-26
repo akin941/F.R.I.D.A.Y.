@@ -56,7 +56,9 @@ public struct HelloAck: Equatable {
     public let accepted: [String]
 }
 
-public final class NodeSession {
+/// Not thread-safe by design: the app confines it to `NodeRunner`'s serial
+/// queue (and tests to one thread).
+public final class NodeSession: @unchecked Sendable {
     public static let frameErrorLimit = 3
     public static let frameErrorWindowSeconds: Int64 = 60
     public static let silenceSeconds: Int64 = 45
