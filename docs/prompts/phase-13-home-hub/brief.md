@@ -1372,3 +1372,37 @@ accounts or judgement):
 
 Nothing in this branch needs the Mac, real credentials, paid calls or real
 hardware: it is documentation only.
+
+### Known follow-ups (unresolved LOW review notes, recorded at merge 2026-11-26)
+
+These came out of the plan review and were not fixed before merge into
+`integ/phase-13`. Each is to be resolved in a docs branch or by the branch
+that implements the affected decision.
+
+1. **D11 / branch 5 — Wake-on-LAN vs the entity allowlist.** D11 says
+   `ha_call_service` is refused unless `entity_id` is an enabled
+   `HomeEntity`, but the existing bridge's `wake_on_lan` service takes no
+   entity (`CallServiceArguments` rejects `entity_id` for WoL and uses
+   `HA_WOL_ALLOWED_MACS`). Fix: state in D11 and the branch 5 tests that WoL
+   stays governed by `HA_WOL_ALLOWED_MACS` (no `HomeEntity`), gate-class and
+   unchanged; add a test that WoL still works with an empty entity
+   allowlist and still needs an allowlisted MAC.
+2. **D6 / Risks — `last_active_at` is node-controlled.** It is bumped from
+   node-relayed hook events, so a compromised node could keep itself "last
+   active" and win rule 3 for un-named requests. The mitigations hold
+   (approval card names the node, the node's own confirmation window,
+   explicit mention beats everything) but are not listed in Risks and no
+   test covers them. Fix: add a Risks row; add a test that a node bumping
+   `last_active_at` cannot change an explicit or origin resolution;
+   optionally cap hook-driven bumps to nodes whose catalogue has the
+   capability.
+3. **Branch table / MASTER_PLAN row — mixed dates.** The brief row says
+   "implemented 2026-11-20 (swarm date stamp)" and the owner steps are
+   headed "recorded 2026-11-20", while the owner decision and ADR are dated
+   2026-11-26. Fix: use 2026-11-26 consistently, or drop the "swarm date
+   stamp" remark.
+4. **ADR number.** The task spec asked for ADR-016, but ADR-016 already
+   exists (Phase 12 proactive runs), so this is ADR-017; the deviation is
+   documented in the ADR, this brief, MASTER_PLAN d11 and the handoff, and
+   `self_sources.json` is updated. No fix required; owner step 2 covers the
+   confirmation.
