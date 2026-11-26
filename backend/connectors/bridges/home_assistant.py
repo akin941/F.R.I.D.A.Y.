@@ -16,6 +16,14 @@ LAN additionally needs the MAC in `HA_WOL_ALLOWED_MACS` (empty: refused).
 No domain is confirm-class or ungated (Q7): every call is the gated
 `ha_call_service` tool.
 
+**The entity allowlist (Phase 13 D11).** On top of the code maximum, every
+entity call needs an enabled `connectors.HomeEntity` of the request's
+workspace whose `services` include the service -- checked at request time
+(`check_allowlist`, the policy's scope check) and as the execution
+precondition (`target_present`); an empty allowlist allows no entity call.
+Rows are written only by the owner over the web (`connectors.home_entities`).
+Wake-on-LAN has no entity and stays on `HA_WOL_ALLOWED_MACS`.
+
 **The pin.** There is no remote `inputSchema` to pin: the "schema" of each
 tool is this module's own request contract (`tool_schemas()`, derived from
 the serializers), and the manifest pins its sha256. Widening the allowlist
