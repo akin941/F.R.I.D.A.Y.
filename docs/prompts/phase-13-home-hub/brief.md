@@ -516,7 +516,10 @@ A productionised node built from the reference node, **read-only**:
   `scripts/vendor.py` copies `backend/nodes/protocol/`,
   `backend/nodes/capabilities/v1/`, `backend/nodes/reference/{node,
   transport,readers,local_policy,spool,hook_relay,_scrubber_vendored}.py`
-  into `friday_node_linux/_vendor/` and writes `vendor.lock` (sha256 per
+  and the 8B owner-turn readers and contracts
+  (`backend/integrations/node_reference/owner_turns.py`,
+  `backend/integrations/node_reference/contracts/v1/`) into
+  `friday_node_linux/_vendor/` and writes `vendor.lock` (sha256 per
   file); `vendor.py --check` (CI) fails on drift, so the reference node
   stays the single spec and the Linux node cannot diverge silently.
 - **Capabilities.** The v1 read set over the **real** home directory:
@@ -527,13 +530,15 @@ A productionised node built from the reference node, **read-only**:
   `codex.transcripts.owner_turns`). `apps.frontmost` and `windows.list`
   are advertised `unavailable` (no portable, consent-respecting Wayland
   equivalent; X11 is not worth a special case). No v2 capability.
-- **Local policy, local only.** `~/.config/friday-node/policy.toml`
+- **Local policy, local only.** `~/.config/friday-node/policy.json`
   (0600): per-directory read grants (off by default, ADR-013 decision 11),
   registered repos. Changed only by `friday-node-linux grant|revoke|repo
   add|repo remove`, run by the local user at an interactive TTY, which
   shows the exact change and requires typing the directory's basename to
-  confirm — the Linux stand-in for Touch ID. The daemon re-reads the file
-  only on `SIGHUP` from the same uid; no protocol message can reach it.
+  confirm — the Linux stand-in for Touch ID. The CLI writes the file
+  atomically (temp file + rename, 0600); the daemon re-reads it on
+  `SIGHUP` (only the same uid or root can signal it); no protocol message
+  can reach it.
 - **Credential.** The node secret is stored in
   `$XDG_STATE_HOME/friday-node/credential` (0600, refused if group/other
   readable or owned by another uid); Secret Service storage is a later
@@ -918,10 +923,11 @@ with correct live status and the existing HUD tests are unchanged.
 **Tests.**
 - Conformance: every v1 case and the compromised-server family pass
   against the packaged node over a real localhost TLS socket.
-- Policy: no protocol frame changes `policy.toml` (a hostile gateway
+- Policy: no protocol frame changes `policy.json` (a hostile gateway
   sends every message type with policy-shaped payloads; the file's mtime
   and hash are unchanged); `grant` refuses without a TTY or with a wrong
-  confirmation word; `SIGHUP` from another uid is ignored.
+  confirmation word; a policy file with mode wider than 0600 or another
+  owner is refused at load.
 - Credential: mode 0644 or another owner → refuses to start; the secret
   never appears in logs (log capture scan).
 - Readers over a real temporary `$HOME` (not the fixture factory): grants
