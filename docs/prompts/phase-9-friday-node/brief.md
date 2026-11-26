@@ -2975,3 +2975,26 @@ Decisions and deviations:
 1. Wire a vetted `ccusage` binary (owner step 2).
 2. Run `scrub_differential.py` again whenever `memory/ingestion/scrubber.py` changes (the vectors pin the corpus, not every pattern edge); consider a CI job on a macOS runner if the owner decides A5 that way.
 3. A reader differential (the reference `Readers` and `NodeReaders` over generated homes), like the scrubber one: the review's ad-hoc version found the timestamp and money edges above.
+
+
+### Implementation notes — `feat/p9-node-hook-relay` (Mac session M3, 2026-11-26)
+
+| Contract test | Status |
+|---|---|
+| Reference tests in Swift | **Pass**: `SpoolTests`, `SessionEventTests`, `HookRelayTests` re-express `test_reference_spool.py` and `test_reference_hook_relay.py` (with the CLI's 3 s exit both when the node is down and when stdin never closes); 72 NodeCore tests pass in all. |
+| Server side (branch 6) | `nodes/tests/test_node_events.py` passes on this Mac; `config/tests/test_hooks_via_node.py::test_the_done_criterion` fails here as it did before this branch: the Python **reference** relay reads the peer uid with Linux `SO_PEERCRED`, absent on macOS, so it refuses (fail closed); it passes on the Linux CI. The Swift relay uses `getpeereid`, tested over a real socket. |
+| Live, real stack | `friday-node hook` → socket → app → WSS → gateway: a live event arrives (`spooled=False`); with the gateway stopped three events were spooled (three 0600 batch files), and after the restart each was uploaded exactly once (`spooled=True`), acked and deleted (spool empty after 11 s). The server **dropped** them, by design: the owner's `claude_code_hooks` source is disabled and has no mapping rule. |
+| Manual pass "arrive once in /sessions" | **Pending owner step**: enable the source and add a `path_prefix` rule on the web (below). |
+
+Decisions and deviations:
+
+- **The event is built in the app, not the CLI**, as the reference relay does (`hook_relay.py`: the CLI relays stdin, `HookRelay` builds the event): one place scrubs, and the CLI stays a minimal relay that always exits 0 within 3 s (`SIGALRM` backstop). The brief text puts `build_event` in `Hook.swift`; the event shape is the same (`HookEvent.build`, checked against `build_hook_event`'s output).
+- **The CLI lives at `~/Library/Application Support/Friday/bin/friday-node`** (`scripts/install-hook-cli.sh`), a release SwiftPM build; the app bundle does not carry it.
+- **Switch-over done**: `~/.claude/settings.json` gained `friday-node hook` entries for `SessionStart`, `Notification`, `Stop`, `SessionEnd` (backup `settings.json.bak-before-friday-node-hook-20261126`). There were no `friday-hook` entries on this Mac and `friday-hook` is not installed, so there is no fallback entry to keep.
+- **Not done on purpose:** enabling the `claude_code_hooks` source and adding a mapping rule from a shell. `memory/ingestion/services.py` accepts both only from the owner on the web channel; a direct database update made during the live pass was reverted the same minute (no event had been stored).
+
+### Owner steps (pending) — `feat/p9-node-hook-relay`, recorded 2026-11-26
+
+1. On the web (once the front end runs, see the M2 owner step): enable the `claude_code_hooks` source and add a `path_prefix` rule for the directories whose sessions Friday may record (absolute paths, e.g. the project folder) to the personal workspace.
+2. Then the manual pass: stop the stack, run a Claude Code session, restart; the spooled events arrive once in `/sessions`.
+3. To fall back: restore `~/.claude/settings.json` from the backup (or delete the four `friday-node hook` entries).

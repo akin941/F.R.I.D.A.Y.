@@ -6,7 +6,8 @@ Mac, is built and installed locally, and is never distributed.
 
 Status: **M1** (`feat/p9-node-app`) — shell, identity, session, verifier;
 **M2** (`feat/p9-node-readers`) — readers, local policy and grants, the
-scrubber. The hook relay is M3.
+scrubber; **M3** (`feat/p9-node-hook-relay`) — the hook relay
+(`friday-node hook`, the app's Unix socket) and the bounded spool.
 
 ## Layout
 
@@ -23,6 +24,8 @@ scrubber. The hook relay is M3.
 | `Sources/NodeCore/Scrubber.swift` | The 8A scrubber, byte-identical (`ScrubParityTests`, `scripts/scrub_differential.py`) |
 | `Sources/NodeCore/Readers/`, `Policy/` | The eight readers; the local policy (keychain) and grants (Touch ID) |
 | `../scripts/scrubber-corpus.sh` | Corpus recall gate over `friday-node scrub` |
+| `Sources/NodeCore/HookSocket.swift`, `Spool.swift` | The hook relay socket and the event spool (M3) |
+| `scripts/install-hook-cli.sh` | Installs `friday-node` for Claude Code's hooks |
 
 ## Commands
 

@@ -123,6 +123,42 @@ the morning card; its sessions appear on `/sessions` and the HUD sessions
 panel. Enabling the other sources, the audit view and forget/restore are in
 `docs/runbooks/learning-memory.md`.
 
+## 8. Through the Mac node instead (Phase 9 M3, `friday-node hook`)
+
+With the Friday Node app paired and running (`docs/runbooks/friday-node.md`),
+Claude Code's hooks can go through the node: no PAT, no HTTP from the hook,
+events spooled while the server is unreachable.
+
+```bash
+node/friday-node/scripts/install-hook-cli.sh   # ~/Library/Application Support/Friday/bin/friday-node
+```
+
+Hook entries (`~/.claude/settings.json`), one per event: `SessionStart`,
+`Notification`, `Stop`, `SessionEnd`:
+
+```json
+{"hooks": [{"type": "command", "command": "\"$HOME/Library/Application Support/Friday/bin/friday-node\" hook", "timeout": 5}]}
+```
+
+(write the absolute path; `settings.json` does not expand `$HOME`).
+`friday-node hook` writes the hook's stdin to the app's socket
+(`~/Library/Application Support/Friday/node.sock`, 0600 in a 0700
+directory, peer uid checked) and exits 0 within 3 s whatever happens; the
+app builds the same allow-listed, scrubbed event as `friday-hook` and sends
+it live or spools it (≤ 10 MiB, ≤ 24 h) until the next `hello.ack`.
+`friday-hook` keeps working as the fallback, but use **one path at a time**:
+each relay mints its own random `event_id`, and the server dedupes on
+`hook:<session>:<event_id>` (re-uploads of the same event, such as a spooled
+batch sent again), not across the two relays, so configuring both stores
+every event twice.
+
+The server stores the events only when the owner's `claude_code_hooks`
+source is enabled and a `path_prefix` rule maps the session's `cwd` (an
+**absolute** path for hooks: Claude Code reports `cwd` absolute) — both set
+on the web, by the owner (`memory/ingestion/services.py` accepts them on
+the web channel only). Until then the gateway acks the events as
+`dropped` (`dropped_paused` / `dropped_unmapped`).
+
 ## Limits (8A)
 
 - No spool: an event lost while the server is unreachable is gone; the panel
