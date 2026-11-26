@@ -23,6 +23,11 @@
 //   --conformance-cert PATH         its self-signed certificate (PEM)
 //   --conformance-keys PATH         backend/nodes/conformance/keys/conformance_keys.json
 //   --conformance-fixtures PATH     backend/nodes/reference/fixtures
+//   --conformance-home PATH         a fixture home built by
+//                                   nodes/reference/fixtures/factory.py
+//                                   (build_fixture_home), which the readers
+//                                   read (M2): transcripts, the two repos,
+//                                   desktop.json in place of NSWorkspace
 
 #if CONFORMANCE
 
@@ -53,36 +58,23 @@ public struct ConformanceError: Error, CustomStringConvertible {
     init(_ description: String) { self.description = description }
 }
 
-/// `apps.frontmost` over the reference fixture desktop; every other read is
-/// an M2 reader and fails (the same reader the offline suite uses).
-final class ConformanceDesktopReader: ReadProvider {
-    private(set) var calls = 0
-    private let desktop: JSONValue
-
-    init(fixtures: URL) throws {
-        desktop = try JSON.parse(try Data(contentsOf: fixtures.appendingPathComponent("desktop.json")))
-    }
-
-    func read(capability: String, args: JSONValue, now: Int64) -> ReadOutcome {
-        calls += 1
-        guard capability == "apps.frontmost" else { return .failure }
-        let frontmost = desktop["frontmost"] ?? [:]
-        return .success(["bundle_id": frontmost["bundle_id"] ?? .null, "app_name": frontmost["app_name"] ?? .null])
-    }
-}
-
 public final class ConformanceHookClient {
-    public static let policyFingerprint = "m1-no-local-policy"
     static let nodeID = "6f1e2d3c-4b5a-4987-8a6b-5c4d3e2f1a0b"
 
     let hookPath: String
     let gateway: String
     let pins: ConformancePins
     let fixtures: URL
+    let home: String
+    let repos: [LocalRepo]
+    let desktop: FixtureDesktop
+    /// sha256 of the fixture policy document: the same before and after
+    /// every case (nothing in the protocol can change the local policy).
+    let policyFingerprint: String
     private let queue = DispatchQueue(label: "friday-node.conformance")
     private var session: NodeSession?
     private var clock: ManualClock?
-    private var reader: ConformanceDesktopReader?
+    private var reader: NodeReaders?
     private var connection: NodeConnection?
 
     /// Parse the launch arguments; nil when the app was not started in
@@ -94,19 +86,29 @@ public final class ConformanceHookClient {
         }
         guard let hook = value("--conformance-hook") else { return nil }
         guard let gateway = value("--conformance-gateway"), let cert = value("--conformance-cert"),
-            let keys = value("--conformance-keys"), let fixtures = value("--conformance-fixtures")
+            let keys = value("--conformance-keys"), let fixtures = value("--conformance-fixtures"),
+            let home = value("--conformance-home")
         else { throw ConformanceError("missing --conformance-* arguments") }
         let pins = try ConformancePins(
             keysFile: URL(fileURLWithPath: keys), certificateFile: URL(fileURLWithPath: cert))
-        return ConformanceHookClient(
-            hookPath: hook, gateway: gateway, pins: pins, fixtures: URL(fileURLWithPath: fixtures))
+        return try ConformanceHookClient(
+            hookPath: hook, gateway: gateway, pins: pins, fixtures: URL(fileURLWithPath: fixtures), home: home)
     }
 
-    init(hookPath: String, gateway: String, pins: ConformancePins, fixtures: URL) {
+    init(hookPath: String, gateway: String, pins: ConformancePins, fixtures: URL, home: String) throws {
         self.hookPath = hookPath
         self.gateway = gateway
         self.pins = pins
         self.fixtures = fixtures
+        self.home = ReaderPaths.realpathC(home)
+        let policyData = try Data(contentsOf: fixtures.appendingPathComponent("local_policy.json"))
+        let policy = try JSON.parse(policyData)
+        repos = (policy["repos"]?.arrayValue ?? []).compactMap { repo in
+            guard let name = repo["name"]?.stringValue, let root = repo["root"]?.stringValue else { return nil }
+            return LocalRepo(name: name, root: root, home: ReaderPaths.realpathC(home))
+        }
+        desktop = try FixtureDesktop(fixturesDirectory: fixtures)
+        policyFingerprint = JSON.hexDigest(policyData)
     }
 
     /// Serve the hook until the gateway closes it. Returns the exit status.
@@ -154,7 +156,7 @@ public final class ConformanceHookClient {
         switch op["op"]?.stringValue {
         case "prepare":
             try queue.sync { try prepare(op["case"] ?? [:]) }
-            return ["ok": true, "policy_fingerprint": .string(Self.policyFingerprint)]
+            return ["ok": true, "policy_fingerprint": .string(policyFingerprint)]
         case "advance":
             let seconds = op["seconds"]?.intValue ?? 0
             queue.sync {
@@ -184,8 +186,15 @@ public final class ConformanceHookClient {
         connection?.stop()
         let setup = document["setup"] ?? [:]
         let clock = ManualClock(setup["now"]?.intValue ?? 0)
-        let reader = try ConformanceDesktopReader(fixtures: fixtures)
-        var availability: [String: String] = [:]
+        // Both directory grants on unless the case turns one off; titles
+        // off unless the case turns them on (D13 item 5).
+        var grants = ReaderGrants(claude: true, codex: true)
+        if let claude = setup["reader_grants"]?["claude"]?.boolValue { grants.claude = claude }
+        if let codex = setup["reader_grants"]?["codex"]?.boolValue { grants.codex = codex }
+        let reader = NodeReaders(
+            home: home, repos: repos, grants: grants, windowTitles: setup["window_titles"]?.boolValue ?? false,
+            desktop: desktop, usage: .transcripts)
+        var availability = reader.availability()
         for (name, value) in setup["availability"]?.objectValue ?? [:] { availability[name] = value.stringValue }
         let session = NodeSession(
             nodeID: Self.nodeID, pinned: pins.signingKeys, catalogue: .standard(availability: availability),
@@ -207,13 +216,13 @@ public final class ConformanceHookClient {
     private func report() -> JSONValue {
         guard let session else { return ["ok": false] }
         return [
-            "reader_calls": .int(Int64(reader?.calls ?? 0)),
+            "reader_calls": .int(Int64(reader?.calls.count ?? 0)),
             "executor_calls": 0,
             "executor_terminated": 0,
             "windows_shown": 0,
             "closed_reason": session.closedReason.map(JSONValue.string) ?? .null,
             "reconnect_allowed": .bool(session.reconnectAllowed),
-            "policy_fingerprint": .string(Self.policyFingerprint),
+            "policy_fingerprint": .string(policyFingerprint),
             // Seconds as an integer number of milliseconds would change the
             // check; the gateway compares 0 <= delay <= max, so whole seconds,
             // rounded up, keep the bound honest.
