@@ -116,7 +116,7 @@ describe("RoomsEditor (Phase 13 D2)", () => {
     await user.click(screen.getByRole("button", { name: "Sil" }));
     const dialog = await screen.findByRole("alertdialog");
     await user.click(within(dialog).getByRole("button", { name: "Sil" }));
-    expect(await within(dialog).findByText(/önce düğümün odasını değiştir/)).toBeInTheDocument();
+    expect(await within(dialog).findByText(/bir Home Assistant varlığına atanmış/)).toBeInTheDocument();
     expect(calls(fetchMock).some(([method]) => method === "DELETE")).toBe(true);
   });
 });
