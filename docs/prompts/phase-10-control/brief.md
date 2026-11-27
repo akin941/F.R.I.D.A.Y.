@@ -3644,3 +3644,65 @@ the AX re-check and the keystroke post.
   ADR-014 amendment. Owner: M3.
 - **FU-B6-3 — macOS-capable escape scripts** (`limit_output`,
   `limit_runtime`, the unsandboxed control). Owner: M3.
+
+## Implementation record — `feat/p10-node-executor-hardening` (B6 review round 2 non-blocking findings, 2026-11-27)
+
+Cut from `integ/phase-13` at `1d22d30` (B6 merged). One commit per finding.
+
+- **N1 — retry escape.** The root is spawned with
+  `POSIX_SPAWN_START_SUSPENDED`; its identity and its kqueue
+  `NOTE_FORK`/`NOTE_EXIT` watch exist before it runs (then SIGCONT). Fork
+  and exit events trigger an immediate full sweep; exited members' unique
+  ids stay in the lineage set; scans run every 5 ms for the first 2 s, then
+  50 ms, 200 ms after 2 s without forks (the optional NIT), and the monitor
+  keeps sweeping 1.5 s after the tree first looks empty. A last-resort
+  orphan sweep kills a launchd-parented process of this user created after
+  the root whose recorded parent is gone and whose macOS responsible process
+  is this app; it is on only when the app is its own responsible process
+  (the installed app) and off under a shell or test runner. The reaper no
+  longer takes a stopped child for an exited one (macOS `waitid` reports
+  stops). **Measured** with the review's probe (an intermediate forks a
+  `setsid` child and exits; 15 per run; children alive 0.7 s after the run
+  counted), 40 runs = 600 children: before hardening 3 of 150 survived;
+  lineage and events only (sweep off) 4 of 600, and 2 of 600 on the final
+  code (the rate varies, about 0.2-0.7 %); with the orphan sweep forced on
+  in the test (restricted to the probe's perl and sleep binaries) 0 of 600
+  and 0 of 593 on the final code (7 children were killed before they could
+  print their pid). In six full `swift test` runs the 90-child probes in the
+  suite showed 0 survivors with the sweep on (after the test filter accepted
+  perl as well as sleep) and 0-1 with it off.
+  **Residual, stated plainly: with the orphan sweep off, a daemonising
+  command can still evade the monitor by retrying** (each attempt has a
+  small chance). The installed app is expected to run with the sweep on, but
+  that macOS names the launchd-launched app its own responsible process is
+  **not verified on the installed app yet** (M3, FU-B6-4).
+- **N2 — srt trust on first use.** `Exec/SrtPin.swift` pins the five
+  packages (sandbox-runtime 0.0.83 with the A6 sha512, and the four
+  dependencies' lockfile integrities). Confirming refuses unless the prefix
+  lockfile lists exactly those, each npm-cached tarball hashes to its
+  integrity, and the installed files equal the tarball's byte for byte.
+  This is verified offline from `~/.npm/_cacache`, unpacked with
+  `/usr/bin/tar`; on this Mac all five match. A missing cache entry refuses.
+  `problem()` and the re-confirm prompt name the changed digests.
+- **N3 — tree hash gaps.** A symlink leaving the prefix (or dangling) is
+  refused; links inside are hashed. srt's Node runs with
+  `--no-global-search-paths`; `NODE_*` names are refused in mappings and at
+  start. HOME stays the owner's: the sandboxed command needs it, and srt uses
+  it only for paths it denies and for its default settings file, which
+  `--settings` replaces. The real srt run still passes. The check-to-exec
+  window (milliseconds between the digest check and the spawn) is documented
+  in the README and the manifest.
+- **N4 — monitor fails open.** The monitor is built while the root is
+  suspended. A missing root identity, a failed kqueue or watch, or a failed
+  unique-id self-test (`ProcessTree.selfTestPassed`) kills the suspended
+  root's group and fails the start. The session then reports `error`, and
+  nothing runs. The self-test also gates `repo.command.run`'s availability
+  (`unsupported`). A DEBUG-only injection test shows the command never ran.
+
+Follow-up:
+- **FU-B6-4 — verify the orphan sweep in the installed app.** Check that
+  `responsibility_get_pid_responsible_for_pid(getpid()) == getpid()` for
+  the signed app launched from Finder. Run the retry probe through a mapped
+  command on the installed app (0 survivors expected). Check whether a
+  sandboxed command can get a descendant started under another
+  responsible process. Owner: M3.

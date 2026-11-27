@@ -36,7 +36,7 @@ The app advertises every action contract with its real availability: see
 | `Sources/NodeCore/OutputStreamer.swift` | `StreamScrubber` (D12 carry-over), the incremental UTF-8 decoder, 8 KiB pieces, `seq`, the 1 MiB cap, the 4 KiB tail (`scrub_stream.json`) |
 | `Sources/NodeCore/Policy/ActionPolicy.swift` | Check 22: repo realpath equality, mapped kinds, enabled recipes, the bundle-id list (read side) |
 | `Sources/NodeCore/Policy/CommandMappings.swift` | The owner's command mappings, recipes, bundle ids and srt location: the keychain item (account `command-mappings`) and `CommandMappingsEditor` (LocalAuthentication first) |
-| `Sources/NodeCore/Exec/` | The executor port; `SandboxPolicy` (the `srt` settings document, byte-identical to `sandbox.json`); `SrtExecutor` and `SandboxRun`; `ProcessTree` (the `max_processes` / `cpu_seconds` monitor); `ChildProcess` (every spawn: argv, CLOEXEC default, explicit stdio; `BoundedRun`, `ChildRegistry`); `MacActionExecutor` (the app's executor, TCC-gated availability); the throwaway-worktree mode; and (DEBUG only) `ScriptedExecutor` and `CaseSetup` that the offline suite and the Conformance hook drive |
+| `Sources/NodeCore/Exec/` | The executor port; `SandboxPolicy` (the `srt` settings document, byte-identical to `sandbox.json`); `SrtExecutor` and `SandboxRun`; `SrtPin` (the pinned npm packages, verified offline); `ProcessTree` and `TreeMonitor` (the `max_processes` / `cpu_seconds` monitor); `ChildProcess` (every spawn: argv, CLOEXEC default, explicit stdio; `BoundedRun`, `ChildRegistry`); `MacActionExecutor` (the app's executor, TCC-gated availability); the throwaway-worktree mode; and (DEBUG only) `ScriptedExecutor` and `CaseSetup` that the offline suite and the Conformance hook drive |
 | `Sources/NodeCore/Recipes/` | One file per recipe of `capabilities/v2/recipes/`: the fixed AppleScript, values only as escaped string literals, run by `osascript` |
 | `Sources/NodeCore/AX/`, `Sources/NodeCore/Apps/` | `ax.press` / `ax.type_text` (frontmost window only, exact title, never a secure field) and `apps.open` / `apps.focus` (NSWorkspace, the local list) |
 | `App/FridayNode/CommandMappingsMenu.swift` | The "İzinler" section that edits the command mappings, recipes, bundle ids and srt location, and asks for the TCC grants |
@@ -159,7 +159,19 @@ opens, so a TCC grant given in System Settings reaches the server as
   binary, the whole `node_modules` tree and `package-lock.json` in the
   keychain item; any later change of those files makes `repo.command.run`
   `unsupported` until the owner re-confirms (an upgrade of srt or Node needs
-  that step).
+  that step; the prompt and the menu name the digests that changed).
+  Confirming is refused unless the prefix is exactly the pinned npm packages
+  (`Exec/SrtPin.swift`: the lockfile's five packages at their versions and
+  integrities, sandbox-runtime 0.0.83 with the A6 sha512; each cached
+  tarball in `~/.npm/_cacache` hashes to its integrity; the installed files
+  equal the tarball's, byte for byte). A missing cache entry refuses: run
+  `npm cache add <name>@<version>` first. srt's Node runs with
+  `--no-global-search-paths`; the tree hash refuses a symlink out of the
+  prefix; a mapping may not list a `NODE_*` variable. **Check-to-exec
+  window:** the digests are verified right before `node` is spawned, so a
+  process of the owner's user that rewrites the prefix in that gap
+  (milliseconds) is not caught; only a later run notices. The prefix is
+  writable by any process of the user, as the whole home is.
 - **Mappings:** "İzinler" → "Komut deposu ekle…", then per repo "Komut ekle /
   değiştir…": kind, argv (one argument per line, no shell), PATH (must
   contain `/bin`: srt runs the argv through `bash` found on it), environment
@@ -168,24 +180,44 @@ opens, so a TCC grant given in System Settings reaches the server as
   password and is refused before saving when it does not validate.
 - **Limits on macOS:** `max_processes` and `cpu_seconds` are enforced by a
   process-tree monitor (never `RLIMIT_NPROC`, which macOS counts per user).
-  Members are followed by **unique-id lineage** (`p_puniqueid`, kept when a
-  process is re-parented to launchd), learnt from kqueue fork events on
-  every member and a 50 ms scan, so a `setsid` child whose parent exits at
-  once is still killed. Every kill goes to one pid after re-checking its
-  (unique id, start time); the monitor never uses `killpg`. Output past
+  The root is spawned suspended; its identity and kqueue fork/exit watch
+  exist before it runs (if they cannot be set up, the suspended root is
+  killed and the run is an `error`; a failed unique-id self-test makes
+  `repo.command.run` `unsupported`). Members are followed by **unique-id
+  lineage** (`p_puniqueid`, kept when a process is re-parented to launchd;
+  exited members' ids are kept), learnt from fork and exit events, which
+  trigger an immediate full sweep, and from scans every 5 ms for the first
+  2 s, then 50 ms, 200 ms once forks stop. A last-resort **orphan sweep**
+  kills a launchd-parented process of this user created after the root
+  whose recorded parent is gone and whose responsible process (macOS
+  responsibility) is this app; it is on only when the app is its own
+  responsible process (the installed app), never under a shell or test
+  runner. Every kill goes to one pid after re-checking its (unique id,
+  start time); the monitor never uses `killpg`. Output past
   1 MiB is counted, not kept; "Durdur", the kill switch and socket loss
   send SIGTERM to the (unreaped) group and SIGKILL to the verified tree
   after 5 s, without blocking the session; the worktree and temp dirs are
   removed once the tree is gone.
-- **Residual limits (carried into M3):** an intermediate process that forks
-  and exits before its fork event is handled and before a scan
-  (microseconds) is not learnt, nor are its children; a fork burst can
-  overshoot the count for one 50 ms sample (`kern.maxprocperuid` is the
-  backstop); CPU time of a process that lived less than a sample is not
-  counted; a few microseconds remain between the identity check and
-  `kill(2)`, and between the srt digest check and `node` starting. (A
-  per-run environment marker was tried and dropped: macOS does not show
-  other processes' environments.)
+- **Residual limits (carried into M3):**
+  - **A daemonising command can still evade the monitor by retrying when
+    the orphan sweep is off.** An intermediate process that forks a
+    `setsid` child and exits before its fork event is handled leaves a
+    child whose recorded parent is unknown. Measured with the review's
+    probe (15 such children per run, 40 runs, 600 children; 2026-11-27):
+    lineage and events only, 2-4 of 600 survived (before hardening: 3 of
+    150); with the orphan sweep on (forced in the test, restricted to the
+    probe's perl and sleep binaries), 0 of 600. The installed app has the sweep on only if
+    macOS names it its own responsible process, which is expected for an
+    app launched by launchd but **not yet verified on the installed app**
+    (M3). A descendant that gets itself started under another responsible
+    process (for example through launchd or LaunchServices) is out of
+    reach; whether a sandboxed command can do that is not tested yet (M3).
+  - A fork burst can overshoot the count for one sample (5-200 ms;
+    `kern.maxprocperuid` is the backstop); CPU time of a process that lived
+    less than a sample is not counted; a few microseconds remain between the
+    identity check and `kill(2)` (macOS has no pidfd).
+  - (A per-run environment marker was tried and dropped: macOS does not show
+    other processes' environments.)
 - **apps.open / apps.focus** launch or activate only a bundle whose realpath
   is under `/Applications`, `/System/Applications` or
   `/System/Library/CoreServices`, and `apps.open` only with a valid code
