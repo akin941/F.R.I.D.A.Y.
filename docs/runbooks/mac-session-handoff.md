@@ -629,9 +629,13 @@ rejects `--node` as an unknown make option. Before B7:
 harness and manifest) is **not on the integration branch** and no local
 branch of it exists (Phase 6 brief A9).
 
-- [ ] Implement or restore it per the Phase 6 brief ("Amendment
+- [x] Implement or restore it per the Phase 6 brief ("Amendment
       2026-11-20", branch 3a) before C2's WER and TTS measurements. This is
       not Swift work and can be done in a cloud session.
+      **Implemented 2026-11-27 on `feat/p6-voice-eval`** (awaits the
+      independent Sonnet 5 review and the merge): `manage.py voice_eval`,
+      `docs/voice/eval-manifest.md`, runbook `voice-setup.md` §8; notes
+      under "Branch 3a — implementation notes" in the Phase 6 brief.
 
 ### A12. The `nodes`-backed transcript port — a server-side gap (blocks B4's live half and C5 item 4)
 
@@ -1236,10 +1240,11 @@ in the record, with the dominant stage named.
 
 ### C1. Phase 5 — real stack and real credentials
 
-- [ ] `make up && make frontend-build && make preflight` with
+- [x] `make up && make frontend-build && make preflight` with
       `PREFLIGHT_BFF_URL` (the running frontend) and
       `PREFLIGHT_FRONTEND_BUILD_ID_FILE` (its `.next/BUILD_ID`): 0 fail;
       record the summary line in the Phase 5 brief §10.
+      Done 2026-11-27: `49 pass / 0 fail / 30 warn` (recorded there).
 - [ ] `OPENROUTER_API_KEY` in `deploy/docker/.env`, re-run
       `seed_ai_defaults` (or enable the `openrouter` row), `make preflight`:
       `provider:openrouter` passes and one `ops.preflight` `ModelUsage` row

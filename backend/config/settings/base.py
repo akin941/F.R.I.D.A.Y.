@@ -611,6 +611,10 @@ AI_UNTIERED_PURPOSES = frozenset(
         # speech (Phase 6 D5): capability, not tier, selects audio providers
         "voice.stt",
         "voice.tts",
+        # Phase 6 branch 3a (brief "3a"): the Turkish evaluation set's own
+        # STT/TTS calls (`manage.py voice_eval`), untiered like the above.
+        "voice.eval_stt",
+        "voice.eval_tts",
         # `manage.py preflight` (Phase 5 closeout): pinned to one provider at
         # a time (`only_provider`), so a tier would never apply.
         "ops.preflight",
@@ -626,6 +630,13 @@ AI_AUDIO_PURPOSES = ("voice.stt", "voice.tts")
 AI_BUDGET_AUDIO_MONTHLY_USD = env("AI_BUDGET_AUDIO_MONTHLY_USD", default="20")
 AI_BUDGET_AUDIO_SESSION_USD = env("AI_BUDGET_AUDIO_SESSION_USD", default="1")
 AI_BUDGET_AUDIO_DAILY_USD = env("AI_BUDGET_AUDIO_DAILY_USD", default="")
+# Phase 6 branch 3a: the evaluation set's audio calls have their OWN A3 row
+# (`voice_eval`, seeded once, owner-editable), so an eval run can never
+# exhaust live voice's `audio` cap. The session window is one
+# `voice_eval` run (`voice_eval:<run id>`).
+AI_VOICE_EVAL_PURPOSES = ("voice.eval_stt", "voice.eval_tts")
+AI_BUDGET_VOICE_EVAL_MONTHLY_USD = env("AI_BUDGET_VOICE_EVAL_MONTHLY_USD", default="5")
+AI_BUDGET_VOICE_EVAL_RUN_USD = env("AI_BUDGET_VOICE_EVAL_RUN_USD", default="2")
 # Phase 8A D13: the learning loop's gateway caps. `learning` is the shared
 # monthly cap over both learning purposes (20 USD, ADR-012); each purpose
 # also gets its own daily cap. Seeded once by `seed_ai_defaults`
@@ -740,6 +751,17 @@ VOICE_TTS_PROVIDER_PARAMS = {
 # A5: `voice.VoiceTurnTrace` rows (stage timings only) are pruned daily
 # after this many days (config/celery.py).
 VOICE_TRACE_RETENTION_DAYS = env.int("VOICE_TRACE_RETENTION_DAYS", default=30)
+# --- Turkish evaluation set (Phase 6 branch 3a, brief A4/A5) ---
+# `manage.py voice_eval`. The owner's recordings live OUTSIDE the repo
+# (biometric data) in a mode-0700 directory; only the manifest
+# (`docs/voice/eval-manifest.md`: file names, sha256, reference text,
+# condition) is committed. Result files (0600) and the latency baseline are
+# written outside the repo too.
+VOICE_EVAL_SET_DIR = env("VOICE_EVAL_SET_DIR", default="~/FridayEval/asr")
+VOICE_EVAL_RESULTS_DIR = env("VOICE_EVAL_RESULTS_DIR", default="~/FridayEval/results")
+VOICE_EVAL_BASELINE = env("VOICE_EVAL_BASELINE", default="~/FridayEval/latency-baseline.json")
+# Empty = `<repo>/docs/voice/eval-manifest.md` (BASE_DIR's parent).
+VOICE_EVAL_MANIFEST = env("VOICE_EVAL_MANIFEST", default="")
 # --- Live voice on the node (Phase 11 D3/D5) ---
 # Hard lifetime of a `node_voice` token (minted by the node secret, handed
 # to the voice child). Refused at boot above one hour: a leaked child

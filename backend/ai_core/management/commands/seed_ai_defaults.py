@@ -1247,6 +1247,18 @@ class Command(BaseCommand):
         )
         self._log("audio budget", created)
 
+        # Phase 6 branch 3a: the evaluation set's own cap, separate from the
+        # live `audio` row so an eval run never starves live voice.
+        _, created = AIBudget.objects.get_or_create(
+            name="voice_eval",
+            defaults={
+                "purposes": list(settings.AI_VOICE_EVAL_PURPOSES),
+                "monthly_limit_usd": _usd_or_none(settings.AI_BUDGET_VOICE_EVAL_MONTHLY_USD),
+                "session_limit_usd": _usd_or_none(settings.AI_BUDGET_VOICE_EVAL_RUN_USD),
+            },
+        )
+        self._log("voice_eval budget", created)
+
         # Phase 8A D13: the learning caps (shared monthly + per-purpose daily).
         # Phase 8B D15: reconciliation and reflection join the shared cap.
         extraction_purpose = "memory.episode_extraction"

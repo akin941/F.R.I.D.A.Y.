@@ -108,6 +108,8 @@ COMPRESSION_NOT_APPLICABLE = frozenset(
         "knowledge.retrieval",
         "voice.stt",
         "voice.tts",
+        "voice.eval_stt",
+        "voice.eval_tts",
         "harness.discovery",
         "harness.implementation",
         "harness.review",
