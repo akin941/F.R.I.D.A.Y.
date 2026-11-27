@@ -188,11 +188,22 @@ opens, so a TCC grant given in System Settings reaches the server as
   exited members' ids are kept), learnt from fork and exit events, which
   trigger an immediate full sweep, and from scans every 5 ms for the first
   2 s, then 50 ms, 200 ms once forks stop. A last-resort **orphan sweep**
-  kills a launchd-parented process of this user created after the root
-  whose recorded parent is gone and whose responsible process (macOS
-  responsibility) is this app; it is on only when the app is its own
-  responsible process (the installed app), never under a shell or test
-  runner. Every kill goes to one pid after re-checking its (unique id,
+  attributes to the run (so it dies with the run) a launchd-parented process
+  of this user created after the root whose recorded parent is gone and
+  whose responsible process (macOS responsibility) is this app; it is on
+  only when the app is its own responsible process (the installed app),
+  never under a shell or test runner. **The rule against other runs:** a
+  process-wide registry holds every live monitor's member and lineage unique
+  ids (exited ones included) and the node's helpers (git, osascript); the
+  sweep skips a candidate that another monitor knows, or whose recorded
+  parent or any live ancestor it knows, or that descends from a helper; and
+  it does not run at all while another run has a live root or members, or
+  while a helper runs or ran in the last 10 s, since an orphan nobody knows
+  the parent of cannot be attributed to one run. So with two concurrent
+  runs, only lineage protects each run's tree. After the root exits the
+  monitor keeps killing leftovers for at most 10 s; members that survive
+  that are logged (os_log, `tree-monitor`) and the monitor stops, freeing
+  its kqueue and threads. Every kill goes to one pid after re-checking its (unique id,
   start time); the monitor never uses `killpg`. Output past
   1 MiB is counted, not kept; "Durdur", the kill switch and socket loss
   send SIGTERM to the (unreaped) group and SIGKILL to the verified tree

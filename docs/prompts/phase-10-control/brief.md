@@ -3711,3 +3711,45 @@ Follow-up:
   command on the installed app (0 survivors expected). Check whether a
   sandboxed command can get a descendant started under another
   responsible process. Owner: M3.
+
+### Review of `feat/p10-node-executor-hardening` (APPROVE with fixes), fixed 2026-11-27
+
+1. **Orphan sweep vs other runs.** A process-wide registry holds every live
+   monitor's member and lineage unique ids (exited ones included) and the
+   node's helpers (BoundedRun: git, osascript). **The rule:** the sweep
+   skips a candidate that another monitor knows, or whose recorded parent
+   or any live ancestor it knows, or that descends from a helper. It does
+   not run at all while another run has a live root or members, or while a
+   helper runs or ran in the last 10 s: an orphan whose parent nobody knows
+   cannot be attributed to one run. So with concurrent runs only lineage
+   protects each tree. Test: run 2's `(sleep 30 &)` daemon survives run 1's
+   forced sweep until run 2 ends, and is gone after.
+2. **Deterministic tests; opt-in statistics.** The always-run tests are:
+   - a setsid child of a learnt intermediate is killed;
+   - a planted orphan is attributed by the forced sweep (filtered to that
+     pid) and dies with the run, and outlives a run without the sweep.
+
+   The retry probes moved to `FRIDAY_PROBE=1` (`FRIDAY_PROBE_RUNS`, default
+   40), bounded at 0.5 % with the sweep and 2 % with lineage only (so a move
+   from about 0.5 % to 4 % fails). Measured on the final code, 40 runs each:
+   lineage only 3 of 600; with the sweep 2 of 600, then 0 of 600. Every
+   survivor record carries ppid, status, path, start, responsible pid,
+   unique id, parent unique id and whether a monitor knows either. All
+   survivors were launchd-parented `/bin/sleep` with the same responsible
+   process, unknown to every monitor. The cause is still not found; FU-B6-2
+   carries it.
+3. **N2 layout.** `node_modules` must hold exactly the pinned package roots
+   (each scope holding exactly its packages), `.bin` (only `srt`, linked to
+   `../@anthropic-ai/sandbox-runtime/dist/cli.js`) and `.package-lock.json`
+   (`testTheNodeModulesLayoutIsExactlyThePinnedOne`).
+4. **Bounded sweeping.** After the root exits the monitor sweeps for at most
+   10 s. It logs members still alive then (os_log, category
+   `tree-monitor`) and stops. Stopping unregisters it, and the event thread
+   closes the kqueue and leaves. A finished run's monitor is freed
+   (`testAFinishedRunsMonitorIsFreed`). No test makes a process that
+   survives SIGKILL, so the give-up path itself is not exercised.
+5. **Double close.** The explicit `close(kq)` is gone; `deinit` closes it
+   once. A watch failure injected after `kqueue()` frees the monitor and
+   leaves a descriptor opened afterwards intact.
+6. **Loader variables.** `DYLD_*`, `OPENSSL_CONF*` and `UV_*` are refused
+   next to `NODE_*`, in mappings and first thing at start.
