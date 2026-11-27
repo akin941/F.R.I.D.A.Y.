@@ -13,7 +13,21 @@
 //   owner-turn rules over one Claude Code project directory or a Codex
 //   sessions directory, printed as counts per line kind and per excluded
 //   marker, never any text (NodeCore OwnerTurnPreview).
-// No model calls, no provider keys, no network.
+// - `voice-loopback` (Phase 11 M3, runbook B8): one 16 kHz mono PCM16 WAV on
+//   stdin -> the running app plays it through the voice host's
+//   voice-processing graph and captures the AEC-cleaned mic for the clip
+//   plus 1 s -> that capture as a WAV on stdout. Nothing is written to disk.
+//   Exit 0, or the code's status with `friday-node voice-loopback: error
+//   <code>` on stderr (VoiceSelftestCode). DEBUG builds also take
+//   `--debug-echo-engine` (in process, a zero-latency echo, no device: the
+//   `CommandLoopback` contract run; never in Release).
+// - `voice-token --out <file>`: the app takes the selftest hold and mints a
+//   fresh `node_voice` token, written to a new 0600 file (and nowhere else);
+//   stdout gets `server_url=`, `ca_sha256=` and `expires_at=` lines (no
+//   token). `voice-token --end <file>`: removes the file and ends the hold.
+// No model calls, no provider keys. The voice commands talk only to the
+// app's own Unix socket (VoiceSelftestSocket); the app holds the mic grant
+// and the node secret (README "Nightly self-trigger").
 
 import Foundation
 import NodeCore
@@ -30,7 +44,79 @@ if arguments.first == "hook" {
     exit(0)
 }
 
+func voiceFailure(_ command: String, _ code: VoiceSelftestCode) -> Never {
+    FileHandle.standardError.write(Data("friday-node \(command): error \(code.rawValue)\n".utf8))
+    exit(code.exitStatus)
+}
+
+/// stdin, at most `VoiceLoopback.maxInputBytes` (more is `wav_too_long`).
+func readClip() -> Data {
+    var input = Data()
+    while true {
+        let chunk = FileHandle.standardInput.readData(ofLength: 65_536)
+        if chunk.isEmpty { break }
+        input.append(chunk)
+        if input.count > VoiceLoopback.maxInputBytes { voiceFailure("voice-loopback", .wavTooLong) }
+    }
+    return input
+}
+
 switch arguments.first {
+case "voice-loopback" where arguments.count == 1:
+    let clip = readClip()
+    do {
+        _ = try LoopbackWAV.decode(clip)  // refused here before the app is asked
+        FileHandle.standardOutput.write(try VoiceSelftestClient.loopback(clip))
+    } catch let code as VoiceSelftestCode {
+        voiceFailure("voice-loopback", code)
+    } catch {
+        voiceFailure("voice-loopback", .protocolError)
+    }
+#if DEBUG
+case "voice-loopback" where arguments == ["voice-loopback", "--debug-echo-engine"]:
+    do {
+        let capture = try VoiceLoopback.run(wav: readClip(), audio: EchoVoiceEngine(), micAuthorized: { true })
+        FileHandle.standardOutput.write(capture)
+    } catch let code as VoiceSelftestCode {
+        voiceFailure("voice-loopback", code)
+    } catch {
+        voiceFailure("voice-loopback", .protocolError)
+    }
+#endif
+case "voice-token" where arguments.count == 3 && arguments[1] == "--out":
+    let path = arguments[2]
+    do {
+        let fd = try SelftestTokenFile.create(path)
+        let minted: SelftestToken
+        do {
+            minted = try VoiceSelftestClient.begin()
+        } catch {
+            close(fd)
+            SelftestTokenFile.remove(path)
+            throw error
+        }
+        do {
+            try SelftestTokenFile.write(minted.token, to: fd, path: path)
+        } catch {
+            try? VoiceSelftestClient.end()
+            throw error
+        }
+        let info = "server_url=\(minted.serverURL)\nca_sha256=\(minted.caSHA256 ?? "")\nexpires_at=\(minted.expiresAt)\n"
+        FileHandle.standardOutput.write(Data(info.utf8))
+    } catch let code as VoiceSelftestCode {
+        voiceFailure("voice-token", code)
+    } catch {
+        voiceFailure("voice-token", .protocolError)
+    }
+case "voice-token" where arguments.count == 3 && arguments[1] == "--end":
+    SelftestTokenFile.remove(arguments[2])
+    do {
+        try VoiceSelftestClient.end()
+    } catch let code as VoiceSelftestCode {
+        voiceFailure("voice-token", code)
+    } catch {
+        voiceFailure("voice-token", .protocolError)
+    }
 case "version", "--version":
     print("friday-node \(NodeInfo.version) (protocol v\(NodeProtocol.version))")
 case "scrub" where arguments.dropFirst() == ["--stdin"]:
@@ -71,9 +157,11 @@ case "scrub-preview" where arguments.count == 3 && ["--owner-turns", "--codex"].
 default:
     #if DEBUG
     let usage = "usage: friday-node version | hook | scrub --stdin | scrub --jsonl"
+        + " | voice-loopback [--debug-echo-engine] | voice-token --out <file> | voice-token --end <file>"
         + " | scrub-preview --owner-turns <dir> | scrub-preview --codex <dir>\n"
     #else
-    let usage = "usage: friday-node version | hook | scrub --stdin | scrub --jsonl\n"
+    let usage = "usage: friday-node version | hook | scrub --stdin | scrub --jsonl"
+        + " | voice-loopback | voice-token --out <file> | voice-token --end <file>\n"
     #endif
     FileHandle.standardError.write(Data(usage.utf8))
     exit(arguments.isEmpty ? 0 : 2)

@@ -18,6 +18,11 @@
 //   (indicator `error`), forgets the token and backs off 1 s -> 60 s.
 // - Mute is re-read every second (stored setting and the input device's
 //   switch); a read failure is `mute: unreadable`.
+// - The nightly selftest's hold (Phase 11 M3, runbook B8; VoiceSelftest.swift):
+//   while it is on, voice is not wanted (the child stops, the mic is released
+//   and the token forgotten), so the selftest has the microphone and the
+//   node's one live `node_voice` token to itself; when it ends, the child
+//   starts again with a fresh token (which supersedes the selftest's).
 
 import Foundation
 import os
@@ -46,6 +51,7 @@ public final class VoiceService: VoiceChildHostDelegate, @unchecked Sendable {
     // Host-queue state.
     private var linkUp = false
     private var killSwitch = false
+    private var selftestHold = false
     private var settings = VoiceSettings()
     private var token: VoiceToken?
     private var minting = false
@@ -149,6 +155,29 @@ public final class VoiceService: VoiceChildHostDelegate, @unchecked Sendable {
         audio.shutdown()
     }
 
+    /// The nightly selftest takes (`true`) or gives back (`false`) the
+    /// microphone and the voice credential. Taking it waits (at most
+    /// `timeout` seconds) until this service's capture has stopped and
+    /// returns whether it did.
+    @discardableResult
+    public func setSelftestHold(_ on: Bool, timeout: Double = 3) -> Bool {
+        host.perform { core in
+            self.selftestHold = on
+            if on { self.token = nil }
+            self.reconcile(core)
+        }
+        guard on else { return true }
+        let deadline = Date().addingTimeInterval(timeout)
+        while host.performSync({ _ in self.capturing }) {
+            if Date() > deadline { return false }
+            usleep(20_000)
+        }
+        return true
+    }
+
+    /// Whether this service holds the microphone now.
+    public var micInUse: Bool { host.performSync { _ in self.capturing } }
+
     public var indicator: MicIndicator {
         MicIndicator.presentation(for: host.performSync { $0.indicator })
     }
@@ -156,7 +185,7 @@ public final class VoiceService: VoiceChildHostDelegate, @unchecked Sendable {
     // MARK: Host queue
 
     private func wanted() -> Bool {
-        settings.mode != "off" && linkUp && !killSwitch && link?.credentialForVoice() != nil
+        settings.mode != "off" && linkUp && !killSwitch && !selftestHold && link?.credentialForVoice() != nil
     }
 
     private func reconcile(_ core: VoiceHostCore) {
@@ -225,7 +254,9 @@ public final class VoiceService: VoiceChildHostDelegate, @unchecked Sendable {
         switch outcome {
         case .success(let token):
             mintBackoff = 1
-            guard !killSwitch else { return }
+            // A token minted before a selftest hold is superseded by the
+            // selftest's own: never kept.
+            guard !killSwitch, !selftestHold else { return }
             self.token = token
             core.sendCredential(token.frame)
         case .failure(VoiceCredentialError.refused):

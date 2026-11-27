@@ -119,13 +119,24 @@ transcript through the node voice channel's chat turn: at most a
 same scenario with the real pieces:
 
 ```bash
-friday-voice selftest --nightly \
-  --server https://friday.example.internal \
-  --token-file "$HOME/Library/Application Support/Friday/voice/selftest.token" \
-  --model-dir "$HOME/Library/Application Support/Friday/voice/models" \
-  --loopback-cmd "/Applications/Friday Node.app/Contents/MacOS/friday-node voice-loopback" \
-  --result-file "$HOME/Library/Application Support/Friday/voice/selftest-result.json"
+F="$HOME/Library/Application Support/Friday"
+"$F/bin/friday-node" voice-token --out "$F/voice/selftest.token"   # prints server_url= / ca_sha256=
+"$F/voice/.venv/bin/friday-voice" selftest --nightly \
+  --server https://friday.example.internal --ca-sha256 <ca_sha256 from the mint> \
+  --token-file "$F/voice/selftest.token" \
+  --model-dir "$F/voice/models" \
+  --loopback-cmd "'$F/bin/friday-node' voice-loopback" \
+  --result-file "$F/voice/selftest-result.json"
+"$F/bin/friday-node" voice-token --end "$F/voice/selftest.token"   # deletes it, ends the hold
 ```
+
+`selftest-nightly.sh` (below) runs exactly this. `friday-node` is the CLI
+`node/friday-node/scripts/install-hook-cli.sh` installs; both voice commands
+are clients of the **running FridayNode.app**, which plays and captures and
+mints, because the Microphone TCC grant and the Keychain node secret are the
+app's (a launchd job's own processes have neither: node/friday-node/README.md
+"Nightly self-trigger"). The owner turns the socket on with "Ses" → "Gece
+öz-testi" (Touch ID).
 
 - The clip is synthesised by Friday's real TTS (through the gateway, one
   `ModelUsage` row), played on the speakers and captured through the host's
@@ -143,37 +154,55 @@ friday-voice selftest --nightly \
   Point the server's `VOICE_LIVE_SELFTEST_RESULT_PATH` at it (read by the
   `voice_live_selftest` preflight check, branch 8: pass when green and
   < 48 h old, warn when missing, fail when the last run failed).
-- The token file holds a `node_voice` token (minted by the host with the
-  node secret, 15-minute TTL): the launchd job asks the host to mint one
-  right before the run (Mac session M3).
+- The token file holds a `node_voice` token (minted by the app with the
+  node secret, 15-minute TTL): `friday-node voice-token --out` creates it
+  new and 0600 right before the run, and `--end` (the job's trap) deletes
+  it. While the selftest holds the voice, the live voice child is stopped
+  (one voice at a time); afterwards it mints its own token again.
+- `--loopback-cmd`: `friday-node voice-loopback` reads one 16 kHz mono PCM16
+  WAV, plays it on the app's voice-processing engine and writes the
+  AEC-cleaned capture (the clip plus 1 s) as a WAV; non-zero with
+  `friday-node voice-loopback: error <code>` on stderr for any audio, TCC
+  or app failure (README "Nightly self-trigger" lists the codes).
 
 ### The launchd job (Mac)
 
 `~/Library/LaunchAgents/ai.friday.voice-selftest.plist`, nightly at 03:17
-when on power:
+(a night missed while the Mac slept runs at the next wake), rendered from
+`node/friday-node/scripts/ai.friday.voice-selftest.plist.template` by
+`node/friday-node/scripts/install-voice-selftest.sh`:
 
 ```xml
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-  <key>Label</key><string>ai.friday.voice-selftest</string>
-  <key>ProgramArguments</key>
-  <array>
-    <string>/bin/sh</string><string>-c</string>
-    <string>"$HOME/Library/Application Support/Friday/voice/selftest-nightly.sh"</string>
-  </array>
-  <key>StartCalendarInterval</key>
-  <dict><key>Hour</key><integer>3</integer><key>Minute</key><integer>17</integer></dict>
-  <key>StandardErrorPath</key><string>/tmp/friday-voice-selftest.log</string>
-</dict>
-</plist>
+<key>Label</key><string>ai.friday.voice-selftest</string>
+<key>ProgramArguments</key>
+<array>
+  <string>/bin/bash</string>
+  <string>/Users/<you>/Library/Application Support/Friday/voice/selftest-nightly.sh</string>
+</array>
+<key>StartCalendarInterval</key>
+<dict><key>Hour</key><integer>3</integer><key>Minute</key><integer>17</integer></dict>
+<key>LimitLoadToSessionType</key><string>Aqua</string>
+<key>StandardOutPath</key><string>/Users/<you>/Library/Logs/Friday/voice-selftest.log</string>
+<key>StandardErrorPath</key><string>/Users/<you>/Library/Logs/Friday/voice-selftest.log</string>
 ```
 
-`selftest-nightly.sh` (written in Mac session M3) skips the run on battery,
-asks the host for a fresh voice token, runs the command above and leaves
-the result line in place. Load it with `launchctl load -w …plist`. Seven
-consecutive green nights are the go/no-go evidence (brief M3).
+`selftest-nightly.sh` (`node/friday-node/scripts/`, installed next to the
+voice home) skips the run on battery, asks the app for a fresh voice token,
+runs the command above and leaves the result line in place; a night without
+a token still writes an `error` line. Installing never loads the agent: the
+job plays audio and opens the microphone every night, so loading is the
+owner's step:
+
+```bash
+node/friday-node/scripts/install-hook-cli.sh
+node/friday-node/scripts/install-voice-selftest.sh
+/bin/bash "$HOME/Library/Application Support/Friday/voice/selftest-nightly.sh"; echo "exit $?"   # once, at the Mac
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/ai.friday.voice-selftest.plist
+# (older form: launchctl load -w ~/Library/LaunchAgents/ai.friday.voice-selftest.plist)
+# stop: launchctl bootout gui/$(id -u)/ai.friday.voice-selftest
+```
+
+Seven consecutive green nights are the go/no-go evidence (brief M3).
 
 ## What never happens
 

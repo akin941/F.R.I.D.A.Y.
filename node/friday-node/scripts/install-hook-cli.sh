@@ -8,6 +8,9 @@ set -euo pipefail
 HERE=$(cd "$(dirname "$0")/.." && pwd)
 DEST="$HOME/Library/Application Support/Friday/bin"
 (cd "$HERE" && swift build -c release --product friday-node >/dev/null)
+# Runbook B8: the release CLI carries no DEBUG-only command (the voice
+# loopback's echo engine, the scrub preview) and no conformance marker.
+"$HERE/scripts/check-release-markers.sh" "$HERE/.build/release/friday-node" >/dev/null
 mkdir -p "$DEST"
 chmod 700 "$HOME/Library/Application Support/Friday" "$DEST"
 install -m 0755 "$HERE/.build/release/friday-node" "$DEST/friday-node"

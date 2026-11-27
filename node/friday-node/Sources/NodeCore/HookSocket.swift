@@ -137,38 +137,7 @@ public final class HookSocket: @unchecked Sendable {
         let running = fd >= 0
         lock.unlock()
         guard !running else { return }  // already listening
-        let directory = (path as NSString).deletingLastPathComponent
-        try? FileManager.default.createDirectory(
-            atPath: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
-        var info = stat()
-        guard lstat(directory, &info) == 0, (info.st_mode & S_IFMT) == S_IFDIR, info.st_uid == getuid(),
-            chmod(directory, 0o700) == 0
-        else { throw HookSocketError.unsafeDirectory }
-        if lstat(path, &info) == 0 {
-            guard (info.st_mode & S_IFMT) == S_IFSOCK else { throw HookSocketError.unsafePath }
-            unlink(path)
-        }
-        let socketFD = socket(AF_UNIX, SOCK_STREAM, 0)
-        guard socketFD >= 0 else { throw HookSocketError.socket }
-        var address = sockaddr_un()
-        address.sun_family = sa_family_t(AF_UNIX)
-        let bytes = Array(path.utf8)
-        guard bytes.count < MemoryLayout.size(ofValue: address.sun_path) else {
-            close(socketFD)
-            throw HookSocketError.unsafePath
-        }
-        withUnsafeMutableBytes(of: &address.sun_path) { $0.copyBytes(from: bytes) }
-        let previous = umask(0o177)
-        let bound = withUnsafePointer(to: &address) {
-            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
-                bind(socketFD, $0, socklen_t(MemoryLayout<sockaddr_un>.size))
-            }
-        }
-        umask(previous)
-        guard bound == 0, chmod(path, 0o600) == 0, listen(socketFD, 8) == 0 else {
-            close(socketFD)
-            throw HookSocketError.socket
-        }
+        let socketFD = try LocalSocket.listen(path: path)
         lock.lock()
         fd = socketFD
         lock.unlock()
@@ -184,8 +153,7 @@ public final class HookSocket: @unchecked Sendable {
             shutdown(socketFD, SHUT_RDWR)
             close(socketFD)
         }
-        var info = stat()
-        if lstat(path, &info) == 0, (info.st_mode & S_IFMT) == S_IFSOCK { unlink(path) }
+        LocalSocket.unlinkSocket(path)
     }
 
     private func acceptLoop(_ socketFD: Int32) {
@@ -258,24 +226,8 @@ public enum HookClient {
     public static let deadlineSeconds = 3
 
     public static func relay(_ data: Data, to path: String) {
-        let socketFD = socket(AF_UNIX, SOCK_STREAM, 0)
-        guard socketFD >= 0 else { return }
+        guard let socketFD = LocalSocket.connect(path: path, timeoutSeconds: deadlineSeconds) else { return }
         defer { close(socketFD) }
-        var timeout = timeval(tv_sec: deadlineSeconds, tv_usec: 0)
-        setsockopt(socketFD, SOL_SOCKET, SO_SNDTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size))
-        var noSigPipe: Int32 = 1
-        setsockopt(socketFD, SOL_SOCKET, SO_NOSIGPIPE, &noSigPipe, socklen_t(MemoryLayout<Int32>.size))
-        var address = sockaddr_un()
-        address.sun_family = sa_family_t(AF_UNIX)
-        let bytes = Array(path.utf8)
-        guard bytes.count < MemoryLayout.size(ofValue: address.sun_path) else { return }
-        withUnsafeMutableBytes(of: &address.sun_path) { $0.copyBytes(from: bytes) }
-        let connected = withUnsafePointer(to: &address) {
-            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
-                connect(socketFD, $0, socklen_t(MemoryLayout<sockaddr_un>.size))
-            }
-        }
-        guard connected == 0 else { return }
         let payload = [UInt8](data.prefix(HookEvent.maxInputBytes + 1))
         var offset = 0
         while offset < payload.count {

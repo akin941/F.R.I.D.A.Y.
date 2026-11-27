@@ -6,6 +6,8 @@
 # It also refuses the debug-only owner-turn preview (Phase 8B brief M1,
 # runbook B4: `scrub-preview` and its `OwnerTurnPreview` type, `#if DEBUG`),
 # which reads real transcripts and must never ship.
+# And the DEBUG-only voice loopback echo engine (runbook B8). install-hook-cli.sh
+# runs it on the release `friday-node` CLI too.
 # Run by the Release-only build phase (before CodeSign) and again by
 # build-sign-local.sh on the final binary.
 set -euo pipefail
@@ -49,6 +51,13 @@ fi
 # key and its helper type), which only `#if CONFORMANCE` code spells.
 if grep -qE "child_verdicts|VoiceCasesLive" "$TEXT"; then
   echo "voice conformance runner marker in $(basename "$BIN"): refusing" >&2
+  exit 1
+fi
+# Runbook B8 (Phase 11 M3): the DEBUG-only echo engine of `friday-node
+# voice-loopback --debug-echo-engine` (a fake speaker -> mic path for the
+# CommandLoopback contract run), its flag and its type.
+if grep -qE "debug-echo-engine|EchoVoiceEngine" "$TEXT"; then
+  echo "debug-only voice loopback echo engine marker in $(basename "$BIN"): refusing" >&2
   exit 1
 fi
 echo "no conformance or debug-preview marker in $(basename "$BIN")"
