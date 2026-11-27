@@ -32,14 +32,19 @@ itself -- and the Swift host computes it from the chain it sees.
 `NODE_TLS_PIN_SHA256` (the FridayNode pairing pin) is the SPKI sha256 in
 base64. `ca set` and `ca show` print both, labelled.
 
-`ca set` writes only into the install home: it refuses when `tls.json` or
-`server-ca.pem` there is a symlink, writes each file through a fresh
-`O_EXCL | O_NOFOLLOW` temporary (mode 0600) renamed into place, and
-tightens the home to 0700 (the child runs as the same user). It warns when
-the PEM holds more than one certificate, and refuses a CA certificate
-(`CA:TRUE`) unless `--allow-ca` is given: a CA in the trust store accepts
-every certificate it signs for the hostname, and the pin then holds only
-if the host sends that CA's DER sha256 as the top of the chain.
+`ca set` writes only into an install home (`check_home`): an existing real
+directory (not a symlink) owned by this user, never the user's home
+directory, and either a friday-voice install (its pyproject.toml names
+friday-voice) or a directory holding nothing but `tls.json` /
+`server-ca.pem`. It refuses when either of those is a symlink, writes each
+through a fresh `O_EXCL | O_NOFOLLOW` temporary (mode 0600) renamed into
+place, and tightens the home to 0700 (the child runs as the same user). It
+warns when the PEM holds more than one certificate, and refuses a
+certificate that may act as a CA -- `CA:TRUE`, or no basicConstraints at
+all (v1, or v3 without the extension) -- unless `--allow-ca` is given: a CA
+in the trust store accepts every certificate it signs for the hostname, and
+the pin then holds only if the host sends that CA's DER sha256 as the top
+of the chain.
 """
 
 import base64
@@ -125,7 +130,20 @@ class CertInfo:
 
     der_sha256: str  # hex: what a credential's `ca_sha256` pins (the voice pin)
     spki_sha256_b64: str  # base64: the node pairing pin / NODE_TLS_PIN_SHA256
-    is_ca: bool  # basicConstraints CA:TRUE
+    ca_constraint: bool | None  # basicConstraints cA; None: no extension (v1 or v3 without)
+
+    @property
+    def is_ca(self) -> bool:
+        """True unless the certificate says CA:FALSE: without
+        basicConstraints, OpenSSL may accept it as an issuer, so it counts
+        as a possible CA."""
+        return self.ca_constraint is not False
+
+    @property
+    def ca_label(self) -> str:
+        if self.ca_constraint is None:
+            return "no basicConstraints: possibly a CA"
+        return "CA:TRUE" if self.ca_constraint else "CA:FALSE"
 
 
 def _tlv(data: bytes, offset: int):
@@ -161,7 +179,9 @@ _VERSION, _EXTENSIONS = 0xA0, 0xA3
 _BASIC_CONSTRAINTS_OID = bytes([0x55, 0x1D, 0x13])  # 2.5.29.19
 
 
-def _is_ca(der: bytes, extensions_start: int, extensions_end: int) -> bool:
+def _basic_constraints_ca(der: bytes, extensions_start: int, extensions_end: int):
+    """basicConstraints cA: True / False, or None when the extension is
+    absent."""
     (_off, tag, seq_start, seq_end), *_rest = _children(der, extensions_start, extensions_end)
     if tag != _SEQUENCE:
         raise ValueError("bad extensions")
@@ -178,7 +198,7 @@ def _is_ca(der: bytes, extensions_start: int, extensions_end: int) -> bool:
             raise ValueError("bad basicConstraints")
         inner = _children(der, bc_start, bc_end)
         return bool(inner) and inner[0][1] == _BOOLEAN and der[inner[0][2]] != 0
-    return False
+    return None
 
 
 def cert_info(der: bytes) -> CertInfo:
@@ -196,18 +216,17 @@ def cert_info(der: bytes) -> CertInfo:
         spki_offset, spki_tag, _s, spki_end = fields[first + 5]
         if spki_tag != _SEQUENCE:
             raise ValueError("no subjectPublicKeyInfo")
-        is_ca = any(
-            _is_ca(der, start, end)
-            for _o, tag, start, end in fields[first + 6 :]
-            if tag == _EXTENSIONS
-        )
+        constraint = None  # v1, or v3 without basicConstraints: unknown
+        for _o, tag, start, end in fields[first + 6 :]:
+            if tag == _EXTENSIONS:
+                constraint = _basic_constraints_ca(der, start, end)
     except (ValueError, IndexError) as exc:
         raise TlsConfigError("CA file holds a certificate that cannot be parsed") from exc
     spki = der[spki_offset:spki_end]
     return CertInfo(
         der_sha256=hashlib.sha256(der).hexdigest(),
         spki_sha256_b64=base64.b64encode(hashlib.sha256(spki).digest()).decode("ascii"),
-        is_ca=is_ca,
+        ca_constraint=constraint,
     )
 
 
@@ -253,9 +272,9 @@ def bundle_warnings(infos) -> list[str]:
     for number, info in enumerate(infos, 1):
         if info.is_ca:
             warnings.append(
-                f"certificate {number} is a CA (CA:TRUE): it trusts every certificate it "
-                "signs for the hostname; the pin holds only if the host sends this CA's "
-                "DER sha256 as the top of the chain"
+                f"certificate {number} is treated as a CA ({info.ca_label}): it may trust "
+                "every certificate it signs for the hostname; the pin holds only if the "
+                "host sends this certificate's DER sha256 as the top of the chain"
             )
     return warnings
 
@@ -295,24 +314,65 @@ def _write_atomic(path: Path, data: bytes) -> None:
         os.close(dir_fd)
 
 
+RECORD_NAMES = frozenset({CONFIG_NAME, CA_COPY_NAME})
+
+
+def _is_voice_install(home: Path) -> bool:
+    """A `make friday-voice-install` home: the rsynced package, whose
+    pyproject.toml names the friday-voice project."""
+    import tomllib
+
+    pyproject = home / "pyproject.toml"
+    if pyproject.is_symlink() or not pyproject.is_file() or not (home / "friday_voice").is_dir():
+        return False
+    try:
+        data = tomllib.loads(pyproject.read_text("utf-8"))
+    except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError):
+        return False
+    return data.get("project", {}).get("name") == "friday-voice"
+
+
+def check_home(home) -> Path:
+    """The directory `ca set` may write into and chmod 0700, or
+    TlsConfigError. The rule: an existing real directory (not a symlink),
+    owned by this user, never the user's home directory, and either a
+    friday-voice install (`make friday-voice-install`) or a directory
+    holding nothing but the two record files (fresh, or a previous
+    `ca set`)."""
+    home = Path(home).expanduser() if home is not None else default_home()
+    if home.is_symlink():
+        raise TlsConfigError("the install home is a symlink: not written")
+    if not home.is_dir():
+        raise TlsConfigError("install home missing: run `make friday-voice-install` first")
+    home = home.absolute()
+    if home.resolve() == Path.home().resolve() or home.resolve() == Path("/"):
+        raise TlsConfigError("refusing the user's home directory as the install home")
+    if home.stat().st_uid != os.getuid():
+        raise TlsConfigError("the install home is not owned by this user: not written")
+    entries = {entry.name for entry in home.iterdir()}
+    if not entries <= RECORD_NAMES and not _is_voice_install(home):
+        raise TlsConfigError(
+            "the install home is neither a friday-voice install nor an empty directory: not written"
+        )
+    return home
+
+
 def set_ca(source, home=None, *, allow_ca=False):
     """Copy `source` into the install home and record it in `tls.json`.
     Returns `(target, infos, warnings)`."""
     infos = check_ca_file(source)
     if any(info.is_ca for info in infos) and not allow_ca:
+        labels = ", ".join(sorted({info.ca_label for info in infos if info.is_ca}))
         raise TlsConfigError(
-            "the PEM holds a CA certificate (CA:TRUE), which trusts every certificate it "
-            "signs: pass --allow-ca to record it deliberately (the gen-local-tls "
-            "certificate is not a CA)"
+            f"the PEM holds a certificate that may act as a CA ({labels}), which trusts "
+            "every certificate it signs: pass --allow-ca to record it deliberately (the "
+            "gen-local-tls certificate is CA:FALSE)"
         )
-    home = Path(home).expanduser() if home is not None else default_home()
-    if not home.is_dir():
-        raise TlsConfigError("install home missing: run `make friday-voice-install` first")
-    home = home.resolve()
+    home = check_home(home)
     target, config_path = home / CA_COPY_NAME, home / CONFIG_NAME
     for path in (target, config_path):
         _refuse_symlink(path)
-    os.chmod(home, HOME_MODE)
+    os.chmod(home, HOME_MODE, follow_symlinks=False)
     _write_atomic(target, Path(source).read_bytes())
     check_ca_file(target)
     config = json.dumps({"ca_file": str(target)}, indent=2) + "\n"
@@ -335,7 +395,7 @@ def clear_ca(home=None) -> bool:
 
 def _print_infos(infos) -> None:
     for number, info in enumerate(infos, 1):
-        print(f"certificate {number} of {len(infos)}{' (CA:TRUE)' if info.is_ca else ''}:")
+        print(f"certificate {number} of {len(infos)} ({info.ca_label}):")
         print(f"  voice pin (credential ca_sha256, DER sha256 hex): {info.der_sha256}")
         print(
             "  node pairing pin (SPKI sha256 base64, NODE_TLS_PIN_SHA256; "

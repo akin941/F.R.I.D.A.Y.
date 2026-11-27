@@ -84,11 +84,21 @@ still reads them. Both files survive a reinstall. A new key
 
 `ca set` warns when the PEM holds more than one certificate (each one
 becomes a trust anchor, and the pin must name the top certificate of the
-chain the server sends) and refuses a CA certificate (`CA:TRUE`) unless
-`--allow-ca` is given: a CA in the trust store accepts every certificate it
-signs for the hostname, and the pin then holds only if the host sends that
-CA's DER sha256 as the top of the chain. The gen-local-tls certificate is
-`CA:FALSE`, so it needs no flag. An empty `--ca-file ""` (on `ca set`,
+chain the server sends) and refuses a certificate that may act as a CA —
+`CA:TRUE`, or no basicConstraints at all (a v1 certificate, or v3 without
+the extension) — unless `--allow-ca` is given: a CA in the trust store
+accepts every certificate it signs for the hostname, and the pin then holds
+only if the host sends that CA's DER sha256 as the top of the chain. The
+gen-local-tls certificate is `CA:FALSE`, so it needs no flag.
+
+`ca set` writes only into an install home. The rule (`friday_voice.tls.check_home`):
+the `--home` (default `~/Library/Application Support/Friday/voice`) must be
+an existing real directory — not a symlink — owned by the current user,
+never the user's home directory, and either a friday-voice install (its
+`pyproject.toml` names `friday-voice`, with the `friday_voice/` package
+beside it) or a directory that holds nothing but `tls.json` /
+`server-ca.pem` (fresh, or a previous `ca set`). Anything else is refused
+before a file is written or a mode is changed. An empty `--ca-file ""` (on `ca set`,
 `replay`, `selftest`) is an error, never "the default bundle".
 
 The CA file **replaces** the public bundle for this install; it relaxes
@@ -118,8 +128,12 @@ Caddy's `path` matcher is case-insensitive and matches the *cleaned* path
 as `/API/v1/voice/speech` or `/x/../api/v1/voice/speech` is forwarded too.
 That stays safe because every listed name is an exact route that exists
 (the test resolves each one through Django, `/ws/node/v1` against the node
-gateway's mount), no prefix or wildcard is used, and Django is
-case-sensitive: any variant other than the exact path is a 404 upstream.
+gateway's mount), no prefix or wildcard is used, and a forwarded variant
+either resolves to the same exact route or 404s: `%2f` is decoded by
+Django too (`/api/v1/voice%2Fspeech` reaches the speech view, as it would
+by its exact path), while a case variant, a dot-segment or `//` is a 404
+(Django is case-sensitive and does not clean paths). The test checks each
+of these against Django.
 
 The proxy adds no header of its own: it never answers with
 `Access-Control-Allow-Origin` (no `header` directive), sets no CORS or CSRF

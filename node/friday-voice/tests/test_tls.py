@@ -30,15 +30,16 @@ MODEL = "a" * 64
 
 
 def _make_cert(directory: Path, name: str, san: str, *, ca=False):
+    """`ca`: False (CA:FALSE), True (CA:TRUE) or None (no basicConstraints)."""
     if shutil.which("openssl") is None:
         pytest.fail("the TLS tests need the openssl CLI")
     conf = directory / f"{name}.cnf"
     usage = "keyCertSign, cRLSign, digitalSignature" if ca else "digitalSignature"
+    constraint = "" if ca is None else f"basicConstraints = critical, CA:{str(ca).upper()}\n"
     conf.write_text(
         "[req]\ndistinguished_name = dn\nx509_extensions = ext\nprompt = no\n"
         f"[dn]\nCN = {name}\n"
-        f"[ext]\nsubjectAltName = {san}\n"
-        f"basicConstraints = critical, CA:{'TRUE' if ca else 'FALSE'}\n"
+        f"[ext]\nsubjectAltName = {san}\n{constraint}"
         f"keyUsage = critical, {usage}\nextendedKeyUsage = serverAuth\n",
         encoding="ascii",
     )
@@ -63,7 +64,8 @@ def certs(tmp_path_factory):
     local = _make_cert(directory, "friday-local-tls", "IP:127.0.0.1, DNS:localhost")
     other = _make_cert(directory, "elsewhere", "DNS:elsewhere.test")
     ca = _make_cert(directory, "a-ca", "DNS:a-ca.test", ca=True)
-    return {"local": local, "other": other, "ca": ca}
+    bare = _make_cert(directory, "no-constraints", "DNS:bare.test", ca=None)
+    return {"local": local, "other": other, "ca": ca, "bare": bare}
 
 
 def _spki_b64(cert):
@@ -321,16 +323,75 @@ def test_the_write_never_follows_a_planted_temporary(tmp_path, monkeypatch):
     assert victim.read_text() == "untouched" and not target.exists()
 
 
-def test_a_ca_certificate_needs_allow_ca(certs, tmp_path, capsys):
-    cert = certs["ca"][0]
-    assert tls.check_ca_file(cert)[0].is_ca
+@pytest.mark.parametrize(
+    ("kind", "label"), [("ca", "CA:TRUE"), ("bare", "no basicConstraints: possibly a CA")]
+)
+def test_a_possible_ca_certificate_needs_allow_ca(certs, tmp_path, capsys, kind, label):
+    cert = certs[kind][0]
+    (info,) = tls.check_ca_file(cert)
+    assert info.is_ca and info.ca_label == label
     assert cli.main(["ca", "set", str(cert), "--home", str(tmp_path)]) == 1
-    assert "--allow-ca" in capsys.readouterr().err
+    err = capsys.readouterr().err
+    assert "--allow-ca" in err and label in err
     assert not (tmp_path / tls.CONFIG_NAME).exists()
     assert cli.main(["ca", "set", str(cert), "--allow-ca", "--home", str(tmp_path)]) == 0
     captured = capsys.readouterr()
-    assert "certificate 1 is a CA (CA:TRUE)" in captured.err
-    assert "(CA:TRUE)" in captured.out
+    assert f"certificate 1 is treated as a CA ({label})" in captured.err
+    assert f"({label})" in captured.out
+
+
+def test_the_leaf_is_ca_false(certs):
+    (info,) = tls.check_ca_file(certs["local"][0])
+    assert info.ca_constraint is False and not info.is_ca and info.ca_label == "CA:FALSE"
+
+
+# --- which directory `ca set` may write into (tls.check_home) ---
+
+
+def test_ca_set_refuses_a_symlinked_home(certs, tmp_path, capsys):
+    real = tmp_path / "real"
+    real.mkdir(mode=0o755)
+    link = tmp_path / "link"
+    link.symlink_to(real)
+    assert cli.main(["ca", "set", str(certs["local"][0]), "--home", str(link)]) == 1
+    assert "symlink" in capsys.readouterr().err
+    assert (real.stat().st_mode & 0o777) == 0o755 and not list(real.iterdir())
+
+
+def test_ca_set_refuses_the_users_home(certs, tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(tls.Path, "home", classmethod(lambda cls: tmp_path))
+    tmp_path.chmod(0o755)
+    assert cli.main(["ca", "set", str(certs["local"][0]), "--home", str(tmp_path)]) == 1
+    assert "home directory" in capsys.readouterr().err
+    assert (tmp_path.stat().st_mode & 0o777) == 0o755
+
+
+def test_ca_set_refuses_a_home_owned_by_someone_else(certs, tmp_path, monkeypatch, capsys):
+    other_uid = os.getuid() + 1
+    monkeypatch.setattr(tls.os, "getuid", lambda: other_uid)
+    assert cli.main(["ca", "set", str(certs["local"][0]), "--home", str(tmp_path)]) == 1
+    assert "not owned by this user" in capsys.readouterr().err
+
+
+def test_ca_set_refuses_a_foreign_directory(certs, tmp_path, capsys):
+    (tmp_path / "notes.txt").write_text("someone else's")
+    tmp_path.chmod(0o755)
+    assert cli.main(["ca", "set", str(certs["local"][0]), "--home", str(tmp_path)]) == 1
+    assert "neither a friday-voice install" in capsys.readouterr().err
+    assert (tmp_path.stat().st_mode & 0o777) == 0o755
+    assert not (tmp_path / tls.CONFIG_NAME).exists()
+
+
+def test_ca_set_accepts_a_friday_voice_install(certs, tmp_path):
+    (tmp_path / "pyproject.toml").write_text('[project]\nname = "friday-voice"\n')
+    (tmp_path / "friday_voice").mkdir()
+    (tmp_path / ".venv").mkdir()
+    (tmp_path / "uv.lock").write_text("")
+    tls.set_ca(certs["local"][0], tmp_path)
+    assert tls.installed_ca_file(tmp_path) == str((tmp_path / tls.CA_COPY_NAME).resolve())
+    (tmp_path / "pyproject.toml").write_text('[project]\nname = "something-else"\n')
+    with pytest.raises(tls.TlsConfigError):
+        tls.set_ca(certs["local"][0], tmp_path)
 
 
 def test_a_bundle_of_several_certificates_warns(certs, tmp_path, capsys):

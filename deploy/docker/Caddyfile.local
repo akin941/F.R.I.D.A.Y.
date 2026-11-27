@@ -9,8 +9,10 @@
 # cleaned path (`//` merged, `%2f` decoded, `.`/`..` segments resolved), so
 # e.g. /API/v1/voice/speech or /x/../api/v1/voice/speech is forwarded too.
 # That is safe only because every name below is an exact, real route
-# (asserted by the test) and Django is case-sensitive: any variant other
-# than the exact path is a 404 upstream. No prefix or wildcard is ever used.
+# (asserted by the test) and a forwarded variant either resolves to that
+# same exact route in Django (`%2f` is decoded upstream too) or 404s (case,
+# dot-segments, `//`: Django is case-sensitive and does not clean paths).
+# No prefix or wildcard is ever used.
 # The proxy adds no header of its own (no CORS, no Origin): Django's
 # CORS/CSRF policy decides, unchanged.
 {
