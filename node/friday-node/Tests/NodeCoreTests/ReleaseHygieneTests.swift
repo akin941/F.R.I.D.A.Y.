@@ -35,13 +35,39 @@ final class ReleaseHygieneTests: XCTestCase {
         #endif
     }
 
-    /// Whatever the build, the protocol offer is v2 then v1, and the release
-    /// executor runs nothing: every action contract is `unsupported`.
-    func testTheReleaseExecutorRunsNothing() {
+    /// Whatever the build, the protocol offer is v2 then v1, and a node
+    /// without executors runs nothing: every action contract is
+    /// `unsupported`.
+    func testTheExecutorlessNodeRunsNothing() {
         XCTAssertEqual(NodeProtocol.offeredSubprotocols, ["friday-node.v2", "friday-node.v1"])
         let executor = UnavailableExecutor()
         for contract in CapabilityContract.actions {
             XCTAssertEqual(executor.availability(for: contract.name), "unsupported", contract.name)
         }
     }
+
+    /// Runbook B6: the Release app advertises the real executors, each gated
+    /// by its own grant: with no usable srt, no Accessibility grant and no
+    /// Automation grant for an enabled recipe's target, only open/focus
+    /// (which need no TCC grant) are `granted`; check 22 (the owner's local
+    /// mappings) still gates every one of them.
+    func testTheReleaseExecutorIsGatedByTCCAndTheSrtLocation() {
+        let denied = DeniedProbe()
+        let executor = MacActionExecutor(
+            srt: SrtExecutor(location: SrtLocation(node: "/nonexistent/node", prefix: "/nonexistent")),
+            recipesEnabled: ["music.play_pause"], permissions: denied)
+        XCTAssertEqual(executor.availability(for: "repo.command.run"), "unsupported")
+        XCTAssertEqual(executor.availability(for: "applescript.recipe.run"), "not_granted")
+        XCTAssertEqual(executor.availability(for: "ax.press"), "not_granted")
+        XCTAssertEqual(executor.availability(for: "ax.type_text"), "not_granted")
+        XCTAssertEqual(executor.availability(for: "apps.open"), "granted")
+        XCTAssertEqual(executor.availability(for: "apps.focus"), "granted")
+        XCTAssertEqual(ActionPolicy.empty(home: "/Users/o").repos.count, 0)
+    }
+}
+
+/// Every TCC answer "no" (the Release hygiene test never asks the real TCC).
+final class DeniedProbe: PermissionProbe {
+    var accessibilityTrusted: Bool { false }
+    func automation(_ bundleID: String, ask: Bool) -> AutomationStatus { .undetermined }
 }

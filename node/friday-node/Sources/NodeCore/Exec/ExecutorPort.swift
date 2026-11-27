@@ -9,19 +9,19 @@
 // `terminate()` on socket loss, the kill switch, "Durdur" and the runtime
 // cap, and sends no late result.
 //
-// Runbook B5 ships the port, the throwaway-worktree mode and (DEBUG builds
-// only) the scripted double the conformance suites run against. The real
-// executors are runbook B6: `Exec/SrtExecutor.swift` (with the `srt`
+// Runbook B5 shipped the port, the throwaway-worktree mode and (DEBUG builds
+// only) the scripted double the conformance suites run against. Runbook B6
+// adds the real executors: `Exec/SrtExecutor.swift` (with the `srt`
 // settings document of `Exec/SandboxPolicy.swift`, byte-identical to
-// backend/nodes/reference/sandbox.py), the recipes, AX and open/focus. Until
-// then the app's executor is `UnavailableExecutor`: every action contract
-// is advertised `unsupported`, so check 21 refuses before any window opens.
+// backend/nodes/reference/sandbox.py), the recipes, AX and open/focus,
+// composed by `Exec/MacActionExecutor.swift`. `UnavailableExecutor` stays
+// for a node without them (everything `unsupported`).
 
 import Foundation
 
-/// What one command run gets (reference `SandboxSpec`, minus the `srt`
-/// settings document and the stripped environment, which B6's
-/// `SandboxPolicy` adds).
+/// What one command run gets (reference `SandboxSpec`): the mapping's argv
+/// and paths, and (`sandbox`) the `srt` settings document, the stripped
+/// environment and the limits `SandboxPolicy` generated for this run.
 public struct CommandSpec: Equatable, Sendable {
     public let mode: String
     public let argv: [String]
@@ -38,13 +38,18 @@ public struct CommandSpec: Equatable, Sendable {
     /// min(mapping, contract, 900) seconds (sandbox.py `wall`).
     public let wallSeconds: Int64
     public let killGraceSeconds: Int64
+    /// The generated sandbox (settings, environment, limits). Nil only for a
+    /// spec a test builds by hand; the real executor refuses such a spec.
+    public let sandbox: SandboxDocument?
 
     public static let killGrace: Int64 = 5
 
     public init(
         mode: String, argv: [String], cwd: String, repoRoot: String, writeRoot: String, tempDir: String,
-        path: String, networkDomains: [String], wallSeconds: Int64, killGraceSeconds: Int64 = CommandSpec.killGrace
+        path: String, networkDomains: [String], wallSeconds: Int64, killGraceSeconds: Int64 = CommandSpec.killGrace,
+        sandbox: SandboxDocument? = nil
     ) {
+        self.sandbox = sandbox
         self.mode = mode
         self.argv = argv
         self.cwd = cwd
@@ -82,6 +87,19 @@ public struct ActionRequest: Equatable, Sendable {
     public let args: JSONValue
     public let bundleID: String?
     public let recipe: String?
+    /// A repo recipe's repo root as check 22 resolved it (the realpath that
+    /// equals a mapped root).
+    public let repoRoot: String?
+
+    public init(
+        capability: String, args: JSONValue, bundleID: String? = nil, recipe: String? = nil, repoRoot: String? = nil
+    ) {
+        self.capability = capability
+        self.args = args
+        self.bundleID = bundleID
+        self.recipe = recipe
+        self.repoRoot = repoRoot
+    }
 }
 
 public struct ActionOutcome: Equatable, Sendable {
@@ -97,10 +115,14 @@ public struct ActionOutcome: Equatable, Sendable {
 public struct OutputChunk: Equatable, Sendable {
     public let stream: String
     public let data: Data
+    /// Bytes past the output cap the executor counted but did not keep
+    /// (they still count toward `output_bytes`).
+    public let droppedBytes: Int64
 
-    public init(stream: String, data: Data) {
+    public init(stream: String, data: Data, droppedBytes: Int64 = 0) {
         self.stream = stream
         self.data = data
+        self.droppedBytes = droppedBytes
     }
 }
 
@@ -110,8 +132,20 @@ public protocol RunningCommand: AnyObject {
     func read() -> [OutputChunk]
     /// The outcome once the command finished; nil while it runs.
     func poll() -> CommandOutcome?
-    /// SIGTERM, then SIGKILL after the spec's grace. Idempotent.
+    /// SIGTERM, then SIGKILL after the spec's grace. Idempotent and
+    /// non-blocking: the process may still be alive when it returns.
     func terminate()
+    /// The process tree is gone: its files may be removed now.
+    var hasExited: Bool { get }
+    /// Run `work` once the process tree is gone (at once when it already
+    /// is): the session defers removing the worktree and the temp dir until
+    /// then (B5 review NIT: no cleanup under a live process).
+    func afterExit(_ work: @escaping () -> Void)
+}
+
+extension RunningCommand {
+    public var hasExited: Bool { poll() != nil }
+    public func afterExit(_ work: @escaping () -> Void) { work() }
 }
 
 public protocol ActionExecutor: AnyObject {
@@ -129,8 +163,9 @@ public struct ExecutorError: Error, Equatable {
     public init(_ reason: String) { self.reason = reason }
 }
 
-/// The release app's executor until runbook B6: nothing can run, every
-/// action contract is advertised `unsupported`.
+/// A node without executors (the runner's default when no executor factory
+/// is given): nothing can run, every action contract is `unsupported`. The
+/// app uses `MacActionExecutor` since runbook B6.
 public final class UnavailableExecutor: ActionExecutor {
     public init() {}
     public func availability(for capability: String) -> String { "unsupported" }

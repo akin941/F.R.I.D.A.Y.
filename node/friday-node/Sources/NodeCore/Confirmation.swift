@@ -130,16 +130,54 @@ public enum ConfirmationRenderer {
         let values = recipe != nil ? (args["params"] ?? [:]) : args
         var sentence = template
         for name in slots(template) ?? [] {
-            sentence = sentence.replacingOccurrences(of: "{\(name)}", with: pythonString(values[name]))
+            sentence = sentence.replacingOccurrences(of: "{\(name)}", with: displaySafe(pythonString(values[name])))
         }
         let approvalID = envelope["grant"]?["approval_id"]?.stringValue
         return ConfirmationPrompt(
             invocationID: envelope["invocation_id"]?.stringValue ?? "", capability: capability,
-            capabilityClass: envelope["class"]?.stringValue ?? "", sentence: sentence, recipeLabel: recipe?.label,
-            repoName: resolved?.repo?.name, argv: resolved?.command?.argv,
-            networkDomains: resolved?.command.map(\.networkDomains),
-            approvalPrefix: approvalID.flatMap { $0.isEmpty ? nil : String($0.prefix(8)) }, shownAt: shownAt,
-            deadline: shownAt + timeout)
+            capabilityClass: envelope["class"]?.stringValue ?? "", sentence: sentence,
+            recipeLabel: recipe.map { displaySafe($0.label) }, repoName: resolved?.repo.map { displaySafe($0.name) },
+            argv: resolved?.command?.argv.map(displaySafe),
+            networkDomains: resolved?.command.map { $0.networkDomains.map(displaySafe) },
+            approvalPrefix: approvalID.flatMap { $0.isEmpty ? nil : displaySafe(String($0.prefix(8))) },
+            shownAt: shownAt, deadline: shownAt + timeout)
+    }
+
+    /// Shown after a value whose control characters were made visible.
+    public static let alteredMark = "⟨kontrol karakteri gösterildi⟩"
+
+    /// A character that would break the window's lines or reorder its text:
+    /// C0 and C1 controls (newline included), DEL, the line and paragraph
+    /// separators, and the bidi controls.
+    static func isUnsafeForDisplay(_ scalar: Unicode.Scalar) -> Bool {
+        let value = scalar.value
+        return value < 0x20 || (0x7F...0x9F).contains(value) || value == 0x2028 || value == 0x2029
+            || (0x202A...0x202E).contains(value) || (0x2066...0x2069).contains(value) || value == 0x200E
+            || value == 0x200F || value == 0x061C
+    }
+
+    /// One value as the window shows it (B5 review finding 5): every unsafe
+    /// character is replaced by a visible escape (`\n`, `\r`, `\t`,
+    /// `\u{202E}`), so a value can never forge another label line ("Onay:
+    /// ...") or flip the text around, and an altered value ends with
+    /// `alteredMark`. A value without such a character is unchanged.
+    public static func displaySafe(_ text: String) -> String {
+        var out = ""
+        var altered = false
+        for scalar in text.unicodeScalars {
+            guard isUnsafeForDisplay(scalar) else {
+                out.unicodeScalars.append(scalar)
+                continue
+            }
+            altered = true
+            switch scalar {
+            case "\n": out += "\\n"
+            case "\r": out += "\\r"
+            case "\t": out += "\\t"
+            default: out += "\\u{" + String(scalar.value, radix: 16, uppercase: true) + "}"
+            }
+        }
+        return altered ? out + " " + alteredMark : out
     }
 }
 
@@ -269,25 +307,35 @@ public struct ConfirmationPanelView: Equatable, Sendable {
     public let countdown: String
     /// The buttons to show, in order.
     public let buttons: [String]
+    /// What "Durdur" stops: the running command's invocation, also while
+    /// a second window asks (B5 review NIT: the stop must stay reachable).
+    public let stopInvocationID: String?
 
     public static let hidden = ConfirmationPanelView(
-        mode: .hidden, invocationID: nil, lines: [], secondsLeft: 0, countdown: "", buttons: [])
+        mode: .hidden, invocationID: nil, lines: [], secondsLeft: 0, countdown: "", buttons: [],
+        stopInvocationID: nil)
+
+    /// The line a window shows while another approved command still runs.
+    public static let stillRunningLine = "Önceki onaylı komut hâlâ çalışıyor (Durdur ile durdurulur)."
 
     /// `prompt`: the open window, if any; `running`: the prompt whose
-    /// command runs, if any. An open window wins (one window at a time).
+    /// command runs, if any. An open window wins (one window at a time), and
+    /// keeps "Durdur" for the command that runs.
     public static func make(prompt: ConfirmationPrompt?, running: ConfirmationPrompt?, now: Int64)
         -> ConfirmationPanelView
     {
         if let prompt {
             let left = max(prompt.deadline - now, 0)
             return ConfirmationPanelView(
-                mode: .asking, invocationID: prompt.invocationID, lines: prompt.lines, secondsLeft: left,
-                countdown: "\(left) sn", buttons: [approveTitle, denyTitle])
+                mode: .asking, invocationID: prompt.invocationID,
+                lines: prompt.lines + (running == nil ? [] : [stillRunningLine]), secondsLeft: left,
+                countdown: "\(left) sn", buttons: running == nil ? [approveTitle, denyTitle] : [stopTitle, denyTitle, approveTitle],
+                stopInvocationID: running?.invocationID)
         }
         if let running {
             return ConfirmationPanelView(
                 mode: .running, invocationID: running.invocationID, lines: running.lines, secondsLeft: 0,
-                countdown: "Çalışıyor…", buttons: [stopTitle])
+                countdown: "Çalışıyor…", buttons: [stopTitle], stopInvocationID: running.invocationID)
         }
         return .hidden
     }
