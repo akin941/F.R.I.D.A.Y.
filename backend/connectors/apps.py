@@ -33,3 +33,8 @@ class ConnectorsConfig(AppConfig):
         from connectors.home_phrases import register as register_home_ports
 
         register_home_ports()
+        # Phase 13b (ADR-018, branch 1b): the direct-media classifier port.
+        # No executor is registered yet (branch 1c), so no turn changes.
+        from connectors.home_direct import register as register_home_direct
+
+        register_home_direct()

@@ -8,12 +8,16 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from connectors import home_entities
+from connectors import home_direct, home_entities
 from connectors.manifest import get_manifest
 from connectors.models import HOME_ENTITY_LABEL_MAX_CHARS, ConnectorBinding, HomeEntity
 from connectors.serializers import (
     BindingQuerySerializer,
     BindingUpdateSerializer,
+    HomeDirectCallSerializer,
+    HomeDirectCallsQuerySerializer,
+    HomeDirectQuerySerializer,
+    HomeDirectSettingsWriteSerializer,
     HomeEntityQuerySerializer,
     HomeEntitySerializer,
     HomeEntityWriteSerializer,
@@ -129,7 +133,12 @@ def _personal_workspace(request, workspace_id):
     )
 
 
-_REFUSALS = (home_entities.HomeEntityError, LabelError, ConnectorPermissionDenied)
+_REFUSALS = (
+    home_entities.HomeEntityError,
+    home_direct.HomeDirectError,
+    LabelError,
+    ConnectorPermissionDenied,
+)
 
 
 def _entity_refusal(exc):
@@ -193,6 +202,7 @@ class HomeEntityListView(APIView):
                 room_id=data.get("room_id"),
                 aliases=data.get("aliases"),
                 enabled=data.get("enabled", True),
+                direct=data.get("direct", False),
             )
         except _REFUSALS as exc:
             return _entity_refusal(exc)
@@ -232,6 +242,7 @@ class HomeEntityDetailView(APIView):
                 aliases=data.get("aliases", unset),
                 services=data.get("services", unset),
                 enabled=data.get("enabled", unset),
+                direct=data.get("direct", unset),
             )
         except _REFUSALS as exc:
             return _entity_refusal(exc)
@@ -270,3 +281,79 @@ class HomeEntityCandidatesView(APIView):
         except _REFUSALS as exc:
             return _entity_refusal(exc)
         return Response(body)
+
+
+class HomeDirectSettingsView(APIView):
+    """`GET` / `PATCH /api/v1/connectors/home-assistant/direct?workspace=<id>`
+    (Phase 13b D6, ADR-018 decisions 6-7): the owner kill switch and the
+    volume maximum, with the read-only env kill switch, state, limits, the
+    closed service list and the flagged-entity count. Owner, human, web
+    channel, personal workspace only (the service re-checks
+    `require_owner_web`); a firm or another user's workspace is 404. The
+    first `GET` creates the row with the defaults."""
+
+    permission_classes = [IsAuthenticated, IsWebChannel]
+
+    def get(self, request):
+        query = HomeDirectQuerySerializer(data=request.query_params)
+        query.is_valid(raise_exception=True)
+        workspace = _personal_workspace(request, query.validated_data["workspace"])
+        if workspace is None:
+            return Response(status=status.HTTP_404_NOT_FOUND)
+        try:
+            row = home_direct.get_settings(
+                actor=request.user, workspace=workspace, channel=request_channel(request)
+            )
+        except _REFUSALS as exc:
+            return _entity_refusal(exc)
+        return Response(home_direct.settings_view(actor=request.user, workspace=workspace, row=row))
+
+    def patch(self, request):
+        body = HomeDirectSettingsWriteSerializer(data=request.data)
+        body.is_valid(raise_exception=True)
+        data = body.validated_data
+        workspace = _personal_workspace(request, data["workspace"])
+        if workspace is None:
+            return Response(status=status.HTTP_404_NOT_FOUND)
+        unset = home_direct.UNSET
+        try:
+            row = home_direct.update_settings(
+                actor=request.user,
+                workspace=workspace,
+                channel=request_channel(request),
+                kill_switch=data.get("kill_switch", unset),
+                volume_max=data.get("volume_max", unset),
+            )
+        except _REFUSALS as exc:
+            return _entity_refusal(exc)
+        return Response(home_direct.settings_view(actor=request.user, workspace=workspace, row=row))
+
+
+class HomeDirectCallsView(APIView):
+    """`GET /api/v1/connectors/home-assistant/direct/calls?workspace=<id>&limit=`
+    (Phase 13b D11): the workspace's direct calls, newest first, at most
+    100, through `for_actor()`. Owner web only, personal workspace."""
+
+    permission_classes = [IsAuthenticated, IsWebChannel]
+
+    def get(self, request):
+        query = HomeDirectCallsQuerySerializer(data=request.query_params)
+        query.is_valid(raise_exception=True)
+        workspace = _personal_workspace(request, query.validated_data["workspace"])
+        if workspace is None:
+            return Response(status=status.HTTP_404_NOT_FOUND)
+        try:
+            rows = home_direct.list_calls(
+                actor=request.user,
+                workspace=workspace,
+                channel=request_channel(request),
+                limit=query.validated_data["limit"],
+            )
+        except _REFUSALS as exc:
+            return _entity_refusal(exc)
+        return Response(
+            {
+                "workspace": str(workspace.pk),
+                "results": HomeDirectCallSerializer(rows, many=True).data,
+            }
+        )

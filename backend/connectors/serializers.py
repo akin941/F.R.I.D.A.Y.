@@ -32,6 +32,9 @@ class HomeEntityWriteSerializer(serializers.Serializer):
         child=serializers.CharField(max_length=40), max_length=40, allow_empty=True
     )
     enabled = serializers.BooleanField(required=False)
+    # Phase 13b D5 (ADR-018): the owner's "Doğrudan (onaysız)" flag -- a
+    # strict JSON boolean ("true" / 1 are refused, see to_internal_value).
+    direct = serializers.BooleanField(required=False)
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -45,6 +48,8 @@ class HomeEntityWriteSerializer(serializers.Serializer):
             unknown = sorted(set(data) - set(self.fields))
             if unknown:
                 raise serializers.ValidationError({key: ["Unknown field."] for key in unknown})
+            if "direct" in data and not isinstance(data["direct"], bool):
+                raise serializers.ValidationError({"direct": ["Must be true or false."]})
         return super().to_internal_value(data)
 
     def validate(self, attrs):
@@ -62,6 +67,10 @@ class HomeEntitySerializer(serializers.Serializer):
     aliases = serializers.ListField(child=serializers.CharField(), read_only=True)
     services = serializers.ListField(child=serializers.CharField(), read_only=True)
     enabled = serializers.BooleanField(read_only=True)
+    direct = serializers.BooleanField(read_only=True)
+    # The services the flag covers / would cover (ADR-018's closed class
+    # intersected with the entity's own services); empty = not eligible.
+    direct_services = serializers.ListField(child=serializers.CharField(), read_only=True)
     room = serializers.SerializerMethodField()
     created_at = serializers.DateTimeField(read_only=True)
     updated_at = serializers.DateTimeField(read_only=True)
@@ -123,3 +132,58 @@ def serialize_binding(manifest, binding, workspace):
         },
         "updated_at": binding.updated_at.isoformat() if binding else None,
     }
+
+
+class HomeDirectQuerySerializer(serializers.Serializer):
+    workspace = serializers.UUIDField()
+
+
+class HomeDirectCallsQuerySerializer(serializers.Serializer):
+    workspace = serializers.UUIDField()
+    limit = serializers.IntegerField(min_value=1, max_value=100, required=False, default=20)
+
+
+class HomeDirectSettingsWriteSerializer(serializers.Serializer):
+    """`PATCH /connectors/home-assistant/direct` (Phase 13b D6): the owner
+    kill switch and the volume maximum (0..1). Everything else the view
+    returns (env kill switch, limits, the closed list) is read-only;
+    unknown keys are refused."""
+
+    workspace = serializers.UUIDField()
+    kill_switch = serializers.BooleanField(required=False)
+    volume_max = serializers.DecimalField(
+        max_digits=3, decimal_places=2, min_value=0, max_value=1, required=False
+    )
+
+    def to_internal_value(self, data):
+        if isinstance(data, dict):
+            unknown = sorted(set(data) - set(self.fields))
+            if unknown:
+                raise serializers.ValidationError({key: ["Unknown field."] for key in unknown})
+            if "kill_switch" in data and not isinstance(data["kill_switch"], bool):
+                raise serializers.ValidationError({"kill_switch": ["Must be true or false."]})
+            if "volume_max" in data and isinstance(data["volume_max"], bool):
+                raise serializers.ValidationError({"volume_max": ["Must be a number."]})
+        return super().to_internal_value(data)
+
+    def validate(self, attrs):
+        if not (set(attrs) - {"workspace"}):
+            raise serializers.ValidationError("Provide at least one field to change.")
+        return attrs
+
+
+class HomeDirectCallSerializer(serializers.Serializer):
+    id = serializers.UUIDField(read_only=True)
+    home_entity_id = serializers.UUIDField(read_only=True, allow_null=True)
+    entity_id = serializers.CharField(read_only=True)
+    service = serializers.CharField(read_only=True)
+    data = serializers.JSONField(read_only=True)
+    requested_data = serializers.JSONField(read_only=True)
+    origin = serializers.CharField(read_only=True)
+    node = serializers.UUIDField(read_only=True, allow_null=True)
+    status = serializers.CharField(read_only=True)
+    error_type = serializers.CharField(read_only=True)
+    read_back = serializers.BooleanField(read_only=True)
+    started_at = serializers.DateTimeField(read_only=True)
+    finished_at = serializers.DateTimeField(read_only=True)
+    created_at = serializers.DateTimeField(read_only=True)

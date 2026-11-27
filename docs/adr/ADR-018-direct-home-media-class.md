@@ -155,3 +155,59 @@ minute, never louder than the owner's maximum".
 - **Letting the model's extracted arguments run directly.** Rejected: the
   deterministic matcher over the owner's words is the only path; model
   output never executes (CLAUDE.md rule 4).
+
+## Implementation note — branch 1b `feat/p13-direct-media-model` (2026-11-27)
+
+The model, the closed set, the classifier, the rate windows and the owner
+API; **no executor** (branch 1c), so nothing is direct yet and no turn
+behaves differently.
+
+- **Closed set and digest.** `backend/connectors/home_direct.py`:
+  `DIRECT_MEDIA_DOMAIN = "media_player"`, `DIRECT_MEDIA_SERVICES` (the
+  eight services of decision 1), `DIRECT_MEDIA_DIGEST` = sha256 of the
+  sorted names joined by `\n`:
+
+  `ADR-018 digest: 9ca85ee245440d6c31779bf26dfd256489eeafff83e3e678bc3c7572ad2d3183`
+
+  `home_direct.ADR_018_DIGEST` carries the same value;
+  `connectors/tests/test_home_direct_classifier.py` asserts code, constant
+  and this line agree (the closeout's `ha_direct_media` preflight row will
+  compare them too). Changing the set without amending this ADR fails CI.
+- **Models** (`connectors` migration `0006_home_direct`):
+  `HomeEntity.direct` (default false; `save()` refuses it,
+  `ha_entity.direct_not_allowed`, unless the entity is a `media_player`
+  whose services include a closed-set service); `HomeDirectSettings`
+  (personal workspace, one row; `kill_switch`, `volume_max` 0–1, default
+  `HA_DIRECT_VOLUME_MAX`); `HomeDirectCall` (the call log; the FK to the
+  allowlist row is `home_entity` because `entity_id` is the HA id column;
+  no writer in 1b).
+- **Classifier** `home_direct.classify(*, workspace, actor, arguments,
+  origin, channel, input_mode, state=…)` — the brief's D7 order with one
+  added closed reason, `arguments_invalid` (the bridge's strict
+  `CallServiceArguments` refuses the arguments: a widened `data`, a
+  `"direct": true` key, a domain narrowed away by `HA_ALLOWED_DOMAINS`),
+  checked right after the domain and service. Origins: `chat` = web +
+  `input_mode=text`, `voice` = web + `voice`, `node` = `node_voice` +
+  `voice`; anything else is `origin_not_direct`. Read-only: the rate
+  windows are only peeked (`peek_direct_calls`); the single increment per
+  call is `count_direct_call`, the executor's step right before the send,
+  which takes its increment back when the call is over a limit (the brief
+  review's follow-up 1). Without a live state a `volume_up` is admitted
+  with `needs_live_volume=True` and the executor must apply
+  `volume_refusal` to its pre-send read (decision 6).
+- **Port** `tools.home_ports`: `register_direct_classifier` /
+  `classify_home_direct` (unregistered or raising → `not_available`) and
+  `register_direct_executor` / `run_home_direct` (unregistered → `not_direct`;
+  raising → `error`, never a card). `ConnectorsConfig.ready` registers the
+  classifier only.
+- **Owner API** (web session of the installation owner, personal workspace):
+  `direct` on `POST`/`PATCH /api/v1/connectors/home-assistant/entities`
+  (audited `ha.entity_direct_changed`; unticking the last eligible service
+  clears the flag in the same write), `GET`/`PATCH
+  /api/v1/connectors/home-assistant/direct` (audited
+  `ha.direct_settings_changed`), `GET
+  /api/v1/connectors/home-assistant/direct/calls?limit=` (≤ 100).
+- **Settings**: `HA_DIRECT_MEDIA_KILL_SWITCH` (false),
+  `HA_DIRECT_RATE_GLOBAL_PER_MINUTE` (30), `HA_DIRECT_RATE_ENTITY_PER_MINUTE`
+  (10; 0 disables the class), `HA_DIRECT_VOLUME_MAX` (0.6, validated 0–1 at
+  load) in `config/settings/base.py` and `.env.example`.

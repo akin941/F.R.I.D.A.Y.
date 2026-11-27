@@ -22,6 +22,21 @@ typed-turn draft check need the owner's Home Assistant allowlist. So
   services) shown to `router.connector_args` **as data** so the argument
   step can name a real target; never instructions, never server text.
 
+Phase 13b (ADR-018, brief D7/D10, branch 1b) adds the direct-media ports:
+
+- `register_direct_classifier(fn)`: `fn(*, workspace, actor, arguments,
+  origin, channel, input_mode, **options) -> DirectVerdict` -- the closed,
+  ordered admission check of ADR-018's direct class
+  (`connectors.home_direct.classify`). Read-only: it never sends, never
+  creates a row and never spends rate-limit quota.
+- `register_direct_executor(fn)`: `fn(*, workspace, actor, message, origin,
+  channel, node_id) -> DirectRun` -- the single direct send (branch 1c).
+  **Nothing registers an executor in branch 1b**, so every
+  `run_home_direct` answers `not_direct` and sends nothing.
+
+An unregistered or raising classifier/executor is **never direct**
+(`not_available`): the turn stays exactly the gate-class Phase 13 turn.
+
 Unregistered resolver -> every utterance is a miss. Unregistered check ->
 no extra check (the tool's own serializer and request-time scope check
 still run when the owner taps the card). A port that raises is treated as
@@ -147,3 +162,136 @@ def draft_vocabulary(tool_name, *, workspace, actor):
         logger.warning("draft vocabulary for %s failed: %s", tool_name, type(exc).__name__)
         return []
     return list(rows or [])
+
+
+# --- Phase 13b: the direct-media class (ADR-018) -----------------------------
+
+# The one reason the port itself produces: no (working) classifier or
+# executor. Every other reason is `connectors.home_direct`'s closed set.
+DIRECT_NOT_AVAILABLE = "not_available"
+
+DIRECT_RUN_SENT = "sent"
+DIRECT_RUN_NOT_DIRECT = "not_direct"
+# The executor raised: a send may or may not have been attempted, so the
+# caller must neither build a card from the arguments nor claim success.
+DIRECT_RUN_ERROR = "error"
+DIRECT_RUN_OUTCOMES = frozenset({DIRECT_RUN_SENT, DIRECT_RUN_NOT_DIRECT, DIRECT_RUN_ERROR})
+DIRECT_EXECUTOR_FAILED = "executor_failed"
+
+
+@dataclass(frozen=True)
+class DirectVerdict:
+    """The classifier's answer. `direct` only when every ADR-018 condition
+    held; otherwise `reason` is the first failing closed code. `limit` names
+    the window (`global` / `entity`) of a `rate_limited` verdict.
+    `needs_live_volume` marks a direct `volume_up` classified without a live
+    state: the executor must re-check the volume rule on its pre-send read
+    (D9) and send nothing if it fails."""
+
+    direct: bool
+    reason: str = ""
+    limit: str = ""
+    needs_live_volume: bool = False
+
+    def __post_init__(self):
+        if self.direct and self.reason:
+            raise ValueError("a direct verdict carries no reason")
+        if not self.direct and not self.reason:
+            raise ValueError("a non-direct verdict names its reason")
+
+
+NOT_AVAILABLE = DirectVerdict(direct=False, reason=DIRECT_NOT_AVAILABLE)
+
+
+@dataclass(frozen=True)
+class DirectRun:
+    """The executor's answer (branch 1c fills `call_id` / `reply`)."""
+
+    outcome: str
+    reason: str = ""
+    reply: str = ""
+    call_id: str = ""
+
+    def __post_init__(self):
+        if self.outcome not in DIRECT_RUN_OUTCOMES:
+            raise ValueError(f"unknown direct run outcome {self.outcome!r}")
+
+
+_DIRECT_CLASSIFIER: list[Callable[..., Any]] = []
+_DIRECT_EXECUTOR: list[Callable[..., Any]] = []
+
+
+def register_direct_classifier(fn):
+    _DIRECT_CLASSIFIER[:] = [fn]
+
+
+def unregister_direct_classifier():
+    """Test-only."""
+    _DIRECT_CLASSIFIER.clear()
+
+
+def direct_classifier():
+    return _DIRECT_CLASSIFIER[0] if _DIRECT_CLASSIFIER else None
+
+
+def classify_home_direct(*, workspace, actor, arguments, origin, channel, input_mode, **options):
+    """The registered classifier's verdict; `NOT_AVAILABLE` (never direct)
+    when none is registered, it raises, or it answers anything but a
+    `DirectVerdict`."""
+    fn = direct_classifier()
+    if fn is None:
+        return NOT_AVAILABLE
+    try:
+        verdict = fn(
+            workspace=workspace,
+            actor=actor,
+            arguments=arguments,
+            origin=origin,
+            channel=channel,
+            input_mode=input_mode,
+            **options,
+        )
+    except Exception as exc:  # noqa: BLE001 -- fail closed: the card
+        logger.warning("direct classifier failed: %s", type(exc).__name__)
+        return NOT_AVAILABLE
+    return verdict if isinstance(verdict, DirectVerdict) else NOT_AVAILABLE
+
+
+def register_direct_executor(fn):
+    _DIRECT_EXECUTOR[:] = [fn]
+
+
+def unregister_direct_executor():
+    """Test-only."""
+    _DIRECT_EXECUTOR.clear()
+
+
+def direct_executor():
+    return _DIRECT_EXECUTOR[0] if _DIRECT_EXECUTOR else None
+
+
+def run_home_direct(*, workspace, actor, message, origin, channel, node_id=None):
+    """The registered executor's result; `not_direct` / `not_available`
+    (nothing sent) when none is registered -- the case for all of branch
+    1b. An executor that raises or answers anything but a `DirectRun` is
+    reported `error` / `executor_failed`: it may have reached the send, so
+    the caller must not substitute a card (ADR-018 decision 9); its own
+    `HomeDirectCall` row is the record."""
+    fn = direct_executor()
+    if fn is None:
+        return DirectRun(outcome=DIRECT_RUN_NOT_DIRECT, reason=DIRECT_NOT_AVAILABLE)
+    try:
+        result = fn(
+            workspace=workspace,
+            actor=actor,
+            message=message,
+            origin=origin,
+            channel=channel,
+            node_id=node_id,
+        )
+    except Exception as exc:  # noqa: BLE001 -- never an approval
+        logger.warning("direct executor failed: %s", type(exc).__name__)
+        return DirectRun(outcome=DIRECT_RUN_ERROR, reason=DIRECT_EXECUTOR_FAILED)
+    if isinstance(result, DirectRun):
+        return result
+    return DirectRun(outcome=DIRECT_RUN_ERROR, reason=DIRECT_EXECUTOR_FAILED)

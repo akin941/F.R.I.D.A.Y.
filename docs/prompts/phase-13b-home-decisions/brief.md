@@ -1107,7 +1107,7 @@ says "server side done; go/no-go pending owner evaluation".
 |---|---|---|---|---|
 | brief | `docs/p13b-brief` | This brief (no stub existed; the owner decisions of 2026-11-26 kept as goal, scope and boundary), ADR-018 (Accepted 2026-11-26), ADR-017 amendment, ADR-014/ADR-015 cross references, CLAUDE.md rule 4 sentence, runbook "Interim: server on the MacBook" + R2 + TPM, housekeeping (handoff branch names, `feat/mac-a1-spike`, "(former repository)" notes, Phase 13 follow-ups 1–3, Q1/Q5/Q6 notes), MASTER_PLAN §AA row 9b + §O d12, `self_sources.json` regenerated | Phase 13 closeout | **implemented 2026-11-26** (docs only; awaits the independent Sonnet 5 plan review to APPROVE) |
 | 1a | `feat/p13-media-play-pause-stop` | `media_play_pause`/`media_stop` in the code maximum as gate-class services (manifest v3, pins, governance docs), the play_pause dialog row, `STOP`/`PLAY_PAUSE` verbs and vectors | brief approved | **implemented 2026-11-20** (manifest v3, new `CALL_SERVICE_PIN`, `STATES_PIN` unchanged; play_pause outcome row + precondition; awaits the independent Sonnet 5 review) |
-| 1b | `feat/p13-direct-media-model` | `HomeEntity.direct`, `HomeDirectSettings`, `HomeDirectCall` (`connectors` 0006), closed allowlist + digest, `classify`, rate windows, volume rules, settings service, entity `direct` field + `/direct` + `/direct/calls` endpoints with role × endpoint, registry walk, the classifier port, `HA_DIRECT_*` settings, ADR-018 implementation note | 1a | not started |
+| 1b | `feat/p13-direct-media-model` | `HomeEntity.direct`, `HomeDirectSettings`, `HomeDirectCall` (`connectors` 0006), closed allowlist + digest, `classify`, rate windows, volume rules, settings service, entity `direct` field + `/direct` + `/direct/calls` endpoints with role × endpoint, registry walk, the classifier port, `HA_DIRECT_*` settings, ADR-018 implementation note | 1a | **implemented 2026-11-20** (`connectors` 0006; closed set + digest `9ca85ee2…` pinned in ADR-018; read-only `classify` with the added closed reason `arguments_invalid`; peek-only classify + one `count_direct_call`; owner API with role × endpoint; classifier port only, no executor; awaits the independent Sonnet 5 review) |
 | 1c | `feat/p13-direct-media-exec` | `execute` (re-resolution, kill-switch re-check, clamp, one send, audit), recovery scan, executor port, `HOME_DIRECT` intent (`assistant` 0015) + code-only parser lock, cap clause, `extra_effects` + `_finish` check, sentinel factory, voice/`node_voice`/typed paths, provenance tests | 1b | not started |
 | 1d | `feat/p13-direct-media-ui` | HUD `home_direct` line, `/connectors` direct switch and settings panel, vitest | 1b (merges after 1c, so nothing is shown as "on" before it can run) | not started |
 | 2 | `feat/p13-interim-mac-server` | `HOME_SERVER_PLATFORM`, `home_server_platform`, macOS-aware `home_disk_encryption`, `HOME_BACKUP_OFFSITE_REPOSITORY` + the R2 destination check, R2 names in `.env.example`, portable backup/drill scripts, `restic.env.example`, launchd plist, `compose.mac.yml`, `make up-mac-server` | brief approved (independent of 1) | **implemented 2026-11-20** (server side, tested against the macOS tool-set double; the real Mac run is M1 — deferred: Mac session; awaits the independent Sonnet 5 review) |
@@ -1558,3 +1558,86 @@ here, the server side is implemented and tested against doubles:
    `restic backup` and `restic cat config`/`restic snapshots` in the same
    subshell that exports the repository, or record the repository from
    that subshell.
+
+### Owner steps (pending) — `feat/p13-direct-media-model` (branch 1b), recorded 2026-11-20
+
+What branch 1b did: `HomeEntity.direct` (default off; `save()` refuses it
+— `ha_entity.direct_not_allowed` — unless the entity is a `media_player`
+with at least one closed-set service), `HomeDirectSettings` (kill switch,
+volume maximum 0–1) and `HomeDirectCall` (the call log, no writer yet) in
+`connectors` migration `0006_home_direct`; `connectors/home_direct.py` with
+ADR-018's closed set and its digest
+(`9ca85ee245440d6c31779bf26dfd256489eeafff83e3e678bc3c7572ad2d3183`,
+recorded in ADR-018's implementation note and pinned by a test), the
+D7-ordered read-only `classify`, the D8 windows, the D9 volume rules and
+`volume_set` clamp, the owner-web settings service and the calls selector;
+`direct` on the entity endpoints (audited `ha.entity_direct_changed`,
+cleared with the last eligible service), `GET`/`PATCH
+/api/v1/connectors/home-assistant/direct` and `GET …/direct/calls`, with
+role × endpoint tests; the classifier port in `tools.home_ports` (an
+executor port is declared but **nothing registers one**, so no turn
+behaves differently: a flagged TV still gets the Phase 13 card, tested);
+the `HA_DIRECT_*` settings in `config/settings/base.py` and `.env.example`;
+the registry walk extended to the flag, the settings and the call log.
+Everything was tested against the fake HA and the real views; nothing
+needed the Mac, real credentials, paid calls or hardware.
+
+Implementation choices the reviewer should check (all fail closed):
+- **`arguments_invalid`** joins the closed reason set right after the
+  domain/service checks (D7 step 4): arguments the bridge's strict
+  `CallServiceArguments` refuses — a widened `data`, a `"direct": true`
+  key, `media_player` narrowed away by `HA_ALLOWED_DOMAINS` — are never
+  direct. The D7 list had no reason for them.
+- **Origins** are checked as `(channel, input_mode)` pairs: `chat` =
+  `web`+`text`, `voice` = `web`+`voice`, `node` = `node_voice`+`voice`;
+  `classify` therefore takes a required `input_mode` keyword in addition to
+  the brief's signature.
+- **Rate windows (follow-up 1 resolved):** `classify` only peeks the
+  windows; `count_direct_call` is the single increment per call (branch
+  1c's executor, right before the send) and takes its increment back when
+  the call is over a limit, so a call that becomes a card spends no quota.
+  A `rate_limited` verdict is audited `ha.direct_rate_limited`
+  (`audit_rate_limit=False` lets 1c's re-check avoid a second row).
+- **`volume_up` without a live read:** the route has no HA state at
+  classification time, so `classify(state=<omitted>)` admits a direct
+  `volume_up` with `needs_live_volume=True`, and branch 1c's executor must
+  run `volume_refusal` on its pre-send read and send nothing on failure
+  (D9). With a state given (`state=None` included) the rule applies at once.
+- **`HomeDirectCall.home_entity`** is the brief's `entity` FK: the name
+  `entity` would collide with the `entity_id` HA-id column in Django.
+- **`run_home_direct`** answers `error` / `executor_failed` (never
+  `not_direct`) when a registered executor raises, so 1c's caller cannot
+  substitute a card after a possible send (ADR-018 decision 9).
+- **Settings row:** created only by the owner's first `GET /direct`
+  (`get_settings`); until then the classifier reads the defaults and never
+  creates a row (the walk pins the writers).
+- Also on this branch: a `chore(lint)` commit adding two test-only
+  `ignore_imports` (`ops.tests.test_local_tls_caddyfile ->
+  config.asgi_nodes`, `ai_core.tests.test_speech_gateway ->
+  config.settings.base`) that were breaking `lint-imports` on the
+  integration branch.
+
+1. Start the independent Sonnet 5 review of this branch; merge after
+   APPROVE (before branch 1c is cut).
+2. Confirm the defaults now in `.env.example` (owner step 3 above): 30/min
+   global, 10/min per entity, volume maximum 0.6, `volume_up` headroom 0.1;
+   and the added `arguments_invalid` reason.
+3. Nothing to do on `/connectors` yet: the flag can be set over the API,
+   but no call is direct until branch 1c merges, and the UI switch arrives
+   with branch 1d (owner step 7 above).
+
+### Known follow-ups — review notes left open at the `feat/p13-direct-media-model` merge (2026-11-27)
+
+1. **LOW — peek-then-increment window** (`backend/connectors/home_direct.py`).
+   `count_direct_call` and `over_limit` both read the 60 per-second buckets
+   with a separate `get_many` on each call, so a concurrent burst can briefly
+   exceed the limit between a peek and the increment. Bounded, because the
+   executor's increment-then-check with take-back is the authoritative step.
+   Fix: no change in 1b; in 1c keep the executor's increment-then-check as
+   the only authority and add a concurrency test there.
+2. **LOW — `classify` writes an audit row on `rate_limited`**
+   (`backend/connectors/home_direct.py`). `classify` is documented as
+   read-only, yet the `rate_limited` path writes `ha.direct_rate_limited`
+   (as the brief asks), so a caller that classifies repeatedly while over
+   the limit writes repeated audit rows. Fix (optional): in 1c pass
+   `audit_rate_limit=False` on re-checks; the parameter already exists.

@@ -325,6 +325,13 @@ export const ERROR_MESSAGES = {
     message: "Home Assistant okunamadı; bağlantının açık ve sağlıklı olduğundan emin ol.",
     specific: true,
   },
+  // The direct media class (Phase 13b, ADR-018).
+  "ha_entity.direct_not_allowed": {
+    message:
+      "Yalnızca oynatma, duraklatma, durdurma ya da ses hizmeti olan bir medya oynatıcı doğrudan olabilir.",
+    specific: true,
+  },
+  "ha_direct.invalid": { message: "Doğrudan medya ayarı geçerli değil.", specific: true },
   // Workspaces
   "workspace.permission_denied": {
     message: "Rolün bu çalışma alanını düzenlemeye yetmiyor.",
