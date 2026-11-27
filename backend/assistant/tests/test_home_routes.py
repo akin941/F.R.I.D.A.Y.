@@ -433,7 +433,9 @@ def _tap_and_approve(web_client, owner, workspace, draft, committed):
     )
     assert response.status_code == 201, response.content
     request_id = response.json()["id"]
-    rows = {r["label"]: r["value"] for r in ApprovalRequest.objects.get().payload["display"]["rows"]}
+    rows = {
+        r["label"]: r["value"] for r in ApprovalRequest.objects.get().payload["display"]["rows"]
+    }
     with committed():
         assert web_client(owner).post(f"{APPROVALS}/{request_id}/approve").status_code == 200
     return rows

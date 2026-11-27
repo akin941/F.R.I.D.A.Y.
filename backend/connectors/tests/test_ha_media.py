@@ -1,8 +1,10 @@
-"""Phase 13 D12 + Phase 13b D4 (branch 1a): media/TV services -- power, input, mute and volume steps,
-the bounded live `source_list`, every one gate-class, executed at most once,
-state read back -- and the branch's done-when: "turn on the salon TV" can
-be drafted, approved and executed once against the fake HA with the entity
-allowlisted. `httpx.MockTransport` only, never a real HA."""
+"""Phase 13 D12 + Phase 13b D4 (branch 1a): media/TV services -- power,
+input, mute and volume steps, `media_play_pause` (its outcome row and
+precondition) and `media_stop`, the bounded live `source_list`, every one
+gate-class, executed at most once, state read back -- and the branch's
+done-when: "turn on the salon TV" can be drafted, approved and executed
+once against the fake HA with the entity allowlisted.
+`httpx.MockTransport` only, never a real HA."""
 
 import json
 
