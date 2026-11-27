@@ -148,22 +148,78 @@ def test_the_proxy_never_sets_cors_or_rewrites_headers():
         assert not keys & CORS_SETTINGS
 
 
-@pytest.mark.parametrize("origin", PROXY_ORIGINS)
-def test_django_grants_no_cors_to_the_proxy_origin(settings, origin):
-    from corsheaders.middleware import CorsMiddleware
-    from django.http import HttpResponse
-    from django.test import RequestFactory
+ACAO, ACAC = "Access-Control-Allow-Origin", "Access-Control-Allow-Credentials"
 
-    assert origin not in settings.CORS_ALLOWED_ORIGINS
-    assert not getattr(settings, "CORS_ALLOW_ALL_ORIGINS", False)
-    assert origin not in getattr(settings, "CSRF_TRUSTED_ORIGINS", [])
-    middleware = CorsMiddleware(lambda _request: HttpResponse("view"))
-    factory = RequestFactory()
-    preflight = factory.options(
-        "/api/v1/voice/speech", HTTP_ORIGIN=origin, HTTP_ACCESS_CONTROL_REQUEST_METHOD="POST"
+
+def _cors_requests(origin):
+    """An OPTIONS preflight and a POST, both through the full MIDDLEWARE
+    stack and the URL conf (django.test.Client), to forwarded voice paths."""
+    from django.test import Client
+
+    client = Client()
+    preflight = client.options(
+        "/api/v1/voice/speech",
+        HTTP_ORIGIN=origin,
+        HTTP_ACCESS_CONTROL_REQUEST_METHOD="POST",
+        HTTP_ACCESS_CONTROL_REQUEST_HEADERS="authorization, content-type",
     )
-    plain = factory.post("/api/v1/voice/live/sessions", HTTP_ORIGIN=origin)
-    for request in (preflight, plain):
-        response = middleware(request)
-        assert "Access-Control-Allow-Origin" not in response.headers
-        assert "Access-Control-Allow-Credentials" not in response.headers
+    post = client.post("/api/v1/voice/speech", data={}, HTTP_ORIGIN=origin)
+    return preflight, post
+
+
+def test_the_cors_settings_grant_nothing_to_the_proxy(settings):
+    assert "corsheaders.middleware.CorsMiddleware" in settings.MIDDLEWARE
+    assert not getattr(settings, "CORS_ALLOW_ALL_ORIGINS", False)
+    assert not getattr(settings, "CORS_ALLOW_CREDENTIALS", False)
+    assert not getattr(settings, "CORS_ALLOWED_ORIGIN_REGEXES", [])
+    for origin in PROXY_ORIGINS:
+        assert origin not in settings.CORS_ALLOWED_ORIGINS
+        assert origin not in getattr(settings, "CSRF_TRUSTED_ORIGINS", [])
+
+
+@pytest.mark.parametrize("origin", PROXY_ORIGINS)
+def test_django_grants_no_cors_to_the_proxy_origin(origin):
+    for response in _cors_requests(origin):
+        assert ACAO not in response.headers
+        assert ACAC not in response.headers
+
+
+@pytest.mark.parametrize("credentials", [False, True])
+def test_the_cors_control_grants_once_the_origin_is_allowed(settings, credentials):
+    """The control: the same requests through the same stack DO carry the
+    headers once the origin is allow-listed, so the negative test above
+    can fail."""
+    origin = PROXY_ORIGINS[0]
+    settings.CORS_ALLOWED_ORIGINS = [origin]
+    settings.CORS_ALLOW_CREDENTIALS = credentials
+    for response in _cors_requests(origin):
+        assert response.headers.get(ACAO) == origin
+        assert response.headers.get(ACAC) == ("true" if credentials else None)
+
+
+# --- what Django does with the variants Caddy's cleaned-path match lets through ---
+
+
+@pytest.mark.parametrize(
+    ("path", "outcome"),
+    [
+        ("/api/v1/voice%2Fspeech", "same"),  # %2f: decoded to the same exact route
+        ("/api/v1/voice%2fspeech", "same"),
+        ("/API/v1/voice/speech", 404),  # Caddy matches case-insensitively; Django does not
+        ("/api/v1/VOICE/speech", 404),
+        ("/x/../api/v1/voice/speech", 404),  # forwarded as sent: not a Django route
+        ("//api/v1/voice/speech", 404),
+    ],
+)
+def test_a_variant_resolves_to_the_same_route_or_404s(path, outcome):
+    from django.test import Client
+
+    exact = Client().post("/api/v1/voice/speech", data={})
+    response = Client().post(path, data={})
+    assert exact.status_code != 404
+    if outcome == "same":
+        assert response.status_code == exact.status_code
+        assert response.resolver_match is not None
+        assert response.resolver_match.func == exact.resolver_match.func
+    else:
+        assert response.status_code == 404
