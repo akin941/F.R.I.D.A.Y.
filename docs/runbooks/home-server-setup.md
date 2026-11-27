@@ -602,6 +602,21 @@ The backend image ships no `node/` directory, so in the container
 `PREFLIGHT_LINUX_NODE_DIR` / `PREFLIGHT_FRIDAY_VOICE_DIR` to a checkout to
 check them there, or run `make preflight` from the repository checkout.
 
+The Phase 13b closeout (`chore/p13b-closeout`, 2026-11-20) adds
+`check_home_direct` (read-only: no Home Assistant request, no model call,
+nothing written) for ADR-018's direct media class. `home_server_platform`
+(Phase 13b branch 2) is the last `check_home` row above.
+
+| Row | Pass | Warn | Fail |
+|---|---|---|---|
+| `ha_direct_media` | both kill switches off, at least one flagged entity, each one enabled, a `media_player` with at least one direct-eligible service ticked, and the closed set's digest equal to ADR-018's recorded value | the class is off by the environment (`HA_DIRECT_MEDIA_KILL_SWITCH=true` or a `HA_DIRECT_RATE_*` limit of 0) or by the owner's "Doğrudan medyayı kapat"; Home Assistant not configured in the owner's personal workspace (manifest, binding or `ha_call_service` pin); nothing flagged (owner step: flag a TV on `/connectors`); a flagged entity disabled in the allowlist | a flagged entity outside the class (not a `media_player`, no direct-eligible service, or outside a personal workspace — `HomeEntity.save()` refuses all three, so this means a write went around it), or the closed set changed without an ADR-018 amendment (digest mismatch) |
+
+The detail names the state (`on`, `off_env`, `off_owner`), the flagged
+count, both rate limits and the volume maximum, never a token, a URL or a
+Home Assistant state. On the interim Mac a macOS-declared run with
+R2-recorded status files has no `fail` row and `ha_direct_media` passes
+once a TV is flagged (`backend/ops/tests/test_home_direct_e2e.py`).
+
 ---
 
 ## Interim: server on the MacBook

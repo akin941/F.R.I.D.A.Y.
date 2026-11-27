@@ -6,6 +6,10 @@
 > `docs/prompts/phase-13-home-hub/brief.md`). It needs its independent
 > Sonnet 5 plan review to reach APPROVE before branch 1a, because the
 > implementing model never reviews its own brief.**
+> **Closeout 2026-11-20 (`chore/p13b-closeout`, implemented):** branches
+> 1a–1d, 2 and the closeout are implemented; server side done, go/no-go
+> pending owner evaluation (Mac session M1–M2, owner hardware M3 —
+> `docs/runbooks/mac-session-handoff.md` Part F).
 > Sources: the owner decisions of 2026-11-26 (recorded below as "Owner
 > decisions kept"); the Phase 13 brief (D11–D15, "Open questions" Q1, Q5,
 > Q6, "Owner steps (pending)", "Known follow-ups"); ADR-017 (home hub
@@ -1111,7 +1115,7 @@ says "server side done; go/no-go pending owner evaluation".
 | 1c | `feat/p13-direct-media-exec` | `execute` (re-resolution, kill-switch re-check, clamp, one send, audit), recovery scan, executor port, `HOME_DIRECT` intent (`assistant` 0015) + code-only parser lock, cap clause, `extra_effects` + `_finish` check, sentinel factory, voice/`node_voice`/typed paths, provenance tests | 1b | **implemented 2026-11-20** (`assistant` 0015; executor registered — a flagged TV is direct from this branch on; executor-only reason `target_unavailable` added; real `friday-voice run` e2e; the real Swift node and the real TV are M2 — deferred: Mac session; awaits the independent Sonnet 5 review) |
 | 1d | `feat/p13-direct-media-ui` | HUD `home_direct` line, `/connectors` direct switch and settings panel, vitest | 1b (merges after 1c, so nothing is shown as "on" before it can run) | **implemented 2026-11-20** (no migration; the HUD reads the line through a new read-only `tools.home_ports` status port — one import-linter edge `hud.services -> tools.home_ports`; a zero rate limit reads `off_env`; the card shows the recommended `direct_reason` subset; the real TV on `/connectors` is M2 — deferred: Mac session; awaits the independent Sonnet 5 review) |
 | 2 | `feat/p13-interim-mac-server` | `HOME_SERVER_PLATFORM`, `home_server_platform`, macOS-aware `home_disk_encryption`, `HOME_BACKUP_OFFSITE_REPOSITORY` + the R2 destination check, R2 names in `.env.example`, portable backup/drill scripts, `restic.env.example`, launchd plist, `compose.mac.yml`, `make up-mac-server` | brief approved (independent of 1) | **implemented 2026-11-20** (server side, tested against the macOS tool-set double; the real Mac run is M1 — deferred: Mac session; awaits the independent Sonnet 5 review) |
-| 3 | `chore/p13b-closeout` | `ha_direct_media` preflight row, home-direct e2e, handoff Part F, MASTER_PLAN row, ADR-018 closeout note, `self_sources.json`, runbook step 12 | 1a–1d, 2 | not started |
+| 3 | `chore/p13b-closeout` | `ha_direct_media` preflight row, home-direct e2e, handoff Part F, MASTER_PLAN row, ADR-018 closeout note, `self_sources.json`, runbook step 12 | 1a–1d, 2 | **implemented 2026-11-20** (`check_home_direct` / `ha_direct_media` with an independent ADR-018 digest pin in preflight; `ops/tests/test_home_direct_e2e.py` green incl. the real `friday-voice run` child; handoff Part F; MASTER_PLAN row 9b "server side done; go/no-go pending owner evaluation"; no migration; awaits the independent Sonnet 5 review) |
 | M1 | Interim server on the real MacBook | Runbook "Interim" I1–I5: OrbStack/Docker Desktop, `make up-mac-server`, FileVault attestation, the R2 bucket, the LaunchAgent, the first backup and restore drill, one drill from R2 | 2 merged | deferred: Mac session (pending owner evaluation) |
 | M2 | Mac node on the same machine + the real TV | Loopback pairing (I3) of the existing Swift app; flag the TV; direct pause/volume by voice; kill switch; rate limit; unflagged → card | 1a–1d, 2 merged; M1; Phase 9 B1 | deferred: Mac session (pending owner evaluation) |
 | M3 | Home PC with TPM unlock; move off the Mac | Runbook step 1 (TPM, recovery key, dracut) and "Interim" I6 (restore + re-point) on the real home PC | M1; the owner buys the PC | deferred: owner hardware (pending owner evaluation) |
@@ -1217,12 +1221,12 @@ R2 with a passing drill from the R2 copy."
 
 | Item | How it is measured | Result |
 |---|---|---|
-| Closed class; non-media, non-flagged, agent flag attempts and kill switch reach the gate | branch 1b + 1c tests | pending (branches 1b, 1c) |
-| The router cannot emit `home_direct`; forged payloads refused | branch 1c tests (D10a) | pending (branch 1c) |
-| Direct calls audited with origin and entity; no `ApprovalRequest` | branch 1c + closeout e2e | pending (branch 1c, closeout) |
-| Rate limits and volume clamp fail closed to the card | branch 1b + 1c tests | pending (branches 1b, 1c) |
-| No macOS-caused preflight failure; R2 destination checked | branch 2 tests + closeout e2e | branch 2 tests green (2026-11-20); pending (closeout e2e) |
-| No protocol change | `node_protocol_frozen` | pending (closeout) |
+| Closed class; non-media, non-flagged, agent flag attempts and kill switch reach the gate | branch 1b + 1c tests | branch 1b + 1c tests green (2026-11-20); closeout e2e (unflagged → card, kill switch on `/connectors` → card) green (2026-11-20) |
+| The router cannot emit `home_direct`; forged payloads refused | branch 1c tests (D10a) | branch 1c tests green (2026-11-20) |
+| Direct calls audited with origin and entity; no `ApprovalRequest` | branch 1c + closeout e2e | branch 1c tests and the closeout e2e green (2026-11-20; origins `node` with the node id, `voice`, `chat`) |
+| Rate limits and volume clamp fail closed to the card | branch 1b + 1c tests | branch 1b + 1c tests and the closeout e2e (11th call → card, 90 % → 0.6) green (2026-11-20) |
+| No macOS-caused preflight failure; R2 destination checked | branch 2 tests + closeout e2e | branch 2 tests and the closeout e2e green (2026-11-20) |
+| No protocol change | `node_protocol_frozen` | pass (closeout e2e, 2026-11-20) |
 | Interim server on the real Mac, backups to R2, drill from R2 | M1 | pending owner evaluation |
 | Real-TV direct media, kill switch, rate limit; latency recorded | M2 | pending owner evaluation (Mac session) |
 | Two weeks of use, zero out-of-class direct calls | M2 + audit review | pending owner evaluation |
@@ -1879,3 +1883,80 @@ credentials, paid calls or hardware.
    path. This is intentional and tested, but the precedence (env, then owner,
    then availability) lives only in the docstring. Fix (optional): mention the
    precedence in ADR-018 or in this brief's D11 text.
+
+### Implementation notes — `chore/p13b-closeout` (branch 3, implemented 2026-11-20)
+
+What the closeout did:
+- **Preflight `ha_direct_media`** (`backend/ops/preflight.py`,
+  `check_home_direct`, registered after `check_home_control`). Read-only:
+  no Home Assistant request, no model call, nothing written (the owner's
+  `HomeDirectSettings` row is read, never created). Order: `fail` first
+  (the digest; a flagged entity outside the class), then `warn` (env off,
+  owner off, Home Assistant not usable in the owner's personal workspace,
+  none flagged, a flagged entity disabled), else `pass`. Detail: `state
+  <on|off_env|off_owner>, N flagged entit(y|ies), limits G/min global and
+  E/min per entity, volume max P%`.
+- **Implementation choices the reviewer should check:**
+  - The digest is pinned **twice**: `connectors.home_direct.
+    ADR_018_DIGEST` (branch 1b) and a new, independent
+    `ops.preflight.ADR_018_DIRECT_MEDIA_SHA256`; the row fails unless the
+    computed digest and both pins agree, so moving the set and the code
+    constant together still fails preflight (a test asserts it, and that
+    the preflight pin appears in ADR-018).
+  - Flagged entities are read installation-wide (as `ha_entities` reads
+    the allowlist), so a flagged row outside a personal workspace is a
+    `fail` (`not_personal`) — the brief lists only the domain and service
+    cases; the third is the same "should be impossible" class.
+  - A flagged but **disabled** entity is a `warn` (it is not direct); the
+    brief's pass condition requires every flagged entity enabled and names
+    no row for the case.
+  - "Home Assistant not configured" reuses the classifier's own
+    availability check through a new public read
+    `connectors.home_direct.ha_usable(workspace)` (the manifest active, the
+    binding enabled, the `ha_call_service` pin `ok`), evaluated for the
+    installation owner's personal workspace.
+  - A zero `HA_DIRECT_RATE_*` limit reads `off_env`, as on the HUD and the
+    settings body (branch 1d).
+- **E2e** `backend/ops/tests/test_home_direct_e2e.py`: the `node_voice`
+  turn runs through the Phase 11 reference voice host and a real
+  `friday-voice run` child against a live uvicorn Friday; the web voice,
+  typed, kill switch, rate-limit and clamp turns run through the real
+  chat view in process (`APIClient`, the same database), and only the
+  child test skips without a `node/friday-voice` environment (unless
+  `FRIDAY_VOICE_E2E=1`). The rate-limit test uses the real one-minute
+  windows (eleven turns well inside a minute), not a frozen clock.
+- **Docs:** this brief (branch table, go/no-go rows), MASTER_PLAN §AA row
+  9b, `docs/runbooks/mac-session-handoff.md` Part F (F0–F4),
+  ADR-018 closeout note, `docs/runbooks/home-server-setup.md` step 12
+  (`ha_direct_media`; `home_server_platform` was added by branch 2),
+  `backend/assistant/self_sources.json` regenerated.
+- The Phase 13 registration tests (`test_preflight_home.py`,
+  `test_preflight_home_control.py`) now assert the order `home`,
+  `home_control`, `home_direct` instead of `home_control` being last.
+
+Tests: `backend/ops/tests/test_preflight_home_direct.py` (pass, each
+warn, each fail, the double pin, registration, a crashing row),
+`backend/ops/tests/test_home_direct_e2e.py`. Nothing needed the Mac, real
+credentials, paid calls or hardware; nothing touched `node/friday-node/**`.
+
+### Owner steps (pending) — `chore/p13b-closeout` (branch 3), recorded 2026-11-20
+
+1. Start the independent Sonnet 5 review of this branch; merge after
+   APPROVE.
+2. Confirm the `ha_direct_media` rules the closeout added beyond the
+   brief's text: a flagged entity outside a personal workspace fails, a
+   flagged but disabled entity warns, and the preflight carries its own
+   copy of ADR-018's digest.
+3. **M1 (deferred: Mac session, pending owner evaluation):** handoff Part
+   F F1 — the interim server on the MacBook, R2 bucket and token, the
+   LaunchAgent, a drill from the R2 copy; `make preflight` with no macOS
+   `fail` and `home_backup_fresh` "off-site R2".
+4. **M2 (deferred: Mac session, pending owner evaluation):** handoff Part
+   F F2 — the Mac node over loopback, the real TV flagged,
+   `ha_direct_media` pass, the voice commands, the kill switch, the
+   eleventh call, the audit review; the latency from end of speech to the
+   TV reacting recorded in the "Go/no-go record".
+5. **M3 (deferred: owner hardware, pending owner evaluation):** handoff
+   Part F F3 — the home PC with TPM unlock and the move off the Mac.
+6. After two weeks of daily use: record the remaining go/no-go rows
+   (zero out-of-class direct calls in the audit review).

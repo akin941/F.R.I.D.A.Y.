@@ -318,3 +318,39 @@ new writer of `direct`, `HomeDirectSettings` or `HomeDirectCall` exists.
 - **Card reason.** A Home Assistant card that was not direct shows
   "Doğrudan değil: <reason>" for the reasons that concern a flagged or
   flaggable player; the frontend's texts are pinned to `REASON_TEXT`.
+
+## Closeout note — `chore/p13b-closeout` (2026-11-20)
+
+The server side of this ADR is complete (branches 1a–1d, branch 2 for
+the interim Mac server, and the closeout); what remains needs the owner's
+Mac, the real TV or the home PC (Phase 13b brief "Mac session (deferred)"
+M1–M3, `docs/runbooks/mac-session-handoff.md` Part F) and is **pending
+owner evaluation**.
+
+- **Preflight `ha_direct_media`** (`ops.preflight.check_home_direct`,
+  registered after `check_home_control`; read-only — no Home Assistant
+  request, no model call, the owner's settings row read, never created).
+  The closed set's digest is compared with this ADR's recorded value
+  through a **second, independent pin** (`ops.preflight.
+  ADR_018_DIRECT_MEDIA_SHA256`), so changing the set together with
+  `home_direct.ADR_018_DIGEST` still fails preflight until this ADR is
+  amended and the pin moves with it. `fail` also for a flagged entity
+  outside the class (not a `media_player`, no direct-eligible service, or
+  outside a personal workspace — `HomeEntity.save()` refuses all three, so
+  a hit is a write that went around it); `warn` while the class is off
+  (env kill switch or a zero rate limit; the owner's kill switch), Home
+  Assistant is not usable in the owner's personal workspace, nothing is
+  flagged, or a flagged entity is disabled; otherwise `pass`. The detail
+  names the state, the flagged count, both limits and the volume maximum.
+- **End to end** (`backend/ops/tests/test_home_direct_e2e.py`): a
+  `node_voice` turn through the Phase 11 reference voice host and a real
+  `friday-voice run` child, plus web voice and typed turns, on a flagged
+  TV — one POST each, no `ApprovalRequest`, a `HomeDirectCall` and an
+  `ha.direct_call` with origin `node` (and the node id), `voice`, `chat`,
+  no router or chat model call; unflagged → card → approval → one call;
+  the `/connectors` kill switch makes the next utterance a card; the
+  eleventh call in a minute is a card; "sesi yüzde 90'a ayarla" is sent as
+  0.6; `node_protocol_frozen` passes; a macOS-declared preflight with
+  R2-recorded status files has no `fail` and `ha_direct_media` passes.
+- **No change to the decision.** No service, domain, origin or reason was
+  added; the protocol is unchanged (`node_protocol_frozen`).
