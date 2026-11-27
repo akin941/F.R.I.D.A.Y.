@@ -66,6 +66,7 @@ def test_create_stores_the_owner_set_row_and_audits_ids_only(owner, workspace, s
         "room_id": str(salon.pk),
         "alias_count": 1,
         "enabled": True,
+        "direct": False,
     }
     assert log.actor == owner
 

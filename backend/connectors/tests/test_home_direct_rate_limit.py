@@ -153,6 +153,21 @@ def test_an_increment_failure_is_unavailable_too(direct_tv, workspace, monkeypat
         home_direct.count_direct_call(workspace.pk, TV)
 
 
+def test_a_failing_peek_after_the_increments_takes_them_back(
+    direct_tv, workspace, clock, monkeypatch
+):
+    real_get_many = cache.get_many
+
+    def boom(*args, **kwargs):
+        raise ConnectionError("redis down")
+
+    monkeypatch.setattr(cache, "get_many", boom)
+    with pytest.raises(home_direct.RateStoreUnavailable):
+        home_direct.count_direct_call(workspace.pk, TV)
+    monkeypatch.setattr(cache, "get_many", real_get_many)
+    assert home_direct.peek_direct_calls(workspace.pk, TV) == (0, 0)
+
+
 def test_env_limits_are_honoured(direct_tv, owner, workspace, clock, ha_settings):
     ha_settings.HA_DIRECT_RATE_ENTITY_PER_MINUTE = 2
     assert _count(workspace, times=3) == [None, None, "entity"]

@@ -156,7 +156,7 @@ minute, never louder than the owner's maximum".
   deterministic matcher over the owner's words is the only path; model
   output never executes (CLAUDE.md rule 4).
 
-## Implementation note — branch 1b `feat/p13-direct-media-model` (2026-11-20)
+## Implementation note — branch 1b `feat/p13-direct-media-model` (2026-11-27)
 
 The model, the closed set, the classifier, the rate windows and the owner
 API; **no executor** (branch 1c), so nothing is direct yet and no turn

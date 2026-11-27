@@ -332,7 +332,8 @@ def count_direct_call(workspace_id, entity_id):
     before the send). Returns `None` when the call is within both limits,
     else the exceeded window (`global` / `entity`), in which case the
     increments are taken back: a call that falls back to the card spends no
-    quota. Raises `RateStoreUnavailable` on any cache error."""
+    quota. Raises `RateStoreUnavailable` on any cache error, after taking
+    back (best effort) any increment already made."""
     global_limit, entity_limit = rate_limits()
     if global_limit <= 0:
         return LIMIT_GLOBAL
@@ -341,9 +342,12 @@ def count_direct_call(workspace_id, entity_id):
     now = _now_seconds()
     global_bucket = _global_key(workspace_id, now)
     entity_bucket = _entity_key(workspace_id, entity_id, now)
+    counted = []
     try:
         _incr(global_bucket)
+        counted.append(global_bucket)
         _incr(entity_bucket)
+        counted.append(entity_bucket)
         global_count, entity_count = peek_direct_calls(workspace_id, entity_id)
         exceeded = None
         if global_count > global_limit:
@@ -353,11 +357,22 @@ def count_direct_call(workspace_id, entity_id):
         if exceeded is not None:
             _take_back(global_bucket)
             _take_back(entity_bucket)
-    except RateStoreUnavailable:
-        raise
     except Exception as exc:  # noqa: BLE001 -- any store failure fails closed
+        # The call falls back to the card, so it spends no quota: take back
+        # whatever was already counted (best effort -- the store is failing).
+        _take_back_quietly(counted)
+        if isinstance(exc, RateStoreUnavailable):
+            raise
         raise RateStoreUnavailable(type(exc).__name__) from None
     return exceeded
+
+
+def _take_back_quietly(keys):
+    for key in keys:
+        try:
+            _take_back(key)
+        except Exception:  # noqa: BLE001, S110 -- best effort on a failing store
+            pass
 
 
 def record_rate_limited(*, actor, workspace, arguments, origin, limit):
