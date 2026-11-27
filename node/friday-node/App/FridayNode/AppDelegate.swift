@@ -10,6 +10,9 @@
 //   ~/.codex/sessions, the window-titles toggle and the git repo list. Every
 //   change asks for Touch ID or the password first (PolicyEditor); the node
 //   then advertises the new availability at once.
+// - "Acil durdur" (Phase 10 M1): the node's local kill switch; the
+//   confirmation window (ConfirmationWindow.swift) closes and later clicks
+//   are refused until the owner releases it after LocalAuthentication.
 
 import AppKit
 import CoreGraphics
@@ -29,6 +32,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         store: KeychainCredentialStore(), policyStore: policyStore, desktop: SystemDesktop(),
         home: NSHomeDirectory(), usage: .unsupported)
     lazy var editor = PolicyEditor(store: policyStore, authentication: DeviceOwnerAuthentication())
+    /// The confirmation window (Phase 10 M1); the runner holds it weakly.
+    private lazy var confirmationWindow = ConfirmationWindowController(runner: runner)
+    private var killSwitchItem: NSMenuItem!
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
@@ -43,7 +49,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         resumeItem = NSMenuItem(title: "Devam et", action: #selector(resume), keyEquivalent: "")
         pairItem = NSMenuItem(title: "Eşleştir…", action: #selector(pair), keyEquivalent: "")
         unpairItem = NSMenuItem(title: "Eşleştirmeyi kaldır", action: #selector(unpair), keyEquivalent: "")
-        for item in [resumeItem!, pairItem!, unpairItem!] {
+        // The local kill switch (Phase 10 D5 check 24): closes an open
+        // confirmation window, stops a running command, and refuses every
+        // later click until released (release needs Touch ID or the password).
+        killSwitchItem = NSMenuItem(title: "Acil durdur", action: #selector(toggleKillSwitch), keyEquivalent: "")
+        for item in [resumeItem!, pairItem!, unpairItem!, killSwitchItem!] {
             item.target = self
             menu.addItem(item)
         }
@@ -62,7 +72,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             DispatchQueue.main.async { self?.rebuildPermissions() }
         }
         rebuildPermissions()
-        runner.onStatus = { [weak self] status in self?.show(status) }
+        runner.confirmationObserver = confirmationWindow
+        runner.onStatus = { [weak self] status in
+            self?.show(status)
+            // A lost or closed socket closes the confirmation window at once.
+            self?.confirmationWindow.refresh()
+        }
         show(.connecting)
         // The hook relay (M3): Claude Code's `friday-node hook` writes here.
         do {
@@ -200,6 +215,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func resume() {
         runner.ownerResume()
+    }
+
+    @objc private func toggleKillSwitch() {
+        guard runner.killSwitchEngaged else {
+            runner.engageKillSwitch()
+            killSwitchItem.state = .on
+            killSwitchItem.title = "Acil durdurmayı kaldır"
+            return
+        }
+        Task {
+            guard await DeviceOwnerAuthentication().authenticate(reason: "Friday Node'un acil durdurmasını kaldır")
+            else { return }
+            runner.releaseKillSwitch()
+            await MainActor.run {
+                self.killSwitchItem.state = .off
+                self.killSwitchItem.title = "Acil durdur"
+            }
+        }
     }
 
     @objc private func pair() {

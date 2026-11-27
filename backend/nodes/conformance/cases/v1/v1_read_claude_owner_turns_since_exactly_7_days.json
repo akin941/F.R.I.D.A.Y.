@@ -1,0 +1,85 @@
+{
+  "check": null,
+  "description": "A since of exactly now - 7 days is accepted.",
+  "expect": {
+    "frames": [
+      {
+        "output": {
+          "next_since": "2026-11-30T00:40:00.000Z",
+          "sessions": [
+            {
+              "cwd": "~/work/acme",
+              "session_id": "cc-acme-1",
+              "turns": [
+                {
+                  "at": "2026-11-29T20:00:00.000Z",
+                  "text": "Fix the flaky invoice test in acme.",
+                  "turn_id": "u-1"
+                },
+                {
+                  "at": "2026-11-29T20:01:00.000Z",
+                  "text": "The staging key is [SECRET:openai_key], use it for the smoke run.",
+                  "turn_id": "u-4"
+                }
+              ]
+            },
+            {
+              "cwd": "~/code/friday",
+              "session_id": "cc-friday-1",
+              "turns": [
+                {
+                  "at": "2026-11-30T00:40:00.000Z",
+                  "text": "Wire the node gateway; my AWS key [SECRET:aws_key] must not leak and DB_PASSWORD=[SECRET:assignment] stays local.",
+                  "turn_id": "u-1"
+                }
+              ]
+            }
+          ],
+          "truncated": false
+        },
+        "status": "ok",
+        "truncated": false,
+        "type": "result"
+      }
+    ],
+    "reader_calls": 1
+  },
+  "name": "v1_read_claude_owner_turns_since_exactly_7_days",
+  "setup": {
+    "now": 1796000005
+  },
+  "steps": [
+    {
+      "frame": {
+        "args": {
+          "cwd_prefixes": [
+            "~/work/acme",
+            "~/code/friday"
+          ],
+          "max_sessions": 50,
+          "max_turns": 200,
+          "since": "2026-11-23T00:53:25.000Z"
+        },
+        "args_sha256": "0ec50f8a08956ff570c4c24c13ca1e96db52b6544b74ef6140d0970664d3e9e0",
+        "capability": "claude.transcripts.owner_turns",
+        "capability_version": 1,
+        "class": "read",
+        "expires_at": 1796000030,
+        "grant": null,
+        "id": "888ebfcd-8050-46e5-a741-55bae800d881",
+        "invocation_id": "58b43de5-45b2-426d-b9b2-b7157fbc12e0",
+        "issued_at": 1796000000,
+        "key_id": "03396219237f75a6",
+        "node_id": "6f1e2d3c-4b5a-4987-8a6b-5c4d3e2f1a0b",
+        "nonce": "tVkF34wjSG2VQnGth-3yem6F0_SOffvj64qTS1ucJwE",
+        "sig": "XseyJ_qu55ur6XjeKO_AYJvieo36lRIUDp5S8IuzKGIio-H5ejhl4rWyaXCl5fshqToqYbr2HnyBxS9JGD8lAA",
+        "trace_id": "conformance-v1-read-claude_owner_turns_since_exactly_7_days",
+        "type": "invoke",
+        "v": 1,
+        "workspace_id": "2a3b4c5d-6e7f-4a8b-9c0d-1e2f3a4b5c6d"
+      },
+      "op": "send"
+    }
+  ],
+  "version": 1
+}

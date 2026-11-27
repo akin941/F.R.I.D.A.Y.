@@ -3,7 +3,8 @@
 
 The node validates every frame against `backend/nodes/protocol/schemas/` and
 advertises the server's capability contracts (`backend/nodes/capabilities/`)
-as its own catalogue (Phase 9 brief D5, D7). Those files are the single
+as its own catalogue (Phase 9 brief D5, D7; v2 and the action contracts and
+recipes since Phase 10 M1). Those files are the single
 source of truth; the app cannot read the repo at run time, so this script
 copies them byte for byte into a generated Swift file (base64, so no
 escaping can change a byte). `NodeCoreTests/VendoredProtocolTests` fails
@@ -26,6 +27,11 @@ OUTPUT = REPO / "node/friday-node/Sources/NodeCore/Generated/VendoredProtocol.sw
 GLOBS = (
     "protocol/schemas/v1/*.schema.json",
     "capabilities/v1/*.json",
+    # Phase 10 M1 (runbook B5): the v2 message schemas (and the `grant`
+    # sub-schema), the action contracts and the recipe catalogue.
+    "protocol/schemas/v2/*.schema.json",
+    "capabilities/v2/*.json",
+    "capabilities/v2/recipes/*.json",
 )
 
 

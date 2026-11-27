@@ -217,11 +217,17 @@ def test_the_packaged_linux_node_pairs_connects_and_serves_node_sessions(live, o
         assert {entry["class"] for entry in entries.values()} == {"read"}
         assert not [e for e in entries.values() if e["invocable"] and e["class"] != "read"]
         invocable = {name for name, entry in entries.items() if entry["invocable"]}
-        assert invocable == {"claude.sessions.list", "claude.sessions.read"}
+        # Runbook A12: the owner-turn reads are server contracts now, so the
+        # claude one is invocable behind the same ~/.claude grant.
+        assert invocable == {
+            "claude.sessions.list",
+            "claude.sessions.read",
+            "claude.transcripts.owner_turns",
+        }
         assert entries["codex.threads.list"]["reason"] == "not_granted"
         assert entries["apps.frontmost"]["reason"] == "unsupported"
         assert entries["git.status"]["reason"] == "not_granted"
-        assert entries["claude.transcripts.owner_turns"]["reason"] == "unknown_capability"
+        assert entries["codex.transcripts.owner_turns"]["reason"] == "not_granted"
         node.refresh_from_db()
         assert node.node_version.startswith("friday-node-linux ")
         assert node.os_version.startswith("Linux")

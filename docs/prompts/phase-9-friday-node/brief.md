@@ -900,6 +900,13 @@ every other kernel app as a source. `memory` and `memory.ingestion` gain
 > follow-up once it merges) moves the checks into `nodes.services`, the
 > contracts into `nodes/capabilities/v1/`, and adds the `nodes`-backed port
 > (8B brief, "Owner steps (pending) — `feat/p8-transcript-ingestion`").
+>
+> **State on 2026-11-26 (runbook A12, `feat/p8-node-transcript-port`,
+> awaits review):** the two contracts are in `nodes/capabilities/v1/` (ten
+> v1 read contracts), `SYSTEM_READ_CAPABILITIES` names them, and a non-web
+> read must be exactly `channel=system` (any other non-web channel is
+> `server_refused:not_invocable`). The `nodes`-backed port is
+> `tools/transcript_node_port.py`, the pull's default from app start.
 
 ### D10 — Node events: the hook relay path into memory
 

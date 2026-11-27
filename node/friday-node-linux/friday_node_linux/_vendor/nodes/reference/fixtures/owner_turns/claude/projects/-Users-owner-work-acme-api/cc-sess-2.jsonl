@@ -1,0 +1,1 @@
+{"type": "user", "uuid": "u-101", "parentUuid": null, "sessionId": "cc-sess-2", "cwd": "/Users/owner/work/acme/api", "timestamp": "2026-11-20T09:10:00.000Z", "isSidechain": false, "userType": "external", "version": "2.0.0", "message": {"role": "user", "content": "Acme deploy depends on the queue service since Monday."}}

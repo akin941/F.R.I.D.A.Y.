@@ -379,6 +379,15 @@ enum ReaderFiles {
     /// a transcript outside `cwd_prefixes` stops at its first `cwd` line
     /// (rule 2), so the rest of the file is never read or parsed.
     static func forEachLine(_ path: String, _ body: (LooseJSON) -> Bool) {
+        forEachRawLine(path) { _, value in value.map(body) ?? true }
+    }
+
+    /// `forEachLine` with every line, as Python's `for raw in handle`:
+    /// `offset` is the line's byte offset in the file (every line counts,
+    /// skipped ones too), `value` nil for a line that is malformed, not a
+    /// JSON object or over MAX_LINE_BYTES. A file over MAX_FILE_BYTES (or
+    /// unreadable) yields nothing.
+    static func forEachRawLine(_ path: String, _ body: (_ offset: Int, _ value: LooseJSON?) -> Bool) {
         guard let attributes = try? FileManager.default.attributesOfItem(atPath: path),
             let size = attributes[.size] as? Int, size <= ReaderLimits.maxFileBytes,
             let handle = FileHandle(forReadingAtPath: path)
@@ -386,13 +395,18 @@ enum ReaderFiles {
         defer { try? handle.close() }
         var line = Data()
         var oversized = false
+        var position = 0
+        var lineStart = 0
         func finish() -> Bool {
             defer {
                 line.removeAll(keepingCapacity: true)
                 oversized = false
+                lineStart = position
             }
-            guard !oversized, let value = LooseJSON.parse(line), case .object = value else { return true }
-            return body(value)
+            guard !oversized, let value = LooseJSON.parse(line), case .object = value else {
+                return body(lineStart, nil)
+            }
+            return body(lineStart, value)
         }
         while true {
             guard let chunk = try? handle.read(upToCount: chunkBytes), !chunk.isEmpty else { break }
@@ -408,6 +422,7 @@ enum ReaderFiles {
                         line.append(chunk[start..<end])
                     }
                 }
+                position += end - start
                 start = end
                 if newline != nil, !finish() { return }
             }

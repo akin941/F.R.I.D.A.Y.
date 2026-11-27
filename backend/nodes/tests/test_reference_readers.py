@@ -18,6 +18,12 @@ from nodes.reference.fixtures.factory import build_fixture_home, fixture_policy,
 from nodes.reference.readers import Readers, matches_prefixes, path_forms
 
 NOW = C.NOW
+OWNER_TURN_ARGS = {
+    "since": C.OWNER_TURN_FLOOR,
+    "cwd_prefixes": ["~"],
+    "max_sessions": 50,
+    "max_turns": 200,
+}
 ALL_READS = [
     ("claude.sessions.list", {"since_hours": 168, "limit": 50}),
     ("claude.sessions.read", {"session_id": "cc-acme-1", "last_turns": 20}),
@@ -31,6 +37,8 @@ ALL_READS = [
     ("git.status", {"repo_path": "~/work/acme"}),
     ("apps.frontmost", {}),
     ("windows.list", {"limit": 30}),
+    ("claude.transcripts.owner_turns", OWNER_TURN_ARGS),
+    ("codex.transcripts.owner_turns", OWNER_TURN_ARGS),
 ]
 
 
@@ -57,10 +65,7 @@ def test_every_reader_answers_within_its_result_schema(home):
         assert outcome.status == "ok", capability
         contracts[capability].validate_result(outcome.output)
         seen.add(capability)
-    assert seen == set(contracts) - {
-        "claude.transcripts.owner_turns",
-        "codex.transcripts.owner_turns",
-    }
+    assert seen == set(contracts)
 
 
 def test_readers_never_return_tool_results_file_contents_or_injected_text(home):

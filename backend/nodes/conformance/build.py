@@ -15,7 +15,14 @@ Phase 10 brief branch 2; `manage.py build_node_conformance`):
   (transcripts rendered with the home `/Users/owner`, and the desktop
   fixture) with its expected output from the vendored scrubber (no
   workspace terms). The Swift scrubber port must reproduce every
-  `expected` byte for byte (Mac session M2). Inputs are base64.
+  `expected` byte for byte (Mac session M2). Inputs are base64. The
+  owner-turn fixtures (`reference/fixtures/owner_turns/`) are reader
+  fixtures too (runbook A12);
+- `vectors/owner_turns.json` (runbook A12; the staged 8B
+  `expected_owner_turns.json`): the owner-turn readers' output
+  (`nodes.reference.owner_turns.read_owner_turns`) over the committed
+  owner-turn fixtures at a fixed instant. The Swift readers (runbook B4)
+  must produce the same output for the same files.
 
 `check()` lists every file that differs from its definition, and every
 stale case file that no definition renders. Pure Python.
@@ -24,9 +31,11 @@ stale case file that no definition renders. Pure Python.
 import base64
 import hashlib
 import json
+from datetime import UTC, datetime
 from pathlib import Path
 
 from nodes.conformance.cases import all_cases, render_case
+from nodes.reference import owner_turns
 from nodes.reference._scrubber_vendored import scrub_text
 from nodes.reference.fixtures.factory import (
     FIXTURES_DIR,
@@ -222,7 +231,36 @@ def fixture_strings() -> list:
                 found.add(line)
     desktop = json.loads((FIXTURES_DIR / "desktop.json").read_text(encoding="utf-8"))
     found.update(_strings(desktop))
+    for path in sorted(owner_turns.FIXTURES_DIR.rglob("*.jsonl")):
+        for line in path.read_text(encoding="utf-8").splitlines():
+            if not line.strip():
+                continue
+            try:
+                found.update(_strings(json.loads(line)))
+            except ValueError:
+                found.add(line)
     return sorted(s for s in found if s)
+
+
+# The owner-turn vector's fixed instant and arguments (the staged 8B values).
+OWNER_TURNS_NOW = "2026-11-21T00:00:00.000Z"
+OWNER_TURNS_ARGS = {
+    "since": "2026-11-20T00:00:00.000Z",
+    "cwd_prefixes": ["/Users/owner/code", "/Users/owner/work/acme"],
+    "max_sessions": 50,
+    "max_turns": 200,
+}
+
+
+def owner_turns_document() -> dict:
+    now = datetime.fromisoformat(OWNER_TURNS_NOW.replace("Z", "+00:00")).astimezone(UTC)
+    results = {}
+    for capability in owner_turns.CAPABILITIES:
+        reply = owner_turns.read_owner_turns(
+            capability, OWNER_TURNS_ARGS, root=owner_turns.FIXTURES_DIR, granted=True, now=now
+        )
+        results[capability] = reply["output"]
+    return {"now": OWNER_TURNS_NOW, "args": OWNER_TURNS_ARGS, "results": results}
 
 
 def _scrub_item(item_id, text):
@@ -267,6 +305,7 @@ def rendered_files() -> dict:
     files["vectors/sandbox.json"] = _render(sandbox_document())
     files["vectors/scrub_stream.json"] = _render(scrub_stream_document())
     files["vectors/scrub.json"] = _render(scrub_document())
+    files["vectors/owner_turns.json"] = _render(owner_turns_document())
     return files
 
 

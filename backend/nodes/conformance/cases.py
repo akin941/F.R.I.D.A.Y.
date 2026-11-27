@@ -803,8 +803,194 @@ def _reader_cases():
     ]
 
 
+# --- the owner-turn reads (Phase 8B D13/D17; folded from the staged 8B
+# `owner_turns_cases.json` by the nodes-backed transcript port, runbook A12) --
+
+OWNER_TURN_SINCE = "2026-11-29T00:00:00.000Z"
+OWNER_TURN_PREFIXES = ["~/work/acme", "~/code/friday"]
+# The node clock (`NOW`, 2026-11-30T00:53:25Z) minus exactly 7 days.
+OWNER_TURN_FLOOR = "2026-11-23T00:53:25.000Z"
+# Assistant text, and text of rows outside the prefixes, that an owner-turn
+# result must never carry (on top of `NEVER_RETURNED` and the secrets).
+NOT_OWNER_TURNS = (
+    "I will look at the test first.",
+    "Gateway wired; tests are green.",
+    "Bumped the client to 2.1.",
+    "Two strings need Turkish plurals.",
+    "NESTED-SIBLING-PHRASE",
+    "HARNESS-MARKER-PHRASE",
+    "SCRATCH-PHRASE",
+    "acme-secret",
+)
+CLAUDE_OWNER_SESSIONS = [
+    {
+        "session_id": "cc-acme-1",
+        "cwd": "~/work/acme",
+        "turns": [
+            {
+                "turn_id": "u-1",
+                "at": "2026-11-29T20:00:00.000Z",
+                "text": "Fix the flaky invoice test in acme.",
+            },
+            {
+                "turn_id": "u-4",
+                "at": "2026-11-29T20:01:00.000Z",
+                "text": "The staging key is [SECRET:openai_key], use it for the smoke run.",
+            },
+        ],
+    },
+    {
+        "session_id": "cc-friday-1",
+        "cwd": "~/code/friday",
+        "turns": [
+            {
+                "turn_id": "u-1",
+                "at": "2026-11-30T00:40:00.000Z",
+                "text": (
+                    "Wire the node gateway; my AWS key [SECRET:aws_key] must not leak and "
+                    "DB_PASSWORD=[SECRET:assignment] stays local."
+                ),
+            }
+        ],
+    },
+]
+
+
+def _owner_turn_args(**overrides):
+    args = {
+        "since": OWNER_TURN_SINCE,
+        "cwd_prefixes": list(OWNER_TURN_PREFIXES),
+        "max_sessions": 50,
+        "max_turns": 200,
+    }
+    args.update(overrides)
+    return {k: v for k, v in args.items() if v is not ...}
+
+
+def _owner_ok(output, *, truncated=False):
+    """A Claude result pinned whole. A Codex result is pinned by status and
+    `truncated` only: its turn ids hash the file's byte offsets, which
+    depend on the fixture home's path length (the exact Codex output over
+    home-independent fixtures is `vectors/owner_turns.json`)."""
+    frame = {"type": "result", "status": "ok", "truncated": truncated}
+    if output is not None:
+        frame["output"] = output
+    return [frame]
+
+
+def _owner_turn_cases():
+    cases = []
+    absent = _absent(*FIXTURE_SECRETS, *NEVER_RETURNED, *NOT_OWNER_TURNS)
+    for tool, capability in (
+        ("claude", "claude.transcripts.owner_turns"),
+        ("codex", "codex.transcripts.owner_turns"),
+    ):
+        claude = tool == "claude"
+        full = {
+            "sessions": CLAUDE_OWNER_SESSIONS,
+            "next_since": "2026-11-30T00:40:00.000Z",
+            "truncated": False,
+        }
+        first = {
+            "sessions": [
+                {**CLAUDE_OWNER_SESSIONS[0], "turns": CLAUDE_OWNER_SESSIONS[0]["turns"][:1]}
+            ],
+            "next_since": "2026-11-29T20:00:00.000Z",
+            "truncated": True,
+        }
+        one_session = {
+            "sessions": [CLAUDE_OWNER_SESSIONS[0]],
+            "next_since": "2026-11-29T20:01:00.000Z",
+            "truncated": True,
+        }
+        schema_refusals = {
+            "cwd_prefixes_missing": _owner_turn_args(cwd_prefixes=...),
+            "cwd_prefixes_empty": _owner_turn_args(cwd_prefixes=[]),
+            "cwd_prefixes_too_many": _owner_turn_args(cwd_prefixes=[f"/p/{i}" for i in range(21)]),
+            "cwd_prefix_relative": _owner_turn_args(cwd_prefixes=["code/friday"]),
+            "cwd_prefix_duplicate": _owner_turn_args(cwd_prefixes=["/a", "/a"]),
+            "since_malformed": _owner_turn_args(since="yesterday"),
+            "since_missing": _owner_turn_args(since=...),
+            "max_turns_oversize": _owner_turn_args(max_turns=201),
+            "max_turns_zero": _owner_turn_args(max_turns=0),
+            "max_turns_bool": _owner_turn_args(max_turns=True),
+            "max_sessions_oversize": _owner_turn_args(max_sessions=51),
+            "unknown_arg": {**_owner_turn_args(), "include_assistant": True},
+        }
+        for label, args in schema_refusals.items():
+            cases.append(
+                _read_case(
+                    f"{tool}_owner_turns_{label}",
+                    capability,
+                    args,
+                    [refused("args_schema")],
+                    description=f"Owner-turn args outside the node's own schema ({label}).",
+                )
+            )
+        cases += [
+            _read_case(
+                f"{tool}_owner_turns_not_granted",
+                capability,
+                _owner_turn_args(),
+                [refused("not_granted")],
+                description=f"Without the local ~/.{tool} grant the read is not_granted.",
+                setup={"reader_grants": {tool: False}},
+            ),
+            _read_case(
+                f"{tool}_owner_turns_since_older_than_7_days",
+                capability,
+                _owner_turn_args(since="2026-11-23T00:53:24.000Z"),
+                _ERROR,
+                description=(
+                    "A since older than now - 7 days is within the schema but outside the "
+                    "contract's bound: the reader refuses it (an error without detail)."
+                ),
+                reader_calls=1,
+            ),
+            _read_case(
+                f"{tool}_owner_turns_since_exactly_7_days",
+                capability,
+                _owner_turn_args(since=OWNER_TURN_FLOOR),
+                _owner_ok(full if claude else None),
+                description="A since of exactly now - 7 days is accepted.",
+                reader_calls=1,
+            ),
+            _read_case(
+                f"{tool}_owner_turns_only",
+                capability,
+                _owner_turn_args(),
+                _owner_ok(full if claude else None),
+                description=(
+                    "Only owner-typed turns under the prefixes, scrubbed node-side: never "
+                    "assistant text, tool calls or results, meta, sidechain, summary or marker "
+                    "lines, unknown kinds, or rows outside the prefixes (~/work/acme-secret is "
+                    "not under ~/work/acme)."
+                ),
+                reader_calls=1,
+                absent_b64=absent,
+            ),
+            _read_case(
+                f"{tool}_owner_turns_max_turns_truncates",
+                capability,
+                _owner_turn_args(max_turns=1),
+                _owner_ok(first if claude else None, truncated=True),
+                description="The first turn max_turns cannot take ends the result, truncated.",
+                reader_calls=1,
+            ),
+            _read_case(
+                f"{tool}_owner_turns_max_sessions_truncates",
+                capability,
+                _owner_turn_args(max_sessions=1),
+                _owner_ok(one_session if claude else None, truncated=True),
+                description="The first turn of a session max_sessions cannot take ends the result.",
+                reader_calls=1,
+            ),
+        ]
+    return cases
+
+
 def v1_cases():
-    cases = _common_cases(1) + _reader_cases() + _voice_state_cases(1)
+    cases = _common_cases(1) + _reader_cases() + _owner_turn_cases() + _voice_state_cases(1)
     grant_attached = plain("v1-grant", "apps.frontmost", {}, version=1)
     grant_attached = resign({**grant_attached, "grant": {"approval_id": APPROVAL_ID}})
     cases.append(

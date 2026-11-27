@@ -11,8 +11,10 @@ from pathlib import Path
 
 import pytest
 
+from accounts.services import register_user
 from audit.models import AuditLog
 from nodes import audit_chain, bus, services
+from nodes.capabilities import get_contract
 from nodes.models import NodeInvocation
 from nodes.protocol.messages import catalogue_sha256
 from nodes.reference.node import default_catalogue
@@ -120,11 +122,65 @@ def test_the_inflight_cap_is_busy(node, settings):
     assert bus.inflight_count(node.pk) == 2  # the busy call took no slot
 
 
-def test_a_non_web_channel_is_refused_until_branch_5(node):
+def test_a_non_web_channel_is_refused_outside_the_system_read_capabilities(node):
     bus.mark_present(node.pk)
     outcome = read(node, channel="system")
     assert_one_not_sent_row(outcome, "server_refused", "not_invocable")
     assert NodeInvocation.objects.get().channel == "system"
+
+
+def test_the_system_read_capabilities_are_the_two_owner_turn_contracts():
+    """Runbook A12: the allow list names exactly the transcript pull's two
+    reads, both server-known personal-class read contracts."""
+    assert services.SYSTEM_READ_CAPABILITIES == {
+        "claude.transcripts.owner_turns",
+        "codex.transcripts.owner_turns",
+    }
+    for name in services.SYSTEM_READ_CAPABILITIES:
+        contract = get_contract(name)
+        assert (contract.capability_class, contract.data_class) == ("read", "personal")
+
+
+SYSTEM_ARGS = {
+    "since": "2026-11-29T00:00:00.000Z",
+    "cwd_prefixes": ["~/work/acme"],
+    "max_sessions": 50,
+    "max_turns": 200,
+}
+
+
+def test_a_system_channel_owner_turn_read_passes_the_channel_check(node):
+    """Not refused `not_invocable`: with no presence it goes on to
+    `node_offline` (nothing sent), on the system channel."""
+    outcome = read(
+        node, capability="claude.transcripts.owner_turns", args=SYSTEM_ARGS, channel="system"
+    )
+    assert_one_not_sent_row(outcome, "node_offline")
+    assert NodeInvocation.objects.get().channel == "system"
+
+
+@pytest.mark.parametrize("channel", ["cli", "hook", "node", "openai"])
+def test_an_owner_turn_read_on_another_non_web_channel_is_not_invocable(node, channel):
+    """Only `channel=system` opens the allow list (runbook A12)."""
+    bus.mark_present(node.pk)
+    outcome = read(
+        node, capability="claude.transcripts.owner_turns", args=SYSTEM_ARGS, channel=channel
+    )
+    assert_one_not_sent_row(outcome, "server_refused", "not_invocable")
+    assert inbox_len(node) == 0
+
+
+def test_a_system_channel_owner_turn_read_still_needs_the_node_owner(node):
+    stranger = register_user(email="stranger@test.dev", password="x-Strong-Pass-2026")
+    outcome = services.invoke_read(
+        node=node,
+        capability="codex.transcripts.owner_turns",
+        args=SYSTEM_ARGS,
+        workspace=node.workspace,
+        actor=stranger,
+        channel="system",
+    )
+    assert_one_not_sent_row(outcome, "server_refused", "actor_not_owner")
 
 
 def test_refuse_read_writes_the_two_rows_and_sends_nothing(node):

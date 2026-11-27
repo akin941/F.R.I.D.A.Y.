@@ -3,6 +3,9 @@
 # M1 contract test 2; runbook Part B "The conformance build rule"): the
 # strings FRIDAY_NODE_CONFORMANCE or "conformance" (any case), or the
 # conformance public key's base64 from backend/nodes/conformance/keys/.
+# It also refuses the debug-only owner-turn preview (Phase 8B brief M1,
+# runbook B4: `scrub-preview` and its `OwnerTurnPreview` type, `#if DEBUG`),
+# which reads real transcripts and must never ship.
 # Run by the Release-only build phase (before CodeSign) and again by
 # build-sign-local.sh on the final binary.
 set -euo pipefail
@@ -28,4 +31,18 @@ if grep -qiE "FRIDAY_NODE_CONFORMANCE|conformance" "$TEXT" || grep -qF -- "$CONF
   echo "conformance marker in $(basename "$BIN"): refusing" >&2
   exit 1
 fi
-echo "no conformance marker in $(basename "$BIN")"
+# Case-sensitive: the CLI word and the Swift type name as compiled in.
+if grep -qE "scrub-preview|OwnerTurnPreview" "$TEXT"; then
+  echo "debug-only scrub-preview marker in $(basename "$BIN"): refusing" >&2
+  exit 1
+fi
+# Runbook B5 (Phase 10 M1): the conformance hook's own words (the
+# `wait_disconnected` op and the report keys `executor_terminated` /
+# `windows_shown`, which nothing outside `#if CONFORMANCE` spells), and the
+# DEBUG-only scripted doubles the hook and the offline suite drive (the
+# window owner's `script`, `ScriptedExecutor`, `CaseSetup`).
+if grep -qE "wait_disconnected|executor_terminated|windows_shown|ScriptedExecutor|ScriptedRun|CaseSetup|CommandScript" "$TEXT"; then
+  echo "conformance hook or scripted-double marker in $(basename "$BIN"): refusing" >&2
+  exit 1
+fi
+echo "no conformance or debug-preview marker in $(basename "$BIN")"

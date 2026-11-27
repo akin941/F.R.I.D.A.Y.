@@ -524,9 +524,9 @@ uv run python manage.py build_node_conformance --check   # case and vector files
 
 ### A6. `srt` on the Mac (Phase 10 owner step 4) — blocks B6
 
-- [ ] Install Anthropic's sandbox-runtime `srt` at an **exact** version and
+- [x] Install Anthropic's sandbox-runtime `srt` at an **exact** version and
       record it in `docs/mcp/dependencies/node-gateway.md`.
-- [ ] Confirm the CLI matches `SRT_ARGV_TEMPLATE`
+- [x] Confirm the CLI matches `SRT_ARGV_TEMPLATE`
       (`srt --settings <file> -- <argv...>`) and the settings keys of
       `backend/nodes/conformance/vectors/sandbox.json`
       (`network.allowedDomains`, `deniedDomains`, `allowUnixSockets`,
@@ -535,6 +535,10 @@ uv run python manage.py build_node_conformance --check   # case and vector files
       (`backend/nodes/reference/sandbox.py`), regenerate the vectors with
       `uv run python manage.py build_node_conformance` in a dedicated
       branch, and merge it **before** B6.
+
+      Done 2026-11-27: 0.0.83, CLI and all six vector documents match, no
+      generator change; macOS findings for B6 (shell on `PATH`, per-user
+      `RLIMIT_NPROC`, escape scripts) in the manifest.
 
 ### A7. Local speech server (Phase 6 branch 1 step 0) — blocks C2 and B7
 
@@ -620,6 +624,20 @@ the transcript pull is a no-op. It needs no Mac:
       install it in `tools.transcript_ingest`, and re-run
       `tools/tests/test_transcript_ingest.py` and the 8B e2e against the
       in-process gateway transport.
+      **Implemented 2026-11-26 on this branch (awaits the independent
+      Sonnet 5 review; tick the box when it merges).** The contracts now
+      sit in `backend/nodes/capabilities/v1/` with full-match path patterns
+      and the protocol's 64 KiB result bound; the readers moved to
+      `backend/nodes/reference/owner_turns.py`; the 36 folded cases are
+      `v1_read_{claude,codex}_owner_turns_*`, and the 8B expected file is
+      `backend/nodes/conformance/vectors/owner_turns.json`; the port is
+      `backend/tools/transcript_node_port.py`, installed by
+      `ToolsConfig.ready`; the gateway runs are
+      `tools/tests/test_transcript_node_port.py` and
+      `ops/tests/test_transcripts_gateway_e2e.py`. Preflight `transcripts`
+      now warns "not reachable" (no connected node) or "not granted" until
+      the Swift owner-turn readers (B4) and the Touch ID grant (M1); the
+      Swift node advertises both reads `not_granted` until B4.
 
 ---
 
@@ -877,26 +895,36 @@ build N** with `scripts/build-sign-local.sh`, then do C4.
 Needs: B2, A12 (for the live half). Spec: Phase 8B brief "Mac session
 (deferred)" M1, D13 (owner-turn rules), D17.
 
-- [ ] `Sources/NodeCore/Readers/ClaudeOwnerTurns.swift` and
-      `CodexOwnerTurns.swift` (streaming JSONL, D13 rules); catalogue
-      entries `claude.transcripts.owner_turns` and
-      `codex.transcripts.owner_turns` with schemas loaded from, or checked
-      byte-identical to, `backend/nodes/capabilities/v1/` (before A12 they
-      are in `backend/integrations/node_reference/contracts/v1/`; use
-      whichever the merged tree has).
-- [ ] `Tests/NodeCoreTests/OwnerTurnReaderTests.swift` over the reference
-      fixtures (`backend/nodes/reference/fixtures/{claude,codex}/`, or
-      `backend/integrations/node_reference/fixtures/` before A12), output
-      compared to `expected_owner_turns.json`.
-- [ ] Availability `not_granted` until the Touch ID grant; revoke gives
-      `not_granted` at once plus `grant.availability_changed`.
+- [x] `Sources/NodeCore/Readers/ClaudeOwnerTurns.swift` and
+      `CodexOwnerTurns.swift` (streaming JSONL, D13 rules; shared half in
+      `OwnerTurns.swift`); catalogue entries `claude.transcripts.owner_turns`
+      and `codex.transcripts.owner_turns` with schemas byte-identical to
+      `backend/nodes/capabilities/v1/` (the vendored copies,
+      `vendor_protocol.py --check`). Done 2026-11-27.
+- [x] `Tests/NodeCoreTests/OwnerTurnReaderTests.swift` over the reference
+      fixtures (`backend/nodes/reference/fixtures/owner_turns/`), output
+      compared to `backend/nodes/conformance/vectors/owner_turns.json` (the
+      A12 name of `expected_owner_turns.json`), plus a synthetic home pinned
+      against the Python reference. Done 2026-11-27.
+- [x] Availability `not_granted` until the Touch ID grant; revoke gives
+      `not_granted` at once plus `grant.availability_changed` (the reads
+      follow the `claude` / `codex` directory grants). Done 2026-11-27.
 - [ ] Real-file verification, never committed: the debug-only
       `friday-node scrub-preview --owner-turns ~/.claude/projects/<one project>`
-      (and the Codex equivalent) prints counts per line kind and per
-      excluded marker, never text. A line kind not covered by D13 → stop,
+      (and `--codex <dir>`) prints counts per line kind and per excluded
+      marker, never text. A line kind not covered by D13 → stop,
       update D13 + fixtures + reference readers + cases in one server
       branch, re-run. The owner skims the first 20 accepted turns and
-      confirms they are text the owner typed.
+      confirms they are text the owner typed. **2026-11-27: the command
+      exists and was run once on this repo's Claude project and on
+      `~/.codex/sessions` (counts only); it found accepted Claude turns
+      that start with `<task-notification>` (14) and `<bash-input>` (1),
+      which no D13 marker covers: the server branch and the owner skim
+      are still open (Phase 8B brief, M1 implementation record).**
+      **2026-11-27, later: the D13 marker fix is implemented on
+      `feat/p8-d13-harness-markers` (awaits the Sonnet 5 review); the
+      re-run shows no accepted turn starting with a harness tag (Claude
+      17 accepted, Codex 35). The owner skim is still open.**
 
 **Server-side contract tests it must pass:** every case in
 `backend/nodes/conformance/cases/v1/` (with the owner-turn cases) offline
@@ -912,27 +940,42 @@ place of the reference node.
 Needs: B1–B3. Spec: Phase 10 brief "Mac session (deferred)" M1, D5 checks
 13–24, D12; ADR-013 decision 6; ADR-014.
 
-- [ ] `GrantVerifier.swift` (domain-separated Ed25519 over the canonical
+- [x] `GrantVerifier.swift` (domain-separated Ed25519 over the canonical
       grant, field binding, TTL ≤ 120 s); `VerifierV2.swift` (D5 checks
       13–24 in order, same codes); `OutputStreamer.swift` (8 KiB chunks,
       seq, D12 carry-over scrub so a split secret is still removed, 1 MiB
-      cap, tail ≤ 4 KiB); v2 subprotocol offer in `Session.swift`.
-- [ ] `Sources/FridayNode/ConfirmationWindow.swift`: non-activating
+      cap, tail ≤ 4 KiB); v2 subprotocol offer in `Session.swift`. Done
+      2026-11-27 (`VerifierV2` runs 1–22; 23–24 are in `NodeSession`, as in
+      the reference node).
+- [x] `Sources/FridayNode/ConfirmationWindow.swift`: non-activating
       floating `NSPanel`, rendered from the node's **own** validated args
       and the capability's `confirm_template` (never server text); shows
       the approval id's first 8 characters for gate-class, the repo's local
       name and the exact argv and network setting for `repo.command.run`;
       buttons "Çalıştır" / "Reddet"; 60 s countdown; closes on socket loss,
       kill switch or timeout; one window at a time; "Durdur" while running.
-- [ ] Validate `text`, `title` and `repo_path` with the **identical**
+      Done 2026-11-27: the file is `App/FridayNode/ConfirmationWindow.swift`
+      (the app target; there is no `Sources/FridayNode/`); the decision
+      logic is NodeCore `Confirmation.swift` and `NodeSession`, unit-tested.
+- [x] Validate `text`, `title` and `repo_path` with the **identical**
       pattern strings from the v2 contract files (no `CharacterSet`
       approximation); replay the hostile-insert families of
       `backend/nodes/tests/test_capabilities_v2.py`; mirror
-      `x-friday-max-bytes`.
-- [ ] The `Conformance` build implements the external JSON-lines hook of
+      `x-friday-max-bytes`. Done 2026-11-27 (`ArgsValidationTests`, plus a
+      CPython `re.fullmatch` differential over every code point).
+- [x] The `Conformance` build implements the external JSON-lines hook of
       `backend/nodes/conformance/gateway.py` (ops `prepare`, `advance`,
       `tick`, `kill_switch`, `report`, `wait_disconnected`), compiled only
-      under `#if CONFORMANCE`.
+      under `#if CONFORMANCE`. Done 2026-11-27 (plus `voice_state`; the
+      scripted owner and executor are `#if DEBUG`).
+
+**Status 2026-11-27 (`feat/p10-node-confirm`):** contract test 1 passes
+(86/86 v1, 99/99 v2 offline, none pending; `grants.json`, `signing_v2.json`,
+`scrub_stream.json`); contract test 2 passes live (`--protocol 2` 99/99,
+`--protocol 1` 86/86, port 8766); contract test 3 is an owner step that
+needs runbook B6 first (until then every action is advertised
+`unsupported` and no repo is mapped). Details: the Phase 10 brief, M1
+implementation record.
 
 **Server-side contract tests it must pass:**
 
@@ -1037,7 +1080,11 @@ Needs: B1–B3, B5 merged; A7, A8, A10. Spec: Phase 11 brief "Mac session
       validated against `$defs.voice_state_item`, re-sent with every
       heartbeat and after reconnect, never spooled); the `Conformance`
       build's `{"op": "voice_state", …}` hook op and the
-      `voice_states_dropped` report key.
+      `voice_states_dropped` report key. **2026-11-27: the session-side
+      relay (`NodeSession.relayVoiceState`), the hook op and the report key
+      landed with B5, because B5's contract test 1 plays every `cases/v2`
+      file (the nine voice-state cases pass offline and live); what is left
+      here is feeding it from `VoiceChildHost`.**
 - [ ] `release_mic(storm)` releases the mic and shows `storm_muted` until a
       mute on → off cycle.
 - [ ] Microphone entitlement (`com.apple.security.device.audio-input`,

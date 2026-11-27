@@ -127,7 +127,10 @@ final class VendoredProtocolTests: XCTestCase {
     func testVendoredFilesMatchTheRepo() throws {
         let fileManager = FileManager.default
         var repoPaths: [String] = []
-        for directory in ["protocol/schemas/v1", "capabilities/v1"] {
+        for directory in [
+            "protocol/schemas/v1", "capabilities/v1", "protocol/schemas/v2", "capabilities/v2",
+            "capabilities/v2/recipes",
+        ] {
             let url = Repo.url("backend/nodes/\(directory)")
             for name in try fileManager.contentsOfDirectory(atPath: url.path) where name.hasSuffix(".json") {
                 repoPaths.append("\(directory)/\(name)")
@@ -145,8 +148,20 @@ final class VendoredProtocolTests: XCTestCase {
         for type in NodeProtocol.nodeToServer.union(NodeProtocol.serverToNode) {
             XCTAssertNotNil(NodeProtocol.schema(for: type), type)
         }
-        XCTAssertEqual(CapabilityContract.all.count, 8)
+        XCTAssertEqual(CapabilityContract.all.count, 10)
         XCTAssertTrue(CapabilityContract.all.allSatisfy { $0.capabilityClass == "read" && $0.version == 1 })
+        // v2: every type of both directions plus the grant sub-schema; six
+        // action contracts and five recipes (Phase 10 D3).
+        for type in NodeProtocol.nodeToServerV2.union(NodeProtocol.serverToNodeV2).union(["grant"]) {
+            XCTAssertNotNil(NodeProtocol.schema(for: type, version: 2), type)
+        }
+        XCTAssertEqual(
+            CapabilityContract.actions.map(\.name),
+            ["applescript.recipe.run", "apps.focus", "apps.open", "ax.press", "ax.type_text", "repo.command.run"])
+        XCTAssertTrue(CapabilityContract.actions.allSatisfy { $0.isAction && $0.confirmTemplate != nil })
+        XCTAssertEqual(
+            RecipeContract.all.keys.sorted(),
+            ["finder.reveal_repo", "music.next_track", "music.play_pause", "system.volume_set", "terminal.open_repo"])
     }
 }
 
@@ -156,6 +171,33 @@ final class PolicyGuardTests: XCTestCase {
     func testServerToNodeSetIsFrozen() {
         XCTAssertEqual(NodeProtocol.serverToNode, ["hello.ack", "heartbeat.ack", "invoke", "event.ack", "bye"])
         XCTAssertEqual(NodeProtocol.nodeToServer, ["hello", "heartbeat", "result", "event"])
+        // Phase 10 D1: v2 adds no server -> node type (no cancel) and exactly
+        // two node -> server types.
+        XCTAssertEqual(NodeProtocol.serverToNodeV2, NodeProtocol.serverToNode)
+        XCTAssertEqual(NodeProtocol.nodeToServerV2, ["hello", "heartbeat", "result", "event", "confirmation", "output"])
+        XCTAssertEqual(NodeProtocol.offeredSubprotocols, ["friday-node.v2", "friday-node.v1"])
+    }
+
+    /// The v2 server -> node schemas pass the same guard; the grant object's
+    /// own properties pass it as written (`grant(?!_id)`).
+    func testNoPolicyShapedNamesInV2() throws {
+        let policy = try NSRegularExpression(
+            pattern: "(?i)policy|allowlist|grant(?!_id)|catalogue[._]set|config|exec_policy|settings")
+        func names(_ schema: JSONValue) -> [String] {
+            var out: [String] = []
+            for (key, value) in schema["properties"]?.objectValue ?? [:] {
+                out.append(key)
+                out += names(value)
+            }
+            return out
+        }
+        for type in NodeProtocol.serverToNodeV2 {
+            for name in [type] + names(try XCTUnwrap(NodeProtocol.schema(for: type, version: 2)))
+            where !(type == "invoke" && name == "grant") {
+                let range = NSRange(name.startIndex..., in: name)
+                XCTAssertNil(policy.firstMatch(in: name, range: range), "\(type).\(name)")
+            }
+        }
     }
 
     func testNoPolicyShapedNames() throws {

@@ -1,0 +1,55 @@
+{
+  "check": null,
+  "description": "Without the local ~/.claude grant the read is not_granted.",
+  "expect": {
+    "frames": [
+      {
+        "refusal_code": "not_granted",
+        "status": "refused",
+        "type": "result"
+      }
+    ],
+    "reader_calls": 0
+  },
+  "name": "v1_read_claude_owner_turns_not_granted",
+  "setup": {
+    "now": 1796000005,
+    "reader_grants": {
+      "claude": false
+    }
+  },
+  "steps": [
+    {
+      "frame": {
+        "args": {
+          "cwd_prefixes": [
+            "~/work/acme",
+            "~/code/friday"
+          ],
+          "max_sessions": 50,
+          "max_turns": 200,
+          "since": "2026-11-29T00:00:00.000Z"
+        },
+        "args_sha256": "871d3c3bde38836ca93d3596e6494ac85b8f1c17efade7abb0dc6ccf241698e1",
+        "capability": "claude.transcripts.owner_turns",
+        "capability_version": 1,
+        "class": "read",
+        "expires_at": 1796000030,
+        "grant": null,
+        "id": "21a4706c-a0b6-42dc-b03e-dac0553e2554",
+        "invocation_id": "fe616a4e-2034-4dea-aaa5-d167c2ac973d",
+        "issued_at": 1796000000,
+        "key_id": "03396219237f75a6",
+        "node_id": "6f1e2d3c-4b5a-4987-8a6b-5c4d3e2f1a0b",
+        "nonce": "v8XRFaZQbrQ5WkkM6WD3MVDUSahyytZIjuw9yb72g0U",
+        "sig": "GMNxH61YamcZhmxmsaXfmhTlkae4kfDs6G4Tx62QCDM9wJDL_TaD4wjn0esQOyVASIwvZDf6BkhH_Wg1QFKXDA",
+        "trace_id": "conformance-v1-read-claude_owner_turns_not_granted",
+        "type": "invoke",
+        "v": 1,
+        "workspace_id": "2a3b4c5d-6e7f-4a8b-9c0d-1e2f3a4b5c6d"
+      },
+      "op": "send"
+    }
+  ],
+  "version": 1
+}

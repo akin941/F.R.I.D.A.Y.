@@ -1,0 +1,74 @@
+{
+  "check": null,
+  "description": "The first turn of a session max_sessions cannot take ends the result.",
+  "expect": {
+    "frames": [
+      {
+        "output": {
+          "next_since": "2026-11-29T20:01:00.000Z",
+          "sessions": [
+            {
+              "cwd": "~/work/acme",
+              "session_id": "cc-acme-1",
+              "turns": [
+                {
+                  "at": "2026-11-29T20:00:00.000Z",
+                  "text": "Fix the flaky invoice test in acme.",
+                  "turn_id": "u-1"
+                },
+                {
+                  "at": "2026-11-29T20:01:00.000Z",
+                  "text": "The staging key is [SECRET:openai_key], use it for the smoke run.",
+                  "turn_id": "u-4"
+                }
+              ]
+            }
+          ],
+          "truncated": true
+        },
+        "status": "ok",
+        "truncated": true,
+        "type": "result"
+      }
+    ],
+    "reader_calls": 1
+  },
+  "name": "v1_read_claude_owner_turns_max_sessions_truncates",
+  "setup": {
+    "now": 1796000005
+  },
+  "steps": [
+    {
+      "frame": {
+        "args": {
+          "cwd_prefixes": [
+            "~/work/acme",
+            "~/code/friday"
+          ],
+          "max_sessions": 1,
+          "max_turns": 200,
+          "since": "2026-11-29T00:00:00.000Z"
+        },
+        "args_sha256": "bb586060297fcd5f9bcf71aa305206f8f7ef23e92edd6c5386aab0bad2930b1a",
+        "capability": "claude.transcripts.owner_turns",
+        "capability_version": 1,
+        "class": "read",
+        "expires_at": 1796000030,
+        "grant": null,
+        "id": "63f2012c-08ee-4d7e-97db-80f3758856bf",
+        "invocation_id": "2c6bfdf4-1c6c-42fc-96bb-ff289444414a",
+        "issued_at": 1796000000,
+        "key_id": "03396219237f75a6",
+        "node_id": "6f1e2d3c-4b5a-4987-8a6b-5c4d3e2f1a0b",
+        "nonce": "Pdv903a3yo1xPCRXzChQOpXWjvNU0L3J7U01LIf7ae4",
+        "sig": "aGTljIUsSI7aPZ9E7fpARZWTws2CoXL-dw-PyUxqLseIqiW4OlXzLd5PEw9Jvq3OOWAfdhNzlzKNudcSn1CJDw",
+        "trace_id": "conformance-v1-read-claude_owner_turns_max_sessions_truncates",
+        "type": "invoke",
+        "v": 1,
+        "workspace_id": "2a3b4c5d-6e7f-4a8b-9c0d-1e2f3a4b5c6d"
+      },
+      "op": "send"
+    }
+  ],
+  "version": 1
+}

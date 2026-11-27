@@ -1,0 +1,53 @@
+{
+  "check": null,
+  "description": "A since older than now - 7 days is within the schema but outside the contract's bound: the reader refuses it (an error without detail).",
+  "expect": {
+    "frames": [
+      {
+        "output": null,
+        "refusal_code": null,
+        "status": "error",
+        "type": "result"
+      }
+    ],
+    "reader_calls": 1
+  },
+  "name": "v1_read_claude_owner_turns_since_older_than_7_days",
+  "setup": {
+    "now": 1796000005
+  },
+  "steps": [
+    {
+      "frame": {
+        "args": {
+          "cwd_prefixes": [
+            "~/work/acme",
+            "~/code/friday"
+          ],
+          "max_sessions": 50,
+          "max_turns": 200,
+          "since": "2026-11-23T00:53:24.000Z"
+        },
+        "args_sha256": "b287ee5f0eb06560a92fa98b969f09a4b0bff72d4e57f360a9fd6c0b1f7de003",
+        "capability": "claude.transcripts.owner_turns",
+        "capability_version": 1,
+        "class": "read",
+        "expires_at": 1796000030,
+        "grant": null,
+        "id": "e3bc4406-a7b9-4b46-80d3-eb7fbc9b7842",
+        "invocation_id": "820aafcd-6da2-4d0f-9a06-cabc91140ed4",
+        "issued_at": 1796000000,
+        "key_id": "03396219237f75a6",
+        "node_id": "6f1e2d3c-4b5a-4987-8a6b-5c4d3e2f1a0b",
+        "nonce": "euI5FwqNtOrFB5u8S3gpwF3RPlGEmC-IdnNlVCIM3bY",
+        "sig": "pa89kvwtTdIDLDK1xqkc9_Wc8GYT1tyfZRmA_4yIbY4l9Fz-1RHQG4dvwZAud7za3f-74-Z_aYH4FP56VdkDAg",
+        "trace_id": "conformance-v1-read-claude_owner_turns_since_older_than_7_days",
+        "type": "invoke",
+        "v": 1,
+        "workspace_id": "2a3b4c5d-6e7f-4a8b-9c0d-1e2f3a4b5c6d"
+      },
+      "op": "send"
+    }
+  ],
+  "version": 1
+}

@@ -1,0 +1,109 @@
+{
+  "check": null,
+  "description": "Only owner-typed turns under the prefixes, scrubbed node-side: never assistant text, tool calls or results, meta, sidechain, summary or marker lines, unknown kinds, or rows outside the prefixes (~/work/acme-secret is not under ~/work/acme).",
+  "expect": {
+    "absent_b64": [
+      "c2stcHJvai1GaXh0dXJlRkFLRTAxMjM0NTY3ODlhYmNkZWZHSElKS0xtbm9wUVI=",
+      "Z2hwX0ZpeHR1cmVGQUtFMDEyMzQ1Njc4OWFiY2RlZkdISUpLTG1u",
+      "QUtJQUZJWFRVUkVGQUtFMTIzNDU=",
+      "Rml4dHVyZVBhc3MyMDI2eA==",
+      "b3duZXIuZml4dHVyZUBleGFtcGxlLmNvbQ==",
+      "VE9PTC1SRVNVTFQtUEhSQVNF",
+      "RklMRS1DT05URU5ULVBIUkFTRQ==",
+      "RlVOQ1RJT04tT1VUUFVULVBIUkFTRQ==",
+      "UkVBU09OSU5HLVBIUkFTRQ==",
+      "U1VNTUFSWS1QSFJBU0U=",
+      "TUVUQS1QSFJBU0U=",
+      "U0lERUNIQUlOLVBIUkFTRQ==",
+      "TUFSS0VSLVBIUkFTRQ==",
+      "VU5LTk9XTi1LSU5ELVBIUkFTRQ==",
+      "SSB3aWxsIGxvb2sgYXQgdGhlIHRlc3QgZmlyc3Qu",
+      "R2F0ZXdheSB3aXJlZDsgdGVzdHMgYXJlIGdyZWVuLg==",
+      "QnVtcGVkIHRoZSBjbGllbnQgdG8gMi4xLg==",
+      "VHdvIHN0cmluZ3MgbmVlZCBUdXJraXNoIHBsdXJhbHMu",
+      "TkVTVEVELVNJQkxJTkctUEhSQVNF",
+      "SEFSTkVTUy1NQVJLRVItUEhSQVNF",
+      "U0NSQVRDSC1QSFJBU0U=",
+      "YWNtZS1zZWNyZXQ="
+    ],
+    "frames": [
+      {
+        "output": {
+          "next_since": "2026-11-30T00:40:00.000Z",
+          "sessions": [
+            {
+              "cwd": "~/work/acme",
+              "session_id": "cc-acme-1",
+              "turns": [
+                {
+                  "at": "2026-11-29T20:00:00.000Z",
+                  "text": "Fix the flaky invoice test in acme.",
+                  "turn_id": "u-1"
+                },
+                {
+                  "at": "2026-11-29T20:01:00.000Z",
+                  "text": "The staging key is [SECRET:openai_key], use it for the smoke run.",
+                  "turn_id": "u-4"
+                }
+              ]
+            },
+            {
+              "cwd": "~/code/friday",
+              "session_id": "cc-friday-1",
+              "turns": [
+                {
+                  "at": "2026-11-30T00:40:00.000Z",
+                  "text": "Wire the node gateway; my AWS key [SECRET:aws_key] must not leak and DB_PASSWORD=[SECRET:assignment] stays local.",
+                  "turn_id": "u-1"
+                }
+              ]
+            }
+          ],
+          "truncated": false
+        },
+        "status": "ok",
+        "truncated": false,
+        "type": "result"
+      }
+    ],
+    "reader_calls": 1
+  },
+  "name": "v1_read_claude_owner_turns_only",
+  "setup": {
+    "now": 1796000005
+  },
+  "steps": [
+    {
+      "frame": {
+        "args": {
+          "cwd_prefixes": [
+            "~/work/acme",
+            "~/code/friday"
+          ],
+          "max_sessions": 50,
+          "max_turns": 200,
+          "since": "2026-11-29T00:00:00.000Z"
+        },
+        "args_sha256": "871d3c3bde38836ca93d3596e6494ac85b8f1c17efade7abb0dc6ccf241698e1",
+        "capability": "claude.transcripts.owner_turns",
+        "capability_version": 1,
+        "class": "read",
+        "expires_at": 1796000030,
+        "grant": null,
+        "id": "2d9cff21-8492-4374-a4a2-abc4dbced2e9",
+        "invocation_id": "82f0f540-b8e4-4bd7-bd27-4035b07a63de",
+        "issued_at": 1796000000,
+        "key_id": "03396219237f75a6",
+        "node_id": "6f1e2d3c-4b5a-4987-8a6b-5c4d3e2f1a0b",
+        "nonce": "6TZYwovScMMeU4wog1QDmAO6BOiHW11md4_6tqq6ZNM",
+        "sig": "47Yh2Pwk8uyQ2dQlZ_jzVUm_6aS4Wjo2WZnJTdU_fbs8GIqmpV0lMe6C5y3U8bcByA50XMywebURdayO5DhEAA",
+        "trace_id": "conformance-v1-read-claude_owner_turns_only",
+        "type": "invoke",
+        "v": 1,
+        "workspace_id": "2a3b4c5d-6e7f-4a8b-9c0d-1e2f3a4b5c6d"
+      },
+      "op": "send"
+    }
+  ],
+  "version": 1
+}

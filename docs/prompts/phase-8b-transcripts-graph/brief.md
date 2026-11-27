@@ -1331,11 +1331,47 @@ episodes.
       `<local-command-stdout>`, `<local-command-stderr>`,
       `<system-reminder>`, `<user-prompt-submit-hook>`,
       `Caveat: The messages below were generated`, or
-      `[Request interrupted`.
+      `[Request interrupted`; and (added 2026-11-27 after the M1
+      real-file run) `<local-command-caveat>`, `<bash-input>`,
+      `<bash-stdout`, `<bash-stderr`, `<bash-exit-code>`,
+      `<task-notification>`, `<tick>`, `<user-memory-input>`,
+      `<fork-boilerplate>`, `<teammate-message`,
+      `<cross-session-message`, `<agent-message`, `<channel source="`,
+      `<mcp-resource-update`, `<mcp-polling-update`, or
+      `Another Claude session sent a message`.
   - **Codex rollout JSONL:** a `response_item` of payload type
     `message` with `role == "user"` and `input_text` parts only, whose
     text does not start with `<environment_context>`,
-    `<user_instructions>` or `<user_shell_command>`.
+    `<user_instructions>` or `<user_shell_command>`, or (added
+    2026-11-27) `# AGENTS.md instructions`, `<skill>`, `<turn_aborted>`
+    or `<subagent_notification>`.
+  - **How a marker matches.** Leading whitespace is stripped (Python's
+    `str.lstrip()`), then the text must **start with** the marker string
+    exactly (case-sensitive, a plain prefix; never "anywhere in the
+    text"). An owner turn that names a tag later on is kept. A marker
+    without its closing `>` (`<teammate-message`, `<bash-stdout`) is a tag
+    Claude Code writes with attributes, or one its own check matches
+    without the `>`.
+  - **Where the 2026-11-27 markers come from.** The tag constants and the
+    "not a human prompt" checks in the Claude Code CLI (2.1.201) and the
+    contextual user fragments of the Codex CLI (0.142.5), read from the
+    installed programs, never from a transcript. They are harness text the
+    owner did not type: background-task results (`<task-notification>`),
+    shell-mode output, the loop tick, peer, teammate, channel and MCP
+    messages, fork boilerplate, and Codex's AGENTS.md, skill, abort and
+    sub-agent injections. Two are typed by the owner and still excluded,
+    because they are commands, not prompts to the assistant: shell-mode
+    input (`! cmd`, stored as `<bash-input>`) and the `#` memory note
+    (`<user-memory-input>`).
+  - **Known gaps (fail open, counted by the M1 preview).** A peer
+    message that starts with "A message arrived from " (the next line is
+    a `<channel` or `<teammate-message` tag) is not a prefix marker: the
+    words are too common to exclude by prefix. Channel messages are
+    written `isMeta`, which already skips them. IDE context tags
+    (`<ide_opened_file>`, `<ide_selection>`) are not markers either:
+    there is no evidence of them in the CLI, and as a prefix they would
+    drop the owner's prompt that follows them. The debug preview names
+    all of these tags when an accepted turn starts with one.
   - **Every returned text** is scrubbed on the node with the 8A rules
     (Phase 9 D13 item 6: the vendored copy in the reference node, the
     Swift port in the app) and truncated to 4000 characters.
@@ -3439,7 +3475,9 @@ What was built:
     `job: transcript_pull`, counts only).
 - The node seam is `NodeReadPort`. Its default `UnavailableNodePort` has
   no node, so the beat is a no-op in production until the `nodes`-backed
-  port exists.
+  port exists. (Since runbook A12 the default is the `nodes`-backed
+  `tools.transcript_node_port.NodesTranscriptPort`, installed by
+  `ToolsConfig.ready`.)
 - `integrations/node_reference/`:
   - `owner_turns.py`: the D13/D17 readers;
   - `contracts/v1/{claude,codex}.transcripts.owner_turns.json`;
@@ -3571,6 +3609,16 @@ Tests:
      in-process gateway transport instead of the double.
 
    Until then the pull is a no-op.
+   Steps 3-5 are implemented on `feat/p8-node-transcript-port` (runbook
+   A12, 2026-11-26, awaits review). Deviations: the readers moved to
+   `nodes/reference/owner_turns.py` (the reference node may not import
+   `integrations`), the staged `owner_turns_cases.json` became 36 v1
+   frame-level cases (Codex results pinned by status and `truncated` only:
+   their turn ids hash byte offsets that depend on the fixture home's path
+   length; the exact Codex output is `vectors/owner_turns.json`), the
+   contracts' `max_result_bytes` is the protocol's 64 KiB (the reader's
+   budget 60 KiB) instead of 1 MiB, and the double-based tests stay, with
+   the gateway runs added beside them.
 6. After deploy, run `manage.py migrate` and then `manage.py
    seed_ingestion_sources` once, so both transcript sources exist.
    Preflight's `learning_sources` fails until they do.
@@ -3968,15 +4016,18 @@ Tests:
    over `nodes.services.invoke_read(channel=CHANNEL_SYSTEM, actor=owner)`
    and install it, then re-run `tools/tests/test_transcript_ingest.py` and
    this e2e against the in-process gateway transport. Until then preflight
-   `transcripts` warns and the pull is a no-op.
+   `transcripts` warns and the pull is a no-op. **Implemented 2026-11-26 on `feat/p8-node-transcript-port` (runbook A12; awaits the Sonnet 5 review):** contracts in `nodes/capabilities/v1/` (full-match path patterns, 64 KiB result bound), readers in `nodes/reference/owner_turns.py` dispatched by `readers.py`, 36 folded v1 cases plus `vectors/owner_turns.json`, `SYSTEM_READ_CAPABILITIES` set, and `tools/transcript_node_port.py` installed by `ToolsConfig.ready`; the pull and this e2e run over the in-process gateway in `tools/tests/test_transcript_node_port.py` and `ops/tests/test_transcripts_gateway_e2e.py`.
 3. After deploy: `manage.py migrate`, `seed_ai_defaults`,
    `seed_ingestion_sources` and `build_vector_indexes` (preflight
    `retrieval_indexes` fails on a provider without its index).
 4. Run `manage.py preflight` on the dev stack with the reference node
    paired (`run_reference_node`, `docs/runbooks/friday-node.md`) and
    confirm no `fail` line. The expected warns until the Mac session and the
-   owner evaluations: `graphify` (no repo enabled), `transcripts` (no node
-   port, or not granted), `eval_baseline` (no private baseline).
+   owner evaluations: `graphify` (no repo enabled), `transcripts` (no
+   reachable node, or not granted: since the nodes-backed port (step 2) the
+   "no node port" warn appears only if the app-start install did not run;
+   the Swift node advertises the owner-turn reads `not_granted` until
+   runbook B4), `eval_baseline` (no private baseline).
 5. On the runner host: build the Graphify image (`docker build -f
    graphify.Dockerfile -t friday-harness-graphify:0.9.103 .` in
    `backend/harness/docker/`), enable `graphify_enabled` for the Friday
@@ -4007,7 +4058,10 @@ migration renumbering needed).
    the seam, not the in-process gateway. MASTER_PLAN row 8B says "server
    half done" while that port is outstanding. Fix: keep the follow-up
    branch (`feat/p9-node-reads` follow-up 1) visible in the MASTER_PLAN
-   go/no-go table.
+   go/no-go table. **The port is implemented 2026-11-26 on
+   `feat/p8-node-transcript-port` (runbook A12, awaits review); the e2e
+   also runs over the in-process gateway
+   (`ops/tests/test_transcripts_gateway_e2e.py`).**
 3. **`test_headroom_compresses_with_litellm_blocked` fails where headroom
    is absent** (`deploy/compressor/test_no_litellm.py`). It raises
    `ModuleNotFoundError: headroom` outside the sidecar image; environmental,
@@ -4029,7 +4083,7 @@ migration renumbering needed).
 | 8 | `feat/p8-transcript-ingestion` | Owner-turn capabilities, reference readers + conformance, pull job in `tools`, port, cursor, personal-class sources, transcript corpus | 2; **Phase 9 branches 2–5 merged** | **implemented 2026-11-20** (awaits the Sonnet 5 review; see "Implementation record" under branch 8). Phase 9 branches 2–5 were not merged, so the contracts, readers and conformance files are staged in `integrations/node_reference/` and the node is reached through a `NodeReadPort` seam. The `nodes` wiring is owner steps 3–5 of branch 8. Swift readers: deferred: Mac session (M1) |
 | 9 | `feat/p8-graph-ui` | `/memory/graph`, timeline, sources/Graphify/conflict/eval views | 2, 4 (5, 7, 8 for their panels) | **implemented 2026-11-20** (awaits the Sonnet 5 review; see "Implementation record" under branch 9; the real-phone and screen-reader check is pending owner evaluation) |
 | 10 | `chore/p8b-closeout` | Preflight checks, e2e, retrieval default decision, runbooks, ADR notes, MASTER_PLAN row, go/no-go record | 1–9 | **implemented 2026-11-20** (awaits the Sonnet 5 review; see "Implementation record" under branch 10; `MEMORY_RETRIEVAL_MODE` kept `legacy`; the `nodes`-backed transcript port is a follow-up branch; preflight on the dev stack with a paired node and the Mac rows are owner steps, pending owner evaluation) |
-| M1 | `feat/p8-node-transcript-readers` | Swift readers for the two owner-turn capabilities, grant wiring, real-file rule verification, conformance pass | 8 merged; Phase 9 M2 | deferred: Mac session |
+| M1 | `feat/p8-node-transcript-readers` | Swift readers for the two owner-turn capabilities, grant wiring, real-file rule verification, conformance pass | 8 merged; Phase 9 M2 | **implemented 2026-11-27** (awaits the Sonnet 5 review; 86/86 offline and live): real-file verification found unmarked `<task-notification>` / `<bash-input>` turns; the D13 marker fix is implemented on `feat/p8-d13-harness-markers` (awaits review; re-run: no accepted turn starts with a harness tag); the owner skim is open (see "Implementation record" under M1) |
 | M2 | Mac and owner evaluation | Private eval baseline, Headroom compare, real transcript run, go/no-go measurements | 3, 4, 6, M1 | deferred: Mac session (pending owner evaluation) |
 
 **Branch count.** Ten rows against the roughly 4–8 target: eight
@@ -4112,6 +4166,102 @@ they name.
   session);
 - the e2e of the closeout, with the live node in place of the reference
   node.
+
+**Implementation record (2026-11-27).** Status: implemented on
+`feat/p8-node-transcript-readers` (runbook B4), awaiting the independent
+Sonnet 5 review.
+
+- **Files.** `node/friday-node/Sources/NodeCore/Readers/ClaudeOwnerTurns.swift`,
+  `CodexOwnerTurns.swift` and a shared `OwnerTurns.swift` (args, the
+  reference's instant parser and formatter, `collect_files`, the
+  canonical-size cut); `OwnerTurnPreview.swift` and the CLI's
+  `scrub-preview`, both `#if DEBUG`; `Tests/NodeCoreTests/OwnerTurnReaderTests.swift`.
+  The A12 placeholder (an `owner_turns` family always `not_granted`) is
+  gone: both reads follow the `claude` / `codex` directory grants.
+- **Contract tests.** Offline: every `cases/v1` case passes in
+  `ConformanceTests.swift` (86/86, `pendingB4` empty); the readers
+  reproduce `conformance/vectors/owner_turns.json` exactly (the A12 name
+  of `fixtures/expected_owner_turns.json`, over `fixtures/owner_turns/`
+  laid out as a node home); scrub parity with `scrub.json` unchanged
+  (`ScrubParityTests`). Live: the Conformance build against
+  `node_conformance_server --external --port 8766 --tls-self-signed
+  --protocol 1`, 86/86 PASS. The pull-job re-run against the live Mac node
+  and the closeout e2e with it are owner steps (they need the paired node
+  and the running stack).
+- **Python-exact details, pinned in tests with values measured on CPython
+  3.12.** Times keep microseconds (ordering, `at >= since`) and format with
+  milliseconds cut; `fromisoformat` quirks (offset minutes not
+  range-checked, the whole offset under 24 h, `24:00` and `:60` refused);
+  Codex turn ids hash byte offsets with malformed, multi-byte and oversized
+  lines counted; the 60 KiB budget is measured as compact JSON, the cut at
+  4 000 scalars after the scrub; the sort is stable on `(at, turn_id)`; a
+  synthetic home (ten turns cut by the budget, tied and sub-millisecond
+  times, one 6 000-character turn) matches the reference byte for byte.
+- **Server follow-ups from the A12 review (same branch, `fix(p8)`).**
+  `readers.py` `_fit` no longer cuts an owner-turn result by whole
+  sessions: `_fit_owner_turns` drops the newest turns first in
+  `(at, turn_id)` order and recomputes `next_since` from the turns left,
+  so the cursor never skips a dropped turn (the Swift `fit` mirrors it;
+  unreachable with the 60 KiB budget, kept as defence in depth).
+  `transcript_node_port.owner_node` ranks online first, then offering the
+  reads, so an offline node that offers them never hides an online one.
+- **Deviations.** (1) A time the reference's `datetime` cannot hold (year
+  1 or 9999 pushed past the range by its offset) makes the reference's read
+  raise `OverflowError`; the Swift read fails as a whole too (`result`
+  `error`), at the same points (Claude: candidate lines only; Codex: every
+  line after `session_meta`). (2) Inherited from M2: a transcript line with
+  a lone-surrogate `\u` escape is skipped by the Swift parser, while
+  Python parses it (a surrogate in a returned text then fails the read when
+  the canonical form refuses it; one elsewhere in the line leaves the turn
+  returned, where Swift skips it). (3) `scrub-preview` also counts accepted turns that start
+  with a tag and names the tag when it is a known harness tag (a fixed
+  list since the D13 marker fix; anything else is `(other)`), so a harness
+  format no marker covers is visible without any text.
+- **Real-file verification (counts only, nothing committed).** Run once on
+  2026-11-27 on this repo's Claude project directory and on
+  `~/.codex/sessions`. Codex: 35 accepted turns, the only exclusions are
+  `<environment_context>` markers; no unknown user content part. Claude:
+  32 accepted turns, of which 14 start with `<task-notification>` and 1
+  with `<bash-input>`: harness-injected or shell-mode text that no D13
+  marker (nor the server's `INJECTED_MARKERS`) covers. Per step 2 this
+  stops M1's real-file half: D13, the fixtures, the reference readers and
+  the cases need one server branch adding these markers (and whatever the
+  owner's skim finds), then a re-run. The owner skim of the first 20
+  accepted turns is still open (the session never prints transcript text).
+- **The D13 marker fix (2026-11-27, `feat/p8-d13-harness-markers`, awaiting
+  the Sonnet 5 review).** D13 gains 16 Claude Code markers and 4 Codex
+  markers, taken from the installed CLIs' own tag constants (see D13,
+  "Where the 2026-11-27 markers come from"); the matching rule is unchanged
+  (`lstrip`, then a plain prefix). One list per side, kept identical in
+  `nodes/reference/owner_turns.py`, `nodes/reference/readers.py` (the
+  `claude.sessions` / `codex.threads` walks), the server re-check
+  `memory.ingestion.transcripts.INJECTED_MARKERS`, the Linux node's vendored
+  copy and the Swift `TranscriptText`. The owner-turn fixtures gain one line
+  per new marker (plus an indented one); the conformance fixture home
+  gains two Claude marker lines and one Codex one, absent from the
+  `*_owner_turns_only` results. `vectors/owner_turns.json` is unchanged
+  (every new line is excluded); `scrub.json` gains the new fixture
+  strings; only the two `*_owner_turns_only` cases change, by their absent
+  phrases (86 v1 cases, offline and live). The prefix-only rule (a tag
+  named later in an owner turn is kept; case-sensitive) is pinned by a
+  reference unit test. In the same branch, the B4
+  review findings: the Swift readers drop a turn before `since` as it
+  streams by, as the reference's comprehension does (output unchanged); the
+  preview names a leading tag only from a fixed list of known harness tags
+  and echoes line kinds, roles and block or part types only from fixed
+  lists (anything else is `(other)`); `check-release-markers.sh` also
+  refuses `scrub-preview` / `OwnerTurnPreview` in a Release binary (the
+  Conformance and debug builds are its positive controls).
+- **Real-file re-run (2026-11-27, counts only).** Claude (this repo's
+  project directory): 17 accepted turns, none starting with any tag;
+  excluded as markers: 17 `<task-notification>`, 1 `<bash-input>`; 2 186
+  lines of a line kind outside the preview's list (`kind.(other)`; not
+  `user` lines, so they never reach the owner-turn rules). Codex: 35
+  accepted turns, none starting with a tag; 6 `<environment_context>`
+  exclusions; `(other)` line or payload kinds: 136 + 36 + 7, none of them
+  user messages. Expected from a correct reader from here on: no accepted
+  turn names a harness tag, and M2 item 4's `dropped_not_owner` stays 0.
+  The owner skim of the first 20 accepted turns remains open.
 
 ### M2 — Mac and owner evaluation (go/no-go measurements)
 

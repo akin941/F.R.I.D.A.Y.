@@ -1,0 +1,52 @@
+{
+  "check": null,
+  "description": "A since of exactly now - 7 days is accepted.",
+  "expect": {
+    "frames": [
+      {
+        "status": "ok",
+        "truncated": false,
+        "type": "result"
+      }
+    ],
+    "reader_calls": 1
+  },
+  "name": "v1_read_codex_owner_turns_since_exactly_7_days",
+  "setup": {
+    "now": 1796000005
+  },
+  "steps": [
+    {
+      "frame": {
+        "args": {
+          "cwd_prefixes": [
+            "~/work/acme",
+            "~/code/friday"
+          ],
+          "max_sessions": 50,
+          "max_turns": 200,
+          "since": "2026-11-23T00:53:25.000Z"
+        },
+        "args_sha256": "0ec50f8a08956ff570c4c24c13ca1e96db52b6544b74ef6140d0970664d3e9e0",
+        "capability": "codex.transcripts.owner_turns",
+        "capability_version": 1,
+        "class": "read",
+        "expires_at": 1796000030,
+        "grant": null,
+        "id": "9d03b10b-99ee-468e-a9e1-b846fe339253",
+        "invocation_id": "1cb614cb-d647-45a4-872a-a1e1b0deaeba",
+        "issued_at": 1796000000,
+        "key_id": "03396219237f75a6",
+        "node_id": "6f1e2d3c-4b5a-4987-8a6b-5c4d3e2f1a0b",
+        "nonce": "GZwZWrddtFO5N76lugBuTEs7tuWM6ur1E7D7rGy6QN8",
+        "sig": "CTujDhCOrTAxIguzBFI9UPqj9EP6VgUoMMl4FDPkQX5Zh5wcWZ4ym0GEJrt7trQfDQWVmoQhuSi8nj6Uxs_BAQ",
+        "trace_id": "conformance-v1-read-codex_owner_turns_since_exactly_7_days",
+        "type": "invoke",
+        "v": 1,
+        "workspace_id": "2a3b4c5d-6e7f-4a8b-9c0d-1e2f3a4b5c6d"
+      },
+      "op": "send"
+    }
+  ],
+  "version": 1
+}

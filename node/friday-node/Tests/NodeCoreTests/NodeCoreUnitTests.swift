@@ -161,7 +161,7 @@ final class NodeSessionTests: XCTestCase {
         let frames = session.connect()
         XCTAssertEqual(frames.count, 1)
         XCTAssertEqual(frames[0]["type"], "hello")
-        XCTAssertEqual(frames[0]["catalogue"]?.arrayValue?.count, 8)
+        XCTAssertEqual(frames[0]["catalogue"]?.arrayValue?.count, 10)
         XCTAssertNoThrow(try NodeProtocol.validate(frames[0], direction: .nodeToServer))
         XCTAssertEqual(session.invalidOutgoingFrames, 0)
     }
@@ -227,6 +227,28 @@ final class NodeSessionTests: XCTestCase {
             "codex.threads.list": "not_granted", "codex.threads.read": "not_granted",
             "git.status": "not_granted", "usage.ccusage": "unsupported",
             "apps.frontmost": "granted", "windows.list": "granted",
+            // Behind the directory grants, off by default (runbook B4).
+            "claude.transcripts.owner_turns": "not_granted", "codex.transcripts.owner_turns": "not_granted",
         ])
+    }
+
+    func testTheOwnerTurnReadsFollowTheDirectoryGrants() {
+        let granted = NodeReaders(
+            home: NSTemporaryDirectory(), repos: nil, grants: ReaderGrants(claude: true, codex: true),
+            windowTitles: false, desktop: SystemDesktop(), usage: .unsupported)
+        XCTAssertEqual(granted.availability()["claude.transcripts.owner_turns"], "granted")
+        XCTAssertEqual(granted.availability()["codex.transcripts.owner_turns"], "granted")
+        let off = NodeReaders(
+            home: NSTemporaryDirectory(), repos: nil, grants: ReaderGrants(claude: false, codex: false),
+            windowTitles: false, desktop: SystemDesktop(), usage: .unsupported)
+        XCTAssertEqual(off.availability()["claude.transcripts.owner_turns"], "not_granted")
+        XCTAssertEqual(off.availability()["codex.transcripts.owner_turns"], "not_granted")
+        let args: JSONValue = .object([
+            "since": "2026-11-29T00:00:00.000Z", "cwd_prefixes": .array(["~/work/acme"]),
+            "max_sessions": 50, "max_turns": 200,
+        ])
+        XCTAssertEqual(
+            off.read(capability: "claude.transcripts.owner_turns", args: args, now: 1_796_000_005), .failure,
+            "an owner-turn read without its directory grant must fail")
     }
 }

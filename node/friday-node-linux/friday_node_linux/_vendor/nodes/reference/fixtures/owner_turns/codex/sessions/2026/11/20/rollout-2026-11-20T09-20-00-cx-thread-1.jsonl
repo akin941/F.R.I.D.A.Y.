@@ -1,0 +1,18 @@
+{"timestamp": "2026-11-20T09:20:00.000Z", "type": "session_meta", "payload": {"id": "cx-thread-1", "timestamp": "2026-11-20T09:20:00.000Z", "cwd": "/Users/owner/code/friday", "originator": "codex_cli"}}
+{"timestamp": "2026-11-20T09:20:00.000Z", "type": "response_item", "payload": {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "<environment_context>MARKER-PHRASE cwd</environment_context>"}]}}
+{"timestamp": "2026-11-20T09:20:00.000Z", "type": "response_item", "payload": {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "<user_instructions>MARKER-PHRASE AGENTS.md</user_instructions>"}]}}
+{"timestamp": "2026-11-20T09:20:00.000Z", "type": "response_item", "payload": {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "<user_shell_command>MARKER-PHRASE ls</user_shell_command>"}]}}
+{"timestamp": "2026-11-20T09:21:00.000Z", "type": "response_item", "payload": {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "Rename the reconciliation purpose in the runbook."}]}}
+{"timestamp": "2026-11-20T09:21:10.000Z", "type": "response_item", "payload": {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "ASSISTANT-ONLY-PHRASE renamed it."}]}}
+{"timestamp": "2026-11-20T09:22:00.000Z", "type": "response_item", "payload": {"type": "function_call", "name": "shell", "arguments": "{\"cmd\":\"ls\"}"}}
+{"timestamp": "2026-11-20T09:22:05.000Z", "type": "response_item", "payload": {"type": "function_call_output", "output": "TOOL-RESULT-PHRASE a.txt"}}
+{"timestamp": "2026-11-20T09:22:09.000Z", "type": "event_msg", "payload": {"type": "user_message", "message": "EVENT-MSG-PHRASE duplicate"}}
+{"timestamp": "2026-11-20T09:23:00.000Z", "type": "response_item", "payload": {"type": "reasoning", "summary": [{"type": "summary_text", "text": "REASON"}]}}
+{"timestamp": "2026-11-20T09:23:05.000Z", "type": "response_item", "payload": {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "IMAGE-PHRASE look"}, {"type": "input_image", "image_url": "data:x"}]}}
+{"timestamp": "2026-11-20T09:24:00.000Z", "type": "response_item", "payload": {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "The token dump from my shell:\nexport API_TOKEN=Zx81Kd02LmQpRt5UvWy7Ab9Cd3Ef4Gh"}]}}
+{"timestamp": "2026-11-20T09:24:05.000Z", "type": "turn_context", "payload": {"cwd": "/Users/owner/code/friday"}}
+{"timestamp": "2026-11-20T09:25:00.000Z", "type": "response_item", "payload": {"type": "message", "role": "developer", "content": [{"type": "output_text", "text": "DEVELOPER-PHRASE rules"}]}}
+{"timestamp": "2026-11-20T09:25:30.000Z", "type": "response_item", "payload": {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "# AGENTS.md instructions for /Users/owner/code/friday\n\n<INSTRUCTIONS>\nMARKER-PHRASE\n</INSTRUCTIONS>"}]}}
+{"timestamp": "2026-11-20T09:25:30.000Z", "type": "response_item", "payload": {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "<skill>\n<name>MARKER-PHRASE</name>\n</skill>"}]}}
+{"timestamp": "2026-11-20T09:25:30.000Z", "type": "response_item", "payload": {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "<turn_aborted>MARKER-PHRASE</turn_aborted>"}]}}
+{"timestamp": "2026-11-20T09:25:30.000Z", "type": "response_item", "payload": {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "<subagent_notification>MARKER-PHRASE</subagent_notification>"}]}}
