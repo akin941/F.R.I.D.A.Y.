@@ -4003,17 +4003,16 @@ def _direct_flag_refusal(row):
 
 
 def _owner_direct_settings(workspace):
-    """`(kill switch, volume maximum)` of the owner's settings row, or the
-    defaults while it does not exist (never created here)."""
+    """`(kill switch, volume maximum)` the classifier would read for the
+    installation owner's personal workspace (`effective_settings`, through
+    `for_actor()`): the owner's row, or the defaults while it does not
+    exist (never created here)."""
     from connectors import home_direct
-    from connectors.models import HomeDirectSettings
 
-    row = None
-    if workspace is not None:
-        row = HomeDirectSettings.objects.filter(workspace=workspace).first()
-    if row is None:
+    if workspace is None:
         return False, home_direct.default_volume_max()
-    return bool(row.kill_switch), row.volume_max
+    current = home_direct.effective_settings(actor=workspace.owner, workspace=workspace)
+    return current.kill_switch, current.volume_max
 
 
 def _check_ha_direct_media():
@@ -4030,7 +4029,8 @@ def _check_ha_direct_media():
       disabled in the allowlist (it is not direct);
     - otherwise `pass`.
     Read-only: no Home Assistant request, no model call, no row written
-    (the owner's settings row is read, never created). Details carry the
+    (the owner's settings are read through the classifier's own reader,
+    never created). Details carry the
     state, counts, entity ids, limits and the volume maximum -- never a
     token, a URL or a Home Assistant state."""
     from connectors import home_direct

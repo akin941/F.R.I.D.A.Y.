@@ -1917,6 +1917,11 @@ What the closeout did:
     installation owner's personal workspace.
   - A zero `HA_DIRECT_RATE_*` limit reads `off_env`, as on the HUD and the
     settings body (branch 1d).
+  - The owner's kill switch and volume maximum are read through the
+    classifier's own `home_direct.effective_settings` (through
+    `for_actor()` as the installation owner), so `ops/preflight.py` never
+    names `HomeDirectSettings` and the registry walk
+    (`test_ha_allowlist_gate.py`) keeps its writer/mention set unchanged.
 - **E2e** `backend/ops/tests/test_home_direct_e2e.py`: the `node_voice`
   turn runs through the Phase 11 reference voice host and a real
   `friday-voice run` child against a live uvicorn Friday; the web voice,
