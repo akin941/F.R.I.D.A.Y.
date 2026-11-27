@@ -9,6 +9,7 @@ pin; the default bundle, a wrong or missing pin, a wrong hostname and a
 missing, unreadable or empty CA file all fail closed before any request
 reaches the server."""
 
+import base64
 import hashlib
 import json
 import os
@@ -28,15 +29,17 @@ TOKEN = "jpat_" + "tlsTestT0kenAbcdef" * 2
 MODEL = "a" * 64
 
 
-def _make_cert(directory: Path, name: str, san: str):
+def _make_cert(directory: Path, name: str, san: str, *, ca=False):
     if shutil.which("openssl") is None:
         pytest.fail("the TLS tests need the openssl CLI")
     conf = directory / f"{name}.cnf"
+    usage = "keyCertSign, cRLSign, digitalSignature" if ca else "digitalSignature"
     conf.write_text(
         "[req]\ndistinguished_name = dn\nx509_extensions = ext\nprompt = no\n"
         f"[dn]\nCN = {name}\n"
-        f"[ext]\nsubjectAltName = {san}\nbasicConstraints = critical, CA:FALSE\n"
-        "keyUsage = critical, digitalSignature\nextendedKeyUsage = serverAuth\n",
+        f"[ext]\nsubjectAltName = {san}\n"
+        f"basicConstraints = critical, CA:{'TRUE' if ca else 'FALSE'}\n"
+        f"keyUsage = critical, {usage}\nextendedKeyUsage = serverAuth\n",
         encoding="ascii",
     )
     key, cert = directory / f"{name}.key.pem", directory / f"{name}.pem"
@@ -59,7 +62,22 @@ def certs(tmp_path_factory):
     directory = tmp_path_factory.mktemp("certs")
     local = _make_cert(directory, "friday-local-tls", "IP:127.0.0.1, DNS:localhost")
     other = _make_cert(directory, "elsewhere", "DNS:elsewhere.test")
-    return {"local": local, "other": other}
+    ca = _make_cert(directory, "a-ca", "DNS:a-ca.test", ca=True)
+    return {"local": local, "other": other, "ca": ca}
+
+
+def _spki_b64(cert):
+    """The node pairing pin exactly as deploy/docker/gen-local-tls.sh computes it."""
+    pubkey = subprocess.run(
+        ["openssl", "x509", "-in", str(cert), "-pubkey", "-noout"], check=True, capture_output=True
+    ).stdout
+    der = subprocess.run(
+        ["openssl", "pkey", "-pubin", "-outform", "der"],
+        input=pubkey,
+        check=True,
+        capture_output=True,
+    ).stdout
+    return base64.b64encode(hashlib.sha256(der).digest()).decode()
 
 
 class _Handler(BaseHTTPRequestHandler):
@@ -210,10 +228,22 @@ def test_no_record_is_the_default_bundle(tmp_path):
 
 def test_ca_set_copies_records_and_the_child_uses_it(local_server, tmp_path, capsys):
     server, cert, pin = local_server
+    tmp_path.chmod(0o755)
     assert cli.main(["ca", "set", str(cert), "--home", str(tmp_path)]) == 0
-    out = capsys.readouterr().out
-    assert f"certificate DER sha256: {pin}" in out
+    captured = capsys.readouterr()
+    assert f"voice pin (credential ca_sha256, DER sha256 hex): {pin}" in captured.out
+    spki = _spki_b64(cert)
+    assert (
+        f"node pairing pin (SPKI sha256 base64, NODE_TLS_PIN_SHA256; not the voice pin): {spki}"
+        in captured.out
+    )
+    assert captured.err == ""  # one non-CA certificate: no warning
     copy = tmp_path / tls.CA_COPY_NAME
+    # 0600 files in a 0700 home; the child (same user) still reads them.
+    assert (tmp_path.stat().st_mode & 0o777) == 0o700
+    assert (copy.stat().st_mode & 0o777) == 0o600
+    assert ((tmp_path / tls.CONFIG_NAME).stat().st_mode & 0o777) == 0o600
+    assert not [p.name for p in tmp_path.iterdir() if p.name.endswith(".tmp")]
     assert copy.read_bytes() == cert.read_bytes()
     record = json.loads((tmp_path / tls.CONFIG_NAME).read_text("utf-8"))
     assert record == {"ca_file": str(copy.resolve())}
@@ -262,6 +292,76 @@ def test_ca_set_refuses_a_private_key_and_a_missing_home(certs, tmp_path, capsys
     assert "private key" in capsys.readouterr().err
     assert cli.main(["ca", "set", str(cert), "--home", str(tmp_path / "absent")]) == 1
     assert not (tmp_path / tls.CONFIG_NAME).exists()
+
+
+@pytest.mark.parametrize("name", [tls.CA_COPY_NAME, tls.CONFIG_NAME])
+def test_ca_set_refuses_a_symlink_in_the_home(certs, tmp_path, capsys, name):
+    cert = certs["local"][0]
+    home = tmp_path / "home"
+    home.mkdir()
+    victim = tmp_path / "victim"
+    victim.write_text("untouched")
+    (home / name).symlink_to(victim)
+    assert cli.main(["ca", "set", str(cert), "--home", str(home)]) == 1
+    assert "symlink" in capsys.readouterr().err
+    assert victim.read_text() == "untouched"
+    assert not (home / tls.CONFIG_NAME).exists() or (home / tls.CONFIG_NAME).is_symlink()
+
+
+def test_the_write_never_follows_a_planted_temporary(tmp_path, monkeypatch):
+    """The temporary is O_EXCL|O_NOFOLLOW: a link already at its name fails
+    the write instead of being written through."""
+    victim = tmp_path / "victim"
+    victim.write_text("untouched")
+    target = tmp_path / tls.CONFIG_NAME
+    monkeypatch.setattr(tls.secrets, "token_hex", lambda _n: "fixed")
+    (tmp_path / f".{tls.CONFIG_NAME}.fixed.tmp").symlink_to(victim)
+    with pytest.raises(OSError):
+        tls._write_atomic(target, b"{}")
+    assert victim.read_text() == "untouched" and not target.exists()
+
+
+def test_a_ca_certificate_needs_allow_ca(certs, tmp_path, capsys):
+    cert = certs["ca"][0]
+    assert tls.check_ca_file(cert)[0].is_ca
+    assert cli.main(["ca", "set", str(cert), "--home", str(tmp_path)]) == 1
+    assert "--allow-ca" in capsys.readouterr().err
+    assert not (tmp_path / tls.CONFIG_NAME).exists()
+    assert cli.main(["ca", "set", str(cert), "--allow-ca", "--home", str(tmp_path)]) == 0
+    captured = capsys.readouterr()
+    assert "certificate 1 is a CA (CA:TRUE)" in captured.err
+    assert "(CA:TRUE)" in captured.out
+
+
+def test_a_bundle_of_several_certificates_warns(certs, tmp_path, capsys):
+    bundle = tmp_path / "bundle.pem"
+    bundle.write_bytes(certs["local"][0].read_bytes() + certs["other"][0].read_bytes())
+    home = tmp_path / "home"
+    home.mkdir()
+    assert cli.main(["ca", "set", str(bundle), "--home", str(home)]) == 0
+    captured = capsys.readouterr()
+    assert "holds 2 certificates" in captured.err
+    assert certs["local"][2] in captured.out and certs["other"][2] in captured.out
+    assert [info.is_ca for info in tls.check_ca_file(bundle)] == [False, False]
+
+
+def test_an_empty_ca_file_is_an_error_not_the_default(local_server, capsys):
+    server, _cert, pin = local_server
+    with pytest.raises(tls.TlsConfigError):
+        tls.load_context("")
+    url = f"https://127.0.0.1:{server.server_address[1]}"
+    with pytest.raises(FridayError) as caught:
+        _policy(HttpFridayClient(ca_file=""), url, pin)
+    assert caught.value.code == CODE_CA_FILE
+    for argv in (
+        ["replay", "--server", url, "--token-file", "t", "--ca-file", ""],
+        ["selftest", "--nightly", "--ca-file", " "],
+        ["ca", "set", ""],
+    ):
+        with pytest.raises(SystemExit):
+            cli.main(argv)
+        assert "must not be empty" in capsys.readouterr().err
+    assert server.requests == []
 
 
 def test_the_context_never_turns_verification_off(certs):

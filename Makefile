@@ -147,6 +147,9 @@ friday-voice-install:
 		--exclude .ruff_cache --exclude tests --exclude /models/ \
 		--exclude /tls.json --exclude /server-ca.pem \
 		$(FRIDAY_VOICE_DIR)/ "$(FRIDAY_VOICE_HOME)/"
+	@# rsync -a copies the checkout's directory mode onto the home: keep the
+	@# 0700 `friday-voice ca set` gave it while a CA file is recorded.
+	if [ -f "$(FRIDAY_VOICE_HOME)/tls.json" ]; then chmod 700 "$(FRIDAY_VOICE_HOME)"; fi
 	cd "$(FRIDAY_VOICE_HOME)" && uv sync --frozen --no-dev
 	$(if $(FRIDAY_VOICE_CA_FILE),$(MAKE) friday-voice-ca)
 	shasum -a 256 "$(FRIDAY_VOICE_HOME)/uv.lock"
