@@ -347,6 +347,11 @@ public final class NodeRunner: @unchecked Sendable {
     private var generation = 0
 
     public var onStatus: ((Status) -> Void)?
+    /// Phase 11 M1: the voice host's `link` (the node WebSocket is up, i.e.
+    /// the session got `hello.ack`), called on the runner queue whenever it
+    /// changes (ADR-013 decision 6: a lost socket releases the mic).
+    public var onVoiceLink: ((Bool) -> Void)?
+    private var voiceLinkUp = false
     public private(set) var status: Status = .notPaired {
         didSet {
             guard status != oldValue else { return }
@@ -354,6 +359,11 @@ public final class NodeRunner: @unchecked Sendable {
             // Local, never uploaded, no secret or frame content (D13 item 8).
             Self.log.info("status: \(String(describing: s), privacy: .public)")
             DispatchQueue.main.async { self.onStatus?(s) }
+            let up = s == .connected
+            if up != voiceLinkUp {
+                voiceLinkUp = up
+                onVoiceLink?(up)
+            }
         }
     }
     private static let log = Logger(subsystem: "dev.friday.friday-node", category: "runner")
@@ -553,6 +563,29 @@ public final class NodeRunner: @unchecked Sendable {
 
     /// Never waits on the session queue.
     public var killSwitchEngaged: Bool { killSwitch.engaged }
+
+    // MARK: The voice host (Phase 11 M1)
+
+    /// One mic state from the voice child (`state`, `mode`, `session_open`,
+    /// the three counters): relayed as `voice.state` by the session's rules
+    /// (v2 only, after `hello.ack`, coalesced to one per second, validated,
+    /// re-sent with every heartbeat, never spooled).
+    public func relayVoiceState(_ state: JSONValue) {
+        queue.async {
+            guard let session = self.session else { return }
+            let frames = session.relayVoiceState(state)
+            if !frames.isEmpty { self.connection?.sendSessionFrames(frames) }
+        }
+    }
+
+    /// The paired credential, for the voice token mint (memory only; the
+    /// voice host never stores it).
+    public func credentialForVoice() -> NodeCredential? {
+        queue.sync { credential }
+    }
+
+    /// Whether the node WebSocket is up now.
+    public var voiceLink: Bool { queue.sync { voiceLinkUp } }
 
     /// Load the credential and connect.
     public func start() {

@@ -1084,9 +1084,16 @@ Needs: B5, A6. Spec: Phase 10 brief M2, D4; ADR-014.
 Needs: B1–B3, B5 merged; A7, A8, A10. Spec: Phase 11 brief "Mac session
 (deferred)" M1, D6, D9, D12, D15; ADR-013 decisions 1, 5, 6; ADR-015.
 
-- [ ] `make friday-voice-install` (prints the installed `uv.lock` sha256;
-      compile it into the host) and the node model fill (A10).
-- [ ] `Voice/VoiceChildHost.swift` (spawns
+- [x] `make friday-voice-install` (prints the installed `uv.lock` sha256;
+      compile it into the host) and the node model fill (A10). **2026-11-27
+      (`feat/p11-node-voice-host`): the hash is generated from
+      `node/friday-voice/uv.lock` by `scripts/vendor_protocol.py`
+      (`Generated/VendoredVoiceProtocol.swift`, `--check` in CI,
+      `VoiceProtocolTests`); it equals the installed lock (`354e9c73…`, checked
+      against the real install by the opt-in `VoiceInstalledChildTests`).
+      `hey_friday.onnx` is not pinned (A8): wake reads not armable, push-to-talk
+      only.**
+- [x] `Voice/VoiceChildHost.swift` (spawns
       `~/Library/Application Support/Friday/voice/.venv/bin/friday-voice run`,
       stdin/stdout pipes, clean env `PATH`/`HOME`/`LANG` only, lock-hash
       check, restart backoff 1 s → 60 s, watchdog 10 s, kill on quit, kill
@@ -1103,8 +1110,14 @@ Needs: B1–B3, B5 merged; A7, A8, A10. Spec: Phase 11 brief "Mac session
       always-on needs LocalAuthentication; mute read failure →
       `mute: unreadable`); `VoiceCredential.swift` (mints `node_voice`
       with the Keychain node secret, refresh ≤ 60 s before expiry, never
-      written anywhere, a 401 releases the mic and backs off).
-- [ ] `voice.state` relay exactly as `backend/nodes/reference/node.py`
+      written anywhere, a 401 releases the mic and backs off). **2026-11-27:
+      done; the testable parts live in `Sources/NodeCore/Voice/` (the core,
+      the child host, the audio engine behind `VoiceAudioIO`, the indicator,
+      the settings, the credential, `VoiceService`), only `Hotkey.swift` and
+      the "Ses" menu in `App/FridayNode/Voice/` (Phase 11 brief, M1 record).
+      The real microphone, AEC and speakers are exercised only by owner
+      steps (contract tests 4 and 5).**
+- [x] `voice.state` relay exactly as `backend/nodes/reference/node.py`
       `relay_voice_state` (coalesced ≤ 1/s, v2 only, after `hello.ack`,
       validated against `$defs.voice_state_item`, re-sent with every
       heartbeat and after reconnect, never spooled); the `Conformance`
@@ -1113,12 +1126,17 @@ Needs: B1–B3, B5 merged; A7, A8, A10. Spec: Phase 11 brief "Mac session
       relay (`NodeSession.relayVoiceState`), the hook op and the report key
       landed with B5, because B5's contract test 1 plays every `cases/v2`
       file (the nine voice-state cases pass offline and live); what is left
-      here is feeding it from `VoiceChildHost`.**
-- [ ] `release_mic(storm)` releases the mic and shows `storm_muted` until a
-      mute on → off cycle.
+      here is feeding it from `VoiceChildHost`.** **2026-11-27: fed from
+      `VoiceService` (each child `state` → `NodeRunner.relayVoiceState`).**
+- [x] `release_mic(storm)` releases the mic and shows `storm_muted` until a
+      mute on → off cycle. **2026-11-27: the host releases at once; the child
+      re-arms only after the cycle (`VoiceServiceTests`).**
 - [ ] Microphone entitlement (`com.apple.security.device.audio-input`,
       checked in A1) and TCC usage string; a new build signed with the same
-      Personal Team identity (`scripts/build-sign-local.sh`).
+      Personal Team identity (`scripts/build-sign-local.sh`). **2026-11-27:
+      entitlement, `NSMicrophoneUsageDescription`, the signing allowlist and
+      `EntitlementAllowlistTests` updated together; the signed build and the
+      mic TCC grant are owner steps (not run in the session).**
 
 **Server-side contract tests it must pass:**
 

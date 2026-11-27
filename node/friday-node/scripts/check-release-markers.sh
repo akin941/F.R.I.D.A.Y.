@@ -45,4 +45,10 @@ if grep -qE "wait_disconnected|executor_terminated|windows_shown|ScriptedExecuto
   echo "conformance hook or scripted-double marker in $(basename "$BIN"): refusing" >&2
   exit 1
 fi
+# Runbook B7 (Phase 11 M1): the live voice runner's own words (its report
+# key and its helper type), which only `#if CONFORMANCE` code spells.
+if grep -qE "child_verdicts|VoiceCasesLive" "$TEXT"; then
+  echo "voice conformance runner marker in $(basename "$BIN"): refusing" >&2
+  exit 1
+fi
 echo "no conformance or debug-preview marker in $(basename "$BIN")"

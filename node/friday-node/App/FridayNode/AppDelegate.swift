@@ -1,8 +1,11 @@
 // The menu bar (Phase 9 brief M1, D13 items 2 and 9).
 //
 // - A status line: not paired / connecting / connected / waiting / stopped.
-// - The mic line reserves the ADR-015 decision 2 state and always reads
-//   "off" in Phase 9: the node has no microphone entitlement until Phase 11.
+// - The mic line and the status icon show the voice host's state (ADR-015
+//   decision 2; Phase 11 M1, runbook B7: MicIndicator): off, armed (push-to-
+//   talk or wake), listening, thinking, speaking, muted, storm-muted, error.
+// - "Ses" (Phase 11 M1): mic mode, mute, the push-to-talk hotkey and the
+//   wake model state (VoiceMenu.swift); always-on asks for Touch ID first.
 // - "Resume" is the owner's local action after a `bye` that stops
 //   reconnecting (revoked, kill switch, credential expired).
 // - "Pair..." opens the pairing window; "Unpair" forgets the credential.
@@ -55,11 +58,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// The confirmation window (Phase 10 M1); the runner holds it weakly.
     private lazy var confirmationWindow = ConfirmationWindowController(runner: runner)
     private var killSwitchItem: NSMenuItem!
+    /// Phase 11 M1 (runbook B7): the voice host, its settings and hotkey.
+    let voiceSettingsStore = KeychainVoiceSettingsStore()
+    lazy var voiceEditor = VoiceSettingsEditor(store: voiceSettingsStore, authentication: DeviceOwnerAuthentication())
+    lazy var voice = VoiceService.app(link: runner, audio: AVAudioVoiceEngine(), settingsStore: voiceSettingsStore)
+    private lazy var voiceMenuBuilder = VoiceMenu(
+        editor: voiceEditor,
+        onFailure: { [weak self] text in self?.statusLine.title = "Friday Node: \(text)" })
+    private let voiceMenu = NSMenu(title: "Ses")
+    private let hotkey = PushToTalkHotkey()
+    private static let baseSymbol = "point.3.connected.trianglepath.dotted"
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        statusItem.button?.image = NSImage(systemSymbolName: "point.3.connected.trianglepath.dotted",
-                                           accessibilityDescription: "Friday Node")
+        statusItem.button?.image = NSImage(systemSymbolName: Self.baseSymbol, accessibilityDescription: "Friday Node")
         let menu = NSMenu()
         statusLine.isEnabled = false
         micLine.isEnabled = false
@@ -81,6 +93,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         permissions.submenu = permissionsMenu
         permissionsMenu.autoenablesItems = false
         menu.addItem(.separator())
+        let voiceItem = NSMenuItem(title: "Ses", action: nil, keyEquivalent: "")
+        voiceItem.submenu = voiceMenu
+        menu.addItem(voiceItem)
         menu.addItem(permissions)
         menu.addItem(.separator())
         menu.addItem(NSMenuItem(title: "Çık", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
@@ -104,6 +119,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.confirmationWindow.refresh()
         }
         show(.connecting)
+        startVoice()
         // The hook relay (M3): Claude Code's `friday-node hook` writes here.
         do {
             try runner.startHookRelay()
@@ -114,8 +130,46 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        hotkey.unregister()
+        voice.shutdown()  // the child gets `shutdown`; its tree is killed
         runner.stopHookRelay()
         runner.stop()
+    }
+
+    // MARK: Voice (Phase 11 M1)
+
+    private func startVoice() {
+        voice.onIndicator = { [weak self] indicator in self?.showMic(indicator) }
+        runner.onVoiceLink = { [weak self] up in self?.voice.linkChanged(up) }
+        hotkey.onChange = { [weak self] down in self?.voice.ptt(down) }
+        voiceEditor.onChange = { [weak self] settings in
+            self?.voice.settingsChanged(settings)
+            DispatchQueue.main.async {
+                self?.registerHotkey(settings)
+                self?.voiceMenuBuilder.build(into: self?.voiceMenu ?? NSMenu())
+            }
+        }
+        let settings = (try? voiceEditor.current()) ?? VoiceSettings()
+        registerHotkey(settings)
+        voiceMenuBuilder.build(into: voiceMenu)
+        voice.start()
+        voice.killSwitchChanged(engaged: runner.killSwitchEngaged)
+        showMic(MicIndicator.presentation(for: "off"))
+    }
+
+    private func registerHotkey(_ settings: VoiceSettings) {
+        if settings.mode == "off" {
+            hotkey.unregister()
+        } else if let choice = VoiceHotkeys.byID[settings.hotkey] {
+            hotkey.register(choice)
+        }
+    }
+
+    private func showMic(_ indicator: MicIndicator) {
+        micLine.title = "Mikrofon: \(indicator.label)"
+        let symbol = indicator.state == "off" ? Self.baseSymbol : indicator.symbol
+        statusItem.button?.image = NSImage(
+            systemSymbolName: symbol, accessibilityDescription: "Friday Node — mikrofon: \(indicator.label)")
     }
 
     private func show(_ status: NodeRunner.Status) {
@@ -137,7 +191,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         default: paired = true
         }
         unpairItem.isEnabled = paired
-        micLine.title = "Mikrofon: kapalı"
     }
 
     private static func describe(_ reason: String) -> String {
@@ -255,6 +308,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func toggleKillSwitch() {
         guard runner.killSwitchEngaged else {
             runner.engageKillSwitch()
+            voice.killSwitchChanged(engaged: true)  // the voice child dies at once
             syncKillSwitchItem()
             return
         }
@@ -262,6 +316,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             guard await DeviceOwnerAuthentication().authenticate(reason: "Friday Node'un acil durdurmasını kaldır")
             else { return }
             runner.releaseKillSwitch()
+            voice.killSwitchChanged(engaged: false)
             await MainActor.run { self.syncKillSwitchItem() }
         }
     }
@@ -284,6 +339,7 @@ extension AppDelegate: NSMenuDelegate {
     func menuWillOpen(_ menu: NSMenu) {
         syncKillSwitchItem()
         rebuildPermissions()
+        voiceMenuBuilder.build(into: voiceMenu)
         runner.refreshAvailability()
     }
 }

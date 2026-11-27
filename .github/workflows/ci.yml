@@ -56,8 +56,10 @@ jobs:
         run: uv run python manage.py build_self_sources --check
 
       # Phase 9 M1: the Swift node's vendored copy of the protocol schemas
-      # and capability contracts must equal backend/nodes byte for byte
-      # (stdlib only; the Swift tests run on the Mac, no macOS runner here).
+      # and capability contracts must equal backend/nodes byte for byte, and
+      # (Phase 11 M1) its copy of the friday-voice/v1 schemas and the
+      # node/friday-voice/uv.lock hash must be current (stdlib only; the
+      # Swift tests run on the Mac, no macOS runner here).
       - name: Swift node vendored protocol check
         run: python3 -I ../node/friday-node/scripts/vendor_protocol.py --check
 
@@ -232,6 +234,10 @@ jobs:
         run: uv run python scripts/vendor_scrubber.py --check
       - name: Pipecat surface snapshot check
         run: uv run python scripts/snapshot_pipecat.py --check
+      # Phase 11 M1 (runbook B7): the reference host's barge-in traces the
+      # Swift host's VoiceHostTraceTests replay must match the scripts.
+      - name: Swift voice host traces check
+        run: uv run python ../friday-node/scripts/voice_host_traces.py --check
 
       - name: friday-voice/v1 conformance (reference implementations)
         run: uv run friday-voice conformance
