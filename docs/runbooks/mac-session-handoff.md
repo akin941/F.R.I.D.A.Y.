@@ -1236,10 +1236,11 @@ in the record, with the dominant stage named.
 
 ### C1. Phase 5 — real stack and real credentials
 
-- [ ] `make up && make frontend-build && make preflight` with
+- [x] `make up && make frontend-build && make preflight` with
       `PREFLIGHT_BFF_URL` (the running frontend) and
       `PREFLIGHT_FRONTEND_BUILD_ID_FILE` (its `.next/BUILD_ID`): 0 fail;
       record the summary line in the Phase 5 brief §10.
+      Done 2026-11-27: `49 pass / 0 fail / 30 warn` (recorded there).
 - [ ] `OPENROUTER_API_KEY` in `deploy/docker/.env`, re-run
       `seed_ai_defaults` (or enable the `openrouter` row), `make preflight`:
       `provider:openrouter` passes and one `ops.preflight` `ModelUsage` row
