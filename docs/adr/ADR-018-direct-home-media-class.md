@@ -297,3 +297,24 @@ The executor, the code-only intent and the three provenance locks (Phase
   (the reference voice host and a real `friday-voice run` child); the
   registry walk (`connectors/tests/test_ha_allowlist_gate.py`) now pins the
   call log's writers to `execute`'s two helpers and the recovery scan.
+
+## Implementation note — branch 1d `feat/p13-direct-media-ui` (2026-11-20)
+
+Presentation only (Phase 13b brief D11): nothing becomes direct, and no
+new writer of `direct`, `HomeDirectSettings` or `HomeDirectCall` exists.
+
+- **HUD.** `health.home_direct = {state, flagged, calls_last_hour}`,
+  `state` ∈ {`on`, `off_owner`, `off_env`, `not_configured`}, read through
+  the read-only `tools.home_ports.home_direct_status` port
+  (`connectors.home_direct.hud_status`); one import-linter edge
+  `hud.services -> tools.home_ports`. DB only, never a Home Assistant
+  request; the HUD shows the line and offers no toggle.
+- **`off_env`** also covers a rate limit of 0 (decision 5's "0 disables"):
+  `direct_state` now agrees with the classifier.
+- **`/connectors`.** The per-entity "Doğrudan (onaysız)" switch (eligible
+  media players only; turning it on is confirmed) and the owner panel
+  (kill switch, volume maximum, env-kill notice, the closed list, the
+  limits, the last 20 calls), over the existing owner-web endpoints.
+- **Card reason.** A Home Assistant card that was not direct shows
+  "Doğrudan değil: <reason>" for the reasons that concern a flagged or
+  flaggable player; the frontend's texts are pinned to `REASON_TEXT`.
