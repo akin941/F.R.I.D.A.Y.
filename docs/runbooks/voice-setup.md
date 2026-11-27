@@ -27,6 +27,7 @@ cd "$D" && uvx --from 'uv~=0.8.14' uv sync --frozen --no-dev --python 3.12
 # Loopback only; keyed with the VOICE_API_KEY placeholder; no web UI;
 # CoreML off (onnxruntime's CoreML provider segfaults in Piper on the Mac).
 # Docker Desktop still reaches it as host.docker.internal:8000.
+mkdir -p "$HOME/Library/Logs/Friday"
 cd "$D" && API_KEY=voice-local ENABLE_UI=false \
   UNSTABLE_ORT_OPTS__EXCLUDE_PROVIDERS='["TensorrtExecutionProvider","CoreMLExecutionProvider"]' \
   nohup .venv/bin/uvicorn --factory --host 127.0.0.1 --port 8000 speaches.main:create_app \
@@ -86,14 +87,14 @@ VOICE_TTS_ROUTE_EN_VOICE=en_US-lessac-medium
 
 Then reseed (idempotent): `make up` runs `seed_ai_defaults`, or
 `uv run python manage.py seed_ai_defaults` from `backend/`. With
-`VOICE_API_KEY` set it creates `voice-stt-local` and `voice-tts-local`
-(`personal_data_allowed=True`, cost 0). Existing rows are never overwritten:
+`VOICE_API_KEY` set it creates `voice-stt-local`, `voice-tts-local` and
+`voice-tts-local-en` (`personal_data_allowed=True`, cost 0). Existing rows are never overwritten:
 to change a model id later, edit the row in the admin.
 
 ### Language routing (A2)
 
 `settings.VOICE_TTS_ROUTES` maps a language to a provider row and voice
-(`tr` and `en` → `voice-tts-local` by default). The routed provider is used
+(`tr` → `voice-tts-local`, `en` → `voice-tts-local-en` by default). The routed provider is used
 only if it is active, keyed and `personal_data_allowed`; otherwise the
 gateway falls back to priority order among eligible rows. The client never
 chooses the provider.
