@@ -193,3 +193,190 @@ class ConnectorAsyncRead(WorkspaceScopedModel, TimestampedModel):
 
     def __str__(self):
         return f"{self.connector}.{self.tool} async read {self.id} ({self.status})"
+
+
+HOME_ENTITY_ID_MAX_CHARS = 141
+HOME_ENTITY_LABEL_MAX_CHARS = 60
+
+
+class HomeEntity(WorkspaceScopedModel, TimestampedModel):
+    """One Home Assistant entity the owner allowlisted (Phase 13 D11).
+
+    `ha_call_service` is refused unless its `entity_id` is an **enabled**
+    `HomeEntity` of the request's workspace and its `service` is in
+    `services` -- at request time, as the execution precondition and in the
+    bridge's own pre-send read. An empty allowlist means no entity call is
+    possible (fail closed; Wake-on-LAN, which has no entity, stays governed
+    by `HA_WOL_ALLOWED_MACS`). Rows of the owner's **personal** workspace
+    only; created, changed and removed only by the installation owner over
+    the web (`connectors.home_entities`, audited `ha.entity_allowed` /
+    `ha.entity_changed` / `ha.entity_removed`). No tool, route, schedule or
+    connector writes this table (CLAUDE.md rule 4; a registry walk test
+    pins it).
+
+    `services` is a subset of the bridge's code maximum for the entity's
+    domain (`connectors.bridges.home_assistant.SERVICES`), never of a
+    `NEVER_DOMAINS` or read-only domain: `save()` re-checks it, so not even
+    a direct ORM write can widen the maximum. `HA_ALLOWED_DOMAINS` narrows
+    further at call time. `label` / `aliases` follow the shared label rules
+    (`workspaces.rooms.clean_label` / `clean_aliases`); `key` is the
+    label's `core.speech.phrase_key` (what the home routes resolve on)."""
+
+    entity_id = models.CharField(max_length=HOME_ENTITY_ID_MAX_CHARS)
+    room = models.ForeignKey(
+        "workspaces.Room",
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="home_entities",
+    )
+    label = models.CharField(max_length=HOME_ENTITY_LABEL_MAX_CHARS)
+    key = models.CharField(max_length=HOME_ENTITY_LABEL_MAX_CHARS)
+    aliases = models.JSONField(default=list, blank=True)
+    services = models.JSONField(default=list, blank=True)
+    enabled = models.BooleanField(default=True)
+    # Phase 13b D5 (ADR-018 decision 2): the owner's per-entity "direct"
+    # flag -- default off, only on a `media_player` with at least one
+    # service of the closed direct class (`save()` refuses anything else),
+    # set only by the owner over the web (`connectors.home_entities`,
+    # audited `ha.entity_direct_changed`). Never by an agent, tool or model.
+    direct = models.BooleanField(default=False)
+
+    class Meta:
+        ordering = ["entity_id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["workspace", "entity_id"], name="connectors_home_entity_unique"
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.entity_id} ({self.label})"
+
+    @property
+    def domain(self):
+        return self.entity_id.split(".", 1)[0]
+
+    def save(self, *args, **kwargs):
+        # The code maximum holds on every write path, not only the
+        # owner-web service. Lazy import: the bridge loads the connector
+        # framework, which must not run during app-registry setup.
+        from django.core.exceptions import ValidationError
+
+        from connectors.bridges.home_assistant import code_maximum_refusal
+
+        refusal = code_maximum_refusal(self.entity_id, self.services)
+        if refusal is not None:
+            raise ValidationError(refusal, code=refusal)
+        if self.direct:
+            from connectors.home_direct import DIRECT_NOT_ALLOWED, direct_eligible
+
+            if not direct_eligible(self.entity_id, self.services):
+                raise ValidationError(DIRECT_NOT_ALLOWED, code=DIRECT_NOT_ALLOWED)
+        super().save(*args, **kwargs)
+
+    @property
+    def direct_services(self):
+        """The entity's services inside ADR-018's closed direct class (in
+        the code maximum's order); what a `direct` flag covers."""
+        from connectors.home_direct import direct_services
+
+        return direct_services(self.entity_id, self.services)
+
+
+HOME_DIRECT_VOLUME_DECIMALS = 2
+
+
+class HomeDirectSettings(WorkspaceScopedModel, TimestampedModel):
+    """The owner's direct-media settings (Phase 13b D6, ADR-018 decisions
+    6-7): one row per **personal** workspace, created on the owner's first
+    read over the web (`connectors.home_direct.get_settings`) and changed
+    only by `update_settings` (owner, web, audited
+    `ha.direct_settings_changed`). Until the row exists the defaults apply
+    (`kill_switch` off, `volume_max` = `HA_DIRECT_VOLUME_MAX`); the
+    classifier only reads it and never creates it.
+
+    `kill_switch=True` turns every would-be direct call back into a
+    gate-class card. `HA_DIRECT_MEDIA_KILL_SWITCH` in the environment does
+    the same and cannot be switched off here."""
+
+    kill_switch = models.BooleanField(default=False)
+    volume_max = models.DecimalField(max_digits=3, decimal_places=HOME_DIRECT_VOLUME_DECIMALS)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["workspace"], name="connectors_home_direct_settings_one"
+            ),
+            models.CheckConstraint(
+                condition=models.Q(volume_max__gte=0) & models.Q(volume_max__lte=1),
+                name="connectors_home_direct_volume_max_range",
+            ),
+        ]
+
+    def __str__(self):
+        return f"home direct settings {self.workspace_id} (kill={self.kill_switch})"
+
+
+class HomeDirectCall(WorkspaceScopedModel, TimestampedModel):
+    """The record of one direct (card-less) Home Assistant media call
+    (Phase 13b D11, ADR-018 decision 8): created `running` immediately
+    before the single send and finalized once (`succeeded` / `failed` /
+    `unknown_outcome`); never retried, never re-sent. Written only by the
+    direct executor (`connectors.home_direct.execute`, branch 1c) and its
+    recovery scan (a lost `running` row -> `unknown_outcome`); a registry
+    walk pins it. `error_type` uses `ConnectorWriteExecution.ErrorType`'s closed
+    vocabulary; no HA free text is ever stored. `requested_data` is what
+    the owner asked for when it differs from what was sent (a clamped
+    `volume_set`)."""
+
+    class Origin(models.TextChoices):
+        VOICE = "voice"
+        NODE = "node"
+        CHAT = "chat"
+
+    class Status(models.TextChoices):
+        RUNNING = "running"
+        SUCCEEDED = "succeeded"
+        FAILED = "failed"
+        UNKNOWN_OUTCOME = "unknown_outcome"
+
+    TERMINAL = frozenset({Status.SUCCEEDED, Status.FAILED, Status.UNKNOWN_OUTCOME})
+
+    # The brief's `entity` FK; named `home_entity` because `entity_id` is
+    # the Home Assistant id column (kept when the allowlist row is removed).
+    home_entity = models.ForeignKey(
+        HomeEntity, null=True, blank=True, on_delete=models.SET_NULL, related_name="direct_calls"
+    )
+    entity_id = models.CharField(max_length=HOME_ENTITY_ID_MAX_CHARS)
+    service = models.CharField(max_length=40)
+    data = models.JSONField(default=dict, blank=True)
+    requested_data = models.JSONField(null=True, blank=True)
+    origin = models.CharField(max_length=10, choices=Origin.choices)
+    node = models.UUIDField(null=True, blank=True)
+    requested_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        on_delete=models.SET_NULL,
+        related_name="home_direct_calls",
+    )
+    source_message_id = models.UUIDField(null=True, blank=True)
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.RUNNING)
+    error_type = models.CharField(
+        max_length=40, blank=True, default="", choices=ConnectorWriteExecution.ErrorType.choices
+    )
+    state_before = models.JSONField(null=True, blank=True)
+    state_after = models.JSONField(null=True, blank=True)
+    read_back = models.BooleanField(default=False)
+    started_at = models.DateTimeField(null=True, blank=True)
+    finished_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["workspace", "created_at"]),
+            models.Index(fields=["status", "created_at"]),
+        ]
+
+    def __str__(self):
+        return f"direct {self.service} on {self.entity_id} ({self.status})"

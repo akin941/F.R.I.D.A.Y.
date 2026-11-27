@@ -1,0 +1,240 @@
+# ADR-017: Home Hub Topology — One Home Server, Many Nodes
+
+## Status
+Accepted 2026-11-26 — owner decision of 2026-11-26 (MASTER_PLAN §O,
+decision d11), recorded with the Phase 13 brief
+(`docs/prompts/phase-13-home-hub/brief.md`, branch `docs/p13-brief`).
+Builds on ADR-001 (workspace axis), ADR-005 (Postgres is the source of
+truth), ADR-010 (connectors, Home Assistant bridge), ADR-013 (Friday Node
+protocol, unchanged), ADR-014 (node action classes, unchanged) and ADR-015
+(voice-originated turns, unchanged). Amends nothing.
+**Amended 2026-11-26 (Phase 13b owner decisions):** interim server on the
+owner's MacBook, Cloudflare R2 as the off-site target, TPM auto-unlock with
+an owner-accepted residual, and the ADR-018 cross-reference — see
+"Amendment — owner decisions 2026-11-26 (Phase 13b)" at the end.
+
+Numbering note: the Phase 13 task text named this ADR "ADR-016". ADR-016 is
+already taken by Phase 12 ("Proactive Runs, Schedules and Instruction
+Skills", `docs/adr/ADR-016-proactive-runs-and-skills.md`), so this ADR takes
+the next free number. Every Phase 13 document cites it as ADR-017.
+
+## Context
+Until Phase 13 the plan never said where the Friday server runs. The
+Docker Compose stack (`deploy/docker/compose.yml` plus the daily-driver
+override `compose.daily.yml`) runs on "the Mac or the server host"
+(`docs/runbooks/mac-session-handoff.md` A3), every port is published on
+`127.0.0.1`, and the node runbook (`docs/runbooks/friday-node.md`) assumes a
+TLS reverse proxy that "already fronts Friday". Phase 9 allowed more than
+one node per owner but explicitly did not optimise for it (Phase 9 brief,
+"Out of scope").
+
+The owner uses Friday only at home, from more than one PC. If the server
+lived on one Mac, the other PCs would lose Friday whenever that Mac sleeps,
+travels or is rebuilt, and memory would follow the laptop instead of the
+person. A hosted database (Supabase or similar) would split the stack:
+Postgres in a third party's cloud, Redis, Celery, the gateway and the node
+gateway at home, and the owner's personal memory outside the house.
+
+## Decision
+1. **One always-on Friday server on a home PC.** A Linux machine on the
+   home LAN (a mini PC is enough) runs the whole Docker Compose stack:
+   Django web, the Next.js frontend, Postgres with pgvector, Redis, the
+   Celery worker with beat, the `node-gateway` and the connector sidecars.
+   It is the only Friday server. Postgres on it is the source of truth
+   (ADR-005); nothing else holds a primary copy.
+2. **Every PC is a paired node of that one server.** Macs now
+   (`friday-node`, ADR-013), Linux PCs from Phase 13 (a productionised
+   Python node, read capabilities only), Windows later (deferred). Because
+   every node talks to the same server, identity, memory, approvals, audit
+   and budgets are the same on every PC. A node holds no Friday data of its
+   own beyond its credential, its local policy and its bounded spool
+   (ADR-013 decisions 2, 5, 7).
+3. **Home only; LAN reach by default.** Friday is used only at home. The
+   server is reachable on the home LAN only: the reverse proxy binds the
+   server's LAN address, the host firewall admits the LAN subnet only, and
+   nothing is port-forwarded or published to the internet. Tailscale is an
+   optional overlay the owner may add (its CGNAT range is already in
+   `DEVICE_PAIRING_NETWORKS`); it is never a public exposure. No public DNS
+   name, no public certificate authority, no tunnel service.
+4. **Node WSS stays TLS with a pinned certificate (ADR-013 unchanged).**
+   The node gateway is served over TLS by the reverse proxy with a
+   certificate issued by a private CA the owner creates for the house. The
+   node pins the server certificate's key or the private CA (ADR-013
+   decision 2); `NODE_TLS_PIN_SHA256` lets preflight catch a changed key.
+   "It is only the LAN" is never a reason for plain `ws://`.
+5. **Full-disk encryption on the home server.** The server's disk is
+   encrypted (LUKS on Linux) so a stolen or discarded machine does not
+   leak the owner's memory, transcripts-derived facts, audit trail or the
+   `.env` secrets.
+6. **Nightly encrypted off-site backup with a tested restore.** Every
+   night a `pg_dump` (custom format) is encrypted with `age` to a public
+   key whose private half is kept off the server, and the encrypted dumps
+   are pushed with `restic` to an off-site repository (Cloudflare R2 or
+   any S3-compatible or SFTP target the owner chooses; optional, a second
+   local disk is acceptable until one is chosen). A restore drill (restore
+   into a scratch Postgres, migrate check, audit-chain verification) is run
+   and recorded at least monthly. Preflight warns when the last backup or
+   the last drill is too old. Backups are host-level operations configured
+   by the owner, not Friday actions: no agent, tool or model can start,
+   change or read them.
+7. **An explicit later migration path to a VPS, without changing the
+   node protocol.** If the owner ever moves the server off the home PC,
+   the same Compose stack is brought up on the VPS, the latest backup is
+   restored, the same `NODE_SIGNING_KEY` and the same private CA (or the
+   same TLS key) are carried over, and each node is re-pointed to the new
+   address in its own local settings. The node protocol, the pairing
+   records and the audit chain are unchanged; a node whose pin no longer
+   matches is re-paired. Reach on a VPS is through the private overlay
+   (Tailscale/WireGuard), never public. The checklist lives in
+   `docs/runbooks/home-server-setup.md`.
+8. **Many nodes are first-class, but an invocation targets exactly one
+   node.** Nodes get owner-set names, rooms and roles; the server resolves
+   "which PC" for every node call (explicit name, then the speaking node,
+   then the last active one, otherwise it asks) and every read or action
+   is signed for, sent to and audited against one node. There is no
+   broadcast invocation and no fan-out write. ADR-014's classes apply per
+   node unchanged: a gate-class action is still a web approval plus a click
+   on that node's own window.
+
+## Consequences
+- The home PC must stay on. A server outage stops Friday on every PC at
+  once; nodes fail closed (ADR-013 decision 6), and nothing is queued.
+- The owner operates a small server: OS updates, Docker updates, disk
+  encryption passphrase at boot (or a TPM/Clevis unlock they choose),
+  backups and drills. The runbook keeps this to a checklist, and preflight
+  reports backup freshness and drill age.
+- Away from home Friday is unavailable by design, unless the owner adds
+  Tailscale. Home Assistant, which already lives on the LAN (ADR-010,
+  `docs/mcp/home-assistant.md`), is reachable from the server without any
+  new exposure.
+- A second PC no longer needs its own Friday: pairing it as a node gives it
+  the same memory and the same approvals.
+- Moving to a VPS later is a restore plus a re-point, not a redesign.
+
+## Alternatives considered
+- **Supabase (hosted Postgres).** Rejected. It would host only Postgres:
+  Redis, Celery, the gateway and the node gateway would still run at home,
+  so the stack would be split across two places with the latency and the
+  failure modes of both, and the owner's personal memory would live with a
+  third party. It adds an account, an external dependency and a data
+  processor for no capability Friday needs.
+- **Object storage as the database** (SQLite files or dumps on S3/R2 as
+  the live store). Rejected. Friday needs transactions, row-level locks
+  (`select_for_update` on the audit chain head), pgvector and recursive
+  CTEs; object storage is a backup target only (decision 6).
+- **The server on one of the Macs.** Rejected. The server would sleep,
+  travel and be rebuilt with the laptop; the other PCs would depend on it;
+  the TCC-granted node and the server would share one machine's blast
+  radius. A Mac remains a node.
+- **A public VPS from day one.** Not chosen now: Friday is used only at
+  home, and a public server adds exposure for no benefit. It stays the
+  documented later path (decision 7).
+- **One server per PC, synchronised.** Rejected: two primary copies of
+  memory and approvals contradict ADR-005 and the single audit chain.
+
+## Implementation notes — Phase 13 closeout (`chore/p13-closeout`, 2026-11-26)
+
+What the server side of this ADR now consists of (branches 1–7 and the
+closeout, all on the integration branch). Nothing here was run on the
+owner's home PC or a Mac (M2/M3, pending owner evaluation).
+
+- **Decision 1 (one server, many nodes).** Rooms, node labels (name,
+  room, role, platform, aliases), per-node presence (the HUD `nodes`
+  section, `/devices`), per-node audit (`GET /api/v1/nodes/<id>/audit`) and
+  the deterministic "which PC" resolver (`nodes.targeting`: explicit name
+  → speaking node → last active → ask; exactly one node per invocation).
+  The closeout e2e (`backend/ops/tests/test_home_hub_e2e.py`) runs this on
+  one live TLS server with two PCs: the Python reference node v2
+  ("MacBook") and the packaged `friday-node-linux` daemon ("Masaüstü", v1,
+  read-only).
+- **Decisions 3 (LAN only) and 4 (TLS with a pin).** `compose.home.yml`
+  publishes nothing, and a test checks that every compose `ports:` entry
+  is loopback. `make preflight` reports `home_lan_only` and `home_tls_pin`.
+- **Decision 6 (encrypted off-site backups, tested restore).**
+  `deploy/home/friday-backup.sh` and `friday-restore-drill.sh` round-trip
+  on the CI Postgres with a local restic repository and a throwaway age
+  key (branch 7 and the closeout e2e). The rows are `home_backup_fresh`,
+  `home_restore_drill_age` and `home_disk_encryption`.
+- **Decision 7 (VPS later without a protocol change).** Phase 13 changed
+  no protocol surface, and the closeout pins that. The preflight row
+  `node_protocol_frozen` hashes the node protocol files (schemas, vectors,
+  capability contracts, conformance cases and vectors: 196 files) and
+  `node/friday-voice/conformance.lock`, and compares them with the values
+  at the Phase 12 closeout merge (`7d2dee5`). A later protocol change
+  updates those digests in the branch that carries its ADR.
+- **Home Assistant (ADR-010).** The owner's entity allowlist
+  (`connectors.HomeEntity`) fails closed. Media and scene services are
+  gate-class. Home voice routes only propose (ADR-015 unchanged).
+  `ha_entities` checks the allowlist against the bridge's code maximum and
+  makes one read-only `ha_states` read.
+- **Closeout preflight rows** (`check_home_control`): `nodes_labels`,
+  `ha_entities`, `linux_node_vendor` and `node_protocol_frozen`. D15 put
+  `nodes_labels` and `linux_node_vendor` in `check_nodes`. They are grouped
+  with the HA row instead, so the Phase 9 `check_nodes` row set stays
+  unchanged (its own tests and the HUD health test pin it).
+- **Still open** (recorded in the brief, not decided here): pairing and
+  credential rotation through the home Caddy. `Caddyfile.example` sends
+  every path except `/ws/node/v1` to the BFF, and the BFF has no node
+  pairing route. Routing `/api/v1/nodes/pair` and
+  `/api/v1/auth/nodes/credential/rotate` straight to Django would change
+  which client IP PIN pairing trusts, so it is an owner decision (brief
+  "Owner steps (pending)").
+
+## Amendment — owner decisions 2026-11-26 (Phase 13b)
+
+Recorded with `docs/prompts/phase-13b-home-decisions/brief.md` (branch
+`docs/p13b-brief`), owner decisions of 2026-11-26. Decisions 1–8 above
+keep their text; this section narrows how they are met until the home PC
+exists, fixes two choices they left open, and records one residual.
+
+1. **Interim server on the owner's MacBook (narrows decision 1 and the
+   "server on one of the Macs" alternative, for a bounded period).** Until
+   a home PC is bought, the same Compose stack runs on the owner's MacBook
+   under Docker Desktop or OrbStack. Friday is down while the Mac sleeps,
+   travels or is off, and the other PCs lose Friday with it — the cost the
+   alternative named, accepted by the owner as temporary. Everything else
+   holds: LAN-only reach (no public exposure), node WSS over TLS with a
+   pinned key or the private CA (decision 4), nightly encrypted backups
+   (they run while the Mac is awake; a missed run catches up on wake),
+   Postgres as the only source of truth. The Mac's own `friday-node`
+   pairs with the server on the same machine through the existing
+   loopback-only TLS path (`compose.local-tls.yml`, Caddy on
+   `127.0.0.1:8443`, from `feat/p9-node-local-pairing`); other PCs reach it
+   through a LAN-bound proxy with the private CA. Disk encryption on the
+   Mac is FileVault, which a container cannot see: preflight reports it as
+   an owner-confirmed **warning**, never a failure, while
+   `HOME_SERVER_PLATFORM=macos`. The move to the home PC is the decision 7
+   path: restore the latest backup, carry over `NODE_SIGNING_KEY` and the
+   CA (or the TLS key), re-point every node. The runbook section
+   "Interim: server on the MacBook" (`docs/runbooks/home-server-setup.md`)
+   is the checklist.
+2. **Off-site backup target = Cloudflare R2 (fixes decision 6's open
+   choice, Phase 13 Q5).** `restic` with the S3 backend to an R2 bucket,
+   the dumps `age`-encrypted before they leave the host, a bucket-scoped
+   API token. The bucket credentials live only in the host's restic
+   environment file, never in the stack's `.env` or any container; the
+   stack knows only the non-secret repository identifier
+   (`HOME_BACKUP_OFFSITE_REPOSITORY`), against which preflight checks that
+   the last backup went to R2. A second local disk remains acceptable only
+   as "off-site pending".
+3. **Disk unlock = TPM auto-unlock on the future home PC (fixes decision
+   5's open choice, Phase 13 Q6).** LUKS with
+   `systemd-cryptenroll --tpm2-device=auto --tpm2-pcrs=7`, so the box
+   comes back after a power cut without a person; a recovery key is
+   enrolled as a second slot and kept **off the server** (password manager
+   plus an offline copy); the passphrase slot may stay as a third.
+   **Owner-accepted residual:** a thief who takes the *whole machine* and
+   boots it with Secure Boot state unchanged gets an unlocked disk up to
+   the login prompt — the disk is protected against a removed or
+   discarded drive and against a changed boot chain (PCR 7), not against
+   the stolen running box. Mitigations that remain: the stack's secrets
+   and the database sit behind the OS login and Docker's root-owned data
+   directory, the server holds no age private key (old backups stay
+   unreadable), and the owner can revoke every node and rotate
+   `NODE_SIGNING_KEY` from another PC. The owner accepted this on
+   2026-11-26 in exchange for unattended reboots.
+4. **Direct-execute home media class.** Home Assistant calls stay
+   gate-class as decided with Phase 13, except the closed `media_player`
+   class of ADR-018 (play, pause, play_pause, stop, volume up/down/set,
+   mute on owner-flagged entities, rate-limited, volume-clamped, with an
+   owner kill switch). See ADR-018.

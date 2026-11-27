@@ -342,15 +342,16 @@ def test_fixture_transcripts_to_an_approved_fact_answered_mirrored_forgotten_res
     assert ModelUsage.objects.filter(purpose="chat").count() == 5
 
     # 9. The closeout preflight checks see the pipeline. The default port
-    #    has no node (the `nodes`-backed port is a pending follow-up), so
-    #    `transcripts` warns; with the reference node installed it reads
-    #    the last pull of each capability.
+    #    is the `nodes`-backed one (runbook A12) and no node is paired here,
+    #    so `transcripts` warns; with the reference node installed it reads
+    #    the last pull of each capability (the gateway transport:
+    #    `test_transcripts_gateway_e2e.py`).
     learning = {r.name: r for r in preflight.check_learning()}
     assert learning["learning_scrubber"].status == preflight.PASS
     graph = {r.name: r for r in preflight.check_graph()}
     assert graph["graph_integrity"].status == preflight.PASS, graph["graph_integrity"]
     assert graph["transcripts"].status == preflight.WARN
-    assert "no node port" in graph["transcripts"].detail
+    assert "not reachable" in graph["transcripts"].detail
     assert graph["eval_baseline"].status == preflight.WARN
     previous = set_node_port(node)
     try:

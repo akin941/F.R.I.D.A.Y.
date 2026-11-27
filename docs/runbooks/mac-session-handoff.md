@@ -5,6 +5,11 @@
 > every "Owner steps (pending)" list of the phase briefs 5, 6, 8A, 9, 8B,
 > 10, 11 and 12 into **one ordered checklist**. A future Claude Code
 > session on the owner's MacBook starts here.
+>
+> **Revised 2026-11-25 (d9):** A1 is now the Personal Team signing spike;
+> the paid Apple Developer Program, Developer ID and notarization are not
+> required (fallback / optional later: A1-F). `scripts/build-sign-notarize.sh`
+> is replaced by `scripts/build-sign-local.sh`.
 
 ## How to use this file
 
@@ -18,8 +23,9 @@ and accounts.
 Work top to bottom:
 
 1. **Part A — prerequisites.** Accounts, tools, the running stack. Do
-   these first. Some of them (Apple enrolment, 24 h of audio) take days, so
-   start them early.
+   these first. Some of them (24 h of audio, `hey_friday`
+   training) take days, so start them early. A1, the Personal Team
+   signing spike (d9 revised 2026-11-25), comes first and takes hours.
 2. **Part B — Swift `friday-node` tasks.** One branch per task, in the
    order given. Each one names the server-side conformance and contract
    tests it must pass, with the exact commands.
@@ -28,6 +34,15 @@ Work top to bottom:
 4. **Part D — owner-only steps that are not Swift work** (credentials,
    reviews, merges, decisions). Most of them do not need the Mac. They are
    listed so nothing is lost.
+5. **Part E — Phase 13 home hub** (added 2026-11-26, after the Phase 12
+   items): the small Swift change for pairing `platform` and server
+   re-point, the real-hardware multi-node and home-route run, and the home
+   server on the owner's PC. Start E1 after B1; E3 needs no Mac.
+6. **Part F — Phase 13b owner decisions** (added 2026-11-20 by the
+   Phase 13b closeout): the interim server on the MacBook with R2
+   backups, the Mac's own node over loopback and the real TV flagged
+   direct (ADR-018), and the later home PC with TPM unlock. No Swift
+   change; F1 needs no paired node, F2 needs B1 and B7.
 
 Each item has a checkbox. The **brief** named in each item is the full
 specification; this file is the order, the commands and the acceptance
@@ -44,7 +59,9 @@ branch.
 - `ruff`, `pytest` and CI must be green before work is declared done. For
   Swift branches, `swift test` must also be green on the Mac (CI has no
   macOS runner unless the owner decides otherwise, step D9).
-- **The Developer ID signing key never leaves the Mac. CI never holds it.**
+- **The Personal Team ("Apple Development") signing key never leaves the
+  Mac. CI never holds it.** (d9 revised 2026-11-25: no paid Developer
+  Program, no Developer ID, no notarization unless A1 falls back.)
   No `NODE_SIGNING_KEY`, node secret (`jnd_…`), PAT or provider key in any
   file in the repo.
 - **Recordings never enter the repo or the database.** Household audio,
@@ -69,24 +86,30 @@ branch.
 | 10 | `docs/prompts/phase-10-control/brief.md` | "Mac session (deferred)" M1–M4 | phase list + nine branch lists; "Go/no-go record" |
 | 11 | `docs/prompts/phase-11-live-voice/brief.md` | "Mac session (deferred)" M1–M4 | phase list + nine branch lists; "Go/no-go record" |
 | 12 | `docs/prompts/phase-12-reach/brief.md` | "Mac session (deferred)" M1 (verification only) | phase list + nine branch lists; "Go/no-go record" |
+| 13 | `docs/prompts/phase-13-home-hub/brief.md` | "Mac session (deferred)" M1–M3 (Part E) | "Owner steps (pending)" + the branch lists; "Go/no-go record" |
+| 13b | `docs/prompts/phase-13b-home-decisions/brief.md` | "Mac session (deferred)" M1–M3 (Part F) | "Owner steps (pending)" + the branch lists; "Go/no-go record" |
 
 ADRs these tasks implement: **ADR-013** (Friday Node protocol: identity,
 pinning, no listener, owner-away rules), **ADR-014** (node action
 classes; the M3 evidence run), **ADR-015** (voice-originated turns
 only propose), **ADR-012** (ingestion privacy pipeline: scrubber parity),
-**ADR-011** (voice transport) and **ADR-016** (proactive, Proposed).
+**ADR-011** (voice transport), **ADR-016** (proactive, Proposed) and
+**ADR-017** (home hub topology, Accepted 2026-11-26; Part E; amended
+2026-11-26, Part F) and **ADR-018** (direct-execute home media class,
+Accepted 2026-11-26; Part F).
 
 Runbooks the Mac session uses: `friday-node.md`, `claude-code-hooks.md`,
 `live-voice.md`, `voice-setup.md`, `memory-eval.md`, `learning-memory.md`,
-`harness-drivers.md`, `proactive.md`, `n8n-connector.md`, `skills.md`, and
-`docs/voice/live-eval.md`.
+`harness-drivers.md`, `proactive.md`, `n8n-connector.md`, `skills.md`,
+`home-server-setup.md` (Parts E and F), and `docs/voice/live-eval.md`.
 
 ---
 
 ## What is implemented server-side (as of 2026-11-20)
 
-All of this is on the integration branch `claude/inspiring-franklin-pw7avo`
-and green in CI against reference doubles (`MASTER_PLAN.md` §AA).
+All of this is on the integration branch `integ/phase-13` (in this
+repository; it was `claude/inspiring-franklin-pw7avo` in the former
+repository) and green in CI against reference doubles (`MASTER_PLAN.md` §AA).
 
 | Phase | Server side (done) | Left for the Mac session / owner |
 |---|---|---|
@@ -98,18 +121,304 @@ and green in CI against reference doubles (`MASTER_PLAN.md` §AA).
 | 10 Control | protocol v2 + invocation grants, capability contracts v2, reference executor + `srt` policy generator, 32-case escape suite (fake executor), `node_action` gate, trust check, HUD terminal, Codex/Agent SDK drivers (off), preflight | Swift confirmation window + executors M1–M2 (B5–B6), macOS `srt` evidence M3 and measurements M4 (C6), driver pins on the Linux runner (D6) |
 | 11 Local live voice | `node_voice` credential and channel, `friday-voice/v1` + reference host, Pipecat pipeline, barge-in, always-on gate (closed), storm backstop, CI self-trigger gate, FAR/FRR harness, `voice.state`, preflight | Swift voice host M1 (B7), loopback + nightly M3 (B8, C7), MLX speech server M2 (C7), FAR/FRR/latency/barge-in/CPU M4 (C7) |
 | 12 Reach | `proactive` app, digest, `/today`, wake routes, n8n connector (relay, allowlist, gated writes), SKILL.md skills + curator, playbooks, preflight | spoken digest and wake routes on the Mac M1 (C8), live n8n, two-week digest checkpoint (C9, D7) |
+| 13 Home hub | rooms + node labels, "which PC" resolver (one node per call), HUD `nodes` panel + `/devices` overview, per-node audit, `friday-node-linux` (read-only, v1, 50/50 conformance), HA entity allowlist + media/scene services (gate-class), home voice routes (propose only), `compose.home.yml` + backup/drill scripts, `check_home` + `check_home_control` preflight, home-hub e2e (`chore/p13-closeout`) | Swift pairing `platform` + server re-point (E1), real-hardware multi-node and home routes (E2), the home server on the owner's PC (E3), owner steps (E4) |
+| 13b Owner decisions | ADR-018 direct media class (closed allowlist + digest, per-entity owner-only `direct` flag, kill switches, rate limits, volume clamp, `HomeDirectCall` audit, code-only `home_direct` intent with provenance locks) on web voice, `node_voice` and typed turns; `/connectors` direct switch + settings panel, HUD `home_direct` line; macOS-tolerant preflight (`HOME_SERVER_PLATFORM`, `home_server_platform`), R2 destination check, portable backup/drill scripts, LaunchAgent, `compose.mac.yml`; `ha_direct_media` preflight; home-direct e2e (`chore/p13b-closeout`) | the interim server on the real Mac with R2 (F1), the Mac node over loopback and the real TV (F2), the home PC with TPM unlock (F3), owner steps (F4) |
 
 ---
 
 ## Part A — Prerequisites (do these first, in this order)
 
-### A1. Apple Developer enrolment and signing identity (Phase 9 d9) — blocks B1
+### A1. Personal Team signing spike (Phase 9 d9, revised 2026-11-25) — blocks B1
 
-- [ ] Enrol in the Apple Developer Program (99 USD/year). This takes days:
-      start it first.
+> **Owner decision 2026-11-25 (d9 revised).** `friday-node` runs only on
+> this Mac. It is built and installed locally from Xcode and never
+> distributed, so the paid Apple Developer Program (99 USD/year), the
+> Developer ID identity and notarization are **not required**. The app is
+> signed with the free Apple ID **Personal Team** "Apple Development"
+> identity, with hardened runtime. That identity is stable, so TCC grants
+> and Keychain items should survive rebuilds. **Never** use ad-hoc signing
+> ("Sign to Run Locally", `codesign -s -`) for a build that holds TCC
+> grants: an ad-hoc designated requirement is the code hash, so every
+> rebuild loses its grants. The signing key never leaves this Mac; CI never
+> holds it. This spike proves the decision on the real Mac **before** any
+> Swift branch; it takes hours, not days. Needs only Xcode (install it
+> first: A2's first bullet). Sources: MASTER_PLAN §O d9; ADR-013
+> "Amendment 2026-11-25 (d9 revised)".
+
+The spike app is throwaway and lives **outside the repo**, in
+`~/FridaySpike/PTSpike/` (an Xcode macOS App project, Swift, no tests).
+It must be a real `.app` bundle launched with `open`: TCC attributes a
+bare command-line binary started from Terminal to Terminal, which would
+make the test meaningless. Use a spike bundle id
+(`<your reverse domain>.friday-node-spike`), never the real app's, so the
+spike's grants and Keychain items do not leak into `friday-node`.
+
+**A1.0 — Identity.**
+
+- [ ] Xcode → Settings → Accounts → "+" → Apple ID: sign in with the
+      owner's free Apple ID. The team shows as "<Name> (Personal Team)".
+      Select it → Manage Certificates → "+" → **Apple Development** if no
+      certificate is listed yet.
+- [ ] Check that the identity is in the login Keychain and note its Team ID
+      (the `OU` of the subject):
+
+  ```bash
+  security find-identity -v -p codesigning | grep "Apple Development"
+  # the identity's SHA-1 (first column); select *that* certificate, not just
+  # the first "Apple Development" one (old or renewed certs may coexist):
+  HASH=$(security find-identity -v -p codesigning | grep -m1 "Apple Development" | awk '{print $2}')
+  security find-certificate -a -Z -c "Apple Development" -p \
+    | awk -v h="$HASH" '/^SHA-1 hash:/ {keep = ($3 == h); next} /^SHA-256 hash:/ {next} keep' \
+    | openssl x509 -noout -subject -startdate -enddate
+  ```
+
+  If `find-identity` lists more than one valid Apple Development identity,
+  pick the Personal Team's by its SHA-1 and use that hash everywhere
+  below (`codesign --sign "$HASH"` accepts it).
+
+  Never copy the certificate, its private key or a `.p12` off this Mac,
+  and never put the identity name or Team ID in a committed file (it names
+  the owner); the scripts read the Team ID from the untracked env var
+  `FRIDAY_NODE_TEAM_ID` and the identity from the Keychain.
+
+**A1.1 — (a) Signing works with hardened runtime and the needed entitlements.**
+
+- [ ] Create the spike project (Xcode → New → Project → macOS → App,
+      product `PTSpike`). Signing & Capabilities: Team = the Personal
+      Team, "Automatically manage signing" on, **Hardened Runtime** on
+      with *Audio Input* and *Apple Events* ticked, **no App Sandbox**
+      (remove the capability if Xcode added it). The source
+      `PTSpike.entitlements` holds these two keys (Xcode adds its own
+      signing entitlements at build time — see below):
+
+  ```xml
+  <key>com.apple.security.device.audio-input</key><true/>
+  <key>com.apple.security.automation.apple-events</key><true/>
+  ```
+
+  Info.plist: `NSMicrophoneUsageDescription` and
+  `NSAppleEventsUsageDescription` strings.
+- [ ] On launch the app writes one line per check to
+      `~/FridaySpike/status-<CFBundleVersion>.txt` and shows the same in a
+      window (no prompts are triggered from a background loop; each
+      request is a button):
+  - Microphone: `AVCaptureDevice.authorizationStatus(for: .audio)`
+    (button: `requestAccess(for: .audio)`);
+  - Accessibility: `AXIsProcessTrusted()` (button:
+    `AXIsProcessTrustedWithOptions` with the prompt option);
+  - Screen Recording: `CGPreflightScreenCaptureAccess()` (button:
+    `CGRequestScreenCaptureAccess()`);
+  - Full Disk Access: whether `FileManager` can list
+    `~/Library/Safari` (or another FDA-protected directory) — added by
+    hand in System Settings;
+  - Automation: `AEDeterminePermissionToAutomateTarget` for
+    `com.apple.systemevents` with `askUserIfNeeded` false (button: the
+    same with true, or `NSAppleScript` `tell application "System Events"
+    to get name of first process`);
+  - Keychain: see A1.4.
+- [ ] **Shipped path: Xcode automatic signing.** Build Release with
+      Xcode's automatic signing for the Personal Team and hardened
+      runtime, exactly the way `scripts/build-sign-local.sh` will (B1).
+      Do **not** re-sign the result with a hand-written entitlements
+      file: `codesign --force --entitlements <source file>` replaces the
+      entitlements Xcode added (`com.apple.application-identifier`,
+      `com.apple.developer.team-identifier`, `keychain-access-groups`),
+      which would break the data protection keychain test (A1.4) for a
+      reason that has nothing to do with the Personal Team.
+
+  ```bash
+  cd ~/FridaySpike/PTSpike
+  TEAM=<Personal Team ID from A1.0>          # shell variable only, never committed
+  xcodebuild -project PTSpike.xcodeproj -scheme PTSpike -configuration Release \
+    -derivedDataPath build -allowProvisioningUpdates \
+    CODE_SIGN_STYLE=Automatic DEVELOPMENT_TEAM="$TEAM" ENABLE_HARDENED_RUNTIME=YES build
+  APP=build/Build/Products/Release/PTSpike.app
+  codesign --verify --strict --verbose=2 "$APP"                 # "valid on disk", "satisfies its Designated Requirement"
+  codesign -dv --verbose=4 "$APP" 2>&1 | grep -E "Identifier|Authority|TeamIdentifier|flags|Runtime"
+  codesign -d --entitlements - "$APP"                           # the two source keys plus whatever Xcode added — record the full list
+  codesign -d -r- "$APP"                                        # the designated requirement
+  ```
+
+  Expected entitlements: the two source keys, plus — if Xcode provisioned
+  the app — `com.apple.application-identifier`,
+  `com.apple.developer.team-identifier` and possibly
+  `keychain-access-groups`. Record the full list; it is the entitlement
+  set B1 ships with.
+- [ ] **Manual re-sign only if needed** (for example, a step Xcode cannot
+      do). Re-sign with the **full** entitlement set extracted from the
+      Xcode-signed build, never with the source file:
+
+  ```bash
+  codesign -d --entitlements :- "$APP" > ~/FridaySpike/full.entitlements   # from the Xcode-signed build
+  codesign --force --options runtime --entitlements ~/FridaySpike/full.entitlements \
+    --sign "$HASH" "$APP"
+  ```
+
+  Then re-run the four checks above. If restricted entitlements are
+  present (`application-identifier`, `keychain-access-groups`), the
+  embedded provisioning profile must stay in the bundle and valid.
+
+  Expect `flags=0x10000(runtime)`, `Authority=Apple Development: …`,
+  `Authority=Apple Worldwide Developer Relations Certification Authority`,
+  `Authority=Apple Root CA`, a `TeamIdentifier` (not `not set`), and a
+  designated requirement of the form `identifier "…" and anchor apple
+  generic and certificate leaf[subject.CN] = "Apple Development: …" and
+  certificate 1[field.1.2.840.113635.100.6.2.1] /* exists */`. A
+  requirement containing `cdhash` means the build is ad-hoc: stop and fix
+  the signing. Save the requirement to the untracked file
+  `~/FridaySpike/designated-requirement.txt`.
+- [ ] Gatekeeper, for the record only:
+
+  ```bash
+  spctl --assess --type execute -vv "$APP"     # expected: rejected / not notarized — accepted, the app is never downloaded
+  xattr -p com.apple.quarantine "$APP"         # expected: no such xattr (local build)
+  ```
+
+  A local build carries no quarantine attribute and launches without a
+  Gatekeeper prompt. Never clear quarantine on anything downloaded and
+  never disable Gatekeeper (`spctl --master-disable`) for this.
+- [ ] Check whether Xcode embedded a provisioning profile
+      (`ls "$APP/Contents/embedded.provisionprofile"`). If it did, record
+      its expiry:
+      `security cms -D -i "$APP/Contents/embedded.provisionprofile" | plutil -p - | grep -E 'Name|ExpirationDate|TeamIdentifier'`.
+      The two hardened-runtime entitlements alone do not need one; Xcode
+      embeds one when it adds `application-identifier` /
+      `keychain-access-groups`. Record whether it did and why.
+
+**A1.2 — (b) Certificate validity, expiry and renewal.**
+
+- [ ] Record the certificate's `notBefore` / `notAfter` (A1.0) and, if
+      any, the profile's `ExpirationDate` (A1.1). Free-account
+      certificates and profiles are short-lived compared with paid ones;
+      record the actual dates, do not assume them.
+- [ ] Renewal: in Xcode → Settings → Accounts → Manage Certificates,
+      create a new Apple Development certificate (only with the owner's
+      OK; the old one can be left to expire), rebuild with it and compare
+      `codesign -d -r-` against `~/FridaySpike/designated-requirement.txt`.
+      The requirement pins the leaf's **common name**, not its serial, so
+      it is expected to stay equal; record whether it did and whether the
+      A1.3 grants and A1.4 item survived. If the owner prefers not to
+      renew now, record "renewal untested" and put a reminder two weeks
+      before `notAfter` to run this check then.
+- [ ] What happens at expiry. Expected, to be confirmed and recorded:
+      an already-installed local build without an embedded profile keeps
+      launching (a local, non-quarantined app is not assessed for
+      notarization), new builds need the renewed identity, and an app
+      whose embedded profile has expired may refuse to launch. If a
+      profile was embedded (A1.1), its expiry is the binding date: record
+      how often the app must be rebuilt, and that the rebuild keeps the
+      grants (A1.3).
+
+**A1.3 — (c) TCC grants persist across two rebuilds.**
+
+- [ ] Install build N: `ditto "$APP" /Applications/PTSpike.app && open /Applications/PTSpike.app`.
+      Grant all five: Microphone and Automation (System Events) through
+      the prompts; Accessibility, Screen Recording and Full Disk Access in
+      System Settings → Privacy & Security (add `PTSpike` with "+" where
+      needed). Relaunch; `status-<N>.txt` must show all five granted.
+- [ ] Build N+1: bump `CFBundleVersion` (and change a visible string so
+      the binary really differs), build and sign exactly as in A1.1,
+      `codesign -d -r-` must equal the saved requirement, quit the app,
+      `ditto` over `/Applications/PTSpike.app`, `open` it. **No new
+      prompt**, and `status-<N+1>.txt` shows all five still granted.
+- [ ] Build N+2: the same again. Two consecutive rebuilds must keep every
+      grant.
+- [ ] **Do not misread Sequoia re-prompts.** macOS 15 (Sequoia) and later
+      periodically ask again whether an app may keep recording the screen
+      (and after some updates), regardless of how the app is signed. Such
+      a prompt is not a lost grant: the check is whether
+      `CGPreflightScreenCaptureAccess()` is still true right after a
+      rebuild and whether the app stays listed and switched on in System
+      Settings. Record any periodic prompt with its date, separately from
+      the rebuild result.
+- [ ] Inspect the grants in System Settings → Privacy & Security (each
+      pane lists `PTSpike` switched on). Do not read `TCC.db` directly.
+      Use `tccutil reset <Service> <bundle id>` (services `Microphone`,
+      `AppleEvents`, `Accessibility`, `ScreenCapture`,
+      `SystemPolicyAllFiles`) **only** to clean up after the spike or to
+      retry a confused state, always with the spike's bundle id, never
+      without one.
+
+**A1.4 — (d) Keychain items written by build N are readable by build N+1.**
+
+- [ ] Build N — the **Xcode-signed** build from A1.1 with its full
+      entitlement set, never a build re-signed with the source
+      entitlements file — writes a `kSecClassGenericPassword` item with
+      service `friday-node-spike`, account `spike`, and the same attributes
+      `Credential.swift` will use (B1:
+      `kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly`, no iCloud sync).
+      Try it twice:
+      1. **Data protection keychain** (`kSecUseDataProtectionKeychain:
+         true`) — the preferred path, because only this keychain honours
+         `kSecAttrAccessible…` (`AfterFirstUnlockThisDeviceOnly`: not
+         readable before first unlock, never migrated to another device).
+      2. **File-based (legacy) keychain** (the default on macOS).
+
+      Record the `OSStatus` of each. `-34018` (`errSecMissingEntitlement`)
+      on the first **may** mean a missing `keychain-access-groups` /
+      `application-identifier` entitlement or provisioning profile (for
+      example, Xcode did not provision the app, or it was re-signed without
+      them) rather than a Personal Team limit: check
+      `codesign -d --entitlements -` and the embedded profile first, fix
+      the build, and retry before concluding anything. A plain
+      non-sandboxed app may get neither entitlement by default: add the
+      **Keychain Sharing** capability (Signing & Capabilities, one group =
+      the app's bundle id) so Xcode provisions `keychain-access-groups` and
+      `application-identifier`, rebuild, and rerun this check.
+- [ ] Builds N+1 and N+2 read the item back **without** a Keychain access
+      prompt ("PTSpike wants to use your confidential information…"). A
+      prompt means the item's access control no longer matches the
+      designated requirement: a failure.
+- [ ] **If only the file-based keychain works**, the outcome is
+      **PARTIAL**, not a pass: the legacy file-based keychain ignores
+      `kSecAttrAccessible…`, so `AfterFirstUnlockThisDeviceOnly` is lost.
+      The node secret is then protected only by the login keychain (locked
+      with the owner's login) and the item's ACL bound to the designated
+      requirement; nothing stops it being part of a keychain backup or
+      migration. B1 may start on this path only after the owner
+      acknowledges it in a dated **residual note in ADR-013** (on the same
+      `feat/mac-a1-spike` branch) — not as a silent B1 note —
+      or the owner chooses the paid fallback (A1-F) to get the data
+      protection keychain.
+- [ ] Clean up: delete the spike items from the app (or Keychain Access),
+      `tccutil reset All <spike bundle id>`, remove
+      `/Applications/PTSpike.app`. Keep `~/FridaySpike/` notes until the
+      result is recorded.
+
+**A1.5 — Result and fallback.**
+
+- [ ] **Pass** = (a) the Xcode-signed build has hardened runtime and both
+      entitlements, no sandbox; (b) dates recorded (renewal tested or
+      reminded); (c) all five grants survive two rebuilds; (d) the item,
+      in the **data protection keychain**, is read without a prompt by
+      N+1 and N+2.
+- [ ] **Partial** = everything passes but (d) works only with the
+      file-based keychain (A1.4): record it, and B1 waits for the
+      owner-acknowledged ADR-013 residual note (or A1-F).
+- [ ] **Record the result (Pass, Partial or Fail):** macOS and Xcode
+      versions, date, the requirement's *form* without the owner's name,
+      cert and profile expiry, keychain variant used, per-check pass/fail,
+      as a dated implementation note in ADR-013 ("Implementation notes —
+      Personal Team spike") on the `feat/mac-a1-spike` branch,
+      reviewed like any brief change. On **Pass**, B1 may start now; on
+      **Partial**, only after the residual note above.
+- [ ] **Fail** (a needed entitlement is unavailable to a Personal Team, a
+      grant or the Keychain item does not survive a rebuild, or a
+      profile's expiry would break the installed app): record which check
+      failed and why in the same note and in MASTER_PLAN §O d9, and switch
+      to the **fallback**, the original paid path (A1-F below). B1 waits
+      for A1-F.
+
+### A1-F. Fallback / optional later: the paid Apple Developer Program
+
+Not required by the 2026-11-25 decision. Do this **only** if A1.5 fails
+(fallback), or later if the owner wants to distribute `friday-node` to
+other Macs or use Sparkle-style auto-update (optional). It is the original
+d9 path:
+
+- [ ] Enrol in the Apple Developer Program (99 USD/year). This takes days.
 - [ ] Create a **Developer ID Application** certificate in Xcode
-      (Settings → Accounts → Manage Certificates → "+") so the identity is
-      in the login Keychain. Check:
+      (Settings → Accounts → Manage Certificates → "+"). Check:
 
   ```bash
   security find-identity -v -p codesigning | grep "Developer ID Application"
@@ -121,11 +430,18 @@ and green in CI against reference doubles (`MASTER_PLAN.md` §AA).
 
   ```bash
   xcrun notarytool store-credentials friday-notary \
-    --apple-id <owner apple id> --team-id <TEAMID> --password <app-specific password>
+    --apple-id <owner apple id> --team-id <TEAMID>   # no --password: it prompts, so the secret stays out of shell history
   xcrun notarytool history --keychain-profile friday-notary   # must list without error
   ```
 
-The key never leaves this Mac and CI never holds it.
+- [ ] `scripts/build-sign-local.sh` then gains a `--notarize` mode
+      (`codesign --options runtime --timestamp` with the Developer ID,
+      `notarytool submit --wait --keychain-profile friday-notary`,
+      `stapler staple`), keeping the same conformance-marker refusal.
+      Switching identity changes the designated requirement, so every TCC
+      grant and Keychain item has to be granted / re-paired once more.
+
+The key never leaves this Mac and CI never holds it, on either path.
 
 ### A2. Tools on the Mac
 
@@ -136,12 +452,12 @@ The key never leaves this Mac and CI never holds it.
       `git` ≥ 2.27 (`git --version`). `rsync` and `shasum` ship with macOS
       (needed by `make friday-voice-install`).
 - [ ] `sox` for recordings (`brew install sox`), optional.
-- [ ] Clone and check out the integration branch (or `main` once D4 has
-      merged it):
+- [ ] Clone and check out the integration branch `integ/phase-13` (or
+      `main` once the owner has merged it, D4):
 
   ```bash
   git clone <repo url> ~/code/friday && cd ~/code/friday
-  git checkout claude/inspiring-franklin-pw7avo
+  git checkout integ/phase-13      # after the owner's merge (D4): git checkout main
   (cd backend && uv sync --frozen)
   (cd frontend && npm ci)
   (cd node/friday-voice && uv sync --frozen)
@@ -217,9 +533,9 @@ uv run python manage.py build_node_conformance --check   # case and vector files
 
 ### A6. `srt` on the Mac (Phase 10 owner step 4) — blocks B6
 
-- [ ] Install Anthropic's sandbox-runtime `srt` at an **exact** version and
+- [x] Install Anthropic's sandbox-runtime `srt` at an **exact** version and
       record it in `docs/mcp/dependencies/node-gateway.md`.
-- [ ] Confirm the CLI matches `SRT_ARGV_TEMPLATE`
+- [x] Confirm the CLI matches `SRT_ARGV_TEMPLATE`
       (`srt --settings <file> -- <argv...>`) and the settings keys of
       `backend/nodes/conformance/vectors/sandbox.json`
       (`network.allowedDomains`, `deniedDomains`, `allowUnixSockets`,
@@ -229,18 +545,26 @@ uv run python manage.py build_node_conformance --check   # case and vector files
       `uv run python manage.py build_node_conformance` in a dedicated
       branch, and merge it **before** B6.
 
+      Done 2026-11-27: 0.0.83, CLI and all six vector documents match, no
+      generator change; macOS findings for B6 (shell on `PATH`, per-user
+      `RLIMIT_NPROC`, escape scripts) in the manifest.
+
 ### A7. Local speech server (Phase 6 branch 1 step 0) — blocks C2 and B7
 
-- [ ] Install speaches on the Mac host (not in Docker), with Piper served,
+- [x] Install speaches on the Mac host (not in Docker), with Piper served,
       on `:8000` (`docs/runbooks/voice-setup.md` §1). Record the exact
       STT/TTS model ids, voice ids, the WAV response shape and cold/warm
       latency in the Phase 6 brief; set `VOICE_*` in `.env`.
-- [ ] Done-when: `InferenceGateway().transcribe/synthesize` round-trips a
+- [x] Done-when: `InferenceGateway().transcribe/synthesize` round-trips a
       Turkish sentence with one `ModelUsage` each (`voice-setup.md` §3, in
       `manage.py shell`).
 - [ ] One real transcription and one speech request through the BFF from a
       trusted browser (`voice-setup.md` §4): 200s, one `ModelUsage` each,
       workspace = the conversation's, cost 0.
+
+      Items 1–2 done 2026-11-27 (speaches v0.9.0-rc.3, CPU, loopback; ids,
+      WAV shape, latency and the round trip in the Phase 6 brief, "Step 0
+      on the Mac"). Item 3 needs the owner's trusted browser session.
 
 ### A8. Train and pin `hey_friday.onnx` (Phase 6 owner step 4, Phase 11 owner step 3) — blocks B7 and C7
 
@@ -271,13 +595,23 @@ The Phase 11 brief and `docs/runbooks/live-voice.md` §1 say
 `frontend/scripts/voice-models.mjs` has no `--node` option, and GNU make
 rejects `--node` as an unknown make option. Before B7:
 
-- [ ] Add a small tooling branch (`feat/p11-node-voice-models`) that adds
+- [x] Add a small tooling branch (`feat/p11-node-voice-models`) that adds
       the node mode (for example `make voice-models-node`: download every
       `models.json` entry with a `source`, verify its sha256, copy the
       owner's `hey_friday.onnx` from `VOICE_WAKE_MODEL_SRC`, write into
-      `modelDir`), with a test, and fix the two docs that name
-      `make voice-models --node`. This can be done in a cloud session too.
-- [ ] Then: `make friday-voice-install` and the node model fill; check with
+      `modelDir`), with a test, and fix the docs that named the missing
+      mode. **2026-11-27: done.** `make voice-models-node` runs
+      `friday-voice models fetch` (`node/friday-voice/friday_voice/model_fetch.py`,
+      tests in `tests/test_model_fetch.py`): https downloads (every redirect
+      hop checked), sha256 verified while streaming, atomic temp-file +
+      `os.replace` writes, a mismatch is refused and never replaces a file;
+      the keyword model is copied from `VOICE_WAKE_MODEL_SRC` only once its
+      pin is set (while empty, the file is refused and its hash printed);
+      smart-turn is checked inside the pipecat-ai wheel, never fetched. The
+      target defaults to `modelDir`; `VOICE_NODE_MODEL_DIR=<dir>` overrides
+      it. `make friday-voice-install` now excludes `/models/` from its
+      `rsync --delete`, so a reinstall keeps the filled directory.
+- [x] Then: `make friday-voice-install` and the node model fill; check with
 
   ```bash
   cd node/friday-voice
@@ -286,15 +620,31 @@ rejects `--node` as an unknown make option. Before B7:
   uv run friday-voice selftest --ci
   ```
 
+  **2026-11-27, on the Mac:** installed `uv.lock` sha256
+  `354e9c73a786578a2ef3e3d3294696b78848d891a7c43a7ada2c18de7a3d62dc`;
+  the fill wrote `melspectrogram.onnx` (1,087,958 bytes),
+  `embedding_model.onnx` (1,326,578 bytes) and `silero_vad.onnx`
+  (2,327,524 bytes), each matching its pin (re-checked with
+  `shasum -a 256`); smart-turn verified in the wheel; `hey_friday.onnx`
+  skipped (A8: not trained, pin empty), so wake mode stays not armable.
+  Conformance files up to date; host 28/28 and child 23/23 pass;
+  `selftest --ci` PASS. **Left:** after A8, pin the keyword sha256 in both
+  manifests and rerun with `VOICE_WAKE_MODEL_SRC=/path/to/hey_friday.onnx
+  make voice-models-node`.
+
 ### A11. Phase 6 branch 3a — a server-side gap (blocks C2's A4 measurements)
 
 `feat/p6-voice-eval` (the Turkish eval set's `voice_eval` scorer, replay
 harness and manifest) is **not on the integration branch** and no local
 branch of it exists (Phase 6 brief A9).
 
-- [ ] Implement or restore it per the Phase 6 brief ("Amendment
+- [x] Implement or restore it per the Phase 6 brief ("Amendment
       2026-11-20", branch 3a) before C2's WER and TTS measurements. This is
       not Swift work and can be done in a cloud session.
+      **Implemented 2026-11-27 on `feat/p6-voice-eval`** (awaits the
+      independent Sonnet 5 review and the merge): `manage.py voice_eval`,
+      `docs/voice/eval-manifest.md`, runbook `voice-setup.md` §8; notes
+      under "Branch 3a — implementation notes" in the Phase 6 brief.
 
 ### A12. The `nodes`-backed transcript port — a server-side gap (blocks B4's live half and C5 item 4)
 
@@ -313,6 +663,20 @@ the transcript pull is a no-op. It needs no Mac:
       install it in `tools.transcript_ingest`, and re-run
       `tools/tests/test_transcript_ingest.py` and the 8B e2e against the
       in-process gateway transport.
+      **Implemented 2026-11-26 on this branch (awaits the independent
+      Sonnet 5 review; tick the box when it merges).** The contracts now
+      sit in `backend/nodes/capabilities/v1/` with full-match path patterns
+      and the protocol's 64 KiB result bound; the readers moved to
+      `backend/nodes/reference/owner_turns.py`; the 36 folded cases are
+      `v1_read_{claude,codex}_owner_turns_*`, and the 8B expected file is
+      `backend/nodes/conformance/vectors/owner_turns.json`; the port is
+      `backend/tools/transcript_node_port.py`, installed by
+      `ToolsConfig.ready`; the gateway runs are
+      `tools/tests/test_transcript_node_port.py` and
+      `ops/tests/test_transcripts_gateway_e2e.py`. Preflight `transcripts`
+      now warns "not reachable" (no connected node) or "not granted" until
+      the Swift owner-turn readers (B4) and the Touch ID grant (M1); the
+      Swift node advertises both reads `not_granted` until B4.
 
 ---
 
@@ -330,10 +694,10 @@ Common commands for every B branch:
 cd node/friday-node
 swift build
 swift test                                            # NodeCoreTests, Debug
-xcodebuild -scheme FridayNode -configuration Conformance build   # unsigned, CONFORMANCE condition
+xcodebuild -scheme FridayNode -configuration Conformance CODE_SIGNING_ALLOWED=NO build   # unsigned, CONFORMANCE condition
 xcodebuild -scheme FridayNode -configuration Release test \
   -only-testing:NodeCoreTests/ReleaseHygieneTests      # the conformance pin type is not compiled in
-scripts/build-sign-notarize.sh                         # Release only; refuses conformance markers
+scripts/build-sign-local.sh                            # Release only; refuses conformance markers; Personal Team signing + hardened runtime
 ```
 
 and on the server side (Part A4 environment, from `backend/`):
@@ -346,13 +710,55 @@ uv run python manage.py build_node_conformance --check
 **The conformance build rule (ADR-013 decisions 2 and 4).** Everything
 that pins the fake server's self-signed SPKI or the conformance key sits
 inside `#if CONFORMANCE … #endif` in the separate, unsigned `Conformance`
-configuration. The release build has **no** environment variable, user
-default or launch argument that changes the TLS pin, the pinned signing
-keys or the server URL. The conformance build is never signed with the
-Developer ID, never notarised and never a login item.
-`scripts/build-sign-notarize.sh` fails before `codesign` if `strings` on
-the release Mach-O finds `FRIDAY_NODE_CONFORMANCE`, `conformance` or the
-conformance public key's base64 (from `backend/nodes/conformance/keys/`).
+configuration (`CODE_SIGNING_ALLOWED = NO` set explicitly in that
+configuration's build settings, and on the command line above). The
+release build has **no** environment variable, user default or launch
+argument that changes the TLS pin, the pinned signing keys or the server
+URL. The conformance build is never signed with the
+Personal Team identity (or any Developer ID), never notarised and never a
+login item. `scripts/build-sign-local.sh` fails before `codesign` if
+`strings` on the release Mach-O finds `FRIDAY_NODE_CONFORMANCE`,
+`conformance` or the conformance public key's base64 (from
+`backend/nodes/conformance/keys/`).
+
+**`scripts/build-sign-local.sh` (d9 revised 2026-11-25; replaces
+`build-sign-notarize.sh`).** It builds the `Release` configuration only,
+with Xcode automatic signing for the Personal Team and hardened runtime
+(the path A1.1 proved), so the app keeps the full entitlement set Xcode
+adds. The conformance-marker refusal above still runs **before
+`codesign`**: it is a Release-only "Run Script" build phase placed after
+linking, which Xcode runs before its CodeSign step, and the script
+repeats it on the final Mach-O before installing anything:
+
+```bash
+TEAM=${FRIDAY_NODE_TEAM_ID:?set FRIDAY_NODE_TEAM_ID (untracked env, A1.0)}
+xcodebuild -scheme FridayNode -configuration Release -derivedDataPath build \
+  -allowProvisioningUpdates CODE_SIGN_STYLE=Automatic DEVELOPMENT_TEAM="$TEAM" \
+  ENABLE_HARDENED_RUNTIME=YES build          # the Run Script phase fails the build on a marker
+APP=build/Build/Products/Release/FridayNode.app
+# repeat the marker check on the final binary (same check as the build phase)
+CONF_KEY_B64=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["signing"]["public_key_b64"])' \
+  ../backend/nodes/conformance/keys/conformance_keys.json)
+if strings "$APP/Contents/MacOS/FridayNode" \
+   | grep -qiE -e "FRIDAY_NODE_CONFORMANCE|conformance" -e "$CONF_KEY_B64"; then
+  echo "conformance marker in the release binary: refusing"; exit 1
+fi
+codesign --verify --strict --verbose=2 "$APP"
+codesign -dv --verbose=4 "$APP" 2>&1 | grep -q "Authority=Apple Development" \
+  || { echo "not signed with an Apple Development identity (A1)"; exit 1; }
+codesign -d -r- "$APP" 2>&1 | grep -q cdhash && { echo "ad-hoc requirement: refusing"; exit 1; }
+```
+
+It refuses ad-hoc signing (a requirement with `cdhash`) or any identity
+other than Apple Development, warns if the designated requirement differs
+from the one recorded in the untracked
+`~/.config/friday-node/designated-requirement.txt` (a change means every
+TCC grant and Keychain item is lost), and only then installs with `ditto`
+to `/Applications/FridayNode.app`. No notarization and no stapling. A
+manual re-sign, if ever needed, uses the full entitlement set extracted
+from the Xcode-signed build (A1.1), never the source entitlements file;
+nested code (helpers, frameworks) is signed inside-out before the app,
+never `--deep`. The Team ID and identity name are never committed.
 
 ### B1. Phase 9 M1 — `feat/p9-node-app`: shell, identity, session, verifier
 
@@ -367,15 +773,26 @@ and 9; ADR-013.
       `friday-node.v2, friday-node.v1` as the v2 work lands, **no
       `Origin`**), `Backoff.swift`, `Credential.swift` (Keychain
       `kSecClassGenericPassword`, service `friday-node`,
+      `kSecUseDataProtectionKeychain`,
       `kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly`, no iCloud sync;
-      the secret, the TLS SPKI pin and the pinned server keys),
+      the secret, the TLS SPKI pin and the pinned server keys; the
+      file-based keychain, which drops the `kSecAttrAccessible…`
+      protection, only if A1 ended PARTIAL and the owner acknowledged the
+      ADR-013 residual note),
       `Pairing.swift` (`POST /api/v1/nodes/pair`), `Rotation.swift`
       (`POST /api/v1/auth/nodes/credential/rotate`; persist the new secret
       **before** finishing the call — ADR-013 residual);
-      `scripts/build-sign-notarize.sh` (`codesign --options runtime
-      --timestamp`, `notarytool submit --wait --keychain-profile
-      friday-notary`, `stapler staple`); entitlements: hardened runtime and
-      `com.apple.security.network.client` only.
+      `scripts/build-sign-local.sh` (Release only, conformance-marker
+      refusal before CodeSign, Xcode automatic signing with the Personal
+      Team "Apple Development" identity and hardened runtime,
+      `codesign --verify --strict`, no ad-hoc, no notarization — see
+      Part B intro); entitlements: hardened runtime only, plus whatever
+      Xcode adds for signing and the keychain (A1.1). M1 is a deliberate
+      subset: no App Sandbox (so no `com.apple.security.network.client`,
+      which has no effect unsandboxed), no microphone, no Apple Events.
+      `com.apple.security.automation.apple-events` arrives with Phase 10
+      M2 (B6) and `com.apple.security.device.audio-input` with Phase 11
+      M1 (B7); A1 already proved both.
 - [ ] Gateway behaviour (Phase 9 branch 4 owner step 6): `Authorization:
       Bearer <jnd_…>`, `hello` within 10 s, heartbeat every 15 s (45 s of
       silence closes 4408), ≤ 20 frames/s and ≤ 256 KiB per frame, one
@@ -509,34 +926,44 @@ uv run pytest -q config/tests/test_hooks_via_node.py nodes/tests/test_node_event
 Manual pass: stop the stack, run a Claude Code session, restart; the
 spooled events arrive **once** in `/sessions`.
 
-**After B1–B3: build, sign, notarise and install release build N** with
-`scripts/build-sign-notarize.sh`, then do C4.
+**After B1–B3: build, sign (Personal Team identity) and install release
+build N** with `scripts/build-sign-local.sh`, then do C4.
 
 ### B4. Phase 8B M1 — `feat/p8-node-transcript-readers`: owner-turn readers
 
 Needs: B2, A12 (for the live half). Spec: Phase 8B brief "Mac session
 (deferred)" M1, D13 (owner-turn rules), D17.
 
-- [ ] `Sources/NodeCore/Readers/ClaudeOwnerTurns.swift` and
-      `CodexOwnerTurns.swift` (streaming JSONL, D13 rules); catalogue
-      entries `claude.transcripts.owner_turns` and
-      `codex.transcripts.owner_turns` with schemas loaded from, or checked
-      byte-identical to, `backend/nodes/capabilities/v1/` (before A12 they
-      are in `backend/integrations/node_reference/contracts/v1/`; use
-      whichever the merged tree has).
-- [ ] `Tests/NodeCoreTests/OwnerTurnReaderTests.swift` over the reference
-      fixtures (`backend/nodes/reference/fixtures/{claude,codex}/`, or
-      `backend/integrations/node_reference/fixtures/` before A12), output
-      compared to `expected_owner_turns.json`.
-- [ ] Availability `not_granted` until the Touch ID grant; revoke gives
-      `not_granted` at once plus `grant.availability_changed`.
+- [x] `Sources/NodeCore/Readers/ClaudeOwnerTurns.swift` and
+      `CodexOwnerTurns.swift` (streaming JSONL, D13 rules; shared half in
+      `OwnerTurns.swift`); catalogue entries `claude.transcripts.owner_turns`
+      and `codex.transcripts.owner_turns` with schemas byte-identical to
+      `backend/nodes/capabilities/v1/` (the vendored copies,
+      `vendor_protocol.py --check`). Done 2026-11-27.
+- [x] `Tests/NodeCoreTests/OwnerTurnReaderTests.swift` over the reference
+      fixtures (`backend/nodes/reference/fixtures/owner_turns/`), output
+      compared to `backend/nodes/conformance/vectors/owner_turns.json` (the
+      A12 name of `expected_owner_turns.json`), plus a synthetic home pinned
+      against the Python reference. Done 2026-11-27.
+- [x] Availability `not_granted` until the Touch ID grant; revoke gives
+      `not_granted` at once plus `grant.availability_changed` (the reads
+      follow the `claude` / `codex` directory grants). Done 2026-11-27.
 - [ ] Real-file verification, never committed: the debug-only
       `friday-node scrub-preview --owner-turns ~/.claude/projects/<one project>`
-      (and the Codex equivalent) prints counts per line kind and per
-      excluded marker, never text. A line kind not covered by D13 → stop,
+      (and `--codex <dir>`) prints counts per line kind and per excluded
+      marker, never text. A line kind not covered by D13 → stop,
       update D13 + fixtures + reference readers + cases in one server
       branch, re-run. The owner skims the first 20 accepted turns and
-      confirms they are text the owner typed.
+      confirms they are text the owner typed. **2026-11-27: the command
+      exists and was run once on this repo's Claude project and on
+      `~/.codex/sessions` (counts only); it found accepted Claude turns
+      that start with `<task-notification>` (14) and `<bash-input>` (1),
+      which no D13 marker covers: the server branch and the owner skim
+      are still open (Phase 8B brief, M1 implementation record).**
+      **2026-11-27, later: the D13 marker fix is implemented on
+      `feat/p8-d13-harness-markers` (awaits the Sonnet 5 review); the
+      re-run shows no accepted turn starting with a harness tag (Claude
+      17 accepted, Codex 35). The owner skim is still open.**
 
 **Server-side contract tests it must pass:** every case in
 `backend/nodes/conformance/cases/v1/` (with the owner-turn cases) offline
@@ -552,27 +979,42 @@ place of the reference node.
 Needs: B1–B3. Spec: Phase 10 brief "Mac session (deferred)" M1, D5 checks
 13–24, D12; ADR-013 decision 6; ADR-014.
 
-- [ ] `GrantVerifier.swift` (domain-separated Ed25519 over the canonical
+- [x] `GrantVerifier.swift` (domain-separated Ed25519 over the canonical
       grant, field binding, TTL ≤ 120 s); `VerifierV2.swift` (D5 checks
       13–24 in order, same codes); `OutputStreamer.swift` (8 KiB chunks,
       seq, D12 carry-over scrub so a split secret is still removed, 1 MiB
-      cap, tail ≤ 4 KiB); v2 subprotocol offer in `Session.swift`.
-- [ ] `Sources/FridayNode/ConfirmationWindow.swift`: non-activating
+      cap, tail ≤ 4 KiB); v2 subprotocol offer in `Session.swift`. Done
+      2026-11-27 (`VerifierV2` runs 1–22; 23–24 are in `NodeSession`, as in
+      the reference node).
+- [x] `Sources/FridayNode/ConfirmationWindow.swift`: non-activating
       floating `NSPanel`, rendered from the node's **own** validated args
       and the capability's `confirm_template` (never server text); shows
       the approval id's first 8 characters for gate-class, the repo's local
       name and the exact argv and network setting for `repo.command.run`;
       buttons "Çalıştır" / "Reddet"; 60 s countdown; closes on socket loss,
       kill switch or timeout; one window at a time; "Durdur" while running.
-- [ ] Validate `text`, `title` and `repo_path` with the **identical**
+      Done 2026-11-27: the file is `App/FridayNode/ConfirmationWindow.swift`
+      (the app target; there is no `Sources/FridayNode/`); the decision
+      logic is NodeCore `Confirmation.swift` and `NodeSession`, unit-tested.
+- [x] Validate `text`, `title` and `repo_path` with the **identical**
       pattern strings from the v2 contract files (no `CharacterSet`
       approximation); replay the hostile-insert families of
       `backend/nodes/tests/test_capabilities_v2.py`; mirror
-      `x-friday-max-bytes`.
-- [ ] The `Conformance` build implements the external JSON-lines hook of
+      `x-friday-max-bytes`. Done 2026-11-27 (`ArgsValidationTests`, plus a
+      CPython `re.fullmatch` differential over every code point).
+- [x] The `Conformance` build implements the external JSON-lines hook of
       `backend/nodes/conformance/gateway.py` (ops `prepare`, `advance`,
       `tick`, `kill_switch`, `report`, `wait_disconnected`), compiled only
-      under `#if CONFORMANCE`.
+      under `#if CONFORMANCE`. Done 2026-11-27 (plus `voice_state`; the
+      scripted owner and executor are `#if DEBUG`).
+
+**Status 2026-11-27 (`feat/p10-node-confirm`):** contract test 1 passes
+(86/86 v1, 99/99 v2 offline, none pending; `grants.json`, `signing_v2.json`,
+`scrub_stream.json`); contract test 2 passes live (`--protocol 2` 99/99,
+`--protocol 1` 86/86, port 8766); contract test 3 is an owner step that
+needs runbook B6 first (until then every action is advertised
+`unsupported` and no repo is mapped). Details: the Phase 10 brief, M1
+implementation record.
 
 **Server-side contract tests it must pass:**
 
@@ -614,7 +1056,7 @@ Needs: B1–B3. Spec: Phase 10 brief "Mac session (deferred)" M1, D5 checks
 
 Needs: B5, A6. Spec: Phase 10 brief M2, D4; ADR-014.
 
-- [ ] `Exec/SrtExecutor.swift` (spawns `srt` with the settings document
+- [x] `Exec/SrtExecutor.swift` (spawns `srt` with the settings document
       generated exactly as `backend/nodes/reference/sandbox.py`; argv only;
       stripped env; SIGTERM/SIGKILL on loss), `Exec/SandboxPolicy.swift`;
       `Policy/CommandMappings.swift` (repo root, local name,
@@ -626,9 +1068,12 @@ Needs: B5, A6. Spec: Phase 10 brief M2, D4; ADR-014.
       exact title match, refuses when not frontmost or a secure text field
       has focus); `Apps/OpenFocus.swift` (`NSWorkspace`, local bundle
       list); availability in `hello` (`granted` only with the TCC grant).
+      Landed 2026-11-27 (also the policy UI in "İzinler" and the B5 review
+      findings); contract tests 1-3 pass; record: Phase 10 brief, M2
+      implementation record.
 - [ ] Owner, in the node's policy UI with Touch ID (Phase 10 owner step 5):
       map the repos and commands, enable the wanted recipes and the
-      bundle-id list.
+      bundle-id list (and grant Accessibility / Automation when asked).
 
 **Server-side contract tests it must pass:**
 
@@ -652,9 +1097,16 @@ Needs: B5, A6. Spec: Phase 10 brief M2, D4; ADR-014.
 Needs: B1–B3, B5 merged; A7, A8, A10. Spec: Phase 11 brief "Mac session
 (deferred)" M1, D6, D9, D12, D15; ADR-013 decisions 1, 5, 6; ADR-015.
 
-- [ ] `make friday-voice-install` (prints the installed `uv.lock` sha256;
-      compile it into the host) and the node model fill (A10).
-- [ ] `Voice/VoiceChildHost.swift` (spawns
+- [x] `make friday-voice-install` (prints the installed `uv.lock` sha256;
+      compile it into the host) and the node model fill (A10). **2026-11-27
+      (`feat/p11-node-voice-host`): the hash is generated from
+      `node/friday-voice/uv.lock` by `scripts/vendor_protocol.py`
+      (`Generated/VendoredVoiceProtocol.swift`, `--check` in CI,
+      `VoiceProtocolTests`); it equals the installed lock (`354e9c73…`, checked
+      against the real install by the opt-in `VoiceInstalledChildTests`).
+      `hey_friday.onnx` is not pinned (A8): wake reads not armable, push-to-talk
+      only.**
+- [x] `Voice/VoiceChildHost.swift` (spawns
       `~/Library/Application Support/Friday/voice/.venv/bin/friday-voice run`,
       stdin/stdout pipes, clean env `PATH`/`HOME`/`LANG` only, lock-hash
       check, restart backoff 1 s → 60 s, watchdog 10 s, kill on quit, kill
@@ -671,16 +1123,33 @@ Needs: B1–B3, B5 merged; A7, A8, A10. Spec: Phase 11 brief "Mac session
       always-on needs LocalAuthentication; mute read failure →
       `mute: unreadable`); `VoiceCredential.swift` (mints `node_voice`
       with the Keychain node secret, refresh ≤ 60 s before expiry, never
-      written anywhere, a 401 releases the mic and backs off).
-- [ ] `voice.state` relay exactly as `backend/nodes/reference/node.py`
+      written anywhere, a 401 releases the mic and backs off). **2026-11-27:
+      done; the testable parts live in `Sources/NodeCore/Voice/` (the core,
+      the child host, the audio engine behind `VoiceAudioIO`, the indicator,
+      the settings, the credential, `VoiceService`), only `Hotkey.swift` and
+      the "Ses" menu in `App/FridayNode/Voice/` (Phase 11 brief, M1 record).
+      The real microphone, AEC and speakers are exercised only by owner
+      steps (contract tests 4 and 5).**
+- [x] `voice.state` relay exactly as `backend/nodes/reference/node.py`
       `relay_voice_state` (coalesced ≤ 1/s, v2 only, after `hello.ack`,
       validated against `$defs.voice_state_item`, re-sent with every
       heartbeat and after reconnect, never spooled); the `Conformance`
       build's `{"op": "voice_state", …}` hook op and the
-      `voice_states_dropped` report key.
-- [ ] `release_mic(storm)` releases the mic and shows `storm_muted` until a
-      mute on → off cycle.
-- [ ] Microphone entitlement and TCC usage string; a new notarised build.
+      `voice_states_dropped` report key. **2026-11-27: the session-side
+      relay (`NodeSession.relayVoiceState`), the hook op and the report key
+      landed with B5, because B5's contract test 1 plays every `cases/v2`
+      file (the nine voice-state cases pass offline and live); what is left
+      here is feeding it from `VoiceChildHost`.** **2026-11-27: fed from
+      `VoiceService` (each child `state` → `NodeRunner.relayVoiceState`).**
+- [x] `release_mic(storm)` releases the mic and shows `storm_muted` until a
+      mute on → off cycle. **2026-11-27: the host releases at once; the child
+      re-arms only after the cycle (`VoiceServiceTests`).**
+- [ ] Microphone entitlement (`com.apple.security.device.audio-input`,
+      checked in A1) and TCC usage string; a new build signed with the same
+      Personal Team identity (`scripts/build-sign-local.sh`). **2026-11-27:
+      entitlement, `NSMicrophoneUsageDescription`, the signing allowlist and
+      `EntitlementAllowlistTests` updated together; the signed build and the
+      mic TCC grant are owner steps (not run in the session).**
 
 **Server-side contract tests it must pass:**
 
@@ -723,16 +1192,33 @@ Needs: B1–B3, B5 merged; A7, A8, A10. Spec: Phase 11 brief "Mac session
 Needs: B7. Spec: Phase 11 brief M3, `node/friday-voice/friday_voice/selftest.py`,
 `docs/voice/live-eval.md` §4.
 
-- [ ] `friday-node voice-loopback`: one PCM WAV on stdin → played through
+- [x] `friday-node voice-loopback`: one PCM WAV on stdin → played through
       the same voice-processing graph → AEC-cleaned capture (clip + 1 s)
       as 16 kHz mono PCM16 WAV on stdout; exit 0 (non-zero on any audio or
       TCC failure); never writes audio to disk; releases the mic.
-- [ ] Token hand-over: the host mints a fresh `node_voice` token into a
-      0600 file for `--token-file`, deleted after the run.
+      **2026-11-27 (`feat/p11-node-voice-loopback`): code done. The CLI is a
+      client of the running app (`VoiceSelftestSocket`), which plays and
+      captures on B7's `AVAudioVoiceEngine`: a launchd job's processes have
+      no Microphone grant of their own (TCC attributes them to the job), the
+      app has it (README "Nightly self-trigger"). Logic in
+      `NodeCore/Voice/VoiceLoopback.swift` behind `VoiceAudioIO`; stable
+      codes on stderr (exit 2–6). The real mic and speakers: owner step.**
+- [x] Token hand-over: the host mints a fresh `node_voice` token into a
+      0600 file for `--token-file`, deleted after the run. **2026-11-27:
+      `friday-node voice-token --out <file>` / `--end <file>`; the app mints
+      (the node secret is in the app's data protection keychain group, which
+      the CLI cannot read), the CLI creates the file new and 0600; the
+      script's trap deletes it. Off until "Ses" → "Gece öz-testi" (Touch
+      ID).**
 - [ ] `selftest-nightly.sh` (skips on battery) and
       `~/Library/LaunchAgents/ai.friday.voice-selftest.plist` (03:17
       nightly) from `docs/voice/live-eval.md`;
       `launchctl load -w ~/Library/LaunchAgents/ai.friday.voice-selftest.plist`.
+      **2026-11-27: `node/friday-node/scripts/selftest-nightly.sh`, the
+      plist template and `install-voice-selftest.sh` (copies, renders, never
+      loads) done; installing and loading (`launchctl bootstrap
+      gui/$(id -u) …`, the same as `load -w`) are owner steps, not run in
+      the session.**
 
 **Contract test:** the `CommandLoopback` tests (loopback section of
 `node/friday-voice/tests/test_selftest.py`) with the real binary in place of
@@ -745,6 +1231,13 @@ uv run friday-voice selftest --nightly --server <https url> --token-file <0600 f
   --loopback-cmd "<path>/friday-node voice-loopback"
 ```
 
+**2026-11-27:** the contract tests run with `FRIDAY_NODE_LOOPBACK_CMD` set
+to a DEBUG build's `friday-node voice-loopback --debug-echo-engine` (no
+device; the flag is DEBUG-only and `check-release-markers.sh` refuses it):
+pass. The run with the real binary, speakers and AEC (the app running,
+"Gece öz-testi" on; the token from `friday-node voice-token --out`) is an
+owner step: Phase 11 brief, M3 code-half record.
+
 ---
 
 ## Part C — Measurements and go/no-go evaluations (real hardware, real data)
@@ -756,10 +1249,11 @@ in the record, with the dominant stage named.
 
 ### C1. Phase 5 — real stack and real credentials
 
-- [ ] `make up && make frontend-build && make preflight` with
+- [x] `make up && make frontend-build && make preflight` with
       `PREFLIGHT_BFF_URL` (the running frontend) and
       `PREFLIGHT_FRONTEND_BUILD_ID_FILE` (its `.next/BUILD_ID`): 0 fail;
       record the summary line in the Phase 5 brief §10.
+      Done 2026-11-27: `49 pass / 0 fail / 30 warn` (recorded there).
 - [ ] `OPENROUTER_API_KEY` in `deploy/docker/.env`, re-run
       `seed_ai_defaults` (or enable the `openrouter` row), `make preflight`:
       `provider:openrouter` passes and one `ops.preflight` `ModelUsage` row
@@ -786,7 +1280,7 @@ in the record, with the dominant stage named.
 
 Needs: A7, A8, A11.
 
-- [ ] **A1 spike (paid):** one real OpenRouter STT call (30 s WAV) and one
+- [ ] **Phase 6 OpenRouter audio spike (paid; Phase 6 "A1"):** one real OpenRouter STT call (30 s WAV) and one
       TTS call; confirm `usage.cost`, the PCM `Content-Type` rate,
       `/generation?id=` `total_cost`, and which voices speak Turkish;
       correct seeded prices/model ids if needed.
@@ -858,9 +1352,10 @@ Needs: A7, A8, A11.
 
 ### C4. Phase 9 M4 — node measurements (after B1–B3)
 
-- [ ] **TCC across updates:** install notarised build N, grant Screen
-      Recording; install build N+1 signed by the same Developer ID; the
-      grant stays and titles are still returned.
+- [ ] **TCC across rebuilds:** install build N signed with the Personal
+      Team identity, grant Screen Recording; install build N+1 signed by
+      the same Personal Team identity (same designated requirement as
+      recorded in A1); the grant stays and titles are still returned.
 - [ ] **Keychain half of spike S9.0:** the secret survives a reboot;
       rotation updates the Keychain item in place; deleting the item forces
       re-pair; `grep -r jnd_ ~/Library` finds nothing.
@@ -935,7 +1430,7 @@ Commands: `docs/runbooks/memory-eval.md` §4–§6.
 - [ ] **M4:** confirmation window latency invoke → shown ≤ 1 s (p95 over
       20 runs); kill switch and socket loss close an open window ≤ 2 s and
       stop a running command ≤ 6 s; Accessibility and Automation grants
-      survive an update signed by the same Developer ID; a real `pytest` of
+      survive a rebuild signed by the same Personal Team identity; a real `pytest` of
       a registered repo under `srt` with network denied completes and
       streams, and a test that opens a socket fails.
 - [ ] `make preflight` on the dev stack with the Mac node: every control
@@ -984,8 +1479,8 @@ Commands: `docs/runbooks/memory-eval.md` §4–§6.
       `BARGE_IN_VAD` / guard values against the voice-processing AEC (a
       change is a code change in `friday_voice/config.py`).
 - [ ] **CPU:** the child with always-on wake < 10% of one core at rest.
-- [ ] **TCC:** the Microphone grant survives an update signed by the same
-      Developer ID.
+- [ ] **TCC:** the Microphone grant survives a rebuild signed by the same
+      Personal Team identity.
 - [ ] `manage.py preflight`: record the live-voice rows.
 
 ### C8. Phase 12 M1 — spoken digest and wake routes on the Mac (after B7)
@@ -1047,7 +1542,7 @@ Mac. They are collected here from the same briefs.
       regenerate the `self` snapshot:
       `cd backend && uv run python manage.py build_self_sources`.
 - [ ] **D4 Merge to `main`.** After the integration branch's review and a
-      green CI, merge `claude/inspiring-franklin-pw7avo` to `main`; close
+      green CI, merge `integ/phase-13` to `main`; close
       the former repository's PR #29 with a pointer to the Phase 5 brief
       §10. Then the history rewrite and the move described in
       `.swarm/README.md` and `docs/runbooks/rename-jarvis-to-friday.md`.
@@ -1085,6 +1580,219 @@ Mac. They are collected here from the same briefs.
 
 ---
 
+## Part E — Phase 13 home hub (added 2026-11-26)
+
+Source: `docs/prompts/phase-13-home-hub/brief.md` ("Mac session
+(deferred)" M1–M3), ADR-017, `docs/runbooks/home-server-setup.md`.
+Phase 13 adds **no protocol surface**: no WS message, no schema field, no
+capability contract, no `friday-voice/v1` change. The node conformance
+suite and `node/friday-voice/conformance.lock` stay as they are; every
+item below must leave them unchanged.
+
+- [x] **E0 Phase 13 server side (`chore/p13-closeout`, 2026-11-20).**
+      Branches 1–7 and the closeout are on the integration branch, and the
+      contract tests E1–E3 name are committed and green here:
+      `nodes/tests/test_pairing_platform.py`,
+      `assistant/tests/test_which_pc.py`,
+      `assistant/tests/test_home_routes_node_voice.py`,
+      `ops/tests/test_home_hub_e2e.py` (reference node v2 as the MacBook +
+      the packaged Linux node on one live TLS server; voice origin; the TV
+      approved once; backup → drill), `ops/tests/test_home_backup_restore.py`.
+      The protocol is unchanged: `node_protocol_frozen` (preflight) hashes
+      the node protocol files and `node/friday-voice/conformance.lock`
+      against the Phase 12 closeout. Open for the owner before E2/E3: how
+      `/api/v1/nodes/pair` and `/api/v1/auth/nodes/credential/rotate` reach
+      Django through the home Caddy (Phase 13 brief, closeout owner steps).
+- [x] **E1 Phase 13 M1 — `feat/p13-node-app-pairing-platform` (Swift,
+      after B1).** In `node/friday-node/`:
+      `Pairing/PairingRequest.swift` sends `"platform": "macos"` in the
+      pairing body; `Settings/ServerAddress.swift` +
+      `Settings/ServerAddressView.swift` add "Sunucu adresini değiştir"
+      behind LocalAuthentication (Touch ID / macOS password) — the new base
+      URL is stored locally, the signing-key pin and the TLS pin (SPKI or
+      private CA) are **kept**, and a server whose pins differ is refused
+      before `hello` ("Sunucu kimliği değişti — yeniden eşleştirin"); the
+      menu shows the connected server host from local settings only. No
+      server message may change the address (ADR-013 decision 5).
+      **Must pass:** `cd backend && uv run pytest -q
+      nodes/tests/test_pairing_platform.py` (Phase 13 branch 1);
+      `uv run python manage.py node_conformance_server --external
+      --tls-self-signed --protocol 2 --hook-socket /tmp/friday-conformance-hook.sock`
+      all green (policy-mutation family included);
+      `uv run python manage.py build_node_conformance --check` unchanged;
+      behaviour identical to `friday-node-linux config set server-url`
+      (`node/friday-node-linux/tests/test_daemon_failclosed.py`, branch 4);
+      `swift test` green.
+      **Implemented 2026-11-27 on `feat/p13-node-app-pairing-platform`
+      (awaits the independent Sonnet 5 review).** Files follow the
+      package's flat layout, not the names above: the body is
+      `PairingRequest.body` in `Sources/NodeCore/Pairing.swift` (it already
+      sent `platform: "macos"` since B1; now pinned by a test); the logic is
+      `Sources/NodeCore/ServerAddress.swift` (`ServerAddress.check`,
+      `TLSPinProbe`, `ServerAddressEditor`, `NodeRunner.repoint`); the view is
+      `App/FridayNode/ServerAddressWindow.swift`; the menu gains "Sunucu:
+      <host>" and "Sunucu adresini değiştir…". The address is the Keychain
+      credential's `serverURL`, the one value the WebSocket, rotation, the B7
+      voice mint and the B8 selftest mint all read. Order as Linux: URL
+      check → Touch ID / password → TLS handshake against the stored SPKI pin
+      (nothing sent) → save, every pin kept; a refusal changes nothing. At
+      run time a server off the pin is refused in the handshake (no upgrade
+      request, no Bearer, no `hello`), the menu shows "Sunucu kimliği
+      değişti — yeniden eşleştirin" and the node retries the same address
+      with backoff (no fallback), as the Linux daemon does. Green: `swift
+      test` (294, 3 env-gated skips), Conformance / Release builds, the
+      release hygiene + entitlement tests, `check-release-markers.sh`,
+      `vendor_protocol.py --check`, `test_pairing_platform.py` (18), live
+      conformance on :8766 protocol 2 (99/99) and protocol 1 (86/86)
+      including the policy-mutation family, `build_node_conformance --check`
+      unchanged. Owner step: try the menu item on the installed app (Phase 13
+      brief, M1 implementation record).
+- [ ] **E2 Phase 13 M2 — multi-node and home routes on real hardware
+      (after E1, B2–B3, B7 and Phase 13 branches 2, 3, 4, 6).** Pair the
+      MacBook and one real Linux PC (`friday-node-linux`) to the home
+      server; set names, rooms and roles on `/devices`; HUD shows both,
+      a disconnected PC goes `offline` within 45 s; by voice on the Mac,
+      ten un-named reads resolve to the MacBook and ten naming the Linux
+      PC resolve to it — **zero wrong-node chain rows**; typed with both
+      idle → the ask template, nothing invoked; "Hey Friday, salondaki
+      TV'yi aç", "TV'nin sesini kıs", "film gecesi modunu aç" → draft
+      cards only, one HA call each after on-screen approval; STT misses
+      recorded as text, fixed with owner aliases. **Contract:**
+      `assistant/tests/test_which_pc.py`,
+      `assistant/tests/test_home_routes_node_voice.py`,
+      `ops/tests/test_home_hub_e2e.py`. Record in the Phase 13 brief's
+      "Go/no-go record".
+- [ ] **E3 Phase 13 M3 — the home server on the owner's PC (owner
+      hardware, not the Mac; after Phase 13 branch 7).** Run
+      `docs/runbooks/home-server-setup.md` steps 1–9: LUKS, DHCP
+      reservation, `friday-home.local`, the stack with `compose.home.yml`,
+      Caddy with the private CA bound to the LAN address, `ufw` LAN-only,
+      nightly age + restic backups to the chosen off-site target (or a
+      second disk recorded as "off-site pending"), the first restore drill
+      and one drill from the off-site copy. Keep the CA root key and the
+      age private key **off** the server. Then re-pair (or re-point with
+      E1) the Mac node to the home server. `make preflight`: every
+      `home_*` row pass.
+- [ ] **E4 Phase 13 owner steps.** The brief's "Owner steps (pending)":
+      the Sonnet 5 plan review, the ADR-017 numbering confirmation (the
+      task text said ADR-016, which is Phase 12's), the defaults, the
+      off-site target and LUKS unlock choices, allowlisting the HA
+      entities after branch 5 (no HA call is possible before that), and
+      the two-week go/no-go record.
+
+A **Windows node** is not part of Phase 13 (stub README only,
+`node/friday-node-windows/README.md` after branch 4); it needs its own
+brief (d1: Tauri v2) and must pass the same conformance suite.
+
+---
+
+## Part F — Phase 13b owner decisions: interim Mac server, R2, the real TV (added 2026-11-20 by `chore/p13b-closeout`)
+
+Source: `docs/prompts/phase-13b-home-decisions/brief.md` ("Mac session
+(deferred)" M1–M3), ADR-017 (amendment of 2026-11-26), ADR-018 (the
+direct-execute home media class), `docs/runbooks/home-server-setup.md`
+("Interim: server on the MacBook", step 8 R2, step 1 TPM). Phase 13b
+changes **no protocol surface and no Swift code**: the Mac session uses
+the existing `friday-node` app. `node_protocol_frozen` must still pass
+after every item. Check out `integ/phase-13` (or `main` after the owner's
+merge).
+
+- [x] **F0 Phase 13b server side (`chore/p13b-closeout`, 2026-11-20).**
+      Branches 1a–1d and 2 and the closeout are on the integration branch
+      and the contract tests F1–F3 name are committed and green here
+      (against the fake Home Assistant, the Phase 11 reference voice host,
+      a real `friday-voice run` child, a PATH shim for the macOS tool set
+      and `plistlib` for the LaunchAgent). Preflight shows
+      `home_server_platform` (`check_home`) and `ha_direct_media`
+      (`check_home_direct`).
+- [ ] **F1 Phase 13b M1 — the interim server on the MacBook (owner's Mac;
+      runbook "Interim" I1, I2, I4 optional, I5).**
+      1. FileVault on (`fdesetup status`); OrbStack or Docker Desktop;
+         Homebrew `bash age restic caddy`.
+      2. `deploy/docker/.env`: `HOME_SERVER_PLATFORM=macos`,
+         `HOME_BACKUP_HOST_DIR`, `HOME_FDE_CONFIRMED_ON`,
+         `DJANGO_ALLOWED_HOSTS` with the Mac's `.local` name;
+         `make up-mac-server`.
+      3. R2: a bucket and a bucket-scoped token;
+         `~/.config/friday-backup/restic.env` from
+         `deploy/home/restic.env.example` (the five names, host only —
+         never in `deploy/docker/.env`); `restic init`;
+         `HOME_BACKUP_OFFSITE_REPOSITORY` in `deploy/docker/.env`.
+      4. The LaunchAgent `deploy/home/macos/com.friday.backup.plist`
+         (`launchctl bootstrap gui/$UID …`); one manual run; close the lid
+         overnight once and confirm the catch-up run on wake
+         (`~/Library/Logs/friday-backup.log`, `status.json`).
+      5. The first restore drill, and one from the R2 copy.
+      6. `make preflight`: no `fail` row caused by macOS;
+         `home_server_platform` and `home_disk_encryption` warn (FileVault
+         is an owner attestation); `home_backup_fresh` pass ending
+         ", off-site R2"; `home_restore_drill_age` pass.
+      **Contract (green here):** `ops/tests/test_preflight_home_macos.py`,
+      `ops/tests/test_preflight_home_offsite.py`,
+      `ops/tests/test_home_backup_portable.py`,
+      `ops/tests/test_launchd_plist.py`,
+      `ops/tests/test_no_bucket_secrets_in_compose.py`,
+      `config/tests/test_compose_files.py` (the `up-mac-server` merge),
+      and `ops/tests/test_home_direct_e2e.py::test_a_macos_preflight_with_r2_status_files_has_no_fail_and_direct_media_passes`.
+      Record in the Phase 13b brief's "Go/no-go record" (M1 row).
+- [ ] **F2 Phase 13b M2 — the Mac's own node and the real TV (owner's
+      Mac; after F1, Part B B1, B7; go/no-go).**
+      1. Pair the MacBook's `friday-node` with the server on the same
+         machine over the loopback TLS path (runbook I3: `make local-tls`,
+         strong code, typed pin, `https://127.0.0.1:8443`); `node_link`
+         connected, `node_tls_pin` pass.
+      2. On `/connectors` → Home Assistant, flag the real TV "Doğrudan
+         (onaysız)" (the confirmation names its services); set the volume
+         maximum. The HUD line reads "Doğrudan medya: açık · 1 cihaz".
+         `make preflight`: `ha_direct_media` pass.
+      3. By voice on the Mac (real mic, the Phase 11 voice host): "TV'yi
+         duraklat", "devam ettir", "durdur", "sesi kıs", "sesi yüzde 90'a
+         ayarla" → each one Home Assistant call, no card; record the time
+         from end of speech to the TV reacting, and that 90 % became the
+         maximum ("Ses en fazla %60 olabilir; %60'a ayarladım.").
+      4. "Salondaki TV'yi aç" → a card (power is gate-class); an unflagged
+         speaker → a card ("Doğrudan değil: işaretli değil").
+      5. Tap "Doğrudan medyayı kapat" → the HUD goes "kapalı" and the next
+         utterance is a card ("Doğrudan değil: doğrudan medya kapalı");
+         tap it back. Say eleven volume commands within a minute → the
+         eleventh is a card.
+      6. Review `/connectors` "Son doğrudan çağrılar" and the audit log
+         (`ha.direct_call`): every row has origin `node`, the Mac's node id
+         and the right entity.
+      **Contract (green here; the Swift node must pass it unchanged):**
+      `ops/tests/test_home_direct_e2e.py` (node_voice through the
+      reference voice host + a real `friday-voice run` child, web voice and
+      typed direct; unflagged → card → approval → one call; the kill switch
+      on `/connectors`; the eleventh call; the 0.6 clamp;
+      `node_protocol_frozen`), `ops/tests/test_home_direct_voice_e2e.py`,
+      `assistant/tests/test_home_direct_node_voice.py`,
+      `assistant/tests/test_home_direct_provenance.py`,
+      `connectors/tests/test_home_direct_rate_limit.py`. Run them with
+      `cd backend && uv run pytest -q <paths>` (`node/friday-voice` synced:
+      `uv sync --frozen` there, or `FRIDAY_VOICE_E2E=1` makes a missing
+      environment a failure). Record in the Phase 13b brief's "Go/no-go
+      record" (M2 rows), and after two weeks the audit review row.
+- [ ] **F3 Phase 13b M3 — the home PC with TPM unlock; move off the Mac
+      (owner hardware, not the Mac).** Buy the PC; runbook steps 0–6 with
+      step 1's TPM enrolment (recovery key first, kept off the server;
+      `systemd-cryptenroll --tpm2-device=auto --tpm2-pcrs=7`; `dracut`), a
+      reboot that unlocks without a prompt and one that asks after a Secure
+      Boot change; then "Interim" I6: a final backup on the Mac, restore on
+      the PC, the same `NODE_SIGNING_KEY` and CA, re-point (Part E E1) or
+      re-pair the Mac node, unload the LaunchAgent,
+      `HOME_SERVER_PLATFORM=linux`. Never run both servers. `make
+      preflight`: every `home_*` row and `ha_direct_media` pass.
+- [ ] **F4 Phase 13b owner steps.** The brief's "Owner steps (pending)"
+      lists (one per branch): the Sonnet 5 reviews, confirming ADR-018 and
+      the CLAUDE.md rule 4 sentence, the defaults (30/min global, 10/min
+      per entity, volume maximum 0.6, `volume_up` headroom 0.1, "durdur" →
+      `media_pause` (owner 2026-11-27; English "stop" stays `media_stop`),
+      rate-limit overflow → card; ADR-018, the rule 4 sentence and these
+      defaults are CONFIRMED by the owner 2026-11-27), the UI wording, the
+      R2 bucket, and the two-week go/no-go record.
+
+---
+
 ## Closing the Mac session
 
 - [ ] Every B branch merged after its review reached APPROVE, with
@@ -1103,9 +1811,11 @@ Mac. They are collected here from the same briefs.
 1. Run the independent Sonnet 5 review of this branch (CLAUDE.md
    "Reviews") and fix findings until APPROVE.
 2. Start the Mac session with this file as its task list (Parts A → B →
-   C), once A1 (Apple Developer enrolment) is complete.
+   C), starting with A1, the Personal Team signing spike (d9 revised
+   2026-11-25; no paid enrolment unless the spike falls back to A1-F).
 3. Close the three server-side gaps found while writing this handoff
-   (A10 `make voice-models --node` has no implementation, A11 Phase 6
+   (A10 the node model fill had no implementation, now `make
+   voice-models-node`; A11 Phase 6
    branch 3a, A12 the `nodes`-backed transcript port). None needs the Mac;
    each is its own branch.
 

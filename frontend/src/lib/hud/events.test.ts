@@ -99,6 +99,19 @@ describe("applyHudFrame", () => {
     // A delta before any snapshot has nothing to apply to.
     expect(applyHudFrame(null, { type: "delta", approvals })).toBeNull();
   });
+
+  it("carries the Phase 13 nodes section through snapshots and deltas", () => {
+    // A backend without the section: empty rows.
+    const first = applyHudFrame(null, { type: "snapshot", workspace: "w1", interval_seconds: 5, ...SAMPLE });
+    expect(first?.nodes).toEqual({ items: [], total: 0, online: 0 });
+    const nodes = { items: [], total: 2, online: 1 };
+    const parsed = parseHudFrame(frame({ type: "delta", nodes }).trim());
+    expect(parsed).toEqual({ type: "delta", nodes });
+    const next = applyHudFrame(first, parsed!);
+    expect(next?.nodes).toEqual(nodes);
+    // A delta without it keeps the rows.
+    expect(applyHudFrame(next, { type: "delta", cost: SAMPLE.cost })?.nodes).toEqual(nodes);
+  });
 });
 
 describe("HudStream", () => {

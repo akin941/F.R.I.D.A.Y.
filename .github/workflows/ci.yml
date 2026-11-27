@@ -55,6 +55,14 @@ jobs:
       - name: Self sources snapshot check
         run: uv run python manage.py build_self_sources --check
 
+      # Phase 9 M1: the Swift node's vendored copy of the protocol schemas
+      # and capability contracts must equal backend/nodes byte for byte, and
+      # (Phase 11 M1) its copy of the friday-voice/v1 schemas and the
+      # node/friday-voice/uv.lock hash must be current (stdlib only; the
+      # Swift tests run on the Mac, no macOS runner here).
+      - name: Swift node vendored protocol check
+        run: python3 -I ../node/friday-node/scripts/vendor_protocol.py --check
+
       # Phase 10 branch 2: the node conformance cases (v1, v2), the sandbox
       # and streaming-scrub vectors and the vendored node scrubber must match
       # their definitions (the Swift node loads these files), and the escape
@@ -100,6 +108,76 @@ jobs:
           uv run python manage.py migrate --noinput -v 0
           uv run python manage.py seed_ai_defaults
           uv run python manage.py memory_eval baseline --set public --retrieval-only
+
+  # Phase 13 branch 7 (brief D14): the home server's backup and restore
+  # drill scripts, shellcheck-clean, run for real against this job's
+  # Postgres with a throwaway age key and a LOCAL restic repository (no
+  # network, never a bucket). FRIDAY_HOME_OPS=1 turns the module's
+  # "tools missing" skip into a failure.
+  home-ops:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: friday
+          POSTGRES_PASSWORD: friday
+          POSTGRES_DB: friday
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U friday -d friday"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgres://friday:friday@localhost:5432/friday
+      REDIS_URL: redis://localhost:6379/0
+      FRIDAY_HOME_OPS: "1"
+    steps:
+      - uses: actions/checkout@v4
+
+      # Ubuntu 24.04's own packages: postgresql-client is 16 (the service's
+      # major version), age 1.1, restic 0.16.
+      - name: Install age, restic, shellcheck and the Postgres client
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q age restic shellcheck postgresql-client-16
+          pg_dump --version
+
+      - name: Shellcheck the home scripts
+        working-directory: deploy/home
+        run: shellcheck -x friday-backup.sh friday-restore-drill.sh
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      # Phase 13b branch 2: also under the macOS tool-set PATH shim, the
+      # macOS/R2 preflight rows, the LaunchAgent and the bucket-secret guard.
+      - name: Backup -> restore drill round trip, compose guard, home preflight rows
+        run: >-
+          uv run pytest ops/tests/test_home_backup_restore.py
+          ops/tests/test_compose_no_public_ports.py ops/tests/test_preflight_home.py
+          ops/tests/test_home_backup_portable.py ops/tests/test_preflight_home_macos.py
+          ops/tests/test_preflight_home_offsite.py ops/tests/test_launchd_plist.py
+          ops/tests/test_no_bucket_secrets_in_compose.py config/tests/test_compose_files.py
 
   # Phase 11 branch 2 (brief D6, D7, D16): the node voice child. Its own
   # pyproject/uv.lock; imports nothing from backend/. No real model, mic,
@@ -161,6 +239,10 @@ jobs:
         run: uv run python scripts/vendor_scrubber.py --check
       - name: Pipecat surface snapshot check
         run: uv run python scripts/snapshot_pipecat.py --check
+      # Phase 11 M1 (runbook B7): the reference host's barge-in traces the
+      # Swift host's VoiceHostTraceTests replay must match the scripts.
+      - name: Swift voice host traces check
+        run: uv run python ../friday-node/scripts/voice_host_traces.py --check
 
       - name: friday-voice/v1 conformance (reference implementations)
         run: uv run friday-voice conformance
@@ -197,6 +279,87 @@ jobs:
         run: |
           uv sync --frozen
           uv run pytest ops/tests/test_live_voice_e2e.py
+
+  # Phase 13 branch 4 (brief D10): the read-only Linux node. Its own
+  # pyproject/uv.lock; imports nothing from backend/ (the reference node is
+  # vendored and `vendor.lock` fails on drift). The conformance run is the
+  # backend's hostile gateway (`node_conformance_server --external
+  # --tls-self-signed --protocol 1`) against the packaged node over real
+  # localhost TLS. No real server, credential or network beyond localhost.
+  linux-node:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: node/friday-node-linux
+    # The last step runs the backend tests that pair the packaged node with
+    # a live test server and the real gateway process: Postgres + Redis.
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: friday
+          POSTGRES_PASSWORD: friday
+          POSTGRES_DB: friday
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U friday -d friday"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgres://friday:friday@localhost:5432/friday
+      REDIS_URL: redis://localhost:6379/0
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: |
+            node/friday-node-linux/uv.lock
+            backend/uv.lock
+
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      - name: Ruff lint
+        run: uv run ruff check .
+
+      - name: Ruff format check
+        run: uv run ruff format --check .
+
+      - name: Vendored reference node matches backend/ (vendor.lock)
+        run: uv run python scripts/vendor.py --check
+
+      - name: Tests
+        run: uv run pytest
+
+      - name: Backend environment (the hostile gateway runs there)
+        working-directory: backend
+        run: uv sync --frozen
+
+      - name: External conformance (node_conformance_server --external --tls-self-signed --protocol 1)
+        run: uv run python scripts/external_conformance.py
+
+      # FRIDAY_LINUX_NODE=1 makes a missing node environment a failure.
+      - name: Server side (pairing platform=linux, real gateway, node_sessions, policy unchanged)
+        working-directory: backend
+        env:
+          FRIDAY_LINUX_NODE: "1"
+        run: >-
+          uv run pytest nodes/tests/test_linux_node_external.py
+          config/tests/test_linux_node_gateway.py
 
   frontend:
     runs-on: ubuntu-latest

@@ -140,3 +140,41 @@ class FirmWorkspaceCreateSerializer(serializers.Serializer):
         if not value:
             raise serializers.ValidationError("Name cannot be blank.")
         return value
+
+
+# --- rooms (Phase 13 D2) ---
+
+# Transport bounds only: the label rules (length, keys, limits, conflicts)
+# are `workspaces.rooms`'s, so a direct service caller gets the same answer.
+_LABEL_TRANSPORT_MAX = 200
+
+
+class RoomSerializer(serializers.Serializer):
+    id = serializers.UUIDField(read_only=True)
+    name = serializers.CharField(read_only=True)
+    key = serializers.CharField(read_only=True)
+    aliases = serializers.ListField(child=serializers.CharField(), read_only=True)
+    sort_order = serializers.IntegerField(read_only=True)
+    created_at = serializers.DateTimeField(read_only=True)
+    updated_at = serializers.DateTimeField(read_only=True)
+
+
+class RoomWriteSerializer(serializers.Serializer):
+    """`POST` (name required) and `PATCH` (partial) body of a room."""
+
+    name = serializers.CharField(
+        max_length=_LABEL_TRANSPORT_MAX, trim_whitespace=False, allow_blank=True
+    )
+    aliases = serializers.ListField(
+        child=serializers.CharField(
+            max_length=_LABEL_TRANSPORT_MAX, trim_whitespace=False, allow_blank=True
+        ),
+        max_length=20,
+        required=False,
+    )
+    sort_order = serializers.IntegerField(min_value=0, max_value=32767, required=False)
+
+    def validate(self, attrs):
+        if self.partial and not attrs:
+            raise serializers.ValidationError("Provide `name`, `aliases` and/or `sort_order`.")
+        return attrs

@@ -127,6 +127,11 @@ class ToolPolicy:
     # Phase 12 D12: a write whose draft card carries router-extracted
     # arguments (`tools.registry.DraftArguments`). Writes only.
     draft_arguments: bool = False
+    # Phase 13 D11: sync reads of native bridges only --
+    # `(workspace, structured) -> structured`, Friday's own per-workspace
+    # annotation of the reduced result before it is composed (a Home
+    # Assistant entity's owner-set room and label). Never widens the scope.
+    annotate: Callable[[Any, Any], Any] | None = None
 
     @property
     def display_label(self):
@@ -257,6 +262,10 @@ def _validate_tool(manifest, policy):
         raise ValueError(f"{where}: only a read may be async.")
     if policy.draft_arguments and policy.kind != TOOL_WRITE:
         raise ValueError(f"{where}: draft arguments apply to writes only.")
+    if policy.annotate is not None and (
+        policy.kind != TOOL_READ or policy.mode != READ_MODE_SYNC or manifest.kind != KIND_NATIVE
+    ):
+        raise ValueError(f"{where}: annotate applies to sync reads of native bridges only.")
     if policy.timeout_setting and not _ENV_RE.match(policy.timeout_setting):
         raise ValueError(f"{where}: {policy.timeout_setting!r} is not a settings name.")
     if policy.label and (len(policy.label) > 60 or not policy.label.strip()):

@@ -245,6 +245,7 @@ def classify_intent(
     allowed_intents=None,
     context_report=None,
     channel=None,
+    call_context=None,
 ):
     """Classify a user's chat message into a router intent (MVP 6 §1).
 
@@ -305,7 +306,15 @@ def classify_intent(
     precedes a first personal read runs without it -- it carries only the
     owner's message and tool names, never connector content.
 
-    Returns `{"intent": Message.Intent, "intent_payload": dict}`.
+    `call_context` (Phase 13 D6, a `tools.registry.ToolCallContext`): the
+    owner's own message and, for a `node_voice` turn, the speaking node --
+    what the "which PC" resolver of a node action proposal decides by. When
+    it cannot decide (or the model's node disagrees with the owner's words)
+    the result is plain `chat` carrying `reply_text`, the Friday-authored
+    ask/refusal the view answers with (no chat completion, no draft).
+
+    Returns `{"intent": Message.Intent, "intent_payload": dict}` (plus
+    `reply_text` in that one case).
     """
     from tools.registry import list_read_tools, list_tool_names
 
@@ -369,9 +378,17 @@ def classify_intent(
                 channel=channel,
                 context_report=context_report,
                 personal_data=personal_data,
+                call_context=call_context,
             )
             if proposal is None:
                 return {"intent": Message.Intent.CHAT, "intent_payload": {}}
+            if proposal.get("reply_text"):
+                # Phase 13 D6: "which PC" could not be decided -- no draft.
+                return {
+                    "intent": Message.Intent.CHAT,
+                    "intent_payload": {},
+                    "reply_text": proposal["reply_text"],
+                }
             return {
                 "intent": Message.Intent.TOOL_REQUEST,
                 "intent_payload": {
@@ -380,13 +397,22 @@ def classify_intent(
                     "action_class": proposal["action_class"],
                 },
             }
-        payload = draft_tool_payload(
-            conversation,
-            actor=actor,
-            content=content,
-            tool_name=parsed["tool_name"],
-            context_report=context_report,
-        )
+        try:
+            payload = draft_tool_payload(
+                conversation,
+                actor=actor,
+                content=content,
+                tool_name=parsed["tool_name"],
+                context_report=context_report,
+            )
+        except DraftRefused as refused:
+            # Phase 13 D13: e.g. the model's entity is not the one the owner
+            # named (`target_mismatch`) -- no draft, Friday's own reply.
+            return {
+                "intent": Message.Intent.CHAT,
+                "intent_payload": {},
+                "reply_text": refused.reply,
+            }
         if payload is None:
             return {"intent": Message.Intent.CHAT, "intent_payload": {}}
         return {
@@ -447,7 +473,14 @@ def _node_action_targets_block(targets):
 
 
 def propose_node_action(
-    conversation, *, actor, content, channel, context_report=None, personal_data=False
+    conversation,
+    *,
+    actor,
+    content,
+    channel,
+    context_report=None,
+    personal_data=False,
+    call_context=None,
 ):
     """The D13 argument step of a `node_action` tool request: one cheap
     `router.node_action_args` call that sees only the owner's message and
@@ -462,7 +495,14 @@ def propose_node_action(
     the actions view (confirm class), which re-validate everything.
     Phase 11 D4: the node voice channel proposes too ("testleri çalıştır"
     said to the Mac) -- still a draft card, clicked on screen; the trust
-    check caps it at `warn` (`voice_evidence`)."""
+    check caps it at `warn` (`voice_evidence`).
+
+    Phase 13 D6: the validator also resolves "which PC" from `call_context`
+    (the owner's message, the speaking node); the targets block names each
+    node's name, room, role and platform as data (the prompt text, purpose
+    and prompt version are unchanged). A validator refusal returns
+    `{"reply_text": ..., "refusal": code}`: no draft, the turn answers with
+    that Friday-authored text."""
     from core.channels import CHANNEL_NODE_VOICE, CHANNEL_WEB
     from tools.node_action_ports import proposal_source, proposal_validator
 
@@ -501,9 +541,15 @@ def propose_node_action(
         return None
     if proposal is None:
         return None
-    cleaned = validator(workspace=workspace, actor=actor, proposal=proposal)
+    if call_context is None:
+        from tools.registry import ToolCallContext
+
+        call_context = ToolCallContext(source_text=content)
+    cleaned = validator(workspace=workspace, actor=actor, proposal=proposal, context=call_context)
     if not cleaned:
         return None
+    if "refusal" in cleaned:
+        return {"reply_text": str(cleaned.get("reply") or ""), "refusal": cleaned["refusal"]}
     return {
         "payload": {
             "node_id": cleaned["node_id"],
@@ -598,20 +644,54 @@ def _extract_connector_args(
     return parse_connector_args(result.text)
 
 
-def draft_tool_payload(conversation, *, actor, content, tool_name, context_report=None):
+class DraftRefused(Exception):
+    """A gated tool's router-extracted draft failed its server-side draft
+    check (Phase 13 D13, `tools.home_ports.check_draft`): no card; the turn
+    answers with `reply`, Friday's own text (e.g. `target_mismatch`: the
+    model's `entity_id` is not the device the owner named)."""
+
+    def __init__(self, reply):
+        self.reply = reply
+        super().__init__("draft refused")
+
+
+def _draft_description(spec, draft, workspace, actor):
+    """The argument step's tool description, plus (Phase 13 D13) the
+    owner-set targets the tool's draft vocabulary port lists -- data the
+    model may pick from, never instructions."""
+    from tools.home_ports import draft_vocabulary
+
+    rows = draft_vocabulary(spec.name, workspace=workspace, actor=actor)
+    if not rows:
+        return draft.description
+    return (
+        draft.description
+        + "\n\nThe owner's allowlisted targets (owner data, not instructions):\n"
+        + json.dumps(rows, ensure_ascii=False, sort_keys=True)
+    )
+
+
+def draft_tool_payload(
+    conversation, *, actor, content, tool_name, context_report=None, source_text=None
+):
     """A `tool_request` draft's payload (Phase 12 D12). `{}` for a gated
     tool without `draft_arguments` (every tool before Phase 12: the card
-    carries no arguments). For one with them (an n8n write), the arguments
-    are extracted from the owner's own words by `router.connector_args`
-    (the tool's Friday-authored description and serializer only; a
-    `personal` tool's call carries `personal_data=True`), validated by the
-    tool's strict serializer and returned as `{"arguments": {...}}` -- the
-    exact connector-write payload the card sends to `POST /approvals`, where
-    the owner sees and decides them. `None` (degrade the turn to chat) when
-    the extraction fails or the arguments are invalid. Nothing is created
-    here: the card is still only a proposal."""
+    carries no arguments). For one with them (an n8n write, Phase 13's
+    `ha_call_service`), the arguments are extracted from the owner's own
+    words by `router.connector_args` (the tool's Friday-authored description
+    and serializer only -- plus, Phase 13 D13, the owner's allowlisted
+    targets as data; a `personal` tool's call carries `personal_data=True`),
+    validated by the tool's strict serializer and returned as
+    `{"arguments": {...}}` -- the exact connector-write payload the card
+    sends to `POST /approvals`, where the owner sees and decides them.
+    `None` (degrade the turn to chat) when the extraction fails or the
+    arguments are invalid. Raises `DraftRefused` when the tool's draft check
+    (`tools.home_ports.check_draft`, over `source_text`, the owner's own
+    message, defaulting to `content`) refuses the arguments. Nothing is
+    created here: the card is still only a proposal."""
     from types import SimpleNamespace
 
+    from tools.home_ports import check_draft
     from tools.registry import DATA_CLASS_PERSONAL, get_tool
 
     spec = get_tool(tool_name)
@@ -623,7 +703,7 @@ def draft_tool_payload(conversation, *, actor, content, tool_name, context_repor
     )
     described = SimpleNamespace(
         name=tool_name,
-        description=draft.description,
+        description=_draft_description(spec, draft, conversation.workspace, actor),
         argument_serializer=draft.argument_serializer,
     )
     try:
@@ -640,7 +720,17 @@ def draft_tool_payload(conversation, *, actor, content, tool_name, context_repor
     serializer = draft.argument_serializer(data=arguments)
     if not serializer.is_valid():
         return None
-    return {"arguments": json.loads(json.dumps(serializer.validated_data, default=str))}
+    cleaned = json.loads(json.dumps(serializer.validated_data, default=str))
+    refusal = check_draft(
+        tool_name,
+        workspace=conversation.workspace,
+        actor=actor,
+        arguments=cleaned,
+        source_text=content if source_text is None else source_text,
+    )
+    if refusal is not None:
+        raise DraftRefused(refusal)
+    return {"arguments": cleaned}
 
 
 @dataclass
@@ -666,7 +756,14 @@ class ConnectorTurn:
 
 
 def prepare_connector_read(
-    conversation, *, actor, content, channel, tool_name, context_report=None
+    conversation,
+    *,
+    actor,
+    content,
+    channel,
+    tool_name,
+    context_report=None,
+    call_context=None,
 ):
     """Run the one connector read of a `connector_read` turn (D4/D5), in
     this order:
@@ -689,7 +786,13 @@ def prepare_connector_read(
     The result is fenced here (`render_connector_block`) and never stored:
     `Message.connector_reads` keeps bookkeeping only. `context_report`
     (optional, Phase 6 A5) joins the argument call's ModelUsage report --
-    e.g. the voice turn's trace id."""
+    e.g. the voice turn's trace id.
+
+    `call_context` (Phase 13 D6, a `tools.registry.ToolCallContext`) reaches
+    the read tools that accept it (the node reads' "which PC"). A refusal
+    carrying a Friday-authored `reply` (the ask template, a refusal naming
+    the PC) ends the turn with that text as its reply (`reply_text`), not an
+    error: no chat completion, nothing read."""
     from tools.registry import (
         DATA_CLASS_PERSONAL,
         READ_MODE_ASYNC,
@@ -702,7 +805,9 @@ def prepare_connector_read(
     spec = next(
         (
             candidate
-            for candidate in list_read_tools(workspace=conversation.workspace, channel=channel)
+            for candidate in list_read_tools(
+                workspace=conversation.workspace, channel=channel, context=call_context
+            )
             if candidate.name == tool_name
         ),
         None,
@@ -764,9 +869,24 @@ def prepare_connector_read(
             )
         else:
             result = run_read_tool(
-                spec, workspace=conversation.workspace, actor=actor, args=arguments, channel=channel
+                spec,
+                workspace=conversation.workspace,
+                actor=actor,
+                args=arguments,
+                channel=channel,
+                context=call_context,
             )
     except ReadToolError as exc:
+        if getattr(exc, "reply", ""):
+            # Phase 13 D6: "which PC?" (or a refusal naming the PC) -- the
+            # turn's reply is Friday's fixed text, nothing was read.
+            return ConnectorTurn(
+                tool_name=tool_name,
+                outcome=exc.code,
+                reply_text=exc.reply,
+                tool_label=spec.display_label,
+                source=spec.source,
+            )
         if exc.code in _INVALID_ARGUMENT_CODES:
             error_type = CONNECTOR_ERROR_INVALID_ARGUMENTS
         elif exc.code == "reconnect_required":
@@ -832,6 +952,9 @@ def prepare_connector_read(
 # inheriting voice access by accident.
 EFFECT_READ = "read"
 EFFECT_PROPOSAL = "proposal"
+EFFECT_DIRECT_HOME = "direct_home"
+# The one tool a `direct_home` classification may name (ADR-018).
+HOME_DIRECT_TOOL = "ha_call_service"
 INTENT_EFFECTS = {
     Message.Intent.CHAT: EFFECT_READ,
     Message.Intent.MEMORY_QUERY: EFFECT_READ,
@@ -843,8 +966,17 @@ INTENT_EFFECTS = {
     # turns into an approval request by click, decided on /approvals.
     Message.Intent.TASK_DRAFT: EFFECT_PROPOSAL,
     Message.Intent.TOOL_REQUEST: EFFECT_PROPOSAL,
+    # Phase 13b D10 (ADR-018): one card-less Home Assistant media call on an
+    # owner-flagged entity -- the single, closed exception to "a voice turn
+    # reads and proposes only". Code-only (D10a): never a router result.
+    Message.Intent.HOME_DIRECT: EFFECT_DIRECT_HOME,
 }
-VOICE_ALLOWED_EFFECTS = frozenset({EFFECT_READ, EFFECT_PROPOSAL})
+# ADR-015 decision 1 with ADR-018's one exception: `direct_home` is admitted
+# for a voice turn only as a `ha_call_service` classification (the cap
+# clause below); the chat view runs it only with the code-only provenance
+# marker (`is_code_home_direct`), and the executor then re-resolves the
+# stored words and re-runs ADR-018's classifier before the one send.
+VOICE_ALLOWED_EFFECTS = frozenset({EFFECT_READ, EFFECT_PROPOSAL, EFFECT_DIRECT_HOME})
 _CHAT_RESULT = {"intent": Message.Intent.CHAT, "intent_payload": {}}
 
 
@@ -867,7 +999,197 @@ def apply_voice_capability_cap(classification, *, input_mode):
         tool_name = (classification.get("intent_payload") or {}).get("tool_name")
         if get_read_tool(tool_name) is None:
             return dict(_CHAT_RESULT)
+    if intent == Message.Intent.HOME_DIRECT:
+        # ADR-018: the direct effect only ever names Home Assistant's call
+        # service; anything else is plain chat.
+        tool_name = (classification.get("intent_payload") or {}).get("tool_name")
+        if tool_name != HOME_DIRECT_TOOL:
+            return dict(_CHAT_RESULT)
     return classification
+
+
+# --- Phase 13b D10/D10a: the direct home-media turn (ADR-018) ---
+
+# D10a lock 2: the in-process provenance marker of a code-built `home_direct`
+# classification -- an object, compared by identity, under a key JSON can
+# never carry: router output is a parsed JSON dict and so can never hold it.
+# Never serialised: `strip_provenance` removes it before the `Message` row is
+# saved.
+_CODE_ORIGIN = object()
+PROVENANCE_KEY = "_provenance"
+
+ORIGIN_VOICE = "voice"
+ORIGIN_NODE = "node"
+ORIGIN_CHAT = "chat"
+
+# Fixed Friday texts of the direct turn's fallbacks (no model call).
+DIRECT_FALLBACK_REPLY = "Bunu doğrudan yapmadım; onay kartı ekranda."
+DIRECT_ERROR_REPLY = "Komutu gönderirken bir sorun oldu; komut gitmiş olabilir, tekrar denemedim."
+DIRECT_NOT_RESOLVED_REPLY = "Bunu doğrudan yapmadım; isteğini yeniden söyler misin?"
+
+
+def direct_origin(*, channel, input_mode):
+    """The ADR-018 origin of a turn (server-side, never client-asserted):
+    `node` for a paired node's voice channel, `voice` for web voice, `chat`
+    for a typed web turn; None for every other channel."""
+    from core.channels import CHANNEL_NODE_VOICE, CHANNEL_WEB
+
+    if channel == CHANNEL_NODE_VOICE and input_mode == Message.InputMode.VOICE:
+        return ORIGIN_NODE
+    if channel == CHANNEL_WEB and input_mode == Message.InputMode.VOICE:
+        return ORIGIN_VOICE
+    if channel == CHANNEL_WEB and input_mode == Message.InputMode.TEXT:
+        return ORIGIN_CHAT
+    return None
+
+
+def home_direct_classification(resolution, *, origin, node_id=None):
+    """The single factory of a `home_direct` classification (D10a lock 2):
+    the resolver's exact draft arguments plus the code-only marker. Called
+    by the `home.control` route and `route_typed_home_direct` only."""
+    return {
+        "intent": Message.Intent.HOME_DIRECT,
+        "intent_payload": {
+            "tool_name": resolution.tool_name,
+            "arguments": dict(resolution.arguments),
+            "origin": origin,
+            "node_id": node_id,
+        },
+        PROVENANCE_KEY: _CODE_ORIGIN,
+    }
+
+
+def is_code_home_direct(classification):
+    """A `home_direct` classification built by Friday's code: the marker by
+    identity, never by value."""
+    return (
+        isinstance(classification, dict)
+        and classification.get("intent") == Message.Intent.HOME_DIRECT
+        and classification.get(PROVENANCE_KEY) is _CODE_ORIGIN
+    )
+
+
+def strip_provenance(classification):
+    """The classification without the marker (what may be persisted)."""
+    return {k: v for k, v in classification.items() if k != PROVENANCE_KEY}
+
+
+def classify_direct_draft(resolution, *, workspace, actor, channel, input_mode):
+    """ADR-018's admission verdict for a resolver draft, through the port
+    (never direct without a registered classifier). Read-only."""
+    from tools.home_ports import classify_home_direct
+
+    return classify_home_direct(
+        workspace=workspace,
+        actor=actor,
+        arguments=dict(resolution.arguments),
+        origin=direct_origin(channel=channel, input_mode=input_mode),
+        channel=channel,
+        input_mode=input_mode,
+    )
+
+
+def route_typed_home_direct(conversation, *, actor, content, channel, input_mode, node_id=None):
+    """D10: the typed pre-router step. For a typed web turn of the workspace
+    owner whose words the deterministic home matcher resolves to one draft
+    that ADR-018 admits as direct, the `home_direct` classification (no
+    `router.intent` call). Anything else -- a miss, an ask, a refusal, a
+    non-direct draft, another channel -- is None and the turn goes to the
+    router exactly as in Phase 13."""
+    from core.channels import CHANNEL_WEB
+    from tools.home_ports import OUTCOME_DRAFT, resolve_home_command
+
+    if channel != CHANNEL_WEB or input_mode != Message.InputMode.TEXT:
+        return None
+    workspace = conversation.workspace
+    if (
+        actor is None
+        or not getattr(actor, "is_authenticated", False)
+        or getattr(actor, "is_agent", False)
+        or str(workspace.owner_id) != str(actor.pk)
+    ):
+        return None
+    resolution = resolve_home_command(workspace=workspace, actor=actor, text=content)
+    if resolution is None or resolution.outcome != OUTCOME_DRAFT:
+        return None
+    if resolution.tool_name != HOME_DIRECT_TOOL:
+        return None
+    verdict = classify_direct_draft(
+        resolution, workspace=workspace, actor=actor, channel=channel, input_mode=input_mode
+    )
+    if not verdict.direct:
+        return None
+    return home_direct_classification(
+        resolution, origin=direct_origin(channel=channel, input_mode=input_mode), node_id=node_id
+    )
+
+
+@dataclass(frozen=True)
+class DirectTurn:
+    """How the chat view answers a `home_direct` turn: the user message's
+    final intent and payload, and Friday's fixed reply. A `tool_request`
+    intent is the fallback card (nothing was sent)."""
+
+    intent: str
+    intent_payload: dict
+    reply: str
+
+
+def run_direct_turn(classification, *, workspace, actor, message, channel, input_mode, node_id):
+    """The turn's one direct call, through the port, with the saved user
+    `Message` (the executor re-resolves its text, D10a lock 3), and the
+    turn's outcome from the executor's answer:
+
+    - `sent`: the call was attempted -- `home_direct` with the call's id and
+      the executor's fixed reply (a failure after the send is reported,
+      never replaced by a card);
+    - `not_direct`, nothing sent: the `tool_request` card with the
+      executor's (re-resolved) arguments, or -- when the stored words now
+      resolve to an ask or a refusal -- that text with no card;
+    - `error`: the executor raised and may have reached the send: no card,
+      a fixed "may have gone" reply."""
+    from tools.home_ports import (
+        DIRECT_NOT_AVAILABLE,
+        DIRECT_RUN_ERROR,
+        DIRECT_RUN_SENT,
+        run_home_direct,
+    )
+    from tools.registry import list_tool_names
+
+    payload = dict(classification["intent_payload"])
+    run = run_home_direct(
+        workspace=workspace,
+        actor=actor,
+        message=message,
+        origin=direct_origin(channel=channel, input_mode=input_mode),
+        channel=channel,
+        node_id=node_id,
+    )
+    if run.outcome == DIRECT_RUN_SENT:
+        payload.update({"call_id": run.call_id, "outcome": run.outcome})
+        return DirectTurn(Message.Intent.HOME_DIRECT, payload, run.reply or DIRECT_ERROR_REPLY)
+    if run.outcome == DIRECT_RUN_ERROR:
+        payload.update({"outcome": run.outcome, "reason": run.reason})
+        return DirectTurn(Message.Intent.HOME_DIRECT, payload, DIRECT_ERROR_REPLY)
+    arguments = dict(run.arguments or {})
+    tool_name = run.tool_name or HOME_DIRECT_TOOL
+    if not arguments and run.reason == DIRECT_NOT_AVAILABLE and not run.reply:
+        # No (working) executor: nothing was re-resolved or sent; the card
+        # carries the code-built classification's own arguments.
+        arguments = dict(payload.get("arguments") or {})
+    if arguments and tool_name in list_tool_names():
+        return DirectTurn(
+            Message.Intent.TOOL_REQUEST,
+            {
+                "tool_name": tool_name,
+                "payload": {"arguments": arguments},
+                "direct_reason": run.reason,
+            },
+            run.reply or DIRECT_FALLBACK_REPLY,
+        )
+    return DirectTurn(
+        Message.Intent.CHAT, {"direct_reason": run.reason}, run.reply or DIRECT_NOT_RESOLVED_REPLY
+    )
 
 
 @transaction.atomic

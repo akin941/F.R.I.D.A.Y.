@@ -17,6 +17,8 @@ from rest_framework.views import APIView
 
 from accounts import devices
 from audit.services import record_audit
+from core.api_errors import service_error_response
+from core.channels import request_channel
 from core.client_ip import trusted_client_ip
 from core.permissions import IsOwner, IsWebChannel
 from core.throttling import ScopedRateThrottle
@@ -26,8 +28,10 @@ from nodes.models import NodeActionExecution
 from nodes.serializers import (
     NodeActionCreateSerializer,
     NodeActionExecutionSerializer,
+    NodeLabelSerializer,
     NodePairSerializer,
 )
+from workspaces.rooms import LabelError
 
 logger = logging.getLogger(__name__)
 
@@ -71,6 +75,7 @@ class NodePairView(APIView):
                 protocol_versions=data["protocol_versions"],
                 client_ip=trusted_client_ip(request),
                 user_agent=request.headers.get("User-Agent", "")[:_USER_AGENT_MAX],
+                platform=data["platform"],
             )
         except SigningKeyUnavailable as exc:
             logger.warning("node pairing refused: signing key unavailable (%s)", exc.reason)
@@ -201,8 +206,14 @@ class NodeListView(APIView):
 class NodeDetailView(APIView):
     """`GET /api/v1/nodes/<id>` -- one node plus its latest snapshot's
     entries (name, version, class, availability, invocable, and the
-    `not_invocable` reason). Read-only: there is no policy surface (ADR-013
-    decision 5), availability is what the node reported."""
+    `not_invocable` reason). There is no policy surface (ADR-013 decision
+    5), availability is what the node reported.
+
+    Phase 13 D3: `PATCH` `{name?, room_id?, role?, aliases?}` sets the
+    owner's labels -- server-side display and resolution data only; nothing
+    is sent to the node. The node's owner over the web only; `platform` is
+    not editable (an unknown field is a 400). A name or alias another
+    usable node answers to is `409 label.conflict`."""
 
     permission_classes = _NODE_PERMISSIONS
 
@@ -211,6 +222,57 @@ class NodeDetailView(APIView):
         if node is None:
             return Response(_NOT_FOUND, status=status.HTTP_404_NOT_FOUND)
         return Response(selectors.node_detail(node))
+
+    def patch(self, request, node_id):
+        node = _owned_node(request, node_id)
+        if node is None:
+            return Response(_NOT_FOUND, status=status.HTTP_404_NOT_FOUND)
+        serializer = NodeLabelSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+        fields = {key: data[key] for key in ("name", "room_id", "role", "aliases") if key in data}
+        try:
+            services.relabel_node(
+                actor=request.user, node=node, channel=request_channel(request), **fields
+            )
+        except services.NodeLabelPermissionDenied as exc:
+            return service_error_response(exc, status.HTTP_403_FORBIDDEN)
+        except LabelError as exc:
+            return service_error_response(exc, exc.http_status)
+        return Response(selectors.node_detail(_owned_node(request, node_id)))
+
+
+class NodeAuditView(APIView):
+    """`GET /api/v1/nodes/<id>/audit?before=<cursor>` (Phase 13 D8) -- the
+    node's chain rows merged with its AuditLog rows (paired, relabelled,
+    revoked, kill switch, credential rotation, refusals, voice mutes),
+    newest first, 50 a page; `before` is the previous page's
+    `next_cursor`. Codes, hashes, keys and ids -- never args or output
+    content. Owner, web channel, human only; another user's node is 404.
+    Audited `nodes.audit.viewed` (counts only; such rows are not listed)."""
+
+    permission_classes = _NODE_PERMISSIONS
+
+    def get(self, request, node_id):
+        node = _owned_node(request, node_id)
+        if node is None:
+            return Response(_NOT_FOUND, status=status.HTTP_404_NOT_FOUND)
+        raw = request.query_params.get("before")
+        before = None
+        if raw not in (None, ""):
+            try:
+                before = selectors.decode_audit_cursor(raw)
+            except selectors.InvalidAuditCursor:
+                return _refusal("Invalid cursor.", "invalid_cursor", status.HTTP_400_BAD_REQUEST)
+        rows, next_cursor = selectors.node_audit_page(request.user, node, before=before)
+        record_audit(
+            action="nodes.audit.viewed",
+            actor=request.user,
+            workspace=node.workspace,
+            resource=node,
+            metadata={"node_id": str(node.pk), "count": len(rows)},
+        )
+        return Response({"results": rows, "next_cursor": next_cursor})
 
 
 INVOCATIONS_PAGE_SIZE = 50

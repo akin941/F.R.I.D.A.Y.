@@ -338,3 +338,55 @@ and TTS run, barge-in during a long digest and Turkish route-phrase
 recognition are the Mac session (Phase 12 M1), pending owner evaluation.
 `node/friday-voice/conformance.lock` and the node conformance suite are
 unchanged by Phase 12. No decision changes.
+
+## Implementation note — home routes only propose (Phase 13 branch 6, 2026-11-20)
+
+Phase 13 D13 adds the `home.control` wake route
+(`backend/assistant/wake_routes.py`, `CODE_ROUTES`): a voice turn (web voice
+and every `node_voice` turn) that `connectors.home_phrases` parses as a home
+command over the owner's own rows ("salondaki TV'yi aç", "TV'nin sesini
+kıs", "televizyonu HDMI 2'ye geç", "sesi yüzde 30'a ayarla", "film gecesi
+modunu aç", "turn off the living room lights") is answered without a model
+call. Decision 1 is unchanged:
+- the route's `effect` is `proposal`; it is in the boot-validated table
+  (`validate_routes`), and a code-matched route with any other effect or
+  with phrases refuses to start the app;
+- one allowlisted entity whose ticked services include the verb's one
+  service -> a `tool_request` draft card for `ha_call_service` with the
+  exact arguments (validated by the bridge's serializer and
+  `allowlist_refusal`) and a fixed spoken confirmation; several matches ->
+  the ask template; an unknown room, a device not in the named room, a
+  service the owner did not tick or HA not connected -> a fixed refusal.
+  No `ApprovalRequest`, no Home Assistant request, no `ModelUsage` is
+  created by the route; the only rows the turn writes are its two messages;
+- `apply_voice_capability_cap` still runs on the route's classification;
+- the card goes the normal gated path: the owner taps it (`POST
+  /approvals`, web session only) and decides on `/approvals`. A
+  `node_voice` token can neither create nor approve the request
+  (`assistant/tests/test_home_routes_node_voice.py`); the e2e with the
+  reference voice host and a real `friday-voice run` child
+  (`ops/tests/test_home_voice_e2e.py`) shows the spoken command ends as a
+  card on screen;
+- `home.control` takes no owner alias and its vocabulary is the owner's
+  own `Room` / `HomeEntity` rows (written only over the web), so a spoken
+  sentence cannot widen what a later one may do.
+
+Typed turns are still never wake-routed. The router's `ha_call_service`
+draft (`router.connector_args`, now with `draft_arguments` and the owner's
+allowlist shown as data) is checked before the card exists: outside the
+allowlist, or a different entity than the room/label the owner named ->
+`target_mismatch`, no draft. No decision changes; no node protocol or
+`friday-voice/v1` surface is added.
+
+## Cross-reference — ADR-018 (2026-11-26)
+
+ADR-018 (Direct-Execute Home Media Class, Accepted 2026-11-26, owner
+decision) is the single exception to decision 1: a voice or `node_voice`
+turn whose words the deterministic home matcher resolves to one of
+ADR-018's closed `media_player` services on an owner-flagged entity runs
+that call without an on-screen act (rate-limited, volume-clamped, behind
+the owner's kill switch, audited with its origin). `apply_voice_capability_cap`
+admits exactly that one intent (`home_direct`) and nothing else; every
+other voice effect is still read or proposal only, and decision 7's
+accepted risk now includes "a person or a TV in the room can pause or
+change the volume of a flagged media player".

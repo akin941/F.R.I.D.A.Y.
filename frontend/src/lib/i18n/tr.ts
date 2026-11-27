@@ -302,6 +302,36 @@ export const ERROR_MESSAGES = {
     specific: true,
   },
   "wake_alias.limit": { message: "Bir komutun en fazla 5 takma adı olabilir.", specific: true },
+  // Rooms and node labels (Phase 13 D2/D3).
+  "label.invalid": {
+    message: "Ad harf ya da rakam içermeli (oda 60, düğüm 100 karaktere kadar); takma ad 2-40 karakter olmalı.",
+    specific: true,
+  },
+  "label.limit": { message: "En fazla 5 takma ad eklenebilir.", specific: true },
+  "label.conflict": { message: "Bu ad ya da takma ad zaten kullanılıyor.", specific: true },
+  "label.unknown_room": { message: "Böyle bir oda yok.", specific: true },
+  "room.in_use": {
+    message: "Bu oda hâlâ bir düğüme ya da bir Home Assistant varlığına atanmış; önce onu değiştir.",
+    specific: true,
+  },
+  // The Home Assistant entity allowlist (Phase 13 D11).
+  "ha_entity.invalid": { message: "Bu bir Home Assistant varlık kimliği değil.", specific: true },
+  "ha_entity.not_allowed": {
+    message: "Bu varlık türü ya da hizmet hiçbir zaman izin listesine eklenemez.",
+    specific: true,
+  },
+  "ha_entity.conflict": { message: "Bu varlık zaten izin listesinde.", specific: true },
+  "ha_entity.read_failed": {
+    message: "Home Assistant okunamadı; bağlantının açık ve sağlıklı olduğundan emin ol.",
+    specific: true,
+  },
+  // The direct media class (Phase 13b, ADR-018).
+  "ha_entity.direct_not_allowed": {
+    message:
+      "Yalnızca oynatma, duraklatma, durdurma ya da ses hizmeti olan bir medya oynatıcı doğrudan olabilir.",
+    specific: true,
+  },
+  "ha_direct.invalid": { message: "Doğrudan medya ayarı geçerli değil.", specific: true },
   // Workspaces
   "workspace.permission_denied": {
     message: "Rolün bu çalışma alanını düzenlemeye yetmiyor.",
@@ -540,6 +570,27 @@ export const tr = {
       nodeMicSession: "oturum açık",
       nodeMicCounts: (accepts: number, discards: number, storms: number) =>
         `bugün ${accepts} uyanma · ${discards} elendi` + (storms > 0 ? ` · ${storms} fırtına` : ""),
+      // Phase 13b D11 (ADR-018): the direct media line (read-only).
+      homeDirect: "Doğrudan medya",
+      homeDirectStates: {
+        on: "açık",
+        off_owner: "kapalı",
+        off_env: "kapalı (ortam ayarı)",
+        not_configured: "ayarlanmadı",
+      } as Record<string, string>,
+      homeDirectCounts: (flagged: number, calls: number) =>
+        `${flagged} cihaz · son 1 saatte ${calls} çağrı`,
+      homeDirectManage: "Ayarlar",
+    },
+    // Phase 13 D4: the per-node presence panel.
+    nodes: {
+      heading: (online: number, total: number) => `Düğümler (${online}/${total} bağlı)`,
+      rowLabel: (name: string, status: string) => `${name}: ${status} — ayrıntıları aç`,
+      counts: (reads: number, actions: number) => `${reads} okuma · ${actions} eylem`,
+      mic: "Mikrofon",
+      more: (count: number) => `+${count} düğüm daha (Cihazlar sayfasında)`,
+      connectedNow: (name: string) => `${name} bağlandı`,
+      disconnectedNow: (name: string) => `${name} bağlantısı kesildi`,
     },
     settings: {
       heading: "Bu cihazda",
@@ -1210,7 +1261,7 @@ export const tr = {
     // Phase 10 D6/D12: the `node_action` card summary.
     nodeAction: {
       capability: "İşlem",
-      node: "Mac",
+      node: "Bilgisayar",
       repo: "Depo",
       command: "Komut",
       recipe: "Tarif",
@@ -2140,6 +2191,18 @@ export const tr = {
       "Friday Node, Mac'indeki Claude Code / Codex oturumlarını, git durumunu ve öndeki uygulamayı yalnızca okur. İzinler Mac'te verilir; buradan değiştirilemez.",
     loadFailed: "Mac düğümleri yüklenemedi.",
     empty: "Henüz eşleştirilmiş Mac düğümü yok.",
+    // Phase 13 D4/D5: the overview table above the node cards.
+    overview: {
+      caption: "Düğümlere genel bakış",
+      name: "Ad",
+      status: "Durum",
+      room: "Oda",
+      role: "Rol",
+      platform: "Platform",
+      can: "Yapabildikleri",
+      noRoom: "—",
+      canCounts: (reads: number, actions: number) => `${reads} okuma · ${actions} eylem`,
+    },
     pairPin: "Mac eşleştir",
     pairStrong: "Ağ dışı Mac için güçlü kod",
     pairFailed: "Düğüm eşleştirme kodu üretilemedi.",

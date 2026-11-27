@@ -113,7 +113,7 @@ def test_real_smart_turn_scores_a_fixture():
 
 
 @pytest.mark.real_models
-@pytest.mark.skipif(not MODEL_DIR, reason="FRIDAY_VOICE_MODEL_DIR (make voice-models --node)")
+@pytest.mark.skipif(not MODEL_DIR, reason="FRIDAY_VOICE_MODEL_DIR (make voice-models-node)")
 def test_real_silero_loads_from_the_pinned_hash_and_scores_a_fixture():
     vad = SileroVad(MODEL_DIR)
     silence = vad.speech_probability(b"\x00" * 640 * 50)

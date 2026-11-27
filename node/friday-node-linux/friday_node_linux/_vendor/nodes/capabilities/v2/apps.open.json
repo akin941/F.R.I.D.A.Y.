@@ -1,0 +1,34 @@
+{
+  "name": "apps.open",
+  "version": 1,
+  "class": "confirm",
+  "label": "Uygulamayı aç",
+  "data_class": "personal",
+  "description": "Opens an app whose bundle id is on the node's local list.",
+  "path_args": [],
+  "workspace_resolution": "personal_only",
+  "max_result_bytes": 16,
+  "max_runtime_seconds": 10,
+  "streams_output": false,
+  "confirm_template": "{bundle_id} uygulaması açılsın mı?",
+  "args_schema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "bundle_id"
+    ],
+    "properties": {
+      "bundle_id": {
+        "type": "string",
+        "minLength": 3,
+        "maxLength": 155,
+        "pattern": "^[A-Za-z0-9-]{1,63}(?:\\.[A-Za-z0-9-]{1,63}){1,7}$"
+      }
+    }
+  },
+  "result_schema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "null"
+  }
+}

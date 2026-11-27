@@ -3,6 +3,7 @@ from django.urls import path
 from nodes.views import (
     NodeActionDetailView,
     NodeActionListView,
+    NodeAuditView,
     NodeDetailView,
     NodeInvocationListView,
     NodeListView,
@@ -16,6 +17,8 @@ urlpatterns = [
     path("nodes", NodeListView.as_view(), name="node-list"),
     path("nodes/<uuid:node_id>", NodeDetailView.as_view(), name="node-detail"),
     path("nodes/<uuid:node_id>/revoke", NodeRevokeView.as_view(), name="node-revoke"),
+    # Phase 13 D8: the node's chain rows merged with its audit events.
+    path("nodes/<uuid:node_id>/audit", NodeAuditView.as_view(), name="node-audit"),
     # Phase 9 D11 (branch 5): the node's chain rows, never content.
     path(
         "nodes/<uuid:node_id>/invocations",

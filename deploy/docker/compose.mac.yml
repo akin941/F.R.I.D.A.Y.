@@ -1,0 +1,34 @@
+# Friday OS -- interim server on the owner's MacBook (Phase 13b D1, ADR-017
+# amendment 1). The last layer of the Mac server stack:
+#
+#   make up-mac-server
+#   # = docker compose -f deploy/docker/compose.yml \
+#   #     -f deploy/docker/compose.daily.yml \
+#   #     -f deploy/docker/compose.home.yml \
+#   #     -f deploy/docker/compose.local-tls.yml \
+#   #     -f deploy/docker/compose.mac.yml up -d --build
+#
+# Under OrbStack or Docker Desktop (docs/runbooks/home-server-setup.md
+# "Interim: server on the MacBook"). A container cannot tell the runtime's
+# Linux VM from a Linux host, so this file DECLARES the platform:
+# `HOME_SERVER_PLATFORM: macos` into web and worker. Preflight then reports
+# `home_server_platform` as a warning (Friday is down while the Mac sleeps)
+# and reads HOME_FDE_CONFIRMED_ON as the FileVault attestation (always a
+# warning: no LUKS/TPM on macOS) -- never a failure merely for being a Mac.
+#
+# It publishes NOTHING (backend/ops/tests/test_compose_no_public_ports.py):
+# the Mac's own node uses the loopback TLS proxy of compose.local-tls.yml on
+# 127.0.0.1:8443; other LAN PCs go through Homebrew Caddy on the host (I4).
+# It passes no RESTIC_* / AWS_* variable: the bucket credentials stay in the
+# host's restic env file (test_no_bucket_secrets_in_compose.py).
+x-mac-env: &mac_env
+  HOME_SERVER_PLATFORM: macos
+
+services:
+  web:
+    environment:
+      <<: *mac_env
+
+  worker:
+    environment:
+      <<: *mac_env

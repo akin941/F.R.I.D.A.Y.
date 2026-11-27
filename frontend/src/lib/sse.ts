@@ -69,6 +69,10 @@ function parseFrame(frame: string): ChatStreamEvent | { type: "protocol_error" }
           source_message_id: payload.source_message_id,
           tool_name: payload.tool_name,
           payload: payload.payload,
+          // Phase 13b D7: a closed reason code; anything else is dropped.
+          ...(typeof payload.direct_reason === "string" && /^[a-z_]{1,40}$/.test(payload.direct_reason)
+            ? { direct_reason: payload.direct_reason }
+            : {}),
         };
       }
       // Unknown event type: ignore without crashing.

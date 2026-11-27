@@ -1,0 +1,76 @@
+{
+  "check": null,
+  "description": "Only owner-typed turns under the prefixes, scrubbed node-side: never assistant text, tool calls or results, meta, sidechain, summary or marker lines, unknown kinds, or rows outside the prefixes (~/work/acme-secret is not under ~/work/acme).",
+  "expect": {
+    "absent_b64": [
+      "c2stcHJvai1GaXh0dXJlRkFLRTAxMjM0NTY3ODlhYmNkZWZHSElKS0xtbm9wUVI=",
+      "Z2hwX0ZpeHR1cmVGQUtFMDEyMzQ1Njc4OWFiY2RlZkdISUpLTG1u",
+      "QUtJQUZJWFRVUkVGQUtFMTIzNDU=",
+      "Rml4dHVyZVBhc3MyMDI2eA==",
+      "b3duZXIuZml4dHVyZUBleGFtcGxlLmNvbQ==",
+      "VE9PTC1SRVNVTFQtUEhSQVNF",
+      "RklMRS1DT05URU5ULVBIUkFTRQ==",
+      "RlVOQ1RJT04tT1VUUFVULVBIUkFTRQ==",
+      "UkVBU09OSU5HLVBIUkFTRQ==",
+      "U1VNTUFSWS1QSFJBU0U=",
+      "TUVUQS1QSFJBU0U=",
+      "U0lERUNIQUlOLVBIUkFTRQ==",
+      "TUFSS0VSLVBIUkFTRQ==",
+      "VU5LTk9XTi1LSU5ELVBIUkFTRQ==",
+      "SSB3aWxsIGxvb2sgYXQgdGhlIHRlc3QgZmlyc3Qu",
+      "R2F0ZXdheSB3aXJlZDsgdGVzdHMgYXJlIGdyZWVuLg==",
+      "QnVtcGVkIHRoZSBjbGllbnQgdG8gMi4xLg==",
+      "VHdvIHN0cmluZ3MgbmVlZCBUdXJraXNoIHBsdXJhbHMu",
+      "TkVTVEVELVNJQkxJTkctUEhSQVNF",
+      "SEFSTkVTUy1NQVJLRVItUEhSQVNF",
+      "U0NSQVRDSC1QSFJBU0U=",
+      "YWNtZS1zZWNyZXQ="
+    ],
+    "frames": [
+      {
+        "status": "ok",
+        "truncated": false,
+        "type": "result"
+      }
+    ],
+    "reader_calls": 1
+  },
+  "name": "v1_read_codex_owner_turns_only",
+  "setup": {
+    "now": 1796000005
+  },
+  "steps": [
+    {
+      "frame": {
+        "args": {
+          "cwd_prefixes": [
+            "~/work/acme",
+            "~/code/friday"
+          ],
+          "max_sessions": 50,
+          "max_turns": 200,
+          "since": "2026-11-29T00:00:00.000Z"
+        },
+        "args_sha256": "871d3c3bde38836ca93d3596e6494ac85b8f1c17efade7abb0dc6ccf241698e1",
+        "capability": "codex.transcripts.owner_turns",
+        "capability_version": 1,
+        "class": "read",
+        "expires_at": 1796000030,
+        "grant": null,
+        "id": "b52a780b-7ee5-4937-96bf-dff4d3652515",
+        "invocation_id": "9030f652-3986-4d90-9d38-f706fb606bcf",
+        "issued_at": 1796000000,
+        "key_id": "03396219237f75a6",
+        "node_id": "6f1e2d3c-4b5a-4987-8a6b-5c4d3e2f1a0b",
+        "nonce": "0Tq_aOkzVQAuLZIC3x-9i954LQ5yQgpub3AVaYFTO5Q",
+        "sig": "_2tiTVx2XycCNKW18CdGQr2GzCCi2sMKhBcfuq1ELyL09V9KBg6DHIC3uaiHqJuUBZTXcly935AyXdh4OvXeAg",
+        "trace_id": "conformance-v1-read-codex_owner_turns_only",
+        "type": "invoke",
+        "v": 1,
+        "workspace_id": "2a3b4c5d-6e7f-4a8b-9c0d-1e2f3a4b5c6d"
+      },
+      "op": "send"
+    }
+  ],
+  "version": 1
+}

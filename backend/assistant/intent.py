@@ -6,11 +6,11 @@ object of this shape:
     {"intent": "chat", "tool_name": null}
 
 `intent` is exactly one of: chat, memory_query, knowledge_query, task_draft,
-tool_request, connector_read. `tool_name` names the registered tool the
-message appears to request (a gated tool for `tool_request`, a read tool for
-`connector_read`, Phase 5 branch 4) and is populated ONLY for those two
-intents — it must be null for every other intent value (never a value the
-caller has to strip back out itself).
+tool_request, connector_read (never a code-only intent, `CODE_ONLY_INTENTS`).
+`tool_name` names the registered tool the message appears to request (a gated
+tool for `tool_request`, a read tool for `connector_read`, Phase 5 branch 4)
+and is populated ONLY for those two intents — it must be null for every
+other intent value (never a value the caller has to strip back out itself).
 
 This parser validates `tool_name`'s *shape* only (non-empty string) —
 whether it names a tool that actually exists is deliberately NOT checked
@@ -35,7 +35,15 @@ import json
 
 from assistant.models import Message
 
-_ALLOWED_INTENTS = frozenset(Message.Intent.values)
+# Phase 13b D10a lock 1 (ADR-018): intents only Friday's own code may build.
+# `home_direct` (one card-less Home Assistant media call) is constructed by
+# the `home.control` route and the typed home step alone; a router reply
+# naming it (a model error or text injected into the conversation) is an
+# "unrecognized intent value" here, and the caller degrades it to chat like
+# any parse failure. The seeded router prompt never names it (a test pins
+# that).
+CODE_ONLY_INTENTS = frozenset({Message.Intent.HOME_DIRECT})
+_ALLOWED_INTENTS = frozenset(Message.Intent.values) - CODE_ONLY_INTENTS
 _TOP_LEVEL_KEYS = {"intent", "tool_name"}
 _NAMED_TOOL_INTENTS = frozenset({Message.Intent.TOOL_REQUEST, Message.Intent.CONNECTOR_READ})
 

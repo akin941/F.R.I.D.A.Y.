@@ -33,6 +33,18 @@ GENESIS_HASH = "0" * 64
 class Node(WorkspaceScopedModel, TimestampedModel):
     """A paired Friday Node. `id` == `device_id` (set at pairing)."""
 
+    class Role(models.TextChoices):
+        WORKSTATION = "workstation"
+        LAPTOP = "laptop"
+        MEDIA = "media"
+        SERVER = "server"
+        OTHER = "other"
+
+    class Platform(models.TextChoices):
+        MACOS = "macos"
+        LINUX = "linux"
+        WINDOWS = "windows"
+
     workspace = models.ForeignKey(
         "workspaces.Workspace", on_delete=models.PROTECT, related_name="nodes"
     )
@@ -67,6 +79,31 @@ class Node(WorkspaceScopedModel, TimestampedModel):
     voice_wake_accepts_today = models.PositiveIntegerField(default=0)
     voice_wake_discards_today = models.PositiveIntegerField(default=0)
     voice_storm_mutes_today = models.PositiveIntegerField(default=0)
+    # Phase 13 D3: owner-set labels -- server-side display and resolution
+    # data, never node policy (ADR-013 decision 5): no server message
+    # carries them. `name_key` is `core.speech.phrase_key(name)`; it and
+    # every alias key are unique per owner among USABLE nodes (not revoked,
+    # killed or expired), checked in `nodes.services` under a lock on the
+    # owner's personal workspace row at pairing and at relabel. No DB
+    # constraint: revocation lives on `TrustedDevice` (also flipped by
+    # `accounts.revoke_all_devices`, which may not import `nodes`), so a
+    # partial index cannot express "usable".
+    name_key = models.CharField(max_length=100, db_index=True, default="")
+    room = models.ForeignKey(
+        "workspaces.Room",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="nodes",
+    )
+    role = models.CharField(max_length=16, choices=Role.choices, default=Role.OTHER)
+    # Set once at pairing (`platform`, optional, default macOS), never
+    # edited afterwards.
+    platform = models.CharField(max_length=16, choices=Platform.choices, default=Platform.MACOS)
+    aliases = models.JSONField(default=list, blank=True)
+    # When the owner demonstrably used this PC (Phase 13 D6; written from
+    # branch 2). Heartbeats never count.
+    last_active_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         ordering = ["-created_at"]

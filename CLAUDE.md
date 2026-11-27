@@ -25,6 +25,9 @@ not a real operating system.
    never modify their own definitions or permissions. Coder and reviewer agents
    are never the same. (ADR-004; system-created gates, deploys, connectors: ADR-010)
    Owner deletes are reversible trash moves; permanent purge is gated. (ADR-009)
+   The single exception: owner-flagged "direct" Home Assistant `media_player`
+   entities may run play/pause/play_pause/stop/volume calls without a card,
+   under ADR-018's closed allowlist, rate limits and kill switch. (ADR-018)
 5. **LLM-calling code must be mockable.** Tests that hit a real LLM are
    nightly-only.
 6. **Modular monolith dependencies are one-way:** kernel apps never import

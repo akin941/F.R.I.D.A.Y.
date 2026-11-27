@@ -506,8 +506,16 @@ def test_every_audio_purpose_with_a_priced_provider_has_a_budget(monkeypatch):
     call_command("seed_ai_defaults")
     from django.conf import settings
 
-    capability_of = {"voice.stt": STT, "voice.tts": TTS}
-    assert set(settings.AI_AUDIO_PURPOSES) == set(capability_of)
+    capability_of = {
+        "voice.stt": STT,
+        "voice.tts": TTS,
+        # Phase 6 branch 3a: the evaluation set, under its own row.
+        "voice.eval_stt": STT,
+        "voice.eval_tts": TTS,
+    }
+    assert set(settings.AI_AUDIO_PURPOSES) | set(settings.AI_VOICE_EVAL_PURPOSES) == set(
+        capability_of
+    )
     for purpose, capability in capability_of.items():
         priced = [p for p in ModelProvider.objects.filter(capability=capability) if p.is_priced]
         if not priced:
@@ -537,6 +545,14 @@ def test_seed_fake_speech_rows_and_audio_budget():
     assert budget.monthly_limit_usd == Decimal("20")
     assert budget.session_limit_usd == Decimal("1")
     assert budget.daily_limit_usd is None
+    # Phase 6 branch 3a: the eval purposes have their own row, never the
+    # live `audio` cap, so an eval run cannot starve live voice.
+    eval_budget = AIBudget.objects.get(name="voice_eval")
+    assert set(eval_budget.purposes) == {"voice.eval_stt", "voice.eval_tts"}
+    assert eval_budget.monthly_limit_usd == Decimal("5")
+    assert eval_budget.session_limit_usd == Decimal("2")
+    assert [b.name for b in budgets.budgets_for("voice.eval_stt")] == ["voice_eval"]
+    assert [b.name for b in budgets.budgets_for("voice.stt")] == ["audio"]
     for name in ("openrouter-stt", "openrouter-tts"):
         row = ModelProvider.objects.get(name=name)
         assert (row.is_active, row.personal_data_allowed) == (False, False)
@@ -553,15 +569,24 @@ def test_seed_local_speech_rows_with_voice_key_and_idempotent(monkeypatch):
     call_command("seed_ai_defaults")
     stt_row = ModelProvider.objects.get(name="voice-stt-local")
     tts_row = ModelProvider.objects.get(name="voice-tts-local")
-    for row in (stt_row, tts_row):
+    tts_en_row = ModelProvider.objects.get(name="voice-tts-local-en")
+    for row in (stt_row, tts_row, tts_en_row):
         assert row.provider_type == ModelProvider.ProviderType.OPENAI_COMPATIBLE
         assert row.base_url == "http://host.docker.internal:8000/v1"
         assert row.api_key_env_var == "VOICE_API_KEY"
         assert row.personal_data_allowed is True
         assert not row.is_priced
     assert stt_row.model_id == "Systran/faster-whisper-medium"
+    # speaches selects the voice by model id, so English has its own row,
+    # ranked after the Turkish one (the fallback for an unrouted language).
+    assert tts_row.model_id == "speaches-ai/piper-tr_TR-dfki-medium"
+    assert tts_en_row.model_id == "speaches-ai/piper-en_US-lessac-medium"
+    assert (tts_row.priority, tts_en_row.priority) == (5, 6)
     assert (
-        ModelProvider.objects.filter(name__in=["voice-stt-local", "voice-tts-local"]).count() == 2
+        ModelProvider.objects.filter(
+            name__in=["voice-stt-local", "voice-tts-local", "voice-tts-local-en"]
+        ).count()
+        == 3
     )
     # audio + the three Phase 8A and two Phase 8B learning budgets + the
     # Phase 8B eval cap + the Phase 10 `control` cap (migration 0008).
@@ -579,6 +604,8 @@ def test_seed_local_speech_rows_with_voice_key_and_idempotent(monkeypatch):
         "skills_curate_weekly",
         # Phase 12 D17 (ai_core 0013): the playbook distiller's daily cap.
         "skills_playbook_daily",
+        # Phase 6 branch 3a: the evaluation set's own audio cap.
+        "voice_eval",
     }
 
 
@@ -658,3 +685,14 @@ def test_cost_correction_skips_rows_with_provider_cost(monkeypatch):
     hits = _lookup(monkeypatch, httpx.Response(200, json={"data": {"total_cost": 1}}))
     assert apply_cost_correction(usage.pk) == "skipped"
     assert hits == []
+
+
+def test_default_routes_send_english_to_its_own_local_row():
+    # speaches selects the Piper voice by model id (the request's `voice` is
+    # ignored), so `en` must route to the English row, not the Turkish one.
+    # Read the shipped default (test settings and fixtures override the live one).
+    from config.settings import base
+
+    routes = base.VOICE_TTS_ROUTES
+    assert routes["tr"]["provider"] == "voice-tts-local"
+    assert routes["en"]["provider"] == "voice-tts-local-en"

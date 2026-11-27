@@ -30,6 +30,21 @@ normal router runs. Typed turns are never routed.
   only, matched as the leading words of the utterance; they yield exactly
   what the router would (a `connector_read` turn, or a `tool_request` draft
   card) and make exactly the router's argument call, nothing more.
+- **Home route (Phase 13 D13).** `home.control` has no phrase table: its
+  matcher is code (`connectors.home_phrases`, reached through
+  `tools.home_ports`) over the owner's own room and device rows. Tried after
+  the phrase and `tool.*` routes, before `skill.*` aliases. Effect
+  `proposal`: one allowlisted entity -> the `ha_call_service` draft card
+  (the exact arguments, a fixed spoken confirmation, no model call);
+  several -> the ask template; nothing allowed -> a fixed refusal. It never
+  approves or executes; the card goes the normal gated path.
+- **Direct media (Phase 13b D10/D10a, ADR-018).** A `home.control` draft
+  that ADR-018's classifier admits (an owner-flagged `media_player`, one of
+  the eight closed services, kill switch off, within the rate limits)
+  becomes a `home_direct` classification carrying the code-only provenance
+  marker; the chat view then runs the one call after the cap. Only
+  `home.control` may return that effect (`extra_effects`, checked by
+  `validate_routes` and again on every result by `_finish`).
 - **Scope.** Routes answer only the owner of the conversation's workspace,
   from that workspace's rows (`for_actor()` through `proactive.api` and
   `memory.probes`): a firm digest never answers a personal conversation.
@@ -38,7 +53,6 @@ normal router runs. Typed turns are never routed.
 from __future__ import annotations
 
 import re
-import unicodedata
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
@@ -49,9 +63,17 @@ from django.utils import timezone
 
 from assistant.models import Message, WakeRouteAlias
 
+# Phase 13 D16: the normalizer moved to `core.speech` (stdlib only) so
+# `nodes` and `connectors` share it; re-exported here for every caller.
+from core.speech import match_key, normalize_speech  # noqa: F401
+
 EFFECT_READ = "read"
 EFFECT_PROPOSAL = "proposal"
 ALLOWED_EFFECTS = frozenset({EFFECT_READ, EFFECT_PROPOSAL})
+# Phase 13b D10 (ADR-018): the one extra effect a route may declare, and the
+# one route that may declare it (`validate_routes` refuses anything else).
+EFFECT_DIRECT_HOME = "direct_home"
+ALLOWED_EXTRA_EFFECTS = frozenset({EFFECT_DIRECT_HOME})
 
 # Stripped once from the start of an utterance (longest first).
 WAKE_PHRASES = ("hey friday", "friday")
@@ -68,38 +90,6 @@ NO_DIGEST_TEXT = "Bugün için brifing yok."
 NO_NOTICES_TEXT = "Okunmamış bildirim yok."
 NO_LEARNING_TEXT = "Öğrenme kartında bekleyen öneri yok."
 NOTICES_READ_LIMIT = 5
-
-
-def _turkish_lower(text: str) -> str:
-    # `toLocaleLowerCase("tr-TR")`: dotted capital I -> i, dotless capital
-    # I -> dotless ı, then the ordinary lower-casing.
-    return text.replace("İ", "i").replace("I", "ı").lower()
-
-
-def normalize_speech(text: str) -> str:
-    """`self-trigger.ts` `normalizeSpeech`, ported: NFC, Turkish lower
-    case, NFC again, non-letter/digit/space characters to spaces,
-    whitespace collapsed."""
-    text = unicodedata.normalize("NFC", str(text or ""))
-    text = unicodedata.normalize("NFC", _turkish_lower(text))
-    kept = []
-    for char in text:
-        if char.isspace():
-            kept.append(" ")
-        elif unicodedata.category(char)[0] in ("L", "N"):
-            kept.append(char)
-        else:
-            kept.append(" ")
-    return " ".join("".join(kept).split())
-
-
-def match_key(text: str) -> str:
-    """The comparison form of a normalized phrase: dotless ı folded to i.
-    An all-caps transcript ("HEY FRIDAY", "BRIEFING") lower-cases the
-    Turkish way to "frıday" / "brıefıng"; the closed phrase table is small
-    enough that folding costs no real collision, and every comparison
-    (wake phrase, fillers, routes, aliases, clashes) uses it."""
-    return text.replace("ı", "i")
 
 
 def normalize_utterance(text: str) -> str:
@@ -129,26 +119,41 @@ class WakeTurn:
     content: str
     remainder: str = ""
     now: Any = None
+    # Phase 13b: the node a `node_voice` turn was spoken to (the voice
+    # token's device), else None -- recorded on a direct call's origin.
+    origin_node_id: str | None = None
+    input_mode: str = Message.InputMode.VOICE
 
 
 @dataclass
 class RouteResult:
     """A handler's answer: the classification it stands for (checked by
     the ADR-015 cap), the reply text spoken back with no model call, and
-    the effect to commit only if the cap keeps the route."""
+    the effect to commit only if the cap keeps the route. `provenance`
+    (Phase 13b D10a lock 2) is the code-only marker of a `home_direct`
+    classification, carried into the route's classification by identity."""
 
     intent: str = Message.Intent.CHAT
     intent_payload: dict = field(default_factory=dict)
     reply_text: str | None = None
     commit: Callable[[], None] | None = None
+    provenance: Any = None
 
 
 @dataclass(frozen=True)
 class WakeRoute:
+    """One route. A phrase route matches its `default_phrases` (and owner
+    aliases); a `matched_by_code` route (Phase 13 `home.control`) has none:
+    its handler is also its matcher and returns None on a miss.
+    `extra_effects` (Phase 13b D10): effects the route's results may have
+    beyond `effect` -- only `home.control`, only `direct_home`."""
+
     name: str
     effect: str
     default_phrases: tuple
-    handler: Callable[[WakeTurn], RouteResult]
+    handler: Callable[[WakeTurn], RouteResult | None]
+    matched_by_code: bool = False
+    extra_effects: tuple = ()
 
 
 @dataclass(frozen=True)
@@ -261,6 +266,83 @@ ROUTES: tuple[WakeRoute, ...] = (
 )
 
 
+# --- home.control (Phase 13 D13, branch 6) -------------------------------------
+#
+# The deterministic home route: "salondaki TV'yi aç" -> the `ha_call_service`
+# draft card for the one allowlisted entity the owner named, with a fixed
+# spoken confirmation. The matcher and resolver live in `connectors`
+# (`connectors.home_phrases`), reached through `tools.home_ports`. No model
+# call, no Home Assistant request, no `ApprovalRequest`.
+
+HOME_ROUTE_NAME = "home.control"
+
+
+def _home_control(turn: WakeTurn) -> RouteResult | None:
+    from tools.home_ports import OUTCOME_DRAFT, resolve_home_command
+    from tools.registry import list_tool_names
+
+    resolution = resolve_home_command(workspace=turn.workspace, actor=turn.actor, text=turn.content)
+    if resolution is None:
+        return None
+    if resolution.outcome != OUTCOME_DRAFT:
+        # The ask or the refusal: Friday's own text, no card.
+        return RouteResult(reply_text=resolution.reply)
+    if resolution.tool_name not in list_tool_names():
+        return None
+    # Phase 13b D10 (ADR-018): a draft ADR-018 admits as direct is the
+    # `home_direct` classification (the call runs in the chat view, after
+    # the cap, with the saved message); any other draft is today's card,
+    # carrying the closed reason it is not direct.
+    from assistant.services import (
+        PROVENANCE_KEY,
+        classify_direct_draft,
+        direct_origin,
+        home_direct_classification,
+    )
+
+    verdict = classify_direct_draft(
+        resolution,
+        workspace=turn.workspace,
+        actor=turn.actor,
+        channel=turn.channel,
+        input_mode=turn.input_mode,
+    )
+    if verdict.direct:
+        origin = direct_origin(channel=turn.channel, input_mode=turn.input_mode)
+        classification = home_direct_classification(
+            resolution, origin=origin, node_id=turn.origin_node_id
+        )
+        return RouteResult(
+            intent=classification["intent"],
+            intent_payload=classification["intent_payload"],
+            reply_text=None,
+            provenance=classification[PROVENANCE_KEY],
+        )
+    return RouteResult(
+        intent=Message.Intent.TOOL_REQUEST,
+        intent_payload={
+            "tool_name": resolution.tool_name,
+            "payload": {"arguments": dict(resolution.arguments)},
+            "direct_reason": verdict.reason,
+        },
+        reply_text=resolution.reply,
+    )
+
+
+# Routes whose matcher is code, tried after the phrase and `tool.*` routes.
+CODE_ROUTES: tuple[WakeRoute, ...] = (
+    WakeRoute(
+        name=HOME_ROUTE_NAME,
+        effect=EFFECT_PROPOSAL,
+        default_phrases=(),
+        handler=_home_control,
+        matched_by_code=True,
+        # ADR-018: the only route that may return `home_direct`.
+        extra_effects=(EFFECT_DIRECT_HOME,),
+    ),
+)
+
+
 # --- the table ------------------------------------------------------------------
 
 
@@ -280,7 +362,7 @@ def validate_routes(routes=None) -> None:
     non-empty, and no phrase equal to or a word-prefix of another route's.
     Anything else raises `ImproperlyConfigured` -- the app refuses to
     start."""
-    routes = ROUTES if routes is None else routes
+    routes = (*ROUTES, *CODE_ROUTES) if routes is None else routes
     names = set()
     owned = []
     for route in routes:
@@ -293,6 +375,26 @@ def validate_routes(routes=None) -> None:
             )
         if not callable(route.handler):
             raise ImproperlyConfigured(f"wake route {route.name} has no handler")
+        extra = tuple(getattr(route, "extra_effects", ()) or ())
+        if extra:
+            # Phase 13b D10 (ADR-018): only `home.control` may return the
+            # direct effect, and it is the only extra effect there is.
+            if route.name != HOME_ROUTE_NAME or not route.matched_by_code:
+                raise ImproperlyConfigured(
+                    f"wake route {route.name} may not declare extra effects {extra!r}"
+                )
+            if any(effect not in ALLOWED_EXTRA_EFFECTS for effect in extra):
+                raise ImproperlyConfigured(
+                    f"wake route {route.name} declares an unknown extra effect {extra!r}"
+                )
+        if route.matched_by_code:
+            # Phase 13 D13: a code matcher, never a phrase an alias could
+            # shadow or that could shadow another route.
+            if route.default_phrases:
+                raise ImproperlyConfigured(
+                    f"wake route {route.name} is matched by code and takes no phrase"
+                )
+            continue
         if not route.default_phrases:
             raise ImproperlyConfigured(f"wake route {route.name} has no phrase")
         for phrase in route.default_phrases:
@@ -338,14 +440,20 @@ def _tool_read_handler(tool_name):
 
 def _tool_write_handler(tool_name):
     def handler(turn: WakeTurn) -> RouteResult:
-        from assistant.services import draft_tool_payload
+        from assistant.services import DraftRefused, draft_tool_payload
 
-        payload = draft_tool_payload(
-            turn.conversation,
-            actor=turn.actor,
-            content=turn.remainder or turn.content,
-            tool_name=tool_name,
-        )
+        try:
+            payload = draft_tool_payload(
+                turn.conversation,
+                actor=turn.actor,
+                content=turn.remainder or turn.content,
+                tool_name=tool_name,
+                source_text=turn.content,
+            )
+        except DraftRefused as refused:
+            # Phase 13 D13: the draft check refused (e.g. a device other
+            # than the one the owner named) -- no card.
+            return RouteResult(reply_text=refused.reply)
         if payload is None:
             return RouteResult()
         return RouteResult(
@@ -552,14 +660,15 @@ def static_reply_stream(text):
     yield text
 
 
-def route_voice_turn(conversation, *, actor, content, channel, input_mode, now=None):
+def route_voice_turn(
+    conversation, *, actor, content, channel, input_mode, now=None, origin_node_id=None
+):
     """The chat turn's hook (D8). None unless the turn is a voice turn of
     the workspace owner whose whole utterance is a route phrase; otherwise
     the route's capped classification and its reply text (None when the
     cap degraded the route: the turn is then answered as plain chat).
-    Makes no model call."""
-    from assistant.services import apply_voice_capability_cap
-
+    Makes no model call. `origin_node_id` (Phase 13b): the speaking node of
+    a `node_voice` turn, recorded on a direct call."""
     if input_mode != Message.InputMode.VOICE:
         return None
     workspace = conversation.workspace
@@ -567,8 +676,6 @@ def route_voice_turn(conversation, *, actor, content, channel, input_mode, now=N
         return None
     aliases = aliases_for(workspace)
     route, remainder = match_turn(content, aliases=aliases)
-    if route is None:
-        return _route_skill(actor, workspace, content, aliases)
     turn = WakeTurn(
         conversation=conversation,
         actor=actor,
@@ -577,11 +684,39 @@ def route_voice_turn(conversation, *, actor, content, channel, input_mode, now=N
         content=content,
         remainder=remainder,
         now=now or timezone.now(),
+        origin_node_id=origin_node_id,
+        input_mode=input_mode,
     )
-    result = route.handler(turn)
+    if route is None:
+        # Phase 13 D13: the code-matched routes (`home.control`).
+        for code_route in CODE_ROUTES:
+            result = code_route.handler(turn)
+            if result is not None:
+                return _finish(code_route, result, input_mode=input_mode, remainder="")
+        return _route_skill(actor, workspace, content, aliases)
+    return _finish(route, route.handler(turn), input_mode=input_mode, remainder=remainder)
+
+
+def _finish(route, result, *, input_mode, remainder):
+    """The route's capped classification (ADR-015): degraded to plain chat
+    with no reply when the cap changes it, or -- Phase 13b D10a lock 2 --
+    when the result's own effect is not one the route declared (a read
+    route proposing, any route but `home.control` returning `home_direct`);
+    else its commit runs. A read result is always within a route's
+    effect (it narrows, never widens)."""
+    from assistant.services import INTENT_EFFECTS, PROVENANCE_KEY, apply_voice_capability_cap
+
     classification = {"intent": result.intent, "intent_payload": dict(result.intent_payload)}
+    if result.provenance is not None:
+        classification[PROVENANCE_KEY] = result.provenance
+    permitted = {EFFECT_READ, route.effect, *tuple(route.extra_effects or ())}
+    result_effect = INTENT_EFFECTS.get(result.intent)
     capped = apply_voice_capability_cap(classification, input_mode=input_mode)
-    if capped != classification or route.effect not in ALLOWED_EFFECTS:
+    if (
+        capped != classification
+        or route.effect not in ALLOWED_EFFECTS
+        or result_effect not in permitted
+    ):
         return RoutedTurn(
             route=route.name,
             classification={"intent": Message.Intent.CHAT, "intent_payload": {}},

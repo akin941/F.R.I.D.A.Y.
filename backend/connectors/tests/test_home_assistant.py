@@ -18,7 +18,7 @@ from connectors.manifests import home_assistant as ha_manifest
 from connectors.models import ConnectorBinding, ConnectorWriteExecution
 from connectors.services import ConnectorInvalidTransition, set_binding_enabled
 from connectors.tasks import run_connector_write
-from connectors.tests.fake_home_assistant import TOKEN_CANARY, ha  # noqa: F401
+from connectors.tests.fake_home_assistant import TOKEN_CANARY, allow, ha  # noqa: F401
 from core.channels import CHANNEL_CLI, CHANNEL_WEB
 from memory.models import Memory
 from tools.registry import ReadToolError, get_read_tool, get_tool, list_tool_names
@@ -39,6 +39,11 @@ def ha_settings(settings):
 
 @pytest.fixture
 def bound(ha, enable, workspace):  # noqa: F811
+    # Phase 13 D11: entity calls need the owner's allowlist; these Phase 5
+    # tests allowlist the fake's callable entities with their whole code
+    # maximum (the allowlist itself is tested in `test_ha_allowlist_gate`).
+    for entity_id in ("light.salon", "climate.salon", "media_player.tv"):
+        allow(workspace, entity_id)
     return enable(MANIFEST, workspace)
 
 
@@ -419,17 +424,19 @@ def test_home_assistant_unreachable_at_execution_is_failed_and_nothing_sent(
     assert ha.posts == []
 
 
-def test_precondition_refusals_map_to_closed_error_types(ha, ha_settings):  # noqa: F811
+def test_precondition_refusals_map_to_closed_error_types(bound, ha, ha_settings):  # noqa: F811
     payload = {"arguments": dict(SALON_40)}
-    assert bridge.target_present(MANIFEST, None, payload) is None
-    del ha.states["light.salon"]
-    assert bridge.target_present(MANIFEST, None, payload) == "target_missing"
-    ha_settings.HA_ALLOWED_DOMAINS = ["switch"]
+    assert bridge.target_present(MANIFEST, bound, payload) is None
+    # No binding: the entity allowlist cannot be checked -> refused.
     assert bridge.target_present(MANIFEST, None, payload) == "connector_changed"
+    del ha.states["light.salon"]
+    assert bridge.target_present(MANIFEST, bound, payload) == "target_missing"
+    ha_settings.HA_ALLOWED_DOMAINS = ["switch"]
+    assert bridge.target_present(MANIFEST, bound, payload) == "connector_changed"
     # A payload that is not exactly the normalized snapshot is refused too.
     tampered = {"arguments": {**SALON_40, "data": {"brightness_pct": 40, "x": 1}}}
     ha_settings.HA_ALLOWED_DOMAINS = []
-    assert bridge.target_present(MANIFEST, None, tampered) == "connector_changed"
+    assert bridge.target_present(MANIFEST, bound, tampered) == "connector_changed"
     assert ha.posts == []
 
 

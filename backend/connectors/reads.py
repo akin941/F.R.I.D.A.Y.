@@ -23,6 +23,7 @@ content themselves. Fencing the text for a prompt is the caller's job
 memory and never reaches the router.
 """
 
+import dataclasses
 import hashlib
 import json
 import time
@@ -176,6 +177,12 @@ def perform_read(manifest, policy, *, workspace, actor, args, channel, as_data=F
             raise ReadToolError(exc.code) from None
         if result.is_error:
             raise ReadToolError("tool_error")
+        if policy.annotate is not None and result.structured is not None:
+            # Friday's own per-workspace annotation (Phase 13 D11), on the
+            # already-reduced result; never a wider scope.
+            result = dataclasses.replace(
+                result, structured=policy.annotate(workspace, result.structured)
+            )
         if as_data:
             data = parse_json_result(result)
             audit["size"] = len(canonical_json(data)) if data is not None else 0

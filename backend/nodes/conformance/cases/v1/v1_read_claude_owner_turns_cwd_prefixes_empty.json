@@ -1,0 +1,49 @@
+{
+  "check": null,
+  "description": "Owner-turn args outside the node's own schema (cwd_prefixes_empty).",
+  "expect": {
+    "frames": [
+      {
+        "refusal_code": "args_schema",
+        "status": "refused",
+        "type": "result"
+      }
+    ],
+    "reader_calls": 0
+  },
+  "name": "v1_read_claude_owner_turns_cwd_prefixes_empty",
+  "setup": {
+    "now": 1796000005
+  },
+  "steps": [
+    {
+      "frame": {
+        "args": {
+          "cwd_prefixes": [],
+          "max_sessions": 50,
+          "max_turns": 200,
+          "since": "2026-11-29T00:00:00.000Z"
+        },
+        "args_sha256": "ba1b0340a7d0341916978b9d0745fd2b49eb3c0f84069ffb039773d290986508",
+        "capability": "claude.transcripts.owner_turns",
+        "capability_version": 1,
+        "class": "read",
+        "expires_at": 1796000030,
+        "grant": null,
+        "id": "e65720e6-f623-4a10-ac71-07d4f470f0a1",
+        "invocation_id": "4ba73da4-9c0a-4deb-a912-9d810fed0d8a",
+        "issued_at": 1796000000,
+        "key_id": "03396219237f75a6",
+        "node_id": "6f1e2d3c-4b5a-4987-8a6b-5c4d3e2f1a0b",
+        "nonce": "ffwF5KjKCv8MaSGJ9AfUfvIUKaJO9deODIo1sP3kjW8",
+        "sig": "nxXnVactADkLoBdl0D2CZag3JKebrLiufBKVlgWOsA4Z2bjJgTUFnggaoleu9VIOWkkZwZeidPZ4fvDDjGqwCA",
+        "trace_id": "conformance-v1-read-claude_owner_turns_cwd_prefixes_empty",
+        "type": "invoke",
+        "v": 1,
+        "workspace_id": "2a3b4c5d-6e7f-4a8b-9c0d-1e2f3a4b5c6d"
+      },
+      "op": "send"
+    }
+  ],
+  "version": 1
+}

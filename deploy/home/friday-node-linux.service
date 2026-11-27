@@ -1,0 +1,49 @@
+# Friday Node for Linux -- read-only node daemon (Phase 13 D10).
+# A systemd **user** unit: runs as you, reads your ~/.claude / ~/.codex only
+# where policy.json grants it, holds its credential in ~/.local/state.
+# Install (as the desktop user, not root):
+#   make linux-node-install            # the locked environment + this unit
+#   friday-node-linux pair --server https://friday-home.local --code <code> --ca <ca.pem>
+#   friday-node-linux grant claude     # interactive: type the directory name
+#   systemctl --user daemon-reload && systemctl --user enable --now friday-node-linux
+# A policy change (grant/revoke/repo) reloads it with SIGHUP; so does
+#   systemctl --user reload friday-node-linux
+# Docs: node/friday-node-linux/README.md
+[Unit]
+Description=Friday Node for Linux (read-only)
+Documentation=file://%h/.local/share/friday-node-linux/README.md
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/share/friday-node-linux/.venv/bin/friday-node-linux run
+ExecReload=/bin/kill -HUP $MAINPID
+# A revocation (bye{revoked}) exits 0: no restart loop. A crash or a lost
+# config restarts after 10 s; the node's own backoff handles the network.
+Restart=on-failure
+RestartSec=10
+UMask=0077
+# Hardening: the whole file system is read-only to the daemon except its
+# state directory (credential, spool, pid) and its runtime directory (the
+# hook socket). ~/.config/friday-node/policy.json is read-only to it: only
+# the interactive CLI, run by you, changes it.
+NoNewPrivileges=yes
+ProtectSystem=strict
+StateDirectory=friday-node
+StateDirectoryMode=0700
+RuntimeDirectory=friday-node
+RuntimeDirectoryMode=0700
+ReadWritePaths=%S/friday-node %t/friday-node
+PrivateTmp=yes
+PrivateDevices=yes
+LockPersonality=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+RestrictNamespaces=yes
+SystemCallArchitectures=native
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=default.target

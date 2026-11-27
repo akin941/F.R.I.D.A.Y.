@@ -28,3 +28,13 @@ class ConnectorsConfig(AppConfig):
             register_writes(manifest)
         # Phase 12 D1/D12: finished n8n writes as notices (core.probes).
         register_probes()
+        # Phase 13 D13: the `home.control` resolver and the `ha_call_service`
+        # draft check, reached by `assistant` through `tools.home_ports`.
+        from connectors.home_phrases import register as register_home_ports
+
+        register_home_ports()
+        # Phase 13b (ADR-018): the direct-media classifier (branch 1b) and
+        # executor (branch 1c) ports.
+        from connectors.home_direct import register as register_home_direct
+
+        register_home_direct()

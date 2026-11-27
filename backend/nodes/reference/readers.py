@@ -1,5 +1,6 @@
-"""The reference node's readers for the eight v1 read capabilities (Phase 9
-brief D7, D13 items 5-6; Mac session M2 ports them to Swift).
+"""The reference node's readers for the ten v1 read capabilities (Phase 9
+brief D7, D13 items 5-6; Mac session M2 ports the first eight to Swift,
+runbook B4 the two owner-turn reads).
 
 They are bounded, read-only parsers over **fixture directories** (the
 reference node never reads a real `~/.claude` or `~/.codex`: its home is the
@@ -17,7 +18,14 @@ fixture home of `nodes.reference.fixtures.factory`):
   on the node-local list (the local policy's repos; a symlink resolving to a
   listed root is the listed repo, anything else is refused);
 - `apps.frontmost` / `windows.list`: a desktop fixture (`desktop.json`);
-  window titles only when the owner enabled them locally (off by default).
+  window titles only when the owner enabled them locally (off by default);
+- `claude.transcripts.owner_turns` / `codex.transcripts.owner_turns`
+  (Phase 8B D13, D17): the owner-typed turns of the same transcripts, by
+  the rules of `nodes.reference.owner_turns` (which this module feeds with
+  its own vetted files, rule 4, and its home-aware prefix match, rule 2).
+  Their `cwd` is reported in the form of the prefix that matched (absolute
+  first, else `~/`), their times are RFC 3339 strings with milliseconds,
+  and texts are cut at 4 000 characters (their contract's bounds).
 
 Normative rules (the Swift readers must match them, the conformance cases
 pin them):
@@ -44,8 +52,10 @@ pin them):
 4. **Bounded.** At most `MAX_FILES` transcript files, `MAX_FILE_BYTES` per
    file and `MAX_LINE_BYTES` per line are read. A row that does not match
    the capability's `result_schema` is dropped. The output is cut to the
-   contract's `max_result_bytes` (oldest turns, or last rows, first) and
-   marked `truncated`.
+   contract's `max_result_bytes` (oldest turns, or last rows, first; an
+   owner-turn result loses its newest turns first and its `next_since` is
+   recomputed from the turns left, `_fit_owner_turns`) and marked
+   `truncated`.
 5. `cwd` is returned in `~/` form under the node's home, absolute
    elsewhere. Times are integer Unix seconds.
 6. Nothing is cached, copied or logged: every call re-reads the files.
@@ -62,13 +72,14 @@ import posixpath
 import shutil
 import subprocess
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from decimal import ROUND_HALF_EVEN, Decimal, InvalidOperation
 from pathlib import Path
 
 from nodes.capabilities import load_contracts
 from nodes.protocol.canonical import canonicalize
 from nodes.protocol.messages import ProtocolError, validate_instance
+from nodes.reference import owner_turns
 from nodes.reference.local_policy import NotConfigured
 from nodes.reference.stream_scrub import default_scrub
 
@@ -91,8 +102,35 @@ CLAUDE_MARKERS = (
     "<user-prompt-submit-hook>",
     "Caveat: The messages below were generated",
     "[Request interrupted",
+    # The 2026-11-27 additions (brief D13): the rest of the family that
+    # Claude Code's own "not a human prompt" checks name. Shell-mode input
+    # (`<bash-input>`) and the `#` memory note are commands, not prompts.
+    "<local-command-caveat>",
+    "<bash-input>",
+    "<bash-stdout",
+    "<bash-stderr",
+    "<bash-exit-code>",
+    "<task-notification>",
+    "<tick>",
+    "<user-memory-input>",
+    "<fork-boilerplate>",
+    "<teammate-message",
+    "<cross-session-message",
+    "<agent-message",
+    '<channel source="',
+    "<mcp-resource-update",
+    "<mcp-polling-update",
+    "Another Claude session sent a message",
 )
-CODEX_MARKERS = ("<environment_context>", "<user_instructions>", "<user_shell_command>")
+CODEX_MARKERS = (
+    "<environment_context>",
+    "<user_instructions>",
+    "<user_shell_command>",
+    "# AGENTS.md instructions",
+    "<skill>",
+    "<turn_aborted>",
+    "<subagent_notification>",
+)
 
 FAMILY = {
     "claude.sessions.list": "claude",
@@ -103,6 +141,9 @@ FAMILY = {
     "git.status": "git",
     "apps.frontmost": "desktop",
     "windows.list": "desktop",
+    # Phase 8B D13: the owner-turn reads, behind the same directory grants.
+    owner_turns.CLAUDE: "claude",
+    owner_turns.CODEX: "codex",
 }
 PERIOD_SECONDS = {"week": 7 * 86400, "month": 30 * 86400}
 _GIT_ENV = {
@@ -280,7 +321,7 @@ class _Transcript:
 
 
 class Readers:
-    """The eight v1 readers over one fixture home (see the module doc)."""
+    """The ten v1 readers over one fixture home (see the module doc)."""
 
     def __init__(
         self,
@@ -336,6 +377,11 @@ class Readers:
         except ReaderError:
             return ReadOutcome("error")
         output, truncated = self._fit(capability, output)
+        if capability in owner_turns.CAPABILITIES:
+            # The owner-turn result carries its own flag; a cut by `_fit`
+            # (a canonical size over the reader's own budget) sets it too.
+            truncated = truncated or output.get("truncated") is True
+            output = {**output, "truncated": truncated}
         try:
             validate_instance(self.contracts[capability].result_schema, output, code="result")
         except ProtocolError:
@@ -602,6 +648,61 @@ class Readers:
                 }
         raise ReaderError("thread not found")
 
+    # --- owner turns (Phase 8B D13, D17) -------------------------------------
+
+    def _owner_turn_match(self, prefixes):
+        """Rule 2 for the owner-turn reads: a row's `cwd` matches when its
+        absolute or `~/` form lies under a prefix. It is reported in the
+        form of the prefix that matched (absolute first), so the server's
+        literal `path_prefix` resolution finds the same rule."""
+        absolute_prefixes = [p for p in prefixes if p.startswith("/")]
+        home_prefixes = [p for p in prefixes if not p.startswith("/")]
+
+        def match(cwd):
+            display, forms = path_forms(cwd, self.home)
+            if display is None:
+                return None
+            absolute = next(form for form in forms if form.startswith("/"))
+            if any(_path_matches(prefix, absolute) for prefix in absolute_prefixes):
+                return absolute
+            if display != absolute and any(
+                _path_matches(prefix, display) for prefix in home_prefixes
+            ):
+                return display
+            return None
+
+        return match
+
+    def _owner_turns(self, capability, args, now):
+        try:
+            since, prefixes, max_sessions, max_turns = owner_turns.validate_args(
+                args, now=datetime.fromtimestamp(now, UTC)
+            )
+        except owner_turns.Refused as exc:
+            raise ReaderError("owner-turn args outside the contract bounds") from exc
+        if capability == owner_turns.CLAUDE:
+            root, prefix, files = self.claude_root, "claude/projects", self._claude_files()
+        else:
+            root, prefix, files = self.codex_root, "codex/sessions", self._codex_files()
+        # `relative` as under a transcript root, so Codex turn ids equal the
+        # fixture form's (`owner_turns.read_owner_turns`).
+        listed = [(path, f"{prefix}/{path.relative_to(root).as_posix()}") for path in files]
+        return owner_turns.collect_files(
+            capability,
+            listed,
+            self._owner_turn_match(prefixes),
+            since,
+            max_sessions,
+            max_turns,
+            scrub=self.scrub,
+        )
+
+    def _claude_transcripts_owner_turns(self, args, now):
+        return self._owner_turns(owner_turns.CLAUDE, args, now)
+
+    def _codex_transcripts_owner_turns(self, args, now):
+        return self._owner_turns(owner_turns.CODEX, args, now)
+
     # --- git ---------------------------------------------------------------
 
     def _git_status(self, args, now):
@@ -680,10 +781,13 @@ class Readers:
 
     def _fit(self, capability, output):
         """Cut `output` to the contract's `max_result_bytes`: turns from the
-        oldest, other rows from the end (usage totals recomputed)."""
+        oldest, other rows from the end (usage totals recomputed); an
+        owner-turn result by `_fit_owner_turns`."""
         limit = self.contracts[capability].max_result_bytes
         if len(canonicalize(output)) <= limit:
             return output, False
+        if capability in owner_turns.CAPABILITIES:
+            return _fit_owner_turns(output, limit), True
         key = next(
             (k for k in ("turns", "sessions", "threads", "by_project", "windows") if k in output),
             None,
@@ -700,6 +804,44 @@ class Readers:
                 return candidate, True
         candidate = _usage_totals([]) if key == "by_project" else {**output, key: []}
         return candidate, True
+
+
+def _fit_owner_turns(output, limit):
+    """An owner-turn result cut to `limit` canonical bytes: the newest turns
+    go first, in the reader's own `(at, turn_id)` order (sessions left
+    without a turn go too), and `next_since` is recomputed as the `at` of
+    the last surviving turn. Every dropped turn is then at or after
+    `next_since`, and `since` is inclusive, so the next call returns it: the
+    cursor never skips a turn this cut dropped. (Dropping whole sessions
+    from the end, as for other lists, could drop a turn older than one that
+    survives and leave a `next_since` past it.) With no turn left,
+    `next_since` is the earliest dropped turn's `at`. `at` strings share one
+    fixed format, so they order as instants; two turns in the same
+    millisecond both sit at or after a `next_since` of that millisecond.
+    Unreachable with the reader's own 60 KiB budget (owner_turns.py), kept
+    as defence in depth."""
+    sessions = output["sessions"]
+    order = sorted(
+        (turn["at"], turn["turn_id"], i, j)
+        for i, session in enumerate(sessions)
+        for j, turn in enumerate(session["turns"])
+    )
+    keep = len(order)
+    while True:
+        keep = max(keep - 1, 0)
+        kept = {(i, j) for _at, _turn_id, i, j in order[:keep]}
+        rows = []
+        for i, session in enumerate(sessions):
+            turns = [turn for j, turn in enumerate(session["turns"]) if (i, j) in kept]
+            if turns:
+                rows.append({**session, "turns": turns})
+        if keep:
+            next_since = order[keep - 1][0]
+        else:
+            next_since = order[0][0] if order else output["next_since"]
+        candidate = {**output, "sessions": rows, "next_since": next_since, "truncated": True}
+        if keep == 0 or len(canonicalize(candidate)) <= limit:
+            return candidate
 
 
 def _usage_totals(rows):

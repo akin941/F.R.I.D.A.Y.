@@ -18,10 +18,24 @@ current release, licence and whether Piper voices are still served before
 installing (brief, step 0 spike — owner step).
 
 ```bash
-# On the Mac (not in the Django image). Follow the speaches README for the
-# current install command; it is a Python app run with uvicorn.
-# Listen on :8000 so the default VOICE_BASE_URL works from Docker Desktop.
+# On the Mac (not in the Django image). Pinned and measured 2026-11-27
+# (Phase 6 brief, "Step 0 on the Mac"): speaches v0.9.0-rc.3, MIT.
+D="$HOME/Library/Application Support/Friday/speaches"
+git clone --depth 1 --branch v0.9.0-rc.3 https://github.com/speaches-ai/speaches.git "$D"
+cd "$D" && uvx --from 'uv~=0.8.14' uv sync --frozen --no-dev --python 3.12
+
+# Loopback only; keyed with the VOICE_API_KEY placeholder; no web UI;
+# CoreML off (onnxruntime's CoreML provider segfaults in Piper on the Mac).
+# Docker Desktop still reaches it as host.docker.internal:8000.
+mkdir -p "$HOME/Library/Logs/Friday"
+cd "$D" && API_KEY=voice-local ENABLE_UI=false \
+  UNSTABLE_ORT_OPTS__EXCLUDE_PROVIDERS='["TensorrtExecutionProvider","CoreMLExecutionProvider"]' \
+  nohup .venv/bin/uvicorn --factory --host 127.0.0.1 --port 8000 speaches.main:create_app \
+  > "$HOME/Library/Logs/Friday/speaches.log" 2>&1 &
 ```
+
+It does not start at login; start it again after a reboot (a launchd
+agent is a later owner choice).
 
 Pull the models through the server (speaches downloads from Hugging Face on
 first use or via its model API):
@@ -31,9 +45,20 @@ first use or via its model API):
 - TTS: a Turkish Piper voice, e.g. `tr_TR-dfki-medium`, and an English one,
   e.g. `en_US-lessac-medium`.
 
-Exact model ids as the server names them (e.g. whether the TTS model is
-`speaches-ai/piper-tr_TR-dfki-medium` with voice `tr_TR-dfki-medium`) are a
-spike result — record them in the brief and set the env below to match.
+Measured 2026-11-27: STT `Systran/faster-whisper-small`; TTS
+`speaches-ai/piper-tr_TR-dfki-medium` and `speaches-ai/piper-en_US-lessac-medium`.
+Pull them once:
+
+```bash
+for m in Systran/faster-whisper-small speaches-ai/piper-tr_TR-dfki-medium speaches-ai/piper-en_US-lessac-medium; do
+  curl -s -X POST -H "Authorization: Bearer voice-local" "http://127.0.0.1:8000/v1/models/$m"; echo
+done
+```
+
+speaches picks the Piper voice from the **model id** and ignores the
+request's `voice`, so English has its own provider row
+(`voice-tts-local-en`, `VOICE_TTS_EN_MODEL_ID`) and the `en` route points at
+it.
 
 **Fallback** if speaches no longer serves Piper or misbehaves: the
 `deploy/voice/` FastAPI sidecar (≈150 lines wrapping `faster-whisper` and
@@ -53,7 +78,8 @@ spike result — record them in the brief and set the env below to match.
 VOICE_API_KEY=voice-local          # placeholder opt-in, not a secret
 VOICE_BASE_URL=http://host.docker.internal:8000/v1
 VOICE_STT_MODEL_ID=Systran/faster-whisper-small
-VOICE_TTS_MODEL_ID=<the server's Piper model id>
+VOICE_TTS_MODEL_ID=speaches-ai/piper-tr_TR-dfki-medium
+VOICE_TTS_EN_MODEL_ID=speaches-ai/piper-en_US-lessac-medium
 VOICE_STT_LANGUAGE=tr              # "" = auto-detect (unreliable on short clips)
 VOICE_TTS_ROUTE_TR_VOICE=tr_TR-dfki-medium
 VOICE_TTS_ROUTE_EN_VOICE=en_US-lessac-medium
@@ -61,14 +87,14 @@ VOICE_TTS_ROUTE_EN_VOICE=en_US-lessac-medium
 
 Then reseed (idempotent): `make up` runs `seed_ai_defaults`, or
 `uv run python manage.py seed_ai_defaults` from `backend/`. With
-`VOICE_API_KEY` set it creates `voice-stt-local` and `voice-tts-local`
-(`personal_data_allowed=True`, cost 0). Existing rows are never overwritten:
+`VOICE_API_KEY` set it creates `voice-stt-local`, `voice-tts-local` and
+`voice-tts-local-en` (`personal_data_allowed=True`, cost 0). Existing rows are never overwritten:
 to change a model id later, edit the row in the admin.
 
 ### Language routing (A2)
 
 `settings.VOICE_TTS_ROUTES` maps a language to a provider row and voice
-(`tr` and `en` → `voice-tts-local` by default). The routed provider is used
+(`tr` → `voice-tts-local`, `en` → `voice-tts-local-en` by default). The routed provider is used
 only if it is active, keyed and `personal_data_allowed`; otherwise the
 gateway falls back to priority order among eligible rows. The client never
 chooses the provider.
@@ -98,7 +124,9 @@ is routed there; STT stays local unless the STT row is also enabled.
 
 The `audio` `AIBudget` row (admin → Ai core → AI budgets) caps
 `voice.stt`/`voice.tts` spend: monthly 20 USD and 1 USD per voice session by
-default (`AI_BUDGET_AUDIO_*` seed values). Local providers cost 0 and never
+default (`AI_BUDGET_AUDIO_*` seed values). The evaluation set's
+`voice.eval_stt`/`voice.eval_tts` have their own `voice_eval` row (§8.3),
+so an eval run never eats this cap. Local providers cost 0 and never
 trip it. A refused call is a `ModelUsage` row with
 `error_type="budget_exceeded"`.
 
@@ -301,6 +329,7 @@ running stack (brief A7):
 | `voice_providers` | at least one eligible STT and one eligible TTS row (an eligible priced cloud row is named) | no eligible row (no `VOICE_API_KEY` / `AI_FAKE_PROVIDER`) | no STT or no TTS rows at all (run `seed_ai_defaults`) |
 | `voice_routes` | every `VOICE_TTS_ROUTES` language names an eligible TTS row | a route names a missing or ineligible row (the gateway falls back to priority order) | — |
 | `voice_budget` | an active `AIBudget` with a monthly cap covers `voice.stt` and `voice.tts` | a cover has no monthly cap | an audio purpose has no active budget |
+| `voice_eval_budget` | an active budget covers `voice.eval_stt` and `voice.eval_tts` (the seeded `voice_eval` row, §8.3) | none does (`voice_eval` then refuses to run) | — |
 | `voice_mute` | `PREFLIGHT_VOICE_MUTE_CMD` exits 0 | the command is not set | it exits non-zero, times out or cannot start |
 
 Each speech call is a `ModelUsage` row like the chat rows' (paid only for
@@ -327,3 +356,188 @@ uv run python manage.py preflight
 (`E2E_BROWSER_CHANNEL=chrome` uses the installed Chrome instead of
 Playwright's own download.) Inside `make preflight` the check stays a
 warning.
+
+## 8. The Turkish evaluation set (Phase 6 branch 3a, owner step C2 A4)
+
+`manage.py voice_eval` measures speech-to-text WER per condition, the
+Turkish TTS listening test and the latency baseline (brief A4/A5). The
+recordings are the owner's own biometric data: they stay **outside the
+repository and outside Friday's database**. Only the manifest
+`docs/voice/eval-manifest.md` (file name, sha256, condition, reference
+text) is committed. Wake-word FRR/FAR is measured separately with the
+Phase 11 harness (`docs/voice/live-eval.md`, `friday-voice wake-eval`),
+on the same negative audio.
+
+| Target (A4, initial) | Measured by |
+|---|---|
+| WER ≤ 12% `tr-quiet`, ≤ 18% `tr-noise`, ≤ 15% code-switched (`cs-quiet` + `cs-noise`) | `voice_eval --set …` |
+| Turkish TTS ≥ 4/5 intelligibility **and** naturalness | `voice_eval --tts-sheet`, then `--score-tts` |
+| End of speech → first audio p50 ≤ 1.5 s, p95 ≤ 2.5 s (A5) | `voice_eval --traces` (live turns' `VoiceTurnTrace`) |
+| Replay latency: p50 per stage within +20% of the stored baseline | `voice_eval --set …` (nightly rule) |
+| Wake FRR ≤ 10%, FAR ≤ 0.5/h (in-tab, A4) | `friday-voice wake-eval` (Phase 11) |
+
+### 8.1 Write the script, then record
+
+1. Edit the table in `docs/voice/eval-manifest.md`: one row per utterance
+   (about 100 Turkish, 50 code-switched, 50 English; each in a quiet room
+   and with room noise — TV, fan — and with firm and project names). Leave
+   `sha256` empty. Condition: `tr-quiet`, `tr-noise`, `cs-quiet`,
+   `cs-noise`, `en-quiet`, `en-noise`.
+2. Create the private set directory and record each row's file there as
+   16 kHz mono 16-bit PCM WAV (at most 30 s; a little silence before and
+   after is fine):
+
+   ```bash
+   mkdir -p ~/FridayEval/asr && chmod 700 ~/FridayEval ~/FridayEval/asr
+   cd ~/FridayEval/asr
+   sox -d -r 16000 -c 1 -b 16 tr-quiet-001.wav trim 0 8   # say the row's reference
+   ```
+
+   The command refuses a directory others can read, symlinks and any
+   other format (`invalid_audio:wrong_sample_rate` in the report).
+   How to write numbers, times and hyphenated words in a reference:
+   `docs/voice/eval-manifest.md`.
+   Record the 2 h of negative audio (TV, podcasts, calls) for the wake
+   word under `~/FridayEval/` too — see `docs/voice/live-eval.md`.
+3. Write the hashes into the manifest and commit **only the manifest**:
+
+   ```bash
+   cd backend
+   DJANGO_SETTINGS_MODULE=config.settings.test DATABASE_URL=postgres://x:x@localhost:1/x \
+     uv run python manage.py voice_eval --fill-hashes --set ~/FridayEval/asr
+   git add ../docs/voice/eval-manifest.md
+   ```
+
+   An existing hash is never overwritten: a re-recorded clip fails the run
+   (`sha256 differs`) until its hash is cleared in the manifest.
+
+### 8.2 Run the WER set
+
+The run needs the real stack's database and speech server (each clip is
+one `voice.eval_stt` gateway call and, unless `--stt-only`, one
+`voice.eval_tts` call for the first sentence — a `ModelUsage` row each in
+the owner's personal workspace, cost 0 locally). The seeded speech rows
+point at `host.docker.internal:8000`, which resolves inside the
+containers only, so the default is to run it in a one-off `web`
+container. The live stack here is `make up-local-tls`, i.e. compose
+project `friday` with `compose.yml` + `compose.local-tls.yml` (the
+Makefile's `COMPOSE_LOCAL_TLS`; `make preflight` itself only passes
+`compose.yml` to `exec` into the running `web`). Pass the same two files,
+`--no-deps` (the database and Redis are already up), and mount the set
+and the docs. Run it from the repository root.
+
+**Step 1 — dry run (no database, no model call).** Confirm the bind mount
+passes the 0700 check and every recorded hash matches:
+
+```bash
+COMPOSE="docker compose -f deploy/docker/compose.yml -f deploy/docker/compose.local-tls.yml"
+$COMPOSE run --rm --no-deps -T -e DATABASE_URL=postgres://x:x@localhost:1/x \
+  -v "$HOME/FridayEval:/FridayEval" -v "$PWD/docs:/docs:ro" web \
+  uv run python manage.py voice_eval --check-set /FridayEval/asr \
+    --manifest /docs/voice/eval-manifest.md
+```
+
+It prints only the directory mode and uid (and the process's uid),
+whether the private check passes, the WAV count and the hash status per
+row (ok / differs / missing / unrecorded / unreadable / unlisted) — no
+file contents, no reference text — and exits non-zero if a real run would
+be refused. The `DATABASE_URL` override makes sure it cannot write a row.
+Measured on this Mac (Docker Desktop, 2026-11-27): a host directory with
+mode 0700 owned by uid 501 shows inside the container as **mode 0700,
+uid 0**, and the process runs as uid 0, so the check passes; a 0755
+directory shows as 0755 and is refused. The uid check is skipped for a
+root process for exactly this reason (the mode check still applies).
+
+**Step 2 — the run:**
+
+```bash
+$COMPOSE run --rm --no-deps -T \
+  -v "$HOME/FridayEval:/FridayEval" -v "$PWD/docs:/docs:ro" web \
+  uv run python manage.py voice_eval --set /FridayEval/asr \
+    --manifest /docs/voice/eval-manifest.md \
+    --results-dir /FridayEval/results --baseline /FridayEval/latency-baseline.json \
+    --write-baseline
+```
+
+**From the host checkout instead.** `VOICE_EVAL_*` default to
+`~/FridayEval/…`, `DATABASE_URL`/`REDIS_URL` point at `127.0.0.1:5433` /
+`:6380`, but the seeded rows' `host.docker.internal` does not resolve on
+the Mac. Two ways, both owner choices:
+
+- Add two rows in the admin (Ai core → Model providers), e.g.
+  `voice-stt-host` and `voice-tts-host`: copies of `voice-stt-local` /
+  `voice-tts-local` with `base_url` `http://127.0.0.1:8000/v1`, active,
+  `personal_data_allowed` on, priority 99 (so live voice in the containers
+  only ever reaches them after the seeded rows fail). Then pin them:
+  `voice_eval --set ~/FridayEval/asr --stt-provider voice-stt-host
+  --tts-provider voice-tts-host`. `seed_ai_defaults` never overwrites or
+  deletes an existing row, so they survive reseeds (and editing the seeded
+  rows' `base_url` instead would break live voice in the containers).
+- Or map the name on the host: `127.0.0.1 host.docker.internal` in
+  `/etc/hosts` (a system file; containers use Docker's own DNS and are not
+  affected).
+
+**What it prints.** WER per condition and per target group, the latency
+p50/p95 of `stt_ms`, `tts_first_ms` and `turn_ms`, and the report path;
+no transcript or reference is printed. The full report (0600, per-clip
+errors and hypotheses) goes to `--results-dir`; report, TTS sheet and
+baseline paths inside the repository are refused. Exit status is non-zero
+on a `fail` verdict (a group above its target or a > 20% p50 regression
+against the stored baseline); `incomplete` means a target group has no
+clips yet (or a clip failed).
+
+**A failed clip** (invalid WAV, an STT error, an unusable TTS reply)
+stays in the WER with an **empty hypothesis**: every reference word counts
+as a deletion, so it raises the group's WER and the group is at best
+`incomplete`. The report and the stdout `failed:` lines name it and the
+error code. A missing provider or an exhausted budget aborts the whole
+run instead, before any report is written.
+
+**Options.** `--stt-provider` / `--tts-provider` pin one row (e.g. to
+compare Whisper `small` and `medium` rows), `--limit N`, `--allow-missing`,
+`--stt-only`. `--write-baseline` replaces the stored baseline only from a
+complete, passing run: it is refused (and says why) for a `fail` verdict,
+for a run that regressed, and with `--limit` or `--stt-only`; `--force`
+overrides that. Write it from a run on the settled local stack; later runs
+(the nightly replay) compare against it.
+
+### 8.3 TTS listening test (A2)
+
+```bash
+$COMPOSE run --rm --no-deps -T -v "$HOME/FridayEval:/FridayEval" -v "$PWD/docs:/docs:ro" web \
+  uv run python manage.py voice_eval --tts-sheet \
+    --manifest /docs/voice/eval-manifest.md --results-dir /FridayEval/results
+```
+
+synthesizes up to 20 Turkish references (`--tts-limit`) through
+`voice.eval_tts` on the `tr` route (`--tts-provider openrouter-tts` to
+rate the cloud voice, which needs the d2 toggle) into
+`~/FridayEval/results/tts-<run>/`, with `ratings.csv`. Listen, fill in
+`intelligibility` and `naturalness` (1–5) per row, then
+`voice_eval --score-tts /FridayEval/results/tts-<run>/ratings.csv`. Below
+4.0 on either mean: route `tr` to OpenRouter (§2, A2) or record the gap.
+
+**Budget.** The eval purposes (`voice.eval_stt`, `voice.eval_tts`) have
+their **own** A3 budget row, `voice_eval` (seeded once: 5 USD a month,
+2 USD per `voice_eval` run; `AI_BUDGET_VOICE_EVAL_MONTHLY_USD`,
+`AI_BUDGET_VOICE_EVAL_RUN_USD`; owner-editable in the admin). They are
+**not** under live voice's 20 USD/month `audio` row, so a long eval run
+against an enabled cloud row (e.g. rating `openrouter-tts`) can never
+exhaust the budget live voice runs on: it stops at its own cap with a
+`budget_exceeded` usage row and the run aborts. Local rows cost 0 and
+never touch either cap. `voice_eval --set` and `--tts-sheet` refuse to
+start when no active budget covers both eval purposes (run
+`seed_ai_defaults`, or re-activate the row); `--check-set`,
+`--fill-hashes` and `--score-tts` make no model call and need none.
+
+### 8.4 Latency of live turns (A5)
+
+After some push-to-talk turns on `/voice` with local models:
+`voice_eval --traces [--days 30] [--source web|node]` prints p50/p95 of
+every `VoiceTurnTrace` stage in the owner's workspace and judges
+`playback_start_ms` (end of speech → first audio) against p50 ≤ 1.5 s /
+p95 ≤ 2.5 s.
+
+Record the numbers (WER per group, TTS means, latency, the TTS choice) in
+the Phase 6 brief, "A9 — exit criteria record"; re-set a target there
+with its reason if needed.

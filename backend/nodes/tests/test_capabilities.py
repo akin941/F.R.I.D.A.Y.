@@ -1,5 +1,6 @@
-"""The eight v1 read capability contracts (Phase 9 brief D7) and the
-catalogue matching rule: name, version and the sha256 of both schemas."""
+"""The ten v1 read capability contracts (Phase 9 brief D7; the two 8B
+owner-turn reads since runbook A12) and the catalogue matching rule:
+name, version and the sha256 of both schemas."""
 
 import copy
 
@@ -15,7 +16,8 @@ from nodes.capabilities import (
 from nodes.protocol import ProtocolError, sha256_hex
 from nodes.protocol.messages import MAX_RESULT_BYTES
 
-EIGHT = {
+OWNER_TURNS = {"claude.transcripts.owner_turns", "codex.transcripts.owner_turns"}
+TEN = {
     "claude.sessions.list",
     "claude.sessions.read",
     "codex.threads.list",
@@ -24,13 +26,13 @@ EIGHT = {
     "git.status",
     "apps.frontmost",
     "windows.list",
-}
+} | OWNER_TURNS
 
 
-def test_exactly_the_eight_read_capabilities():
+def test_exactly_the_ten_read_capabilities():
     contracts = load_contracts()
-    assert set(contracts) == EIGHT
-    assert {path.stem for path in CONTRACT_DIR.glob("*.json")} == EIGHT
+    assert set(contracts) == TEN
+    assert {path.stem for path in CONTRACT_DIR.glob("*.json")} == TEN
     for contract in contracts.values():
         assert contract.capability_class == "read"
         assert contract.version == 1
@@ -40,12 +42,19 @@ def test_exactly_the_eight_read_capabilities():
 def test_data_classes_and_workspace_resolution():
     by_name = load_contracts()
     personal = {name for name, c in by_name.items() if c.data_class == "personal"}
-    assert personal == {
-        "claude.sessions.read",
-        "codex.threads.read",
-        "apps.frontmost",
-        "windows.list",
-    }
+    assert (
+        personal
+        == {
+            "claude.sessions.read",
+            "codex.threads.read",
+            "apps.frontmost",
+            "windows.list",
+        }
+        | OWNER_TURNS
+    )
+    for name in OWNER_TURNS:
+        assert by_name[name].workspace_resolution == "row_cwd"
+        assert by_name[name].path_args == ("cwd_prefixes",)
     assert by_name["git.status"].path_args == ("repo_path",)
     assert by_name["git.status"].workspace_resolution == "path_arg"
     for name in ("claude.sessions.list", "codex.threads.list", "usage.ccusage"):

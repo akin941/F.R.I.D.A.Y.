@@ -95,6 +95,34 @@ all three `warn` while no binding is enabled, owner step); `check_skills`
 `skills_beat` (curator and distiller scheduled) and `skills_parser` (every
 usable skill's current version passes the current SKILL.md parser).
 
+Phase 13 branch 7 adds the home-server checks (`check_home`, read-only, no
+model call, nothing sent to a node, no backup started or read): `home_lan_only`
+(every `DJANGO_ALLOWED_HOSTS` entry and the `PREFLIGHT_NODE_TLS_URL` host
+resolve only to loopback, RFC 1918, ULA or Tailscale CGNAT addresses, seam
+`resolve_host`), `home_tls_pin` (`node_tls_pin`'s comparison, seam
+`served_spki_sha256`), `home_backup_fresh` and `home_restore_drill_age` (the
+`status.json` / `drill.json` files `deploy/home/friday-backup.sh` and
+`friday-restore-drill.sh` write on the host) and `home_disk_encryption` (the
+owner's `HOME_FDE_CONFIRMED_ON` attestation).
+
+Phase 13 closeout adds `check_home_control` (read-only, no model call,
+nothing sent to a node): `nodes_labels` (unique node names per owner, rooms
+set in a multi-node home), `ha_entities` (every allowlisted Home Assistant
+entity inside the bridge's code maximum and still present in HA -- one
+read-only `ha_states` read, seam `ha_state_ids`), `linux_node_vendor`
+(`node/friday-node-linux/vendor.lock` against this backend, seam
+`linux_node_dir`) and `node_protocol_frozen` (the node protocol files and
+the `friday-voice` conformance lock hash to the Phase 12 closeout values:
+Phase 13 adds no protocol surface).
+
+Phase 13b closeout adds `check_home_direct` (read-only, no model call, no
+Home Assistant request): `ha_direct_media` (ADR-018's direct media class --
+the closed set's digest against ADR-018's recorded value, every flagged
+entity a `media_player` with a direct-eligible service in a personal
+workspace, the env and owner kill switches, Home Assistant usable, the
+limits and the volume maximum). Phase 13b branch 2 added
+`home_server_platform` to `check_home`.
+
 Rules this module keeps:
 
 - Provider calls go through the single door (ADR-003): one minimal
@@ -748,6 +776,30 @@ def _check_voice_budget():
     return CheckResult("voice_budget", PASS, described)
 
 
+def _check_voice_eval_budget():
+    """Phase 6 branch 3a: the evaluation set's own A3 row. `voice_eval`
+    refuses to run without it, so a missing cover is only a warning here
+    (live voice is unaffected)."""
+    from ai_core.budgets import budgets_for
+
+    purposes = tuple(getattr(settings, "AI_VOICE_EVAL_PURPOSES", ()) or ())
+    covers = {p: budgets_for(p) for p in purposes}
+    uncovered = [p for p in purposes if not covers[p]]
+    if not purposes or uncovered:
+        return CheckResult(
+            "voice_eval_budget",
+            WARN,
+            f"no active budget covers {', '.join(uncovered) or 'the eval purposes'}: "
+            "run seed_ai_defaults (voice_eval refuses to run)",
+        )
+    budgets = {b.pk: b for found in covers.values() for b in found}
+    return CheckResult(
+        "voice_eval_budget",
+        PASS,
+        "; ".join(_describe_budget(b) for b in sorted(budgets.values(), key=lambda b: b.name)),
+    )
+
+
 def check_voice_config():
     """Phase 6 configuration, read-only (no model call, no `ModelUsage`):
 
@@ -761,6 +813,8 @@ def check_voice_config():
       to priority order (A2), the owner sees which route is not honoured.
     - `voice_budget`: an active `AIBudget` covers every audio purpose
       (`fail` otherwise -- A3); a cover without a monthly cap is a `warn`.
+    - `voice_eval_budget` (branch 3a): an active budget covers the eval
+      purposes (`AI_VOICE_EVAL_PURPOSES`); none is a `warn`.
     """
     from ai_core.models import ModelProvider
 
@@ -774,6 +828,7 @@ def check_voice_config():
         _check_voice_providers(rows),
         _check_voice_routes({p.name: p for p in rows["tts"]}),
         _check_voice_budget(),
+        _check_voice_eval_budget(),
     ]
 
 
@@ -1451,8 +1506,10 @@ def _check_transcripts():
     enabled source: the owner's node is reachable through the pull's port,
     the capability is granted, and the last pull's status (`ok` passes,
     `node_refused` warns, `failed`/`server_refused` fail). No port, no node
-    or no grant is a `warn`: the `nodes`-backed port is a pending follow-up
-    and the Swift readers and the Touch ID grant are the Mac session (M1).
+    or no grant is a `warn`: the `nodes`-backed port is installed at app
+    start (runbook A12), so "no node port" means the install did not run;
+    no reachable node or no grant waits on the Swift owner-turn readers
+    and the Touch ID grant (runbook B4, Mac session M1).
     Codes and counts only, never a path or a turn."""
     from memory.ingestion.transcript_audit import CAPABILITY_BY_SOURCE_KIND
     from memory.models import IngestionSource
@@ -1472,7 +1529,9 @@ def _check_transcripts():
     port = transcript_node_port()
     if isinstance(port, UnavailableNodePort):
         return CheckResult(
-            name, WARN, "no node port installed (nodes-backed port pending; the pull is a no-op)"
+            name,
+            WARN,
+            "no node port installed (the nodes-backed port did not install; the pull is a no-op)",
         )
     node = port.owner_node(workspace.owner)
     if node is None:
@@ -1711,12 +1770,12 @@ def _decode_pin(value):
     return raw if len(raw) == 32 else None
 
 
-def _check_node_tls_pin():
+def _check_node_tls_pin(name="node_tls_pin"):
     """When `NODE_TLS_PIN_SHA256` is set, the certificate served at
     `PREFLIGHT_NODE_TLS_URL` (the proxy in front of `/ws/node/v1`) has that
     SPKI. A changed certificate key would make every pinned node refuse the
-    server."""
-    name = "node_tls_pin"
+    server. Phase 13's `home_tls_pin` is the same comparison under its own
+    row name (D15)."""
     pin = getattr(settings, "NODE_TLS_PIN_SHA256", "")
     if not pin:
         return CheckResult(name, WARN, "NODE_TLS_PIN_SHA256 not set")
@@ -3103,6 +3162,957 @@ def check_skills():
     ]
 
 
+# --- Phase 13: the home server (branch 7, D14/D15) ---------------------------
+
+# D15 `home_lan_only`: the only address ranges a home-only Friday may answer
+# on -- loopback, RFC 1918, IPv6 ULA and the CGNAT range Tailscale uses. A
+# fixed list, deliberately not `DEVICE_PAIRING_NETWORKS` (an owner setting).
+HOME_LAN_NETWORKS = (
+    "127.0.0.0/8",
+    "::1/128",
+    "10.0.0.0/8",
+    "172.16.0.0/12",
+    "192.168.0.0/16",
+    "fc00::/7",
+    "100.64.0.0/10",
+)
+# The status-file formats `deploy/home/friday-backup.sh` and
+# `friday-restore-drill.sh` write (D14, pinned).
+HOME_STATUS_VERSION = 1
+HOME_STATUS_MAX_BYTES = 4096
+# A status timestamp this far in the future is a clock or forgery problem.
+HOME_STATUS_FUTURE_SKEW_SECONDS = 300
+_HOME_TIMESTAMP = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z")
+_HOME_DUMP_NAME = re.compile(r"friday-\d{8}T\d{6}Z\.dump\.age")
+_HOME_SNAPSHOT = re.compile(r"[0-9a-f]{8,64}")
+_HOME_SHA256 = re.compile(r"[0-9a-f]{64}")
+HOME_DRILL_RESULTS = ("pass", "fail")
+# Phase 13b D1: the host platforms the owner may declare
+# (`HOME_SERVER_PLATFORM`); `macos` is the interim server (ADR-017
+# amendment 1).
+HOME_PLATFORM_LINUX = "linux"
+HOME_PLATFORM_MACOS = "macos"
+HOME_SERVER_PLATFORMS = (HOME_PLATFORM_LINUX, HOME_PLATFORM_MACOS)
+# Phase 13b D2: a restic repository identifier as `friday-backup.sh`
+# records it (the same character set the script accepts). Userinfo (`@`)
+# and a query (`?`) are refused separately, before this, and never echoed.
+_HOME_REPOSITORY = re.compile(r"[A-Za-z0-9._~:/%+=,-]{1,512}")
+HOME_R2_HOST_SUFFIX = ".r2.cloudflarestorage.com"
+
+
+def resolve_host(host):
+    """The IP addresses `host` resolves to here (`getaddrinfo`, any family).
+    Resolver errors propagate (`OSError`); the caller decides."""
+    import socket
+
+    infos = socket.getaddrinfo(host, None)
+    return sorted({info[4][0] for info in infos})
+
+
+class _HomeStatusError(Exception):
+    """A configured status file that is missing or malformed: the row fails
+    with this message (setting names and field names only, never a path)."""
+
+
+def _ip_or_none(text):
+    import ipaddress
+
+    try:
+        address = ipaddress.ip_address(text.split("%", 1)[0])
+    except ValueError:
+        return None
+    if isinstance(address, ipaddress.IPv6Address) and address.ipv4_mapped:
+        return address.ipv4_mapped
+    return address
+
+
+def _is_lan_address(text):
+    import ipaddress
+
+    address = _ip_or_none(text)
+    if address is None:
+        return False
+    return any(
+        address.version == network.version and address in network
+        for network in map(ipaddress.ip_network, HOME_LAN_NETWORKS)
+    )
+
+
+def _classify_home_host(host):
+    """`(verdict, note)` for one host: verdict `ok`, `public`, `wildcard` or
+    `unresolved`; note `mdns` for an unresolved `.local` name."""
+    host = host.strip().lower().rstrip(".")
+    if host.startswith("[") and host.endswith("]"):
+        host = host[1:-1]
+    if not host or host == "*" or host.startswith("."):
+        return "wildcard", ""
+    if _ip_or_none(host) is not None:
+        return ("ok", "") if _is_lan_address(host) else ("public", "")
+    try:
+        addresses = resolve_host(host)
+    except OSError:
+        addresses = []
+    if not addresses:
+        # mDNS names are link-local by definition (RFC 6762) and do not
+        # resolve inside a container: LAN-only without an address to check.
+        if host.endswith(".local"):
+            return "ok", "mdns"
+        return "unresolved", ""
+    if all(_is_lan_address(address) for address in addresses):
+        return "ok", ""
+    return "public", ""
+
+
+def _check_home_lan_only():
+    """Every `DJANGO_ALLOWED_HOSTS` entry and the `PREFLIGHT_NODE_TLS_URL`
+    host name only LAN addresses (`HOME_LAN_NETWORKS`). A wildcard, an empty
+    host list or a public address fails; an unset URL warns (dev)."""
+    name = "home_lan_only"
+    hosts = [h for h in (getattr(settings, "ALLOWED_HOSTS", None) or []) if h.strip()]
+    if not hosts:
+        return CheckResult(name, FAIL, "DJANGO_ALLOWED_HOSTS is empty")
+    url = getattr(settings, "PREFLIGHT_NODE_TLS_URL", "")
+    checked = [("DJANGO_ALLOWED_HOSTS", host.strip()) for host in hosts]
+    if url:
+        url_host = urlparse(url).hostname
+        if not url_host:
+            return CheckResult(name, FAIL, "PREFLIGHT_NODE_TLS_URL has no host")
+        checked.append(("PREFLIGHT_NODE_TLS_URL", url_host))
+    found = {"public": [], "wildcard": [], "unresolved": [], "mdns": []}
+    for source, host in checked:
+        verdict, note = _classify_home_host(host)
+        label = f"{host} ({source})"
+        if verdict != "ok":
+            found[verdict].append(label)
+        elif note:
+            found[note].append(label)
+    problems = []
+    if found["wildcard"]:
+        problems.append("a wildcard host: " + ", ".join(found["wildcard"]))
+    if found["public"]:
+        problems.append("not a LAN address: " + ", ".join(found["public"]))
+    if problems:
+        return CheckResult(
+            name, FAIL, "; ".join(problems) + " (Friday is home-only, ADR-017 decision 3)"
+        )
+    summary = f"{len(checked)} host(s) LAN-only"
+    if found["mdns"]:
+        summary += f" ({len(found['mdns'])} mDNS name(s) taken as link-local)"
+    if found["unresolved"]:
+        return CheckResult(
+            name,
+            WARN,
+            f"{summary}; could not resolve here: "
+            + ", ".join(found["unresolved"])
+            + " (not verified LAN-only: a name this container cannot resolve may still"
+            " be public; check it resolves only to a LAN address)",
+        )
+    if not url:
+        return CheckResult(name, WARN, f"{summary}; PREFLIGHT_NODE_TLS_URL not set (dev)")
+    return CheckResult(name, PASS, summary)
+
+
+def _check_home_tls_pin():
+    """D15: the LAN URL serves `NODE_TLS_PIN_SHA256` -- `node_tls_pin`'s
+    comparison under the home row's name."""
+    return _check_node_tls_pin(name="home_tls_pin")
+
+
+def _read_home_status(setting):
+    """The parsed JSON object of the status file `setting` names, or None
+    when the setting is empty. A missing, oversized or non-JSON file raises
+    `_HomeStatusError`."""
+    path = getattr(settings, setting, "")
+    if not path:
+        return None
+    try:
+        with open(path, "rb") as handle:
+            raw = handle.read(HOME_STATUS_MAX_BYTES + 1)
+    except FileNotFoundError as exc:
+        raise _HomeStatusError(f"no status file at {setting} (run the script once)") from exc
+    except OSError as exc:
+        raise _HomeStatusError(f"{setting} is not readable ({type(exc).__name__})") from exc
+    if len(raw) > HOME_STATUS_MAX_BYTES:
+        raise _HomeStatusError(f"the {setting} file is larger than {HOME_STATUS_MAX_BYTES} bytes")
+    try:
+        data = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, ValueError) as exc:
+        raise _HomeStatusError(f"the {setting} file is not JSON") from exc
+    if not isinstance(data, dict):
+        raise _HomeStatusError(f"the {setting} file is not a JSON object")
+    version = data.get("v")
+    if isinstance(version, bool) or version != HOME_STATUS_VERSION:
+        raise _HomeStatusError(f"the {setting} file is not format v{HOME_STATUS_VERSION}")
+    return data
+
+
+def _home_timestamp(data, field, setting, now):
+    from datetime import UTC, datetime
+
+    value = data.get(field)
+    error = _HomeStatusError(f"{field} in the {setting} file is not a UTC timestamp")
+    if not isinstance(value, str) or not _HOME_TIMESTAMP.fullmatch(value):
+        raise error
+    try:
+        moment = datetime.strptime(value, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC)
+    except ValueError as exc:
+        raise error from exc
+    if (moment - now).total_seconds() > HOME_STATUS_FUTURE_SKEW_SECONDS:
+        raise _HomeStatusError(f"{field} in the {setting} file is in the future")
+    return moment
+
+
+def _home_age_label(seconds):
+    seconds = max(0, int(seconds))
+    if seconds < 2 * 3600:
+        return f"{seconds // 60} min"
+    if seconds < 3 * 24 * 3600:
+        return f"{seconds // 3600} h"
+    return f"{seconds // (24 * 3600)} d"
+
+
+def _home_thresholds(warn_setting, fail_setting, unit_seconds):
+    warn = _int_setting(warn_setting)
+    fail = _int_setting(fail_setting)
+    if warn is None or fail is None or warn <= 0 or fail <= warn:
+        raise _HomeStatusError(f"{fail_setting} must be greater than {warn_setting} (> 0)")
+    return warn * unit_seconds, fail * unit_seconds
+
+
+def _home_dump_name(data, setting, *, allow_empty=False):
+    dump = data.get("dump")
+    if isinstance(dump, str) and (_HOME_DUMP_NAME.fullmatch(dump) or (allow_empty and not dump)):
+        return dump
+    raise _HomeStatusError(f"dump in the {setting} file is not a backup file name")
+
+
+def _home_repository_refusal(value):
+    """Why a restic repository identifier cannot be used, or None. Never
+    contains the value itself: a refused value may carry a credential."""
+    if "@" in value:
+        return "carries userinfo (@)"
+    if "?" in value:
+        return "carries a query (?)"
+    if not _HOME_REPOSITORY.fullmatch(value):
+        return "is not a restic repository identifier"
+    return None
+
+
+def _home_repository_host(value):
+    """The host of a URL-shaped repository (`s3:https://host/bucket`,
+    `rest:https://host/`), else None."""
+    _backend, sep, rest = value.partition(":")
+    if sep and "://" in rest:
+        return (urlparse(rest).hostname or "").lower() or None
+    return None
+
+
+def home_repository_label(value):
+    """A short, non-secret description of a repository: `<backend>:<scheme>
+    ://<host>` for a URL-shaped one, `<backend>:<host>` for another remote
+    backend, `a local path` for a directory. Never a path or a bucket."""
+    backend, sep, rest = value.partition(":")
+    if not sep or not backend or "/" in backend or backend.startswith("."):
+        return "a local path"
+    if "://" in rest:
+        parsed = urlparse(rest)
+        return f"{backend}:{parsed.scheme}://{(parsed.hostname or '').lower()}"
+    head = re.split(r"[/:]", rest, maxsplit=1)[0]
+    return f"{backend}:{head}" if head else backend
+
+
+def _home_is_r2(value):
+    host = _home_repository_host(value)
+    return bool(host) and host.endswith(HOME_R2_HOST_SUFFIX)
+
+
+def _home_offsite_repository():
+    """The configured `HOME_BACKUP_OFFSITE_REPOSITORY` (stripped; trailing
+    slashes are not significant), or "" when unset. A value with userinfo
+    or a query raises `_HomeStatusError` without echoing it."""
+    value = (getattr(settings, "HOME_BACKUP_OFFSITE_REPOSITORY", "") or "").strip()
+    if not value:
+        return ""
+    refusal = _home_repository_refusal(value)
+    if refusal is not None:
+        raise _HomeStatusError(
+            f"HOME_BACKUP_OFFSITE_REPOSITORY {refusal}: set only the non-secret"
+            " repository identifier (no key, no userinfo, no query)"
+        )
+    return value.rstrip("/")
+
+
+def _home_recorded_repository(data, setting):
+    """The `repository` field of `status.json` (Phase 13b D2, optional), or
+    None when the file predates it. A malformed value or one with userinfo
+    or a query raises `_HomeStatusError` without echoing it."""
+    if "repository" not in data:
+        return None
+    value = data["repository"]
+    if not isinstance(value, str) or not value:
+        raise _HomeStatusError(f"repository in the {setting} file is not a repository")
+    refusal = _home_repository_refusal(value)
+    if refusal is not None:
+        raise _HomeStatusError(
+            f"repository in the {setting} file {refusal} (friday-backup.sh never records"
+            " that: check the script and the host's restic environment file)"
+        )
+    return value.rstrip("/")
+
+
+def _check_home_backup_fresh():
+    """`status.json` from `deploy/home/friday-backup.sh` (D14): well-formed,
+    finished at most `HOME_BACKUP_WARN_HOURS` ago (warn up to
+    `HOME_BACKUP_FAIL_HOURS`, then fail). Reads the status file only.
+
+    Phase 13b D2: with `HOME_BACKUP_OFFSITE_REPOSITORY` set, the last
+    backup must also have recorded that repository -- absent is a warning
+    (an old script), a different one a failure; the detail names R2 when
+    the host is Cloudflare R2's. No call to the bucket: the web container
+    holds no bucket credential (ADR-017 decision 6)."""
+    from django.utils import timezone
+
+    name = "home_backup_fresh"
+    setting = "HOME_BACKUP_STATUS_PATH"
+    try:
+        warn_after, fail_after = _home_thresholds(
+            "HOME_BACKUP_WARN_HOURS", "HOME_BACKUP_FAIL_HOURS", 3600
+        )
+        offsite = _home_offsite_repository()
+        data = _read_home_status(setting)
+        if data is None:
+            return CheckResult(name, WARN, f"{setting} not set (owner step: runbook step 8)")
+        now = timezone.now()
+        finished = _home_timestamp(data, "finished_at", setting, now)
+        dump = _home_dump_name(data, setting)
+        size = data.get("bytes")
+        if isinstance(size, bool) or not isinstance(size, int) or size <= 0:
+            raise _HomeStatusError(f"bytes in the {setting} file is not a positive integer")
+        digest = data.get("sha256")
+        if not isinstance(digest, str) or not _HOME_SHA256.fullmatch(digest):
+            raise _HomeStatusError(f"sha256 in the {setting} file is not a sha256 hex digest")
+        snapshot = data.get("restic_snapshot")
+        if not isinstance(snapshot, str) or not _HOME_SNAPSHOT.fullmatch(snapshot):
+            raise _HomeStatusError(f"restic_snapshot in the {setting} file is not a snapshot id")
+        recorded = _home_recorded_repository(data, setting)
+    except _HomeStatusError as exc:
+        return CheckResult(name, FAIL, str(exc))
+    age = (now - finished).total_seconds()
+    detail = f"last backup {_home_age_label(age)} ago ({dump}, restic {snapshot})"
+    if offsite and recorded is not None and recorded != offsite:
+        return CheckResult(
+            name,
+            FAIL,
+            f"{detail}; the last backup went to {home_repository_label(recorded)}, not the"
+            " configured off-site repository (HOME_BACKUP_OFFSITE_REPOSITORY; check the"
+            " host's restic environment file)",
+        )
+    notes = []
+    if offsite and recorded is None:
+        notes.append(
+            "the last backup did not record its repository -- update friday-backup.sh"
+            " (the off-site destination is not verified)"
+        )
+    elif offsite:
+        where = "R2" if _home_is_r2(offsite) else home_repository_label(offsite)
+        detail += f", off-site {where}"
+    if age > fail_after:
+        return CheckResult(
+            name,
+            FAIL,
+            f"{detail}; older than HOME_BACKUP_FAIL_HOURS (is friday-backup.timer on? on the"
+            " interim Mac: the LaunchAgent)",
+        )
+    if age > warn_after:
+        notes.insert(0, "older than HOME_BACKUP_WARN_HOURS")
+    return CheckResult(name, WARN if notes else PASS, "; ".join([detail, *notes]))
+
+
+def _check_home_restore_drill_age():
+    """`drill.json` from `deploy/home/friday-restore-drill.sh` (D14): the
+    last drill passed at most `HOME_DRILL_WARN_DAYS` ago (warn up to
+    `HOME_DRILL_FAIL_DAYS`, then fail); a failed last drill fails."""
+    from django.utils import timezone
+
+    name = "home_restore_drill_age"
+    setting = "HOME_RESTORE_DRILL_STATUS_PATH"
+    try:
+        warn_after, fail_after = _home_thresholds(
+            "HOME_DRILL_WARN_DAYS", "HOME_DRILL_FAIL_DAYS", 24 * 3600
+        )
+        data = _read_home_status(setting)
+        if data is None:
+            return CheckResult(name, WARN, f"{setting} not set (owner step: runbook step 9)")
+        now = timezone.now()
+        drilled = _home_timestamp(data, "drilled_at", setting, now)
+        result = data.get("result")
+        if result not in HOME_DRILL_RESULTS:
+            raise _HomeStatusError(f"result in the {setting} file is not pass or fail")
+        dump = _home_dump_name(data, setting, allow_empty=result == "fail")
+    except _HomeStatusError as exc:
+        return CheckResult(name, FAIL, str(exc))
+    age = (now - drilled).total_seconds()
+    label = f"{_home_age_label(age)} ago"
+    if result == "fail":
+        return CheckResult(
+            name,
+            FAIL,
+            f"the last restore drill failed {label} ({dump or 'no dump'}): "
+            "fix the backup and drill again",
+        )
+    detail = f"last restore drill passed {label} ({dump})"
+    if age <= warn_after:
+        return CheckResult(name, PASS, detail)
+    if age <= fail_after:
+        return CheckResult(name, WARN, f"{detail}; older than HOME_DRILL_WARN_DAYS")
+    return CheckResult(name, FAIL, f"{detail}; older than HOME_DRILL_FAIL_DAYS")
+
+
+def _home_platform():
+    """The declared `HOME_SERVER_PLATFORM` (lower-cased; empty = `linux`),
+    or None when it is not one of `HOME_SERVER_PLATFORMS`."""
+    value = (getattr(settings, "HOME_SERVER_PLATFORM", "") or "").strip().lower()
+    value = value or HOME_PLATFORM_LINUX
+    return value if value in HOME_SERVER_PLATFORMS else None
+
+
+def _check_home_server_platform():
+    """Phase 13b D1: the platform the owner declares. `linux` (the home PC)
+    passes; `macos` (the interim server on the MacBook, ADR-017 amendment
+    1) is a warning, because Friday is down whenever the Mac sleeps; any
+    other value fails (the value is not echoed)."""
+    name = "home_server_platform"
+    platform = _home_platform()
+    if platform == HOME_PLATFORM_LINUX:
+        return CheckResult(name, PASS, "linux (the always-on home server)")
+    if platform == HOME_PLATFORM_MACOS:
+        return CheckResult(
+            name,
+            WARN,
+            "macos: interim server (ADR-017 amendment 1): Friday is down while the Mac sleeps",
+        )
+    return CheckResult(
+        name, FAIL, "HOME_SERVER_PLATFORM is not one of " + ", ".join(HOME_SERVER_PLATFORMS)
+    )
+
+
+def _check_home_disk_encryption_macos(value):
+    """Phase 13b D1: on the interim Mac, `HOME_FDE_CONFIRMED_ON` is the
+    FileVault attestation -- always a warning (never pass, never fail)."""
+    from datetime import date
+
+    from django.utils import timezone
+
+    name = "home_disk_encryption"
+    suffix = "no LUKS/TPM on macOS (interim)"
+    confirmed = None
+    if value:
+        try:
+            confirmed = date.fromisoformat(value)
+        except ValueError:
+            confirmed = None
+        if confirmed is not None and confirmed > timezone.now().date():
+            confirmed = None
+    if confirmed is not None:
+        return CheckResult(name, WARN, f"FileVault owner-confirmed on {confirmed}; {suffix}")
+    reason = (
+        "HOME_FDE_CONFIRMED_ON not set"
+        if not value
+        else "HOME_FDE_CONFIRMED_ON is not a past ISO date (YYYY-MM-DD)"
+    )
+    return CheckResult(
+        name,
+        WARN,
+        f"FileVault not confirmed ({reason}; owner attestation, runbook I1); {suffix}",
+    )
+
+
+def _check_home_disk_encryption():
+    """`HOME_FDE_CONFIRMED_ON`: the owner's attestation that the server disk
+    is LUKS encrypted (a container cannot see the host's disks). Never a
+    fail: unset or unusable is a warning.
+
+    Phase 13b D1: on `HOME_SERVER_PLATFORM=macos` the same setting is the
+    FileVault attestation and the row is ALWAYS a warning: there is no
+    LUKS/TPM on the interim Mac, and an attestation a container cannot
+    verify is not reported as verified. An unknown platform (which
+    `home_server_platform` fails) is a warning here."""
+    from datetime import date
+
+    from django.utils import timezone
+
+    name = "home_disk_encryption"
+    value = (getattr(settings, "HOME_FDE_CONFIRMED_ON", "") or "").strip()
+    platform = _home_platform()
+    if platform is None:
+        return CheckResult(
+            name, WARN, "HOME_SERVER_PLATFORM is unknown: disk encryption not assessed"
+        )
+    if platform == HOME_PLATFORM_MACOS:
+        return _check_home_disk_encryption_macos(value)
+    if not value:
+        return CheckResult(
+            name, WARN, "HOME_FDE_CONFIRMED_ON not set (owner attestation, runbook step 1)"
+        )
+    try:
+        confirmed = date.fromisoformat(value)
+    except ValueError:
+        return CheckResult(name, WARN, "HOME_FDE_CONFIRMED_ON is not an ISO date (YYYY-MM-DD)")
+    if confirmed > timezone.now().date():
+        return CheckResult(name, WARN, "HOME_FDE_CONFIRMED_ON is in the future")
+    return CheckResult(name, PASS, f"owner confirmed full-disk encryption on {confirmed}")
+
+
+def check_home():
+    """Phase 13 D15 (branch 7), read-only: `home_lan_only`, `home_tls_pin`,
+    `home_backup_fresh`, `home_restore_drill_age`, `home_disk_encryption`,
+    and (Phase 13b D1) `home_server_platform`.
+    Nothing is sent to a node, no model is called, no backup is started or
+    read -- only the two status files the host's scripts write. Details
+    carry host names, setting names, file names and ages -- never a path or
+    a secret."""
+    return [
+        _guarded("home_lan_only", _check_home_lan_only),
+        _guarded("home_tls_pin", _check_home_tls_pin),
+        _guarded("home_backup_fresh", _check_home_backup_fresh),
+        _guarded("home_restore_drill_age", _check_home_restore_drill_age),
+        _guarded("home_disk_encryption", _check_home_disk_encryption),
+        _guarded("home_server_platform", _check_home_server_platform),
+    ]
+
+
+# --- Phase 13 closeout: labels, the HA allowlist, the Linux node, no protocol change
+
+# Boundary "no new protocol surface" (`node_protocol_frozen`): Phase 13 adds
+# no WS message, schema field or capability contract (ADR-013 and ADR-015
+# unchanged, ADR-017). The node protocol surface (schemas, vectors,
+# capability contracts, conformance cases and vectors) and
+# `node/friday-voice/conformance.lock`, hashed at the Phase 12 closeout
+# merge (7d2dee5, `chore/p12-closeout`). A later protocol change updates
+# these digests in the same branch as its ADR. Re-pinned at the
+# integ/phase-13 integration of the Phase 10 protocol v2 (ADR-013
+# "Implementation notes -- protocol v2", `feat/p10-node-confirm`) and the
+# runbook A12 move of the reference contracts into `nodes/` (235 files);
+# `node/friday-voice/conformance.lock` is unchanged.
+NODE_PROTOCOL_GLOBS = (
+    "nodes/protocol/schemas/**/*.json",
+    "nodes/protocol/vectors/**/*.json",
+    "nodes/capabilities/**/*.json",
+    "nodes/conformance/cases/**/*.json",
+    "nodes/conformance/vectors/**/*.json",
+)
+PHASE12_NODE_PROTOCOL_SHA256 = "543be31274e000cb10c56d5ec7249b1344cfaff4cb55e74eb3abf41906669c51"
+PHASE12_NODE_PROTOCOL_FILES = 235
+PHASE12_FRIDAY_VOICE_LOCK_SHA256 = (
+    "a9be6508206d1d779036119ddaf3ef2453f2333bb46166a6d9f093c0eae1ef29"
+)
+# D15 `linux_node_vendor`: the trees `node/friday-node-linux/scripts/
+# vendor.py` vendors whole (a test pins that both lists agree; the backend
+# imports nothing from the package, this check reads hashes only).
+LINUX_NODE_LOCK = "vendor.lock"
+LINUX_NODE_VENDOR = "friday_node_linux/_vendor"
+LINUX_NODE_VENDORED_TREES = (
+    "nodes/protocol",
+    "nodes/capabilities",
+    "nodes/reference/fixtures",
+)
+_VENDOR_LOCK_LINE = re.compile(r"^([0-9a-f]{64})  ([0-9a-f]{64})  ([A-Za-z0-9_./-]+)$")
+_VENDOR_SKIP_PARTS = frozenset({"__pycache__", ".pytest_cache"})
+HA_OWNER_STEP = "owner step 5: allowlist entities on /connectors/home-assistant"
+
+
+def node_protocol_digest(backend=None):
+    """`(sha256, file count)` of the node protocol surface under `backend`
+    (default: this checkout's backend): sha256 over the sorted
+    `<sha256 of file>  <path>` lines of every `NODE_PROTOCOL_GLOBS` file."""
+    import hashlib
+
+    backend = Path(backend) if backend is not None else Path(settings.BASE_DIR).resolve()
+    files = sorted(
+        {
+            path.relative_to(backend).as_posix()
+            for pattern in NODE_PROTOCOL_GLOBS
+            for path in backend.glob(pattern)
+            if path.is_file()
+        }
+    )
+    digest = hashlib.sha256()
+    for relative in files:
+        digest.update(f"{_sha256_file(backend / relative)}  {relative}\n".encode())
+    return digest.hexdigest(), len(files)
+
+
+def linux_node_dir():
+    """The `node/friday-node-linux` checkout preflight hashes, or None when
+    this host has none (the backend image does not ship `node/`)."""
+    configured = getattr(settings, "PREFLIGHT_LINUX_NODE_DIR", "") or ""
+    path = (
+        Path(configured)
+        if configured
+        else Path(settings.BASE_DIR).resolve().parent / "node" / "friday-node-linux"
+    )
+    return path if path.is_dir() else None
+
+
+def ha_state_ids():
+    """The entity ids of one read-only `ha_states` read (the bridge's
+    `get_states` under the manifest's own pin, every domain the deployment
+    may read). Raises the bridge's `ConnectorError` (`not_configured`
+    without `HA_BASE_URL` / `HA_TOKEN`)."""
+    from connectors.bridges import home_assistant as bridge
+    from connectors.manifest import get_manifest
+
+    manifest = get_manifest("home_assistant")
+    (policy,) = [p for p in manifest.tools if p.server_tool == bridge.SERVER_TOOL_STATES]
+    result = bridge.call_tool(
+        manifest,
+        server_tool=bridge.SERVER_TOOL_STATES,
+        arguments={},
+        schema_sha256=policy.schema_sha256,
+        timeout=_timeout(),
+    )
+    return {entity["entity_id"] for entity in (result.structured or {}).get("entities", [])}
+
+
+def _label_list(values, limit=5):
+    values = sorted(values)
+    shown = ", ".join(values[:limit])
+    return shown + (f" (+{len(values) - limit} more)" if len(values) > limit else "")
+
+
+def _check_nodes_labels():
+    """D3/D15: per owner, every non-revoked node has a unique name (its
+    `name_key`), and rooms are set once the owner has more than one node --
+    what "which PC" resolves on. A node without a room in a multi-node home
+    is a `warn`; a duplicate `name_key` (pairing and `PATCH` prevent it) a
+    `fail`. Details carry node names and counts only."""
+    name = "nodes_labels"
+    active = _active_nodes()
+    if not active:
+        return CheckResult(name, WARN, "no node paired (pending owner evaluation, M2)")
+    by_owner = {}
+    for node, _status in active:
+        by_owner.setdefault(node.owner_id, []).append(node)
+    duplicates, roomless = [], []
+    for nodes in by_owner.values():
+        keys = Counter(node.name_key or node.name for node in nodes)
+        duplicates += [n.name for n in nodes if keys[n.name_key or n.name] > 1]
+        if len(nodes) > 1:
+            roomless += [n.name for n in nodes if n.room_id is None]
+    detail = f"{len(active)} node(s) of {len(by_owner)} owner(s)"
+    if duplicates:
+        return CheckResult(
+            name,
+            FAIL,
+            f"{detail}; duplicate names: {_label_list(duplicates)} "
+            "(rename on /devices: 'which PC' cannot tell them apart)",
+        )
+    if roomless:
+        return CheckResult(
+            name, WARN, f"{detail}; no room set: {_label_list(roomless)} (set it on /devices)"
+        )
+    return CheckResult(name, PASS, f"{detail}, names unique, rooms set")
+
+
+def _check_ha_entities():
+    """D11/D15: the owner's entity allowlist. Every enabled `HomeEntity`
+    stays inside the bridge's code maximum (never a `NEVER_DOMAINS` or
+    read-only domain, services a subset of `SERVICES`) -- else `fail` --
+    and still exists in Home Assistant (one read-only `ha_states` read,
+    seam `ha_state_ids`). None allowlisted, or HA not configured, is a
+    `warn`: no entity call is possible then (fail closed). Details carry
+    entity ids, codes and counts -- never a state, a token or a URL."""
+    from connectors.bridges import home_assistant as bridge
+    from connectors.mcp_client import ConnectorError
+    from connectors.models import HomeEntity
+
+    name = "ha_entities"
+    rows = list(HomeEntity.objects.filter(enabled=True).order_by("entity_id"))
+    if not rows:
+        return CheckResult(name, WARN, f"no entity allowlisted ({HA_OWNER_STEP})")
+    outside = [
+        f"{row.entity_id}={refusal}"
+        for row in rows
+        if (refusal := bridge.code_maximum_refusal(row.entity_id, row.services)) is not None
+    ]
+    if outside:
+        return CheckResult(
+            name, FAIL, f"outside the code maximum: {_label_list(outside)} (remove them)"
+        )
+    readable = bridge.read_domains()
+    narrowed = [r.entity_id for r in rows if bridge.entity_domain(r.entity_id) not in readable]
+    checked = [r.entity_id for r in rows if r.entity_id not in narrowed]
+    detail = f"{len(rows)} enabled entit{'y' if len(rows) == 1 else 'ies'}"
+    notes = []
+    if narrowed:
+        notes.append(f"narrowed away by HA_ALLOWED_DOMAINS: {_label_list(narrowed)}")
+    if checked:
+        try:
+            present = ha_state_ids()
+        except ConnectorError as exc:
+            status = WARN if exc.code == "not_configured" else FAIL
+            return CheckResult(name, status, f"{detail}; ha_states read failed: {exc.code}")
+        missing = [entity_id for entity_id in checked if entity_id not in present]
+        if missing:
+            notes.append(f"not found in Home Assistant: {_label_list(missing)}")
+    if notes:
+        return CheckResult(name, WARN, f"{detail}; " + "; ".join(notes))
+    return CheckResult(name, PASS, f"{detail}, each inside the code maximum and present in HA")
+
+
+def _read_vendor_lock(path):
+    """`{relative path: (source sha256, vendored sha256)}`, or None when a
+    line is malformed."""
+    entries = {}
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if not line.strip() or line.startswith("#"):
+            continue
+        match = _VENDOR_LOCK_LINE.match(line)
+        if match is None or ".." in match.group(3).split("/"):
+            return None
+        entries[match.group(3)] = (match.group(1), match.group(2))
+    return entries
+
+
+def _vendored_tree_files(backend):
+    return {
+        path.relative_to(backend).as_posix()
+        for tree in LINUX_NODE_VENDORED_TREES
+        for path in (backend / tree).rglob("*")
+        if path.is_file() and not _VENDOR_SKIP_PARTS & set(path.parts) and path.suffix != ".pyc"
+    }
+
+
+def _check_linux_node_vendor():
+    """D10/D15: `node/friday-node-linux/vendor.lock` against this backend --
+    every locked backend source unchanged, every vendored copy as locked,
+    no file of a vendored tree left out. Hashes only (the backend imports
+    nothing from the package; `scripts/vendor.py --check` is the CI step).
+    No checkout here is a `warn`."""
+    name = "linux_node_vendor"
+    root = linux_node_dir()
+    if root is None:
+        return CheckResult(name, WARN, "not checkable here (no node/friday-node-linux)")
+    lock = root / LINUX_NODE_LOCK
+    if not lock.is_file():
+        return CheckResult(name, FAIL, f"{LINUX_NODE_LOCK} missing (run scripts/vendor.py)")
+    entries = _read_vendor_lock(lock)
+    if not entries:
+        return CheckResult(name, FAIL, f"{LINUX_NODE_LOCK} is malformed or empty")
+    backend = Path(settings.BASE_DIR).resolve()
+    vendor = root / LINUX_NODE_VENDOR
+    drift = []
+    for relative, (source_sha, copy_sha) in entries.items():
+        source = backend / relative
+        if not source.is_file() or _sha256_file(source) != source_sha:
+            drift.append(f"backend/{relative}")
+        copy = vendor / relative
+        if not copy.is_file() or _sha256_file(copy) != copy_sha:
+            drift.append(f"_vendor/{relative}")
+    left_out = _vendored_tree_files(backend) - set(entries)
+    drift += [f"backend/{relative} (not vendored)" for relative in left_out]
+    if drift:
+        return CheckResult(
+            name,
+            FAIL,
+            f"drift against {LINUX_NODE_LOCK}: {_label_list(drift)} (run scripts/vendor.py)",
+        )
+    return CheckResult(name, PASS, f"{len(entries)} vendored file(s) match {LINUX_NODE_LOCK}")
+
+
+def _check_node_protocol_frozen():
+    """Boundary "no new protocol surface": the node protocol files and the
+    `friday-voice` conformance lock hash to the Phase 12 closeout values
+    (`node_conformance` and `friday_voice_conformance` prove the files are
+    current; this row proves they did not move). Without a
+    `node/friday-voice` checkout its half is skipped (a `warn`)."""
+    name = "node_protocol_frozen"
+    digest, count = node_protocol_digest()
+    problems = []
+    if digest != PHASE12_NODE_PROTOCOL_SHA256:
+        problems.append(
+            f"the node protocol surface changed ({count} files, was "
+            f"{PHASE12_NODE_PROTOCOL_FILES}; sha256 {digest[:12]})"
+        )
+    root = friday_voice_dir()
+    if root is not None:
+        lock = root / FRIDAY_VOICE_LOCK
+        if not lock.is_file():
+            problems.append(f"node/friday-voice/{FRIDAY_VOICE_LOCK} missing")
+        elif _sha256_file(lock) != PHASE12_FRIDAY_VOICE_LOCK_SHA256:
+            problems.append(f"node/friday-voice/{FRIDAY_VOICE_LOCK} changed")
+    if problems:
+        return CheckResult(
+            name,
+            FAIL,
+            "; ".join(problems) + " since the Phase 12 closeout (a protocol change needs an ADR)",
+        )
+    if root is None:
+        return CheckResult(
+            name,
+            WARN,
+            f"{count} node protocol files unchanged since the Phase 12 closeout; "
+            "friday-voice lock not checkable here (no node/friday-voice)",
+        )
+    return CheckResult(
+        name,
+        PASS,
+        f"{count} node protocol files and the friday-voice lock unchanged since the "
+        "Phase 12 closeout",
+    )
+
+
+def check_home_control():
+    """Phase 13 closeout (D15), read-only: `nodes_labels`, `ha_entities`,
+    `linux_node_vendor` and `node_protocol_frozen`. One `ha_states` read is
+    the only outside contact; nothing is sent to a node, no model is called
+    and nothing is written."""
+    return [
+        _guarded("nodes_labels", _check_nodes_labels),
+        _guarded("ha_entities", _check_ha_entities),
+        _guarded("linux_node_vendor", _check_linux_node_vendor),
+        _guarded("node_protocol_frozen", _check_node_protocol_frozen),
+    ]
+
+
+# --- Phase 13b closeout: the direct media class (ADR-018) ---------------------
+
+# ADR-018's implementation note records the digest of the closed set
+# (sha256 of the eight sorted service names joined by a newline). Pinned
+# here independently of `connectors.home_direct.ADR_018_DIGEST`: widening or
+# narrowing the set needs an ADR-018 amendment that updates both.
+ADR_018_DIRECT_MEDIA_SHA256 = "9ca85ee245440d6c31779bf26dfd256489eeafff83e3e678bc3c7572ad2d3183"
+HA_DIRECT_OWNER_STEP = "owner step: flag a TV 'Doğrudan (onaysız)' on /connectors"
+
+
+def _direct_flag_refusal(row):
+    """Why a flagged `HomeEntity` is outside ADR-018's class, or None.
+    `HomeEntity.save()` refuses all three on every write path, so a hit
+    here means a write went around it."""
+    from connectors import home_direct
+    from connectors.bridges import home_assistant as bridge
+    from workspaces.models import Workspace
+
+    if bridge.entity_domain(row.entity_id) != home_direct.DIRECT_MEDIA_DOMAIN:
+        return "not_media_player"
+    if not home_direct.direct_eligible(row.entity_id, row.services):
+        return "no_direct_service"
+    if row.workspace.type != Workspace.Type.PERSONAL:
+        return "not_personal"
+    return None
+
+
+def _owner_direct_settings(workspace):
+    """`(kill switch, volume maximum)` the classifier would read for the
+    installation owner's personal workspace (`effective_settings`, through
+    `for_actor()`): the owner's row, or the defaults while it does not
+    exist (never created here)."""
+    from connectors import home_direct
+
+    if workspace is None:
+        return False, home_direct.default_volume_max()
+    current = home_direct.effective_settings(actor=workspace.owner, workspace=workspace)
+    return current.kill_switch, current.volume_max
+
+
+def _check_ha_direct_media():
+    """Phase 13b D4-D8 (ADR-018): the direct media class.
+
+    - `fail`: `DIRECT_MEDIA_SERVICES`' digest differs from ADR-018's
+      recorded value, or a flagged entity is outside the class (not a
+      `media_player`, no direct-eligible service ticked, or outside a
+      personal workspace) -- `HomeEntity.save()` makes both impossible on
+      every write path, so a hit is a defect;
+    - `warn`: the class is off (the env kill switch or a zero rate limit;
+      the owner's kill switch), Home Assistant is not usable in the owner's
+      personal workspace, no entity is flagged, or a flagged entity is
+      disabled in the allowlist (it is not direct);
+    - otherwise `pass`.
+    Read-only: no Home Assistant request, no model call, no row written
+    (the owner's settings are read through the classifier's own reader,
+    never created). Details carry the
+    state, counts, entity ids, limits and the volume maximum -- never a
+    token, a URL or a Home Assistant state."""
+    from connectors import home_direct
+    from connectors.models import HomeEntity
+
+    name = "ha_direct_media"
+    digest = home_direct.closed_set_digest(home_direct.DIRECT_MEDIA_SERVICES)
+    if not digest == home_direct.ADR_018_DIGEST == ADR_018_DIRECT_MEDIA_SHA256:
+        return CheckResult(
+            name,
+            FAIL,
+            f"the direct media closed set changed (sha256 {digest[:12]}, ADR-018 records "
+            f"{ADR_018_DIRECT_MEDIA_SHA256[:12]}): changing it needs an ADR-018 amendment",
+        )
+    flagged = list(
+        HomeEntity.objects.filter(direct=True).select_related("workspace").order_by("entity_id")
+    )
+    outside = [
+        f"{row.entity_id}={refusal}"
+        for row in flagged
+        if (refusal := _direct_flag_refusal(row)) is not None
+    ]
+    if outside:
+        return CheckResult(
+            name,
+            FAIL,
+            f"flagged outside ADR-018's class: {_label_list(outside)} (unflag them on /connectors)",
+        )
+    workspace = _installation_owner_workspace()
+    owner_kill, volume_max = _owner_direct_settings(workspace)
+    state = home_direct.direct_state(kill_switch=owner_kill)
+    global_limit, entity_limit = home_direct.rate_limits()
+    enabled = [row for row in flagged if row.enabled]
+    disabled = [row.entity_id for row in flagged if not row.enabled]
+    count = len(enabled)
+    detail = (
+        f"state {state}, {count} flagged entit{'y' if count == 1 else 'ies'}, "
+        f"limits {global_limit}/min global and {entity_limit}/min per entity, "
+        f"volume max {round(float(volume_max) * 100)}%"
+    )
+    if state == home_direct.STATE_OFF_ENV:
+        return CheckResult(
+            name,
+            WARN,
+            f"{detail}; off by the environment (HA_DIRECT_MEDIA_KILL_SWITCH or a zero "
+            "HA_DIRECT_RATE_* limit): every media call is a card",
+        )
+    if state == home_direct.STATE_OFF_OWNER:
+        return CheckResult(
+            name, WARN, f"{detail}; the owner's kill switch is on: every media call is a card"
+        )
+    if workspace is None or not home_direct.ha_usable(workspace):
+        return CheckResult(
+            name,
+            WARN,
+            f"{detail}; Home Assistant not configured in the owner's personal workspace "
+            "(manifest, binding or ha_call_service pin)",
+        )
+    if not enabled:
+        return CheckResult(
+            name, WARN, f"{detail}; no entity flagged direct ({HA_DIRECT_OWNER_STEP})"
+        )
+    if disabled:
+        return CheckResult(
+            name,
+            WARN,
+            f"{detail}; flagged but disabled (not direct): {_label_list(disabled)}",
+        )
+    return CheckResult(
+        name,
+        PASS,
+        f"{detail}; each a media_player with a direct service, closed set matches ADR-018",
+    )
+
+
+def check_home_direct():
+    """Phase 13b closeout, read-only: `ha_direct_media` (ADR-018's closed
+    set, the flagged entities, the kill switches, the limits and the volume
+    maximum). No Home Assistant request, no model call, nothing written."""
+    return [_guarded("ha_direct_media", _check_ha_direct_media)]
+
+
 CHECKS = (
     ("web", check_web),
     ("bff", check_bff),
@@ -3124,6 +4134,9 @@ CHECKS = (
     ("proactive", check_proactive),
     ("n8n", check_n8n),
     ("skills", check_skills),
+    ("home", check_home),
+    ("home_control", check_home_control),
+    ("home_direct", check_home_direct),
 )
 
 

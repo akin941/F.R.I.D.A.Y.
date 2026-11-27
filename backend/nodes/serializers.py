@@ -1,5 +1,7 @@
 from rest_framework import serializers
 
+from nodes.models import Node
+
 
 class NodePairSerializer(serializers.Serializer):
     """`POST /api/v1/nodes/pair` body (D4)."""
@@ -11,6 +13,38 @@ class NodePairSerializer(serializers.Serializer):
         min_length=1,
         max_length=8,
     )
+    # Phase 13 D3: optional; absent = macOS, so the existing Swift app pairs
+    # unchanged. Recorded once, never edited afterwards.
+    platform = serializers.ChoiceField(
+        choices=Node.Platform.choices, required=False, default=Node.Platform.MACOS
+    )
+
+
+class NodeLabelSerializer(serializers.Serializer):
+    """`PATCH /api/v1/nodes/<id>` body (Phase 13 D3): any of `name`,
+    `room_id` (null clears it), `role`, `aliases`. Transport bounds only:
+    the label rules are `nodes.services.relabel_node`'s. Unknown fields --
+    `platform` among them -- are refused, not ignored."""
+
+    name = serializers.CharField(
+        max_length=200, trim_whitespace=False, allow_blank=True, required=False
+    )
+    room_id = serializers.UUIDField(allow_null=True, required=False)
+    role = serializers.CharField(max_length=32, required=False)
+    aliases = serializers.ListField(
+        child=serializers.CharField(max_length=200, trim_whitespace=False, allow_blank=True),
+        max_length=20,
+        required=False,
+    )
+
+    def validate(self, attrs):
+        initial = self.initial_data if isinstance(self.initial_data, dict) else {}
+        unknown = set(initial) - set(self.fields)
+        if unknown:
+            raise serializers.ValidationError(f"Unknown fields: {', '.join(sorted(unknown))}.")
+        if not attrs:
+            raise serializers.ValidationError("Provide `name`, `room_id`, `role` or `aliases`.")
+        return attrs
 
 
 class NodeActionCreateSerializer(serializers.Serializer):

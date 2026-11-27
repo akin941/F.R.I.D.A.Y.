@@ -226,4 +226,96 @@ describe("NodesSection (Phase 9 D11)", () => {
     render(<NodesSection />);
     expect(await screen.findByText("Mac düğümleri yüklenemedi.")).toBeInTheDocument();
   });
+
+  it("shows the owner's labels and edits them in a dialog (Phase 13 D3)", async () => {
+    const labelled = node({
+      room: { id: "r1", name: "Çalışma odası", key: "çalişma odasi" },
+      role: "workstation",
+      platform: "linux",
+      aliases: ["masa"],
+    });
+    const fetchMock = stubBackend({
+      nodes: [labelled],
+      extra: (url, init) =>
+        url === `/api/nodes/${ID}` && init?.method === "PATCH"
+          ? jsonResponse({ ...labelled, name: "Masaüstü" })
+          : undefined,
+    });
+    const user = userEvent.setup();
+    render(<NodesSection />);
+    const card = await screen.findByTestId("node-card");
+    expect(within(card).getByTestId("node-labels")).toHaveTextContent(
+      "Çalışma odası · Masaüstü iş istasyonu · Linux · takma adlar: masa",
+    );
+    await user.click(within(card).getByRole("button", { name: "Düzenle" }));
+    const dialog = await screen.findByRole("dialog");
+    const name = within(dialog).getByLabelText("Ad");
+    await user.clear(name);
+    await user.type(name, "Masaüstü");
+    await user.click(within(dialog).getByRole("button", { name: "Kaydet" }));
+    await waitFor(() => expect(within(card).getByText("Masaüstü")).toBeInTheDocument());
+    const patch = fetchMock.mock.calls.find(([, init]) => init?.method === "PATCH")!;
+    expect(JSON.parse(patch[1]!.body as string)).toMatchObject({ name: "Masaüstü", room_id: "r1" });
+  });
+});
+
+describe("NodesSection overview (Phase 13 D4/D5)", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("lists every node with room, role, platform (icon + label) and can-counts", async () => {
+    const SECOND = "44444444-4444-4444-8444-444444444444";
+    stubBackend({
+      nodes: [
+        node({
+          room: { id: "r1", name: "Çalışma odası", key: "calisma odasi" },
+          role: "laptop",
+          platform: "macos",
+          invocable_read_count: 8,
+          invocable_action_count: 5,
+        }),
+        node({
+          id: SECOND,
+          name: "Masaüstü",
+          status: "disconnected",
+          role: "workstation",
+          platform: "linux",
+          invocable_read_count: 8,
+          invocable_action_count: 0,
+        }),
+      ],
+    });
+    render(<NodesSection />);
+    const table = await screen.findByTestId("nodes-overview");
+    expect(within(table).getAllByRole("columnheader").map((cell) => cell.textContent)).toEqual([
+      "Ad",
+      "Durum",
+      "Oda",
+      "Rol",
+      "Platform",
+      "Yapabildikleri",
+    ]);
+    const rows = within(table).getAllByTestId("nodes-overview-row");
+    expect(rows).toHaveLength(2);
+    const [mac, desk] = rows as [HTMLElement, HTMLElement];
+    expect(within(mac).getByRole("link", { name: "MacBook Pro" })).toHaveAttribute("href", `/devices/nodes/${ID}`);
+    expect(mac).toHaveTextContent("Bağlı");
+    expect(mac).toHaveTextContent("Çalışma odası");
+    expect(mac).toHaveTextContent("Dizüstü");
+    expect(mac).toHaveTextContent("macOS");
+    expect(within(mac).getByTestId("nodes-overview-can")).toHaveTextContent("8 okuma · 5 eylem");
+    expect(desk).toHaveTextContent("Bağlı değil");
+    expect(desk).toHaveTextContent("Linux");
+    expect(within(desk).getByTestId("nodes-overview-can")).toHaveTextContent("8 okuma · 0 eylem");
+    // The overview has no control besides the detail links.
+    expect(table.querySelectorAll("input, button, select, textarea")).toHaveLength(0);
+  });
+
+  it("reads zero counts from an older backend without them", async () => {
+    stubBackend();
+    render(<NodesSection />);
+    const table = await screen.findByTestId("nodes-overview");
+    expect(within(table).getByTestId("nodes-overview-can")).toHaveTextContent("0 okuma · 0 eylem");
+  });
 });

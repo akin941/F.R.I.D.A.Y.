@@ -363,6 +363,10 @@ NODE_IDLE_EXPIRY_DAYS = env.int("NODE_IDLE_EXPIRY_DAYS", default=30)
 # - after a rotation the previous secret stays valid this long, or until the
 #   new secret is first used, whichever comes first.
 NODE_ROTATION_GRACE_SECONDS = env.int("NODE_ROTATION_GRACE_SECONDS", default=600)
+# Phase 13 D6 ("which PC"): among several online nodes that can serve a
+# request nobody named, the one the owner used last wins only if that use
+# is this recent (seconds); otherwise Friday asks which PC.
+NODE_LAST_ACTIVE_WINDOW_SECONDS = env.int("NODE_LAST_ACTIVE_WINDOW_SECONDS", default=900)
 
 # Friday Node protocol signing (Phase 9 brief D4). NODE_SIGNING_KEY is an
 # Ed25519 private key, base64 of its raw 32 bytes, from the environment only
@@ -607,6 +611,10 @@ AI_UNTIERED_PURPOSES = frozenset(
         # speech (Phase 6 D5): capability, not tier, selects audio providers
         "voice.stt",
         "voice.tts",
+        # Phase 6 branch 3a (brief "3a"): the Turkish evaluation set's own
+        # STT/TTS calls (`manage.py voice_eval`), untiered like the above.
+        "voice.eval_stt",
+        "voice.eval_tts",
         # `manage.py preflight` (Phase 5 closeout): pinned to one provider at
         # a time (`only_provider`), so a tier would never apply.
         "ops.preflight",
@@ -622,6 +630,13 @@ AI_AUDIO_PURPOSES = ("voice.stt", "voice.tts")
 AI_BUDGET_AUDIO_MONTHLY_USD = env("AI_BUDGET_AUDIO_MONTHLY_USD", default="20")
 AI_BUDGET_AUDIO_SESSION_USD = env("AI_BUDGET_AUDIO_SESSION_USD", default="1")
 AI_BUDGET_AUDIO_DAILY_USD = env("AI_BUDGET_AUDIO_DAILY_USD", default="")
+# Phase 6 branch 3a: the evaluation set's audio calls have their OWN A3 row
+# (`voice_eval`, seeded once, owner-editable), so an eval run can never
+# exhaust live voice's `audio` cap. The session window is one
+# `voice_eval` run (`voice_eval:<run id>`).
+AI_VOICE_EVAL_PURPOSES = ("voice.eval_stt", "voice.eval_tts")
+AI_BUDGET_VOICE_EVAL_MONTHLY_USD = env("AI_BUDGET_VOICE_EVAL_MONTHLY_USD", default="5")
+AI_BUDGET_VOICE_EVAL_RUN_USD = env("AI_BUDGET_VOICE_EVAL_RUN_USD", default="2")
 # Phase 8A D13: the learning loop's gateway caps. `learning` is the shared
 # monthly cap over both learning purposes (20 USD, ADR-012); each purpose
 # also gets its own daily cap. Seeded once by `seed_ai_defaults`
@@ -720,7 +735,7 @@ VOICE_TTS_ROUTES = {
         "voice": env("VOICE_TTS_ROUTE_TR_VOICE", default="tr_TR-dfki-medium"),
     },
     "en": {
-        "provider": env("VOICE_TTS_ROUTE_EN_PROVIDER", default="voice-tts-local"),
+        "provider": env("VOICE_TTS_ROUTE_EN_PROVIDER", default="voice-tts-local-en"),
         "voice": env("VOICE_TTS_ROUTE_EN_VOICE", default="en_US-lessac-medium"),
     },
 }
@@ -736,6 +751,17 @@ VOICE_TTS_PROVIDER_PARAMS = {
 # A5: `voice.VoiceTurnTrace` rows (stage timings only) are pruned daily
 # after this many days (config/celery.py).
 VOICE_TRACE_RETENTION_DAYS = env.int("VOICE_TRACE_RETENTION_DAYS", default=30)
+# --- Turkish evaluation set (Phase 6 branch 3a, brief A4/A5) ---
+# `manage.py voice_eval`. The owner's recordings live OUTSIDE the repo
+# (biometric data) in a mode-0700 directory; only the manifest
+# (`docs/voice/eval-manifest.md`: file names, sha256, reference text,
+# condition) is committed. Result files (0600) and the latency baseline are
+# written outside the repo too.
+VOICE_EVAL_SET_DIR = env("VOICE_EVAL_SET_DIR", default="~/FridayEval/asr")
+VOICE_EVAL_RESULTS_DIR = env("VOICE_EVAL_RESULTS_DIR", default="~/FridayEval/results")
+VOICE_EVAL_BASELINE = env("VOICE_EVAL_BASELINE", default="~/FridayEval/latency-baseline.json")
+# Empty = `<repo>/docs/voice/eval-manifest.md` (BASE_DIR's parent).
+VOICE_EVAL_MANIFEST = env("VOICE_EVAL_MANIFEST", default="")
 # --- Live voice on the node (Phase 11 D3/D5) ---
 # Hard lifetime of a `node_voice` token (minted by the node secret, handed
 # to the voice child). Refused at boot above one hour: a leaked child
@@ -827,6 +853,43 @@ VOICE_LIVE_SELFTEST_RESULT_PATH = env("VOICE_LIVE_SELFTEST_RESULT_PATH", default
 # its `conformance.lock`. Empty = `<repo>/node/friday-voice` next to the
 # backend; absent (the backend image ships no `node/`) = a warning.
 PREFLIGHT_FRIDAY_VOICE_DIR = env("PREFLIGHT_FRIDAY_VOICE_DIR", default="")
+# Phase 13 branch 7 (ADR-017, brief D14/D15): the home-server rows
+# (`check_home`). The two status files the host's backup and drill scripts
+# write (deploy/home/; deploy/docker/compose.home.yml binds them read-only
+# into web). Empty = the row warns (not configured); a configured path with
+# no readable file fails. Preflight reads only these files, never a dump.
+HOME_BACKUP_STATUS_PATH = env("HOME_BACKUP_STATUS_PATH", default="")
+HOME_RESTORE_DRILL_STATUS_PATH = env("HOME_RESTORE_DRILL_STATUS_PATH", default="")
+# `home_backup_fresh`: pass <= warn hours, warn up to fail hours, then fail.
+HOME_BACKUP_WARN_HOURS = env.int("HOME_BACKUP_WARN_HOURS", default=26)
+HOME_BACKUP_FAIL_HOURS = env.int("HOME_BACKUP_FAIL_HOURS", default=72)
+# `home_restore_drill_age`: pass <= warn days with `result: pass`, warn up to
+# fail days, then fail (or at once when the last drill failed).
+HOME_DRILL_WARN_DAYS = env.int("HOME_DRILL_WARN_DAYS", default=35)
+HOME_DRILL_FAIL_DAYS = env.int("HOME_DRILL_FAIL_DAYS", default=90)
+# The owner's attestation (ISO date) that the server's disk is LUKS
+# encrypted (runbook step 1); a container cannot see the host's disks.
+# Empty = `home_disk_encryption` warns.
+HOME_FDE_CONFIRMED_ON = env("HOME_FDE_CONFIRMED_ON", default="")
+# Phase 13b D1 (ADR-017 amendment 1): the host platform the owner DECLARES
+# (`linux` | `macos`; a container cannot tell Docker Desktop's or OrbStack's
+# Linux VM from a Linux host). `macos` = the interim server on the MacBook:
+# `home_server_platform` warns (Friday is down while the Mac sleeps) and
+# `home_disk_encryption` reads HOME_FDE_CONFIRMED_ON as the FileVault
+# attestation (always a warning there). Any other value fails the row.
+HOME_SERVER_PLATFORM = env("HOME_SERVER_PLATFORM", default="linux")
+# Phase 13b D2 (ADR-017 amendment 2): the NON-SECRET identifier of the
+# off-site restic repository (e.g. `s3:https://<account-id>.r2.
+# cloudflarestorage.com/<bucket>`, the host's RESTIC_REPOSITORY value, never
+# a key). Set = `home_backup_fresh` also requires the last backup's
+# recorded `repository` to equal it. Empty = the age rules only ("off-site
+# pending"). A value with userinfo (`@`) or a query (`?`) fails the row.
+HOME_BACKUP_OFFSITE_REPOSITORY = env("HOME_BACKUP_OFFSITE_REPOSITORY", default="")
+# Phase 13 closeout (brief D15): the `node/friday-node-linux` checkout
+# `linux_node_vendor` hashes against its `vendor.lock`. Empty =
+# `<repo>/node/friday-node-linux` next to the backend; absent (the backend
+# image ships no `node/`) = a warning.
+PREFLIGHT_LINUX_NODE_DIR = env("PREFLIGHT_LINUX_NODE_DIR", default="")
 
 # --- Knowledge/RAG (MVP 3) ---
 
@@ -946,6 +1009,22 @@ GOOGLE_MAIL_BODY_MAX_CHARS = env.int("GOOGLE_MAIL_BODY_MAX_CHARS", default=6000)
 HA_ALLOWED_DOMAINS = env.list("HA_ALLOWED_DOMAINS", default=[])
 # Wake-on-LAN targets; empty = `wake_on_lan.send_magic_packet` is refused.
 HA_WOL_ALLOWED_MACS = env.list("HA_WOL_ALLOWED_MACS", default=[])
+# Phase 13b (ADR-018, brief D6/D8): the direct-execute home media class.
+# Nothing is direct until the owner flags an entity on /connectors (and
+# branch 1c's executor is merged). The env kill switch turns every
+# would-be direct call back into an approval card, whatever the owner's
+# /connectors toggle says. Rate limits are direct calls per sliding minute
+# for the owner (global) and per entity; over a limit -> the card. 0
+# disables the class. `HA_DIRECT_VOLUME_MAX` is the initial owner maximum
+# for a direct `volume_set` (0..1; the owner changes it on /connectors).
+HA_DIRECT_MEDIA_KILL_SWITCH = env.bool("HA_DIRECT_MEDIA_KILL_SWITCH", default=False)
+HA_DIRECT_RATE_GLOBAL_PER_MINUTE = env.int("HA_DIRECT_RATE_GLOBAL_PER_MINUTE", default=30)
+HA_DIRECT_RATE_ENTITY_PER_MINUTE = env.int("HA_DIRECT_RATE_ENTITY_PER_MINUTE", default=10)
+HA_DIRECT_VOLUME_MAX = env.float("HA_DIRECT_VOLUME_MAX", default=0.6)
+if not 0.0 <= HA_DIRECT_VOLUME_MAX <= 1.0:
+    raise ImproperlyConfigured("HA_DIRECT_VOLUME_MAX must be between 0 and 1.")
+if HA_DIRECT_RATE_GLOBAL_PER_MINUTE < 0 or HA_DIRECT_RATE_ENTITY_PER_MINUTE < 0:
+    raise ImproperlyConfigured("HA_DIRECT_RATE_*_PER_MINUTE must be 0 or more (0 disables).")
 
 # --- Agent runtime (MVP 7) ---
 

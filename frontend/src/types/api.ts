@@ -140,6 +140,144 @@ export interface ApiNodeSummary {
   advertised_count: number;
   invocable_count: number;
   snapshot_at: string | null;
+  /** Phase 13 D3: the owner's labels (server-side data; never sent to the node). */
+  name_key?: string;
+  room?: ApiRoomRef | null;
+  role?: ApiNodeRole;
+  platform?: ApiNodePlatform;
+  aliases?: string[];
+  last_active_at?: string | null;
+  /** Phase 13 D5: what the node can do, as two counts (never names). */
+  invocable_read_count?: number;
+  invocable_action_count?: number;
+}
+
+export type ApiNodeRole = "workstation" | "laptop" | "media" | "server" | "other";
+export type ApiNodePlatform = "macos" | "linux" | "windows";
+
+/** A room as a node carries it (Phase 13 D2). */
+export interface ApiRoomRef {
+  id: string;
+  name: string;
+  key: string;
+}
+
+/** `GET/POST /api/v1/workspaces/<id>/rooms` row (Phase 13 D2). */
+export interface ApiRoom extends ApiRoomRef {
+  aliases: string[];
+  sort_order: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ApiRoomList {
+  workspace: string;
+  limits: { aliases: number; alias_min_chars: number; alias_max_chars: number; name_max_chars: number };
+  results: ApiRoom[];
+}
+
+/** One allowlisted Home Assistant entity (Phase 13 D11). */
+export interface ApiHomeEntity {
+  id: string;
+  entity_id: string;
+  domain: string;
+  label: string;
+  key: string;
+  aliases: string[];
+  services: string[];
+  enabled: boolean;
+  /**
+   * Phase 13b D5 (ADR-018): the owner-set "direct" flag (no approval card
+   * for the closed media services). Optional: absent from a backend
+   * predating branch 1b.
+   */
+  direct?: boolean;
+  /** The closed-class services the flag covers on this entity; empty = not eligible. */
+  direct_services?: string[];
+  room: ApiRoomRef | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/** Phase 13b D6: `on` / off by the owner / off by the environment. */
+export type ApiHomeDirectState = "on" | "off_owner" | "off_env";
+
+/** `GET/PATCH /api/v1/connectors/home-assistant/direct` (Phase 13b D6). */
+export interface ApiHomeDirectSettings {
+  workspace: string;
+  kill_switch: boolean;
+  env_kill_switch: boolean;
+  state: ApiHomeDirectState;
+  volume_max: number;
+  rate_global_per_minute: number;
+  rate_entity_per_minute: number;
+  services: string[];
+  digest: string;
+  flagged_count: number;
+}
+
+/** One row of `GET /api/v1/connectors/home-assistant/direct/calls` (Phase 13b D11). */
+export interface ApiHomeDirectCall {
+  id: string;
+  home_entity_id: string | null;
+  entity_id: string;
+  service: string;
+  data: Record<string, unknown>;
+  requested_data: Record<string, unknown> | null;
+  origin: "voice" | "node" | "chat";
+  node: string | null;
+  status: "running" | "succeeded" | "failed" | "unknown_outcome";
+  error_type: string;
+  read_back: boolean;
+  started_at: string | null;
+  finished_at: string | null;
+  created_at: string;
+}
+
+export interface ApiHomeDirectCalls {
+  workspace: string;
+  results: ApiHomeDirectCall[];
+}
+
+/** `GET /api/v1/connectors/home-assistant/entities`. `services`: the code maximum per domain, narrowed. */
+export interface ApiHomeEntityList {
+  workspace: string;
+  limits: { aliases: number; alias_min_chars: number; alias_max_chars: number; label_max_chars: number };
+  services: Record<string, string[]>;
+  results: ApiHomeEntity[];
+}
+
+/** One row of the editor's pick list (a live `ha_states` read; HA text is display-only). */
+export interface ApiHomeEntityCandidate {
+  entity_id: string;
+  domain: string;
+  friendly_name: string;
+  state: string;
+  source_list: string[];
+  services: string[];
+  allowlisted: boolean;
+}
+
+export interface ApiHomeEntityCandidates {
+  results: ApiHomeEntityCandidate[];
+  omitted: number;
+}
+
+/** One row of `GET /api/v1/nodes/<id>/audit` (Phase 13 D8): a chain row or an event. */
+export type ApiNodeAuditRow =
+  | ({ kind: "invocation" } & ApiNodeInvocation)
+  | {
+      kind: "event";
+      id: string;
+      created_at: string;
+      action: string;
+      actor_type: string;
+      details: Record<string, string | number | boolean | null | string[]>;
+    };
+
+export interface ApiNodeAuditPage {
+  results: ApiNodeAuditRow[];
+  next_cursor: string | null;
 }
 
 /** One snapshot entry: availability is the Mac's own (read-only here). */
@@ -383,6 +521,8 @@ export type ChatStreamEvent =
       source_message_id: string;
       tool_name: string;
       payload: Record<string, unknown>;
+      /** Phase 13b D7: why a `home.control` card is not direct (a closed code). */
+      direct_reason?: string;
     };
 
 // --- Memory (MVP 2) ---
@@ -551,6 +691,9 @@ export interface ApiNodeActionDisplaySummary {
   title: string;
   capability: string;
   node_name: string;
+  // Phase 13 D9: the target PC's room and platform (absent on older rows).
+  node_room?: string;
+  node_platform?: string;
   repo_name: string;
   trust_verdict: string;
   trust_reason: string;

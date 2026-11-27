@@ -5,7 +5,7 @@
 > is retired)**. Precondition met 2026-09-27 (Phase 4 merged to `main`,
 > former repository, PR #27); step-0 spikes recorded below.
 > **Closeout (2026-11-20): all ten branches implemented** on the
-> integration branch `claude/inspiring-franklin-pw7avo`, which supersedes
+> integration branch `claude/inspiring-franklin-pw7avo` (former repository), which supersedes
 > the former repository's `integ/phase-5` PR #29 (§10); owner steps
 > pending per branch.
 > Parent decisions: ADR-001, ADR-002 (import contracts), ADR-003
@@ -831,13 +831,13 @@ preflight`, (b) a seeded OpenRouter provider row, (c) a record that the
 former repository's Phase 5 PR is superseded.
 
 **Status: implemented 2026-11-20** (branch `chore/p5-closeout`, cut from
-the integration branch `claude/inspiring-franklin-pw7avo` with branches
+the integration branch `claude/inspiring-franklin-pw7avo` (former repository) with branches
 1–9 merged).
 
 - **Superseded PR (c).** The former repository's Phase 5 integration PR
   (`integ/phase-5` → `main`, PR #29, opened 2026-09-28 with branches 1–6
   and 8) is **superseded** by the integration branch
-  `claude/inspiring-franklin-pw7avo` in this repository, which carries all
+  `claude/inspiring-franklin-pw7avo` (the integration branch of that time; former repository), which carries all
   ten Phase 5 branches. PR #29 is not merged and not updated; it should be
   closed with a pointer here (owner step 6). "`integ/phase-5`" elsewhere in
   this brief means this integration branch from now on.
@@ -959,6 +959,45 @@ Mac, real credentials, paid calls or real hardware:
   recorded as owner steps rather than tested here (explicitly documented
   and acceptable). Record the real-stack preflight summary line after
   owner step 1.
+
+**Preflight baseline — dev stack on the owner's Mac (runbook A3,
+`fix/p9-dev-image-git`, 2026-11-26).** `make up`, migrate, `seed_ai_defaults`,
+`bootstrap_owner` (by the owner), `seed_ingestion_sources`, local Ollama
+(`llama3.1:8b`, `nomic-embed-text`) opted in, reference node paired:
+**`41 pass / 0 fail / 34 warn`**. Every `warn` is an owner step or a pending
+Mac evaluation (BFF/frontend URLs, OpenRouter rows, MCP bindings, the
+learning sources, `graphify`, `eval_baseline`, `node_tls_pin`,
+`node_escape_suite` Mac evidence, voice live rows, proactive schedules, n8n,
+the five `home_*` rows). The first run had one `fail`, `node_escape_suite:
+check crashed: RuntimeError`: the dev image had no `git`, which the
+reference node's fixture home needs (so `run_reference_node` crashed too);
+`Dockerfile.dev` now installs it. Both reference nodes were revoked after the
+run. This is not the real-stack line above: no real provider or connector
+credentials are configured yet.
+
+**Preflight with the frontend — dev stack on the owner's Mac (runbook C1
+item 1, 2026-11-27).** Same stack after B1–B8 and A7 (`make up-local-tls`,
+`AI_FAKE_PROVIDER=false`, the local speech server, the Swift node paired on
+protocol v2); `make frontend-build` (`.next/BUILD_ID` `EE5ISzRerUkYQuspjktxI`)
+served by `next start -H 127.0.0.1 --port 3001`; preflight run in `web` with
+`PREFLIGHT_BFF_URL=http://host.docker.internal:3001/enroll` (the frontend's
+`/` redirects there until the browser is enrolled) and
+`PREFLIGHT_FRONTEND_BUILD_ID_FILE` at a copy of that `BUILD_ID`:
+**`49 pass / 0 fail / 30 warn`**. `bff` HTTP 200; `frontend_build` found
+the build id in the real Next.js output (closing the "unit-tested only"
+note above); `provider:ollama-local` and `provider:ollama-embedding`
+answered (the providers check took about 11 minutes on this 8 GB Mac with
+real model calls). Every `warn` is an owner step, a credential not yet
+configured (OpenRouter, MCP/n8n bindings, Home Assistant) or a pending Mac
+evaluation (eval baseline, escape-suite Mac evidence, live-voice policy and
+self-test, `home_*`); the fake providers now warn "off" by design.
+Observed while measuring: two earlier preflight runs hit a Postgres backend
+crash (`server process … exited with exit code 2`, automatic recovery)
+while other backend test suites ran against the same dev Postgres; a run of
+every check one at a time with a sentinel connection did not reproduce it.
+Treat a run that shows a burst of `OperationalError` rows as void and
+re-run it on a quiet stack. Item 2 (OpenRouter, paid) and items 3–6 remain
+owner steps.
 
 ## Branch table
 

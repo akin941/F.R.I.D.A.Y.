@@ -10,6 +10,29 @@ precondition, the state read back after execution).
 `records_work_log=False`: a light toggle is audit-worthy, not memory-worthy
 (brief D13). No domain is ungated or confirm-class (Q7).
 
+Version 2 (Phase 13 D11/D12): every entity call needs an enabled,
+owner-set `connectors.HomeEntity` whose `services` include the service
+(`scope_check` at request time, the precondition before the send; an empty
+allowlist allows no entity call -- Wake-on-LAN stays on the MAC allowlist);
+`media_player` gains `turn_on` / `turn_off` / `select_source` (a live
+`source_list` value) / `volume_mute` / `volume_up` / `volume_down`;
+`ha_states` keeps `source` / `source_list` (bounded) and annotates
+allowlisted entities with their room and label. Every call stays gate-class.
+
+Phase 13 D13 (branch 6): `draft_arguments` -- the router (typed turns) and
+the `home.control` wake route (voice) draft the card with exact arguments;
+`draft_arguments` is a Friday-side flag, not part of the pinned request
+contract, so the pins and the version are unchanged.
+
+Version 3 (Phase 13b D4, branch 1a): `media_player` gains
+`media_play_pause` and `media_stop` (both no data), **gate-class like every
+service** -- a card, `/approvals`, one `ConnectorWriteExecution`. The
+`media_play_pause` dialog shows the state read at request time and the
+outcome it implies ("şu an oynatılıyor → duraklatılır"); the precondition
+refuses the send when the live state now implies the other outcome
+(`connector_changed`). `CALL_SERVICE_PIN` changes; `STATES_PIN` does not
+(the read contract is unchanged).
+
 The pins are the sha256 of the bridge's own request contract
 (`connectors.bridges.home_assistant.tool_schemas()`); widening the
 allowlist means updating them and bumping `version` in the same reviewed
@@ -31,12 +54,12 @@ from core.channels import CHANNEL_WEB
 # The native bridge `connectors.bridges.get_bridge` dispatches to.
 BRIDGE = bridge.BRIDGE
 
-STATES_PIN = "f24e86599d4763a6bf1fa3cb0093bcc51d8d3c942629106323df3288b4ad0822"
-CALL_SERVICE_PIN = "230b3efed4a19051774cb937ce9303212a4183428d61632ad56d0bc3351708c7"
+STATES_PIN = "772b49f1813b8f1bbd3e9357a8a03d063ce5b3fb3924c28e317eade8bfdaf2d6"
+CALL_SERVICE_PIN = "968bd894bfcb584ca03bc5d05d74e3a6576c95d5d8d0a50b731db563bdf001cd"
 
 MANIFEST = ConnectorManifest(
     name="home_assistant",
-    version=1,
+    version=3,
     display_name="Home Assistant",
     kind=KIND_NATIVE,
     status=STATUS_ACTIVE,
@@ -57,24 +80,32 @@ MANIFEST = ConnectorManifest(
             ),
             argument_serializer=bridge.StatesArguments,
             schema_sha256=STATES_PIN,
+            annotate=bridge.annotate_states,
         ),
         ToolPolicy(
             name="ha_call_service",
             server_tool=bridge.SERVER_TOOL_CALL,
             kind=TOOL_WRITE,
             description=(
-                "Call one allowlisted Home Assistant service on one exact entity "
-                "(lights, switches, fans, covers, climate, media players, scenes, "
-                "Wake-on-LAN) after the owner's decision."
+                "Call one Home Assistant service the owner allowlisted for one exact "
+                "entity (lights, switches, fans, covers, climate, media players: power, "
+                "input, volume, mute, play/pause/stop; scenes; Wake-on-LAN) after the owner's "
+                "decision."
             ),
             argument_serializer=bridge.CallServiceArguments,
             schema_sha256=CALL_SERVICE_PIN,
+            scope_check=bridge.check_allowlist,
             gate_name="ha_call_service",
             user_invocable=True,
             renderer=bridge.render_call,
             request_rows=bridge.request_rows,
             precondition=bridge.target_present,
             records_work_log=False,
+            # Phase 13 D13 (branch 6): a typed turn's draft carries the
+            # router-extracted arguments, checked against the allowlist and
+            # the owner's room/label mention before the card exists
+            # (`connectors.home_phrases.check_call_draft`).
+            draft_arguments=True,
         ),
     ),
 )

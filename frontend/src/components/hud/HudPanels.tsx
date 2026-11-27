@@ -9,6 +9,7 @@ import type {
   HudApprovals,
   HudCost,
   HudHealth,
+  HudHomeDirect,
   HudNodeLine,
   HudNodeVoice,
   HudProviderStatus,
@@ -261,16 +262,54 @@ export function HudNodeMicLine({ voice }: { voice: HudNodeVoice }) {
   );
 }
 
+// Phase 13b D11 (ADR-018): the direct media line's colour per state --
+// checked HUD tokens only; the state word carries the meaning. `on` is the
+// "awaiting approval" amber: calls run without a card while it is on.
+export const HOME_DIRECT_HUD_TOKENS: Record<HudHomeDirect["state"], string> = {
+  on: "text-hud-awaiting-approval",
+  off_owner: "text-hud-caption-muted",
+  off_env: "text-hud-caption-muted",
+  not_configured: "text-hud-caption-muted",
+};
+
+/**
+ * The direct media class (Phase 13b D11): its state, the flagged entities
+ * and the direct calls of the last hour. Read-only -- the only control is a
+ * link to `/connectors`, where the owner switches it.
+ */
+export function HudHomeDirectLine({ line }: { line: HudHomeDirect }) {
+  const copy = tr.hud.health;
+  return (
+    <div className="flex flex-col gap-0.5 text-xs" data-testid="hud-home-direct" data-state={line.state}>
+      <h3 className="flex justify-between text-hud-caption-muted">
+        <span>{copy.homeDirect}</span>
+        <Link href="/connectors" className="underline underline-offset-2">
+          {copy.homeDirectManage}
+        </Link>
+      </h3>
+      <p className={HOME_DIRECT_HUD_TOKENS[line.state] ?? "text-hud-caption"} data-testid="hud-home-direct-text">
+        {copy.homeDirect}: {copy.homeDirectStates[line.state] ?? line.state}
+        {line.state === "not_configured" && line.flagged === 0 && line.calls_last_hour === 0
+          ? null
+          : ` · ${copy.homeDirectCounts(line.flagged, line.calls_last_hour)}`}
+      </p>
+    </div>
+  );
+}
+
 export type MicState = keyof typeof tr.hud.health.micStates;
 
 export function HealthPanel({
   health,
   mic,
   stream,
+  hideNodeLine = false,
 }: {
   health: HudHealth | null;
   mic: MicState;
   stream: HudStreamStatus;
+  /** Phase 13 D4: with more than one node the HUD shows `HudNodesPanel` instead. */
+  hideNodeLine?: boolean;
 }) {
   const providers = health?.providers ?? [];
   const budgets = health?.budgets ?? [];
@@ -348,7 +387,9 @@ export function HealthPanel({
         )}
       </div>
 
-      {health?.node ? <HudNodeLineView node={health.node} /> : null}
+      {health?.node && !hideNodeLine ? <HudNodeLineView node={health.node} /> : null}
+
+      {health?.home_direct ? <HudHomeDirectLine line={health.home_direct} /> : null}
 
       <div className="flex flex-col gap-0.5 text-xs" data-testid="hud-preflight">
         <h3 className="text-hud-caption-muted">{tr.hud.health.preflight}</h3>

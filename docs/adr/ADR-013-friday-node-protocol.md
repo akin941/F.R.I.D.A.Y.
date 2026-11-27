@@ -9,6 +9,12 @@ Phase 9 branch 1; if the spike fails, Phase 9 does not start and this ADR is
 revisited before any node code lands. Extends ADR-002 (new kernel app
 `nodes`), ADR-004/ADR-008 decision 3 (gated node actions, classified by
 ADR-014). Amends nothing.
+**Amended 2026-11-25 (d9 revised):** signing uses a free Apple ID Personal
+Team identity, not a notarized Developer ID build — see "Amendment
+2026-11-25 (d9 revised)" at the end.
+**Personal Team spike PASS 2026-11-26** (data protection keychain; the
+profile is valid 7 days) — see "Implementation notes — Personal Team
+spike" at the end.
 
 Numbering note: the proposal called this "ADR-012". ADR-011 is reserved by
 the Phase 6 brief for "voice transport", so the proposal's ADRs are
@@ -26,11 +32,15 @@ WebSocket was exploited. The repo already has device trust
 cookie, idle expiry).
 
 ## Decision
-1. **Shape (d1, d9).** One signed and notarized Swift macOS menu-bar app,
+1. **Shape (d1, d9).** One signed Swift macOS menu-bar app,
    `friday-node`, with the Python voice pipeline as a child process from
    Phase 11. It opens one **outbound-only** WSS connection to the server and
-   has **no TCP listener**. Signing uses the owner's Apple Developer ID; the
-   signing key stays on the owner's Mac and CI never holds it.
+   has **no TCP listener**. ~~Signing uses the owner's Apple Developer ID~~
+   *(amended 2026-11-25)* Signing uses the owner's free Apple ID Personal
+   Team "Apple Development" identity with hardened runtime; the app is not
+   notarized and not distributed (paid Developer ID + notarization is an
+   optional later path). The signing key stays on the owner's Mac and CI
+   never holds it.
 2. **Identity.** A `kind=node` principal: a long-lived node credential kept
    in the macOS Keychain, rotation without re-pairing, immediate revocation,
    an owner kill switch (web UI and `manage.py`), covered by
@@ -89,8 +99,11 @@ cookie, idle expiry).
 ## Consequences
 - A compromised server can sign grants but cannot change node policy, run
   anything outside the catalogue, or get past the local click.
-- The owner pays for an Apple Developer membership (99 USD/year, d9) and
-  keeps a signing key on the Mac.
+- ~~The owner pays for an Apple Developer membership (99 USD/year, d9)~~
+  *(amended 2026-11-25)* The owner needs no paid Apple Developer membership
+  while the node runs only on their own Mac; they keep a Personal Team
+  signing key on the Mac. Paid membership returns only if the Personal Team
+  spike fails or the owner later wants distribution or auto-update.
 - Phase 9 is read-only; gated execution and its classification arrive with
   ADR-014 in Phase 10.
 - A compromised-server test suite (unknown capability, out-of-schema args,
@@ -397,7 +410,8 @@ checks the chain and audit rows, revokes the node over the web
 refuses its reconnect (4401). The Swift app must pass the offline and live
 conformance runs and the server-side contract tests listed in the brief's
 "Mac session (deferred)" (M1–M3) before it is used; the Keychain half of
-the spike, the Swift conformance pass and TCC across notarized updates are
+the spike, the Swift conformance pass and TCC across notarized updates (since
+2026-11-25: across rebuilds signed by the same Personal Team identity) are
 **pending owner evaluation** (brief "Go/no-go record").
 
 ## Implementation note — Phase 8B closeout (`chore/p8b-closeout`, 2026-11-20)
@@ -602,3 +616,198 @@ how the child honours them.
   dropped, shows `off` with the mic released (decision 6).
 - Decisions 1, 6 and 8 are unchanged: the child stays a stdio-only,
   model-free, keyless process; the server→node message set is untouched.
+
+## Amendment 2026-11-25 (d9 revised)
+
+**Owner decision 2026-11-25.** `friday-node` runs only on the owner's own
+Mac. It is never distributed to other Macs and is installed from a local
+Xcode build. So the paid Apple Developer Program (99 USD/year), the
+Developer ID Application identity and notarization are **not required**.
+
+- **Signing identity.** The app is signed with the free Apple ID **Personal
+  Team** "Apple Development" identity (Xcode → Settings → Accounts), with
+  hardened runtime. That identity is stable: the designated requirement
+  stays the same from build to build, so TCC grants (Accessibility, Screen
+  Recording, Full Disk Access, Microphone, Automation) and Keychain items
+  written by build N should survive build N+1. Ad-hoc signing ("Sign to Run
+  Locally") is **never** used for a build that holds TCC grants: its
+  designated requirement is the code hash, so every rebuild loses them.
+- **No notarization, no Developer ID, no distribution.** Gatekeeper
+  assessment (`spctl`) of a Personal Team build is expected to report it as
+  not notarized; that is accepted because the app is never downloaded from
+  elsewhere.
+- **Unchanged.** The signing key never leaves the Mac; CI never holds it.
+  The conformance build stays a separate, unsigned debug configuration,
+  never signed with the Personal Team identity and never installed as a
+  login item, and the local build script still refuses conformance markers
+  in a release build.
+- **Verification first.** The first step of the Mac session is a spike
+  (`docs/runbooks/mac-session-handoff.md` A1) that checks on the real Mac:
+  (a) Personal Team signing works with hardened runtime and the needed
+  entitlements (microphone, Apple Events/automation, keychain access, no
+  App Sandbox requirement); (b) the certificate's validity and expiry, and
+  what happens on renewal; (c) TCC grants persist across two rebuilds
+  signed with the same identity; (d) Keychain items written by build N are
+  readable by build N+1. The shipped build uses Xcode automatic signing,
+  so the entitlements Xcode adds (application identifier, team identifier,
+  keychain access groups) are kept; a manual re-sign uses that full set.
+- **Keychain variant.** The node credential belongs in the data
+  protection keychain, the only macOS keychain that honours
+  `kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly`. If the spike shows
+  it is unavailable to a Personal Team build, the outcome is PARTIAL: the
+  file-based keychain would protect the secret only by the login keychain
+  lock and an ACL bound to the designated requirement. Using it needs a
+  dated, owner-acknowledged residual note in this ADR before Phase 9 M1;
+  otherwise the paid fallback applies.
+- **Fallback.** If the spike fails (a needed entitlement is unavailable to
+  a Personal Team, or grants or Keychain items do not persist), the
+  original path applies: enrol in the paid program, sign with Developer ID
+  and notarize. The failure is recorded in the runbook and in MASTER_PLAN
+  §O d9.
+- **Optional later.** Paid enrolment + Developer ID + notarization is an
+  optional later step, only if the owner wants to distribute the app to
+  other Macs or use Sparkle-style auto-update.
+
+Where earlier sections of this ADR or the briefs say "notarized build" or
+"Developer ID", read "Personal Team signed build" and "the Personal Team
+signing identity", and read "TCC across updates" as "TCC across rebuilds
+signed by the same Personal Team identity".
+
+## Implementation note — "which PC" and one node per call (Phase 13 branch 2, 2026-11-20)
+
+`feat/p13-node-targeting` (Phase 13 brief D5–D7, D9). **No protocol
+change**: no WS message, schema field, capability contract or
+`friday-voice/v1` change; `build_node_conformance --check` and the
+conformance locks are untouched. What changed is server-side only:
+
+- **One resolver.** `nodes.targeting.resolve_target(owner, *, capabilities,
+  source_text, origin_node_id, requested_node_id, requested_label)` decides
+  the one node of every node read and node-action proposal, in this order:
+  the owner's own words (a node name or alias, a room in locative form, a
+  role or platform word; a named node that is offline, lacks the capability
+  or is cut off is refused *naming it*, never replaced by another node);
+  the speaking node of a `node_voice` turn (the voice token's
+  `node_device_id`, now also on `ChannelPrincipal.node_device_id`); the only
+  eligible node; the eligible node used last within
+  `NODE_LAST_ACTIVE_WINDOW_SECONDS` (900), strictly later than the others;
+  otherwise Friday asks ("Hangi bilgisayar: MacBook mu, Masaüstü mü?") and
+  calls no node. The model's `node_id` / `node` argument is untrusted: it
+  is only checked against that resolution (`target_mismatch`,
+  `node_unknown`) and can neither decide nor settle an ambiguity. It
+  replaced Phase 9's `nodes.selectors.read_node_for`.
+- **`last_active_at`** is written (at most once a minute per node) by a
+  relayed hook batch, a `node_voice` transcription request (injected into
+  `voice` by `config/urls.py`) and a click on the node's own confirmation
+  window (`approved` / `denied`); never by a heartbeat. It is node-
+  influenced, so it only ranks candidates nobody named: an explicit mention
+  and the speaking node always win, and the approval card plus the target
+  node's own window still name the PC (ADR-014 unchanged).
+- **One node per invocation.** `invoke_read`, `invoke_confirm` and
+  `dispatch_gated` keep their single `node`; `NodeInvocation` and
+  `NodeActionExecution` keep one `node` FK; `node_action` takes exactly one
+  string `node_id`. `tools/tests/test_one_node_invariant.py` walks every
+  registered node-reaching read tool with two online reference nodes and
+  asserts every chain row of a call is the named node's and the other node
+  receives nothing. The grant stays bound to its `node_id` (protocol v2):
+  an approval for node A dispatched while node B is the active one still
+  goes to A only.
+- **Labels stay server-side.** The router's targets block carries each
+  node's name, room, role and platform as data (prompt text, purpose and
+  prompt version unchanged); the approval summary adds `node_room` and
+  `node_platform`. Nothing is sent to a node.
+
+## Implementation notes — Personal Team spike (runbook A1, `feat/mac-a1-spike`, 2026-11-26)
+
+**Result: PASS, conditional on the 2026-12-04 expiry check** — (a) to (d)
+of "Amendment 2026-11-25 (d9 revised)" hold on the owner's Mac, with the
+node credential in the **data protection keychain**. The runbook's Fail
+criterion "a profile's expiry would break the installed app" cannot be
+tested before the 7-day profile expires (see below); B1 starts on this
+basis, and if the check fails this note is changed to FAIL and A1-F
+applies. Run on macOS 27.2 (build `26B123` as `sw_vers` reports it), Xcode
+27.2 (27B52),
+Apple silicon, on 2026-11-26. The spike app and its build script are in
+`node/spikes/ptspike/` (owner decision 2026-11-26: the spike, its script
+and this note live on one branch, instead of the runbook's out-of-repo
+spike and separate `docs/p9-personal-team-spike` branch; the branch is
+`feat/mac-a1-spike`, the name the handoff now uses). Build outputs,
+status files and the saved requirement stay in `~/FridaySpike/` (0700),
+outside the repo. No identity name, Team ID or certificate is committed.
+
+| Check | Result |
+|---|---|
+| (a) Signing | PASS. Xcode automatic signing, Release, `flags=0x10000(runtime)`, no App Sandbox, chain Apple Development → Apple Worldwide Developer Relations CA (G3) → Apple Root CA, `TeamIdentifier` set, `codesign --verify --strict` valid. Never re-signed by hand. |
+| (b) Dates | Certificate valid one year (notBefore 2026-11-26, notAfter 2027-11-26; read from the signing certificate by `build.sh`, `inspect-6.txt`). Xcode-managed profile valid **7 days** (created 2026-11-26, expires 2026-12-03). Renewal untested. |
+| (c) TCC across two rebuilds | PASS. Build 3 (N) held Microphone, Accessibility, Screen Recording, Full Disk Access and Automation (System Events); builds 4 and 5, each with a different binary (a per-build marker string) and `CFBundleVersion`, kept all five, with no prompt. |
+| (d) Keychain across two rebuilds | PASS, data protection keychain. Build 3 wrote a `kSecClassGenericPassword` item with `kSecUseDataProtectionKeychain` (the code sets `kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly` and not synchronizable; the attributes were not read back); builds 4 and 5 read it with no prompt. A data-protection read never shows an ACL prompt, so for this variant the evidence is the successful read by a different build, not the absence of a prompt. The file-based variant also passed. |
+
+- **Designated requirement form:** `identifier "<spike bundle id>" and
+  anchor apple generic and certificate leaf[subject.CN] = "Apple
+  Development: <owner> (<cert id>)" and certificate
+  1[field.1.2.840.113635.100.6.2.1] /* exists */`. No `cdhash`. It was
+  equal for every build (1–6; build 6 was built after review, not installed) and did not change when the entitlements or
+  the embedded profile changed.
+- **Entitlement set B1 ships with** (as Xcode signed it):
+  `com.apple.security.device.audio-input`,
+  `com.apple.security.automation.apple-events`, `keychain-access-groups`
+  (one group: `<team id>.<bundle id>`), `com.apple.application-identifier`,
+  `com.apple.developer.team-identifier` and
+  `com.apple.security.get-task-allow`. Xcode adds `get-task-allow` to every
+  Apple Development build; it lets a debugger attach to the process. B1
+  must decide whether to keep it (and test whether a Personal Team build
+  still launches with it removed, `CODE_SIGN_INJECT_BASE_ENTITLEMENTS=NO`)
+  before the node holds its credential.
+- **Data protection needs Keychain Sharing.** With only the two
+  hardened-runtime keys, Xcode embedded no profile and added no
+  `application-identifier`, and a data-protection `SecItemAdd` returned
+  `-34018` (`errSecMissingEntitlement`). With the **Keychain Sharing**
+  capability (one group = the bundle id) and
+  `xcodebuild -allowProvisioningUpdates -allowProvisioningDeviceRegistration`
+  (registers this Mac for the free team), Xcode embedded a "Mac Team
+  Provisioning Profile" and the item was written and read. So
+  `scripts/build-sign-local.sh` (B1) needs both the capability and the
+  device-registration flag.
+- **The 7-day profile is the binding date.** Because data protection needs
+  the embedded profile, every installed build carries a profile that
+  expires a week after it was made. Builds 2–6 all embedded the **same**
+  profile (created 2026-11-26 15:48 UTC, expires 2026-12-03 15:48 UTC):
+  rebuilds before expiry reuse it, so a rebuild today does not extend it.
+  Shown: grants and the item survive rebuilds. **Untested:** (1) whether an
+  installed build with an expired profile still launches and reads its
+  item; (2) whether a rebuild after (or near) expiry gets a new 7-day
+  profile and still keeps the grants and the item. B1's operating plan
+  ("rebuild at least weekly") rests on (2), so it is not settled yet.
+  **Check on 2026-12-04:** launch the installed build 5 and record whether
+  it starts and reads the item; then rebuild with `build.sh <next>
+  --install`, read the new profile's `CreationDate` / `ExpirationDate`
+  (`inspect-<next>.txt`, from `security cms -D -i … | plutil -p -`), and
+  record whether the grants and the item survived; record both here. Certificate renewal (same CN is expected to keep the requirement
+  equal): reminder for **2027-11-12**, two weeks before notAfter.
+- **Gatekeeper, for the record:** `spctl --assess` rejects the app (not
+  notarized), as accepted by the amendment; a local build has no
+  `com.apple.quarantine` attribute and launched with no Gatekeeper prompt.
+- **Things that would have looked like failures but were not:**
+  1. This Mac lacked the Apple Worldwide Developer Relations CA **G3**
+     intermediate (only the expired 2023 G1 was present), so
+     `security find-identity -v` listed the new identity as invalid. Fixed by
+     importing Apple's `AppleWWDRCAG3.cer` (SHA-256 `DC:F2:18:78:…:60:1F`)
+     into the login keychain.
+  2. A query without `kSecUseDataProtectionKeychain` can also match
+     data-protection items, so a file-based `SecItemDelete` removed the
+     data-protection item when both used the same account (observed on
+     build 2; that status file was overwritten, so it is not kept as
+     evidence). The spike uses
+     one account per variant; `Credential.swift` must always pass
+     `kSecUseDataProtectionKeychain: true`, on delete too.
+  3. `AEDeterminePermissionToAutomateTarget` with `typeWildCard` never
+     prompts, and nothing prompts while System Events is not running
+     (`-600`; it quits when idle). A real Apple event (`NSAppleScript`,
+     `tell application "System Events" …`) launched it and asked once.
+  4. Screen Recording took effect only after the app was relaunched. No
+     periodic Sequoia-style re-prompt was seen on 2026-11-26.
+- **Cleanup deferred to the expiry check.** Build 5 stays installed in
+  `/Applications/PTSpike.app` with its five grants and both Keychain items
+  until the 2026-12-04 check, which needs them. After that check: delete
+  the items (the app's "Delete spike Keychain items" button), run
+  `tccutil reset All <spike bundle id>`, remove `/Applications/PTSpike.app`,
+  and keep `~/FridaySpike/` only until the result is recorded here.

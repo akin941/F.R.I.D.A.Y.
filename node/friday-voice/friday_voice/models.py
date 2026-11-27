@@ -63,6 +63,6 @@ def path_of(model_dir, role, manifest=None) -> Path:
 
 
 def default_model_dir(manifest=None) -> Path:
-    """The node's model directory (outside the repo; `make voice-models
-    --node` writes it)."""
+    """The node's model directory (outside the repo; `make voice-models-node`
+    -- `friday-voice models fetch` -- writes it)."""
     return Path((manifest or load_manifest())["modelDir"]).expanduser()

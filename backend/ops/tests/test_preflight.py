@@ -866,3 +866,25 @@ def test_record_last_result_survives_a_cache_outage(monkeypatch):
     summary = command.record_last_result([CheckResult("a", PASS), CheckResult("b", WARN)])
     assert summary["status"] == WARN
     assert summary["pass"] == 1 and summary["warn"] == 1
+
+
+def test_voice_eval_budget_check(settings):
+    """Phase 6 branch 3a follow-up: the eval purposes' own budget row."""
+    from ai_core.models import AIBudget
+
+    settings.AI_FAKE_PROVIDER = True
+    call_command("seed_ai_defaults", stdout=StringIO())
+    result = _voice_config()["voice_eval_budget"]
+    assert result == CheckResult(
+        "voice_eval_budget", PASS, "voice_eval: monthly 5 USD, session 2 USD"
+    )
+    AIBudget.objects.filter(name="voice_eval").update(purposes=["voice.eval_stt"])
+    result = _voice_config()["voice_eval_budget"]
+    assert (result.status, result.detail) == (
+        WARN,
+        "no active budget covers voice.eval_tts: run seed_ai_defaults (voice_eval refuses to run)",
+    )
+    AIBudget.objects.filter(name="voice_eval").update(is_active=False)
+    assert _voice_config()["voice_eval_budget"].status == WARN
+    # The live voice budget check is unaffected.
+    assert _voice_config()["voice_budget"].status == PASS

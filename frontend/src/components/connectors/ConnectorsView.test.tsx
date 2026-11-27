@@ -49,6 +49,29 @@ function stub(
       const current = bindings[body.workspace]![0]!;
       return jsonResponse({ ...current, enabled: body.enabled });
     }
+    if (method === "GET" && url.startsWith("/api/connectors/home-assistant/entities?")) {
+      return jsonResponse({ workspace: ws, limits: {}, services: {}, results: [] });
+    }
+    if (method === "GET" && url.startsWith("/api/connectors/home-assistant/direct/calls?")) {
+      return jsonResponse({ workspace: ws, results: [] });
+    }
+    if (method === "GET" && url.startsWith("/api/connectors/home-assistant/direct?")) {
+      return jsonResponse({
+        workspace: ws,
+        kill_switch: false,
+        env_kill_switch: false,
+        state: "on",
+        volume_max: 0.6,
+        rate_global_per_minute: 30,
+        rate_entity_per_minute: 10,
+        services: ["media_pause"],
+        digest: "x",
+        flagged_count: 0,
+      });
+    }
+    if (method === "GET" && url.startsWith("/api/workspaces/")) {
+      return jsonResponse({ workspace: "w1", limits: {}, results: [] });
+    }
     throw new Error(`Unexpected fetch ${method} ${url}`);
   });
   vi.stubGlobal("fetch", fetchMock);
@@ -165,6 +188,23 @@ describe("ConnectorsView", () => {
     expect(screen.queryByTestId("connector-github")).not.toBeInTheDocument();
     expect(await screen.findByTestId("connector-external_installation")).toBeInTheDocument();
     expect(screen.queryByTestId("connector-github")).not.toBeInTheDocument();
+  });
+
+  it("shows the Home Assistant entity allowlist editor only where HA can bind (Phase 13 D11)", async () => {
+    stub({
+      w1: [binding({ connector: "home_assistant", display_name: "Home Assistant", data_class: "personal" })],
+      w2: [binding({ connector: "home_assistant", display_name: "Home Assistant", bindable: false })],
+    });
+    const { rerender } = renderWithClient(<ConnectorsView />);
+    expect(await screen.findByTestId("ha-entities-editor")).toBeInTheDocument();
+    expect(await screen.findByTestId("ha-entities-empty")).toBeInTheDocument();
+    // Phase 13b D11: the direct media panel sits under the allowlist.
+    expect(await screen.findByTestId("ha-direct-state")).toHaveAttribute("data-state", "on");
+    holder.current = { id: "w2", name: "Acme", type: "company", role: "owner" };
+    rerender(<ConnectorsView />);
+    await screen.findByTestId("connector-home_assistant");
+    expect(screen.queryByTestId("ha-entities-editor")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("ha-direct-settings")).not.toBeInTheDocument();
   });
 
   it("shows the owner-only refusal as an error state", async () => {

@@ -1,5 +1,19 @@
 # Phase 9 — Friday Node v1, read-only (server side + Mac session)
 
+> **Amendment 2026-11-25 (d9 revised).** `friday-node` runs only on the
+> owner's own Mac, so the paid Apple Developer Program, Developer ID and
+> notarization are **not required**. The app is signed with the free Apple
+> ID Personal Team "Apple Development" identity (hardened runtime), a stable
+> identity that keeps TCC grants and Keychain items across rebuilds; never
+> ad-hoc "Sign to Run Locally" for a build that holds TCC grants. The first
+> Mac-session step is the Personal Team spike
+> (`docs/runbooks/mac-session-handoff.md` A1); if it fails, the original
+> paid path (enrolment + Developer ID + notarization) is the fallback.
+> `scripts/build-sign-notarize.sh` below becomes `scripts/build-sign-local.sh`
+> with the same conformance-marker check. See MASTER_PLAN §O d9 and the
+> ADR-013 amendment of 2026-11-25. Older wording below is kept where it is
+> history; requirement lines are updated.
+
 > Status: **Draft (2026-11-20). Written on `docs/p9-brief` from the stub of
 > the same date, which was taken from the owner-approved Friday 3.0 roadmap.
 > It needs its independent Sonnet 5 plan review before branch 1, because
@@ -37,7 +51,8 @@
 >   Swift app must pass later.
 > - **Not built here:** everything that must be built, signed or run on
 >   macOS. That means the Swift `friday-node` app, Keychain, Touch ID, TCC
->   grants, notarization and real-hardware measurements. These are listed
+>   grants, Personal Team code signing (d9 revised 2026-11-25) and
+>   real-hardware measurements. These are listed
 >   under "Mac session (deferred)" and marked "deferred: Mac session" in
 >   the branch table.
 >
@@ -50,8 +65,10 @@
 > - the Phase 6 HUD health panel.
 >
 > The server branches need nothing else. The Mac session also needs:
-> - the owner's Apple Developer enrolment (d9);
-> - a Developer ID identity on the Mac.
+> - ~~the owner's Apple Developer enrolment (d9); a Developer ID identity
+>   on the Mac~~ *(revised 2026-11-25)* a free Apple ID Personal Team
+>   "Apple Development" identity on the Mac and a passed Personal Team
+>   spike (d9 revised).
 >
 > **Branches.** Phase 9 branches are cut from the integration branch that
 > holds the merged Phase 8A closeout, and they integrate on the phase
@@ -883,6 +900,13 @@ every other kernel app as a source. `memory` and `memory.ingestion` gain
 > follow-up once it merges) moves the checks into `nodes.services`, the
 > contracts into `nodes/capabilities/v1/`, and adds the `nodes`-backed port
 > (8B brief, "Owner steps (pending) — `feat/p8-transcript-ingestion`").
+>
+> **State on 2026-11-26 (runbook A12, `feat/p8-node-transcript-port`,
+> awaits review):** the two contracts are in `nodes/capabilities/v1/` (ten
+> v1 read contracts), `SYSTEM_READ_CAPABILITIES` names them, and a non-web
+> read must be exactly `channel=system` (any other non-web channel is
+> `server_refused:not_invocable`). The `nodes`-backed port is
+> `tools/transcript_node_port.py`, the pull's default from app start.
 
 ### D10 — Node events: the hook relay path into memory
 
@@ -1609,7 +1633,7 @@ node paired, the e2e test is green, and the go/no-go record is written.
 | 6 | `feat/p9-node-events` | `event` sink wiring into `ingest_hook_events`, cross-relay dedupe, spool upload acks, availability events | 4 (parallel with 5) | **implemented 2026-11-20** (done criterion met: `config/tests/test_hooks_via_node.py::test_the_done_criterion` — an event written to the reference relay's Unix socket reaches `GET /memory/sessions` through the node, and a `friday-hook` replay is a `duplicate`; `nodes/events.py` sink registry + availability successor snapshots, spooled-batch pacing, `config.asgi_nodes` registration; awaits independent Sonnet 5 review) |
 | 7 | `feat/p9-node-ui` | `/devices` node section, invocation log page, HUD node line, `hud → nodes` contract | 4, 5 (6 for availability) | **implemented 2026-11-20** (done criterion met server- and UI-side: pair (node code shown once), inspect (status, heartbeat, credential age, capability availability as text, invocation log), kill-switch and revoke behind confirmations on `/devices`; the HUD health panel's node line from `health.node` — `hud/tests/test_node_line.py`, `components/nodes/*.test.tsx`, `HudNodeLine.test.tsx`; the `hud → nodes` edge already existed (Phase 10 D12), only its comment changed; awaits independent Sonnet 5 review) |
 | 8 | `chore/p9-closeout` | Preflight node checks, e2e, runbook, ADR-013 notes, MASTER_PLAN row, go/no-go record | 1–7 | **implemented 2026-11-20** (done criterion met in process: `config/tests/test_reference_node_preflight.py::test_preflight_is_green_with_the_reference_node_paired` — the reference node paired by the new `run_reference_node` command and connected to the real gateway process, every node check `pass` (TLS pin `warn`, not configured); e2e `ops/tests/test_node_e2e.py` green; go/no-go record written; preflight on the owner's real dev stack is an owner step below; awaits independent Sonnet 5 review) |
-| M1 | `feat/p9-node-app` | Swift menu-bar app: signing/notarization, Keychain credential + TLS pin, pairing, WSS client, D5 verifier, conformance pass | 1–4 merged; owner's Apple Developer ID (d9) | deferred: Mac session |
+| M1 | `feat/p9-node-app` | Swift menu-bar app: Personal Team signing (no notarization), Keychain credential + TLS pin, pairing, WSS client, D5 verifier, conformance pass | 1–4 merged; Personal Team signing spike passed (d9 revised 2026-11-25) | deferred: Mac session |
 | M2 | `feat/p9-node-readers` | Swift readers for the eight capabilities, per-directory Touch ID grants, local policy UI, scrubber port + corpus | M1 | deferred: Mac session |
 | M3 | `feat/p9-node-hook-relay` | `friday-node hook` CLI, 0600 Unix socket + peer uid, spool, Claude Code hook switch-over | M1; 6 merged | deferred: Mac session |
 | M4 | Mac evaluation | Go/no-go measurements on the real Mac (below) | M1–M3 | deferred: Mac session (pending owner evaluation) |
@@ -1626,10 +1650,13 @@ MacBook**. They are self-contained: a fresh session starts from this
 section, the merged branches 1–7 and the files they name.
 
 **Preconditions:**
-- the owner's Apple Developer enrolment and a Developer ID Application
-  identity in the login Keychain (d9);
-- Xcode (current stable) and `notarytool` credentials stored as a
-  Keychain profile (`xcrun notarytool store-credentials friday-notary`);
+- *(revised 2026-11-25, d9)* the owner's free Apple ID added in Xcode →
+  Settings → Accounts, with its Personal Team "Apple Development"
+  identity in the login Keychain, and the Personal Team spike passed
+  (`docs/runbooks/mac-session-handoff.md` A1). No paid enrolment, no
+  Developer ID, no `notarytool` profile (those return only on the spike's
+  fallback path);
+- Xcode (current stable);
 - a running Friday stack reachable over the owner's overlay or TLS
   proxy, with `node-gateway` exposed at `/ws/node/v1` and
   `NODE_SIGNING_KEY` set;
@@ -1654,20 +1681,37 @@ Apple frameworks unless one goes through the governance manifest
     `URLSessionDelegate`, subprotocol `friday-node.v1`, no `Origin`);
   - `Backoff.swift`;
   - `Credential.swift` (Keychain `kSecClassGenericPassword`, service
-    `friday-node`, `kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly`,
-    no iCloud sync; holds the secret, the TLS SPKI pin and the pinned
-    server keys);
+    `friday-node`, `kSecUseDataProtectionKeychain`,
+    `kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly`, no iCloud sync;
+    holds the secret, the TLS SPKI pin and the pinned server keys).
+    *(2026-11-25, d9 revised)* The file-based (legacy) keychain ignores
+    `kSecAttrAccessible…`; it is used only if the Personal Team spike
+    ended PARTIAL (data protection keychain unavailable) **and** the owner
+    acknowledged a dated ADR-013 residual note (protection is then only
+    the login keychain lock and the ACL bound to the designated
+    requirement);
   - `Pairing.swift` (calls `POST /api/v1/nodes/pair`);
   - `Rotation.swift` (calls `POST /api/v1/auth/nodes/credential/rotate`);
 - `Tests/NodeCoreTests/`;
-- `scripts/build-sign-notarize.sh` (`Release` configuration only;
-  conformance-marker check on the binary, see contract test 2; then
-  `codesign --options runtime --timestamp`, `notarytool submit --wait`,
-  `stapler staple`);
-- a `Conformance` build configuration (unsigned, debug, compilation
-  condition `CONFORMANCE`) used only for contract test 2;
-- entitlements: hardened runtime, `com.apple.security.network.client`
-  only. No server entitlement, no microphone.
+- `scripts/build-sign-local.sh` (`Release` configuration only;
+  conformance-marker check on the binary before CodeSign, see contract
+  test 2; Xcode automatic signing with the Personal Team "Apple
+  Development" identity and hardened runtime (`xcodebuild
+  -allowProvisioningUpdates CODE_SIGN_STYLE=Automatic`), so the
+  entitlements Xcode adds are kept; `codesign --verify --strict`; no
+  ad-hoc, no notarization, no stapling — revised 2026-11-25, was
+  `scripts/build-sign-notarize.sh`; any manual re-sign uses the full
+  entitlement set extracted from the Xcode-signed build);
+- a `Conformance` build configuration (unsigned — `CODE_SIGNING_ALLOWED =
+  NO` set explicitly — debug, compilation condition `CONFORMANCE`) used
+  only for contract test 2;
+- entitlements: hardened runtime only, plus what Xcode adds for signing
+  and the keychain. M1 is a deliberate subset: no App Sandbox (so no
+  `com.apple.security.network.client`, which has no effect unsandboxed),
+  no server entitlement, no microphone, no Apple Events
+  (`com.apple.security.automation.apple-events` arrives with Phase 10,
+  `com.apple.security.device.audio-input` with Phase 11; the Personal
+  Team spike checks both up front).
 
 **Must satisfy:**
 - **Canonical JSON:** `backend/nodes/protocol/vectors/canonical.json`.
@@ -1695,11 +1739,12 @@ Apple frameworks unless one goes through the governance manifest
    - There is **no environment variable, user default or launch
      argument in the release build** that changes the TLS pin, the
      pinned signing keys or the server URL. A runtime switch in the
-     notarized binary would be a backdoor that any local process or
+     signed release binary would be a backdoor that any local process or
      launch agent could flip, defeating ADR-013 decisions 2 and 4.
-   - The conformance build is never signed with the Developer ID
-     identity, never notarized and never installed as a login item.
-   - `scripts/build-sign-notarize.sh` builds the `Release`
+   - The conformance build is never signed with the Personal Team
+     identity (or any Developer ID), never notarized and never installed
+     as a login item.
+   - `scripts/build-sign-local.sh` builds the `Release`
      configuration only and, before `codesign`, fails if the release
      binary contains any conformance marker: `strings` over the Mach-O
      must not find `FRIDAY_NODE_CONFORMANCE`, `conformance`, or the
@@ -1833,9 +1878,11 @@ installed as the fallback.
 
 Recorded in this brief's "Go/no-go record" by the owner or by the Mac
 session:
-1. **TCC across updates.** Install notarized build N and grant Screen
-   Recording (window titles). Install build N+1, signed by the same
-   Developer ID, so the designated requirement is unchanged. The grant
+1. **TCC across rebuilds.** Install Personal Team signed build N and
+   grant Screen Recording (window titles). Install build N+1, signed by
+   the same Personal Team identity, so the designated requirement is
+   unchanged (revised 2026-11-25; was "notarized build … same Developer
+   ID"). The grant
    must still be present and titles still returned.
 2. **Spike Keychain half.** The secret survives reboot. Rotation updates
    the Keychain item in place. Deleting the item forces re-pair. No
@@ -1851,13 +1898,13 @@ session:
 | Item | How it is measured | Result |
 |---|---|---|
 | Spike S9.0, server half | Branch 1 tests (six criteria) | **passed 2026-11-20** (branch 1 tests; ADR-013 "Implementation notes — spike S9.0") |
-| Spike S9.0, Keychain half | M4 item 2 | pending owner evaluation (Mac session) |
+| Spike S9.0, Keychain half | M4 item 2 | **partly measured 2026-11-26.** No secret on disk outside the Keychain: a `grep -rlI 'jnd_[A-Za-z0-9_-]{20,}'` search (2026-11-26) of `~/Library/Application Support/Friday`, `Preferences`, `Caches`, `Logs`, `Saved Application State`, `HTTPStorages`, `WebKit`, `CrashReporter` and `Containers`, and of the app's unified log (24 h), finds nothing (the literal `grep -r jnd_ ~/Library` was not run: it walks TCC-protected folders and raises permission prompts). A server-revoked credential got 4401 and the menu asked to pair again (M1 contract test 3); deleting the Keychain item itself was not exercised. **Pending owner:** the secret survives a reboot; a rotation updates the item in place (due after `rotate_after_days`; `RotationTests` pin persist-before-success); deleting the Keychain item (menu "Eşleştirmeyi kaldır") forces re-pairing. |
 | Compromised-server suite, reference node | Branch 3 conformance run | **passed 2026-11-20** (`node_conformance_server --protocol 1` all-pass, `test_every_v1_case_passes_through_the_command_over_a_socket`; `build_node_conformance --check` in CI and as the `node_conformance` preflight check) |
-| Compromised-server suite, Swift app | M1 contract tests 1–2 | pending owner evaluation (Mac session) |
-| Notarized build keeps TCC grants across updates | M4 item 1 | pending owner evaluation (Mac session) |
+| Compromised-server suite, Swift app | M1 contract tests 1–2 | **passed 2026-11-26**: offline 50/50 and live `node_conformance_server --external --tls-self-signed --protocol 1` 50/50 ALL PASS (M1 + M2 implementation notes). |
+| Personal Team signed build keeps TCC grants across rebuilds (d9 revised 2026-11-25) | M4 item 1 | **passed for the signing identity** (A1 spike: five grants and a data-protection item survived two rebuilds; and every app build since went through `scripts/build-sign-local.sh`, which compares the designated requirement with the one recorded at the first build and refuses an install when it differs: no build was refused). **Pending owner** for the app itself: grant Screen Recording with window titles on, rebuild, and check titles are still returned. |
 | Server half end to end (closeout) | `ops/tests/test_node_e2e.py`: pair through the endpoint → connect → `hello` → chat turn → fenced rows of the workspace → chain rows → revoke → `bye{revoked}` → tools unavailable | **passed 2026-11-20** (CI, fakes) |
-| Preflight green with a node paired | `config/tests/test_reference_node_preflight.py` (in process, real gateway process); `make preflight` on the owner's dev stack with `run_reference_node` | **passed 2026-11-20** in process; on the real dev stack: pending owner evaluation (owner step 2 of the closeout) |
-| Kill-switch latency, heartbeat/backoff, no TCP listener on the Mac | M4 items 3–5 | pending owner evaluation (Mac session); server side: socket closed within 2 s of revoke / kill switch (`nodes/tests/test_gateway_handshake.py`) |
+| Preflight green with a node paired | `config/tests/test_reference_node_preflight.py` (in process, real gateway process); `make preflight` on the owner's dev stack with `run_reference_node` | **passed 2026-11-20** in process; **passed 2026-11-26** on the owner's loopback dev stack, with the reference node (41 pass / 0 fail) and then with the Swift node (44 pass / 0 fail: `node_gateway`, `node_signing_key`, `node_link:<the Mac>`, `node_audit_chain`, `node_conformance`, `node_tls_pin`) |
+| Kill-switch latency, heartbeat/backoff, no TCP listener on the Mac | M4 items 3–5 | **Kill switch: 0.24 s** from the command to the closed socket on the Mac (revoke: 0.04 s); **no TCP listener** (`lsof -iTCP -sTCP:LISTEN` prints nothing while paired; unpaired, `lsof -i` shows no socket at all); backoff unit-tested (1 → 60 s full jitter, failed handshakes included). **Pending owner:** heartbeat and backoff over sleep/wake and a network change. |
 
 **Verdict (2026-11-20): continue.** Every server-side item passed. The Mac
 rows are pending owner evaluation and, as decided, do not block Phase 8B's
@@ -1986,7 +2033,8 @@ confusion, generated per schema.
   could diverge from Python. The shared vectors and case files, loaded
   from the repo by the Swift test target, plus the live fake server,
   bound it. Any case change must pass both.
-- **R6 — Mac work slips.** Apple enrolment, notarization friction or TCC
+- **R6 — Mac work slips.** Personal Team signing limits (or, on the
+  fallback path, Apple enrolment and notarization friction) or TCC
   quirks can delay it. The server half is complete and conformance-tested
   without it, `friday-hook` keeps the sessions panel alive, and the
   go/no-go Mac rows are pending owner evaluation without blocking 8B's
@@ -2038,10 +2086,12 @@ confusion, generated per schema.
 
 The first three are from the stub and are kept.
 
-1. **Apple Developer enrolment (d9).** Enrol in the Apple Developer
-   Program (99 USD/year) and create a Developer ID signing identity on
-   the Mac. The key never leaves the Mac and CI never holds it. This
-   blocks M1 only.
+1. **Personal Team signing (d9, revised 2026-11-25).** Add the owner's
+   free Apple ID in Xcode → Settings → Accounts and run the Personal Team
+   spike (`docs/runbooks/mac-session-handoff.md` A1). No paid enrolment,
+   Developer ID or notarization; those are the fallback only if the spike
+   fails, or an optional later step for distribution. The key never leaves
+   the Mac and CI never holds it. This blocks M1 only.
 2. **Spike S9.0 on the real Mac.** Run the pairing and revocation checks
    on the real Mac. In this brief that is M1 contract test 3 and M4
    item 2.
@@ -2772,3 +2822,186 @@ Implementation notes (branch 5):
    user-chosen node name reaches the HUD. Fix: none required; optionally
    emit a generic `node_link` name in the HUD's failing list if node names
    are ever considered sensitive.
+
+
+### Implementation notes — `feat/p9-node-app` (Mac session M1, 2026-11-26)
+
+Built on the owner's Mac (macOS 27.2, Xcode 27.2) after the A1 Personal
+Team spike passed (ADR-013 "Implementation notes — Personal Team spike").
+Package `node/friday-node/` (README there). Contract test status:
+
+| Contract test | Status |
+|---|---|
+| 1. Offline conformance | `swift test`: every `cases/v1` file is played; **39 of 50 match the reference node**. The 11 read cases that need the M2 readers and the scrubber (Claude Code / Codex transcripts, git, usage, window titles) are listed in `ConformanceTests.pendingM2`; the test fails when a listed case starts passing, so M2 must empty the list. Nothing is skipped silently. |
+| 2. Live conformance | `node_conformance_server --external --tls-self-signed --protocol 1` with the unsigned `Conformance` build: **39/39 ALL PASS** for the same M1 case set over real WSS with the self-signed certificate pinned. The full `--protocol 1` run waits for M2's readers. |
+| 3. Real stack | **Pass** (2026-11-26, loopback stack on the owner's Mac, `feat/p9-node-local-pairing`): paired from the menu with a strong code and the typed pin; `hello.ack` arrived; connected read server-side from the gateway's `/healthz` count and preflight `node_link` (which stand in for `GET /api/v1/nodes`; the `/devices` page itself was not looked at); kill switch on → socket closed **0.24 s** after the command returned, `stopped(bye:kill_switch)`, no reconnect for 20 s, kill switch released (`node_kill_switch off`) and still no reconnect 15 s later; owner "Devam et" → connected in 0.15 s; revoke → socket closed **0.04 s** after the call, `stopped(bye:revoked)`, no reconnect; "Devam et" then → 4401 → `needsPairing`; re-paired with a new code → connected. |
+| 4. No listener | **Pass**: `lsof -nP -iTCP -sTCP:LISTEN -a -p $(pgrep FridayNode)` prints nothing; `lsof -i` shows no socket at all while unpaired. |
+| 5. `make preflight` | **Pass**: `node_link:<the Mac>` connected (heartbeat seconds ago, protocol v1, 0/8 invocable as M1 grants nothing), `node_signing_key` the same key id in web, worker and gateway, `node_tls_pin` the served SPKI matches; 44 pass / 0 fail / 29 warn (every warn an owner step or a pending Mac evaluation). |
+
+Decisions and deviations, each kept within the brief's rules:
+
+- **Two build systems, one source tree.** `Package.swift` builds `NodeCore`,
+  the CLI and the tests (`swift test`); `FridayNode.xcodeproj` compiles the
+  same `Sources/NodeCore` as a static library for the app and the test
+  bundle, because SwiftPM has no custom `Conformance` configuration and
+  cannot sign an app. `CONFORMANCE` is defined only in the Xcode
+  `Conformance` configuration (`CODE_SIGNING_ALLOWED = NO`, debug).
+- **Vendored protocol files.** The node needs the v1 schemas and the
+  capability contracts at run time; they are copied byte for byte (base64)
+  into `Generated/VendoredProtocol.swift` by `scripts/vendor_protocol.py`.
+  `VendoredProtocolTests` (Mac) and a new CI step (`vendor_protocol.py
+  --check`, stdlib, Linux) fail on drift.
+- **Conformance mode** lives entirely in `NodeCore/ConformanceSupport.swift`
+  inside `#if CONFORMANCE`, with its inputs (hook socket, gateway, the
+  self-signed certificate, the conformance key file, the fixture directory)
+  read from launch arguments only in that block. `ReleaseHygieneTests`
+  asserts the pin type is absent outside that configuration **and present in
+  it** (a positive control): the test bundle links with `-ObjC`, otherwise
+  the static library's unused object file is dropped and the check would
+  pass vacuously.
+- **The release marker check** (`scripts/check-release-markers.sh`) scans
+  every Mach-O section with `strings -a` (21 hits in the Conformance build,
+  0 in Release). Two findings: (1) the runbook's `strings … | grep -q`
+  pattern under `set -o pipefail` reports "no marker" whenever grep exits at
+  the first match (strings dies of SIGPIPE), so the check could never fail;
+  the script collects first, then searches. (2) Scanning every byte of the
+  file would hit the symbol table, where every Swift binary names
+  compiler-generated `associated conformance` symbols; those are not a
+  marker of conformance mode. `build-sign-local.sh` runs the check on every
+  Mach-O in the bundle (Xcode's debug-dylib split put the code outside the
+  main executable until `ENABLE_DEBUG_DYLIB = NO`).
+- **Entitlements shipped by M1** (as Xcode signs Release): `keychain-access-
+  groups` (one group, the bundle id), `com.apple.application-identifier`,
+  `com.apple.developer.team-identifier`. **No `get-task-allow`** in Release
+  (`CODE_SIGN_INJECT_BASE_ENTITLEMENTS = NO`), deciding ADR-013's open
+  point: the app still launches and the data protection keychain query still
+  answers (`credential: none`, not `-34018`). No sandbox, no microphone, no
+  Apple Events, no server entitlement: `build-sign-local.sh` requires the
+  signed entitlement keys to be exactly those three.
+- **Bundle id** `dev.friday.friday-node.n<random>`, generated once into
+  `~/.config/friday-node/bundle-id` (a Personal Team App ID must be globally
+  unique; the suffix names no one). It is part of the designated
+  requirement, so it must stay stable.
+- **TLS pin** = sha256 of the leaf's DER SubjectPublicKeyInfo (the runbook's
+  openssl value; tested against openssl for P-256, P-384, RSA 2048/3072/4096).
+  Pairing requires the system trust evaluation and captures the pin from
+  that connection; later connections check the pin instead of CA trust.
+  A server whose certificate the Mac does not trust (a private CA, a
+  self-signed home server) cannot pair in M1: follow-up below.
+- **Parser differences on hostile input only** (all frame errors or
+  refusals either way; no conformance case exercises them): a lone
+  surrogate escape is `malformed` at parse time (Swift strings cannot hold
+  one; Python answers later); two keys differing only in Unicode
+  normalization are a duplicate here (Swift compares by canonical
+  equivalence; every protocol key is ASCII); nesting deeper than 128 is
+  `malformed` (Python ~1000), which keeps the parser well inside a 512 KiB
+  dispatch-thread stack in unoptimized builds (tested on such a thread).
+- **Backoff** (review finding): a connection attempt that never opens a
+  session (server down, pin mismatch, refused upgrade) counts as a failed
+  attempt, so the delay grows 1 → 60 s; the backoff resets only on
+  `hello.ack`, not when a socket merely opens (so 4408/4429 loops grow too).
+- **`NodeRunner`** confines everything to one queue and moves to a new
+  generation on start, stop, re-pair and unpair, so a late socket close or
+  an in-flight rotation of an older generation changes nothing (a rotation
+  cannot write its secret back after an unpair). At most one rotation runs.
+  A 4401 close is read whichever callback reports the close first. HTTPS
+  and WSS refuse redirects. `NodeRunner` itself has no unit test: contract
+  test 3 on the real stack covers it (owner step below).
+- **Live-mode `next_reconnect_delay`** is reported to the gateway in whole
+  seconds rounded up (the node's JSON has no floats); the first backoff
+  ceiling is 1 s, so the check's bound still holds.
+
+### Owner steps (1-3 done, 4 pending) — `feat/p9-node-app`, recorded 2026-11-26
+
+**Steps 1-3 done 2026-11-26** on the loopback stack (`make up-local-tls`,
+no exposure beyond the Mac, owner decision); step 4 stays.
+
+1. Create the installation owner (needs your password, typed by you):
+   `docker compose -f deploy/docker/compose.yml exec web uv run python
+   manage.py bootstrap_owner --email <you>`; then `seed_ingestion_sources`.
+2. Expose only `/ws/node/v1` (and the API's `/api/v1/nodes/pair` and
+   `/api/v1/auth/nodes/credential/rotate`) over the overlay or a TLS proxy
+   with a certificate this Mac trusts (runbook A3; `friday-node.md`
+   "Expose `/ws/node/v1`"). Optionally set `NODE_TLS_PIN_SHA256`.
+3. Pair: `/devices` → "Mac düğümü eşle" (or `issue_pairing_code --node
+   --strong`), FridayNode menu → "Eşleştir…"; then run contract test 3
+   (hello.ack, `/devices` Bağlı, kill switch closes within 2 s and stops
+   reconnecting until "Devam et", revoke requires re-pairing) and
+   `make preflight` (contract test 5).
+4. The Personal Team profile is valid for 7 days: rebuild with
+   `scripts/build-sign-local.sh --install` at least weekly until the
+   2026-12-04 expiry check (ADR-013) is recorded.
+
+### Known follow-ups (from `feat/p9-node-app`)
+
+1. **M2** empties `ConformanceTests.pendingM2` (readers, grants, local
+   policy, scrubber parity), then the full `--protocol 1` live run.
+2. **Pairing to a server the Mac does not trust.** Done in
+   `feat/p9-node-local-pairing` (2026-11-26): the pairing window takes an
+   optional owner-typed SPKI pin (an explicit local owner action, stored
+   with the credential, never a runtime switch); with it the connection is
+   accepted only on a key match, with no CA trust. Used for the loopback
+   proxy of `deploy/docker/compose.local-tls.yml` (runbook `friday-node.md`
+   "A node on this Mac only"). Probed live: wrong pin refused, right pin
+   reaches the server, no pin requires system trust.
+3. **macOS CI** (runbook A5): until the owner decides, `swift test` and the
+   two `xcodebuild` checks run on the Mac before each merge.
+
+
+### Implementation notes — `feat/p9-node-readers` (Mac session M2, 2026-11-26)
+
+| Contract test | Status |
+|---|---|
+| 1. Scrub parity | **Pass**: `ScrubParityTests` reproduces all 190 vectors of `vectors/scrub.json` byte for byte (and idempotently). Beyond the vectors, `node/friday-node/scripts/scrub_differential.py` compares the two scrubbers on mutated corpus and fixture strings (Turkish dotted/dotless i, long s, Kelvin sign, sharp s, U+000B/U+001C/U+0085, non-ASCII digits, marks, emoji): about 220 000 inputs over five seeds, 0 differ. |
+| 2. Corpus recall | **Pass**: `node/scripts/scrubber-corpus.sh` runs `friday-node scrub --stdin` over every corpus item: 46 secrets and 20 PII at 100% recall with the typed placeholder, 14 benign unchanged. |
+| 3. Offline conformance | **Pass, 50/50** (`ConformanceTests.pendingM2` is empty), over a fixture home the tests build like `factory.py` (the pinned `git.status` commit sha reproduces). |
+| (fingerprint) | The conformance report's policy fingerprint hashes the fixture policy file, which the node only reads; it shows the file was not swapped, not more (the Swift `LocalPolicy` has no protocol path at all). |
+| 4. Live conformance | **Pass**: `node_conformance_server --external --tls-self-signed --protocol 1`, no case filter, against the `Conformance` build reading a home built by `factory.build_fixture_home` (`--conformance-home`): **50/50 ALL PASS**. |
+| 5. Real stack (manual) | **Partly done** on the loopback stack: with the default policy the server's snapshot shows transcripts and git `not_granted`, `usage.ccusage` `unsupported`; the owner turned on "Claude Code oturumları" with Touch ID and the snapshot turned `granted` at once (the `grant.availability_changed` event); a server-side `invoke_read` of `claude.sessions.list` over the owner's real sessions returned `ok` (rows in `~/` form; texts not inspected). **Not done:** the `/devices` wording and the web-chat question, because the web front end is not running on this Mac yet (owner step). |
+
+Decisions and deviations:
+
+- **Regex translation.** The scrubber's Python patterns are written for ICU so they match what CPython 3.12's `re` matches: `\s` as Python's exact isspace set, `re.IGNORECASE` as explicit classes (ASCII cases plus U+0130, U+0131, U+017F, U+212A, measured on 3.12), never ICU case folding (which would match `ss` to `ß`); `\Z` as `\z`; `\b` as lookarounds over Python's `\w`. **Python's `\w` and `\d` are exact sets**: this Mac's ICU puts 9 697 code points in `[\p{L}\p{N}_]` and 90 in `\p{Nd}` that CPython 3.12 (Unicode 15.0) does not (Apple private-use letters, Unicode 16 additions; none the other way, measured over U+0000..U+10FFFF), so they are subtracted; `ScrubberUnicodeTests` pins both sets by count and sha256 against CPython 3.12, so a macOS ICU update fails a test instead of drifting (review finding: a key next to such a letter stayed unredacted).
+- **Rule 2 streams** (review finding, BLOCKING in the first round): transcripts are read line by line in 64 KiB chunks, an over-long line is discarded as it streams, and a transcript outside `cwd_prefixes` stops at its first `cwd` line; a 30 MB non-matching file is skipped in well under a second (`ReaderHelperTests`).
+- **Parser edges that stay narrower than CPython** (fail closed, real transcripts unaffected): timestamps accept the extended RFC 3339 forms only (`datetime.fromisoformat` also takes basic `20261128T234427Z`, hour-only and `+HH` forms); a `costUSD` string with non-ASCII digits or underscores counts 0 (Python's `Decimal` takes them).
+- **Codex files** are `~/.codex/sessions/**/*.jsonl` as the reference node globs them (the brief text says `rollout-*.jsonl`).
+- **A change between `hello` and `hello.ack`** is announced when the ack arrives (the difference from the catalogue the `hello` carried).
+- **Transcripts parse like `json.loads`** (floats, NaN, duplicate keys), not with the protocol's strict parser; files are listed and ordered like pathlib on 3.12 (`*/` follows a symlinked directory, `**/` does not, dot files included, component order); paths and identifiers compare by code point (Swift's `String` would compare by canonical equivalence).
+- **The local policy lives in the data protection keychain** (service `friday-node`, account `local-policy`), not a file in the app's container: the app is not sandboxed, so another process of the same user could rewrite a file; the keychain item is writable only with this app's access group. Every change goes through `LAContext .deviceOwnerAuthentication`.
+- **`usage.ccusage` is `unsupported` in the app.** The brief's release path runs a pinned `ccusage` binary (path and hash in the local policy, governance manifest entry); none is installed or vetted, so the app advertises `unsupported` as the brief prescribes for a missing binary. The reference rule (transcripts' usage and `costUSD`) runs in the tests and the Conformance build.
+- **`git.status`** runs `log -1 --format=%H %ct` like the reference node (the brief's `%cI` form is not what the reference parses).
+- **Desktop readers** are available by default, as in the reference node; titles need the local toggle and the Screen Recording grant (`CGPreflightScreenCaptureAccess`), and the toggle asks for that grant when turned on.
+
+### Owner steps (pending) — `feat/p9-node-readers`, recorded 2026-11-26
+
+1. Run the web front end against the loopback stack, then finish contract test 5: on `/devices` an ungranted directory reads "Mac'te izin verilmedi" and a granted one "Kullanılabilir"; in a web chat with the local model, "Claude Code oturumlarım ne yapıyor?" is answered from local detail and rows of unmapped directories never appear.
+2. Decide on `ccusage`: install a pinned binary through the governance manifest (then a follow-up branch wires it), or keep `usage.ccusage` unsupported.
+
+### Known follow-ups (from `feat/p9-node-readers`)
+
+1. Wire a vetted `ccusage` binary (owner step 2).
+2. Run `scrub_differential.py` again whenever `memory/ingestion/scrubber.py` changes (the vectors pin the corpus, not every pattern edge); consider a CI job on a macOS runner if the owner decides A5 that way.
+3. A reader differential (the reference `Readers` and `NodeReaders` over generated homes), like the scrubber one: the review's ad-hoc version found the timestamp and money edges above.
+
+
+### Implementation notes — `feat/p9-node-hook-relay` (Mac session M3, 2026-11-26)
+
+| Contract test | Status |
+|---|---|
+| Reference tests in Swift | **Pass**: `SpoolTests`, `SessionEventTests`, `HookRelayTests` re-express `test_reference_spool.py` and `test_reference_hook_relay.py` (with the CLI's 3 s exit both when the node is down and when stdin never closes); 72 NodeCore tests pass in all. |
+| Server side (branch 6) | `nodes/tests/test_node_events.py` passes on this Mac; `config/tests/test_hooks_via_node.py::test_the_done_criterion` fails here as it did before this branch: the Python **reference** relay reads the peer uid with Linux `SO_PEERCRED`, absent on macOS, so it refuses (fail closed); it passes on the Linux CI. The Swift relay uses `getpeereid`, tested over a real socket. |
+| Live, real stack | `friday-node hook` → socket → app → WSS → gateway: a live event arrives (`spooled=False`); with the gateway stopped three events were spooled (three 0600 batch files), and after the restart each was uploaded exactly once (`spooled=True`), acked and deleted (spool empty after 11 s). The server **dropped** them, by design: the owner's `claude_code_hooks` source is disabled and has no mapping rule. |
+| Manual pass "arrive once in /sessions" | **Pending owner step**: enable the source and add a `path_prefix` rule on the web (below). |
+
+Decisions and deviations:
+
+- **The event is built in the app, not the CLI**, as the reference relay does (`hook_relay.py`: the CLI relays stdin, `HookRelay` builds the event): one place scrubs, and the CLI stays a minimal relay that always exits 0 within 3 s (`SIGALRM` backstop). The brief text puts `build_event` in `Hook.swift`; the event shape is the same (`HookEvent.build`, checked against `build_hook_event`'s output).
+- **The CLI lives at `~/Library/Application Support/Friday/bin/friday-node`** (`scripts/install-hook-cli.sh`), a release SwiftPM build; the app bundle does not carry it.
+- **Switch-over done**: `~/.claude/settings.json` gained `friday-node hook` entries for `SessionStart`, `Notification`, `Stop`, `SessionEnd` (backup `settings.json.bak-before-friday-node-hook-20261126`). There were no `friday-hook` entries on this Mac and `friday-hook` is not installed, so there is no fallback entry to keep.
+- **Not done on purpose:** enabling the `claude_code_hooks` source and adding a mapping rule from a shell. `memory/ingestion/services.py` accepts both only from the owner on the web channel; a direct database update made during the live pass was reverted the same minute (no event had been stored).
+
+### Owner steps (pending) — `feat/p9-node-hook-relay`, recorded 2026-11-26
+
+1. On the web (once the front end runs, see the M2 owner step): enable the `claude_code_hooks` source and add a `path_prefix` rule for the directories whose sessions Friday may record (absolute paths, e.g. the project folder) to the personal workspace.
+2. Then the manual pass: stop the stack, run a Claude Code session, restart; the spooled events arrive once in `/sessions`.
+3. To fall back: restore `~/.claude/settings.json` from the backup (or delete the four `friday-node hook` entries).

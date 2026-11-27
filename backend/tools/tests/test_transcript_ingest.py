@@ -686,6 +686,8 @@ def test_only_the_pull_job_passes_the_system_channel():
         relative = path.relative_to(backend).as_posix()
         if "/tests/" in relative or relative.startswith((".venv", "tools/transcript_ingest.py")):
             continue
+        if relative == "nodes/services.py":
+            continue  # defines `invoke_read` and checks the channel itself
         text = path.read_text(encoding="utf-8", errors="replace")
         if "invoke_read" in text and "CHANNEL_SYSTEM" in text:
             offenders.append(relative)

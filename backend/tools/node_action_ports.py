@@ -23,11 +23,13 @@ ours.
   `assistant` may not): `register_proposal_source(fn)` -- `fn(*, workspace,
   actor) -> list[dict]`, the actor's own nodes with their invocable action
   capabilities and the workspace's 8A path prefixes -- and
-  `register_proposal_validator(fn)` -- `fn(*, workspace, actor, proposal) ->
-  dict | None`, the deterministic server contract (actor check, contract,
-  args, workspace rule) applied to the router's untrusted output. Both
-  unregistered -> no target and no valid proposal (the router degrades to
-  chat).
+  `register_proposal_validator(fn)` -- `fn(*, workspace, actor, proposal,
+  context) -> dict | None`, the deterministic server contract (actor check,
+  contract, args, workspace rule and, Phase 13 D6, the "which PC" resolver
+  over the turn's `tools.registry.ToolCallContext`) applied to the router's
+  untrusted output; a `{"refusal", "reply"}` dict means "no draft, answer
+  with this Friday-authored text". Both unregistered -> no target and no
+  valid proposal (the router degrades to chat).
 """
 
 from dataclasses import dataclass
@@ -138,8 +140,9 @@ def register_proposal_source(fn) -> None:
 
 
 def register_proposal_validator(fn) -> None:
-    """`fn(*, workspace, actor, proposal) -> dict | None` (D13): the server
-    contract applied to the router's untrusted argument output."""
+    """`fn(*, workspace, actor, proposal, context) -> dict | None` (D13;
+    `context` since Phase 13 D6): the server contract applied to the
+    router's untrusted argument output."""
     global _proposal_validator
     if not callable(fn):
         raise TypeError("the proposal validator must be callable")

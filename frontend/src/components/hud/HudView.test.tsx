@@ -409,3 +409,74 @@ describe("HudView (A8)", () => {
     expect(JSON.parse(window.localStorage.getItem("friday:hud:settings")!)).toMatchObject({ animateOnBattery: true });
   });
 });
+
+describe("HudView nodes layout (Phase 13 D4)", () => {
+  const voice = {
+    state: "unknown",
+    mode: "",
+    session_open: false,
+    wake_accepts_today: 0,
+    wake_discards_today: 0,
+    storm_mutes_today: 0,
+    at: null,
+  } as const;
+  const line = {
+    status: "connected",
+    last_heartbeat_at: null,
+    catalogue_sha256: "0123456789ab",
+    invocable_count: 8,
+    advertised_count: 8,
+    spool_depth: 0,
+    node_version: "",
+    voice,
+  } as const;
+  function presence(id: string, name: string, online: boolean) {
+    return {
+      id,
+      name,
+      room: null,
+      role: "other",
+      platform: "linux",
+      status: online ? ("connected" as const) : ("disconnected" as const),
+      online,
+      last_heartbeat_at: null,
+      last_active_at: null,
+      invocable_read_count: 8,
+      invocable_action_count: 0,
+      voice,
+    };
+  }
+  const health = { providers: [], providers_down: 0, budgets: [], budgets_exhausted: 0, preflight: null, node: line };
+
+  it("keeps the single node line with one node", () => {
+    const h = setup();
+    h.push(data({ health, nodes: { items: [presence("n1", "MacBook", true)], total: 1, online: 1 } }));
+    expect(screen.getByTestId("hud-node")).toBeInTheDocument();
+    expect(screen.queryByTestId("hud-nodes")).toBeNull();
+  });
+
+  it("keeps the line for a backend without the nodes section", () => {
+    const h = setup();
+    h.push(data({ health }));
+    expect(screen.getByTestId("hud-node")).toBeInTheDocument();
+    expect(screen.queryByTestId("hud-nodes")).toBeNull();
+  });
+
+  it("shows the per-node panel instead of the line with two nodes", () => {
+    const h = setup();
+    h.push(
+      data({
+        health,
+        nodes: {
+          items: [presence("n1", "MacBook", true), presence("n2", "Masaüstü", false)],
+          total: 2,
+          online: 1,
+        },
+      }),
+    );
+    expect(screen.queryByTestId("hud-node")).toBeNull();
+    const panel = screen.getByTestId("hud-nodes");
+    expect(within(panel).getAllByTestId("hud-nodes-row")).toHaveLength(2);
+    expect(within(panel).getByText("Masaüstü")).toBeInTheDocument();
+  });
+});
