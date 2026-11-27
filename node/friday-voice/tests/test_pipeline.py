@@ -287,6 +287,18 @@ def test_a_refused_or_failed_turn_plays_the_error_earcon_and_speaks_nothing(stat
     assert session.states()[-1] == "armed_ptt"
 
 
+@pytest.mark.parametrize("code", ["tls_pin_mismatch", "tls_ca_file_unreadable"])
+def test_a_tls_refusal_releases_the_mic_with_the_error_earcon(code):
+    session, fake = ptt_session()
+    fake.fail_next("stt", FridayError(0, code))
+    ptt_turn(session)
+    assert session.sent("earcon") == [{"type": "earcon", "earcon": "error"}]
+    assert session.sent("release_mic")[-1] == {"type": "release_mic", "reason": "error"}
+    assert len(fake.calls("stt")) == 1  # never retried: not a network error
+    assert fake.calls("chat") == []
+    assert session.states()[-1] == "error"
+
+
 def test_a_429_on_speech_stops_the_reply():
     session, fake = ptt_session()
     fake.fail_next("tts", FridayError(429, "throttled"))

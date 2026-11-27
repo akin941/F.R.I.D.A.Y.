@@ -10,10 +10,13 @@
                            [--threshold <t>] [--refractory-ms <ms>] [--out <path>]
     friday-voice e2e --server <url> --token-file <path> --scenario <name>
     friday-voice models fetch [--model-dir <dir>] [--keyword-src <onnx>]
+    friday-voice ca set <pem> | clear | show [--home <dir>]
 
 `run` takes no configuration: the host hands the child everything over
 stdin (`hello`, `credential`, ...). Never pass a credential in argv or the
-environment (brief D3).
+environment (brief D3). The one install-time setting it reads is the CA
+file `friday-voice ca set` recorded (`friday_voice.tls`): it replaces the
+default trust bundle, and the pin and hostname checks still run.
 """
 
 import argparse
@@ -43,7 +46,32 @@ def load_wake_stack(model_dir=None):
         return None
 
 
-def make_run_pipeline(clock, *, wake_stack_loader=load_wake_stack):
+def install_ca(home=None):
+    """`(ca_file, ca_unusable)` from the install's `tls.json`
+    (`friday_voice.tls`): `(None, False)` when none is recorded (the
+    default bundle). A broken config or CA file is logged here, once, and
+    fails closed in the client (`tls_ca_file_unreadable`), never falling
+    back to the default bundle."""
+    from . import log, tls
+
+    try:
+        ca_file = tls.installed_ca_file(home)
+    except tls.TlsConfigError as exc:
+        log.emit("tls.config_invalid", str(exc))
+        return None, True
+    if ca_file is None:
+        return None, False
+    try:
+        tls.load_context(ca_file)
+    except tls.TlsConfigError as exc:
+        # Kept: the client re-tries the load per connection and fails closed.
+        log.emit("tls.ca_file_unreadable", str(exc))
+    else:
+        log.emit("tls.ca_file")
+    return ca_file, False
+
+
+def make_run_pipeline(clock, *, wake_stack_loader=load_wake_stack, tls_home=None):
     """The pipeline `friday-voice run` serves: Friday's HTTPS client on a
     thread worker. Push-to-talk needs no detector. Wake mode needs the
     verified detector stack (`load_wake_stack`); with it the real arming
@@ -55,16 +83,18 @@ def make_run_pipeline(clock, *, wake_stack_loader=load_wake_stack):
     from .workers import ThreadWorker
 
     stack = wake_stack_loader()
+    ca_file, ca_unusable = install_ca(tls_home)
+
+    def client():
+        return HttpFridayClient(ca_file=ca_file, ca_unusable=ca_unusable)
 
     def build(post):
         if stack is None:
-            return VoicePipeline(
-                clock, HttpFridayClient(), ThreadWorker(post), arming=RefuseAlwaysOn()
-            )
+            return VoicePipeline(clock, client(), ThreadWorker(post), arming=RefuseAlwaysOn())
         detector, vad, turn_end = stack
         return VoicePipeline(
             clock,
-            HttpFridayClient(),
+            client(),
             ThreadWorker(post),
             vad=vad,
             turn_end=turn_end,
@@ -209,6 +239,12 @@ def _models_fetch(args) -> int:
     return model_fetch.main(args)
 
 
+def _ca(args) -> int:
+    from . import tls
+
+    return tls.main(args)
+
+
 def build_parser():
     parser = argparse.ArgumentParser(prog="friday-voice")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -238,7 +274,9 @@ def build_parser():
     group.add_argument("--write-baseline", action="store_true", help="store the baseline")
     group.add_argument("--server", default=None, help="a running Friday (push-to-talk only)")
     replay.add_argument("--token-file", default=None, help="file holding a node_voice token")
-    replay.add_argument("--ca-file", default=None, help="extra CA bundle for an https server")
+    replay.add_argument(
+        "--ca-file", default=None, help="CA bundle trusted instead of the default (https)"
+    )
     replay.add_argument("--ca-sha256", default=None, help="pinned CA fingerprint (https)")
     replay.add_argument(
         "--wake-model-sha256",
@@ -267,7 +305,9 @@ def build_parser():
         default=None,
         help="--nightly: the host's audio path (WAV on stdin -> AEC capture WAV on stdout)",
     )
-    selftest.add_argument("--ca-file", default=None, help="--nightly: extra CA bundle")
+    selftest.add_argument(
+        "--ca-file", default=None, help="--nightly: CA bundle trusted instead of the default"
+    )
     selftest.add_argument("--ca-sha256", default=None, help="--nightly: pinned CA fingerprint")
     selftest.add_argument("--result-file", default=None, help="write the one-line JSON result")
     selftest.set_defaults(func=_selftest)
@@ -306,6 +346,19 @@ def build_parser():
         help="the owner-trained keyword model to copy (default: $VOICE_WAKE_MODEL_SRC)",
     )
     fetch.set_defaults(func=_models_fetch)
+
+    ca_cmd = sub.add_parser(
+        "ca", help="the install's CA file: trusted instead of the default bundle (local TLS)"
+    )
+    ca_sub = ca_cmd.add_subparsers(dest="ca_command", required=True)
+    home_help = "the install home (default: ~/Library/Application Support/Friday/voice)"
+    ca_set = ca_sub.add_parser("set", help="copy a PEM certificate in and record it")
+    ca_set.add_argument("ca_file", help="PEM certificate(s), no private key")
+    ca_clear = ca_sub.add_parser("clear", help="remove the record (back to the default bundle)")
+    ca_show = ca_sub.add_parser("show", help="print what is recorded")
+    for ca_parser in (ca_set, ca_clear, ca_show):
+        ca_parser.add_argument("--home", default=None, help=home_help)
+        ca_parser.set_defaults(func=_ca)
     return parser
 
 

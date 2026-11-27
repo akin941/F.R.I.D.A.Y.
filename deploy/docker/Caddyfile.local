@@ -1,5 +1,9 @@
 # Loopback TLS front for a Friday Node on this Mac (compose.local-tls.yml).
-# Only the node's three paths are forwarded; everything else is 404.
+# Only the node's own paths are forwarded -- pairing, credential rotation,
+# the node gateway, and the node voice flow (the host's voice-token mint plus
+# the six views a node_voice token reaches, Phase 11 D4 / preflight
+# voice_live_channel) -- everything else is 404.
+# backend/ops/tests/test_local_tls_caddyfile.py guards this list.
 {
 	admin off
 	auto_https off
@@ -22,6 +26,20 @@ https://127.0.0.1:8443, https://localhost:8443, https://local-tls:8443 {
 
 	@node_api path /api/v1/nodes/pair /api/v1/auth/nodes/credential/rotate
 	handle @node_api {
+		reverse_proxy web:8000
+	}
+
+	# The node voice flow (Phase 11): the Swift host mints the node_voice
+	# token; the voice child (node/friday-voice/friday_voice/client.py)
+	# opens the live session, transcribes, sends the chat turn, synthesizes
+	# and reads the always-on policy; the receipt is the sixth D4 view.
+	@node_voice path /api/v1/auth/nodes/voice-token /api/v1/auth/nodes/voice-policy /api/v1/voice/live/sessions /api/v1/voice/transcriptions /api/v1/voice/speech /api/v1/voice/receipt
+	handle @node_voice {
+		reverse_proxy web:8000
+	}
+
+	@node_voice_turn path_regexp ^/api/v1/ai/conversations/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/messages$
+	handle @node_voice_turn {
 		reverse_proxy web:8000
 	}
 

@@ -245,9 +245,15 @@ def test_the_pin_refuses_any_other_chain(chain):
         hook("connection.start_tls.complete", {"return_value": stream})
 
 
-def test_the_pin_only_looks_at_the_tls_handshake_and_needs_a_pin():
+def test_the_pin_only_looks_at_the_tls_handshake():
     pin_hook(CA_SHA)("http11.send_request_headers.started", {})
-    pin_hook(None)("connection.start_tls.complete", {"return_value": None})
+    pin_hook(None)("http11.send_request_headers.started", {})  # loopback http: no pin
+
+
+def test_a_tls_handshake_without_a_pin_is_refused():
+    stream = FakeStream(FakeSSLObject([LEAF, CA]))
+    with pytest.raises(PinMismatch):
+        pin_hook(None)("connection.start_tls.complete", {"return_value": stream})
 
 
 def test_a_pin_failure_is_reported_as_such():
