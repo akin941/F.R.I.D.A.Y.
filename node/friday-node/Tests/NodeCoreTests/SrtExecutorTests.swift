@@ -136,6 +136,55 @@ final class SandboxRunTests: XCTestCase {
         XCTAssertTrue(Waiting.until(5) { kill(pid, 0) != 0 }, "the background child is gone")
     }
 
+    /// A grandchild that calls setsid while its parent exits at once (before
+    /// any sample sees it) is re-parented to launchd and leaves the group;
+    /// its recorded parent unique id still ties it to the run (B6 review
+    /// finding 2). Repeated, since the race is what is tested.
+    func testASetsidEscapeeIsFoundByItsLineage() throws {
+        guard FileManager.default.isExecutableFile(atPath: "/usr/bin/perl") else { throw XCTSkip("no perl") }
+        let script = """
+            /usr/bin/perl -MPOSIX -e 'exit if fork(); POSIX::setsid(); exit if fork(); print "$$\\n"; \
+            close STDOUT; close STDERR; exec "/bin/sleep", "60"'
+            """
+        // A deeper chain: three generations, each parent exiting at once.
+        let deeper = """
+            /usr/bin/perl -MPOSIX -e 'exit if fork(); POSIX::setsid(); exit if fork(); exit if fork(); \
+            print "$$\\n"; close STDOUT; close STDERR; exec "/bin/sleep", "60"'
+            """
+        for (attempt, script) in (Array(repeating: script, count: 10) + Array(repeating: deeper, count: 10)).enumerated() {
+            let run = try sh(script)
+            let (output, outcome) = Waiting.finish(run, timeout: 15)
+            XCTAssertNotNil(outcome, "attempt \(attempt)")
+            let pid = pid_t(output.trimmingCharacters(in: .whitespacesAndNewlines)) ?? 0
+            XCTAssertGreaterThan(pid, 0, "attempt \(attempt)")
+            XCTAssertTrue(Waiting.until(5) { kill(pid, 0) != 0 }, "attempt \(attempt): the setsid escapee survived")
+        }
+    }
+
+    /// A pid is signalled only while it still names the same process (pid
+    /// AND start time): a stale identity is never killed (finding 3).
+    func testAStaleIdentityIsNeverSignalled() throws {
+        let child = try ChildProcess.spawn(
+            executable: "/bin/sleep", argv: ["sleep", "30"], environment: [:], stdout: .devNull, stderr: .devNull)
+        defer {
+            child.signal(SIGKILL)
+            child.wait(timeout: 5)
+        }
+        let identity = try XCTUnwrap(ProcessTree.identity(of: child.pid))
+        let stale = ProcessIdentity(
+            pid: identity.pid, uniqueID: identity.uniqueID, startSeconds: identity.startSeconds &- 1,
+            startMicroseconds: identity.startMicroseconds)
+        let recycled = ProcessIdentity(
+            pid: identity.pid, uniqueID: identity.uniqueID &+ 1, startSeconds: identity.startSeconds,
+            startMicroseconds: identity.startMicroseconds)
+        XCTAssertFalse(ProcessTree.signal(recycled, SIGKILL))
+        XCTAssertFalse(ProcessTree.signal(stale, SIGKILL))
+        XCTAssertFalse(child.wait(timeout: 0.3), "the process was killed through a stale identity")
+        XCTAssertTrue(ProcessTree.signal(identity, SIGKILL))
+        XCTAssertTrue(child.wait(timeout: 5))
+        XCTAssertFalse(ProcessTree.signal(identity, SIGKILL), "a reaped process is not signalled")
+    }
+
     /// Output past the cap is counted, not kept.
     func testOutputPastTheCapIsCountedNotKept() throws {
         let small = RunLimits(maxProcesses: 8, cpuSeconds: 30, maxOutputBytes: 1000, killGraceSeconds: 1)
@@ -265,10 +314,45 @@ func resolvedPath(_ path: String) -> String {
 /// Real `srt` (skipped when it is not installed at the configured
 /// location): only a temp dir is written; nothing of the owner's is read.
 final class RealSrtTests: XCTestCase {
+    /// The default location, confirmed as the owner would (the test reads
+    /// the installed files; it changes nothing).
     private func executor() throws -> SrtExecutor {
-        let executor = SrtExecutor()
+        guard let confirmed = try? SrtLocation().confirmed() else { throw XCTSkip("srt not installed") }
+        let executor = SrtExecutor(location: confirmed)
         if let problem = executor.location.problem() { throw XCTSkip("srt not usable: \(problem)") }
         return executor
+    }
+
+    /// srt is trusted only as confirmed: unconfirmed, or any file changed
+    /// since, is `unsupported` (B6 review finding 6). Checked on a copy of
+    /// the installed prefix in a temp dir.
+    func testSrtIsTrustedOnlyAsConfirmed() throws {
+        let installed = try executor().location
+        let base = resolvedPath(try makeTempDirectory())
+        defer { try? FileManager.default.removeItem(atPath: base) }
+        let prefix = base + "/srt"
+        try FileManager.default.copyItem(atPath: installed.prefix, toPath: prefix)
+        let unconfirmed = SrtLocation(node: installed.node, prefix: prefix)
+        XCTAssertEqual(unconfirmed.problem(), "srt not confirmed (Touch ID)")
+        let confirmed = try unconfirmed.confirmed()
+        XCTAssertNil(confirmed.problem())
+        XCTAssertEqual(confirmed.digests["node_modules"], installed.digests["node_modules"], "the copy is the same tree")
+        XCTAssertTrue(SrtExecutor(location: confirmed).available)
+        // Tamper with cli.js: refused until confirmed again.
+        let cli = confirmed.cliPath
+        let handle = try XCTUnwrap(FileHandle(forWritingAtPath: cli))
+        handle.seekToEndOfFile()
+        handle.write(Data("\n// tampered\n".utf8))
+        try handle.close()
+        XCTAssertEqual(confirmed.problem(), "srt files changed since confirmation")
+        XCTAssertFalse(SrtExecutor(location: confirmed).available)
+        // A file added anywhere in node_modules changes the tree too.
+        let reconfirmed = try confirmed.confirmed()
+        XCTAssertNil(reconfirmed.problem())
+        try Data("x".utf8).write(to: URL(fileURLWithPath: prefix + "/node_modules/zod/extra.js"))
+        XCTAssertEqual(reconfirmed.problem(), "srt files changed since confirmation")
+        // The digests survive the keychain document.
+        XCTAssertEqual(SrtLocation.from(reconfirmed.document), reconfirmed)
     }
 
     private func run(_ script: String, _ executor: SrtExecutor, base: String, home: String, network: [String] = [])

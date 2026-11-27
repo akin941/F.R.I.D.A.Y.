@@ -81,6 +81,44 @@ public struct CommandMappings: Equatable, Sendable {
         self.srt = srt
     }
 
+    // MARK: Changes keyed by repo root and command kind (B6 review finding
+    // 10): the UI never applies an index it read before the Touch ID
+    // prompt; a target that is gone by then refuses the change.
+
+    public struct TargetGone: Error, Equatable, CustomStringConvertible {
+        public let description: String
+    }
+
+    /// Change the repo whose root is `root`; refused when it is not mapped.
+    public mutating func updateRepo(root: String, _ body: (inout Repo) throws -> Void) throws {
+        guard let index = repos.firstIndex(where: { Scalars.equal($0.root, root) }) else {
+            throw TargetGone(description: "the repo \(root) is no longer mapped")
+        }
+        try body(&repos[index])
+    }
+
+    public mutating func removeRepo(root: String) throws {
+        try updateRepo(root: root) { _ in }
+        repos.removeAll { Scalars.equal($0.root, root) }
+    }
+
+    public mutating func removeCommand(root: String, kind: String) throws {
+        try updateRepo(root: root) { repo in
+            guard repo.commands.contains(where: { $0.kind == kind }) else {
+                throw TargetGone(description: "\(kind) is no longer mapped for \(root)")
+            }
+            repo.commands.removeAll { $0.kind == kind }
+        }
+    }
+
+    /// Map (or replace) `command.kind` for the repo at `root`.
+    public mutating func setCommand(root: String, _ command: Command) throws {
+        try updateRepo(root: root) { repo in
+            repo.commands.removeAll { $0.kind == command.kind }
+            repo.commands.append(command)
+        }
+    }
+
     static let bundlePattern = "^[A-Za-z0-9-]{1,63}(?:\\.[A-Za-z0-9-]{1,63}){1,7}$"
 
     /// The `local_policy.json` document check 22 reads.
@@ -242,18 +280,18 @@ public final class CommandMappingsEditor: @unchecked Sendable {
     public func current() throws -> CommandMappings { try store.load() }
 
     @discardableResult
-    public func change(reason: String, _ change: (inout CommandMappings) -> Void) async throws -> CommandMappings {
+    public func change(reason: String, _ change: (inout CommandMappings) throws -> Void) async throws -> CommandMappings {
         guard await authentication.authenticate(reason: reason) else { throw PolicyChangeError.notAuthenticated }
         let mappings = try apply(change)
         onChange?(mappings)
         return mappings
     }
 
-    private func apply(_ change: (inout CommandMappings) -> Void) throws -> CommandMappings {
+    private func apply(_ change: (inout CommandMappings) throws -> Void) throws -> CommandMappings {
         lock.lock()
         defer { lock.unlock() }
         var mappings = try store.load()
-        change(&mappings)
+        try change(&mappings)
         _ = try mappings.actionPolicy(home: home)  // refuses before saving
         try store.save(mappings)
         return mappings

@@ -27,9 +27,8 @@ public enum AXPress {
         let matches = find(in: window, role: axRole, title: title, driver: driver)
         guard !matches.isEmpty else { throw AXRefusal.notFound }
         guard matches.count == 1 else { throw AXRefusal.ambiguous }
-        guard let front = driver.frontmost(), Scalars.equal(front.bundleID, bundleID), front.pid == pid else {
-            throw AXRefusal.notFrontmost
-        }
+        try AXRules.stillFront(driver, bundleID: bundleID, pid: pid)
+        try AXRules.noSecureFocus(driver, pid: pid)
         guard driver.press(matches[0]) else { throw AXRefusal.actionFailed }
     }
 

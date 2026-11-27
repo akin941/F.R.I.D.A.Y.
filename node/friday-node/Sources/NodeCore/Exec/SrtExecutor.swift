@@ -35,6 +35,15 @@
 // private prefix `~/Library/Application Support/Friday/srt` holding
 // `@anthropic-ai/sandbox-runtime` 0.0.83, the pinned version. A location
 // whose package is another version is `unsupported`.
+//
+// The version string is not trusted alone (B6 review finding 6): the prefix
+// is user-writable. Setting or re-confirming the location (Touch ID, in the
+// policy UI) stores in the keychain item the sha256 of the Node binary, of
+// the whole `<prefix>/node_modules` tree (cli.js, dist and every dependency)
+// and of `<prefix>/package-lock.json`; `problem()` recomputes them (cached
+// per file by inode, size, mtime and ctime) before every start and every
+// availability answer, and any difference is `unsupported` until the owner
+// re-confirms.
 
 import Darwin
 import Foundation
@@ -49,25 +58,57 @@ public struct SrtLocation: Equatable, Sendable {
 
     public var node: String
     public var prefix: String
+    /// The sha256 of what runs (B6 review finding 6), taken when the owner
+    /// set or re-confirmed the location with Touch ID: `node` (the binary),
+    /// `node_modules` (the whole installed tree, `dist/cli.js` and every
+    /// dependency included), `package-lock.json` (the prefix's lockfile).
+    /// Empty: not confirmed, so `unsupported`.
+    public var digests: [String: String]
 
-    public init(node: String = SrtLocation.defaultNode, prefix: String = SrtLocation.defaultPrefix) {
+    public static let digestNames = ["node", "node_modules", "package-lock.json"]
+
+    public init(
+        node: String = SrtLocation.defaultNode, prefix: String = SrtLocation.defaultPrefix, digests: [String: String] = [:]
+    ) {
         self.node = node
         self.prefix = prefix
+        self.digests = digests
     }
 
     public var cliPath: String { prefix + "/" + Self.packagePath + "/dist/cli.js" }
     var packageJSON: String { prefix + "/" + Self.packagePath + "/package.json" }
 
-    public var document: JSONValue { ["node": .string(node), "prefix": .string(prefix)] }
+    public var document: JSONValue {
+        ["node": .string(node), "prefix": .string(prefix), "sha256": .object(digests.mapValues(JSONValue.string))]
+    }
 
     public static func from(_ value: JSONValue?) -> SrtLocation? {
         guard let node = value?["node"]?.stringValue, let prefix = value?["prefix"]?.stringValue else { return nil }
-        return SrtLocation(node: node, prefix: prefix)
+        let digests = (value?["sha256"]?.objectValue ?? [:]).compactMapValues(\.stringValue)
+        return SrtLocation(node: node, prefix: prefix, digests: digests)
+    }
+
+    /// The digests of the files as they are now (throws when one cannot be
+    /// read). Unchanged files are not re-read (FileDigests caches by inode,
+    /// size, mtime and ctime).
+    public func currentDigests() throws -> [String: String] {
+        [
+            "node": try FileDigests.shared.file(node),
+            "node_modules": try FileDigests.shared.tree(prefix + "/node_modules"),
+            "package-lock.json": try FileDigests.shared.file(prefix + "/package-lock.json"),
+        ]
+    }
+
+    /// This location with the digests of what is installed now (the owner
+    /// confirms it with Touch ID in the policy UI).
+    public func confirmed() throws -> SrtLocation {
+        SrtLocation(node: node, prefix: prefix, digests: try currentDigests())
     }
 
     /// Why this location cannot run commands, or nil when it can: absolute
     /// paths, an executable Node >= 22.12, the CLI present, the package at
-    /// the pinned version.
+    /// the pinned version, and every file unchanged since the owner
+    /// confirmed the location.
     public func problem() -> String? {
         guard node.hasPrefix("/"), prefix.hasPrefix("/"), !node.contains("\0"), !prefix.contains("\0") else {
             return "srt paths must be absolute"
@@ -81,7 +122,12 @@ public struct SrtLocation: Equatable, Sendable {
             let version = (try? JSON.parse(data))?["version"]?.stringValue
         else { return "srt package.json unreadable" }
         guard version == Self.pinnedVersion else { return "srt \(version) is not the pinned \(Self.pinnedVersion)" }
-        guard let nodeVersion = NodeVersionCache.shared.version(of: node) else { return "node --version failed" }
+        guard Set(digests.keys) == Set(Self.digestNames) else { return "srt not confirmed (Touch ID)" }
+        guard let now = try? currentDigests() else { return "srt files unreadable" }
+        guard now == digests else { return "srt files changed since confirmation" }
+        guard let nodeVersion = NodeVersionCache.shared.version(of: node, digest: now["node"] ?? "") else {
+            return "node --version failed"
+        }
         guard Self.nodeIsRecentEnough(nodeVersion) else { return "node \(nodeVersion) is older than 22.12" }
         return nil
     }
@@ -95,16 +141,17 @@ public struct SrtLocation: Equatable, Sendable {
     }
 }
 
-/// `node --version` per binary, asked once (it is spawned with an empty
-/// environment and a 10 s timeout).
+/// `node --version` per binary content: asked again whenever the binary's
+/// digest changes (spawned with an empty environment and a 10 s timeout).
 final class NodeVersionCache: @unchecked Sendable {
     static let shared = NodeVersionCache()
     private let lock = NSLock()
     private var versions: [String: String] = [:]
 
-    func version(of node: String) -> String? {
+    func version(of node: String, digest: String) -> String? {
+        let key = node + "\u{0}" + digest
         lock.lock()
-        if let known = versions[node] {
+        if let known = versions[key] {
             lock.unlock()
             return known
         }
@@ -115,9 +162,73 @@ final class NodeVersionCache: @unchecked Sendable {
         else { return nil }
         let version = String(decoding: outcome.stdout, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
         lock.lock()
-        versions[node] = version
+        versions[key] = version
         lock.unlock()
         return version
+    }
+}
+
+/// sha256 of files and directory trees, cached per file by (device, inode,
+/// size, mtime, ctime): a file that is written changes its ctime, which no
+/// unprivileged process can set back, so an unchanged signature means
+/// unchanged content.
+public final class FileDigests: @unchecked Sendable {
+    public static let shared = FileDigests()
+    private let lock = NSLock()
+    private var cache: [String: (signature: [Int64], digest: String)] = [:]
+
+    public init() {}
+
+    static func signature(_ path: String) -> [Int64]? {
+        var info = stat()
+        guard lstat(path, &info) == 0 else { return nil }
+        return [
+            Int64(info.st_dev), Int64(bitPattern: info.st_ino), Int64(info.st_size), Int64(info.st_mode),
+            Int64(info.st_mtimespec.tv_sec), Int64(info.st_mtimespec.tv_nsec),
+            Int64(info.st_ctimespec.tv_sec), Int64(info.st_ctimespec.tv_nsec),
+        ]
+    }
+
+    /// One regular file (a symlink is resolved and its target hashed).
+    public func file(_ path: String) throws -> String {
+        let real = ReaderPaths.realpathC(path)
+        guard let signature = Self.signature(real) else { throw ExecutorError("unreadable: \(path)") }
+        lock.lock()
+        if let cached = cache[real], cached.signature == signature {
+            lock.unlock()
+            return cached.digest
+        }
+        lock.unlock()
+        guard let data = FileManager.default.contents(atPath: real) else { throw ExecutorError("unreadable: \(path)") }
+        let digest = JSON.hexDigest(data)
+        lock.lock()
+        cache[real] = (signature, digest)
+        lock.unlock()
+        return digest
+    }
+
+    /// A directory tree: every entry's relative path, kind and (for a file)
+    /// digest or (for a symlink) target, sorted, hashed together.
+    public func tree(_ root: String) throws -> String {
+        guard let enumerator = FileManager.default.enumerator(atPath: root) else {
+            throw ExecutorError("unreadable: \(root)")
+        }
+        var lines: [String] = []
+        for case let relative as String in enumerator {
+            let path = root + "/" + relative
+            var info = stat()
+            guard lstat(path, &info) == 0 else { throw ExecutorError("unreadable: \(path)") }
+            switch info.st_mode & S_IFMT {
+            case S_IFDIR: lines.append("d \(relative)")
+            case S_IFLNK:
+                let target = (try? FileManager.default.destinationOfSymbolicLink(atPath: path)) ?? ""
+                lines.append("l \(relative) -> \(target)")
+            case S_IFREG: lines.append("f \(relative) \(try file(path)) \(info.st_mode & 0o7777)")
+            default: lines.append("o \(relative)")
+            }
+        }
+        lines.sort(by: Scalars.less)
+        return JSON.hexDigest(Data(lines.joined(separator: "\n").utf8))
     }
 }
 
@@ -210,11 +321,12 @@ public final class SandboxRun: RunningCommand, @unchecked Sendable {
         self.child = child
         self.limits = limits
         self.cleanupDirectory = cleanupDirectory
-        monitor = TreeMonitor(
-            root: child.pid, group: child.pid, maxProcesses: limits.maxProcesses, cpuSeconds: limits.cpuSeconds)
+        monitor = TreeMonitor(root: child.pid, maxProcesses: limits.maxProcesses, cpuSeconds: limits.cpuSeconds)
     }
 
-    /// Spawn `argv` in a new process group and start pumping and watching.
+    /// Spawn `argv` in a new process group and start pumping and watching
+    /// (TreeMonitor follows the tree by unique-id lineage, so a descendant
+    /// that left the group and lost its parent is still the run's).
     public static func start(
         executable: String, argv: [String], environment: [String: String], cwd: String, limits: RunLimits,
         cleanupDirectory: String? = nil
@@ -284,7 +396,9 @@ public final class SandboxRun: RunningCommand, @unchecked Sendable {
         let handlers = finishHandlers
         finishHandlers = []
         lock.unlock()
-        monitor.stop()
+        // Whatever of the tree is left (a child that left the group) dies
+        // now; the monitor keeps sampling until no member is left.
+        monitor.killTree()
         TempDirectory.remove(cleanupDirectory)
         for handler in handlers { DispatchQueue.global(qos: .utility).async(execute: handler) }
     }
@@ -317,8 +431,13 @@ public final class SandboxRun: RunningCommand, @unchecked Sendable {
         }
         terminating = true
         lock.unlock()
+        // While the root is not reaped its group id names this run only.
         child.signal(SIGTERM)
         DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + limits.killGraceSeconds) { [self] in
+            // A run that finished meanwhile is not signalled again (its
+            // leftovers are the monitor's); otherwise only verified
+            // identities and an unreaped root are signalled.
+            guard !self.hasExited else { return }
             self.monitor.killTree()
             self.child.signal(SIGKILL)
         }

@@ -77,6 +77,35 @@ final class CommandMappingsTests: XCTestCase {
         XCTAssertThrowsError(try srt.validate())
     }
 
+    /// Changes are keyed by repo root and kind, so a target that changed
+    /// between the menu and the Touch ID prompt is refused, never another
+    /// repo changed instead (B6 review finding 10).
+    func testChangesAreKeyedByRootAndRefusedWhenTheTargetIsGone() async throws {
+        var two = Self.acme()
+        two.repos.insert(.init(name: "other", root: "~/work/other"), at: 0)
+        var copy = two
+        try copy.removeCommand(root: "~/work/acme", kind: "lint")
+        XCTAssertEqual(copy.repos[1].commands.map(\.kind), ["test"])
+        XCTAssertEqual(copy.repos[0].commands, [])
+        XCTAssertThrowsError(try copy.removeCommand(root: "~/work/acme", kind: "lint"))
+        XCTAssertThrowsError(try copy.setCommand(root: "~/work/gone", .init(kind: "test", argv: ["true"])))
+        try copy.removeRepo(root: "~/work/other")
+        XCTAssertEqual(copy.repos.map(\.root), ["~/work/acme"])
+        XCTAssertThrowsError(try copy.removeRepo(root: "~/work/other"))
+
+        // Through the editor: the repo vanished before the owner confirmed.
+        let store = MemoryCommandMappingsStore(two)
+        let editor = CommandMappingsEditor(store: store, authentication: FixedAuthentication(true), home: "/Users/owner")
+        try store.save(Self.acme())  // "other" is gone meanwhile
+        do {
+            _ = try await editor.change(reason: "kaldır") { try $0.removeRepo(root: "~/work/other") }
+            XCTFail("a gone target was changed")
+        } catch {
+            XCTAssertTrue(error is CommandMappings.TargetGone)
+        }
+        XCTAssertEqual(try store.load(), Self.acme(), "nothing else changed")
+    }
+
     func testTheEditorChangesNothingWithoutTheOwner() async throws {
         let store = MemoryCommandMappingsStore()
         let refused = CommandMappingsEditor(store: store, authentication: FixedAuthentication(false), home: "/Users/owner")
@@ -128,6 +157,24 @@ final class ConfirmationDisplayTests: XCTestCase {
         XCTAssertEqual(ConfirmationRenderer.displaySafe("~/work/çalışma"), "~/work/çalışma")
         XCTAssertEqual(ConfirmationRenderer.displaySafe("a\tb"), "a\\tb " + ConfirmationRenderer.alteredMark)
         XCTAssertEqual(ConfirmationRenderer.displaySafe("\r"), "\\r " + ConfirmationRenderer.alteredMark)
+    }
+
+    /// The panel shows the sandbox mode, with a visible warning for
+    /// `in_place`; the rendered text stays the reference's.
+    func testThePanelShowsTheModeAndWarnsForInPlace() throws {
+        let policy = try ActionPolicy.load(try Repo.json("backend/nodes/reference/fixtures/local_policy.json"), home: "/nonexistent/home")
+        for (kind, mode) in [("test", "in_place"), ("lint", "worktree")] {
+            let args: JSONValue = ["repo_path": "~/work/acme", "command_kind": .string(kind)]
+            let prompt = ConfirmationRenderer.prompt(
+                envelope: ["capability": "repo.command.run", "class": "gate", "args": args,
+                           "invocation_id": "00000000-0000-4000-8000-000000000001", "grant": nil],
+                resolved: try policy.resolve(capability: "repo.command.run", args: args), shownAt: 0)
+            XCTAssertEqual(prompt.sandboxMode, mode)
+            XCTAssertFalse(prompt.text.contains("Kip:"), "the reference text is unchanged")
+            let view = ConfirmationPanelView.make(prompt: prompt, running: nil, now: 0)
+            let line = try XCTUnwrap(view.lines.first { $0.hasPrefix("Kip: ") })
+            XCTAssertEqual(line.contains("⚠︎"), mode == "in_place", line)
+        }
     }
 
     func testDurdurStaysReachableWhileASecondWindowAsks() {

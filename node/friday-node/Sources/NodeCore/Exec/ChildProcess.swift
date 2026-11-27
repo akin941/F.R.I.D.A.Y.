@@ -207,17 +207,14 @@ public final class ChildProcess: @unchecked Sendable {
         lock.unlock()
     }
 
-    /// Signal the child (its whole group when it leads one). Never after it
-    /// was reaped.
+    /// Signal the child (its whole group when it leads one), only while it
+    /// is not reaped: until then its pid, and so its group id, cannot name
+    /// another process. After the reap nothing is sent here (a sandboxed
+    /// run's leftovers are TreeMonitor's, by verified identity).
     public func signal(_ signal: Int32) {
         lock.lock()
         defer { lock.unlock() }
-        guard exitStatus == nil else {
-            // The leader is gone, but its group may live on (background
-            // children); a group id is not reused while members exist.
-            if processGroup { _ = killpg(pid, signal) }
-            return
-        }
+        guard exitStatus == nil else { return }
         if processGroup { _ = killpg(pid, signal) } else { _ = kill(pid, signal) }
     }
 

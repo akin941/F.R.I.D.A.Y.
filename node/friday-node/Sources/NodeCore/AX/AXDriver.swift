@@ -51,6 +51,7 @@ public enum AXRefusal: String, Error, Equatable {
     case ambiguous = "ambiguous"
     case noFocus = "no_focus"
     case focusOutsideWindow = "focus_outside_window"
+    case focusMoved = "focus_moved"
     case actionFailed = "action_failed"
     case badArgs = "bad_args"
 }
@@ -66,6 +67,13 @@ enum AXRules {
         }
         guard let window = driver.focusedWindow(pid: front.pid) else { throw AXRefusal.noWindow }
         return (front.pid, window)
+    }
+
+    /// `bundleID` (the same process) is still the frontmost app.
+    static func stillFront(_ driver: AccessibilityDriver, bundleID: String, pid: pid_t) throws {
+        guard let front = driver.frontmost(), Scalars.equal(front.bundleID, bundleID), front.pid == pid else {
+            throw AXRefusal.notFrontmost
+        }
     }
 
     /// No secure text field has focus (and secure input is off).

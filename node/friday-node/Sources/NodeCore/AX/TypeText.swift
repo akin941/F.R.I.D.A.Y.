@@ -7,9 +7,13 @@
 //   the focus is outside that window, and when the focused element is a
 //   secure text field (or secure input is on): the node never types into a
 //   password field.
-// - The text is inserted at the caret through the element's AXSelectedText;
-//   an element that does not take it gets keystrokes posted to that app's
-//   pid only (never the system-wide event tap).
+// - The text is inserted at the caret through the element's AXSelectedText
+//   (bound to the checked element); an element that does not take it gets
+//   keystrokes posted to that app's pid only (never the system-wide event
+//   tap), and only after checking again that the app is frontmost, the same
+//   element has focus and it is not a secure field. A residual window of
+//   microseconds between that check and the post remains (keystrokes cannot
+//   be bound to an element).
 // - Before Return the frontmost app and the secure-field rule are checked
 //   again.
 
@@ -27,12 +31,19 @@ public enum AXTypeText {
             throw AXRefusal.focusOutsideWindow
         }
         if !driver.insertText(text, into: focused) {
+            // Keystrokes go to whatever has focus, not to `focused`: check
+            // again right before posting that the app is still frontmost,
+            // the same element still has focus, and it is not a secure field
+            // (B6 review finding 4).
+            try AXRules.stillFront(driver, bundleID: bundleID, pid: pid)
+            try AXRules.noSecureFocus(driver, pid: pid)
+            guard let now = driver.focusedElement(pid: pid), driver.same(now, focused) else {
+                throw AXRefusal.focusMoved
+            }
             guard driver.typeKeystrokes(text, pid: pid) else { throw AXRefusal.actionFailed }
         }
         guard submit else { return }
-        guard let front = driver.frontmost(), Scalars.equal(front.bundleID, bundleID), front.pid == pid else {
-            throw AXRefusal.notFrontmost
-        }
+        try AXRules.stillFront(driver, bundleID: bundleID, pid: pid)
         try AXRules.noSecureFocus(driver, pid: pid)
         guard driver.pressReturn(pid: pid) else { throw AXRefusal.actionFailed }
     }

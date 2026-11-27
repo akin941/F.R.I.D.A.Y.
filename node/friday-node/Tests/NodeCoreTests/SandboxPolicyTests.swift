@@ -129,6 +129,45 @@ final class SandboxPolicyTests: XCTestCase {
         }
     }
 
+    /// What the app actually writes (its own data dirs added to `denyRead`)
+    /// against the reference document, for every vector: the reference's
+    /// `denyRead` is a prefix (and so a subset) of the app's, the additions
+    /// are exactly the app's own directories, and every other byte of the
+    /// document is the reference's (B6 review finding 8).
+    func testTheAppDocumentOnlyAddsItsOwnDeniedDirectories() throws {
+        let doc = try Repo.json(Self.vectors)
+        let nodeEnv = (doc["vector_node_env"]?.objectValue ?? [:]).compactMapValues(\.stringValue)
+        for vector in try XCTUnwrap(doc["vectors"]?.arrayValue) {
+            let name = vector["name"]?.stringValue ?? "?"
+            let inputs = try XCTUnwrap(vector["inputs"])
+            let home = try XCTUnwrap(inputs["home"]?.stringValue)
+            let names = (inputs["node_env_names"]?.arrayValue ?? []).compactMap(\.stringValue)
+            let app = try SandboxPolicy.build(
+                command: try mapping(try XCTUnwrap(inputs["mapping"])), home: home,
+                repoRoot: try XCTUnwrap(inputs["repo_root"]?.stringValue),
+                writeRoot: try XCTUnwrap(inputs["write_root"]?.stringValue),
+                tempDir: try XCTUnwrap(inputs["temp_dir"]?.stringValue),
+                contractMaxRuntime: try XCTUnwrap(inputs["contract_max_runtime"]?.intValue),
+                nodeEnvironment: nodeEnv.filter { names.contains($0.key) }, nodeDirs: SandboxPolicy.appNodeDirs)
+            let expected = try XCTUnwrap(vector["expected"])
+            let reference = try XCTUnwrap(expected["settings"]?["filesystem"]?["denyRead"]?.arrayValue)
+            let written = try XCTUnwrap(app.settings["filesystem"]?["denyRead"]?.arrayValue)
+            XCTAssertEqual(Array(written.prefix(reference.count)), reference, name)
+            let added = written.dropFirst(reference.count).compactMap(\.stringValue)
+            let ownDirs = SandboxPolicy.appNodeDirs.filter { !SandboxPolicy.defaultNodeDirs.contains($0) }
+            XCTAssertEqual(added, ownDirs.map { home + "/" + $0 }, name)
+            // Everything else is the reference's, byte for byte.
+            guard case .object(var document) = app.document, case .object(var settings)? = document["settings"],
+                case .object(var filesystem)? = settings["filesystem"]
+            else { return XCTFail(name) }
+            filesystem["denyRead"] = .array(reference)
+            settings["filesystem"] = .object(filesystem)
+            document["settings"] = .object(settings)
+            document["settings_sha256"] = expected["settings_sha256"]
+            XCTAssertEqual(try JSON.canonicalString(.object(document)), try JSON.canonicalString(expected), name)
+        }
+    }
+
     // MARK: Contract test 3: the escape suite's policies
 
     static let defaultRuntime: Int64 = 30

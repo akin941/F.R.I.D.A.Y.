@@ -37,7 +37,7 @@ final class CommandMappingsMenu: NSObject {
         mappings = (try? editor.current()) ?? CommandMappings()
         menu.addItem(.separator())
         header("Komut eşlemeleri (repo.command.run)", into: menu)
-        for (index, repo) in mappings.repos.enumerated() {
+        for repo in mappings.repos {
             let item = NSMenuItem(title: "\(repo.name) — \(repo.root)", action: nil, keyEquivalent: "")
             let sub = NSMenu(title: repo.name)
             sub.autoenablesItems = false
@@ -48,12 +48,12 @@ final class CommandMappingsMenu: NSObject {
                     action: nil, keyEquivalent: "")
                 line.isEnabled = false
                 sub.addItem(line)
-                sub.addItem(action("  Kaldır: \(command.kind)", #selector(removeCommand(_:)), tag: index,
-                                   represented: command.kind))
+                sub.addItem(action("  Kaldır: \(command.kind)", #selector(removeCommand(_:)),
+                                   represented: [repo.root, command.kind]))
             }
             sub.addItem(.separator())
-            sub.addItem(action("Komut ekle / değiştir…", #selector(editCommand(_:)), tag: index))
-            sub.addItem(action("Repoyu kaldır", #selector(removeRepo(_:)), tag: index))
+            sub.addItem(action("Komut ekle / değiştir…", #selector(editCommand(_:)), represented: [repo.root]))
+            sub.addItem(action("Repoyu kaldır", #selector(removeRepo(_:)), represented: [repo.root]))
             item.submenu = sub
             menu.addItem(item)
         }
@@ -81,8 +81,12 @@ final class CommandMappingsMenu: NSObject {
 
         menu.addItem(.separator())
         let problem = mappings.srt.problem()
-        header("srt: " + (problem ?? "hazır (\(SrtLocation.pinnedVersion))"), into: menu)
-        menu.addItem(action("srt konumu…", #selector(editSrt)))
+        header("srt: " + (problem ?? "hazır (\(SrtLocation.pinnedVersion), dosyalar onaylı)"), into: menu)
+        // Setting the location stores the sha256 of node, node_modules and
+        // the lockfile; any later change of those files makes srt
+        // `unsupported` until the owner re-confirms them with Touch ID.
+        menu.addItem(action("srt konumu… (Touch ID ile onaylanır)", #selector(editSrt)))
+        menu.addItem(action("srt dosyalarını yeniden onayla (Touch ID)", #selector(confirmSrt)))
     }
 
     private func header(_ title: String, into menu: NSMenu) {
@@ -91,24 +95,26 @@ final class CommandMappingsMenu: NSObject {
         menu.addItem(item)
     }
 
-    private func action(_ title: String, _ selector: Selector, tag: Int = 0, represented: String? = nil) -> NSMenuItem {
+    private func action(_ title: String, _ selector: Selector, represented: Any? = nil) -> NSMenuItem {
         let item = NSMenuItem(title: title, action: selector, keyEquivalent: "")
         item.target = self
-        item.tag = tag
         item.representedObject = represented
         return item
     }
 
     // MARK: Changes (each behind LocalAuthentication)
 
-    private func change(_ reason: String, _ change: @escaping (inout CommandMappings) -> Void) {
+    /// Every change names its target by repo root (and command kind), never
+    /// by a menu index read before the Touch ID prompt; a target gone by then
+    /// refuses the change (CommandMappings.TargetGone).
+    private func change(_ reason: String, _ change: @escaping (inout CommandMappings) throws -> Void) {
         Task {
             do {
                 _ = try await editor.change(reason: reason, change)
             } catch PolicyChangeError.notAuthenticated {
                 // Cancelled or failed authentication: nothing changed.
             } catch {
-                let text = (error as? ActionPolicyError)?.description ?? String(describing: error)
+                let text = (error as? CustomStringConvertible)?.description ?? String(describing: error)
                 await MainActor.run { self.onFailure(text) }
             }
         }
@@ -135,31 +141,22 @@ final class CommandMappingsMenu: NSObject {
     }
 
     @objc private func removeRepo(_ sender: NSMenuItem) {
-        let index = sender.tag
-        change("Friday Node'dan komut deposunu kaldır") { mappings in
-            guard mappings.repos.indices.contains(index) else { return }
-            mappings.repos.remove(at: index)
-        }
+        guard let root = (sender.representedObject as? [String])?.first else { return }
+        change("Friday Node'dan komut deposunu kaldır: \(root)") { try $0.removeRepo(root: root) }
     }
 
     @objc private func removeCommand(_ sender: NSMenuItem) {
-        let index = sender.tag
-        guard let kind = sender.representedObject as? String else { return }
-        change("Friday Node'dan '\(kind)' komutunu kaldır") { mappings in
-            guard mappings.repos.indices.contains(index) else { return }
-            mappings.repos[index].commands.removeAll { $0.kind == kind }
-        }
+        guard let key = sender.representedObject as? [String], key.count == 2 else { return }
+        let (root, kind) = (key[0], key[1])
+        change("Friday Node'dan \(root) için '\(kind)' komutunu kaldır") { try $0.removeCommand(root: root, kind: kind) }
     }
 
     @objc private func editCommand(_ sender: NSMenuItem) {
-        let index = sender.tag
-        guard mappings.repos.indices.contains(index), let command = CommandDialog.run(repo: mappings.repos[index])
+        guard let root = (sender.representedObject as? [String])?.first,
+            let repo = mappings.repos.first(where: { $0.root == root }), let command = CommandDialog.run(repo: repo)
         else { return }
-        let name = mappings.repos[index].name
-        change("Friday Node'da \(name) için '\(command.kind)' komutunu eşle") { mappings in
-            guard mappings.repos.indices.contains(index) else { return }
-            mappings.repos[index].commands.removeAll { $0.kind == command.kind }
-            mappings.repos[index].commands.append(command)
+        change("Friday Node'da \(repo.name) için '\(command.kind)' komutunu eşle") {
+            try $0.setCommand(root: root, command)
         }
     }
 
@@ -201,8 +198,15 @@ final class CommandMappingsMenu: NSObject {
             let prefix = ask("srt öneki", "npm --prefix dizini (@anthropic-ai/sandbox-runtime \(SrtLocation.pinnedVersion)).",
                              default: current.prefix)
         else { return }
-        change("Friday Node'un srt konumunu değiştir") { mappings in
-            mappings.srt = SrtLocation(node: node, prefix: prefix)
+        // The digests are taken after Touch ID, inside the change.
+        change("Friday Node'un srt konumunu ayarla ve dosyalarını onayla") { mappings in
+            mappings.srt = try SrtLocation(node: node, prefix: prefix).confirmed()
+        }
+    }
+
+    @objc private func confirmSrt() {
+        change("Friday Node'un srt dosyalarını yeniden onayla") { mappings in
+            mappings.srt = try mappings.srt.confirmed()
         }
     }
 

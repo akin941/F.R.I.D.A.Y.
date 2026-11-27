@@ -69,6 +69,20 @@ public struct ConfirmationPrompt: Equatable, Sendable {
     public let networkDomains: [String]?
     /// The approval id's first 8 characters (gate class).
     public let approvalPrefix: String?
+    /// The mapping's sandbox mode (`repo.command.run`): the panel shows it,
+    /// with a warning for `in_place` (writes stay in the repo). Not part of
+    /// `lines`/`text`, which stay the reference's `render_confirmation`.
+    public var sandboxMode: String? = nil
+
+    /// The panel's extra line for the sandbox mode, if any.
+    public var modeLine: String? {
+        switch sandboxMode {
+        case "in_place"?: return "Kip: in_place — ⚠︎ komut doğrudan repoda çalışır, yazdıkları kalır"
+        case "worktree"?: return "Kip: worktree — geçici çalışma ağacında, sonra silinir"
+        case let other?: return "Kip: " + ConfirmationRenderer.displaySafe(other)
+        case nil: return nil
+        }
+    }
     public let shownAt: Int64
     public let deadline: Int64
 
@@ -140,7 +154,7 @@ public enum ConfirmationRenderer {
             argv: resolved?.command?.argv.map(displaySafe),
             networkDomains: resolved?.command.map { $0.networkDomains.map(displaySafe) },
             approvalPrefix: approvalID.flatMap { $0.isEmpty ? nil : displaySafe(String($0.prefix(8))) },
-            shownAt: shownAt, deadline: shownAt + timeout)
+            sandboxMode: resolved?.command?.mode, shownAt: shownAt, deadline: shownAt + timeout)
     }
 
     /// Shown after a value whose control characters were made visible.
@@ -328,13 +342,15 @@ public struct ConfirmationPanelView: Equatable, Sendable {
             let left = max(prompt.deadline - now, 0)
             return ConfirmationPanelView(
                 mode: .asking, invocationID: prompt.invocationID,
-                lines: prompt.lines + (running == nil ? [] : [stillRunningLine]), secondsLeft: left,
+                lines: prompt.lines + [prompt.modeLine].compactMap { $0 } + (running == nil ? [] : [stillRunningLine]),
+                secondsLeft: left,
                 countdown: "\(left) sn", buttons: running == nil ? [approveTitle, denyTitle] : [stopTitle, denyTitle, approveTitle],
                 stopInvocationID: running?.invocationID)
         }
         if let running {
             return ConfirmationPanelView(
-                mode: .running, invocationID: running.invocationID, lines: running.lines, secondsLeft: 0,
+                mode: .running, invocationID: running.invocationID,
+                lines: running.lines + [running.modeLine].compactMap { $0 }, secondsLeft: 0,
                 countdown: "Çalışıyor…", buttons: [stopTitle], stopInvocationID: running.invocationID)
         }
         return .hidden

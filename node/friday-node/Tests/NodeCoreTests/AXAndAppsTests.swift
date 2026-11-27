@@ -67,7 +67,12 @@ final class FakeAccessibility: AccessibilityDriver {
         acted = true
         return true
     }
+    /// Runs when an insert is attempted (a focus change between the check
+    /// and the keystrokes).
+    var onInsertAttempt: (() -> Void)?
+
     func insertText(_ text: String, into element: AXHandle) -> Bool {
+        onInsertAttempt?()
         guard acceptsInsert else { return false }
         inserted.append(text)
         acted = true
@@ -86,18 +91,22 @@ final class FakeAccessibility: AccessibilityDriver {
 
 final class FakeWorkspace: WorkspaceDriver {
     var installed: [String: URL] = ["com.apple.Terminal": URL(fileURLWithPath: "/System/Applications/Utilities/Terminal.app")]
-    var running: Set<String> = []
+    /// Running instances per bundle id (their bundle URLs).
+    var running: [String: [URL]] = [:]
+    var signed = true
     private(set) var opened: [URL] = []
     private(set) var activated: [String] = []
 
     func applicationURL(bundleID: String) -> URL? { installed[bundleID] }
+    func runningApplicationURLs(bundleID: String) -> [URL] { running[bundleID] ?? [] }
+    func hasValidSignature(_ url: URL) -> Bool { signed }
     func openApplication(at url: URL, timeout: Double) -> Bool {
         opened.append(url)
         return true
     }
-    func activateRunning(bundleID: String) -> Bool {
-        guard running.contains(bundleID) else { return false }
-        activated.append(bundleID)
+    func activateRunning(bundleID: String, at url: URL) -> Bool {
+        guard running[bundleID]?.contains(url) ?? false else { return false }
+        activated.append(url.path)
         return true
     }
 }
@@ -206,6 +215,37 @@ final class AXTests: XCTestCase {
         XCTAssertEqual(switched.returns, 0)
     }
 
+    /// The keystroke fallback is re-checked right before the post: focus
+    /// that moved to a secure field, to another element, or another app
+    /// in front refuses (B6 review finding 4).
+    func testTheKeystrokeFallbackRechecksFocusRightBeforePosting() {
+        let toSecure = notes()
+        toSecure.acceptsInsert = false
+        toSecure.onInsertAttempt = {
+            let secure = FakeAccessibility.Node("AXTextField", subrole: "AXSecureTextField")
+            secure.window = toSecure.window
+            toSecure.focused = secure
+        }
+        XCTAssertEqual(type(toSecure, "parola"), .secureField)
+        let secureInput = notes()
+        secureInput.acceptsInsert = false
+        secureInput.onInsertAttempt = { secureInput.secureInputActive = true }
+        XCTAssertEqual(type(secureInput, "x"), .secureField)
+        let moved = notes()
+        moved.acceptsInsert = false
+        moved.onInsertAttempt = {
+            let other = FakeAccessibility.Node("AXTextField")
+            other.window = moved.window
+            moved.focused = other
+        }
+        XCTAssertEqual(type(moved, "x"), .focusMoved)
+        let switched = notes()
+        switched.acceptsInsert = false
+        switched.onInsertAttempt = { switched.front = ("com.apple.Terminal", 7) }
+        XCTAssertEqual(type(switched, "x"), .notFrontmost)
+        for ax in [toSecure, secureInput, moved, switched] { XCTAssertEqual(ax.keystrokes, []) }
+    }
+
     func testAXAvailabilityIsTheAccessibilityGrant() {
         let probe = GrantedProbe()
         let executor = MacActionExecutor(
@@ -253,8 +293,55 @@ final class OpenFocusTests: XCTestCase {
             XCTAssertEqual($0 as? OpenFocusError, .notRunning)
         }
         XCTAssertEqual(workspace.opened, [])
-        workspace.running = ["com.apple.Terminal"]
+        let terminal = URL(fileURLWithPath: "/System/Applications/Utilities/Terminal.app")
+        workspace.running = ["com.apple.Terminal": [terminal]]
         try OpenFocus.focus(bundleID: "com.apple.Terminal", allowed: ["com.apple.Terminal"], driver: workspace)
-        XCTAssertEqual(workspace.activated, ["com.apple.Terminal"])
+        XCTAssertEqual(workspace.activated, [terminal.path])
+    }
+
+    /// A look-alike bundle outside the trusted roots (in a repo, in the temp
+    /// dir, behind a symlink from /Applications-like names) is never opened
+    /// or focused; a bad signature is refused too (B6 review finding 5).
+    func testOnlyTrustedLocationsWithAValidSignatureOpen() throws {
+        let base = resolvedPath(try makeTempDirectory())
+        defer { try? FileManager.default.removeItem(atPath: base) }
+        let fake = base + "/work/acme/Terminal.app"
+        try FileManager.default.createDirectory(atPath: fake, withIntermediateDirectories: true)
+        let workspace = FakeWorkspace()
+        workspace.installed["com.apple.Terminal"] = URL(fileURLWithPath: fake)
+        XCTAssertThrowsError(try OpenFocus.open(bundleID: "com.apple.Terminal", allowed: ["com.apple.Terminal"], driver: workspace)) {
+            XCTAssertEqual($0 as? OpenFocusError, .untrustedLocation)
+        }
+        // A symlink whose path looks trusted but resolves into the repo.
+        let link = base + "/Applications"
+        try FileManager.default.createSymbolicLink(atPath: link, withDestinationPath: base + "/work/acme")
+        workspace.installed["com.apple.Terminal"] = URL(fileURLWithPath: link + "/Terminal.app")
+        XCTAssertThrowsError(try OpenFocus.open(bundleID: "com.apple.Terminal", allowed: ["com.apple.Terminal"], driver: workspace))
+        workspace.running = ["com.apple.Terminal": [URL(fileURLWithPath: fake)]]
+        XCTAssertThrowsError(try OpenFocus.focus(bundleID: "com.apple.Terminal", allowed: ["com.apple.Terminal"], driver: workspace)) {
+            XCTAssertEqual($0 as? OpenFocusError, .untrustedLocation)
+        }
+        XCTAssertEqual(workspace.opened, [])
+        XCTAssertEqual(workspace.activated, [])
+        // The real path, but the signature does not verify.
+        workspace.installed["com.apple.Terminal"] = URL(fileURLWithPath: "/System/Applications/Utilities/Terminal.app")
+        workspace.signed = false
+        XCTAssertThrowsError(try OpenFocus.open(bundleID: "com.apple.Terminal", allowed: ["com.apple.Terminal"], driver: workspace)) {
+            XCTAssertEqual($0 as? OpenFocusError, .badSignature)
+        }
+        XCTAssertFalse(OpenFocus.isTrustedLocation(URL(fileURLWithPath: "/Applications")))
+        XCTAssertFalse(OpenFocus.isTrustedLocation(URL(fileURLWithPath: "/ApplicationsX/Evil.app")))
+    }
+
+    /// The real signature check, read-only, on an Apple app.
+    func testTheSystemSignatureCheckAcceptsAnAppleApp() throws {
+        let terminal = URL(fileURLWithPath: "/System/Applications/Utilities/Terminal.app")
+        guard FileManager.default.fileExists(atPath: terminal.path) else { throw XCTSkip("no Terminal.app") }
+        XCTAssertTrue(OpenFocus.isTrustedLocation(terminal))
+        XCTAssertTrue(SystemWorkspace().hasValidSignature(terminal))
+        let base = resolvedPath(try makeTempDirectory())
+        defer { try? FileManager.default.removeItem(atPath: base) }
+        try FileManager.default.createDirectory(atPath: base + "/Fake.app", withIntermediateDirectories: true)
+        XCTAssertFalse(SystemWorkspace().hasValidSignature(URL(fileURLWithPath: base + "/Fake.app")))
     }
 }

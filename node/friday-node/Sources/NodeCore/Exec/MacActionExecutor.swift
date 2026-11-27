@@ -14,6 +14,15 @@
 //
 // Which repos, kinds, recipes and bundle ids exist is the local policy
 // (check 22); this executor only re-checks what it is handed.
+//
+// Recipe availability is coarse on purpose (B6 review finding 9): the v2
+// `hello` catalogue carries one availability per capability
+// (`applescript.recipe.run`), and the recipe catalogue has no availability
+// field, so the node cannot advertise "music.play_pause granted, finder
+// not". It fails closed: `granted` only when every ENABLED recipe's target
+// app has the Automation grant. A recipe the owner has not granted makes the
+// whole capability `not_granted`; disabling that recipe (or granting it)
+// restores the others.
 
 import CoreServices
 import Foundation
@@ -116,6 +125,12 @@ public final class MacActionExecutor: ActionExecutor {
         }
     }
 
+    /// The bundle id is on the local list (scalar comparison, as open/focus).
+    private func onList(_ bundleID: String?) -> Bool {
+        guard let bundleID else { return false }
+        return bundleIDs.contains { Scalars.equal($0, bundleID) }
+    }
+
     public func start(_ spec: CommandSpec) throws -> RunningCommand {
         try srt.start(spec)
     }
@@ -128,10 +143,10 @@ public final class MacActionExecutor: ActionExecutor {
             case "apps.focus":
                 try OpenFocus.focus(bundleID: action.bundleID ?? "", allowed: bundleIDs, driver: workspace)
             case "ax.press":
-                guard bundleIDs.contains(action.bundleID ?? "") else { throw OpenFocusError.notOnList }
+                guard onList(action.bundleID) else { throw OpenFocusError.notOnList }
                 try AXPress.perform(args: action.args, driver: accessibility)
             case "ax.type_text":
-                guard bundleIDs.contains(action.bundleID ?? "") else { throw OpenFocusError.notOnList }
+                guard onList(action.bundleID) else { throw OpenFocusError.notOnList }
                 try AXTypeText.perform(args: action.args, driver: accessibility)
             case ActionContracts.recipeCapability:
                 guard let name = action.recipe, recipesEnabled.contains(name) else {
