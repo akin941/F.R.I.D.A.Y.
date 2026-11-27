@@ -297,6 +297,17 @@ public final class SrtExecutor: @unchecked Sendable {
     /// for its default settings file, which `--settings` replaces.
     public static let nodeFlags = ["--no-global-search-paths"]
 
+    /// Variable name prefixes that steer how srt's Node (or its libraries)
+    /// loads code or configuration: Node's own (`NODE_OPTIONS --require`,
+    /// `NODE_PATH`), the dynamic loader's (`DYLD_INSERT_LIBRARIES`, …),
+    /// OpenSSL's configuration (`OPENSSL_CONF`, `OPENSSL_CONF_INCLUDE`) and
+    /// libuv's (`UV_THREADPOOL_SIZE`, …).
+    public static let loaderPrefixes = ["NODE_", "DYLD_", "OPENSSL_CONF", "UV_"]
+
+    public static func isLoaderVariable(_ name: String) -> Bool {
+        loaderPrefixes.contains { name.hasPrefix($0) }
+    }
+
     /// The exact argv srt is started with (tests, the README).
     public func argv(settingsPath: String, command: [String]) -> [String] {
         [location.node] + Self.nodeFlags + [location.cliPath, "--settings", settingsPath, "--"] + command
@@ -307,6 +318,12 @@ public final class SrtExecutor: @unchecked Sendable {
     /// resolves to the write root.
     public func start(_ spec: CommandSpec) throws -> RunningCommand {
         guard let sandbox = spec.sandbox else { throw ExecutorError("no sandbox document") }
+        // No module, library or option from outside the prefix (hardening
+        // N3): a loader variable never reaches srt's Node; CommandMappings
+        // refuses mapping one.
+        if let name = sandbox.environment.keys.first(where: Self.isLoaderVariable) {
+            throw ExecutorError("\(name) would reach srt's Node")
+        }
         guard ProcessTree.selfTestPassed else { throw ExecutorError("process monitor self-test failed") }
         if let problem = location.problem() { throw ExecutorError(problem) }
         // The write root was resolved before the window; it must still be
@@ -322,12 +339,6 @@ public final class SrtExecutor: @unchecked Sendable {
                 atPath: settingsPath, contents: bytes, attributes: [.posixPermissions: 0o600])
             else { throw ExecutorError("settings file not written") }
             var environment = sandbox.environment
-            // No module or option from outside the prefix (hardening N3):
-            // a NODE_* variable (NODE_PATH, NODE_OPTIONS --require, …) never
-            // reaches srt's Node; CommandMappings refuses mapping one.
-            guard !environment.keys.contains(where: { $0.hasPrefix("NODE_") }) else {
-                throw ExecutorError("a NODE_* variable would reach srt's Node")
-            }
             environment["CLAUDE_CODE_TMPDIR"] = sandbox.tempDir
             return try SandboxRun.start(
                 executable: location.node, argv: argv(settingsPath: settingsPath, command: sandbox.argv),

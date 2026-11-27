@@ -165,9 +165,33 @@ final class SrtTreeConfinementTests: XCTestCase {
         var mappings = CommandMappingsTests.acme()
         mappings.repos[0].commands[0].envNames = ["NODE_OPTIONS"]
         XCTAssertThrowsError(try mappings.validate())
-        mappings.repos[0].commands[0].envNames = ["NODE_PATH"]
-        XCTAssertThrowsError(try mappings.validate())
+        for name in ["NODE_PATH", "DYLD_INSERT_LIBRARIES", "DYLD_LIBRARY_PATH", "OPENSSL_CONF",
+                     "OPENSSL_CONF_INCLUDE", "UV_THREADPOOL_SIZE"] {
+            mappings.repos[0].commands[0].envNames = [name]
+            XCTAssertThrowsError(try mappings.validate(), name)
+        }
+        mappings.repos[0].commands[0].envNames = ["PYTHONHASHSEED"]
+        XCTAssertNoThrow(try mappings.validate())
         XCTAssertEqual(SrtExecutor.nodeFlags, ["--no-global-search-paths"])
+    }
+
+    /// The same names are refused at start, even from a policy built
+    /// without CommandMappings (defence in depth).
+    func testLoaderVariablesNeverReachSrt() throws {
+        for name in ["NODE_OPTIONS", "DYLD_INSERT_LIBRARIES", "OPENSSL_CONF", "UV_THREADPOOL_SIZE"] {
+            let sandbox = try SandboxPolicy.build(
+                command: CommandMapping(kind: "test", argv: ["true"], envNames: [name]), home: "/Users/o",
+                repoRoot: "/Users/o/r", writeRoot: "/Users/o/r", tempDir: "/private/var/t/run",
+                nodeEnvironment: [name: "x"])
+            XCTAssertEqual(sandbox.environment[name], "x", "the reference generator passes it")
+            let spec = CommandSpec(
+                mode: "in_place", argv: ["true"], cwd: "/Users/o/r", repoRoot: "/Users/o/r", writeRoot: "/Users/o/r",
+                tempDir: "/private/var/t/run", path: "/bin", networkDomains: [], wallSeconds: 10, sandbox: sandbox)
+            XCTAssertThrowsError(try SrtExecutor(location: SrtLocation(node: "/bin/sh", prefix: "/nonexistent")).start(spec)) {
+                XCTAssertEqual(($0 as? ExecutorError)?.reason, "\(name) would reach srt's Node")
+            }
+            XCTAssertTrue(SrtExecutor.isLoaderVariable(name))
+        }
     }
 }
 

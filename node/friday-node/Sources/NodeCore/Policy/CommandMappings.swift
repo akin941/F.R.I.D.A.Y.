@@ -160,9 +160,10 @@ public struct CommandMappings: Equatable, Sendable {
                     throw ActionPolicyError("\(repo.name)/\(command.kind): PATH must contain /bin (srt runs bash)")
                 }
                 // srt's own Node inherits the command's environment: no
-                // NODE_PATH, NODE_OPTIONS or other NODE_* (hardening N3).
-                guard !command.envNames.contains(where: { $0.hasPrefix("NODE_") }) else {
-                    throw ActionPolicyError("\(repo.name)/\(command.kind): NODE_* variables are refused (srt's Node)")
+                // loader or option variable (NODE_*, DYLD_*, OPENSSL_CONF*,
+                // UV_*) may be mapped (hardening N3 and its review).
+                if let name = command.envNames.first(where: SrtExecutor.isLoaderVariable) {
+                    throw ActionPolicyError("\(repo.name)/\(command.kind): \(name) is refused (it would steer srt's Node)")
                 }
             }
         }
