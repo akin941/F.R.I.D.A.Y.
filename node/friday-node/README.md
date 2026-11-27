@@ -13,13 +13,16 @@ owner-turn readers and the debug-only `friday-node scrub-preview`;
 **Phase 10 M1** (`feat/p10-node-confirm`, runbook B5) — protocol v2 (the
 `friday-node.v2, friday-node.v1` offer), the v2 verifier (D5 checks 13-24),
 grants, the confirmation window, output streaming with the D12 carry-over
-scrub, and the `voice.state` relay the v2 cases need.
+scrub, and the `voice.state` relay the v2 cases need;
+**Phase 10 M2** (`feat/p10-node-executors`, runbook B6) — the real
+executors: commands under `srt`, the AppleScript recipes, AX press/type,
+open/focus, the owner's command mappings (keychain, edited in "İzinler"
+behind Touch ID), and TCC-gated availability.
 
-Until runbook B6 the app has **no executor and no command mappings**: every
-confirm- and gate-class contract is advertised `unsupported` (check 21
-refuses before any window opens) and the action policy is empty
-(`not_configured`). B6 adds `Exec/SrtExecutor.swift`, `SandboxPolicy.swift`,
-`Policy/CommandMappings.swift`, the recipes, AX and open/focus.
+The app advertises every action contract with its real availability: see
+"The executors (Phase 10 M2)" below. Nothing runs before the owner maps it
+(check 22 `not_configured`), grants the TCC permission it needs (check 21
+`not_granted`), and clicks the confirmation window.
 
 ## Layout
 
@@ -31,8 +34,12 @@ refuses before any window opens) and the action policy is empty
 | `Sources/NodeCore/VerifierV2.swift`, `GrantVerifier.swift` | The v2 order, checks 1-22, same codes at the same checks as `nodes.protocol.verify` / `reference/verifier_v2.py`; the grant's domain-separated signature, field binding and TTL (`grants.json`, `signing_v2.json`) |
 | `Sources/NodeCore/Confirmation.swift` | The window's rules (one at a time, 60 s, first click before the deadline), the text rendered from the node's own args and `confirm_template`, and `ConfirmationPanelView` (what the panel draws) |
 | `Sources/NodeCore/OutputStreamer.swift` | `StreamScrubber` (D12 carry-over), the incremental UTF-8 decoder, 8 KiB pieces, `seq`, the 1 MiB cap, the 4 KiB tail (`scrub_stream.json`) |
-| `Sources/NodeCore/Policy/ActionPolicy.swift` | Check 22: repo realpath equality, mapped kinds, enabled recipes, the bundle-id list (read side; editing is B6) |
-| `Sources/NodeCore/Exec/` | The executor port, the throwaway-worktree mode, and (DEBUG only) `ScriptedExecutor` and `CaseSetup` that the offline suite and the Conformance hook drive |
+| `Sources/NodeCore/Policy/ActionPolicy.swift` | Check 22: repo realpath equality, mapped kinds, enabled recipes, the bundle-id list (read side) |
+| `Sources/NodeCore/Policy/CommandMappings.swift` | The owner's command mappings, recipes, bundle ids and srt location: the keychain item (account `command-mappings`) and `CommandMappingsEditor` (LocalAuthentication first) |
+| `Sources/NodeCore/Exec/` | The executor port; `SandboxPolicy` (the `srt` settings document, byte-identical to `sandbox.json`); `SrtExecutor` and `SandboxRun`; `ProcessTree` (the `max_processes` / `cpu_seconds` monitor); `ChildProcess` (every spawn: argv, CLOEXEC default, explicit stdio; `BoundedRun`, `ChildRegistry`); `MacActionExecutor` (the app's executor, TCC-gated availability); the throwaway-worktree mode; and (DEBUG only) `ScriptedExecutor` and `CaseSetup` that the offline suite and the Conformance hook drive |
+| `Sources/NodeCore/Recipes/` | One file per recipe of `capabilities/v2/recipes/`: the fixed AppleScript, values only as escaped string literals, run by `osascript` |
+| `Sources/NodeCore/AX/`, `Sources/NodeCore/Apps/` | `ax.press` / `ax.type_text` (frontmost window only, exact title, never a secure field) and `apps.open` / `apps.focus` (NSWorkspace, the local list) |
+| `App/FridayNode/CommandMappingsMenu.swift` | The "İzinler" section that edits the command mappings, recipes, bundle ids and srt location, and asks for the TCC grants |
 | `App/FridayNode/ConfirmationWindow.swift` | The non-activating floating `NSPanel` ("Çalıştır" / "Reddet", 60 s countdown, "Durdur") |
 | `Sources/NodeCore/ConformanceSupport.swift` | Live conformance mode, compiled only with `CONFORMANCE` |
 | `App/FridayNode/` | The `LSUIElement` menu-bar app |
@@ -131,6 +138,80 @@ timeout; one window at a time (a second invoke is `busy_confirming`). The
 menu's "Acil durdur" is the node's local kill switch (later clicks are
 refused `expired_after_confirm`); releasing it asks for Touch ID or the
 password.
+
+### The executors (Phase 10 M2, runbook B6)
+
+| Capability | Runs with | Availability in `hello` |
+|---|---|---|
+| `repo.command.run` | `srt` 0.0.83 by absolute paths: `<node> <prefix>/node_modules/@anthropic-ai/sandbox-runtime/dist/cli.js --settings <file> -- <argv>`; the settings document of `SandboxPolicy` (byte-identical to `backend/nodes/conformance/vectors/sandbox.json`), the stripped environment plus `CLAUDE_CODE_TMPDIR` (so `TMPDIR` is the run's private dir), its own process group | `granted` when the configured srt location is usable (pinned version, Node ≥ 22.12), else `unsupported` |
+| `applescript.recipe.run` | `osascript -e <fixed source>`, values only as escaped string literals | `granted` when every enabled recipe's target app has the Automation grant (`AEDeterminePermissionToAutomateTarget`, never prompting), else `not_granted` |
+| `ax.press`, `ax.type_text` | Accessibility API on the frontmost window of the bundle id | `granted` with the Accessibility grant (`AXIsProcessTrusted`), else `not_granted` |
+| `apps.open`, `apps.focus` | `NSWorkspace` | `granted` (no TCC grant involved) |
+
+The runner re-reads the availability every 15 s and whenever the menu
+opens, so a TCC grant given in System Settings reaches the server as
+`grant.availability_changed`.
+
+- **srt location:** "İzinler" → "srt konumu… (Touch ID ile onaylanır)"
+  (default `/usr/local/bin/node`, `~/Library/Application Support/Friday/srt`;
+  see `docs/mcp/dependencies/node-gateway.md`). Setting it, or "srt
+  dosyalarını yeniden onayla (Touch ID)", stores the sha256 of the Node
+  binary, the whole `node_modules` tree and `package-lock.json` in the
+  keychain item; any later change of those files makes `repo.command.run`
+  `unsupported` until the owner re-confirms (an upgrade of srt or Node needs
+  that step).
+- **Mappings:** "İzinler" → "Komut deposu ekle…", then per repo "Komut ekle /
+  değiştir…": kind, argv (one argument per line, no shell), PATH (must
+  contain `/bin`: srt runs the argv through `bash` found on it), environment
+  names, network domains (empty: network off), runtime, mode. Recipes and
+  the bundle-id list in the same menu. Every change asks for Touch ID or the
+  password and is refused before saving when it does not validate.
+- **Limits on macOS:** `max_processes` and `cpu_seconds` are enforced by a
+  process-tree monitor (never `RLIMIT_NPROC`, which macOS counts per user).
+  Members are followed by **unique-id lineage** (`p_puniqueid`, kept when a
+  process is re-parented to launchd), learnt from kqueue fork events on
+  every member and a 50 ms scan, so a `setsid` child whose parent exits at
+  once is still killed. Every kill goes to one pid after re-checking its
+  (unique id, start time); the monitor never uses `killpg`. Output past
+  1 MiB is counted, not kept; "Durdur", the kill switch and socket loss
+  send SIGTERM to the (unreaped) group and SIGKILL to the verified tree
+  after 5 s, without blocking the session; the worktree and temp dirs are
+  removed once the tree is gone.
+- **Residual limits (carried into M3):** an intermediate process that forks
+  and exits before its fork event is handled and before a scan
+  (microseconds) is not learnt, nor are its children; a fork burst can
+  overshoot the count for one 50 ms sample (`kern.maxprocperuid` is the
+  backstop); CPU time of a process that lived less than a sample is not
+  counted; a few microseconds remain between the identity check and
+  `kill(2)`, and between the srt digest check and `node` starting. (A
+  per-run environment marker was tried and dropped: macOS does not show
+  other processes' environments.)
+- **apps.open / apps.focus** launch or activate only a bundle whose realpath
+  is under `/Applications`, `/System/Applications` or
+  `/System/Library/CoreServices`, and `apps.open` only with a valid code
+  signature; `ax.type_text`'s keystroke fallback re-checks frontmost, the
+  focused element and the secure-field rule right before posting.
+- **The window** shows the mapping's sandbox mode (`in_place` with a
+  warning: the command writes into the repo itself).
+- **Git for the worktree mode:** 60 s timeout, `HOME=/var/empty`,
+  `GIT_CONFIG_GLOBAL=/dev/null`, `GIT_CONFIG_NOSYSTEM=1`, hooks and
+  fsmonitor off, every filter driver of the repo's config blanked; the kill
+  switch kills a running git from the menu thread.
+- **Tests never drive the owner's apps:** AX, workspace, AppleScript and TCC
+  are spies or fakes; the real-`srt` test writes only into a temp dir and
+  skips when srt is not at the configured location.
+
+Escape-policy export (contract test 3):
+
+```bash
+# backend/
+uv run python manage.py node_escape_suite --export-policy /private/tmp/<x>/reference-policy.json
+# node/friday-node/ (the Swift documents over the reference's context must equal its documents)
+FRIDAY_ESCAPE_REFERENCE=/private/tmp/<x>/reference-policy.json FRIDAY_ESCAPE_EXPORT=/private/tmp/<x>/swift-policy.json \
+  swift test --filter SandboxPolicyTests
+# backend/
+uv run python manage.py node_escape_suite --check-policy /private/tmp/<x>/swift-policy.json   # 32/32 covered
+```
 
 ## Rules this package keeps
 

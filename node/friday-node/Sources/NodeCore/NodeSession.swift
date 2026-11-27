@@ -69,6 +69,34 @@ public protocol ReadProvider: AnyObject {
     func read(capability: String, args: JSONValue, now: Int64) -> ReadOutcome
 }
 
+/// The owner's local kill switch: one flag, readable and settable from any
+/// thread (the menu engages it at once, before the session queue gets to
+/// it), owned by `NodeRunner` for the app's lifetime.
+public final class KillSwitch: @unchecked Sendable {
+    private let lock = NSLock()
+    private var isEngaged = false
+
+    public init(engaged: Bool = false) { isEngaged = engaged }
+
+    public var engaged: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return isEngaged
+    }
+
+    public func engage() {
+        lock.lock()
+        isEngaged = true
+        lock.unlock()
+    }
+
+    public func release() {
+        lock.lock()
+        isEngaged = false
+        lock.unlock()
+    }
+}
+
 /// What `hello.ack` told the node.
 public struct HelloAck: Equatable {
     public let nodeID: String
@@ -114,7 +142,16 @@ public final class NodeSession: @unchecked Sendable {
     /// private temp directory per run).
     public var worktreeBase: String?
     public weak var confirmationObserver: ConfirmationObserver?
-    public private(set) var killSwitchEngaged = false
+    /// The owner's local kill switch. Shared with `NodeRunner`, which keeps
+    /// one for the app's lifetime: a re-pair (a new session) or an unpaired
+    /// node keeps the state the menu shows (B5 review finding 3).
+    public let killSwitch: KillSwitch
+    public var killSwitchEngaged: Bool { killSwitch.engaged }
+    /// The node's own environment: the names a mapping lists are taken from
+    /// it (never a secret-shaped one; SandboxPolicy).
+    public var nodeEnvironment: [String: String]
+    /// The node's own data directories, denied to every sandboxed command.
+    public var nodeDirs: [String]
 
     /// The negotiated protocol version of the current (or last) socket.
     public private(set) var version: Int64 = NodeProtocol.version
@@ -204,8 +241,13 @@ public final class NodeSession: @unchecked Sendable {
         backoff: Backoff = Backoff(), makeID: @escaping () -> String = { UUID().uuidString.lowercased() },
         policy: ActionPolicy? = nil, executor: ActionExecutor = UnavailableExecutor(),
         window: ConfirmationWindowModel = ConfirmationWindowModel(), scrub: @escaping ScrubFunction = Scrubber.scrub,
-        worktreeBase: String? = nil
+        worktreeBase: String? = nil, killSwitch: KillSwitch = KillSwitch(),
+        nodeEnvironment: [String: String] = ProcessInfo.processInfo.environment,
+        nodeDirs: [String] = SandboxPolicy.defaultNodeDirs
     ) {
+        self.killSwitch = killSwitch
+        self.nodeEnvironment = nodeEnvironment
+        self.nodeDirs = nodeDirs
         self.nodeID = nodeID
         self.pinned = pinned
         self.catalogue = catalogue
@@ -329,7 +371,7 @@ public final class NodeSession: @unchecked Sendable {
     /// what runs (an `error` result). While engaged, check 24 refuses every
     /// click (`expired_after_confirm`).
     public func engageKillSwitch() -> [JSONValue] {
-        killSwitchEngaged = true
+        killSwitch.engage()
         var frames: [JSONValue] = []
         if let pending {
             self.pending = nil
@@ -348,7 +390,7 @@ public final class NodeSession: @unchecked Sendable {
     /// The owner released the local kill switch (the app asks for
     /// LocalAuthentication first).
     public func releaseKillSwitch() {
-        killSwitchEngaged = false
+        killSwitch.release()
     }
 
     /// The owner changed the local policy: from now on the node answers
@@ -649,10 +691,14 @@ public final class NodeSession: @unchecked Sendable {
         let envelope = current.envelope
         let capability = envelope["capability"]?.stringValue ?? ""
         guard capability == ActionContracts.commandCapability else {
+            // A repo recipe's repo must still resolve to the mapped root now.
+            if let repo = current.resolved?.repo, !stillResolves(repo, envelope["args"]?["params"]?["repo_path"]) {
+                return [result(for: envelope, status: "error", confirmState: "approved", receivedAt: current.receivedAt)]
+            }
             let outcome = executor.perform(
                 ActionRequest(
                     capability: capability, args: envelope["args"] ?? [:], bundleID: current.resolved?.bundleID,
-                    recipe: current.resolved?.recipe))
+                    recipe: current.resolved?.recipe, repoRoot: current.resolved?.repo?.realRoot))
             return [
                 result(
                     for: envelope, status: outcome.ok ? "ok" : "error", confirmState: "approved",
@@ -660,9 +706,11 @@ public final class NodeSession: @unchecked Sendable {
             ]
         }
         let failed = [result(for: envelope, status: "error", confirmState: "approved", receivedAt: current.receivedAt)]
-        guard let command = current.resolved?.command, let repoRoot = current.resolved?.repo?.realRoot else {
-            return failed
-        }
+        guard let repo = current.resolved?.repo, let command = current.resolved?.command else { return failed }
+        let repoRoot = repo.realRoot
+        // Check 22 ran before the window; the repo must still resolve to the
+        // same mapped root now (B5 review finding 4).
+        guard stillResolves(repo, envelope["args"]?["repo_path"]) else { return failed }
         var tempDir: String?
         var worktree: String?
         var ownBase: String?
@@ -680,12 +728,18 @@ public final class NodeSession: @unchecked Sendable {
                 worktree = made
                 writeRoot = made
             }
+            // The kill switch may have been engaged from the menu while git
+            // ran (it stops a running git from any thread).
+            guard !killSwitch.engaged else { throw ExecutorError("kill switch") }
+            let contractMax = CapabilityContract.named(capability)?.maxRuntimeSeconds ?? ActionContracts.maxRuntimeSeconds
+            let realTemp = ReaderPaths.realpathC(temp)
+            let sandbox = try SandboxPolicy.build(
+                command: command, home: policy.home, repoRoot: repoRoot, writeRoot: writeRoot, tempDir: realTemp,
+                contractMaxRuntime: contractMax, nodeEnvironment: nodeEnvironment, nodeDirs: nodeDirs)
             let spec = CommandSpec(
                 mode: command.mode, argv: command.argv, cwd: writeRoot, repoRoot: repoRoot, writeRoot: writeRoot,
-                tempDir: ReaderPaths.realpathC(temp), path: command.path, networkDomains: command.networkDomains,
-                wallSeconds: CommandSpec.wallSeconds(
-                    mapping: command.maxRuntimeSeconds,
-                    contract: CapabilityContract.named(capability)?.maxRuntimeSeconds))
+                tempDir: realTemp, path: command.path, networkDomains: command.networkDomains,
+                wallSeconds: sandbox.wallSeconds, sandbox: sandbox)
             let handle = try executor.start(spec)
             let run = Running(
                 envelope: envelope, handle: handle, streamer: OutputStreamer(scrub: scrub), startedAt: clock.now(),
@@ -700,6 +754,21 @@ public final class NodeSession: @unchecked Sendable {
             TempDirectory.remove(ownBase)
             return failed
         }
+    }
+
+    /// `path` (as the server sent it) and the mapping's own root both still
+    /// realpath-resolve to the root check 22 found.
+    private func stillResolves(_ repo: RepoMapping, _ path: JSONValue?) -> Bool {
+        guard let path = path?.stringValue else { return false }
+        let viaArgs = ReaderPaths.realpathC(ActionPolicy.expand(path, home: policy.home))
+        let viaMapping = ReaderPaths.realpathC(ActionPolicy.expand(repo.root, home: policy.home))
+        return Scalars.equal(viaArgs, repo.realRoot) && Scalars.equal(viaMapping, repo.realRoot)
+    }
+
+    private func feed(_ run: Running, _ chunk: OutputChunk) -> [JSONValue] {
+        var frames = outputFrames(run, run.streamer.feed(chunk.stream, chunk.data))
+        if chunk.droppedBytes > 0 { frames += outputFrames(run, run.streamer.countDropped(chunk.droppedBytes)) }
+        return frames
     }
 
     private func outputFrames(_ run: Running, _ pieces: [OutputPiece]) -> [JSONValue] {
@@ -719,9 +788,9 @@ public final class NodeSession: @unchecked Sendable {
 
     private func pumpRunning(_ run: Running) -> [JSONValue] {
         var frames: [JSONValue] = []
-        for chunk in run.handle.read() { frames += outputFrames(run, run.streamer.feed(chunk.stream, chunk.data)) }
+        for chunk in run.handle.read() { frames += feed(run, chunk) }
         if let outcome = run.handle.poll() {
-            for chunk in run.handle.read() { frames += outputFrames(run, run.streamer.feed(chunk.stream, chunk.data)) }
+            for chunk in run.handle.read() { frames += feed(run, chunk) }
             return frames
                 + finish(
                     run, status: outcome.error == nil ? "ok" : "error", exitCode: outcome.exitCode,
@@ -749,15 +818,23 @@ public final class NodeSession: @unchecked Sendable {
         ]
     }
 
+    /// Remove the run's worktree and temp dirs once its process tree is gone
+    /// (`afterExit`: at once for a finished command, later for one that was
+    /// just told to stop; the real executor does it off the session queue).
     private func cleanup(_ run: Running) {
-        if let worktree = run.worktree, let repoRoot = run.repoRoot {
-            Worktree.remove(repoRoot, worktree)
-            run.worktree = nil
-        }
-        TempDirectory.remove(run.tempDir)
+        let worktree = run.worktree
+        let repoRoot = run.repoRoot
+        let tempDir = run.tempDir
+        let ownBase = run.ownBase
+        run.worktree = nil
         run.tempDir = nil
-        TempDirectory.remove(run.ownBase)
         run.ownBase = nil
+        guard worktree != nil || tempDir != nil || ownBase != nil else { return }
+        run.handle.afterExit {
+            if let worktree, let repoRoot { Worktree.remove(repoRoot, worktree) }
+            TempDirectory.remove(tempDir)
+            TempDirectory.remove(ownBase)
+        }
     }
 
     // MARK: Frames

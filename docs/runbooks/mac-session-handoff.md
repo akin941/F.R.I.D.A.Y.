@@ -1017,7 +1017,7 @@ implementation record.
 
 Needs: B5, A6. Spec: Phase 10 brief M2, D4; ADR-014.
 
-- [ ] `Exec/SrtExecutor.swift` (spawns `srt` with the settings document
+- [x] `Exec/SrtExecutor.swift` (spawns `srt` with the settings document
       generated exactly as `backend/nodes/reference/sandbox.py`; argv only;
       stripped env; SIGTERM/SIGKILL on loss), `Exec/SandboxPolicy.swift`;
       `Policy/CommandMappings.swift` (repo root, local name,
@@ -1029,9 +1029,12 @@ Needs: B5, A6. Spec: Phase 10 brief M2, D4; ADR-014.
       exact title match, refuses when not frontmost or a secure text field
       has focus); `Apps/OpenFocus.swift` (`NSWorkspace`, local bundle
       list); availability in `hello` (`granted` only with the TCC grant).
+      Landed 2026-11-27 (also the policy UI in "İzinler" and the B5 review
+      findings); contract tests 1-3 pass; record: Phase 10 brief, M2
+      implementation record.
 - [ ] Owner, in the node's policy UI with Touch ID (Phase 10 owner step 5):
       map the repos and commands, enable the wanted recipes and the
-      bundle-id list.
+      bundle-id list (and grant Accessibility / Automation when asked).
 
 **Server-side contract tests it must pass:**
 

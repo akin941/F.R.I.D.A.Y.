@@ -79,7 +79,10 @@ final class ConformanceDriver {
         try ActionPolicy.load(try Repo.json("backend/nodes/reference/fixtures/local_policy.json"), home: home)
     }
 
-    init(case document: JSONValue) throws {
+    /// `actionExecutor`: run the case against another executor than the
+    /// case's scripted one (runbook B6 contract test 2: the real executor
+    /// wired to spies; the scripted one then records nothing).
+    init(case document: JSONValue, actionExecutor: ActionExecutor? = nil) throws {
         version = document["version"]?.intValue ?? 1
         checker = GatewayChecker(version: version)
         let setup = document["setup"] ?? [:]
@@ -105,7 +108,7 @@ final class ConformanceDriver {
             readers: reader, clock: clock,
             nodeVersion: "friday-node conformance", osVersion: "macOS test",
             readDelaySeconds: setup["read_delay"]?.intValue ?? 0,
-            backoff: Backoff(random: { 0.5 }), policy: policy, executor: caseSetup.executor,
+            backoff: Backoff(random: { 0.5 }), policy: policy, executor: actionExecutor ?? caseSetup.executor,
             window: caseSetup.window)
         silent = setup["silent"]?.boolValue ?? false
         handle(session.connect(version: version))
@@ -240,7 +243,8 @@ final class ConformanceTests: XCTestCase {
     /// Runbook B5: v2 cases that need a runbook B6 executor (srt, recipes,
     /// AX, open/focus) to pass. Empty: every v2 case passes against the
     /// scripted executor the reference node's own suites use, so none is
-    /// pending; kept explicit so a gap must be named here.
+    /// pending; kept explicit so a gap must be named here. (B6's executors
+    /// are covered by ExecutorContractTests and the executor unit tests.)
     static let pendingB6: Set<String> = []
     static var pending: Set<String> { pendingM2.union(pendingB4).union(pendingB6) }
 
