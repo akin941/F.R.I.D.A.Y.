@@ -119,7 +119,8 @@ The gateway's full dependency surface is in this table.
   - `max_processes` is not `RLIMIT_NPROC` (finding 2): the node counts the
     run's process tree (root spawned suspended and watched before it runs),
     followed by unique-id lineage (`p_puniqueid`, kept across re-parenting
-    to launchd) from kqueue fork/exit events, immediate sweeps and 5-200 ms
+    to launchd only in some cases, see the node README) from kqueue
+    fork/exit events, immediate sweeps and 5-200 ms
     scans, plus an orphan sweep by macOS responsibility in the installed
     app (hardening N1; residuals in the node README), and kills it (SIGKILL, per pid after re-checking unique id and
     start time) above the limit; `cpu_seconds` the same way, over the

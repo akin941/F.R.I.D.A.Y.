@@ -3557,7 +3557,8 @@ new commits on the branch:
    step (not run here).
 2. **setsid escapees.** `ProcessTree` now follows members by unique-id
    lineage: `p_puniqueid` (PROC_PIDUNIQIDENTIFIERINFO) keeps the forking
-   parent's unique id when the process is re-parented to launchd, and
+   parent's unique id, often (not always, see the hardening review below)
+   after the process is re-parented to launchd, and
    members are learnt from kqueue `NOTE_FORK` events on every member plus a
    50 ms scan. A per-run environment marker was tried first and dropped:
    macOS does not show other processes' environments (`ps -E` shows none),
@@ -3753,3 +3754,35 @@ Follow-up:
    leaves a descriptor opened afterwards intact.
 6. **Loader variables.** `DYLD_*`, `OPENSSL_CONF*` and `UV_*` are refused
    next to `NODE_*`, in mappings and first thing at start.
+
+### Re-review of `feat/p10-node-executor-hardening` (REQUEST_CHANGES), fixed 2026-11-27
+
+1. **Blocking: the concurrent-run test was vacuous.** Run 2's `(sleep 30 &)`
+   child has its recorded parent reset to 1, so it never became an orphan
+   candidate. The test now plants a real candidate in run 2. A parent forks
+   a setsid daemon and lives 0.5 s, so the daemon is launchd-parented with
+   its recorded parent kept, which the test asserts. Run 1's root exits
+   during run 2's life, so a wrong claim by run 1 would kill the daemon
+   then. **Mutation check:** with the registry gate, the `isHelper` check
+   and the `anotherMonitorKnows` check removed, the test failed 3 of 3
+   runs ("run 1 killed run 2's daemon"). Restored, it passed 5 of 5.
+2. **`p_puniqueid` wording** corrected in `ProcessTree.swift`, the node
+   README, the manifest and this brief. Measured: it is kept for a setsid
+   child and for a child whose parent lived about 0.5 s, and reset to 1 for
+   a non-setsid child whose parent exits at once and for `( cmd & )`. In
+   this session a setsid child's id was also seen reset once. The sweep's
+   `parentUniqueID > root` condition skips such children; lineage (fork
+   events, group, scans) still contained the review's non-setsid daemons,
+   0 of 60.
+3. **Helper rule narrowed.** Only helpers whose unique id is greater than
+   the run's root (started after it) turn the sweep off, so a worktree's
+   git calls do not. Ended helpers are pruned on insert. Tests:
+   - git helpers before the root leave the sweep on;
+   - a helper after the root turns it off.
+4. **Always-run coverage.**
+   - A smoke retry probe: 3 runs of 15 intermediates, bound 20 %.
+   - The learnt-intermediate test now asserts that at least one attempt
+     produced a pid.
+- NITs: the watch-failure test is renamed and says plainly that it only
+  checks freeing (it cannot detect a double close in the failing init);
+  `endedHelpers` is pruned on insert.

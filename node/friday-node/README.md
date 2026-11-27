@@ -184,8 +184,16 @@ opens, so a TCC grant given in System Settings reaches the server as
   exist before it runs (if they cannot be set up, the suspended root is
   killed and the run is an `error`; a failed unique-id self-test makes
   `repo.command.run` `unsupported`). Members are followed by **unique-id
-  lineage** (`p_puniqueid`, kept when a process is re-parented to launchd;
-  exited members' ids are kept), learnt from fork and exit events, which
+  lineage** (`p_puniqueid`, the forking parent's unique id; exited members'
+  ids are kept). The kernel keeps `p_puniqueid` across re-parenting to
+  launchd only sometimes: measured, it was kept for a `setsid` child and for
+  a child whose parent lived about 0.5 s after forking, and reset to 1 for a
+  non-setsid child whose parent exits at once and for `( cmd & )` (and
+  occasionally even for a setsid child). A child whose id was reset is found
+  only if it was learnt while its parent lived; the orphan sweep (which
+  requires a recorded parent newer than the root) skips it. In the review's
+  probe such non-setsid daemons were still contained 0 of 60 times through
+  fork events, the process group and scans. Members are learnt from fork and exit events, which
   trigger an immediate full sweep, and from scans every 5 ms for the first
   2 s, then 50 ms, 200 ms once forks stop. A last-resort **orphan sweep**
   attributes to the run (so it dies with the run) a launchd-parented process
@@ -198,7 +206,9 @@ opens, so a TCC grant given in System Settings reaches the server as
   sweep skips a candidate that another monitor knows, or whose recorded
   parent or any live ancestor it knows, or that descends from a helper; and
   it does not run at all while another run has a live root or members, or
-  while a helper runs or ran in the last 10 s, since an orphan nobody knows
+  while a helper started after the run's root runs or ran in the last 10 s
+  (helpers before the root, such as the worktree's git calls, do not
+  count: the sweep only considers processes newer than the root), since an orphan nobody knows
   the parent of cannot be attributed to one run. So with two concurrent
   runs, only lineage protects each run's tree. After the root exits the
   monitor keeps killing leftovers for at most 10 s; members that survive

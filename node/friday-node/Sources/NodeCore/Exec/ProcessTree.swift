@@ -14,10 +14,18 @@
 // `killpg` (a recycled group id could name an unrelated group).
 //
 // Membership. A process belongs to the run when its PARENT'S unique id
-// (`p_puniqueid`, which the kernel keeps when the process is re-parented to
-// launchd) is the unique id of a member, starting from the root. So a child
-// that calls `setsid` and whose parent exits at once is still found: its
-// recorded parent is a member even though its current parent is launchd.
+// (`p_puniqueid`) is the unique id of a member, starting from the root.
+// The kernel does NOT always keep that id when the process is re-parented
+// to launchd (measured, B6 hardening review): it was kept for a `setsid`
+// child and for a child whose parent lived about 0.5 s after forking it, and
+// reset to 1 for a non-setsid child whose parent exits at once and for
+// `( cmd & )`, and even a setsid child's id was occasionally reset. Where it
+// is kept, a child whose parent is gone is still found by its recorded
+// parent. Where it is reset, the child is found only if it was learnt while
+// its parent lived (fork events, the process group, scans); the orphan
+// sweep's `parentUniqueID > root` condition skips such a child. In the
+// review's probe, non-setsid daemons were still contained 0 of 60 times that
+// way.
 // Members are learnt three ways:
 // - kqueue `EVFILT_PROC NOTE_FORK` on every member: the moment a member
 //   forks, its children (`proc_listchildpids`) are read and watched in turn,
@@ -81,7 +89,8 @@ func keventWait(_ kq: Int32, _ events: inout [KernelEvent], _ timeout: UnsafePoi
 
 struct ProcessRow {
     let identity: ProcessIdentity
-    /// The unique id of the process that forked it (kept across re-parenting).
+    /// The unique id of the process that forked it (often, not always, kept
+    /// after re-parenting to launchd; 1 when the kernel reset it).
     let parentUniqueID: UInt64
     let pgid: pid_t
     let ppid: pid_t

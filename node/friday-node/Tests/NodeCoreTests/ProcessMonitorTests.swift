@@ -172,8 +172,9 @@ final class ProcessMonitorTests: XCTestCase {
         let run1 = try MonitorTestSupport.sh("sleep 1.5")
         Thread.sleep(forTimeInterval: 0.2)
         let run2 = try MonitorTestSupport.sh("""
-            /usr/bin/perl -MPOSIX -e '$| = 1; exit if fork(); select(undef, undef, undef, 0.5); \
-            exit if fork(); POSIX::setsid(); print "$$\\n"; close STDOUT; close STDERR; exec "/bin/sleep", "30"'; sleep 4
+            /usr/bin/perl -MPOSIX -e '$| = 1; exit if fork(); my $d = fork(); \
+            if ($d) { select(undef, undef, undef, 0.5); exit } POSIX::setsid(); print "$$\\n"; \
+            close STDOUT; close STDERR; exec "/bin/sleep", "30"'; sleep 4
             """)
         var output = ""
         let deadline = Date().addingTimeInterval(3)
@@ -184,6 +185,10 @@ final class ProcessMonitorTests: XCTestCase {
             Thread.sleep(forTimeInterval: 0.02)
         }
         let daemon = try XCTUnwrap(child, "run 2 printed no pid")
+        // Once its parent (which lived 0.5 s after forking it) is gone, the
+        // daemon is a real candidate: launchd-parented, recorded parent kept.
+        XCTAssertTrue(Waiting.until(2) { ProcessTree.parentUniqueID(of: daemon).map { $0 > 1 } ?? false
+            && MonitorTestSupport.describe(daemon).contains("ppid=1 ") })
         XCTAssertNotEqual(ProcessTree.parentUniqueID(of: daemon), 1, "the daemon's recorded parent was reset")
         // While run 2 lives (run 1's root exits at 1.5 s), the daemon lives.
         var checks = 0
