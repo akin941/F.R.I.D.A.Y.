@@ -64,12 +64,17 @@ uv run friday-voice replay --server http://127.0.0.1:8001 --token-file <file>  #
 uv run friday-voice selftest --ci             # the self-trigger release gate (fakes)
 uv run friday-voice selftest --nightly --server <url> --token-file <f> --model-dir <d> --loopback-cmd <cmd>  # Mac
 uv run friday-voice wake-eval --negative <dir> --positives <dir> --model <onnx> --out report.json  # FAR/FRR
+uv run friday-voice ca set <pem> | clear | show [--home <dir>]  # the install's CA file (local TLS)
 uv run pytest                                 # default run; `-m real_models` is opt-in
 ```
 
 `make friday-voice-test` runs the CI job locally; `make friday-voice-install`
 installs the locked environment on the Mac under
 `~/Library/Application Support/Friday/voice/` (outside the signed bundle).
+`FRIDAY_VOICE_CA_FILE=<pem>` (or `make friday-voice-ca`) records a CA file
+the child trusts instead of the public bundle, for a server behind a
+self-signed certificate on this Mac; the pin and hostname checks still run
+(`friday_voice/tls.py`, `docs/runbooks/live-voice.md` §1a).
 
 ## `friday-voice/v1` in one screen
 

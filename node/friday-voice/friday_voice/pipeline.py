@@ -74,7 +74,13 @@ from . import config, language, log
 from .arming import AllowAlwaysOn, ArmingPolicy, RefuseAlwaysOn
 from .audio import encode_wav, play_chunks
 from .barge_in import BargeInMonitor
-from .client import CODE_ALWAYS_ON_NOT_PERMITTED, CODE_LIVE_MUTED, CODE_PIN, FridayError
+from .client import (
+    CODE_ALWAYS_ON_NOT_PERMITTED,
+    CODE_CA_FILE,
+    CODE_LIVE_MUTED,
+    CODE_PIN,
+    FridayError,
+)
 from .policy import policy_job, poll_due, request_policy
 from .segmenter import SentenceSegmenter
 from .self_trigger import SelfTriggerFilter
@@ -917,7 +923,7 @@ class VoicePipeline:
         elif error.status in (401, 403):
             self.refused = True
             self._release("credential_refused")
-        elif error.code == CODE_PIN:
+        elif error.code in (CODE_PIN, CODE_CA_FILE):
             self.error_until = self.clock.monotonic_ms() + config.ERROR_HOLD_MS
             self._send({"type": "earcon", "earcon": "error"})
             self._release("error")
