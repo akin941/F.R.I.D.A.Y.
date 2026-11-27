@@ -148,6 +148,17 @@ def test_the_env_kill_switch_is_shown_and_wins(owner, workspace, web_client, ha_
     assert (body["env_kill_switch"], body["kill_switch"], body["state"]) == (True, False, "off_env")
 
 
+@pytest.mark.parametrize(
+    "limit", ["HA_DIRECT_RATE_GLOBAL_PER_MINUTE", "HA_DIRECT_RATE_ENTITY_PER_MINUTE"]
+)
+def test_a_zero_limit_reads_off_env(owner, workspace, web_client, ha_settings, limit):
+    # Branch 1d: a limit of 0 disables the class (D8), so the state the
+    # panel and the HUD show is `off_env`, like the env kill switch.
+    setattr(ha_settings, limit, 0)
+    body = web_client(owner).get(DIRECT, {"workspace": str(workspace.pk)}).json()
+    assert (body["env_kill_switch"], body["state"]) == (False, "off_env")
+
+
 def test_env_limits_and_the_flagged_count_are_shown(owner, workspace, web_client, ha_settings):
     ha_settings.HA_DIRECT_RATE_GLOBAL_PER_MINUTE = 5
     ha_settings.HA_DIRECT_RATE_ENTITY_PER_MINUTE = 0

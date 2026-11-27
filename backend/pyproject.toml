@@ -673,6 +673,8 @@ forbidden_modules = ["voice"]
 # terminal section and the terminal output stream; Phase 9 branch 7 (D11)
 # uses the same edge for the health panel's node line
 # (`nodes.selectors.node_health`).
+# Phase 13b branch 1d: one read-only port edge, `hud.services ->
+# tools.home_ports` (the `home_direct` HUD line), listed below.
 # Phase 12 D19 (branch 2): `hud` also reads `proactive` for the `notices`
 # section and the digest card -- through `proactive.api` only (the
 # "assistant and hud reach proactive only through proactive.api" contract).
@@ -687,6 +689,15 @@ allow_indirect_imports = true
 # Tests build users and PATs for the role x endpoint matrix.
 ignore_imports = [
     "hud.tests.** -> accounts.**",
+    # Phase 13b branch 1d (D11): the HUD's `home_direct` line is read through
+    # the read-only status port (`tools.home_ports` imports nothing of ours;
+    # `connectors` registers the reader at boot). No other `tools` edge.
+    "hud.services -> tools.home_ports",
+    # The line's tests build flagged entities, bindings and call rows, and
+    # swap the registered reader.
+    "hud.tests.** -> connectors.**",
+    "hud.tests.** -> tools.**",
+    "hud.tests.test_home_direct_line -> audit.**",
 ]
 
 # ...and `hud` is a leaf: nothing imports it. The composition root

@@ -250,8 +250,14 @@ def effective_settings(*, actor, workspace, for_update=False):
     return EffectiveSettings(kill_switch=row.kill_switch, volume_max=_quantize(row.volume_max))
 
 
+def env_disabled():
+    """The environment turns the class off: the env kill switch, or a rate
+    limit of 0 (documented in `.env.example`: 0 disables)."""
+    return env_kill_switch() or min(rate_limits()) <= 0
+
+
 def direct_state(*, kill_switch):
-    if env_kill_switch():
+    if env_disabled():
         return STATE_OFF_ENV
     if kill_switch:
         return STATE_OFF_OWNER
@@ -1194,11 +1200,56 @@ def list_calls(*, actor, workspace, channel, limit=CALLS_LIMIT_DEFAULT):
     )
 
 
+# --- the HUD line (D11, branch 1d) ----------------------------------------------
+
+STATE_NOT_CONFIGURED = "not_configured"
+HUD_CALLS_WINDOW = timedelta(hours=1)
+
+
+def hud_status(*, workspace, actor):
+    """The HUD's `home_direct` line `{state, flagged, calls_last_hour}`
+    (D11), registered on `tools.home_ports.register_direct_status`. DB and
+    settings reads only: never a Home Assistant request, never a row written
+    (the settings row is not created here; the defaults apply until the
+    owner opens `/connectors`). Informational only -- the classifier and the
+    executor re-read everything themselves.
+
+    - not the installation owner in his personal workspace ->
+      `not_configured` with zero counts (the class does not exist there);
+    - the environment disables the class -> `off_env`;
+    - the owner kill switch -> `off_owner`;
+    - Home Assistant not usable (manifest, binding, `ha_call_service` pin)
+      or no enabled flagged entity -> `not_configured`;
+    - otherwise `on`.
+    `flagged` counts enabled flagged entities and `calls_last_hour` the
+    direct call records (each one an attempted send) of the last hour, both
+    through `for_actor()`."""
+    if not _is_owner_personal(actor, workspace):
+        return {"state": STATE_NOT_CONFIGURED, "flagged": 0, "calls_last_hour": 0}
+    flagged = flagged_count(actor=actor, workspace=workspace)
+    since = timezone.now() - HUD_CALLS_WINDOW
+    calls = (
+        HomeDirectCall.objects.for_actor(actor, workspace=workspace)
+        .filter(created_at__gte=since)
+        .count()
+    )
+    current = effective_settings(actor=actor, workspace=workspace)
+    state = direct_state(kill_switch=current.kill_switch)
+    if state == STATE_ON and (flagged == 0 or not _available(workspace)):
+        state = STATE_NOT_CONFIGURED
+    return {"state": state, "flagged": flagged, "calls_last_hour": calls}
+
+
 def register():
-    """`ConnectorsConfig.ready`: the direct classifier and (branch 1c) the
-    direct executor ports, reached by `assistant` through
-    `tools.home_ports`."""
-    from tools.home_ports import register_direct_classifier, register_direct_executor
+    """`ConnectorsConfig.ready`: the direct classifier, (branch 1c) the
+    direct executor and (branch 1d) the HUD status ports, reached by
+    `assistant` and `hud` through `tools.home_ports`."""
+    from tools.home_ports import (
+        register_direct_classifier,
+        register_direct_executor,
+        register_direct_status,
+    )
 
     register_direct_classifier(classify)
     register_direct_executor(execute)
+    register_direct_status(hud_status)
