@@ -68,13 +68,62 @@ The gateway's full dependency surface is in this table.
   before M2 starts. It is not in `pyproject.toml`, not in `uv.lock`, not in
   any backend image, and CI never installs it.
 - **Use on this side:** `nodes.reference.executor.SrtExecutor` calls an
-  `srt` already on PATH only for the opt-in `pytest -m srt` tests and
+  `srt` found on PATH only for the opt-in `pytest -m srt` tests and
   `manage.py node_escape_suite --executor srt` (local evidence on Linux; the
   ADR-014 evidence is the Mac run, M3). Without `srt` those tests skip and
-  the command refuses to start.
-- **Invocation:** `srt --settings <file> -- <argv...>`
-  (`SRT_ARGV_TEMPLATE`); the exact flags are verified against the pinned
-  version on the Mac (owner step, Phase 10 branch 2 record).
+  the command refuses to start. On the Mac `srt` is **not** on the global
+  PATH, so put the private prefix's `.bin` in front for that one run (from
+  `backend/`):
+
+  ```bash
+  PATH="$HOME/Library/Application Support/Friday/srt/node_modules/.bin:$PATH" uv run pytest -m srt
+  ```
+
+  (`srt`'s `#!/usr/bin/env node` shebang then needs a Node ≥ 22.12 on that
+  PATH too; `/usr/local/bin/node` is 24.)
+- **Invocation (reference):** `srt --settings <file> -- <argv...>`
+  (`SRT_ARGV_TEMPLATE`); verified against the pinned version on the Mac
+  (runbook A6).
+- **Invocation (the Swift node, runbook B6, `Exec/SrtExecutor.swift`):** by
+  absolute paths only, never through a PATH lookup or the shebang:
+
+  ```text
+  <node> <prefix>/node_modules/@anthropic-ai/sandbox-runtime/dist/cli.js --settings <private dir>/settings.json -- <mapped argv...>
+  ```
+
+  The location is the owner's choice in the node's policy UI ("İzinler" →
+  "srt konumu…", stored with the command mappings in the keychain); the
+  recorded choice is the default, `node = /usr/local/bin/node` and
+  `prefix = ~/Library/Application Support/Friday/srt`. The node refuses a
+  location (`repo.command.run` advertised `unsupported`) whose package is
+  not 0.0.83 or whose Node is older than 22.12 (`node --version`, asked once
+  with an empty environment).
+  - `--settings` is **always** given. srt then refuses to run (exit 1) when
+    the file is missing, empty or invalid instead of falling back to its
+    built-in defaults.
+  - The child gets the document's stripped environment (D4) plus
+    `CLAUDE_CODE_TMPDIR=<run temp dir>`: srt otherwise hands the sandboxed
+    command `TMPDIR=/tmp/claude`; with it, `TMPDIR` is the run's private
+    temp dir, as D4 wants. srt adds its own proxy variables
+    (`HTTP(S)_PROXY`, `ALL_PROXY`, …, with a per-run proxy password) inside
+    the sandbox.
+  - **Network is proxy-mediated:** srt starts an HTTP and a SOCKS proxy in
+    its own (unsandboxed) process and the Seatbelt profile only lets the
+    child reach those. With no allowed domain an HTTPS `CONNECT` is
+    answered `403` (`curl: (56) CONNECT tunnel failed, response 403`);
+    direct sockets are refused by the profile.
+  - **ripgrep is not needed on macOS** (checked 2026-11-27 in the 0.0.83
+    sources and by a run with `PATH=/usr/bin:/bin`, which has no `rg`):
+    srt uses `rg` only on Linux (`linuxGetMandatoryDenyPaths`); its macOS
+    backend builds the deny patterns without it.
+  - `max_processes` is not `RLIMIT_NPROC` (finding 2): the node counts the
+    run's process tree (its process group plus every descendant of the root)
+    every 100 ms and kills the tree (SIGKILL) above the limit; `cpu_seconds`
+    the same way, over the sampled CPU time of every process seen in the
+    tree (posix_spawn cannot set `RLIMIT_CPU` on the child). Known limits: a
+    fork burst can overshoot between two samples (`kern.maxprocperuid` is the
+    backstop), and a process that lives shorter than a sample is not
+    counted. `Exec/ProcessTree.swift`.
 - **Pinned version:** `@anthropic-ai/sandbox-runtime` **0.0.83** (npm,
   published 2026-11-13; `dist.integrity`
   `sha512-yEusORnVJrNseF/9fvjVYyk6tr79/aFbIB3T/X8p2puLZdaaiGNeYN50v0CE+1DT70v7XuzKOAnTivh1f5cksA==`;
@@ -84,7 +133,12 @@ The gateway's full dependency surface is in this table.
   `npm install --prefix … --ignore-scripts --save-exact` (the package has
   no install-time scripts; 4 runtime dependencies: `zod`, `commander`,
   `node-forge`, `@pondwader/socks5-server`). Needs Node ≥ 22.12 (the Mac has
-  24). Not on the global PATH; the node app (B6) calls it by absolute path.
+  24, `/usr/local/bin/node`): the Swift spawner runs `cli.js` with that Node
+  by absolute path. Not on the global PATH; the node app (B6) calls it by
+  absolute path. **The transitive pins are the prefix's lockfile**,
+  `~/Library/Application Support/Friday/srt/package-lock.json` (on
+  2026-11-27: `@pondwader/socks5-server` 1.0.10, `commander` 12.1.0,
+  `node-forge` 1.4.4, `zod` 3.25.76); a reinstall must reproduce it.
 - **Verification against the pin (2026-11-27, runbook A6):**
   - CLI: `srt --version` → `0.0.83`; `srt [options] [command...]` with
     `-s, --settings <path>`, so `SRT_ARGV_TEMPLATE`
@@ -105,17 +159,30 @@ The gateway's full dependency surface is in this table.
   2. `RLIMIT_NPROC` on macOS counts **every process of the user**, not the
      command's: with about 290 owner processes running, the reference
      executor's `RLIMIT_NPROC = 256` (`_set_limits`) makes every fork fail
-     (`srt` exits 1, "Shell 'bash' not found in PATH"). The opt-in
-     `pytest -m srt` run passes once that one limit is skipped on darwin. B6
-     must enforce `max_processes` another way on macOS (for example a
-     process-group count, or `RLIMIT_NPROC` relative to the current count)
-     and document it; the reference executor stays Linux-targeted.
+     (`srt` exits 1, "Shell 'bash' not found in PATH"). With that one limit
+     skipped on darwin, `test_a_real_srt_run` passes; the escape suite stays
+     at 30/32 either way (finding 3). B6 enforces `max_processes` with a
+     process-tree count instead (see the Swift invocation above); the
+     reference executor stays Linux-targeted.
   3. `manage.py node_escape_suite --executor srt` on the Mac: 30/32
-     contained, with `limit_output` and `limit_runtime` not exercised — the
-     escape scripts do not run on macOS even unsandboxed
-     (`test_without_a_sandbox_the_scripts_really_escape` is a known
-     macOS failure). The ADR-014 evidence run (Mac session M3) has to make
-     the escape scripts macOS-capable first; 30/32 is not evidence.
+     contained, with `limit_output` and `limit_runtime` not exercised. Some
+     escape scripts do not escape on macOS even unsandboxed (for example
+     `read_ssh`), while others do (for example `write_home`), so
+     `test_without_a_sandbox_the_scripts_really_escape` is a known macOS
+     failure. The ADR-014 evidence run (Mac session M3) has to make the
+     escape scripts macOS-capable first; 30/32 is not evidence.
+  4. **Implicit writable paths (runbook B6, 2026-11-27).** srt 0.0.83 adds
+     its own write allowances on macOS beyond the settings document:
+     `/tmp/claude` and `/private/tmp/claude` (always, if they exist; they do
+     not on the owner's Mac and the sandbox cannot create them, since `/tmp`
+     is not writable) and the home "convenience" directories `~/.npm/_logs`
+     and `~/.claude/debug` unless a `denyRead` entry covers them
+     (`~/.claude` is denied; **`~/.npm/_logs` exists on the owner's Mac and
+     is writable from inside the sandbox**). A `denyWrite` entry for
+     `~/.npm` stops it (verified). The generator is the spec and the
+     vectors pin it, so B6 does not add the entry; recommended follow-up: add
+     `~/.npm` to `denyWrite` in `sandbox.py`, regenerate `sandbox.json`, and
+     take it into the M3 evidence run.
 
 ## `cryptography` 50.0.1
 
