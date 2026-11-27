@@ -1171,6 +1171,17 @@ class Command(BaseCommand):
                     "VOICE_TTS_MODEL_ID",
                     "speaches-ai/piper-tr_TR-dfki-medium",
                 ),
+                # speaches picks the Piper voice from the *model* id and
+                # ignores the request's `voice` (measured 2026-11-27, runbook
+                # A7), so English needs its own row; the `en` route points
+                # here. Priority 6 keeps the Turkish row first for any
+                # unrouted language.
+                (
+                    "voice-tts-local-en",
+                    ModelProvider.Capability.TTS,
+                    "VOICE_TTS_EN_MODEL_ID",
+                    "speaches-ai/piper-en_US-lessac-medium",
+                ),
             ):
                 _, created = ModelProvider.objects.get_or_create(
                     name=name,
@@ -1180,7 +1191,7 @@ class Command(BaseCommand):
                         "model_id": os.environ.get(model_env) or default_model,
                         "base_url": base_url,
                         "api_key_env_var": "VOICE_API_KEY",
-                        "priority": 5,
+                        "priority": 6 if name == "voice-tts-local-en" else 5,
                         # Local, free, private (D5): the owner's own hardware.
                         "personal_data_allowed": True,
                     },

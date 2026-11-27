@@ -553,15 +553,24 @@ def test_seed_local_speech_rows_with_voice_key_and_idempotent(monkeypatch):
     call_command("seed_ai_defaults")
     stt_row = ModelProvider.objects.get(name="voice-stt-local")
     tts_row = ModelProvider.objects.get(name="voice-tts-local")
-    for row in (stt_row, tts_row):
+    tts_en_row = ModelProvider.objects.get(name="voice-tts-local-en")
+    for row in (stt_row, tts_row, tts_en_row):
         assert row.provider_type == ModelProvider.ProviderType.OPENAI_COMPATIBLE
         assert row.base_url == "http://host.docker.internal:8000/v1"
         assert row.api_key_env_var == "VOICE_API_KEY"
         assert row.personal_data_allowed is True
         assert not row.is_priced
     assert stt_row.model_id == "Systran/faster-whisper-medium"
+    # speaches selects the voice by model id, so English has its own row,
+    # ranked after the Turkish one (the fallback for an unrouted language).
+    assert tts_row.model_id == "speaches-ai/piper-tr_TR-dfki-medium"
+    assert tts_en_row.model_id == "speaches-ai/piper-en_US-lessac-medium"
+    assert (tts_row.priority, tts_en_row.priority) == (5, 6)
     assert (
-        ModelProvider.objects.filter(name__in=["voice-stt-local", "voice-tts-local"]).count() == 2
+        ModelProvider.objects.filter(
+            name__in=["voice-stt-local", "voice-tts-local", "voice-tts-local-en"]
+        ).count()
+        == 3
     )
     # audio + the three Phase 8A and two Phase 8B learning budgets + the
     # Phase 8B eval cap + the Phase 10 `control` cap (migration 0008).
@@ -658,3 +667,14 @@ def test_cost_correction_skips_rows_with_provider_cost(monkeypatch):
     hits = _lookup(monkeypatch, httpx.Response(200, json={"data": {"total_cost": 1}}))
     assert apply_cost_correction(usage.pk) == "skipped"
     assert hits == []
+
+
+def test_default_routes_send_english_to_its_own_local_row():
+    # speaches selects the Piper voice by model id (the request's `voice` is
+    # ignored), so `en` must route to the English row, not the Turkish one.
+    # Read the shipped default (test settings and fixtures override the live one).
+    from config.settings import base
+
+    routes = base.VOICE_TTS_ROUTES
+    assert routes["tr"]["provider"] == "voice-tts-local"
+    assert routes["en"]["provider"] == "voice-tts-local-en"
