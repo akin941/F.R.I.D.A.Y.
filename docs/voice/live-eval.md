@@ -43,7 +43,7 @@ number or recording a worse re-measurement re-closes the gate.
 
 On the Mac, in the installed child (`make friday-voice-install`) or a dev
 checkout of `node/friday-voice`, with the node model directory holding the
-pinned melspectrogram and embedding graphs (`make voice-models --node`):
+pinned melspectrogram and embedding graphs (`make voice-models-node`):
 
 ```bash
 uv run friday-voice wake-eval \

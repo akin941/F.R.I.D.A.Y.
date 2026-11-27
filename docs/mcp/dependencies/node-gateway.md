@@ -117,9 +117,12 @@ The gateway's full dependency surface is in this table.
     srt uses `rg` only on Linux (`linuxGetMandatoryDenyPaths`); its macOS
     backend builds the deny patterns without it.
   - `max_processes` is not `RLIMIT_NPROC` (finding 2): the node counts the
-    run's process tree, followed by unique-id lineage (`p_puniqueid`, kept
-    across re-parenting to launchd) from kqueue fork events and a 50 ms
-    scan, and kills it (SIGKILL, per pid after re-checking unique id and
+    run's process tree (root spawned suspended and watched before it runs),
+    followed by unique-id lineage (`p_puniqueid`, kept across re-parenting
+    to launchd only in some cases, see the node README) from kqueue
+    fork/exit events, immediate sweeps and 5-200 ms
+    scans, plus an orphan sweep by macOS responsibility in the installed
+    app (hardening N1; residuals in the node README), and kills it (SIGKILL, per pid after re-checking unique id and
     start time) above the limit; `cpu_seconds` the same way, over the
     sampled CPU time of every member (posix_spawn cannot set `RLIMIT_CPU` on
     the child). Known limits: an intermediate process that forks and exits
@@ -133,6 +136,29 @@ The gateway's full dependency surface is in this table.
     keychain; every start and every availability answer recomputes them and
     a change is `unsupported` until re-confirmed (an srt or Node upgrade
     needs that step).
+  - **Pinned in code (hardening N2, `Exec/SrtPin.swift`):** a confirmation
+    is refused unless the lockfile lists exactly these five packages at
+    these integrities, each cached tarball (`~/.npm/_cacache`, by
+    integrity) hashes to it, and the installed files equal the tarball's
+    byte for byte (verified offline, 2026-11-27: all five match):
+    `@anthropic-ai/sandbox-runtime` 0.0.83 (the sha512 above),
+    `@pondwader/socks5-server` 1.0.10
+    `sha512-bQY06wzzR8D2+vVCUoBsr5QS2U6UgPUQRmErNwtsuI6vLcyRKkafjkr3KxbtGFf9aBBIV2mcvlsKD1UYaIV+sg==`,
+    `commander` 12.1.0
+    `sha512-Vw8qHK3bZM9y/P10u3Vib8o/DdkvA2OtPtZvD871QKjy74Wj1WSKFILMPRPSdUSx5RFK1arlJzEtA4PkFgnbuA==`,
+    `node-forge` 1.4.4
+    `sha512-T6VRRpF3+czIGcXW/LOeoD7Ej28d8CF1UMEAbJyJRUtYMvyXAgxUPW2kbUibumvV9LiUQAznJOFyeYclzSJMMg==`,
+    `zod` 3.25.76
+    `sha512-gzUt/qt81nXsFGKIFcC3YnfEAx5NkunCfnDlvuBSSFS02bcXu4Lmea0AFIUwbLWxWPx3d9p8S5QoaujKcNQxcQ==`.
+    The four dependency integrities are the ones of the A6 lockfile, pinned
+    here for review. A changed version means editing `SrtPin.swift` and
+    this list together.
+  - **Module confinement (N3):** srt's Node runs with
+    `--no-global-search-paths` (no `$HOME/.node_modules`, `NODE_PATH`);
+    the tree hash refuses a symlink leaving the prefix; mappings cannot list
+    `NODE_*` variables. The check-to-exec window (digest check, then
+    spawn, milliseconds) remains: a same-user process rewriting the prefix
+    in between is caught only by the next run.
 - **Pinned version:** `@anthropic-ai/sandbox-runtime` **0.0.83** (npm,
   published 2026-11-13; `dist.integrity`
   `sha512-yEusORnVJrNseF/9fvjVYyk6tr79/aFbIB3T/X8p2puLZdaaiGNeYN50v0CE+1DT70v7XuzKOAnTivh1f5cksA==`;

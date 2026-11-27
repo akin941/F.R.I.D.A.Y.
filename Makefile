@@ -16,7 +16,7 @@ FRONTEND := cd frontend &&
 	harness-images harness-smoke harness-runner deploy-smoke preflight \
 	test-backend test-frontend test-e2e lint-backend lint-frontend \
 	frontend-install frontend-dev frontend-build e2e-install voice-models \
-	friday-voice-test friday-voice-e2e friday-voice-install \
+	friday-voice-test friday-voice-e2e friday-voice-install friday-voice-ca voice-models-node \
 	linux-node-test linux-node-conformance linux-node-install
 
 # Generates any missing secret into the gitignored deploy/docker/.env
@@ -115,8 +115,15 @@ voice-models:
 # app bundle and installs the locked environment there; the Swift host
 # launches $(FRIDAY_VOICE_HOME)/.venv/bin/friday-voice run and refuses to
 # when the installed uv.lock sha256 differs from the one compiled into it.
+# FRIDAY_VOICE_CA_FILE=<pem> (install or `friday-voice-ca`) records a CA file
+# the child trusts INSTEAD of the public bundle -- for the loopback Caddy of
+# compose.local-tls.yml: FRIDAY_VOICE_CA_FILE=deploy/docker/local-tls/cert.pem.
+# It is copied into the install (server-ca.pem + tls.json, kept across
+# reinstalls); the pin and hostname checks still run. `friday-voice-ca`
+# without the variable shows the record; FRIDAY_VOICE_CA_FILE=none clears it.
 FRIDAY_VOICE_DIR := node/friday-voice
 FRIDAY_VOICE_HOME ?= $(HOME)/Library/Application Support/Friday/voice
+FRIDAY_VOICE_BIN = "$(FRIDAY_VOICE_HOME)/.venv/bin/friday-voice"
 
 friday-voice-test:
 	cd $(FRIDAY_VOICE_DIR) && uv sync --frozen && uv run ruff check . && \
@@ -137,9 +144,34 @@ friday-voice-e2e:
 friday-voice-install:
 	mkdir -p "$(FRIDAY_VOICE_HOME)"
 	rsync -a --delete --exclude .venv --exclude __pycache__ --exclude .pytest_cache \
-		--exclude .ruff_cache --exclude tests $(FRIDAY_VOICE_DIR)/ "$(FRIDAY_VOICE_HOME)/"
+		--exclude .ruff_cache --exclude tests --exclude /models/ \
+		--exclude /tls.json --exclude /server-ca.pem \
+		$(FRIDAY_VOICE_DIR)/ "$(FRIDAY_VOICE_HOME)/"
+	@# rsync -a copies the checkout's directory mode onto the home: keep the
+	@# 0700 `friday-voice ca set` gave it while a CA file is recorded.
+	if [ -f "$(FRIDAY_VOICE_HOME)/tls.json" ]; then chmod 700 "$(FRIDAY_VOICE_HOME)"; fi
 	cd "$(FRIDAY_VOICE_HOME)" && uv sync --frozen --no-dev
+	$(if $(FRIDAY_VOICE_CA_FILE),$(MAKE) friday-voice-ca)
 	shasum -a 256 "$(FRIDAY_VOICE_HOME)/uv.lock"
+
+friday-voice-ca:
+ifeq ($(FRIDAY_VOICE_CA_FILE),)
+	$(FRIDAY_VOICE_BIN) ca show --home "$(FRIDAY_VOICE_HOME)"
+else ifeq ($(FRIDAY_VOICE_CA_FILE),none)
+	$(FRIDAY_VOICE_BIN) ca clear --home "$(FRIDAY_VOICE_HOME)"
+else
+	$(FRIDAY_VOICE_BIN) ca set "$(FRIDAY_VOICE_CA_FILE)" --home "$(FRIDAY_VOICE_HOME)"
+endif
+
+# Runbook A10: fill the node's model directory from models.json -- download
+# every entry with a URL source, verify its sha256, copy the owner-trained
+# keyword model from VOICE_WAKE_MODEL_SRC (refused while its pin is empty),
+# atomic writes only. `/models/` is excluded from the install rsync above so
+# a reinstall never deletes it. The target defaults to models.json `modelDir`
+# (the directory the child reads); VOICE_NODE_MODEL_DIR=<dir> overrides it.
+voice-models-node:
+	cd $(FRIDAY_VOICE_DIR) && uv sync --frozen && \
+		uv run friday-voice models fetch $(if $(VOICE_NODE_MODEL_DIR),--model-dir "$(VOICE_NODE_MODEL_DIR)")
 
 # --- Linux node (Phase 13 branch 4, brief D10) ---
 # node/friday-node-linux is its own uv project; it imports nothing from

@@ -3557,7 +3557,8 @@ new commits on the branch:
    step (not run here).
 2. **setsid escapees.** `ProcessTree` now follows members by unique-id
    lineage: `p_puniqueid` (PROC_PIDUNIQIDENTIFIERINFO) keeps the forking
-   parent's unique id when the process is re-parented to launchd, and
+   parent's unique id, often (not always, see the hardening review below)
+   after the process is re-parented to launchd, and
    members are learnt from kqueue `NOTE_FORK` events on every member plus a
    50 ms scan. A per-run environment marker was tried first and dropped:
    macOS does not show other processes' environments (`ps -E` shows none),
@@ -3644,3 +3645,144 @@ the AX re-check and the keystroke post.
   ADR-014 amendment. Owner: M3.
 - **FU-B6-3 — macOS-capable escape scripts** (`limit_output`,
   `limit_runtime`, the unsandboxed control). Owner: M3.
+
+## Implementation record — `feat/p10-node-executor-hardening` (B6 review round 2 non-blocking findings, 2026-11-27)
+
+Cut from `integ/phase-13` at `1d22d30` (B6 merged). One commit per finding.
+
+- **N1 — retry escape.** The root is spawned with
+  `POSIX_SPAWN_START_SUSPENDED`; its identity and its kqueue
+  `NOTE_FORK`/`NOTE_EXIT` watch exist before it runs (then SIGCONT). Fork
+  and exit events trigger an immediate full sweep; exited members' unique
+  ids stay in the lineage set; scans run every 5 ms for the first 2 s, then
+  50 ms, 200 ms after 2 s without forks (the optional NIT), and the monitor
+  keeps sweeping 1.5 s after the tree first looks empty. A last-resort
+  orphan sweep kills a launchd-parented process of this user created after
+  the root whose recorded parent is gone and whose macOS responsible process
+  is this app; it is on only when the app is its own responsible process
+  (the installed app) and off under a shell or test runner. The reaper no
+  longer takes a stopped child for an exited one (macOS `waitid` reports
+  stops). **Measured** with the review's probe (an intermediate forks a
+  `setsid` child and exits; 15 per run; children alive 0.7 s after the run
+  counted), 40 runs = 600 children: before hardening 3 of 150 survived;
+  lineage and events only (sweep off) 4 of 600, and 2 of 600 on the final
+  code (the rate varies, about 0.2-0.7 %); with the orphan sweep forced on
+  in the test (restricted to the probe's perl and sleep binaries) 0 of 600,
+  0 of 593 and, on the final code, 1 of 596 (children killed before they
+  printed their pid are not counted). In repeated `swift test --filter
+  SandboxRunTests` runs, where the 90-child probe runs after the other
+  process tests, about 4 survivors in 1080 children were seen with the sweep
+  on: launchd-parented `sleep` processes of this user, answering to the
+  same responsible process, that the sweep missed. The cause was not found
+  (exec does not change the unique id, which was checked, and a zombie
+  parent is now treated as gone). The suite's assertions therefore allow 1
+  of 90 with the sweep on, 5 % with it off, and 2 of 20 setsid chains.
+  **Residual, stated plainly: a daemonising command can still evade the
+  monitor by retrying.** With the sweep off, a few per thousand attempts
+  succeed; with it on, about one to four per thousand. The installed app is expected to run with the sweep on, but
+  that macOS names the launchd-launched app its own responsible process is
+  **not verified on the installed app yet** (M3, FU-B6-4).
+- **N2 — srt trust on first use.** `Exec/SrtPin.swift` pins the five
+  packages (sandbox-runtime 0.0.83 with the A6 sha512, and the four
+  dependencies' lockfile integrities). Confirming refuses unless the prefix
+  lockfile lists exactly those, each npm-cached tarball hashes to its
+  integrity, and the installed files equal the tarball's byte for byte.
+  This is verified offline from `~/.npm/_cacache`, unpacked with
+  `/usr/bin/tar`; on this Mac all five match. A missing cache entry refuses.
+  `problem()` and the re-confirm prompt name the changed digests.
+- **N3 — tree hash gaps.** A symlink leaving the prefix (or dangling) is
+  refused; links inside are hashed. srt's Node runs with
+  `--no-global-search-paths`; `NODE_*` names are refused in mappings and at
+  start. HOME stays the owner's: the sandboxed command needs it, and srt uses
+  it only for paths it denies and for its default settings file, which
+  `--settings` replaces. The real srt run still passes. The check-to-exec
+  window (milliseconds between the digest check and the spawn) is documented
+  in the README and the manifest.
+- **N4 — monitor fails open.** The monitor is built while the root is
+  suspended. A missing root identity, a failed kqueue or watch, or a failed
+  unique-id self-test (`ProcessTree.selfTestPassed`) kills the suspended
+  root's group and fails the start. The session then reports `error`, and
+  nothing runs. The self-test also gates `repo.command.run`'s availability
+  (`unsupported`). A DEBUG-only injection test shows the command never ran.
+
+Follow-up:
+- **FU-B6-4 — verify the orphan sweep in the installed app.** Check that
+  `responsibility_get_pid_responsible_for_pid(getpid()) == getpid()` for
+  the signed app launched from Finder. Run the retry probe through a mapped
+  command on the installed app (0 survivors expected). Check whether a
+  sandboxed command can get a descendant started under another
+  responsible process. Owner: M3.
+
+### Review of `feat/p10-node-executor-hardening` (APPROVE with fixes), fixed 2026-11-27
+
+1. **Orphan sweep vs other runs.** A process-wide registry holds every live
+   monitor's member and lineage unique ids (exited ones included) and the
+   node's helpers (BoundedRun: git, osascript). **The rule:** the sweep
+   skips a candidate that another monitor knows, or whose recorded parent
+   or any live ancestor it knows, or that descends from a helper. It does
+   not run at all while another run has a live root or members, or while a
+   helper runs or ran in the last 10 s: an orphan whose parent nobody knows
+   cannot be attributed to one run. So with concurrent runs only lineage
+   protects each tree. Test: run 2's `(sleep 30 &)` daemon survives run 1's
+   forced sweep until run 2 ends, and is gone after.
+2. **Deterministic tests; opt-in statistics.** The always-run tests are:
+   - a setsid child of a learnt intermediate is killed;
+   - a planted orphan is attributed by the forced sweep (filtered to that
+     pid) and dies with the run, and outlives a run without the sweep.
+
+   The retry probes moved to `FRIDAY_PROBE=1` (`FRIDAY_PROBE_RUNS`, default
+   40), bounded at 0.5 % with the sweep and 2 % with lineage only (so a move
+   from about 0.5 % to 4 % fails). Measured on the final code, 40 runs each:
+   lineage only 3 of 600; with the sweep 2 of 600, then 0 of 600. Every
+   survivor record carries ppid, status, path, start, responsible pid,
+   unique id, parent unique id and whether a monitor knows either. All
+   survivors were launchd-parented `/bin/sleep` with the same responsible
+   process, unknown to every monitor. The cause is still not found; FU-B6-2
+   carries it.
+3. **N2 layout.** `node_modules` must hold exactly the pinned package roots
+   (each scope holding exactly its packages), `.bin` (only `srt`, linked to
+   `../@anthropic-ai/sandbox-runtime/dist/cli.js`) and `.package-lock.json`
+   (`testTheNodeModulesLayoutIsExactlyThePinnedOne`).
+4. **Bounded sweeping.** After the root exits the monitor sweeps for at most
+   10 s. It logs members still alive then (os_log, category
+   `tree-monitor`) and stops. Stopping unregisters it, and the event thread
+   closes the kqueue and leaves. A finished run's monitor is freed
+   (`testAFinishedRunsMonitorIsFreed`). No test makes a process that
+   survives SIGKILL, so the give-up path itself is not exercised.
+5. **Double close.** The explicit `close(kq)` is gone; `deinit` closes it
+   once. A watch failure injected after `kqueue()` frees the monitor and
+   leaves a descriptor opened afterwards intact.
+6. **Loader variables.** `DYLD_*`, `OPENSSL_CONF*` and `UV_*` are refused
+   next to `NODE_*`, in mappings and first thing at start.
+
+### Re-review of `feat/p10-node-executor-hardening` (REQUEST_CHANGES), fixed 2026-11-27
+
+1. **Blocking: the concurrent-run test was vacuous.** Run 2's `(sleep 30 &)`
+   child has its recorded parent reset to 1, so it never became an orphan
+   candidate. The test now plants a real candidate in run 2. A parent forks
+   a setsid daemon and lives 0.5 s, so the daemon is launchd-parented with
+   its recorded parent kept, which the test asserts. Run 1's root exits
+   during run 2's life, so a wrong claim by run 1 would kill the daemon
+   then. **Mutation check:** with the registry gate, the `isHelper` check
+   and the `anotherMonitorKnows` check removed, the test failed 3 of 3
+   runs ("run 1 killed run 2's daemon"). Restored, it passed 5 of 5.
+2. **`p_puniqueid` wording** corrected in `ProcessTree.swift`, the node
+   README, the manifest and this brief. Measured: it is kept for a setsid
+   child and for a child whose parent lived about 0.5 s, and reset to 1 for
+   a non-setsid child whose parent exits at once and for `( cmd & )`. In
+   this session a setsid child's id was also seen reset once. The sweep's
+   `parentUniqueID > root` condition skips such children; lineage (fork
+   events, group, scans) still contained the review's non-setsid daemons,
+   0 of 60.
+3. **Helper rule narrowed.** Only helpers whose unique id is greater than
+   the run's root (started after it) turn the sweep off, so a worktree's
+   git calls do not. Ended helpers are pruned on insert. Tests:
+   - git helpers before the root leave the sweep on;
+   - a helper after the root turns it off.
+4. **Always-run coverage.**
+   - A smoke retry probe: 3 runs of 15 intermediates, bound 20 %.
+   - The learnt-intermediate test now asserts that at least one attempt
+     produced a pid.
+- NITs: the watch-failure test is renamed and says plainly that it only
+  checks freeing (it cannot detect a double close in the failing init);
+  `endedHelpers` is pruned on insert.

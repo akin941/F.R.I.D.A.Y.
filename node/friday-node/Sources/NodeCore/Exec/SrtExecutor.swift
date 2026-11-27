@@ -100,9 +100,22 @@ public struct SrtLocation: Equatable, Sendable {
     }
 
     /// This location with the digests of what is installed now (the owner
-    /// confirms it with Touch ID in the policy UI).
-    public func confirmed() throws -> SrtLocation {
-        SrtLocation(node: node, prefix: prefix, digests: try currentDigests())
+    /// confirms it with Touch ID in the policy UI). Refused unless the
+    /// prefix holds exactly the pinned npm packages (SrtPin: lockfile
+    /// versions and integrities, and the installed files equal to the
+    /// cached, integrity-checked tarballs).
+    public func confirmed(npmCache: String = SrtPin.defaultCache) throws -> SrtLocation {
+        if let problem = SrtPin.problem(prefix: prefix, cache: npmCache) {
+            throw ExecutorError("srt is not the pinned package: \(problem)")
+        }
+        return SrtLocation(node: node, prefix: prefix, digests: try currentDigests())
+    }
+
+    /// The digests that differ from the confirmed ones (what the re-confirm
+    /// prompt names), empty when none does.
+    public func changedDigests() -> [String] {
+        guard let now = try? currentDigests() else { return Self.digestNames }
+        return Self.digestNames.filter { now[$0] != digests[$0] }
     }
 
     /// Why this location cannot run commands, or nil when it can: absolute
@@ -124,7 +137,10 @@ public struct SrtLocation: Equatable, Sendable {
         guard version == Self.pinnedVersion else { return "srt \(version) is not the pinned \(Self.pinnedVersion)" }
         guard Set(digests.keys) == Set(Self.digestNames) else { return "srt not confirmed (Touch ID)" }
         guard let now = try? currentDigests() else { return "srt files unreadable" }
-        guard now == digests else { return "srt files changed since confirmation" }
+        guard now == digests else {
+            let changed = Self.digestNames.filter { now[$0] != digests[$0] }
+            return "srt files changed since confirmation: " + changed.joined(separator: ", ")
+        }
         guard let nodeVersion = NodeVersionCache.shared.version(of: node, digest: now["node"] ?? "") else {
             return "node --version failed"
         }
@@ -213,6 +229,7 @@ public final class FileDigests: @unchecked Sendable {
         guard let enumerator = FileManager.default.enumerator(atPath: root) else {
             throw ExecutorError("unreadable: \(root)")
         }
+        let realRoot = ReaderPaths.realpathC(root)
         var lines: [String] = []
         for case let relative as String in enumerator {
             let path = root + "/" + relative
@@ -221,7 +238,14 @@ public final class FileDigests: @unchecked Sendable {
             switch info.st_mode & S_IFMT {
             case S_IFDIR: lines.append("d \(relative)")
             case S_IFLNK:
+                // A link must stay inside the tree (hardening N3): its target
+                // is hashed as part of the tree; a link out of it (a module
+                // swapped for one elsewhere on disk) is refused.
                 let target = (try? FileManager.default.destinationOfSymbolicLink(atPath: path)) ?? ""
+                let resolved = ReaderPaths.realpathC(path)
+                guard SandboxPolicy.under(resolved, realRoot), FileManager.default.fileExists(atPath: resolved) else {
+                    throw ExecutorError("symlink leaves the srt tree: \(relative)")
+                }
                 lines.append("l \(relative) -> \(target)")
             case S_IFREG: lines.append("f \(relative) \(try file(path)) \(info.st_mode & 0o7777)")
             default: lines.append("o \(relative)")
@@ -260,11 +284,33 @@ public final class SrtExecutor: @unchecked Sendable {
         self.location = location
     }
 
-    public var available: Bool { location.problem() == nil }
+    /// srt is usable AND the process monitor works on this system (its
+    /// unique-id self-test passed): never `granted` for an unmonitorable run.
+    public var available: Bool { ProcessTree.selfTestPassed && location.problem() == nil }
+
+    /// Node options for srt's own process (hardening N3):
+    /// `--no-global-search-paths` stops CommonJS `require` from looking in
+    /// `$HOME/.node_modules`, `$HOME/.node_libraries`, `$PREFIX/lib/node`
+    /// and `NODE_PATH`, so only the confirmed prefix's modules load. HOME
+    /// stays the owner's home: the sandboxed command needs it (it is the
+    /// document's `HOME`), and srt reads it only for paths it then denies or
+    /// for its default settings file, which `--settings` replaces.
+    public static let nodeFlags = ["--no-global-search-paths"]
+
+    /// Variable name prefixes that steer how srt's Node (or its libraries)
+    /// loads code or configuration: Node's own (`NODE_OPTIONS --require`,
+    /// `NODE_PATH`), the dynamic loader's (`DYLD_INSERT_LIBRARIES`, …),
+    /// OpenSSL's configuration (`OPENSSL_CONF`, `OPENSSL_CONF_INCLUDE`) and
+    /// libuv's (`UV_THREADPOOL_SIZE`, …).
+    public static let loaderPrefixes = ["NODE_", "DYLD_", "OPENSSL_CONF", "UV_"]
+
+    public static func isLoaderVariable(_ name: String) -> Bool {
+        loaderPrefixes.contains { name.hasPrefix($0) }
+    }
 
     /// The exact argv srt is started with (tests, the README).
     public func argv(settingsPath: String, command: [String]) -> [String] {
-        [location.node, location.cliPath, "--settings", settingsPath, "--"] + command
+        [location.node] + Self.nodeFlags + [location.cliPath, "--settings", settingsPath, "--"] + command
     }
 
     /// Start `spec` under srt; throws (nothing runs) when srt is not usable,
@@ -272,6 +318,13 @@ public final class SrtExecutor: @unchecked Sendable {
     /// resolves to the write root.
     public func start(_ spec: CommandSpec) throws -> RunningCommand {
         guard let sandbox = spec.sandbox else { throw ExecutorError("no sandbox document") }
+        // No module, library or option from outside the prefix (hardening
+        // N3): a loader variable never reaches srt's Node; CommandMappings
+        // refuses mapping one.
+        if let name = sandbox.environment.keys.first(where: Self.isLoaderVariable) {
+            throw ExecutorError("\(name) would reach srt's Node")
+        }
+        guard ProcessTree.selfTestPassed else { throw ExecutorError("process monitor self-test failed") }
         if let problem = location.problem() { throw ExecutorError(problem) }
         // The write root was resolved before the window; it must still be
         // the same directory now (no symlink swapped in meanwhile).
@@ -317,25 +370,39 @@ public final class SandboxRun: RunningCommand, @unchecked Sendable {
     private var finishHandlers: [() -> Void] = []
     private var terminating = false
 
-    private init(child: ChildProcess, limits: RunLimits, cleanupDirectory: String?) {
+    private init(child: ChildProcess, monitor: TreeMonitor, limits: RunLimits, cleanupDirectory: String?) {
         self.child = child
+        self.monitor = monitor
         self.limits = limits
         self.cleanupDirectory = cleanupDirectory
-        monitor = TreeMonitor(root: child.pid, maxProcesses: limits.maxProcesses, cpuSeconds: limits.cpuSeconds)
     }
 
-    /// Spawn `argv` in a new process group and start pumping and watching
+    /// Spawn `argv` suspended in a new process group, set up the monitor
+    /// (identity, fork/exit watch) and the pumps, then let it run
     /// (TreeMonitor follows the tree by unique-id lineage, so a descendant
-    /// that left the group and lost its parent is still the run's).
+    /// that left the group and lost its parent is still the run's). When
+    /// the monitor cannot be set up, the suspended root's group is killed
+    /// and nothing runs (hardening N4).
     public static func start(
         executable: String, argv: [String], environment: [String: String], cwd: String, limits: RunLimits,
         cleanupDirectory: String? = nil
     ) throws -> SandboxRun {
         let child = try ChildProcess.spawn(
             executable: executable, argv: argv, environment: environment, cwd: cwd, stdout: .pipe, stderr: .pipe,
-            newProcessGroup: true)
-        let run = SandboxRun(child: child, limits: limits, cleanupDirectory: cleanupDirectory)
+            newProcessGroup: true, startSuspended: true)
+        let monitor: TreeMonitor
+        do {
+            monitor = try TreeMonitor(
+                root: child.pid, maxProcesses: limits.maxProcesses, cpuSeconds: limits.cpuSeconds)
+        } catch {
+            child.signal(SIGKILL)  // still suspended and unreaped: its group is this run only
+            child.wait(timeout: 5)
+            for fd in [child.stdoutFD, child.stderrFD].compactMap({ $0 }) { close(fd) }
+            throw ExecutorError("the run cannot be monitored: \(error)")
+        }
+        let run = SandboxRun(child: child, monitor: monitor, limits: limits, cleanupDirectory: cleanupDirectory)
         run.begin()
+        child.resume()
         return run
     }
 

@@ -159,6 +159,12 @@ public struct CommandMappings: Equatable, Sendable {
                 guard entries.contains("/bin") else {
                     throw ActionPolicyError("\(repo.name)/\(command.kind): PATH must contain /bin (srt runs bash)")
                 }
+                // srt's own Node inherits the command's environment: no
+                // loader or option variable (NODE_*, DYLD_*, OPENSSL_CONF*,
+                // UV_*) may be mapped (hardening N3 and its review).
+                if let name = command.envNames.first(where: SrtExecutor.isLoaderVariable) {
+                    throw ActionPolicyError("\(repo.name)/\(command.kind): \(name) is refused (it would steer srt's Node)")
+                }
             }
         }
         for recipe in recipesEnabled where RecipeContract.all[recipe] == nil || RecipeBook.recipe(named: recipe) == nil {

@@ -17,12 +17,16 @@ pipeline can tell a 401 caused by a routine rotation (a newer credential
 arrived meanwhile: retry once) from a refusal (D8 "Errors").
 
 TLS (D6 `credential.ca_sha256`): an `https://` server is verified against
-the system trust store (plus an optional CA file the replay harness may
-pass), and the TLS handshake is then checked, **before any request byte is
-sent**, for a certificate in the verified chain whose DER sha256 equals
-the pinned fingerprint (an httpcore trace hook on
-`connection.start_tls.complete`). A loopback `http://` dev server (the
-only plain-HTTP form the schema accepts) has no pin.
+the default (certifi) bundle, or -- when the install recorded one
+(`friday_voice.tls`, `friday-voice ca set`) or a harness passes
+`--ca-file` -- against that CA file **instead**. Certificate and hostname
+verification are never turned off. The TLS handshake is then checked,
+**before any request byte is sent**, for a certificate in the verified
+chain whose DER sha256 equals the pinned fingerprint (an httpcore trace
+hook on `connection.start_tls.complete`); a TLS connection without a pin
+is refused too. A loopback `http://` dev server (the only plain-HTTP form
+the schema accepts) has no pin. A CA file that cannot be loaded fails
+closed (`tls_ca_file_unreadable`), never falling back to the default.
 
 The client is synchronous: the pipeline runs every call on a worker
 (`friday_voice.pipeline.ThreadWorker`), never on the protocol loop.
@@ -33,10 +37,9 @@ import json
 import ssl
 from dataclasses import dataclass, field
 
-import certifi
 import httpx
 
-from . import config
+from . import config, tls
 
 SESSIONS_PATH = "/api/v1/voice/live/sessions"
 TRANSCRIPTIONS_PATH = "/api/v1/voice/transcriptions"
@@ -53,6 +56,7 @@ CODE_LIVE_MUTED = "voice.live_muted"
 CODE_ALWAYS_ON_NOT_PERMITTED = "voice.always_on_not_permitted"
 CODE_NETWORK = "network"
 CODE_PIN = "tls_pin_mismatch"
+CODE_CA_FILE = "tls_ca_file_unreadable"
 CODE_BAD_RESPONSE = "bad_response"
 
 
@@ -146,11 +150,14 @@ class PinMismatch(Exception):
 def pin_hook(ca_sha256):
     """An httpcore trace callback refusing the connection, right after the
     TLS handshake and before the request is written, unless the pinned
-    CA is in the verified chain."""
+    CA is in the verified chain. A TLS connection without a pin (null is
+    for a loopback `http://` server only) is refused: fail closed."""
 
     def trace(event_name, info):
-        if event_name != "connection.start_tls.complete" or ca_sha256 is None:
+        if event_name != "connection.start_tls.complete":
             return
+        if ca_sha256 is None:
+            raise PinMismatch(CODE_PIN)
         stream = info.get("return_value")
         ssl_object = stream.get_extra_info("ssl_object") if stream is not None else None
         if ssl_object is None or ca_sha256 not in chain_fingerprints(ssl_object):
@@ -176,10 +183,14 @@ def parse_sse(lines):
 
 
 class HttpFridayClient:
-    def __init__(self, *, ca_file=None, transport=None, timeout=None):
+    def __init__(self, *, ca_file=None, ca_unusable=False, transport=None, timeout=None):
+        """`ca_file`: the CA bundle trusted instead of the default one.
+        `ca_unusable`: the install's TLS config could not be read
+        (`friday_voice.tls.TlsConfigError`); every request is refused."""
         self._credential = None
         self._generation = 0
         self._ca_file = ca_file
+        self._ca_unusable = bool(ca_unusable)
         self._transport = transport
         self._timeout = timeout or httpx.Timeout(
             config.HTTP_READ_TIMEOUT_S, connect=config.HTTP_CONNECT_TIMEOUT_S
@@ -212,9 +223,12 @@ class HttpFridayClient:
             if self._transport is not None:
                 self._http = httpx.Client(transport=self._transport, timeout=self._timeout)
             else:
-                context = ssl.create_default_context(cafile=certifi.where())
-                if self._ca_file:
-                    context.load_verify_locations(cafile=str(self._ca_file))
+                if self._ca_unusable:
+                    raise FridayError(0, CODE_CA_FILE, generation=self._generation)
+                try:
+                    context = tls.load_context(self._ca_file)
+                except tls.TlsConfigError as exc:
+                    raise FridayError(0, CODE_CA_FILE, generation=self._generation) from exc
                 self._http = httpx.Client(verify=context, timeout=self._timeout, trust_env=False)
         return self._http
 

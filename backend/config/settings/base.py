@@ -724,7 +724,7 @@ VOICE_TTS_ROUTES = {
         "voice": env("VOICE_TTS_ROUTE_TR_VOICE", default="tr_TR-dfki-medium"),
     },
     "en": {
-        "provider": env("VOICE_TTS_ROUTE_EN_PROVIDER", default="voice-tts-local"),
+        "provider": env("VOICE_TTS_ROUTE_EN_PROVIDER", default="voice-tts-local-en"),
         "voice": env("VOICE_TTS_ROUTE_EN_VOICE", default="en_US-lessac-medium"),
     },
 }

@@ -44,6 +44,13 @@ CNF
   chmod 644 "$DIR/key.pem" "$DIR/cert.pem"
 fi
 PIN=$(openssl x509 -in "$DIR/cert.pem" -pubkey -noout | openssl pkey -pubin -outform der | openssl dgst -sha256 -binary | base64)
+# The voice child pins something else: the DER sha256 (hex) of the top
+# certificate of the served chain -- for this self-signed certificate, the
+# certificate itself. The Swift host computes it from the chain it sees and
+# sends it as the credential's ca_sha256; it is never typed anywhere.
+VOICE_PIN=$(openssl x509 -in "$DIR/cert.pem" -outform der | openssl dgst -sha256 | awk '{print $NF}')
 echo "certificate: $DIR/cert.pem"
-echo "SPKI pin (type it into FridayNode -> Eşleştir… -> Sertifika pini): $PIN"
+echo "node pairing pin, SPKI sha256 base64 (type it into FridayNode -> Eşleştir… -> Sertifika pini): $PIN"
 echo "for preflight, in deploy/docker/.env: NODE_TLS_PIN_SHA256=$PIN"
+echo "voice child pin, certificate DER sha256 hex (credential ca_sha256; NOT the SPKI pin above): $VOICE_PIN"
+echo "voice child CA file: make friday-voice-ca FRIDAY_VOICE_CA_FILE=deploy/docker/local-tls/cert.pem"
