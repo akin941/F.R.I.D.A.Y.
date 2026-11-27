@@ -190,3 +190,12 @@ def test_percentile():
     assert replay.percentile([100], 0.95) == 100
     assert replay.percentile([100, 200, 300, 400], 0.5) == 250
     assert replay.percentile(list(range(1, 101)), 0.95) == 95
+
+
+def test_end_of_turn_is_audio_time_from_the_clip_start(
+    owner, workspace, speech_providers, scripted_stt
+):
+    wav = fixtures.clip(lead=0.3, speech=1.0, tail=0.6)
+    entry = Entry("a.wav", sha256_hex(wav), "tr-quiet", "x")
+    report = runner.run_wer(clips=[(entry, wav)], owner=owner, workspace=workspace, run_id="r7")
+    assert report["results"][0]["end_of_turn_ms"] == 1300 + replay.FINISH_MS

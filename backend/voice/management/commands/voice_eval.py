@@ -7,9 +7,15 @@ branch 3a; runbook `docs/runbooks/voice-setup.md` §8).
   group and the latency p50/p95, compare with the stored latency baseline
   (> 20% p50 regression fails), write the full report (0600) to
   `--out` or `<VOICE_EVAL_RESULTS_DIR>/voice-eval-<run>.json`.
-  `--write-baseline` stores this run's p50s as the new baseline.
+  `--write-baseline` stores this run's p50s as the new baseline -- refused
+  for a `fail` verdict, a regression, `--limit` or `--stt-only` unless
+  `--force`. Reports, sheets and the baseline are refused inside the repo.
 - `voice_eval --set <dir> --fill-hashes`: write the sha256 of each newly
-  recorded clip into the manifest (never changes an existing hash).
+  recorded clip into the manifest (never changes an existing hash; the
+  manifest is replaced atomically).
+- `voice_eval --check-set <dir>`: dry run, no database and no model call:
+  the directory's mode and uid, whether it passes the 0700 check, the WAV
+  count and each manifest row's hash status (for a bind mount).
 - `voice_eval --tts-sheet`: synthesize the Turkish references for the
   owner's listening test; `voice_eval --score-tts <ratings.csv>` scores it
   (>= 4/5 intelligibility and naturalness).
@@ -27,7 +33,15 @@ from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError
 
 from voice.eval import replay, runner
-from voice.eval.manifest import ManifestError, expand, fill_hashes, load_set, parse_manifest
+from voice.eval.manifest import (
+    ManifestError,
+    expand,
+    fill_hashes,
+    load_set,
+    parse_manifest,
+    set_status,
+    write_manifest_atomic,
+)
 from voice.eval.manifest import replace_table as manifest_replace_table
 from voice.models import SOURCES
 
@@ -53,6 +67,11 @@ class Command(BaseCommand):
         mode.add_argument("--tts-sheet", action="store_true")
         mode.add_argument("--score-tts", metavar="RATINGS_CSV")
         mode.add_argument("--traces", action="store_true")
+        mode.add_argument(
+            "--check-set",
+            metavar="DIR",
+            help="Dry run: directory mode, uid, file count and hash status only.",
+        )
         parser.add_argument("--set", dest="set_dir", default=None)
         parser.add_argument("--manifest", default=None)
         parser.add_argument("--owner", default=None, help="The installation owner's e-mail.")
@@ -60,6 +79,11 @@ class Command(BaseCommand):
         parser.add_argument("--results-dir", default=None)
         parser.add_argument("--baseline", default=None)
         parser.add_argument("--write-baseline", action="store_true")
+        parser.add_argument(
+            "--force",
+            action="store_true",
+            help="Write the baseline even from a failed, regressed or partial run.",
+        )
         parser.add_argument("--stt-only", action="store_true")
         parser.add_argument("--stt-provider", default=None, help="Pin one STT row by name.")
         parser.add_argument("--tts-provider", default=None, help="Pin one TTS row by name.")
@@ -71,6 +95,8 @@ class Command(BaseCommand):
 
     def handle(self, *args, **options):
         try:
+            if options["check_set"]:
+                return self._check_set(options)
             if options["score_tts"]:
                 return self._score_tts(options)
             if options["fill_hashes"]:
@@ -109,7 +135,7 @@ class Command(BaseCommand):
         updated, filled = fill_hashes(self._set_dir(options), entries)
         if filled:
             text = path.read_text(encoding="utf-8")
-            path.write_text(manifest_replace_table(text, updated), encoding="utf-8")
+            write_manifest_atomic(path, manifest_replace_table(text, updated))
         self.stdout.write(f"filled {len(filled)} hash(es) in {path}")
         for name in filled:
             self.stdout.write(f"  {name}")
@@ -156,13 +182,52 @@ class Command(BaseCommand):
         runner.write_json(out, report)
         self._print_run(report)
         if options["write_baseline"]:
-            data = replay.make_baseline(
-                report["latency"], run_id=run_id, created_at=report["created_at"]
-            )
-            runner.replace_private(baseline_path, (json.dumps(data, indent=2) + "\n").encode())
-            self.stdout.write(f"Baseline written: {baseline_path}")
+            refusal = self._baseline_refusal(report, options)
+            if refusal and not options["force"]:
+                self.stdout.write(f"Baseline NOT written: {refusal} (--force to override)")
+            else:
+                data = replay.make_baseline(
+                    report["latency"], run_id=run_id, created_at=report["created_at"]
+                )
+                runner.replace_private(baseline_path, (json.dumps(data, indent=2) + "\n").encode())
+                self.stdout.write(f"Baseline written: {baseline_path}")
         self.stdout.write(f"Report: {out}")
         self._verdict("verdict", report["verdict"])
+
+    @staticmethod
+    def _baseline_refusal(report, options):
+        """Why this run must not become the latency baseline (A5): a baseline
+        from a failed, regressed or partial run would hide the next
+        regression."""
+        if report["verdict"] == runner.FAIL:
+            return "the run's verdict is fail"
+        if report["regressions"]:
+            return "the run regressed against the stored baseline"
+        if options["limit"]:
+            return "--limit replays only part of the set"
+        if options["stt_only"]:
+            return "--stt-only measures no TTS stage"
+        return ""
+
+    def _check_set(self, options):
+        _path, entries = self._manifest(options)
+        status = set_status(options["check_set"], entries)
+        self.stdout.write(f"set directory: {status['directory']}")
+        if not status["exists"]:
+            raise CommandError("the set directory does not exist")
+        self.stdout.write(
+            f"mode {status['mode']}, uid {status['uid']} (this process: uid "
+            f"{status['process_uid']}); private check: {status['private_check']}"
+        )
+        if status["is_dir"]:
+            self.stdout.write(
+                f"{status['wav_files']} WAV file(s), {status['manifest_rows']} manifest row(s): "
+                f"{status['matched']} hash ok, {status['mismatched']} hash differs, "
+                f"{status['missing']} missing, {status['unrecorded']} unrecorded, "
+                f"{status['unreadable']} unreadable, {status['unlisted']} unlisted"
+            )
+        if status["private_check"] != "pass" or status.get("mismatched"):
+            raise CommandError("the set would be refused by a real run")
 
     def _print_run(self, report):
         s = report["set"]

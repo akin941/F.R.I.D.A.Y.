@@ -17,7 +17,7 @@ from voice.eval.scorer import align, corpus_errors, normalize, score
         ("Merhaba, Friday! Nasılsın?", "merhaba friday nasılsın"),
         ("Repo'yu aç.", "repoyu aç"),
         ("PR’ı merge et…", "prı merge et"),
-        ("Saat 10'da — “toplantı”", "saat 10da toplantı"),
+        ("Saat 10'da — “toplantı”", "saat onda toplantı"),
         ("  çok   boşluk  ", "çok boşluk"),
         ("", ""),
     ],

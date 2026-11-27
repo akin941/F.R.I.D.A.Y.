@@ -1236,7 +1236,7 @@ class Command(BaseCommand):
             )
             self._log(f"{name} provider (disabled)", created)
 
-        audio_budget, created = AIBudget.objects.get_or_create(
+        _, created = AIBudget.objects.get_or_create(
             name="audio",
             defaults={
                 "purposes": list(settings.AI_AUDIO_PURPOSES),
@@ -1245,15 +1245,19 @@ class Command(BaseCommand):
                 "daily_limit_usd": _usd_or_none(settings.AI_BUDGET_AUDIO_DAILY_USD),
             },
         )
-        missing = [p for p in settings.AI_AUDIO_PURPOSES if p not in (audio_budget.purposes or [])]
-        if not created and missing:
-            # Phase 6 branch 3a: an upgraded installation's audio cap must
-            # cover the eval purposes too. Purposes are only ever added; the
-            # owner's limits are never touched.
-            audio_budget.purposes = [*(audio_budget.purposes or []), *missing]
-            audio_budget.save(update_fields=["purposes", "updated_at"])
-            created = True
         self._log("audio budget", created)
+
+        # Phase 6 branch 3a: the evaluation set's own cap, separate from the
+        # live `audio` row so an eval run never starves live voice.
+        _, created = AIBudget.objects.get_or_create(
+            name="voice_eval",
+            defaults={
+                "purposes": list(settings.AI_VOICE_EVAL_PURPOSES),
+                "monthly_limit_usd": _usd_or_none(settings.AI_BUDGET_VOICE_EVAL_MONTHLY_USD),
+                "session_limit_usd": _usd_or_none(settings.AI_BUDGET_VOICE_EVAL_RUN_USD),
+            },
+        )
+        self._log("voice_eval budget", created)
 
         # Phase 8A D13: the learning caps (shared monthly + per-purpose daily).
         # Phase 8B D15: reconciliation and reflection join the shared cap.

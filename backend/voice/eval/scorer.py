@@ -11,20 +11,32 @@ library. `normalize()` makes a reference and a hypothesis comparable:
 3. Apostrophes are dropped and the suffix joined (`repo'yu` -> `repoyu`,
    `PR'ı` -> `prı`): Whisper writes the Turkish suffix apostrophe
    inconsistently, and the brief scores words, not orthography.
-4. Every other punctuation or symbol character becomes a space.
+4. A hyphen between two letters is dropped and the parts joined
+   (`e-posta` -> `eposta`, as Whisper often writes it); a dash with space
+   around it is punctuation.
+5. Turkish text only: digits become words (`numbers.spell_numbers`:
+   integers, `10:30` -> `on buçuk`, `%15`, `₺`/`tl`, `3,5`), so `3` and
+   `üç` score the same. English digits are compared as written.
+6. Every other punctuation or symbol character becomes a space.
 
 WER = (substitutions + deletions + insertions) / reference words, summed
 over an utterance set (corpus WER), never averaged per utterance.
 """
 
+import re
 import unicodedata
 from dataclasses import dataclass
+
+from voice.eval.numbers import spell_numbers
 
 # ASCII and typographic apostrophes, the modifier letter apostrophe and
 # the two accent characters keyboards produce in their place.
 APOSTROPHES = frozenset("'’‘ʼ`´")
 _TURKISH_CASE = str.maketrans({"İ": "i", "I": "ı"})
 TURKISH_LANGUAGES = frozenset({"tr", "az"})
+# Hyphen-minus, hyphen and non-breaking hyphen between two letters (not
+# digits: `Covid-19` stays two words, `covid on dokuz`).
+_INTRA_WORD_HYPHEN = re.compile(r"(?<=[^\W\d_])[-\u2010\u2011](?=[^\W\d_])")
 
 
 def fold_case(text, language="tr"):
@@ -37,11 +49,12 @@ def fold_case(text, language="tr"):
 def normalize(text, language="tr"):
     """The comparable form of `text`: case-folded, punctuation-free words
     joined by single spaces."""
-    folded = fold_case(text or "", language)
+    folded = "".join(c for c in fold_case(text or "", language) if c not in APOSTROPHES)
+    folded = _INTRA_WORD_HYPHEN.sub("", folded)
+    if language in TURKISH_LANGUAGES:
+        folded = spell_numbers(folded)
     out = []
     for char in folded:
-        if char in APOSTROPHES:
-            continue
         category = unicodedata.category(char)
         if category[0] in {"P", "S"} or char.isspace():
             out.append(" ")

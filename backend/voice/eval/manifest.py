@@ -133,6 +133,80 @@ def replace_table(text, entries):
     return "\n".join(new) + ("\n" if text.endswith("\n") else "")
 
 
+def write_manifest_atomic(path, text):
+    """Replace the manifest in one step (temp file in the same directory,
+    then `os.replace`), keeping its mode; a crash never leaves half a
+    table."""
+    path = Path(path)
+    mode = stat.S_IMODE(os.stat(path).st_mode) if path.exists() else 0o644
+    temp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    fd = os.open(temp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, mode)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(text)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.chmod(temp, mode)
+        os.replace(temp, path)
+    except BaseException:
+        if temp.exists():
+            temp.unlink()
+        raise
+    return path
+
+
+def set_status(directory, entries):
+    """`voice_eval --check-set`: the directory's mode, uid and the hash
+    status of each manifest row, WITHOUT raising for a bad mode (the owner
+    sees whether the bind mount passes the 0700 check before a real run).
+    Reads only; never prints or returns a reference."""
+    directory = expand(directory)
+    status = {"directory": str(directory), "exists": False}
+    try:
+        info = os.lstat(directory)
+    except FileNotFoundError:
+        return status
+    status.update(
+        exists=True,
+        is_dir=stat.S_ISDIR(info.st_mode) and not stat.S_ISLNK(info.st_mode),
+        mode=f"{stat.S_IMODE(info.st_mode):04o}",
+        uid=info.st_uid,
+        process_uid=os.getuid() if hasattr(os, "getuid") else None,
+    )
+    try:
+        check_private_dir(directory)
+        status["private_check"] = "pass"
+    except ManifestError as exc:
+        status["private_check"] = f"fail: {exc}"
+    if not status["is_dir"]:
+        return status
+    wavs = [p for p in directory.iterdir() if p.suffix.lower() == ".wav"]
+    counts = dict.fromkeys(("matched", "mismatched", "missing", "unrecorded", "unreadable"), 0)
+    for entry in entries:
+        if not entry.sha256:
+            counts["unrecorded"] += 1
+            continue
+        try:
+            data = read_clip(directory, entry.file)
+        except ManifestError:
+            counts["unreadable"] += 1
+            continue
+        if data is None:
+            counts["missing"] += 1
+        elif sha256_hex(data) == entry.sha256:
+            counts["matched"] += 1
+        else:
+            counts["mismatched"] += 1
+    listed = {e.file for e in entries}
+    status.update(
+        wav_files=len(wavs),
+        manifest_rows=len(entries),
+        unlisted=sum(1 for p in wavs if p.name not in listed),
+        **counts,
+    )
+    return status
+
+
 def expand(path):
     return Path(os.path.expanduser(str(path)))
 

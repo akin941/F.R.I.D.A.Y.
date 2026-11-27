@@ -509,11 +509,13 @@ def test_every_audio_purpose_with_a_priced_provider_has_a_budget(monkeypatch):
     capability_of = {
         "voice.stt": STT,
         "voice.tts": TTS,
-        # Phase 6 branch 3a: the evaluation set's own calls.
+        # Phase 6 branch 3a: the evaluation set, under its own row.
         "voice.eval_stt": STT,
         "voice.eval_tts": TTS,
     }
-    assert set(settings.AI_AUDIO_PURPOSES) == set(capability_of)
+    assert set(settings.AI_AUDIO_PURPOSES) | set(settings.AI_VOICE_EVAL_PURPOSES) == set(
+        capability_of
+    )
     for purpose, capability in capability_of.items():
         priced = [p for p in ModelProvider.objects.filter(capability=capability) if p.is_priced]
         if not priced:
@@ -539,10 +541,18 @@ def test_seed_fake_speech_rows_and_audio_budget():
         assert row.provider_type == ModelProvider.ProviderType.FAKE
         assert (row.priority, row.is_active, row.personal_data_allowed) == (0, True, True)
     budget = AIBudget.objects.get(name="audio")
-    assert set(budget.purposes) == {"voice.stt", "voice.tts", "voice.eval_stt", "voice.eval_tts"}
+    assert set(budget.purposes) == {"voice.stt", "voice.tts"}
     assert budget.monthly_limit_usd == Decimal("20")
     assert budget.session_limit_usd == Decimal("1")
     assert budget.daily_limit_usd is None
+    # Phase 6 branch 3a: the eval purposes have their own row, never the
+    # live `audio` cap, so an eval run cannot starve live voice.
+    eval_budget = AIBudget.objects.get(name="voice_eval")
+    assert set(eval_budget.purposes) == {"voice.eval_stt", "voice.eval_tts"}
+    assert eval_budget.monthly_limit_usd == Decimal("5")
+    assert eval_budget.session_limit_usd == Decimal("2")
+    assert [b.name for b in budgets.budgets_for("voice.eval_stt")] == ["voice_eval"]
+    assert [b.name for b in budgets.budgets_for("voice.stt")] == ["audio"]
     for name in ("openrouter-stt", "openrouter-tts"):
         row = ModelProvider.objects.get(name=name)
         assert (row.is_active, row.personal_data_allowed) == (False, False)
@@ -594,6 +604,8 @@ def test_seed_local_speech_rows_with_voice_key_and_idempotent(monkeypatch):
         "skills_curate_weekly",
         # Phase 12 D17 (ai_core 0013): the playbook distiller's daily cap.
         "skills_playbook_daily",
+        # Phase 6 branch 3a: the evaluation set's own audio cap.
+        "voice_eval",
     }
 
 
@@ -684,15 +696,3 @@ def test_default_routes_send_english_to_its_own_local_row():
     routes = base.VOICE_TTS_ROUTES
     assert routes["tr"]["provider"] == "voice-tts-local"
     assert routes["en"]["provider"] == "voice-tts-local-en"
-
-
-def test_reseed_adds_the_eval_purposes_to_an_existing_audio_budget():
-    """Phase 6 branch 3a: an installation seeded before the eval purposes
-    existed gains them on reseed; the owner's limits stay untouched."""
-    AIBudget.objects.create(
-        name="audio", purposes=["voice.stt", "voice.tts"], monthly_limit_usd=Decimal("7")
-    )
-    call_command("seed_ai_defaults")
-    budget = AIBudget.objects.get(name="audio")
-    assert budget.purposes == ["voice.stt", "voice.tts", "voice.eval_stt", "voice.eval_tts"]
-    assert budget.monthly_limit_usd == Decimal("7") and budget.session_limit_usd is None

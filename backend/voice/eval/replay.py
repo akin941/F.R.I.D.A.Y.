@@ -14,7 +14,8 @@ port so CI runs it with fakes and the owner's Mac with real models:
 Timings per clip: `stt_ms` and `tts_first_ms` are the gateway's own
 latencies (the same numbers `VoiceTurnTrace` stores for live turns),
 `turn_ms` the wall clock from STT start to the first sentence's audio,
-`end_of_turn_ms` the finish window in audio time. The LLM stage of A5's
+`end_of_turn_ms` the audio time from the clip's start at which end-of-turn
+would fire (last speech frame + the finish window). The LLM stage of A5's
 table is not replayed here; the live end-to-end figure comes from
 `VoiceTurnTrace.playback_start_ms` (`voice_eval --traces`).
 
@@ -234,7 +235,7 @@ def replay_clip(pipeline, entry, wav):
     hypothesis = ""
     if seg is not None:
         result.has_speech, result.speech_ms = seg.has_speech, seg.speech_ms
-        result.end_of_turn_ms = pipeline.finish_ms if seg.has_speech else None
+        result.end_of_turn_ms = seg.end_of_turn_ms if seg.has_speech else None
         started = pipeline.clock()
         try:
             hypothesis, result.stt_ms = pipeline.stt(wav, condition=entry.condition)

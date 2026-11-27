@@ -57,12 +57,18 @@ def resolve_owner(email=None):
     users = get_user_model().objects.filter(is_owner=True, is_active=True, is_agent=False)
     if email:
         users = users.filter(email__iexact=email)
-    owner = users.first()
+    owner = users.order_by("created_at", "pk").first()
     if owner is None:
         raise EvalError(
             f"{email} is not the active installation owner" if email else "no installation owner"
         )
-    workspace = Workspace.objects.filter(owner=owner, type=Workspace.Type.PERSONAL).first()
+    # The oldest personal workspace, as `workspaces.services.
+    # ensure_personal_workspace` picks it (read-only here: never created).
+    workspace = (
+        Workspace.objects.filter(owner=owner, type=Workspace.Type.PERSONAL)
+        .order_by("created_at", "pk")
+        .first()
+    )
     if workspace is None:
         raise EvalError("the owner has no personal workspace")
     return owner, workspace
@@ -75,10 +81,35 @@ def new_run_id():
 # --- files ---------------------------------------------------------------------
 
 
+def repo_roots():
+    """The checkout this code runs from: `backend/` and, when it is the
+    repository (it holds CLAUDE.md), its parent. Inside the `web` image
+    `backend/` is `/app` and its parent is `/`, which is not the repo."""
+    backend = Path(settings.BASE_DIR).resolve()
+    roots = [backend]
+    if (backend.parent / "CLAUDE.md").exists():
+        roots.append(backend.parent)
+    return roots
+
+
+def refuse_inside_repo(path, what):
+    """Reports, TTS audio and the baseline never land in the repository."""
+    resolved = Path(os.path.abspath(expand(path)))
+    try:
+        resolved = resolved.resolve()
+    except OSError:
+        pass
+    for root in repo_roots():
+        if resolved == root or root in resolved.parents:
+            raise EvalError(f"{what} {path} is inside the repository; use a directory outside it")
+    return path
+
+
 def ensure_private_dir(directory):
     """Create `directory` (and missing parents) mode 0700; refuse an
-    existing one others can read."""
+    existing one others can read, and one inside the repository."""
     directory = expand(directory)
+    refuse_inside_repo(directory, "directory")
     missing = []
     current = directory
     while not current.exists() and not current.is_symlink():

@@ -626,11 +626,17 @@ AI_UNTIERED_PURPOSES = frozenset(
 # creates it once; afterwards the owner edits the row in the admin, and a
 # reseed never overwrites it). The budget covers AI_AUDIO_PURPOSES; local
 # speech providers cost 0 and never trip it. Empty = no cap for that window.
-# Branch 3a's eval purposes are budgeted under the same A3 cap.
-AI_AUDIO_PURPOSES = ("voice.stt", "voice.tts", "voice.eval_stt", "voice.eval_tts")
+AI_AUDIO_PURPOSES = ("voice.stt", "voice.tts")
 AI_BUDGET_AUDIO_MONTHLY_USD = env("AI_BUDGET_AUDIO_MONTHLY_USD", default="20")
 AI_BUDGET_AUDIO_SESSION_USD = env("AI_BUDGET_AUDIO_SESSION_USD", default="1")
 AI_BUDGET_AUDIO_DAILY_USD = env("AI_BUDGET_AUDIO_DAILY_USD", default="")
+# Phase 6 branch 3a: the evaluation set's audio calls have their OWN A3 row
+# (`voice_eval`, seeded once, owner-editable), so an eval run can never
+# exhaust live voice's `audio` cap. The session window is one
+# `voice_eval` run (`voice_eval:<run id>`).
+AI_VOICE_EVAL_PURPOSES = ("voice.eval_stt", "voice.eval_tts")
+AI_BUDGET_VOICE_EVAL_MONTHLY_USD = env("AI_BUDGET_VOICE_EVAL_MONTHLY_USD", default="5")
+AI_BUDGET_VOICE_EVAL_RUN_USD = env("AI_BUDGET_VOICE_EVAL_RUN_USD", default="2")
 # Phase 8A D13: the learning loop's gateway caps. `learning` is the shared
 # monthly cap over both learning purposes (20 USD, ADR-012); each purpose
 # also gets its own daily cap. Seeded once by `seed_ai_defaults`

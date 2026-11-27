@@ -211,3 +211,119 @@ def test_traces_are_scoped_to_the_owner_workspace(owner, workspace):
 def test_no_owner_is_refused(db):
     with pytest.raises(CommandError, match="no installation owner"):
         _call("--traces")
+
+
+# --- review follow-ups (A11 review) ----------------------------------------------
+
+
+def _baseline(eval_env):
+    return eval_env["root"] / "latency-baseline.json"
+
+
+def test_baseline_refused_for_a_failed_run_unless_forced(eval_env, scripted_stt):
+    _call("--fill-hashes")
+    wav = (eval_env["set"] / "tr-quiet-001.wav").read_bytes()
+    scripted_stt[sha256_hex(wav)] = "tamamen başka bir cümle"
+    out = StringIO()
+    with pytest.raises(CommandError, match="verdict: fail"):
+        call_command("voice_eval", "--write-baseline", stdout=out)
+    assert "Baseline NOT written: the run's verdict is fail" in out.getvalue()
+    assert not _baseline(eval_env).exists()
+    with pytest.raises(CommandError, match="verdict: fail"):
+        call_command("voice_eval", "--write-baseline", "--force", stdout=StringIO())
+    assert _baseline(eval_env).exists()
+
+
+def test_baseline_refused_on_a_regression(eval_env):
+    _call("--fill-hashes")
+    _baseline(eval_env).write_text(
+        json.dumps({"version": 1, "run_id": "old", "p50": {"turn_ms": 0.001}})
+    )
+    out = StringIO()
+    with pytest.raises(CommandError, match="verdict: fail"):
+        call_command("voice_eval", "--write-baseline", stdout=out)
+    assert "REGRESSION turn_ms" in out.getvalue()
+    assert "Baseline NOT written" in out.getvalue()
+    assert json.loads(_baseline(eval_env).read_text())["run_id"] == "old"
+
+
+@pytest.mark.parametrize(
+    ("flags", "reason"),
+    [(("--limit", "1"), "--limit"), (("--stt-only",), "--stt-only")],
+)
+def test_baseline_refused_for_a_partial_run(eval_env, flags, reason):
+    _call("--fill-hashes")
+    out = _call("--write-baseline", *flags)
+    assert f"Baseline NOT written: {reason}" in out
+    assert not _baseline(eval_env).exists()
+    out = _call("--write-baseline", "--force", *flags)
+    assert "Baseline written" in out and _baseline(eval_env).exists()
+
+
+def test_check_set_reports_mode_uid_and_hashes(eval_env):
+    _call("--fill-hashes")
+    (eval_env["set"] / "cs-quiet-001.wav").write_bytes(fixtures.clip(speech=0.9))
+    (eval_env["set"] / "stray.wav").write_bytes(fixtures.clip(speech=0.1))
+    out = StringIO()
+    with pytest.raises(CommandError, match="would be refused"):
+        call_command("voice_eval", "--check-set", str(eval_env["set"]), stdout=out)
+    text = out.getvalue()
+    assert f"mode 0700, uid {os.getuid()}" in text and "private check: pass" in text
+    assert "5 WAV file(s), 5 manifest row(s): 3 hash ok, 1 hash differs" in text
+    assert "1 unrecorded" in text and "1 unlisted" in text
+    assert "hekimi" not in text.lower()
+    # A dry run makes no model call.
+    assert not ModelUsage.objects.exists()
+
+
+def test_check_set_passes_and_flags_a_readable_directory(eval_env):
+    _call("--fill-hashes")
+    assert "4 hash ok" in _call("--check-set", str(eval_env["set"]))
+    os.chmod(eval_env["set"], 0o750)
+    out = StringIO()
+    with pytest.raises(CommandError, match="would be refused"):
+        call_command("voice_eval", "--check-set", str(eval_env["set"]), stdout=out)
+    assert "mode 0750" in out.getvalue() and "private check: fail" in out.getvalue()
+
+
+def test_check_set_needs_no_database(eval_env, django_db_blocker):
+    """`--check-set` reads files only: it runs with database access blocked."""
+    _call("--fill-hashes")
+    with django_db_blocker.block():
+        assert "4 hash ok" in _call("--check-set", str(eval_env["set"]))
+
+
+def test_fill_hashes_writes_the_manifest_atomically(eval_env):
+    os.chmod(eval_env["manifest"], 0o640)
+    _call("--fill-hashes")
+    assert stat.S_IMODE(os.stat(eval_env["manifest"]).st_mode) == 0o640
+    assert [p.name for p in eval_env["manifest"].parent.glob(".eval-manifest.md.*")] == []
+
+
+@pytest.mark.parametrize("option", ["--out", "--results-dir"])
+def test_outputs_inside_the_repo_are_refused(eval_env, settings, option):
+    from pathlib import Path
+
+    _call("--fill-hashes")
+    inside = Path(settings.BASE_DIR) / "voice-eval-out"
+    target = str(inside / "r.json") if option == "--out" else str(inside)
+    with pytest.raises(CommandError, match="inside the repository"):
+        _call(option, target)
+    assert not inside.exists()
+
+
+def test_the_oldest_personal_workspace_is_chosen(owner, workspace):
+    """Two personal workspaces: the oldest wins, as in `ensure_personal_workspace`
+    (`accounts_single_owner` already allows only one owner row)."""
+    from datetime import timedelta
+
+    from django.utils import timezone
+
+    from voice.eval import runner
+    from workspaces.models import Workspace
+
+    older = Workspace.objects.create(name="Older", type=Workspace.Type.PERSONAL, owner=owner)
+    Workspace.objects.filter(pk=older.pk).update(created_at=timezone.now() - timedelta(days=365))
+    assert runner.resolve_owner()[1].pk == older.pk
+    assert runner.resolve_owner(owner.email)[1].pk == older.pk
+    assert runner.resolve_owner()[0].pk == owner.pk
