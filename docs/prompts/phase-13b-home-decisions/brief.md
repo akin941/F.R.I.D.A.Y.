@@ -1863,3 +1863,19 @@ credentials, paid calls or hardware.
    and see the HUD go "kapalı" and the next utterance become a card with
    "Doğrudan değil: doğrudan medya kapalı". The server side is covered here
    against the fake Home Assistant; the Swift node needs no change.
+
+### Known follow-ups — review notes left open at the `feat/p13-direct-media-ui` merge (2026-11-27)
+
+1. **LOW — calls fetch failure shown as an empty list**
+   (`frontend/src/components/connectors/HomeDirectSettings.tsx`). If the calls
+   fetch fails, `load()` sets `calls` to `[]` and the panel shows
+   "Henüz doğrudan komut yok.", which is misleading for an audit-style list:
+   the owner cannot tell "no calls" from "could not load". Fix: keep a
+   separate calls error state and show "Komutlar yüklenemedi." on failure.
+2. **LOW — HUD state precedence documented only in the docstring**
+   (`backend/connectors/home_direct.py`). `hud_status` reports
+   `not_configured` with non-zero counts when Home Assistant is unusable, and
+   `not_configured` can override `off_owner` / `off_env` only in the "on"
+   path. This is intentional and tested, but the precedence (env, then owner,
+   then availability) lives only in the docstring. Fix (optional): mention the
+   precedence in ADR-018 or in this brief's D11 text.
