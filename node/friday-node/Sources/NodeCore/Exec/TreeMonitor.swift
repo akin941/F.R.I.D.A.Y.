@@ -377,6 +377,19 @@ final class TreeMonitor: @unchecked Sendable {
         }
         lock.unlock()
         if broken != nil || (exited && !members.isEmpty) { kill(members) }
-        if exited && members.isEmpty { stop() }
+        // Stop only after the tree has stayed empty for a while: a process
+        // still being created when the last member died is caught too.
+        lock.lock()
+        if exited && members.isEmpty {
+            emptySince = emptySince ?? Date()
+        } else {
+            emptySince = nil
+        }
+        let quiet = emptySince.map { Date().timeIntervalSince($0) >= Self.emptyGrace } ?? false
+        lock.unlock()
+        if quiet { stop() }
     }
+
+    static let emptyGrace: Double = 1.5
+    private var emptySince: Date?
 }
