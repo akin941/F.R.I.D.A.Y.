@@ -2861,6 +2861,28 @@ Backend not touched.
    server's `VOICE_LIVE_SELFTEST_RESULT_PATH` at the result file; seven green
    nights (M3), with `-m real_models` run first (M1 owner step 6).
 
+**Hardening follow-up (`fix/p11-voice-selftest-hardening`, 2026-11-27;
+the B8 review's non-blocking items).**
+1. `selftest-nightly.sh` runs `friday-voice` in the background and waits
+   on it, so a SIGTERM reaches the trap at once (bash defers a trap until a
+   foreground command returns): the child is stopped, the token deleted and
+   the hold ended before launchd's SIGKILL. The cleanup also runs before the
+   battery check. The agent's `ExitTimeOut` is 45 s (> the 30 s mint
+   timeout, the one foreground step left). `testATermMidRunDeletesTheTokenAndStopsTheChild`
+   (a 30 s fake `friday-voice`): against the old script it fails (the
+   script waited 30 s and exited 130); against the new one it passes.
+2. A lease that runs out during a loopback no longer releases the hold
+   under it: the expiry is deferred and ends the hold when the loopback
+   returns (`testALeaseThatRunsOutDuringALoopbackWaitsForIt`). `end` stays
+   ungated (`testEndWorksWithTheSettingOff`).
+3. README "The app's gates" / "What the setting trusts": with "Gece
+   öz-testi" on, any process of the owner's user can mint a token and pause
+   live voice through the socket; `end` works with the setting off.
+4. The socket's per-connection read timeout is 2 s (was 10 s): a stalled
+   client holds the serial accept loop back for at most 2 s.
+5. `swift test` 5× in a row: see the branch report (no flake reproduced
+   when no other build ran in the worktree).
+
 ### M4 — Mac evaluation (go/no-go measurements)
 
 1. **FAR** on 24 h of household audio (owner step 1, recorded outside

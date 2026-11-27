@@ -20,6 +20,10 @@
   <key>StartCalendarInterval</key>
   <dict><key>Hour</key><integer>3</integer><key>Minute</key><integer>17</integer></dict>
   <key>LimitLoadToSessionType</key><string>Aqua</string>
+  <!-- Longer than the app's 30 s mint timeout: a SIGTERM that lands while
+       the token mint runs still reaches the script's trap (which
+       deletes the token) before launchd escalates to SIGKILL. -->
+  <key>ExitTimeOut</key><integer>45</integer>
   <key>StandardOutPath</key><string>@HOME@/Library/Logs/Friday/voice-selftest.log</string>
   <key>StandardErrorPath</key><string>@HOME@/Library/Logs/Friday/voice-selftest.log</string>
 </dict>
