@@ -340,7 +340,7 @@ def test_the_protocol_surface_is_the_phase_12_closeout_one(settings):
         return
     assert row.status == PASS, row
     assert row.detail == (
-        "196 node protocol files and the friday-voice lock unchanged since the Phase 12 closeout"
+        "235 node protocol files and the friday-voice lock unchanged since the Phase 12 closeout"
     )
 
 
@@ -361,10 +361,10 @@ def test_the_digest_moves_with_any_schema_or_contract_change(tmp_path):
     schema = next((copy / "nodes" / "protocol" / "schemas").rglob("*.json"))
     schema.write_bytes(schema.read_bytes().replace(b"{", b"{ ", 1))
     changed, count = preflight.node_protocol_digest(copy)
-    assert changed != preflight.PHASE12_NODE_PROTOCOL_SHA256 and count == 196
+    assert changed != preflight.PHASE12_NODE_PROTOCOL_SHA256 and count == 235
     new = copy / "nodes" / "capabilities" / "v1" / "screen.capture.json"
     new.write_text("{}", encoding="utf-8")
-    assert preflight.node_protocol_digest(copy)[1] == 197
+    assert preflight.node_protocol_digest(copy)[1] == 236
 
 
 @pytest.mark.django_db
@@ -373,7 +373,7 @@ def test_a_changed_node_protocol_fails(monkeypatch, settings):
     monkeypatch.setattr(preflight, "PHASE12_NODE_PROTOCOL_SHA256", "0" * 64)
     row = _rows()["node_protocol_frozen"]
     assert row.status == FAIL
-    assert row.detail.startswith("the node protocol surface changed (196 files, was 196;")
+    assert row.detail.startswith("the node protocol surface changed (235 files, was 235;")
     assert row.detail.endswith("(a protocol change needs an ADR)")
 
 
@@ -395,7 +395,7 @@ def test_without_a_friday_voice_checkout_only_the_node_half_is_checked(settings,
     settings.PREFLIGHT_FRIDAY_VOICE_DIR = str(tmp_path / "absent")
     row = _rows()["node_protocol_frozen"]
     assert row.status == WARN
-    assert "196 node protocol files unchanged" in row.detail
+    assert "235 node protocol files unchanged" in row.detail
     assert "friday-voice lock not checkable here" in row.detail
 
 

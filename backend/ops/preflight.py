@@ -3467,7 +3467,11 @@ def check_home():
 # capability contracts, conformance cases and vectors) and
 # `node/friday-voice/conformance.lock`, hashed at the Phase 12 closeout
 # merge (7d2dee5, `chore/p12-closeout`). A later protocol change updates
-# these digests in the same branch as its ADR.
+# these digests in the same branch as its ADR. Re-pinned at the
+# integ/phase-13 integration of the Phase 10 protocol v2 (ADR-013
+# "Implementation notes -- protocol v2", `feat/p10-node-confirm`) and the
+# runbook A12 move of the reference contracts into `nodes/` (235 files);
+# `node/friday-voice/conformance.lock` is unchanged.
 NODE_PROTOCOL_GLOBS = (
     "nodes/protocol/schemas/**/*.json",
     "nodes/protocol/vectors/**/*.json",
@@ -3475,8 +3479,8 @@ NODE_PROTOCOL_GLOBS = (
     "nodes/conformance/cases/**/*.json",
     "nodes/conformance/vectors/**/*.json",
 )
-PHASE12_NODE_PROTOCOL_SHA256 = "c30e06b779f660c9f5c06c51a3dac1b7d86b8ed45729f9c8a7d8259a4cd9b0fb"
-PHASE12_NODE_PROTOCOL_FILES = 196
+PHASE12_NODE_PROTOCOL_SHA256 = "543be31274e000cb10c56d5ec7249b1344cfaff4cb55e74eb3abf41906669c51"
+PHASE12_NODE_PROTOCOL_FILES = 235
 PHASE12_FRIDAY_VOICE_LOCK_SHA256 = (
     "a9be6508206d1d779036119ddaf3ef2453f2333bb46166a6d9f093c0eae1ef29"
 )
@@ -3489,7 +3493,6 @@ LINUX_NODE_VENDORED_TREES = (
     "nodes/protocol",
     "nodes/capabilities",
     "nodes/reference/fixtures",
-    "integrations/node_reference/contracts",
 )
 _VENDOR_LOCK_LINE = re.compile(r"^([0-9a-f]{64})  ([0-9a-f]{64})  ([A-Za-z0-9_./-]+)$")
 _VENDOR_SKIP_PARTS = frozenset({"__pycache__", ".pytest_cache"})
