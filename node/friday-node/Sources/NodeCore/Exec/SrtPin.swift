@@ -61,11 +61,63 @@ public enum SrtPin {
         guard listed == pinned else {
             return "package-lock.json lists other packages: " + listed.symmetricDifference(pinned).sorted().joined(separator: ", ")
         }
+        if let problem = layoutProblem(prefix: prefix) { return problem }
         for package in packages {
             guard entries[package.path]?["version"]?.stringValue == package.version,
                 entries[package.path]?["integrity"]?.stringValue == package.integrity
             else { return "\(package.path): not the pinned \(package.version) / integrity" }
             if let problem = verifyInstalled(package, prefix: prefix, cache: cache) { return problem }
+        }
+        return nil
+    }
+
+    /// The `.bin` links npm creates for the pinned packages, with their
+    /// exact targets.
+    public static let binLinks = ["srt": "../@anthropic-ai/sandbox-runtime/dist/cli.js"]
+
+    /// `<prefix>/node_modules` holds exactly the pinned package roots (a
+    /// scope directory holds exactly its pinned packages), `.bin` (exactly
+    /// `binLinks`) and `.package-lock.json`: no extra module that a
+    /// `require` could find (hardening review, N2).
+    static func layoutProblem(prefix: String) -> String? {
+        let modules = prefix + "/node_modules"
+        func entries(_ path: String) -> Set<String> {
+            Set((try? FileManager.default.contentsOfDirectory(atPath: path)) ?? [])
+        }
+        let names = packages.map { String($0.path.dropFirst("node_modules/".count)) }
+        var expectedTop: Set<String> = [".bin", ".package-lock.json"]
+        var scopes: [String: Set<String>] = [:]
+        for name in names {
+            let parts = name.split(separator: "/", maxSplits: 1).map(String.init)
+            if parts.count == 2 {
+                expectedTop.insert(parts[0])
+                scopes[parts[0], default: []].insert(parts[1])
+            } else {
+                expectedTop.insert(name)
+            }
+        }
+        let top = entries(modules)
+        guard top == expectedTop else {
+            return "node_modules holds other entries: " + top.symmetricDifference(expectedTop).sorted().joined(separator: ", ")
+        }
+        for (scope, expected) in scopes {
+            let found = entries(modules + "/" + scope)
+            guard found == expected else {
+                return "node_modules/\(scope) holds other entries: "
+                    + found.symmetricDifference(expected).sorted().joined(separator: ", ")
+            }
+        }
+        let bin = entries(modules + "/.bin")
+        guard bin == Set(binLinks.keys) else {
+            return "node_modules/.bin holds other entries: "
+                + bin.symmetricDifference(Set(binLinks.keys)).sorted().joined(separator: ", ")
+        }
+        for (name, target) in binLinks {
+            let path = modules + "/.bin/" + name
+            var info = stat()
+            guard lstat(path, &info) == 0, info.st_mode & S_IFMT == S_IFLNK,
+                (try? FileManager.default.destinationOfSymbolicLink(atPath: path)) == target
+            else { return "node_modules/.bin/\(name) is not the link to \(target)" }
         }
         return nil
     }

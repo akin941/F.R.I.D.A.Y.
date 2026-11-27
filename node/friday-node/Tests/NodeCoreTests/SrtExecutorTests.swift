@@ -471,6 +471,39 @@ final class RealSrtTests: XCTestCase {
         XCTAssertEqual(SrtLocation.from(reconfirmed.document), reconfirmed)
     }
 
+    /// node_modules holds exactly the pinned roots, `.bin` (with `srt`
+    /// linked to the pinned cli.js) and `.package-lock.json`.
+    func testTheNodeModulesLayoutIsExactlyThePinnedOne() throws {
+        let installed = try executor().location
+        let base = resolvedPath(try makeTempDirectory())
+        defer { try? FileManager.default.removeItem(atPath: base) }
+        let prefix = base + "/srt"
+        try FileManager.default.copyItem(atPath: installed.prefix, toPath: prefix)
+        let modules = prefix + "/node_modules"
+        XCTAssertNil(SrtPin.problem(prefix: prefix))
+        // An extra top-level module (a `require` could find it).
+        try FileManager.default.createDirectory(atPath: modules + "/evil", withIntermediateDirectories: true)
+        XCTAssertEqual(SrtPin.problem(prefix: prefix), "node_modules holds other entries: evil")
+        try FileManager.default.removeItem(atPath: modules + "/evil")
+        // An extra package inside a scope.
+        try FileManager.default.createDirectory(atPath: modules + "/@anthropic-ai/other", withIntermediateDirectories: true)
+        XCTAssertNotNil(SrtPin.problem(prefix: prefix))
+        try FileManager.default.removeItem(atPath: modules + "/@anthropic-ai/other")
+        // `.bin/srt` pointing elsewhere, or an extra link.
+        try FileManager.default.removeItem(atPath: modules + "/.bin/srt")
+        try FileManager.default.createSymbolicLink(atPath: modules + "/.bin/srt", withDestinationPath: "../zod/index.js")
+        XCTAssertEqual(
+            SrtPin.problem(prefix: prefix),
+            "node_modules/.bin/srt is not the link to ../@anthropic-ai/sandbox-runtime/dist/cli.js")
+        try FileManager.default.removeItem(atPath: modules + "/.bin/srt")
+        try FileManager.default.createSymbolicLink(
+            atPath: modules + "/.bin/srt", withDestinationPath: "../@anthropic-ai/sandbox-runtime/dist/cli.js")
+        try FileManager.default.createSymbolicLink(atPath: modules + "/.bin/extra", withDestinationPath: "../zod/index.js")
+        XCTAssertNotNil(SrtPin.problem(prefix: prefix))
+        try FileManager.default.removeItem(atPath: modules + "/.bin/extra")
+        XCTAssertNil(SrtPin.problem(prefix: prefix))
+    }
+
     /// The pin (hardening N2): a lockfile with another integrity, or no
     /// cached tarball to verify against, refuses.
     func testOnlyThePinnedPackagesCanBeConfirmed() throws {
