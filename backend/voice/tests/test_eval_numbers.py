@@ -48,6 +48,10 @@ def test_integer_words(digits, words):
         ("250₺", "iki yüz elli lira"),
         ("250 TL", "iki yüz elli lira"),
         ("1.000.000 kişi", "bir milyon kişi"),
+        ("1.000", "bin"),
+        ("1.000,50 TL", "bin virgül elli lira"),
+        ("12.500,75", "on iki bin beş yüz virgül yetmiş beş"),
+        ("₺1.000,50", "bin virgül elli lira"),
         ("3,5 kilo", "üç virgül beş kilo"),
     ],
 )

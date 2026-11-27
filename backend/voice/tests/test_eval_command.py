@@ -15,7 +15,7 @@ from django.core.management import CommandError, call_command
 
 from ai_core.adapters.base import TranscribeAdapterResult
 from ai_core.adapters.fake import FakeAdapter
-from ai_core.models import ModelUsage
+from ai_core.models import AIBudget, ModelUsage
 from voice.eval import fixtures, replay
 from voice.eval.manifest import MANIFEST_MARKER, Entry, parse_manifest, render_table, sha256_hex
 from voice.models import VoiceTurnTrace
@@ -42,6 +42,9 @@ def scripted_stt(monkeypatch):
 
 @pytest.fixture
 def eval_env(tmp_path, settings, owner, speech_providers, scripted_stt):
+    AIBudget.objects.create(
+        name="voice_eval", purposes=list(settings.AI_VOICE_EVAL_PURPOSES), monthly_limit_usd=5
+    )
     set_dir = tmp_path / "FridayEval" / "asr"
     set_dir.mkdir(parents=True, mode=0o700)
     os.chmod(tmp_path / "FridayEval", 0o700)
@@ -327,3 +330,65 @@ def test_the_oldest_personal_workspace_is_chosen(owner, workspace):
     assert runner.resolve_owner()[1].pk == older.pk
     assert runner.resolve_owner(owner.email)[1].pk == older.pk
     assert runner.resolve_owner()[0].pk == owner.pk
+
+
+# --- follow-ups (fix/p6-voice-eval-followups) -------------------------------------
+
+
+@pytest.mark.parametrize("mode", [(), ("--tts-sheet",)])
+def test_model_calling_modes_need_the_eval_budget(eval_env, mode):
+    _call("--fill-hashes")
+    AIBudget.objects.filter(name="voice_eval").update(purposes=["voice.eval_stt"])
+    with pytest.raises(CommandError, match=r"voice\.eval_tts: run `manage.py seed_ai_defaults`"):
+        _call(*mode)
+    AIBudget.objects.filter(name="voice_eval").update(
+        purposes=["voice.eval_stt", "voice.eval_tts"], is_active=False
+    )
+    with pytest.raises(CommandError, match="seed_ai_defaults"):
+        _call(*mode)
+    assert not ModelUsage.objects.exists()
+
+
+def test_seeded_eval_budget_lets_the_run_through(eval_env, settings):
+    AIBudget.objects.filter(name="voice_eval").delete()
+    call_command("seed_ai_defaults", stdout=StringIO())
+    _call("--fill-hashes")
+    assert "verdict: pass" in _call()
+
+
+def test_dry_and_offline_modes_need_no_budget(eval_env):
+    AIBudget.objects.all().delete()
+    assert "filled 4 hash(es)" in _call("--fill-hashes")
+    assert "4 hash ok" in _call("--check-set", str(eval_env["set"]))
+
+
+def _case_changed(path):
+    """`path` with its last component's case flipped, or None when that
+    spelling does not name the same directory (a case-sensitive FS)."""
+    from pathlib import Path
+
+    path = Path(path)
+    flipped = path.with_name(path.name.swapcase())
+    if flipped == path:
+        return None
+    try:
+        return flipped if os.path.samefile(flipped, path) else None
+    except OSError:
+        return None
+
+
+def test_repo_guard_is_not_bypassed_by_a_case_change(eval_env, settings):
+    from pathlib import Path
+
+    changed = _case_changed(Path(settings.BASE_DIR))
+    if changed is None:
+        pytest.skip("case-sensitive filesystem")
+    _call("--fill-hashes")
+    target = changed / "voice-eval-out"
+    with pytest.raises(CommandError, match="inside the repository"):
+        _call("--results-dir", str(target))
+    assert not (Path(settings.BASE_DIR) / "voice-eval-out").exists()
+    from voice.eval import runner
+
+    with pytest.raises(runner.EvalError, match="inside the repository"):
+        runner.refuse_inside_repo(changed / "deep" / "not" / "yet" / "there.json", "file")

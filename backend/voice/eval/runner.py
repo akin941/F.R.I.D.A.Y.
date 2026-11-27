@@ -81,6 +81,39 @@ def new_run_id():
 # --- files ---------------------------------------------------------------------
 
 
+def require_eval_budget():
+    """Refuse a model-calling `voice_eval` mode unless an active `AIBudget`
+    covers both eval purposes (A3: the `voice_eval` row, seeded by
+    `seed_ai_defaults`). Without one an eval run against a priced row would
+    be uncapped."""
+    from ai_core.budgets import budgets_for
+
+    uncovered = [p for p in settings.AI_VOICE_EVAL_PURPOSES if not budgets_for(p)]
+    if uncovered:
+        raise EvalError(
+            f"no active AI budget covers {', '.join(uncovered)}: run "
+            "`manage.py seed_ai_defaults` (creates the `voice_eval` budget) "
+            "or re-activate it in the admin"
+        )
+
+
+def _same_or_inside(path, root_stat):
+    """True if `path` or one of its existing ancestors IS the root, compared
+    by (st_dev, st_ino) -- immune to case-insensitive or Unicode-normalising
+    filesystems where two spellings name one directory."""
+    current = path
+    while True:
+        try:
+            info = os.stat(current)
+        except OSError:
+            info = None
+        if info is not None and (info.st_dev, info.st_ino) == root_stat:
+            return True
+        if current.parent == current:
+            return False
+        current = current.parent
+
+
 def repo_roots():
     """The checkout this code runs from: `backend/` and, when it is the
     repository (it holds CLAUDE.md), its parent. Inside the `web` image
@@ -100,7 +133,11 @@ def refuse_inside_repo(path, what):
     except OSError:
         pass
     for root in repo_roots():
-        if resolved == root or root in resolved.parents:
+        try:
+            root_info = os.stat(root)
+        except OSError:
+            continue
+        if _same_or_inside(resolved, (root_info.st_dev, root_info.st_ino)):
             raise EvalError(f"{what} {path} is inside the repository; use a directory outside it")
     return path
 

@@ -329,6 +329,7 @@ running stack (brief A7):
 | `voice_providers` | at least one eligible STT and one eligible TTS row (an eligible priced cloud row is named) | no eligible row (no `VOICE_API_KEY` / `AI_FAKE_PROVIDER`) | no STT or no TTS rows at all (run `seed_ai_defaults`) |
 | `voice_routes` | every `VOICE_TTS_ROUTES` language names an eligible TTS row | a route names a missing or ineligible row (the gateway falls back to priority order) | — |
 | `voice_budget` | an active `AIBudget` with a monthly cap covers `voice.stt` and `voice.tts` | a cover has no monthly cap | an audio purpose has no active budget |
+| `voice_eval_budget` | an active budget covers `voice.eval_stt` and `voice.eval_tts` (the seeded `voice_eval` row, §8.3) | none does (`voice_eval` then refuses to run) | — |
 | `voice_mute` | `PREFLIGHT_VOICE_MUTE_CMD` exits 0 | the command is not set | it exits non-zero, times out or cannot start |
 
 Each speech call is a `ModelUsage` row like the chat rows' (paid only for
@@ -524,7 +525,10 @@ their **own** A3 budget row, `voice_eval` (seeded once: 5 USD a month,
 against an enabled cloud row (e.g. rating `openrouter-tts`) can never
 exhaust the budget live voice runs on: it stops at its own cap with a
 `budget_exceeded` usage row and the run aborts. Local rows cost 0 and
-never touch either cap.
+never touch either cap. `voice_eval --set` and `--tts-sheet` refuse to
+start when no active budget covers both eval purposes (run
+`seed_ai_defaults`, or re-activate the row); `--check-set`,
+`--fill-hashes` and `--score-tts` make no model call and need none.
 
 ### 8.4 Latency of live turns (A5)
 

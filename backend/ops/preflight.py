@@ -768,6 +768,30 @@ def _check_voice_budget():
     return CheckResult("voice_budget", PASS, described)
 
 
+def _check_voice_eval_budget():
+    """Phase 6 branch 3a: the evaluation set's own A3 row. `voice_eval`
+    refuses to run without it, so a missing cover is only a warning here
+    (live voice is unaffected)."""
+    from ai_core.budgets import budgets_for
+
+    purposes = tuple(getattr(settings, "AI_VOICE_EVAL_PURPOSES", ()) or ())
+    covers = {p: budgets_for(p) for p in purposes}
+    uncovered = [p for p in purposes if not covers[p]]
+    if not purposes or uncovered:
+        return CheckResult(
+            "voice_eval_budget",
+            WARN,
+            f"no active budget covers {', '.join(uncovered) or 'the eval purposes'}: "
+            "run seed_ai_defaults (voice_eval refuses to run)",
+        )
+    budgets = {b.pk: b for found in covers.values() for b in found}
+    return CheckResult(
+        "voice_eval_budget",
+        PASS,
+        "; ".join(_describe_budget(b) for b in sorted(budgets.values(), key=lambda b: b.name)),
+    )
+
+
 def check_voice_config():
     """Phase 6 configuration, read-only (no model call, no `ModelUsage`):
 
@@ -781,6 +805,8 @@ def check_voice_config():
       to priority order (A2), the owner sees which route is not honoured.
     - `voice_budget`: an active `AIBudget` covers every audio purpose
       (`fail` otherwise -- A3); a cover without a monthly cap is a `warn`.
+    - `voice_eval_budget` (branch 3a): an active budget covers the eval
+      purposes (`AI_VOICE_EVAL_PURPOSES`); none is a `warn`.
     """
     from ai_core.models import ModelProvider
 
@@ -794,6 +820,7 @@ def check_voice_config():
         _check_voice_providers(rows),
         _check_voice_routes({p.name: p for p in rows["tts"]}),
         _check_voice_budget(),
+        _check_voice_eval_budget(),
     ]
 
 
