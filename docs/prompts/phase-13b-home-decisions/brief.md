@@ -1110,7 +1110,7 @@ says "server side done; go/no-go pending owner evaluation".
 | 1b | `feat/p13-direct-media-model` | `HomeEntity.direct`, `HomeDirectSettings`, `HomeDirectCall` (`connectors` 0006), closed allowlist + digest, `classify`, rate windows, volume rules, settings service, entity `direct` field + `/direct` + `/direct/calls` endpoints with role × endpoint, registry walk, the classifier port, `HA_DIRECT_*` settings, ADR-018 implementation note | 1a | not started |
 | 1c | `feat/p13-direct-media-exec` | `execute` (re-resolution, kill-switch re-check, clamp, one send, audit), recovery scan, executor port, `HOME_DIRECT` intent (`assistant` 0015) + code-only parser lock, cap clause, `extra_effects` + `_finish` check, sentinel factory, voice/`node_voice`/typed paths, provenance tests | 1b | not started |
 | 1d | `feat/p13-direct-media-ui` | HUD `home_direct` line, `/connectors` direct switch and settings panel, vitest | 1b (merges after 1c, so nothing is shown as "on" before it can run) | not started |
-| 2 | `feat/p13-interim-mac-server` | `HOME_SERVER_PLATFORM`, `home_server_platform`, macOS-aware `home_disk_encryption`, `HOME_BACKUP_OFFSITE_REPOSITORY` + the R2 destination check, R2 names in `.env.example`, portable backup/drill scripts, `restic.env.example`, launchd plist, `compose.mac.yml`, `make up-mac-server` | brief approved (independent of 1) | not started |
+| 2 | `feat/p13-interim-mac-server` | `HOME_SERVER_PLATFORM`, `home_server_platform`, macOS-aware `home_disk_encryption`, `HOME_BACKUP_OFFSITE_REPOSITORY` + the R2 destination check, R2 names in `.env.example`, portable backup/drill scripts, `restic.env.example`, launchd plist, `compose.mac.yml`, `make up-mac-server` | brief approved (independent of 1) | **implemented 2026-11-20** (server side, tested against the macOS tool-set double; the real Mac run is M1 — deferred: Mac session; awaits the independent Sonnet 5 review) |
 | 3 | `chore/p13b-closeout` | `ha_direct_media` preflight row, home-direct e2e, handoff Part F, MASTER_PLAN row, ADR-018 closeout note, `self_sources.json`, runbook step 12 | 1a–1d, 2 | not started |
 | M1 | Interim server on the real MacBook | Runbook "Interim" I1–I5: OrbStack/Docker Desktop, `make up-mac-server`, FileVault attestation, the R2 bucket, the LaunchAgent, the first backup and restore drill, one drill from R2 | 2 merged | deferred: Mac session (pending owner evaluation) |
 | M2 | Mac node on the same machine + the real TV | Loopback pairing (I3) of the existing Swift app; flag the TV; direct pause/volume by voice; kill switch; rate limit; unflagged → card | 1a–1d, 2 merged; M1; Phase 9 B1 | deferred: Mac session (pending owner evaluation) |
@@ -1163,7 +1163,9 @@ MacBook" I1, I2, I4 optional, I5):
 
 **Contract (already enforced here):** branch 2
 `ops/tests/test_preflight_home_macos.py`, `test_preflight_home_offsite.py`,
-`test_home_backup_portable.py`, `test_launchd_plist.py`; the closeout e2e's
+`test_home_backup_portable.py`, `test_launchd_plist.py`,
+`test_no_bucket_secrets_in_compose.py`, `config/tests/test_compose_files.py`
+(the `up-mac-server` merge); the closeout e2e's
 macOS preflight run.
 
 ### M2 — The Mac's own node and the real TV (go/no-go)
@@ -1219,7 +1221,7 @@ R2 with a passing drill from the R2 copy."
 | The router cannot emit `home_direct`; forged payloads refused | branch 1c tests (D10a) | pending (branch 1c) |
 | Direct calls audited with origin and entity; no `ApprovalRequest` | branch 1c + closeout e2e | pending (branch 1c, closeout) |
 | Rate limits and volume clamp fail closed to the card | branch 1b + 1c tests | pending (branches 1b, 1c) |
-| No macOS-caused preflight failure; R2 destination checked | branch 2 tests + closeout e2e | pending (branch 2, closeout) |
+| No macOS-caused preflight failure; R2 destination checked | branch 2 tests + closeout e2e | branch 2 tests green (2026-11-20); pending (closeout e2e) |
 | No protocol change | `node_protocol_frozen` | pending (closeout) |
 | Interim server on the real Mac, backups to R2, drill from R2 | M1 | pending owner evaluation |
 | Real-TV direct media, kill switch, rate limit; latency recorded | M2 | pending owner evaluation (Mac session) |
@@ -1396,3 +1398,87 @@ hardware: it is documentation only.
    execute step 3, immediately before the send; add a 1b/1c test that one
    direct call increments each window exactly once and that a fallback
    increments none.
+
+### Implementation notes — `feat/p13-interim-mac-server` (implemented 2026-11-20)
+
+- **Preflight** (`backend/ops/preflight.py`): `home_server_platform` is
+  the sixth `check_home` row (after `home_disk_encryption`); `linux` (and
+  an empty value) pass, `macos` warns, anything else fails without echoing
+  the value (and `home_disk_encryption` then warns "not assessed"). On
+  `macos`, `home_disk_encryption` is always a warning naming FileVault
+  ("FileVault owner-confirmed on <date>; no LUKS/TPM on macOS (interim)" /
+  "FileVault not confirmed (…)"); on `linux` its texts are unchanged.
+  `home_backup_fresh`: `HOME_BACKUP_OFFSITE_REPOSITORY` is validated first
+  (userinfo `@`, query `?` or a character outside
+  `[A-Za-z0-9._~:/%+=,-]` → fail, value never echoed); a recorded
+  `repository` is validated the same way whether or not the setting is
+  set; trailing slashes are not significant; a mismatch fails naming
+  `home_repository_label` (`<backend>:<scheme>://<host>`, `<backend>:<host>`
+  or "a local path" — never a path or bucket); absent → warn (a stale
+  backup still fails); equal → the age rules with ", off-site R2" (or the
+  label for a non-R2 host).
+- **Scripts** (`deploy/home/`): bash ≥ 4.4 is checked from `BASH_VERSION`
+  before `shopt -s inherit_errexit` (exit 1 for the backup, 2 for the
+  drill, both naming `/opt/homebrew/bin/bash`); the test double for an old
+  bash overwrites `BASH_VERSION` before sourcing the script. Lock: `flock`
+  when on PATH, else `.friday-backup.lock.d/pid` (mkdir-atomic; a holder
+  whose PID `ps -p` does not find, or a missing/garbled PID file, is stale
+  and taken over); restic excludes the lock directory. `sha256sum` or
+  `shasum -a 256`; size by `wc -c`; the drill's `realpath -m` became a
+  portable `abspath`. `RESTIC_REPOSITORY` is read from the restic env file
+  in a subshell and refused (never echoed) **before anything is dumped**.
+  New optional `FRIDAY_PATH` replaces `PATH` (launchd starts jobs without
+  Homebrew or the Docker CLI on `PATH`); the LaunchAgent sets it, so its
+  environment stays `FRIDAY_*`-only.
+- **Compose/Make**: `compose.mac.yml` sets only `HOME_SERVER_PLATFORM:
+  macos` on web and worker; `compose.home.yml` passes
+  `HOME_SERVER_PLATFORM` (default `linux`) and
+  `HOME_BACKUP_OFFSITE_REPOSITORY`; `make up-mac-server` depends on
+  `secrets` and `local-tls`. `config/tests/test_compose_files.py` merges the
+  five files in Python and, where the Docker CLI exists, runs the real
+  `docker compose config` with dummy secrets and an empty `--env-file` (no
+  daemon).
+- **Tests**: `ops/tests/test_preflight_home_macos.py`,
+  `test_preflight_home_offsite.py`, `test_home_backup_portable.py` (the
+  macOS tool-set PATH shim: system tools symlinked without `flock`,
+  `sha256sum`, `realpath`; a BSD-like `stat` double refusing `-c`; a
+  `shasum` double; round trip + macOS-declared preflight, lock held/stale,
+  old bash, credential-bearing repositories, `FRIDAY_PATH`),
+  `test_launchd_plist.py`, `test_no_bucket_secrets_in_compose.py`;
+  `test_preflight_home.py`, `test_home_backup_restore.py`,
+  `test_home_hub_e2e.py`, `test_compose_no_public_ports.py` updated for the
+  new row, the `repository` field and the two settings. The CI `home-ops`
+  job runs the new modules too.
+
+### Owner steps (pending) — `feat/p13-interim-mac-server`, recorded 2026-11-20
+
+These need the owner's Mac, accounts or hardware; nothing was skipped
+here, the server side is implemented and tested against doubles:
+
+1. Mac session **M1** (deferred: Mac session): `brew install bash age
+   restic caddy`; `HOME_BACKUP_HOST_DIR`, `HOME_FDE_CONFIRMED_ON` (the
+   FileVault date) and `DJANGO_ALLOWED_HOSTS` in `deploy/docker/.env`;
+   `make up-mac-server` under OrbStack or Docker Desktop; `make preflight`
+   shows `home_server_platform` and `home_disk_encryption` as warnings and
+   no `fail` caused by macOS.
+2. Create the R2 bucket and a bucket-scoped Object Read & Write token; fill
+   `~/.config/friday-backup/restic.env` from
+   `deploy/home/restic.env.example` (no userinfo, no query in
+   `RESTIC_REPOSITORY`); `restic init`; set the same string as
+   `HOME_BACKUP_OFFSITE_REPOSITORY` in `deploy/docker/.env`; confirm
+   `home_backup_fresh` says "off-site R2".
+3. Install the LaunchAgent (runbook I5: `sed` the `/Users/USERNAME`
+   placeholder, `plutil -lint`, `launchctl bootstrap`, one `kickstart`);
+   close the lid overnight once and confirm the catch-up run on wake in
+   `~/Library/Logs/friday-backup.log` and `status.json`. Check the
+   plist's `FRIDAY_PATH` finds `docker` for the runtime in use (OrbStack:
+   `~/.orbstack/bin`; Docker Desktop: `/usr/local/bin`).
+4. Run the backup and the restore drill once with the real macOS tools
+   (BSD `find`/`date`, Perl `shasum`, no `flock`): the PATH shim stands in
+   for them here; fix any step that differs in a follow-up branch.
+5. One restore drill from the R2 copy (`restic restore` + the drill's
+   DUMP argument).
+6. The `docker compose -f … exec -T postgres` dump path on the Mac uses the
+   same two base files as on Linux; confirm the project name matches the
+   stack `make up-mac-server` started (it does when both are run from the
+   checkout root).
