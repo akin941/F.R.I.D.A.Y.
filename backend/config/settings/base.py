@@ -973,6 +973,22 @@ GOOGLE_MAIL_BODY_MAX_CHARS = env.int("GOOGLE_MAIL_BODY_MAX_CHARS", default=6000)
 HA_ALLOWED_DOMAINS = env.list("HA_ALLOWED_DOMAINS", default=[])
 # Wake-on-LAN targets; empty = `wake_on_lan.send_magic_packet` is refused.
 HA_WOL_ALLOWED_MACS = env.list("HA_WOL_ALLOWED_MACS", default=[])
+# Phase 13b (ADR-018, brief D6/D8): the direct-execute home media class.
+# Nothing is direct until the owner flags an entity on /connectors (and
+# branch 1c's executor is merged). The env kill switch turns every
+# would-be direct call back into an approval card, whatever the owner's
+# /connectors toggle says. Rate limits are direct calls per sliding minute
+# for the owner (global) and per entity; over a limit -> the card. 0
+# disables the class. `HA_DIRECT_VOLUME_MAX` is the initial owner maximum
+# for a direct `volume_set` (0..1; the owner changes it on /connectors).
+HA_DIRECT_MEDIA_KILL_SWITCH = env.bool("HA_DIRECT_MEDIA_KILL_SWITCH", default=False)
+HA_DIRECT_RATE_GLOBAL_PER_MINUTE = env.int("HA_DIRECT_RATE_GLOBAL_PER_MINUTE", default=30)
+HA_DIRECT_RATE_ENTITY_PER_MINUTE = env.int("HA_DIRECT_RATE_ENTITY_PER_MINUTE", default=10)
+HA_DIRECT_VOLUME_MAX = env.float("HA_DIRECT_VOLUME_MAX", default=0.6)
+if not 0.0 <= HA_DIRECT_VOLUME_MAX <= 1.0:
+    raise ImproperlyConfigured("HA_DIRECT_VOLUME_MAX must be between 0 and 1.")
+if HA_DIRECT_RATE_GLOBAL_PER_MINUTE < 0 or HA_DIRECT_RATE_ENTITY_PER_MINUTE < 0:
+    raise ImproperlyConfigured("HA_DIRECT_RATE_*_PER_MINUTE must be 0 or more (0 disables).")
 
 # --- Agent runtime (MVP 7) ---
 

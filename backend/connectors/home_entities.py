@@ -24,12 +24,20 @@ Rules:
   label (the home routes ask when a name is ambiguous);
 - `room_id` is a room of the same workspace (`label.unknown_room`);
 - one row per `entity_id` per workspace (`ha_entity.conflict`, 409),
-  checked under a lock on the workspace row.
+  checked under a lock on the workspace row;
+- Phase 13b D5 (ADR-018 decision 2): `direct` (default false) only on a
+  `media_player` whose services include one of the closed direct class
+  (`ha_entity.direct_not_allowed`); a change of `direct` is audited
+  separately as `ha.entity_direct_changed` (`{home_entity_id, entity_id,
+  direct, direct_services}`), so every widening is one query; unticking the
+  last direct-eligible service clears `direct` in the same write (audited
+  the same way).
 """
 
 from django.db import IntegrityError, transaction
 
 from audit.services import record_audit
+from connectors import home_direct
 from connectors.bridges import home_assistant as bridge
 from connectors.models import HOME_ENTITY_LABEL_MAX_CHARS, HomeEntity
 from connectors.services import ConnectorPermissionDenied, ConnectorServiceError
@@ -59,6 +67,13 @@ class HomeEntityNotAllowed(HomeEntityError):
     service at all."""
 
     code = "ha_entity.not_allowed"
+
+
+class HomeEntityDirectNotAllowed(HomeEntityError):
+    """`direct` asked for an entity outside ADR-018's class: not a
+    `media_player`, or none of its services is direct-eligible."""
+
+    code = home_direct.DIRECT_NOT_ALLOWED
 
 
 class HomeEntityConflict(HomeEntityError):
@@ -131,6 +146,25 @@ def _labels(label, aliases):
     return text, key, alias_texts
 
 
+def _check_direct(direct, entity_id, services):
+    if not isinstance(direct, bool):
+        raise HomeEntityInvalid("direct must be true or false.")
+    if direct and not home_direct.direct_eligible(entity_id, services):
+        raise HomeEntityDirectNotAllowed(
+            "Only a media player with a play, pause, stop or volume service can be direct."
+        )
+    return direct
+
+
+def _audit_direct(*, actor, entity):
+    _audit(
+        "ha.entity_direct_changed",
+        actor=actor,
+        entity=entity,
+        metadata={"direct": entity.direct, "direct_services": entity.direct_services},
+    )
+
+
 def _lock_workspace(workspace):
     return Workspace.objects.select_for_update().get(pk=workspace.pk)
 
@@ -181,11 +215,14 @@ def create_entity(
     room_id=None,
     aliases=None,
     enabled=True,
+    direct=False,
 ):
-    """Allowlist one entity (owner, web only). Audited `ha.entity_allowed`."""
+    """Allowlist one entity (owner, web only). Audited `ha.entity_allowed`;
+    a `direct=True` entity is also audited `ha.entity_direct_changed`."""
     require_entities_owner_web(actor=actor, workspace=workspace, channel=channel)
     domain = _check_entity(entity_id)
     clean_services = _check_services(domain, services)
+    direct = _check_direct(direct, entity_id, clean_services)
     text, key, alias_texts = _labels(label, aliases)
     locked = _lock_workspace(workspace)
     room = _room(locked, room_id)
@@ -202,6 +239,7 @@ def create_entity(
                 aliases=alias_texts,
                 services=clean_services,
                 enabled=bool(enabled),
+                direct=direct,
             )
     except IntegrityError as exc:
         raise HomeEntityConflict("This entity is already allowlisted.") from exc
@@ -215,8 +253,11 @@ def create_entity(
             "room_id": str(room.pk) if room else None,
             "alias_count": len(alias_texts),
             "enabled": entity.enabled,
+            "direct": entity.direct,
         },
     )
+    if entity.direct:
+        _audit_direct(actor=actor, entity=entity)
     return entity
 
 
@@ -231,6 +272,7 @@ def update_entity(
     aliases=UNSET,
     services=UNSET,
     enabled=UNSET,
+    direct=UNSET,
 ):
     """Relabel, move, re-alias, change the services of or switch one
     allowlisted entity on/off (owner, web only). `entity_id` never changes
@@ -268,9 +310,24 @@ def update_entity(
     if enabled is not UNSET and bool(enabled) != locked.enabled:
         locked.enabled = bool(enabled)
         changed.append("enabled")
+    # Phase 13b D5: an explicit `direct` must fit the (new) services; a
+    # services change that removes the last direct-eligible one clears it.
+    new_direct = locked.direct
+    if direct is not UNSET:
+        new_direct = _check_direct(direct, locked.entity_id, locked.services)
+    elif new_direct and not home_direct.direct_eligible(locked.entity_id, locked.services):
+        new_direct = False
+    direct_changed = new_direct != locked.direct
+    if direct_changed:
+        locked.direct = new_direct
+        changed.append("direct")
     if not changed:
         return locked
     locked.save(update_fields=[*changed, "updated_at"])
+    if direct_changed:
+        _audit_direct(actor=actor, entity=locked)
+    if set(changed) == {"direct"}:
+        return locked
     _audit(
         "ha.entity_changed",
         actor=actor,
@@ -281,6 +338,7 @@ def update_entity(
             "services": list(locked.services),
             "room_id": str(locked.room_id) if locked.room_id else None,
             "enabled": locked.enabled,
+            "direct": locked.direct,
         },
     )
     return locked
