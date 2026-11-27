@@ -126,6 +126,9 @@ DOMAIN_ERROR_CODES = frozenset(
         "ha_entity.not_allowed",
         "ha_entity.conflict",
         "ha_entity.read_failed",
+        # The direct media class (Phase 13b branch 1b, ADR-018 D5/D6).
+        "ha_entity.direct_not_allowed",
+        "ha_direct.invalid",
         "workspace.permission_denied",
     }
 )
