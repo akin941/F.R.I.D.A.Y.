@@ -12,7 +12,11 @@
 //   then advertises the new availability at once.
 // - "Acil durdur" (Phase 10 M1): the node's local kill switch; the
 //   confirmation window (ConfirmationWindow.swift) closes and later clicks
-//   are refused until the owner releases it after LocalAuthentication.
+//   are refused until the owner releases it after LocalAuthentication. The
+//   flag lives on the runner (B6), so the item is right after a re-pair.
+// - "İzinler" also holds (runbook B6, CommandMappingsMenu.swift) the command
+//   mappings, recipes, bundle-id list and srt location, every change behind
+//   LocalAuthentication, plus the Accessibility / Automation TCC requests.
 
 import AppKit
 import CoreGraphics
@@ -28,10 +32,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var pairingWindow: PairingWindowController?
     private let permissionsMenu = NSMenu(title: "İzinler")
     let policyStore = KeychainLocalPolicyStore()
-    lazy var runner = NodeRunner(
-        store: KeychainCredentialStore(), policyStore: policyStore, desktop: SystemDesktop(),
-        home: NSHomeDirectory(), usage: .unsupported)
+    /// Runbook B6: the command mappings (keychain), the TCC probe shared by
+    /// the executor and the menu, and the real executors built from them.
+    let mappingsStore = KeychainCommandMappingsStore()
+    let permissions = SystemPermissionProbe()
+    lazy var runner: NodeRunner = {
+        let permissions = self.permissions
+        return NodeRunner(
+            store: KeychainCredentialStore(), policyStore: policyStore, desktop: SystemDesktop(),
+            home: NSHomeDirectory(), usage: .unsupported, mappingsStore: mappingsStore,
+            makeExecutor: { mappings in
+                MacActionExecutor(
+                    srt: SrtExecutor(location: mappings.srt), bundleIDs: Set(mappings.bundleIDs),
+                    recipesEnabled: Set(mappings.recipesEnabled), permissions: permissions)
+            })
+    }()
     lazy var editor = PolicyEditor(store: policyStore, authentication: DeviceOwnerAuthentication())
+    lazy var mappingsEditor = CommandMappingsEditor(store: mappingsStore, authentication: DeviceOwnerAuthentication())
+    private lazy var mappingsMenu = CommandMappingsMenu(
+        editor: mappingsEditor, permissions: permissions,
+        onFailure: { [weak self] text in self?.statusLine.title = "Friday Node: eşleme reddedildi (\(text))" })
     /// The confirmation window (Phase 10 M1); the runner holds it weakly.
     private lazy var confirmationWindow = ConfirmationWindowController(runner: runner)
     private var killSwitchItem: NSMenuItem!
@@ -65,10 +85,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(.separator())
         menu.addItem(NSMenuItem(title: "Çık", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
         menu.autoenablesItems = false
+        menu.delegate = self
         statusItem.menu = menu
 
         editor.onChange = { [weak self] policy in
             self?.runner.policyChanged(policy)
+            DispatchQueue.main.async { self?.rebuildPermissions() }
+        }
+        mappingsEditor.onChange = { [weak self] mappings in
+            self?.runner.mappingsChanged(mappings)
             DispatchQueue.main.async { self?.rebuildPermissions() }
         }
         rebuildPermissions()
@@ -151,6 +176,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let add = NSMenuItem(title: "Depo ekle…", action: #selector(addRepo), keyEquivalent: "")
         add.target = self
         permissionsMenu.addItem(add)
+        // Runbook B6: command mappings, recipes, the bundle-id list, srt.
+        mappingsMenu.build(into: permissionsMenu)
+    }
+
+    /// The kill switch item follows the runner's flag (also after a
+    /// re-pair); the TCC lines are re-read each time the menu opens.
+    private func syncKillSwitchItem() {
+        let engaged = runner.killSwitchEngaged
+        killSwitchItem.state = engaged ? .on : .off
+        killSwitchItem.title = engaged ? "Acil durdurmayı kaldır" : "Acil durdur"
     }
 
     private func changePolicy(
@@ -220,18 +255,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func toggleKillSwitch() {
         guard runner.killSwitchEngaged else {
             runner.engageKillSwitch()
-            killSwitchItem.state = .on
-            killSwitchItem.title = "Acil durdurmayı kaldır"
+            syncKillSwitchItem()
             return
         }
         Task {
             guard await DeviceOwnerAuthentication().authenticate(reason: "Friday Node'un acil durdurmasını kaldır")
             else { return }
             runner.releaseKillSwitch()
-            await MainActor.run {
-                self.killSwitchItem.state = .off
-                self.killSwitchItem.title = "Acil durdur"
-            }
+            await MainActor.run { self.syncKillSwitchItem() }
         }
     }
 
@@ -244,5 +275,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func unpair() {
         try? runner.unpair()
+    }
+}
+
+extension AppDelegate: NSMenuDelegate {
+    /// The kill switch item, the permissions (TCC lines included) and the
+    /// advertised availability are refreshed whenever the menu opens.
+    func menuWillOpen(_ menu: NSMenu) {
+        syncKillSwitchItem()
+        rebuildPermissions()
+        runner.refreshAvailability()
     }
 }

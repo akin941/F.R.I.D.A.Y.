@@ -147,8 +147,9 @@ final class ConfirmationWindowController: NSObject, ConfirmationObserver, NSWind
         runner.decide(.deny, invocationID: id)
     }
 
+    /// "Durdur": the running command, also while a second window asks.
     @objc private func stop() {
-        guard current.mode == .running, let id = current.invocationID else { return }
+        guard let id = current.stopInvocationID else { return }
         runner.stop(invocationID: id)
     }
 
