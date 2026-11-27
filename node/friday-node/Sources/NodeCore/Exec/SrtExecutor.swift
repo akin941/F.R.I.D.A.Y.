@@ -260,7 +260,9 @@ public final class SrtExecutor: @unchecked Sendable {
         self.location = location
     }
 
-    public var available: Bool { location.problem() == nil }
+    /// srt is usable AND the process monitor works on this system (its
+    /// unique-id self-test passed): never `granted` for an unmonitorable run.
+    public var available: Bool { ProcessTree.selfTestPassed && location.problem() == nil }
 
     /// The exact argv srt is started with (tests, the README).
     public func argv(settingsPath: String, command: [String]) -> [String] {
@@ -272,6 +274,7 @@ public final class SrtExecutor: @unchecked Sendable {
     /// resolves to the write root.
     public func start(_ spec: CommandSpec) throws -> RunningCommand {
         guard let sandbox = spec.sandbox else { throw ExecutorError("no sandbox document") }
+        guard ProcessTree.selfTestPassed else { throw ExecutorError("process monitor self-test failed") }
         if let problem = location.problem() { throw ExecutorError(problem) }
         // The write root was resolved before the window; it must still be
         // the same directory now (no symlink swapped in meanwhile).
@@ -317,25 +320,39 @@ public final class SandboxRun: RunningCommand, @unchecked Sendable {
     private var finishHandlers: [() -> Void] = []
     private var terminating = false
 
-    private init(child: ChildProcess, limits: RunLimits, cleanupDirectory: String?) {
+    private init(child: ChildProcess, monitor: TreeMonitor, limits: RunLimits, cleanupDirectory: String?) {
         self.child = child
+        self.monitor = monitor
         self.limits = limits
         self.cleanupDirectory = cleanupDirectory
-        monitor = TreeMonitor(root: child.pid, maxProcesses: limits.maxProcesses, cpuSeconds: limits.cpuSeconds)
     }
 
-    /// Spawn `argv` in a new process group and start pumping and watching
+    /// Spawn `argv` suspended in a new process group, set up the monitor
+    /// (identity, fork/exit watch) and the pumps, then let it run
     /// (TreeMonitor follows the tree by unique-id lineage, so a descendant
-    /// that left the group and lost its parent is still the run's).
+    /// that left the group and lost its parent is still the run's). When
+    /// the monitor cannot be set up, the suspended root's group is killed
+    /// and nothing runs (hardening N4).
     public static func start(
         executable: String, argv: [String], environment: [String: String], cwd: String, limits: RunLimits,
         cleanupDirectory: String? = nil
     ) throws -> SandboxRun {
         let child = try ChildProcess.spawn(
             executable: executable, argv: argv, environment: environment, cwd: cwd, stdout: .pipe, stderr: .pipe,
-            newProcessGroup: true)
-        let run = SandboxRun(child: child, limits: limits, cleanupDirectory: cleanupDirectory)
+            newProcessGroup: true, startSuspended: true)
+        let monitor: TreeMonitor
+        do {
+            monitor = try TreeMonitor(
+                root: child.pid, maxProcesses: limits.maxProcesses, cpuSeconds: limits.cpuSeconds)
+        } catch {
+            child.signal(SIGKILL)  // still suspended and unreaped: its group is this run only
+            child.wait(timeout: 5)
+            for fd in [child.stdoutFD, child.stderrFD].compactMap({ $0 }) { close(fd) }
+            throw ExecutorError("the run cannot be monitored: \(error)")
+        }
+        let run = SandboxRun(child: child, monitor: monitor, limits: limits, cleanupDirectory: cleanupDirectory)
         run.begin()
+        child.resume()
         return run
     }
 

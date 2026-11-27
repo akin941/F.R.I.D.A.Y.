@@ -56,7 +56,7 @@ public final class ChildProcess: @unchecked Sendable {
     /// the child: `environment` is all it gets.
     public static func spawn(
         executable: String, argv: [String], environment: [String: String], cwd: String? = nil,
-        stdout: Output = .pipe, stderr: Output = .pipe, newProcessGroup: Bool = false
+        stdout: Output = .pipe, stderr: Output = .pipe, newProcessGroup: Bool = false, startSuspended: Bool = false
     ) throws -> ChildProcess {
         guard executable.hasPrefix("/"), !argv.isEmpty else { throw SpawnError("bad executable or argv") }
         for part in argv + [executable] + environment.keys + environment.values + [cwd ?? ""]
@@ -104,6 +104,9 @@ public final class ChildProcess: @unchecked Sendable {
         posix_spawnattr_init(&attributes)
         defer { posix_spawnattr_destroy(&attributes) }
         var flags = Int32(POSIX_SPAWN_CLOEXEC_DEFAULT) | Int32(POSIX_SPAWN_SETSIGDEF) | Int32(POSIX_SPAWN_SETSIGMASK)
+        // Suspended: the child exists (its pid, identity and process group
+        // can be read and watched) but runs no instruction until `resume()`.
+        if startSuspended { flags |= Int32(POSIX_SPAWN_START_SUSPENDED) }
         if newProcessGroup {
             flags |= Int32(POSIX_SPAWN_SETPGROUP)
             posix_spawnattr_setpgroup(&attributes, 0)
@@ -145,10 +148,21 @@ public final class ChildProcess: @unchecked Sendable {
 
     private func startReaper() {
         let thread = Thread { [self] in
-            var info = siginfo_t()
             // Wait without reaping: the pid stays ours until the exit is
-            // recorded under the lock.
-            while waitid(P_PID, id_t(pid), &info, WEXITED | WNOWAIT) < 0 && errno == EINTR {}
+            // recorded under the lock. macOS's waitid also reports a child
+            // that is merely stopped (a `startSuspended` spawn), so only an
+            // exit, a kill or a dump ends the wait; the reap itself never
+            // blocks under the lock.
+            while true {
+                var info = siginfo_t()
+                let result = waitid(P_PID, id_t(pid), &info, WEXITED | WNOWAIT)
+                if result < 0 {
+                    if errno == EINTR { continue }
+                    break  // ECHILD: nothing left to wait for
+                }
+                if [CLD_EXITED, CLD_KILLED, CLD_DUMPED].contains(info.si_code) { break }
+                usleep(1_000)  // stopped or continued: not an exit yet
+            }
             lock.lock()
             var status: Int32 = 0
             while waitpid(pid, &status, 0) < 0 && errno == EINTR {}
@@ -211,6 +225,14 @@ public final class ChildProcess: @unchecked Sendable {
     /// is not reaped: until then its pid, and so its group id, cannot name
     /// another process. After the reap nothing is sent here (a sandboxed
     /// run's leftovers are TreeMonitor's, by verified identity).
+    /// Let a child spawned with `startSuspended` run.
+    public func resume() {
+        lock.lock()
+        defer { lock.unlock() }
+        guard exitStatus == nil else { return }
+        _ = kill(pid, SIGCONT)
+    }
+
     public func signal(_ signal: Int32) {
         lock.lock()
         defer { lock.unlock() }

@@ -161,6 +161,63 @@ final class SandboxRunTests: XCTestCase {
         }
     }
 
+    /// The review's retry probe (hardening N1): each run forks 15
+    /// intermediates, each of which forks a `setsid` child and exits at
+    /// once; the root exits right after. Counts the children still alive
+    /// 0.7 s after each run finished (and kills them). `FRIDAY_PROBE_RUNS`
+    /// sets the number of runs (default 6) for a measurement.
+    private func retryProbe() throws -> (survivors: Int, children: Int, runs: Int) {
+        let runs = Int(ProcessInfo.processInfo.environment["FRIDAY_PROBE_RUNS"] ?? "") ?? 6
+        let script = """
+            /usr/bin/perl -MPOSIX -e '$| = 1; for (1..15) { my $i = fork(); next if $i; \
+            my $c = fork(); exit if $c; POSIX::setsid(); print "$$\\n"; close STDOUT; close STDERR; \
+            exec "/bin/sleep", "60" }'
+            """
+        var children: [pid_t] = []
+        var survivors: [pid_t] = []
+        for _ in 0..<runs {
+            let run = try sh(script)
+            let (output, outcome) = Waiting.finish(run, timeout: 20)
+            XCTAssertNotNil(outcome)
+            let pids = output.split(separator: "\n").compactMap { pid_t($0.trimmingCharacters(in: .whitespaces)) }
+            children += pids
+            Thread.sleep(forTimeInterval: 0.7)
+            survivors += pids.filter { kill($0, 0) == 0 }
+        }
+        for pid in survivors { kill(pid, SIGKILL) }
+        return (survivors.count, children.count, runs)
+    }
+
+    /// With the orphan sweep on (as in the installed app, which is its own
+    /// responsible process; forced here and restricted to /bin/sleep, so no
+    /// other process of the session can be touched): no child survives.
+    func testTheRetryEscapeProbeLeavesNoSurvivorWithTheOrphanSweep() throws {
+        guard FileManager.default.isExecutableFile(atPath: "/usr/bin/perl") else { throw XCTSkip("no perl") }
+        OrphanSweepTesting.force { pid in
+            var buffer = [CChar](repeating: 0, count: 4096)
+            guard proc_pidpath(pid, &buffer, UInt32(buffer.count)) > 0 else { return false }
+            return String(cString: buffer) == "/bin/sleep"
+        }
+        defer { OrphanSweepTesting.force(nil) }
+        let result = try retryProbe()
+        FileHandle.standardError.write(Data(
+            "retry probe (orphan sweep): \(result.survivors) of \(result.children) survived (\(result.runs) runs)\n".utf8))
+        XCTAssertEqual(result.survivors, 0)
+        XCTAssertEqual(result.children, result.runs * 15)
+    }
+
+    /// Lineage and fork events only (the sweep off, as under a test runner
+    /// or a shell): measured, and bounded loosely (the residual the README
+    /// documents).
+    func testTheRetryEscapeProbeWithLineageOnly() throws {
+        guard FileManager.default.isExecutableFile(atPath: "/usr/bin/perl") else { throw XCTSkip("no perl") }
+        XCTAssertFalse(OrphanSweepTesting.active, "the sweep is off under a test runner")
+        let result = try retryProbe()
+        FileHandle.standardError.write(Data(
+            "retry probe (lineage only): \(result.survivors) of \(result.children) survived (\(result.runs) runs)\n".utf8))
+        XCTAssertLessThanOrEqual(result.survivors, max(3, result.children / 20))
+    }
+
     /// A pid is signalled only while it still names the same process (pid
     /// AND start time): a stale identity is never killed (finding 3).
     func testAStaleIdentityIsNeverSignalled() throws {

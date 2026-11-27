@@ -60,18 +60,21 @@ public struct ProcessIdentity: Hashable, Sendable {
         self.startSeconds = startSeconds
         self.startMicroseconds = startMicroseconds
     }
+
+    /// The start time in seconds since the epoch.
+    var start: Double { Double(startSeconds) + Double(startMicroseconds) / 1_000_000 }
 }
 
 /// `struct kevent` (the name is also the function's).
 typealias KernelEvent = Darwin.kevent
 
 /// kevent(2) with one change and no event list.
-private func keventRegister(_ kq: Int32, _ change: UnsafePointer<KernelEvent>) -> Int32 {
+func keventRegister(_ kq: Int32, _ change: UnsafePointer<KernelEvent>) -> Int32 {
     kevent(kq, change, 1, nil, 0, nil)
 }
 
 /// kevent(2) waiting for up to `events.count` events.
-private func keventWait(_ kq: Int32, _ events: inout [KernelEvent], _ timeout: UnsafePointer<timespec>) -> Int32 {
+func keventWait(_ kq: Int32, _ events: inout [KernelEvent], _ timeout: UnsafePointer<timespec>) -> Int32 {
     let capacity = Int32(events.count)
     return events.withUnsafeMutableBufferPointer { kevent(kq, nil, 0, $0.baseAddress, capacity, timeout) }
 }
@@ -81,6 +84,8 @@ struct ProcessRow {
     /// The unique id of the process that forked it (kept across re-parenting).
     let parentUniqueID: UInt64
     let pgid: pid_t
+    let ppid: pid_t
+    let uid: uid_t
 }
 
 /// sys/proc_info.h `struct proc_uniqidentifierinfo` (PROC_PIDUNIQIDENTIFIERINFO),
@@ -131,11 +136,30 @@ public enum ProcessTree {
             identity: ProcessIdentity(
                 pid: pid, uniqueID: unique.uniqueID, startSeconds: bsd.pbi_start_tvsec,
                 startMicroseconds: bsd.pbi_start_tvusec),
-            parentUniqueID: unique.parentUniqueID, pgid: pid_t(bsd.pbi_pgid))
+            parentUniqueID: unique.parentUniqueID, pgid: pid_t(bsd.pbi_pgid), ppid: pid_t(bsd.pbi_ppid),
+            uid: bsd.pbi_uid)
     }
 
     /// The identity of a live `pid`, nil when it is gone.
     public static func identity(of pid: pid_t) -> ProcessIdentity? { row(pid)?.identity }
+
+    /// The monitor's kernel interfaces work on this system (hardening N4):
+    /// the unique-id flavor answers for this process with plausible ids (its
+    /// own after its parent's), and a kqueue can be made. Asked once; when
+    /// it fails, `repo.command.run` is `unsupported` (never run unmonitored).
+    public static let selfTestPassed: Bool = {
+        guard let me = row(getpid()), me.identity.uniqueID != 0, me.parentUniqueID != 0,
+            me.parentUniqueID < me.identity.uniqueID
+        else { return false }
+        // Launched by launchd (the app): its row may not be readable.
+        if getppid() != 1 {
+            guard let parent = row(getppid()), parent.identity.uniqueID == me.parentUniqueID else { return false }
+        }
+        let probe = kqueue()
+        guard probe >= 0 else { return false }
+        close(probe)
+        return true
+    }()
 
     private static let timebase: (numer: UInt64, denom: UInt64) = {
         var info = mach_timebase_info_data_t()
@@ -168,192 +192,3 @@ public enum ProcessTree {
     }
 }
 
-/// Learns one run's members and enforces `max_processes` and `cpu_seconds`.
-final class TreeMonitor: @unchecked Sendable {
-    static let interval: Double = 0.05
-
-    private let root: ProcessIdentity?
-    private let group: pid_t
-    private let maxProcesses: Int
-    private let cpuSeconds: Double
-    private let lock = NSLock()
-    private var timer: DispatchSourceTimer?
-    private var cpuByProcess: [ProcessIdentity: Double] = [:]
-    private var violation: String?
-    private var rootExited = false
-    private var stopped = false
-    /// Every member ever learnt, by unique id (never reused within a boot).
-    private var memberIDs: Set<UInt64> = []
-    private(set) var peakProcesses = 0
-    private let queue = DispatchQueue(label: "friday-node.tree-monitor", qos: .utility)
-    private let kq: Int32
-
-    init(root pid: pid_t, maxProcesses: Int, cpuSeconds: Double) {
-        root = ProcessTree.identity(of: pid)
-        group = pid
-        self.maxProcesses = maxProcesses
-        self.cpuSeconds = cpuSeconds
-        kq = kqueue()
-        if let root { memberIDs.insert(root.uniqueID) }
-    }
-
-    deinit {
-        if kq >= 0 { close(kq) }
-    }
-
-    func start() {
-        if let root { watch(root.pid) }
-        if kq >= 0 {
-            let thread = Thread { [weak self] in self?.forkEvents() }
-            thread.name = "friday-node.fork-events"
-            thread.start()
-        }
-        let timer = DispatchSource.makeTimerSource(queue: queue)
-        timer.schedule(deadline: .now(), repeating: Self.interval, leeway: .milliseconds(5))
-        timer.setEventHandler { [weak self] in self?.sample() }
-        lock.lock()
-        self.timer = timer
-        lock.unlock()
-        timer.resume()
-    }
-
-    func stop() {
-        lock.lock()
-        let timer = self.timer
-        self.timer = nil
-        stopped = true
-        lock.unlock()
-        timer?.cancel()
-    }
-
-    /// The limit the run broke, if any (`max_processes`, `cpu_seconds`).
-    var brokenLimit: String? {
-        lock.lock()
-        defer { lock.unlock() }
-        return violation
-    }
-
-    /// The root was reaped: kill what is left of the tree from now on.
-    func rootDidExit() {
-        lock.lock()
-        rootExited = true
-        lock.unlock()
-        queue.async { self.sample() }
-    }
-
-    /// Kill every member now (terminate's SIGKILL step); each pid is checked
-    /// against its identity first.
-    func killTree() {
-        queue.sync { kill(currentMembers()) }
-    }
-
-    private func kill(_ members: Set<ProcessIdentity>) {
-        for member in members { ProcessTree.signal(member, SIGKILL) }
-    }
-
-    // MARK: Fork events
-
-    private func watch(_ pid: pid_t) {
-        guard kq >= 0 else { return }
-        var change = KernelEvent()
-        change.ident = UInt(pid)
-        change.filter = Int16(EVFILT_PROC)
-        change.flags = UInt16(EV_ADD | EV_ENABLE)
-        change.fflags = UInt32(NOTE_FORK) | UInt32(NOTE_EXIT)
-        _ = keventRegister(kq, &change)
-    }
-
-    /// Learn the children of `pid` (a member) at once, and watch them.
-    private func learnChildren(of pid: pid_t) {
-        guard let parent = ProcessTree.row(pid) else { return }
-        lock.lock()
-        let isMember = memberIDs.contains(parent.identity.uniqueID)
-        lock.unlock()
-        guard isMember else { return }
-        for child in ProcessTree.childPIDs(pid) {
-            guard let row = ProcessTree.row(child), row.parentUniqueID == parent.identity.uniqueID else { continue }
-            lock.lock()
-            let new = memberIDs.insert(row.identity.uniqueID).inserted
-            lock.unlock()
-            if new {
-                watch(child)
-                learnChildren(of: child)
-            }
-        }
-    }
-
-    private func forkEvents() {
-        var events = [KernelEvent](repeating: KernelEvent(), count: 16)
-        var timeout = timespec(tv_sec: 0, tv_nsec: 200_000_000)
-        while true {
-            lock.lock()
-            let done = stopped
-            lock.unlock()
-            if done { return }
-            let count = keventWait(kq, &events, &timeout)
-            guard count > 0 else { continue }
-            for event in events.prefix(Int(count)) where event.fflags & UInt32(NOTE_FORK) != 0 {
-                learnChildren(of: pid_t(event.ident))
-            }
-        }
-    }
-
-    // MARK: Scans
-
-    /// The live members now (on `queue`): every process whose recorded
-    /// parent is a member, to a fixed point; plus the root's group while it
-    /// is not reaped.
-    private func currentMembers() -> Set<ProcessIdentity> {
-        lock.lock()
-        let exited = rootExited
-        var known = memberIDs
-        lock.unlock()
-        var rows: [ProcessRow] = []
-        for pid in ProcessTree.allPIDs() {
-            if let row = ProcessTree.row(pid) { rows.append(row) }
-        }
-        let rootAlive = !exited && root.map { root in rows.contains { $0.identity == root } } ?? false
-        var members: Set<ProcessIdentity> = []
-        var changed = true
-        while changed {
-            changed = false
-            for row in rows where !members.contains(row.identity) {
-                let byLineage = known.contains(row.identity.uniqueID) || known.contains(row.parentUniqueID)
-                let byGroup = rootAlive && row.pgid == group
-                guard byLineage || byGroup else { continue }
-                members.insert(row.identity)
-                if known.insert(row.identity.uniqueID).inserted { changed = true }
-            }
-        }
-        lock.lock()
-        let fresh = known.subtracting(memberIDs)
-        memberIDs.formUnion(known)
-        lock.unlock()
-        for member in members where fresh.contains(member.uniqueID) { watch(member.pid) }
-        return members
-    }
-
-    private func sample() {
-        let members = currentMembers()
-        lock.lock()
-        let exited = rootExited
-        peakProcesses = max(peakProcesses, members.count)
-        var broken: String?
-        if !exited && violation == nil {
-            if members.count > maxProcesses {
-                broken = "max_processes"
-            } else {
-                for member in members {
-                    if let cpu = ProcessTree.cpuSeconds(member.pid), ProcessTree.identity(of: member.pid) == member {
-                        cpuByProcess[member] = max(cpuByProcess[member] ?? 0, cpu)
-                    }
-                }
-                if cpuByProcess.values.reduce(0, +) > cpuSeconds { broken = "cpu_seconds" }
-            }
-            if let broken { violation = broken }
-        }
-        lock.unlock()
-        if broken != nil || (exited && !members.isEmpty) { kill(members) }
-        if exited && members.isEmpty { stop() }
-    }
-}
