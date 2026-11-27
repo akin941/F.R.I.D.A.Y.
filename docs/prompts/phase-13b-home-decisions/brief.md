@@ -1743,3 +1743,28 @@ needed the Mac, real credentials, paid calls or hardware.
    each a card again. The server side of this is
    `ops/tests/test_home_direct_voice_e2e.py`, which the Swift node must
    satisfy unchanged (no protocol change).
+
+### Known follow-ups — review notes left open at the `feat/p13-direct-media-exec` merge (2026-11-27)
+
+1. **LOW — unattended denial reported as "may have gone"**
+   (`backend/connectors/home_direct.py`). `execute()` runs
+   `unattended.deny_if_unattended` before any send, but if it raises,
+   `run_home_direct` maps it to `error`/`executor_failed` and the turn replies
+   that the command may have gone, although nothing was sent. Fix: catch the
+   unattended denial in `execute` (or in `run_home_direct`) and return a
+   `not_direct` `DirectRun` with a `not_available` reason so the reply is
+   accurate.
+2. **LOW — rate slot consumed by a rolled-back attempt**
+   (`backend/connectors/home_direct.py`). `count_direct_call` increments the
+   Redis rate windows inside the DB transaction; if `_start_call` then fails
+   and the transaction rolls back, the counter is not taken back, so a failed
+   attempt consumes a rate slot. Fix: call `_take_back_quietly(keys)` on an
+   exception between the count and the commit, or create the row before
+   counting.
+3. **LOW — unscoped recovery scan needs a comment**
+   (`backend/connectors/home_direct.py`). `mark_lost_direct_calls` selects
+   stale running rows with an unscoped `HomeDirectCall.objects.filter` (no
+   `for_actor`). This is a system recovery task and matches the existing
+   write-recovery pattern, but it deserves an explicit comment. Fix: add a
+   one-line comment that the system scan is deliberately cross-workspace and
+   only finalizes rows.
