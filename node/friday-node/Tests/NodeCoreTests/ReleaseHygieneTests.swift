@@ -82,7 +82,22 @@ final class EntitlementAllowlistTests: XCTestCase {
         XCTAssertEqual(expected, expected.sorted(), "the script compares a sorted list")
         XCTAssertEqual(Set(expected), fileKeys.union(Self.xcodeAdded))
         XCTAssertTrue(fileKeys.contains("com.apple.security.automation.apple-events"))
+        // Phase 11 M1 (runbook B7): the voice host's microphone.
+        XCTAssertTrue(fileKeys.contains("com.apple.security.device.audio-input"))
         XCTAssertFalse(fileKeys.contains("com.apple.security.get-task-allow"))
+        XCTAssertFalse(fileKeys.contains("com.apple.security.device.camera"))
+        XCTAssertFalse(fileKeys.contains("com.apple.security.app-sandbox"))
+        XCTAssertTrue(fileKeys.allSatisfy { !$0.hasPrefix("com.apple.security.cs.") }, "no hardened-runtime relaxation")
+    }
+
+    /// The microphone entitlement needs its TCC usage string, or macOS kills
+    /// the app at the first capture.
+    func testTheMicrophoneHasItsUsageString() throws {
+        let plist = try PropertyListSerialization.propertyList(
+            from: try Repo.data("node/friday-node/App/Info.plist"), format: nil)
+        let info = try XCTUnwrap(plist as? [String: Any])
+        let usage = try XCTUnwrap(info["NSMicrophoneUsageDescription"] as? String)
+        XCTAssertFalse(usage.isEmpty)
     }
 }
 

@@ -3,8 +3,9 @@
 // the B5 review's findings 1 and 4).
 //
 // - `posix_spawn` with an argv (never a shell), an explicit environment and
-//   explicit stdio: stdin is /dev/null, stdout and stderr are pipes the node
-//   reads (or /dev/null). `POSIX_SPAWN_CLOEXEC_DEFAULT` keeps every other
+//   explicit stdio: stdin is /dev/null (or, for the voice child, a pipe the
+//   node writes: runbook B7), stdout and stderr are pipes the node reads (or
+//   /dev/null). `POSIX_SPAWN_CLOEXEC_DEFAULT` keeps every other
 //   descriptor of the app (the WebSocket, the hook socket, the keychain) out
 //   of the child; the parent's pipe ends are close-on-exec as well, so a
 //   concurrent Foundation spawn elsewhere cannot inherit them either.
@@ -43,10 +44,15 @@ public final class ChildProcess: @unchecked Sendable {
     /// The parent's read ends (nil for /dev/null), close-on-exec.
     public let stdoutFD: Int32?
     public let stderrFD: Int32?
+    /// The parent's write end of the child's stdin (nil for /dev/null),
+    /// close-on-exec and `F_SETNOSIGPIPE` (a write after the child is gone
+    /// fails with EPIPE instead of killing the app).
+    public let stdinFD: Int32?
 
-    private init(pid: pid_t, processGroup: Bool, stdoutFD: Int32?, stderrFD: Int32?) {
+    private init(pid: pid_t, processGroup: Bool, stdinFD: Int32?, stdoutFD: Int32?, stderrFD: Int32?) {
         self.pid = pid
         self.processGroup = processGroup
+        self.stdinFD = stdinFD
         self.stdoutFD = stdoutFD
         self.stderrFD = stderrFD
     }
@@ -56,20 +62,29 @@ public final class ChildProcess: @unchecked Sendable {
     /// the child: `environment` is all it gets.
     public static func spawn(
         executable: String, argv: [String], environment: [String: String], cwd: String? = nil,
-        stdout: Output = .pipe, stderr: Output = .pipe, newProcessGroup: Bool = false, startSuspended: Bool = false
+        stdin: Output = .devNull, stdout: Output = .pipe, stderr: Output = .pipe, newProcessGroup: Bool = false,
+        startSuspended: Bool = false
     ) throws -> ChildProcess {
         guard executable.hasPrefix("/"), !argv.isEmpty else { throw SpawnError("bad executable or argv") }
         for part in argv + [executable] + environment.keys + environment.values + [cwd ?? ""]
         where part.utf8.contains(0) {
             throw SpawnError("NUL in argv, environment or cwd")
         }
+        var inPipe: [Int32] = [-1, -1]
         var outPipe: [Int32] = [-1, -1]
         var errPipe: [Int32] = [-1, -1]
         func closeAll() {
-            for fd in outPipe + errPipe where fd >= 0 { close(fd) }
+            for fd in inPipe + outPipe + errPipe where fd >= 0 { close(fd) }
+        }
+        if stdin == .pipe {
+            guard pipe(&inPipe) == 0 else { throw SpawnError("pipe failed") }
+            _ = fcntl(inPipe[1], F_SETNOSIGPIPE, 1)
         }
         if stdout == .pipe {
-            guard pipe(&outPipe) == 0 else { throw SpawnError("pipe failed") }
+            guard pipe(&outPipe) == 0 else {
+                closeAll()
+                throw SpawnError("pipe failed")
+            }
         }
         if stderr == .pipe {
             guard pipe(&errPipe) == 0 else {
@@ -77,12 +92,16 @@ public final class ChildProcess: @unchecked Sendable {
                 throw SpawnError("pipe failed")
             }
         }
-        for fd in outPipe + errPipe where fd >= 0 { _ = fcntl(fd, F_SETFD, FD_CLOEXEC) }
+        for fd in inPipe + outPipe + errPipe where fd >= 0 { _ = fcntl(fd, F_SETFD, FD_CLOEXEC) }
 
         var actions: posix_spawn_file_actions_t?
         posix_spawn_file_actions_init(&actions)
         defer { posix_spawn_file_actions_destroy(&actions) }
-        posix_spawn_file_actions_addopen(&actions, 0, "/dev/null", O_RDONLY, 0)
+        if stdin == .pipe {
+            posix_spawn_file_actions_adddup2(&actions, inPipe[0], 0)
+        } else {
+            posix_spawn_file_actions_addopen(&actions, 0, "/dev/null", O_RDONLY, 0)
+        }
         if stdout == .pipe {
             posix_spawn_file_actions_adddup2(&actions, outPipe[1], 1)
         } else {
@@ -132,15 +151,18 @@ public final class ChildProcess: @unchecked Sendable {
         var pid: pid_t = 0
         let status = posix_spawn(&pid, executable, &actions, &attributes, &cArgv, &cEnv)
         // The child's ends belong to the child now.
+        if inPipe[0] >= 0 { close(inPipe[0]) }
         if outPipe[1] >= 0 { close(outPipe[1]) }
         if errPipe[1] >= 0 { close(errPipe[1]) }
         guard status == 0 else {
+            if inPipe[1] >= 0 { close(inPipe[1]) }
             if outPipe[0] >= 0 { close(outPipe[0]) }
             if errPipe[0] >= 0 { close(errPipe[0]) }
             throw SpawnError("posix_spawn failed (\(status))")
         }
         let child = ChildProcess(
-            pid: pid, processGroup: newProcessGroup, stdoutFD: outPipe[0] >= 0 ? outPipe[0] : nil,
+            pid: pid, processGroup: newProcessGroup, stdinFD: inPipe[1] >= 0 ? inPipe[1] : nil,
+            stdoutFD: outPipe[0] >= 0 ? outPipe[0] : nil,
             stderrFD: errPipe[0] >= 0 ? errPipe[0] : nil)
         child.startReaper()
         return child

@@ -10,6 +10,10 @@ import NodeCore
 // The unsigned Conformance build only: serve the fake gateway's hook and
 // exit (see NodeCore/ConformanceSupport.swift).
 do {
+    // Phase 11 M1 contract test 2: the voice host against the hostile child.
+    if let voice = try VoiceConformanceLive.fromArguments(CommandLine.arguments) {
+        exit(voice.run())
+    }
     if let hook = try ConformanceHookClient.fromArguments(CommandLine.arguments) {
         exit(hook.run())
     }

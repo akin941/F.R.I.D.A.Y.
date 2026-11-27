@@ -13,10 +13,16 @@
   as the responsible process; every target app still asks the owner once,
   the Automation TCC prompt). Accessibility (AX press/type) is a TCC grant
   with no entitlement.
+  Phase 11 M1 (runbook B7): the microphone, which the hardened runtime
+  requires for AVAudioEngine capture (the voice host); the owner still
+  grants it once (the Microphone TCC prompt, NSMicrophoneUsageDescription
+  in Info.plist). Nothing else: no camera, no network server.
 -->
 <plist version="1.0">
 <dict>
 	<key>com.apple.security.automation.apple-events</key>
+	<true/>
+	<key>com.apple.security.device.audio-input</key>
 	<true/>
 	<key>keychain-access-groups</key>
 	<array>

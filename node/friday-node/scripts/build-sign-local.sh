@@ -78,15 +78,17 @@ grep -q "flags=0x10000(runtime)" <<<"$SIGNING" || { echo "hardened runtime flag 
 
 # 3. Exactly the entitlement set the app ships (an allowlist, not a
 #    denylist): Apple Events (Phase 10 M2, runbook B6: the AppleScript
-#    recipes under the hardened runtime), keychain access groups, and what
-#    Xcode adds for signing (application identifier, team identifier). No
-#    get-task-allow (Release is signed without it), no sandbox, no
-#    microphone (Phase 11), no cs.* relaxation. ReleaseHygieneTests ties
-#    this list to App/FridayNode.entitlements (EXPECTED = the file's keys
-#    plus the two Xcode adds), so the two cannot drift apart.
+#    recipes under the hardened runtime), the microphone (Phase 11 M1,
+#    runbook B7: the voice host's AVAudioEngine capture under the hardened
+#    runtime), keychain access groups, and what Xcode adds for signing
+#    (application identifier, team identifier). No get-task-allow (Release
+#    is signed without it), no sandbox, no camera, no cs.* relaxation.
+#    EntitlementAllowlistTests ties this list to App/FridayNode.entitlements
+#    (EXPECTED = the file's keys plus the two Xcode adds), so the two cannot
+#    drift apart.
 ENTITLEMENT_KEYS=$(codesign -d --entitlements - --xml "$APP" 2>/dev/null \
   | python3 -I -c 'import plistlib,sys; print("\n".join(sorted(plistlib.loads(sys.stdin.buffer.read()))))')
-EXPECTED=$'com.apple.application-identifier\ncom.apple.developer.team-identifier\ncom.apple.security.automation.apple-events\nkeychain-access-groups'
+EXPECTED=$'com.apple.application-identifier\ncom.apple.developer.team-identifier\ncom.apple.security.automation.apple-events\ncom.apple.security.device.audio-input\nkeychain-access-groups'
 if [[ $ENTITLEMENT_KEYS != "$EXPECTED" ]]; then
   echo "unexpected entitlement set:" >&2
   echo "$ENTITLEMENT_KEYS" >&2
