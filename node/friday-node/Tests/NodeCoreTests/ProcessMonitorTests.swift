@@ -31,10 +31,10 @@ enum MonitorTestSupport {
         return info.pbi_status != 5  // SZOMB
     }
 
-    /// Wait until no node helper ran in the last 10 s and no other run is
-    /// being monitored (the orphan sweep's preconditions).
+    /// Wait until no other run is being monitored (helpers that ran before a
+    /// run's root do not matter to its sweep).
     static func waitForQuiet() {
-        _ = Waiting.until(15) { MonitorRegistryTesting.helpersQuiet && MonitorRegistryTesting.registeredMonitors == 0 }
+        _ = Waiting.until(15) { MonitorRegistryTesting.registeredMonitors == 0 }
     }
 
     /// Plant an orphan outside every run: perl forks a child that calls
@@ -92,6 +92,7 @@ final class ProcessMonitorTests: XCTestCase {
     /// child (re-parented to launchd, outside the group) is killed.
     func testASetsidChildOfALearntIntermediateIsKilled() throws {
         guard FileManager.default.isExecutableFile(atPath: "/usr/bin/perl") else { throw XCTSkip("no perl") }
+        var printed = 0
         for attempt in 0..<5 {
             let run = try MonitorTestSupport.sh("""
                 /usr/bin/perl -MPOSIX -e '$| = 1; exit if fork(); POSIX::setsid(); select(undef, undef, undef, 0.3); \
@@ -100,9 +101,23 @@ final class ProcessMonitorTests: XCTestCase {
             let (output, outcome) = Waiting.finish(run, timeout: 15)
             XCTAssertNotNil(outcome)
             guard let pid = pid_t(output.trimmingCharacters(in: .whitespacesAndNewlines)), pid > 1 else { continue }
+            printed += 1
             XCTAssertTrue(Waiting.until(5) { !MonitorTestSupport.isRunning(pid) }, "attempt \(attempt): \(MonitorTestSupport.describe(pid))")
             if MonitorTestSupport.isRunning(pid) { kill(pid, SIGKILL) }
         }
+        // Not vacuous: at least one attempt got as far as printing its pid.
+        XCTAssertGreaterThan(printed, 0, "no attempt produced a setsid child")
+    }
+
+    /// Always-run smoke test of the review's retry probe: 3 runs of 15
+    /// intermediates that fork a setsid child and exit at once, bounded
+    /// loosely (20 %); the opt-in probes below measure it properly.
+    func testRetryProbeSmoke() throws {
+        guard FileManager.default.isExecutableFile(atPath: "/usr/bin/perl") else { throw XCTSkip("no perl") }
+        let result = try retryProbe(runs: 3)
+        FileHandle.standardError.write(Data("retry probe (smoke): \(result.survivors) of \(result.children) survived\n".utf8))
+        XCTAssertGreaterThan(result.children, 0)
+        XCTAssertLessThanOrEqual(Double(result.survivors), Double(result.children) * 0.2)
     }
 
     /// The orphan sweep, deterministically: with the sweep on (forced, and
@@ -139,10 +154,13 @@ final class ProcessMonitorTests: XCTestCase {
         kill(orphan, SIGKILL)
     }
 
-    /// Two concurrent runs (review finding 1): run 2 daemonises a child
-    /// (`(sleep 30 &)`, a launchd-parented orphan newer than run 1's root)
-    /// while run 1's orphan sweep is on; the child must survive until run 2
-    /// ends, and be gone after.
+    /// Two concurrent runs (review finding 1): run 2 makes a real orphan
+    /// candidate (an intermediate lives 0.5 s, forks the daemon and exits;
+    /// the daemon calls setsid, so it is launchd-parented with its recorded
+    /// parent kept and gone, newer than run 1's root) while run 1's forced orphan
+    /// sweep is on. Run 1's root exits during run 2's life, so a wrong claim
+    /// by run 1 would kill the daemon then. It must survive until run 2
+    /// ends, and be gone after (run 2 learnt it).
     func testAnotherRunsDaemonisedChildSurvivesUntilThatRunEnds() throws {
         guard FileManager.default.isExecutableFile(atPath: "/usr/bin/perl") else { throw XCTSkip("no perl") }
         MonitorTestSupport.waitForQuiet()
@@ -151,11 +169,14 @@ final class ProcessMonitorTests: XCTestCase {
             guard proc_pidpath(pid, &path, UInt32(path.count)) > 0 else { return false }
             return String(cString: path) == "/bin/sleep"
         }
-        let run1 = try MonitorTestSupport.sh("sleep 6")
+        let run1 = try MonitorTestSupport.sh("sleep 1.5")
         Thread.sleep(forTimeInterval: 0.2)
-        let run2 = try MonitorTestSupport.sh("( /bin/sleep 30 & echo $! ); sleep 2.5")
+        let run2 = try MonitorTestSupport.sh("""
+            /usr/bin/perl -MPOSIX -e '$| = 1; exit if fork(); select(undef, undef, undef, 0.5); \
+            exit if fork(); POSIX::setsid(); print "$$\\n"; close STDOUT; close STDERR; exec "/bin/sleep", "30"'; sleep 4
+            """)
         var output = ""
-        let deadline = Date().addingTimeInterval(2)
+        let deadline = Date().addingTimeInterval(3)
         var child: pid_t?
         while child == nil, Date() < deadline {
             for chunk in run2.read() { output += String(decoding: chunk.data, as: UTF8.self) }
@@ -163,12 +184,16 @@ final class ProcessMonitorTests: XCTestCase {
             Thread.sleep(forTimeInterval: 0.02)
         }
         let daemon = try XCTUnwrap(child, "run 2 printed no pid")
-        // While run 2 lives, run 1's sweep must leave its daemon alone.
-        for _ in 0..<8 {
-            Thread.sleep(forTimeInterval: 0.2)
-            XCTAssertTrue(MonitorTestSupport.isRunning(daemon), "run 1 killed run 2's child: \(MonitorTestSupport.describe(daemon))")
-            if run2.hasExited { break }
+        XCTAssertNotEqual(ProcessTree.parentUniqueID(of: daemon), 1, "the daemon's recorded parent was reset")
+        // While run 2 lives (run 1's root exits at 1.5 s), the daemon lives.
+        var checks = 0
+        while !run2.hasExited, run2.poll() == nil, checks < 30 {
+            XCTAssertTrue(MonitorTestSupport.isRunning(daemon), "run 1 killed run 2's daemon: \(MonitorTestSupport.describe(daemon))")
+            if !MonitorTestSupport.isRunning(daemon) { break }
+            Thread.sleep(forTimeInterval: 0.15)
+            checks += 1
         }
+        XCTAssertGreaterThan(checks, 15, "the window in which run 1's root exits was not observed")
         _ = Waiting.finish(run2, timeout: 10)
         // After run 2 ended, nothing of it outlives it.
         XCTAssertTrue(Waiting.until(4) { !MonitorTestSupport.isRunning(daemon) }, MonitorTestSupport.describe(daemon))
@@ -176,16 +201,55 @@ final class ProcessMonitorTests: XCTestCase {
         _ = Waiting.finish(run1, timeout: 10)
     }
 
-    /// A helper of the node (BoundedRun: git, osascript) turns the sweep off
-    /// while it runs and for 10 s after.
-    func testAHelperTurnsTheSweepOff() throws {
-        _ = try BoundedRun.run(executable: "/usr/bin/true", argv: ["true"], environment: [:], timeout: 5)
-        XCTAssertFalse(MonitorRegistryTesting.helpersQuiet)
+    /// Helpers that ran before a run's root (the git calls that create a
+    /// worktree) do not turn its sweep off (review finding 3).
+    func testHelpersBeforeTheRootLeaveTheSweepOn() throws {
+        guard FileManager.default.isExecutableFile(atPath: "/usr/bin/perl") else { throw XCTSkip("no perl") }
+        MonitorTestSupport.waitForQuiet()
+        for _ in 0..<3 {
+            _ = try BoundedRun.run(executable: "/usr/bin/git", argv: ["git", "--version"], environment: [:], timeout: 10)
+        }
+        XCTAssertFalse(MonitorRegistryTesting.helpersQuiet, "the helpers are recent")
+        let target = LockedPid()
+        OrphanSweepTesting.force { $0 == target.value }
+        let run = try MonitorTestSupport.sh("sleep 1.5")
+        Thread.sleep(forTimeInterval: 0.2)
+        let orphan = try MonitorTestSupport.plantOrphan()
+        target.value = orphan
+        let identity = try XCTUnwrap(ProcessTree.identity(of: orphan))
+        XCTAssertTrue(Waiting.until(2) { MonitorRegistryTesting.anyMonitorKnows(identity.uniqueID) }, "the sweep was off")
+        _ = Waiting.finish(run, timeout: 10)
+        XCTAssertTrue(Waiting.until(2) { !MonitorTestSupport.isRunning(orphan) })
+        if MonitorTestSupport.isRunning(orphan) { kill(orphan, SIGKILL) }
     }
 
-    /// Review N5: a watch failure after `kqueue()` throws, frees the monitor
-    /// and closes its kqueue exactly once (no other descriptor is closed).
-    func testAWatchFailureAfterKqueueFreesTheMonitorOnce() throws {
+    /// A helper that starts after the root does turn the sweep off.
+    func testAHelperAfterTheRootTurnsTheSweepOff() throws {
+        guard FileManager.default.isExecutableFile(atPath: "/usr/bin/perl") else { throw XCTSkip("no perl") }
+        MonitorTestSupport.waitForQuiet()
+        let target = LockedPid()
+        OrphanSweepTesting.force { $0 == target.value }
+        let run = try MonitorTestSupport.sh("sleep 1.5")
+        Thread.sleep(forTimeInterval: 0.1)
+        _ = try BoundedRun.run(executable: "/usr/bin/git", argv: ["git", "--version"], environment: [:], timeout: 10)
+        let orphan = try MonitorTestSupport.plantOrphan()
+        target.value = orphan
+        let identity = try XCTUnwrap(ProcessTree.identity(of: orphan))
+        Thread.sleep(forTimeInterval: 1)
+        XCTAssertFalse(MonitorRegistryTesting.anyMonitorKnows(identity.uniqueID), "attributed despite a newer helper")
+        _ = Waiting.finish(run, timeout: 10)
+        Thread.sleep(forTimeInterval: 0.3)
+        XCTAssertTrue(MonitorTestSupport.isRunning(orphan))
+        kill(orphan, SIGKILL)
+    }
+
+    /// Review N5 NIT: a watch failure after `kqueue()` throws and frees the
+    /// monitor. This only checks that the monitor is freed and that a
+    /// descriptor opened afterwards stays open; it cannot by itself detect a
+    /// double close inside the failing init (nothing can reuse the number
+    /// between two closes there). The code closes the kqueue in one place,
+    /// `closeQueue()`, guarded by a flag under the lock.
+    func testAWatchFailureAfterKqueueFreesTheMonitor() throws {
         let path = NSTemporaryDirectory() + "friday-fd-probe-\(UUID().uuidString)"
         FileManager.default.createFile(atPath: path, contents: Data("x".utf8))
         defer { try? FileManager.default.removeItem(atPath: path) }

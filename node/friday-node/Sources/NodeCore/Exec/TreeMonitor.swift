@@ -163,9 +163,12 @@ public enum MonitorFailureInjection {
 /// The rule a sweep follows: an orphan candidate is skipped when any other
 /// live monitor knows it, its recorded parent, or any live ancestor (by
 /// unique id); when it descends from a helper; and the orphan sweep does not
-/// run at all while another monitor is live or a helper runs or ended in
-/// the last 10 s, because a candidate whose recorded parent is unknown to
-/// everyone cannot be attributed to one run.
+/// run at all while another monitor is live or a helper started after the
+/// run's root runs or ended in the last 10 s, because a candidate whose
+/// recorded parent is unknown to everyone cannot be attributed to one run.
+/// (Helpers that started before the root, such as the git calls that make a
+/// worktree, do not count: the sweep only considers processes newer than
+/// the root.)
 final class MonitorRegistry: @unchecked Sendable {
     static let shared = MonitorRegistry()
     static let helperMemory: Double = 10
@@ -224,17 +227,30 @@ final class MonitorRegistry: @unchecked Sendable {
         lock.lock()
         liveHelpers.removeValue(forKey: uniqueID)
         endedHelpers[uniqueID] = Date()
+        pruneEndedHelpers()  // bounded: only the last `helperMemory` seconds
         lock.unlock()
     }
 
-    /// A helper runs, or one ended less than `helperMemory` seconds ago.
-    var helperActiveOrRecent: Bool {
-        lock.lock()
-        defer { lock.unlock() }
+    /// Under the lock.
+    private func pruneEndedHelpers() {
         let now = Date()
         endedHelpers = endedHelpers.filter { now.timeIntervalSince($0.value) < Self.helperMemory }
-        return !liveHelpers.isEmpty || !endedHelpers.isEmpty
     }
+
+    /// A helper started after `rootUniqueID` (its unique id is greater: unique
+    /// ids grow with creation) runs, or ended less than `helperMemory`
+    /// seconds ago. Helpers that ran before the root (the git calls that
+    /// create a worktree) cannot have left anything newer than the root, and
+    /// the sweep only ever considers processes newer than the root.
+    func helperActiveOrRecent(after rootUniqueID: UInt64) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        pruneEndedHelpers()
+        return liveHelpers.keys.contains { $0 > rootUniqueID } || endedHelpers.keys.contains { $0 > rootUniqueID }
+    }
+
+    /// Any helper runs or ran recently (tests).
+    var helperActiveOrRecent: Bool { helperActiveOrRecent(after: 0) }
 
     func isHelper(_ uniqueID: UInt64) -> Bool {
         lock.lock()
@@ -536,7 +552,7 @@ final class TreeMonitor: @unchecked Sendable {
         // no helper of the node runs or just ran (an orphan whose recorded
         // parent nobody knows cannot be attributed otherwise).
         let registry = MonitorRegistry.shared
-        let anchor = (registry.anotherMonitorIsLive(than: self) || registry.helperActiveOrRecent)
+        let anchor = (registry.anotherMonitorIsLive(than: self) || registry.helperActiveOrRecent(after: root.uniqueID))
             ? nil : OrphanSweep.anchor
         let rowsByUniqueID = Dictionary(rows.map { ($0.identity.uniqueID, $0) }, uniquingKeysWith: { first, _ in first })
         /// The candidate, its recorded parent and every live ancestor.
