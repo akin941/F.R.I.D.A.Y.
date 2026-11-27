@@ -21,6 +21,11 @@
 //   confirmation window (ConfirmationWindow.swift) closes and later clicks
 //   are refused until the owner releases it after LocalAuthentication. The
 //   flag lives on the runner (B6), so the item is right after a re-pair.
+// - Phase 13 M1 (runbook E1): "Sunucu: <host>" shows the server the node
+//   is paired with, read from the local Keychain credential only;
+//   "Sunucu adresini değiştir…" (ServerAddressWindow.swift) re-points it
+//   after Touch ID or the password, keeping the pins. No server message can
+//   change the address (ADR-013 decision 5).
 // - "İzinler" also holds (runbook B6, CommandMappingsMenu.swift) the command
 //   mappings, recipes, bundle-id list and srt location, every change behind
 //   LocalAuthentication, plus the Accessibility / Automation TCC requests.
@@ -37,6 +42,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var pairItem: NSMenuItem!
     private var unpairItem: NSMenuItem!
     private var pairingWindow: PairingWindowController?
+    private let serverLine = NSMenuItem(title: "Sunucu: —", action: nil, keyEquivalent: "")
+    private var serverAddressItem: NSMenuItem!
+    private var serverAddressWindow: ServerAddressWindowController?
+    lazy var serverAddressEditor = ServerAddressEditor(target: runner, authentication: DeviceOwnerAuthentication())
     private let permissionsMenu = NSMenu(title: "İzinler")
     let policyStore = KeychainLocalPolicyStore()
     /// Runbook B6: the command mappings (keychain), the TCC probe shared by
@@ -90,6 +99,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusLine.isEnabled = false
         micLine.isEnabled = false
         menu.addItem(statusLine)
+        serverLine.isEnabled = false
+        menu.addItem(serverLine)
         menu.addItem(micLine)
         menu.addItem(.separator())
         resumeItem = NSMenuItem(title: "Devam et", action: #selector(resume), keyEquivalent: "")
@@ -99,7 +110,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // confirmation window, stops a running command, and refuses every
         // later click until released (release needs Touch ID or the password).
         killSwitchItem = NSMenuItem(title: "Acil durdur", action: #selector(toggleKillSwitch), keyEquivalent: "")
-        for item in [resumeItem!, pairItem!, unpairItem!, killSwitchItem!] {
+        serverAddressItem = NSMenuItem(
+            title: "Sunucu adresini değiştir…", action: #selector(changeServerAddress), keyEquivalent: "")
+        for item in [resumeItem!, pairItem!, serverAddressItem!, unpairItem!, killSwitchItem!] {
             item.target = self
             menu.addItem(item)
         }
@@ -201,6 +214,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case .waiting(let seconds): text = "Yeniden bağlanacak (\(seconds) sn)"
         case .stopped(let reason): text = "Durduruldu (\(Self.describe(reason)))"
         case .needsPairing: text = "Yeniden eşleştirme gerekli"
+        case .identityChanged: text = ServerAddress.identityChangedMessage
         case .error(let what): text = "Hata: \(what)"
         }
         statusLine.title = "Friday Node: \(text)"
@@ -211,6 +225,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         default: paired = true
         }
         unpairItem.isEnabled = paired
+        serverAddressItem.isEnabled = paired
+        syncServerLine()
+    }
+
+    /// The host from the local credential only (never from a frame).
+    private func syncServerLine() {
+        serverLine.title = "Sunucu: \(runner.serverHost ?? "—")"
     }
 
     private static func describe(_ reason: String) -> String {
@@ -348,6 +369,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.activate(ignoringOtherApps: true)
     }
 
+    /// One editor at a time: a second click fronts the open window.
+    @objc private func changeServerAddress() {
+        if let open = serverAddressWindow, open.window?.isVisible == true {
+            open.showWindow(nil)
+            open.window?.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+            return
+        }
+        let controller = ServerAddressWindowController(editor: serverAddressEditor) { [weak self] in
+            self?.syncServerLine()
+        }
+        serverAddressWindow = controller
+        controller.showWindow(nil)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
     @objc private func unpair() {
         try? runner.unpair()
     }
@@ -358,6 +395,7 @@ extension AppDelegate: NSMenuDelegate {
     /// advertised availability are refreshed whenever the menu opens.
     func menuWillOpen(_ menu: NSMenu) {
         syncKillSwitchItem()
+        syncServerLine()
         rebuildPermissions()
         voiceMenuBuilder.build(into: voiceMenu)
         runner.refreshAvailability()

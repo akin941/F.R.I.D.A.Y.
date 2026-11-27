@@ -41,6 +41,7 @@ public final class NodeConnection: NSObject, URLSessionWebSocketDelegate, @unche
     /// The subprotocols offered, highest first.
     public let offered: [String]
     private var urlSession: URLSession?
+    private var pinning: PinningDelegate?
     private var task: URLSessionWebSocketTask?
     private var timer: DispatchSourceTimer?
     private var opened = false
@@ -87,6 +88,7 @@ public final class NodeConnection: NSObject, URLSessionWebSocketDelegate, @unche
         configuration.urlCache = nil
         configuration.httpShouldSetCookies = false
         let pinning = PinningDelegate(pin: pin)
+        self.pinning = pinning
         let urlSession = URLSession(
             configuration: configuration, delegate: Forwarder(self, pinning), delegateQueue: delegateQueue)
         var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalAndRemoteCacheData, timeoutInterval: 15)
@@ -175,6 +177,11 @@ public final class NodeConnection: NSObject, URLSessionWebSocketDelegate, @unche
     }
 
     public var isFinished: Bool { finished }
+
+    /// The TLS handshake was refused because the server's leaf SPKI is not
+    /// the pinned one: nothing was sent (no upgrade request, no Bearer, so
+    /// never `hello`). Read on `queue`, e.g. in `onClose`.
+    public var pinRefused: Bool { pinning?.refusedPin ?? false }
 
     /// Send frames the session produced outside a receive or tick (an
     /// availability change). Call on `queue`.
@@ -309,6 +316,12 @@ public final class NodeRunner: @unchecked Sendable {
         case stopped(reason: String)
         /// 4401 or a credential the server refuses: pair again.
         case needsPairing
+        /// Phase 13 M1: the server at the stored address presented another
+        /// TLS key than the pinned one; refused before anything is sent
+        /// ("Sunucu kimliği değişti — yeniden eşleştirin"). The runner keeps
+        /// retrying the same address with backoff (the Linux daemon's
+        /// behaviour); it never falls back to another address.
+        case identityChanged
         case error(String)
     }
 
@@ -342,6 +355,8 @@ public final class NodeRunner: @unchecked Sendable {
     private var reconnectWork: DispatchWorkItem?
     private var running = false
     private var rotating = false
+    /// The rotation's HTTPS POST (tests inject a fake).
+    private let rotationPost: Rotation.Post
     /// Bumped by start, stop, adopt and unpair: a late callback of an older
     /// connection or rotation sees another generation and changes nothing.
     private var generation = 0
@@ -375,9 +390,11 @@ public final class NodeRunner: @unchecked Sendable {
         store: CredentialStore, policyStore: LocalPolicyStore, desktop: DesktopSource, home: String,
         usage: UsageSource = .unsupported, clock: NodeClock = SystemClock(), actionPolicy: ActionPolicy? = nil,
         executor: ActionExecutor = UnavailableExecutor(), mappingsStore: CommandMappingsStore? = nil,
-        makeExecutor: ((CommandMappings) -> ActionExecutor)? = nil, nodeDirs: [String] = SandboxPolicy.appNodeDirs
+        makeExecutor: ((CommandMappings) -> ActionExecutor)? = nil, nodeDirs: [String] = SandboxPolicy.appNodeDirs,
+        rotationPost: @escaping Rotation.Post = Rotation.pinnedPost
     ) {
         self.store = store
+        self.rotationPost = rotationPost
         self.policyStore = policyStore
         self.desktop = desktop
         self.home = home
@@ -584,6 +601,11 @@ public final class NodeRunner: @unchecked Sendable {
         queue.sync { credential }
     }
 
+    /// The server host the menu shows, from the stored credential only.
+    public var serverHost: String? {
+        ServerAddress.displayHost(of: currentCredential())
+    }
+
     /// Whether the node WebSocket is up now.
     public var voiceLink: Bool { queue.sync { voiceLinkUp } }
 
@@ -634,6 +656,36 @@ public final class NodeRunner: @unchecked Sendable {
             self.credential = credential
             session = makeSession(credential)
             connect()
+        }
+    }
+
+    /// Phase 13 M1: the owner re-pointed the node (ServerAddressEditor, after
+    /// LocalAuthentication and the pin probe). Saved on `queue`; every pin,
+    /// the node id and the secret are kept. A running node reconnects to the
+    /// new address; a stopped session stays stopped (re-pointing is not
+    /// "Resume").
+    ///
+    /// A rotation in flight (its POST went to the old host) is **not**
+    /// superseded: the identity did not change, and the server may already
+    /// have issued the new secret, which must not be lost (it would end in
+    /// `needsPairing` after the grace period). The swap waits for it: the
+    /// new address is saved now, the rotation's `persist` merges the rotated
+    /// secret into the credential as it is then (so the new address stays),
+    /// and its completion opens the socket to the new address. Unpair and
+    /// re-pair still bump the generation and drop the rotated secret.
+    public func repoint(to serverURL: URL, nodeID: String) throws -> NodeCredential {
+        try queue.sync {
+            guard var next = try credential ?? store.load(), next.nodeID == nodeID else {
+                throw ServerAddressError.notPaired
+            }
+            next.serverURL = serverURL
+            try store.save(next)
+            credential = next
+            if running, session != nil, !rotating {
+                reset(running: true)
+                connect()
+            }
+            return next
         }
     }
 
@@ -699,17 +751,29 @@ public final class NodeRunner: @unchecked Sendable {
         let now = clock.now()
         // Persisted on `queue`, and only while this generation is current: an
         // unpair or re-pair meanwhile wins, and the rotated secret is dropped.
+        // The rotated secret is merged into the credential as it is now, so a
+        // re-point while the POST was in flight keeps its new address
+        // (identity and pins must still match, else it is dropped too).
         let persist: (NodeCredential) throws -> Void = { [weak self] rotated in
             guard let self else { throw RunnerError.superseded }
             try self.queue.sync {
-                guard self.generation == generation else { throw RunnerError.superseded }
-                try self.store.save(rotated)
+                guard self.generation == generation, let current = self.credential,
+                    current.nodeID == rotated.nodeID, current.pinnedKeys == rotated.pinnedKeys,
+                    current.tlsPinSHA256 == rotated.tlsPinSHA256
+                else { throw RunnerError.superseded }
+                var merged = current
+                merged.secret = rotated.secret
+                merged.secretIssuedAt = rotated.secretIssuedAt
+                merged.rotateAfterDays = rotated.rotateAfterDays
+                try self.store.save(merged)
+                self.credential = merged
             }
         }
         Task {
             let outcome: Result<NodeCredential, Error>
             do {
-                outcome = .success(try await Rotation.rotate(credential, now: now, persist: persist))
+                outcome = .success(
+                    try await Rotation.rotate(credential, now: now, persist: persist, post: self.rotationPost))
             } catch {
                 outcome = .failure(error)
             }
@@ -717,9 +781,11 @@ public final class NodeRunner: @unchecked Sendable {
                 guard self.generation == generation else { return }
                 self.rotating = false
                 switch outcome {
-                case .success(let rotated):
-                    self.credential = rotated
-                    self.openSocket(rotated, session)
+                case .success:
+                    // `persist` already stored the merged credential (the
+                    // current address, the rotated secret).
+                    guard let current = self.credential else { return }
+                    self.openSocket(current, session)
                 case .failure(NodeHTTPError.status(401, _)):
                     self.status = .needsPairing
                 case .failure:
@@ -740,9 +806,15 @@ public final class NodeRunner: @unchecked Sendable {
             guard let self, self.generation == generation, session.sessionReady else { return }
             self.status = .connected
         }
-        connection.onClose = { [weak self] code in
+        connection.onClose = { [weak self, weak connection] code in
             guard let self, self.generation == generation else { return }
             self.connection = nil
+            if connection?.pinRefused == true {
+                Self.log.error("server identity changed: TLS pin refused before hello")
+                self.status = .identityChanged
+                self.scheduleReconnect(session, showWaiting: false)
+                return
+            }
             self.handleClose(code, session)
         }
         self.connection = connection
@@ -761,10 +833,10 @@ public final class NodeRunner: @unchecked Sendable {
         scheduleReconnect(session)
     }
 
-    private func scheduleReconnect(_ session: NodeSession) {
+    private func scheduleReconnect(_ session: NodeSession, showWaiting: Bool = true) {
         guard running else { return }
         let delay = session.nextReconnectDelay ?? Backoff.minimumSeconds
-        status = .waiting(seconds: Int(delay.rounded(.up)))
+        if showWaiting { status = .waiting(seconds: Int(delay.rounded(.up))) }
         let generation = self.generation
         let work = DispatchWorkItem { [weak self] in
             guard let self, self.generation == generation else { return }
@@ -772,6 +844,13 @@ public final class NodeRunner: @unchecked Sendable {
         }
         reconnectWork = work
         queue.asyncAfter(deadline: .now() + delay, execute: work)
+    }
+}
+
+extension NodeRunner: ServerAddressTarget {
+    /// The credential the runner holds, else the stored one (local only).
+    public func currentCredential() -> NodeCredential? {
+        queue.sync { credential ?? (try? store.load()) }
     }
 }
 

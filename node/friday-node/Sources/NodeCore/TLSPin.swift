@@ -93,10 +93,19 @@ public final class PinningDelegate: NSObject, URLSessionDelegate, URLSessionTask
     private let expectedPin: Data?
     private let lock = NSLock()
     private var _observedPin: Data?
+    private var _refusedPin = false
 
     /// `pin == nil`: pairing mode (system trust required, pin recorded).
     public init(pin: Data?) {
         expectedPin = pin
+    }
+
+    /// True once a server's leaf did not match the expected pin (Phase 13
+    /// M1: the runner shows "Sunucu kimliği değişti — yeniden eşleştirin").
+    public var refusedPin: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return _refusedPin
     }
 
     /// The leaf pin of the last accepted server (pairing mode).
@@ -141,6 +150,9 @@ public final class PinningDelegate: NSObject, URLSessionDelegate, URLSessionTask
         }
         if let expected = expectedPin {
             guard leaf == expected else {
+                lock.lock()
+                _refusedPin = true
+                lock.unlock()
                 completionHandler(.cancelAuthenticationChallenge, nil)
                 return
             }

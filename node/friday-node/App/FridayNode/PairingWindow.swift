@@ -50,10 +50,17 @@ final class PairingWindowController: NSWindowController {
     required init?(coder: NSCoder) { nil }
 
     @objc private func pair() {
-        guard let server = URL(string: serverField.stringValue.trimmingCharacters(in: .whitespaces)),
-            server.scheme == "https", server.host != nil
-        else {
-            message.stringValue = "Sunucu adresi https:// ile başlamalı."
+        // The same address rules as "Sunucu adresini değiştir" and
+        // friday-node-linux `pair` (`check_server_url`).
+        let server: URL
+        do {
+            server = try ServerAddress.check(serverField.stringValue)
+        } catch ServerAddressError.invalid(let why) {
+            message.stringValue = why
+            return
+        } catch {
+            // `check` throws only `.invalid`; any other error is still a refusal.
+            message.stringValue = "Sunucu adresi geçersiz."
             return
         }
         let pinText = pinField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
