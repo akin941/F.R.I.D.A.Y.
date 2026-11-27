@@ -43,6 +43,15 @@ the actor (`nodes.selectors.node_presence`, `for_actor()` plus
 invocable read/action counts and the mic state; never a path, capability
 name, argument or output. `health.node` (the single "most relevant node"
 line) is kept unchanged for the compact HUD and older clients.
+
+Phase 13b branch 1d (brief D11, ADR-018) adds `health.home_direct`: the
+direct media class's `{state, flagged, calls_last_hour}` -- `state` one of
+`on` / `off_owner` / `off_env` / `not_configured`, the number of enabled
+flagged entities and the direct calls of the last hour. Read through the
+`tools.home_ports.home_direct_status` port (`hud` may not import
+`connectors`; the port module imports nothing of ours), DB only, never a
+Home Assistant request. The HUD shows it and never toggles anything: the
+switches live on `/connectors`.
 """
 
 import posixpath
@@ -63,6 +72,7 @@ from nodes.models import EXECUTION_TERMINAL_STATUSES, NodeActionExecution
 from nodes.selectors import node_health, node_presence_page
 from proactive import api as proactive_api
 from tasks.models import Task
+from tools.home_ports import home_direct_status, not_configured_status
 
 ZERO = Decimal("0")
 # Errors that say nothing about whether a provider is up: the caller hung
@@ -306,6 +316,14 @@ def _voice_line(voice):
     }
 
 
+def home_direct_section(workspace, actor):
+    """Phase 13b D11: the direct media class's HUD line -- a state word and
+    two counts, never an entity id, service or call content."""
+    if actor is None:
+        return not_configured_status()
+    return home_direct_status(workspace=workspace, actor=actor)
+
+
 def health_section(workspace, actor=None):
     """Provider status (the last call in the window, per provider), budgets
     used, the last preflight result and (Phase 9 D11) the actor's node
@@ -337,6 +355,7 @@ def health_section(workspace, actor=None):
         "budgets_exhausted": sum(1 for b in budget_rows if b["exhausted"]),
         "preflight": _preflight(),
         "node": node_section(actor) if actor is not None else None,
+        "home_direct": home_direct_section(workspace, actor),
     }
 
 

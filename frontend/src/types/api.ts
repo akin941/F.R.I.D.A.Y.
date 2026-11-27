@@ -186,9 +186,57 @@ export interface ApiHomeEntity {
   aliases: string[];
   services: string[];
   enabled: boolean;
+  /**
+   * Phase 13b D5 (ADR-018): the owner-set "direct" flag (no approval card
+   * for the closed media services). Optional: absent from a backend
+   * predating branch 1b.
+   */
+  direct?: boolean;
+  /** The closed-class services the flag covers on this entity; empty = not eligible. */
+  direct_services?: string[];
   room: ApiRoomRef | null;
   created_at: string;
   updated_at: string;
+}
+
+/** Phase 13b D6: `on` / off by the owner / off by the environment. */
+export type ApiHomeDirectState = "on" | "off_owner" | "off_env";
+
+/** `GET/PATCH /api/v1/connectors/home-assistant/direct` (Phase 13b D6). */
+export interface ApiHomeDirectSettings {
+  workspace: string;
+  kill_switch: boolean;
+  env_kill_switch: boolean;
+  state: ApiHomeDirectState;
+  volume_max: number;
+  rate_global_per_minute: number;
+  rate_entity_per_minute: number;
+  services: string[];
+  digest: string;
+  flagged_count: number;
+}
+
+/** One row of `GET /api/v1/connectors/home-assistant/direct/calls` (Phase 13b D11). */
+export interface ApiHomeDirectCall {
+  id: string;
+  home_entity_id: string | null;
+  entity_id: string;
+  service: string;
+  data: Record<string, unknown>;
+  requested_data: Record<string, unknown> | null;
+  origin: "voice" | "node" | "chat";
+  node: string | null;
+  status: "running" | "succeeded" | "failed" | "unknown_outcome";
+  error_type: string;
+  read_back: boolean;
+  started_at: string | null;
+  finished_at: string | null;
+  created_at: string;
+}
+
+export interface ApiHomeDirectCalls {
+  workspace: string;
+  results: ApiHomeDirectCall[];
 }
 
 /** `GET /api/v1/connectors/home-assistant/entities`. `services`: the code maximum per domain, narrowed. */
@@ -473,6 +521,8 @@ export type ChatStreamEvent =
       source_message_id: string;
       tool_name: string;
       payload: Record<string, unknown>;
+      /** Phase 13b D7: why a `home.control` card is not direct (a closed code). */
+      direct_reason?: string;
     };
 
 // --- Memory (MVP 2) ---

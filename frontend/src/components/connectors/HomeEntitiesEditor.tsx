@@ -94,6 +94,77 @@ function ServiceBoxes({
   );
 }
 
+/**
+ * Phase 13b D5/D11 (ADR-018): why an entity cannot be flagged "direct", or
+ * null when it can. Only a `media_player` with at least one ticked service
+ * of the closed class is eligible (the backend refuses anything else).
+ */
+export function directIneligibleReason(entity: ApiHomeEntity): string | null {
+  if (entity.domain !== "media_player") return "Yalnızca medya oynatıcılar doğrudan olabilir.";
+  if ((entity.direct_services ?? []).length === 0) {
+    return "Doğrudan sınıftan izinli hizmet yok (oynat, duraklat, durdur, ses).";
+  }
+  return null;
+}
+
+function DirectSwitch({
+  entity,
+  busy,
+  onChange,
+}: {
+  entity: ApiHomeEntity;
+  busy: boolean;
+  onChange: (entity: ApiHomeEntity, direct: boolean) => Promise<void>;
+}) {
+  const [confirming, setConfirming] = useState(false);
+  const id = `ha-entity-${entity.id}-direct`;
+  const reason = directIneligibleReason(entity);
+  const on = Boolean(entity.direct);
+  const covered = entity.direct_services ?? [];
+  return (
+    <div className="flex flex-col gap-1" data-testid="ha-direct">
+      <label htmlFor={id} className="flex items-center gap-2 text-sm font-medium">
+        <input
+          id={id}
+          type="checkbox"
+          role="switch"
+          aria-checked={on}
+          checked={on}
+          disabled={busy || reason !== null}
+          aria-describedby={`${id}-help`}
+          onChange={() => {
+            // Turning it on widens the one exception to the approval gate:
+            // the owner confirms it. Turning it off is immediate.
+            if (on) void onChange(entity, false);
+            else setConfirming(true);
+          }}
+        />
+        Doğrudan (onaysız)
+        {on ? (
+          <Badge variant="outline" className={TONE_PILL_CLASSES.warning}>
+            Kartsız
+          </Badge>
+        ) : null}
+      </label>
+      <p id={`${id}-help`} className="text-xs text-muted-foreground" data-testid="ha-direct-help">
+        {reason ??
+          `Onay kartı olmadan çalışır: ${covered.map((service) => SERVICE_LABELS[service] ?? service).join(", ")}. Diğer her işlem yine onay bekler.`}
+      </p>
+      <ConfirmDialog
+        open={confirming}
+        onOpenChange={setConfirming}
+        title="Bu cihaz doğrudan olsun mu?"
+        description={`"${entity.entity_id}" için ${covered.join(", ")} komutları sesli ya da yazılı isteğinde onay kartı olmadan çalışır. Dakikalık sınırlar, ses üst sınırı ve "Doğrudan medyayı kapat" anahtarı geçerlidir.`}
+        confirmLabel="Doğrudan yap"
+        busyLabel="Kaydediliyor…"
+        errorFallback="Doğrudan işareti kaydedilemedi."
+        destructive={false}
+        onConfirm={() => onChange(entity, true)}
+      />
+    </div>
+  );
+}
+
 function RoomSelect({
   id,
   rooms,
@@ -151,6 +222,7 @@ function EntityRow({
   onSave,
   onToggle,
   onDelete,
+  onDirect,
 }: {
   entity: ApiHomeEntity;
   rooms: ApiRoom[];
@@ -159,6 +231,7 @@ function EntityRow({
   onSave: (entity: ApiHomeEntity, draft: Draft) => Promise<void>;
   onToggle: (entity: ApiHomeEntity) => Promise<void>;
   onDelete: (entity: ApiHomeEntity) => Promise<void>;
+  onDirect: (entity: ApiHomeEntity, direct: boolean) => Promise<void>;
 }) {
   const [draft, setDraft] = useState<Draft>(() => toDraft(entity));
   const initial = toDraft(entity);
@@ -215,6 +288,7 @@ function EntityRow({
         selected={draft.services}
         onChange={(services) => setDraft((prev) => ({ ...prev, services }))}
       />
+      <DirectSwitch entity={entity} busy={busy} onChange={onDirect} />
       <div className="flex flex-wrap gap-2">
         <Button
           size="sm"
@@ -395,11 +469,19 @@ function AddEntity({
  * The owner's Home Assistant entity allowlist (Phase 13 D11), on
  * `/connectors` under the Home Assistant card: only the entities listed
  * here, and only their ticked services, can ever be called -- each call
- * still needs its own approval on `/approvals`. The services offered are
+ * still needs its own approval on `/approvals`, except (Phase 13b, ADR-018)
+ * the closed media services on a player the owner flagged "direct". The services offered are
  * the code maximum for the entity's domain (never a toggle, never a lock
  * or script). An empty list means nothing is callable.
  */
-export function HomeEntitiesEditor({ workspaceId }: { workspaceId: string }) {
+export function HomeEntitiesEditor({
+  workspaceId,
+  onDirectChanged,
+}: {
+  workspaceId: string;
+  /** Phase 13b: a "direct" flag changed (the settings panel refreshes its count). */
+  onDirectChanged?: () => void;
+}) {
   const [data, setData] = useState<ApiHomeEntityList | null>(null);
   const [rooms, setRooms] = useState<ApiRoom[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -472,6 +554,19 @@ export function HomeEntitiesEditor({ workspaceId }: { workspaceId: string }) {
     await run(() => updateHomeEntity(entity.id, { enabled: !entity.enabled }), "Varlık güncellenemedi.");
   }
 
+  async function setDirect(entity: ApiHomeEntity, direct: boolean) {
+    if (direct) {
+      // From the confirmation dialog: its own error slot reports a failure.
+      await updateHomeEntity(entity.id, { direct: true });
+      await load();
+      onDirectChanged?.();
+      return;
+    }
+    if (await run(() => updateHomeEntity(entity.id, { direct: false }), "Doğrudan işareti kaldırılamadı.")) {
+      onDirectChanged?.();
+    }
+  }
+
   async function remove(entity: ApiHomeEntity) {
     // Errors surface in the confirmation dialog (`errorFallback`).
     await deleteHomeEntity(entity.id);
@@ -487,7 +582,8 @@ export function HomeEntitiesEditor({ workspaceId }: { workspaceId: string }) {
       </h2>
       <p className="text-sm text-muted-foreground">
         Friday yalnızca burada listelenen varlıklarda, yalnızca işaretli hizmetleri çağırabilir; her
-        çağrı yine Onaylar sayfasında senin kararını bekler.
+        çağrı yine Onaylar sayfasında senin kararını bekler. Tek istisna: &quot;Doğrudan (onaysız)&quot;
+        işaretlediğin medya oynatıcılarda oynat, duraklat, durdur ve ses komutları kartsız çalışır.
       </p>
       {error ? (
         <Alert variant="destructive" role="alert">
@@ -511,6 +607,7 @@ export function HomeEntitiesEditor({ workspaceId }: { workspaceId: string }) {
             onSave={save}
             onToggle={toggle}
             onDelete={remove}
+            onDirect={setDirect}
           />
         ))}
       </ul>

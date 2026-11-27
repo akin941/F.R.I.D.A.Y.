@@ -2,6 +2,8 @@
 
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Plug } from "lucide-react";
+import { useState } from "react";
+import { HomeDirectSettings } from "@/components/connectors/HomeDirectSettings";
 import { HomeEntitiesEditor } from "@/components/connectors/HomeEntitiesEditor";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -225,6 +227,8 @@ function RecentReads({ workspaceId }: { workspaceId: string }) {
 
 function ConnectorsForWorkspace({ workspaceId }: { workspaceId: string }) {
   const query = useConnectorBindings(workspaceId);
+  // Phase 13b: a "direct" flag change refreshes the direct panel's count.
+  const [directVersion, setDirectVersion] = useState(0);
   return (
     <>
       {query.isPending ? (
@@ -244,7 +248,10 @@ function ConnectorsForWorkspace({ workspaceId }: { workspaceId: string }) {
         </div>
       )}
       {query.data?.some((b) => b.connector === "home_assistant" && b.bindable) ? (
-        <HomeEntitiesEditor workspaceId={workspaceId} />
+        <>
+          <HomeEntitiesEditor workspaceId={workspaceId} onDirectChanged={() => setDirectVersion((v) => v + 1)} />
+          <HomeDirectSettings workspaceId={workspaceId} refreshKey={directVersion} />
+        </>
       ) : null}
       <RecentReads workspaceId={workspaceId} />
     </>

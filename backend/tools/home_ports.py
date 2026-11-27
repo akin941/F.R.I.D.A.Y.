@@ -37,6 +37,14 @@ Phase 13b (ADR-018, brief D7/D10, branch 1b) adds the direct-media ports:
   registered executor every `run_home_direct` answers `not_direct` and
   sends nothing.
 
+Phase 13b branch 1d (brief D11) adds the read-only status port:
+
+- `register_direct_status(fn)`: `fn(*, workspace, actor) -> dict` --
+  `{state, flagged, calls_last_hour}` for the HUD's `home_direct` line
+  (`connectors.home_direct.hud_status`; DB only, never a Home Assistant
+  request). `hud` may not import `connectors`, so it reads the line here.
+  Unregistered, raising or malformed -> `not_configured` with zero counts.
+
 An unregistered or raising classifier/executor is **never direct**
 (`not_available`): the turn stays exactly the gate-class Phase 13 turn.
 
@@ -310,3 +318,68 @@ def run_home_direct(*, workspace, actor, message, origin, channel, node_id=None)
     if isinstance(result, DirectRun):
         return result
     return DirectRun(outcome=DIRECT_RUN_ERROR, reason=DIRECT_EXECUTOR_FAILED)
+
+
+# --- Phase 13b branch 1d: the HUD status line (D11) --------------------------
+
+DIRECT_STATUS_ON = "on"
+DIRECT_STATUS_OFF_OWNER = "off_owner"
+DIRECT_STATUS_OFF_ENV = "off_env"
+DIRECT_STATUS_NOT_CONFIGURED = "not_configured"
+DIRECT_STATUS_STATES = frozenset(
+    {
+        DIRECT_STATUS_ON,
+        DIRECT_STATUS_OFF_OWNER,
+        DIRECT_STATUS_OFF_ENV,
+        DIRECT_STATUS_NOT_CONFIGURED,
+    }
+)
+
+_DIRECT_STATUS: list[Callable[..., Any]] = []
+
+
+def not_configured_status():
+    return {"state": DIRECT_STATUS_NOT_CONFIGURED, "flagged": 0, "calls_last_hour": 0}
+
+
+def register_direct_status(fn):
+    _DIRECT_STATUS[:] = [fn]
+
+
+def unregister_direct_status():
+    """Test-only."""
+    _DIRECT_STATUS.clear()
+
+
+def direct_status_reader():
+    return _DIRECT_STATUS[0] if _DIRECT_STATUS else None
+
+
+def _count(value):
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise ValueError("a count is a non-negative int")
+    return value
+
+
+def home_direct_status(*, workspace, actor):
+    """The registered reader's `{state, flagged, calls_last_hour}` -- only
+    those three keys, the state one of the four closed words. Read-only and
+    informational: nothing decides on it (the classifier and the executor
+    read the settings themselves). Unregistered, raising or malformed ->
+    `not_configured` with zero counts."""
+    fn = direct_status_reader()
+    if fn is None:
+        return not_configured_status()
+    try:
+        raw = fn(workspace=workspace, actor=actor)
+        state = raw["state"]
+        if state not in DIRECT_STATUS_STATES:
+            raise ValueError("unknown state")
+        return {
+            "state": state,
+            "flagged": _count(raw["flagged"]),
+            "calls_last_hour": _count(raw["calls_last_hour"]),
+        }
+    except Exception as exc:  # noqa: BLE001 -- the HUD line is informational
+        logger.warning("direct status failed: %s", type(exc).__name__)
+        return not_configured_status()

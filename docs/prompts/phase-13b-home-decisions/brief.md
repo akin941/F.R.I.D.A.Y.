@@ -1109,7 +1109,7 @@ says "server side done; go/no-go pending owner evaluation".
 | 1a | `feat/p13-media-play-pause-stop` | `media_play_pause`/`media_stop` in the code maximum as gate-class services (manifest v3, pins, governance docs), the play_pause dialog row, `STOP`/`PLAY_PAUSE` verbs and vectors | brief approved | **implemented 2026-11-20** (manifest v3, new `CALL_SERVICE_PIN`, `STATES_PIN` unchanged; play_pause outcome row + precondition; awaits the independent Sonnet 5 review) |
 | 1b | `feat/p13-direct-media-model` | `HomeEntity.direct`, `HomeDirectSettings`, `HomeDirectCall` (`connectors` 0006), closed allowlist + digest, `classify`, rate windows, volume rules, settings service, entity `direct` field + `/direct` + `/direct/calls` endpoints with role × endpoint, registry walk, the classifier port, `HA_DIRECT_*` settings, ADR-018 implementation note | 1a | **implemented 2026-11-20** (`connectors` 0006; closed set + digest `9ca85ee2…` pinned in ADR-018; read-only `classify` with the added closed reason `arguments_invalid`; peek-only classify + one `count_direct_call`; owner API with role × endpoint; classifier port only, no executor; awaits the independent Sonnet 5 review) |
 | 1c | `feat/p13-direct-media-exec` | `execute` (re-resolution, kill-switch re-check, clamp, one send, audit), recovery scan, executor port, `HOME_DIRECT` intent (`assistant` 0015) + code-only parser lock, cap clause, `extra_effects` + `_finish` check, sentinel factory, voice/`node_voice`/typed paths, provenance tests | 1b | **implemented 2026-11-20** (`assistant` 0015; executor registered — a flagged TV is direct from this branch on; executor-only reason `target_unavailable` added; real `friday-voice run` e2e; the real Swift node and the real TV are M2 — deferred: Mac session; awaits the independent Sonnet 5 review) |
-| 1d | `feat/p13-direct-media-ui` | HUD `home_direct` line, `/connectors` direct switch and settings panel, vitest | 1b (merges after 1c, so nothing is shown as "on" before it can run) | not started |
+| 1d | `feat/p13-direct-media-ui` | HUD `home_direct` line, `/connectors` direct switch and settings panel, vitest | 1b (merges after 1c, so nothing is shown as "on" before it can run) | **implemented 2026-11-20** (no migration; the HUD reads the line through a new read-only `tools.home_ports` status port — one import-linter edge `hud.services -> tools.home_ports`; a zero rate limit reads `off_env`; the card shows the recommended `direct_reason` subset; the real TV on `/connectors` is M2 — deferred: Mac session; awaits the independent Sonnet 5 review) |
 | 2 | `feat/p13-interim-mac-server` | `HOME_SERVER_PLATFORM`, `home_server_platform`, macOS-aware `home_disk_encryption`, `HOME_BACKUP_OFFSITE_REPOSITORY` + the R2 destination check, R2 names in `.env.example`, portable backup/drill scripts, `restic.env.example`, launchd plist, `compose.mac.yml`, `make up-mac-server` | brief approved (independent of 1) | **implemented 2026-11-20** (server side, tested against the macOS tool-set double; the real Mac run is M1 — deferred: Mac session; awaits the independent Sonnet 5 review) |
 | 3 | `chore/p13b-closeout` | `ha_direct_media` preflight row, home-direct e2e, handoff Part F, MASTER_PLAN row, ADR-018 closeout note, `self_sources.json`, runbook step 12 | 1a–1d, 2 | not started |
 | M1 | Interim server on the real MacBook | Runbook "Interim" I1–I5: OrbStack/Docker Desktop, `make up-mac-server`, FileVault attestation, the R2 bucket, the LaunchAgent, the first backup and restore drill, one drill from R2 | 2 merged | deferred: Mac session (pending owner evaluation) |
@@ -1768,3 +1768,98 @@ needed the Mac, real credentials, paid calls or hardware.
    write-recovery pattern, but it deserves an explicit comment. Fix: add a
    one-line comment that the system scan is deliberately cross-workspace and
    only finalizes rows.
+
+### Implementation notes — `feat/p13-direct-media-ui` (branch 1d, implemented 2026-11-20)
+
+What branch 1d did (D11, presentation only — no migration, no new write
+path, no change to what is direct):
+- **HUD line.** `hud.services.health_section` gains `home_direct =
+  {state, flagged, calls_last_hour}` (`hud.services.home_direct_section`).
+  `hud` may not import `connectors`, so the line is read through a new
+  read-only port in `tools.home_ports` (`register_direct_status` /
+  `home_direct_status`, registered by `ConnectorsConfig.ready` with
+  `connectors.home_direct.hud_status`). The port passes only the three keys
+  and the four closed state words; an unregistered, raising or malformed
+  reader is `not_configured` with zero counts. The import-linter contract
+  "hud may import only …" gains exactly one production edge,
+  `hud.services -> tools.home_ports` (that module imports nothing of
+  ours), plus test-only edges for `hud.tests`.
+- **States.** `not_configured` when the actor is not the installation
+  owner in his personal workspace (zero counts — a firm stream or another
+  user never sees anything), `off_env` when the environment disables the
+  class, `off_owner` for the owner kill switch, `not_configured` when Home
+  Assistant is not usable (manifest, binding, `ha_call_service` pin) or no
+  enabled entity is flagged, otherwise `on`. `flagged` counts enabled
+  flagged entities and `calls_last_hour` the `HomeDirectCall` rows of the
+  last hour (each an attempted send), both through `for_actor()`. DB only:
+  no Home Assistant request, no settings row created, no audit row.
+- **Implementation choice the reviewer should check:** a rate limit of 0
+  ("0 disables", D8/`.env.example`) now also reads `off_env` in
+  `home_direct.direct_state`, so the `/direct` settings body and the HUD
+  agree with the classifier (which already refused every call); the
+  settings body's `env_kill_switch` stays the env flag alone and the panel
+  words the notice for either cause.
+- **`/connectors`.** `HomeEntitiesEditor`: a "Doğrudan (onaysız)" switch
+  (`role="switch"`) on every row, enabled only on a `media_player` with at
+  least one ticked closed-class service (`direct_services`), disabled with
+  the reason otherwise; turning it on opens a confirmation naming the
+  entity and the services (one `PATCH {direct: true}` only from the
+  dialog's confirm), turning it off is one immediate `PATCH {direct:
+  false}`. The editor's intro names the exception. New
+  `HomeDirectSettings` panel under the allowlist: the state, the flagged
+  count, "Doğrudan medyayı kapat" (one `PATCH {kill_switch}` each way),
+  the volume maximum as 0–100 % (sent as a fraction; out-of-range or
+  unchanged values cannot be saved), the env-kill notice (which disables
+  the toggle), the closed list, the limits and the last 20 calls (origin,
+  status, the sent and — when clamped — the asked volume). BFF routes
+  `/api/connectors/home-assistant/direct` (GET/PATCH) and `/direct/calls`
+  (GET, `limit` 1–100 checked before the backend).
+- **Card reason (owner step 3 of branch 1c).** The `draft` event's
+  `direct_reason` reaches `ToolRequestDraft` (live chat, web voice and the
+  persisted message); the Home Assistant card shows "Doğrudan değil:
+  <reason>" only for the recommended subset (`not_flagged`,
+  `kill_switch_*`, `rate_*`, `volume_*`, `not_available`,
+  `provenance_mismatch`, `target_unavailable`) — the frontend mirror
+  `frontend/src/lib/home-direct.ts` is pinned to `REASON_TEXT` by
+  `connectors/tests/test_home_direct_ui_mirror.py`. Narrowing or widening
+  the subset is a one-line change in both files.
+- **HUD.** `HudPanels.HealthPanel` renders `HudHomeDirectLine` ("Doğrudan
+  medya: açık · 1 cihaz · son 1 saatte 1 çağrı"), coloured only with
+  checked HUD tokens (`tokens.test.ts`); its only control is a link to
+  `/connectors` — no switch, checkbox or button.
+
+Tests: `backend/hud/tests/test_home_direct_line.py` (the four states, a
+zero limit, unusable bindings, counts and the one-hour window, isolation
+between owners and from a firm stream, writes nothing, no Home Assistant
+transport, a delta between ticks, the port's fail-closed answers);
+`connectors/tests/test_home_direct_api.py` (zero limit → `off_env`);
+`connectors/tests/test_home_direct_ui_mirror.py`; vitest
+`HomeEntitiesEditor.test.tsx` (switch only on eligible rows, confirm-on /
+immediate-off PATCH), `HomeDirectSettings.test.tsx` (kill switch, volume,
+env notice disabling the toggle, zero-limit notice, calls list, refusal,
+refresh), `HudHomeDirectLine.test.tsx` (the line per state, no toggle,
+delta), `ToolRequestCardDirectReason.test.tsx`, `ConnectorsView.test.tsx`,
+`ha-entity-routes.test.ts`, `tokens.test.ts`. Nothing needed the Mac, real
+credentials, paid calls or hardware.
+
+### Owner steps (pending) — `feat/p13-direct-media-ui` (branch 1d), recorded 2026-11-20
+
+1. Start the independent Sonnet 5 review of this branch; merge after
+   APPROVE, after branch 1c (so nothing is shown "on" before it can run).
+2. Confirm the UI wording: "Doğrudan (onaysız)", the confirmation "Bu
+   cihaz doğrudan olsun mu?", "Doğrudan medyayı kapat", the state words
+   ("Açık", "Kapalı (sen kapattın)", "Kapalı (sunucu ortam ayarı)"), the
+   HUD line "Doğrudan medya: açık · N cihaz · son 1 saatte N çağrı" and
+   "ayarlanmadı" for `not_configured`.
+3. Confirm (or change) the card's `direct_reason` subset implemented from
+   the 1c recommendation (owner step 3 of branch 1c) and the confirmation
+   step before an entity becomes direct (turning it off has none).
+4. Confirm that a rate limit of 0 is shown as `off_env` ("ortam ayarıyla
+   kapalı") on `/connectors` and the HUD.
+5. **M2 (deferred: Mac session, pending owner evaluation):** on the real
+   MacBook, flag the real TV on `/connectors`, check the HUD line goes
+   "açık · 1 cihaz", say "Hey Friday, TV'yi duraklat" and see the call in
+   the panel's list and the count on the HUD; tap "Doğrudan medyayı kapat"
+   and see the HUD go "kapalı" and the next utterance become a card with
+   "Doğrudan değil: doğrudan medya kapalı". The server side is covered here
+   against the fake Home Assistant; the Swift node needs no change.

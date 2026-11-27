@@ -206,6 +206,7 @@ export function VoiceView({
                 sourceMessageId: event.source_message_id,
                 toolName: event.tool_name,
                 payload: event.payload,
+                ...(event.direct_reason ? { directReason: event.direct_reason } : {}),
               },
               created: null,
             },

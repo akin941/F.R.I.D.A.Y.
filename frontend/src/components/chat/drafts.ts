@@ -11,6 +11,8 @@ export interface ToolRequestDraft {
   sourceMessageId: string;
   toolName: string;
   payload: Record<string, unknown>;
+  /** Phase 13b D7: the closed reason a `home.control` card is not direct. */
+  directReason?: string;
 }
 
 /**
@@ -46,9 +48,11 @@ export function toolDraftFromMessage(message: ChatMessageView): ToolRequestDraft
   const toolName = message.intentPayload?.tool_name;
   if (typeof toolName !== "string" || !toolName) return null;
   const payload = message.intentPayload?.payload;
+  const directReason = message.intentPayload?.direct_reason;
   return {
     sourceMessageId: message.id,
     toolName,
+    ...(typeof directReason === "string" ? { directReason } : {}),
     payload:
       payload && typeof payload === "object" && !Array.isArray(payload)
         ? (payload as Record<string, unknown>)
