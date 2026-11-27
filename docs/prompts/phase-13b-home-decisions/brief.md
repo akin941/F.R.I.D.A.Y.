@@ -2027,3 +2027,23 @@ credentials, paid calls or hardware; nothing touched `node/friday-node/**`.
    environment, so CI coverage depends on the voice venv being present.
    Fix: confirm CI provisions it, so the e2e is not silently reduced to the
    reference host.
+
+### Known follow-ups — fix/p13b-durdur-pause
+
+1. **LOW — DB-backed tests not run in review**
+   (`backend/connectors/tests/test_home_phrases.py`). The reviewer could not
+   run the DB-backed tests (test_home_routes, test_home_direct_routes,
+   test_home_direct_e2e, and the DB-fixture tests in test_home_phrases)
+   because Postgres was not available in the review sandbox, and checked
+   them by reading only: the new assertions match the phrase table, the
+   reply maps and the card verb (the owner's spoken word). Ruff is clean on
+   the touched dirs, build_self_sources --check reports up to date, and the
+   70 non-DB phrase tests passed. Fix: confirm CI is green on the DB tests.
+2. **LOW — `media_stop` checkbox still labeled "durdur"**
+   (`frontend/src/components/connectors/HomeEntitiesEditor.tsx`). The
+   editor labels the media_stop checkbox "durdur" and the helper text says
+   "oynat, duraklat, durdur, ses". Spoken "durdur" now pauses, so the label
+   can mislead owners ticking services; media_stop is now reached only by
+   English "stop". The code comment explains it and the editor test pins
+   the label, so this is cosmetic. Fix (optional): relabel media_stop
+   (e.g. "sonlandır" or "stop") and update HomeEntitiesEditor.test.tsx.
