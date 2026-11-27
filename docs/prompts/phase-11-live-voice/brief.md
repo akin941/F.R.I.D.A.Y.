@@ -2487,6 +2487,174 @@ closed), D12 (release on link loss, mute unreadable, child exit), D15
    normal volume; a reply left to play out with nobody speaking) for M4
    item 4.
 
+#### M1 implementation record (`feat/p11-node-voice-host`, 2026-11-27)
+
+Built on `integ/phase-13` (with A10 `323503e` and the B6 hardening
+`b065358`). Runbook B7.
+
+**What landed.**
+- `Sources/NodeCore/Voice/`: `VoiceMessages.swift` and `VoiceFraming.swift`
+  (`friday-voice/v1`: the frozen sets, the byte limits, the Python refusal
+  codes in the Python order; `VoiceJSON` mirrors `json.loads` with the
+  duplicate-key, float and constant hooks); `VoiceHostCore.swift` (a
+  line-by-line port of `reference/host.py` `HostCore`, paced playback
+  included, plus the effects the app needs: speakers, earcons, the
+  `voice.state` item, the child's release reasons); `VoiceChildHost.swift`
+  (the process: `ChildProcess` with a new stdin pipe option, clean `PATH` /
+  `HOME` / `LANG`, the `uv.lock` check, a 20 ms tick for the 10 s watchdog,
+  pacing and the 1 s → 60 s backoff, non-blocking writes with a 1 MiB
+  bound, the kill ladder: stdin closed, SIGTERM to the group after 2 s,
+  SIGKILL to the group and to every lineage-verified descendant after 2 s
+  more; the child is registered as a node helper so no `srt` run's orphan
+  sweep touches it); `AudioEngine.swift` (`VoiceAudioIO`;
+  `AVAudioVoiceEngine`: voice processing on the input node, 16 kHz mono
+  PCM16 in 640-byte frames, `play` and earcons on player nodes of the same
+  engine, `AVAudioPlayerNode.stop()` for `stop_playback`, an output-only
+  engine for sound while the mic is not held; earcons synthesised in code);
+  `MicIndicator.swift` (all nine states); `VoiceSettings.swift` (the
+  Keychain item `voice-settings`; always-on only after LocalAuthentication;
+  mute = the stored switch and the input device's mute property where it
+  exists; any read failure → `mute: unreadable`; `WakeModels` = the child's
+  `wake_armable` rule over the installed `models.json`);
+  `VoiceCredential.swift` (the helper's exchange over the pairing pin,
+  `Cache-Control: no-store` required, the four fields, the token checked
+  against the `credential` schema; `ca_sha256` = DER sha256 of the top
+  certificate the server presented on that pinned connection);
+  `VoiceService.swift` (the wiring: child wanted while mode ≠ off, WS up,
+  kill switch released and paired; WS loss → `link: down` then stop; kill
+  switch → kill; mute polled every second; mint at child start, 75 s before
+  expiry and on `release_mic(credential_refused)`; a 401 → the core's
+  `refuseCredential()`: mic released, indicator `error`, no re-acquire until
+  a new token, mint backoff 1 s → 60 s; each child `state` relayed with
+  `NodeRunner.relayVoiceState`).
+- `NodeRunner`: `onVoiceLink` (up ⇔ status `connected`, i.e. after
+  `hello.ack`), `relayVoiceState`, `credentialForVoice`.
+- `App/FridayNode/Voice/Hotkey.swift` (Carbon `RegisterEventHotKey`, press
+  and release, no Accessibility grant) and `VoiceMenu.swift` ("Ses": mode,
+  mute, hotkey, wake model state); `AppDelegate` shows the indicator on the
+  status icon and the "Mikrofon" line, wires the kill switch and quits the
+  child on terminate.
+- `com.apple.security.device.audio-input` in `App/FridayNode.entitlements`,
+  `NSMicrophoneUsageDescription` in `App/Info.plist`, the same key in
+  `scripts/build-sign-local.sh`'s `EXPECTED` list and in
+  `EntitlementAllowlistTests` (plus a usage-string test), changed together.
+- `scripts/vendor_protocol.py` also writes
+  `Generated/VendoredVoiceProtocol.swift` (the v1 schemas and the
+  `uv.lock` sha256, `354e9c73…`; CI's existing `--check` covers it).
+  `scripts/voice_host_traces.py` + `fixtures/voice_host_traces.json` (CI
+  `--check` in the `friday-voice` job). `check-release-markers.sh` also
+  refuses the live voice runner's words.
+
+**Contract tests (all run in this session).**
+0. `VoiceCredentialTests` (fake server: method, path, bearer, no body, the
+   pin, 201 + no-store + four fields, 401 → refused, seven malformed answers
+   refused, `+00:00`, refresh ≥ 60 s ahead): pass.
+   `accounts/tests/test_node_voice_token.py` +
+   `config/tests/test_node_voice_surfaces.py`: 51 passed.
+1. `VoiceConformanceTests`: all 28 host cases offline, none skipped: pass.
+2. Conformance build, `--conformance-voice-exec
+   node/friday-voice/.venv/bin/friday-voice`: 28/28 cases pass, 38 hostile
+   child processes, every one `"verdict": "pass"` (watchdog: 2 processes,
+   child-exit backoff: 9).
+3. `node_conformance_server --external --tls-self-signed --port 8766`,
+   fresh `build_fixture_home`: protocol 2 99/99 (the eight v2 voice-state
+   cases), protocol 1 86/86 (`v1_voice_state_never_sent`): ALL PASS.
+4. Owner step (below).
+5. `VoiceHostTraceTests`: the six `barge_in.json` scripts replayed into
+   `VoiceHostCore` give the reference host's frames call by call, the same
+   `stopped_at` (each in the call that carried its `stop_playback`), the
+   same counters, mic and indicator; a mutation of the pacing rule fails
+   it. Plus a hand-written paced-playback test. Real AEC: owner step.
+6. `FRIDAY_VOICE_MODEL_DIR=… uv run pytest -m real_models`: 2 passed,
+   1 skipped (`test_wake_eval.py`: needs `FRIDAY_VOICE_STANDIN_HEAD`, the
+   `hey_jarvis` stand-in, not on this Mac). CA pin against the local Caddy
+   chain (`127.0.0.1:8443`, one self-signed `friday-local-tls`
+   certificate): the host's rule picks that certificate (`b6a06ddf…`); the
+   child's own `chain_fingerprints` finds it in the verified chain when the
+   certificate is loaded as a CA file, and the handshake is refused with
+   certifi alone.
+
+Also: `swift test`: 242 tests, 0 failures, 3 skipped (the two B6 opt-in probes and the opt-in `VoiceInstalledChildTests`); Xcode Conformance and Release
+builds succeed; `ReleaseHygieneTests` + `EntitlementAllowlistTests` in
+Release: 6/6; `check-release-markers.sh` passes the Release binary and
+refuses the Conformance one; `vendor_protocol.py --check`; the opt-in
+`VoiceInstalledChildTests` against the real install (lock hash OK, real
+`friday-voice run` handshake to `armed_ptt`, the child gone after stop).
+
+**Deviations.**
+- Paths: the brief's `Sources/FridayNode/Voice/` does not exist (the app is
+  `App/FridayNode/`). Everything testable is in `Sources/NodeCore/Voice/`
+  (SwiftPM tests and the Conformance runner need it there); only the
+  Carbon hotkey and the menu are in `App/FridayNode/Voice/`. `VoiceService`
+  and `VoiceConformanceLive` are additional files.
+- Live run, launcher: the recorded run spawns the project's entry point
+  (what `uv run friday-voice` resolves to). Through `uv run` 27/28 pass:
+  uv keeps its own copy of the child's stdout open while it waits, so
+  `host.child_stdout_short_read` never sees end of stream and the watchdog
+  fires instead. The app spawns the installed entry point directly too.
+- Live run, clock: the three `"clock": "manual"` cases run with real
+  processes on a stepped host clock (`advance_ms` moves it; the hostile
+  child sleeps the scaled time): their 999 ms / 1 ms boundaries race any
+  free-running clock. Restart cases are split at each restart into
+  `<id>.part<n>` files (`--cases <tmp>`), one per process, because the
+  hostile child has no notion of a restart. The `any` cases use the real
+  clock.
+- Storm: the host does not latch `storm_muted` itself (the host case
+  `host.child_release_mic` requires it to re-acquire on the child's next
+  armed state); the mute on → off requirement is the child's, and the host
+  releases at once and relays both mute changes.
+- WS loss stops the child (runbook) after sending `link: down`; at the
+  protocol level (host cases) the link to the child stays open, as the
+  cases require.
+- Strict JSON, hostile input only: a lone `\uD800` escape is
+  `schema_invalid` (Python keeps the string); nesting deeper than 128 is
+  `invalid_json` (Python parses deeper and refuses later). The link drops
+  either way.
+- Paced playback keeps a queued utterance's PCM (the reference keeps only
+  durations), bounded at 16 MiB queued; beyond, frames are dropped and
+  counted.
+- Mute: only an input device that has a mute property is consulted; most
+  built-in microphones have none, so treating "no property" as unreadable
+  would leave voice muted for good.
+- While the mic is released but an utterance is still playing (mute during
+  a reply), the voice-processing engine keeps running until playback ends
+  (no frame reaches the child: the core gates capture). Releasing while
+  idle stops the engine.
+
+**Open gap (blocks owner step 4 against the local stack).** `friday-voice
+run` trusts certifi only and takes no CA file, so it cannot reach a server
+whose certificate is self-signed or from a private CA (the local Caddy
+stack): the pin would match (contract test 6), but the TLS handshake fails
+first. Either the child gains a CA-file input from the host (a
+`friday-voice` change, a separate branch), or the owner serves Friday with
+a publicly trusted certificate.
+
+**Owner steps (pending).**
+1. Build, sign and install: `FRIDAY_NODE_TEAM_ID=<team>
+   node/friday-node/scripts/build-sign-local.sh --install` (the entitlement
+   check now expects `com.apple.security.device.audio-input`). The
+   designated requirement must stay the same.
+2. Open "Ses" → "Bas-konuş"; the first capture asks for the Microphone
+   TCC grant: allow it. Check `codesign -d --entitlements - --xml
+   /Applications/FridayNode.app` lists `com.apple.security.device.audio-input`.
+3. Contract test 4 (after the CA gap above is closed): with the node
+   paired and connected, hold the hotkey (default ⌥⌘ Boşluk), say "bugün ne
+   var", release → a spoken reply; say "testleri çalıştır" → a card on
+   `/chat/<id>` and nothing else; press "Acil durdur" mid-session → icon
+   off within 2 s and the next request refused; HUD node line and ring
+   follow the menu-bar state within ~1 s, `unknown` 30 s after quitting,
+   `off` after the kill switch; trigger the storm (more than 8
+   transcriptions in 60 s) → `/voice` banner → release → mute on → off on
+   the Mac → the next turn works. Compare frames, states and server rows
+   with `backend/ops/tests/test_live_voice_e2e.py`.
+4. Contract test 5 by hand with the real AEC: talk over a reply at normal
+   volume (playback stops, the next turn is yours); leave a reply to play
+   out with nobody speaking (no stop, no second turn). Feeds M4 item 4.
+5. Wake: train and pin `hey_friday.onnx` (A8); until then the menu reads
+   "Uyandırma modeli hazır değil" and always-on runs as push-to-talk.
+6. Contract test 6 fully: rerun `-m real_models` with
+   `FRIDAY_VOICE_STANDIN_HEAD` set to the `hey_jarvis` stand-in head.
+
 ### M2 — Speech server spike: MLX Whisper behind the gateway
 
 Install an OpenAI-compatible server that serves MLX Whisper on the Mac

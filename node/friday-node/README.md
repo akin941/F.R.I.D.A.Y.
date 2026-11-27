@@ -17,7 +17,12 @@ scrub, and the `voice.state` relay the v2 cases need;
 **Phase 10 M2** (`feat/p10-node-executors`, runbook B6) — the real
 executors: commands under `srt`, the AppleScript recipes, AX press/type,
 open/focus, the owner's command mappings (keychain, edited in "İzinler"
-behind Touch ID), and TCC-gated availability.
+behind Touch ID), and TCC-gated availability;
+**Phase 11 M1** (`feat/p11-node-voice-host`, runbook B7) — the voice host:
+the `friday-voice run` child over `friday-voice/v1`, AVAudioEngine with
+voice processing, the menu-bar mic indicator, the push-to-talk hotkey, the
+"Ses" settings, the `node_voice` credential and the `voice.state` relay
+(see "The voice host (Phase 11 M1)" below).
 
 The app advertises every action contract with its real availability: see
 "The executors (Phase 10 M2)" below. Nothing runs before the owner maps it
@@ -42,6 +47,10 @@ The app advertises every action contract with its real availability: see
 | `App/FridayNode/CommandMappingsMenu.swift` | The "İzinler" section that edits the command mappings, recipes, bundle ids and srt location, and asks for the TCC grants |
 | `App/FridayNode/ConfirmationWindow.swift` | The non-activating floating `NSPanel` ("Çalıştır" / "Reddet", 60 s countdown, "Durdur") |
 | `Sources/NodeCore/ConformanceSupport.swift` | Live conformance mode, compiled only with `CONFORMANCE` |
+| `Sources/NodeCore/Voice/` | The voice host (Phase 11 M1): `VoiceMessages` / `VoiceFraming` (`friday-voice/v1`, the Python codes), `VoiceHostCore` (a port of the reference `HostCore`, paced playback), `VoiceChildHost` (the child process: clean env, lock hash, backoff, watchdog, kill ladder), `AudioEngine` (`VoiceAudioIO`, `AVAudioVoiceEngine`), `MicIndicator`, `VoiceSettings` (keychain item `voice-settings`, mute, wake models), `VoiceCredential`, `VoiceService` (the wiring); `VoiceConformanceLive` (`CONFORMANCE` only) |
+| `Sources/NodeCore/Generated/VendoredVoiceProtocol.swift` | Byte copies of `node/friday-voice/friday_voice/protocol/schemas/v1` and the sha256 of `node/friday-voice/uv.lock` (`scripts/vendor_protocol.py`) |
+| `App/FridayNode/Voice/` | `Hotkey.swift` (Carbon `RegisterEventHotKey`, press/release) and `VoiceMenu.swift` (the "Ses" menu) |
+| `fixtures/voice_host_traces.json`, `scripts/voice_host_traces.py` | The reference host's barge-in traces (`--check` in CI) that `VoiceHostTraceTests` replays |
 | `App/FridayNode/` | The `LSUIElement` menu-bar app |
 | `FridayNode.xcodeproj` | Debug / Release / unsigned **Conformance** configurations |
 | `scripts/build-sign-local.sh` | Release build, Personal Team signing, checks, install |
@@ -270,6 +279,40 @@ FRIDAY_ESCAPE_REFERENCE=/private/tmp/<x>/reference-policy.json FRIDAY_ESCAPE_EXP
 # backend/
 uv run python manage.py node_escape_suite --check-policy /private/tmp/<x>/swift-policy.json   # 32/32 covered
 ```
+
+## The voice host (Phase 11 M1, runbook B7)
+
+The app runs `~/Library/Application Support/Friday/voice/.venv/bin/friday-voice
+run` (`make friday-voice-install`) while voice is wanted: the "Ses" mode is
+not "Kapalı", the node WebSocket is up, the kill switch is released and the
+node is paired. Before each spawn the installed `uv.lock` must hash to the
+value compiled in from this checkout's `node/friday-voice/uv.lock` (rerun
+`python3 scripts/vendor_protocol.py` after a lock change, then reinstall).
+The child gets `PATH`, `HOME` and `LANG` only; a failed child is released,
+shown `off` and restarted 1 s → 60 s; quitting, WS loss and mode off send
+`shutdown` and kill what is left; the kill switch kills the tree at once.
+The mic (AVAudioEngine, voice processing on) runs only while the host core
+holds it. Always-on asks for Touch ID; it arms only with every wake model
+pinned (`hey_friday.onnx` is not yet: push-to-talk only). The voice token
+is minted with the node secret over the pairing pin, kept in memory, and
+re-minted 75 s before expiry; a 401 releases the mic (icon `error`).
+
+```bash
+cd node/friday-node
+swift test --filter Voice                    # vectors, the 28 host cases offline, barge-in traces, credential, service, settings
+FRIDAY_VOICE_INSTALLED_CHILD=1 swift test --filter VoiceInstalledChildTests   # the installed child: lock hash + handshake
+# contract test 2: the Conformance build against the hostile child, one process per (re)started child
+node/friday-node/build/Build/Products/Conformance/FridayNode.app/Contents/MacOS/FridayNode \
+  --conformance-voice-cases "$PWD/node/friday-voice/friday_voice/conformance/cases" \
+  --conformance-voice-project "$PWD/node/friday-voice" \
+  --conformance-voice-exec "$PWD/node/friday-voice/.venv/bin/friday-voice"     # from the repo root
+cd node/friday-voice && uv run python ../friday-node/scripts/voice_host_traces.py [--check]
+```
+
+`--conformance-voice-uv "$(which uv)"` runs the hostile child as `uv run
+--frozen friday-voice …` instead; under uv `host.child_stdout_short_read`
+cannot pass (uv keeps the child's stdout open while it waits). The three
+manual-clock cases run with real processes on a stepped host clock.
 
 ## Rules this package keeps
 
