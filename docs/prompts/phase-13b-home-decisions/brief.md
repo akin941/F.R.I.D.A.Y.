@@ -1108,7 +1108,7 @@ says "server side done; go/no-go pending owner evaluation".
 | brief | `docs/p13b-brief` | This brief (no stub existed; the owner decisions of 2026-11-26 kept as goal, scope and boundary), ADR-018 (Accepted 2026-11-26), ADR-017 amendment, ADR-014/ADR-015 cross references, CLAUDE.md rule 4 sentence, runbook "Interim: server on the MacBook" + R2 + TPM, housekeeping (handoff branch names, `feat/mac-a1-spike`, "(former repository)" notes, Phase 13 follow-ups 1–3, Q1/Q5/Q6 notes), MASTER_PLAN §AA row 9b + §O d12, `self_sources.json` regenerated | Phase 13 closeout | **implemented 2026-11-26** (docs only; awaits the independent Sonnet 5 plan review to APPROVE) |
 | 1a | `feat/p13-media-play-pause-stop` | `media_play_pause`/`media_stop` in the code maximum as gate-class services (manifest v3, pins, governance docs), the play_pause dialog row, `STOP`/`PLAY_PAUSE` verbs and vectors | brief approved | **implemented 2026-11-20** (manifest v3, new `CALL_SERVICE_PIN`, `STATES_PIN` unchanged; play_pause outcome row + precondition; awaits the independent Sonnet 5 review) |
 | 1b | `feat/p13-direct-media-model` | `HomeEntity.direct`, `HomeDirectSettings`, `HomeDirectCall` (`connectors` 0006), closed allowlist + digest, `classify`, rate windows, volume rules, settings service, entity `direct` field + `/direct` + `/direct/calls` endpoints with role × endpoint, registry walk, the classifier port, `HA_DIRECT_*` settings, ADR-018 implementation note | 1a | **implemented 2026-11-20** (`connectors` 0006; closed set + digest `9ca85ee2…` pinned in ADR-018; read-only `classify` with the added closed reason `arguments_invalid`; peek-only classify + one `count_direct_call`; owner API with role × endpoint; classifier port only, no executor; awaits the independent Sonnet 5 review) |
-| 1c | `feat/p13-direct-media-exec` | `execute` (re-resolution, kill-switch re-check, clamp, one send, audit), recovery scan, executor port, `HOME_DIRECT` intent (`assistant` 0015) + code-only parser lock, cap clause, `extra_effects` + `_finish` check, sentinel factory, voice/`node_voice`/typed paths, provenance tests | 1b | not started |
+| 1c | `feat/p13-direct-media-exec` | `execute` (re-resolution, kill-switch re-check, clamp, one send, audit), recovery scan, executor port, `HOME_DIRECT` intent (`assistant` 0015) + code-only parser lock, cap clause, `extra_effects` + `_finish` check, sentinel factory, voice/`node_voice`/typed paths, provenance tests | 1b | **implemented 2026-11-20** (`assistant` 0015; executor registered — a flagged TV is direct from this branch on; executor-only reason `target_unavailable` added; real `friday-voice run` e2e; the real Swift node and the real TV are M2 — deferred: Mac session; awaits the independent Sonnet 5 review) |
 | 1d | `feat/p13-direct-media-ui` | HUD `home_direct` line, `/connectors` direct switch and settings panel, vitest | 1b (merges after 1c, so nothing is shown as "on" before it can run) | not started |
 | 2 | `feat/p13-interim-mac-server` | `HOME_SERVER_PLATFORM`, `home_server_platform`, macOS-aware `home_disk_encryption`, `HOME_BACKUP_OFFSITE_REPOSITORY` + the R2 destination check, R2 names in `.env.example`, portable backup/drill scripts, `restic.env.example`, launchd plist, `compose.mac.yml`, `make up-mac-server` | brief approved (independent of 1) | **implemented 2026-11-20** (server side, tested against the macOS tool-set double; the real Mac run is M1 — deferred: Mac session; awaits the independent Sonnet 5 review) |
 | 3 | `chore/p13b-closeout` | `ha_direct_media` preflight row, home-direct e2e, handoff Part F, MASTER_PLAN row, ADR-018 closeout note, `self_sources.json`, runbook step 12 | 1a–1d, 2 | not started |
@@ -1641,3 +1641,105 @@ Implementation choices the reviewer should check (all fail closed):
    (as the brief asks), so a caller that classifies repeatedly while over
    the limit writes repeated audit rows. Fix (optional): in 1c pass
    `audit_rate_limit=False` on re-checks; the parameter already exists.
+
+### Implementation notes — `feat/p13-direct-media-exec` (branch 1c, implemented 2026-11-20)
+
+What branch 1c did: `connectors.home_direct.execute` (D10 steps 1–6 after
+the D10a re-resolution), registered on the executor port by
+`ConnectorsConfig.ready`; `mark_lost_direct_calls` in
+`connectors.tasks.recover_stale_connector_writes` (its result gains
+`direct_unknown_outcome`); `Message.Intent.HOME_DIRECT` (`assistant`
+migration `0015_home_direct_intent`, choices only), `EFFECT_DIRECT_HOME`,
+the cap clause, `CODE_ONLY_INTENTS` (lock 1), `WakeRoute.extra_effects` +
+`validate_routes` + the `_finish` effect check (lock 2), the
+`home_direct_classification` factory and the `_CODE_ORIGIN` marker, the
+`home.control` direct branch, `route_typed_home_direct`, the chat-view
+direct branch and its fixed Turkish replies; ADR-018's implementation note
+for the three locks. **From this branch on a flagged entity is direct**
+(1d adds the UI; until then the flag is set over the API).
+
+Implementation choices the reviewer should check (all fail closed):
+- **The pre-send read is the executor's own precondition read.** D9/D10
+  name `_call_service`'s internal read; the executor instead reads the
+  entity once through `bridge.precondition_state` (the shared half of
+  `target_present`, factored out unchanged), applies the `volume_up` rule
+  to that read under the settings row lock, and `_call_service` still
+  re-reads right before the POST (defence in depth). A refused read sends
+  nothing, writes no call row and is the card (`target_unavailable`, a new
+  executor-only closed reason next to `provenance_mismatch`).
+- **Lock scope.** The settings row lock covers the final `classify` (kill
+  switches, flag, volume), the single `count_direct_call` and the creation
+  of the `running` row; the row is committed **before** the send (so a
+  lost worker leaves a row for the recovery scan) and the send follows at
+  once. A kill switch flipped after that commit cannot stop a call already
+  on its way — the brief's "a call already sent completes and is audited".
+- **Unsent send failures.** A `ConnectorError` with `sent=False`
+  (`pin_mismatch`, `tool_missing`, `not_configured`, …) finalises the row
+  `failed` and the turn becomes the card (`not_available` /
+  `target_unavailable`); after a send attempt it is `unknown_outcome` and
+  reported, never a card. HA 4xx is `failed` / `tool_error`, reported.
+- **A binding disabled between the classification and the send** makes the
+  re-resolution the matcher's own "Home Assistant bağlı değil" refusal
+  (the D10a rule: its current result), so that case is a refusal with
+  `ha.direct_provenance_refused`, not a card — a card could not be
+  approved with a disabled binding anyway. A tool whose recorded pin status
+  is no longer `ok` is `not_available` → the card.
+- **`direct_reason`.** Every `home.control` card now carries the closed
+  reason it is not direct (`intent_payload.direct_reason` and the `draft`
+  event's `direct_reason`), including `not_media_player` for a light and
+  `service_not_direct` for `turn_on`; 1d decides which ones the card shows.
+  `payload` itself is unchanged, so every Phase 13 card test is green.
+- **Typed direct turns are recorded with `route="home.control"`** (Friday's
+  fixed text with no model call → no memory extraction job, the routed
+  rule); a typed turn that is not direct keeps `route=None`.
+- **Call rows keep a state summary only** (`state`, `volume_level`,
+  `is_volume_muted`), never Home Assistant names, titles or sources; the
+  `ha.direct_call` audit row carries ids, origin, node, entity id, service,
+  data, `requested_data` when clamped, status and error type.
+- **Origin/node provenance.** The view derives the origin from the channel
+  and the (server-forced) input mode and the node from the voice token's
+  device; the executor requires them to equal the stored payload's, so a
+  payload cannot move a call to another origin or node.
+- Follow-ups of the 1b merge: (1) the executor's increment-then-check is
+  the only authority (a test with a blind classifier peek and a 12-thread
+  burst that never overshoots); (2) every re-check passes
+  `audit_rate_limit=False`, and only the executor's authoritative over-limit
+  writes `ha.direct_rate_limited`.
+
+Tests: `connectors/tests/test_home_direct_execution.py`;
+`assistant/tests/test_home_direct_routes.py` (web voice; the parametrised
+"still gate-class" table over web voice, `node_voice` and typed with a
+completeness check against `CLASSIFY_REASONS`),
+`test_home_direct_node_voice.py`, `test_home_direct_typed.py`,
+`test_home_direct_provenance.py` (the three locks on all three origins),
+`test_voice_cap_home_direct.py`, `test_intent.py` (parser lock);
+`ops/tests/test_home_direct_voice_e2e.py` (the reference voice host and a
+real `friday-voice run` child over real HTTP); the registry walk extended
+to the call log's writers. Everything ran against the fake HA; nothing
+needed the Mac, real credentials, paid calls or hardware.
+
+### Owner steps (pending) — `feat/p13-direct-media-exec` (branch 1c), recorded 2026-11-20
+
+1. Start the independent Sonnet 5 review of this branch; merge after
+   APPROVE (1d merges after it, so nothing is shown "on" before it runs).
+2. Confirm the fixed reply templates ("Salon TV duraklatıldı.", "Ses en
+   fazla %60 olabilir; %60'a ayarladım.", "… yanıt vermedi; komut gitmiş
+   olabilir, tekrar denemedim.", "Bunu doğrudan yapmadım (<neden>); onay
+   kartı ekranda.") and the added executor-only reason
+   `target_unavailable` ("cihaz şu an doğrulanamadı").
+3. Decide (with 1d) which `direct_reason` codes the card shows; the
+   recommendation is to show it only for a flagged entity
+   (`kill_switch_*`, `rate_*`, `volume_*`, `not_available`,
+   `provenance_mismatch`, `target_unavailable`) and `not_flagged` on an
+   eligible media player.
+4. **M2 (deferred: Mac session, pending owner evaluation):** with the real
+   Swift `friday-node` paired over loopback and the real TV flagged on
+   `/connectors` (after 1d) or over `PATCH
+   /api/v1/connectors/home-assistant/entities/<id>` `{"direct": true}`:
+   "Hey Friday, TV'yi duraklat" pauses with no card and one
+   `ha.direct_call` (origin `node`, the Mac's node id); "sesi yüzde 90'a
+   ayarla" sets the owner maximum and says so; "salondaki TV'yi aç" is a
+   card; the eleventh call in a minute is a card; the kill switch makes
+   each a card again. The server side of this is
+   `ops/tests/test_home_direct_voice_e2e.py`, which the Swift node must
+   satisfy unchanged (no protocol change).

@@ -323,9 +323,9 @@ class HomeDirectCall(WorkspaceScopedModel, TimestampedModel):
     (Phase 13b D11, ADR-018 decision 8): created `running` immediately
     before the single send and finalized once (`succeeded` / `failed` /
     `unknown_outcome`); never retried, never re-sent. Written only by the
-    direct executor (`connectors.home_direct.execute`, branch 1c); branch
-    1b adds the model, the owner's list and no writer (a registry walk pins
-    it). `error_type` uses `ConnectorWriteExecution.ErrorType`'s closed
+    direct executor (`connectors.home_direct.execute`, branch 1c) and its
+    recovery scan (a lost `running` row -> `unknown_outcome`); a registry
+    walk pins it. `error_type` uses `ConnectorWriteExecution.ErrorType`'s closed
     vocabulary; no HA free text is ever stored. `requested_data` is what
     the owner asked for when it differs from what was sent (a clamped
     `volume_set`)."""

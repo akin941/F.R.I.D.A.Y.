@@ -211,3 +211,89 @@ behaves differently.
   `HA_DIRECT_RATE_GLOBAL_PER_MINUTE` (30), `HA_DIRECT_RATE_ENTITY_PER_MINUTE`
   (10; 0 disables the class), `HA_DIRECT_VOLUME_MAX` (0.6, validated 0–1 at
   load) in `config/settings/base.py` and `.env.example`.
+
+## Implementation note — branch 1c `feat/p13-direct-media-exec` (2026-11-20)
+
+The executor, the code-only intent and the three provenance locks (Phase
+13b brief D9, D10, D10a). From this branch on a flagged TV is direct.
+
+- **Intent.** `assistant.Message.Intent.HOME_DIRECT = "home_direct"`
+  (`assistant` migration `0015_home_direct_intent`, choices only);
+  `assistant.services.EFFECT_DIRECT_HOME = "direct_home"`,
+  `INTENT_EFFECTS[HOME_DIRECT] = direct_home`, and
+  `VOICE_ALLOWED_EFFECTS` gains it — the only executing effect of the
+  table. `apply_voice_capability_cap` keeps a voice `home_direct` only when
+  `intent_payload["tool_name"] == "ha_call_service"` (else chat).
+- **Lock 1 — the router cannot emit it.** `assistant/intent.py`:
+  `CODE_ONLY_INTENTS = {home_direct}`, `_ALLOWED_INTENTS =
+  Message.Intent.values - CODE_ONLY_INTENTS`; `parse_intent` raises
+  `IntentParseError` ("unrecognized intent value") and the turn is chat.
+  The seeded `friday_router_intent` prompt never names it (pinned).
+- **Lock 2 — only `home.control`, only with the marker.**
+  `WakeRoute.extra_effects` (only `home.control`, only `direct_home`;
+  `validate_routes` refuses anything else at boot) and `_finish` checks
+  every result's own effect against `{read, route.effect} ∪
+  route.extra_effects` (a read result narrows and is always allowed).
+  `assistant.services.home_direct_classification` is the single factory
+  (used by `_home_control` and `route_typed_home_direct`); it attaches the
+  module-private `_CODE_ORIGIN` object under `_provenance`. The chat view
+  runs the direct branch only when `is_code_home_direct` finds that object
+  by identity; anything else with the intent is chat. `strip_provenance`
+  removes it before the `Message` row is saved.
+- **Lock 3 — the executor never trusts the payload.**
+  `connectors.home_direct.execute(*, workspace, actor, message, origin,
+  channel, node_id)` takes the saved user message: it must be this
+  actor's `home_direct` message of this workspace and channel, with the
+  same origin and node; `connectors.home_phrases.resolve_home_command` is
+  re-run on `message.content` and must return the same `ha_call_service`
+  draft with canonically equal arguments. Otherwise nothing is sent, no
+  `HomeDirectCall` is written, `ha.direct_provenance_refused`
+  (`{source_message_id, origin, reason: provenance_mismatch, detail}` —
+  `detail` a closed token, never argument text) is audited, and the turn
+  answers with the matcher's current result (its card, ask or refusal).
+- **Execution order.** `deny_if_unattended("ha_direct_call")` → lock 3 →
+  `classify` (pre-check, no audit) → `precondition_state` (the bridge's
+  shared half of `target_present`: strict arguments, the allowlist, one
+  read of the entity; `target_unavailable` → the card) → under
+  `HomeDirectSettings`' row lock: `classify` again with the live state
+  (kill switches, flag, the decision 6 `volume_up` rule on this pre-send
+  read), `count_direct_call` (the only increment; over a limit →
+  `ha.direct_rate_limited`, the card), `clamp_volume`, one
+  `HomeDirectCall(running)` committed → one `connectors.bridges.call_tool`
+  (the manifest's pinned schema, `CONNECTOR_WRITE_TIMEOUT_SECONDS`) →
+  one fenced finalize (`succeeded` / `failed` / `unknown_outcome`, the
+  `ConnectorWriteExecution.ErrorType` vocabulary) audited
+  `ha.direct_call`. Never retried. A failure before anything reached the
+  transport (`pin_mismatch`, …) is recorded `failed` and the turn is the
+  card; a failure after a send attempt is reported ("komut gitmiş
+  olabilir, tekrar denemedim"), never replaced by a card (decision 9).
+  The call row keeps a state summary only (`state`, `volume_level`,
+  `is_volume_muted`) — no Home Assistant names or titles.
+- **Executor-only reasons.** `provenance_mismatch` and
+  `target_unavailable` (the pre-send read refused or failed, or the send
+  was refused unsent). The closed reason set is `CLASSIFY_REASONS` +
+  `EXECUTOR_REASONS`; each has a Turkish card text.
+- **Recovery.** `connectors.tasks.recover_stale_connector_writes` also runs
+  `home_direct.mark_lost_direct_calls`: a `running` call older than
+  `CONNECTOR_WRITE_LEASE_SECONDS` → `unknown_outcome` / `worker_lost`,
+  audited, never re-sent.
+- **Ports.** `ConnectorsConfig.ready` registers the classifier and the
+  executor; `tools.home_ports.DirectRun` gains `tool_name` / `arguments`
+  (the fallback card's re-resolved arguments).
+- **Paths.** Web voice and `node_voice`: `home.control` classifies a draft
+  through the port; direct → `home_direct` (origin `voice` / `node`, the
+  voice token's device as the node id); not direct → the Phase 13 card
+  carrying `direct_reason`. Typed web: `assistant.services.
+  route_typed_home_direct` runs before `router.intent` and returns a
+  classification only for a direct draft (origin `chat`); every other typed
+  turn reaches the router as in Phase 13. The view saves the user message,
+  then `run_direct_turn` calls the executor and finalises the message's
+  intent (`home_direct`, or `tool_request` for the fallback card); the
+  reply is a fixed Turkish template through `static_reply_stream` — no
+  gateway call, no `ModelUsage`.
+- **Tests.** `connectors/tests/test_home_direct_execution.py`;
+  `assistant/tests/test_home_direct_{routes,node_voice,typed,provenance}.py`,
+  `test_voice_cap_home_direct.py`; `ops/tests/test_home_direct_voice_e2e.py`
+  (the reference voice host and a real `friday-voice run` child); the
+  registry walk (`connectors/tests/test_ha_allowlist_gate.py`) now pins the
+  call log's writers to `execute`'s two helpers and the recovery scan.

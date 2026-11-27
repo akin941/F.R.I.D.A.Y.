@@ -112,6 +112,12 @@ class Message(WorkspaceScopedModel, TimestampedModel):
         TOOL_REQUEST = "tool_request"
         # Phase 5 branch 4 (brief D4): one connector read this turn.
         CONNECTOR_READ = "connector_read"
+        # Phase 13b D10/D10a (ADR-018): one direct Home Assistant media call
+        # this turn. Code-only: the model router can never return it
+        # (`assistant.intent.CODE_ONLY_INTENTS`); only the `home.control`
+        # route and the typed home step build it, with an in-process
+        # provenance marker the chat view checks.
+        HOME_DIRECT = "home_direct"
 
     Channel = MessageChannel
 

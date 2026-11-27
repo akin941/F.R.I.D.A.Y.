@@ -16,6 +16,19 @@ class TestParseIntent:
         raw = '{"intent": "tool_request", "tool_name": "vault_export"}'
         assert parse_intent(raw) == {"intent": "tool_request", "tool_name": "vault_export"}
 
+    @pytest.mark.parametrize("tool_name", ['"ha_call_service"', "null"])
+    def test_the_code_only_home_direct_intent_is_unrecognized(self, tool_name):
+        """Phase 13b D10a lock 1: the router can never return `home_direct`."""
+        with pytest.raises(IntentParseError, match="unrecognized intent value"):
+            parse_intent(f'{{"intent": "home_direct", "tool_name": {tool_name}}}')
+
+    def test_every_other_intent_is_still_allowed(self):
+        from assistant.intent import _ALLOWED_INTENTS, CODE_ONLY_INTENTS
+        from assistant.models import Message
+
+        assert CODE_ONLY_INTENTS == {"home_direct"}
+        assert _ALLOWED_INTENTS == set(Message.Intent.values) - {"home_direct"}
+
     def test_malformed_json_raises(self):
         with pytest.raises(IntentParseError):
             parse_intent("not json")

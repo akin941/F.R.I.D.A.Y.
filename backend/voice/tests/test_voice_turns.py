@@ -78,9 +78,13 @@ def test_unknown_input_mode_is_400(owner, conversation, chat_setup, web_client):
 
 def test_every_router_intent_has_a_declared_effect():
     """A new intent must decide what it does on a voice turn when it is
-    added; one that executes is absent from VOICE_ALLOWED_EFFECTS."""
+    added; one that executes is absent from VOICE_ALLOWED_EFFECTS -- except
+    ADR-018's single direct home-media effect (Phase 13b D10), which is
+    code-only and capped to `ha_call_service`."""
     assert set(INTENT_EFFECTS) == set(Message.Intent.values)
-    assert VOICE_ALLOWED_EFFECTS == {"read", "proposal"}
+    assert VOICE_ALLOWED_EFFECTS == {"read", "proposal", "direct_home"}
+    executing = {i for i, e in INTENT_EFFECTS.items() if e not in {"read", "proposal"}}
+    assert executing == {Message.Intent.HOME_DIRECT}
 
 
 def test_an_executing_or_unknown_intent_degrades_to_chat_for_voice_only(monkeypatch):

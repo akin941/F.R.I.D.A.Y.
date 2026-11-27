@@ -966,6 +966,33 @@ _PRECONDITION_ERRORS = {
 }
 
 
+def precondition_state(binding, arguments):
+    """`(refusal, live state)` of a call about to be sent: the shared half of
+    `target_present` and the direct executor's pre-send check (Phase 13b
+    D10 step 5). The arguments must still be exactly what the strict
+    serializer and the binding workspace's allowlist admit
+    (`connector_changed`), and the entity must still exist and be readable
+    (`target_missing`, transport codes); for `select_source` the input must
+    still be offered. `(None, None)` for a call without an entity (Wake-on-
+    LAN); `(None, state)` when the send may go ahead."""
+    serializer = CallServiceArguments(data=arguments)
+    if not serializer.is_valid() or serializer.validated_data != arguments:
+        return "connector_changed", None
+    if binding is None or allowlist_refusal(binding.workspace, arguments) is not None:
+        return "connector_changed", None
+    entity_id = arguments.get("entity_id")
+    if not entity_id:
+        return None, None
+    try:
+        with _client(settings.CONNECTOR_READ_TIMEOUT_SECONDS) as client:
+            state = _read_entity(client, entity_id, operation="precondition")
+    except ConnectorError as exc:
+        return _PRECONDITION_ERRORS.get(exc.code, "unknown"), None
+    if source_refusal(arguments, state) is not None:
+        return "connector_changed", None
+    return None, state
+
+
 def target_present(manifest, binding, payload):
     """`ToolPolicy.precondition` of `ha_call_service`, run by the write task
     after the claim and before the one send. The approved call must still be
@@ -982,21 +1009,9 @@ def target_present(manifest, binding, payload):
     the source right before the POST (defence in depth: the entity can
     vanish between the two reads)."""
     arguments = (payload or {}).get("arguments") or {}
-    serializer = CallServiceArguments(data=arguments)
-    if not serializer.is_valid() or serializer.validated_data != arguments:
-        return "connector_changed"
-    if binding is None or allowlist_refusal(binding.workspace, arguments) is not None:
-        return "connector_changed"
-    entity_id = arguments.get("entity_id")
-    if not entity_id:
-        return None
-    try:
-        with _client(settings.CONNECTOR_READ_TIMEOUT_SECONDS) as client:
-            state = _read_entity(client, entity_id, operation="precondition")
-    except ConnectorError as exc:
-        return _PRECONDITION_ERRORS.get(exc.code, "unknown")
-    if source_refusal(arguments, state) is not None:
-        return "connector_changed"
+    refused, state = precondition_state(binding, arguments)
+    if refused is not None or state is None:
+        return refused
     if arguments.get("service") == PLAY_PAUSE_SERVICE:
         # Phase 13b D4: the toggle must do what the owner approved (the
         # dialog row's outcome); a player that started or stopped playing
