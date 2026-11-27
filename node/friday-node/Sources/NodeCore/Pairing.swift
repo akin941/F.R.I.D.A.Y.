@@ -39,6 +39,22 @@ public struct PairingRequest: Sendable {
         self.nodeName = nodeName
         self.expectedPin = expectedPin
     }
+
+    /// The pairing platform (Phase 13 D3, branch 1:
+    /// `backend/nodes/tests/test_pairing_platform.py`). Optional on the
+    /// server (absent = `macos`), sent explicitly by this node.
+    public static let platform = "macos"
+
+    /// The `POST /api/v1/nodes/pair` body, exactly these four fields (the
+    /// server refuses unknown ones).
+    public var body: JSONValue {
+        [
+            "code": .string(code.trimmingCharacters(in: .whitespacesAndNewlines)),
+            "node_name": .string(String(nodeName.prefix(100))),
+            "protocol_versions": [.int(NodeProtocol.version)],
+            "platform": .string(Self.platform),
+        ]
+    }
 }
 
 enum HTTP {
@@ -97,12 +113,7 @@ public enum Pairing {
     /// stored here: the caller saves it (and only then shows success).
     public static func pair(_ request: PairingRequest, now: Int64) async throws -> NodeCredential {
         let url = try HTTP.endpoint(request.serverURL, "/api/v1/nodes/pair")
-        let body: JSONValue = [
-            "code": .string(request.code.trimmingCharacters(in: .whitespacesAndNewlines)),
-            "node_name": .string(String(request.nodeName.prefix(100))),
-            "protocol_versions": [.int(NodeProtocol.version)],
-            "platform": "macos",
-        ]
+        let body = request.body
         // With an owner-typed pin the connection is accepted only if the
         // served key matches it (no CA trust involved); without one, only if
         // the system trusts the server.

@@ -1594,7 +1594,7 @@ item below must leave them unchanged.
       against the Phase 12 closeout. Open for the owner before E2/E3: how
       `/api/v1/nodes/pair` and `/api/v1/auth/nodes/credential/rotate` reach
       Django through the home Caddy (Phase 13 brief, closeout owner steps).
-- [ ] **E1 Phase 13 M1 — `feat/p13-node-app-pairing-platform` (Swift,
+- [x] **E1 Phase 13 M1 — `feat/p13-node-app-pairing-platform` (Swift,
       after B1).** In `node/friday-node/`:
       `Pairing/PairingRequest.swift` sends `"platform": "macos"` in the
       pairing body; `Settings/ServerAddress.swift` +
@@ -1614,6 +1614,30 @@ item below must leave them unchanged.
       behaviour identical to `friday-node-linux config set server-url`
       (`node/friday-node-linux/tests/test_daemon_failclosed.py`, branch 4);
       `swift test` green.
+      **Implemented 2026-11-27 on `feat/p13-node-app-pairing-platform`
+      (awaits the independent Sonnet 5 review).** Files follow the
+      package's flat layout, not the names above: the body is
+      `PairingRequest.body` in `Sources/NodeCore/Pairing.swift` (it already
+      sent `platform: "macos"` since B1; now pinned by a test); the logic is
+      `Sources/NodeCore/ServerAddress.swift` (`ServerAddress.check`,
+      `TLSPinProbe`, `ServerAddressEditor`, `NodeRunner.repoint`); the view is
+      `App/FridayNode/ServerAddressWindow.swift`; the menu gains "Sunucu:
+      <host>" and "Sunucu adresini değiştir…". The address is the Keychain
+      credential's `serverURL`, the one value the WebSocket, rotation, the B7
+      voice mint and the B8 selftest mint all read. Order as Linux: URL
+      check → Touch ID / password → TLS handshake against the stored SPKI pin
+      (nothing sent) → save, every pin kept; a refusal changes nothing. At
+      run time a server off the pin is refused in the handshake (no upgrade
+      request, no Bearer, no `hello`), the menu shows "Sunucu kimliği
+      değişti — yeniden eşleştirin" and the node retries the same address
+      with backoff (no fallback), as the Linux daemon does. Green: `swift
+      test` (294, 3 env-gated skips), Conformance / Release builds, the
+      release hygiene + entitlement tests, `check-release-markers.sh`,
+      `vendor_protocol.py --check`, `test_pairing_platform.py` (18), live
+      conformance on :8766 protocol 2 (99/99) and protocol 1 (86/86)
+      including the policy-mutation family, `build_node_conformance --check`
+      unchanged. Owner step: try the menu item on the installed app (Phase 13
+      brief, M1 implementation record).
 - [ ] **E2 Phase 13 M2 — multi-node and home routes on real hardware
       (after E1, B2–B3, B7 and Phase 13 branches 2, 3, 4, 6).** Pair the
       MacBook and one real Linux PC (`friday-node-linux`) to the home
