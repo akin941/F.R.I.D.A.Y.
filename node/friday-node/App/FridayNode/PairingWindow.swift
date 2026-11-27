@@ -59,7 +59,8 @@ final class PairingWindowController: NSWindowController {
             message.stringValue = why
             return
         } catch {
-            message.stringValue = "Sunucu adresi https:// ile başlamalı."
+            // `check` throws only `.invalid`; any other error is still a refusal.
+            message.stringValue = "Sunucu adresi geçersiz."
             return
         }
         let pinText = pinField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)

@@ -1815,6 +1815,32 @@ in `App/FridayNode/`, so the files named above are:
   (`config.update`, `server.repoint`) are `unknown_type`, the
   policy-mutation conformance family stays green.
 
+**Review follow-up (`fix/p13-repoint-rotation-race`, 2026-11-27).** The
+E1 review (APPROVE) left non-blocking items, fixed here:
+- *Rotation race:* a rotation POST in flight to the old host while the
+  owner re-points used to be superseded (the re-point bumped the
+  generation), so a secret the server had already issued was dropped and
+  the node would end in `needsPairing` after the grace period. Now
+  `repoint` does not supersede a rotation in flight: it saves the new
+  address, the rotation's `persist` merges the rotated secret into the
+  credential as it is then (same node id and pins required), and the
+  rotation's completion opens the socket to the new address; no second
+  rotation runs with the old secret. Unpair and re-pair still bump the
+  generation and drop the rotated secret (the identity is gone).
+  `RepointRotationRaceTests` (re-point, unpair and re-pair mid-flight,
+  through the new `NodeRunner(rotationPost:)` seam); the re-point test
+  fails on the previous logic.
+- *Mints in flight:* a voice or selftest mint already in flight when the
+  owner re-points finishes against the old host. Benign: it returns only a
+  short-lived token and never writes the stored address; the next mint
+  uses the new one.
+- `testProbeRefusesAServerWithAnotherKey` (and the runner test) now assert
+  the server saw exactly `conn handshake=fail bytes=0`, not an
+  `allSatisfy` that an empty list passes.
+- The menu fronts the open "Sunucu adresi" window instead of opening a
+  second editor; the pairing window's fallback refusal says "Sunucu
+  adresi geçersiz.".
+
 **Deviations.**
 - File names (above).
 - Stricter than Python's `urlsplit` on degenerate input it would accept:

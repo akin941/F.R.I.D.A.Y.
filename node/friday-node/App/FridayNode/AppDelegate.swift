@@ -369,7 +369,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.activate(ignoringOtherApps: true)
     }
 
+    /// One editor at a time: a second click fronts the open window.
     @objc private func changeServerAddress() {
+        if let open = serverAddressWindow, open.window?.isVisible == true {
+            open.showWindow(nil)
+            open.window?.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+            return
+        }
         let controller = ServerAddressWindowController(editor: serverAddressEditor) { [weak self] in
             self?.syncServerLine()
         }

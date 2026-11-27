@@ -355,6 +355,8 @@ public final class NodeRunner: @unchecked Sendable {
     private var reconnectWork: DispatchWorkItem?
     private var running = false
     private var rotating = false
+    /// The rotation's HTTPS POST (tests inject a fake).
+    private let rotationPost: Rotation.Post
     /// Bumped by start, stop, adopt and unpair: a late callback of an older
     /// connection or rotation sees another generation and changes nothing.
     private var generation = 0
@@ -388,9 +390,11 @@ public final class NodeRunner: @unchecked Sendable {
         store: CredentialStore, policyStore: LocalPolicyStore, desktop: DesktopSource, home: String,
         usage: UsageSource = .unsupported, clock: NodeClock = SystemClock(), actionPolicy: ActionPolicy? = nil,
         executor: ActionExecutor = UnavailableExecutor(), mappingsStore: CommandMappingsStore? = nil,
-        makeExecutor: ((CommandMappings) -> ActionExecutor)? = nil, nodeDirs: [String] = SandboxPolicy.appNodeDirs
+        makeExecutor: ((CommandMappings) -> ActionExecutor)? = nil, nodeDirs: [String] = SandboxPolicy.appNodeDirs,
+        rotationPost: @escaping Rotation.Post = Rotation.pinnedPost
     ) {
         self.store = store
+        self.rotationPost = rotationPost
         self.policyStore = policyStore
         self.desktop = desktop
         self.home = home
@@ -656,11 +660,19 @@ public final class NodeRunner: @unchecked Sendable {
     }
 
     /// Phase 13 M1: the owner re-pointed the node (ServerAddressEditor, after
-    /// LocalAuthentication and the pin probe). Saved on `queue`, so a
-    /// rotation in flight (a new generation drops it) cannot write the old
-    /// address back; every pin, the node id and the secret are kept. A
-    /// running node reconnects to the new address; a stopped session stays
-    /// stopped (re-pointing is not "Resume").
+    /// LocalAuthentication and the pin probe). Saved on `queue`; every pin,
+    /// the node id and the secret are kept. A running node reconnects to the
+    /// new address; a stopped session stays stopped (re-pointing is not
+    /// "Resume").
+    ///
+    /// A rotation in flight (its POST went to the old host) is **not**
+    /// superseded: the identity did not change, and the server may already
+    /// have issued the new secret, which must not be lost (it would end in
+    /// `needsPairing` after the grace period). The swap waits for it: the
+    /// new address is saved now, the rotation's `persist` merges the rotated
+    /// secret into the credential as it is then (so the new address stays),
+    /// and its completion opens the socket to the new address. Unpair and
+    /// re-pair still bump the generation and drop the rotated secret.
     public func repoint(to serverURL: URL, nodeID: String) throws -> NodeCredential {
         try queue.sync {
             guard var next = try credential ?? store.load(), next.nodeID == nodeID else {
@@ -669,7 +681,7 @@ public final class NodeRunner: @unchecked Sendable {
             next.serverURL = serverURL
             try store.save(next)
             credential = next
-            if running, session != nil {
+            if running, session != nil, !rotating {
                 reset(running: true)
                 connect()
             }
@@ -739,17 +751,29 @@ public final class NodeRunner: @unchecked Sendable {
         let now = clock.now()
         // Persisted on `queue`, and only while this generation is current: an
         // unpair or re-pair meanwhile wins, and the rotated secret is dropped.
+        // The rotated secret is merged into the credential as it is now, so a
+        // re-point while the POST was in flight keeps its new address
+        // (identity and pins must still match, else it is dropped too).
         let persist: (NodeCredential) throws -> Void = { [weak self] rotated in
             guard let self else { throw RunnerError.superseded }
             try self.queue.sync {
-                guard self.generation == generation else { throw RunnerError.superseded }
-                try self.store.save(rotated)
+                guard self.generation == generation, let current = self.credential,
+                    current.nodeID == rotated.nodeID, current.pinnedKeys == rotated.pinnedKeys,
+                    current.tlsPinSHA256 == rotated.tlsPinSHA256
+                else { throw RunnerError.superseded }
+                var merged = current
+                merged.secret = rotated.secret
+                merged.secretIssuedAt = rotated.secretIssuedAt
+                merged.rotateAfterDays = rotated.rotateAfterDays
+                try self.store.save(merged)
+                self.credential = merged
             }
         }
         Task {
             let outcome: Result<NodeCredential, Error>
             do {
-                outcome = .success(try await Rotation.rotate(credential, now: now, persist: persist))
+                outcome = .success(
+                    try await Rotation.rotate(credential, now: now, persist: persist, post: self.rotationPost))
             } catch {
                 outcome = .failure(error)
             }
@@ -757,9 +781,11 @@ public final class NodeRunner: @unchecked Sendable {
                 guard self.generation == generation else { return }
                 self.rotating = false
                 switch outcome {
-                case .success(let rotated):
-                    self.credential = rotated
-                    self.openSocket(rotated, session)
+                case .success:
+                    // `persist` already stored the merged credential (the
+                    // current address, the rotated secret).
+                    guard let current = self.credential else { return }
+                    self.openSocket(current, session)
                 case .failure(NodeHTTPError.status(401, _)):
                     self.status = .needsPairing
                 case .failure:
