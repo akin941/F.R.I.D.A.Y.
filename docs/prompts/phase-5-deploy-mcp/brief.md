@@ -975,6 +975,30 @@ reference node's fixture home needs (so `run_reference_node` crashed too);
 run. This is not the real-stack line above: no real provider or connector
 credentials are configured yet.
 
+**Preflight with the frontend — dev stack on the owner's Mac (runbook C1
+item 1, 2026-11-27).** Same stack after B1–B8 and A7 (`make up-local-tls`,
+`AI_FAKE_PROVIDER=false`, the local speech server, the Swift node paired on
+protocol v2); `make frontend-build` (`.next/BUILD_ID` `EE5ISzRerUkYQuspjktxI`)
+served by `next start -H 127.0.0.1 --port 3001`; preflight run in `web` with
+`PREFLIGHT_BFF_URL=http://host.docker.internal:3001/enroll` (the frontend's
+`/` redirects there until the browser is enrolled) and
+`PREFLIGHT_FRONTEND_BUILD_ID_FILE` at a copy of that `BUILD_ID`:
+**`49 pass / 0 fail / 30 warn`**. `bff` HTTP 200; `frontend_build` found
+the build id in the real Next.js output (closing the "unit-tested only"
+note above); `provider:ollama-local` and `provider:ollama-embedding`
+answered (the providers check took about 11 minutes on this 8 GB Mac with
+real model calls). Every `warn` is an owner step, a credential not yet
+configured (OpenRouter, MCP/n8n bindings, Home Assistant) or a pending Mac
+evaluation (eval baseline, escape-suite Mac evidence, live-voice policy and
+self-test, `home_*`); the fake providers now warn "off" by design.
+Observed while measuring: two earlier preflight runs hit a Postgres backend
+crash (`server process … exited with exit code 2`, automatic recovery)
+while other backend test suites ran against the same dev Postgres; a run of
+every check one at a time with a sentinel connection did not reproduce it.
+Treat a run that shows a burst of `OperationalError` rows as void and
+re-run it on a quiet stack. Item 2 (OpenRouter, paid) and items 3–6 remain
+owner steps.
+
 ## Branch table
 
 | # | Branch | Scope | Depends on |
