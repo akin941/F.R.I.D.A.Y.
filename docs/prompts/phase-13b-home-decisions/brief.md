@@ -1965,3 +1965,26 @@ credentials, paid calls or hardware; nothing touched `node/friday-node/**`.
    Part F F3 — the home PC with TPM unlock and the move off the Mac.
 6. After two weeks of daily use: record the remaining go/no-go rows
    (zero out-of-class direct calls in the audit review).
+
+### Known follow-ups — review notes left open at the `chore/p13b-closeout` merge (2026-11-27)
+
+1. **LOW — `ha_direct_media` goes beyond the brief's fail/warn text**
+   (`backend/ops/preflight.py`). The spec lists "fail: … without an eligible
+   service" and "warn: none flagged / HA not configured". The implementation
+   also fails on a flagged entity in a non-personal workspace, and the warn
+   conditions follow a fixed order (env kill switch, owner kill switch, HA
+   unusable, none flagged, disabled), so a flagged entity that is disabled
+   while others are enabled gives WARN rather than PASS. This is a
+   documented extension, consistent with runbook step 12 and owner step 2
+   above. No change needed.
+2. **LOW — closeout dates** (`docs/prompts/phase-13b-home-decisions/brief.md`,
+   `docs/MASTER_PLAN.md`). The closeout rows and the MASTER_PLAN row say
+   "implemented 2026-11-20", while the merges recorded in this brief's
+   follow-up headings are dated 2026-11-26/27. Cosmetic. Fix: align the
+   dates (implementation vs. merge) in a docs pass.
+3. **LOW — e2e child half depends on the voice venv**
+   (`backend/ops/tests/test_home_direct_e2e.py`). Part 1's child half (the
+   real `friday-voice run` child) skips where node/friday-voice has no
+   environment, so CI coverage depends on the voice venv being present.
+   Fix: confirm CI provisions it, so the e2e is not silently reduced to the
+   reference host.
