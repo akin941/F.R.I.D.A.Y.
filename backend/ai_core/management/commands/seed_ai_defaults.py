@@ -1236,7 +1236,7 @@ class Command(BaseCommand):
             )
             self._log(f"{name} provider (disabled)", created)
 
-        _, created = AIBudget.objects.get_or_create(
+        audio_budget, created = AIBudget.objects.get_or_create(
             name="audio",
             defaults={
                 "purposes": list(settings.AI_AUDIO_PURPOSES),
@@ -1245,6 +1245,14 @@ class Command(BaseCommand):
                 "daily_limit_usd": _usd_or_none(settings.AI_BUDGET_AUDIO_DAILY_USD),
             },
         )
+        missing = [p for p in settings.AI_AUDIO_PURPOSES if p not in (audio_budget.purposes or [])]
+        if not created and missing:
+            # Phase 6 branch 3a: an upgraded installation's audio cap must
+            # cover the eval purposes too. Purposes are only ever added; the
+            # owner's limits are never touched.
+            audio_budget.purposes = [*(audio_budget.purposes or []), *missing]
+            audio_budget.save(update_fields=["purposes", "updated_at"])
+            created = True
         self._log("audio budget", created)
 
         # Phase 8A D13: the learning caps (shared monthly + per-purpose daily).

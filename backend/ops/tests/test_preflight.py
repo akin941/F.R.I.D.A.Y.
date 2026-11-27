@@ -605,7 +605,8 @@ def test_voice_config_without_speech_rows_fails():
     assert results["voice_providers"].detail == ("no STT/TTS provider rows: run seed_ai_defaults")
     assert results["voice_budget"].status == FAIL
     assert results["voice_budget"].detail == (
-        "no active budget covers voice.stt, voice.tts: run seed_ai_defaults"
+        "no active budget covers voice.stt, voice.tts, voice.eval_stt, voice.eval_tts: "
+        "run seed_ai_defaults"
     )
 
 
@@ -663,9 +664,14 @@ def test_voice_budget_states(settings):
     AIBudget.objects.filter(name="audio").update(monthly_limit_usd=None)
     result = _voice_config()["voice_budget"]
     assert result.status == WARN
-    assert result.detail == "no monthly cap on voice.stt, voice.tts: audio: session 1 USD"
-    # A budget covering only one purpose leaves the other uncovered.
-    AIBudget.objects.filter(name="audio").update(purposes=["voice.stt"], monthly_limit_usd=5)
+    assert result.detail == (
+        "no monthly cap on voice.stt, voice.tts, voice.eval_stt, voice.eval_tts: "
+        "audio: session 1 USD"
+    )
+    # A budget that misses one purpose leaves it uncovered.
+    AIBudget.objects.filter(name="audio").update(
+        purposes=["voice.stt", "voice.eval_stt", "voice.eval_tts"], monthly_limit_usd=5
+    )
     result = _voice_config()["voice_budget"]
     assert (result.status, result.detail) == (
         FAIL,

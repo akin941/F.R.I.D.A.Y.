@@ -506,7 +506,13 @@ def test_every_audio_purpose_with_a_priced_provider_has_a_budget(monkeypatch):
     call_command("seed_ai_defaults")
     from django.conf import settings
 
-    capability_of = {"voice.stt": STT, "voice.tts": TTS}
+    capability_of = {
+        "voice.stt": STT,
+        "voice.tts": TTS,
+        # Phase 6 branch 3a: the evaluation set's own calls.
+        "voice.eval_stt": STT,
+        "voice.eval_tts": TTS,
+    }
     assert set(settings.AI_AUDIO_PURPOSES) == set(capability_of)
     for purpose, capability in capability_of.items():
         priced = [p for p in ModelProvider.objects.filter(capability=capability) if p.is_priced]
@@ -533,7 +539,7 @@ def test_seed_fake_speech_rows_and_audio_budget():
         assert row.provider_type == ModelProvider.ProviderType.FAKE
         assert (row.priority, row.is_active, row.personal_data_allowed) == (0, True, True)
     budget = AIBudget.objects.get(name="audio")
-    assert set(budget.purposes) == {"voice.stt", "voice.tts"}
+    assert set(budget.purposes) == {"voice.stt", "voice.tts", "voice.eval_stt", "voice.eval_tts"}
     assert budget.monthly_limit_usd == Decimal("20")
     assert budget.session_limit_usd == Decimal("1")
     assert budget.daily_limit_usd is None
@@ -678,3 +684,15 @@ def test_default_routes_send_english_to_its_own_local_row():
     routes = base.VOICE_TTS_ROUTES
     assert routes["tr"]["provider"] == "voice-tts-local"
     assert routes["en"]["provider"] == "voice-tts-local-en"
+
+
+def test_reseed_adds_the_eval_purposes_to_an_existing_audio_budget():
+    """Phase 6 branch 3a: an installation seeded before the eval purposes
+    existed gains them on reseed; the owner's limits stay untouched."""
+    AIBudget.objects.create(
+        name="audio", purposes=["voice.stt", "voice.tts"], monthly_limit_usd=Decimal("7")
+    )
+    call_command("seed_ai_defaults")
+    budget = AIBudget.objects.get(name="audio")
+    assert budget.purposes == ["voice.stt", "voice.tts", "voice.eval_stt", "voice.eval_tts"]
+    assert budget.monthly_limit_usd == Decimal("7") and budget.session_limit_usd is None
