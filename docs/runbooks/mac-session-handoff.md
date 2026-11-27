@@ -523,9 +523,9 @@ uv run python manage.py build_node_conformance --check   # case and vector files
 
 ### A6. `srt` on the Mac (Phase 10 owner step 4) — blocks B6
 
-- [ ] Install Anthropic's sandbox-runtime `srt` at an **exact** version and
+- [x] Install Anthropic's sandbox-runtime `srt` at an **exact** version and
       record it in `docs/mcp/dependencies/node-gateway.md`.
-- [ ] Confirm the CLI matches `SRT_ARGV_TEMPLATE`
+- [x] Confirm the CLI matches `SRT_ARGV_TEMPLATE`
       (`srt --settings <file> -- <argv...>`) and the settings keys of
       `backend/nodes/conformance/vectors/sandbox.json`
       (`network.allowedDomains`, `deniedDomains`, `allowUnixSockets`,
@@ -534,6 +534,10 @@ uv run python manage.py build_node_conformance --check   # case and vector files
       (`backend/nodes/reference/sandbox.py`), regenerate the vectors with
       `uv run python manage.py build_node_conformance` in a dedicated
       branch, and merge it **before** B6.
+
+      Done 2026-11-27: 0.0.83, CLI and all six vector documents match, no
+      generator change; macOS findings for B6 (shell on `PATH`, per-user
+      `RLIMIT_NPROC`, escape scripts) in the manifest.
 
 ### A7. Local speech server (Phase 6 branch 1 step 0) — blocks C2 and B7
 
