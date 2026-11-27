@@ -117,13 +117,22 @@ The gateway's full dependency surface is in this table.
     srt uses `rg` only on Linux (`linuxGetMandatoryDenyPaths`); its macOS
     backend builds the deny patterns without it.
   - `max_processes` is not `RLIMIT_NPROC` (finding 2): the node counts the
-    run's process tree (its process group plus every descendant of the root)
-    every 100 ms and kills the tree (SIGKILL) above the limit; `cpu_seconds`
-    the same way, over the sampled CPU time of every process seen in the
-    tree (posix_spawn cannot set `RLIMIT_CPU` on the child). Known limits: a
-    fork burst can overshoot between two samples (`kern.maxprocperuid` is the
-    backstop), and a process that lives shorter than a sample is not
-    counted. `Exec/ProcessTree.swift`.
+    run's process tree, followed by unique-id lineage (`p_puniqueid`, kept
+    across re-parenting to launchd) from kqueue fork events and a 50 ms
+    scan, and kills it (SIGKILL, per pid after re-checking unique id and
+    start time) above the limit; `cpu_seconds` the same way, over the
+    sampled CPU time of every member (posix_spawn cannot set `RLIMIT_CPU` on
+    the child). Known limits: an intermediate process that forks and exits
+    within microseconds can go unseen with its children, a fork burst can
+    overshoot for one sample (`kern.maxprocperuid` is the backstop), and a
+    process that lives shorter than a sample adds no CPU time.
+    `Exec/ProcessTree.swift`.
+  - **Integrity, not the version string:** the owner's Touch ID
+    confirmation of the location stores the sha256 of the Node binary, the
+    whole `<prefix>/node_modules` tree and `package-lock.json` in the
+    keychain; every start and every availability answer recomputes them and
+    a change is `unsupported` until re-confirmed (an srt or Node upgrade
+    needs that step).
 - **Pinned version:** `@anthropic-ai/sandbox-runtime` **0.0.83** (npm,
   published 2026-11-13; `dist.integrity`
   `sha512-yEusORnVJrNseF/9fvjVYyk6tr79/aFbIB3T/X8p2puLZdaaiGNeYN50v0CE+1DT70v7XuzKOAnTivh1f5cksA==`;

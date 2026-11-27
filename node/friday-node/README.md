@@ -152,9 +152,14 @@ The runner re-reads the availability every 15 s and whenever the menu
 opens, so a TCC grant given in System Settings reaches the server as
 `grant.availability_changed`.
 
-- **srt location:** "İzinler" → "srt konumu…" (default
-  `/usr/local/bin/node`, `~/Library/Application Support/Friday/srt`; see
-  `docs/mcp/dependencies/node-gateway.md`).
+- **srt location:** "İzinler" → "srt konumu… (Touch ID ile onaylanır)"
+  (default `/usr/local/bin/node`, `~/Library/Application Support/Friday/srt`;
+  see `docs/mcp/dependencies/node-gateway.md`). Setting it, or "srt
+  dosyalarını yeniden onayla (Touch ID)", stores the sha256 of the Node
+  binary, the whole `node_modules` tree and `package-lock.json` in the
+  keychain item; any later change of those files makes `repo.command.run`
+  `unsupported` until the owner re-confirms (an upgrade of srt or Node needs
+  that step).
 - **Mappings:** "İzinler" → "Komut deposu ekle…", then per repo "Komut ekle /
   değiştir…": kind, argv (one argument per line, no shell), PATH (must
   contain `/bin`: srt runs the argv through `bash` found on it), environment
@@ -162,11 +167,32 @@ opens, so a TCC grant given in System Settings reaches the server as
   the bundle-id list in the same menu. Every change asks for Touch ID or the
   password and is refused before saving when it does not validate.
 - **Limits on macOS:** `max_processes` and `cpu_seconds` are enforced by a
-  100 ms process-tree monitor that kills the tree (never `RLIMIT_NPROC`,
-  which macOS counts per user); output past 1 MiB is counted, not kept;
-  "Durdur", the kill switch and socket loss send SIGTERM to the group and
-  SIGKILL to the tree after 5 s, without blocking the session; the worktree
-  and temp dirs are removed once the tree is gone.
+  process-tree monitor (never `RLIMIT_NPROC`, which macOS counts per user).
+  Members are followed by **unique-id lineage** (`p_puniqueid`, kept when a
+  process is re-parented to launchd), learnt from kqueue fork events on
+  every member and a 50 ms scan, so a `setsid` child whose parent exits at
+  once is still killed. Every kill goes to one pid after re-checking its
+  (unique id, start time); the monitor never uses `killpg`. Output past
+  1 MiB is counted, not kept; "Durdur", the kill switch and socket loss
+  send SIGTERM to the (unreaped) group and SIGKILL to the verified tree
+  after 5 s, without blocking the session; the worktree and temp dirs are
+  removed once the tree is gone.
+- **Residual limits (carried into M3):** an intermediate process that forks
+  and exits before its fork event is handled and before a scan
+  (microseconds) is not learnt, nor are its children; a fork burst can
+  overshoot the count for one 50 ms sample (`kern.maxprocperuid` is the
+  backstop); CPU time of a process that lived less than a sample is not
+  counted; a few microseconds remain between the identity check and
+  `kill(2)`, and between the srt digest check and `node` starting. (A
+  per-run environment marker was tried and dropped: macOS does not show
+  other processes' environments.)
+- **apps.open / apps.focus** launch or activate only a bundle whose realpath
+  is under `/Applications`, `/System/Applications` or
+  `/System/Library/CoreServices`, and `apps.open` only with a valid code
+  signature; `ax.type_text`'s keystroke fallback re-checks frontmost, the
+  focused element and the secure-field rule right before posting.
+- **The window** shows the mapping's sandbox mode (`in_place` with a
+  warning: the command writes into the repo itself).
 - **Git for the worktree mode:** 60 s timeout, `HOME=/var/empty`,
   `GIT_CONFIG_GLOBAL=/dev/null`, `GIT_CONFIG_NOSYSTEM=1`, hooks and
   fsmonitor off, every filter driver of the repo's config blanked; the kill

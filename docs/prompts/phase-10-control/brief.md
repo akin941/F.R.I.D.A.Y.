@@ -3364,7 +3364,7 @@ D4, D5 checks 21-24, ADR-014; runbook B6; the `srt` section of
   non-blocking `terminate()` (SIGTERM to the group, SIGKILL to the tree after
   5 s), `afterExit` for the session's cleanup.
 - `Sources/NodeCore/Exec/ProcessTree.swift` — `max_processes` and
-  `cpu_seconds` enforced by a 100 ms process-tree monitor (group + descendants)
+  `cpu_seconds` enforced by a process-tree monitor (unique-id lineage; see review round 1 below)
   that kills the tree; leftovers are killed once the root exits.
 - `Sources/NodeCore/Exec/ChildProcess.swift` — every spawn (git, srt,
   osascript): argv, explicit environment, stdin /dev/null, stdout/stderr
@@ -3484,7 +3484,7 @@ finding 4 (srt's implicit writable paths).
   (equal to the mapped root), not the raw param; still only as a literal.
 - `max_processes` / `cpu_seconds` are a sampled tree count / CPU sum, not
   rlimits (A6 finding 2; `posix_spawn` cannot set `RLIMIT_CPU` on the child).
-  A fork burst can overshoot for up to one 100 ms sample.
+  A fork burst can overshoot for up to one sample (50 ms since review round 1).
 - `CLAUDE_CODE_TMPDIR` is added to srt's environment (not to the document's
   `process.env`, which stays the reference's) so the child's `TMPDIR` is the
   private dir instead of srt's `/tmp/claude`.
@@ -3525,7 +3525,7 @@ finding 4 (srt's implicit writable paths).
    (`FRIDAY_NODE_TEAM_ID=<Personal Team ID> node/friday-node/scripts/build-sign-local.sh --install`),
    then in the menu "İzinler" (runbook B6 owner checkbox, Phase 10 owner
    step 5), each change confirmed with Touch ID:
-   1. check the line "srt: hazır (0.0.83)" (else "srt konumu…");
+   1. "srt konumu… (Touch ID ile onaylanır)" once (the line then reads "srt: hazır (0.0.83, dosyalar onaylı)"; after any srt or Node upgrade use "srt dosyalarını yeniden onayla (Touch ID)");
    2. "Komut deposu ekle…" for each repo, then "Komut ekle / değiştir…":
       e.g. `test` → `uv` / `run` / `pytest` / `-q` (one per line), PATH
       including `/bin` (and the directory of `uv`), network domains only if
@@ -3541,5 +3541,106 @@ finding 4 (srt's implicit writable paths).
    mapped), and record it there.
 4. M3: make the escape scripts macOS-capable (`limit_output`,
    `limit_runtime`, the unsandboxed control), decide the `~/.npm` `denyWrite`
-   follow-up, then run the ADR-014 evidence run.
+   follow-up (FU-B6-1 below), then run the ADR-014 evidence run.
 5. M4 measurements on the installed app.
+
+### Review round 1 — `feat/p10-node-executors`, fixed 2026-11-27
+
+The independent review returned REQUEST_CHANGES; every finding is fixed in
+new commits on the branch:
+
+1. **Blocking — entitlement allowlist.** `scripts/build-sign-local.sh`'s
+   EXPECTED now includes `com.apple.security.automation.apple-events` (the
+   comment no longer says "no Apple Events"); `EntitlementAllowlistTests`
+   ties EXPECTED to `App/FridayNode.entitlements` (file keys plus the two
+   Xcode adds) so they cannot drift. The signed build itself is an owner
+   step (not run here).
+2. **setsid escapees.** `ProcessTree` now follows members by unique-id
+   lineage: `p_puniqueid` (PROC_PIDUNIQIDENTIFIERINFO) keeps the forking
+   parent's unique id when the process is re-parented to launchd, and
+   members are learnt from kqueue `NOTE_FORK` events on every member plus a
+   50 ms scan. A per-run environment marker was tried first and dropped:
+   macOS does not show other processes' environments (`ps -E` shows none),
+   so it cannot be read back. `testASetsidEscapeeIsFoundByItsLineage` runs
+   a double-fork + `setsid` escapee 10 times and a three-generation chain
+   10 times; all 20 are killed (run 3 times: 60/60).
+3. **Recycled pids.** Every member is a (pid, unique id, start time)
+   identity, re-read before every kill; the monitor never sends `killpg`;
+   `ChildProcess.signal` sends nothing after the reap; the deferred
+   SIGKILL after `terminate()` is skipped once the run finished
+   (`testAStaleIdentityIsNeverSignalled`).
+4. **AX keystroke fallback.** Right before `typeKeystrokes`, the app must
+   still be frontmost, the same element must have focus (`focus_moved`
+   otherwise) and it must not be secure
+   (`testTheKeystrokeFallbackRechecksFocusRightBeforePosting`); `ax.press`
+   re-checks the secure-field rule before the press too.
+5. **Spoofed apps.** `apps.open` opens only a bundle whose realpath is under
+   `/Applications`, `/System/Applications` or `/System/Library/CoreServices`
+   and whose code signature validates (`SecStaticCodeCheckValidity`, strict);
+   `apps.focus` activates only an instance under those roots
+   (`testOnlyTrustedLocationsWithAValidSignatureOpen`,
+   `testTheSystemSignatureCheckAcceptsAnAppleApp`).
+6. **srt integrity.** Setting or re-confirming the location (Touch ID)
+   stores the sha256 of the Node binary, the whole `node_modules` tree and
+   `package-lock.json` in the keychain item; every start and availability
+   answer recomputes them (cached per file by inode, size, mtime, ctime) and
+   a mismatch is `unsupported`; the menu says that confirming needs Touch ID
+   and offers "srt dosyalarını yeniden onayla (Touch ID)"
+   (`testSrtIsTrustedOnlyAsConfirmed`, on a copy of the prefix: tampering
+   with `cli.js` or adding a file under `node_modules` is refused until
+   re-confirmed). `node --version` is now cached per binary digest.
+7. **`~/.npm/_logs`** is a tracked follow-up (FU-B6-1 below).
+8. **App document vs reference.** `testTheAppDocumentOnlyAddsItsOwnDeniedDirectories`:
+   for every vector the reference `denyRead` is a prefix of the app's, the
+   additions are exactly the app's own directories, and the rest of the
+   document is the reference's byte for byte.
+9. **Recipe availability** stays coarse, now documented in
+   `MacActionExecutor.swift`: the v2 `hello` catalogue has one availability
+   per capability and the recipe catalogue none, so `granted` needs every
+   enabled recipe's target granted (fail closed).
+10. **Stale menu indices.** Every mapping change is keyed by repo root (and
+    command kind) and applied with `CommandMappings.updateRepo/removeRepo/
+    removeCommand/setCommand`, which refuse a target that is gone
+    (`testChangesAreKeyedByRootAndRefusedWhenTheTargetIsGone`).
+- NITs: `ax.*` compare bundle ids by scalars (as open/focus); the panel shows
+  the sandbox mode with a warning for `in_place` (a panel line, so the
+  rendered text stays the reference's); `node --version` re-checked when the
+  binary's digest changes.
+
+Re-run after the fixes: `swift build && swift test` 188 tests, 0 failures
+(offline conformance v1 86/86, v2 99/99; the real-srt tests ran, not
+skipped); Release `xcodebuild` build succeeded, `check-release-markers.sh`
+passes it and refuses the Conformance binary; Release `test
+-only-testing:NodeCoreTests/ReleaseHygieneTests
+-only-testing:NodeCoreTests/EntitlementAllowlistTests` 5/5; Conformance
+build succeeded; escape-policy export/check 32/32 covered; live
+conformance port 8766 `--protocol 2` 99/99 ALL PASS, `--protocol 1` 86/86
+ALL PASS; `vendor_protocol.py --check` current. The ops preflight tests on a
+clean `origin/integ/phase-13` tree (`git archive` of `2f4c428`) fail the
+same 10 tests as on this branch (`test_preflight.py` ×4,
+`test_preflight_home_control.py` ×5, `test_preflight_learning.py` ×1), so
+they are not this branch's.
+
+Residual limits, carried into M3 (also in the node README): an
+intermediate process that forks and exits within microseconds, before its
+fork event is handled and before a scan, is not learnt (nor its children);
+a fork burst can overshoot `max_processes` for one 50 ms sample
+(`kern.maxprocperuid` backstop); CPU time of a process shorter than a sample
+is not counted; microsecond windows remain between the identity check and
+`kill(2)`, between the srt digest check and `node` starting, and between
+the AX re-check and the keystroke post.
+
+### Known follow-ups — `feat/p10-node-executors` (tracked for M3)
+
+- **FU-B6-1 — srt's implicit writable `~/.npm/_logs`.** srt 0.0.83 keeps
+  `~/.npm/_logs` writable inside the sandbox (it exists on the owner's Mac;
+  `node-gateway.md` srt finding 4). Fix: add `~/.npm` to `denyWrite` in
+  `backend/nodes/reference/sandbox.py`, regenerate
+  `backend/nodes/conformance/vectors/sandbox.json`, port to
+  `SandboxPolicy.swift`, and include it in the M3 evidence run. Owner: M3.
+- **FU-B6-2 — the process-tree residuals above** (microsecond intermediate
+  processes, one-sample fork overshoot): measure in the M3 evidence run
+  (fork-bomb and double-fork escape cases) and decide whether they bar the
+  ADR-014 amendment. Owner: M3.
+- **FU-B6-3 — macOS-capable escape scripts** (`limit_output`,
+  `limit_runtime`, the unsandboxed control). Owner: M3.
