@@ -127,7 +127,7 @@ def test_the_home_checks_are_registered_after_skills_and_report_six_rows(home, r
     resolver["table"]["localhost"] = ["127.0.0.1", "::1"]
     names = [name for name, _ in preflight.CHECKS]
     # The closeout's `home_control` rows follow (test_preflight_home_control).
-    assert names[-2:] == ["home", "home_control"]
+    assert names[-3:] == ["home", "home_control", "home_direct"]
     assert ("home", preflight.check_home) in preflight.CHECKS
     results = preflight.run_preflight(checks=(("home", preflight.check_home),))
     assert [r.name for r in results] == HOME_ROWS

@@ -38,6 +38,11 @@ Work top to bottom:
    items): the small Swift change for pairing `platform` and server
    re-point, the real-hardware multi-node and home-route run, and the home
    server on the owner's PC. Start E1 after B1; E3 needs no Mac.
+6. **Part F — Phase 13b owner decisions** (added 2026-11-20 by the
+   Phase 13b closeout): the interim server on the MacBook with R2
+   backups, the Mac's own node over loopback and the real TV flagged
+   direct (ADR-018), and the later home PC with TPM unlock. No Swift
+   change; F1 needs no paired node, F2 needs B1 and B7.
 
 Each item has a checkbox. The **brief** named in each item is the full
 specification; this file is the order, the commands and the acceptance
@@ -82,18 +87,21 @@ branch.
 | 11 | `docs/prompts/phase-11-live-voice/brief.md` | "Mac session (deferred)" M1–M4 | phase list + nine branch lists; "Go/no-go record" |
 | 12 | `docs/prompts/phase-12-reach/brief.md` | "Mac session (deferred)" M1 (verification only) | phase list + nine branch lists; "Go/no-go record" |
 | 13 | `docs/prompts/phase-13-home-hub/brief.md` | "Mac session (deferred)" M1–M3 (Part E) | "Owner steps (pending)" + the branch lists; "Go/no-go record" |
+| 13b | `docs/prompts/phase-13b-home-decisions/brief.md` | "Mac session (deferred)" M1–M3 (Part F) | "Owner steps (pending)" + the branch lists; "Go/no-go record" |
 
 ADRs these tasks implement: **ADR-013** (Friday Node protocol: identity,
 pinning, no listener, owner-away rules), **ADR-014** (node action
 classes; the M3 evidence run), **ADR-015** (voice-originated turns
 only propose), **ADR-012** (ingestion privacy pipeline: scrubber parity),
 **ADR-011** (voice transport), **ADR-016** (proactive, Proposed) and
-**ADR-017** (home hub topology, Accepted 2026-11-26; Part E).
+**ADR-017** (home hub topology, Accepted 2026-11-26; Part E; amended
+2026-11-26, Part F) and **ADR-018** (direct-execute home media class,
+Accepted 2026-11-26; Part F).
 
 Runbooks the Mac session uses: `friday-node.md`, `claude-code-hooks.md`,
 `live-voice.md`, `voice-setup.md`, `memory-eval.md`, `learning-memory.md`,
 `harness-drivers.md`, `proactive.md`, `n8n-connector.md`, `skills.md`,
-`home-server-setup.md` (Part E), and `docs/voice/live-eval.md`.
+`home-server-setup.md` (Parts E and F), and `docs/voice/live-eval.md`.
 
 ---
 
@@ -114,6 +122,7 @@ repository) and green in CI against reference doubles (`MASTER_PLAN.md` §AA).
 | 11 Local live voice | `node_voice` credential and channel, `friday-voice/v1` + reference host, Pipecat pipeline, barge-in, always-on gate (closed), storm backstop, CI self-trigger gate, FAR/FRR harness, `voice.state`, preflight | Swift voice host M1 (B7), loopback + nightly M3 (B8, C7), MLX speech server M2 (C7), FAR/FRR/latency/barge-in/CPU M4 (C7) |
 | 12 Reach | `proactive` app, digest, `/today`, wake routes, n8n connector (relay, allowlist, gated writes), SKILL.md skills + curator, playbooks, preflight | spoken digest and wake routes on the Mac M1 (C8), live n8n, two-week digest checkpoint (C9, D7) |
 | 13 Home hub | rooms + node labels, "which PC" resolver (one node per call), HUD `nodes` panel + `/devices` overview, per-node audit, `friday-node-linux` (read-only, v1, 50/50 conformance), HA entity allowlist + media/scene services (gate-class), home voice routes (propose only), `compose.home.yml` + backup/drill scripts, `check_home` + `check_home_control` preflight, home-hub e2e (`chore/p13-closeout`) | Swift pairing `platform` + server re-point (E1), real-hardware multi-node and home routes (E2), the home server on the owner's PC (E3), owner steps (E4) |
+| 13b Owner decisions | ADR-018 direct media class (closed allowlist + digest, per-entity owner-only `direct` flag, kill switches, rate limits, volume clamp, `HomeDirectCall` audit, code-only `home_direct` intent with provenance locks) on web voice, `node_voice` and typed turns; `/connectors` direct switch + settings panel, HUD `home_direct` line; macOS-tolerant preflight (`HOME_SERVER_PLATFORM`, `home_server_platform`), R2 destination check, portable backup/drill scripts, LaunchAgent, `compose.mac.yml`; `ha_direct_media` preflight; home-direct e2e (`chore/p13b-closeout`) | the interim server on the real Mac with R2 (F1), the Mac node over loopback and the real TV (F2), the home PC with TPM unlock (F3), owner steps (F4) |
 
 ---
 
@@ -1674,6 +1683,111 @@ item below must leave them unchanged.
 A **Windows node** is not part of Phase 13 (stub README only,
 `node/friday-node-windows/README.md` after branch 4); it needs its own
 brief (d1: Tauri v2) and must pass the same conformance suite.
+
+---
+
+## Part F — Phase 13b owner decisions: interim Mac server, R2, the real TV (added 2026-11-20 by `chore/p13b-closeout`)
+
+Source: `docs/prompts/phase-13b-home-decisions/brief.md` ("Mac session
+(deferred)" M1–M3), ADR-017 (amendment of 2026-11-26), ADR-018 (the
+direct-execute home media class), `docs/runbooks/home-server-setup.md`
+("Interim: server on the MacBook", step 8 R2, step 1 TPM). Phase 13b
+changes **no protocol surface and no Swift code**: the Mac session uses
+the existing `friday-node` app. `node_protocol_frozen` must still pass
+after every item. Check out `integ/phase-13` (or `main` after the owner's
+merge).
+
+- [x] **F0 Phase 13b server side (`chore/p13b-closeout`, 2026-11-20).**
+      Branches 1a–1d and 2 and the closeout are on the integration branch
+      and the contract tests F1–F3 name are committed and green here
+      (against the fake Home Assistant, the Phase 11 reference voice host,
+      a real `friday-voice run` child, a PATH shim for the macOS tool set
+      and `plistlib` for the LaunchAgent). Preflight shows
+      `home_server_platform` (`check_home`) and `ha_direct_media`
+      (`check_home_direct`).
+- [ ] **F1 Phase 13b M1 — the interim server on the MacBook (owner's Mac;
+      runbook "Interim" I1, I2, I4 optional, I5).**
+      1. FileVault on (`fdesetup status`); OrbStack or Docker Desktop;
+         Homebrew `bash age restic caddy`.
+      2. `deploy/docker/.env`: `HOME_SERVER_PLATFORM=macos`,
+         `HOME_BACKUP_HOST_DIR`, `HOME_FDE_CONFIRMED_ON`,
+         `DJANGO_ALLOWED_HOSTS` with the Mac's `.local` name;
+         `make up-mac-server`.
+      3. R2: a bucket and a bucket-scoped token;
+         `~/.config/friday-backup/restic.env` from
+         `deploy/home/restic.env.example` (the five names, host only —
+         never in `deploy/docker/.env`); `restic init`;
+         `HOME_BACKUP_OFFSITE_REPOSITORY` in `deploy/docker/.env`.
+      4. The LaunchAgent `deploy/home/macos/com.friday.backup.plist`
+         (`launchctl bootstrap gui/$UID …`); one manual run; close the lid
+         overnight once and confirm the catch-up run on wake
+         (`~/Library/Logs/friday-backup.log`, `status.json`).
+      5. The first restore drill, and one from the R2 copy.
+      6. `make preflight`: no `fail` row caused by macOS;
+         `home_server_platform` and `home_disk_encryption` warn (FileVault
+         is an owner attestation); `home_backup_fresh` pass ending
+         ", off-site R2"; `home_restore_drill_age` pass.
+      **Contract (green here):** `ops/tests/test_preflight_home_macos.py`,
+      `ops/tests/test_preflight_home_offsite.py`,
+      `ops/tests/test_home_backup_portable.py`,
+      `ops/tests/test_launchd_plist.py`,
+      `ops/tests/test_no_bucket_secrets_in_compose.py`,
+      `config/tests/test_compose_files.py` (the `up-mac-server` merge),
+      and `ops/tests/test_home_direct_e2e.py::test_a_macos_preflight_with_r2_status_files_has_no_fail_and_direct_media_passes`.
+      Record in the Phase 13b brief's "Go/no-go record" (M1 row).
+- [ ] **F2 Phase 13b M2 — the Mac's own node and the real TV (owner's
+      Mac; after F1, Part B B1, B7; go/no-go).**
+      1. Pair the MacBook's `friday-node` with the server on the same
+         machine over the loopback TLS path (runbook I3: `make local-tls`,
+         strong code, typed pin, `https://127.0.0.1:8443`); `node_link`
+         connected, `node_tls_pin` pass.
+      2. On `/connectors` → Home Assistant, flag the real TV "Doğrudan
+         (onaysız)" (the confirmation names its services); set the volume
+         maximum. The HUD line reads "Doğrudan medya: açık · 1 cihaz".
+         `make preflight`: `ha_direct_media` pass.
+      3. By voice on the Mac (real mic, the Phase 11 voice host): "TV'yi
+         duraklat", "devam ettir", "durdur", "sesi kıs", "sesi yüzde 90'a
+         ayarla" → each one Home Assistant call, no card; record the time
+         from end of speech to the TV reacting, and that 90 % became the
+         maximum ("Ses en fazla %60 olabilir; %60'a ayarladım.").
+      4. "Salondaki TV'yi aç" → a card (power is gate-class); an unflagged
+         speaker → a card ("Doğrudan değil: işaretli değil").
+      5. Tap "Doğrudan medyayı kapat" → the HUD goes "kapalı" and the next
+         utterance is a card ("Doğrudan değil: doğrudan medya kapalı");
+         tap it back. Say eleven volume commands within a minute → the
+         eleventh is a card.
+      6. Review `/connectors` "Son doğrudan çağrılar" and the audit log
+         (`ha.direct_call`): every row has origin `node`, the Mac's node id
+         and the right entity.
+      **Contract (green here; the Swift node must pass it unchanged):**
+      `ops/tests/test_home_direct_e2e.py` (node_voice through the
+      reference voice host + a real `friday-voice run` child, web voice and
+      typed direct; unflagged → card → approval → one call; the kill switch
+      on `/connectors`; the eleventh call; the 0.6 clamp;
+      `node_protocol_frozen`), `ops/tests/test_home_direct_voice_e2e.py`,
+      `assistant/tests/test_home_direct_node_voice.py`,
+      `assistant/tests/test_home_direct_provenance.py`,
+      `connectors/tests/test_home_direct_rate_limit.py`. Run them with
+      `cd backend && uv run pytest -q <paths>` (`node/friday-voice` synced:
+      `uv sync --frozen` there, or `FRIDAY_VOICE_E2E=1` makes a missing
+      environment a failure). Record in the Phase 13b brief's "Go/no-go
+      record" (M2 rows), and after two weeks the audit review row.
+- [ ] **F3 Phase 13b M3 — the home PC with TPM unlock; move off the Mac
+      (owner hardware, not the Mac).** Buy the PC; runbook steps 0–6 with
+      step 1's TPM enrolment (recovery key first, kept off the server;
+      `systemd-cryptenroll --tpm2-device=auto --tpm2-pcrs=7`; `dracut`), a
+      reboot that unlocks without a prompt and one that asks after a Secure
+      Boot change; then "Interim" I6: a final backup on the Mac, restore on
+      the PC, the same `NODE_SIGNING_KEY` and CA, re-point (Part E E1) or
+      re-pair the Mac node, unload the LaunchAgent,
+      `HOME_SERVER_PLATFORM=linux`. Never run both servers. `make
+      preflight`: every `home_*` row and `ha_direct_media` pass.
+- [ ] **F4 Phase 13b owner steps.** The brief's "Owner steps (pending)"
+      lists (one per branch): the Sonnet 5 reviews, confirming ADR-018 and
+      the CLAUDE.md rule 4 sentence, the defaults (30/min global, 10/min
+      per entity, volume maximum 0.6, `volume_up` headroom 0.1, "durdur" →
+      `media_stop`, rate-limit overflow → card), the UI wording, the R2
+      bucket, and the two-week go/no-go record.
 
 ---
 

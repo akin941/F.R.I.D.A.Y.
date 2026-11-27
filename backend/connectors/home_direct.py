@@ -500,6 +500,13 @@ def _available(workspace):
     return policy is not None and tool_available(enabled_binding(workspace, manifest.name), policy)
 
 
+def ha_usable(workspace):
+    """Is Home Assistant usable for a direct call in `workspace` (the
+    manifest active, the binding enabled, `ha_call_service`'s pin `ok`)?
+    Read-only; the closeout's `ha_direct_media` preflight row asks it."""
+    return _available(workspace)
+
+
 def classify(
     *,
     workspace,

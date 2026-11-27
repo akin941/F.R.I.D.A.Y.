@@ -406,7 +406,7 @@ def test_without_a_friday_voice_checkout_only_the_node_half_is_checked(settings,
 def test_the_closeout_rows_are_registered_last(home, ha_env, personal):
     allow(personal, TV, ["turn_on"], label="TV")
     names = [name for name, _ in preflight.CHECKS]
-    assert names[-1] == "home_control"
+    assert names.index("home_control") == names.index("home") + 1
     assert ("home_control", preflight.check_home_control) in preflight.CHECKS
     results = preflight.run_preflight(checks=(("home_control", preflight.check_home_control),))
     assert [r.name for r in results] == ROWS

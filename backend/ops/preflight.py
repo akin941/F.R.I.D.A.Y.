@@ -115,6 +115,14 @@ read-only `ha_states` read, seam `ha_state_ids`), `linux_node_vendor`
 the `friday-voice` conformance lock hash to the Phase 12 closeout values:
 Phase 13 adds no protocol surface).
 
+Phase 13b closeout adds `check_home_direct` (read-only, no model call, no
+Home Assistant request): `ha_direct_media` (ADR-018's direct media class --
+the closed set's digest against ADR-018's recorded value, every flagged
+entity a `media_player` with a direct-eligible service in a personal
+workspace, the env and owner kill switches, Home Assistant usable, the
+limits and the volume maximum). Phase 13b branch 2 added
+`home_server_platform` to `check_home`.
+
 Rules this module keeps:
 
 - Provider calls go through the single door (ADR-003): one minimal
@@ -3967,6 +3975,144 @@ def check_home_control():
     ]
 
 
+# --- Phase 13b closeout: the direct media class (ADR-018) ---------------------
+
+# ADR-018's implementation note records the digest of the closed set
+# (sha256 of the eight sorted service names joined by a newline). Pinned
+# here independently of `connectors.home_direct.ADR_018_DIGEST`: widening or
+# narrowing the set needs an ADR-018 amendment that updates both.
+ADR_018_DIRECT_MEDIA_SHA256 = "9ca85ee245440d6c31779bf26dfd256489eeafff83e3e678bc3c7572ad2d3183"
+HA_DIRECT_OWNER_STEP = "owner step: flag a TV 'Doğrudan (onaysız)' on /connectors"
+
+
+def _direct_flag_refusal(row):
+    """Why a flagged `HomeEntity` is outside ADR-018's class, or None.
+    `HomeEntity.save()` refuses all three on every write path, so a hit
+    here means a write went around it."""
+    from connectors import home_direct
+    from connectors.bridges import home_assistant as bridge
+    from workspaces.models import Workspace
+
+    if bridge.entity_domain(row.entity_id) != home_direct.DIRECT_MEDIA_DOMAIN:
+        return "not_media_player"
+    if not home_direct.direct_eligible(row.entity_id, row.services):
+        return "no_direct_service"
+    if row.workspace.type != Workspace.Type.PERSONAL:
+        return "not_personal"
+    return None
+
+
+def _owner_direct_settings(workspace):
+    """`(kill switch, volume maximum)` the classifier would read for the
+    installation owner's personal workspace (`effective_settings`, through
+    `for_actor()`): the owner's row, or the defaults while it does not
+    exist (never created here)."""
+    from connectors import home_direct
+
+    if workspace is None:
+        return False, home_direct.default_volume_max()
+    current = home_direct.effective_settings(actor=workspace.owner, workspace=workspace)
+    return current.kill_switch, current.volume_max
+
+
+def _check_ha_direct_media():
+    """Phase 13b D4-D8 (ADR-018): the direct media class.
+
+    - `fail`: `DIRECT_MEDIA_SERVICES`' digest differs from ADR-018's
+      recorded value, or a flagged entity is outside the class (not a
+      `media_player`, no direct-eligible service ticked, or outside a
+      personal workspace) -- `HomeEntity.save()` makes both impossible on
+      every write path, so a hit is a defect;
+    - `warn`: the class is off (the env kill switch or a zero rate limit;
+      the owner's kill switch), Home Assistant is not usable in the owner's
+      personal workspace, no entity is flagged, or a flagged entity is
+      disabled in the allowlist (it is not direct);
+    - otherwise `pass`.
+    Read-only: no Home Assistant request, no model call, no row written
+    (the owner's settings are read through the classifier's own reader,
+    never created). Details carry the
+    state, counts, entity ids, limits and the volume maximum -- never a
+    token, a URL or a Home Assistant state."""
+    from connectors import home_direct
+    from connectors.models import HomeEntity
+
+    name = "ha_direct_media"
+    digest = home_direct.closed_set_digest(home_direct.DIRECT_MEDIA_SERVICES)
+    if not digest == home_direct.ADR_018_DIGEST == ADR_018_DIRECT_MEDIA_SHA256:
+        return CheckResult(
+            name,
+            FAIL,
+            f"the direct media closed set changed (sha256 {digest[:12]}, ADR-018 records "
+            f"{ADR_018_DIRECT_MEDIA_SHA256[:12]}): changing it needs an ADR-018 amendment",
+        )
+    flagged = list(
+        HomeEntity.objects.filter(direct=True).select_related("workspace").order_by("entity_id")
+    )
+    outside = [
+        f"{row.entity_id}={refusal}"
+        for row in flagged
+        if (refusal := _direct_flag_refusal(row)) is not None
+    ]
+    if outside:
+        return CheckResult(
+            name,
+            FAIL,
+            f"flagged outside ADR-018's class: {_label_list(outside)} (unflag them on /connectors)",
+        )
+    workspace = _installation_owner_workspace()
+    owner_kill, volume_max = _owner_direct_settings(workspace)
+    state = home_direct.direct_state(kill_switch=owner_kill)
+    global_limit, entity_limit = home_direct.rate_limits()
+    enabled = [row for row in flagged if row.enabled]
+    disabled = [row.entity_id for row in flagged if not row.enabled]
+    count = len(enabled)
+    detail = (
+        f"state {state}, {count} flagged entit{'y' if count == 1 else 'ies'}, "
+        f"limits {global_limit}/min global and {entity_limit}/min per entity, "
+        f"volume max {round(float(volume_max) * 100)}%"
+    )
+    if state == home_direct.STATE_OFF_ENV:
+        return CheckResult(
+            name,
+            WARN,
+            f"{detail}; off by the environment (HA_DIRECT_MEDIA_KILL_SWITCH or a zero "
+            "HA_DIRECT_RATE_* limit): every media call is a card",
+        )
+    if state == home_direct.STATE_OFF_OWNER:
+        return CheckResult(
+            name, WARN, f"{detail}; the owner's kill switch is on: every media call is a card"
+        )
+    if workspace is None or not home_direct.ha_usable(workspace):
+        return CheckResult(
+            name,
+            WARN,
+            f"{detail}; Home Assistant not configured in the owner's personal workspace "
+            "(manifest, binding or ha_call_service pin)",
+        )
+    if not enabled:
+        return CheckResult(
+            name, WARN, f"{detail}; no entity flagged direct ({HA_DIRECT_OWNER_STEP})"
+        )
+    if disabled:
+        return CheckResult(
+            name,
+            WARN,
+            f"{detail}; flagged but disabled (not direct): {_label_list(disabled)}",
+        )
+    return CheckResult(
+        name,
+        PASS,
+        f"{detail}; each a media_player with a direct service, closed set matches ADR-018",
+    )
+
+
+def check_home_direct():
+    """Phase 13b closeout, read-only: `ha_direct_media` (ADR-018's closed
+    set, the flagged entities, the kill switches, the limits and the volume
+    maximum). No Home Assistant request, no model call, nothing written."""
+    return [_guarded("ha_direct_media", _check_ha_direct_media)]
+
+
 CHECKS = (
     ("web", check_web),
     ("bff", check_bff),
@@ -3990,6 +4136,7 @@ CHECKS = (
     ("skills", check_skills),
     ("home", check_home),
     ("home_control", check_home_control),
+    ("home_direct", check_home_direct),
 )
 
 
