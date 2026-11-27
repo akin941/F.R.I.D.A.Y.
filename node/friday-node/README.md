@@ -206,7 +206,12 @@ opens, so a TCC grant given in System Settings reaches the server as
     probe (15 such children per run, 40 runs, 600 children; 2026-11-27):
     lineage and events only, 2-4 of 600 survived (before hardening: 3 of
     150); with the orphan sweep on (forced in the test, restricted to the
-    probe's perl and sleep binaries), 0 of 600. The installed app has the sweep on only if
+    probe's perl and sleep binaries), 0 of 600, 0 of 593 and 1 of 596 in
+    three measurements, and about 4 in 1080 when the whole test suite ran
+    (a launchd-parented `sleep` answering to the same responsible process
+    that the sweep missed; the cause is not found). **So even with the sweep
+    on, a daemonising command that retries hundreds of times can expect an
+    occasional survivor.** The installed app has the sweep on only if
     macOS names it its own responsible process, which is expected for an
     app launched by launchd but **not yet verified on the installed app**
     (M3). A descendant that gets itself started under another responsible

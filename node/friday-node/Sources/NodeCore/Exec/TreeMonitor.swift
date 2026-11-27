@@ -326,6 +326,9 @@ final class TreeMonitor: @unchecked Sendable {
         }
         let rootAlive = !exited && rows.contains { $0.identity == root }
         let liveIDs = Set(rows.map(\.identity.uniqueID))
+        // A parent that cannot be read is gone or a zombie (whose child is
+        // not re-parented until the zombie is reaped).
+        let readablePIDs = Set(rows.map(\.identity.pid))
         let anchor = OrphanSweep.anchor
         let uid = getuid()
         var members: Set<ProcessIdentity> = []
@@ -336,7 +339,7 @@ final class TreeMonitor: @unchecked Sendable {
                 let byLineage = known.contains(row.identity.uniqueID) || known.contains(row.parentUniqueID)
                 let byGroup = rootAlive && row.pgid == group
                 var byOrphanSweep = false
-                if !byLineage && !byGroup, let anchor, row.ppid == 1, row.uid == uid,
+                if !byLineage && !byGroup, let anchor, row.ppid == 1 || !readablePIDs.contains(row.ppid), row.uid == uid,
                     row.identity.uniqueID > root.uniqueID, row.parentUniqueID > root.uniqueID,
                     !liveIDs.contains(row.parentUniqueID), row.identity.start >= root.start,
                     OrphanSweep.responsible(for: row.identity.pid) == anchor, OrphanSweep.accepts(row.identity.pid)
