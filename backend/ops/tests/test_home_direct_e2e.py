@@ -196,21 +196,22 @@ def test_node_voice_web_voice_and_typed_each_make_one_direct_call(voice_child, h
     events, voice_user = _web_turn(web_client, world, "TV'yi devam ettir")
     assert _draft(events) is None and _reply(events) == "Salon TV oynatılıyor."
     assert voice_user.intent == "home_direct"
-    # Typed: "durdur" is media_stop (Phase 13b D7), before any router call.
+    # Typed: "durdur" pauses (owner 2026-11-27, amending Phase 13b D7: some
+    # TVs close the app on media_stop), before any router call.
     events, typed_user = _web_turn(web_client, world, "TV'yi durdur", voice=False)
-    assert _draft(events) is None and _reply(events) == "Salon TV durduruldu."
+    assert _draft(events) is None and _reply(events) == "Salon TV duraklatıldı."
     assert (typed_user.intent, typed_user.route) == ("home_direct", "home.control")
 
     assert ha.posts == [
         PAUSE,
         ("/api/services/media_player/media_play", {"entity_id": TV}),
-        ("/api/services/media_player/media_stop", {"entity_id": TV}),
+        PAUSE,
     ]
     calls = list(HomeDirectCall.objects.order_by("created_at"))
     assert [(c.origin, c.service, c.status) for c in calls] == [
         ("node", "media_pause", "succeeded"),
         ("voice", "media_play", "succeeded"),
-        ("chat", "media_stop", "succeeded"),
+        ("chat", "media_pause", "succeeded"),
     ]
     assert str(calls[0].node) == str(world.node.pk)
     assert calls[1].node is None and calls[2].node is None

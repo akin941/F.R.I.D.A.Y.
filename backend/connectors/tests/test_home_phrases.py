@@ -93,6 +93,25 @@ def test_the_vectors_cover_the_briefs_examples():
         assert example in inputs
 
 
+@pytest.mark.parametrize(
+    ("text", "kind", "service"),
+    [
+        ("TV'yi durdur", "pause", "media_pause"),
+        ("televizyonu durdur", "pause", "media_pause"),
+        ("TV'yi duraklat", "pause", "media_pause"),
+        ("stop the TV", "stop", "media_stop"),
+    ],
+)
+def test_durdur_is_pause_and_english_stop_is_stop(text, kind, service):
+    """Owner 2026-11-27 (amends Phase 13b D7): Turkish "durdur" is
+    `media_pause` (some TVs close the app on `media_stop`); English "stop"
+    stays `media_stop`."""
+    entities, rooms = _vector_vocabulary()
+    command = home_phrases.parse_home_command(text, entities=entities, rooms=rooms)
+    assert command.action.kind == kind
+    assert home_phrases.service_for(command.action, "media_player") == (service, {})
+
+
 def test_a_source_keeps_the_owners_spelling_without_its_ending():
     entities, rooms = _vector_vocabulary()
     for text, source in (

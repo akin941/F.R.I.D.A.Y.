@@ -79,7 +79,9 @@ def test_web_voice_pauses_the_flagged_tv_with_one_call_and_no_card(turn, ha, cal
     ("text", "service", "data", "reply"),
     [
         ("TV'yi oynat", "media_play", {}, "Salon TV oynatılıyor."),
-        ("TV'yi durdur", "media_stop", {}, "Salon TV durduruldu."),
+        # Owner 2026-11-27: Turkish "durdur" pauses; English "stop" stops.
+        ("TV'yi durdur", "media_pause", {}, "Salon TV duraklatıldı."),
+        ("stop the TV", "media_stop", {}, "Salon TV durduruldu."),
         ("TV'yi oynat duraklat", "media_play_pause", {}, "Salon TV oynatılıyor."),
         ("TV'nin sesini kapat", "volume_mute", {"is_volume_muted": True}, None),
         ("sesi yüzde 40'a ayarla", "volume_set", {"volume_level": 0.4}, None),
@@ -93,6 +95,21 @@ def test_each_direct_service_is_one_call_with_a_fixed_reply(turn, ha, text, serv
     if reply is not None:
         assert reply_text(events) == reply
     assert HomeDirectCall.objects.get().status == "succeeded"
+
+
+@pytest.mark.parametrize("text", ["TV'yi durdur", "Hey Friday, televizyonu durdur"])
+def test_durdur_directly_pauses_a_flagged_tv_that_allowlists_only_media_pause(turn, ha, home, text):
+    """Regression (owner 2026-11-27, D7 amendment): a flagged TV whose
+    `services` are exactly `["media_pause"]` is paused by "durdur" with one
+    direct call: no card, no refusal, never `media_stop`."""
+    home.tv.services = ["media_pause"]
+    home.tv.save()
+    events, user = turn("voice", text)
+    assert draft_of(events) is None, user.intent_payload
+    assert reply_text(events) == "Salon TV duraklatıldı."
+    assert ha.posts == [("/api/services/media_player/media_pause", {"entity_id": TV})]
+    call = HomeDirectCall.objects.get()
+    assert (call.status, call.service) == ("succeeded", "media_pause")
 
 
 def test_volume_set_reply_names_the_level(turn, ha):

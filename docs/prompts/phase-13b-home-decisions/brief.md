@@ -294,7 +294,8 @@ Concretely, at the end of the phase:
 - **Gate behaviour unchanged.** Any call that is not direct goes through
   exactly the Phase 13 path (draft card → `/approvals` →
   `ConnectorWriteExecution`), byte for byte; the Phase 13 tests stay green
-  (only the `durdur` vector moves to `media_stop`, D7).
+  (only the `durdur` vector moves to `media_stop`, D7; amended 2026-11-27:
+  `durdur` stays `media_pause`, English `stop` is `media_stop`).
 - **Backups stay host operations.** Friday never starts, changes or reads
   a backup and never holds R2 credentials (ADR-017 decision 6); preflight
   reads the status file's non-secret repository identifier.
@@ -492,6 +493,14 @@ the problem.
   `duraklat` stays pause); `PLAY_PAUSE` (TR `oynat duraklat`, EN `play
   pause`, `toggle play`) → `media_play_pause`. Vectors in
   `docs/voice/home-route-vectors.json` updated in the same commit.
+- **Amendment (owner, 2026-11-27):** Turkish `durdur` maps to `PAUSE` →
+  `media_pause` (the same as `duraklat`), overriding the `media_stop`
+  choice above: some TVs close the app on stop. English `stop` stays
+  `STOP` → `media_stop` (explicit), and `media_stop` / `media_play_pause`
+  stay in the code maximum and the direct class. A TV that allowlists only
+  `media_pause` is paused by "durdur". Implemented on
+  `fix/p13b-durdur-pause` (phrase table, vectors, route/direct/e2e tests,
+  a regression test in `test_home_phrases.py` and `test_home_routes.py`).
 - `connectors.home_direct.classify(*, workspace, actor, arguments,
   origin, channel) -> DirectVerdict(direct: bool, reason: str)`. `direct`
   only if **all** hold, otherwise `reason` is the first failing closed
@@ -781,8 +790,9 @@ series as a whole.
 - manifest `version` 2 → 3, new `CALL_SERVICE_PIN` (and `STATES_PIN` if
   its listing changes) in the same commit; `docs/mcp/home-assistant.md`
   and `docs/mcp/allowlist.md` (MCP governance);
-- `connectors.home_phrases`: `STOP` (`durdur`/`stop` → `media_stop`;
-  `durdur` moves off `media_pause`), `PLAY_PAUSE` (`oynat duraklat`,
+- `connectors.home_phrases`: `STOP` (`stop` → `media_stop`; *superseded
+  2026-11-27: `durdur` → `media_pause`, D7 amendment — branch 1a had moved
+  it to `media_stop`*), `PLAY_PAUSE` (`oynat duraklat`,
   `play pause`, `toggle play` → `media_play_pause`); an entity without
   the service → the existing "izin yok" refusal; vectors in
   `docs/voice/home-route-vectors.json`.
@@ -797,16 +807,17 @@ the manifest pin tests, the HA dialog tests updated),
 (the approvals dialog component + its test).
 
 **Tests.** The two services validate with `NoData` and refuse any data;
-a voice "durdur" on an allowlisted TV → a `media_stop` **card**, approve →
+a voice "stop" on an allowlisted TV → a `media_stop` **card**, approve →
 one POST to the fake HA; "oynat duraklat" → `media_play_pause` card whose
 dialog shows "şu an oynatılıyor → duraklatılır"; an entity whose
-`services` lacks `media_stop` → refusal, no card; the pins match
-`tool_schemas()`; the Phase 13 home tests green except the `durdur`
-vector.
+`services` lacks `media_stop` → refusal to "stop", no card; the pins match
+`tool_schemas()`; the Phase 13 home tests green. *(Superseded 2026-11-27:
+"durdur" → `media_pause`, D7 amendment; the branch-1a tests that pinned
+"durdur" → `media_stop` were updated on `fix/p13b-durdur-pause`.)*
 
 **Done when:** the two services exist as ordinary gate-class HA services
-under manifest v3, and the matcher maps "durdur" and "oynat duraklat" to
-them.
+under manifest v3, and the matcher maps "stop" and "oynat duraklat" to
+them ("durdur" → `media_pause` since the 2026-11-27 amendment).
 
 ### 1b. `feat/p13-direct-media-model` — flag, settings, call log, closed set, classifier, rate limits, owner API
 
@@ -1293,8 +1304,9 @@ VPS, DNS, bucket or hardware in tests.
   by the other.
 - **Phase 13 regression.** The Phase 13 home tests (`test_ha_*`,
   `test_home_routes*`, `test_home_hub_e2e.py`, `test_home_voice_e2e.py`,
-  `test_preflight_home*.py`) stay green unchanged, except the `durdur`
-  vector (now `media_stop`) and the manifest pins (v3).
+  `test_preflight_home*.py`) stay green unchanged, except the manifest
+  pins (v3). *(Superseded 2026-11-27: the `durdur` vector stays
+  `media_pause`, D7 amendment; it no longer moves to `media_stop`.)*
 
 ## Risks
 
@@ -1309,7 +1321,7 @@ VPS, DNS, bucket or hardware in tests.
 | Kill switch toggled while a call is in flight | Re-checked under a row lock right before the send; there is no queue; a call already sent completes and is audited |
 | Rate-limit store down | `rate_store_unavailable` → card (never direct) |
 | A lost worker leaves a direct call `running` | Recovery scan → `unknown_outcome`, never re-sent, shown in the calls list |
-| "durdur" changes meaning (pause → stop) | Vectors updated; documented in `docs/mcp/home-assistant.md` and the editor; if an entity lacks `media_stop`, the route refuses ("izin yok") instead of guessing |
+| ~~"durdur" changes meaning (pause → stop)~~ Superseded 2026-11-27: "durdur" stays `media_pause` (D7 amendment); English "stop" is `media_stop` | Vectors updated; documented in `docs/mcp/home-assistant.md` and the editor; if an entity lacks the asked-for service (`media_pause` for "durdur", `media_stop` for "stop"), the route refuses ("izin yok") instead of guessing |
 | The interim Mac sleeps and Friday is down | Accepted by the owner (ADR-017 amendment 1); `home_server_platform` warns; nodes fail closed; backups catch up on wake; stale backups still warn/fail |
 | FileVault off on the interim Mac | Owner attestation only (a container cannot see it); `home_disk_encryption` stays a warning on macOS so it is never mistaken for verified; runbook I1 |
 | Two servers after the move (Mac and PC both running) | Runbook I6 stops and wipes the Mac stack only after a passing drill on the PC; never run both |
@@ -1335,6 +1347,25 @@ VPS, DNS, bucket or hardware in tests.
   voice, chat and node; recommended: yes, through the matcher only (D7),
   so a typed "TV'yi duraklat" is as fast as the spoken one.
 
+## Owner confirmations — recorded 2026-11-27
+
+The owner answered in the cloud session on 2026-11-27 (details in the
+numbered owner steps below):
+
+- **CONFIRMED:** ADR-018 (the owner chose this class earlier), the
+  CLAUDE.md rule 4 sentence, and the ADR-017 amendment with the TPM
+  residual (owner step 2).
+- **CONFIRMED:** Phase 13b defaults — 30/min global, 10/min per entity,
+  volume maximum 0.6, `volume_up` headroom 0.1, overflow → approval card
+  (owner step 3).
+- **CONFIRMED (amends D7):** "durdur" → `media_pause`, overriding D7's
+  `media_stop` choice; English "stop" stays `media_stop`.
+- **CONFIRMED:** the Phase 13 defaults (15 min last-active, 5 aliases, 16
+  HUD nodes, backup warn 26 h / fail 72 h, restore drill warn 35 d / fail
+  90 d, `source_list` 30) (owner step 4).
+- **Still PENDING (not asked):** the Linux node typed-directory-name
+  confirmation (owner step 5).
+
 ## Owner steps (pending) — recorded 2026-11-26
 
 These cannot happen in a cloud session (they need the owner's hardware,
@@ -1343,19 +1374,22 @@ accounts or judgement):
 1. Before branch 1a: have the independent Sonnet 5 plan review of this
    brief (with ADR-018, the ADR-017 amendment, the CLAUDE.md sentence and
    the runbook changes) reach APPROVE.
-2. Confirm ADR-018 as written (Accepted 2026-11-26) and the one-sentence
-   CLAUDE.md rule 4 exception; confirm the ADR-017 amendment, including
-   the TPM residual.
-3. Confirm or change the Phase 13b defaults: 30/min global, 10/min per
-   entity, volume maximum 0.6, `volume_up` headroom 0.1, "durdur" →
-   `media_stop`, rate-limit overflow → card (Q1).
-4. **Still pending from Phase 13 (not confirmed by the owner):** the
-   proposed defaults — last-active window 15 min, ≤ 5 aliases per
-   node/room/entity, ≤ 16 nodes in the HUD panel, backup warn 26 h / fail
-   72 h, restore drill warn 35 d / fail 90 d, `source_list` ≤ 30 entries.
-5. **Still pending from Phase 13:** the Linux node's local-policy
-   confirmation (TTY + typed directory basename) as the accepted stand-in
-   for Touch ID (Phase 13 Q4).
+2. **CONFIRMED by the owner 2026-11-27.** Confirm ADR-018 as written
+   (Accepted 2026-11-26; the owner chose this class earlier) and the
+   one-sentence CLAUDE.md rule 4 exception; confirm the ADR-017
+   amendment, including the TPM residual.
+3. **CONFIRMED by the owner 2026-11-27, with one change.** The Phase 13b
+   defaults: 30/min global, 10/min per entity, volume maximum 0.6,
+   `volume_up` headroom 0.1, rate-limit overflow → approval card (Q1) —
+   all kept. **Changed:** "durdur" → `media_pause`, not `media_stop`
+   (D7 amendment; English "stop" stays `media_stop`).
+4. **CONFIRMED by the owner 2026-11-27 (from Phase 13):** the defaults —
+   last-active window 15 min, ≤ 5 aliases per node/room/entity, ≤ 16
+   nodes in the HUD panel, backup warn 26 h / fail 72 h, restore drill
+   warn 35 d / fail 90 d, `source_list` ≤ 30 entries.
+5. **Still PENDING from Phase 13 (not asked 2026-11-27):** the Linux
+   node's local-policy confirmation (TTY + typed directory basename) as
+   the accepted stand-in for Touch ID (Phase 13 Q4).
 6. **Still pending from Phase 13:** the node-pairing route through the
    home Caddy (Phase 13 closeout owner step 2) — it now also decides how
    LAN PCs pair with the interim Mac server (runbook I4).
@@ -1413,8 +1447,10 @@ row "Sonuç (istek anındaki duruma göre)" ("şu an oynatılıyor →
 duraklatılır" / "şu an duraklatılmış → oynatılır"), and the execution
 precondition refuses the send (`connector_changed`, unsent) when the live
 state now implies the other outcome — a toggle never does the opposite of
-what was approved; `connectors.home_phrases` maps `durdur`/`stop` →
-`media_stop` (was `media_pause`) and `oynat duraklat`/`play pause`/`toggle
+what was approved; `connectors.home_phrases` mapped `durdur`/`stop` →
+`media_stop` (was `media_pause`; *superseded 2026-11-27: `durdur` →
+`media_pause` again, D7 amendment, `fix/p13b-durdur-pause`; only English
+`stop` → `media_stop`*) and `oynat duraklat`/`play pause`/`toggle
 play` → `media_play_pause`; vectors, `docs/mcp/home-assistant.md`,
 `docs/mcp/allowlist.md` and the `/connectors` editor labels updated.
 Nothing is direct (no `home_direct` code exists yet). All of it is tested
@@ -1425,11 +1461,14 @@ credentials, paid calls or hardware.
    APPROVE.
 2. After the merge, on `/connectors` → Home Assistant, tick
    `media_stop` (and `media_play_pause` if wanted) for each TV: existing
-   rows do not gain the new services, so until then "TV'yi durdur" is the
-   fixed "izin yok" refusal (by design, never a pause instead).
-3. Confirm "durdur" → `media_stop` (owner step 3 above); some TVs end the
-   app session on stop — check on the real TV in Mac session M2 and, if it
-   is unwanted, keep `media_stop` unticked for that TV.
+   rows do not gain the new services, so until then English "stop" is the
+   fixed "izin yok" refusal (by design, never a pause instead). "TV'yi
+   durdur" needs only `media_pause` (D7 amendment 2026-11-27).
+3. *(Resolved 2026-11-27: the owner chose "durdur" → `media_pause`, D7
+   amendment, `fix/p13b-durdur-pause`; "TV'yi durdur" now needs only
+   `media_pause` ticked. English "stop" still needs `media_stop`; some
+   TVs end the app session on stop — if that is unwanted, keep
+   `media_stop` unticked for that TV.)*
 4. Any approval left pending under manifest v2 fails its snapshot check
    after the upgrade (`connector_changed`, nothing sent): re-ask it.
 5. Residual (documented in `docs/mcp/home-assistant.md`): the player can

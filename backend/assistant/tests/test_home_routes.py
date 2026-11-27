@@ -403,8 +403,10 @@ def test_the_home_parsers_wake_strip_tables_equal_the_wake_routes():
     assert home_phrases.TRAILING_FILLERS == wake_routes.TRAILING_FILLERS
 
 
-# --- Phase 13b D7 (branch 1a): "durdur" is media_stop, "oynat duraklat" ------
-# media_play_pause; both stay ordinary gate-class cards.
+# --- Phase 13b D7 (branch 1a, amended by the owner 2026-11-27): Turkish ------
+# "durdur" is media_pause (some TVs close the app on media_stop), English
+# "stop" is media_stop, "oynat duraklat" is media_play_pause; all stay
+# ordinary gate-class cards.
 
 APPROVALS = "/api/v1/approvals/requests"
 MEDIA = ["media_play", "media_pause", "media_play_pause", "media_stop"]
@@ -441,21 +443,43 @@ def _tap_and_approve(web_client, owner, workspace, draft, committed):
     return rows
 
 
-def test_durdur_is_a_media_stop_card_and_approve_sends_one_post(
+def test_durdur_is_a_media_pause_card_and_approve_sends_one_post(
     media_tv, web_voice, web_client, owner, workspace, ha, calls, committed
 ):
     ha.states[TV]["state"] = "playing"
     events = web_voice("Hey Friday, TV'yi durdur")
     draft = _draft(events)
     assert draft["tool_name"] == "ha_call_service"
-    assert draft["payload"] == {"arguments": _call("media_stop")}
+    assert draft["payload"] == {"arguments": _call("media_pause")}
     assert reply_text(events) == "Onay kartı hazır: Salon TV · durdur. Kararı ekranda verirsin."
     assert calls == [] and not ModelUsage.objects.exists()
     assert not ApprovalRequest.objects.exists() and ha.posts == []
 
     rows = _tap_and_approve(web_client, owner, workspace, draft, committed)
+    assert rows["Hizmet"] == "media_player.media_pause"
+    assert ha.posts == [("/api/services/media_player/media_pause", {"entity_id": TV})]
+
+
+def test_english_stop_is_a_media_stop_card_and_approve_sends_one_post(
+    media_tv, web_voice, web_client, owner, workspace, ha, calls, committed
+):
+    ha.states[TV]["state"] = "playing"
+    draft = _draft(web_voice("stop the TV"))
+    assert draft["payload"] == {"arguments": _call("media_stop")}
+    rows = _tap_and_approve(web_client, owner, workspace, draft, committed)
     assert rows["Hizmet"] == "media_player.media_stop"
     assert ha.posts == [("/api/services/media_player/media_stop", {"entity_id": TV})]
+
+
+@pytest.mark.parametrize("text", ["TV'yi durdur", "Hey Friday, televizyonu durdur"])
+def test_durdur_pauses_a_tv_that_allowlists_only_media_pause(home, web_voice, calls, ha, text):
+    """Regression (owner 2026-11-27): a TV that keeps `media_pause` but not
+    `media_stop` is paused by "durdur", never refused and never stopped."""
+    home.tv.services = [*home.tv.services, "media_pause"]
+    home.tv.save()
+    draft = _draft(web_voice(text))
+    assert draft["payload"] == {"arguments": _call("media_pause")}
+    assert calls == [] and ha.requests == []
 
 
 def test_duraklat_stays_media_pause(media_tv, web_voice):
@@ -486,7 +510,7 @@ def test_english_stop_and_play_pause_draft_the_new_services(media_tv, web_voice)
 @pytest.mark.parametrize(
     ("text", "reply"),
     [
-        ("TV'yi durdur", "Bunu yapmaya iznim yok: Salon TV için 'durdur' açık değil."),
+        ("stop the TV", "I'm not allowed to do that: 'stop' is not enabled for Salon TV."),
         (
             "TV'yi oynat duraklat",
             "Bunu yapmaya iznim yok: Salon TV için 'oynat duraklat' açık değil.",
@@ -496,8 +520,8 @@ def test_english_stop_and_play_pause_draft_the_new_services(media_tv, web_voice)
 def test_an_entity_without_the_service_is_refused_not_guessed(
     home, web_voice, calls, ha, text, reply
 ):
-    """The TV allows `media_pause` but not `media_stop`: "durdur" is the
-    fixed refusal, never a pause card instead."""
+    """The TV allows `media_pause` but not `media_stop`: English "stop" is
+    the fixed refusal, never a pause card instead."""
     home.tv.services = [*home.tv.services, "media_pause", "media_play"]
     home.tv.save()
     events = web_voice(text)

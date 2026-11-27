@@ -32,8 +32,9 @@ export const SERVICE_LABELS: Record<string, string> = {
   turn_off: "kapat",
   media_play: "oynat",
   media_pause: "duraklat",
-  // Phase 13b D4/D7: voice "durdur" means media_stop; the toggle's card shows
-  // the live state and the outcome it implies.
+  // Phase 13b D4/D7: the toggle's card shows the live state and the outcome
+  // it implies. Voice "durdur" pauses (owner 2026-11-27); English "stop" is
+  // media_stop, still labelled "durdur" here as its Turkish name.
   media_play_pause: "oynat/duraklat",
   media_stop: "durdur",
   select_source: "kaynak seç",

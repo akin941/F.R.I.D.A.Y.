@@ -63,7 +63,9 @@ VOLUME_UP = "volume_up"
 VOLUME_DOWN = "volume_down"
 PLAY = "play"
 PAUSE = "pause"
-# Phase 13b D7: "durdur" / "stop" is `media_stop` (it was `media_pause`);
+# Phase 13b D7 as amended by the owner 2026-11-27: Turkish "durdur" is
+# PAUSE (`media_pause`, same as "duraklat") because some TVs close the app on
+# `media_stop`; English "stop" stays STOP (`media_stop`, explicit).
 # "oynat duraklat" / "play pause" / "toggle play" is `media_play_pause`.
 STOP = "stop"
 PLAY_PAUSE = "play_pause"
@@ -97,7 +99,8 @@ _TR_VERBS = (
     (("oynat", "duraklat"), PLAY_PAUSE),
     (("oynat",), PLAY),
     (("duraklat",), PAUSE),
-    (("durdur",), STOP),
+    # Owner 2026-11-27: "durdur" pauses (never `media_stop`).
+    (("durdur",), PAUSE),
     (("aç",), ON),
     (("kapat",), OFF),
 )
