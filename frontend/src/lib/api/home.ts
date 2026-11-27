@@ -2,6 +2,8 @@
 
 import { apiDelete, apiGetJson, apiPatchJson, apiPostJson } from "@/lib/api-client";
 import type {
+  ApiHomeDirectCalls,
+  ApiHomeDirectSettings,
   ApiHomeEntity,
   ApiHomeEntityCandidates,
   ApiHomeEntityList,
@@ -33,6 +35,8 @@ export interface HomeEntityInput {
   aliases?: string[];
   services?: string[];
   enabled?: boolean;
+  /** Phase 13b D5: the owner's "direct" flag (eligible media players only). */
+  direct?: boolean;
 }
 
 export function createHomeEntity(
@@ -49,6 +53,33 @@ export function updateHomeEntity(id: string, input: HomeEntityInput): Promise<Ap
 
 export function deleteHomeEntity(id: string): Promise<void> {
   return apiDelete(`${HA}/entities/${encodeURIComponent(id)}`);
+}
+
+/**
+ * Phase 13b D6/D11 (ADR-018): the direct media class's owner settings and
+ * its call log. Owner, web session, personal workspace only on the backend.
+ */
+export function fetchHomeDirectSettings(workspaceId: string): Promise<ApiHomeDirectSettings> {
+  return apiGetJson(`${HA}/direct?workspace=${encodeURIComponent(workspaceId)}`);
+}
+
+export interface HomeDirectSettingsInput {
+  kill_switch?: boolean;
+  /** 0..1 (the panel edits a percentage). */
+  volume_max?: number;
+}
+
+export function updateHomeDirectSettings(
+  workspaceId: string,
+  input: HomeDirectSettingsInput,
+): Promise<ApiHomeDirectSettings> {
+  return apiPatchJson(`${HA}/direct`, { workspace: workspaceId, ...input });
+}
+
+export function fetchHomeDirectCalls(workspaceId: string, limit = 20): Promise<ApiHomeDirectCalls> {
+  return apiGetJson(
+    `${HA}/direct/calls?workspace=${encodeURIComponent(workspaceId)}&limit=${encodeURIComponent(String(limit))}`,
+  );
 }
 
 /**

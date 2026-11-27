@@ -81,7 +81,16 @@ function stub(initial: ApiHomeEntity[], candidates: ApiHomeEntityCandidate[] = [
       state.entities = [...state.entities, created];
       return jsonResponse(created, 201);
     }
-    if (method === "PATCH") return jsonResponse({});
+    if (method === "PATCH") {
+      // Phase 13b: a "direct" change shows on the next list read.
+      const body = JSON.parse(init!.body as string);
+      if ("direct" in body) {
+        state.entities = state.entities.map((row) =>
+          url.endsWith(`/${row.id}`) ? { ...row, direct: body.direct, updated_at: "2026-11-20T11:00:00Z" } : row,
+        );
+      }
+      return jsonResponse({});
+    }
     if (method === "DELETE") return jsonResponse(null, 204);
     throw new Error(`Unexpected fetch ${method} ${url}`);
   });
@@ -198,5 +207,77 @@ describe("HomeEntitiesEditor (Phase 13 D11)", () => {
     await screen.findByTestId("ha-entities-empty");
     await user.click(screen.getByRole("button", { name: "Home Assistant'tan varlıkları oku" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("Home Assistant okunamadı");
+  });
+});
+
+// Phase 13b D5/D11 (ADR-018): the per-entity "Doğrudan (onaysız)" switch.
+const ELIGIBLE = {
+  services: ["turn_on", "media_pause", "volume_set"],
+  direct_services: ["media_pause", "volume_set"],
+};
+
+describe("HomeEntitiesEditor direct switch (Phase 13b D11)", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("is enabled only on an eligible media player and names the services it covers", async () => {
+    stub([
+      entity({ ...ELIGIBLE, direct: false }),
+      entity({ id: "e2", entity_id: "light.salon", domain: "light", label: "Lamba", services: ["turn_on"], direct_services: [] }),
+      entity({ id: "e3", entity_id: "media_player.yatak", label: "Yatak TV", services: ["turn_on", "select_source"], direct_services: [] }),
+    ]);
+    render(<HomeEntitiesEditor workspaceId={WS} />);
+    const rows = await screen.findAllByTestId("ha-entity-row");
+    const [tv, lamp, bedroom] = rows.map((row) => within(row).getByRole("switch", { name: /Doğrudan/ }));
+    expect(tv).toBeEnabled();
+    expect(tv).not.toBeChecked();
+    expect(within(rows[0]!).getByTestId("ha-direct-help")).toHaveTextContent("duraklat, ses düzeyi");
+    expect(lamp).toBeDisabled();
+    expect(within(rows[1]!).getByTestId("ha-direct-help")).toHaveTextContent("Yalnızca medya oynatıcılar");
+    expect(bedroom).toBeDisabled();
+    expect(within(rows[2]!).getByTestId("ha-direct-help")).toHaveTextContent("izinli hizmet yok");
+  });
+
+  it("is disabled for a backend without the direct fields", async () => {
+    stub([entity({ services: ["media_pause"] })]);
+    render(<HomeEntitiesEditor workspaceId={WS} />);
+    const row = await screen.findByTestId("ha-entity-row");
+    expect(within(row).getByRole("switch", { name: /Doğrudan/ })).toBeDisabled();
+  });
+
+  it("turns direct on only after the owner confirms, with one PATCH", async () => {
+    const fetchMock = stub([entity({ ...ELIGIBLE, direct: false })]);
+    const changed = vi.fn();
+    const user = userEvent.setup();
+    render(<HomeEntitiesEditor workspaceId={WS} onDirectChanged={changed} />);
+    const row = await screen.findByTestId("ha-entity-row");
+    await user.click(within(row).getByRole("switch", { name: /Doğrudan/ }));
+    // The click alone writes nothing: the confirmation dialog is open.
+    expect(writes(fetchMock)).toEqual([]);
+    const dialog = await screen.findByRole("alertdialog");
+    expect(dialog).toHaveTextContent("media_player.salon_tv");
+    await user.click(within(dialog).getByRole("button", { name: "Vazgeç" }));
+    expect(writes(fetchMock)).toEqual([]);
+    await user.click(within(row).getByRole("switch", { name: /Doğrudan/ }));
+    await user.click(within(await screen.findByRole("alertdialog")).getByRole("button", { name: "Doğrudan yap" }));
+    await waitFor(() => expect(writes(fetchMock)).toHaveLength(1));
+    expect(writes(fetchMock)[0]).toEqual(["PATCH", "/api/connectors/home-assistant/entities/e1", { direct: true }]);
+    await waitFor(() => expect(screen.getByRole("switch", { name: /Doğrudan/ })).toBeChecked());
+    expect(changed).toHaveBeenCalledTimes(1);
+  });
+
+  it("turns direct off at once", async () => {
+    const fetchMock = stub([entity({ ...ELIGIBLE, direct: true })]);
+    const changed = vi.fn();
+    const user = userEvent.setup();
+    render(<HomeEntitiesEditor workspaceId={WS} onDirectChanged={changed} />);
+    const row = await screen.findByTestId("ha-entity-row");
+    const toggle = within(row).getByRole("switch", { name: /Doğrudan/ });
+    expect(toggle).toBeChecked();
+    expect(row).toHaveTextContent("Kartsız");
+    await user.click(toggle);
+    await waitFor(() => expect(writes(fetchMock)).toHaveLength(1));
+    expect(writes(fetchMock)[0]).toEqual(["PATCH", "/api/connectors/home-assistant/entities/e1", { direct: false }]);
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    await waitFor(() => expect(changed).toHaveBeenCalledTimes(1));
   });
 });

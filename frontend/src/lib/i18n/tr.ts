@@ -570,6 +570,17 @@ export const tr = {
       nodeMicSession: "oturum açık",
       nodeMicCounts: (accepts: number, discards: number, storms: number) =>
         `bugün ${accepts} uyanma · ${discards} elendi` + (storms > 0 ? ` · ${storms} fırtına` : ""),
+      // Phase 13b D11 (ADR-018): the direct media line (read-only).
+      homeDirect: "Doğrudan medya",
+      homeDirectStates: {
+        on: "açık",
+        off_owner: "kapalı",
+        off_env: "kapalı (ortam ayarı)",
+        not_configured: "ayarlanmadı",
+      } as Record<string, string>,
+      homeDirectCounts: (flagged: number, calls: number) =>
+        `${flagged} cihaz · son 1 saatte ${calls} çağrı`,
+      homeDirectManage: "Ayarlar",
     },
     // Phase 13 D4: the per-node presence panel.
     nodes: {

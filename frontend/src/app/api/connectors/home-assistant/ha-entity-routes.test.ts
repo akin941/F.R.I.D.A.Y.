@@ -99,3 +99,55 @@ describe("Home Assistant entity BFF routes (Phase 13 D11)", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 });
+
+describe("Home Assistant direct media BFF routes (Phase 13b D6/D11)", () => {
+  beforeEach(() => {
+    vi.resetAllMocks();
+    vi.unstubAllGlobals();
+  });
+
+  it("settings and calls forward to the backend", async () => {
+    cookiesMock.mockResolvedValue(cookieStore("token"));
+    const fetchMock = stubFetch(200, {});
+    const direct = await import("@/app/api/connectors/home-assistant/direct/route");
+    const calls = await import("@/app/api/connectors/home-assistant/direct/calls/route");
+    expect((await direct.GET(req(`/api/connectors/home-assistant/direct?workspace=${WS}`))).status).toBe(200);
+    await direct.PATCH(
+      req(`/api/connectors/home-assistant/direct`, "PATCH", { workspace: WS, kill_switch: true }),
+    );
+    await calls.GET(req(`/api/connectors/home-assistant/direct/calls?workspace=${WS}&limit=20`));
+    expect(fetchMock.mock.calls.map(([url, init]) => [url, init?.method ?? "GET"])).toEqual([
+      [`${BACKEND}/connectors/home-assistant/direct?workspace=${WS}`, "GET"],
+      [`${BACKEND}/connectors/home-assistant/direct`, "PATCH"],
+      [`${BACKEND}/connectors/home-assistant/direct/calls?workspace=${WS}&limit=20`, "GET"],
+    ]);
+  });
+
+  it("refuses a bad workspace, a bad limit and a foreign origin before the backend", async () => {
+    cookiesMock.mockResolvedValue(cookieStore("token"));
+    const fetchMock = stubFetch();
+    const direct = await import("@/app/api/connectors/home-assistant/direct/route");
+    const calls = await import("@/app/api/connectors/home-assistant/direct/calls/route");
+    expect((await direct.GET(req(`/api/connectors/home-assistant/direct`))).status).toBe(400);
+    expect(
+      (await calls.GET(req(`/api/connectors/home-assistant/direct/calls?workspace=../x`))).status,
+    ).toBe(400);
+    for (const limit of ["0", "abc", "101", "1000", "-1"]) {
+      const url = `/api/connectors/home-assistant/direct/calls?workspace=${WS}&limit=${limit}`;
+      expect((await calls.GET(req(url))).status).toBe(400);
+    }
+    expect(
+      (await direct.PATCH(req(`/api/x`, "PATCH", { kill_switch: true }, { origin: "https://evil.example" })))
+        .status,
+    ).toBe(403);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("refuses without a session before the backend", async () => {
+    cookiesMock.mockResolvedValue(cookieStore());
+    const fetchMock = stubFetch();
+    const direct = await import("@/app/api/connectors/home-assistant/direct/route");
+    expect((await direct.GET(req(`/api/connectors/home-assistant/direct?workspace=${WS}`))).status).toBe(401);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+});

@@ -132,6 +132,16 @@ export interface HudNodeLine {
   voice?: HudNodeVoice | null;
 }
 
+// Phase 13b D11 (ADR-018): the direct media class's state and counts (no
+// entity, service or call content). The HUD shows it; it never toggles it.
+export type HudHomeDirectState = "on" | "off_owner" | "off_env" | "not_configured";
+
+export interface HudHomeDirect {
+  state: HudHomeDirectState;
+  flagged: number;
+  calls_last_hour: number;
+}
+
 export interface HudHealth {
   providers: HudProvider[];
   providers_down: number;
@@ -140,6 +150,8 @@ export interface HudHealth {
   preflight: HudPreflight | null;
   /** Optional: absent from a backend predating Phase 9 branch 7. */
   node?: HudNodeLine | null;
+  /** Optional: absent from a backend predating Phase 13b branch 1d. */
+  home_direct?: HudHomeDirect | null;
 }
 
 // Phase 10 D12: the actor's last five node action executions (no output).

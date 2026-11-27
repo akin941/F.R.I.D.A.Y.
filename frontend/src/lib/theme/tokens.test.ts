@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { SESSION_HUD_TOKENS } from "@/components/hud/HudLearningPanels";
-import { NODE_HUD_TOKENS } from "@/components/hud/HudPanels";
+import { HOME_DIRECT_HUD_TOKENS, NODE_HUD_TOKENS } from "@/components/hud/HudPanels";
 import { HUD_STATES } from "@/lib/hud/states";
 import { STATUS_TONES, TONE_PILL_CLASSES, type StatusTone } from "@/lib/theme/status";
 
@@ -159,6 +159,14 @@ describe("Phase 9 branch 7 surfaces", () => {
   it("colour the HUD node line only with checked HUD text tokens", () => {
     const checked = new Set(PAIRS.filter(([, bg]) => bg === "hud-surface").map(([fg]) => fg));
     for (const className of Object.values(NODE_HUD_TOKENS)) {
+      expect(className.startsWith("text-")).toBe(true);
+      expect(checked.has(className.slice("text-".length))).toBe(true);
+    }
+  });
+
+  it("colour the Phase 13b direct media line only with checked HUD text tokens", () => {
+    const checked = new Set(PAIRS.filter(([, bg]) => bg === "hud-surface").map(([fg]) => fg));
+    for (const className of Object.values(HOME_DIRECT_HUD_TOKENS)) {
       expect(className.startsWith("text-")).toBe(true);
       expect(checked.has(className.slice("text-".length))).toBe(true);
     }
