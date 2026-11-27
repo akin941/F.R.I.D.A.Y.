@@ -153,6 +153,11 @@ ignore_imports = [
     # The Phase 13 closeout e2e serves Django + the node gateway's composition
     # root (`config.asgi_nodes`) on one TLS port, as the home box's Caddy does.
     "ops.tests.test_home_hub_e2e -> config.asgi_nodes",
+    # The loopback Caddyfile test checks every forwarded path is a real route,
+    # including the node gateway's ASGI mount path.
+    "ops.tests.test_local_tls_caddyfile -> config.asgi_nodes",
+    # Reads the shipped default VOICE_TTS_ROUTES (test settings override it).
+    "ai_core.tests.test_speech_gateway -> config.settings.base",
 ]
 
 # ai_core is the single door for LLM traffic (ADR-003): it must never depend on
