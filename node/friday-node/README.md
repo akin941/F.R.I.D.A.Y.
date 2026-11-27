@@ -372,20 +372,37 @@ which would put a second app instance and its keychain access behind a
 user-writable script chain); an embedded helper (same attribution); the CLI
 reading the keychain (no entitlement, no profile).
 
-**The app's gates.** Everything on the socket is refused until the owner
+**The app's gates.** `begin` and `loopback` are refused until the owner
 turns on "Ses" → "Gece öz-testi" (stored in the `voice-settings` Keychain
 item, Touch ID to turn on), and while the kill switch is engaged or the node
-is unpaired. `begin` stops the live voice child (one voice at a time: the
-selftest has the mic, and its token supersedes the child's), mints, and
-returns the token to the CLI only; the hold ends with `--end` or after 15
-minutes, and the live voice then mints again. `loopback` runs only inside a
-hold and refuses while the live voice still holds the mic. The app needs to
-be running at 03:17 (a menu-bar app at login); if it is not, the run
-records `error`.
+is unpaired. `end` is never gated: it works with the setting off, so turning
+the setting off never strands a hold. `begin` stops the live voice child (one
+voice at a time: the selftest has the mic, and its token supersedes the
+child's), mints, and returns the token to the CLI only; the hold ends with
+`--end` or after 15 minutes (a lease that runs out during a loopback ends
+the hold when that loopback finishes, never under it), and the live voice
+then mints again. `loopback` runs only inside a hold and refuses while the
+live voice still holds the mic. The app needs to be running at 03:17 (a
+menu-bar app at login); if it is not, the run records `error`.
+
+**What the setting trusts.** The socket checks the peer's user id, not its
+code identity. Once "Gece öz-testi" is on, **any process running as the
+owner's user** can mint a `node_voice` token (15 minutes, the node voice
+channel's reach: chat turns, every action still behind the approval gate)
+and pause live voice for up to 15 minutes, as often as it likes. That is
+the same user that can already read the hook socket, run the CLI or edit
+the nightly script; the setting is the owner's consent to it, and turning
+it off closes the socket to everything but `end`. Requests are served one
+at a time with a 2 s read timeout, so a client that stalls holds the others
+back for at most 2 s.
 
 **The job.** `scripts/selftest-nightly.sh` skips on battery (`pmset -g
 batt`), mints into `~/Library/Application Support/Friday/voice/selftest.token`
-(deleted on every exit by its trap), passes `--server` / `--ca-sha256` from
+(deleted on every exit by its trap; `friday-voice` runs in the background
+and is waited on, so a launchd SIGTERM reaches the trap at once, stops the
+child and deletes the token before any SIGKILL; a stale file or hold from a
+killed run is cleaned up first, even on battery; the agent's `ExitTimeOut`
+is 45 s, longer than the app's 30 s mint timeout), passes `--server` / `--ca-sha256` from
 the mint and `--ca-file` from `friday-voice ca set`'s `tls.json`, and runs
 the installed `friday-voice selftest --nightly` with `--loopback-cmd
 "<cli> voice-loopback"` and the result file

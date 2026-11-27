@@ -15,11 +15,14 @@ final class LoopFake: VoiceAudioIO, @unchecked Sendable {
     var frames: [Data] = []
     var aec = "on"
     var failStart = false
+    /// Seconds `startCapture` takes (a loopback that is still running).
+    var startDelay = 0.0
     private(set) var calls: [String] = []
 
     func startCapture() throws {
         calls.append("startCapture")
         if failStart { throw VoiceAudioError.noInput }
+        if startDelay > 0 { usleep(UInt32(startDelay * 1_000_000)) }
         for frame in frames { onCapture?(frame, aec) }
     }
     func stopCapture() { calls.append("stopCapture") }
@@ -352,6 +355,17 @@ final class VoiceSelftestHostTests: XCTestCase {
         XCTAssertEqual(code { try host.selftestLoopback(WAVBytes.make(Data())) }, .noSelftestHold)
     }
 
+    /// `end` is never gated: turning the setting off never strands a hold.
+    func testEndWorksWithTheSettingOff() throws {
+        let hold = FakeHold()
+        let host = makeHost(ScriptedMint([.success(ScriptedMint.token())]), hold: hold)
+        _ = try host.selftestBegin()
+        enabled = false
+        host.selftestEnd()
+        XCTAssertEqual(hold.calls, [true, false])
+        XCTAssertFalse(host.holding)
+    }
+
     func testAFailedMintGivesTheVoiceBack() {
         let hold = FakeHold()
         let refused = makeHost(ScriptedMint([.failure(.refused)]), hold: hold)
@@ -375,6 +389,29 @@ final class VoiceSelftestHostTests: XCTestCase {
         while host.holding, Date() < deadline { usleep(20_000) }
         XCTAssertFalse(host.holding)
         XCTAssertEqual(hold.calls, [true, false])
+    }
+
+    /// The lease never ends the hold under a running loopback: the live
+    /// voice would take the mic back mid-capture. The expiry waits for the
+    /// loopback, then ends the hold.
+    func testALeaseThatRunsOutDuringALoopbackWaitsForIt() throws {
+        let hold = FakeHold()
+        let host = makeHost(ScriptedMint([.success(ScriptedMint.token())]), hold: hold, lease: 0.2)
+        _ = try host.selftestBegin()
+        audio.startDelay = 0.8
+        audio.frames = Array(repeating: Data(count: 640), count: 60)
+        let during = DispatchSemaphore(value: 0)
+        var seenDuring: [Bool] = []
+        DispatchQueue.global().asyncAfter(deadline: .now() + 0.5) {
+            seenDuring = hold.calls
+            during.signal()
+        }
+        let capture = try LoopbackWAV.decode(host.selftestLoopback(WAVBytes.make(Data(count: 640))))
+        XCTAssertEqual(capture.count, 640 + VoiceLoopback.bytesPerSecond, "the loopback finished")
+        during.wait()
+        XCTAssertEqual(seenDuring, [true], "the expired lease did not release the hold mid-loopback")
+        XCTAssertEqual(hold.calls, [true, false], "it ended the hold once the loopback was done")
+        XCTAssertFalse(host.holding)
     }
 
     func testTheLoopbackRefusesWhileTheLiveVoiceHoldsTheMic() throws {
@@ -578,6 +615,13 @@ final class SelftestNightlyScriptTests: XCTestCase {
               [ "$prev" = "--token-file" ] && echo "token-mode:$(stat -f %Lp "$a")" >> "$STUB_LOG"
               prev=$a
             done
+            if [ -n "$STUB_SLEEP" ]; then
+              # A run that takes 30 s and stops on SIGTERM (as friday-voice does).
+              trap 'echo voice-term >> "$STUB_LOG"; kill $s 2>/dev/null; exit 143' TERM
+              echo "voice-pid:$$" >> "$STUB_LOG"
+              sleep 30 & s=$!
+              wait $s
+            fi
             exit "${STUB_EXIT:-0}"
             """#)
     }
@@ -611,9 +655,53 @@ final class SelftestNightlyScriptTests: XCTestCase {
     }
 
     func testOnBatteryNothingRuns() throws {
+        // A token file a killed run left behind.
+        try FileManager.default.createDirectory(
+            atPath: (tokenFile as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
+        FileManager.default.createFile(atPath: tokenFile, contents: Data("jpat_old\n".utf8))
         let (status, calls) = try run(power: "Battery Power")
         XCTAssertEqual(status, 0)
-        XCTAssertEqual(calls, [], "no token, no audio on battery")
+        XCTAssertEqual(
+            calls, ["node voice-token --end", "node voice-token --end"],
+            "no token, no audio on battery: only the cleanup (before the check and on exit)")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: tokenFile), "a stale token goes even on battery")
+    }
+
+    /// launchd's SIGTERM mid-run: the trap fires at once (friday-voice runs
+    /// in the background), stops the child and deletes the token, so a
+    /// SIGKILL that follows finds nothing on disk.
+    func testATermMidRunDeletesTheTokenAndStopsTheChild() throws {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/bash")
+        process.arguments = [Repo.url("node/friday-node/scripts/selftest-nightly.sh").path]
+        process.environment = [
+            "HOME": home.path, "PATH": "/usr/bin:/bin", "STUB_POWER": "AC Power", "STUB_LOG": log.path,
+            "STUB_MINT": "ok", "STUB_SLEEP": "1", "FRIDAY_NODE_CLI": bin.appendingPathComponent("friday-node").path,
+            "FRIDAY_VOICE_BIN": bin.appendingPathComponent("friday-voice").path,
+            "FRIDAY_SELFTEST_PMSET": bin.appendingPathComponent("pmset").path,
+        ]
+        process.standardError = FileHandle.nullDevice
+        process.standardOutput = FileHandle.nullDevice
+        try process.run()
+        func lines() -> [String] {
+            ((try? String(contentsOf: log, encoding: .utf8)) ?? "").split(separator: "\n").map(String.init)
+        }
+        let deadline = Date().addingTimeInterval(10)
+        while !lines().contains(where: { $0.hasPrefix("voice-pid:") }), Date() < deadline { usleep(20_000) }
+        let pidLine = try XCTUnwrap(lines().first { $0.hasPrefix("voice-pid:") }, "friday-voice started")
+        let voicePID = try XCTUnwrap(Int32(pidLine.dropFirst("voice-pid:".count)))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: tokenFile), "the token is on disk during the run")
+        let sent = Date()
+        kill(process.processIdentifier, SIGTERM)  // to the script only, as launchd sends it
+        process.waitUntilExit()
+        XCTAssertLessThan(Date().timeIntervalSince(sent), 5, "the trap did not wait for the 30 s child")
+        XCTAssertEqual(process.terminationStatus, 143)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: tokenFile), "the token file is gone")
+        XCTAssertEqual(lines().filter { $0 == "node voice-token --end" }.count, 2, "the hold was ended")
+        let gone = Date().addingTimeInterval(3)
+        while kill(voicePID, 0) == 0, Date() < gone { usleep(20_000) }
+        XCTAssertNotEqual(kill(voicePID, 0), 0, "the child was stopped")
+        XCTAssertTrue(lines().contains("voice-term"), "by the script's trap")
     }
 
     func testOnPowerTheTokenIsHandedOverAndDeletedAfterTheRun() throws {

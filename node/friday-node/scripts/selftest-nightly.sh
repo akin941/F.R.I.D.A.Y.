@@ -35,6 +35,33 @@ TOKEN_FILE="$VOICE_HOME/selftest.token"
 
 log() { printf '%s friday-voice-selftest: %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*" >&2; }
 
+# The token file goes on every exit path. bash runs a signal trap only after
+# the foreground command returns, so `friday-voice` runs in the background
+# and the script waits on it: a launchd SIGTERM reaches the trap at once,
+# which stops the child and exits (the EXIT trap then deletes the token), so
+# a SIGKILL after launchd's grace finds nothing left behind.
+child=""
+cleanup() {
+  "$NODE_CLI" voice-token --end "$TOKEN_FILE" >/dev/null 2>&1 || true
+  rm -f -- "$TOKEN_FILE"
+}
+on_signal() {
+  if [[ -n $child ]]; then kill -TERM "$child" 2>/dev/null || true; fi
+  exit 143
+}
+trap cleanup EXIT
+trap on_signal INT TERM HUP
+# `friday-voice` in the background, waited on (see above); its exit status.
+run_voice() {
+  "$FRIDAY_VOICE" "$@" &
+  child=$!
+  local code=0
+  wait "$child" || code=$?
+  child=""
+  return "$code"
+}
+cleanup  # a file or a hold left by an earlier run that died, even on battery
+
 power=$("$PMSET" -g batt 2>/dev/null || true)
 case $power in
   *"'AC Power'"*) ;;
@@ -46,14 +73,6 @@ for tool in "$NODE_CLI" "$FRIDAY_VOICE"; do
 done
 mkdir -p "$VOICE_HOME"
 chmod 700 "$VOICE_HOME"
-
-cleanup() {
-  "$NODE_CLI" voice-token --end "$TOKEN_FILE" >/dev/null 2>&1 || true
-  rm -f -- "$TOKEN_FILE"
-}
-trap cleanup EXIT
-trap 'exit 130' INT TERM HUP
-cleanup  # a file or a hold left by an earlier run that died
 
 loopback="$(printf '%q' "$NODE_CLI") voice-loopback"
 args=(selftest --nightly --model-dir "$MODEL_DIR" --loopback-cmd "$loopback" --result-file "$RESULT_FILE")
@@ -69,7 +88,7 @@ if ! info=$("$NODE_CLI" voice-token --out "$TOKEN_FILE"); then
   # No token: the selftest refuses (exit 2) and records an error line, so
   # a night that could not run never leaves an earlier green in place.
   status=0
-  "$FRIDAY_VOICE" "${args[@]}" >/dev/null || status=$?
+  run_voice "${args[@]}" >/dev/null || status=$?
   exit "$status"
 fi
 server="" ca=""
@@ -83,6 +102,6 @@ args+=(--server "$server" --token-file "$TOKEN_FILE")
 [[ -n $ca ]] && args+=(--ca-sha256 "$ca")
 
 status=0
-"$FRIDAY_VOICE" "${args[@]}" || status=$?
+run_voice "${args[@]}" || status=$?
 log "done: exit $status"
 exit "$status"

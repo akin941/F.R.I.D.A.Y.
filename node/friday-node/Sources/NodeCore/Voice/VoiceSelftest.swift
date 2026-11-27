@@ -67,6 +67,9 @@ public final class VoiceSelftestHost: VoiceSelftestHandler, @unchecked Sendable 
     private var leaseID = 0
     private var leaseActive = false
     private var loopbackRunning = false
+    /// The lease ran out while a loopback held the mic: the hold ends when
+    /// that loopback does, never under it.
+    private var expiryDeferred = false
 
     public init(
         enabled: @escaping () -> Bool, hold: VoiceSelftestHold, credential: @escaping () -> NodeCredential?,
@@ -108,6 +111,7 @@ public final class VoiceSelftestHost: VoiceSelftestHandler, @unchecked Sendable 
             throw VoiceSelftestCode.busy
         }
         leaseActive = true
+        expiryDeferred = false
         leaseID += 1
         let id = leaseID
         lock.unlock()
@@ -131,9 +135,17 @@ public final class VoiceSelftestHost: VoiceSelftestHandler, @unchecked Sendable 
 
     private func expire(_ id: Int) {
         lock.lock()
-        let current = leaseActive && leaseID == id
+        guard leaseActive, leaseID == id else {
+            lock.unlock()
+            return
+        }
+        if loopbackRunning {
+            expiryDeferred = true  // ended by the loopback's own exit
+            lock.unlock()
+            return
+        }
         lock.unlock()
-        if current { selftestEnd() }
+        selftestEnd()
     }
 
     public func selftestEnd() {
@@ -160,7 +172,10 @@ public final class VoiceSelftestHost: VoiceSelftestHandler, @unchecked Sendable 
         defer {
             lock.lock()
             loopbackRunning = false
+            let expired = expiryDeferred
+            expiryDeferred = false
             lock.unlock()
+            if expired { selftestEnd() }
         }
         guard !hold.micInUse else { throw VoiceSelftestCode.micBusy }
         return try VoiceLoopback.run(
@@ -204,7 +219,11 @@ final class ResultBox<T>: @unchecked Sendable {
 
 public final class VoiceSelftestSocket: @unchecked Sendable {
     public static let headerLimit = 4096
-    public static let readSeconds = 10
+    /// Connections are served one at a time (the loopback holds the one
+    /// microphone anyway), so a client that stalls holds the others back for
+    /// at most this long; a real request (a ≤ 2 MB clip over a local socket)
+    /// arrives in milliseconds.
+    public static let readSeconds = 2
 
     /// ~/Library/Application Support/Friday/voice-selftest.sock.
     public static var defaultPath: String {
