@@ -66,6 +66,26 @@ final class ReleaseHygieneTests: XCTestCase {
     }
 }
 
+/// The signing script's entitlement allowlist and the entitlements file
+/// cannot drift apart (B6 review, blocking finding 1).
+final class EntitlementAllowlistTests: XCTestCase {
+    static let xcodeAdded: Set<String> = ["com.apple.application-identifier", "com.apple.developer.team-identifier"]
+
+    func testTheSigningAllowlistIsTheEntitlementsFilePlusWhatXcodeAdds() throws {
+        let plist = try PropertyListSerialization.propertyList(
+            from: try Repo.data("node/friday-node/App/FridayNode.entitlements"), format: nil)
+        let fileKeys = Set(try XCTUnwrap(plist as? [String: Any]).keys)
+        let script = String(decoding: try Repo.data("node/friday-node/scripts/build-sign-local.sh"), as: UTF8.self)
+        let line = try XCTUnwrap(script.split(separator: "\n").first { $0.hasPrefix("EXPECTED=$'") })
+        let body = line.dropFirst("EXPECTED=$'".count).dropLast()
+        let expected = body.components(separatedBy: "\\n")
+        XCTAssertEqual(expected, expected.sorted(), "the script compares a sorted list")
+        XCTAssertEqual(Set(expected), fileKeys.union(Self.xcodeAdded))
+        XCTAssertTrue(fileKeys.contains("com.apple.security.automation.apple-events"))
+        XCTAssertFalse(fileKeys.contains("com.apple.security.get-task-allow"))
+    }
+}
+
 /// Every TCC answer "no" (the Release hygiene test never asks the real TCC).
 final class DeniedProbe: PermissionProbe {
     var accessibilityTrusted: Bool { false }
