@@ -153,6 +153,7 @@ class Command(BaseCommand):
         if not clips:
             raise CommandError("no recorded clip to replay (run --fill-hashes after recording)")
         owner, workspace = runner.resolve_owner(options["owner"])
+        runner.require_eval_budget()
         baseline_path = expand(options["baseline"] or settings.VOICE_EVAL_BASELINE)
         baseline = replay.read_baseline(baseline_path)
         run_id = runner.new_run_id()
@@ -272,6 +273,7 @@ class Command(BaseCommand):
     def _tts_sheet(self, options):
         _path, entries = self._manifest(options)
         owner, workspace = runner.resolve_owner(options["owner"])
+        runner.require_eval_budget()
         run_id = runner.new_run_id()
         sheet, providers = runner.write_tts_sheet(
             entries=entries,

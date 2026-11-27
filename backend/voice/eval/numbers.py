@@ -6,8 +6,9 @@ either spelling scores the same. Deliberately small; it covers exactly:
 
 - integers up to 999 999 999 999 (`250` -> `iki yüz elli`; `1000` ->
   `bin`, never `bir bin`; `100` -> `yüz`), with Turkish thousands dots
-  (`1.000.000` -> `bir milyon`); a digit run with a leading zero or longer
-  than 12 digits is read digit by digit (`05` -> `sıfır beş`);
+  (`1.000.000` -> `bir milyon`, `1.000,50` -> `bin virgül elli`); a
+  digit run with a leading zero or longer than 12 digits is read digit by
+  digit (`05` -> `sıfır beş`);
 - a suffix written straight after the digits, a time, a percentage or a
   lira amount stays glued (`10da` -> `onda`, `10:30da` -> `on buçukda`;
   the apostrophe of `10'da` is dropped before this step). The suffix is
@@ -35,7 +36,8 @@ MAX_DIGITS = 12
 
 _NUM = r"\d+(?:,\d+)?"
 _TIME = re.compile(r"(?<![\d,.])(\d{1,2})[:.](\d{2})(?![\d,]|\.\d)")
-_THOUSANDS = re.compile(r"(?<![\d.,])\d{1,3}(?:\.\d{3})+(?![\d,]|\.\d)")
+# A decimal comma may follow the last group (`1.000,50` -> `1000,50`).
+_THOUSANDS = re.compile(r"(?<![\d.,])\d{1,3}(?:\.\d{3})+(?!\d|\.\d)")
 _PERCENT_BEFORE = re.compile(rf"%\s*({_NUM})")
 _PERCENT_AFTER = re.compile(rf"({_NUM})\s*%")
 _LIRA_BEFORE = re.compile(rf"₺\s*({_NUM})")

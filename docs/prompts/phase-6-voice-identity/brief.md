@@ -1194,6 +1194,14 @@ earlier branch of 3a existed anywhere). Server side only.
   `up-local-tls` compose files, the host-run recipe (pinned host rows or
   an `/etc/hosts` entry) and the failed-clip rule; the manifest notes how
   to write numbers and hyphens.
+- **Follow-ups (2026-11-27, `fix/p6-voice-eval-followups`, the review's
+  non-blocking items).** `1.000,50` normalises to `bin virgül elli`
+  (a decimal comma may follow a thousands group); `voice_eval --set` /
+  `--tts-sheet` refuse to run unless an active budget covers both eval
+  purposes, and preflight gains `voice_eval_budget` (pass / warn); the
+  repo-path guard compares `(st_dev, st_ino)` of the path's existing
+  ancestors with the repo root(s), so a case-changed path on a
+  case-insensitive filesystem cannot bypass it.
 - **Owner steps (C2 A4).** Write and record the set (runbook §8.1), fill
   the hashes and commit the manifest; run the set once (§8.2) with
   `--write-baseline`; run the TTS listening test (§8.3) and choose Piper or
