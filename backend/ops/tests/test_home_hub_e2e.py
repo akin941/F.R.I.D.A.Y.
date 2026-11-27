@@ -821,6 +821,7 @@ PHASE13_ROWS = [
     "home_backup_fresh",
     "home_restore_drill_age",
     "home_disk_encryption",
+    "home_server_platform",  # Phase 13b D1 (linux here: pass)
     "nodes_labels",
     "ha_entities",
     "linux_node_vendor",
@@ -848,6 +849,9 @@ def test_backup_drill_round_trip_and_every_phase_13_row(tmp_path, settings, monk
     settings.HOME_BACKUP_STATUS_PATH = str(home["dir"] / "status" / "status.json")
     settings.HOME_RESTORE_DRILL_STATUS_PATH = str(home["dir"] / "status" / "drill.json")
     settings.HOME_FDE_CONFIRMED_ON = "2026-11-20"
+    settings.HOME_SERVER_PLATFORM = "linux"
+    # Phase 13b D2: the backup recorded the (local, throwaway) repository.
+    settings.HOME_BACKUP_OFFSITE_REPOSITORY = status["repository"]
     settings.ALLOWED_HOSTS = ["friday-home.local", "192.168.1.20"]
     settings.PREFLIGHT_NODE_TLS_URL = ""
     monkeypatch.setattr(preflight, "resolve_host", lambda host: [])  # no DNS in tests
@@ -862,6 +866,7 @@ def test_backup_drill_round_trip_and_every_phase_13_row(tmp_path, settings, monk
     assert rows["home_backup_fresh"].status == preflight.PASS, rows["home_backup_fresh"]
     assert rows["home_restore_drill_age"].status == preflight.PASS
     assert rows["home_disk_encryption"].status == preflight.PASS
+    assert rows["home_server_platform"].status == preflight.PASS
     # No node paired and no entity allowlisted here; the LAN URL and the TLS
     # pin are owner settings: warnings (owner steps), never failures.
     for name in ("home_lan_only", "home_tls_pin", "nodes_labels", "ha_entities"):

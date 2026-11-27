@@ -32,9 +32,56 @@
 #   FRIDAY_DRILL_IMAGE         pgvector/pgvector:pg16
 #   FRIDAY_DRILL_NETWORK       friday_default
 #   FRIDAY_DRILL_UV            uv
+#   FRIDAY_PATH                unset (replaces PATH when set, as in
+#                              friday-backup.sh)
+#
+# Portable (Phase 13b D1): Linux and macOS -- bash >= 4.4 (Homebrew's on
+# the Mac), `sha256sum` or `shasum -a 256`, no GNU-only `realpath -m`.
 set -euo pipefail
+if [[ -n ${FRIDAY_PATH:-} ]]; then
+	PATH=$FRIDAY_PATH
+	export PATH
+fi
+_major=${BASH_VERSION%%.*}
+_minor=${BASH_VERSION#*.}
+_minor=${_minor%%[!0-9]*}
+if ((_major < 4 || (_major == 4 && ${_minor:-0} < 4))); then
+	echo "friday-restore-drill: needs bash >= 4.4, this is bash $BASH_VERSION" \
+		"(on macOS: brew install bash; run it with /opt/homebrew/bin/bash)" >&2
+	exit 2
+fi
 shopt -s inherit_errexit
 umask 077
+
+# An absolute path without resolving symlinks or requiring the file (the
+# portable stand-in for `realpath -m`); unchanged when its directory is
+# missing (the later readability check then fails the drill).
+abspath() {
+	local dir base
+	case $1 in
+	/*) printf '%s' "$1" ;;
+	*)
+		dir=$(dirname -- "$1")
+		base=$(basename -- "$1")
+		if dir=$(cd -- "$dir" 2>/dev/null && pwd); then
+			printf '%s/%s' "$dir" "$base"
+		else
+			printf '%s' "$1"
+		fi
+		;;
+	esac
+}
+
+sha256_of() {
+	if command -v sha256sum >/dev/null; then
+		sha256sum "$1" | cut -d' ' -f1
+	elif command -v shasum >/dev/null; then
+		shasum -a 256 "$1" | cut -d' ' -f1
+	else
+		echo "friday-restore-drill: neither sha256sum nor shasum is installed" >&2
+		return 1
+	fi
+}
 
 usage() {
 	echo "usage: friday-restore-drill AGE_PRIVATE_KEY_FILE [DUMP_FILE]" >&2
@@ -80,8 +127,8 @@ STATUS_DIR=${FRIDAY_STATUS_DIR:-$BACKUP_DIR/status}
 mkdir -p "$STATUS_DIR"
 chmod 0755 "$STATUS_DIR"
 STATUS_DIR=$(cd "$STATUS_DIR" && pwd)
-KEY=$(realpath "$KEY")
-[[ -z $DUMP ]] || DUMP=$(realpath -m "$DUMP")
+KEY=$(abspath "$KEY")
+[[ -z $DUMP ]] || DUMP=$(abspath "$DUMP")
 
 RESULT=fail
 DUMP_NAME=""
@@ -127,7 +174,7 @@ DUMP_NAME=$(basename "$DUMP")
 STATUS="$STATUS_DIR/status.json"
 if [[ -r $STATUS ]] && grep -q "\"dump\":\"$DUMP_NAME\"" "$STATUS"; then
 	want=$(grep -o '"sha256":"[0-9a-f]*"' "$STATUS" | cut -d'"' -f4)
-	have=$(sha256sum "$DUMP" | cut -d' ' -f1)
+	have=$(sha256_of "$DUMP")
 	[[ $want == "$have" ]] || fail "sha256 of $DUMP_NAME differs from status.json"
 else
 	echo "friday-restore-drill: status.json does not name $DUMP_NAME; sha256 comparison skipped (age's MAC still checks it)" >&2

@@ -169,10 +169,15 @@ jobs:
       - name: Install dependencies
         run: uv sync --frozen
 
+      # Phase 13b branch 2: also under the macOS tool-set PATH shim, the
+      # macOS/R2 preflight rows, the LaunchAgent and the bucket-secret guard.
       - name: Backup -> restore drill round trip, compose guard, home preflight rows
         run: >-
           uv run pytest ops/tests/test_home_backup_restore.py
           ops/tests/test_compose_no_public_ports.py ops/tests/test_preflight_home.py
+          ops/tests/test_home_backup_portable.py ops/tests/test_preflight_home_macos.py
+          ops/tests/test_preflight_home_offsite.py ops/tests/test_launchd_plist.py
+          ops/tests/test_no_bucket_secrets_in_compose.py config/tests/test_compose_files.py
 
   # Phase 11 branch 2 (brief D6, D7, D16): the node voice child. Its own
   # pyproject/uv.lock; imports nothing from backend/. No real model, mic,

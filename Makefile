@@ -3,6 +3,7 @@ COMPOSE := docker compose -f deploy/docker/compose.yml
 COMPOSE_DAILY := $(COMPOSE) -f deploy/docker/compose.daily.yml
 COMPOSE_LOCAL_TLS := $(COMPOSE) -f deploy/docker/compose.local-tls.yml
 COMPOSE_HOME := $(COMPOSE_DAILY) -f deploy/docker/compose.home.yml
+COMPOSE_MAC_SERVER := $(COMPOSE_HOME) -f deploy/docker/compose.local-tls.yml -f deploy/docker/compose.mac.yml
 BACKEND := cd backend &&
 # The WSGI/ASGI/Celery entry points default to config.settings.prod (fail
 # hard on a missing env) since Phase 4 branch 1, so host-side Celery runs
@@ -12,7 +13,7 @@ BACKEND := cd backend &&
 DEV_SETTINGS := DJANGO_SETTINGS_MODULE=$${DJANGO_SETTINGS_MODULE:-config.settings.dev}
 FRONTEND := cd frontend &&
 
-.PHONY: up up-daily up-home up-local-tls local-tls down logs secrets test lint fmt shell migrate makemigrations \
+.PHONY: up up-daily up-home up-mac-server up-local-tls local-tls down logs secrets test lint fmt shell migrate makemigrations \
 	harness-images harness-smoke harness-runner deploy-smoke preflight \
 	test-backend test-frontend test-e2e lint-backend lint-frontend \
 	frontend-install frontend-dev frontend-build e2e-install voice-models \
@@ -48,6 +49,13 @@ up-local-tls: secrets local-tls
 # (docs/runbooks/home-server-setup.md steps 8-9).
 up-home: secrets
 	$(COMPOSE_HOME) up -d --build
+
+# Interim server on the owner's MacBook (Phase 13b D1, ADR-017 amendment 1):
+# the home stack plus the loopback TLS proxy for this Mac's own node and
+# deploy/docker/compose.mac.yml (HOME_SERVER_PLATFORM=macos). OrbStack or
+# Docker Desktop; still nothing on 0.0.0.0. Runbook "Interim" I2.
+up-mac-server: secrets local-tls
+	$(COMPOSE_MAC_SERVER) up -d --build
 
 down:
 	$(COMPOSE) down

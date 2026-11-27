@@ -39,9 +39,12 @@ evaluation).
 ADR-018).** Until the home PC is bought, the stack runs on the owner's
 MacBook: see **"Interim: server on the MacBook"** at the end of this
 runbook. The off-site target is **Cloudflare R2** (step 8). The future home
-PC unlocks its disk with the **TPM** (step 1). Items marked *(ships with
-`feat/p13-interim-mac-server`)* name files and settings that branch adds;
-until it is merged, use the Linux steps as written.
+PC unlocks its disk with the **TPM** (step 1). The Mac server files and
+settings (`HOME_SERVER_PLATFORM`, `HOME_BACKUP_OFFSITE_REPOSITORY`,
+`deploy/docker/compose.mac.yml`, `make up-mac-server`,
+`deploy/home/macos/com.friday.backup.plist`, `deploy/home/restic.env.example`
+and the portable backup scripts) shipped with `feat/p13-interim-mac-server`
+(2026-11-20).
 
 Placeholders used throughout: home subnet `192.168.1.0/24`, server address
 `192.168.1.20`, mDNS name `friday-home.local`, user `friday`. Replace them
@@ -373,6 +376,10 @@ only into the host's restic environment file below — never into
 `deploy/docker/.env`, never into any container (Friday cannot read its
 backups, ADR-017 decision 6).
 
+The template is `deploy/home/restic.env.example` (names only):
+`sudo install -m 0600 -o friday deploy/home/restic.env.example
+/etc/friday-backup/restic.env`, then fill it in:
+
 ```bash
 # /etc/friday-backup/restic.env  (0600, owner friday) -- names as in .env.example
 RESTIC_REPOSITORY=s3:https://<account-id>.r2.cloudflarestorage.com/friday-backup
@@ -385,10 +392,15 @@ AWS_DEFAULT_REGION=auto
 So preflight can check that the last backup really went to R2, put the
 **non-secret** repository identifier (the same `s3:https://…/friday-backup`
 string, no key) into `deploy/docker/.env` as
-`HOME_BACKUP_OFFSITE_REPOSITORY=` *(ships with
-`feat/p13-interim-mac-server`: the backup script records the repository in
-`status.json`, and `home_backup_fresh` fails when the last backup went
-elsewhere)*.
+`HOME_BACKUP_OFFSITE_REPOSITORY=` (`compose.home.yml` passes it to web).
+The backup script records `RESTIC_REPOSITORY` in `status.json` as
+`repository`, and `home_backup_fresh` fails when the last backup went
+elsewhere (the detail names only the scheme and host), warns when the
+status file has no `repository` (an older script), and says "off-site R2"
+when they match. Keep the URL free of userinfo (`user:pass@`) and queries
+(`?…`): the script refuses to run with either (so no credential can reach
+the status file), and preflight fails such a configured value without
+echoing it. Preflight never calls the bucket.
 
 ```bash
 set -a; . /etc/friday-backup/restic.env; set +a; restic init
@@ -424,16 +436,22 @@ What one run does (`friday-backup.sh`):
    --prune`, then local `*.age` files older than 3 days are removed;
 4. `status/status.json` for preflight, written atomically (temp file,
    then rename, in the `status/` subdirectory `web` mounts read-only):
-   `{"v":1,"finished_at":…,"dump":…,"bytes":…,"sha256":…,"restic_snapshot":…}`
-   -- no secret, no path beyond the dump's file name.
+   `{"v":1,"finished_at":…,"dump":…,"bytes":…,"sha256":…,"restic_snapshot":…,"repository":…}`
+   -- no secret, no path beyond the dump's file name and the repository
+   identifier.
 
-It refuses to run when `age.pub` holds a private key (`AGE-SECRET-KEY-`),
-takes a `flock` so a manual start and the timer never overlap, and leaves
+It refuses to run when `age.pub` holds a private key (`AGE-SECRET-KEY-`)
+or `RESTIC_REPOSITORY` carries userinfo or a query, needs bash ≥ 4.4,
+takes a `flock` (or, where there is none, as on macOS, a
+`.friday-backup.lock.d` lock directory holding its PID, taken over only
+when that process is gone) so a manual start and the timer never overlap,
+and leaves
 neither a partial file nor a new `status.json` when any step fails (so
 `home_backup_fresh` ages into warn and fail). Every location is an
 environment variable with the defaults above (`FRIDAY_REPO_DIR`,
 `FRIDAY_BACKUP_DIR`, `FRIDAY_STATUS_DIR` (default `$FRIDAY_BACKUP_DIR/status`), `FRIDAY_AGE_RECIPIENTS`, `FRIDAY_RESTIC_ENV`,
-`FRIDAY_ENV_FILE`, `FRIDAY_KEEP_LOCAL_DAYS`, `FRIDAY_RESTIC_KEEP`; change
+`FRIDAY_ENV_FILE`, `FRIDAY_KEEP_LOCAL_DAYS`, `FRIDAY_RESTIC_KEEP`, and
+`FRIDAY_PATH`, which replaces `PATH` for launchd on the Mac; change
 them with `sudo systemctl edit friday-backup.service`). The timer runs at
 03:10 local time with `Persistent=true` (a missed run happens at the next
 boot).
@@ -556,9 +574,10 @@ re-pointed, not redesigned.
 |---|---|---|---|
 | `home_lan_only` | every host in `DJANGO_ALLOWED_HOSTS` and the `PREFLIGHT_NODE_TLS_URL` host resolve to private, loopback, ULA or Tailscale CGNAT addresses | URL not set | a public address or a wildcard host |
 | `home_tls_pin` | the LAN URL serves the pinned SPKI (the `node_tls_pin` comparison) | pin or URL not set | mismatch or handshake error |
-| `home_backup_fresh` | `status.json` ≤ 26 h old and well-formed | 26–72 h, or not configured | > 72 h or malformed |
+| `home_backup_fresh` | `status.json` ≤ 26 h old and well-formed; with `HOME_BACKUP_OFFSITE_REPOSITORY` set, its `repository` equals it ("off-site R2" for an R2 host) | 26–72 h, not configured, or (with the off-site setting) a status file that recorded no `repository` | > 72 h, malformed, the last backup went to another repository, or a configured/recorded repository with userinfo (`@`) or a query (`?`) — never echoed |
 | `home_restore_drill_age` | `drill.json` ≤ 35 days, `result: pass` | 35–90 days, or not configured | > 90 days, or the last drill failed |
-| `home_disk_encryption` | `HOME_FDE_CONFIRMED_ON` set (owner attestation) | not set | — |
+| `home_disk_encryption` | `linux`: `HOME_FDE_CONFIRMED_ON` set (owner LUKS attestation) | `linux`: not set; `macos`: **always** — "FileVault owner-confirmed on <date>; no LUKS/TPM on macOS (interim)" or "FileVault not confirmed" | — |
+| `home_server_platform` | `HOME_SERVER_PLATFORM=linux` (the default) | `macos`: interim server (ADR-017 amendment 1), Friday is down while the Mac sleeps | any other value |
 
 A configured status path whose file is missing or malformed (wrong `v`, a
 timestamp that is not UTC or lies in the future, a dump name that is not
@@ -593,8 +612,8 @@ is down whenever the Mac sleeps, travels or is off**, and every other PC
 loses Friday with it; nodes fail closed (ADR-013 decision 6) and nothing is
 queued. Everything else in ADR-017 holds: LAN only, TLS with a pin or the
 private CA for every node, nightly encrypted backups to R2, Postgres as the
-only source of truth. Items marked *(ships with
-`feat/p13-interim-mac-server`)* are added by that branch.
+only source of truth. The files and settings below shipped with
+`feat/p13-interim-mac-server` (2026-11-20).
 
 ### I1. Prerequisites on the Mac
 
@@ -603,10 +622,11 @@ only source of truth. Items marked *(ships with
   This is the Mac's full-disk encryption; a container cannot see it, so
   you attest it: `HOME_FDE_CONFIRMED_ON=YYYY-MM-DD` in
   `deploy/docker/.env` once `fdesetup status` says "FileVault is On". With
-  `HOME_SERVER_PLATFORM=macos` *(ships with `feat/p13-interim-mac-server`)*
+  `HOME_SERVER_PLATFORM=macos` (set by `deploy/docker/compose.mac.yml`)
   the `home_disk_encryption` row reports this as an **owner-confirmed
-  warning**, never a failure: there is no LUKS or TPM on a Mac, and the
-  interim server is meant to be replaced.
+  warning** ("FileVault owner-confirmed on <date>; no LUKS/TPM on macOS
+  (interim)"), never a pass and never a failure: there is no LUKS or TPM
+  on a Mac, and the interim server is meant to be replaced.
 - A container runtime: **OrbStack** or **Docker Desktop** (either runs the
   stack unchanged; give it at least 8 GB RAM). In Docker Desktop's
   Settings → Resources → File sharing, share the repository and the backup
@@ -632,19 +652,21 @@ make secrets                            # deploy/docker/.env (0600)
 - `DJANGO_ALLOWED_HOSTS=<mac-name>.local,<mac LAN IP>,localhost,127.0.0.1,web`
   (System Settings → General → Sharing shows the `.local` name; give the
   Mac a DHCP reservation on the router as in step 2).
-- `HOME_SERVER_PLATFORM=macos` and
-  `HOME_BACKUP_HOST_DIR=/Users/<you>/FridayBackups` *(ships with
-  `feat/p13-interim-mac-server`)*.
+- `HOME_BACKUP_HOST_DIR=/Users/<you>/FridayBackups` (its `status/`
+  subdirectory must exist before the first `up`: run the first backup, I5).
+  `HOME_SERVER_PLATFORM=macos` comes from `compose.mac.yml`; setting it in
+  `.env` as well is harmless.
 - `HOME_FDE_CONFIRMED_ON=` (I1) and, once R2 is set up,
   `HOME_BACKUP_OFFSITE_REPOSITORY=` (step 8).
 
-Start it with the Mac server target *(ships with
-`feat/p13-interim-mac-server`: `make up-mac-server` = the daily stack, the
-home override, the loopback TLS overlay and `compose.mac.yml`)*; before
-that branch, `make up-daily` plus `make up-local-tls` gives the same
-services without the `home_*` settings. Every port stays on `127.0.0.1`
-(the compose test enforces it): with Docker Desktop and OrbStack a
-`127.0.0.1:` mapping is reachable from the Mac only.
+Start it with the Mac server target: `make up-mac-server` = the daily
+stack, the home override, the loopback TLS overlay
+(`compose.local-tls.yml`, `make local-tls` runs first) and
+`compose.mac.yml`. Every port stays on `127.0.0.1` (the compose test
+enforces it): with Docker Desktop and OrbStack a `127.0.0.1:` mapping is
+reachable from the Mac only. `make preflight` then shows
+`home_server_platform` and `home_disk_encryption` as warnings and no
+failure caused by macOS (step 12).
 
 ### I3. This Mac's own node: the loopback TLS path
 
@@ -701,17 +723,40 @@ The same scripts as steps 8–9, run by `launchd` instead of systemd:
   `FRIDAY_AGE_RECIPIENTS`; the backup directory is
   `FRIDAY_BACKUP_DIR=/Users/<you>/FridayBackups` (shared with the
   container runtime, I1) and `FRIDAY_REPO_DIR=/Users/<you>/code/friday`.
-- Schedule it with the LaunchAgent *(ships with
-  `feat/p13-interim-mac-server`: `deploy/home/macos/com.friday.backup.plist`,
-  03:10 daily, loaded with `launchctl bootstrap gui/$(id -u) …`)*. launchd
+- The restic environment file from the template:
+  `install -m 0600 deploy/home/restic.env.example
+  ~/.config/friday-backup/restic.env`, filled in as step 8.
+- Schedule it with the LaunchAgent `deploy/home/macos/com.friday.backup.plist`
+  (03:10 daily; Homebrew `/opt/homebrew/bin/bash` runs
+  `deploy/home/friday-backup.sh` from the checkout; its
+  `EnvironmentVariables` hold only the `FRIDAY_*` paths, including
+  `FRIDAY_PATH`, because launchd's own `PATH` has neither Homebrew nor the
+  Docker CLI; logs in `~/Library/Logs/friday-backup.log`). Its paths use
+  the placeholder `/Users/USERNAME`:
+
+  ```bash
+  mkdir -p ~/Library/LaunchAgents ~/Library/Logs
+  sed "s|/Users/USERNAME|$HOME|g" deploy/home/macos/com.friday.backup.plist \
+    > ~/Library/LaunchAgents/com.friday.backup.plist
+  plutil -lint ~/Library/LaunchAgents/com.friday.backup.plist
+  launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.friday.backup.plist
+  launchctl kickstart gui/$(id -u)/com.friday.backup     # one manual run
+  tail -n 20 ~/Library/Logs/friday-backup.log; cat ~/FridayBackups/status/status.json
+  ```
+
+  (Docker Desktop puts `docker` in `/usr/local/bin`, OrbStack in
+  `~/.orbstack/bin`; both are in the plist's `FRIDAY_PATH`.) launchd
   runs a calendar job that was missed while the Mac slept **once, at the
   next wake**, so a night with the lid closed becomes a morning backup.
   `home_backup_fresh` still warns after 26 h and fails after 72 h: a long
   trip with the Mac off shows up as a stale backup, on purpose.
-- The scripts need Homebrew `bash` (≥ 4.4) and must work with the macOS
-  tools (`shasum`, BSD `stat`, no `flock`) *(the portability changes ship
-  with `feat/p13-interim-mac-server`; before them, install GNU coreutils
-  and `flock` from Homebrew)*.
+- The scripts need Homebrew `bash` (≥ 4.4; with macOS's 3.2 they stop with
+  "needs bash >= 4.4") and work with the macOS tools: `shasum -a 256` when
+  there is no `sha256sum`, `wc -c` instead of GNU `stat -c`, and a
+  `.friday-backup.lock.d` lock directory (with a stale-PID check) when
+  there is no `flock` — tested under a PATH shim of that tool set
+  (`backend/ops/tests/test_home_backup_portable.py`). No GNU coreutils
+  needed.
 - Restore drill: monthly, as step 9, with the age private key brought in
   only for the drill (a file under `$TMPDIR`, removed afterwards).
 

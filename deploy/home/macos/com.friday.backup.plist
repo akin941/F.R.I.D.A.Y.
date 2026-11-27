@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Friday interim server on the MacBook: the nightly backup LaunchAgent
+  (Phase 13b D1/D2, ADR-017 amendment 1; docs/runbooks/home-server-setup.md
+  "Interim" I5). The macOS stand-in for friday-backup.timer.
+
+  Install (replace USERNAME with your short user name everywhere first):
+    sed "s|/Users/USERNAME|$HOME|g" deploy/home/macos/com.friday.backup.plist \
+      > ~/Library/LaunchAgents/com.friday.backup.plist
+    plutil -lint ~/Library/LaunchAgents/com.friday.backup.plist
+    launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.friday.backup.plist
+    launchctl kickstart gui/$(id -u)/com.friday.backup      # one manual run
+  Remove (I6, after the move to the home PC):
+    launchctl bootout gui/$(id -u)/com.friday.backup
+
+  03:10 every day. launchd runs a calendar job missed while the Mac slept
+  once, at the next wake. No KeepAlive and no RunAtLoad: one run per day.
+  Homebrew bash (>= 4.4; macOS ships 3.2). EnvironmentVariables holds only
+  FRIDAY_* paths: the bucket credentials stay in the restic env file the
+  script sources (FRIDAY_RESTIC_ENV), never here
+  (backend/ops/tests/test_launchd_plist.py).
+-->
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>com.friday.backup</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>/opt/homebrew/bin/bash</string>
+		<string>/Users/USERNAME/code/friday/deploy/home/friday-backup.sh</string>
+	</array>
+	<key>StartCalendarInterval</key>
+	<dict>
+		<key>Hour</key>
+		<integer>3</integer>
+		<key>Minute</key>
+		<integer>10</integer>
+	</dict>
+	<key>RunAtLoad</key>
+	<false/>
+	<key>ProcessType</key>
+	<string>Background</string>
+	<key>LowPriorityIO</key>
+	<true/>
+	<key>EnvironmentVariables</key>
+	<dict>
+		<key>FRIDAY_REPO_DIR</key>
+		<string>/Users/USERNAME/code/friday</string>
+		<key>FRIDAY_BACKUP_DIR</key>
+		<string>/Users/USERNAME/FridayBackups</string>
+		<key>FRIDAY_AGE_RECIPIENTS</key>
+		<string>/Users/USERNAME/.config/friday-backup/age.pub</string>
+		<key>FRIDAY_RESTIC_ENV</key>
+		<string>/Users/USERNAME/.config/friday-backup/restic.env</string>
+		<key>FRIDAY_ENV_FILE</key>
+		<string>/Users/USERNAME/code/friday/deploy/docker/.env</string>
+		<key>FRIDAY_PATH</key>
+		<string>/opt/homebrew/bin:/usr/local/bin:/Users/USERNAME/.orbstack/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+	</dict>
+	<key>StandardOutPath</key>
+	<string>/Users/USERNAME/Library/Logs/friday-backup.log</string>
+	<key>StandardErrorPath</key>
+	<string>/Users/USERNAME/Library/Logs/friday-backup.log</string>
+</dict>
+</plist>

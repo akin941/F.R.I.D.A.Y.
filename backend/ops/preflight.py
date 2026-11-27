@@ -3152,6 +3152,17 @@ _HOME_DUMP_NAME = re.compile(r"friday-\d{8}T\d{6}Z\.dump\.age")
 _HOME_SNAPSHOT = re.compile(r"[0-9a-f]{8,64}")
 _HOME_SHA256 = re.compile(r"[0-9a-f]{64}")
 HOME_DRILL_RESULTS = ("pass", "fail")
+# Phase 13b D1: the host platforms the owner may declare
+# (`HOME_SERVER_PLATFORM`); `macos` is the interim server (ADR-017
+# amendment 1).
+HOME_PLATFORM_LINUX = "linux"
+HOME_PLATFORM_MACOS = "macos"
+HOME_SERVER_PLATFORMS = (HOME_PLATFORM_LINUX, HOME_PLATFORM_MACOS)
+# Phase 13b D2: a restic repository identifier as `friday-backup.sh`
+# records it (the same character set the script accepts). Userinfo (`@`)
+# and a query (`?`) are refused separately, before this, and never echoed.
+_HOME_REPOSITORY = re.compile(r"[A-Za-z0-9._~:/%+=,-]{1,512}")
+HOME_R2_HOST_SUFFIX = ".r2.cloudflarestorage.com"
 
 
 def resolve_host(host):
@@ -3340,10 +3351,90 @@ def _home_dump_name(data, setting, *, allow_empty=False):
     raise _HomeStatusError(f"dump in the {setting} file is not a backup file name")
 
 
+def _home_repository_refusal(value):
+    """Why a restic repository identifier cannot be used, or None. Never
+    contains the value itself: a refused value may carry a credential."""
+    if "@" in value:
+        return "carries userinfo (@)"
+    if "?" in value:
+        return "carries a query (?)"
+    if not _HOME_REPOSITORY.fullmatch(value):
+        return "is not a restic repository identifier"
+    return None
+
+
+def _home_repository_host(value):
+    """The host of a URL-shaped repository (`s3:https://host/bucket`,
+    `rest:https://host/`), else None."""
+    _backend, sep, rest = value.partition(":")
+    if sep and "://" in rest:
+        return (urlparse(rest).hostname or "").lower() or None
+    return None
+
+
+def home_repository_label(value):
+    """A short, non-secret description of a repository: `<backend>:<scheme>
+    ://<host>` for a URL-shaped one, `<backend>:<host>` for another remote
+    backend, `a local path` for a directory. Never a path or a bucket."""
+    backend, sep, rest = value.partition(":")
+    if not sep or not backend or "/" in backend or backend.startswith("."):
+        return "a local path"
+    if "://" in rest:
+        parsed = urlparse(rest)
+        return f"{backend}:{parsed.scheme}://{(parsed.hostname or '').lower()}"
+    head = re.split(r"[/:]", rest, maxsplit=1)[0]
+    return f"{backend}:{head}" if head else backend
+
+
+def _home_is_r2(value):
+    host = _home_repository_host(value)
+    return bool(host) and host.endswith(HOME_R2_HOST_SUFFIX)
+
+
+def _home_offsite_repository():
+    """The configured `HOME_BACKUP_OFFSITE_REPOSITORY` (stripped; trailing
+    slashes are not significant), or "" when unset. A value with userinfo
+    or a query raises `_HomeStatusError` without echoing it."""
+    value = (getattr(settings, "HOME_BACKUP_OFFSITE_REPOSITORY", "") or "").strip()
+    if not value:
+        return ""
+    refusal = _home_repository_refusal(value)
+    if refusal is not None:
+        raise _HomeStatusError(
+            f"HOME_BACKUP_OFFSITE_REPOSITORY {refusal}: set only the non-secret"
+            " repository identifier (no key, no userinfo, no query)"
+        )
+    return value.rstrip("/")
+
+
+def _home_recorded_repository(data, setting):
+    """The `repository` field of `status.json` (Phase 13b D2, optional), or
+    None when the file predates it. A malformed value or one with userinfo
+    or a query raises `_HomeStatusError` without echoing it."""
+    if "repository" not in data:
+        return None
+    value = data["repository"]
+    if not isinstance(value, str) or not value:
+        raise _HomeStatusError(f"repository in the {setting} file is not a repository")
+    refusal = _home_repository_refusal(value)
+    if refusal is not None:
+        raise _HomeStatusError(
+            f"repository in the {setting} file {refusal} (friday-backup.sh never records"
+            " that: check the script and the host's restic environment file)"
+        )
+    return value.rstrip("/")
+
+
 def _check_home_backup_fresh():
     """`status.json` from `deploy/home/friday-backup.sh` (D14): well-formed,
     finished at most `HOME_BACKUP_WARN_HOURS` ago (warn up to
-    `HOME_BACKUP_FAIL_HOURS`, then fail). Reads the status file only."""
+    `HOME_BACKUP_FAIL_HOURS`, then fail). Reads the status file only.
+
+    Phase 13b D2: with `HOME_BACKUP_OFFSITE_REPOSITORY` set, the last
+    backup must also have recorded that repository -- absent is a warning
+    (an old script), a different one a failure; the detail names R2 when
+    the host is Cloudflare R2's. No call to the bucket: the web container
+    holds no bucket credential (ADR-017 decision 6)."""
     from django.utils import timezone
 
     name = "home_backup_fresh"
@@ -3352,6 +3443,7 @@ def _check_home_backup_fresh():
         warn_after, fail_after = _home_thresholds(
             "HOME_BACKUP_WARN_HOURS", "HOME_BACKUP_FAIL_HOURS", 3600
         )
+        offsite = _home_offsite_repository()
         data = _read_home_status(setting)
         if data is None:
             return CheckResult(name, WARN, f"{setting} not set (owner step: runbook step 8)")
@@ -3367,17 +3459,38 @@ def _check_home_backup_fresh():
         snapshot = data.get("restic_snapshot")
         if not isinstance(snapshot, str) or not _HOME_SNAPSHOT.fullmatch(snapshot):
             raise _HomeStatusError(f"restic_snapshot in the {setting} file is not a snapshot id")
+        recorded = _home_recorded_repository(data, setting)
     except _HomeStatusError as exc:
         return CheckResult(name, FAIL, str(exc))
     age = (now - finished).total_seconds()
     detail = f"last backup {_home_age_label(age)} ago ({dump}, restic {snapshot})"
-    if age <= warn_after:
-        return CheckResult(name, PASS, detail)
-    if age <= fail_after:
-        return CheckResult(name, WARN, f"{detail}; older than HOME_BACKUP_WARN_HOURS")
-    return CheckResult(
-        name, FAIL, f"{detail}; older than HOME_BACKUP_FAIL_HOURS (is friday-backup.timer on?)"
-    )
+    if offsite and recorded is not None and recorded != offsite:
+        return CheckResult(
+            name,
+            FAIL,
+            f"{detail}; the last backup went to {home_repository_label(recorded)}, not the"
+            " configured off-site repository (HOME_BACKUP_OFFSITE_REPOSITORY; check the"
+            " host's restic environment file)",
+        )
+    notes = []
+    if offsite and recorded is None:
+        notes.append(
+            "the last backup did not record its repository -- update friday-backup.sh"
+            " (the off-site destination is not verified)"
+        )
+    elif offsite:
+        where = "R2" if _home_is_r2(offsite) else home_repository_label(offsite)
+        detail += f", off-site {where}"
+    if age > fail_after:
+        return CheckResult(
+            name,
+            FAIL,
+            f"{detail}; older than HOME_BACKUP_FAIL_HOURS (is friday-backup.timer on? on the"
+            " interim Mac: the LaunchAgent)",
+        )
+    if age > warn_after:
+        notes.insert(0, "older than HOME_BACKUP_WARN_HOURS")
+    return CheckResult(name, WARN if notes else PASS, "; ".join([detail, *notes]))
 
 
 def _check_home_restore_drill_age():
@@ -3420,16 +3533,88 @@ def _check_home_restore_drill_age():
     return CheckResult(name, FAIL, f"{detail}; older than HOME_DRILL_FAIL_DAYS")
 
 
+def _home_platform():
+    """The declared `HOME_SERVER_PLATFORM` (lower-cased; empty = `linux`),
+    or None when it is not one of `HOME_SERVER_PLATFORMS`."""
+    value = (getattr(settings, "HOME_SERVER_PLATFORM", "") or "").strip().lower()
+    value = value or HOME_PLATFORM_LINUX
+    return value if value in HOME_SERVER_PLATFORMS else None
+
+
+def _check_home_server_platform():
+    """Phase 13b D1: the platform the owner declares. `linux` (the home PC)
+    passes; `macos` (the interim server on the MacBook, ADR-017 amendment
+    1) is a warning, because Friday is down whenever the Mac sleeps; any
+    other value fails (the value is not echoed)."""
+    name = "home_server_platform"
+    platform = _home_platform()
+    if platform == HOME_PLATFORM_LINUX:
+        return CheckResult(name, PASS, "linux (the always-on home server)")
+    if platform == HOME_PLATFORM_MACOS:
+        return CheckResult(
+            name,
+            WARN,
+            "macos: interim server (ADR-017 amendment 1): Friday is down while the Mac sleeps",
+        )
+    return CheckResult(
+        name, FAIL, "HOME_SERVER_PLATFORM is not one of " + ", ".join(HOME_SERVER_PLATFORMS)
+    )
+
+
+def _check_home_disk_encryption_macos(value):
+    """Phase 13b D1: on the interim Mac, `HOME_FDE_CONFIRMED_ON` is the
+    FileVault attestation -- always a warning (never pass, never fail)."""
+    from datetime import date
+
+    from django.utils import timezone
+
+    name = "home_disk_encryption"
+    suffix = "no LUKS/TPM on macOS (interim)"
+    confirmed = None
+    if value:
+        try:
+            confirmed = date.fromisoformat(value)
+        except ValueError:
+            confirmed = None
+        if confirmed is not None and confirmed > timezone.now().date():
+            confirmed = None
+    if confirmed is not None:
+        return CheckResult(name, WARN, f"FileVault owner-confirmed on {confirmed}; {suffix}")
+    reason = (
+        "HOME_FDE_CONFIRMED_ON not set"
+        if not value
+        else "HOME_FDE_CONFIRMED_ON is not a past ISO date (YYYY-MM-DD)"
+    )
+    return CheckResult(
+        name,
+        WARN,
+        f"FileVault not confirmed ({reason}; owner attestation, runbook I1); {suffix}",
+    )
+
+
 def _check_home_disk_encryption():
     """`HOME_FDE_CONFIRMED_ON`: the owner's attestation that the server disk
     is LUKS encrypted (a container cannot see the host's disks). Never a
-    fail: unset or unusable is a warning."""
+    fail: unset or unusable is a warning.
+
+    Phase 13b D1: on `HOME_SERVER_PLATFORM=macos` the same setting is the
+    FileVault attestation and the row is ALWAYS a warning: there is no
+    LUKS/TPM on the interim Mac, and an attestation a container cannot
+    verify is not reported as verified. An unknown platform (which
+    `home_server_platform` fails) is a warning here."""
     from datetime import date
 
     from django.utils import timezone
 
     name = "home_disk_encryption"
     value = (getattr(settings, "HOME_FDE_CONFIRMED_ON", "") or "").strip()
+    platform = _home_platform()
+    if platform is None:
+        return CheckResult(
+            name, WARN, "HOME_SERVER_PLATFORM is unknown: disk encryption not assessed"
+        )
+    if platform == HOME_PLATFORM_MACOS:
+        return _check_home_disk_encryption_macos(value)
     if not value:
         return CheckResult(
             name, WARN, "HOME_FDE_CONFIRMED_ON not set (owner attestation, runbook step 1)"
@@ -3445,7 +3630,8 @@ def _check_home_disk_encryption():
 
 def check_home():
     """Phase 13 D15 (branch 7), read-only: `home_lan_only`, `home_tls_pin`,
-    `home_backup_fresh`, `home_restore_drill_age`, `home_disk_encryption`.
+    `home_backup_fresh`, `home_restore_drill_age`, `home_disk_encryption`,
+    and (Phase 13b D1) `home_server_platform`.
     Nothing is sent to a node, no model is called, no backup is started or
     read -- only the two status files the host's scripts write. Details
     carry host names, setting names, file names and ages -- never a path or
@@ -3456,6 +3642,7 @@ def check_home():
         _guarded("home_backup_fresh", _check_home_backup_fresh),
         _guarded("home_restore_drill_age", _check_home_restore_drill_age),
         _guarded("home_disk_encryption", _check_home_disk_encryption),
+        _guarded("home_server_platform", _check_home_server_platform),
     ]
 
 
