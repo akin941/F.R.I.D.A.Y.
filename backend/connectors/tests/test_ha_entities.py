@@ -82,7 +82,8 @@ def test_create_stores_the_owner_set_row_and_audits_ids_only(owner, workspace, s
         ("wake_on_lan.pc", ["send_magic_packet"], home_entities.HomeEntityNotAllowed),
         ("vacuum.robot", ["start"], home_entities.HomeEntityNotAllowed),
         (TV, ["toggle"], home_entities.HomeEntityNotAllowed),
-        (TV, ["media_play_pause"], home_entities.HomeEntityNotAllowed),
+        (TV, ["play_media"], home_entities.HomeEntityNotAllowed),
+        (TV, ["shuffle_set"], home_entities.HomeEntityNotAllowed),
         (TV, ["turn_on", "turn_on"], home_entities.HomeEntityNotAllowed),
         (TV, [], home_entities.HomeEntityNotAllowed),
         (TV, ["unlock"], home_entities.HomeEntityNotAllowed),
@@ -135,7 +136,12 @@ def test_code_maximum_lists_every_callable_domain_and_nothing_forbidden():
     assert not set(maximum) & (bridge.NEVER_DOMAINS | bridge.READ_ONLY_DOMAINS)
     assert "select_source" in maximum["media_player"]
     for services in maximum.values():
-        assert "toggle" not in services and "media_play_pause" not in services
+        assert "toggle" not in services and "play_media" not in services
+    # Phase 13b D4: the two gate-class services exist, on media players only.
+    assert {"media_play_pause", "media_stop"} <= set(maximum["media_player"])
+    for domain, services in maximum.items():
+        if domain != "media_player":
+            assert not {"media_play_pause", "media_stop"} & set(services)
 
 
 def test_label_rules_are_the_shared_ones(owner, workspace):

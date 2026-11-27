@@ -237,8 +237,9 @@ def test_the_precondition_checks_the_bindings_own_workspace(bound, ha, workspace
 # --- pins (manifest v2) ---
 
 
-def test_manifest_v2_pins_match_the_recomputed_contract():
-    assert MANIFEST.version == 2
+def test_manifest_v3_pins_match_the_recomputed_contract():
+    # Phase 13b D4 (branch 1a): `media_play_pause` / `media_stop` -> v3.
+    assert MANIFEST.version == 3
     hashes = bridge.tool_hashes()
     assert ha_manifest.STATES_PIN == hashes["get_states"]
     assert ha_manifest.CALL_SERVICE_PIN == hashes["call_service"]
@@ -258,7 +259,8 @@ class _WiderSource(bridge.SelectSourceData):
 @pytest.mark.parametrize(
     "widen",
     [
-        lambda mp: mp.setitem(bridge.SERVICES["media_player"], "media_stop", bridge.NoData),
+        lambda mp: mp.setitem(bridge.SERVICES["media_player"], "play_media", bridge.NoData),
+        lambda mp: mp.delitem(bridge.SERVICES["media_player"], "media_stop"),
         lambda mp: mp.setitem(bridge.SERVICES["media_player"], "select_source", _WiderSource),
         lambda mp: mp.setattr(bridge, "SOURCE_LIST_MAX_ITEMS", 500),
         lambda mp: mp.setattr(

@@ -24,6 +24,15 @@ the `home.control` wake route (voice) draft the card with exact arguments;
 `draft_arguments` is a Friday-side flag, not part of the pinned request
 contract, so the pins and the version are unchanged.
 
+Version 3 (Phase 13b D4, branch 1a): `media_player` gains
+`media_play_pause` and `media_stop` (both no data), **gate-class like every
+service** -- a card, `/approvals`, one `ConnectorWriteExecution`. The
+`media_play_pause` dialog shows the state read at request time and the
+outcome it implies ("şu an oynatılıyor → duraklatılır"); the precondition
+refuses the send when the live state now implies the other outcome
+(`connector_changed`). `CALL_SERVICE_PIN` changes; `STATES_PIN` does not
+(the read contract is unchanged).
+
 The pins are the sha256 of the bridge's own request contract
 (`connectors.bridges.home_assistant.tool_schemas()`); widening the
 allowlist means updating them and bumping `version` in the same reviewed
@@ -46,11 +55,11 @@ from core.channels import CHANNEL_WEB
 BRIDGE = bridge.BRIDGE
 
 STATES_PIN = "772b49f1813b8f1bbd3e9357a8a03d063ce5b3fb3924c28e317eade8bfdaf2d6"
-CALL_SERVICE_PIN = "a3487095bf60e4b8cf67592b24f3e0bf529187e30c792a6f8dd047ee8e20ba79"
+CALL_SERVICE_PIN = "968bd894bfcb584ca03bc5d05d74e3a6576c95d5d8d0a50b731db563bdf001cd"
 
 MANIFEST = ConnectorManifest(
     name="home_assistant",
-    version=2,
+    version=3,
     display_name="Home Assistant",
     kind=KIND_NATIVE,
     status=STATUS_ACTIVE,
@@ -80,7 +89,7 @@ MANIFEST = ConnectorManifest(
             description=(
                 "Call one Home Assistant service the owner allowlisted for one exact "
                 "entity (lights, switches, fans, covers, climate, media players: power, "
-                "input, volume, mute, play/pause; scenes; Wake-on-LAN) after the owner's "
+                "input, volume, mute, play/pause/stop; scenes; Wake-on-LAN) after the owner's "
                 "decision."
             ),
             argument_serializer=bridge.CallServiceArguments,

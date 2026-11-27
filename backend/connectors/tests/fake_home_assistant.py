@@ -93,6 +93,11 @@ class FakeHomeAssistant:
                     attributes["volume_level"] = body["volume_level"]
                 elif service in ("media_play", "media_pause"):
                     target["state"] = "playing" if service == "media_play" else "paused"
+                elif service == "media_play_pause":
+                    # HA's rule: pause a playing player, play any other.
+                    target["state"] = "paused" if target["state"] == "playing" else "playing"
+                elif service == "media_stop":
+                    target["state"] = "idle"
                 elif service == "turn_on":
                     target["state"] = "on"
                     if "brightness_pct" in body:

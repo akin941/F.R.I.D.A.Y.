@@ -63,13 +63,19 @@ VOLUME_UP = "volume_up"
 VOLUME_DOWN = "volume_down"
 PLAY = "play"
 PAUSE = "pause"
+# Phase 13b D7: "durdur" / "stop" is `media_stop` (it was `media_pause`);
+# "oynat duraklat" / "play pause" / "toggle play" is `media_play_pause`.
+STOP = "stop"
+PLAY_PAUSE = "play_pause"
 SOURCE = "source"
 VOLUME = "volume"
 LEVEL = "level"
 
 # Actions that make sense without a named device: they can only be about a
 # media player ("sesi kıs", "HDMI 2'ye geç").
-MEDIA_ONLY = frozenset({MUTE, UNMUTE, VOLUME_UP, VOLUME_DOWN, PLAY, PAUSE, SOURCE, VOLUME})
+MEDIA_ONLY = frozenset(
+    {MUTE, UNMUTE, VOLUME_UP, VOLUME_DOWN, PLAY, PAUSE, STOP, PLAY_PAUSE, SOURCE, VOLUME}
+)
 
 # (tokens at the end of a Turkish utterance, action), longest first at match
 # time. Keys are `match_key`-folded (ı -> i).
@@ -88,9 +94,10 @@ _TR_VERBS = (
     (("sesini", "artir"), VOLUME_UP),
     (("sesi", "artir"), VOLUME_UP),
     (("devam", "ettir"), PLAY),
+    (("oynat", "duraklat"), PLAY_PAUSE),
     (("oynat",), PLAY),
     (("duraklat",), PAUSE),
-    (("durdur",), PAUSE),
+    (("durdur",), STOP),
     (("aç",), ON),
     (("kapat",), OFF),
 )
@@ -111,7 +118,10 @@ _EN_VERBS = (
     (("turn", "down"), VOLUME_DOWN),
     (("unmute",), UNMUTE),
     (("mute",), MUTE),
+    (("play", "pause"), PLAY_PAUSE),
+    (("toggle", "play"), PLAY_PAUSE),
     (("pause",), PAUSE),
+    (("stop",), STOP),
     (("resume",), PLAY),
     (("play",), PLAY),
     (("activate",), ON),
@@ -489,6 +499,8 @@ def service_for(action, domain):
             VOLUME_DOWN: ("volume_down", {}),
             PLAY: ("media_play", {}),
             PAUSE: ("media_pause", {}),
+            STOP: ("media_stop", {}),
+            PLAY_PAUSE: ("media_play_pause", {}),
         }
         if kind in simple:
             return simple[kind]

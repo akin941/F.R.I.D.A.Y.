@@ -1,4 +1,4 @@
-"""Phase 13 D12: media/TV services -- power, input, mute and volume steps,
+"""Phase 13 D12 + Phase 13b D4 (branch 1a): media/TV services -- power, input, mute and volume steps,
 the bounded live `source_list`, every one gate-class, executed at most once,
 state read back -- and the branch's done-when: "turn on the salon TV" can
 be drafted, approved and executed once against the fake HA with the entity
@@ -35,6 +35,8 @@ TV = "media_player.salon_tv"
 MEDIA_SERVICES = [
     "media_pause",
     "media_play",
+    "media_play_pause",
+    "media_stop",
     "select_source",
     "turn_off",
     "turn_on",
@@ -105,10 +107,12 @@ def call(service, data=None, entity_id=TV):
 # --- the code maximum ---
 
 
-def test_media_player_code_maximum_is_exactly_the_brief_d12_list():
+def test_media_player_code_maximum_is_exactly_the_brief_d12_and_13b_d4_list():
     assert sorted(bridge.SERVICES["media_player"]) == MEDIA_SERVICES
-    for absent in ("toggle", "media_play_pause", "play_media", "media_stop", "shuffle_set"):
+    for absent in ("toggle", "play_media", "shuffle_set", "media_next_track", "media_seek"):
         assert absent not in bridge.SERVICES["media_player"]
+    for service in ("media_play_pause", "media_stop"):
+        assert bridge.SERVICES["media_player"][service] is bridge.NoData
     assert bridge.SERVICES["media_player"]["select_source"] is bridge.SelectSourceData
     assert bridge.SERVICES["media_player"]["volume_mute"] is bridge.VolumeMuteData
     for step in ("turn_on", "turn_off", "volume_up", "volume_down"):
@@ -124,7 +128,7 @@ def test_every_new_service_is_the_one_gated_tool():
     assert spec.draft_arguments is not None
     assert spec.draft_arguments.argument_serializer is bridge.CallServiceArguments
     assert spec.draft_arguments.data_class == "personal"
-    assert MANIFEST.version == 2
+    assert MANIFEST.version == 3
 
 
 @pytest.mark.parametrize(
@@ -158,7 +162,12 @@ def test_volume_mute_requires_a_json_boolean(data, ok):
         ("volume_up", {}, True),
         ("volume_down", {"volume_step": 5}, False),
         ("toggle", {}, False),
-        ("media_play_pause", {}, False),
+        ("media_play_pause", {}, True),
+        ("media_play_pause", {"state": "playing"}, False),
+        ("media_play_pause", {"entity_id": TV}, False),
+        ("media_stop", {}, True),
+        ("media_stop", {"x": 1}, False),
+        ("media_stop", None, True),
     ],
 )
 def test_media_serializers_are_strict(service, data, ok):
@@ -262,6 +271,7 @@ def test_turn_on_the_salon_tv_is_decidable_executed_once_and_read_back(
         ("turn_off", {}, {"entity_id": TV}),
         ("media_play", {}, {"entity_id": TV}),
         ("media_pause", {}, {"entity_id": TV}),
+        ("media_stop", {}, {"entity_id": TV}),
         ("volume_up", {}, {"entity_id": TV}),
         ("volume_down", {}, {"entity_id": TV}),
         ("volume_set", {"volume_level": 0.3}, {"entity_id": TV, "volume_level": 0.3}),
@@ -422,3 +432,212 @@ def test_a_failed_read_back_still_reports_the_accepted_call(
     assert execution.status == "succeeded"
     assert _structured(execution)["read_back"] == "failed"
     assert len(ha.posts) == 1
+
+
+# --- Phase 13b D4 (branch 1a): `media_play_pause` and `media_stop` ---
+
+OUTCOME_ROW = bridge.PLAY_PAUSE_ROW
+
+
+def _rows(web_client, owner, request_id):
+    summary = web_client(owner).get(f"{URL}/{request_id}").json()["display_summary"]
+    return {row["label"]: row["value"] for row in summary["rows"]}
+
+
+@pytest.mark.parametrize("service", ["media_play_pause", "media_stop"])
+@pytest.mark.parametrize(
+    "data", [{"volume_level": 0.3}, {"is_volume_muted": True}, {"source": "TV"}, {"x": None}]
+)
+def test_the_two_new_services_take_no_data(service, data):
+    assert bridge.CallServiceArguments(data=call(service)).is_valid()
+    assert not bridge.CallServiceArguments(data=call(service, data)).is_valid()
+
+
+def test_the_new_services_exist_on_media_players_only():
+    for domain, services in bridge.SERVICES.items():
+        if domain != "media_player":
+            assert "media_play_pause" not in services and "media_stop" not in services
+    light = {"domain": "light", "service": "media_stop", "entity_id": "light.salon", "data": {}}
+    assert not bridge.CallServiceArguments(data=light).is_valid()
+
+
+def test_the_new_services_are_outside_a_narrowed_domain_list(ha_settings):
+    ha_settings.HA_ALLOWED_DOMAINS = ["light"]
+    assert not bridge.CallServiceArguments(data=call("media_stop")).is_valid()
+
+
+@pytest.mark.parametrize(
+    ("state", "value"),
+    [
+        ("playing", "şu an oynatılıyor → duraklatılır"),
+        ("paused", "şu an duraklatılmış → oynatılır"),
+        ("idle", "şu an boşta → oynatılır"),
+        ("on", "şu an açık → oynatılır"),
+        ("off", "şu an kapalı → oynatılır"),
+        ("standby", "şu an 'standby' → oynatılır"),
+    ],
+)
+def test_the_play_pause_row_names_the_state_and_its_outcome(state, value):
+    assert bridge.play_pause_row_value(state) == value
+    payload = {"display": {"rows": [{"label": OUTCOME_ROW, "value": value}]}}
+    assert bridge.approved_play_pause_outcome(payload) == bridge.play_pause_outcome(state)
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        None,
+        {},
+        {"display": {"rows": []}},
+        {"display": {"rows": [{"label": OUTCOME_ROW, "value": "şu an oynatılıyor"}]}},
+        {"display": {"rows": [{"label": OUTCOME_ROW, "value": 3}]}},
+        {
+            "display": {
+                "rows": [
+                    {"label": OUTCOME_ROW, "value": "şu an kapalı → oynatılır"},
+                    {"label": OUTCOME_ROW, "value": "şu an oynatılıyor → duraklatılır"},
+                ]
+            }
+        },
+    ],
+)
+def test_a_snapshot_without_one_recognisable_outcome_row_has_no_approved_outcome(payload):
+    assert bridge.approved_play_pause_outcome(payload) is None
+
+
+def test_play_pause_dialog_shows_playing_will_pause_and_executes_once(
+    bound,
+    ha,  # noqa: F811
+    web_client,
+    owner,
+    workspace,
+    approve,
+):
+    ha.states[TV]["state"] = "playing"
+    response = _request(web_client, owner, workspace, call("media_play_pause"))
+    assert response.status_code == 201, response.content
+    request_id = response.json()["id"]
+    approval = ApprovalRequest.objects.get(pk=request_id)
+    assert approval.tool_name == GATE and approval.status == "pending"
+    rows = _rows(web_client, owner, request_id)
+    assert rows["Hizmet"] == "media_player.media_play_pause"
+    assert rows[OUTCOME_ROW] == "şu an oynatılıyor → duraklatılır"
+    assert rows["Şu anki durum (istek anında okundu)"].startswith("playing ")
+    assert ha.posts == []
+
+    approve(request_id)
+    assert ha.posts == [("/api/services/media_player/media_play_pause", {"entity_id": TV})]
+    execution = ConnectorWriteExecution.objects.get()
+    assert execution.status == "succeeded"
+    result = _structured(execution)
+    assert (result["state_before"]["state"], result["state_after"]["state"]) == (
+        "playing",
+        "paused",
+    )
+    run_connector_write(str(execution.id))
+    assert len(ha.posts) == 1
+
+
+def test_play_pause_dialog_shows_paused_will_play(
+    bound,
+    ha,  # noqa: F811
+    web_client,
+    owner,
+    workspace,
+):
+    ha.states[TV]["state"] = "paused"
+    request_id = _request(web_client, owner, workspace, call("media_play_pause")).json()["id"]
+    assert _rows(web_client, owner, request_id)[OUTCOME_ROW] == "şu an duraklatılmış → oynatılır"
+
+
+def test_only_play_pause_gets_the_outcome_row(bound, web_client, owner, workspace):
+    for service in ("media_pause", "media_stop", "media_play"):
+        request_id = _request(web_client, owner, workspace, call(service)).json()["id"]
+        assert OUTCOME_ROW not in _rows(web_client, owner, request_id), service
+
+
+@pytest.mark.parametrize(
+    ("at_request", "at_execution", "sent"),
+    [
+        ("playing", "paused", False),
+        ("paused", "playing", False),
+        ("off", "playing", False),
+        ("playing", "playing", True),
+        ("paused", "idle", True),
+    ],
+)
+def test_play_pause_is_refused_unsent_when_the_outcome_flipped_since_the_request(
+    at_request,
+    at_execution,
+    sent,
+    bound,
+    ha,  # noqa: F811
+    web_client,
+    owner,
+    workspace,
+    approve,
+):
+    ha.states[TV]["state"] = at_request
+    request_id = _request(web_client, owner, workspace, call("media_play_pause")).json()["id"]
+    ha.states[TV]["state"] = at_execution
+    approve(request_id)
+    execution = ConnectorWriteExecution.objects.get()
+    if sent:
+        assert execution.status == "succeeded"
+        assert len(ha.posts) == 1
+    else:
+        assert (execution.status, execution.error_type) == ("failed", "connector_changed")
+        assert ha.posts == []
+
+
+def test_play_pause_precondition_refuses_a_snapshot_without_the_row(
+    tv,
+    enable,
+    workspace,
+    ha,  # noqa: F811
+):
+    binding = enable(MANIFEST, workspace)
+    payload = {"arguments": call("media_play_pause"), "display": {"rows": []}}
+    assert bridge.target_present(MANIFEST, binding, payload) == "connector_changed"
+    rows = [{"label": OUTCOME_ROW, "value": bridge.play_pause_row_value("off")}]
+    assert bridge.target_present(MANIFEST, binding, {**payload, "display": {"rows": rows}}) is None
+    # Other services never look for the row.
+    assert bridge.target_present(MANIFEST, binding, {"arguments": call("media_stop")}) is None
+    assert ha.posts == []
+
+
+def test_media_stop_is_gated_and_sends_exactly_once(
+    bound,
+    ha,  # noqa: F811
+    web_client,
+    owner,
+    workspace,
+    approve,
+):
+    ha.states[TV]["state"] = "playing"
+    request_id = _request(web_client, owner, workspace, call("media_stop")).json()["id"]
+    assert ha.posts == []
+    assert _rows(web_client, owner, request_id)["Hizmet"] == "media_player.media_stop"
+    approve(request_id)
+    assert ha.posts == [("/api/services/media_player/media_stop", {"entity_id": TV})]
+    execution = ConnectorWriteExecution.objects.get()
+    assert execution.status == "succeeded"
+    assert _structured(execution)["state_after"]["state"] == "idle"
+
+
+@pytest.mark.parametrize("service", ["media_play_pause", "media_stop"])
+def test_an_entity_without_the_new_service_is_refused_at_request_time(
+    service,
+    ha,  # noqa: F811
+    enable,
+    workspace,
+    web_client,
+    owner,
+):
+    ha.states[TV] = salon_tv_state()
+    allow(workspace, TV, ["media_pause", "media_play"], label="TV")
+    enable(MANIFEST, workspace)
+    response = _request(web_client, owner, workspace, call(service))
+    assert response.status_code == 400
+    assert not ApprovalRequest.objects.exists()
+    assert ha.posts == []
