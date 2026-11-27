@@ -38,6 +38,50 @@ refuses to launch a child whose lock hash differs from the one compiled
 into it. The child is not inside the signed bundle; Piper is never in
 either (GPL-3.0) — it stays the speech server's own executable.
 
+### 1a. A local server behind a self-signed certificate (the install's CA file)
+
+The child verifies an `https://` Friday against the public CA bundle and
+then checks the credential's `ca_sha256` pin (the DER sha256 of the top
+certificate of the chain the host saw on its pinned connection) before any
+request byte is sent. A server on this Mac behind the loopback Caddy of
+`deploy/docker/compose.local-tls.yml` uses the self-signed certificate
+`deploy/docker/gen-local-tls.sh` writes to `deploy/docker/local-tls/cert.pem`,
+which no public bundle holds, so the handshake is refused until the install
+records that certificate as its CA file:
+
+```bash
+make friday-voice-install FRIDAY_VOICE_CA_FILE=deploy/docker/local-tls/cert.pem
+# or, on an existing install, without reinstalling:
+make friday-voice-ca FRIDAY_VOICE_CA_FILE=deploy/docker/local-tls/cert.pem
+make friday-voice-ca                              # show what is recorded
+make friday-voice-ca FRIDAY_VOICE_CA_FILE=none    # back to the public bundle
+```
+
+`friday-voice ca set` copies the certificate into the install
+(`server-ca.pem`, so the child never reads the checkout, which may sit in a
+TCC-protected folder such as `~/Desktop`), records it in `tls.json` and
+prints each certificate's DER sha256 — for the gen-local-tls certificate
+that is the value the host must send as `ca_sha256`. Both files survive a
+reinstall. A new key (`gen-local-tls.sh --force`) means re-pairing and
+running `make friday-voice-ca` again.
+
+The CA file **replaces** the public bundle for this install; it relaxes
+nothing. Certificate and hostname verification stay on, the pin is still
+checked on every connection (a TLS connection without a pin is refused),
+and there is no option that turns either off. Only the install sets it —
+no protocol frame, environment variable or server reply can. A `tls.json`
+that cannot be read, or a recorded CA file that is missing, unreadable or
+holds no certificate, fails closed: the child logs
+`tls.config_invalid` / `tls.ca_file_unreadable` at start-up and every
+request fails with `tls_ca_file_unreadable` (error earcon, mic released);
+it never falls back to the public bundle.
+
+Note: `Caddyfile.local` forwards only the node's pairing, credential-rotation
+and `/ws/node/v1` paths; the child's voice endpoints
+(`/api/v1/voice/…`, `/api/v1/ai/conversations/…/messages`,
+`/api/v1/auth/nodes/voice-policy`) answer 404 there until they are
+forwarded too.
+
 Check the install with the reference implementations before the host:
 
 ```bash
