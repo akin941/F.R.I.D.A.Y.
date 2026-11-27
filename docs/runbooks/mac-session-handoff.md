@@ -1786,8 +1786,10 @@ merge).
       lists (one per branch): the Sonnet 5 reviews, confirming ADR-018 and
       the CLAUDE.md rule 4 sentence, the defaults (30/min global, 10/min
       per entity, volume maximum 0.6, `volume_up` headroom 0.1, "durdur" →
-      `media_stop`, rate-limit overflow → card), the UI wording, the R2
-      bucket, and the two-week go/no-go record.
+      `media_pause` (owner 2026-11-27; English "stop" stays `media_stop`),
+      rate-limit overflow → card; ADR-018, the rule 4 sentence and these
+      defaults are CONFIRMED by the owner 2026-11-27), the UI wording, the
+      R2 bucket, and the two-week go/no-go record.
 
 ---
 

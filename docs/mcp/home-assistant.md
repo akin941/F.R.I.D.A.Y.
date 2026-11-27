@@ -85,9 +85,10 @@ this table).
   the owner 2026-11-27): Turkish "durdur" means `media_pause`, the same as
   "duraklat" (some TVs close the app on `media_stop`); English "stop"
   means `media_stop` (explicit); "pause" stays `media_pause`; "oynat
-  duraklat" / "play pause" / "toggle play" mean `media_play_pause`. An entity whose ticked services
-  lack the one asked for gets the fixed "izin yok" refusal, never a
-  different service. Vectors: `docs/voice/home-route-vectors.json`.
+  duraklat" / "play pause" / "toggle play" mean `media_play_pause`. An
+  entity whose ticked services lack the one asked for gets the fixed
+  "izin yok" refusal, never a different service. Vectors:
+  `docs/voice/home-route-vectors.json`.
 - **Upgrading:** existing `HomeEntity` rows do not gain the new services;
   the owner ticks them on `/connectors` → Home Assistant (owner step). A
   TV that keeps only `media_pause` is paused by "durdur" and answers

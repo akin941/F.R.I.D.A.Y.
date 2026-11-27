@@ -790,8 +790,9 @@ series as a whole.
 - manifest `version` 2 → 3, new `CALL_SERVICE_PIN` (and `STATES_PIN` if
   its listing changes) in the same commit; `docs/mcp/home-assistant.md`
   and `docs/mcp/allowlist.md` (MCP governance);
-- `connectors.home_phrases`: `STOP` (`durdur`/`stop` → `media_stop`;
-  `durdur` moves off `media_pause`), `PLAY_PAUSE` (`oynat duraklat`,
+- `connectors.home_phrases`: `STOP` (`stop` → `media_stop`; *superseded
+  2026-11-27: `durdur` → `media_pause`, D7 amendment — branch 1a had moved
+  it to `media_stop`*), `PLAY_PAUSE` (`oynat duraklat`,
   `play pause`, `toggle play` → `media_play_pause`); an entity without
   the service → the existing "izin yok" refusal; vectors in
   `docs/voice/home-route-vectors.json`.
@@ -806,16 +807,17 @@ the manifest pin tests, the HA dialog tests updated),
 (the approvals dialog component + its test).
 
 **Tests.** The two services validate with `NoData` and refuse any data;
-a voice "durdur" on an allowlisted TV → a `media_stop` **card**, approve →
+a voice "stop" on an allowlisted TV → a `media_stop` **card**, approve →
 one POST to the fake HA; "oynat duraklat" → `media_play_pause` card whose
 dialog shows "şu an oynatılıyor → duraklatılır"; an entity whose
-`services` lacks `media_stop` → refusal, no card; the pins match
-`tool_schemas()`; the Phase 13 home tests green except the `durdur`
-vector.
+`services` lacks `media_stop` → refusal to "stop", no card; the pins match
+`tool_schemas()`; the Phase 13 home tests green. *(Superseded 2026-11-27:
+"durdur" → `media_pause`, D7 amendment; the branch-1a tests that pinned
+"durdur" → `media_stop` were updated on `fix/p13b-durdur-pause`.)*
 
 **Done when:** the two services exist as ordinary gate-class HA services
-under manifest v3, and the matcher maps "durdur" and "oynat duraklat" to
-them.
+under manifest v3, and the matcher maps "stop" and "oynat duraklat" to
+them ("durdur" → `media_pause` since the 2026-11-27 amendment).
 
 ### 1b. `feat/p13-direct-media-model` — flag, settings, call log, closed set, classifier, rate limits, owner API
 
@@ -1302,8 +1304,9 @@ VPS, DNS, bucket or hardware in tests.
   by the other.
 - **Phase 13 regression.** The Phase 13 home tests (`test_ha_*`,
   `test_home_routes*`, `test_home_hub_e2e.py`, `test_home_voice_e2e.py`,
-  `test_preflight_home*.py`) stay green unchanged, except the `durdur`
-  vector (now `media_stop`) and the manifest pins (v3).
+  `test_preflight_home*.py`) stay green unchanged, except the manifest
+  pins (v3). *(Superseded 2026-11-27: the `durdur` vector stays
+  `media_pause`, D7 amendment; it no longer moves to `media_stop`.)*
 
 ## Risks
 
@@ -1318,7 +1321,7 @@ VPS, DNS, bucket or hardware in tests.
 | Kill switch toggled while a call is in flight | Re-checked under a row lock right before the send; there is no queue; a call already sent completes and is audited |
 | Rate-limit store down | `rate_store_unavailable` → card (never direct) |
 | A lost worker leaves a direct call `running` | Recovery scan → `unknown_outcome`, never re-sent, shown in the calls list |
-| "durdur" changes meaning (pause → stop) | Vectors updated; documented in `docs/mcp/home-assistant.md` and the editor; if an entity lacks `media_stop`, the route refuses ("izin yok") instead of guessing |
+| ~~"durdur" changes meaning (pause → stop)~~ Superseded 2026-11-27: "durdur" stays `media_pause` (D7 amendment); English "stop" is `media_stop` | Vectors updated; documented in `docs/mcp/home-assistant.md` and the editor; if an entity lacks the asked-for service (`media_pause` for "durdur", `media_stop` for "stop"), the route refuses ("izin yok") instead of guessing |
 | The interim Mac sleeps and Friday is down | Accepted by the owner (ADR-017 amendment 1); `home_server_platform` warns; nodes fail closed; backups catch up on wake; stale backups still warn/fail |
 | FileVault off on the interim Mac | Owner attestation only (a container cannot see it); `home_disk_encryption` stays a warning on macOS so it is never mistaken for verified; runbook I1 |
 | Two servers after the move (Mac and PC both running) | Runbook I6 stops and wipes the Mac stack only after a passing drill on the PC; never run both |
@@ -1444,8 +1447,10 @@ row "Sonuç (istek anındaki duruma göre)" ("şu an oynatılıyor →
 duraklatılır" / "şu an duraklatılmış → oynatılır"), and the execution
 precondition refuses the send (`connector_changed`, unsent) when the live
 state now implies the other outcome — a toggle never does the opposite of
-what was approved; `connectors.home_phrases` maps `durdur`/`stop` →
-`media_stop` (was `media_pause`) and `oynat duraklat`/`play pause`/`toggle
+what was approved; `connectors.home_phrases` mapped `durdur`/`stop` →
+`media_stop` (was `media_pause`; *superseded 2026-11-27: `durdur` →
+`media_pause` again, D7 amendment, `fix/p13b-durdur-pause`; only English
+`stop` → `media_stop`*) and `oynat duraklat`/`play pause`/`toggle
 play` → `media_play_pause`; vectors, `docs/mcp/home-assistant.md`,
 `docs/mcp/allowlist.md` and the `/connectors` editor labels updated.
 Nothing is direct (no `home_direct` code exists yet). All of it is tested
@@ -1456,14 +1461,14 @@ credentials, paid calls or hardware.
    APPROVE.
 2. After the merge, on `/connectors` → Home Assistant, tick
    `media_stop` (and `media_play_pause` if wanted) for each TV: existing
-   rows do not gain the new services, so until then "TV'yi durdur" is the
-   fixed "izin yok" refusal (by design, never a pause instead).
+   rows do not gain the new services, so until then English "stop" is the
+   fixed "izin yok" refusal (by design, never a pause instead). "TV'yi
+   durdur" needs only `media_pause` (D7 amendment 2026-11-27).
 3. *(Resolved 2026-11-27: the owner chose "durdur" → `media_pause`, D7
    amendment, `fix/p13b-durdur-pause`; "TV'yi durdur" now needs only
-   `media_pause` ticked. English "stop" still needs `media_stop`.)*
-   Confirm "durdur" → `media_stop` (owner step 3 above); some TVs end the
-   app session on stop — check on the real TV in Mac session M2 and, if it
-   is unwanted, keep `media_stop` unticked for that TV.
+   `media_pause` ticked. English "stop" still needs `media_stop`; some
+   TVs end the app session on stop — if that is unwanted, keep
+   `media_stop` unticked for that TV.)*
 4. Any approval left pending under manifest v2 fails its snapshot check
    after the upgrade (`connector_changed`, nothing sent): re-ask it.
 5. Residual (documented in `docs/mcp/home-assistant.md`): the player can

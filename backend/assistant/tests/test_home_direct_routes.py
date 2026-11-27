@@ -97,6 +97,21 @@ def test_each_direct_service_is_one_call_with_a_fixed_reply(turn, ha, text, serv
     assert HomeDirectCall.objects.get().status == "succeeded"
 
 
+@pytest.mark.parametrize("text", ["TV'yi durdur", "Hey Friday, televizyonu durdur"])
+def test_durdur_directly_pauses_a_flagged_tv_that_allowlists_only_media_pause(turn, ha, home, text):
+    """Regression (owner 2026-11-27, D7 amendment): a flagged TV whose
+    `services` are exactly `["media_pause"]` is paused by "durdur" with one
+    direct call: no card, no refusal, never `media_stop`."""
+    home.tv.services = ["media_pause"]
+    home.tv.save()
+    events, user = turn("voice", text)
+    assert draft_of(events) is None, user.intent_payload
+    assert reply_text(events) == "Salon TV duraklatıldı."
+    assert ha.posts == [("/api/services/media_player/media_pause", {"entity_id": TV})]
+    call = HomeDirectCall.objects.get()
+    assert (call.status, call.service) == ("succeeded", "media_pause")
+
+
 def test_volume_set_reply_names_the_level(turn, ha):
     events, _ = turn("voice", "sesi yüzde 40'a ayarla")
     assert reply_text(events) == "Salon TV: ses %40'a ayarlandı."
