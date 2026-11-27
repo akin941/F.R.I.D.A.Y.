@@ -8,6 +8,8 @@ const WS = "22222222-2222-4222-8222-222222222222";
 const MEDIA = [
   "media_pause",
   "media_play",
+  "media_play_pause",
+  "media_stop",
   "select_source",
   "turn_off",
   "turn_on",
@@ -112,6 +114,17 @@ describe("HomeEntitiesEditor (Phase 13 D11)", () => {
     expect(within(row).queryByText("toggle")).toBeNull();
     expect(within(row).getByRole("checkbox", { name: /turn_on/ })).toBeChecked();
     expect(within(row).getByRole("checkbox", { name: /volume_mute/ })).not.toBeChecked();
+  });
+
+  it("names the Phase 13b play/pause toggle and stop services", async () => {
+    stub([entity()]);
+    render(<HomeEntitiesEditor workspaceId={WS} />);
+    const row = await screen.findByTestId("ha-entity-row");
+    const toggle = within(row).getByRole("checkbox", { name: /media_play_pause/ });
+    expect(toggle.closest("label")).toHaveTextContent("oynat/duraklat");
+    const stop = within(row).getByRole("checkbox", { name: /media_stop/ });
+    expect(stop.closest("label")).toHaveTextContent("durdur");
+    expect(stop).not.toBeChecked();
   });
 
   it("saves ticked services and switches an entity off", async () => {
