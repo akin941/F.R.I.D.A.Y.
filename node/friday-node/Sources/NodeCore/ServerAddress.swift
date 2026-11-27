@@ -8,6 +8,11 @@
 //   WebSocket (`NodeCredential.gatewayURL`), rotation, the B7 voice token
 //   mint and the B8 selftest mint (both through
 //   `NodeRunner.credentialForVoice()`). Nothing else holds an address.
+//   A voice or selftest mint already in flight when the owner re-points
+//   finishes against the old host: benign, it only returns a short-lived
+//   token and never writes the stored address; the next mint uses the new
+//   one. A credential rotation in flight is not dropped: its rotated secret
+//   is merged into the re-pointed credential (`NodeRunner.repoint`).
 // - Only the owner changes it, locally: "Sunucu adresini değiştir" in the
 //   menu, after LocalAuthentication (`.deviceOwnerAuthentication`: Touch ID
 //   or the login password). No server frame reaches this code: `NodeSession`

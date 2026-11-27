@@ -451,7 +451,12 @@ Every refusal changes nothing. A server whose pin differs, then or on any
 later connect, is refused in the TLS handshake, before `hello`: the menu
 shows "Sunucu kimliği değişti — yeniden eşleştirin" and the node keeps
 retrying the same address with backoff (the Linux daemon's behaviour); it
-never falls back to another address. No server frame can change the
+never falls back to another address. A credential rotation in flight
+during a re-point is kept: the rotated secret is merged into the
+re-pointed credential, and the reconnect waits for it (only unpair and
+re-pair drop it). A voice or selftest mint already in flight finishes
+against the old host; that only returns a short-lived token and never
+touches the stored address. No server frame can change the
 address (ADR-013 decision 5): the session has no handle on the credential,
 and address-shaped frames are `unknown_type`.
 

@@ -423,7 +423,9 @@ final class ServerAddressTLSTests: XCTestCase {
         let result = await TLSPinProbe().probe(host: "127.0.0.1", port: port, pin: paired.pin)
         XCTAssertEqual(result, .mismatch)
         waitForConnectionLine(lines)
-        XCTAssertTrue(lines.lines.dropFirst().allSatisfy { $0.hasSuffix("bytes=0") }, "\(lines.lines)")
+        // The server saw the connection, the handshake failed, and not one
+        // application byte arrived (an empty list must not pass).
+        XCTAssertEqual(Array(lines.lines.dropFirst()), ["conn handshake=fail bytes=0"])
     }
 
     func testProbeReportsAnUnreachableServer() async throws {
@@ -471,8 +473,9 @@ final class ServerAddressTLSTests: XCTestCase {
         wait(for: [refused], timeout: 15)
         runner.stop()
         waitForConnectionLine(lines)
-        XCTAssertGreaterThanOrEqual(lines.lines.count, 2)
-        XCTAssertTrue(lines.lines.dropFirst().allSatisfy { $0.hasSuffix("bytes=0") }, "\(lines.lines)")
+        let connections = Array(lines.lines.dropFirst())
+        XCTAssertFalse(connections.isEmpty)
+        XCTAssertTrue(connections.allSatisfy { $0 == "conn handshake=fail bytes=0" }, "\(lines.lines)")
         XCTAssertEqual(try store.load()?.serverURL, credential.serverURL)
     }
 }
