@@ -229,6 +229,7 @@ public final class FileDigests: @unchecked Sendable {
         guard let enumerator = FileManager.default.enumerator(atPath: root) else {
             throw ExecutorError("unreadable: \(root)")
         }
+        let realRoot = ReaderPaths.realpathC(root)
         var lines: [String] = []
         for case let relative as String in enumerator {
             let path = root + "/" + relative
@@ -237,7 +238,14 @@ public final class FileDigests: @unchecked Sendable {
             switch info.st_mode & S_IFMT {
             case S_IFDIR: lines.append("d \(relative)")
             case S_IFLNK:
+                // A link must stay inside the tree (hardening N3): its target
+                // is hashed as part of the tree; a link out of it (a module
+                // swapped for one elsewhere on disk) is refused.
                 let target = (try? FileManager.default.destinationOfSymbolicLink(atPath: path)) ?? ""
+                let resolved = ReaderPaths.realpathC(path)
+                guard SandboxPolicy.under(resolved, realRoot), FileManager.default.fileExists(atPath: resolved) else {
+                    throw ExecutorError("symlink leaves the srt tree: \(relative)")
+                }
                 lines.append("l \(relative) -> \(target)")
             case S_IFREG: lines.append("f \(relative) \(try file(path)) \(info.st_mode & 0o7777)")
             default: lines.append("o \(relative)")
@@ -280,9 +288,18 @@ public final class SrtExecutor: @unchecked Sendable {
     /// unique-id self-test passed): never `granted` for an unmonitorable run.
     public var available: Bool { ProcessTree.selfTestPassed && location.problem() == nil }
 
+    /// Node options for srt's own process (hardening N3):
+    /// `--no-global-search-paths` stops CommonJS `require` from looking in
+    /// `$HOME/.node_modules`, `$HOME/.node_libraries`, `$PREFIX/lib/node`
+    /// and `NODE_PATH`, so only the confirmed prefix's modules load. HOME
+    /// stays the owner's home: the sandboxed command needs it (it is the
+    /// document's `HOME`), and srt reads it only for paths it then denies or
+    /// for its default settings file, which `--settings` replaces.
+    public static let nodeFlags = ["--no-global-search-paths"]
+
     /// The exact argv srt is started with (tests, the README).
     public func argv(settingsPath: String, command: [String]) -> [String] {
-        [location.node, location.cliPath, "--settings", settingsPath, "--"] + command
+        [location.node] + Self.nodeFlags + [location.cliPath, "--settings", settingsPath, "--"] + command
     }
 
     /// Start `spec` under srt; throws (nothing runs) when srt is not usable,
@@ -305,6 +322,12 @@ public final class SrtExecutor: @unchecked Sendable {
                 atPath: settingsPath, contents: bytes, attributes: [.posixPermissions: 0o600])
             else { throw ExecutorError("settings file not written") }
             var environment = sandbox.environment
+            // No module or option from outside the prefix (hardening N3):
+            // a NODE_* variable (NODE_PATH, NODE_OPTIONS --require, …) never
+            // reaches srt's Node; CommandMappings refuses mapping one.
+            guard !environment.keys.contains(where: { $0.hasPrefix("NODE_") }) else {
+                throw ExecutorError("a NODE_* variable would reach srt's Node")
+            }
             environment["CLAUDE_CODE_TMPDIR"] = sandbox.tempDir
             return try SandboxRun.start(
                 executable: location.node, argv: argv(settingsPath: settingsPath, command: sandbox.argv),

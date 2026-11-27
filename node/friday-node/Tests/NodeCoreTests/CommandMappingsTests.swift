@@ -134,6 +134,43 @@ final class CommandMappingsTests: XCTestCase {
     }
 }
 
+/// Hardening N3: nothing from outside the confirmed srt prefix loads.
+final class SrtTreeConfinementTests: XCTestCase {
+    func testASymlinkOutOfTheTreeIsRefusedAndInsideIsHashed() throws {
+        let base = resolvedPath(try makeTempDirectory())
+        defer { try? FileManager.default.removeItem(atPath: base) }
+        let tree = base + "/node_modules"
+        try FileManager.default.createDirectory(atPath: tree + "/pkg/dist", withIntermediateDirectories: true)
+        try Data("a".utf8).write(to: URL(fileURLWithPath: tree + "/pkg/dist/cli.js"))
+        try FileManager.default.createDirectory(atPath: tree + "/.bin", withIntermediateDirectories: true)
+        try FileManager.default.createSymbolicLink(atPath: tree + "/.bin/cli", withDestinationPath: "../pkg/dist/cli.js")
+        let digests = FileDigests()
+        let inside = try digests.tree(tree)
+        // Retargeting the inside link changes the hash.
+        try Data("b".utf8).write(to: URL(fileURLWithPath: tree + "/pkg/dist/other.js"))
+        try FileManager.default.removeItem(atPath: tree + "/.bin/cli")
+        try FileManager.default.createSymbolicLink(atPath: tree + "/.bin/cli", withDestinationPath: "../pkg/dist/other.js")
+        XCTAssertNotEqual(try digests.tree(tree), inside)
+        // A link out of the tree (a module elsewhere on disk) is refused.
+        let outside = base + "/elsewhere.js"
+        try Data("evil".utf8).write(to: URL(fileURLWithPath: outside))
+        try FileManager.default.createSymbolicLink(atPath: tree + "/pkg/dist/dep.js", withDestinationPath: outside)
+        XCTAssertThrowsError(try digests.tree(tree))
+        try FileManager.default.removeItem(atPath: tree + "/pkg/dist/dep.js")
+        try FileManager.default.createSymbolicLink(atPath: tree + "/pkg/dist/dangling.js", withDestinationPath: "../../../nope")
+        XCTAssertThrowsError(try digests.tree(tree), "a dangling or escaping link")
+    }
+
+    func testNodeVariablesCannotBeMapped() {
+        var mappings = CommandMappingsTests.acme()
+        mappings.repos[0].commands[0].envNames = ["NODE_OPTIONS"]
+        XCTAssertThrowsError(try mappings.validate())
+        mappings.repos[0].commands[0].envNames = ["NODE_PATH"]
+        XCTAssertThrowsError(try mappings.validate())
+        XCTAssertEqual(SrtExecutor.nodeFlags, ["--no-global-search-paths"])
+    }
+}
+
 final class ConfirmationDisplayTests: XCTestCase {
     func testAValueCannotForgeALabelLine() {
         let prompt = ConfirmationRenderer.prompt(

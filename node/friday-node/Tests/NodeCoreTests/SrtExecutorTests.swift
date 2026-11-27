@@ -510,7 +510,7 @@ final class RealSrtTests: XCTestCase {
         let executor = SrtExecutor(location: SrtLocation(node: "/opt/node", prefix: "/opt/srt"))
         XCTAssertEqual(
             executor.argv(settingsPath: "/p/settings.json", command: ["uv", "run", "pytest"]),
-            ["/opt/node", "/opt/srt/node_modules/@anthropic-ai/sandbox-runtime/dist/cli.js", "--settings",
+            ["/opt/node", "--no-global-search-paths", "/opt/srt/node_modules/@anthropic-ai/sandbox-runtime/dist/cli.js", "--settings",
              "/p/settings.json", "--", "uv", "run", "pytest"])
         XCTAssertTrue(SrtLocation.nodeIsRecentEnough("v24.14.1"))
         XCTAssertTrue(SrtLocation.nodeIsRecentEnough("v22.12.0"))
