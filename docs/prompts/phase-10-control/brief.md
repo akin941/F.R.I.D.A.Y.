@@ -3342,3 +3342,305 @@ Cut from `integ/phase-13` (contains `bd46cf9`). Spec: M1 above, D5 checks
    Record the result here and tick runbook B5 contract test 3.
 3. M4 (pending owner evaluation): the window latency and close-on-loss
    measurements on the installed app, in the go/no-go table.
+
+## Implementation record — `feat/p10-node-executors` (Mac session M2, runbook B6, implemented 2026-11-27)
+
+Cut from `integ/phase-13` (contains `2f4c428`: B5 and A6). Spec: M2 above,
+D4, D5 checks 21-24, ADR-014; runbook B6; the `srt` section of
+`docs/mcp/dependencies/node-gateway.md` (A6 measurements).
+
+**What landed (`node/friday-node/`).**
+- `Sources/NodeCore/Exec/SandboxPolicy.swift` — `build_sandbox` line for
+  line (normpath, `_under`, the refusals, the stripped environment, the
+  sorted domain set, the limits); `settingsBytes()` is the canonical
+  settings document, `document` the reference `SandboxSpec.document()`.
+- `Sources/NodeCore/Exec/SrtExecutor.swift` — `SrtLocation` (default
+  `/usr/local/bin/node` + `~/Library/Application Support/Friday/srt`,
+  configurable in the policy UI, refused unless the package is 0.0.83 and
+  Node ≥ 22.12) and `SrtExecutor`: `<node> <prefix>/…/dist/cli.js --settings
+  <0600 file in a 0700 dir> -- <argv>`, absolute paths only, the document's
+  stripped environment plus `CLAUDE_CODE_TMPDIR`, its own process group;
+  `SandboxRun`: two pipe pumps, output past 1 MiB counted not kept,
+  non-blocking `terminate()` (SIGTERM to the group, SIGKILL to the tree after
+  5 s), `afterExit` for the session's cleanup.
+- `Sources/NodeCore/Exec/ProcessTree.swift` — `max_processes` and
+  `cpu_seconds` enforced by a process-tree monitor (unique-id lineage; see review round 1 below)
+  that kills the tree; leftovers are killed once the root exits.
+- `Sources/NodeCore/Exec/ChildProcess.swift` — every spawn (git, srt,
+  osascript): argv, explicit environment, stdin /dev/null, stdout/stderr
+  pipes, `POSIX_SPAWN_CLOEXEC_DEFAULT`, default signal dispositions,
+  `addchdir_np`; reaping with `waitid(WNOWAIT)` so a signal never hits a
+  recycled pid; `BoundedRun` (timeout) and `ChildRegistry` (the kill switch
+  kills a helper the session queue waits on).
+- `Sources/NodeCore/Policy/CommandMappings.swift` — the owner's mappings
+  (repo root, local name, `command_kind` → argv, PATH, environment names,
+  network domains, runtime, mode), recipes, bundle ids and srt location:
+  one data-protection keychain item (account `command-mappings`, the B2
+  LocalPolicy pattern), changed only by `CommandMappingsEditor` after
+  `LAContext .deviceOwnerAuthentication`; its `policy` part is exactly the
+  `local_policy.json` document `ActionPolicy.load` (check 22) reads.
+- `Sources/NodeCore/Recipes/` — `Recipe.swift` (the literal, the book, the
+  osascript runner) and one file per recipe (`FinderRevealRepo`,
+  `MusicNextTrack`, `MusicPlayPause`, `SystemVolumeSet`, `TerminalOpenRepo`).
+- `Sources/NodeCore/AX/{AXDriver,Press,TypeText}.swift`,
+  `Sources/NodeCore/Apps/OpenFocus.swift`, and
+  `Sources/NodeCore/Exec/MacActionExecutor.swift` (the app's executor and the
+  TCC probe; availability table in the node README).
+- `App/FridayNode/CommandMappingsMenu.swift` — the "İzinler" section that
+  edits all of the above (each change behind Touch ID / the password,
+  refused before saving when it does not validate) and asks for the
+  Accessibility / Automation grants; `AppDelegate` builds the runner with
+  the mappings store and the `MacActionExecutor` factory; entitlements gain
+  `com.apple.security.automation.apple-events`, Info.plist
+  `NSAppleEventsUsageDescription`.
+- `NodeSession` / `NodeRunner` — the sandbox is generated per run and handed
+  to the executor in `CommandSpec.sandbox`; the runner rebuilds the policy
+  and executor on every mapping change and re-reads the availability every
+  15 s and on menu open (`grant.availability_changed`).
+
+**Contract tests (runbook B6).**
+1. Sandbox parity — PASS. `SandboxPolicyTests`: all 6 vectors of
+   `sandbox.json`, `settings_canonical` byte for byte and the whole
+   `expected` document (canonical JSON); the reference refusals with the same
+   inputs.
+2. Args fuzz families — PASS. `ExecutorContractTests` plays every
+   `cases/v2/v2_args_*` case (12) against the real `MacActionExecutor` wired
+   to spies: the reference verdicts and codes, and no value reaches the
+   interpolator, no script, press, keystroke, open or command runs (a positive
+   control shows the same spies see an approved recipe). `RecipeTests` feeds
+   every recipe's `params` fuzz families (the `test_capabilities_v2.py`
+   families, B5's `Fuzz`) to `RecipeBook.render` and the executor: refused
+   before interpolation (spy interpolator: zero calls; spy runner: nothing
+   run). Escaping tests for every recipe, plus `osascript -e 'return
+   <literal>'` reading hostile values back unchanged (no app addressed).
+3. Escape-policy equivalence — PASS. `node_escape_suite --export-policy
+   /private/tmp/fpb6/esc/reference-policy.json`; `FRIDAY_ESCAPE_REFERENCE=…
+   FRIDAY_ESCAPE_EXPORT=/private/tmp/fpb6/esc/swift-policy.json swift test
+   --filter SandboxPolicyTests` (the Swift documents, built over the
+   reference's own context, equal its 32 documents); `node_escape_suite
+   --check-policy /private/tmp/fpb6/esc/swift-policy.json` → `32/32 covered`.
+
+Also run: `swift test` 178 tests, 0 failures (conformance v1 86/86, v2
+99/99 offline); real `srt` from Swift (`RealSrtTests`, temp dir only): write
+inside OK, write outside / into `.git` / into `/tmp` refused, `denyRead`
+refused, HTTPS refused (proxy 403), `TMPDIR` = the run's private dir, no
+`rg` needed; live conformance on port 8766 against the Conformance build:
+`--protocol 2` 99/99 ALL PASS, `--protocol 1` 86/86 ALL PASS; Conformance
+and Release `xcodebuild` builds; Release `test
+-only-testing:NodeCoreTests/ReleaseHygieneTests` 4/4 (NodeCoreTests compile
+in Release, no `@testable`); `check-release-markers.sh` passes the Release
+binary and refuses the Conformance one; `vendor_protocol.py --check`
+current.
+
+**B5 review findings fixed here.**
+1. git has a 60 s timeout per call, and the kill switch kills a running git
+   (or osascript) from the menu thread (`ChildRegistry`), so it never waits
+   behind it; the session checks the kill switch again after the worktree
+   exists. The real executor's cleanup (worktree removal) runs off the
+   session queue (`afterExit`); "Durdur" and the kill switch never block on
+   the process (SIGKILL is scheduled, not waited for).
+2. git runs with `HOME=/var/empty`, `XDG_CONFIG_HOME=/var/empty`,
+   `GIT_CONFIG_GLOBAL=/dev/null`, `GIT_CONFIG_NOSYSTEM=1`,
+   `GIT_ATTR_NOSYSTEM=1`, `GIT_TERMINAL_PROMPT=0`, `-c core.hooksPath=/dev/null
+   -c core.fsmonitor=false`, and every filter driver of the repo's own config
+   blanked (`-c filter.<d>.smudge= … required=false`); `WorktreeSafetyTests`
+   plants a smudge filter, an fsmonitor command and a post-checkout hook and
+   none runs. What still runs: git reading the repo's local config and the
+   in-tree `.gitattributes` (built-in conversions only).
+3. The kill switch is a `KillSwitch` owned by `NodeRunner` and shared by
+   every session it makes (`testTheKillSwitchOutlivesTheSession`); the menu
+   item follows it on every open.
+4. `repo_path` and the mapping's root must still realpath to the root check
+   22 found, at execute time (commands and repo recipes;
+   `testARepoSwappedForASymlinkAfterTheWindowRunsNothing`), and the srt
+   executor re-checks the working directory; every spawn uses
+   `POSIX_SPAWN_CLOEXEC_DEFAULT` with explicit stdio
+   (`testNoDescriptorOfTheNodeLeaksIntoTheChild`).
+5. Slot values (and the repo name, argv, domains, label, approval prefix) are
+   shown with control, separator and bidi characters as visible escapes
+   (`\n`, `\u{202E}`) and the mark "⟨kontrol karakteri gösterildi⟩"; a value
+   can no longer forge a label line.
+6. Cleanup waits for the process tree (`afterExit`,
+   `testCleanupWaitsUntilTheStoppedCommandExited`); a second window keeps
+   "Durdur" for the running command (`stopInvocationID`).
+
+**A6 review doc fixes** (`node-gateway.md`, `srt` section): finding 2
+reworded (`test_a_real_srt_run` passes with the NPROC limit skipped; the
+escape suite stays 30/32), finding 3 narrowed (`read_ssh` does not escape
+unsandboxed on macOS, `write_home` does), "Use on this side" gives the
+`PATH="<prefix>/node_modules/.bin:$PATH" uv run pytest -m srt` invocation;
+added the Node requirement of the spawner, the Swift invocation, the
+proxy-mediated network, `--settings` always, the ripgrep answer (not needed
+on macOS), the lockfile as the source of the transitive pins, and a new
+finding 4 (srt's implicit writable paths).
+
+**Deviations (with reasons).**
+- Recipes run through `/usr/bin/osascript -e <source>` (argv, timeout,
+  killable), not `NSAppleScript`: NSAppleScript belongs on the main thread,
+  and the session queue must never wait on the main thread (the panel
+  already waits on the session queue). TCC attributes the Apple Events to
+  the app as the responsible process.
+- A repo recipe interpolates the realpath check 22 resolved `repo_path` to
+  (equal to the mapped root), not the raw param; still only as a literal.
+- `max_processes` / `cpu_seconds` are a sampled tree count / CPU sum, not
+  rlimits (A6 finding 2; `posix_spawn` cannot set `RLIMIT_CPU` on the child).
+  A fork burst can overshoot for up to one sample (50 ms since review round 1).
+- `CLAUDE_CODE_TMPDIR` is added to srt's environment (not to the document's
+  `process.env`, which stays the reference's) so the child's `TMPDIR` is the
+  private dir instead of srt's `/tmp/claude`.
+- The app denies its own directories too (`SandboxPolicy.appNodeDirs`:
+  `~/Library/Application Support/Friday`, `~/.config/friday-node`, its
+  caches and container) on top of the reference's; the parity vectors and
+  the export use the reference defaults.
+- `CommandMappings` refuses a PATH without `/bin` or with a relative entry
+  (srt finds `bash` with `which`), an unknown recipe, a malformed bundle id,
+  a relative srt path — beyond the reference's checks.
+- `sandbox_violation` is always `false`: srt 0.0.83 on macOS reports no
+  violation to its parent.
+- Automation availability: a target app that is not running cannot be asked
+  without launching it, so it counts as not granted until it was seen
+  granted in this process.
+- Worktree creation still runs on the session queue (the state machine is
+  synchronous and the offline suite plays it), bounded by the 60 s timeout
+  and killable by the kill switch; teardown moved off the queue for the
+  real executor. `apps.open` waits up to 5 s for LaunchServices.
+- `ax.type_text` inserts through `AXSelectedText`, falling back to
+  keystrokes posted to the target pid only; the element search is bounded
+  (depth 40, 4000 elements) and an ambiguous title is refused.
+- Not fixed here, recorded for M3: srt's implicit writable paths
+  (`node-gateway.md` finding 4: `~/.npm/_logs` is writable inside the
+  sandbox on this Mac). Fixing it is a generator change (`~/.npm` in
+  `denyWrite`) plus regenerated `sandbox.json` vectors, outside B6's
+  byte-parity contract.
+- The optional macOS escape scripts (`limit_output`, `limit_runtime`, the
+  unsandboxed control in `backend/nodes/conformance/escape/`) are left to
+  M3, which needs them for its evidence run; `real_srt` evidence on macOS is
+  unchanged (30/32, not evidence).
+
+### Owner steps (pending) — `feat/p10-node-executors`, recorded 2026-11-27
+
+1. Run the independent Sonnet 5 review of this branch (CLAUDE.md
+   "Reviews") and fix findings until APPROVE.
+2. Build and install the signed app yourself
+   (`FRIDAY_NODE_TEAM_ID=<Personal Team ID> node/friday-node/scripts/build-sign-local.sh --install`),
+   then in the menu "İzinler" (runbook B6 owner checkbox, Phase 10 owner
+   step 5), each change confirmed with Touch ID:
+   1. "srt konumu… (Touch ID ile onaylanır)" once (the line then reads "srt: hazır (0.0.83, dosyalar onaylı)"; after any srt or Node upgrade use "srt dosyalarını yeniden onayla (Touch ID)");
+   2. "Komut deposu ekle…" for each repo, then "Komut ekle / değiştir…":
+      e.g. `test` → `uv` / `run` / `pytest` / `-q` (one per line), PATH
+      including `/bin` (and the directory of `uv`), network domains only if
+      the command needs them;
+   3. enable the wanted recipes and add the bundle ids (apps open/focus/AX
+      may target);
+   4. "Erişilebilirlik iznini iste" → allow FridayNode in System Settings →
+      Privacy & Security → Accessibility; for recipes, open each target app
+      (Finder, Music, Terminal) and use "Otomasyon izinlerini iste", answering
+      the Automation prompt; the menu and the server then show `granted`.
+3. Runbook B5 contract test 3 on the real stack, exactly as listed in the
+   M1 owner steps above (now possible: the repo and its `test` command are
+   mapped), and record it there.
+4. M3: make the escape scripts macOS-capable (`limit_output`,
+   `limit_runtime`, the unsandboxed control), decide the `~/.npm` `denyWrite`
+   follow-up (FU-B6-1 below), then run the ADR-014 evidence run.
+5. M4 measurements on the installed app.
+
+### Review round 1 — `feat/p10-node-executors`, fixed 2026-11-27
+
+The independent review returned REQUEST_CHANGES; every finding is fixed in
+new commits on the branch:
+
+1. **Blocking — entitlement allowlist.** `scripts/build-sign-local.sh`'s
+   EXPECTED now includes `com.apple.security.automation.apple-events` (the
+   comment no longer says "no Apple Events"); `EntitlementAllowlistTests`
+   ties EXPECTED to `App/FridayNode.entitlements` (file keys plus the two
+   Xcode adds) so they cannot drift. The signed build itself is an owner
+   step (not run here).
+2. **setsid escapees.** `ProcessTree` now follows members by unique-id
+   lineage: `p_puniqueid` (PROC_PIDUNIQIDENTIFIERINFO) keeps the forking
+   parent's unique id when the process is re-parented to launchd, and
+   members are learnt from kqueue `NOTE_FORK` events on every member plus a
+   50 ms scan. A per-run environment marker was tried first and dropped:
+   macOS does not show other processes' environments (`ps -E` shows none),
+   so it cannot be read back. `testASetsidEscapeeIsFoundByItsLineage` runs
+   a double-fork + `setsid` escapee 10 times and a three-generation chain
+   10 times; all 20 are killed (run 3 times: 60/60).
+3. **Recycled pids.** Every member is a (pid, unique id, start time)
+   identity, re-read before every kill; the monitor never sends `killpg`;
+   `ChildProcess.signal` sends nothing after the reap; the deferred
+   SIGKILL after `terminate()` is skipped once the run finished
+   (`testAStaleIdentityIsNeverSignalled`).
+4. **AX keystroke fallback.** Right before `typeKeystrokes`, the app must
+   still be frontmost, the same element must have focus (`focus_moved`
+   otherwise) and it must not be secure
+   (`testTheKeystrokeFallbackRechecksFocusRightBeforePosting`); `ax.press`
+   re-checks the secure-field rule before the press too.
+5. **Spoofed apps.** `apps.open` opens only a bundle whose realpath is under
+   `/Applications`, `/System/Applications` or `/System/Library/CoreServices`
+   and whose code signature validates (`SecStaticCodeCheckValidity`, strict);
+   `apps.focus` activates only an instance under those roots
+   (`testOnlyTrustedLocationsWithAValidSignatureOpen`,
+   `testTheSystemSignatureCheckAcceptsAnAppleApp`).
+6. **srt integrity.** Setting or re-confirming the location (Touch ID)
+   stores the sha256 of the Node binary, the whole `node_modules` tree and
+   `package-lock.json` in the keychain item; every start and availability
+   answer recomputes them (cached per file by inode, size, mtime, ctime) and
+   a mismatch is `unsupported`; the menu says that confirming needs Touch ID
+   and offers "srt dosyalarını yeniden onayla (Touch ID)"
+   (`testSrtIsTrustedOnlyAsConfirmed`, on a copy of the prefix: tampering
+   with `cli.js` or adding a file under `node_modules` is refused until
+   re-confirmed). `node --version` is now cached per binary digest.
+7. **`~/.npm/_logs`** is a tracked follow-up (FU-B6-1 below).
+8. **App document vs reference.** `testTheAppDocumentOnlyAddsItsOwnDeniedDirectories`:
+   for every vector the reference `denyRead` is a prefix of the app's, the
+   additions are exactly the app's own directories, and the rest of the
+   document is the reference's byte for byte.
+9. **Recipe availability** stays coarse, now documented in
+   `MacActionExecutor.swift`: the v2 `hello` catalogue has one availability
+   per capability and the recipe catalogue none, so `granted` needs every
+   enabled recipe's target granted (fail closed).
+10. **Stale menu indices.** Every mapping change is keyed by repo root (and
+    command kind) and applied with `CommandMappings.updateRepo/removeRepo/
+    removeCommand/setCommand`, which refuse a target that is gone
+    (`testChangesAreKeyedByRootAndRefusedWhenTheTargetIsGone`).
+- NITs: `ax.*` compare bundle ids by scalars (as open/focus); the panel shows
+  the sandbox mode with a warning for `in_place` (a panel line, so the
+  rendered text stays the reference's); `node --version` re-checked when the
+  binary's digest changes.
+
+Re-run after the fixes: `swift build && swift test` 188 tests, 0 failures
+(offline conformance v1 86/86, v2 99/99; the real-srt tests ran, not
+skipped); Release `xcodebuild` build succeeded, `check-release-markers.sh`
+passes it and refuses the Conformance binary; Release `test
+-only-testing:NodeCoreTests/ReleaseHygieneTests
+-only-testing:NodeCoreTests/EntitlementAllowlistTests` 5/5; Conformance
+build succeeded; escape-policy export/check 32/32 covered; live
+conformance port 8766 `--protocol 2` 99/99 ALL PASS, `--protocol 1` 86/86
+ALL PASS; `vendor_protocol.py --check` current. The ops preflight tests on a
+clean `origin/integ/phase-13` tree (`git archive` of `2f4c428`) fail the
+same 10 tests as on this branch (`test_preflight.py` ×4,
+`test_preflight_home_control.py` ×5, `test_preflight_learning.py` ×1), so
+they are not this branch's.
+
+Residual limits, carried into M3 (also in the node README): an
+intermediate process that forks and exits within microseconds, before its
+fork event is handled and before a scan, is not learnt (nor its children);
+a fork burst can overshoot `max_processes` for one 50 ms sample
+(`kern.maxprocperuid` backstop); CPU time of a process shorter than a sample
+is not counted; microsecond windows remain between the identity check and
+`kill(2)`, between the srt digest check and `node` starting, and between
+the AX re-check and the keystroke post.
+
+### Known follow-ups — `feat/p10-node-executors` (tracked for M3)
+
+- **FU-B6-1 — srt's implicit writable `~/.npm/_logs`.** srt 0.0.83 keeps
+  `~/.npm/_logs` writable inside the sandbox (it exists on the owner's Mac;
+  `node-gateway.md` srt finding 4). Fix: add `~/.npm` to `denyWrite` in
+  `backend/nodes/reference/sandbox.py`, regenerate
+  `backend/nodes/conformance/vectors/sandbox.json`, port to
+  `SandboxPolicy.swift`, and include it in the M3 evidence run. Owner: M3.
+- **FU-B6-2 — the process-tree residuals above** (microsecond intermediate
+  processes, one-sample fork overshoot): measure in the M3 evidence run
+  (fork-bomb and double-fork escape cases) and decide whether they bar the
+  ADR-014 amendment. Owner: M3.
+- **FU-B6-3 — macOS-capable escape scripts** (`limit_output`,
+  `limit_runtime`, the unsandboxed control). Owner: M3.

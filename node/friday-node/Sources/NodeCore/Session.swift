@@ -320,11 +320,22 @@ public final class NodeRunner: @unchecked Sendable {
     private let usage: UsageSource
     private let home: String
     private var policy = LocalPolicy()
-    /// Phase 10: the action policy (check 22) and the executor. Empty and
-    /// `UnavailableExecutor` until runbook B6 adds the command mappings UI
-    /// and the real executors, so every action is advertised `unsupported`.
-    private let actionPolicy: ActionPolicy
-    private let executor: ActionExecutor
+    /// Phase 10: the action policy (check 22) and the executor, both built
+    /// from the owner's command mappings (runbook B6: `CommandMappings`, the
+    /// keychain item the "İzinler" menu edits behind LocalAuthentication).
+    /// Without `makeExecutor` the executor is `UnavailableExecutor`.
+    private var actionPolicy: ActionPolicy
+    private var executor: ActionExecutor
+    private let mappingsStore: CommandMappingsStore?
+    private let makeExecutor: ((CommandMappings) -> ActionExecutor)?
+    /// The owner's local kill switch, for the app's lifetime: every session
+    /// shares it, so the menu and the node agree after a re-pair and while
+    /// unpaired (B5 review finding 3).
+    public let killSwitch = KillSwitch()
+    /// The node's own data directories (denied to every sandboxed command).
+    private let nodeDirs: [String]
+    private var availabilityTimer: DispatchSourceTimer?
+    public static let availabilityRefreshSeconds = 15
     private var credential: NodeCredential?
     private var session: NodeSession?
     private var connection: NodeConnection?
@@ -353,7 +364,8 @@ public final class NodeRunner: @unchecked Sendable {
     public init(
         store: CredentialStore, policyStore: LocalPolicyStore, desktop: DesktopSource, home: String,
         usage: UsageSource = .unsupported, clock: NodeClock = SystemClock(), actionPolicy: ActionPolicy? = nil,
-        executor: ActionExecutor = UnavailableExecutor()
+        executor: ActionExecutor = UnavailableExecutor(), mappingsStore: CommandMappingsStore? = nil,
+        makeExecutor: ((CommandMappings) -> ActionExecutor)? = nil, nodeDirs: [String] = SandboxPolicy.appNodeDirs
     ) {
         self.store = store
         self.policyStore = policyStore
@@ -363,6 +375,61 @@ public final class NodeRunner: @unchecked Sendable {
         self.clock = clock
         self.actionPolicy = actionPolicy ?? .empty(home: home)
         self.executor = executor
+        self.mappingsStore = mappingsStore
+        self.makeExecutor = makeExecutor
+        self.nodeDirs = nodeDirs
+    }
+
+    // MARK: Command mappings (runbook B6)
+
+    /// On `queue`: the check-22 policy and the executor from `mappings`; an
+    /// unreadable or unsafe document maps nothing (fail closed).
+    private func adoptMappings(_ mappings: CommandMappings?) {
+        guard let mappings else {
+            actionPolicy = .empty(home: home)
+            executor = makeExecutor?(CommandMappings()) ?? UnavailableExecutor()
+            return
+        }
+        do {
+            actionPolicy = try mappings.actionPolicy(home: home)
+            executor = makeExecutor?(mappings) ?? UnavailableExecutor()
+        } catch {
+            Self.log.error("command mappings: refused; nothing is mapped")
+            actionPolicy = .empty(home: home)
+            executor = makeExecutor?(CommandMappings()) ?? UnavailableExecutor()
+        }
+    }
+
+    /// The owner changed the command mappings (after LocalAuthentication):
+    /// check 22, the executor and the advertised availability follow at once.
+    public func mappingsChanged(_ mappings: CommandMappings) {
+        queue.async {
+            self.adoptMappings(mappings)
+            self.pushCatalogue()
+        }
+    }
+
+    /// Recompute the catalogue (the TCC grants may have changed in System
+    /// Settings) and tell a connected server what changed.
+    public func refreshAvailability() {
+        queue.async { self.pushCatalogue() }
+    }
+
+    private func pushCatalogue() {
+        guard let session else { return }
+        let (catalogue, readers) = readersAndCatalogue()
+        let frames = session.update(catalogue: catalogue, readers: readers, policy: actionPolicy, executor: executor)
+        if !frames.isEmpty { connection?.sendSessionFrames(frames) }
+    }
+
+    private func startAvailabilityTimer() {
+        guard availabilityTimer == nil else { return }
+        let timer = DispatchSource.makeTimerSource(queue: queue)
+        let every = DispatchTimeInterval.seconds(Self.availabilityRefreshSeconds)
+        timer.schedule(deadline: .now() + every, repeating: every)
+        timer.setEventHandler { [weak self] in self?.pushCatalogue() }
+        availabilityTimer = timer
+        timer.resume()
     }
 
     // MARK: The hook relay (M3)
@@ -454,7 +521,8 @@ public final class NodeRunner: @unchecked Sendable {
         }
     }
 
-    /// The owner clicked "Durdur".
+    /// The owner clicked "Durdur". Stopping never waits on the process
+    /// (SIGTERM now, SIGKILL after the grace, off the queue).
     public func stop(invocationID: String) {
         queue.async {
             guard let session = self.session else { return }
@@ -463,9 +531,14 @@ public final class NodeRunner: @unchecked Sendable {
         }
     }
 
-    /// The owner's local kill switch: closes the open window, stops what
-    /// runs, and refuses every later click until released.
+    /// The owner's local kill switch: engaged at once (before the queue gets
+    /// to it), a blocking helper the queue may be waiting on (git creating a
+    /// worktree, osascript) is killed from here, then the session closes the
+    /// open window, stops what runs, and refuses every later click until
+    /// released.
     public func engageKillSwitch() {
+        killSwitch.engage()
+        ChildRegistry.shared.killAll()
         queue.async {
             guard let session = self.session else { return }
             let frames = session.engageKillSwitch()
@@ -475,10 +548,11 @@ public final class NodeRunner: @unchecked Sendable {
 
     /// Release the local kill switch (the app authenticates the owner first).
     public func releaseKillSwitch() {
-        queue.async { self.session?.releaseKillSwitch() }
+        killSwitch.release()
     }
 
-    public var killSwitchEngaged: Bool { queue.sync { session?.killSwitchEngaged ?? false } }
+    /// Never waits on the session queue.
+    public var killSwitchEngaged: Bool { killSwitch.engaged }
 
     /// Load the credential and connect.
     public func start() {
@@ -490,6 +564,10 @@ public final class NodeRunner: @unchecked Sendable {
                 Self.log.error("local policy: unreadable; everything stays off")
                 self.policy = LocalPolicy()
             }
+            if let mappingsStore = self.mappingsStore {
+                self.adoptMappings(try? mappingsStore.load())
+            }
+            self.startAvailabilityTimer()
             do {
                 self.credential = try self.store.load()
                 Self.log.info("credential: \(self.credential == nil ? "none" : "present", privacy: .public)")
@@ -566,7 +644,7 @@ public final class NodeRunner: @unchecked Sendable {
         let session = NodeSession(
             nodeID: credential.nodeID, pinned: credential.pinnedKeys, catalogue: catalogue,
             readers: readers, clock: clock, nodeVersion: NodeInfo.nodeVersion, osVersion: NodeInfo.osVersion,
-            policy: actionPolicy, executor: executor)
+            policy: actionPolicy, executor: executor, killSwitch: killSwitch, nodeDirs: nodeDirs)
         session.spool = spool
         session.confirmationObserver = confirmationObserver
         return session

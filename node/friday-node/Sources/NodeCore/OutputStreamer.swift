@@ -318,6 +318,16 @@ public final class OutputStreamer {
         return emit(stream, scrubber.push(text))
     }
 
+    /// Bytes the executor counted past the cap but did not keep: they count
+    /// toward `outputBytes` and mark the output `truncated`, exactly as if
+    /// they had been fed (everything past the cap is dropped anyway).
+    public func countDropped(_ count: Int64) -> [OutputPiece] {
+        guard count > 0 else { return [] }
+        outputBytes += count
+        truncated = true
+        return []
+    }
+
     /// Flush both decoders and carries (final result, socket loss or the
     /// runtime cap); returns the last payloads.
     public func finish() -> [OutputPiece] {

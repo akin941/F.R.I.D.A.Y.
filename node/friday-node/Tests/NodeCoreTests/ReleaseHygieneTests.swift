@@ -35,13 +35,59 @@ final class ReleaseHygieneTests: XCTestCase {
         #endif
     }
 
-    /// Whatever the build, the protocol offer is v2 then v1, and the release
-    /// executor runs nothing: every action contract is `unsupported`.
-    func testTheReleaseExecutorRunsNothing() {
+    /// Whatever the build, the protocol offer is v2 then v1, and a node
+    /// without executors runs nothing: every action contract is
+    /// `unsupported`.
+    func testTheExecutorlessNodeRunsNothing() {
         XCTAssertEqual(NodeProtocol.offeredSubprotocols, ["friday-node.v2", "friday-node.v1"])
         let executor = UnavailableExecutor()
         for contract in CapabilityContract.actions {
             XCTAssertEqual(executor.availability(for: contract.name), "unsupported", contract.name)
         }
     }
+
+    /// Runbook B6: the Release app advertises the real executors, each gated
+    /// by its own grant: with no usable srt, no Accessibility grant and no
+    /// Automation grant for an enabled recipe's target, only open/focus
+    /// (which need no TCC grant) are `granted`; check 22 (the owner's local
+    /// mappings) still gates every one of them.
+    func testTheReleaseExecutorIsGatedByTCCAndTheSrtLocation() {
+        let denied = DeniedProbe()
+        let executor = MacActionExecutor(
+            srt: SrtExecutor(location: SrtLocation(node: "/nonexistent/node", prefix: "/nonexistent")),
+            recipesEnabled: ["music.play_pause"], permissions: denied)
+        XCTAssertEqual(executor.availability(for: "repo.command.run"), "unsupported")
+        XCTAssertEqual(executor.availability(for: "applescript.recipe.run"), "not_granted")
+        XCTAssertEqual(executor.availability(for: "ax.press"), "not_granted")
+        XCTAssertEqual(executor.availability(for: "ax.type_text"), "not_granted")
+        XCTAssertEqual(executor.availability(for: "apps.open"), "granted")
+        XCTAssertEqual(executor.availability(for: "apps.focus"), "granted")
+        XCTAssertEqual(ActionPolicy.empty(home: "/Users/o").repos.count, 0)
+    }
+}
+
+/// The signing script's entitlement allowlist and the entitlements file
+/// cannot drift apart (B6 review, blocking finding 1).
+final class EntitlementAllowlistTests: XCTestCase {
+    static let xcodeAdded: Set<String> = ["com.apple.application-identifier", "com.apple.developer.team-identifier"]
+
+    func testTheSigningAllowlistIsTheEntitlementsFilePlusWhatXcodeAdds() throws {
+        let plist = try PropertyListSerialization.propertyList(
+            from: try Repo.data("node/friday-node/App/FridayNode.entitlements"), format: nil)
+        let fileKeys = Set(try XCTUnwrap(plist as? [String: Any]).keys)
+        let script = String(decoding: try Repo.data("node/friday-node/scripts/build-sign-local.sh"), as: UTF8.self)
+        let line = try XCTUnwrap(script.split(separator: "\n").first { $0.hasPrefix("EXPECTED=$'") })
+        let body = line.dropFirst("EXPECTED=$'".count).dropLast()
+        let expected = body.components(separatedBy: "\\n")
+        XCTAssertEqual(expected, expected.sorted(), "the script compares a sorted list")
+        XCTAssertEqual(Set(expected), fileKeys.union(Self.xcodeAdded))
+        XCTAssertTrue(fileKeys.contains("com.apple.security.automation.apple-events"))
+        XCTAssertFalse(fileKeys.contains("com.apple.security.get-task-allow"))
+    }
+}
+
+/// Every TCC answer "no" (the Release hygiene test never asks the real TCC).
+final class DeniedProbe: PermissionProbe {
+    var accessibilityTrusted: Bool { false }
+    func automation(_ bundleID: String, ask: Bool) -> AutomationStatus { .undetermined }
 }

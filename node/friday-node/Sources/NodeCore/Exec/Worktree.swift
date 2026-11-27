@@ -3,9 +3,31 @@
 //
 // `worktree` mode creates a detached `git worktree` at `HEAD` outside the
 // source repo, runs the mapped command there, and deletes it; afterwards
-// `git worktree list` of the source repo is unchanged. Git runs with a
-// minimal environment and hooks disabled, so nothing in the repo runs during
-// setup or teardown.
+// `git worktree list` of the source repo is unchanged.
+//
+// Git is started through `BoundedRun` (posix_spawn, argv only,
+// `POSIX_SPAWN_CLOEXEC_DEFAULT`, stdin /dev/null, stderr /dev/null) with a
+// 60 s timeout per call (the reference's), registered with `ChildRegistry`
+// so the kill switch can stop a hung git from any thread (B5 review findings
+// 1 and 4). It runs with nothing of the owner's configuration and none of
+// the repo's executables (finding 2):
+//
+// - environment: `PATH` (system dirs), `LANG=C`, `HOME=/var/empty`,
+//   `XDG_CONFIG_HOME=/var/empty`, `GIT_CONFIG_GLOBAL=/dev/null`,
+//   `GIT_CONFIG_NOSYSTEM=1`, `GIT_TERMINAL_PROMPT=0`, `GIT_ATTR_NOSYSTEM=1`:
+//   no global, XDG or system config, no prompt;
+// - `-c core.hooksPath=/dev/null` (no hook, e.g. post-checkout),
+//   `-c core.fsmonitor=false` (no fsmonitor daemon);
+// - every filter driver the repo's own config names (`filter.<d>.*`, read
+//   with `git config --local --includes`) is blanked for `worktree add`:
+//   `-c filter.<d>.smudge= -c filter.<d>.clean= -c filter.<d>.process=
+//   -c filter.<d>.required=false`, so a configured smudge (git-lfs or
+//   anything else) never runs during checkout. A driver name git's `-c`
+//   cannot carry (containing `=`) refuses the worktree.
+//
+// What still runs is git itself reading the repo's local config (its
+// non-executable settings) and the in-tree `.gitattributes` (built-in eol
+// and text conversion only: without a driver no external program runs).
 
 import Foundation
 
@@ -15,63 +37,72 @@ public enum Worktree {
     }
 
     static let gitPath = "/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin"
+    public static let timeoutSeconds: Double = 60
 
-    /// Run git with an argv (no shell), the minimal environment and hooks
-    /// disabled; stdout as text. `posix_spawn` + `waitpid` rather than
-    /// Foundation's `Process`, whose `waitUntilExit` polls the run loop and
-    /// adds tens of milliseconds per call (the session runs this on its queue
-    /// between the click and the first output frame).
-    private static func git(_ repoRoot: String, _ args: [String]) throws -> String {
-        let failure = Failure(reason: "git \(args.first ?? "") failed")
+    static let environment: [String: String] = [
+        "PATH": gitPath, "LANG": "C", "HOME": "/var/empty", "XDG_CONFIG_HOME": "/var/empty",
+        "GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_NOSYSTEM": "1", "GIT_TERMINAL_PROMPT": "0",
+        "GIT_ATTR_NOSYSTEM": "1",
+    ]
+    static let safetyOptions = ["-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false"]
+
+    static func gitExecutable() throws -> String {
         guard let executable = gitPath.split(separator: ":").map({ "\($0)/git" })
             .first(where: { FileManager.default.isExecutableFile(atPath: $0) })
         else { throw Failure(reason: "git is not installed") }
-        let argv = [executable, "-c", "core.hooksPath=/dev/null", "-C", repoRoot] + args
-        let environment = [
-            "PATH=\(gitPath)", "LANG=C", "HOME=\((repoRoot as NSString).deletingLastPathComponent)",
-            "GIT_CONFIG_NOSYSTEM=1",
-        ]
-        var pipe: [Int32] = [0, 0]
-        guard Darwin.pipe(&pipe) == 0 else { throw failure }
-        var actions: posix_spawn_file_actions_t?
-        posix_spawn_file_actions_init(&actions)
-        defer { posix_spawn_file_actions_destroy(&actions) }
-        posix_spawn_file_actions_addopen(&actions, 0, "/dev/null", O_RDONLY, 0)
-        posix_spawn_file_actions_adddup2(&actions, pipe[1], 1)
-        posix_spawn_file_actions_addopen(&actions, 2, "/dev/null", O_WRONLY, 0)
-        posix_spawn_file_actions_addclose(&actions, pipe[0])
-        posix_spawn_file_actions_addclose(&actions, pipe[1])
-        var cArgv = argv.map { strdup($0) } + [nil]
-        var cEnv = environment.map { strdup($0) } + [nil]
-        defer {
-            for pointer in cArgv { free(pointer) }
-            for pointer in cEnv { free(pointer) }
+        return executable
+    }
+
+    /// Run git with an argv (no shell), the minimal environment, hooks and
+    /// fsmonitor off, and `extra` `-c` options; stdout as text.
+    static func git(_ repoRoot: String, _ args: [String], extra: [String] = [], allowStatus: Set<Int64> = [0])
+        throws -> String
+    {
+        let executable = try gitExecutable()
+        let argv = ["git"] + safetyOptions + extra + ["-C", repoRoot] + args
+        let outcome: BoundedRun.Outcome
+        do {
+            outcome = try BoundedRun.run(
+                executable: executable, argv: argv, environment: environment, timeout: timeoutSeconds)
+        } catch {
+            throw Failure(reason: "git \(args.first ?? "") could not start")
         }
-        var pid: pid_t = 0
-        let spawned = posix_spawn(&pid, executable, &actions, nil, &cArgv, &cEnv)
-        close(pipe[1])
-        guard spawned == 0 else {
-            close(pipe[0])
-            throw failure
+        if outcome.timedOut { throw Failure(reason: "git \(args.first ?? "") timed out") }
+        guard let code = outcome.exitCode, allowStatus.contains(code) else {
+            throw Failure(reason: "git \(args.first ?? "") failed")
         }
-        var output = Data()
-        var buffer = [UInt8](repeating: 0, count: 4096)
-        while true {
-            let count = read(pipe[0], &buffer, buffer.count)
-            if count > 0 {
-                output.append(contentsOf: buffer[0..<count])
-            } else if count < 0 && errno == EINTR {
-                continue
-            } else {
-                break
+        return String(decoding: outcome.stdout, as: UTF8.self)
+    }
+
+    /// The filter driver names the repo's own config defines.
+    static func filterDrivers(_ repoRoot: String) throws -> [String] {
+        // Exit 1: no such key (no driver at all).
+        let names = try git(
+            repoRoot, ["config", "--local", "--includes", "--name-only", "--get-regexp", "^filter\\."],
+            allowStatus: [0, 1])
+        var drivers: [String] = []
+        for line in names.split(separator: "\n") {
+            let key = String(line)
+            guard key.hasPrefix("filter."), let dot = key.lastIndex(of: "."), dot > key.index(key.startIndex, offsetBy: 6)
+            else { continue }
+            let driver = String(key[key.index(key.startIndex, offsetBy: 7)..<dot])
+            guard !driver.isEmpty else { continue }
+            if !drivers.contains(driver) { drivers.append(driver) }
+        }
+        return drivers
+    }
+
+    /// `-c` options that blank every filter driver of the repo's config.
+    static func blankedFilters(_ repoRoot: String) throws -> [String] {
+        var options: [String] = []
+        for driver in try filterDrivers(repoRoot) {
+            guard !driver.contains("="), !driver.contains("\n") else {
+                throw Failure(reason: "a filter driver name git -c cannot carry")
             }
+            for key in ["smudge", "clean", "process"] { options += ["-c", "filter.\(driver).\(key)="] }
+            options += ["-c", "filter.\(driver).required=false"]
         }
-        close(pipe[0])
-        var status: Int32 = 0
-        while waitpid(pid, &status, 0) < 0 && errno == EINTR {}
-        // Exited normally (low 7 bits 0) with code 0.
-        guard status & 0x7f == 0, (status >> 8) & 0xff == 0 else { throw failure }
-        return String(decoding: output, as: UTF8.self)
+        return options
     }
 
     /// `git worktree list --porcelain` paths of `repoRoot`.
@@ -84,7 +115,14 @@ public enum Worktree {
     public static func create(_ repoRoot: String, base: String) throws -> String {
         let suffix = UUID().uuidString.lowercased().replacingOccurrences(of: "-", with: "").prefix(12)
         let path = (base as NSString).appendingPathComponent("wt-\(suffix)")
-        _ = try git(repoRoot, ["worktree", "add", "--detach", path, "HEAD"])
+        let filters = try blankedFilters(repoRoot)
+        do {
+            _ = try git(repoRoot, ["worktree", "add", "--detach", path, "HEAD"], extra: filters)
+        } catch {
+            // A half-made worktree (timeout, kill switch) is removed at once.
+            remove(repoRoot, path)
+            throw error
+        }
         return ReaderPaths.realpathC(path)
     }
 

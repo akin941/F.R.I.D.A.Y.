@@ -17,10 +17,10 @@
 // - `bundle_id` must be on the local list.
 //
 // Nothing in the protocol reaches it: the type has no setter and the
-// session only calls `resolve`. Editing it (repo roots, argv, network
-// domains, behind LocalAuthentication) is runbook B6
-// (`Policy/CommandMappings.swift`); until then the app's policy is empty and
-// every confirm- and gate-class intent is `not_configured`.
+// session only calls `resolve`. The owner edits it in the app's "İzinler"
+// menu behind LocalAuthentication (runbook B6, `Policy/CommandMappings.swift`,
+// which stores this document in the keychain); with nothing mapped every
+// confirm- and gate-class intent is `not_configured`.
 
 import Foundation
 
@@ -50,6 +50,32 @@ public struct CommandMapping: Equatable, Sendable {
     public let mode: String
 
     public var networkEnabled: Bool { !networkDomains.isEmpty }
+
+    public init(
+        kind: String, argv: [String], path: String = CommandMapping.defaultPath, envNames: [String] = [],
+        networkDomains: [String] = [], maxRuntimeSeconds: Int64 = 900, mode: String = "in_place"
+    ) {
+        self.kind = kind
+        self.argv = argv
+        self.path = path
+        self.envNames = envNames
+        self.networkDomains = networkDomains
+        self.maxRuntimeSeconds = maxRuntimeSeconds
+        self.mode = mode
+    }
+
+    /// The `local_policy.json` shape of one mapping.
+    public var document: JSONValue {
+        [
+            "kind": .string(kind),
+            "argv": .array(argv.map(JSONValue.string)),
+            "path": .string(path),
+            "env_names": .array(envNames.map(JSONValue.string)),
+            "network_domains": .array(networkDomains.map(JSONValue.string)),
+            "max_runtime_seconds": .int(maxRuntimeSeconds),
+            "mode": .string(mode),
+        ]
+    }
 }
 
 public struct RepoMapping: Equatable, Sendable {
