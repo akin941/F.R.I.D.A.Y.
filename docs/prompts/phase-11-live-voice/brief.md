@@ -2553,7 +2553,7 @@ Built on `integ/phase-13` (with A10 `323503e` and the B6 hardening
    `config/tests/test_node_voice_surfaces.py`: 51 passed.
 1. `VoiceConformanceTests`: all 28 host cases offline, none skipped: pass.
 2. Conformance build, `--conformance-voice-exec
-   node/friday-voice/.venv/bin/friday-voice`: 28/28 cases pass, 38 hostile
+   node/friday-voice/.venv/bin/friday-voice`: 28/28 cases pass, 37 hostile
    child processes, every one `"verdict": "pass"` (watchdog: 2 processes,
    child-exit backoff: 9).
 3. `node_conformance_server --external --tls-self-signed --port 8766`,
@@ -2616,10 +2616,49 @@ refuses the Conformance one; `vendor_protocol.py --check`; the opt-in
 - Mute: only an input device that has a mute property is consulted; most
   built-in microphones have none, so treating "no property" as unreadable
   would leave voice muted for good.
-- While the mic is released but an utterance is still playing (mute during
-  a reply), the voice-processing engine keeps running until playback ends
-  (no frame reaches the child: the core gates capture). Releasing while
-  idle stops the engine.
+- Releasing the mic stops the voice-processing engine at once, so a reply
+  still playing (mute during a reply) is cut off with it; the core's pacing
+  goes on and reports `ended` on its clock. (Corrected in the review fixes
+  below: an earlier text said the engine kept running until playback
+  ended; the code never did.)
+- The lock hash gates `uv.lock` only: it shows which dependency set the
+  install was asked for, not what `.venv` (or the child's own sources)
+  contain now; nothing re-hashes the installed tree.
+
+**Review fixes (B7 review, APPROVE with fixes; 2026-11-27).**
+1. `VoiceChildHost.kill()` also SIGKILLs every child still in a graceful
+   stop's grace (`testTheKillSwitchKillsAChildThatIsStopping`).
+2. Quit (`stop(wait: true)`) runs the ladder synchronously and bounded
+   (0.5 s for the exit after stdin EOF, SIGTERM, 0.5 s, SIGKILL to the
+   tree, 0.5 s): a child that ignores `shutdown`, EOF and SIGTERM is gone
+   when it returns (`testQuitKillsAStubbornChildBeforeReturning`). The
+   live runner ends each case the same way with 3 s steps, so a hostile
+   child still in its last settle can write its verdict (with 0.5 s two
+   `any` cases lost theirs to the SIGTERM).
+   Re-run after the fixes: `swift test` 3× (248 tests, 0 failures, 3
+   skipped each), Release build + markers + the 6 Release tests, live host
+   conformance 28/28 (37 processes, all `pass`; the first record's "38" was
+   a miscount), node conformance on 8766: v2 99/99, v1 86/86.
+3. `AVAudioVoiceEngine`: no AVFoundation call under its lock (state is
+   swapped under the lock, the engine driven after); a `CaptureGate`
+   session id drops any tap buffer of a stopped capture, checked before and
+   after conversion (`testTheCaptureGateDropsLateBuffers`, plus a source
+   check of `stopCapture`).
+4. The docs above match the code; the unused `VoiceHostCore.playbackPending`
+   is removed.
+5. Storm: `node/friday-voice/tests/test_storm_rearm.py` (wake storm and the
+   server's 423) shows the child sends no armed or listening `state` after
+   `release_mic(storm)` through time, push-to-talk, a wake, link down/up,
+   every mode, a new credential, an unmute without a mute and an
+   `unreadable` mute, and re-arms on the mute on → off cycle. The child
+   already had the guarantee; no child code changed.
+6. No overlap: the next child is spawned only after every earlier one's
+   exit was seen (a failed child keeps its place in `stopping` through the
+   SIGKILL step); `testARestartNeverOverlapsTheFailedChild`.
+7. A microphone that cannot be opened blocks the mic in the core
+   (`blockMic`, indicator `error`, nothing re-acquires) and is retried
+   after 1 s → 60 s (`testADeniedMicrophoneBacksOff`); the lock-hash note
+   is in `VoiceChildHost.swift` and above.
 
 **Open gap (blocks owner step 4 against the local stack).** `friday-voice
 run` trusts certifi only and takes no CA file, so it cannot reach a server

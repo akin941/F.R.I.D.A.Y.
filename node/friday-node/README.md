@@ -288,6 +288,10 @@ not "Kapalı", the node WebSocket is up, the kill switch is released and the
 node is paired. Before each spawn the installed `uv.lock` must hash to the
 value compiled in from this checkout's `node/friday-voice/uv.lock` (rerun
 `python3 scripts/vendor_protocol.py` after a lock change, then reinstall).
+The hash gates the lock file only, not what `.venv` contains now.
+A restarted child never overlaps the previous one; quit kills a child that
+ignores `shutdown` before the app exits; releasing the mic stops the audio
+engine at once (a reply still playing is cut).
 The child gets `PATH`, `HOME` and `LANG` only; a failed child is released,
 shown `off` and restarted 1 s → 60 s; quitting, WS loss and mode off send
 `shutdown` and kill what is left; the kill switch kills the tree at once.
