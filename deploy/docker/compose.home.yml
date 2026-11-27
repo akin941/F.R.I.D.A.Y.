@@ -8,7 +8,8 @@
 #
 # What it adds (docs/runbooks/home-server-setup.md):
 # - the `home_*` preflight settings into web and worker (backup and drill
-#   thresholds, the full-disk-encryption attestation date);
+#   thresholds, the full-disk-encryption attestation date, the declared
+#   platform and the off-site repository identifier, Phase 13b);
 # - the status directory the host's backup and drill scripts write their two
 #   status files into (deploy/home/friday-backup.sh, friday-restore-drill.sh:
 #   $HOME_BACKUP_HOST_DIR/status/status.json and drill.json), bound
@@ -36,6 +37,13 @@ x-home-env: &home_env
   # The owner's attestation (YYYY-MM-DD) that the host disk is LUKS
   # encrypted (runbook step 1): a container cannot see the host's disks.
   HOME_FDE_CONFIRMED_ON: "${HOME_FDE_CONFIRMED_ON:-}"
+  # Phase 13b D1: the declared host platform (linux | macos; compose.mac.yml
+  # sets macos for the interim server on the MacBook).
+  HOME_SERVER_PLATFORM: "${HOME_SERVER_PLATFORM:-linux}"
+  # Phase 13b D2: the NON-SECRET off-site repository identifier (the host's
+  # RESTIC_REPOSITORY value); `home_backup_fresh` checks the last backup went
+  # there. The bucket credentials themselves never enter a container.
+  HOME_BACKUP_OFFSITE_REPOSITORY: "${HOME_BACKUP_OFFSITE_REPOSITORY:-}"
 
 services:
   web:

@@ -59,7 +59,8 @@ if _MISSING and not REQUIRED:
 
 pytestmark = pytest.mark.django_db(transaction=True)
 
-STATUS_KEYS = {"v", "finished_at", "dump", "bytes", "sha256", "restic_snapshot"}
+# `repository`: Phase 13b D2 (the RESTIC_REPOSITORY the run backed up to).
+STATUS_KEYS = {"v", "finished_at", "dump", "bytes", "sha256", "restic_snapshot", "repository"}
 DRILL_KEYS = {"v", "drilled_at", "dump", "result"}
 _DUMP_NAME = re.compile(r"friday-\d{8}T\d{6}Z\.dump\.age")
 CHAIN_ROWS = 3
@@ -273,6 +274,8 @@ def test_backup_then_drill_round_trip(home, chain, scratch_db, settings):
     assert set(status) == STATUS_KEYS
     assert status["v"] == 1
     assert _DUMP_NAME.fullmatch(status["dump"])
+    # The destination, as configured in the host's restic env file (D2).
+    assert status["repository"] == str(home["repo"])
     dump = home["dir"] / status["dump"]
     raw = dump.read_bytes()
     assert status["bytes"] == len(raw) > 0
@@ -326,6 +329,12 @@ def test_backup_then_drill_round_trip(home, chain, scratch_db, settings):
     assert rows["home_backup_fresh"].status == PASS
     assert status["dump"] in rows["home_backup_fresh"].detail
     assert rows["home_restore_drill_age"].status == PASS
+    # D2: the configured off-site repository is the one the run recorded;
+    # another one fails.
+    settings.HOME_BACKUP_OFFSITE_REPOSITORY = str(home["repo"])
+    assert _rows(settings, home)["home_backup_fresh"].status == PASS
+    settings.HOME_BACKUP_OFFSITE_REPOSITORY = "s3:https://acct.r2.cloudflarestorage.com/friday"
+    assert _rows(settings, home)["home_backup_fresh"].status == FAIL
 
 
 @pytest.mark.parametrize("keep_status_sha", [False, True])

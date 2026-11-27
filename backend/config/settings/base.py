@@ -849,6 +849,20 @@ HOME_DRILL_FAIL_DAYS = env.int("HOME_DRILL_FAIL_DAYS", default=90)
 # encrypted (runbook step 1); a container cannot see the host's disks.
 # Empty = `home_disk_encryption` warns.
 HOME_FDE_CONFIRMED_ON = env("HOME_FDE_CONFIRMED_ON", default="")
+# Phase 13b D1 (ADR-017 amendment 1): the host platform the owner DECLARES
+# (`linux` | `macos`; a container cannot tell Docker Desktop's or OrbStack's
+# Linux VM from a Linux host). `macos` = the interim server on the MacBook:
+# `home_server_platform` warns (Friday is down while the Mac sleeps) and
+# `home_disk_encryption` reads HOME_FDE_CONFIRMED_ON as the FileVault
+# attestation (always a warning there). Any other value fails the row.
+HOME_SERVER_PLATFORM = env("HOME_SERVER_PLATFORM", default="linux")
+# Phase 13b D2 (ADR-017 amendment 2): the NON-SECRET identifier of the
+# off-site restic repository (e.g. `s3:https://<account-id>.r2.
+# cloudflarestorage.com/<bucket>`, the host's RESTIC_REPOSITORY value, never
+# a key). Set = `home_backup_fresh` also requires the last backup's
+# recorded `repository` to equal it. Empty = the age rules only ("off-site
+# pending"). A value with userinfo (`@`) or a query (`?`) fails the row.
+HOME_BACKUP_OFFSITE_REPOSITORY = env("HOME_BACKUP_OFFSITE_REPOSITORY", default="")
 # Phase 13 closeout (brief D15): the `node/friday-node-linux` checkout
 # `linux_node_vendor` hashes against its `vendor.lock`. Empty =
 # `<repo>/node/friday-node-linux` next to the backend; absent (the backend

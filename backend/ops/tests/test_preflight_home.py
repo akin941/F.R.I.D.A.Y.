@@ -1,6 +1,7 @@
 """`manage.py preflight` home-server rows (Phase 13 branch 7, brief D15):
 `home_lan_only`, `home_tls_pin`, `home_backup_fresh`,
-`home_restore_drill_age`, `home_disk_encryption` -- each passes, warns and
+`home_restore_drill_age`, `home_disk_encryption`, Phase 13b's
+`home_server_platform` (on its `linux` default) -- each passes, warns and
 fails with fake status files and a fake resolver (seam `resolve_host`). No
 DNS, no bucket, no node: the only network is a local TLS server on the
 loopback for `home_tls_pin`."""
@@ -32,6 +33,9 @@ HOME_ROWS = [
     "home_backup_fresh",
     "home_restore_drill_age",
     "home_disk_encryption",
+    # Phase 13b D1, here on its `linux` default (test_preflight_home_macos.py
+    # covers `macos`).
+    "home_server_platform",
 ]
 DUMP = "friday-20261125T031000Z.dump.age"
 SHA = "a" * 64
@@ -70,6 +74,8 @@ def home(settings, tmp_path):
     settings.HOME_DRILL_WARN_DAYS = 35
     settings.HOME_DRILL_FAIL_DAYS = 90
     settings.HOME_FDE_CONFIRMED_ON = "2026-11-01"
+    settings.HOME_SERVER_PLATFORM = "linux"
+    settings.HOME_BACKUP_OFFSITE_REPOSITORY = ""
     write_status(tmp_path, hours_ago=3)
     write_drill(tmp_path, days_ago=4)
     return tmp_path
@@ -116,7 +122,7 @@ def _row(name):
 # --- registration -----------------------------------------------------------
 
 
-def test_the_home_checks_are_registered_after_skills_and_report_five_rows(home, resolver):
+def test_the_home_checks_are_registered_after_skills_and_report_six_rows(home, resolver):
     resolver["table"]["web"] = ["172.18.0.5"]
     resolver["table"]["localhost"] = ["127.0.0.1", "::1"]
     names = [name for name, _ in preflight.CHECKS]
@@ -138,6 +144,7 @@ def test_a_configured_home_server_passes_every_row_and_calls_no_model(home, reso
         "home_backup_fresh": PASS,
         "home_restore_drill_age": PASS,
         "home_disk_encryption": PASS,
+        "home_server_platform": PASS,
     }
     assert not ModelUsage.objects.exists()
 
@@ -151,7 +158,12 @@ def test_an_unconfigured_dev_stack_only_warns(settings, resolver):
     settings.HOME_FDE_CONFIRMED_ON = ""
     resolver["table"]["localhost"] = ["127.0.0.1"]
     rows = _rows()
-    assert {name: rows[name].status for name in HOME_ROWS} == dict.fromkeys(HOME_ROWS, WARN)
+    # Everything the owner configures warns; the platform defaults to linux
+    # (Phase 13b D1), which passes.
+    assert {name: rows[name].status for name in HOME_ROWS} == {
+        **dict.fromkeys(HOME_ROWS, WARN),
+        "home_server_platform": PASS,
+    }
     assert "PREFLIGHT_NODE_TLS_URL not set (dev)" in rows["home_lan_only"].detail
     assert "runbook step 8" in rows["home_backup_fresh"].detail
     assert "runbook step 9" in rows["home_restore_drill_age"].detail
