@@ -100,6 +100,13 @@ def test_fill_hashes_then_run(eval_env):
     assert baseline["version"] == 1 and baseline["run_id"] == report["run_id"]
     assert ModelUsage.objects.filter(purpose=replay.PURPOSE_EVAL_STT).count() == 4
 
+    # The scripted STT's real latencies are a few milliseconds, so a 20%
+    # comparison against them is scheduler noise. Give the stored p50s
+    # headroom: this test proves the baseline is read; regressions are
+    # pinned by test_baseline_refused_on_a_regression.
+    baseline_path = eval_env["root"] / "latency-baseline.json"
+    baseline["p50"] = {stage: 60_000 for stage in baseline["p50"]}
+    baseline_path.write_text(json.dumps(baseline), encoding="utf-8")
     out = _call("--stt-only")
     assert f"baseline: run {report['run_id']}" in out
 
