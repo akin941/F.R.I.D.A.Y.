@@ -34,9 +34,9 @@ def restore_ports():
 
 
 def test_the_boot_registers_the_classifier_and_no_executor():
-    from connectors import home_direct
-
-    assert home_ports.direct_classifier() is home_direct.classify
+    # Named, not imported: `tools` must not import `connectors` (ADR-010).
+    classifier = home_ports.direct_classifier()
+    assert (classifier.__module__, classifier.__name__) == ("connectors.home_direct", "classify")
     assert home_ports.direct_executor() is None
 
 
@@ -106,16 +106,12 @@ def test_verdict_and_run_refuse_inconsistent_values():
         DirectRun(outcome="approved")
 
 
-@pytest.mark.django_db
-def test_branch_1b_sends_nothing_through_the_port(monkeypatch):
-    """With no executor, a would-be direct call is never sent: the bridge's
-    send is never reached."""
-    from connectors.bridges import home_assistant as bridge
-
-    sent = []
-    monkeypatch.setattr(bridge, "_call_service", lambda *a, **k: sent.append(a))
-    run = home_ports.run_home_direct(
-        workspace=None, actor=None, message=None, origin="voice", channel="web"
-    )
-    assert run.outcome == home_ports.DIRECT_RUN_NOT_DIRECT
-    assert sent == []
+def test_branch_1b_answers_not_direct_for_every_origin():
+    """With no executor, a would-be direct call is never sent (the send
+    path is the executor's; `connectors/tests/test_home_direct_flag.py`
+    proves no HA request through the real chat view)."""
+    for origin, channel in (("voice", "web"), ("chat", "web"), ("node", "node_voice")):
+        run = home_ports.run_home_direct(
+            workspace=None, actor=None, message=None, origin=origin, channel=channel
+        )
+        assert run.outcome == home_ports.DIRECT_RUN_NOT_DIRECT
