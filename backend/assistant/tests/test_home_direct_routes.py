@@ -79,7 +79,9 @@ def test_web_voice_pauses_the_flagged_tv_with_one_call_and_no_card(turn, ha, cal
     ("text", "service", "data", "reply"),
     [
         ("TV'yi oynat", "media_play", {}, "Salon TV oynatılıyor."),
-        ("TV'yi durdur", "media_stop", {}, "Salon TV durduruldu."),
+        # Owner 2026-11-27: Turkish "durdur" pauses; English "stop" stops.
+        ("TV'yi durdur", "media_pause", {}, "Salon TV duraklatıldı."),
+        ("stop the TV", "media_stop", {}, "Salon TV durduruldu."),
         ("TV'yi oynat duraklat", "media_play_pause", {}, "Salon TV oynatılıyor."),
         ("TV'nin sesini kapat", "volume_mute", {"is_volume_muted": True}, None),
         ("sesi yüzde 40'a ayarla", "volume_set", {"volume_level": 0.4}, None),

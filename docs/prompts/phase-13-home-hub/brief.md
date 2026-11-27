@@ -2069,17 +2069,37 @@ accounts or judgement):
 7. After two weeks on the home server with two PCs: record the go/no-go
    rows.
 
+### Owner confirmations — recorded 2026-11-27
+
+The owner answered in the cloud session on 2026-11-27:
+
+- **CONFIRMED:** the Phase 13 defaults — last-active window 15 min
+  (`NODE_LAST_ACTIVE_WINDOW_SECONDS=900`), ≤ 5 aliases per
+  node/room/entity, ≤ 16 nodes in the HUD panel, backup warn 26 h / fail
+  72 h, restore drill warn 35 d / fail 90 d, `source_list` ≤ 30 entries
+  (owner step 2 of `docs/p13-brief` below).
+- **CONFIRMED:** Turkish "durdur" means `media_pause` (some TVs close the
+  app on `media_stop`); English "stop" stays `media_stop`. This amends
+  Phase 13b D7 (`docs/prompts/phase-13b-home-decisions/brief.md`) and is
+  implemented on `fix/p13b-durdur-pause`; Phase 13's original "durdur" →
+  `media_pause` mapping is therefore back in force.
+- **Still PENDING (not asked):** the Linux node's local-policy
+  confirmation (TTY + typed directory basename) as the stand-in for
+  Touch ID (Q4; owner step 3 of `docs/p13-brief` below).
+
 ### Owner steps (pending) — `docs/p13-brief`, recorded 2026-11-26
 
 1. Start the independent Sonnet 5 plan review of this brief (and of
    ADR-017 and `docs/runbooks/home-server-setup.md`, written in the same
    branch); branch 1 does not start before APPROVE.
-2. Confirm the defaults this brief proposes or change them in the review:
-   last-active window 15 min, ≤ 5 aliases per node/room/entity, ≤ 16 nodes
-   in the HUD panel, backup warn 26 h / fail 72 h, drill warn 35 d / fail
-   90 d, `source_list` ≤ 30 entries.
-3. Confirm the Linux node's local-policy confirmation (TTY + typed
-   basename) as the accepted stand-in for Touch ID (Q4, Risks).
+2. **CONFIRMED by the owner 2026-11-27.** Confirm the defaults this brief
+   proposes or change them in the review: last-active window 15 min, ≤ 5
+   aliases per node/room/entity, ≤ 16 nodes in the HUD panel, backup warn
+   26 h / fail 72 h, drill warn 35 d / fail 90 d, `source_list` ≤ 30
+   entries. (All kept as proposed.)
+3. **Still PENDING (not asked 2026-11-27).** Confirm the Linux node's
+   local-policy confirmation (TTY + typed basename) as the accepted
+   stand-in for Touch ID (Q4, Risks).
 4. Note that nothing in this branch was run against real hardware: the
    runbook's commands are written for Ubuntu LTS and must be exercised on
    the real home PC (M3); fix any step that differs there in a docs

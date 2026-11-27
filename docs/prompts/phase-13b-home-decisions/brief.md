@@ -294,7 +294,8 @@ Concretely, at the end of the phase:
 - **Gate behaviour unchanged.** Any call that is not direct goes through
   exactly the Phase 13 path (draft card → `/approvals` →
   `ConnectorWriteExecution`), byte for byte; the Phase 13 tests stay green
-  (only the `durdur` vector moves to `media_stop`, D7).
+  (only the `durdur` vector moves to `media_stop`, D7; amended 2026-11-27:
+  `durdur` stays `media_pause`, English `stop` is `media_stop`).
 - **Backups stay host operations.** Friday never starts, changes or reads
   a backup and never holds R2 credentials (ADR-017 decision 6); preflight
   reads the status file's non-secret repository identifier.
@@ -492,6 +493,14 @@ the problem.
   `duraklat` stays pause); `PLAY_PAUSE` (TR `oynat duraklat`, EN `play
   pause`, `toggle play`) → `media_play_pause`. Vectors in
   `docs/voice/home-route-vectors.json` updated in the same commit.
+- **Amendment (owner, 2026-11-27):** Turkish `durdur` maps to `PAUSE` →
+  `media_pause` (the same as `duraklat`), overriding the `media_stop`
+  choice above: some TVs close the app on stop. English `stop` stays
+  `STOP` → `media_stop` (explicit), and `media_stop` / `media_play_pause`
+  stay in the code maximum and the direct class. A TV that allowlists only
+  `media_pause` is paused by "durdur". Implemented on
+  `fix/p13b-durdur-pause` (phrase table, vectors, route/direct/e2e tests,
+  a regression test in `test_home_phrases.py` and `test_home_routes.py`).
 - `connectors.home_direct.classify(*, workspace, actor, arguments,
   origin, channel) -> DirectVerdict(direct: bool, reason: str)`. `direct`
   only if **all** hold, otherwise `reason` is the first failing closed
@@ -1335,6 +1344,25 @@ VPS, DNS, bucket or hardware in tests.
   voice, chat and node; recommended: yes, through the matcher only (D7),
   so a typed "TV'yi duraklat" is as fast as the spoken one.
 
+## Owner confirmations — recorded 2026-11-27
+
+The owner answered in the cloud session on 2026-11-27 (details in the
+numbered owner steps below):
+
+- **CONFIRMED:** ADR-018 (the owner chose this class earlier), the
+  CLAUDE.md rule 4 sentence, and the ADR-017 amendment with the TPM
+  residual (owner step 2).
+- **CONFIRMED:** Phase 13b defaults — 30/min global, 10/min per entity,
+  volume maximum 0.6, `volume_up` headroom 0.1, overflow → approval card
+  (owner step 3).
+- **CONFIRMED (amends D7):** "durdur" → `media_pause`, overriding D7's
+  `media_stop` choice; English "stop" stays `media_stop`.
+- **CONFIRMED:** the Phase 13 defaults (15 min last-active, 5 aliases, 16
+  HUD nodes, backup warn 26 h / fail 72 h, restore drill warn 35 d / fail
+  90 d, `source_list` 30) (owner step 4).
+- **Still PENDING (not asked):** the Linux node typed-directory-name
+  confirmation (owner step 5).
+
 ## Owner steps (pending) — recorded 2026-11-26
 
 These cannot happen in a cloud session (they need the owner's hardware,
@@ -1343,19 +1371,22 @@ accounts or judgement):
 1. Before branch 1a: have the independent Sonnet 5 plan review of this
    brief (with ADR-018, the ADR-017 amendment, the CLAUDE.md sentence and
    the runbook changes) reach APPROVE.
-2. Confirm ADR-018 as written (Accepted 2026-11-26) and the one-sentence
-   CLAUDE.md rule 4 exception; confirm the ADR-017 amendment, including
-   the TPM residual.
-3. Confirm or change the Phase 13b defaults: 30/min global, 10/min per
-   entity, volume maximum 0.6, `volume_up` headroom 0.1, "durdur" →
-   `media_stop`, rate-limit overflow → card (Q1).
-4. **Still pending from Phase 13 (not confirmed by the owner):** the
-   proposed defaults — last-active window 15 min, ≤ 5 aliases per
-   node/room/entity, ≤ 16 nodes in the HUD panel, backup warn 26 h / fail
-   72 h, restore drill warn 35 d / fail 90 d, `source_list` ≤ 30 entries.
-5. **Still pending from Phase 13:** the Linux node's local-policy
-   confirmation (TTY + typed directory basename) as the accepted stand-in
-   for Touch ID (Phase 13 Q4).
+2. **CONFIRMED by the owner 2026-11-27.** Confirm ADR-018 as written
+   (Accepted 2026-11-26; the owner chose this class earlier) and the
+   one-sentence CLAUDE.md rule 4 exception; confirm the ADR-017
+   amendment, including the TPM residual.
+3. **CONFIRMED by the owner 2026-11-27, with one change.** The Phase 13b
+   defaults: 30/min global, 10/min per entity, volume maximum 0.6,
+   `volume_up` headroom 0.1, rate-limit overflow → approval card (Q1) —
+   all kept. **Changed:** "durdur" → `media_pause`, not `media_stop`
+   (D7 amendment; English "stop" stays `media_stop`).
+4. **CONFIRMED by the owner 2026-11-27 (from Phase 13):** the defaults —
+   last-active window 15 min, ≤ 5 aliases per node/room/entity, ≤ 16
+   nodes in the HUD panel, backup warn 26 h / fail 72 h, restore drill
+   warn 35 d / fail 90 d, `source_list` ≤ 30 entries.
+5. **Still PENDING from Phase 13 (not asked 2026-11-27):** the Linux
+   node's local-policy confirmation (TTY + typed directory basename) as
+   the accepted stand-in for Touch ID (Phase 13 Q4).
 6. **Still pending from Phase 13:** the node-pairing route through the
    home Caddy (Phase 13 closeout owner step 2) — it now also decides how
    LAN PCs pair with the interim Mac server (runbook I4).
@@ -1427,7 +1458,10 @@ credentials, paid calls or hardware.
    `media_stop` (and `media_play_pause` if wanted) for each TV: existing
    rows do not gain the new services, so until then "TV'yi durdur" is the
    fixed "izin yok" refusal (by design, never a pause instead).
-3. Confirm "durdur" → `media_stop` (owner step 3 above); some TVs end the
+3. *(Resolved 2026-11-27: the owner chose "durdur" → `media_pause`, D7
+   amendment, `fix/p13b-durdur-pause`; "TV'yi durdur" now needs only
+   `media_pause` ticked. English "stop" still needs `media_stop`.)*
+   Confirm "durdur" → `media_stop` (owner step 3 above); some TVs end the
    app session on stop — check on the real TV in Mac session M2 and, if it
    is unwanted, keep `media_stop` unticked for that TV.
 4. Any approval left pending under manifest v2 fails its snapshot check

@@ -81,15 +81,17 @@ this table).
   pre-send read is recorded as `state_before`).
 - `media_stop` stops playback (on many players the same as pause, on some
   it ends the session).
-- **Voice/typed phrases** (`connectors.home_phrases`, D7): "durdur" /
-  "stop" now means `media_stop` (it meant `media_pause` in Phase 13;
-  "duraklat" / "pause" stay `media_pause`); "oynat duraklat" / "play pause"
-  / "toggle play" mean `media_play_pause`. An entity whose ticked services
+- **Voice/typed phrases** (`connectors.home_phrases`, D7 as amended by
+  the owner 2026-11-27): Turkish "durdur" means `media_pause`, the same as
+  "duraklat" (some TVs close the app on `media_stop`); English "stop"
+  means `media_stop` (explicit); "pause" stays `media_pause`; "oynat
+  duraklat" / "play pause" / "toggle play" mean `media_play_pause`. An entity whose ticked services
   lack the one asked for gets the fixed "izin yok" refusal, never a
   different service. Vectors: `docs/voice/home-route-vectors.json`.
 - **Upgrading:** existing `HomeEntity` rows do not gain the new services;
   the owner ticks them on `/connectors` → Home Assistant (owner step). A
-  TV that keeps only `media_pause` answers "durdur" with the refusal.
+  TV that keeps only `media_pause` is paused by "durdur" and answers
+  English "stop" with the refusal.
   Approvals pending under v2 fail their snapshot check after the upgrade
   (`connector_changed`, nothing sent), as for every manifest bump.
 
