@@ -30,14 +30,18 @@ from assistant.services import (
     build_gateway_stream,
     classify_intent,
     create_conversation,
+    is_code_home_direct,
     mark_conversation_private,
     prepare_connector_read,
     rename_conversation,
+    route_typed_home_direct,
+    run_direct_turn,
     select_turn_skill,
     split_skill_prefix,
     stream_assistant_reply,
+    strip_provenance,
 )
-from assistant.wake_routes import route_voice_turn, static_reply_stream
+from assistant.wake_routes import HOME_ROUTE_NAME, route_voice_turn, static_reply_stream
 from core.channels import (
     CHANNEL_NODE_VOICE,
     CHANNEL_WEB,
@@ -341,13 +345,28 @@ class ConversationMessageListView(APIView):
         # phrase (or an owner alias) is answered by the route -- no
         # `router.intent` call; a miss (and every typed turn) falls through
         # to the normal router.
+        origin_node_id = _origin_node_id(request, channel)
         routed = route_voice_turn(
             conversation,
             actor=request.user,
             content=content,
             channel=channel,
             input_mode=input_mode,
+            origin_node_id=origin_node_id,
         )
+        # Phase 13b D10 (ADR-018): a typed web turn the home matcher resolves
+        # to one draft that ADR-018 admits as direct is `home_direct` -- no
+        # `router.intent` call. Anything else (None) goes to the router.
+        typed_direct = None
+        if routed is None:
+            typed_direct = route_typed_home_direct(
+                conversation,
+                actor=request.user,
+                content=content,
+                channel=channel,
+                input_mode=input_mode,
+                node_id=origin_node_id,
+            )
         # Phase 12 D15: a `skill.<name>` route or an explicit `/skill <name>`
         # prefix names the turn's skill (no `skills.match` call). The prefix
         # is stripped from what the router and the completion see; the
@@ -366,11 +385,13 @@ class ConversationMessageListView(APIView):
         # transcript or node text.
         call_context = ToolCallContext(
             source_text=turn_content,
-            origin_node_id=_origin_node_id(request, channel),
+            origin_node_id=origin_node_id,
             input_mode=input_mode,
         )
         if routed is not None and routed.classification is not None:
             classification = dict(routed.classification)
+        elif typed_direct is not None:
+            classification = typed_direct
         else:
             classification = classify_intent(
                 conversation,
@@ -385,6 +406,15 @@ class ConversationMessageListView(APIView):
         # ADR-015 decision 1 (Phase 6 A6): a voice turn reads and proposes
         # only -- capped here, before any of the turn's paths run.
         classification = apply_voice_capability_cap(classification, input_mode=input_mode)
+        # Phase 13b D10a lock 2: a `home_direct` classification runs only
+        # with the code-only provenance marker (by identity); a router
+        # result, a JSON round trip or any hand-built dict without it is
+        # plain chat. The marker is never persisted.
+        home_direct = classification.get("intent") == Message.Intent.HOME_DIRECT
+        if home_direct and not is_code_home_direct(classification):
+            classification = {"intent": Message.Intent.CHAT, "intent_payload": {}}
+            home_direct = False
+        classification = strip_provenance(classification)
 
         # Phase 5 branch 4 (brief D4/D5): at most one connector read per
         # turn, run and fenced here -- and, for a personal read, the
@@ -413,7 +443,13 @@ class ConversationMessageListView(APIView):
         async_started = connector_turn is not None and connector_turn.async_handle is not None
         if target_reply is None and connector_turn is not None and not async_started:
             target_reply = connector_turn.reply_text or None
-        if routed is not None and routed.reply_text is not None:
+        if home_direct:
+            # Phase 13b D10: the direct call runs below, once the user
+            # message is saved (the executor re-resolves its text); the
+            # reply is Friday's fixed template -- no gateway call.
+            gateway_stream, usage_holder = None, {}
+            memory_ids, chunk_ids, overlay_source_workspaces = [], [], {}
+        elif routed is not None and routed.reply_text is not None:
             # The route's stored text is the reply: no gateway call, no
             # ModelUsage (there is no call), no context assembly.
             gateway_stream, usage_holder = static_reply_stream(routed.reply_text), {}
@@ -456,6 +492,10 @@ class ConversationMessageListView(APIView):
                 )
             )
         route_name = routed.route if routed is not None else None
+        if typed_direct is not None and home_direct:
+            # The typed home step answered: recorded as the home route (a
+            # reply with no model call, so no memory extraction job).
+            route_name = HOME_ROUTE_NAME
         # Phase 10 D13: a node action draft carries its source message's id
         # (the trust check's evidence anchor), so the row's id is fixed
         # first and written into the frozen intent payload.
@@ -479,6 +519,28 @@ class ConversationMessageListView(APIView):
             input_mode=input_mode,
             route=route_name,
         )
+        if home_direct:
+            # ADR-018: the one direct call (D10 steps 1-6 in the executor,
+            # which re-resolves this saved message's text and re-runs the
+            # classifier first). Its outcome finalises this message's intent:
+            # `home_direct` (attempted), or the gate-class card (nothing sent).
+            direct_turn = run_direct_turn(
+                classification,
+                workspace=conversation.workspace,
+                actor=request.user,
+                message=user_message,
+                channel=channel,
+                input_mode=input_mode,
+                node_id=origin_node_id,
+            )
+            classification = {
+                "intent": direct_turn.intent,
+                "intent_payload": direct_turn.intent_payload,
+            }
+            user_message.intent = direct_turn.intent
+            user_message.intent_payload = direct_turn.intent_payload
+            user_message.save(update_fields=["intent", "intent_payload", "updated_at"])
+            gateway_stream = static_reply_stream(direct_turn.reply)
         if async_started:
             create_followup(
                 conversation=conversation,
@@ -516,6 +578,11 @@ class ConversationMessageListView(APIView):
                 "tool_name": classification["intent_payload"]["tool_name"],
                 "payload": classification["intent_payload"]["payload"],
             }
+            direct_reason = classification["intent_payload"].get("direct_reason")
+            if direct_reason:
+                # Phase 13b D7: why this home card is not direct (a closed
+                # code; the card shows its text).
+                draft_event["direct_reason"] = direct_reason
             if classification["intent_payload"]["tool_name"] == NODE_ACTION_TOOL:
                 # D8/D13: a confirm-class card calls the node actions
                 # endpoint, a gate-class card `POST /approvals`; either way

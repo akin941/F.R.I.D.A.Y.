@@ -30,9 +30,12 @@ Phase 13b (ADR-018, brief D7/D10, branch 1b) adds the direct-media ports:
   (`connectors.home_direct.classify`). Read-only: it never sends, never
   creates a row and never spends rate-limit quota.
 - `register_direct_executor(fn)`: `fn(*, workspace, actor, message, origin,
-  channel, node_id) -> DirectRun` -- the single direct send (branch 1c).
-  **Nothing registers an executor in branch 1b**, so every
-  `run_home_direct` answers `not_direct` and sends nothing.
+  channel, node_id) -> DirectRun` -- the single direct send
+  (`connectors.home_direct.execute`, registered by `ConnectorsConfig.ready`
+  since branch 1c). It takes the saved user message, never arguments: it
+  re-resolves the owner's stored words first (D10a lock 3). Without a
+  registered executor every `run_home_direct` answers `not_direct` and
+  sends nothing.
 
 An unregistered or raising classifier/executor is **never direct**
 (`not_available`): the turn stays exactly the gate-class Phase 13 turn.
@@ -205,12 +208,24 @@ NOT_AVAILABLE = DirectVerdict(direct=False, reason=DIRECT_NOT_AVAILABLE)
 
 @dataclass(frozen=True)
 class DirectRun:
-    """The executor's answer (branch 1c fills `call_id` / `reply`)."""
+    """The executor's answer (branch 1c).
+
+    - `sent`: the one send was attempted; `call_id` names the call record,
+      `reply` is Friday's fixed text for its outcome (success, refused by
+      Home Assistant, or "may have gone").
+    - `not_direct`: nothing was sent; `reason` is the closed code. When
+      `arguments` is set the turn becomes the gate-class `tool_name` card
+      with exactly those arguments (the executor's own re-resolution of the
+      owner's words, never the classification's payload); otherwise `reply`
+      (the matcher's current ask or refusal) answers with no card.
+    - `error`: the executor raised; see `run_home_direct`."""
 
     outcome: str
     reason: str = ""
     reply: str = ""
     call_id: str = ""
+    tool_name: str = ""
+    arguments: dict = field(default_factory=dict)
 
     def __post_init__(self):
         if self.outcome not in DIRECT_RUN_OUTCOMES:
@@ -272,11 +287,11 @@ def direct_executor():
 
 def run_home_direct(*, workspace, actor, message, origin, channel, node_id=None):
     """The registered executor's result; `not_direct` / `not_available`
-    (nothing sent) when none is registered -- the case for all of branch
-    1b. An executor that raises or answers anything but a `DirectRun` is
-    reported `error` / `executor_failed`: it may have reached the send, so
-    the caller must not substitute a card (ADR-018 decision 9); its own
-    `HomeDirectCall` row is the record."""
+    (nothing sent) when none is registered. An executor that raises or
+    answers anything but a `DirectRun` is reported `error` /
+    `executor_failed`: it may have reached the send, so the caller must not
+    substitute a card (ADR-018 decision 9); its own `HomeDirectCall` row is
+    the record."""
     fn = direct_executor()
     if fn is None:
         return DirectRun(outcome=DIRECT_RUN_NOT_DIRECT, reason=DIRECT_NOT_AVAILABLE)

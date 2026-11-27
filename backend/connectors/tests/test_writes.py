@@ -182,7 +182,11 @@ def test_lost_worker_is_unknown_outcome_and_never_resent(
         started_at=timezone.now() - timedelta(minutes=10),
         lease_expires_at=timezone.now() - timedelta(minutes=1),
     )
-    assert recover_stale_connector_writes() == {"redispatched": 0, "unknown_outcome": 1}
+    assert recover_stale_connector_writes() == {
+        "redispatched": 0,
+        "unknown_outcome": 1,
+        "direct_unknown_outcome": 0,
+    }
     execution.refresh_from_db()
     assert execution.status == "unknown_outcome"
     assert execution.error_type == "worker_lost"

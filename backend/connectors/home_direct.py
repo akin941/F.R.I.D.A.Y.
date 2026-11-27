@@ -1,27 +1,32 @@
 """ADR-018's direct-execute home media class: the closed set, the classifier,
-the rate windows, the volume rules and the owner's settings (Phase 13b
-brief D4-D9, D11; branch 1b).
+the rate windows, the volume rules, the executor and the owner's settings
+(Phase 13b brief D4-D11; branches 1b and 1c).
 
-This is the **single** exception to CLAUDE.md rule 4. Branch 1b only stores
-and admits: it holds the closed allowlist and its digest, the per-entity
-eligibility rule `HomeEntity.save()` enforces, `classify` (the D7 order,
-read-only), the D8 rate windows (`peek_direct_calls` for the classifier,
-`count_direct_call` for the executor's single increment right before the
-send), the D9 volume rules on a given state, the owner-web settings service
-and the calls selector. **No executor exists yet** (branch 1c): nothing in
-this module sends a request to Home Assistant or writes a `HomeDirectCall`,
-and `tools.home_ports.run_home_direct` therefore answers "not direct".
+This is the **single** exception to CLAUDE.md rule 4. It holds the closed
+allowlist and its digest, the per-entity eligibility rule
+`HomeEntity.save()` enforces, `classify` (the D7 order, read-only), the D8
+rate windows (`peek_direct_calls` for the classifier, `count_direct_call`
+for the executor's single increment right before the send), the D9 volume
+rules, the owner-web settings service, the calls selector and -- branch 1c
+-- `execute`, the one direct send (D10 steps 1-6 after the D10a
+re-resolution of the owner's stored words), plus `mark_lost_direct_calls`
+(the recovery scan: a lost `running` call -> `unknown_outcome`, never
+re-sent).
 
 Writers: `HomeDirectSettings` is created and changed only by
 `get_settings` / `update_settings` here (installation owner, web channel,
 personal workspace, audited `ha.direct_settings_changed`); the `direct`
-flag only by `connectors.home_entities`. No tool, wake route, schedule,
-probe, manifest, node capability or management command reaches either
+flag only by `connectors.home_entities`; `HomeDirectCall` only by
+`execute` (through `_start_call` / `_finalize_call`) and the recovery scan.
+No tool, wake route, schedule, probe, manifest, node capability or
+management command reaches any of them
 (`connectors/tests/test_ha_allowlist_gate.py` walks the registries).
 """
 
 import hashlib
+import logging
 from dataclasses import dataclass
+from datetime import timedelta
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 
 from django.conf import settings
@@ -29,6 +34,7 @@ from django.core.cache import cache
 from django.db import transaction
 from django.utils import timezone
 
+from audit.models import AuditLog
 from audit.services import record_audit
 from connectors.bridges import home_assistant as bridge
 from connectors.models import (
@@ -37,12 +43,15 @@ from connectors.models import (
     HomeDirectSettings,
     HomeEntity,
 )
+from connectors.reads import canonical_json
 from connectors.services import ConnectorPermissionDenied, ConnectorServiceError
 from core import unattended
 from core.channels import CHANNEL_NODE_VOICE, CHANNEL_WEB
 from core.owner_web import OwnerWebRequired, require_owner_web
 from tools.home_ports import DirectVerdict
 from workspaces.models import Workspace
+
+logger = logging.getLogger(__name__)
 
 UNSET = object()
 
@@ -120,6 +129,11 @@ RATE_STORE_UNAVAILABLE = "rate_store_unavailable"
 # Executor-only (branch 1c, D10a lock 3): the stored text no longer resolves
 # to the classification's arguments. Not one of `classify`'s conditions.
 PROVENANCE_MISMATCH = "provenance_mismatch"
+# Executor-only (branch 1c, D10 step 5): the pre-send read of the entity
+# refused the call (gone from Home Assistant, unreadable, the arguments no
+# longer admitted) or the send itself was refused before anything reached
+# the transport. Nothing was sent; the turn becomes the card.
+TARGET_UNAVAILABLE = "target_unavailable"
 
 CLASSIFY_REASONS = (
     UNATTENDED,
@@ -139,7 +153,7 @@ CLASSIFY_REASONS = (
     RATE_LIMITED,
     RATE_STORE_UNAVAILABLE,
 )
-EXECUTOR_REASONS = (PROVENANCE_MISMATCH,)
+EXECUTOR_REASONS = (PROVENANCE_MISMATCH, TARGET_UNAVAILABLE)
 REASONS = frozenset(CLASSIFY_REASONS + EXECUTOR_REASONS)
 
 # The short Turkish text the card shows after "Doğrudan değil: " (D7).
@@ -161,6 +175,7 @@ REASON_TEXT = {
     RATE_LIMITED: "dakikalık sınır aşıldı",
     RATE_STORE_UNAVAILABLE: "sınır sayacı şu an kullanılamıyor",
     PROVENANCE_MISMATCH: "istek söylediğinle eşleşmiyor",
+    TARGET_UNAVAILABLE: "cihaz şu an doğrulanamadı",
 }
 
 # The state of the class for the owner's settings view and the HUD (D6).
@@ -573,6 +588,481 @@ def classify(
     return DirectVerdict(direct=True, needs_live_volume=needs_live_volume)
 
 
+# --- D10/D10a: the executor (branch 1c) --------------------------------------
+
+# `assistant.Message.Intent.HOME_DIRECT` (this app never imports `assistant`).
+HOME_DIRECT_INTENT = "home_direct"
+UNATTENDED_EFFECT = "ha_direct_call"
+
+# Fixed Turkish reply templates (Friday's text, never Home Assistant's).
+FALLBACK_REPLY = "Bunu doğrudan yapmadım ({reason}); onay kartı ekranda."
+UNKNOWN_OUTCOME_REPLY = "{name} yanıt vermedi; komut gitmiş olabilir, tekrar denemedim."
+REFUSED_REPLY = "Home Assistant {name} komutunu reddetti; tekrar denemedim."
+CLAMPED_REPLY = "Ses en fazla %{maximum} olabilir; %{maximum}{suffix} ayarladım."
+_DONE_REPLIES = {
+    "media_play": "{name} oynatılıyor.",
+    "media_pause": "{name} duraklatıldı.",
+    "media_stop": "{name} durduruldu.",
+    "volume_up": "{name}: ses açıldı.",
+    "volume_down": "{name}: ses kısıldı.",
+}
+_PLAY_PAUSE_REPLIES = {
+    "playing": "{name} oynatılıyor.",
+    "paused": "{name} duraklatıldı.",
+}
+PLAY_PAUSE_REPLY = "{name}: oynat/duraklat gönderildi."
+VOLUME_SET_REPLY = "{name}: ses %{percent}{suffix} ayarlandı."
+VOLUME_STEP_REPLY = "{name}: ses {verb} (%{percent})."
+MUTE_REPLY = "{name}: ses kapatıldı."
+UNMUTE_REPLY = "{name}: sessiz mod kapatıldı."
+
+# The Turkish dative suffix after a percentage, by its last spoken word.
+_DATIVE_UNITS = {1: "'e", 2: "'ye", 3: "'e", 4: "'e", 5: "'e", 6: "'ya", 7: "'ye", 8: "'e", 9: "'a"}
+_DATIVE_TENS = {
+    0: "'a",
+    1: "'a",
+    2: "'ye",
+    3: "'a",
+    4: "'a",
+    5: "'ye",
+    6: "'a",
+    7: "'e",
+    8: "'e",
+    9: "'a",
+}
+
+
+def dative_suffix(number):
+    """`'a` / `'e` / `'ya` / `'ye` for an integer percentage 0-100 ("%60'a",
+    "%50'ye", "%100'e")."""
+    number = int(number)
+    if number == 100:
+        return "'e"
+    if number % 10:
+        return _DATIVE_UNITS[number % 10]
+    return _DATIVE_TENS[(number // 10) % 10]
+
+
+def _percent(level):
+    return int((Decimal(str(level)) * 100).quantize(Decimal(1), rounding=ROUND_HALF_UP))
+
+
+# The call's `ConnectorError` codes -> `ConnectorWriteExecution.ErrorType`.
+_ERROR_TYPES = {
+    "pin_mismatch": "pin_mismatch",
+    "tool_missing": "pin_mismatch",
+    "not_configured": "not_configured",
+    "reconnect_required": "not_configured",
+    "timeout": "timeout",
+    "transport_error": "transport_error",
+    "protocol_error": "protocol_error",
+    "target_missing": "target_missing",
+    "not_allowed": "connector_changed",
+    "scope_mismatch": "connector_changed",
+}
+# An unsent failure of these codes means the connector itself is not usable
+# (the card will say so); any other unsent failure is the target's.
+_UNAVAILABLE_CODES = frozenset({"pin_mismatch", "tool_missing", "not_configured"})
+
+
+def _fallback(reason, *, arguments=None, reply=None):
+    """Nothing was sent: the turn becomes the gate-class card with
+    `arguments` (when given) or answers `reply` with no card."""
+    from tools.home_ports import DIRECT_RUN_NOT_DIRECT, DirectRun
+
+    if arguments:
+        text = reply or FALLBACK_REPLY.format(reason=REASON_TEXT.get(reason, reason))
+        return DirectRun(
+            outcome=DIRECT_RUN_NOT_DIRECT,
+            reason=reason,
+            reply=text,
+            tool_name=GATE,
+            arguments=dict(arguments),
+        )
+    return DirectRun(outcome=DIRECT_RUN_NOT_DIRECT, reason=reason, reply=reply or "")
+
+
+def _same_node(a, b):
+    return (str(a) if a else None) == (str(b) if b else None)
+
+
+def _provenance_refusal(*, workspace, actor, message, origin, channel, node_id):
+    """D10a lock 3: `(resolution, None)` when the saved message is this
+    turn's own `home_direct` message and the owner's stored words still
+    resolve to exactly its arguments; else `(resolution or None, detail)`.
+    `detail` is a closed token (never the arguments' text)."""
+    from connectors.home_phrases import resolve_home_command
+    from tools.home_ports import OUTCOME_DRAFT
+
+    if (
+        message is None
+        or getattr(message, "role", None) != "user"
+        or getattr(message, "intent", None) != HOME_DIRECT_INTENT
+        or str(getattr(message, "workspace_id", "")) != str(workspace.pk)
+        or str(getattr(message, "created_by_id", "")) != str(getattr(actor, "pk", ""))
+        or getattr(message, "channel", None) != channel
+    ):
+        return None, "message"
+    payload = message.intent_payload if isinstance(message.intent_payload, dict) else {}
+    if payload.get("origin") != origin or not _same_node(payload.get("node_id"), node_id):
+        return None, "origin"
+    resolution = resolve_home_command(workspace=workspace, actor=actor, text=message.content)
+    if resolution is None:
+        return None, "resolution_none"
+    if resolution.outcome != OUTCOME_DRAFT:
+        return resolution, f"resolution_{resolution.outcome}"
+    if resolution.tool_name != payload.get("tool_name") or resolution.tool_name != GATE:
+        return resolution, "tool"
+    if canonical_json(resolution.arguments) != canonical_json(payload.get("arguments")):
+        return resolution, "arguments"
+    return resolution, None
+
+
+def _record_provenance_refused(*, actor, workspace, message, origin, detail):
+    record_audit(
+        action="ha.direct_provenance_refused",
+        actor=actor,
+        workspace=workspace,
+        metadata={
+            "source_message_id": str(message.pk) if getattr(message, "pk", None) else None,
+            "origin": origin,
+            "reason": PROVENANCE_MISMATCH,
+            "detail": detail,
+        },
+    )
+
+
+def _gate(workspace):
+    """`(manifest, policy, binding)` of `ha_call_service`, or Nones."""
+    from connectors.manifest import STATUS_ACTIVE, get_manifest
+    from connectors.services import enabled_binding, tool_available
+
+    manifest = get_manifest("home_assistant")
+    if manifest is None or manifest.status != STATUS_ACTIVE:
+        return None, None, None
+    policy = manifest.get_tool(GATE)
+    binding = enabled_binding(workspace, manifest.name)
+    if policy is None or not tool_available(binding, policy):
+        return None, None, None
+    return manifest, policy, binding
+
+
+def _state_summary(state):
+    """What a call row keeps of a live state: the state token and the two
+    volume attributes -- no names, titles or other Home Assistant text."""
+    if not isinstance(state, dict):
+        return None
+    attributes = state.get("attributes") if isinstance(state.get("attributes"), dict) else {}
+    summary = {"state": str(state.get("state", ""))[:40]}
+    level = live_volume(state)
+    if level is not None:
+        summary["volume_level"] = float(level)
+    muted = attributes.get("is_volume_muted")
+    if isinstance(muted, bool):
+        summary["is_volume_muted"] = muted
+    return summary
+
+
+def _start_call(*, workspace, actor, entity, arguments, requested, origin, node_id, message):
+    """The single creation of a call record, `running`, committed before the
+    send (so a lost worker leaves a row the recovery scan finalises)."""
+    return HomeDirectCall.objects.create(
+        workspace=workspace,
+        home_entity=entity,
+        entity_id=arguments["entity_id"],
+        service=arguments["service"],
+        data=dict(arguments.get("data") or {}),
+        requested_data=requested,
+        origin=origin,
+        node=node_id if origin == ORIGIN_NODE else None,
+        requested_by=actor,
+        source_message_id=message.pk,
+        status=HomeDirectCall.Status.RUNNING,
+        started_at=timezone.now(),
+    )
+
+
+def _audit_call(call, *, actor):
+    metadata = {
+        "home_direct_call": str(call.pk),
+        "source_message_id": str(call.source_message_id) if call.source_message_id else None,
+        "origin": call.origin,
+        "node": str(call.node) if call.node else None,
+        "entity_id": call.entity_id,
+        "service": call.service,
+        "data": call.data,
+        "status": call.status,
+        "error_type": call.error_type,
+    }
+    if call.requested_data is not None:
+        metadata["requested_data"] = call.requested_data
+    record_audit(
+        action="ha.direct_call",
+        actor=actor,
+        actor_type=AuditLog.ActorType.HUMAN if actor is not None else AuditLog.ActorType.SYSTEM,
+        workspace=call.workspace,
+        resource=call,
+        metadata=metadata,
+    )
+
+
+def _finalize_call(
+    call_id, *, actor, status, error_type="", state_before=None, state_after=None, read_back=False
+):
+    """The single finalize of a `running` call (fenced on the status: a row
+    the recovery scan already moved is left alone), audited
+    `ha.direct_call`. Returns the row, or None when it was no longer
+    running."""
+    with transaction.atomic():
+        call = (
+            HomeDirectCall.objects.select_for_update()
+            .filter(pk=call_id, status=HomeDirectCall.Status.RUNNING)
+            .first()
+        )
+        if call is None:
+            return None
+        call.status = status
+        call.error_type = error_type
+        call.state_before = _state_summary(state_before)
+        call.state_after = _state_summary(state_after)
+        call.read_back = bool(read_back)
+        call.finished_at = timezone.now()
+        call.save(
+            update_fields=[
+                "status",
+                "error_type",
+                "state_before",
+                "state_after",
+                "read_back",
+                "finished_at",
+                "updated_at",
+            ]
+        )
+        _audit_call(call, actor=actor)
+    return call
+
+
+def _done_reply(name, arguments, *, requested, volume_max, state_after):
+    service = arguments["service"]
+    data = arguments.get("data") or {}
+    if service == "volume_set":
+        if requested is not None:
+            maximum = _percent(volume_max)
+            return CLAMPED_REPLY.format(maximum=maximum, suffix=dative_suffix(maximum))
+        percent = _percent(data.get("volume_level", 0))
+        return VOLUME_SET_REPLY.format(name=name, percent=percent, suffix=dative_suffix(percent))
+    if service == "volume_mute":
+        return (MUTE_REPLY if data.get("is_volume_muted") else UNMUTE_REPLY).format(name=name)
+    if service == "media_play_pause":
+        after = (state_after or {}).get("state") if isinstance(state_after, dict) else None
+        return _PLAY_PAUSE_REPLIES.get(after, PLAY_PAUSE_REPLY).format(name=name)
+    if service in ("volume_up", "volume_down"):
+        level = live_volume(state_after)
+        if level is not None:
+            verb = "açıldı" if service == "volume_up" else "kısıldı"
+            return VOLUME_STEP_REPLY.format(name=name, verb=verb, percent=_percent(level))
+    return _DONE_REPLIES[service].format(name=name)
+
+
+def execute(*, workspace, actor, message, origin, channel, node_id=None):
+    """The one direct Home Assistant media call of a turn (ADR-018; D10
+    steps 1-6 with D10a lock 3 first). `message` is the turn's saved user
+    message -- never arguments:
+
+    1. `deny_if_unattended("ha_direct_call")`;
+    2. re-resolve the owner's stored words (`message.content`) with the
+       deterministic matcher: the result must be the same `ha_call_service`
+       draft with canonically equal arguments, from the same origin and
+       node -- else nothing is sent, no call row is written,
+       `ha.direct_provenance_refused` is audited and the turn answers with
+       the matcher's own current result (its card, ask or refusal);
+    3. re-run `classify` on the re-resolved arguments (the payload is never
+       trusted) and read the entity once (`precondition_state`: still
+       allowlisted, still present; the D9 `volume_up` rule is applied to
+       this pre-send read);
+    4. under the settings row lock: `classify` again with that live state
+       (kill switch, flag, volume rules), count the rate windows (the only
+       increment), clamp `volume_set`, create the `running` call row --
+       committed before the send;
+    5. one `call_tool` (the manifest's pinned schema, the write timeout),
+       never retried;
+    6. finalise the row once (`succeeded` / `failed` / `unknown_outcome`)
+       and audit `ha.direct_call`.
+
+    A refusal before the send is a `not_direct` `DirectRun` (the card); a
+    failure after a send attempt is `sent` with a reply saying so."""
+    from connectors import bridges, mcp_client
+    from connectors.home_phrases import display_name
+    from tools.home_ports import DIRECT_RUN_ERROR, DIRECT_RUN_SENT, DirectRun
+
+    # 1
+    unattended.deny_if_unattended(UNATTENDED_EFFECT)
+    # 2 (D10a lock 3)
+    resolution, detail = _provenance_refusal(
+        workspace=workspace,
+        actor=actor,
+        message=message,
+        origin=origin,
+        channel=channel,
+        node_id=node_id,
+    )
+    if detail is not None:
+        _record_provenance_refused(
+            actor=actor, workspace=workspace, message=message, origin=origin, detail=detail
+        )
+        if resolution is None:
+            return _fallback(PROVENANCE_MISMATCH)
+        if resolution.outcome == "draft":
+            # The matcher's own current card, never one built from the
+            # refused arguments.
+            return _fallback(
+                PROVENANCE_MISMATCH, arguments=resolution.arguments, reply=resolution.reply
+            )
+        return _fallback(PROVENANCE_MISMATCH, reply=resolution.reply)
+    arguments = dict(resolution.arguments)
+    input_mode = message.input_mode
+    classify_kwargs = {
+        "workspace": workspace,
+        "actor": actor,
+        "arguments": arguments,
+        "origin": origin,
+        "channel": channel,
+        "input_mode": input_mode,
+    }
+    # 3
+    verdict = classify(**classify_kwargs, audit_rate_limit=False)
+    if not verdict.direct:
+        return _fallback(verdict.reason, arguments=arguments)
+    manifest, policy, binding = _gate(workspace)
+    if policy is None:
+        return _fallback(NOT_AVAILABLE, arguments=arguments)
+    refused, state = bridge.precondition_state(binding, arguments)
+    if refused is not None or state is None:
+        return _fallback(TARGET_UNAVAILABLE, arguments=arguments)
+    # 4
+    limit = None
+    with transaction.atomic():
+        current = effective_settings(actor=actor, workspace=workspace, for_update=True)
+        verdict = classify(**classify_kwargs, state=state, audit_rate_limit=False)
+        if verdict.direct:
+            try:
+                limit = count_direct_call(workspace.pk, arguments["entity_id"])
+            except RateStoreUnavailable:
+                verdict = _verdict(RATE_STORE_UNAVAILABLE)
+        if verdict.direct and limit is not None:
+            record_rate_limited(
+                actor=actor, workspace=workspace, arguments=arguments, origin=origin, limit=limit
+            )
+            verdict = _verdict(RATE_LIMITED, limit=limit)
+        if verdict.direct:
+            entity = (
+                HomeEntity.objects.for_actor(actor, workspace=workspace)
+                .select_related("room")
+                .filter(entity_id=arguments["entity_id"], enabled=True)
+                .first()
+            )
+            sent_arguments, requested = clamp_volume(arguments, current.volume_max)
+            call = _start_call(
+                workspace=workspace,
+                actor=actor,
+                entity=entity,
+                arguments=sent_arguments,
+                requested=requested,
+                origin=origin,
+                node_id=node_id,
+                message=message,
+            )
+    if not verdict.direct:
+        return _fallback(verdict.reason, arguments=arguments)
+    name = display_name(entity) if entity is not None else arguments["entity_id"]
+    # 5
+    try:
+        result = bridges.call_tool(
+            manifest,
+            server_tool=policy.server_tool,
+            arguments=sent_arguments,
+            schema_sha256=policy.schema_sha256,
+            timeout=settings.CONNECTOR_WRITE_TIMEOUT_SECONDS,
+        )
+    except mcp_client.ConnectorError as exc:
+        error_type = _ERROR_TYPES.get(exc.code, "unknown")
+        if exc.sent:
+            _finalize_call(call.pk, actor=actor, status=STATUS_UNKNOWN, error_type=error_type)
+            return DirectRun(
+                outcome=DIRECT_RUN_SENT,
+                reason=error_type,
+                reply=UNKNOWN_OUTCOME_REPLY.format(name=name),
+                call_id=str(call.pk),
+            )
+        # Refused before anything reached the transport: recorded, and the
+        # owner's request is still possible through the card.
+        _finalize_call(call.pk, actor=actor, status=STATUS_FAILED, error_type=error_type)
+        reason = NOT_AVAILABLE if exc.code in _UNAVAILABLE_CODES else TARGET_UNAVAILABLE
+        return _fallback(reason, arguments=arguments)
+    except Exception as exc:  # noqa: BLE001 -- whether it was sent is unknown
+        logger.warning("direct call failed: %s", type(exc).__name__)
+        _finalize_call(call.pk, actor=actor, status=STATUS_UNKNOWN, error_type="unknown")
+        return DirectRun(outcome=DIRECT_RUN_ERROR, reason="executor_failed", call_id=str(call.pk))
+    # 6
+    if result.is_error:
+        _finalize_call(call.pk, actor=actor, status=STATUS_FAILED, error_type="tool_error")
+        return DirectRun(
+            outcome=DIRECT_RUN_SENT,
+            reason="tool_error",
+            reply=REFUSED_REPLY.format(name=name),
+            call_id=str(call.pk),
+        )
+    structured = result.structured if isinstance(result.structured, dict) else {}
+    state_after = structured.get("state_after")
+    _finalize_call(
+        call.pk,
+        actor=actor,
+        status=STATUS_SUCCEEDED,
+        state_before=structured.get("state_before"),
+        state_after=state_after,
+        read_back=structured.get("read_back") == "ok",
+    )
+    return DirectRun(
+        outcome=DIRECT_RUN_SENT,
+        reply=_done_reply(
+            name,
+            sent_arguments,
+            requested=requested,
+            volume_max=current.volume_max,
+            state_after=state_after,
+        ),
+        call_id=str(call.pk),
+    )
+
+
+STATUS_SUCCEEDED = HomeDirectCall.Status.SUCCEEDED
+STATUS_FAILED = HomeDirectCall.Status.FAILED
+STATUS_UNKNOWN = HomeDirectCall.Status.UNKNOWN_OUTCOME
+
+
+def mark_lost_direct_calls(now=None):
+    """The recovery scan's direct half (`connectors.tasks.
+    recover_stale_connector_writes`): a call still `running` longer than
+    `CONNECTOR_WRITE_LEASE_SECONDS` lost its worker somewhere around the
+    send -> `unknown_outcome` / `worker_lost`, audited, never re-sent.
+    Returns how many were moved."""
+    now = now or timezone.now()
+    cutoff = now - timedelta(seconds=settings.CONNECTOR_WRITE_LEASE_SECONDS)
+    stale_ids = list(
+        HomeDirectCall.objects.filter(
+            status=HomeDirectCall.Status.RUNNING, started_at__lt=cutoff
+        ).values_list("id", flat=True)
+    )
+    moved = 0
+    for call_id in stale_ids:
+        if (
+            _finalize_call(call_id, actor=None, status=STATUS_UNKNOWN, error_type="worker_lost")
+            is not None
+        ):
+            moved += 1
+    return moved
+
+
 # --- the owner's settings service (D6) ----------------------------------------
 
 
@@ -705,9 +1195,10 @@ def list_calls(*, actor, workspace, channel, limit=CALLS_LIMIT_DEFAULT):
 
 
 def register():
-    """`ConnectorsConfig.ready`: the direct classifier port only. Branch 1b
-    registers **no executor** (`tools.home_ports.run_home_direct` answers
-    `not_direct`), so no turn behaves differently yet."""
-    from tools.home_ports import register_direct_classifier
+    """`ConnectorsConfig.ready`: the direct classifier and (branch 1c) the
+    direct executor ports, reached by `assistant` through
+    `tools.home_ports`."""
+    from tools.home_ports import register_direct_classifier, register_direct_executor
 
     register_direct_classifier(classify)
+    register_direct_executor(execute)

@@ -4,8 +4,8 @@ flag. `HomeEntity.save()` refuses it outside the class on every write
 path; the owner-web service sets it (audited `ha.entity_direct_changed`,
 separately from `ha.entity_changed`) and clears it when the last eligible
 service is unticked; a model's `"direct": true` in `ha_call_service`
-arguments is a validation error, never a flag; and with branch 1b alone a
-flagged TV still gets the Phase 13 draft card (no executor exists)."""
+arguments is a validation error, never a flag; and without a registered
+executor a flagged TV still gets the Phase 13 draft card."""
 
 import pytest
 from django.core.exceptions import ValidationError
@@ -303,16 +303,26 @@ def test_a_request_carrying_direct_is_refused_and_flags_nothing(
     assert ha.posts == []
 
 
-# --- branch 1b changes no turn -------------------------------------------------------------
+# --- the ports at boot; without an executor no turn is direct ------------------------------
 
 
-def test_no_executor_is_registered_in_branch_1b():
-    assert home_ports.direct_executor() is None
+def test_the_boot_registers_the_classifier_and_the_executor():
     assert home_ports.direct_classifier() is home_direct.classify
+    assert home_ports.direct_executor() is home_direct.execute
+
+
+@pytest.fixture
+def no_executor():
+    executor = home_ports.direct_executor()
+    home_ports.unregister_direct_executor()
+    yield
+    if executor is not None:
+        home_ports.register_direct_executor(executor)
 
 
 @pytest.mark.parametrize("input_mode", ["voice", "text"])
-def test_a_flagged_tv_still_gets_the_phase_13_card(
+def test_without_an_executor_a_flagged_tv_still_gets_the_card(
+    no_executor,
     bound_ha,
     ha,
     owner,
@@ -321,27 +331,23 @@ def test_a_flagged_tv_still_gets_the_phase_13_card(
     conversation,
     n8n_chat,
     calls,
-    route,
     input_mode,
 ):
+    """The branch 1b guarantee kept as a port property: with no executor
+    registered, a would-be direct call is the Phase 13 card with the
+    resolver's arguments, nothing is sent and no model is asked."""
     entity = allow(workspace, TV, label="TV")
     entity.direct = True
     entity.save()
     pause = call("media_pause")
-    if input_mode == "voice":
-        events = chat_turn(web_client(owner), conversation, "TV'yi duraklat", input_mode="voice")
-        drafts = [e for e in events if e["type"] == "draft"]
-        assert drafts and drafts[0]["payload"] == {"arguments": pause}
-        assert calls == []
-        user = Message.objects.get(conversation=conversation, role="user")
-        assert user.intent == "tool_request"
-    else:
-        # Typed turns are not wake-routed in 1b: the router decides (stubbed
-        # here to the gated tool with the same arguments) -> the card.
-        route("ha_call_service", pause, intent="tool_request")
-        events = chat_turn(web_client(owner), conversation, "TV'yi duraklat")
-        drafts = [e for e in events if e["type"] == "draft"]
-        assert drafts and drafts[0]["tool_name"] == "ha_call_service"
+    body = {"input_mode": "voice"} if input_mode == "voice" else {}
+    events = chat_turn(web_client(owner), conversation, "TV'yi duraklat", **body)
+    drafts = [e for e in events if e["type"] == "draft"]
+    assert drafts and drafts[0]["payload"] == {"arguments": pause}
+    assert drafts[0]["direct_reason"] == "not_available"
+    assert calls == []
+    user = Message.objects.get(conversation=conversation, role="user")
+    assert user.intent == "tool_request"
     assert ha.requests == []
     assert not HomeDirectCall.objects.exists()
     assert not ApprovalRequest.objects.exists()

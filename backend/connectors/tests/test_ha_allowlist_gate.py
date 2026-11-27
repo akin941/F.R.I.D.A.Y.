@@ -412,7 +412,32 @@ def _functions_with_writes(tree):
     return found
 
 
-def test_only_the_owner_web_services_write_direct_settings_and_nothing_writes_calls():
+# Branch 1c: the call log's only writers -- the executor's two helpers -- and
+# the only functions allowed to call each of them.
+_CALL_WRITERS = {"_start_call", "_finalize_call"}
+_CALL_WRITER_CALLERS = {
+    "_start_call": {"execute"},
+    "_finalize_call": {"execute", "mark_lost_direct_calls"},
+}
+
+
+def _callers(tree, name):
+    """Top-level functions of `tree` that call `name`."""
+    found = set()
+    for node in tree.body:
+        if not isinstance(node, ast.FunctionDef):
+            continue
+        for inner in ast.walk(node):
+            if (
+                isinstance(inner, ast.Call)
+                and isinstance(inner.func, ast.Name)
+                and inner.func.id == name
+            ):
+                found.add(node.name)
+    return found
+
+
+def test_only_the_owner_web_services_write_settings_and_only_the_executor_writes_calls():
     mentions = {}
     for relative, path in _production_sources():
         text = path.read_text(encoding="utf-8")
@@ -423,18 +448,39 @@ def test_only_the_owner_web_services_write_direct_settings_and_nothing_writes_ca
         tree = ast.parse(text)
         if relative == _DIRECT_MODULE:
             writers = _functions_with_writes(tree)
-            # Only the two owner-web settings functions write anything, and
-            # branch 1b has no `HomeDirectCall` writer at all (1c adds
-            # exactly one, the executor).
-            assert set(writers) <= _SETTINGS_WRITERS, writers
-            for chains in writers.values():
-                assert not any("HomeDirectCall" in chain for chain in chains), chains
+            # Only the two owner-web settings functions and the executor's
+            # two call-log helpers write anything; the settings functions
+            # never touch the call log and the helpers never the settings.
+            assert set(writers) <= _SETTINGS_WRITERS | _CALL_WRITERS, writers
+            for name in _SETTINGS_WRITERS & set(writers):
+                assert not any("HomeDirectCall" in chain for chain in writers[name]), name
+            for name in _CALL_WRITERS & set(writers):
+                assert not any("HomeDirectSettings" in chain for chain in writers[name]), name
+            # ... and the helpers are reached from the executor (and the
+            # recovery scan's finalize) only.
+            for name, allowed in _CALL_WRITER_CALLERS.items():
+                assert _callers(tree, name) <= allowed, (name, _callers(tree, name))
             continue
         for node in ast.walk(tree):
             if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
                 if node.func.attr in _WRITE_METHODS:
                     chain = ast.unparse(node.func)
                     assert "HomeDirect" not in chain, (relative, chain)
+
+
+def test_the_executor_is_reached_only_through_the_port_and_the_scan_only_by_the_task():
+    """No production module but `connectors.home_direct` names the call-log
+    helpers; the executor is registered on the port (its single caller is
+    `tools.home_ports.run_home_direct`), and the recovery scan is run by the
+    connector recovery task only."""
+    for relative, path in _production_sources():
+        text = path.read_text(encoding="utf-8")
+        if relative != _DIRECT_MODULE:
+            assert "_start_call" not in text and "_finalize_call" not in text, relative
+            assert "home_direct.execute(" not in text, relative
+            assert "home_direct import execute" not in text, relative
+        if relative not in {_DIRECT_MODULE, "connectors/tasks.py"}:
+            assert "mark_lost_direct_calls" not in text, relative
 
 
 def test_nothing_but_the_owner_web_service_sets_the_direct_flag():

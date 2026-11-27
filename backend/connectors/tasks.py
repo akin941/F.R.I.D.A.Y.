@@ -10,7 +10,7 @@ from celery import shared_task
 from django.conf import settings
 from django.utils import timezone
 
-from connectors import async_reads, ingestion
+from connectors import async_reads, home_direct, ingestion
 from connectors.manifest import get_manifest
 from connectors.models import ConnectorBinding, ConnectorWriteExecution
 from connectors.services import check_binding_pins
@@ -65,7 +65,14 @@ def recover_stale_connector_writes():
     for execution_id in pending_ids:
         dispatch_write_execution(str(execution_id))
     lost = mark_lost_executions(now)
-    return {"redispatched": len(pending_ids), "unknown_outcome": lost}
+    # Phase 13b D10 (ADR-018): a direct media call whose worker was lost
+    # around the send -> `unknown_outcome`, never re-sent.
+    direct_lost = home_direct.mark_lost_direct_calls(now)
+    return {
+        "redispatched": len(pending_ids),
+        "unknown_outcome": lost,
+        "direct_unknown_outcome": direct_lost,
+    }
 
 
 def _async_read_time_limits():

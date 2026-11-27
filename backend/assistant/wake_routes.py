@@ -38,6 +38,13 @@ normal router runs. Typed turns are never routed.
   (the exact arguments, a fixed spoken confirmation, no model call);
   several -> the ask template; nothing allowed -> a fixed refusal. It never
   approves or executes; the card goes the normal gated path.
+- **Direct media (Phase 13b D10/D10a, ADR-018).** A `home.control` draft
+  that ADR-018's classifier admits (an owner-flagged `media_player`, one of
+  the eight closed services, kill switch off, within the rate limits)
+  becomes a `home_direct` classification carrying the code-only provenance
+  marker; the chat view then runs the one call after the cap. Only
+  `home.control` may return that effect (`extra_effects`, checked by
+  `validate_routes` and again on every result by `_finish`).
 - **Scope.** Routes answer only the owner of the conversation's workspace,
   from that workspace's rows (`for_actor()` through `proactive.api` and
   `memory.probes`): a firm digest never answers a personal conversation.
@@ -63,6 +70,10 @@ from core.speech import match_key, normalize_speech  # noqa: F401
 EFFECT_READ = "read"
 EFFECT_PROPOSAL = "proposal"
 ALLOWED_EFFECTS = frozenset({EFFECT_READ, EFFECT_PROPOSAL})
+# Phase 13b D10 (ADR-018): the one extra effect a route may declare, and the
+# one route that may declare it (`validate_routes` refuses anything else).
+EFFECT_DIRECT_HOME = "direct_home"
+ALLOWED_EXTRA_EFFECTS = frozenset({EFFECT_DIRECT_HOME})
 
 # Stripped once from the start of an utterance (longest first).
 WAKE_PHRASES = ("hey friday", "friday")
@@ -108,31 +119,41 @@ class WakeTurn:
     content: str
     remainder: str = ""
     now: Any = None
+    # Phase 13b: the node a `node_voice` turn was spoken to (the voice
+    # token's device), else None -- recorded on a direct call's origin.
+    origin_node_id: str | None = None
+    input_mode: str = Message.InputMode.VOICE
 
 
 @dataclass
 class RouteResult:
     """A handler's answer: the classification it stands for (checked by
     the ADR-015 cap), the reply text spoken back with no model call, and
-    the effect to commit only if the cap keeps the route."""
+    the effect to commit only if the cap keeps the route. `provenance`
+    (Phase 13b D10a lock 2) is the code-only marker of a `home_direct`
+    classification, carried into the route's classification by identity."""
 
     intent: str = Message.Intent.CHAT
     intent_payload: dict = field(default_factory=dict)
     reply_text: str | None = None
     commit: Callable[[], None] | None = None
+    provenance: Any = None
 
 
 @dataclass(frozen=True)
 class WakeRoute:
     """One route. A phrase route matches its `default_phrases` (and owner
     aliases); a `matched_by_code` route (Phase 13 `home.control`) has none:
-    its handler is also its matcher and returns None on a miss."""
+    its handler is also its matcher and returns None on a miss.
+    `extra_effects` (Phase 13b D10): effects the route's results may have
+    beyond `effect` -- only `home.control`, only `direct_home`."""
 
     name: str
     effect: str
     default_phrases: tuple
     handler: Callable[[WakeTurn], RouteResult | None]
     matched_by_code: bool = False
+    extra_effects: tuple = ()
 
 
 @dataclass(frozen=True)
@@ -268,11 +289,41 @@ def _home_control(turn: WakeTurn) -> RouteResult | None:
         return RouteResult(reply_text=resolution.reply)
     if resolution.tool_name not in list_tool_names():
         return None
+    # Phase 13b D10 (ADR-018): a draft ADR-018 admits as direct is the
+    # `home_direct` classification (the call runs in the chat view, after
+    # the cap, with the saved message); any other draft is today's card,
+    # carrying the closed reason it is not direct.
+    from assistant.services import (
+        PROVENANCE_KEY,
+        classify_direct_draft,
+        direct_origin,
+        home_direct_classification,
+    )
+
+    verdict = classify_direct_draft(
+        resolution,
+        workspace=turn.workspace,
+        actor=turn.actor,
+        channel=turn.channel,
+        input_mode=turn.input_mode,
+    )
+    if verdict.direct:
+        origin = direct_origin(channel=turn.channel, input_mode=turn.input_mode)
+        classification = home_direct_classification(
+            resolution, origin=origin, node_id=turn.origin_node_id
+        )
+        return RouteResult(
+            intent=classification["intent"],
+            intent_payload=classification["intent_payload"],
+            reply_text=None,
+            provenance=classification[PROVENANCE_KEY],
+        )
     return RouteResult(
         intent=Message.Intent.TOOL_REQUEST,
         intent_payload={
             "tool_name": resolution.tool_name,
             "payload": {"arguments": dict(resolution.arguments)},
+            "direct_reason": verdict.reason,
         },
         reply_text=resolution.reply,
     )
@@ -286,6 +337,8 @@ CODE_ROUTES: tuple[WakeRoute, ...] = (
         default_phrases=(),
         handler=_home_control,
         matched_by_code=True,
+        # ADR-018: the only route that may return `home_direct`.
+        extra_effects=(EFFECT_DIRECT_HOME,),
     ),
 )
 
@@ -322,6 +375,18 @@ def validate_routes(routes=None) -> None:
             )
         if not callable(route.handler):
             raise ImproperlyConfigured(f"wake route {route.name} has no handler")
+        extra = tuple(getattr(route, "extra_effects", ()) or ())
+        if extra:
+            # Phase 13b D10 (ADR-018): only `home.control` may return the
+            # direct effect, and it is the only extra effect there is.
+            if route.name != HOME_ROUTE_NAME or not route.matched_by_code:
+                raise ImproperlyConfigured(
+                    f"wake route {route.name} may not declare extra effects {extra!r}"
+                )
+            if any(effect not in ALLOWED_EXTRA_EFFECTS for effect in extra):
+                raise ImproperlyConfigured(
+                    f"wake route {route.name} declares an unknown extra effect {extra!r}"
+                )
         if route.matched_by_code:
             # Phase 13 D13: a code matcher, never a phrase an alias could
             # shadow or that could shadow another route.
@@ -595,12 +660,15 @@ def static_reply_stream(text):
     yield text
 
 
-def route_voice_turn(conversation, *, actor, content, channel, input_mode, now=None):
+def route_voice_turn(
+    conversation, *, actor, content, channel, input_mode, now=None, origin_node_id=None
+):
     """The chat turn's hook (D8). None unless the turn is a voice turn of
     the workspace owner whose whole utterance is a route phrase; otherwise
     the route's capped classification and its reply text (None when the
     cap degraded the route: the turn is then answered as plain chat).
-    Makes no model call."""
+    Makes no model call. `origin_node_id` (Phase 13b): the speaking node of
+    a `node_voice` turn, recorded on a direct call."""
     if input_mode != Message.InputMode.VOICE:
         return None
     workspace = conversation.workspace
@@ -616,6 +684,8 @@ def route_voice_turn(conversation, *, actor, content, channel, input_mode, now=N
         content=content,
         remainder=remainder,
         now=now or timezone.now(),
+        origin_node_id=origin_node_id,
+        input_mode=input_mode,
     )
     if route is None:
         # Phase 13 D13: the code-matched routes (`home.control`).
@@ -629,12 +699,24 @@ def route_voice_turn(conversation, *, actor, content, channel, input_mode, now=N
 
 def _finish(route, result, *, input_mode, remainder):
     """The route's capped classification (ADR-015): degraded to plain chat
-    with no reply when the cap changes it; else its commit runs."""
-    from assistant.services import apply_voice_capability_cap
+    with no reply when the cap changes it, or -- Phase 13b D10a lock 2 --
+    when the result's own effect is not one the route declared (a read
+    route proposing, any route but `home.control` returning `home_direct`);
+    else its commit runs. A read result is always within a route's
+    effect (it narrows, never widens)."""
+    from assistant.services import INTENT_EFFECTS, PROVENANCE_KEY, apply_voice_capability_cap
 
     classification = {"intent": result.intent, "intent_payload": dict(result.intent_payload)}
+    if result.provenance is not None:
+        classification[PROVENANCE_KEY] = result.provenance
+    permitted = {EFFECT_READ, route.effect, *tuple(route.extra_effects or ())}
+    result_effect = INTENT_EFFECTS.get(result.intent)
     capped = apply_voice_capability_cap(classification, input_mode=input_mode)
-    if capped != classification or route.effect not in ALLOWED_EFFECTS:
+    if (
+        capped != classification
+        or route.effect not in ALLOWED_EFFECTS
+        or result_effect not in permitted
+    ):
         return RoutedTurn(
             route=route.name,
             classification={"intent": Message.Intent.CHAT, "intent_payload": {}},
