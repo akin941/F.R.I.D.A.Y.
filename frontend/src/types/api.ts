@@ -521,6 +521,8 @@ export type ChatStreamEvent =
       source_message_id: string;
       tool_name: string;
       payload: Record<string, unknown>;
+      /** Phase 13b D7: why a `home.control` card is not direct (a closed code). */
+      direct_reason?: string;
     };
 
 // --- Memory (MVP 2) ---

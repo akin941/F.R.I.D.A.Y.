@@ -8,11 +8,23 @@ import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/componen
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { ApprovalCard } from "@/components/approvals/ApprovalCard";
 import type { ToolRequestDraft } from "@/components/chat/drafts";
+import { DIRECT_REASON_SHOWN } from "@/lib/home-direct";
 import { apiPostJson, errorMessage } from "@/lib/api-client";
 import { tr } from "@/lib/i18n/tr";
 import type { ApiApprovalRequest, ApiNodeActionExecution } from "@/types/api";
 
 export type { ToolRequestDraft };
+
+/**
+ * Phase 13b D7 (ADR-018): the reason line of a Home Assistant card that was
+ * not direct -- shown only where the owner would expect a direct call (a
+ * flagged entity, or an eligible media player not flagged yet); a light or
+ * `turn_on` card carries a reason too, but says nothing about it.
+ */
+export function directReasonText(draft: ToolRequestDraft): string | null {
+  if (draft.toolName !== "ha_call_service" || !draft.directReason) return null;
+  return DIRECT_REASON_SHOWN[draft.directReason] ?? null;
+}
 
 const NODE_ACTION = "node_action";
 // ADR-014 decision 2 / brief D8: the only confirm-class capabilities.
@@ -239,6 +251,11 @@ export function ToolRequestCard({
         ) : null}
         <p className="text-sm font-medium">{draft.toolName}</p>
         <p className="text-sm text-muted-foreground">{tr.chat.toolDraft.needsApproval}</p>
+        {directReasonText(draft) ? (
+          <p className="text-xs text-muted-foreground" data-testid="tool-draft-direct-reason">
+            Doğrudan değil: {directReasonText(draft)}
+          </p>
+        ) : null}
       </CardContent>
       <CardFooter className="flex justify-end gap-2">
         <Button variant="outline" size="sm" onClick={onDiscard} disabled={busy}>
