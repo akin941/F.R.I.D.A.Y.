@@ -29,7 +29,8 @@ and voice-policy endpoints, nothing else.
 
 ```bash
 make friday-voice-install          # uv sync --frozen into ~/Library/Application Support/Friday/voice
-make voice-models --node           # the pinned openWakeWord graphs, Silero VAD, hey_friday.onnx
+make voice-models-node            # the pinned openWakeWord graphs, Silero VAD, hey_friday.onnx
+                                  # (VOICE_WAKE_MODEL_SRC=/path/to/hey_friday.onnx once trained and pinned)
 ```
 
 `make friday-voice-install` prints the installed `uv.lock` sha256; the host

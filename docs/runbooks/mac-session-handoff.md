@@ -582,13 +582,23 @@ The Phase 11 brief and `docs/runbooks/live-voice.md` §1 say
 `frontend/scripts/voice-models.mjs` has no `--node` option, and GNU make
 rejects `--node` as an unknown make option. Before B7:
 
-- [ ] Add a small tooling branch (`feat/p11-node-voice-models`) that adds
+- [x] Add a small tooling branch (`feat/p11-node-voice-models`) that adds
       the node mode (for example `make voice-models-node`: download every
       `models.json` entry with a `source`, verify its sha256, copy the
       owner's `hey_friday.onnx` from `VOICE_WAKE_MODEL_SRC`, write into
-      `modelDir`), with a test, and fix the two docs that name
-      `make voice-models --node`. This can be done in a cloud session too.
-- [ ] Then: `make friday-voice-install` and the node model fill; check with
+      `modelDir`), with a test, and fix the docs that named the missing
+      mode. **2026-11-27: done.** `make voice-models-node` runs
+      `friday-voice models fetch` (`node/friday-voice/friday_voice/model_fetch.py`,
+      tests in `tests/test_model_fetch.py`): https downloads (every redirect
+      hop checked), sha256 verified while streaming, atomic temp-file +
+      `os.replace` writes, a mismatch is refused and never replaces a file;
+      the keyword model is copied from `VOICE_WAKE_MODEL_SRC` only once its
+      pin is set (while empty, the file is refused and its hash printed);
+      smart-turn is checked inside the pipecat-ai wheel, never fetched. The
+      target defaults to `modelDir`; `VOICE_NODE_MODEL_DIR=<dir>` overrides
+      it. `make friday-voice-install` now excludes `/models/` from its
+      `rsync --delete`, so a reinstall keeps the filled directory.
+- [x] Then: `make friday-voice-install` and the node model fill; check with
 
   ```bash
   cd node/friday-voice
@@ -596,6 +606,18 @@ rejects `--node` as an unknown make option. Before B7:
   uv run friday-voice conformance
   uv run friday-voice selftest --ci
   ```
+
+  **2026-11-27, on the Mac:** installed `uv.lock` sha256
+  `354e9c73a786578a2ef3e3d3294696b78848d891a7c43a7ada2c18de7a3d62dc`;
+  the fill wrote `melspectrogram.onnx` (1,087,958 bytes),
+  `embedding_model.onnx` (1,326,578 bytes) and `silero_vad.onnx`
+  (2,327,524 bytes), each matching its pin (re-checked with
+  `shasum -a 256`); smart-turn verified in the wheel; `hey_friday.onnx`
+  skipped (A8: not trained, pin empty), so wake mode stays not armable.
+  Conformance files up to date; host 28/28 and child 23/23 pass;
+  `selftest --ci` PASS. **Left:** after A8, pin the keyword sha256 in both
+  manifests and rerun with `VOICE_WAKE_MODEL_SRC=/path/to/hey_friday.onnx
+  make voice-models-node`.
 
 ### A11. Phase 6 branch 3a — a server-side gap (blocks C2's A4 measurements)
 
@@ -1601,7 +1623,8 @@ brief (d1: Tauri v2) and must pass the same conformance suite.
    C), starting with A1, the Personal Team signing spike (d9 revised
    2026-11-25; no paid enrolment unless the spike falls back to A1-F).
 3. Close the three server-side gaps found while writing this handoff
-   (A10 `make voice-models --node` has no implementation, A11 Phase 6
+   (A10 the node model fill had no implementation, now `make
+   voice-models-node`; A11 Phase 6
    branch 3a, A12 the `nodes`-backed transcript port). None needs the Mac;
    each is its own branch.
 

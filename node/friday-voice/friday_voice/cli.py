@@ -9,6 +9,7 @@
     friday-voice wake-eval [--negative <dir>] [--positives <dir>] --model <onnx>
                            [--threshold <t>] [--refractory-ms <ms>] [--out <path>]
     friday-voice e2e --server <url> --token-file <path> --scenario <name>
+    friday-voice models fetch [--model-dir <dir>] [--keyword-src <onnx>]
 
 `run` takes no configuration: the host hands the child everything over
 stdin (`hello`, `credential`, ...). Never pass a credential in argv or the
@@ -202,6 +203,12 @@ def _e2e(args) -> int:
     return e2e.main(args)
 
 
+def _models_fetch(args) -> int:
+    from . import model_fetch
+
+    return model_fetch.main(args)
+
+
 def build_parser():
     parser = argparse.ArgumentParser(prog="friday-voice")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -284,6 +291,21 @@ def build_parser():
     e2e.add_argument("--token-file", required=True, help="file holding a node_voice token")
     e2e.add_argument("--scenario", required=True, help="ptt, node_action, barge_in, ...")
     e2e.set_defaults(func=_e2e)
+
+    models_cmd = sub.add_parser("models", help="the node's model directory (models.json)")
+    models_sub = models_cmd.add_subparsers(dest="models_command", required=True)
+    fetch = models_sub.add_parser(
+        "fetch", help="download, verify and write every pinned model (make voice-models-node)"
+    )
+    fetch.add_argument(
+        "--model-dir", default=None, help="the target directory (default: models.json modelDir)"
+    )
+    fetch.add_argument(
+        "--keyword-src",
+        default=None,
+        help="the owner-trained keyword model to copy (default: $VOICE_WAKE_MODEL_SRC)",
+    )
+    fetch.set_defaults(func=_models_fetch)
     return parser
 
 

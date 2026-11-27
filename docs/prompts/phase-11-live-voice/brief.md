@@ -1507,7 +1507,7 @@ Implemented as scoped (D7 adapter, D8, D14), with these recorded choices:
    directly, hosted in Pipecat via the adapter).
 3. **Mac (deferred: Mac session, M1/M4).** On the Mac: run
    `uv run pytest -m real_models` with `FRIDAY_VOICE_MODEL_DIR` pointing at
-   the node model directory (`make voice-models --node`) so the pinned
+   the node model directory (`make voice-models-node`) so the pinned
    Silero file is scored (here only the bundled smart-turn model and
    Pipecat's own Silero copy could be exercised); check the CA pin against
    the real server's chain (a Caddy internal CA must be in the trust store
@@ -2383,7 +2383,7 @@ section, the merged branches 1–7 and the files they name.
   `friday-voice/v1` schemas, vectors and conformance cases, the working
   child, the `voice.state` event kind);
 - `uv` installed on the Mac; `make friday-voice-install` run; `make
-  voice-models --node` run with the owner-trained `hey_friday.onnx`
+  voice-models-node` run with the owner-trained `hey_friday.onnx`
   (its sha256 pinned in both manifests);
 - the signing key stays on the Mac; CI never holds it.
 
