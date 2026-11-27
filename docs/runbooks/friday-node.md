@@ -90,9 +90,20 @@ make up-local-tls     # the dev stack + a Caddy proxy on 127.0.0.1:8443 only
 `make local-tls` (run by `up-local-tls`) creates a self-signed P-256
 certificate in `deploy/docker/local-tls/` (gitignored) once and prints its
 SPKI pin. The proxy (`deploy/docker/compose.local-tls.yml`,
-`Caddyfile.local`) forwards only `/api/v1/nodes/pair`,
-`/api/v1/auth/nodes/credential/rotate` and `/ws/node/v1`; every other path
-is 404, and it never installs a certificate into any trust store. Put the
+`Caddyfile.local`) forwards only the node's own paths: `/api/v1/nodes/pair`,
+`/api/v1/auth/nodes/credential/rotate` and `/ws/node/v1`, and for live
+voice (Phase 11) the host's `POST /api/v1/auth/nodes/voice-token` plus the
+six views a `node_voice` token reaches (D4, preflight `voice_live_channel`):
+`/api/v1/auth/nodes/voice-policy`, `/api/v1/voice/live/sessions`,
+`/api/v1/voice/transcriptions`, `/api/v1/voice/speech`,
+`/api/v1/voice/receipt` and `/api/v1/ai/conversations/<uuid>/messages`.
+Every other path is 404 (`backend/ops/tests/test_local_tls_caddyfile.py`
+guards the list), and it never installs a certificate into any trust store.
+The voice child does not trust this certificate by default: record it as the
+install's CA file (`make friday-voice-ca
+FRIDAY_VOICE_CA_FILE=deploy/docker/local-tls/cert.pem`, `live-voice.md`
+§1a). A running proxy picks up a changed `Caddyfile.local` only when the
+`local-tls` container is recreated (`make up-local-tls`). Put the
 printed `NODE_TLS_PIN_SHA256=...` line into `deploy/docker/.env` so
 preflight's `node_tls_pin` checks the served key (the overlay sets
 `PREFLIGHT_NODE_TLS_URL` to the proxy).

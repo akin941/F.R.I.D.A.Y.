@@ -76,11 +76,16 @@ holds no certificate, fails closed: the child logs
 request fails with `tls_ca_file_unreadable` (error earcon, mic released);
 it never falls back to the public bundle.
 
-Note: `Caddyfile.local` forwards only the node's pairing, credential-rotation
-and `/ws/node/v1` paths; the child's voice endpoints
-(`/api/v1/voice/…`, `/api/v1/ai/conversations/…/messages`,
-`/api/v1/auth/nodes/voice-policy`) answer 404 there until they are
-forwarded too.
+`Caddyfile.local` forwards the node voice flow and nothing else: the host's
+`POST /api/v1/auth/nodes/voice-token` and the six views a `node_voice` token
+reaches (D4, the set preflight `voice_live_channel` checks) —
+`/api/v1/auth/nodes/voice-policy`, `/api/v1/voice/live/sessions`,
+`/api/v1/voice/transcriptions`, `/api/v1/voice/speech`,
+`/api/v1/voice/receipt` and `/api/v1/ai/conversations/<uuid>/messages` —
+beside the node's pairing, rotation and `/ws/node/v1` paths. Every other
+path is 404 (`backend/ops/tests/test_local_tls_caddyfile.py`). A running
+proxy picks the list up only when the `local-tls` container is recreated
+(`make up-local-tls`).
 
 Check the install with the reference implementations before the host:
 
