@@ -41,6 +41,7 @@ public final class NodeConnection: NSObject, URLSessionWebSocketDelegate, @unche
     /// The subprotocols offered, highest first.
     public let offered: [String]
     private var urlSession: URLSession?
+    private var pinning: PinningDelegate?
     private var task: URLSessionWebSocketTask?
     private var timer: DispatchSourceTimer?
     private var opened = false
@@ -87,6 +88,7 @@ public final class NodeConnection: NSObject, URLSessionWebSocketDelegate, @unche
         configuration.urlCache = nil
         configuration.httpShouldSetCookies = false
         let pinning = PinningDelegate(pin: pin)
+        self.pinning = pinning
         let urlSession = URLSession(
             configuration: configuration, delegate: Forwarder(self, pinning), delegateQueue: delegateQueue)
         var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalAndRemoteCacheData, timeoutInterval: 15)
@@ -175,6 +177,11 @@ public final class NodeConnection: NSObject, URLSessionWebSocketDelegate, @unche
     }
 
     public var isFinished: Bool { finished }
+
+    /// The TLS handshake was refused because the server's leaf SPKI is not
+    /// the pinned one: nothing was sent (no upgrade request, no Bearer, so
+    /// never `hello`). Read on `queue`, e.g. in `onClose`.
+    public var pinRefused: Bool { pinning?.refusedPin ?? false }
 
     /// Send frames the session produced outside a receive or tick (an
     /// availability change). Call on `queue`.
@@ -309,6 +316,12 @@ public final class NodeRunner: @unchecked Sendable {
         case stopped(reason: String)
         /// 4401 or a credential the server refuses: pair again.
         case needsPairing
+        /// Phase 13 M1: the server at the stored address presented another
+        /// TLS key than the pinned one; refused before anything is sent
+        /// ("Sunucu kimliği değişti — yeniden eşleştirin"). The runner keeps
+        /// retrying the same address with backoff (the Linux daemon's
+        /// behaviour); it never falls back to another address.
+        case identityChanged
         case error(String)
     }
 
@@ -584,6 +597,11 @@ public final class NodeRunner: @unchecked Sendable {
         queue.sync { credential }
     }
 
+    /// The server host the menu shows, from the stored credential only.
+    public var serverHost: String? {
+        ServerAddress.displayHost(of: currentCredential())
+    }
+
     /// Whether the node WebSocket is up now.
     public var voiceLink: Bool { queue.sync { voiceLinkUp } }
 
@@ -634,6 +652,28 @@ public final class NodeRunner: @unchecked Sendable {
             self.credential = credential
             session = makeSession(credential)
             connect()
+        }
+    }
+
+    /// Phase 13 M1: the owner re-pointed the node (ServerAddressEditor, after
+    /// LocalAuthentication and the pin probe). Saved on `queue`, so a
+    /// rotation in flight (a new generation drops it) cannot write the old
+    /// address back; every pin, the node id and the secret are kept. A
+    /// running node reconnects to the new address; a stopped session stays
+    /// stopped (re-pointing is not "Resume").
+    public func repoint(to serverURL: URL, nodeID: String) throws -> NodeCredential {
+        try queue.sync {
+            guard var next = try credential ?? store.load(), next.nodeID == nodeID else {
+                throw ServerAddressError.notPaired
+            }
+            next.serverURL = serverURL
+            try store.save(next)
+            credential = next
+            if running, session != nil {
+                reset(running: true)
+                connect()
+            }
+            return next
         }
     }
 
@@ -740,9 +780,15 @@ public final class NodeRunner: @unchecked Sendable {
             guard let self, self.generation == generation, session.sessionReady else { return }
             self.status = .connected
         }
-        connection.onClose = { [weak self] code in
+        connection.onClose = { [weak self, weak connection] code in
             guard let self, self.generation == generation else { return }
             self.connection = nil
+            if connection?.pinRefused == true {
+                Self.log.error("server identity changed: TLS pin refused before hello")
+                self.status = .identityChanged
+                self.scheduleReconnect(session, showWaiting: false)
+                return
+            }
             self.handleClose(code, session)
         }
         self.connection = connection
@@ -761,10 +807,10 @@ public final class NodeRunner: @unchecked Sendable {
         scheduleReconnect(session)
     }
 
-    private func scheduleReconnect(_ session: NodeSession) {
+    private func scheduleReconnect(_ session: NodeSession, showWaiting: Bool = true) {
         guard running else { return }
         let delay = session.nextReconnectDelay ?? Backoff.minimumSeconds
-        status = .waiting(seconds: Int(delay.rounded(.up)))
+        if showWaiting { status = .waiting(seconds: Int(delay.rounded(.up))) }
         let generation = self.generation
         let work = DispatchWorkItem { [weak self] in
             guard let self, self.generation == generation else { return }
@@ -772,6 +818,13 @@ public final class NodeRunner: @unchecked Sendable {
         }
         reconnectWork = work
         queue.asyncAfter(deadline: .now() + delay, execute: work)
+    }
+}
+
+extension NodeRunner: ServerAddressTarget {
+    /// The credential the runner holds, else the stored one (local only).
+    public func currentCredential() -> NodeCredential? {
+        queue.sync { credential ?? (try? store.load()) }
     }
 }
 
