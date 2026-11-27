@@ -313,6 +313,9 @@ _READERS = {
     "connectors/home_phrases.py",
     # Phase 13 closeout: the read-only `ha_entities` preflight row.
     "ops/preflight.py",
+    # Phase 13b branch 1b: the direct classifier reads the allowlist
+    # (`for_actor()`) and counts flagged rows; it never writes one.
+    "connectors/home_direct.py",
 }
 _WRITER = "connectors/home_entities.py"
 
@@ -375,3 +378,121 @@ def test_no_tool_route_or_connector_reaches_the_allowlist_writer():
     # And the allowlist is never itself a tool.
     names = set(list_tool_names()) | set(list_read_tool_names())
     assert not {n for n in names if "entity" in n or "allowlist" in n}
+
+
+# --- Phase 13b (ADR-018, branch 1b): the direct flag, settings and call log ---
+
+# The owner-web services allowed to write `HomeDirectSettings`, and the
+# modules allowed to mention the direct models at all.
+_SETTINGS_WRITERS = {"get_settings", "update_settings"}
+_DIRECT_MODULE = "connectors/home_direct.py"
+_DIRECT_MENTIONS = {
+    "connectors/models.py",
+    _DIRECT_MODULE,
+    "connectors/views.py",
+    "connectors/serializers.py",
+    "connectors/urls.py",  # the view names
+    "tools/home_ports.py",  # the port's docstring names the record
+}
+
+
+def _functions_with_writes(tree):
+    """`{function name: [write call chains]}` for every top-level function."""
+    found = {}
+    for node in tree.body:
+        if not isinstance(node, ast.FunctionDef):
+            continue
+        for inner in ast.walk(node):
+            if (
+                isinstance(inner, ast.Call)
+                and isinstance(inner.func, ast.Attribute)
+                and inner.func.attr in _WRITE_METHODS
+            ):
+                found.setdefault(node.name, []).append(ast.unparse(inner.func))
+    return found
+
+
+def test_only_the_owner_web_services_write_direct_settings_and_nothing_writes_calls():
+    mentions = {}
+    for relative, path in _production_sources():
+        text = path.read_text(encoding="utf-8")
+        if "HomeDirectSettings" in text or "HomeDirectCall" in text:
+            mentions[relative] = text
+    assert set(mentions) <= _DIRECT_MENTIONS, sorted(mentions)
+    for relative, text in mentions.items():
+        tree = ast.parse(text)
+        if relative == _DIRECT_MODULE:
+            writers = _functions_with_writes(tree)
+            # Only the two owner-web settings functions write anything, and
+            # branch 1b has no `HomeDirectCall` writer at all (1c adds
+            # exactly one, the executor).
+            assert set(writers) <= _SETTINGS_WRITERS, writers
+            for chains in writers.values():
+                assert not any("HomeDirectCall" in chain for chain in chains), chains
+            continue
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
+                if node.func.attr in _WRITE_METHODS:
+                    chain = ast.unparse(node.func)
+                    assert "HomeDirect" not in chain, (relative, chain)
+
+
+def test_nothing_but_the_owner_web_service_sets_the_direct_flag():
+    """No production module but `connectors.home_entities` assigns
+    `.direct`, passes `direct=` to an ORM write or `setattr`s it."""
+    for relative, path in _production_sources():
+        if relative == _WRITER:
+            continue
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            targets = []
+            if isinstance(node, ast.Assign):
+                targets = node.targets
+            elif isinstance(node, ast.AugAssign | ast.AnnAssign):
+                targets = [node.target]
+            for target in targets:
+                assert not (isinstance(target, ast.Attribute) and target.attr == "direct"), (
+                    relative,
+                    ast.unparse(node),
+                )
+            if not isinstance(node, ast.Call):
+                continue
+            if isinstance(node.func, ast.Name) and node.func.id == "setattr":
+                args = [ast.unparse(a) for a in node.args[1:2]]
+                assert args != ["'direct'"], (relative, ast.unparse(node))
+            if isinstance(node.func, ast.Attribute) and node.func.attr in _WRITE_METHODS:
+                keywords = {k.arg for k in node.keywords}
+                assert "direct" not in keywords, (relative, ast.unparse(node))
+                assert "kill_switch" not in keywords or relative == _DIRECT_MODULE, relative
+
+
+def test_no_tool_route_or_connector_reaches_the_direct_owner_services():
+    from connectors import home_direct
+
+    specs = [get_tool(name) for name in list_tool_names()]
+    specs += [get_read_tool(name) for name in list_read_tool_names()]
+    for manifest in list_manifests():
+        specs += list(manifest.tools)
+    for spec in specs:
+        for field_name, value in _callables(spec):
+            module = getattr(value, "__module__", "") or ""
+            assert module != home_direct.__name__, (spec, field_name)
+    names = set(list_tool_names()) | set(list_read_tool_names())
+    assert not {n for n in names if "direct" in n or "kill" in n}
+
+
+def test_no_management_command_wake_route_or_schedule_kind_touches_the_direct_models():
+    """Management commands, wake routes, schedule kinds and probes live in
+    modules that never mention the direct models (the mention walk above
+    pins the full set); and `update_entity`/`create_entity` stay the only
+    owner-web callers of the flag in views."""
+    commands = [
+        relative
+        for relative, path in _production_sources()
+        if "/management/commands/" in relative
+        and any(
+            name in path.read_text(encoding="utf-8")
+            for name in ("HomeDirect", "home_direct", ".direct")
+        )
+    ]
+    assert commands == []
