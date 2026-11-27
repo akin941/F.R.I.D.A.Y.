@@ -123,7 +123,9 @@ is routed there; STT stays local unless the STT row is also enabled.
 ### Budgets (A3)
 
 The `audio` `AIBudget` row (admin → Ai core → AI budgets) caps
-`voice.stt`/`voice.tts` spend: monthly 20 USD and 1 USD per voice session by
+`voice.stt`/`voice.tts` spend — and the evaluation set's
+`voice.eval_stt`/`voice.eval_tts` (§8; a reseed adds them to an existing
+row without touching its limits): monthly 20 USD and 1 USD per voice session by
 default (`AI_BUDGET_AUDIO_*` seed values). Local providers cost 0 and never
 trip it. A refused call is a `ModelUsage` row with
 `error_type="budget_exceeded"`.
@@ -353,3 +355,112 @@ uv run python manage.py preflight
 (`E2E_BROWSER_CHANNEL=chrome` uses the installed Chrome instead of
 Playwright's own download.) Inside `make preflight` the check stays a
 warning.
+
+## 8. The Turkish evaluation set (Phase 6 branch 3a, owner step C2 A4)
+
+`manage.py voice_eval` measures speech-to-text WER per condition, the
+Turkish TTS listening test and the latency baseline (brief A4/A5). The
+recordings are the owner's own biometric data: they stay **outside the
+repository and outside Friday's database**. Only the manifest
+`docs/voice/eval-manifest.md` (file name, sha256, condition, reference
+text) is committed. Wake-word FRR/FAR is measured separately with the
+Phase 11 harness (`docs/voice/live-eval.md`, `friday-voice wake-eval`),
+on the same negative audio.
+
+| Target (A4, initial) | Measured by |
+|---|---|
+| WER ≤ 12% `tr-quiet`, ≤ 18% `tr-noise`, ≤ 15% code-switched (`cs-quiet` + `cs-noise`) | `voice_eval --set …` |
+| Turkish TTS ≥ 4/5 intelligibility **and** naturalness | `voice_eval --tts-sheet`, then `--score-tts` |
+| End of speech → first audio p50 ≤ 1.5 s, p95 ≤ 2.5 s (A5) | `voice_eval --traces` (live turns' `VoiceTurnTrace`) |
+| Replay latency: p50 per stage within +20% of the stored baseline | `voice_eval --set …` (nightly rule) |
+| Wake FRR ≤ 10%, FAR ≤ 0.5/h (in-tab, A4) | `friday-voice wake-eval` (Phase 11) |
+
+### 8.1 Write the script, then record
+
+1. Edit the table in `docs/voice/eval-manifest.md`: one row per utterance
+   (about 100 Turkish, 50 code-switched, 50 English; each in a quiet room
+   and with room noise — TV, fan — and with firm and project names). Leave
+   `sha256` empty. Condition: `tr-quiet`, `tr-noise`, `cs-quiet`,
+   `cs-noise`, `en-quiet`, `en-noise`.
+2. Create the private set directory and record each row's file there as
+   16 kHz mono 16-bit PCM WAV (at most 30 s; a little silence before and
+   after is fine):
+
+   ```bash
+   mkdir -p ~/FridayEval/asr && chmod 700 ~/FridayEval ~/FridayEval/asr
+   cd ~/FridayEval/asr
+   sox -d -r 16000 -c 1 -b 16 tr-quiet-001.wav trim 0 8   # say the row's reference
+   ```
+
+   The command refuses a directory others can read, symlinks and any
+   other format (`invalid_audio:wrong_sample_rate` in the report).
+   Record the 2 h of negative audio (TV, podcasts, calls) for the wake
+   word under `~/FridayEval/` too — see `docs/voice/live-eval.md`.
+3. Write the hashes into the manifest and commit **only the manifest**:
+
+   ```bash
+   cd backend
+   DJANGO_SETTINGS_MODULE=config.settings.test DATABASE_URL=postgres://x:x@localhost:1/x \
+     uv run python manage.py voice_eval --fill-hashes --set ~/FridayEval/asr
+   git add ../docs/voice/eval-manifest.md
+   ```
+
+   An existing hash is never overwritten: a re-recorded clip fails the run
+   (`sha256 differs`) until its hash is cleared in the manifest.
+
+### 8.2 Run the WER set
+
+The run needs the real stack's database and speech server (each clip is
+one `voice.eval_stt` gateway call and, unless `--stt-only`, one
+`voice.eval_tts` call for the first sentence — a `ModelUsage` row each in
+the owner's personal workspace, cost 0 locally). The provider rows point
+at `host.docker.internal:8000`, so run it in the `web` container with the
+set and the docs mounted:
+
+```bash
+docker compose -f deploy/docker/compose.yml run --rm \
+  -v "$HOME/FridayEval:/FridayEval" -v "$PWD/docs:/docs:ro" web \
+  uv run python manage.py voice_eval --set /FridayEval/asr \
+    --manifest /docs/voice/eval-manifest.md \
+    --results-dir /FridayEval/results --baseline /FridayEval/latency-baseline.json \
+    --write-baseline
+```
+
+(From the host checkout instead, `VOICE_EVAL_*` defaults point at
+`~/FridayEval/…`; the provider rows must then be reachable from the host.)
+It prints WER per condition and per target group, the latency p50/p95 of
+`stt_ms`, `tts_first_ms` and `turn_ms`, and writes the full report (0600,
+per-clip errors and hypotheses) to `--results-dir`. No transcript or
+reference is printed. Exit status is non-zero on a `fail` verdict (a group
+above its target or a > 20% p50 regression against the stored baseline);
+`incomplete` means a target group has no clips yet. Useful options:
+`--stt-provider voice-stt-local` (pin a row, e.g. to compare Whisper
+`small` and `medium` rows), `--limit N`, `--allow-missing`. Write the
+baseline (`--write-baseline`) only from a run on the settled local stack;
+later runs (the nightly replay) compare against it.
+
+### 8.3 TTS listening test (A2)
+
+```bash
+… voice_eval --tts-sheet --manifest /docs/voice/eval-manifest.md --results-dir /FridayEval/results
+```
+
+synthesizes up to 20 Turkish references (`--tts-limit`) through
+`voice.eval_tts` on the `tr` route (`--tts-provider openrouter-tts` to
+rate the cloud voice, which needs the d2 toggle) into
+`~/FridayEval/results/tts-<run>/`, with `ratings.csv`. Listen, fill in
+`intelligibility` and `naturalness` (1–5) per row, then
+`voice_eval --score-tts /FridayEval/results/tts-<run>/ratings.csv`. Below
+4.0 on either mean: route `tr` to OpenRouter (§2, A2) or record the gap.
+
+### 8.4 Latency of live turns (A5)
+
+After some push-to-talk turns on `/voice` with local models:
+`voice_eval --traces [--days 30] [--source web|node]` prints p50/p95 of
+every `VoiceTurnTrace` stage in the owner's workspace and judges
+`playback_start_ms` (end of speech → first audio) against p50 ≤ 1.5 s /
+p95 ≤ 2.5 s.
+
+Record the numbers (WER per group, TTS means, latency, the TTS choice) in
+the Phase 6 brief, "A9 — exit criteria record"; re-set a target there
+with its reason if needed.
