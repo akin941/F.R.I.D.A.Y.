@@ -4,6 +4,15 @@
 # the six views a node_voice token reaches, Phase 11 D4 / preflight
 # voice_live_channel) -- everything else is 404.
 # backend/ops/tests/test_local_tls_caddyfile.py guards this list.
+#
+# Matching: Caddy's `path` matcher is case-insensitive and compares the
+# cleaned path (`//` merged, `%2f` decoded, `.`/`..` segments resolved), so
+# e.g. /API/v1/voice/speech or /x/../api/v1/voice/speech is forwarded too.
+# That is safe only because every name below is an exact, real route
+# (asserted by the test) and Django is case-sensitive: any variant other
+# than the exact path is a 404 upstream. No prefix or wildcard is ever used.
+# The proxy adds no header of its own (no CORS, no Origin): Django's
+# CORS/CSRF policy decides, unchanged.
 {
 	admin off
 	auto_https off
