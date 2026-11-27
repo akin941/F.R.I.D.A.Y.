@@ -1104,6 +1104,103 @@ measured once on the Mac (owner step); results and the TTS choice (Piper
 or OpenRouter, A2) recorded in this brief; targets confirmed or re-set
 with reasons.
 
+### Branch 3a — implementation notes (2026-11-27, `feat/p6-voice-eval`)
+
+Cut from `integ/phase-13` (runbook `mac-session-handoff.md` A11: no
+earlier branch of 3a existed anywhere). Server side only.
+
+- **Code.** `backend/voice/eval/`: `scorer` (word-level Levenshtein with
+  an S/D/I backtrace; corpus WER = summed errors / reference words;
+  normalisation = NFC, Turkish case `İ→i`, `I→ı` before lower-casing (the
+  ordinary rule for `en-*` rows), apostrophes dropped so `repo'yu` =
+  `repoyu`, every other punctuation/symbol → space), `manifest` (the
+  committed table, the private set directory: mode 0700, owner-owned, no
+  symlinks, clips ≤ 2 MB read with `O_NOFOLLOW`; a hash mismatch is
+  always fatal; `--fill-hashes` fills empty hashes only and refuses the
+  same recording twice), `replay` (the harness: capture into 20 ms frames →
+  energy VAD segment (speech span, end-of-turn at `VOICE_FINISH_MS` 900 ms
+  after it) → STT → reply (an echo of the transcript's first sentence — no
+  LLM) → TTS, each a port; gateway ports `GatewaySTT`/`GatewayTTS`;
+  latency p50/p95; the baseline and the > 20% p50 rule), `runner` (A4
+  targets, the WER run, the TTS sheet, `VoiceTurnTrace` latency through
+  `for_actor()`), `fixtures` (synthetic tone/silence WAVs built in code and
+  the self-trigger fixture clip "Hey Friday, terminali aç").
+  `manage.py voice_eval`: `--set <dir>` (run), `--fill-hashes`,
+  `--tts-sheet`, `--score-tts <csv>`, `--traces`; `--write-baseline`,
+  `--stt-only`, `--stt-provider`/`--tts-provider` (pins, `only_provider`),
+  `--allow-missing`, `--limit`. Non-zero exit on a `fail` verdict.
+- **Gateway / ModelUsage.** Purposes `voice.eval_stt`/`voice.eval_tts`:
+  in `AI_UNTIERED_PURPOSES` and `COMPRESSION_NOT_APPLICABLE`, budgeted
+  under A3 by their **own** row `voice_eval` (`AI_VOICE_EVAL_PURPOSES`;
+  seeded once, 5 USD/month and 2 USD per run, owner-editable), not the
+  live `audio` row — an eval run can never exhaust live voice's cap
+  (review follow-up; the A3 coverage test checks both rows). One `ModelUsage`
+  per call in the owner's personal workspace, `context_report`
+  = `voice_eval_run` + `condition` (+ the gateway's own keys) — never audio
+  or text; budget session `voice_eval:<run id>`. A run-wide
+  `NoProviderAvailable`/`BudgetExceeded` aborts before any report is
+  written; a per-clip failure scores as an empty hypothesis.
+- **Files.** Manifest `docs/voice/eval-manifest.md` (seven suggested rows,
+  no hashes yet). Set, reports (0600 in 0700 dirs, never overwritten),
+  TTS sheet audio and the baseline live under `~/FridayEval/`
+  (`VOICE_EVAL_SET_DIR`, `VOICE_EVAL_RESULTS_DIR`, `VOICE_EVAL_BASELINE`,
+  `VOICE_EVAL_MANIFEST`). Runbook `voice-setup.md` §8.
+- **Targets as coded** (`runner.WER_GROUPS`): `tr-quiet` ≤ 12%, `tr-noise`
+  ≤ 18%, code-switched (`cs-quiet` + `cs-noise` pooled) ≤ 15%, English
+  reported without a target; TTS means ≥ 4.0 for intelligibility and
+  naturalness; `--traces` judges `playback_start_ms` p50 ≤ 1500 ms / p95 ≤
+  2500 ms. Wake FRR/FAR is not 3a's: the Phase 11 harness
+  (`friday-voice wake-eval`, `docs/voice/live-eval.md`) measures it.
+- **Tests (CI, fakes only).** `voice/tests/test_eval_scorer.py` (S/D/I,
+  `İ/i`, `I/ı`, punctuation, corpus WER), `test_eval_manifest.py` (changed
+  file fails, fill-once, private dir, no audio committed),
+  `test_eval_replay.py` (fake STT/TTS through the gateway, ModelUsage
+  shape, segmenter on tone/silence, the regression check trips on a
+  synthetic 25% slowdown and not on 15%), `test_eval_command.py` (the
+  command end to end, TTS sheet + score, traces scoped to the owner's
+  workspace). `test_eval_real.py` is opt-in (`VOICE_EVAL_REAL_BASE_URL`).
+- **Opt-in real run (2026-11-27, not a measurement).** Against the Mac's
+  speaches (`faster-whisper-small`, Piper `tr_TR-dfki-medium`) in the test
+  database, four Piper-synthesized Turkish sentences resampled to 16 kHz:
+  WER `tr-quiet` 20.0% (2 clips), `tr-noise` 25.0% (1, no real noise),
+  code-switched 50.0% (1; "Repo'yu" heard as "Ve boyu"); STT p50 1236 ms,
+  TTS first sentence p50 122 ms, turn p50 1364 ms. Synthetic speech says
+  nothing about the owner's voice; the real A4 numbers are the owner's.
+- **Deviations.** (1) No `frontend/src/lib/voice/` replay entry and no
+  `frontend/test/fixtures/voice/` WAVs: the branch is server-side, and the
+  synthetic clips are built in code (`voice/eval/fixtures.py`), so no
+  binary is committed; the browser pipeline keeps its existing vitest
+  fakes. (2) The replay's reply stage is an echo, not the LLM; A5's LLM
+  stage is covered by `VoiceTurnTrace` (`--traces`). (3) STT uses the
+  product's `VOICE_STT_LANGUAGE` (`tr`) for every row, English ones too —
+  it measures what Friday does. (4) The nightly regression is the
+  `voice_eval --set` run against the stored baseline on the Mac; no CI job
+  was added (CI never sees the recordings).
+- **Review follow-ups (2026-11-27, independent review APPROVE with
+  fixes).** The owner and the personal workspace are chosen by
+  `created_at` (as `ensure_personal_workspace`); the scorer spells Turkish
+  digits as words on both sides (`voice/eval/numbers.py`: integers,
+  thousands dots, comma decimals, `HH:MM` times with `:30` = `buçuk`,
+  percent, `₺`/`tl`) and joins hyphenated words (`e-posta` = `eposta`;
+  letter–digit hyphens split); `--write-baseline` is refused for a `fail`
+  verdict, a regression, `--limit` or `--stt-only` unless `--force`;
+  `voice_eval --check-set <dir>` is a database-free dry run (mode, uid,
+  file count, hash status) — run once in a one-off `web` container on
+  this Mac against a 0700 host directory: Docker Desktop reports mode
+  0700, uid 0 (process uid 0), check passes; 0755 is refused;
+  `end_of_turn_ms` is the audio time from the clip start; reports,
+  sheets and the baseline are refused inside the repository; the
+  `--fill-hashes` manifest write is atomic. Runbook §8.2 gains the
+  `up-local-tls` compose files, the host-run recipe (pinned host rows or
+  an `/etc/hosts` entry) and the failed-clip rule; the manifest notes how
+  to write numbers and hyphens.
+- **Owner steps (C2 A4).** Write and record the set (runbook §8.1), fill
+  the hashes and commit the manifest; run the set once (§8.2) with
+  `--write-baseline`; run the TTS listening test (§8.3) and choose Piper or
+  OpenRouter for `tr` (A2); record WER per group, the TTS means and choice
+  in "A9 — exit criteria record", re-setting a target with its reason if
+  needed. Wake FRR/FAR on the negative audio: `docs/voice/live-eval.md`.
+
 ### 4. `feat/p6-wake-word` — local "Hey Friday"
 
 **Step 0 — wake-word spike**, recorded before code: openWakeWord model
@@ -1652,7 +1749,7 @@ slice.
 | 1 `feat/p6-speech-gateway` | **implemented 2026-11-20** (cut from the local integration branch; spike results and owner steps under "Branch 1 — spike results and implementation notes"; awaiting the Sonnet 5 branch review) |
 | 2 `feat/p6-voice-api` | **implemented 2026-11-20** (cut from the local integration branch; notes and owner steps under "Branch 2 — implementation notes"; awaiting the Sonnet 5 branch review) |
 | 3 `feat/p6-push-to-talk` | **implemented 2026-11-20** (cut from the local integration branch; notes and owner steps under "Branch 3 — implementation notes"; awaiting the Sonnet 5 branch review) |
-| 3a `feat/p6-voice-eval` | not started |
+| 3a `feat/p6-voice-eval` | **implemented 2026-11-27** (cut from `integ/phase-13`; notes, deviations and owner steps under "Branch 3a — implementation notes"; the A4 measurements are the owner's (runbook C2 A4); awaiting the Sonnet 5 branch review) |
 | 4 `feat/p6-wake-word` | **implemented 2026-11-20** (cut from the local integration branch; step 0 spike results, notes and owner steps under "Branch 4 — step 0 spike results" / "implementation notes"; push-to-talk stays the default (d3); `hey_friday` model training and the Mac CPU/parity/FAR measurements are owner steps; awaiting the Sonnet 5 branch review) |
 | 4a `feat/p6-wake-word-dsp` | not triggered so far (parity holds; CPU decided by the Mac measurement) |
 | 5 `feat/p6-hud` (built as `feat/p6-visual-identity`) | **implemented 2026-11-20** (cut from the local integration branch; notes and owner steps under "Branch 5 — implementation notes"; the "3–4 done on the Mac" precondition, the GPU/battery and reduced-motion passes are owner steps; awaiting the Sonnet 5 branch review) |
