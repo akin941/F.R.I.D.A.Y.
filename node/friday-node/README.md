@@ -25,7 +25,10 @@ voice processing, the menu-bar mic indicator, the push-to-talk hotkey, the
 (see "The voice host (Phase 11 M1)" below);
 **Phase 11 M3, code half** (`feat/p11-node-voice-loopback`, runbook B8) —
 `friday-node voice-loopback`, the voice token hand-over and the nightly
-launchd job (see "Nightly self-trigger (Phase 11 M3)" below).
+launchd job (see "Nightly self-trigger (Phase 11 M3)" below);
+**Phase 13 M1** (`feat/p13-node-app-pairing-platform`, runbook E1) — the
+pairing body's `platform: "macos"` and "Sunucu adresini değiştir" (see
+"Server address (Phase 13 M1)" below).
 
 The app advertises every action contract with its real availability: see
 "The executors (Phase 10 M2)" below. Nothing runs before the owner maps it
@@ -56,6 +59,8 @@ The app advertises every action contract with its real availability: see
 | `scripts/selftest-nightly.sh`, `scripts/ai.friday.voice-selftest.plist.template`, `scripts/install-voice-selftest.sh` | The nightly job, its launchd agent template and its installer (which never loads it) |
 | `App/FridayNode/Voice/` | `Hotkey.swift` (Carbon `RegisterEventHotKey`, press/release) and `VoiceMenu.swift` (the "Ses" menu) |
 | `fixtures/voice_host_traces.json`, `scripts/voice_host_traces.py` | The reference host's barge-in traces (`--check` in CI) that `VoiceHostTraceTests` replays |
+| `Sources/NodeCore/ServerAddress.swift` | Phase 13 M1: the server-address rules (`friday-node-linux` `check_server_url`), `TLSPinProbe` (a handshake-only pin check), `ServerAddressEditor` and `ServerAddressTarget` (`NodeRunner.repoint`) |
+| `App/FridayNode/ServerAddressWindow.swift` | The "Sunucu adresini değiştir" window |
 | `App/FridayNode/` | The `LSUIElement` menu-bar app |
 | `FridayNode.xcodeproj` | Debug / Release / unsigned **Conformance** configurations |
 | `scripts/build-sign-local.sh` | Release build, Personal Team signing, checks, install |
@@ -425,6 +430,34 @@ scripts/install-hook-cli.sh && scripts/install-voice-selftest.sh   # owner: inst
 device); `check-release-markers.sh` refuses a binary that names it or
 `EchoVoiceEngine`, and `install-hook-cli.sh` runs that check on the release
 CLI it installs.
+
+## Server address (Phase 13 M1, runbook E1)
+
+The server's base URL lives in the Keychain credential pairing stored
+(`serverURL`), and only there: the WebSocket, rotation, the B7 voice token
+mint and the B8 selftest mint all read it. The menu shows "Sunucu: <host>"
+from it. "Sunucu adresini değiştir…" re-points the node (ADR-017 decision 7)
+the way `friday-node-linux config set server-url` does:
+
+1. the URL must be `https://host[:port]`: no path, query, fragment or user
+   info, Python's port rules (the pairing window uses the same check);
+2. Touch ID or the login password;
+3. a TLS handshake with the new server must pass the SPKI pin taken at
+   pairing (nothing is sent after it: no HTTP request, no Bearer secret);
+4. the credential is saved with the new address; the node id, secret,
+   signing-key pins and TLS pin are kept, and a running node reconnects.
+
+Every refusal changes nothing. A server whose pin differs, then or on any
+later connect, is refused in the TLS handshake, before `hello`: the menu
+shows "Sunucu kimliği değişti — yeniden eşleştirin" and the node keeps
+retrying the same address with backoff (the Linux daemon's behaviour); it
+never falls back to another address. No server frame can change the
+address (ADR-013 decision 5): the session has no handle on the credential,
+and address-shaped frames are `unknown_type`.
+
+```bash
+swift test --filter 'ServerAddress|PairingPlatform'   # URL table, the auth gate, pins kept, live TLS refusals (python3 + openssl, 127.0.0.1)
+```
 
 ## Rules this package keeps
 

@@ -1139,7 +1139,7 @@ evaluation".
 | 6 | `feat/p13-home-voice-routes` | `connectors.home_phrases`, `home.control` wake route (proposal only), typed-turn mismatch check, vectors, ADR-015 note | 2, 5 | **implemented 2026-11-26** (see "Branch 6 notes"; no model call, no HA request, no approval from the route; typed `target_mismatch`; e2e with the reference voice host + real `friday-voice run` child; real mic/Whisper: M2, pending owner evaluation; awaits the independent Sonnet 5 review) |
 | 7 | `feat/p13-home-server-ops` | `compose.home.yml`, `deploy/home/` backup/drill/timer/Caddy, `home_*` preflight rows and settings | brief approved (independent) | **implemented 2026-11-26** (compose override + `make up-home`, `deploy/home/` scripts/units/Caddyfile, `check_home` five rows, settings + `.env.example`, `home-ops` CI job, runbook updated; real hardware: M3, pending owner evaluation) |
 | 8 | `chore/p13-closeout` | `nodes_labels` / `ha_entities` / `linux_node_vendor` rows, no-protocol-change check, home-hub e2e, runbooks, ADR-017 note, MASTER_PLAN row, `self_sources.json`, go/no-go record | 1–7 | **implemented 2026-11-26** (`check_home_control`: `nodes_labels`, `ha_entities`, `linux_node_vendor`, `node_protocol_frozen`; `ops/tests/test_home_hub_e2e.py` on one live TLS server with the reference node v2 and the packaged Linux node; runbooks final; ADR-017 closeout note; MASTER_PLAN row 13 "server side done; go/no-go pending owner evaluation"; see "Branch notes and owner steps (pending) — `chore/p13-closeout`"; awaits the independent Sonnet 5 review) |
-| M1 | Swift `friday-node`: pairing `platform`, server re-point | Send `platform: "macos"` at pairing; "Sunucu adresini değiştir" behind Touch ID keeping the pins; conformance unchanged | 1 merged; Phase 9 B1 | deferred: Mac session |
+| M1 | Swift `friday-node`: pairing `platform`, server re-point | Send `platform: "macos"` at pairing; "Sunucu adresini değiştir" behind Touch ID keeping the pins; conformance unchanged | 1 merged; Phase 9 B1 | **implemented 2026-11-27** on `feat/p13-node-app-pairing-platform` (see "M1 implementation record"; awaits the independent Sonnet 5 review; the installed app: owner step) |
 | M2 | Multi-node and home-route run on real hardware | Real mic "which PC" and "salondaki TV'yi aç" on the Mac; Mac + real Linux PC paired to the real home server; HUD presence | 2, 3, 4, 6 merged; M1; Phase 11 B7 | deferred: Mac session (pending owner evaluation) |
 | M3 | Home server on the owner's home PC | Runbook steps 1–9 on real hardware: LUKS, reservation, Caddy + private CA, ufw, backup to the chosen off-site target, first restore drill (and one from off-site) | 7 merged | deferred: owner hardware (pending owner evaluation) |
 | W | Windows node | Not built; own brief later (d1: Tauri v2), must pass the same conformance suite | — | deferred (out of Phase 13) |
@@ -1753,6 +1753,114 @@ verifier) has merged. The same list is appended to
   (branch 4 tests `test_daemon_failclosed.py::test_repoint_keeps_pins`):
   same pins → connects; different SPKI → refuses before `hello`.
 - `swift test` green on the Mac.
+
+#### M1 implementation record (2026-11-27, `feat/p13-node-app-pairing-platform`)
+
+Awaits the independent Sonnet 5 review.
+
+**Where it lives (naming deviation).** `node/friday-node` keeps a flat
+`Sources/NodeCore/` layout with the logic in NodeCore and the AppKit views
+in `App/FridayNode/`, so the files named above are:
+- `Pairing/PairingRequest.swift` → `PairingRequest.body` in
+  `Sources/NodeCore/Pairing.swift` (`PairingRequest.platform = "macos"`).
+  The body already carried `platform: "macos"` since Phase 9 B1; it is now
+  one tested computed property (exactly `code`, `node_name`,
+  `protocol_versions`, `platform`).
+- `Settings/ServerAddress.swift` → `Sources/NodeCore/ServerAddress.swift`:
+  `ServerAddress.check` (the URL rules), `TLSPinProbe` (the pin check),
+  `ServerAddressEditor` (the order below), `ServerAddressTarget`
+  (`NodeRunner` conforms; `NodeRunner.repoint(to:nodeID:)`).
+- `Settings/ServerAddressView.swift` →
+  `App/FridayNode/ServerAddressWindow.swift`; the menu items are in
+  `AppDelegate.swift`.
+
+**Behaviour (mirrors `friday-node-linux config set server-url`).**
+- *Where the address is stored:* the `serverURL` of the Keychain
+  credential pairing stored (`KeychainCredentialStore`, account
+  `credential`). It is the only address the node has: the WebSocket
+  (`gatewayURL`), rotation, the B7 voice token mint and the B8 selftest
+  mint (`NodeRunner.credentialForVoice()`) all read it. A re-point resets
+  the connection, so the voice link drops and the next mint uses the new
+  address.
+- *Order:* paired? → `ServerAddress.check` → LocalAuthentication
+  (`.deviceOwnerAuthentication`, reason "Friday Node'un sunucu adresini
+  değiştir") → a TLS handshake with the new `host:port`, accepted only if
+  the leaf SPKI hashes to the stored pin (Network.framework, cancelled once
+  ready; no application byte, so no HTTP request and never the Bearer
+  secret) → save on the runner queue (a rotation in flight is dropped by
+  the new generation, so it cannot write the old address back) → reconnect
+  if running (a stopped session stays stopped). The node id, secret,
+  gateway path, rotation fields, signing-key pins and the TLS pin are kept.
+  Any refusal changes nothing: the node stays on its previous address
+  (Linux: "no change made"). A mismatch is reported as "Sunucu kimliği
+  değişti — yeniden eşleştirin".
+- *URL rules:* Linux `check_server_url` case for case (`ServerAddressCheckTests`
+  replays its outputs): `https` (any case), a host, no user info, query,
+  fragment or path (empty `?`/`#`/`/` ignored), a port of ASCII digits in
+  0–65535 (empty after `:` = default), a bracketed host only IPv6; the
+  stored form is `https://<netloc>` as typed. The pairing window now uses
+  the same check (Linux `pair` does).
+- *At run time:* a server whose SPKI differs fails the TLS handshake
+  before the WebSocket upgrade (`PinningDelegate`), so before `hello`;
+  `NodeConnection.pinRefused` makes the runner show
+  `.identityChanged` ("Sunucu kimliği değişti — yeniden eşleştirin") and
+  retry the same address with the session's backoff, exactly as the Linux
+  daemon's `PinnedNodeClient` loop does. It never falls back to an earlier
+  address (there is none stored). Signing-key pins are enforced on frames
+  as before, so a server with other keys gets nothing verified.
+- *Menu:* "Sunucu: <host>" (port shown unless 443), from the local
+  credential only; "Sunucu adresini değiştir…" enabled while paired.
+- *No server message changes it (ADR-013 decision 5):* `NodeSession` has no
+  handle on the credential or the editor; address-shaped frames
+  (`config.update`, `server.repoint`) are `unknown_type`, the
+  policy-mutation conformance family stays green.
+
+**Deviations.**
+- File names (above).
+- Stricter than Python's `urlsplit` on degenerate input it would accept:
+  any `@` (Python lets an empty user through, `https://@host`), spaces,
+  tabs (Python strips them silently), control or non-ASCII characters,
+  characters outside the host grammar (`;`, `%`, `\`), IPvFuture
+  (`[v1.x]`). Fail closed; no real server address is affected.
+- The Swift node pins the SPKI only (Phase 9 D4); it has no private-CA pin
+  like Linux `--ca`, so "keeps the TLS pin" means the SPKI pin.
+- Linux has no authentication step for `config set` (the uid owns the
+  file); the Swift app adds LocalAuthentication, as for every other local
+  setting.
+
+**Tests** (`Tests/NodeCoreTests/ServerAddressTests.swift`): the pairing
+body; the Linux URL table, accepted and refused, plus the stricter cases;
+the editor with the fake-auth seam (no owner → no probe, no change), the
+pins kept, a mismatch and an unreachable server change nothing, an invalid
+URL is refused before the owner is asked; `NodeRunner.repoint` feeds the
+gateway URL and the menu host; address-shaped frames are `unknown_type`;
+live TLS on 127.0.0.1 with throwaway openssl certificates and a python3
+server: the probe accepts the same key, refuses another one with zero
+application bytes received, reports an unreachable port; the runner
+against a server with another key ends in `.identityChanged` with zero
+application bytes received and the stored address unchanged.
+
+**Verified on the Mac (2026-11-27).** `swift build`, `swift test` (294
+tests, 3 env-gated skips), Xcode Conformance and Release builds, Release
+`ReleaseHygieneTests` + `EntitlementAllowlistTests` (7),
+`check-release-markers.sh` on the Release app and the release CLI,
+`vendor_protocol.py --check`, `nodes/tests/test_pairing_platform.py` (18),
+live conformance on port 8766 with fresh fixture homes: protocol 2 99/99,
+protocol 1 86/86 (policy-mutation family included),
+`build_node_conformance --check` unchanged,
+`ops/tests/test_preflight_home_control.py` (34, `node_protocol_frozen`
+included), `ruff check`, `lint-imports`. No protocol file, schema or
+`node/friday-voice/conformance.lock` changed.
+
+**Owner steps (pending).**
+1. The independent Sonnet 5 review of the branch.
+2. After the next signed install (`build-sign-local.sh --install`, the
+   owner's step): open the menu, check "Sunucu: <host>", run "Sunucu
+   adresini değiştir…" once to the same server (Touch ID prompt, then
+   "pinler korundu") and once to a server with another certificate
+   (refused, address unchanged). With the home server (M3): re-point the
+   Mac to `https://friday-home.local` if it serves the paired key,
+   otherwise re-pair.
 
 ### M2 — Multi-node and home routes on real hardware (go/no-go)
 
