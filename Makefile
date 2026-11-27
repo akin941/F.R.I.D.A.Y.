@@ -16,7 +16,7 @@ FRONTEND := cd frontend &&
 	harness-images harness-smoke harness-runner deploy-smoke preflight \
 	test-backend test-frontend test-e2e lint-backend lint-frontend \
 	frontend-install frontend-dev frontend-build e2e-install voice-models \
-	friday-voice-test friday-voice-e2e friday-voice-install \
+	friday-voice-test friday-voice-e2e friday-voice-install voice-models-node \
 	linux-node-test linux-node-conformance linux-node-install
 
 # Generates any missing secret into the gitignored deploy/docker/.env
@@ -137,9 +137,20 @@ friday-voice-e2e:
 friday-voice-install:
 	mkdir -p "$(FRIDAY_VOICE_HOME)"
 	rsync -a --delete --exclude .venv --exclude __pycache__ --exclude .pytest_cache \
-		--exclude .ruff_cache --exclude tests $(FRIDAY_VOICE_DIR)/ "$(FRIDAY_VOICE_HOME)/"
+		--exclude .ruff_cache --exclude tests --exclude /models/ \
+		$(FRIDAY_VOICE_DIR)/ "$(FRIDAY_VOICE_HOME)/"
 	cd "$(FRIDAY_VOICE_HOME)" && uv sync --frozen --no-dev
 	shasum -a 256 "$(FRIDAY_VOICE_HOME)/uv.lock"
+
+# Runbook A10: fill the node's model directory from models.json -- download
+# every entry with a URL source, verify its sha256, copy the owner-trained
+# keyword model from VOICE_WAKE_MODEL_SRC (refused while its pin is empty),
+# atomic writes only. `/models/` is excluded from the install rsync above so
+# a reinstall never deletes it. The target defaults to models.json `modelDir`
+# (the directory the child reads); VOICE_NODE_MODEL_DIR=<dir> overrides it.
+voice-models-node:
+	cd $(FRIDAY_VOICE_DIR) && uv sync --frozen && \
+		uv run friday-voice models fetch $(if $(VOICE_NODE_MODEL_DIR),--model-dir "$(VOICE_NODE_MODEL_DIR)")
 
 # --- Linux node (Phase 13 branch 4, brief D10) ---
 # node/friday-node-linux is its own uv project; it imports nothing from
