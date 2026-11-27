@@ -339,6 +339,31 @@ final class VoiceServiceTests: XCTestCase {
         XCTAssertEqual(host.performSync { $0.micHeld }, false)
         host.stop(wait: true)
     }
+
+    /// Runbook B8: the nightly selftest's hold stops the child and releases
+    /// the mic (one voice at a time; the selftest's token supersedes the
+    /// child's), and giving it back starts the child with a fresh mint.
+    func testTheSelftestHoldStopsTheChildAndGivesItBackWithAFreshToken() throws {
+        let mint = ScriptedMint([.success(ScriptedMint.token()), .success(ScriptedMint.token("B"))])
+        let (service, audio, _) = makeService(mint: mint)
+        service.start(autoPoll: false)
+        service.linkChanged(true)
+        wait("credential") { written().contains("credential") }
+        try inject(service, [Self.ready, Self.state("armed_ptt")])
+        wait("capture") { service.micInUse }
+        let first = try XCTUnwrap(service.host.childPID)
+        XCTAssertTrue(service.setSelftestHold(true, timeout: 3), "the mic is free within the timeout")
+        XCTAssertFalse(service.micInUse)
+        XCTAssertTrue(audio.recorded.contains("stopCapture"))
+        wait("child stopped") { kill(first, 0) != 0 }
+        usleep(500_000)
+        XCTAssertNil(service.host.childPID, "no restart while the selftest holds the voice")
+        XCTAssertEqual(mint.calls, 1)
+        service.setSelftestHold(false, timeout: 0)
+        wait("restarted") { service.host.childPID != nil }
+        wait("fresh mint") { mint.calls == 2 }
+        service.shutdown()
+    }
 }
 
 /// An owner who never authenticates.

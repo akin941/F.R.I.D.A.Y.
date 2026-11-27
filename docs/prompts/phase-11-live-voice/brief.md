@@ -2734,6 +2734,155 @@ Contract the Mac side must satisfy (branch 6, `node/friday-voice/friday_voice/se
 - Run `uv run pytest -m real_models` with `FRIDAY_VOICE_MODEL_DIR` and the
   owner-trained head before the first night.
 
+#### M3 code-half implementation record (`feat/p11-node-voice-loopback`, 2026-11-27)
+
+Built on `integ/phase-13` (with B7 `189e0cf` and the voice CA work
+`495fe47`). Runbook B8. No real microphone or speaker was opened in the
+session; every audio test runs against fakes or the DEBUG echo engine.
+
+**Design decisions.**
+- **TCC: the app does the audio, the CLI is a client.** TCC attributes a
+  launchd agent's processes to the job (its *responsible process*:
+  `/bin/bash selftest-nightly.sh`, then `friday-voice`, then whatever it
+  spawns), not to FridayNode.app and not to Terminal. That process has no
+  Microphone grant and nobody can answer a prompt at 03:17; a `friday-node`
+  executable (separate, or embedded in the app bundle and spawned by the
+  job) is attributed the same way. The only process that holds the grant
+  is the app itself (launched by LaunchServices; B7 owner step 2). So
+  `friday-node voice-loopback` sends the WAV to the running app over a new
+  user-owned Unix socket (`VoiceSelftestSocket`,
+  `~/Library/Application Support/Friday/voice-selftest.sock`, the hook
+  socket's rules: 0600 in 0700, peer uid before a byte is read, bounded
+  reads, no TCP), and the app plays it on a fresh `AVAudioVoiceEngine`
+  (B7's voice-processing graph). The loopback checks
+  `AVCaptureDevice.authorizationStatus(.audio)` and never requests it.
+  Rejected: the plist launching the app binary itself (`FridayNode
+  --voice-selftest`, which would make the app the job's responsible
+  process): it puts a second app instance, its keychain access and its mic
+  grant behind a user-writable script and `uv` chain, and it was not
+  verifiable here without opening the mic.
+- **Keychain: the app mints.** The node secret is in the data protection
+  keychain under the app's `keychain-access-groups` entitlement (Personal
+  Team profile); the unentitled SwiftPM CLI cannot read it. `friday-node
+  voice-token --out <file>` asks the app (`begin`), creates the file new
+  (`O_EXCL|O_NOFOLLOW`, 0600, in a directory only the owner can write)
+  before the app mints, writes the token there and nowhere else, and prints
+  `server_url=` / `ca_sha256=` / `expires_at=` (no token). `--end <file>`
+  deletes it and ends the hold. No entitlement changed.
+- **One voice at a time.** A mint supersedes the node's live `node_voice`
+  token (30 s grace). `begin` therefore takes a selftest hold on
+  `VoiceService` (the live child stops, the mic is released, its token is
+  forgotten; a mint landing during the hold is dropped), and `end` or a
+  15-minute lease gives it back: the child starts and mints again,
+  superseding the selftest's token. `loopback` runs only inside a hold and
+  refuses (`mic_busy`) while the live voice still holds the mic.
+- **Owner gate.** The socket refuses everything until "Ses" → "Gece
+  öz-testi" is on (`nightly_selftest` in the `voice-settings` Keychain item,
+  LocalAuthentication to turn on, off by default), and while the kill switch
+  is engaged or the node is unpaired.
+
+**What landed.**
+- `Sources/NodeCore/Voice/VoiceLoopback.swift`: `VoiceSelftestCode` (the
+  stable codes, exit 2 usage, 3 WAV, 4 audio/TCC, 5 app, 6 token file);
+  `LoopbackWAV` (16 kHz mono PCM16 only, extensible PCM accepted, odd chunks
+  padded, ≤ 60 s; the encoder writes Python `wave`'s exact header);
+  `VoiceLoopback.run` over `VoiceAudioIO` (TCC first, capture before
+  playback, the clip + 1 s exactly, `aec` must be `on`, timeout = capture
+  length + 10 s, the mic released on every path); `EchoVoiceEngine` and
+  `ReleaseProbe.voiceLoopbackEchoCompiledIn` (`#if DEBUG`).
+- `Sources/NodeCore/Voice/VoiceSelftest.swift`: `VoiceSelftestHost` (gates,
+  hold, lease, mint), `VoiceSelftestSocket`, `VoiceSelftestClient`,
+  `SelftestTokenFile`. `Sources/NodeCore/LocalSocket.swift`: the socket
+  rules, now shared by `HookSocket` (behaviour unchanged, `HookRelayTests`).
+- `VoiceService.setSelftestHold` / `micInUse`; `VoiceSettings.nightlySelftest`
+  and `VoiceSettingsEditor.setNightlySelftest`; the menu item and the
+  socket in `AppDelegate` / `VoiceMenu`.
+- `friday-node voice-loopback [--debug-echo-engine]`, `voice-token --out
+  <file>`, `voice-token --end <file>` (`Sources/friday-node/main.swift`).
+- `scripts/selftest-nightly.sh` (battery skip via `pmset -g batt`; trap
+  deletes the token and ends the hold; `--ca-file` from `tls.json`; a night
+  without a token still records `error`), `scripts/ai.friday.voice-selftest.plist.template`
+  (03:17, Aqua, log in `~/Library/Logs/Friday/`), `scripts/install-voice-selftest.sh`
+  (copies and renders, never loads). `check-release-markers.sh` also refuses
+  `debug-echo-engine` / `EchoVoiceEngine`; `install-hook-cli.sh` runs it on
+  the release CLI.
+- `node/friday-voice/tests/test_selftest.py`: with `FRIDAY_NODE_LOOPBACK_CMD`
+  set, the loopback section also runs against the host binary (the length
+  rule on a short clip and on the nightly clip, a perfect echo with the echo
+  engine, `wav_invalid` / `wav_unsupported` with exit 3, nothing on stdout).
+
+**Contract test (run in this session).** `FRIDAY_NODE_LOOPBACK_CMD="<worktree>/node/friday-node/.build/debug/friday-node
+voice-loopback --debug-echo-engine" uv run pytest -q tests/test_selftest.py
+-k loopback`: 9 passed (the four echo-script tests and the five host
+tests). Without the variable the host tests skip (CI). Swift:
+`LoopbackWAVTests`, `VoiceLoopbackTests` (length rule, codes, mic released,
+no-disk source check, the DEBUG CLI in an empty HOME / TMPDIR / cwd that
+stay empty), `VoiceSelftestHostTests`, `VoiceSelftestSocketTests`,
+`SelftestTokenFileTests`, `SelftestNightlyScriptTests` (battery skip, token
+0600 during the run and gone after, the argv, the error night, the
+installer against a temporary HOME), the hold in `VoiceServiceTests`, the
+flag in `VoiceSettingsTests`, `ReleaseHygieneTests`.
+
+**Also run.** `swift build`; `swift test` (274 tests, 0 failures, 3 skipped:
+the existing opt-in probes); Xcode Release build (the build-phase marker
+check passes); Release `ReleaseHygieneTests` + `EntitlementAllowlistTests`
+(7/7); `check-release-markers.sh` on the Release app and the `swift build -c
+release` CLI (pass) and on the debug CLI (refused); `vendor_protocol.py
+--check`; `friday-voice` `uv run pytest -q` (887 passed, 6 skipped) and ruff.
+Backend not touched.
+
+**Deviations.**
+- The CLI is not self-sufficient: it needs the running app (and "Gece
+  öz-testi" on). A night with the app not running records `error`
+  (`app_unreachable`), never a pass.
+- Input WAVs other than 16 kHz mono 16-bit are refused (`wav_unsupported`)
+  rather than converted; `CommandLoopback` only ever sends that format.
+- `launchctl bootstrap gui/$(id -u) …` is documented next to the runbook's
+  `launchctl load -w` (same effect, the current form).
+- The plist logs to `~/Library/Logs/Friday/voice-selftest.log`, not
+  `/tmp` (a shared directory); it carries codes and the result line only.
+- The live voice is paused for the length of a run (normally well under a
+  minute; at most the 15-minute lease).
+
+**Owner steps (pending).**
+1. Build, sign and install the app (`FRIDAY_NODE_TEAM_ID=<team>
+   node/friday-node/scripts/build-sign-local.sh --install`); the Microphone
+   grant from B7 step 2 must be in place (same designated requirement).
+2. `node/friday-node/scripts/install-hook-cli.sh` (the release CLI,
+   marker-checked) and `node/friday-node/scripts/install-voice-selftest.sh`.
+3. FridayNode.app → "Ses" → "Gece öz-testi" on (Touch ID).
+4. Real-mic manual run, at the Mac, speakers on at normal volume: `F="$HOME/Library/Application Support/Friday"; "$F/bin/friday-node" voice-token --out "$F/voice/t.token"` then the runbook B8 command with `--server` / `--ca-sha256` from its output, `--token-file "$F/voice/t.token"` and `--loopback-cmd "'$F/bin/friday-node' voice-loopback"`, then `"$F/bin/friday-node" voice-token --end "$F/voice/t.token"`; or simply `/bin/bash "$F/voice/selftest-nightly.sh"; echo $?`. Expect exit 0 and `"result":"pass"` in `$F/voice/selftest-result.json`.
+5. Contract test with the release binary and the real AEC:
+   `FRIDAY_NODE_LOOPBACK_CMD="'$F/bin/friday-node' voice-loopback" uv run
+   pytest -q tests/test_selftest.py -k loopback` inside a hold (step 4's
+   `voice-token --out` first, `--end` after).
+6. Load the agent: `launchctl bootstrap gui/$(id -u)
+   ~/Library/LaunchAgents/ai.friday.voice-selftest.plist`; point the
+   server's `VOICE_LIVE_SELFTEST_RESULT_PATH` at the result file; seven green
+   nights (M3), with `-m real_models` run first (M1 owner step 6).
+
+**Hardening follow-up (`fix/p11-voice-selftest-hardening`, 2026-11-27;
+the B8 review's non-blocking items).**
+1. `selftest-nightly.sh` runs `friday-voice` in the background and waits
+   on it, so a SIGTERM reaches the trap at once (bash defers a trap until a
+   foreground command returns): the child is stopped, the token deleted and
+   the hold ended before launchd's SIGKILL. The cleanup also runs before the
+   battery check. The agent's `ExitTimeOut` is 45 s (> the 30 s mint
+   timeout, the one foreground step left). `testATermMidRunDeletesTheTokenAndStopsTheChild`
+   (a 30 s fake `friday-voice`): against the old script it fails (the
+   script waited 30 s and exited 130); against the new one it passes.
+2. A lease that runs out during a loopback no longer releases the hold
+   under it: the expiry is deferred and ends the hold when the loopback
+   returns (`testALeaseThatRunsOutDuringALoopbackWaitsForIt`). `end` stays
+   ungated (`testEndWorksWithTheSettingOff`).
+3. README "The app's gates" / "What the setting trusts": with "Gece
+   öz-testi" on, any process of the owner's user can mint a token and pause
+   live voice through the socket; `end` works with the setting off.
+4. The socket's per-connection read timeout is 2 s (was 10 s): a stalled
+   client holds the serial accept loop back for at most 2 s.
+5. `swift test` 5× in a row: see the branch report (no flake reproduced
+   when no other build ran in the worktree).
+
 ### M4 — Mac evaluation (go/no-go measurements)
 
 1. **FAR** on 24 h of household audio (owner step 1, recorded outside

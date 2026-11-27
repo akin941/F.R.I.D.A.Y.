@@ -1179,16 +1179,33 @@ Needs: B1–B3, B5 merged; A7, A8, A10. Spec: Phase 11 brief "Mac session
 Needs: B7. Spec: Phase 11 brief M3, `node/friday-voice/friday_voice/selftest.py`,
 `docs/voice/live-eval.md` §4.
 
-- [ ] `friday-node voice-loopback`: one PCM WAV on stdin → played through
+- [x] `friday-node voice-loopback`: one PCM WAV on stdin → played through
       the same voice-processing graph → AEC-cleaned capture (clip + 1 s)
       as 16 kHz mono PCM16 WAV on stdout; exit 0 (non-zero on any audio or
       TCC failure); never writes audio to disk; releases the mic.
-- [ ] Token hand-over: the host mints a fresh `node_voice` token into a
-      0600 file for `--token-file`, deleted after the run.
+      **2026-11-27 (`feat/p11-node-voice-loopback`): code done. The CLI is a
+      client of the running app (`VoiceSelftestSocket`), which plays and
+      captures on B7's `AVAudioVoiceEngine`: a launchd job's processes have
+      no Microphone grant of their own (TCC attributes them to the job), the
+      app has it (README "Nightly self-trigger"). Logic in
+      `NodeCore/Voice/VoiceLoopback.swift` behind `VoiceAudioIO`; stable
+      codes on stderr (exit 2–6). The real mic and speakers: owner step.**
+- [x] Token hand-over: the host mints a fresh `node_voice` token into a
+      0600 file for `--token-file`, deleted after the run. **2026-11-27:
+      `friday-node voice-token --out <file>` / `--end <file>`; the app mints
+      (the node secret is in the app's data protection keychain group, which
+      the CLI cannot read), the CLI creates the file new and 0600; the
+      script's trap deletes it. Off until "Ses" → "Gece öz-testi" (Touch
+      ID).**
 - [ ] `selftest-nightly.sh` (skips on battery) and
       `~/Library/LaunchAgents/ai.friday.voice-selftest.plist` (03:17
       nightly) from `docs/voice/live-eval.md`;
       `launchctl load -w ~/Library/LaunchAgents/ai.friday.voice-selftest.plist`.
+      **2026-11-27: `node/friday-node/scripts/selftest-nightly.sh`, the
+      plist template and `install-voice-selftest.sh` (copies, renders, never
+      loads) done; installing and loading (`launchctl bootstrap
+      gui/$(id -u) …`, the same as `load -w`) are owner steps, not run in
+      the session.**
 
 **Contract test:** the `CommandLoopback` tests (loopback section of
 `node/friday-voice/tests/test_selftest.py`) with the real binary in place of
@@ -1200,6 +1217,13 @@ uv run friday-voice selftest --nightly --server <https url> --token-file <0600 f
   --model-dir "$HOME/Library/Application Support/Friday/voice/models" \
   --loopback-cmd "<path>/friday-node voice-loopback"
 ```
+
+**2026-11-27:** the contract tests run with `FRIDAY_NODE_LOOPBACK_CMD` set
+to a DEBUG build's `friday-node voice-loopback --debug-echo-engine` (no
+device; the flag is DEBUG-only and `check-release-markers.sh` refuses it):
+pass. The run with the real binary, speakers and AEC (the app running,
+"Gece öz-testi" on; the token from `friday-node voice-token --out`) is an
+owner step: Phase 11 brief, M3 code-half record.
 
 ---
 

@@ -8,11 +8,16 @@
   fails the gate.
 - `--nightly`: refuses without `--server`, the token, a model directory and
   the host's audio path; exit code and the one-line result with fakes; the
-  loopback command contract.
+  loopback command contract (with the Python echo script, and -- when
+  `FRIDAY_NODE_LOOPBACK_CMD` names it -- with the Swift host's real
+  `friday-node voice-loopback` binary: runbook B8).
 """
 
 import argparse
 import json
+import os
+import shlex
+import subprocess
 import sys
 import wave
 
@@ -21,6 +26,7 @@ import pytest
 from conftest import PACKAGE_ROOT
 
 from friday_voice import cli, config, selftest
+from friday_voice.audio import decode_wav, encode_wav
 from friday_voice.client import FridayError
 from friday_voice.fakes import FakeFriday
 from friday_voice.self_trigger import SelfTriggerFilter
@@ -297,12 +303,51 @@ def test_nightly_parts_build_the_real_client_and_refuse_unpinned_models(tmp_path
 # --- the loopback command contract ---
 
 ECHO_SCRIPT = "import sys; sys.stdout.buffer.write(sys.stdin.buffer.read())"
+# Runbook B8: the Swift host's command in place of the echo script, e.g.
+# `FRIDAY_NODE_LOOPBACK_CMD=".../.build/debug/friday-node voice-loopback
+# --debug-echo-engine"` (a DEBUG build's zero-latency echo engine: no real
+# microphone or speaker) or, by hand on the Mac, the installed release CLI
+# with the app running (real speakers and AEC; an owner step).
+HOST_LOOPBACK = os.environ.get("FRIDAY_NODE_LOOPBACK_CMD", "")
+needs_host = pytest.mark.skipif(not HOST_LOOPBACK, reason="FRIDAY_NODE_LOOPBACK_CMD not set")
+TAIL_BYTES = config.ms_to_bytes(1_000)
 
 
 def test_the_loopback_command_gets_a_wav_and_returns_the_capture():
     pcm = (np.arange(1600, dtype="<i2") * 3).tobytes()
     loopback = selftest.CommandLoopback([sys.executable, "-c", ECHO_SCRIPT])
     assert loopback.play_and_capture(pcm) == pcm
+
+
+@needs_host
+def test_the_host_loopback_returns_the_clip_plus_one_second():
+    pcm = (np.arange(1600, dtype="<i2") * 3).tobytes()  # 100 ms
+    captured = selftest.CommandLoopback(HOST_LOOPBACK).play_and_capture(pcm)
+    assert len(captured) == len(pcm) + TAIL_BYTES
+    if "--debug-echo-engine" in HOST_LOOPBACK:
+        assert captured == pcm + bytes(TAIL_BYTES)  # a perfect echo, then silence
+    # The nightly's own clip (the fake TTS fixture here; the real TTS at night).
+    clip = decode_wav(CLIP_WAV.read_bytes())
+    captured = selftest.CommandLoopback(HOST_LOOPBACK).play_and_capture(clip)
+    assert len(captured) == len(clip) + TAIL_BYTES
+
+
+@needs_host
+@pytest.mark.parametrize(
+    ("stdin", "code"),
+    [
+        (b"not a wav", "wav_invalid"),
+        (b"", "wav_invalid"),
+        (encode_wav(b"\x00\x00" * 160, sample_rate=44_100), "wav_unsupported"),
+    ],
+)
+def test_the_host_loopback_refuses_what_it_cannot_play(stdin, code):
+    done = subprocess.run(  # noqa: S603 -- the configured host command
+        shlex.split(HOST_LOOPBACK), input=stdin, capture_output=True, timeout=60, check=False
+    )
+    assert done.returncode == 3
+    assert done.stdout == b""  # no audio after a failure
+    assert done.stderr == f"friday-node voice-loopback: error {code}\n".encode()
 
 
 @pytest.mark.parametrize(
