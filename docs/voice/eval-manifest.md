@@ -23,6 +23,28 @@ How to record, hash and score the set: `docs/runbooks/voice-setup.md` §8.
   Scoring normalises case (Turkish `İ/i`, `I/ı`), apostrophes and
   punctuation, so write it naturally.
 
+How the scorer treats what Whisper writes differently (both the reference
+and the transcript go through the same rules, `backend/voice/eval/`):
+
+- **Numbers (Turkish rows).** Digits become words, so `3` = `üç` and
+  `250` = `iki yüz elli`, either way round. Covered: integers (Turkish
+  thousands dots, `1.000.000` = `bir milyon`), decimals with a comma
+  (`3,5` = `üç virgül beş`), clock times `HH:MM`/`HH.MM` (`10:30` = `on
+  buçuk`, `10:00` = `on`, `09:15` = `dokuz on beş`), percent (`%15` =
+  `15%` = `yüzde on beş`) and the lira (`₺250` = `250 TL` = `iki yüz elli
+  lira`). A suffix glued to a number keeps its written form (`10'da` =
+  `onda`, but `10:30'da` becomes `on buçukda`, not `buçukta`), so **write
+  numbers, times, percentages and amounts as digits in the reference**,
+  the way Whisper writes them; then both sides always agree. Not covered:
+  ordinals (`3.`), dates, ranges, other currencies — write those as you
+  expect Whisper to.
+- **English rows** compare digits as written: write `3`, not `three`.
+- **Hyphens.** A hyphen between two letters is dropped and the parts
+  joined (`e-posta` = `eposta`); between a letter and a digit, or with
+  spaces around it, it separates words (`Covid-19` = `covid on dokuz`).
+- **A failed clip** (unusable WAV, an STT error) scores as an empty
+  transcript: all its reference words are deletions.
+
 Targets (A4, initial; any re-set is recorded in the Phase 6 brief, "A9 —
 exit criteria record"): WER ≤ 12% `tr-quiet`, ≤ 18% `tr-noise`, ≤ 15%
 code-switched (`cs-quiet` + `cs-noise` pooled); English is reported

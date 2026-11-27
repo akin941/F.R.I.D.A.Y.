@@ -1130,10 +1130,11 @@ earlier branch of 3a existed anywhere). Server side only.
   `--stt-only`, `--stt-provider`/`--tts-provider` (pins, `only_provider`),
   `--allow-missing`, `--limit`. Non-zero exit on a `fail` verdict.
 - **Gateway / ModelUsage.** Purposes `voice.eval_stt`/`voice.eval_tts`:
-  in `AI_UNTIERED_PURPOSES`, `COMPRESSION_NOT_APPLICABLE` and
-  `AI_AUDIO_PURPOSES` (so the A3 `audio` budget covers them; preflight
-  `voice_budget` checks them). `seed_ai_defaults` adds them to an existing
-  `audio` row (purposes only added, limits untouched). One `ModelUsage`
+  in `AI_UNTIERED_PURPOSES` and `COMPRESSION_NOT_APPLICABLE`, budgeted
+  under A3 by their **own** row `voice_eval` (`AI_VOICE_EVAL_PURPOSES`;
+  seeded once, 5 USD/month and 2 USD per run, owner-editable), not the
+  live `audio` row — an eval run can never exhaust live voice's cap
+  (review follow-up; the A3 coverage test checks both rows). One `ModelUsage`
   per call in the owner's personal workspace, `context_report`
   = `voice_eval_run` + `condition` (+ the gateway's own keys) — never audio
   or text; budget session `voice_eval:<run id>`. A run-wide
@@ -1175,6 +1176,24 @@ earlier branch of 3a existed anywhere). Server side only.
   it measures what Friday does. (4) The nightly regression is the
   `voice_eval --set` run against the stored baseline on the Mac; no CI job
   was added (CI never sees the recordings).
+- **Review follow-ups (2026-11-27, independent review APPROVE with
+  fixes).** The owner and the personal workspace are chosen by
+  `created_at` (as `ensure_personal_workspace`); the scorer spells Turkish
+  digits as words on both sides (`voice/eval/numbers.py`: integers,
+  thousands dots, comma decimals, `HH:MM` times with `:30` = `buçuk`,
+  percent, `₺`/`tl`) and joins hyphenated words (`e-posta` = `eposta`;
+  letter–digit hyphens split); `--write-baseline` is refused for a `fail`
+  verdict, a regression, `--limit` or `--stt-only` unless `--force`;
+  `voice_eval --check-set <dir>` is a database-free dry run (mode, uid,
+  file count, hash status) — run once in a one-off `web` container on
+  this Mac against a 0700 host directory: Docker Desktop reports mode
+  0700, uid 0 (process uid 0), check passes; 0755 is refused;
+  `end_of_turn_ms` is the audio time from the clip start; reports,
+  sheets and the baseline are refused inside the repository; the
+  `--fill-hashes` manifest write is atomic. Runbook §8.2 gains the
+  `up-local-tls` compose files, the host-run recipe (pinned host rows or
+  an `/etc/hosts` entry) and the failed-clip rule; the manifest notes how
+  to write numbers and hyphens.
 - **Owner steps (C2 A4).** Write and record the set (runbook §8.1), fill
   the hashes and commit the manifest; run the set once (§8.2) with
   `--write-baseline`; run the TTS listening test (§8.3) and choose Piper or
