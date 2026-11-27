@@ -6,7 +6,7 @@ Twin of `backend/connectors/manifests/home_assistant.py` and the
 D8, R5, Q7; branch 7 `feat/p5-home-assistant`.
 
 ## Summary
-- **Manifest:** `backend/connectors/manifests/home_assistant.py`, version `2` (Phase 13 branch 5, `feat/p13-ha-home-control`, 2026-11-20: entity allowlist, media/TV services, pins v2)
+- **Manifest:** `backend/connectors/manifests/home_assistant.py`, version `3` (Phase 13b branch 1a, `feat/p13-media-play-pause-stop`, 2026-11-20: `media_play_pause` and `media_stop`, gate-class, new `call_service` pin; v2 was Phase 13 branch 5, `feat/p13-ha-home-control`, 2026-11-20: entity allowlist, media/TV services)
 - **Kind:** `native` — bridge `backend/connectors/bridges/home_assistant.py`,
   exported as the manifest module's `BRIDGE` (`backend/connectors/bridges/__init__.py`)
 - **Status:** active
@@ -34,7 +34,7 @@ WebSocket (no subscriptions needed).
 | Friday name | Server tool | Kind | Schema pin (sha256) | Scope check | Gate / user-invocable | work_log |
 |---|---|---|---|---|---|---|
 | `ha_states` | `get_states` | read | `772b49f1813b8f1bbd3e9357a8a03d063ce5b3fb3924c28e317eade8bfdaf2d6` | allowed domains (serializer) | — | — |
-| `ha_call_service` | `call_service` | write | `a3487095bf60e4b8cf67592b24f3e0bf529187e30c792a6f8dd047ee8e20ba79` | code allowlist ∩ `HA_ALLOWED_DOMAINS`, exact entity of the service's domain, per-service data serializer; **the owner's entity allowlist** (`HomeEntity`: enabled row, service ticked — `check_allowlist`) | `ha_call_service` / yes | **no** (`records_work_log=False`, D13) |
+| `ha_call_service` | `call_service` | write | `968bd894bfcb584ca03bc5d05d74e3a6576c95d5d8d0a50b731db563bdf001cd` | code allowlist ∩ `HA_ALLOWED_DOMAINS`, exact entity of the service's domain, per-service data serializer; **the owner's entity allowlist** (`HomeEntity`: enabled row, service ticked — `check_allowlist`) | `ha_call_service` / yes | **no** (`records_work_log=False`, D13) |
 
 **Pins.** There is no remote `inputSchema`: each pin is the sha256 of the
 bridge's own request contract (`tool_schemas()`, derived from the
@@ -54,13 +54,44 @@ disables that tool (sticky for that manifest version).
 | `fan` | `turn_on`, `turn_off`, `set_percentage` | `percentage` 0–100 |
 | `cover` | `open_cover`, `close_cover`, `stop_cover`, `set_cover_position` | `position` 0–100 |
 | `climate` | `set_temperature`, `set_hvac_mode` | `temperature` 16–30 (finite float), `hvac_mode` ∈ off/heat/cool/heat_cool/auto/dry/fan_only |
-| `media_player` | `turn_on`, `turn_off`, `media_play`, `media_pause`, `select_source`, `volume_set`, `volume_mute`, `volume_up`, `volume_down` | `volume_level` 0–1; `source` ≤ 60 chars, must equal a live `source_list` value; `is_volume_muted` a JSON boolean; the rest none |
+| `media_player` | `turn_on`, `turn_off`, `media_play`, `media_pause`, `media_play_pause`, `media_stop`, `select_source`, `volume_set`, `volume_mute`, `volume_up`, `volume_down` | `volume_level` 0–1; `source` ≤ 60 chars, must equal a live `source_list` value; `is_volume_muted` a JSON boolean; the rest none |
 | `scene` | `turn_on` | — |
 | `wake_on_lan` | `send_magic_packet` | `mac` ∈ `HA_WOL_ALLOWED_MACS` (no entity) |
 
 Reads additionally show `sensor` and `binary_sensor` (read-only).
 Deliberately absent: every `toggle` (its effect depends on the state at
 execution, so the dialog could not say what happens).
+
+### `media_play_pause` and `media_stop` (Phase 13b D4, manifest v3)
+Both take no data and are **gate-class like every service** (a card,
+`/approvals`, one `ConnectorWriteExecution`; nothing is direct in branch
+1a — the ADR-018 direct class arrives in branches 1b/1c and does not change
+this table).
+
+- `media_play_pause` is the one state-dependent service in the maximum.
+  Home Assistant pauses a `playing` player and plays any other, so the
+  decision dialog shows the state read at request time **and the outcome it
+  implies** — the row `Sonuç (istek anındaki duruma göre)`, e.g. "şu an
+  oynatılıyor → duraklatılır" or "şu an duraklatılmış → oynatılır". The
+  execution precondition (`target_present`) re-reads the entity and
+  refuses the send when the live state now implies the **other** outcome
+  (`connector_changed`, nothing sent), so the owner never approves one
+  effect and gets its opposite. Residual: the player can still change
+  between the precondition read and the POST (milliseconds; the bridge's
+  pre-send read is recorded as `state_before`).
+- `media_stop` stops playback (on many players the same as pause, on some
+  it ends the session).
+- **Voice/typed phrases** (`connectors.home_phrases`, D7): "durdur" /
+  "stop" now means `media_stop` (it meant `media_pause` in Phase 13;
+  "duraklat" / "pause" stay `media_pause`); "oynat duraklat" / "play pause"
+  / "toggle play" mean `media_play_pause`. An entity whose ticked services
+  lack the one asked for gets the fixed "izin yok" refusal, never a
+  different service. Vectors: `docs/voice/home-route-vectors.json`.
+- **Upgrading:** existing `HomeEntity` rows do not gain the new services;
+  the owner ticks them on `/connectors` → Home Assistant (owner step). A
+  TV that keeps only `media_pause` answers "durdur" with the refusal.
+  Approvals pending under v2 fail their snapshot check after the upgrade
+  (`connector_changed`, nothing sent), as for every manifest bump.
 
 **Never** (`NEVER_DOMAINS`, a test asserts they are outside the maximum):
 `script`, `automation`, `shell_command`, `rest_command`, `homeassistant`,

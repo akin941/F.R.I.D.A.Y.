@@ -1106,7 +1106,7 @@ says "server side done; go/no-go pending owner evaluation".
 | # | Branch | Scope | Depends on | Status |
 |---|---|---|---|---|
 | brief | `docs/p13b-brief` | This brief (no stub existed; the owner decisions of 2026-11-26 kept as goal, scope and boundary), ADR-018 (Accepted 2026-11-26), ADR-017 amendment, ADR-014/ADR-015 cross references, CLAUDE.md rule 4 sentence, runbook "Interim: server on the MacBook" + R2 + TPM, housekeeping (handoff branch names, `feat/mac-a1-spike`, "(former repository)" notes, Phase 13 follow-ups 1–3, Q1/Q5/Q6 notes), MASTER_PLAN §AA row 9b + §O d12, `self_sources.json` regenerated | Phase 13 closeout | **implemented 2026-11-26** (docs only; awaits the independent Sonnet 5 plan review to APPROVE) |
-| 1a | `feat/p13-media-play-pause-stop` | `media_play_pause`/`media_stop` in the code maximum as gate-class services (manifest v3, pins, governance docs), the play_pause dialog row, `STOP`/`PLAY_PAUSE` verbs and vectors | brief approved | not started |
+| 1a | `feat/p13-media-play-pause-stop` | `media_play_pause`/`media_stop` in the code maximum as gate-class services (manifest v3, pins, governance docs), the play_pause dialog row, `STOP`/`PLAY_PAUSE` verbs and vectors | brief approved | **implemented 2026-11-20** (manifest v3, new `CALL_SERVICE_PIN`, `STATES_PIN` unchanged; play_pause outcome row + precondition; awaits the independent Sonnet 5 review) |
 | 1b | `feat/p13-direct-media-model` | `HomeEntity.direct`, `HomeDirectSettings`, `HomeDirectCall` (`connectors` 0006), closed allowlist + digest, `classify`, rate windows, volume rules, settings service, entity `direct` field + `/direct` + `/direct/calls` endpoints with role × endpoint, registry walk, the classifier port, `HA_DIRECT_*` settings, ADR-018 implementation note | 1a | not started |
 | 1c | `feat/p13-direct-media-exec` | `execute` (re-resolution, kill-switch re-check, clamp, one send, audit), recovery scan, executor port, `HOME_DIRECT` intent (`assistant` 0015) + code-only parser lock, cap clause, `extra_effects` + `_finish` check, sentinel factory, voice/`node_voice`/typed paths, provenance tests | 1b | not started |
 | 1d | `feat/p13-direct-media-ui` | HUD `home_direct` line, `/connectors` direct switch and settings panel, vitest | 1b (merges after 1c, so nothing is shown as "on" before it can run) | not started |
@@ -1396,3 +1396,35 @@ hardware: it is documentation only.
    execute step 3, immediately before the send; add a 1b/1c test that one
    direct call increments each window exactly once and that a fallback
    increments none.
+
+### Owner steps (pending) — `feat/p13-media-play-pause-stop` (branch 1a), recorded 2026-11-20
+
+What branch 1a did: `media_play_pause` and `media_stop` (no data) joined
+`SERVICES["media_player"]` as **gate-class** services (manifest v3, new
+`CALL_SERVICE_PIN` `968bd894…`; `STATES_PIN` unchanged because the read
+contract did not change); the `media_play_pause` decision dialog gains the
+row "Sonuç (istek anındaki duruma göre)" ("şu an oynatılıyor →
+duraklatılır" / "şu an duraklatılmış → oynatılır"), and the execution
+precondition refuses the send (`connector_changed`, unsent) when the live
+state now implies the other outcome — a toggle never does the opposite of
+what was approved; `connectors.home_phrases` maps `durdur`/`stop` →
+`media_stop` (was `media_pause`) and `oynat duraklat`/`play pause`/`toggle
+play` → `media_play_pause`; vectors, `docs/mcp/home-assistant.md`,
+`docs/mcp/allowlist.md` and the `/connectors` editor labels updated.
+Nothing is direct (no `home_direct` code exists yet). All of it is tested
+against the fake HA and the real chat view; nothing needed the Mac, real
+credentials, paid calls or hardware.
+
+1. Start the independent Sonnet 5 review of this branch; merge after
+   APPROVE.
+2. After the merge, on `/connectors` → Home Assistant, tick
+   `media_stop` (and `media_play_pause` if wanted) for each TV: existing
+   rows do not gain the new services, so until then "TV'yi durdur" is the
+   fixed "izin yok" refusal (by design, never a pause instead).
+3. Confirm "durdur" → `media_stop` (owner step 3 above); some TVs end the
+   app session on stop — check on the real TV in Mac session M2 and, if it
+   is unwanted, keep `media_stop` unticked for that TV.
+4. Any approval left pending under manifest v2 fails its snapshot check
+   after the upgrade (`connector_changed`, nothing sent): re-ask it.
+5. Residual (documented in `docs/mcp/home-assistant.md`): the player can
+   change state between the precondition read and the POST (milliseconds).

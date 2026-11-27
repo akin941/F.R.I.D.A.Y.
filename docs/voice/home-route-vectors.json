@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "description": "Phase 13 D13 shared vectors for the home.control wake route. `vocabulary` is the owner's rooms and allowlisted HomeEntity rows (labels and aliases) the parser matches against. `normalize` rows are normalizeSpeech (frontend/src/lib/voice/self-trigger.ts) and its Python port core.speech.normalize_speech of each home utterance. `parse` rows give what connectors.home_phrases.parse_home_command makes of an utterance: the action, the entity ids its label matched (all equally good matches), the room it named, an unknown locative room word, and the (service, data) the action means on the matched entity's domain (connectors.home_phrases.service_for); `match: null` means not a home command (the turn goes to the normal router). Checked by backend/connectors/tests/test_home_phrases.py and frontend/src/lib/voice/home-route-vectors.test.ts (normalize rows).",
+  "description": "Phase 13 D13 shared vectors for the home.control wake route. `vocabulary` is the owner's rooms and allowlisted HomeEntity rows (labels and aliases) the parser matches against. `normalize` rows are normalizeSpeech (frontend/src/lib/voice/self-trigger.ts) and its Python port core.speech.normalize_speech of each home utterance. `parse` rows give what connectors.home_phrases.parse_home_command makes of an utterance: the action, the entity ids its label matched (all equally good matches), the room it named, an unknown locative room word, and the (service, data) the action means on the matched entity's domain (connectors.home_phrases.service_for); `match: null` means not a home command (the turn goes to the normal router). Phase 13b D7 (branch 1a): \"durdur\" / \"stop\" is media_stop (it was media_pause; \"duraklat\" stays media_pause) and \"oynat duraklat\" / \"play pause\" / \"toggle play\" is media_play_pause. Checked by backend/connectors/tests/test_home_phrases.py and frontend/src/lib/voice/home-route-vectors.test.ts (normalize rows).",
   "vocabulary": {
     "rooms": [
       {"name": "Salon", "aliases": ["living room"]},
@@ -35,6 +35,10 @@
     {"input": "sesi yüzde 30'a ayarla", "action": "volume", "value": 30, "entities": [], "room": null, "service": "volume_set", "data": {"volume_level": 0.3}},
     {"input": "TV'yi duraklat", "action": "pause", "entities": ["media_player.salon_tv"], "room": null, "service": "media_pause", "data": {}},
     {"input": "televizyonu devam ettir", "action": "play", "entities": ["media_player.salon_tv"], "room": null, "service": "media_play", "data": {}},
+    {"input": "TV'yi durdur", "action": "stop", "entities": ["media_player.salon_tv"], "room": null, "service": "media_stop", "data": {}},
+    {"input": "Hey Friday, salondaki televizyonu durdur", "action": "stop", "entities": ["media_player.salon_tv"], "room": "Salon", "service": "media_stop", "data": {}},
+    {"input": "TV'yi oynat duraklat", "action": "play_pause", "entities": ["media_player.salon_tv"], "room": null, "service": "media_play_pause", "data": {}},
+    {"input": "oynat duraklat", "action": "play_pause", "entities": [], "room": null, "service": "media_play_pause", "data": {}},
     {"input": "film gecesi modunu aç", "action": "on", "entities": ["scene.film_gecesi"], "room": null, "service": "turn_on", "data": {}},
     {"input": "Friday, film gecesi sahnesini aç lütfen", "action": "on", "entities": ["scene.film_gecesi"], "room": null, "service": "turn_on", "data": {}},
     {"input": "salondaki ışıkları kapat", "action": "off", "entities": ["light.salon_tavan"], "room": "Salon", "service": "turn_off", "data": {}},
@@ -45,6 +49,11 @@
     {"input": "Hey Friday, turn on the living room TV please", "action": "on", "entities": ["media_player.salon_tv"], "room": "Salon", "service": "turn_on", "data": {}},
     {"input": "turn the TV off", "action": "off", "entities": ["media_player.salon_tv"], "room": null, "service": "turn_off", "data": {}},
     {"input": "mute the TV", "action": "mute", "entities": ["media_player.salon_tv"], "room": null, "service": "volume_mute", "data": {"is_volume_muted": true}},
+    {"input": "stop the TV", "action": "stop", "entities": ["media_player.salon_tv"], "room": null, "service": "media_stop", "data": {}},
+    {"input": "pause the living room TV", "action": "pause", "entities": ["media_player.salon_tv"], "room": "Salon", "service": "media_pause", "data": {}},
+    {"input": "play pause the TV", "action": "play_pause", "entities": ["media_player.salon_tv"], "room": null, "service": "media_play_pause", "data": {}},
+    {"input": "toggle play on the speaker", "match": null},
+    {"input": "toggle play the speaker", "action": "play_pause", "entities": ["media_player.yatak_hoparlor"], "room": null, "service": "media_play_pause", "data": {}},
     {"input": "switch the TV to HDMI 1", "action": "source", "value": "HDMI 1", "entities": ["media_player.salon_tv"], "room": null, "service": "select_source", "data": {"source": "HDMI 1"}},
     {"input": "set the volume to 25 percent", "action": "volume", "value": 25, "entities": [], "room": null, "service": "volume_set", "data": {"volume_level": 0.25}},
     {"input": "activate movie night", "action": "on", "entities": ["scene.film_gecesi"], "room": null, "service": "turn_on", "data": {}},

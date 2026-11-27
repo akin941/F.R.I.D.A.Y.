@@ -401,3 +401,107 @@ def test_the_home_parsers_wake_strip_tables_equal_the_wake_routes():
 
     assert home_phrases.WAKE_PHRASES == wake_routes.WAKE_PHRASES
     assert home_phrases.TRAILING_FILLERS == wake_routes.TRAILING_FILLERS
+
+
+# --- Phase 13b D7 (branch 1a): "durdur" is media_stop, "oynat duraklat" ------
+# media_play_pause; both stay ordinary gate-class cards.
+
+APPROVALS = "/api/v1/approvals/requests"
+MEDIA = ["media_play", "media_pause", "media_play_pause", "media_stop"]
+
+
+def _call(service):
+    return {"domain": "media_player", "service": service, "entity_id": TV, "data": {}}
+
+
+@pytest.fixture
+def media_tv(home):
+    home.tv.services = [*home.tv.services, *MEDIA]
+    home.tv.save()
+    return home.tv
+
+
+def _tap_and_approve(web_client, owner, workspace, draft, committed):
+    response = web_client(owner).post(
+        APPROVALS,
+        {
+            "workspace": str(workspace.id),
+            "tool_name": draft["tool_name"],
+            "payload": draft["payload"],
+        },
+        format="json",
+    )
+    assert response.status_code == 201, response.content
+    request_id = response.json()["id"]
+    rows = {
+        r["label"]: r["value"] for r in ApprovalRequest.objects.get().payload["display"]["rows"]
+    }
+    with committed():
+        assert web_client(owner).post(f"{APPROVALS}/{request_id}/approve").status_code == 200
+    return rows
+
+
+def test_durdur_is_a_media_stop_card_and_approve_sends_one_post(
+    media_tv, web_voice, web_client, owner, workspace, ha, calls, committed
+):
+    ha.states[TV]["state"] = "playing"
+    events = web_voice("Hey Friday, TV'yi durdur")
+    draft = _draft(events)
+    assert draft["tool_name"] == "ha_call_service"
+    assert draft["payload"] == {"arguments": _call("media_stop")}
+    assert reply_text(events) == "Onay kartı hazır: Salon TV · durdur. Kararı ekranda verirsin."
+    assert calls == [] and not ModelUsage.objects.exists()
+    assert not ApprovalRequest.objects.exists() and ha.posts == []
+
+    rows = _tap_and_approve(web_client, owner, workspace, draft, committed)
+    assert rows["Hizmet"] == "media_player.media_stop"
+    assert ha.posts == [("/api/services/media_player/media_stop", {"entity_id": TV})]
+
+
+def test_duraklat_stays_media_pause(media_tv, web_voice):
+    assert _draft(web_voice("TV'yi duraklat"))["payload"] == {"arguments": _call("media_pause")}
+
+
+def test_oynat_duraklat_is_a_play_pause_card_showing_the_outcome(
+    media_tv, web_voice, web_client, owner, workspace, ha, calls, committed
+):
+    ha.states[TV]["state"] = "playing"
+    events = web_voice("televizyonu oynat duraklat")
+    draft = _draft(events)
+    assert draft["payload"] == {"arguments": _call("media_play_pause")}
+    assert calls == [] and ha.posts == []
+    rows = _tap_and_approve(web_client, owner, workspace, draft, committed)
+    assert rows["Sonuç (istek anındaki duruma göre)"] == "şu an oynatılıyor → duraklatılır"
+    assert ha.posts == [("/api/services/media_player/media_play_pause", {"entity_id": TV})]
+    assert ha.states[TV]["state"] == "paused"
+
+
+def test_english_stop_and_play_pause_draft_the_new_services(media_tv, web_voice):
+    assert _draft(web_voice("stop the TV"))["payload"] == {"arguments": _call("media_stop")}
+    assert _draft(web_voice("play pause the TV"))["payload"] == {
+        "arguments": _call("media_play_pause")
+    }
+
+
+@pytest.mark.parametrize(
+    ("text", "reply"),
+    [
+        ("TV'yi durdur", "Bunu yapmaya iznim yok: Salon TV için 'durdur' açık değil."),
+        (
+            "TV'yi oynat duraklat",
+            "Bunu yapmaya iznim yok: Salon TV için 'oynat duraklat' açık değil.",
+        ),
+    ],
+)
+def test_an_entity_without_the_service_is_refused_not_guessed(
+    home, web_voice, calls, ha, text, reply
+):
+    """The TV allows `media_pause` but not `media_stop`: "durdur" is the
+    fixed refusal, never a pause card instead."""
+    home.tv.services = [*home.tv.services, "media_pause", "media_play"]
+    home.tv.save()
+    events = web_voice(text)
+    assert _draft(events) is None
+    assert reply_text(events) == reply
+    assert calls == [] and ha.requests == []
+    assert not ApprovalRequest.objects.exists()

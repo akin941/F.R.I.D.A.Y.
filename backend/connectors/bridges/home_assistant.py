@@ -236,8 +236,12 @@ class WakeOnLanData(StrictSerializer):
         return mac
 
 
-# The code maximum (D8). A toggle is deliberately absent: its outcome depends
-# on the state at execution time, so the dialog could not say what happens.
+# The code maximum (D8). A generic `toggle` is deliberately absent: its
+# outcome depends on the state at execution time. The one state-dependent
+# service in it, `media_player.media_play_pause` (Phase 13b D4), is made
+# decidable by its dialog row (`PLAY_PAUSE_ROW`: the live state and the
+# outcome it implies) and its precondition (the outcome at execution must be
+# the one the owner approved, else `connector_changed`, unsent).
 SERVICES = {
     "light": {"turn_on": LightTurnOnData, "turn_off": NoData},
     "switch": {"turn_on": NoData, "turn_off": NoData},
@@ -250,12 +254,15 @@ SERVICES = {
     },
     "climate": {"set_temperature": ClimateTemperatureData, "set_hvac_mode": ClimateHvacModeData},
     # Phase 13 D12: power, input, mute and volume steps join play / pause /
-    # set. `media_play_pause` and `toggle` stay absent (state-dependent).
+    # set. Phase 13b D4 (manifest v3): `media_play_pause` and `media_stop`
+    # join, both gate-class like every service. `toggle` stays absent.
     "media_player": {
         "turn_on": NoData,
         "turn_off": NoData,
         "media_play": NoData,
         "media_pause": NoData,
+        "media_play_pause": NoData,
+        "media_stop": NoData,
         "select_source": SelectSourceData,
         "volume_set": VolumeSetData,
         "volume_mute": VolumeMuteData,
@@ -855,6 +862,52 @@ def render_call(arguments):
 ROOM_ROW = "Oda"
 LABEL_ROW = "Etiket"
 
+# Phase 13b D4: the decision row of the one state-dependent service. Home
+# Assistant's `media_play_pause` pauses a `playing` player and plays any
+# other; the row says which, from the state read at request time, and the
+# precondition refuses the send when the live state now implies the other
+# outcome (`connector_changed`, nothing sent).
+PLAY_PAUSE_SERVICE = "media_play_pause"
+PLAY_PAUSE_ROW = "Sonuç (istek anındaki duruma göre)"
+PLAY_PAUSE_PAUSES = "pause"
+PLAY_PAUSE_PLAYS = "play"
+_PLAY_PAUSE_OUTCOME_TEXT = {PLAY_PAUSE_PAUSES: "duraklatılır", PLAY_PAUSE_PLAYS: "oynatılır"}
+_PLAY_PAUSE_STATE_TEXT = {
+    "playing": "şu an oynatılıyor",
+    "paused": "şu an duraklatılmış",
+    "idle": "şu an boşta",
+    "on": "şu an açık",
+    "off": "şu an kapalı",
+    "buffering": "şu an yükleniyor",
+}
+
+
+def play_pause_outcome(state):
+    """What `media_play_pause` does to a player in `state` (HA's own rule:
+    pause when `playing`, else play)."""
+    return PLAY_PAUSE_PAUSES if state == "playing" else PLAY_PAUSE_PLAYS
+
+
+def play_pause_row_value(state):
+    """ "şu an oynatılıyor → duraklatılır": the live state (a Friday text
+    for the known states, else the HA state value, quoted) and the outcome
+    it implies."""
+    current = _PLAY_PAUSE_STATE_TEXT.get(state, f"şu an '{state}'")
+    return f"{current} → {_PLAY_PAUSE_OUTCOME_TEXT[play_pause_outcome(state)]}"
+
+
+def approved_play_pause_outcome(payload):
+    """The outcome the owner approved, from the stored dialog row, or None
+    when the snapshot has no (recognisable) row."""
+    rows = ((payload or {}).get("display") or {}).get("rows") or []
+    values = [row.get("value") for row in rows if row.get("label") == PLAY_PAUSE_ROW]
+    if len(values) != 1 or not isinstance(values[0], str):
+        return None
+    for outcome, text in _PLAY_PAUSE_OUTCOME_TEXT.items():
+        if values[0].endswith(f"→ {text}"):
+            return outcome
+    return None
+
 
 def request_rows(workspace, arguments):
     """Request-time rows of the decision dialog (D8, D12): the owner's own
@@ -894,6 +947,8 @@ def request_rows(workspace, arguments):
     if details:
         current += " " + json.dumps(details, ensure_ascii=False, sort_keys=True)
     rows.append({"label": "Şu anki durum (istek anında okundu)", "value": current})
+    if arguments.get("service") == PLAY_PAUSE_SERVICE:
+        rows.append({"label": PLAY_PAUSE_ROW, "value": play_pause_row_value(state["state"])})
     return rows
 
 
@@ -920,6 +975,8 @@ def target_present(manifest, binding, payload):
     or disabled, or the service unticked, while the approval was pending ->
     `connector_changed`). The entity must still exist (`target_missing`)
     and, for `select_source`, still offer the approved input
+    (`connector_changed`); for `media_play_pause` (Phase 13b D4), the live
+    state must still imply the outcome the dialog showed
     (`connector_changed`). Any failure to confirm refuses the send --
     nothing reaches Home Assistant. `_call_service` re-reads the entity and
     the source right before the POST (defence in depth: the entity can
@@ -940,6 +997,13 @@ def target_present(manifest, binding, payload):
         return _PRECONDITION_ERRORS.get(exc.code, "unknown")
     if source_refusal(arguments, state) is not None:
         return "connector_changed"
+    if arguments.get("service") == PLAY_PAUSE_SERVICE:
+        # Phase 13b D4: the toggle must do what the owner approved (the
+        # dialog row's outcome); a player that started or stopped playing
+        # since the request -> `connector_changed`, nothing sent.
+        approved = approved_play_pause_outcome(payload)
+        if approved is None or approved != play_pause_outcome(state["state"]):
+            return "connector_changed"
     return None
 
 
