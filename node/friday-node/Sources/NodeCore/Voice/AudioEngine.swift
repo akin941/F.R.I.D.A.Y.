@@ -15,12 +15,15 @@
 // - Earcons: a fixed set the host owns (`wake`, `end`, `error`), synthesised
 //   here (no file, nothing downloaded).
 // - The engine (and so the microphone) runs only while the mic is held.
-//   Sound that arrives while it is not (an earcon after a release) goes to a
-//   second, output-only engine that never touches the input.
+//   Releasing the mic stops it at once, so a reply still playing is cut off
+//   with it (a release is a fail-closed input; the host core's pacing goes
+//   on and reports `ended` on its clock). Sound that arrives while the mic
+//   is not held (an earcon after a release) goes to a second, output-only
+//   engine that never touches the input.
 //
 // Tests never open the real microphone: everything above `VoiceAudioIO` is
-// driven with a fake (VoiceHostIntegrationTests); `AVAudioVoiceEngine` is
-// only built by the app.
+// driven with a fake (VoiceServiceTests); `AVAudioVoiceEngine` is only built
+// by the app.
 
 import AVFoundation
 import Foundation
@@ -61,6 +64,30 @@ public struct PCMFramer {
 
     public mutating func reset() { buffer = Data() }
     public var buffered: Int { buffer.count }
+}
+
+/// Which capture session may still deliver audio (guarded by the engine's
+/// lock): a tap callback of a session that was stopped is dropped, so audio
+/// captured before a release can never reach the child after it.
+public struct CaptureGate: Equatable {
+    private var issued = 0
+    private var live = 0
+
+    public init() {}
+
+    /// A new session id (not yet admitted).
+    public mutating func next() -> Int {
+        issued += 1
+        return issued
+    }
+
+    public mutating func open(_ session: Int) { live = session }
+
+    public mutating func close(_ session: Int) { if live == session { live = 0 } }
+
+    public mutating func closeAll() { live = 0 }
+
+    public func admits(_ session: Int) -> Bool { session != 0 && live == session }
 }
 
 /// The host's fixed earcon set: short sine tones, 16 kHz mono PCM16 LE.
@@ -115,6 +142,14 @@ enum PCMConvert {
 }
 
 /// The real engine (the app only).
+///
+/// Lock discipline (B7 review): `lock` guards this object's own state only.
+/// No AVFoundation call that may wait for an audio thread (`installTap`,
+/// `removeTap`, `start`, `stop`, `play`, `scheduleBuffer`) runs while it is
+/// held, because the tap callback takes it: state is swapped under the lock,
+/// the engine is driven after it is released. Each capture session has a
+/// generation; a tap callback of an earlier generation (a late buffer after
+/// `stopCapture`) drops its audio and never reaches `onCapture`.
 public final class AVAudioVoiceEngine: VoiceAudioIO, @unchecked Sendable {
     public var onCapture: ((Data, String) -> Void)?
     private let lock = NSLock()
@@ -126,21 +161,20 @@ public final class AVAudioVoiceEngine: VoiceAudioIO, @unchecked Sendable {
     private var current: String?
     private var aec = "off"
     private var framer = PCMFramer()
+    /// The capture session the tap belongs to; 0 while none runs.
+    private var gate = CaptureGate()
 
     public init() {}
 
     public func startCapture() throws {
         lock.lock()
-        defer { lock.unlock() }
-        guard engine == nil else { return }
+        let running = engine != nil
+        let session = gate.next()
+        lock.unlock()
+        guard !running else { return }
         let engine = AVAudioEngine()
         let input = engine.inputNode
-        do {
-            try input.setVoiceProcessingEnabled(true)
-            aec = "on"
-        } catch {
-            aec = "off"
-        }
+        let aec = (try? input.setVoiceProcessingEnabled(true)) != nil ? "on" : "off"
         let player = AVAudioPlayerNode()
         let earcons = AVAudioPlayerNode()
         engine.attach(player)
@@ -151,21 +185,43 @@ public final class AVAudioVoiceEngine: VoiceAudioIO, @unchecked Sendable {
         guard inputFormat.sampleRate > 0, let converter = AVAudioConverter(from: inputFormat, to: PCMConvert.captureFormat)
         else { throw VoiceAudioError.noInput }
         converter.downmix = true
+        lock.lock()
         framer.reset()
+        self.aec = aec
+        gate.open(session)  // the tap may deliver from here on
+        lock.unlock()
         input.installTap(onBus: 0, bufferSize: 1024, format: inputFormat) { [weak self] buffer, _ in
-            self?.captured(buffer, converter)
+            self?.captured(buffer, converter, session: session)
         }
         engine.prepare()
-        try engine.start()
+        do {
+            try engine.start()
+        } catch {
+            input.removeTap(onBus: 0)
+            lock.lock()
+            gate.close(session)
+            lock.unlock()
+            throw error
+        }
         player.play()
         earcons.play()
+        lock.lock()
         self.engine = engine
         self.player = player
         self.earconPlayer = earcons
-        stopOutputEngine()
+        let output = (outputEngine, outputPlayer)
+        outputEngine = nil
+        outputPlayer = nil
+        lock.unlock()
+        output.1?.stop()
+        output.0?.stop()
     }
 
-    private func captured(_ buffer: AVAudioPCMBuffer, _ converter: AVAudioConverter) {
+    private func captured(_ buffer: AVAudioPCMBuffer, _ converter: AVAudioConverter, session: Int) {
+        lock.lock()
+        let live = gate.admits(session)
+        lock.unlock()
+        guard live else { return }  // a late buffer of a stopped capture
         let ratio = PCMConvert.captureFormat.sampleRate / buffer.format.sampleRate
         let capacity = AVAudioFrameCount(Double(buffer.frameLength) * ratio + 32)
         guard let out = AVAudioPCMBuffer(pcmFormat: PCMConvert.captureFormat, frameCapacity: capacity) else { return }
@@ -183,6 +239,11 @@ public final class AVAudioVoiceEngine: VoiceAudioIO, @unchecked Sendable {
         guard error == nil, let samples = out.int16ChannelData?[0], out.frameLength > 0 else { return }
         let data = Data(bytes: samples, count: Int(out.frameLength) * 2)
         lock.lock()
+        // Checked again: the capture may have stopped while converting.
+        guard gate.admits(session) else {
+            lock.unlock()
+            return
+        }
         let frames = framer.append(data)
         let aec = self.aec
         let handler = onCapture
@@ -190,19 +251,23 @@ public final class AVAudioVoiceEngine: VoiceAudioIO, @unchecked Sendable {
         for frame in frames { handler?(frame, aec) }
     }
 
+    /// Releasing the mic stops the engine at once, and with it whatever of
+    /// a reply still plays on it (the safer reading of a release).
     public func stopCapture() {
         lock.lock()
-        defer { lock.unlock() }
-        guard let engine else { return }
-        engine.inputNode.removeTap(onBus: 0)
-        player?.stop()
-        earconPlayer?.stop()
-        engine.stop()
-        self.engine = nil
+        let stopped = (engine, player, earconPlayer)
+        engine = nil
         player = nil
         earconPlayer = nil
         current = nil
+        gate.closeAll()  // late tap callbacks drop their audio from here on
         framer.reset()
+        lock.unlock()
+        guard let engine = stopped.0 else { return }
+        engine.inputNode.removeTap(onBus: 0)
+        stopped.1?.stop()
+        stopped.2?.stop()
+        engine.stop()
     }
 
     public func beginPlayback(_ utteranceID: String) {
@@ -213,48 +278,61 @@ public final class AVAudioVoiceEngine: VoiceAudioIO, @unchecked Sendable {
 
     public func enqueue(_ utteranceID: String, pcm: Data) {
         lock.lock()
-        defer { lock.unlock() }
-        guard current == utteranceID, let buffer = PCMConvert.floatBuffer(pcm) else { return }
-        if let player {
-            player.scheduleBuffer(buffer)
-        } else {
+        let target = current == utteranceID ? (player ?? outputPlayer) : nil
+        let needsOutput = current == utteranceID && player == nil && outputPlayer == nil
+        lock.unlock()
+        guard let buffer = PCMConvert.floatBuffer(pcm) else { return }
+        if let target {
+            target.scheduleBuffer(buffer)
+        } else if needsOutput {
             outputNode()?.scheduleBuffer(buffer)
         }
     }
 
     public func stopPlayback(_ utteranceID: String) {
         lock.lock()
-        defer { lock.unlock() }
-        guard current == utteranceID else { return }
+        guard current == utteranceID else {
+            lock.unlock()
+            return
+        }
         current = nil
+        let nodes = [player, outputPlayer].compactMap { $0 }
+        lock.unlock()
         // stop() drops every scheduled buffer at once; play() re-arms the node.
-        player?.stop()
-        player?.play()
-        outputPlayer?.stop()
-        outputPlayer?.play()
+        for node in nodes {
+            node.stop()
+            node.play()
+        }
     }
 
     public func playEarcon(_ name: String) {
-        lock.lock()
-        defer { lock.unlock() }
         guard let pcm = Earcons.pcm(name), let buffer = PCMConvert.floatBuffer(pcm) else { return }
-        if let earconPlayer {
-            earconPlayer.scheduleBuffer(buffer)
-        } else {
-            outputNode()?.scheduleBuffer(buffer)
-        }
+        lock.lock()
+        let target = earconPlayer ?? outputPlayer
+        lock.unlock()
+        (target ?? outputNode())?.scheduleBuffer(buffer)
     }
 
     public func shutdown() {
         stopCapture()
         lock.lock()
-        stopOutputEngine()
+        let output = (outputEngine, outputPlayer)
+        outputEngine = nil
+        outputPlayer = nil
         lock.unlock()
+        output.1?.stop()
+        output.0?.stop()
     }
 
-    /// Under the lock: the output-only engine (no input node is touched).
+    /// The output-only engine (no input node is touched), made outside the
+    /// lock and adopted under it (a concurrent maker's engine is dropped).
     private func outputNode() -> AVAudioPlayerNode? {
-        if let outputPlayer { return outputPlayer }
+        lock.lock()
+        if let outputPlayer {
+            lock.unlock()
+            return outputPlayer
+        }
+        lock.unlock()
         let engine = AVAudioEngine()
         let player = AVAudioPlayerNode()
         engine.attach(player)
@@ -262,16 +340,17 @@ public final class AVAudioVoiceEngine: VoiceAudioIO, @unchecked Sendable {
         engine.prepare()
         guard (try? engine.start()) != nil else { return nil }
         player.play()
+        lock.lock()
+        if let existing = outputPlayer {
+            lock.unlock()
+            player.stop()
+            engine.stop()
+            return existing
+        }
         outputEngine = engine
         outputPlayer = player
+        lock.unlock()
         return player
-    }
-
-    private func stopOutputEngine() {
-        outputPlayer?.stop()
-        outputEngine?.stop()
-        outputPlayer = nil
-        outputEngine = nil
     }
 }
 

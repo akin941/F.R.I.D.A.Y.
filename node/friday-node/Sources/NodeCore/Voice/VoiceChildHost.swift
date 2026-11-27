@@ -12,14 +12,22 @@
 //   compiled into the host (`VoiceProtocol.lockSHA256`, generated from this
 //   checkout's node/friday-voice/uv.lock); a mismatch or a missing install
 //   is a failed start (`lock_mismatch`, `not_installed`) and is retried with
-//   the same backoff.
+//   the same backoff. The hash gates the lock FILE only: it proves which
+//   dependency set `make friday-voice-install` was asked to install, not
+//   what is in `.venv` now (nothing re-hashes the installed packages or the
+//   child's own sources; a process of the owner's user can change them, as
+//   it can change anything in the home).
 // - The core decides; this type moves bytes and time: a 20 ms tick runs the
 //   watchdog (10 s without `state`), paced playback and the restart backoff
 //   (1 s -> 60 s); a failed child has its stdin closed, then SIGTERM to its
-//   group after 2 s and SIGKILL to its verified tree after 2 s more.
-// - `stop()` (quit, kill switch release path, WS loss, mode off) sends
-//   `shutdown`, closes stdin and kills what is left the same way; `kill()`
-//   (the kill switch) SIGKILLs the tree at once. Neither restarts.
+//   group after 2 s and SIGKILL to its verified tree after 2 s more. The
+//   next child is spawned only once every earlier one has exited (or was
+//   SIGKILLed): two children never overlap.
+// - `stop()` (WS loss, mode off) sends `shutdown`, closes stdin and kills
+//   what is left the same way; `stop(wait: true)` (quit) runs that ladder
+//   synchronously, bounded (`quitGraceSeconds` per step), so nothing
+//   outlives the app; `kill()` (the kill switch) SIGKILLs the tree at once,
+//   and every child still in its stop grace with it. None restarts.
 // - The child is registered as a node helper (MonitorRegistry), so no
 //   sandboxed run's orphan sweep attributes its processes to a run.
 //
@@ -90,6 +98,9 @@ public final class VoiceChildHost: @unchecked Sendable {
     public static let tickMs = 20
     public static let maxPendingWrite = 1024 * 1024
     public static let stopGraceSeconds = 2.0
+    /// Quit: how long each step of the synchronous ladder waits (stdin EOF,
+    /// then SIGTERM, then SIGKILL).
+    public static let quitGraceSeconds = 0.5
 
     public let queue = DispatchQueue(label: "friday-node.voice", qos: .userInteractive)
     public let core: VoiceHostCore
@@ -134,15 +145,21 @@ public final class VoiceChildHost: @unchecked Sendable {
             self.running = true
             if autoTick { self.startTimer() }
             // A child in its restart backoff waits for the tick.
-            if self.child == nil, !self.core.childRunning, self.core.restartAt == nil || self.core.restartDue() {
-                self.spawn()
-            }
+            self.spawnIfDue()
         }
+    }
+
+    /// Spawn when wanted and no earlier child is still around (no overlap):
+    /// a restart once its backoff ran out, or a first start.
+    private func spawnIfDue() {
+        guard running, child == nil, stopping.isEmpty, !core.childRunning else { return }
+        if core.restartAt == nil || core.restartDue() { spawn() }
     }
 
     /// Stop on purpose (quit, WS loss, mode off): `shutdown`, then the kill
     /// ladder. No restart until `start()`.
-    public func stop(wait: Bool = false) {
+    /// `grace`: each step of the synchronous ladder when `wait` (quit).
+    public func stop(wait: Bool = false, grace: Double = VoiceChildHost.quitGraceSeconds) {
         let work = {
             self.running = false
             self.core.shutdown()
@@ -150,8 +167,27 @@ public final class VoiceChildHost: @unchecked Sendable {
             self.core.childExited()  // expected: no restart, no watchdog
             self.publish()
             self.retire(graceful: true)
+            if wait { self.finishStopping(grace: grace) }
         }
         if wait { queue.sync(execute: work) } else { queue.async(execute: work) }
+    }
+
+    /// Quit: every child still stopping gets the ladder now, synchronously
+    /// (stdin is closed already): a bounded wait for its exit, SIGTERM to its
+    /// group, a bounded wait, SIGKILL to its tree, a bounded wait for the
+    /// reap. Blocks the host queue for at most 3 x `quitGraceSeconds`.
+    private func finishStopping(grace: Double) {
+        let processes = Array(stopping.values)
+        stopping.removeAll()
+        for process in processes where !process.wait(timeout: grace) {
+            process.signal(SIGTERM)
+            if !process.wait(timeout: grace) {
+                Self.killTree(process)
+                process.wait(timeout: grace)
+            } else {
+                Self.killTree(process)  // its group's leftovers
+            }
+        }
     }
 
     /// The kill switch: SIGKILL the tree now. No restart until `start()`.
@@ -163,6 +199,9 @@ public final class VoiceChildHost: @unchecked Sendable {
             self.core.dropCredential()
             self.publish()
             self.retire(graceful: false)
+            // A child still in a graceful stop's grace dies now too.
+            for process in self.stopping.values { Self.killTree(process) }
+            self.stopping.removeAll()
         }
     }
 
@@ -187,7 +226,7 @@ public final class VoiceChildHost: @unchecked Sendable {
     public func tick() {
         dispatchPrecondition(condition: .onQueue(queue))
         core.tick()
-        if running, child == nil, core.restartDue() { spawn() }
+        spawnIfDue()
         afterCoreChange()
     }
 
@@ -329,7 +368,12 @@ public final class VoiceChildHost: @unchecked Sendable {
     }
 
     private func exited(id: Int, process: ChildProcess) {
-        stopping.removeValue(forKey: id)
+        if stopping.removeValue(forKey: id) != nil {
+            // The last earlier child is gone: a due restart may go now.
+            spawnIfDue()
+            afterCoreChange()
+            return
+        }
         if let helperID, id == childID {
             MonitorRegistry.shared.helperEnded(helperID)
             self.helperID = nil
@@ -417,7 +461,8 @@ public final class VoiceChildHost: @unchecked Sendable {
             guard let self, self.stopping[id] != nil else { return }
             process.signal(SIGTERM)
             self.queue.asyncAfter(deadline: .now() + Self.stopGraceSeconds) { [weak self] in
-                guard let self, self.stopping.removeValue(forKey: id) != nil else { return }
+                // Kept in `stopping` until its exit is seen: no restart overlaps it.
+                guard let self, self.stopping[id] != nil else { return }
                 Self.killTree(process)
             }
         }
@@ -464,6 +509,9 @@ public final class VoiceChildHost: @unchecked Sendable {
     public static func descendantPIDs(of pid: pid_t) -> [pid_t] { descendants(of: pid).map(\.pid) }
 
     public var childPID: pid_t? { queue.sync { child?.pid } }
+
+    /// Children in a stop's grace (tests).
+    public var stoppingPIDs: [pid_t] { queue.sync { stopping.values.map(\.pid) } }
 }
 
 extension VoiceHostCore {

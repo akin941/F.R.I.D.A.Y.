@@ -277,6 +277,29 @@ final class VoiceServiceTests: XCTestCase {
 
     /// Mode off stops the child; the stored settings unreadable means
     /// `mute: unreadable` (fail closed).
+    /// B7 review 7: a microphone that cannot be opened (TCC denied) is not
+    /// retried on every child state; the mic stays released, indicator
+    /// `error`, until the backoff runs out.
+    func testADeniedMicrophoneBacksOff() throws {
+        let audio = FakeAudio()
+        audio.failStart = true
+        let (service, _, _) = makeService(mint: ScriptedMint([.success(ScriptedMint.token())]), audio: audio)
+        service.start(autoPoll: false)
+        service.linkChanged(true)
+        wait("credential") { written().contains("credential") }
+        try inject(service, [Self.ready, Self.state("armed_ptt")])
+        wait("one try") { audio.recorded.filter { $0 == "startCapture" }.count == 1 }
+        wait("blocked") { core(service).indicator == "error" }
+        for _ in 0..<5 { try inject(service, [Self.state("armed_ptt")]) }
+        XCTAssertFalse(core(service).mic)
+        XCTAssertEqual(core(service).indicator, "error")
+        XCTAssertEqual(audio.recorded.filter { $0 == "startCapture" }.count, 1, "no retry inside the backoff")
+        audio.failStart = false
+        wait("retried after the backoff") { audio.recorded.filter { $0 == "startCapture" }.count == 2 }
+        wait("held") { core(service).mic }
+        service.shutdown()
+    }
+
     func testModeOffAndUnreadableSettings() throws {
         let settings = MemoryVoiceSettingsStore(VoiceSettings(mode: "push_to_talk"))
         let (service, _, _) = makeService(mint: ScriptedMint([.success(ScriptedMint.token())]), settings: settings)

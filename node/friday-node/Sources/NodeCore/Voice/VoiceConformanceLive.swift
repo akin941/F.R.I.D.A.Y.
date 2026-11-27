@@ -249,7 +249,8 @@ public final class VoiceConformanceLive {
             }
         }
         let starts = state { $0.starts }
-        host.stop(wait: true)
+        // Bounded like quit, with time for the hostile child to write its verdict.
+        host.stop(wait: true, grace: 3)
         wait { lock.withLock { verdicts.count } >= starts }
         let collected = lock.withLock { verdicts }
         if collected.count < starts { failures.append("\(starts - collected.count) hostile child(ren) wrote no verdict") }

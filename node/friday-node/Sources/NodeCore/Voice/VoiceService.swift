@@ -54,6 +54,9 @@ public final class VoiceService: VoiceChildHostDelegate, @unchecked Sendable {
     private var retryAt: Double?
     private var muteTimer: DispatchSourceTimer?
     private var capturing = false
+    /// The mic could not be opened: the next try waits (1 s -> 60 s), so a
+    /// persistent TCC denial is not retried on every child state.
+    private var captureBackoff = 1.0
 
     /// Main-queue observers (the menu).
     public var onIndicator: ((MicIndicator) -> Void)?
@@ -274,9 +277,15 @@ public final class VoiceService: VoiceChildHostDelegate, @unchecked Sendable {
             do {
                 try audio.startCapture()
                 capturing = true
+                captureBackoff = 1
             } catch {
-                Self.log.error("voice: the microphone could not be opened")
-                host.core.releaseMic("error", indicator: "error")
+                Self.log.error("voice: the microphone could not be opened; retrying later")
+                host.perform { $0.blockMic("mic_unavailable") }
+                let delay = captureBackoff
+                captureBackoff = min(captureBackoff * 2, 60)
+                host.queue.asyncAfter(deadline: .now() + delay) { [weak self] in
+                    self?.host.perform { $0.unblockMic() }
+                }
             }
         } else if !micHeld && capturing {
             audio.stopCapture()

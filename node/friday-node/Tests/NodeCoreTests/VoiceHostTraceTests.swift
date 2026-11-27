@@ -180,7 +180,6 @@ final class VoiceHostTraceTests: XCTestCase {
         XCTAssertEqual(states(), ["b:stopped"])
         XCTAssertEqual(core.takeEffects(), [.playbackStopped("b")])
         XCTAssertEqual(core.stoppedAt.map(\.1), [2_000, 2_010])
-        XCTAssertFalse(core.playbackPending)
         // A stop for nothing is counted, nothing else.
         try send(["type": "stop_playback", "utterance_id": "b"])
         XCTAssertEqual(core.droppedStop, 1)

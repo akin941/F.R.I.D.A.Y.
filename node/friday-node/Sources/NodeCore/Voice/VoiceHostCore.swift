@@ -281,7 +281,27 @@ public final class VoiceHostCore {
 
     // MARK: The mic
 
-    private func localOK() -> Bool { mode != "off" && muted == .no && linkUp && !credentialRefused }
+    /// The microphone could not be opened (no TCC grant, no device): like
+    /// a refused credential, nothing re-acquires it until `unblockMic()`
+    /// (the driver's backoff).
+    public private(set) var micBlocked = false
+
+    public func blockMic(_ reason: String) {
+        micBlocked = true
+        release(reason)
+        indicator = "error"
+    }
+
+    public func unblockMic() {
+        guard micBlocked else { return }
+        micBlocked = false
+        if localOK(), let childState { indicator = childState }
+        maybeAcquire()
+    }
+
+    private func localOK() -> Bool {
+        mode != "off" && muted == .no && linkUp && !credentialRefused && !micBlocked
+    }
 
     private func release(_ reason: String) {
         releases.append(reason)
@@ -447,9 +467,6 @@ public final class VoiceHostCore {
     private func playback(_ utteranceID: String, _ state: String) -> [String: JSONValue] {
         ["type": "playback", "utterance_id": .string(utteranceID), "state": .string(state), "at_ms": .int(clock.nowMs())]
     }
-
-    /// Paced playback still has audio queued or playing.
-    public var playbackPending: Bool { !queue.isEmpty && linkOpen }
 
     private func queuePlay(_ utteranceID: String, seq: Int64, last: Bool, _ payload: Data) {
         if seq == 0 { queue.append(Queued(utteranceID: utteranceID)) }

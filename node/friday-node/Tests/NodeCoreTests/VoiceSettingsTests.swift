@@ -214,6 +214,10 @@ final class VoiceChildHostTests: XCTestCase {
         while Date() < failed, exiting.performSync({ $0.lastFailure }) == nil { usleep(10_000) }
         XCTAssertEqual(exiting.performSync { $0.lastFailure }, "child_exit")
         XCTAssertEqual(exiting.performSync { $0.restartInMs }, 1_000)
+        // The failed child is reaped before any restart (no overlap).
+        let reaped = Date().addingTimeInterval(5)
+        while Date() < reaped, !exiting.stoppingPIDs.isEmpty { usleep(10_000) }
+        XCTAssertEqual(exiting.stoppingPIDs, [])
         clock.advance(999)
         exiting.queue.sync { exiting.tick() }
         XCTAssertEqual(exiting.performSync { $0.starts }, 1)
@@ -221,5 +225,125 @@ final class VoiceChildHostTests: XCTestCase {
         exiting.queue.sync { exiting.tick() }
         XCTAssertEqual(exiting.performSync { $0.starts }, 2)
         exiting.stop(wait: true)
+    }
+
+    /// B7 review 1: the kill switch also kills a child still in a graceful
+    /// stop's grace period.
+    func testTheKillSwitchKillsAChildThatIsStopping() throws {
+        let host = VoiceChildHost(
+            core: VoiceHostCore(clock: ManualVoiceClock(), credential: VoiceCases.credential), install: Stubborn.install())
+        host.start(autoTick: false)
+        let pid = try XCTUnwrap(Stubborn.pid(host))
+        usleep(200_000)  // the shell's sleep exists
+        let tree = [pid] + VoiceChildHost.descendantPIDs(of: pid)
+        host.stop()  // graceful: SIGTERM only after 2 s, SIGKILL after 4 s
+        let stopping = Date().addingTimeInterval(2)
+        while Date() < stopping, host.stoppingPIDs.isEmpty { usleep(5_000) }
+        XCTAssertEqual(host.stoppingPIDs, [pid])
+        let pressed = Date()
+        host.kill()
+        XCTAssertTrue(Stubborn.waitGone(tree, 1.5), "the stopping child outlived the kill switch")
+        XCTAssertLessThan(Date().timeIntervalSince(pressed), 1.5, "killed now, not after the grace")
+        XCTAssertEqual(host.stoppingPIDs, [])
+    }
+
+    /// B7 review 2: quit (`stop(wait: true)`) ends a child that ignores
+    /// `shutdown`, stdin EOF and SIGTERM before it returns.
+    func testQuitKillsAStubbornChildBeforeReturning() throws {
+        let host = VoiceChildHost(
+            core: VoiceHostCore(clock: ManualVoiceClock(), credential: VoiceCases.credential), install: Stubborn.install())
+        host.start(autoTick: false)
+        let pid = try XCTUnwrap(Stubborn.pid(host))
+        usleep(200_000)
+        let tree = [pid] + VoiceChildHost.descendantPIDs(of: pid)
+        XCTAssertGreaterThanOrEqual(tree.count, 2, "the shell and its sleep")
+        let started = Date()
+        host.stop(wait: true)
+        let took = Date().timeIntervalSince(started)
+        XCTAssertLessThanOrEqual(took, 3 * VoiceChildHost.quitGraceSeconds + 0.5, "bounded")
+        // Reaped by the time stop returns (the zombie may need a moment).
+        XCTAssertTrue(Stubborn.waitGone(tree, 0.3), "a child outlived quit")
+        XCTAssertEqual(host.stoppingPIDs, [])
+    }
+
+    /// B7 review 6: after a failure the restart waits for the old child to
+    /// be gone (here it is only SIGKILLed at the end of the 4 s ladder).
+    func testARestartNeverOverlapsTheFailedChild() throws {
+        let clock = ManualVoiceClock()
+        let core = VoiceHostCore(clock: clock, credential: VoiceCases.credential)
+        // Garbage on stdout (an over-length prefix) fails it at once.
+        let host = VoiceChildHost(core: core, install: Stubborn.install("printf '\\377\\377\\377\\377'; "))
+        host.start(autoTick: false)
+        let failed = Date().addingTimeInterval(5)
+        while Date() < failed, host.performSync({ $0.lastFailure }) == nil { usleep(10_000) }
+        XCTAssertEqual(host.performSync { $0.lastFailure }, "frame_too_large")
+        let old = try XCTUnwrap(host.stoppingPIDs.first)
+        clock.advance(1_000)
+        host.queue.sync { host.tick() }
+        XCTAssertEqual(host.performSync { $0.starts }, 1, "no second child while the first lingers")
+        XCTAssertNil(host.childPID)
+        let next = Date().addingTimeInterval(8)
+        while Date() < next, host.performSync({ $0.starts }) < 2 { usleep(20_000) }
+        XCTAssertEqual(host.performSync { $0.starts }, 2, "restarted once the old child was gone")
+        XCTAssertNotEqual(kill(old, 0), 0, "the old child was gone when the new one started")
+        host.kill()
+    }
+
+    /// B7 review 3: a tap buffer of a stopped capture session is dropped.
+    func testTheCaptureGateDropsLateBuffers() {
+        var gate = CaptureGate()
+        let first = gate.next()
+        XCTAssertFalse(gate.admits(first), "not before open")
+        gate.open(first)
+        XCTAssertTrue(gate.admits(first))
+        gate.closeAll()
+        XCTAssertFalse(gate.admits(first), "late callback after stopCapture")
+        let second = gate.next()
+        gate.open(second)
+        XCTAssertFalse(gate.admits(first), "an earlier session never delivers into a later one")
+        gate.close(first)
+        XCTAssertTrue(gate.admits(second))
+        XCTAssertFalse(gate.admits(0))
+    }
+
+    /// B7 review 3: no AVFoundation engine call under the engine's lock in
+    /// stopCapture (the tap callback takes that lock).
+    func testStopCaptureDrivesTheEngineOutsideTheLock() throws {
+        let source = String(decoding: try Repo.data("node/friday-node/Sources/NodeCore/Voice/AudioEngine.swift"), as: UTF8.self)
+        let body = try XCTUnwrap(source.components(separatedBy: "public func stopCapture() {").last?
+            .components(separatedBy: "public func beginPlayback").first)
+        let unlock = try XCTUnwrap(body.range(of: "lock.unlock()"))
+        for call in ["removeTap", "engine.stop()", ".stop()"] {
+            let at = try XCTUnwrap(body.range(of: call), call)
+            XCTAssertGreaterThan(at.lowerBound, unlock.lowerBound, call)
+        }
+    }
+}
+
+/// A child that ignores `shutdown`, stdin EOF and SIGTERM (only SIGKILL
+/// ends it), with a descendant in its group.
+enum Stubborn {
+    static func install(_ script: String = "") -> VoiceChildHost.Install {
+        VoiceChildHost.Install(
+            home: "/tmp", executable: "/bin/sh",
+            argv: ["sh", "-c", script + "trap '' TERM; while :; do sleep 1; done"], cwd: "/", checkLock: false)
+    }
+
+    static func waitGone(_ pids: [pid_t], _ seconds: Double) -> Bool {
+        let deadline = Date().addingTimeInterval(seconds)
+        while Date() < deadline {
+            if !pids.contains(where: { kill($0, 0) == 0 }) { return true }
+            usleep(20_000)
+        }
+        return !pids.contains(where: { kill($0, 0) == 0 })
+    }
+
+    static func pid(_ host: VoiceChildHost) -> pid_t? {
+        let deadline = Date().addingTimeInterval(5)
+        while Date() < deadline {
+            if let pid = host.childPID { return pid }
+            usleep(10_000)
+        }
+        return nil
     }
 }
