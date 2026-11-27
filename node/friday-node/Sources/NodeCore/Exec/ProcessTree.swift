@@ -143,6 +143,9 @@ public enum ProcessTree {
     /// The identity of a live `pid`, nil when it is gone.
     public static func identity(of pid: pid_t) -> ProcessIdentity? { row(pid)?.identity }
 
+    /// The unique id of the process that forked `pid` (diagnostics).
+    public static func parentUniqueID(of pid: pid_t) -> UInt64? { row(pid)?.parentUniqueID }
+
     /// The monitor's kernel interfaces work on this system (hardening N4):
     /// the unique-id flavor answers for this process with plausible ids (its
     /// own after its parent's), and a kqueue can be made. Asked once; when

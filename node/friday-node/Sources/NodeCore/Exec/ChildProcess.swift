@@ -313,7 +313,14 @@ public enum BoundedRun {
         let child = try ChildProcess.spawn(
             executable: executable, argv: argv, environment: environment, cwd: cwd, stdout: .pipe, stderr: .devNull)
         registry.add(child)
-        defer { registry.remove(child) }
+        // Known to the process monitors as a helper of the node (git,
+        // osascript): no run's orphan sweep touches it or what it leaves.
+        let helperID = ProcessTree.identity(of: child.pid)?.uniqueID
+        if let helperID { MonitorRegistry.shared.helperStarted(helperID) }
+        defer {
+            registry.remove(child)
+            if let helperID { MonitorRegistry.shared.helperEnded(helperID) }
+        }
         let collected = LockedData(limit: maxOutput)
         let drained = DispatchSemaphore(value: 0)
         if let fd = child.stdoutFD {

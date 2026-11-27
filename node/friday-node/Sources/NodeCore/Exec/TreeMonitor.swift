@@ -20,6 +20,7 @@
 //   2 s.
 
 import Darwin
+import os
 import Foundation
 
 public struct MonitorUnavailable: Error, Equatable, CustomStringConvertible {
@@ -85,6 +86,12 @@ final class LockedBox<Value>: @unchecked Sendable {
     private let lock = NSLock()
     private var stored: Value
     init(_ value: Value) { stored = value }
+
+    func update(_ change: (inout Value) -> Void) {
+        lock.lock()
+        change(&stored)
+        lock.unlock()
+    }
     var value: Value {
         get {
             lock.lock()
@@ -125,6 +132,145 @@ public enum MonitorFailureInjection {
         armed = false
         return was
     }
+
+    nonisolated(unsafe) private static var watchArmed = false
+
+    /// The next monitor gets its kqueue, then fails to watch the root (the
+    /// path after `kqueue()` succeeded).
+    public static func failNextWatch() {
+        lock.lock()
+        watchArmed = true
+        lock.unlock()
+    }
+
+    static func consumeWatch() -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        let was = watchArmed
+        watchArmed = false
+        return was
+    }
+
+    /// Monitors alive now (tests check that a failed one is freed).
+    public static var liveMonitors: Int { TreeMonitor.liveCount.value }
+}
+#endif
+
+/// Every live monitor of the process and the node's own short-lived helpers
+/// (git, osascript), so one run's orphan sweep never touches another run's
+/// or a helper's process (hardening review, finding 1).
+///
+/// The rule a sweep follows: an orphan candidate is skipped when any other
+/// live monitor knows it, its recorded parent, or any live ancestor (by
+/// unique id); when it descends from a helper; and the orphan sweep does not
+/// run at all while another monitor is live or a helper runs or ended in
+/// the last 10 s, because a candidate whose recorded parent is unknown to
+/// everyone cannot be attributed to one run.
+final class MonitorRegistry: @unchecked Sendable {
+    static let shared = MonitorRegistry()
+    static let helperMemory: Double = 10
+
+    private final class Entry {
+        weak var monitor: TreeMonitor?
+        init(_ monitor: TreeMonitor) { self.monitor = monitor }
+    }
+
+    private let lock = NSLock()
+    private var monitors: [ObjectIdentifier: Entry] = [:]
+    private var liveHelpers: [UInt64: Int] = [:]
+    private var endedHelpers: [UInt64: Date] = [:]
+
+    func register(_ monitor: TreeMonitor) {
+        lock.lock()
+        monitors[ObjectIdentifier(monitor)] = Entry(monitor)
+        lock.unlock()
+    }
+
+    func unregister(_ monitor: TreeMonitor) {
+        lock.lock()
+        monitors.removeValue(forKey: ObjectIdentifier(monitor))
+        lock.unlock()
+    }
+
+    /// The other monitors still sweeping.
+    private func others(than monitor: TreeMonitor) -> [TreeMonitor] {
+        lock.lock()
+        defer { lock.unlock() }
+        return monitors.values.compactMap(\.monitor).filter { $0 !== monitor && $0.isActive }
+    }
+
+    /// Another run still has a live root or live members (a monitor only
+    /// waiting out its empty-tree grace does not count, but its lineage
+    /// still does, below).
+    func anotherMonitorIsLive(than monitor: TreeMonitor) -> Bool {
+        others(than: monitor).contains(where: \.hasLiveTree)
+    }
+
+    /// Some other live monitor knows one of `ids` (a member's unique id, or
+    /// one in its lineage, also of exited members).
+    func anotherMonitorKnows(any ids: [UInt64], than monitor: TreeMonitor) -> Bool {
+        others(than: monitor).contains { other in ids.contains(where: other.knows) }
+    }
+
+    // MARK: Helpers (BoundedRun)
+
+    func helperStarted(_ uniqueID: UInt64) {
+        lock.lock()
+        liveHelpers[uniqueID, default: 0] += 1
+        lock.unlock()
+    }
+
+    func helperEnded(_ uniqueID: UInt64) {
+        lock.lock()
+        liveHelpers.removeValue(forKey: uniqueID)
+        endedHelpers[uniqueID] = Date()
+        lock.unlock()
+    }
+
+    /// A helper runs, or one ended less than `helperMemory` seconds ago.
+    var helperActiveOrRecent: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        let now = Date()
+        endedHelpers = endedHelpers.filter { now.timeIntervalSince($0.value) < Self.helperMemory }
+        return !liveHelpers.isEmpty || !endedHelpers.isEmpty
+    }
+
+    func isHelper(_ uniqueID: UInt64) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return liveHelpers[uniqueID] != nil || endedHelpers[uniqueID] != nil
+    }
+
+    var registeredCount: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return monitors.values.compactMap(\.monitor).count
+    }
+
+    #if DEBUG
+    /// Tests only: whether any live monitor knows `uniqueID`.
+    func anyMonitorKnows(_ uniqueID: UInt64) -> Bool {
+        lock.lock()
+        let all = monitors.values.compactMap(\.monitor)
+        lock.unlock()
+        return all.contains { $0.knows(uniqueID) }
+    }
+    #endif
+}
+
+#if DEBUG
+public enum MonitorRegistryTesting {
+    /// Whether any live monitor knows `uniqueID` (probe diagnostics).
+    public static func anyMonitorKnows(_ uniqueID: UInt64) -> Bool {
+        MonitorRegistry.shared.anyMonitorKnows(uniqueID)
+    }
+
+    /// No helper runs or ran in the last 10 s (the orphan sweep may run).
+    public static var helpersQuiet: Bool { !MonitorRegistry.shared.helperActiveOrRecent }
+
+    /// Monitors still registered (sweeping).
+    public static var registeredMonitors: Int { MonitorRegistry.shared.registeredCount }
 }
 #endif
 
@@ -153,6 +299,13 @@ final class TreeMonitor: @unchecked Sendable {
     private(set) var peakProcesses = 0
     private let queue = DispatchQueue(label: "friday-node.tree-monitor", qos: .userInitiated)
     private let kq: Int32
+    private var kqClosed = false
+    private var rootExitedAt: Date?
+    /// How long the monitor keeps sweeping after the root exited before it
+    /// gives up on members it cannot kill (logged).
+    static let sweepCapAfterRootExit: Double = 10
+    static let log = Logger(subsystem: "dev.friday.friday-node", category: "tree-monitor")
+    static let liveCount = LockedBox(0)
 
     /// Build the monitor for a root that is still suspended; throws when the
     /// run could not be monitored.
@@ -172,16 +325,33 @@ final class TreeMonitor: @unchecked Sendable {
         self.maxProcesses = maxProcesses
         self.cpuSeconds = cpuSeconds
         memberIDs.insert(root.uniqueID)
-        guard watch(pid) else {
-            close(kq)
-            throw MonitorUnavailable(description: "the root's fork/exit watch failed")
-        }
+        Self.liveCount.update { $0 += 1 }
+        var watched = watch(pid)
+        #if DEBUG
+        if MonitorFailureInjection.consumeWatch() { watched = false }
+        #endif
+        // Every stored property is set: a throw from here runs deinit, which
+        // closes the kqueue (once).
+        guard watched else { throw MonitorUnavailable(description: "the root's fork/exit watch failed") }
     }
 
-    deinit { close(kq) }
+    deinit {
+        closeQueue()
+        Self.liveCount.update { $0 -= 1 }
+    }
+
+    /// Close the kqueue once (the event thread on its way out, or deinit).
+    private func closeQueue() {
+        lock.lock()
+        defer { lock.unlock() }
+        guard !kqClosed else { return }
+        kqClosed = true
+        Darwin.close(kq)
+    }
 
     /// Start the event thread and the scans (before the root is resumed).
     func start() {
+        MonitorRegistry.shared.register(self)
         let thread = Thread { [weak self] in self?.forkEvents() }
         thread.name = "friday-node.fork-events"
         thread.qualityOfService = .userInitiated
@@ -189,10 +359,36 @@ final class TreeMonitor: @unchecked Sendable {
         scheduleSample(after: 0)
     }
 
+    /// Stop sweeping: the scans end, the event thread leaves within 100 ms
+    /// and closes the kqueue, and the registry forgets this monitor.
     func stop() {
         lock.lock()
         stopped = true
         lock.unlock()
+        MonitorRegistry.shared.unregister(self)
+    }
+
+    /// Still sweeping (the registry asks).
+    var isActive: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return !stopped
+    }
+
+    /// The root runs, or the last sweep found members.
+    var hasLiveTree: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return !rootExited || lastMemberCount > 0
+    }
+
+    private var lastMemberCount = 1
+
+    /// `uniqueID` is a member, or was one (lineage).
+    func knows(_ uniqueID: UInt64) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return memberIDs.contains(uniqueID)
     }
 
     /// The limit the run broke, if any (`max_processes`, `cpu_seconds`).
@@ -206,6 +402,7 @@ final class TreeMonitor: @unchecked Sendable {
     func rootDidExit() {
         lock.lock()
         rootExited = true
+        rootExitedAt = rootExitedAt ?? Date()
         lock.unlock()
         sweepSoon()
     }
@@ -229,6 +426,11 @@ final class TreeMonitor: @unchecked Sendable {
         change.filter = Int16(EVFILT_PROC)
         change.flags = UInt16(EV_ADD | EV_ENABLE)
         change.fflags = UInt32(NOTE_FORK) | UInt32(NOTE_EXIT)
+        // Under the lock, so the kqueue is never closed (and its number
+        // reused) between the check and the call.
+        lock.lock()
+        defer { lock.unlock() }
+        guard !kqClosed else { return false }
         return keventRegister(kq, &change) == 0
     }
 
@@ -254,6 +456,7 @@ final class TreeMonitor: @unchecked Sendable {
     private func forkEvents() {
         var events = [KernelEvent](repeating: KernelEvent(), count: 32)
         var timeout = timespec(tv_sec: 0, tv_nsec: 100_000_000)
+        defer { closeQueue() }
         while true {
             lock.lock()
             let done = stopped
@@ -329,7 +532,23 @@ final class TreeMonitor: @unchecked Sendable {
         // A parent that cannot be read is gone or a zombie (whose child is
         // not re-parented until the zombie is reaped).
         let readablePIDs = Set(rows.map(\.identity.pid))
-        let anchor = OrphanSweep.anchor
+        // The orphan sweep runs only when this run is the only live one and
+        // no helper of the node runs or just ran (an orphan whose recorded
+        // parent nobody knows cannot be attributed otherwise).
+        let registry = MonitorRegistry.shared
+        let anchor = (registry.anotherMonitorIsLive(than: self) || registry.helperActiveOrRecent)
+            ? nil : OrphanSweep.anchor
+        let rowsByUniqueID = Dictionary(rows.map { ($0.identity.uniqueID, $0) }, uniquingKeysWith: { first, _ in first })
+        /// The candidate, its recorded parent and every live ancestor.
+        func lineage(_ row: ProcessRow) -> [UInt64] {
+            var ids = [row.identity.uniqueID, row.parentUniqueID]
+            var next = rowsByUniqueID[row.parentUniqueID]
+            while let ancestor = next, ids.count < 64 {
+                ids.append(ancestor.parentUniqueID)
+                next = rowsByUniqueID[ancestor.parentUniqueID]
+            }
+            return ids
+        }
         let uid = getuid()
         var members: Set<ProcessIdentity> = []
         var changed = true
@@ -344,7 +563,9 @@ final class TreeMonitor: @unchecked Sendable {
                     !liveIDs.contains(row.parentUniqueID), row.identity.start >= root.start,
                     OrphanSweep.responsible(for: row.identity.pid) == anchor, OrphanSweep.accepts(row.identity.pid)
                 {
-                    byOrphanSweep = true
+                    let ids = lineage(row)
+                    byOrphanSweep = !ids.contains(where: registry.isHelper)
+                        && !registry.anotherMonitorKnows(any: ids, than: self)
                 }
                 guard byLineage || byGroup || byOrphanSweep else { continue }
                 members.insert(row.identity)
@@ -363,6 +584,7 @@ final class TreeMonitor: @unchecked Sendable {
         let members = currentMembers()
         lock.lock()
         let exited = rootExited
+        lastMemberCount = members.count
         peakProcesses = max(peakProcesses, members.count)
         var broken: String?
         if !exited && violation == nil {
@@ -389,8 +611,18 @@ final class TreeMonitor: @unchecked Sendable {
             emptySince = nil
         }
         let quiet = emptySince.map { Date().timeIntervalSince($0) >= Self.emptyGrace } ?? false
+        let givingUp = exited && !members.isEmpty
+            && (rootExitedAt.map { Date().timeIntervalSince($0) >= Self.sweepCapAfterRootExit } ?? false)
         lock.unlock()
-        if quiet { stop() }
+        if givingUp {
+            // Members that survive SIGKILL for 10 s (uninterruptible, or not
+            // this user's): stop rather than sweep forever.
+            Self.log.error(
+                "gave up on \(members.count, privacy: .public) member(s) still alive \(Self.sweepCapAfterRootExit, privacy: .public) s after the root exited")
+            stop()
+        } else if quiet {
+            stop()
+        }
     }
 
     static let emptyGrace: Double = 1.5
