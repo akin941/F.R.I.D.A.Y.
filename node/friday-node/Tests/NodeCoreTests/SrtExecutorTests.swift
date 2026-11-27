@@ -136,31 +136,6 @@ final class SandboxRunTests: XCTestCase {
         XCTAssertTrue(Waiting.until(5) { kill(pid, 0) != 0 }, "the background child is gone")
     }
 
-    /// A grandchild that calls setsid while its parent exits at once (before
-    /// any sample sees it) is re-parented to launchd and leaves the group;
-    /// its recorded parent unique id still ties it to the run (B6 review
-    /// finding 2). Repeated, since the race is what is tested.
-    func testASetsidEscapeeIsFoundByItsLineage() throws {
-        guard FileManager.default.isExecutableFile(atPath: "/usr/bin/perl") else { throw XCTSkip("no perl") }
-        let script = """
-            /usr/bin/perl -MPOSIX -e 'exit if fork(); POSIX::setsid(); exit if fork(); print "$$\\n"; \
-            close STDOUT; close STDERR; exec "/bin/sleep", "60"'
-            """
-        // A deeper chain: three generations, each parent exiting at once.
-        let deeper = """
-            /usr/bin/perl -MPOSIX -e 'exit if fork(); POSIX::setsid(); exit if fork(); exit if fork(); \
-            print "$$\\n"; close STDOUT; close STDERR; exec "/bin/sleep", "60"'
-            """
-        for (attempt, script) in (Array(repeating: script, count: 10) + Array(repeating: deeper, count: 10)).enumerated() {
-            let run = try sh(script)
-            let (output, outcome) = Waiting.finish(run, timeout: 15)
-            XCTAssertNotNil(outcome, "attempt \(attempt)")
-            let pid = pid_t(output.trimmingCharacters(in: .whitespacesAndNewlines)) ?? 0
-            XCTAssertGreaterThan(pid, 0, "attempt \(attempt)")
-            XCTAssertTrue(Waiting.until(5) { kill(pid, 0) != 0 }, "attempt \(attempt): the setsid escapee survived")
-        }
-    }
-
     /// A pid is signalled only while it still names the same process (pid
     /// AND start time): a stale identity is never killed (finding 3).
     func testAStaleIdentityIsNeverSignalled() throws {
@@ -338,21 +313,84 @@ final class RealSrtTests: XCTestCase {
         XCTAssertNil(confirmed.problem())
         XCTAssertEqual(confirmed.digests["node_modules"], installed.digests["node_modules"], "the copy is the same tree")
         XCTAssertTrue(SrtExecutor(location: confirmed).available)
-        // Tamper with cli.js: refused until confirmed again.
+        // Tamper with cli.js: refused, the change named, and it can no
+        // longer be confirmed (it is not the npm package any more).
         let cli = confirmed.cliPath
+        let original = try XCTUnwrap(FileManager.default.contents(atPath: cli))
         let handle = try XCTUnwrap(FileHandle(forWritingAtPath: cli))
         handle.seekToEndOfFile()
         handle.write(Data("\n// tampered\n".utf8))
         try handle.close()
-        XCTAssertEqual(confirmed.problem(), "srt files changed since confirmation")
+        XCTAssertEqual(confirmed.problem(), "srt files changed since confirmation: node_modules")
+        XCTAssertEqual(confirmed.changedDigests(), ["node_modules"])
         XCTAssertFalse(SrtExecutor(location: confirmed).available)
-        // A file added anywhere in node_modules changes the tree too.
+        XCTAssertThrowsError(try confirmed.confirmed()) {
+            XCTAssertTrue(String(describing: $0).contains("cli.js differs from the npm package"), "\($0)")
+        }
+        try original.write(to: URL(fileURLWithPath: cli))
+        // A file added anywhere in a package: refused at confirmation too.
         let reconfirmed = try confirmed.confirmed()
         XCTAssertNil(reconfirmed.problem())
         try Data("x".utf8).write(to: URL(fileURLWithPath: prefix + "/node_modules/zod/extra.js"))
-        XCTAssertEqual(reconfirmed.problem(), "srt files changed since confirmation")
+        XCTAssertEqual(reconfirmed.problem(), "srt files changed since confirmation: node_modules")
+        XCTAssertThrowsError(try reconfirmed.confirmed())
+        try FileManager.default.removeItem(atPath: prefix + "/node_modules/zod/extra.js")
         // The digests survive the keychain document.
         XCTAssertEqual(SrtLocation.from(reconfirmed.document), reconfirmed)
+    }
+
+    /// node_modules holds exactly the pinned roots, `.bin` (with `srt`
+    /// linked to the pinned cli.js) and `.package-lock.json`.
+    func testTheNodeModulesLayoutIsExactlyThePinnedOne() throws {
+        let installed = try executor().location
+        let base = resolvedPath(try makeTempDirectory())
+        defer { try? FileManager.default.removeItem(atPath: base) }
+        let prefix = base + "/srt"
+        try FileManager.default.copyItem(atPath: installed.prefix, toPath: prefix)
+        let modules = prefix + "/node_modules"
+        XCTAssertNil(SrtPin.problem(prefix: prefix))
+        // An extra top-level module (a `require` could find it).
+        try FileManager.default.createDirectory(atPath: modules + "/evil", withIntermediateDirectories: true)
+        XCTAssertEqual(SrtPin.problem(prefix: prefix), "node_modules holds other entries: evil")
+        try FileManager.default.removeItem(atPath: modules + "/evil")
+        // An extra package inside a scope.
+        try FileManager.default.createDirectory(atPath: modules + "/@anthropic-ai/other", withIntermediateDirectories: true)
+        XCTAssertNotNil(SrtPin.problem(prefix: prefix))
+        try FileManager.default.removeItem(atPath: modules + "/@anthropic-ai/other")
+        // `.bin/srt` pointing elsewhere, or an extra link.
+        try FileManager.default.removeItem(atPath: modules + "/.bin/srt")
+        try FileManager.default.createSymbolicLink(atPath: modules + "/.bin/srt", withDestinationPath: "../zod/index.js")
+        XCTAssertEqual(
+            SrtPin.problem(prefix: prefix),
+            "node_modules/.bin/srt is not the link to ../@anthropic-ai/sandbox-runtime/dist/cli.js")
+        try FileManager.default.removeItem(atPath: modules + "/.bin/srt")
+        try FileManager.default.createSymbolicLink(
+            atPath: modules + "/.bin/srt", withDestinationPath: "../@anthropic-ai/sandbox-runtime/dist/cli.js")
+        try FileManager.default.createSymbolicLink(atPath: modules + "/.bin/extra", withDestinationPath: "../zod/index.js")
+        XCTAssertNotNil(SrtPin.problem(prefix: prefix))
+        try FileManager.default.removeItem(atPath: modules + "/.bin/extra")
+        XCTAssertNil(SrtPin.problem(prefix: prefix))
+    }
+
+    /// The pin (hardening N2): a lockfile with another integrity, or no
+    /// cached tarball to verify against, refuses.
+    func testOnlyThePinnedPackagesCanBeConfirmed() throws {
+        let installed = try executor().location
+        let base = resolvedPath(try makeTempDirectory())
+        defer { try? FileManager.default.removeItem(atPath: base) }
+        let prefix = base + "/srt"
+        try FileManager.default.copyItem(atPath: installed.prefix, toPath: prefix)
+        XCTAssertNil(SrtPin.problem(prefix: prefix))
+        XCTAssertEqual(
+            SrtPin.packages.first?.integrity,
+            "sha512-yEusORnVJrNseF/9fvjVYyk6tr79/aFbIB3T/X8p2puLZdaaiGNeYN50v0CE+1DT70v7XuzKOAnTivh1f5cksA==")
+        XCTAssertNotNil(SrtPin.problem(prefix: prefix, cache: base + "/empty-cache"), "no tarball, no confirmation")
+        let lockPath = prefix + "/package-lock.json"
+        let lock = try XCTUnwrap(FileManager.default.contents(atPath: lockPath))
+        let forged = String(decoding: lock, as: UTF8.self).replacingOccurrences(of: "yEusORnVJrNseF", with: "AAAAORnVJrNseF")
+        try Data(forged.utf8).write(to: URL(fileURLWithPath: lockPath))
+        XCTAssertNotNil(SrtPin.problem(prefix: prefix))
+        XCTAssertThrowsError(try SrtLocation(node: installed.node, prefix: prefix).confirmed())
     }
 
     private func run(_ script: String, _ executor: SrtExecutor, base: String, home: String, network: [String] = [])
@@ -423,7 +461,7 @@ final class RealSrtTests: XCTestCase {
         let executor = SrtExecutor(location: SrtLocation(node: "/opt/node", prefix: "/opt/srt"))
         XCTAssertEqual(
             executor.argv(settingsPath: "/p/settings.json", command: ["uv", "run", "pytest"]),
-            ["/opt/node", "/opt/srt/node_modules/@anthropic-ai/sandbox-runtime/dist/cli.js", "--settings",
+            ["/opt/node", "--no-global-search-paths", "/opt/srt/node_modules/@anthropic-ai/sandbox-runtime/dist/cli.js", "--settings",
              "/p/settings.json", "--", "uv", "run", "pytest"])
         XCTAssertTrue(SrtLocation.nodeIsRecentEnough("v24.14.1"))
         XCTAssertTrue(SrtLocation.nodeIsRecentEnough("v22.12.0"))

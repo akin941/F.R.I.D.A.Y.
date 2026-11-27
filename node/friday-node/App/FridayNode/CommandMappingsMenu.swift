@@ -204,8 +204,13 @@ final class CommandMappingsMenu: NSObject {
         }
     }
 
+    /// The Touch ID prompt names what changed since the last confirmation;
+    /// the confirmation itself is refused unless the files are the pinned
+    /// npm packages (SrtPin).
     @objc private func confirmSrt() {
-        change("Friday Node'un srt dosyalarını yeniden onayla") { mappings in
+        let changed = mappings.srt.digests.isEmpty ? [] : mappings.srt.changedDigests()
+        let what = changed.isEmpty ? "" : " (değişen: \(changed.joined(separator: ", ")))"
+        change("Friday Node'un srt dosyalarını yeniden onayla\(what)") { mappings in
             mappings.srt = try mappings.srt.confirmed()
         }
     }
