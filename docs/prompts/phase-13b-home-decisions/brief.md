@@ -1428,3 +1428,24 @@ credentials, paid calls or hardware.
    after the upgrade (`connector_changed`, nothing sent): re-ask it.
 5. Residual (documented in `docs/mcp/home-assistant.md`): the player can
    change state between the precondition read and the POST (milliseconds).
+
+### Known follow-ups — review notes left open at the `feat/p13-media-play-pause-stop` merge (2026-11-27)
+
+1. **LOW — no direct phrase unit tests for the new verbs**
+   (`backend/connectors/home_phrases.py`). The spec names
+   `test_home_phrases.py` as updated, but the branch does not touch it; the
+   new `STOP` and `PLAY_PAUSE` verbs are covered only through
+   `docs/voice/home-route-vectors.json` and
+   `assistant/tests/test_home_routes.py`. The vector rows "toggle play on
+   the speaker" (match null) and "toggle play the speaker" (play_pause) are
+   brittle and a little confusing. Fix (optional): add a short direct unit
+   test in `test_home_phrases.py` for `durdur`, `stop`, `oynat duraklat`
+   and `play pause`.
+2. **LOW — play_pause outcome matched by display text**
+   (`backend/connectors/bridges/home_assistant.py`).
+   `approved_play_pause_outcome` matches the approved outcome by a text
+   suffix of the dialog row. It is fail-closed (an unrecognised row gives
+   `connector_changed`), but it couples the check to the display strings.
+   The residual race between the precondition read and the POST is
+   documented. Fix (optional): store the approved outcome as a structured
+   field in the snapshot instead of parsing display text.
