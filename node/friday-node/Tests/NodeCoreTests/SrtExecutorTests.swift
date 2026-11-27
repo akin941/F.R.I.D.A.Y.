@@ -395,21 +395,51 @@ final class RealSrtTests: XCTestCase {
         XCTAssertNil(confirmed.problem())
         XCTAssertEqual(confirmed.digests["node_modules"], installed.digests["node_modules"], "the copy is the same tree")
         XCTAssertTrue(SrtExecutor(location: confirmed).available)
-        // Tamper with cli.js: refused until confirmed again.
+        // Tamper with cli.js: refused, the change named, and it can no
+        // longer be confirmed (it is not the npm package any more).
         let cli = confirmed.cliPath
+        let original = try XCTUnwrap(FileManager.default.contents(atPath: cli))
         let handle = try XCTUnwrap(FileHandle(forWritingAtPath: cli))
         handle.seekToEndOfFile()
         handle.write(Data("\n// tampered\n".utf8))
         try handle.close()
-        XCTAssertEqual(confirmed.problem(), "srt files changed since confirmation")
+        XCTAssertEqual(confirmed.problem(), "srt files changed since confirmation: node_modules")
+        XCTAssertEqual(confirmed.changedDigests(), ["node_modules"])
         XCTAssertFalse(SrtExecutor(location: confirmed).available)
-        // A file added anywhere in node_modules changes the tree too.
+        XCTAssertThrowsError(try confirmed.confirmed()) {
+            XCTAssertTrue(String(describing: $0).contains("cli.js differs from the npm package"), "\($0)")
+        }
+        try original.write(to: URL(fileURLWithPath: cli))
+        // A file added anywhere in a package: refused at confirmation too.
         let reconfirmed = try confirmed.confirmed()
         XCTAssertNil(reconfirmed.problem())
         try Data("x".utf8).write(to: URL(fileURLWithPath: prefix + "/node_modules/zod/extra.js"))
-        XCTAssertEqual(reconfirmed.problem(), "srt files changed since confirmation")
+        XCTAssertEqual(reconfirmed.problem(), "srt files changed since confirmation: node_modules")
+        XCTAssertThrowsError(try reconfirmed.confirmed())
+        try FileManager.default.removeItem(atPath: prefix + "/node_modules/zod/extra.js")
         // The digests survive the keychain document.
         XCTAssertEqual(SrtLocation.from(reconfirmed.document), reconfirmed)
+    }
+
+    /// The pin (hardening N2): a lockfile with another integrity, or no
+    /// cached tarball to verify against, refuses.
+    func testOnlyThePinnedPackagesCanBeConfirmed() throws {
+        let installed = try executor().location
+        let base = resolvedPath(try makeTempDirectory())
+        defer { try? FileManager.default.removeItem(atPath: base) }
+        let prefix = base + "/srt"
+        try FileManager.default.copyItem(atPath: installed.prefix, toPath: prefix)
+        XCTAssertNil(SrtPin.problem(prefix: prefix))
+        XCTAssertEqual(
+            SrtPin.packages.first?.integrity,
+            "sha512-yEusORnVJrNseF/9fvjVYyk6tr79/aFbIB3T/X8p2puLZdaaiGNeYN50v0CE+1DT70v7XuzKOAnTivh1f5cksA==")
+        XCTAssertNotNil(SrtPin.problem(prefix: prefix, cache: base + "/empty-cache"), "no tarball, no confirmation")
+        let lockPath = prefix + "/package-lock.json"
+        let lock = try XCTUnwrap(FileManager.default.contents(atPath: lockPath))
+        let forged = String(decoding: lock, as: UTF8.self).replacingOccurrences(of: "yEusORnVJrNseF", with: "AAAAORnVJrNseF")
+        try Data(forged.utf8).write(to: URL(fileURLWithPath: lockPath))
+        XCTAssertNotNil(SrtPin.problem(prefix: prefix))
+        XCTAssertThrowsError(try SrtLocation(node: installed.node, prefix: prefix).confirmed())
     }
 
     private func run(_ script: String, _ executor: SrtExecutor, base: String, home: String, network: [String] = [])

@@ -100,9 +100,22 @@ public struct SrtLocation: Equatable, Sendable {
     }
 
     /// This location with the digests of what is installed now (the owner
-    /// confirms it with Touch ID in the policy UI).
-    public func confirmed() throws -> SrtLocation {
-        SrtLocation(node: node, prefix: prefix, digests: try currentDigests())
+    /// confirms it with Touch ID in the policy UI). Refused unless the
+    /// prefix holds exactly the pinned npm packages (SrtPin: lockfile
+    /// versions and integrities, and the installed files equal to the
+    /// cached, integrity-checked tarballs).
+    public func confirmed(npmCache: String = SrtPin.defaultCache) throws -> SrtLocation {
+        if let problem = SrtPin.problem(prefix: prefix, cache: npmCache) {
+            throw ExecutorError("srt is not the pinned package: \(problem)")
+        }
+        return SrtLocation(node: node, prefix: prefix, digests: try currentDigests())
+    }
+
+    /// The digests that differ from the confirmed ones (what the re-confirm
+    /// prompt names), empty when none does.
+    public func changedDigests() -> [String] {
+        guard let now = try? currentDigests() else { return Self.digestNames }
+        return Self.digestNames.filter { now[$0] != digests[$0] }
     }
 
     /// Why this location cannot run commands, or nil when it can: absolute
@@ -124,7 +137,10 @@ public struct SrtLocation: Equatable, Sendable {
         guard version == Self.pinnedVersion else { return "srt \(version) is not the pinned \(Self.pinnedVersion)" }
         guard Set(digests.keys) == Set(Self.digestNames) else { return "srt not confirmed (Touch ID)" }
         guard let now = try? currentDigests() else { return "srt files unreadable" }
-        guard now == digests else { return "srt files changed since confirmation" }
+        guard now == digests else {
+            let changed = Self.digestNames.filter { now[$0] != digests[$0] }
+            return "srt files changed since confirmation: " + changed.joined(separator: ", ")
+        }
         guard let nodeVersion = NodeVersionCache.shared.version(of: node, digest: now["node"] ?? "") else {
             return "node --version failed"
         }
