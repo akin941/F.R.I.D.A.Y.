@@ -22,7 +22,10 @@ behind Touch ID), and TCC-gated availability;
 the `friday-voice run` child over `friday-voice/v1`, AVAudioEngine with
 voice processing, the menu-bar mic indicator, the push-to-talk hotkey, the
 "Ses" settings, the `node_voice` credential and the `voice.state` relay
-(see "The voice host (Phase 11 M1)" below).
+(see "The voice host (Phase 11 M1)" below);
+**Phase 11 M3, code half** (`feat/p11-node-voice-loopback`, runbook B8) —
+`friday-node voice-loopback`, the voice token hand-over and the nightly
+launchd job (see "Nightly self-trigger (Phase 11 M3)" below).
 
 The app advertises every action contract with its real availability: see
 "The executors (Phase 10 M2)" below. Nothing runs before the owner maps it
@@ -49,6 +52,8 @@ The app advertises every action contract with its real availability: see
 | `Sources/NodeCore/ConformanceSupport.swift` | Live conformance mode, compiled only with `CONFORMANCE` |
 | `Sources/NodeCore/Voice/` | The voice host (Phase 11 M1): `VoiceMessages` / `VoiceFraming` (`friday-voice/v1`, the Python codes), `VoiceHostCore` (a port of the reference `HostCore`, paced playback), `VoiceChildHost` (the child process: clean env, lock hash, backoff, watchdog, kill ladder), `AudioEngine` (`VoiceAudioIO`, `AVAudioVoiceEngine`), `MicIndicator`, `VoiceSettings` (keychain item `voice-settings`, mute, wake models), `VoiceCredential`, `VoiceService` (the wiring); `VoiceConformanceLive` (`CONFORMANCE` only) |
 | `Sources/NodeCore/Generated/VendoredVoiceProtocol.swift` | Byte copies of `node/friday-voice/friday_voice/protocol/schemas/v1` and the sha256 of `node/friday-voice/uv.lock` (`scripts/vendor_protocol.py`) |
+| `Sources/NodeCore/Voice/VoiceLoopback.swift`, `VoiceSelftest.swift`, `Sources/NodeCore/LocalSocket.swift` | The nightly selftest (Phase 11 M3): the loopback over `VoiceAudioIO` (WAV rules, the length rule, the stable codes, the DEBUG-only `EchoVoiceEngine`), the app's selftest host and socket, the CLI client, the token file; the Unix socket rules shared with the hook socket |
+| `scripts/selftest-nightly.sh`, `scripts/ai.friday.voice-selftest.plist.template`, `scripts/install-voice-selftest.sh` | The nightly job, its launchd agent template and its installer (which never loads it) |
 | `App/FridayNode/Voice/` | `Hotkey.swift` (Carbon `RegisterEventHotKey`, press/release) and `VoiceMenu.swift` (the "Ses" menu) |
 | `fixtures/voice_host_traces.json`, `scripts/voice_host_traces.py` | The reference host's barge-in traces (`--check` in CI) that `VoiceHostTraceTests` replays |
 | `App/FridayNode/` | The `LSUIElement` menu-bar app |
@@ -317,6 +322,92 @@ cd node/friday-voice && uv run python ../friday-node/scripts/voice_host_traces.p
 --frozen friday-voice …` instead; under uv `host.child_stdout_short_read`
 cannot pass (uv keeps the child's stdout open while it waits). The three
 manual-clock cases run with real processes on a stepped host clock.
+
+## Nightly self-trigger (Phase 11 M3, runbook B8)
+
+`friday-voice selftest --nightly` (docs/voice/live-eval.md §4) needs the
+host's real audio path and a fresh `node_voice` token. Both come from the
+**running app**, through the CLI:
+
+```bash
+friday-node voice-token --out <file>   # the app takes the selftest hold, mints; a new 0600 file
+                                       # stdout: server_url=… / ca_sha256=… / expires_at=… (no token)
+friday-node voice-loopback < clip.wav > capture.wav   # 16 kHz mono PCM16 WAV in and out
+friday-node voice-token --end <file>   # removes the file, ends the hold
+```
+
+`voice-loopback` plays the clip on the app's `AVAudioVoiceEngine` (B7's
+voice-processing graph, so the clip is the echo canceller's reference) and
+returns the AEC-cleaned capture for the clip's length plus 1 s. Exit 0, or
+a non-zero status with one stable line on stderr, `friday-node
+voice-loopback: error <code>`, and nothing on stdout: 2 usage; 3
+`wav_invalid` / `wav_unsupported` / `wav_too_long` (only 16 kHz mono 16-bit,
+≤ 60 s); 4 `tcc_not_granted` / `mic_unavailable` / `mic_busy` /
+`aec_unavailable` (voice processing off) / `capture_timeout`; 5
+`app_unreachable` / `selftest_disabled` / `no_selftest_hold` / `busy` /
+`not_paired` / `kill_switch` / `credential_refused` / `mint_failed` /
+`protocol`; 6 `token_file_unsafe`. The clip and the capture stay in memory;
+the mic is released on every path; the TCC grant is checked, never
+requested (no prompt at 03:17).
+
+**Why the app does it (TCC and Keychain).** A launchd agent's processes
+are attributed to the job itself: TCC's *responsible process* for
+`/bin/bash selftest-nightly.sh` → `friday-voice` → `friday-node` is the job
+(`/bin/bash`), not Terminal and not FridayNode.app, and a process launched
+that way has no Microphone grant and no way to show the prompt (an
+unattended Mac at 03:17). A separate `friday-node` executable, even inside
+the app bundle, is attributed to whoever spawned it, so it does not inherit
+the app's grant either. The app, launched by LaunchServices, is its own
+responsible process and holds the Microphone grant from B7 owner step 2.
+The node secret lives in the data protection keychain under the app's
+`keychain-access-groups` entitlement (provisioned with the Personal Team
+profile); the unentitled SwiftPM `friday-node` binary cannot read it. So the
+CLI is a thin client of the app's `VoiceSelftestSocket`
+(`~/Library/Application Support/Friday/voice-selftest.sock`: 0600 in a 0700
+directory, peer uid checked before a byte is read, bounded reads, no TCP),
+and no new entitlement is needed. Alternatives rejected: running the
+loopback as `FridayNode --voice-loopback` from the job (the responsible
+process is still the job unless the plist launches the app binary itself,
+which would put a second app instance and its keychain access behind a
+user-writable script chain); an embedded helper (same attribution); the CLI
+reading the keychain (no entitlement, no profile).
+
+**The app's gates.** Everything on the socket is refused until the owner
+turns on "Ses" → "Gece öz-testi" (stored in the `voice-settings` Keychain
+item, Touch ID to turn on), and while the kill switch is engaged or the node
+is unpaired. `begin` stops the live voice child (one voice at a time: the
+selftest has the mic, and its token supersedes the child's), mints, and
+returns the token to the CLI only; the hold ends with `--end` or after 15
+minutes, and the live voice then mints again. `loopback` runs only inside a
+hold and refuses while the live voice still holds the mic. The app needs to
+be running at 03:17 (a menu-bar app at login); if it is not, the run
+records `error`.
+
+**The job.** `scripts/selftest-nightly.sh` skips on battery (`pmset -g
+batt`), mints into `~/Library/Application Support/Friday/voice/selftest.token`
+(deleted on every exit by its trap), passes `--server` / `--ca-sha256` from
+the mint and `--ca-file` from `friday-voice ca set`'s `tls.json`, and runs
+the installed `friday-voice selftest --nightly` with `--loopback-cmd
+"<cli> voice-loopback"` and the result file
+`~/Library/Application Support/Friday/voice/selftest-result.json`. A night
+without a token still records an `error` line. `scripts/install-voice-selftest.sh`
+copies the script and renders the agent into
+`~/Library/LaunchAgents/ai.friday.voice-selftest.plist` (03:17,
+`LimitLoadToSessionType` Aqua, log `~/Library/Logs/Friday/voice-selftest.log`,
+codes only); it never loads it.
+
+```bash
+cd node/friday-node
+swift test --filter 'Loopback|Selftest'      # WAV rules, length rule, codes, no disk, the app's gates, socket, token file, script
+FRIDAY_NODE_LOOPBACK_CMD="$PWD/.build/debug/friday-node voice-loopback --debug-echo-engine" \
+  sh -c 'cd ../friday-voice && uv run pytest -q tests/test_selftest.py -k loopback'   # the CommandLoopback contract, no device
+scripts/install-hook-cli.sh && scripts/install-voice-selftest.sh   # owner: installs, does not load
+```
+
+`--debug-echo-engine` exists only in DEBUG builds (a zero-latency echo, no
+device); `check-release-markers.sh` refuses a binary that names it or
+`EchoVoiceEngine`, and `install-hook-cli.sh` runs that check on the release
+CLI it installs.
 
 ## Rules this package keeps
 

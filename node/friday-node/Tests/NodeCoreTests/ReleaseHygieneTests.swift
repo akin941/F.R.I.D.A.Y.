@@ -35,6 +35,17 @@ final class ReleaseHygieneTests: XCTestCase {
         #endif
     }
 
+    /// Runbook B8: the voice loopback's echo engine (`--debug-echo-engine`,
+    /// no real device) exists only in DEBUG builds.
+    func testTheLoopbackEchoEngineIsNotCompiledIntoRelease() {
+        #if DEBUG
+        XCTAssertTrue(ReleaseProbe.voiceLoopbackEchoCompiledIn)
+        #else
+        XCTAssertFalse(ReleaseProbe.voiceLoopbackEchoCompiledIn,
+                       "the voice loopback echo engine is compiled into a Release build")
+        #endif
+    }
+
     /// Whatever the build, the protocol offer is v2 then v1, and a node
     /// without executors runs nothing: every action contract is
     /// `unsupported`.

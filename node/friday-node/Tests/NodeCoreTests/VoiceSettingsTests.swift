@@ -68,6 +68,30 @@ final class VoiceSettingsTests: XCTestCase {
         XCTAssertThrowsError(try VoiceSettings.decoded(Data(#"{"v":1,"mode":"loud","muted":false,"hotkey":"f5"}"#.utf8)))
         XCTAssertThrowsError(try VoiceSettings.decoded(Data(#"{"v":1,"mode":"off","muted":"no","hotkey":"f5"}"#.utf8)))
         XCTAssertEqual(VoiceSettings().mode, "off", "voice is off until the owner turns it on")
+        // Runbook B8: the nightly selftest flag, off by default and in an
+        // older item without the key; anything but a bool is refused.
+        let nightly = VoiceSettings(mode: "push_to_talk", nightlySelftest: true)
+        XCTAssertEqual(try VoiceSettings.decoded(try JSON.canonical(nightly.document)), nightly)
+        XCTAssertFalse(VoiceSettings().nightlySelftest)
+        XCTAssertFalse(try VoiceSettings.decoded(Data(#"{"v":1,"mode":"off","muted":false,"hotkey":"f5"}"#.utf8)).nightlySelftest)
+        XCTAssertThrowsError(try VoiceSettings.decoded(
+            Data(#"{"v":1,"mode":"off","muted":false,"hotkey":"f5","nightly_selftest":"yes"}"#.utf8)))
+    }
+
+    /// Turning the nightly selftest on needs the owner; turning it off never
+    /// waits for them.
+    func testTheNightlySelftestNeedsTheOwnerToTurnOn() async throws {
+        let store = MemoryVoiceSettingsStore(VoiceSettings(mode: "push_to_talk"))
+        let refused = VoiceSettingsEditor(store: store, authentication: AlwaysNo())
+        do {
+            try await refused.setNightlySelftest(true)
+            XCTFail("enabled without the owner")
+        } catch PolicyChangeError.notAuthenticated {}
+        XCTAssertFalse(try store.load().nightlySelftest)
+        try await VoiceSettingsEditor(store: store, authentication: AlwaysYes()).setNightlySelftest(true)
+        XCTAssertTrue(try store.load().nightlySelftest)
+        try await refused.setNightlySelftest(false)
+        XCTAssertFalse(try store.load().nightlySelftest)
     }
 
     func testEveryStateHasAnIndicatorAndOnlyHeldStatesShowALiveMic() {

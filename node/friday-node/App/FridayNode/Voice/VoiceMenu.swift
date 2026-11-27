@@ -5,6 +5,9 @@
 // owner-trained `hey_friday.onnx` included, matches a non-empty pin: runbook
 // A8). Every change goes through VoiceSettingsEditor; nothing here talks to
 // the child or the server directly.
+// Phase 11 M3 (runbook B8): "Gece öz-testi" lets the nightly launchd job
+// (selftest-nightly.sh) borrow the mic and a voice token through the app's
+// selftest socket; turning it on asks for Touch ID or the password.
 
 import AppKit
 import NodeCore
@@ -53,6 +56,11 @@ final class VoiceMenu: NSObject {
         mute.state = settings.muted ? .on : .off
         mute.target = self
         menu.addItem(mute)
+        let nightly = NSMenuItem(
+            title: "Gece öz-testi (03:17, prizdeyken)", action: #selector(toggleNightlySelftest), keyEquivalent: "")
+        nightly.state = settings.nightlySelftest ? .on : .off
+        nightly.target = self
+        menu.addItem(nightly)
         menu.addItem(.separator())
         let header = NSMenuItem(title: "Bas-konuş tuşu", action: nil, keyEquivalent: "")
         header.isEnabled = false
@@ -85,6 +93,19 @@ final class VoiceMenu: NSObject {
             try editor.setMuted(!current.muted)
         } catch {
             onFailure("sessize alma kaydedilemedi")
+        }
+    }
+
+    @objc private func toggleNightlySelftest() {
+        Task {
+            do {
+                let current = try editor.current()
+                try await editor.setNightlySelftest(!current.nightlySelftest)
+            } catch PolicyChangeError.notAuthenticated {
+                // Cancelled or failed authentication: nothing changed.
+            } catch {
+                await MainActor.run { self.onFailure("öz-test ayarı kaydedilemedi") }
+            }
         }
     }
 

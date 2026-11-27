@@ -21,6 +21,11 @@
 //   friday_voice/models.py `wake_armable`); `WakeModels.status` shows it in
 //   the menu. Until the keyword model is pinned (runbook A8) always-on runs
 //   as push-to-talk: the child refuses to arm.
+// - The nightly selftest (Phase 11 M3, runbook B8): off until the owner turns
+//   it on (after LocalAuthentication: it plays audio and opens the mic at
+//   night); while off, the app's selftest socket mints no token and opens no
+//   mic. Stored in the same Keychain item, so no other process can turn it
+//   on (`nightly_selftest`; absent in an older item = off).
 
 import CoreAudio
 import Foundation
@@ -30,18 +35,26 @@ public struct VoiceSettings: Equatable, Sendable {
     public var mode: String
     public var muted: Bool
     public var hotkey: String
+    public var nightlySelftest: Bool
 
     public static let modes = VoiceProtocol.modes
     public static let defaultHotkey = "option_command_space"
 
-    public init(mode: String = "off", muted: Bool = false, hotkey: String = VoiceSettings.defaultHotkey) {
+    public init(
+        mode: String = "off", muted: Bool = false, hotkey: String = VoiceSettings.defaultHotkey,
+        nightlySelftest: Bool = false
+    ) {
         self.mode = mode
         self.muted = muted
         self.hotkey = hotkey
+        self.nightlySelftest = nightlySelftest
     }
 
     public var document: JSONValue {
-        ["v": 1, "mode": .string(mode), "muted": .bool(muted), "hotkey": .string(hotkey)]
+        [
+            "v": 1, "mode": .string(mode), "muted": .bool(muted), "hotkey": .string(hotkey),
+            "nightly_selftest": .bool(nightlySelftest),
+        ]
     }
 
     public static func decoded(_ data: Data) throws -> VoiceSettings {
@@ -50,7 +63,9 @@ public struct VoiceSettings: Equatable, Sendable {
             let muted = doc["muted"]?.boolValue, let hotkey = doc["hotkey"]?.stringValue,
             VoiceHotkeys.byID[hotkey] != nil
         else { throw CredentialError.corrupt }
-        return VoiceSettings(mode: mode, muted: muted, hotkey: hotkey)
+        let nightly = doc["nightly_selftest"]
+        guard nightly == nil || nightly?.boolValue != nil else { throw CredentialError.corrupt }
+        return VoiceSettings(mode: mode, muted: muted, hotkey: hotkey, nightlySelftest: nightly?.boolValue ?? false)
     }
 }
 
@@ -218,6 +233,18 @@ public final class VoiceSettingsEditor: @unchecked Sendable {
 
     @discardableResult
     public func setMuted(_ muted: Bool) throws -> VoiceSettings { try apply { $0.muted = muted } }
+
+    /// Turning the nightly selftest on asks for LocalAuthentication first
+    /// (it plays audio and opens the mic at night); turning it off never
+    /// waits.
+    @discardableResult
+    public func setNightlySelftest(_ on: Bool) async throws -> VoiceSettings {
+        if on {
+            guard await authentication.authenticate(reason: "Friday Node'un gece ses öz-testini aç")
+            else { throw PolicyChangeError.notAuthenticated }
+        }
+        return try apply { $0.nightlySelftest = on }
+    }
 
     @discardableResult
     public func setHotkey(_ id: String) throws -> VoiceSettings {

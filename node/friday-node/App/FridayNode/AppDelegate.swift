@@ -6,6 +6,10 @@
 //   talk or wake), listening, thinking, speaking, muted, storm-muted, error.
 // - "Ses" (Phase 11 M1): mic mode, mute, the push-to-talk hotkey and the
 //   wake model state (VoiceMenu.swift); always-on asks for Touch ID first.
+//   Phase 11 M3 (runbook B8): "Gece öz-testi" (Touch ID to turn on) lets the
+//   nightly launchd job use the app's selftest socket (VoiceSelftest.swift):
+//   the app mints the job's voice token and runs its loopback, because the
+//   Microphone grant and the node secret are the app's.
 // - "Resume" is the owner's local action after a `bye` that stops
 //   reconnecting (revoked, kill switch, credential expired).
 // - "Pair..." opens the pairing window; "Unpair" forgets the credential.
@@ -66,6 +70,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         editor: voiceEditor,
         onFailure: { [weak self] text in self?.statusLine.title = "Friday Node: \(text)" })
     private let voiceMenu = NSMenu(title: "Ses")
+    /// Phase 11 M3 (runbook B8): the nightly selftest's token and loopback.
+    private lazy var voiceSelftest: VoiceSelftestHost = {
+        let editor = voiceEditor
+        let runner = self.runner
+        return VoiceSelftestHost(
+            enabled: { (try? editor.current().nightlySelftest) == true }, hold: voice,
+            credential: { runner.credentialForVoice() }, killSwitch: { runner.killSwitchEngaged },
+            makeAudio: { AVAudioVoiceEngine() })
+    }()
+    private var voiceSelftestSocket: VoiceSelftestSocket?
     private let hotkey = PushToTalkHotkey()
     private static let baseSymbol = "point.3.connected.trianglepath.dotted"
 
@@ -126,11 +140,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         } catch {
             statusLine.title = "Friday Node: hook soketi açılamadı"
         }
+        // The nightly selftest's socket (B8): refuses everything while
+        // "Gece öz-testi" is off.
+        let selftestSocket = VoiceSelftestSocket(handler: voiceSelftest)
+        if (try? selftestSocket.start()) != nil { voiceSelftestSocket = selftestSocket }
         runner.start()
     }
 
     func applicationWillTerminate(_ notification: Notification) {
         hotkey.unregister()
+        voiceSelftestSocket?.stop()
+        voiceSelftest.selftestEnd()
         voice.shutdown()  // the child gets `shutdown`; its tree is killed
         runner.stopHookRelay()
         runner.stop()
