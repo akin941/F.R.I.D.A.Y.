@@ -18,10 +18,24 @@ current release, licence and whether Piper voices are still served before
 installing (brief, step 0 spike — owner step).
 
 ```bash
-# On the Mac (not in the Django image). Follow the speaches README for the
-# current install command; it is a Python app run with uvicorn.
-# Listen on :8000 so the default VOICE_BASE_URL works from Docker Desktop.
+# On the Mac (not in the Django image). Pinned and measured 2026-11-27
+# (Phase 6 brief, "Step 0 on the Mac"): speaches v0.9.0-rc.3, MIT.
+D="$HOME/Library/Application Support/Friday/speaches"
+git clone --depth 1 --branch v0.9.0-rc.3 https://github.com/speaches-ai/speaches.git "$D"
+cd "$D" && uvx --from 'uv~=0.8.14' uv sync --frozen --no-dev --python 3.12
+
+# Loopback only; keyed with the VOICE_API_KEY placeholder; no web UI;
+# CoreML off (onnxruntime's CoreML provider segfaults in Piper on the Mac).
+# Docker Desktop still reaches it as host.docker.internal:8000.
+mkdir -p "$HOME/Library/Logs/Friday"
+cd "$D" && API_KEY=voice-local ENABLE_UI=false \
+  UNSTABLE_ORT_OPTS__EXCLUDE_PROVIDERS='["TensorrtExecutionProvider","CoreMLExecutionProvider"]' \
+  nohup .venv/bin/uvicorn --factory --host 127.0.0.1 --port 8000 speaches.main:create_app \
+  > "$HOME/Library/Logs/Friday/speaches.log" 2>&1 &
 ```
+
+It does not start at login; start it again after a reboot (a launchd
+agent is a later owner choice).
 
 Pull the models through the server (speaches downloads from Hugging Face on
 first use or via its model API):
@@ -31,9 +45,20 @@ first use or via its model API):
 - TTS: a Turkish Piper voice, e.g. `tr_TR-dfki-medium`, and an English one,
   e.g. `en_US-lessac-medium`.
 
-Exact model ids as the server names them (e.g. whether the TTS model is
-`speaches-ai/piper-tr_TR-dfki-medium` with voice `tr_TR-dfki-medium`) are a
-spike result — record them in the brief and set the env below to match.
+Measured 2026-11-27: STT `Systran/faster-whisper-small`; TTS
+`speaches-ai/piper-tr_TR-dfki-medium` and `speaches-ai/piper-en_US-lessac-medium`.
+Pull them once:
+
+```bash
+for m in Systran/faster-whisper-small speaches-ai/piper-tr_TR-dfki-medium speaches-ai/piper-en_US-lessac-medium; do
+  curl -s -X POST -H "Authorization: Bearer voice-local" "http://127.0.0.1:8000/v1/models/$m"; echo
+done
+```
+
+speaches picks the Piper voice from the **model id** and ignores the
+request's `voice`, so English has its own provider row
+(`voice-tts-local-en`, `VOICE_TTS_EN_MODEL_ID`) and the `en` route points at
+it.
 
 **Fallback** if speaches no longer serves Piper or misbehaves: the
 `deploy/voice/` FastAPI sidecar (≈150 lines wrapping `faster-whisper` and
@@ -53,7 +78,8 @@ spike result — record them in the brief and set the env below to match.
 VOICE_API_KEY=voice-local          # placeholder opt-in, not a secret
 VOICE_BASE_URL=http://host.docker.internal:8000/v1
 VOICE_STT_MODEL_ID=Systran/faster-whisper-small
-VOICE_TTS_MODEL_ID=<the server's Piper model id>
+VOICE_TTS_MODEL_ID=speaches-ai/piper-tr_TR-dfki-medium
+VOICE_TTS_EN_MODEL_ID=speaches-ai/piper-en_US-lessac-medium
 VOICE_STT_LANGUAGE=tr              # "" = auto-detect (unreliable on short clips)
 VOICE_TTS_ROUTE_TR_VOICE=tr_TR-dfki-medium
 VOICE_TTS_ROUTE_EN_VOICE=en_US-lessac-medium
@@ -61,14 +87,14 @@ VOICE_TTS_ROUTE_EN_VOICE=en_US-lessac-medium
 
 Then reseed (idempotent): `make up` runs `seed_ai_defaults`, or
 `uv run python manage.py seed_ai_defaults` from `backend/`. With
-`VOICE_API_KEY` set it creates `voice-stt-local` and `voice-tts-local`
-(`personal_data_allowed=True`, cost 0). Existing rows are never overwritten:
+`VOICE_API_KEY` set it creates `voice-stt-local`, `voice-tts-local` and
+`voice-tts-local-en` (`personal_data_allowed=True`, cost 0). Existing rows are never overwritten:
 to change a model id later, edit the row in the admin.
 
 ### Language routing (A2)
 
 `settings.VOICE_TTS_ROUTES` maps a language to a provider row and voice
-(`tr` and `en` → `voice-tts-local` by default). The routed provider is used
+(`tr` → `voice-tts-local`, `en` → `voice-tts-local-en` by default). The routed provider is used
 only if it is active, keyed and `personal_data_allowed`; otherwise the
 gateway falls back to priority order among eligible rows. The client never
 chooses the provider.

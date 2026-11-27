@@ -659,6 +659,59 @@ speaches fails.
    `ModelUsage` each (runbook §3).
 4. Confirm the monthly audio cap (d2; 20 USD default) in the admin.
 
+**Step 0 on the Mac — speech server record (2026-11-27, runbook A7).**
+Owner steps 1 and 3 above are done; 2 (OpenRouter, paid) and 4 (the cap
+in the admin) stay with the owner.
+- **Release and licence.** speaches `v0.9.0-rc.3` (tag commit `24f209c`,
+  the latest GitHub release on 2026-11-27), MIT. Installed from the tag
+  into `~/Library/Application Support/Friday/speaches` with
+  `uv sync --frozen --no-dev` (the project pins `uv ~=0.8.14`; run through
+  `uvx --from 'uv~=0.8.14' uv …`), Python 3.12. Not in the repository,
+  not in any image. Piper **and** Kokoro are served.
+- **Runs on loopback only**: `uvicorn --factory --host 127.0.0.1 --port
+  8000 speaches.main:create_app` with `API_KEY=voice-local` (the
+  `VOICE_API_KEY` placeholder, so the server refuses an unkeyed request),
+  `ENABLE_UI=false`, and
+  `UNSTABLE_ORT_OPTS__EXCLUDE_PROVIDERS='["TensorrtExecutionProvider","CoreMLExecutionProvider"]'`:
+  onnxruntime's CoreML provider **segfaults** in Piper synthesis on this
+  Mac (`EXC_BAD_ACCESS` in `libBNNS` under `MLNeuralNetworkEngine`, first
+  TTS request), CPU is fine. Docker Desktop reaches it at
+  `http://host.docker.internal:8000/v1` (200 from the `web` container);
+  nothing listens beyond 127.0.0.1. Start command in `voice-setup.md` §1.
+- **Model ids as speaches names them.** STT `Systran/faster-whisper-small`;
+  TTS `speaches-ai/piper-tr_TR-dfki-medium` (voice `dfki`) and
+  `speaches-ai/piper-en_US-lessac-medium` (voice `lessac`). Pulled with
+  `POST /v1/models/<id>`; `silero_vad_v5` comes with it.
+- **Voice ids — a finding.** speaches selects the Piper voice from the
+  **model id** and ignores the request's `voice` (any value, even
+  `en_US-lessac-medium` on the Turkish model, gives 200 and the model's
+  own voice). So the `en` route of A2 could never change the voice while
+  it pointed at the Turkish row: this branch seeds `voice-tts-local-en`
+  (`VOICE_TTS_EN_MODEL_ID`, default the lessac model, priority 6 so the
+  Turkish row stays first for an unrouted language) and routes `en` to it.
+  The route voices (`tr_TR-dfki-medium`, `en_US-lessac-medium`) are kept;
+  they are harmless and stay meaningful for a provider that honours them.
+- **WAV response shape.** `audio/wav`, chunked; RIFF and `data` sizes
+  `0xFFFFFFFF` (a streaming header), a `LIST/INFO` chunk before `data`,
+  22 050 Hz mono PCM16. `ai_core/audio.py`'s streaming-header repair
+  handles it (the gateway round trip below parsed it).
+- **Latency on this Mac** (CPU, loopback, one short Turkish sentence of
+  about 3.9 s audio): TTS cold 0.66 s (first request after start; model
+  load 3.1 s on the very first ever), warm 0.14–0.15 s; English TTS 0.45 s
+  cold. STT (faster-whisper-small, `language=tr`) cold 2.46 s, warm
+  1.25–1.31 s.
+- **Gateway round trip (done-when, owner step 3).** In the dev stack
+  (`make up-local-tls`, `AI_FAKE_PROVIDER=false` — the dev compose default
+  `true` puts the in-process fakes first), `manage.py shell`:
+  `synthesize("voice.tts", "Merhaba, ben Friday. Bugün takviminde üç
+  toplantı var.", language tr)` → `voice-tts-local`, `route:tr`, 3.84 s,
+  cost 0; its audio resampled to 16 kHz → `transcribe("voice.stt", …)` →
+  `voice-stt-local`, cost 0, text "Merhaba ben Friday. Bugün takdiminde 3
+  toplantı var." (one Whisper-small slip: *takdiminde*). Exactly two new
+  `ModelUsage` rows, workspace = the owner's personal workspace.
+- **Still open:** the BFF check from a trusted browser (`voice-setup.md`
+  §4, runbook A7 item 3) needs the owner's web session.
+
 ## Scope (one branch each)
 
 ### 1. `feat/p6-speech-gateway` — ADR-011, adapter, personal-data rule, seeds

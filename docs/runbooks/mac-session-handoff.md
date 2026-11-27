@@ -542,16 +542,20 @@ uv run python manage.py build_node_conformance --check   # case and vector files
 
 ### A7. Local speech server (Phase 6 branch 1 step 0) — blocks C2 and B7
 
-- [ ] Install speaches on the Mac host (not in Docker), with Piper served,
+- [x] Install speaches on the Mac host (not in Docker), with Piper served,
       on `:8000` (`docs/runbooks/voice-setup.md` §1). Record the exact
       STT/TTS model ids, voice ids, the WAV response shape and cold/warm
       latency in the Phase 6 brief; set `VOICE_*` in `.env`.
-- [ ] Done-when: `InferenceGateway().transcribe/synthesize` round-trips a
+- [x] Done-when: `InferenceGateway().transcribe/synthesize` round-trips a
       Turkish sentence with one `ModelUsage` each (`voice-setup.md` §3, in
       `manage.py shell`).
 - [ ] One real transcription and one speech request through the BFF from a
       trusted browser (`voice-setup.md` §4): 200s, one `ModelUsage` each,
       workspace = the conversation's, cost 0.
+
+      Items 1–2 done 2026-11-27 (speaches v0.9.0-rc.3, CPU, loopback; ids,
+      WAV shape, latency and the round trip in the Phase 6 brief, "Step 0
+      on the Mac"). Item 3 needs the owner's trusted browser session.
 
 ### A8. Train and pin `hey_friday.onnx` (Phase 6 owner step 4, Phase 11 owner step 3) — blocks B7 and C7
 
