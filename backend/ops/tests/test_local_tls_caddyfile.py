@@ -110,3 +110,116 @@ def test_the_chat_turn_regexp_matches_only_the_messages_route():
         "/api/v1/ai/conversations/",
     ):
         assert not pattern.match(path)
+
+
+# --- every forwarded path is a real route (Caddy normalises before matching) ---
+
+
+def test_every_forwarded_path_is_a_real_route():
+    """Caddy's `path` matcher is case-insensitive and matches the cleaned
+    path (`//` merged, `%2f` and dot-segments resolved), so each forwarded
+    name must be a route that exists exactly: Django (case-sensitive) or
+    the node gateway's ASGI mount. A variant Caddy lets through that is
+    not this exact path is a 404 in Django."""
+    from config.asgi_nodes import GATEWAY_WS_PATH
+
+    matchers = _matchers()
+    paths = {path for kind, args in matchers.values() if kind == "path" for path in args}
+    assert GATEWAY_WS_PATH in paths
+    for path in paths - {GATEWAY_WS_PATH}:
+        _view_name(path)  # Resolver404 for a path Django does not route
+    _view_name(f"/api/v1/ai/conversations/{CONVERSATION}/messages")
+
+
+# --- CORS: the proxy adds nothing, Django's policy is unchanged ---
+
+PROXY_ORIGINS = ("https://127.0.0.1:8443", "https://localhost:8443", "https://local-tls:8443")
+CORS_SETTINGS = {"CORS_ALLOWED_ORIGINS", "CSRF_TRUSTED_ORIGINS", "CORS_ALLOW_ALL_ORIGINS"}
+
+
+def test_the_proxy_never_sets_cors_or_rewrites_headers():
+    directives = _directives()
+    assert not any(line.startswith(("header", "header_up", "header_down")) for line in directives)
+    assert not any("access-control" in line.lower() for line in directives)
+    services = yaml.safe_load(COMPOSE.read_text(encoding="utf-8"))["services"]
+    for name in ("web", "local-tls"):
+        env = (services.get(name) or {}).get("environment") or {}
+        keys = set(env) if isinstance(env, dict) else {item.split("=")[0] for item in env}
+        assert not keys & CORS_SETTINGS
+
+
+ACAO, ACAC = "Access-Control-Allow-Origin", "Access-Control-Allow-Credentials"
+
+
+def _cors_requests(origin):
+    """An OPTIONS preflight and a POST, both through the full MIDDLEWARE
+    stack and the URL conf (django.test.Client), to forwarded voice paths."""
+    from django.test import Client
+
+    client = Client()
+    preflight = client.options(
+        "/api/v1/voice/speech",
+        HTTP_ORIGIN=origin,
+        HTTP_ACCESS_CONTROL_REQUEST_METHOD="POST",
+        HTTP_ACCESS_CONTROL_REQUEST_HEADERS="authorization, content-type",
+    )
+    post = client.post("/api/v1/voice/speech", data={}, HTTP_ORIGIN=origin)
+    return preflight, post
+
+
+def test_the_cors_settings_grant_nothing_to_the_proxy(settings):
+    assert "corsheaders.middleware.CorsMiddleware" in settings.MIDDLEWARE
+    assert not getattr(settings, "CORS_ALLOW_ALL_ORIGINS", False)
+    assert not getattr(settings, "CORS_ALLOW_CREDENTIALS", False)
+    assert not getattr(settings, "CORS_ALLOWED_ORIGIN_REGEXES", [])
+    for origin in PROXY_ORIGINS:
+        assert origin not in settings.CORS_ALLOWED_ORIGINS
+        assert origin not in getattr(settings, "CSRF_TRUSTED_ORIGINS", [])
+
+
+@pytest.mark.parametrize("origin", PROXY_ORIGINS)
+def test_django_grants_no_cors_to_the_proxy_origin(origin):
+    for response in _cors_requests(origin):
+        assert ACAO not in response.headers
+        assert ACAC not in response.headers
+
+
+@pytest.mark.parametrize("credentials", [False, True])
+def test_the_cors_control_grants_once_the_origin_is_allowed(settings, credentials):
+    """The control: the same requests through the same stack DO carry the
+    headers once the origin is allow-listed, so the negative test above
+    can fail."""
+    origin = PROXY_ORIGINS[0]
+    settings.CORS_ALLOWED_ORIGINS = [origin]
+    settings.CORS_ALLOW_CREDENTIALS = credentials
+    for response in _cors_requests(origin):
+        assert response.headers.get(ACAO) == origin
+        assert response.headers.get(ACAC) == ("true" if credentials else None)
+
+
+# --- what Django does with the variants Caddy's cleaned-path match lets through ---
+
+
+@pytest.mark.parametrize(
+    ("path", "outcome"),
+    [
+        ("/api/v1/voice%2Fspeech", "same"),  # %2f: decoded to the same exact route
+        ("/api/v1/voice%2fspeech", "same"),
+        ("/API/v1/voice/speech", 404),  # Caddy matches case-insensitively; Django does not
+        ("/api/v1/VOICE/speech", 404),
+        ("/x/../api/v1/voice/speech", 404),  # forwarded as sent: not a Django route
+        ("//api/v1/voice/speech", 404),
+    ],
+)
+def test_a_variant_resolves_to_the_same_route_or_404s(path, outcome):
+    from django.test import Client
+
+    exact = Client().post("/api/v1/voice/speech", data={})
+    response = Client().post(path, data={})
+    assert exact.status_code != 404
+    if outcome == "same":
+        assert response.status_code == exact.status_code
+        assert response.resolver_match is not None
+        assert response.resolver_match.func == exact.resolver_match.func
+    else:
+        assert response.status_code == 404

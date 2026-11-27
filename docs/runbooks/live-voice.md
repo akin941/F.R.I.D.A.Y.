@@ -59,11 +59,47 @@ make friday-voice-ca FRIDAY_VOICE_CA_FILE=none    # back to the public bundle
 
 `friday-voice ca set` copies the certificate into the install
 (`server-ca.pem`, so the child never reads the checkout, which may sit in a
-TCC-protected folder such as `~/Desktop`), records it in `tls.json` and
-prints each certificate's DER sha256 — for the gen-local-tls certificate
-that is the value the host must send as `ca_sha256`. Both files survive a
-reinstall. A new key (`gen-local-tls.sh --force`) means re-pairing and
-running `make friday-voice-ca` again.
+TCC-protected folder such as `~/Desktop`) and records it in `tls.json`.
+Both files are written mode 0600 through `O_EXCL | O_NOFOLLOW` temporaries
+renamed into place, `ca set` refuses when either name in the home is a
+symlink, and it tightens the home to 0700 (`make friday-voice-install` keeps
+0700 while a CA file is recorded). The child runs as the same user, so it
+still reads them. Both files survive a reinstall. A new key
+(`gen-local-tls.sh --force`) means re-pairing and running
+`make friday-voice-ca` again.
+
+**Two different pins — do not mix them up.**
+
+| | Voice pin (`credential.ca_sha256`) | Node pairing pin (`NODE_TLS_PIN_SHA256`) |
+|---|---|---|
+| What | sha256 of the **DER of the top certificate** of the served chain, **hex** | sha256 of the leaf's **SPKI** (public key), **base64** |
+| For the gen-local-tls certificate | the certificate itself (it is self-signed) | its key |
+| Who uses it | the voice child, on every connection | FridayNode pairing ("Sertifika pini") and preflight `node_tls_pin` |
+| Where it comes from | computed by the Swift host from the chain it sees on its pinned connection, sent in the `credential` frame — never typed (B7 branch `feat/p11-node-voice-host`, not merged yet) | typed by the owner at pairing |
+
+`gen-local-tls.sh` prints both, labelled; `friday-voice ca set` and
+`friday-voice ca show` print both for every certificate in the file
+(`voice pin (credential ca_sha256, DER sha256 hex)` and `node pairing pin
+(SPKI sha256 base64, …; not the voice pin)`).
+
+`ca set` warns when the PEM holds more than one certificate (each one
+becomes a trust anchor, and the pin must name the top certificate of the
+chain the server sends) and refuses a certificate that may act as a CA —
+`CA:TRUE`, or no basicConstraints at all (a v1 certificate, or v3 without
+the extension) — unless `--allow-ca` is given: a CA in the trust store
+accepts every certificate it signs for the hostname, and the pin then holds
+only if the host sends that CA's DER sha256 as the top of the chain. The
+gen-local-tls certificate is `CA:FALSE`, so it needs no flag.
+
+`ca set` writes only into an install home. The rule (`friday_voice.tls.check_home`):
+the `--home` (default `~/Library/Application Support/Friday/voice`) must be
+an existing real directory — not a symlink — owned by the current user,
+never the user's home directory, and either a friday-voice install (its
+`pyproject.toml` names `friday-voice`, with the `friday_voice/` package
+beside it) or a directory that holds nothing but `tls.json` /
+`server-ca.pem` (fresh, or a previous `ca set`). Anything else is refused
+before a file is written or a mode is changed. An empty `--ca-file ""` (on `ca set`,
+`replay`, `selftest`) is an error, never "the default bundle".
 
 The CA file **replaces** the public bundle for this install; it relaxes
 nothing. Certificate and hostname verification stay on, the pin is still
@@ -86,6 +122,25 @@ beside the node's pairing, rotation and `/ws/node/v1` paths. Every other
 path is 404 (`backend/ops/tests/test_local_tls_caddyfile.py`). A running
 proxy picks the list up only when the `local-tls` container is recreated
 (`make up-local-tls`).
+
+Caddy's `path` matcher is case-insensitive and matches the *cleaned* path
+(`//` merged, `%2f` decoded, `.`/`..` segments resolved), so a variant such
+as `/API/v1/voice/speech` or `/x/../api/v1/voice/speech` is forwarded too.
+That stays safe because every listed name is an exact route that exists
+(the test resolves each one through Django, `/ws/node/v1` against the node
+gateway's mount), no prefix or wildcard is used, and a forwarded variant
+either resolves to the same exact route or 404s: `%2f` is decoded by
+Django too (`/api/v1/voice%2Fspeech` reaches the speech view, as it would
+by its exact path), while a case variant, a dot-segment or `//` is a 404
+(Django is case-sensitive and does not clean paths). The test checks each
+of these against Django.
+
+The proxy adds no header of its own: it never answers with
+`Access-Control-Allow-Origin` (no `header` directive), sets no CORS or CSRF
+setting on `web`, and Django's CORS/CSRF policy is unchanged — the proxy's
+origins (`https://127.0.0.1:8443`, `https://localhost:8443`,
+`https://local-tls:8443`) get no CORS grant (the same test). The node and
+the voice child are not browsers and send no `Origin`.
 
 Check the install with the reference implementations before the host:
 

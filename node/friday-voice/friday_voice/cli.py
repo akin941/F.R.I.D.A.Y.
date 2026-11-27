@@ -245,6 +245,14 @@ def _ca(args) -> int:
     return tls.main(args)
 
 
+def _ca_file_arg(value):
+    """A CA file path: never empty. An empty value is an error, not the
+    default bundle (friday_voice.tls)."""
+    if not value or not value.strip():
+        raise argparse.ArgumentTypeError("must not be empty (omit it for the default bundle)")
+    return value
+
+
 def build_parser():
     parser = argparse.ArgumentParser(prog="friday-voice")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -275,7 +283,10 @@ def build_parser():
     group.add_argument("--server", default=None, help="a running Friday (push-to-talk only)")
     replay.add_argument("--token-file", default=None, help="file holding a node_voice token")
     replay.add_argument(
-        "--ca-file", default=None, help="CA bundle trusted instead of the default (https)"
+        "--ca-file",
+        default=None,
+        type=_ca_file_arg,
+        help="CA bundle trusted instead of the default (https)",
     )
     replay.add_argument("--ca-sha256", default=None, help="pinned CA fingerprint (https)")
     replay.add_argument(
@@ -306,7 +317,10 @@ def build_parser():
         help="--nightly: the host's audio path (WAV on stdin -> AEC capture WAV on stdout)",
     )
     selftest.add_argument(
-        "--ca-file", default=None, help="--nightly: CA bundle trusted instead of the default"
+        "--ca-file",
+        default=None,
+        type=_ca_file_arg,
+        help="--nightly: CA bundle trusted instead of the default",
     )
     selftest.add_argument("--ca-sha256", default=None, help="--nightly: pinned CA fingerprint")
     selftest.add_argument("--result-file", default=None, help="write the one-line JSON result")
@@ -353,7 +367,12 @@ def build_parser():
     ca_sub = ca_cmd.add_subparsers(dest="ca_command", required=True)
     home_help = "the install home (default: ~/Library/Application Support/Friday/voice)"
     ca_set = ca_sub.add_parser("set", help="copy a PEM certificate in and record it")
-    ca_set.add_argument("ca_file", help="PEM certificate(s), no private key")
+    ca_set.add_argument("ca_file", type=_ca_file_arg, help="PEM certificate(s), no private key")
+    ca_set.add_argument(
+        "--allow-ca",
+        action="store_true",
+        help="record a CA certificate (CA:TRUE), which trusts every certificate it signs",
+    )
     ca_clear = ca_sub.add_parser("clear", help="remove the record (back to the default bundle)")
     ca_show = ca_sub.add_parser("show", help="print what is recorded")
     for ca_parser in (ca_set, ca_clear, ca_show):
